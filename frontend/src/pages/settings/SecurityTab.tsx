@@ -100,7 +100,7 @@ export function SecurityTab() {
         {mode !== 'open' && (
           <div className="grid grid-cols-2 gap-3 max-w-sm">
             <label className="space-y-1.5">
-              <span className="text-[12px] font-medium text-white/50">{state.pin_set ? 'New PIN' : 'PIN'}</span>
+              <span className="block text-[12px] font-medium text-white/50">{state.pin_set ? 'New PIN' : 'PIN'}</span>
               <input
                 type="password" inputMode="numeric" autoComplete="new-password" maxLength={4}
                 value={pin} onChange={e => setPin(digits(e.target.value))} placeholder="••••"
@@ -108,7 +108,7 @@ export function SecurityTab() {
               />
             </label>
             <label className="space-y-1.5">
-              <span className="text-[12px] font-medium text-white/50">Confirm</span>
+              <span className="block text-[12px] font-medium text-white/50">Confirm</span>
               <input
                 type="password" inputMode="numeric" autoComplete="new-password" maxLength={4}
                 value={confirm} onChange={e => setConfirm(digits(e.target.value))} placeholder="••••"
@@ -119,7 +119,7 @@ export function SecurityTab() {
         )}
 
         <label className="block space-y-1.5">
-          <span className="text-[12px] font-medium text-white/50">Trusted proxies</span>
+          <span className="block text-[12px] font-medium text-white/50">Trusted proxies</span>
           <input
             type="text" value={proxies} onChange={e => setProxies(e.target.value)} placeholder="Addresses or ranges"
             spellCheck={false}
