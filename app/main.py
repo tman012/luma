@@ -14897,6 +14897,52 @@ def _build_season_grid(tmdb_seasons, tvdb_id, tmdb_id):
 
 
 
+def _plex_tv_seasons(tmdb_id: int, light: bool = False) -> Optional[Dict]:
+    """Seasons/episodes payload (same shape as the TMDb one) built from Plex."""
+    try:
+        index = plex_service.build_ownership_index() or {}
+    except Exception:
+        return None
+    entry = (index.get('tv_by_tmdb') or {}).get(int(tmdb_id)) or {}
+    rk = entry.get('rating_key')
+    if not rk:
+        return None
+    rk = int(rk)
+    by_season: Dict[int, List[Dict]] = {}
+    if not light:
+        for ep in plex_service.get_show_episodes(rk) or []:
+            by_season.setdefault(ep.get('season_number'), []).append({
+                'episode_number': ep.get('episode_number'),
+                'name': ep.get('title'),
+                'overview': ep.get('overview') or '',
+                'air_date': ep.get('originally_available_at'),
+                'still_path': _plex_img(f"/library/metadata/{ep['rating_key']}/thumb") if ep.get('rating_key') else None,
+                'runtime': ep.get('runtime'),
+            })
+    seasons_info = []
+    for se in plex_service.get_show_children(rk) or []:
+        num = se.get('index')
+        eps = by_season.get(num, [])
+        seasons_info.append({
+            'season_number': num,
+            'name': se.get('title') or (f'Season {num}' if num else 'Specials'),
+            'overview': '',
+            'air_date': None,
+            'poster_path': _plex_img(se.get('thumbPath')),
+            'episode_count': len(eps) or se.get('leafCount', 0),
+            'episodes': eps,
+            'partial': False,
+        })
+    tvdb_id = entry.get('tvdb_id')
+    if not light and seasons_info:
+        try:
+            seasons_info = _build_season_grid(seasons_info, tvdb_id, tmdb_id)
+        except Exception as e:
+            logger.debug(f"Plex seasons: grid decoration skipped: {e}")
+    return {'success': True, 'tmdb_id': tmdb_id, 'tvdb_id': tvdb_id, 'seasons': seasons_info,
+            'light': light, 'source': 'plex'}
+
+
 @app.route('/api/tv/seasons/<int:tmdb_id>')
 def get_tv_seasons(tmdb_id):
     """Get TV show seasons and episodes from TMDB (cached 1h).
@@ -14955,6 +15001,12 @@ def get_tv_seasons(tmdb_id):
 
         # Fetch TV show details with all seasons
         tmdb_key = settings.get('apis.tmdb.api_key', '') or Config.TMDB_API_KEY
+        if not tmdb_key:
+            # No TMDB: owned shows get their seasons and episodes from Plex.
+            plex_payload = _plex_tv_seasons(tmdb_id, light)
+            if plex_payload:
+                return jsonify(plex_payload)
+            return jsonify({'error': 'TMDb not configured', 'needs_setup': 'tmdb'}), 404
         url = f"https://api.themoviedb.org/3/tv/{tmdb_id}?api_key={tmdb_key}&append_to_response=external_ids"
         response = requests.get(url, timeout=10)
 
