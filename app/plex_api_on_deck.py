@@ -59,6 +59,8 @@ def get_plex_api_on_deck(limit=25):
         except Exception:
             plex_url = Config.PLEX_URL
             plex_token = Config.PLEX_TOKEN
+        if not plex_url or not plex_token:
+            return []  # Plex not connected yet
         url = f"{plex_url}/library/onDeck"
         headers = {"X-Plex-Token": plex_token}
         params = {"includeGuids": 1}

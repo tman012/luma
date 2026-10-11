@@ -953,6 +953,8 @@ def _serve_spa():
 @app.route('/settings')
 @app.route('/upgrades')
 @app.route('/login')
+@app.route('/start')
+@app.route('/unlock')
 @app.route('/admin')
 @app.route('/setup')
 def spa_route():

@@ -121,7 +121,7 @@ export function SecurityTab() {
         <label className="block space-y-1.5">
           <span className="text-[12px] font-medium text-white/50">Trusted proxies</span>
           <input
-            type="text" value={proxies} onChange={e => setProxies(e.target.value)} placeholder="172.18.0.0/16"
+            type="text" value={proxies} onChange={e => setProxies(e.target.value)} placeholder="Addresses or ranges"
             spellCheck={false}
             className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
           />

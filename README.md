@@ -9,7 +9,7 @@ Sonarr and qBittorrent later for discovery, requests and downloads.
 You need Docker with the Compose plugin and a Plex Media Server.
 
 ```sh
-git clone https://github.com/tman012/luma.git
+git clone <this repository's URL> luma
 cd luma
 cp .env.example .env    # optional, see below
 docker compose up -d --build

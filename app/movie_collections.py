@@ -474,7 +474,7 @@ def build_cache(force: bool = False) -> Dict[str, Any]:
     try:
         api_key = _tmdb_key()
         if not api_key:
-            logger.error('movie_collections: no TMDb API key')
+            logger.info('movie_collections: skipped (TMDB not connected)')
             return _load_cache()
 
         owned = scoped_owned_movies()

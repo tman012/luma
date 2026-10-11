@@ -211,27 +211,27 @@ class StartFlowTest(unittest.TestCase):
     def test_access_modes(self):
         self.ua.create_user('owner', '1234', is_admin=True)
         self.assertEqual(self._who('open', '203.0.113.9'), 'owner')
-        self.assertIsNone(self._who('pin', '192.168.1.20'))
-        self.assertEqual(self._who('pin_remote', '192.168.1.20'), 'owner')
-        self.assertEqual(self._who('pin_remote', '10.0.0.5'), 'owner')
+        self.assertIsNone(self._who('pin', '10.20.0.5'))
+        self.assertEqual(self._who('pin_remote', '10.20.0.5'), 'owner')
+        self.assertEqual(self._who('pin_remote', '10.20.0.6'), 'owner')
         self.assertIsNone(self._who('pin_remote', '203.0.113.9'))
         # Relayed by a proxy that isn't trusted: treated as remote, whatever the headers claim.
-        self.assertIsNone(self._who('pin_remote', '127.0.0.1', {'X-Forwarded-For': '192.168.1.20'}))
-        self.assertIsNone(self._who('pin_remote', '172.17.0.1', {'CF-Connecting-IP': '192.168.1.20'}))
+        self.assertIsNone(self._who('pin_remote', '127.0.0.1', {'X-Forwarded-For': '10.20.0.5'}))
+        self.assertIsNone(self._who('pin_remote', '172.21.0.1', {'CF-Connecting-IP': '10.20.0.5'}))
         # Trusted proxy: the forwarded client address decides.
-        self.assertEqual(self._who('pin_remote', '172.18.0.2', {'X-Forwarded-For': '192.168.1.20'}, '172.18.0.0/16'), 'owner')
-        self.assertIsNone(self._who('pin_remote', '172.18.0.2', {'X-Forwarded-For': '192.168.1.20, 198.51.100.7'}, '172.18.0.0/16'))
-        self.assertIsNone(self._who('pin_remote', '172.18.0.2', {'CF-Connecting-IP': '198.51.100.7'}, '172.18.0.0/16'))
+        self.assertEqual(self._who('pin_remote', '172.20.0.2', {'X-Forwarded-For': '10.20.0.5'}, '172.20.0.0/16'), 'owner')
+        self.assertIsNone(self._who('pin_remote', '172.20.0.2', {'X-Forwarded-For': '10.20.0.5, 198.51.100.7'}, '172.20.0.0/16'))
+        self.assertIsNone(self._who('pin_remote', '172.20.0.2', {'CF-Connecting-IP': '198.51.100.7'}, '172.20.0.0/16'))
 
     def test_unset_mode_requires_pin(self):
         self.ua.create_user('owner', '1234', is_admin=True)
         s = _Settings()
         self.assertEqual(self.access.mode(s), 'pin')
-        req = SimpleNamespace(remote_addr='192.168.1.20', headers={})
+        req = SimpleNamespace(remote_addr='10.20.0.5', headers={})
         self.assertTrue(self.access.needs_pin(s, req))
 
     def test_no_users_no_open_access(self):
-        self.assertIsNone(self._who('open', '192.168.1.20'))
+        self.assertIsNone(self._who('open', '10.20.0.5'))
 
 
 class LoginLimiterTest(unittest.TestCase):
