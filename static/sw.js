@@ -1,0 +1,332 @@
+// Service Worker for the Luma PWA
+// ============================================================================
+// Cache strategy summary:
+//   Navigation (HTML)       → NetworkFirst (fallback to cached shell)
+//   /assets/* (hashed)      → CacheFirst (immutable, hash-busted by Vite)
+//   /api/img/* (Plex proxy) → CacheFirst (URL includes full path as key)
+//   /static/images/*        → NetworkFirst (icons change without hash)
+//   /static/* (other)       → NetworkFirst (JS/CSS may change without hash)
+//   /api/* (data)           → Network only (never cached)
+//
+// Key design choice: /static/ uses NetworkFirst, NOT StaleWhileRevalidate.
+// SWR serves stale immediately and updates in background — but Android WebView
+// (Fully Kiosk) may kill background fetches, so the user gets stuck on old
+// assets forever. NetworkFirst ensures fresh content on every load when online,
+// with cache as offline fallback only.
+// ============================================================================
+
+// BUILD_ID is replaced at build time or bumped manually per deploy.
+// When sw.js byte-content changes, the browser installs a new SW.
+const CACHE_VERSION = 'media-kiosk-v101';
+
+// Separate cache for large immutable assets — purged when version bumps
+const IMMUTABLE_CACHE = 'media-immutable-v24';
+
+const SHELL_URLS = [
+  '/',
+  '/static/manifest.json',
+];
+
+// ---------------------------------------------------------------------------
+// Install — purge ALL old caches, cache new shell, skip waiting immediately
+// ---------------------------------------------------------------------------
+self.addEventListener('install', event => {
+  event.waitUntil(
+    // Purge every cache except the ones we're about to create
+    caches.keys().then(names => {
+      const keep = new Set([CACHE_VERSION, IMMUTABLE_CACHE, 'notification-deeplink']);
+      return Promise.all(
+        names.filter(n => !keep.has(n)).map(n => {
+          console.log('[SW] Install: purging old cache:', n);
+          return caches.delete(n);
+        })
+      );
+    })
+    .then(() => caches.open(CACHE_VERSION))
+    .then(cache => cache.addAll(SHELL_URLS))
+  );
+  // Activate new SW immediately — don't wait for old tabs to close
+  self.skipWaiting();
+});
+
+// ---------------------------------------------------------------------------
+// Activate — purge ALL old version caches, claim clients
+// ---------------------------------------------------------------------------
+self.addEventListener('activate', event => {
+  const keepCaches = new Set([CACHE_VERSION, IMMUTABLE_CACHE, 'notification-deeplink']);
+  event.waitUntil(
+    caches.keys().then(names =>
+      Promise.all(
+        names
+          .filter(name => !keepCaches.has(name))
+          .map(name => {
+            console.log('[SW] Purging old cache:', name);
+            return caches.delete(name);
+          })
+      )
+    )
+  );
+  // Take control of all open tabs immediately
+  self.clients.claim();
+});
+
+// ---------------------------------------------------------------------------
+// Message handler — supports cache clearing from client
+// ---------------------------------------------------------------------------
+self.addEventListener('message', event => {
+  if (event.data === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+  if (event.data === 'CLEAR_ALL_CACHES') {
+    event.waitUntil(
+      caches.keys().then(names =>
+        Promise.all(names.map(n => caches.delete(n)))
+      ).then(() => {
+        console.log('[SW] All caches cleared via message');
+      })
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Fetch strategies
+// ---------------------------------------------------------------------------
+self.addEventListener('fetch', event => {
+  if (event.request.method !== 'GET') return;
+
+  const url = new URL(event.request.url);
+
+  // --- API data routes — network only (never cache) ---
+  if (url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/img/')) {
+    return; // Let browser handle normally
+  }
+
+  // --- Hashed assets (/assets/index-ABC123.js) — CacheFirst (immutable) ---
+  // These have content hashes in filenames; a new build = new URL = cache miss.
+  if (url.pathname.startsWith('/assets/')) {
+    event.respondWith(
+      caches.match(event.request).then(cached => {
+        if (cached) return cached;
+        return fetch(event.request).then(resp => {
+          if (resp.ok) {
+            const clone = resp.clone();
+            caches.open(IMMUTABLE_CACHE).then(c => c.put(event.request, clone));
+          }
+          return resp;
+        });
+      })
+    );
+    return;
+  }
+
+  // --- Image proxy routes (/api/img/*) — CacheFirst ---
+  // URL includes the full Plex/TMDb path, so same URL = same image.
+  if (url.pathname.startsWith('/api/img/')) {
+    event.respondWith(
+      caches.match(event.request).then(cached => {
+        if (cached) return cached;
+        return fetch(event.request).then(resp => {
+          if (resp.ok) {
+            const clone = resp.clone();
+            caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
+          }
+          return resp;
+        });
+      })
+    );
+    return;
+  }
+
+  // --- Navigation requests — NetworkFirst (offline fallback to shell) ---
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).then(resp => {
+        const clone = resp.clone();
+        caches.open(CACHE_VERSION).then(c => c.put('/', clone));
+        return resp;
+      }).catch(() => caches.match('/'))
+    );
+    return;
+  }
+
+  // --- /static/images/* — NetworkFirst ---
+  // Rating icons, logos etc. change without filename hash.
+  // MUST go to network first so deploys are picked up immediately.
+  // Cache is offline fallback only.
+  if (url.pathname.startsWith('/static/images/')) {
+    event.respondWith(
+      fetch(event.request).then(resp => {
+        if (resp.ok) {
+          const clone = resp.clone();
+          caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
+        }
+        return resp;
+      }).catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // --- /static/* (other: JS, CSS, manifest) — NetworkFirst ---
+  // Unhashed static files may change between deploys.
+  if (url.pathname.startsWith('/static/')) {
+    event.respondWith(
+      fetch(event.request).then(resp => {
+        if (resp.ok) {
+          const clone = resp.clone();
+          caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
+        }
+        return resp;
+      }).catch(() => caches.match(event.request))
+    );
+    return;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Push notification handler
+// ---------------------------------------------------------------------------
+self.addEventListener('push', event => {
+  try {
+    const data = event.data ? event.data.json() : {};
+    const title = data.title || 'New media available';
+    const options = {
+      body: data.body || '',
+      icon: data.icon || '/static/images/ic_launcher_round.png',
+      badge: data.badge || '/static/images/ic_launcher_round.png',
+      tag: data.tag || 'default',
+      renotify: true,
+      // tmdb_id rides along so an action press can be resolved by the worker
+      // alone, with no window and no URL parsing.
+      data: { url: data.url || '/', tmdb_id: data.tmdb_id },
+    };
+    if (data.image) options.image = data.image;
+    // Action buttons, when the sender supplies them. Chrome/Android renders up
+    // to two; iOS Safari ignores the field entirely, which is why every
+    // notification must still work as a plain tap-to-open deep link.
+    if (Array.isArray(data.actions) && data.actions.length) {
+      options.actions = data.actions.slice(0, 2);
+      options.data.actions = data.actions.slice(0, 2);
+    }
+    event.waitUntil(self.registration.showNotification(title, options));
+  } catch (err) {
+    console.error('[SW] Push handler error:', err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Notification click — focus existing tab or open new one
+//
+// Cache Storage is the source of truth for the pending deep link, and it is
+// written on EVERY click, not just when no window is found. Neither of the two
+// hand-off routes is reliable on its own:
+//
+//   postMessage  — needs a live, reachable client. An iOS standalone PWA that
+//                  the system has suspended is not one; matchAll() can come
+//                  back empty even though the app is "open".
+//   openWindow   — a standalone PWA is usually just brought to the foreground,
+//                  restoring the page it was last on and ignoring the URL. It
+//                  may not even re-mount, so there is nothing to navigate.
+//
+// Writing the link down first means whichever route the platform actually takes
+// — message, cold start, or a bare resume — the app can pick it up. Reads
+// delete the entry, so only one of them ever acts on it.
+// ---------------------------------------------------------------------------
+const DEEPLINK_CACHE = 'notification-deeplink';
+const DEEPLINK_KEY = '/pending-deeplink';
+// How long to let a live SPA claim the deep link before forcing a navigation on
+// it. A page that is awake answers in single-digit milliseconds; anything
+// slower is a page that isn't going to answer at all.
+const ACK_TIMEOUT_MS = 1200;
+
+function storeDeepLink(url) {
+  return caches.open(DEEPLINK_CACHE)
+    .then(cache => cache.put(
+      DEEPLINK_KEY,
+      new Response(JSON.stringify({ url, ts: Date.now() }),
+                   { headers: { 'Content-Type': 'application/json' } }),
+    ))
+    .catch(e => console.error('[SW] Failed to cache deep link:', e));
+}
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+
+  // An action button was pressed rather than the notification body. The worker
+  // can POST the verdict itself, so on platforms that support actions this
+  // resolves without opening the app at all. Android only — iOS never gets
+  // here because it doesn't render the buttons.
+  const action = event.action;
+  if (action && action.startsWith('verdict:')) {
+    const verdict = action.slice('verdict:'.length);
+    const tmdbId = event.notification.data && event.notification.data.tmdb_id;
+    event.waitUntil(
+      fetch('/api/taste/rate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ tmdb_id: tmdbId, verdict }),
+      })
+        .then(r => r.json())
+        .then(res => {
+          const n = (res.suggestions || []).length;
+          return self.registration.showNotification(
+            verdict === 'liked' ? 'Rating saved' : 'Rating saved',
+            {
+              body: n
+                ? `${n} similar film${n === 1 ? '' : 's'} you don't own — tap to review.`
+                : 'Noted. Nothing will be added.',
+              icon: '/static/images/ic_launcher_round.png',
+              tag: `taste-done-${tmdbId}`,
+              data: { url: n ? `/rate/${tmdbId}` : '/' },
+            },
+          );
+        })
+        .catch(err => console.error('[SW] Verdict POST failed:', err)),
+    );
+    return;
+  }
+
+  const relativeUrl = (event.notification.data && event.notification.data.url) || '/';
+  const absoluteUrl = new URL(relativeUrl, self.location.origin).href;
+
+  event.waitUntil(
+    storeDeepLink(relativeUrl)
+      .then(() => clients.matchAll({ type: 'window', includeUncontrolled: true }))
+      .then(async windowClients => {
+      // Try to find an existing app window to reuse
+      for (const client of windowClients) {
+        if (new URL(client.url).origin === self.location.origin) {
+          // Fast path: ask the SPA to route there itself, no reload, state kept.
+          // It answers on the port when it has actually done it.
+          const acked = new Promise(resolve => {
+            const ch = new MessageChannel();
+            ch.port1.onmessage = () => resolve(true);
+            client.postMessage({ type: 'NOTIFICATION_CLICK', url: relativeUrl }, [ch.port2]);
+            setTimeout(() => resolve(false), ACK_TIMEOUT_MS);
+          });
+          // focus() has to happen promptly while the click still counts as user
+          // activation — before we start waiting on anything.
+          await client.focus().catch(() => {});
+          if (await acked) return;
+          // No answer. The page is suspended, or running a build that doesn't
+          // know about this message, or the queue never started. Either way the
+          // tap must not silently do nothing, so force the window to the link.
+          // Costs a reload; landing on the wrong screen costs the whole feature.
+          if (client.navigate) {
+            try {
+              await client.navigate(absoluteUrl);
+              return;
+            } catch (e) {
+              // fall through to openWindow
+            }
+          }
+          return clients.openWindow(absoluteUrl);
+        }
+      }
+      return clients.openWindow(absoluteUrl);
+    }).catch(err => {
+      console.error('[SW] Notification click error:', err);
+      return clients.openWindow(absoluteUrl);
+    })
+  );
+});

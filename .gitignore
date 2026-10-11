@@ -1,0 +1,105 @@
+# =====================================================================
+# Luma — git ignore
+# Goal: back up source only. Secrets, runtime data, caches and build
+# output stay on the server (see data backup notes).
+# =====================================================================
+
+# ---- Secrets / credentials (NEVER commit) ----
+.env
+.env.*
+!.env.example
+settings.json
+**/settings.json
+**/settings-backup.json*
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+cookies*.txt
+*.cookies
+.android/
+**/.android/
+
+# ---- Runtime data (databases, state, logs) ----
+/data/
+/config/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.log
+logs/
+download_monitor.json
+download_history.json
+
+# ---- Caches ----
+/cache/
+/tmp/
+static/hero_cache/
+**/plex_cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- Python envs ----
+venv/
+.venv/
+/env/
+.Python
+*.so
+
+# ---- Node / frontend build output (rebuilt by `npm run build` / Docker stage 1) ----
+node_modules/
+frontend/dist/
+static/spa/
+*.tsbuildinfo
+.vite/
+
+# ---- Android apps (no longer part of this repo; local copies stay untracked) ----
+/android-kiosk/
+/android-tv/
+*.apk
+*.aab
+*.dex
+
+# ---- Backups / scratch copies (often contain old hardcoded keys) ----
+*.bak
+*.bak2
+*.bak.*
+*.bak-*
+*.orig
+*.rej
+
+# ---- Agent / editor / OS ----
+.claude/
+**/.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---- Retired voice feature: keep any leftover local speech-model copies out of git ----
+static/models/
+android-kiosk/app/src/main/assets/model-en-us/
+
+# ---- Retired Alfred agent: keep any leftover local copy (and its .env/users.json) out of git ----
+/alfred/
+
+# ---- Dev instance data (docker-compose.dev.yml) ----
+/.dev-data/
+
+# ---- Per-server compose overrides and proxy config (never committed) ----
+/docker-compose.override.yml
+/Caddyfile
+/Caddyfile.local

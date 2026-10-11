@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stand-in for the adb binary on dev instances (mounted by docker-compose.dev.yml)
+# so no code path can open an ADB session to a real device.
+echo "adb is disabled on this dev instance" >&2
+exit 1

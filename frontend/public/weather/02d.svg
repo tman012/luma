@@ -1,0 +1,21 @@
+<svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- Few clouds day - Alexa style sun behind cloud, no transforms -->
+<g>
+  <!-- Sun behind -->
+  <circle cx="46" cy="42" r="18" fill="#FFB300"/>
+  <circle cx="46" cy="42" r="15" fill="#FFC107"/>
+  <!-- Rays as pre-positioned paths -->
+  <path d="M42 12h8v14a4 4 0 01-8 0V12z" fill="#FFB300"/>
+  <path d="M18 38v8h14a4 4 0 000-8H18z" fill="#FFB300"/>
+  <path d="M29.5 18.2a4 4 0 015.6 0l7 7a4 4 0 01-5.6 5.6l-7-7a4 4 0 010-5.6z" fill="#FFB300"/>
+  <path d="M22 55.4a4 4 0 015.6 0l7 7a4 4 0 01-5.6 5.6l-7-7a4 4 0 010-5.6z" fill="#FFB300"/>
+  <!-- Cloud -->
+  <path d="M95 62C95 53.7 88.3 47 80 47C78.5 47 77 47.2 75.6 47.7C72.3 40.5 65 35.5 56.5 35.5C45 35.5 35.5 44.8 35.5 56.3C35.5 56.8 35.5 57.3 35.6 57.8C30.2 59.6 26.5 64.7 26.5 70.5C26.5 78 32.5 84 40 84H88C92.4 84 96 80.4 96 76C96 72.2 93.5 69 90 67.7C93 66.3 95 63.4 95 62Z" fill="url(#cloud_02d)"/>
+</g>
+<defs>
+  <linearGradient id="cloud_02d" x1="61" y1="35" x2="61" y2="84" gradientUnits="userSpaceOnUse">
+    <stop stop-color="white"/>
+    <stop offset="1" stop-color="#ECEFF1"/>
+  </linearGradient>
+</defs>
+</svg>

@@ -1,0 +1,15 @@
+<svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- Broken/overcast clouds night -->
+<g>
+  <!-- Back cloud (darker) -->
+  <path d="M105 52C105 45.4 99.6 40 93 40C91.8 40 90.6 40.2 89.5 40.5C86.9 34.8 81.1 31 74.5 31C65.4 31 58 38.2 58 47.3C58 47.7 58 48.1 58 48.5C53.8 50 51 54.1 51 58.8C51 65 56 70 62.2 70H98C101.3 70 104 67.3 104 64C104 61.3 102.2 59 99.7 58.1C102.6 57 105 54.8 105 52Z" fill="#78909C"/>
+  <!-- Front cloud -->
+  <path d="M90 76C90 67.7 83.3 61 75 61C73.5 61 72 61.2 70.6 61.7C67.3 54.5 60 49.5 51.5 49.5C40 49.5 30.5 58.8 30.5 70.3C30.5 70.8 30.5 71.3 30.6 71.8C25.2 73.6 21.5 78.7 21.5 84.5C21.5 92 27.5 98 35 98H83C87.4 98 91 94.4 91 90C91 86.2 88.5 83 85 81.7C88 80.3 90 77.4 90 76Z" fill="url(#cloud_04n)"/>
+</g>
+<defs>
+  <linearGradient id="cloud_04n" x1="56" y1="49" x2="56" y2="98" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#B0BEC5"/>
+    <stop offset="1" stop-color="#90A4AE"/>
+  </linearGradient>
+</defs>
+</svg>

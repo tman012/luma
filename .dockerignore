@@ -1,0 +1,43 @@
+# ---- Runtime data & secrets ----
+.android
+data
+.env
+.env.local
+
+# ---- Git ----
+.git
+.gitignore
+
+# ---- Frontend build artifacts (Stage 1 rebuilds from source) ----
+frontend/node_modules
+frontend/dist
+
+# ---- Non-runtime directories ----
+android-kiosk
+android-tv
+tests
+.claude
+static/hero_cache
+
+# ---- Python cache ----
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# ---- IDE / editor ----
+.vscode
+.idea
+*.swp
+*.swo
+
+# ---- Docker / CI files ----
+docker-compose.yml
+Dockerfile
+
+# ---- Misc ----
+*.md
+**/*.log
+**/*.tmp
+**/.DS_Store

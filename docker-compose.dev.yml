@@ -1,0 +1,45 @@
+# Luma dev instance — safe to run next to a production Luma on the same host.
+#
+#   docker compose -f docker-compose.dev.yml -p luma-dev up -d --build
+#
+# * Own container (luma-dev), own port (LUMA_DEV_PORT, default 5199), own data
+#   dir (LUMA_DEV_DATA_DIR, default ./.dev-data) — nothing is shared with prod.
+# * LUMA_DISABLE_AUTOMATIONS=1: no auto-rename, watchlist automations,
+#   auto-grabs, schedulers, Downloads Guard or tunnel auto-start.
+# * LUMA_DISABLE_ADB=1 plus a stub adb binary: never connects to a TV/Shield.
+# * LUMA_READ_ONLY_URLS: non-GET requests to these upstreams (e.g. Plex,
+#   Radarr, Sonarr) are refused locally, so the dev instance can browse real
+#   services without adding, grabbing, deleting or re-matching anything.
+#
+# Values come from .env next to this file (gitignored). See .env.example.
+services:
+  luma-dev:
+    container_name: luma-dev
+    image: luma-dev:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    env_file:
+      - .env
+    environment:
+      - TZ=${TZ:-America/New_York}
+      - FLASK_ENV=production
+      - PORT=5001
+      - DATABASE_PATH=/app/data/media.db
+      - LUMA_DISABLE_AUTOMATIONS=1
+      - LUMA_DISABLE_ADB=1
+      - LUMA_READ_ONLY_URLS=${LUMA_READ_ONLY_URLS:-}
+      # Not used by a dev instance
+      - SHIELD_PLEX_IP=
+    ports:
+      - "${LUMA_DEV_PORT:-5199}:5001"
+    volumes:
+      - ${LUMA_DEV_DATA_DIR:-./.dev-data}:/app/data
+      - ./dev/adb-disabled:/usr/bin/adb:ro
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3

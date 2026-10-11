@@ -1,0 +1,1338 @@
+@import "tailwindcss";
+
+/* Hide settings tab headers on mobile — the page-level nav header replaces them */
+html.layout-compact .settings-tab-header {
+  display: none;
+}
+
+@theme {
+  /* Kiosk colors */
+  --color-kiosk-black: #15102a;
+  --color-glass-5: rgb(255 255 255 / 0.05);
+  --color-glass-10: rgb(255 255 255 / 0.10);
+  --color-glass-15: rgb(255 255 255 / 0.15);
+  --color-glass-20: rgb(255 255 255 / 0.20);
+  --color-glass-25: rgb(255 255 255 / 0.25);
+  --color-accent: #3b82f6;
+  --color-accent-hover: #60a5fa;
+  --color-text-primary: rgb(255 255 255 / 0.95);
+  --color-text-secondary: rgb(255 255 255 / 0.70);
+  --color-text-muted: rgb(255 255 255 / 0.50);
+  --color-text-faint: rgb(255 255 255 / 0.30);
+  --color-seeder-green: #10b981;
+
+  /* Animation durations */
+  --animate-ken-burns: ken-burns 25s ease-in-out infinite alternate;
+  --animate-ken-burns-alt: ken-burns-alt 30s ease-in-out infinite alternate;
+}
+
+@keyframes ken-burns {
+  0% {
+    transform: scale(1) translate(0, 0);
+  }
+  100% {
+    transform: scale(1.15) translate(-2%, -1%);
+  }
+}
+
+@keyframes ken-burns-alt {
+  0% {
+    transform: scale(1.1) translate(-1%, 0);
+  }
+  100% {
+    transform: scale(1) translate(1%, 1%);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@utility glass-panel {
+  background: rgb(255 255 255 / 0.08);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  box-shadow: inset 0 0.5px 0 0 rgb(255 255 255 / 0.1),
+    0 8px 32px rgb(0 0 0 / 0.3);
+}
+
+@utility glass-panel-strong {
+  background: rgb(255 255 255 / 0.15);
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+  box-shadow: inset 0 0.5px 0 0 rgb(255 255 255 / 0.15),
+    0 12px 48px rgb(0 0 0 / 0.4);
+}
+
+@utility glass-panel-subtle {
+  background: rgb(255 255 255 / 0.04);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: inset 0 0.5px 0 0 rgb(255 255 255 / 0.06),
+    0 4px 16px rgb(0 0 0 / 0.2);
+}
+
+/* Dynamic viewport height — fixes Android WebView / Fully Kiosk address bar issues */
+:root {
+  --dvh: 1vh;
+  /* --vvh, --vvw, --vvoffsetTop are set by useVisualViewport hook at runtime */
+}
+@supports (height: 1dvh) {
+  :root {
+    --dvh: 1dvh;
+  }
+}
+
+@utility h-dvh {
+  height: calc(var(--dvh) * 100);
+}
+
+@utility min-h-dvh {
+  min-height: calc(var(--dvh) * 100);
+}
+
+/* Safe-area padding for notch / system bar environments */
+@utility safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+@utility safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Compact (mobile PWA) mode — Luma purple theme */
+html.layout-compact {
+  --color-kiosk-black: #15102a;
+}
+
+/* Global resets */
+html {
+  height: 100%;
+  background: var(--color-kiosk-black);
+}
+body,
+#root {
+  min-height: 100%;
+  background: var(--color-kiosk-black);
+}
+
+/* Kill iOS PWA tap highlight and focus rings on interactive elements */
+button,
+[role="button"] {
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+button:focus,
+button:focus-visible,
+[role="button"]:focus,
+[role="button"]:focus-visible {
+  outline: none;
+}
+
+html,
+body {
+  overflow: hidden;
+  color: rgb(255 255 255 / 0.95);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+
+/* --------------------------------------------------------------------------
+   Shared nested scroll body (sheets / modals / fixed pages)
+   Home uses document scroll (useBodyScroll) — nested surfaces must opt into
+   this so iOS starts panning from rest without fighting pull-to-refresh.
+   -------------------------------------------------------------------------- */
+.luma-scroll-y,
+[data-scroll-container] {
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y;
+}
+
+/* Normalize search inputs across Chrome / Android WebView / Fully Kiosk */
+input[type="search"]::-webkit-search-decoration,
+input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  display: none;
+}
+
+/* Hide scrollbars globally but allow scrolling */
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
+/* --------------------------------------------------------------------------
+   Explore smart tile animations
+   -------------------------------------------------------------------------- */
+
+/* Rail entrance — staggered per rail */
+.explore-rail {
+  opacity: 0;
+  animation: railEnter 0.4s ease-out forwards;
+  animation-delay: var(--rail-delay, 0ms);
+}
+
+@keyframes railEnter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Tile interaction — no stagger, just hover/press spring */
+.explore-tile {
+  transition:
+    transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+    box-shadow 0.25s ease;
+}
+
+/* Hover — subtle scale + shadow lift (web, mouse) */
+.explore-tile:hover {
+  transform: scale(1.03);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+
+/* Press/tap — quick snap down */
+.explore-tile:active {
+  transform: scale(0.97);
+  transition-duration: 0.1s;
+}
+
+/* Focus — same as hover + ring handled by Tailwind */
+.explore-tile:focus-visible {
+  transform: scale(1.03);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+
+/* Reduced motion — disable all decorative animations */
+@media (prefers-reduced-motion: reduce) {
+  .explore-tile:hover,
+  .explore-tile:active,
+  .explore-tile:focus-visible {
+    transform: none;
+    box-shadow: none;
+  }
+  .explore-rail {
+    animation: none;
+    opacity: 1;
+  }
+  .mobile-poster-card:active {
+    transform: none;
+  }
+  .skeleton-shimmer {
+    animation: none;
+  }
+  .mobile-card-enter {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+  .mobile-page-enter {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+  .mobile-rail-title-enter {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+  /* Modal content cascade: show immediately */
+  [data-modal][data-variant="mobile"] {
+    transition: none !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   ReviewCard entrance animation
+   -------------------------------------------------------------------------- */
+
+@keyframes reviewCardEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   ReviewsPanel — neutralize backdrop-filter on glass panels.
+   The panel root is bg-black/95 so inner blurs are invisible but each one
+   creates a GPU compositing layer. With 20+ cards this causes frame drops.
+   -------------------------------------------------------------------------- */
+
+[data-reviews-panel] .glass-panel,
+[data-reviews-panel] .glass-panel-strong,
+[data-reviews-panel] .glass-panel-subtle {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Mobile reviews: solid opaque backgrounds — no transparency */
+@media (max-width: 767px) {
+  [data-reviews-panel] .glass-panel {
+    background: rgb(28 28 30);
+  }
+  [data-reviews-panel] .glass-panel-strong {
+    background: rgb(44 44 46);
+  }
+  [data-reviews-panel] .glass-panel-subtle {
+    background: rgb(20 20 22);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Mobile rail + card entrance — per-card stagger
+   -------------------------------------------------------------------------- */
+
+@keyframes mobileCardEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Mobile page entry animation
+   -------------------------------------------------------------------------- */
+
+@keyframes mobilePageEnter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* --------------------------------------------------------------------------
+   Mobile toast spring animations
+   -------------------------------------------------------------------------- */
+
+@keyframes mobileToastEnter {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(24px) scale(0.9);
+  }
+  60% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(-3px) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1);
+  }
+}
+
+@keyframes mobileToastExit {
+  from {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(12px) scale(0.95);
+  }
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateX(16px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Mobile poster card — press state (touch only, so desktop is unaffected)
+   -------------------------------------------------------------------------- */
+
+/* Long-press posters — kill iOS gray tap/selection flash */
+.mobile-poster-card,
+.longpress-poster {
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+.mobile-poster-card.longpress-poster,
+.longpress-poster {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.mobile-poster-card:focus,
+.mobile-poster-card:focus-visible,
+.longpress-poster:focus,
+.longpress-poster:focus-visible {
+  outline: none;
+}
+
+@media (pointer: coarse) {
+  .mobile-poster-card {
+    transition: transform 200ms cubic-bezier(0.25, 1, 0.5, 1);
+  }
+  .mobile-poster-card:active {
+    transform: scale(0.95);
+    transition-duration: 100ms;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Skeleton shimmer — directional sweep replacing animate-pulse
+   -------------------------------------------------------------------------- */
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+
+@import "./styles/kiosk-tv.css";
+
+/* ==========================================================================
+   Auth — Login, Setup, Admin pages
+   ========================================================================== */
+
+/* ── Shared page wrapper ── */
+.login-page,
+.setup-page,
+.admin-page {
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  background: var(--color-kiosk-black);
+  color: rgba(255,255,255,0.95);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 16px 48px;
+  box-sizing: border-box;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* ── Login card ── */
+.login-card,
+.setup-card {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding-top: 48px;
+}
+
+/* ── Login intro animations ── */
+@keyframes login-float-in {
+  from {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes login-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Login splash — premium streaming intro ── */
+.login-splash {
+  position: fixed;
+  inset: 0;
+  background: var(--color-kiosk-black);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.login-splash-center {
+  flex-shrink: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 16px 60px;
+  gap: 0;
+}
+
+.login-splash-logo {
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 16px 80px rgba(0, 0, 0, 0.7);
+  animation: login-float-in 700ms cubic-bezier(0.22, 1, 0.36, 1) 100ms both;
+}
+
+.login-splash-title {
+  font-size: 54px;
+  font-weight: 700;
+  letter-spacing: -2px;
+  color: rgba(255, 255, 255, 0.95);
+  margin: 12px 0 0;
+  animation: login-fade-up 500ms cubic-bezier(0.22, 1, 0.36, 1) 600ms both;
+}
+
+/* Action zone — fixed height container so no layout shift */
+.login-action-zone {
+  position: relative;
+  width: 100%;
+  min-height: 72px;
+  margin-top: 32px;
+}
+
+.login-action-slot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  transition: opacity 250ms ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.login-action-slot--hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.login-action-slot--fade-in {
+  opacity: 1;
+  animation: login-fade-up 300ms ease both;
+}
+
+.login-splash-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  /* margin-top handled by .login-action-zone */
+  animation: login-fade-up 400ms ease-out 800ms both;
+}
+
+.login-splash-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  padding: 9px 28px;
+  text-align: center;
+  transition: color 200ms, border-color 200ms, background 200ms;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.login-splash-btn:hover {
+  color: rgba(255, 255, 255, 0.95);
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.login-splash-btn:active {
+  background: rgba(255, 255, 255, 0.10);
+}
+
+.login-splash-btn--active {
+  color: rgba(255, 255, 255, 0.95);
+  border-color: rgba(255, 255, 255, 0.40);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+/* ── Action zone: fixed-height swap area (buttons ↔ form, no layout shift) ── */
+.login-action-zone {
+  position: relative;
+  width: 100%;
+  max-width: 360px;
+  /* Tall enough for hint-text + input row + error line */
+  min-height: 110px;
+  margin-top: 36px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+/* Both layers live in the same space via absolute positioning */
+.login-action-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  transition: opacity 300ms ease;
+}
+
+/* Buttons layer is centered vertically in the zone */
+.login-action-layer--buttons {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Form layer starts at the top of the zone */
+.login-action-layer--form {
+  top: 0;
+}
+
+/* Fade out buttons (keep in DOM so layout stays fixed) */
+.login-action-layer--gone {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Fade in for form layer */
+@keyframes login-action-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.login-action-layer--fade-in {
+  animation: login-action-in 350ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ── Legacy panel classes (kept for reference, no longer used by LoginPage) ── */
+@keyframes login-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.login-panel {
+  width: 100%;
+  max-width: 360px;
+  padding: 8px 24px 80px;
+  box-sizing: border-box;
+}
+
+.login-panel--fade-in {
+  animation: login-panel-in 350ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.login-panel-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+
+.login-panel-form .login-input {
+  width: 100%;
+}
+
+.login-panel-hint {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.65);
+  margin: 4px 0 0;
+  text-align: center;
+}
+
+/* Ghost action button — dark bg, white text, subtle border, NO blue */
+.login-ghost-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 15px;
+  font-weight: 500;
+  padding: 12px 28px;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms;
+  min-width: 140px;
+  text-align: center;
+  -webkit-tap-highlight-color: transparent;
+  letter-spacing: 0.02em;
+}
+
+.login-ghost-btn:hover {
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.login-ghost-btn:active {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.login-ghost-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.login-panel-pending {
+  text-align: center;
+  padding: 16px 0;
+}
+
+/* ── Card-style logo (non-landing steps) ── */
+.login-logo {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.login-logo-img {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  animation: login-float-in 600ms cubic-bezier(0.22, 1, 0.36, 1) 60ms both;
+}
+
+.login-title {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.5px;
+  animation: login-fade-up 500ms cubic-bezier(0.22, 1, 0.36, 1) 420ms both;
+}
+
+.login-subtitle {
+  font-size: 15px;
+  color: rgba(255,255,255,0.55);
+  margin: 0;
+  animation: login-fade-up 500ms cubic-bezier(0.22, 1, 0.36, 1) 500ms both;
+}
+
+.login-loading {
+  color: rgba(255,255,255,0.5);
+  padding-top: 48px;
+}
+
+/* ── Login form ── */
+.login-form,
+.login-pin-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.login-label,
+.setup-field-label {
+  font-size: 15px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.85);
+  margin-bottom: 4px;
+}
+
+.login-input,
+.setup-input,
+.setup-select,
+.admin-modal-input {
+  width: 100%;
+  padding: 14px 16px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  color: rgba(255,255,255,0.95);
+  font-size: 16px;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 150ms;
+}
+
+.login-input:focus,
+.setup-input:focus,
+.setup-select:focus,
+.admin-modal-input:focus {
+  border-color: rgba(255, 255, 255, 0.35);
+  outline: none;
+}
+
+.login-input::placeholder,
+.setup-input::placeholder {
+  color: rgba(255,255,255,0.3);
+}
+
+.login-error,
+.setup-error,
+.admin-error,
+.admin-modal-error {
+  color: #f87171;
+  font-size: 14px;
+  margin: 4px 0 0;
+}
+
+.login-btn-primary,
+.setup-btn-primary {
+  width: 100%;
+  padding: 16px;
+  background: #3b82f6;
+  border: none;
+  border-radius: 14px;
+  color: white;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms, transform 100ms, opacity 150ms;
+  margin-top: 4px;
+  letter-spacing: 0.01em;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.login-btn-primary:hover,
+.setup-btn-primary:hover {
+  background: #2563eb;
+}
+
+.login-btn-primary:active,
+.setup-btn-primary:active {
+  transform: scale(0.98);
+}
+
+.login-btn-primary:disabled,
+.setup-btn-primary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.login-back {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.6);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  margin-bottom: 8px;
+}
+
+/* ── Inline input + arrow wrapper (search-bar style) ── */
+.login-inline-field {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+}
+
+.login-inline-field .login-input {
+  flex: 1;
+}
+
+.login-inline-arrow {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms;
+  -webkit-tap-highlight-color: transparent;
+  padding: 0;
+  line-height: 1;
+}
+
+.login-inline-arrow:hover {
+  background: rgba(255, 255, 255, 0.13);
+  border-color: rgba(255, 255, 255, 0.26);
+}
+
+.login-inline-arrow:active {
+  background: rgba(255, 255, 255, 0.20);
+}
+
+.login-inline-arrow:disabled {
+  opacity: 0.28;
+  cursor: not-allowed;
+}
+
+/* ── PIN dots ── */
+.pin-dots {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  margin: 16px 0;
+}
+
+.pin-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.3);
+  background: transparent;
+  transition: background 150ms, border-color 150ms;
+}
+
+.pin-dot--filled {
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(255, 255, 255, 0.88);
+}
+
+/* ── Numpad ── */
+.pin-numpad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  max-width: 280px;
+  margin: 0 auto;
+}
+
+.pin-key {
+  aspect-ratio: 1;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 50%;
+  color: rgba(255,255,255,0.9);
+  font-size: 22px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.pin-key:active {
+  background: rgba(255,255,255,0.18);
+}
+
+.pin-key--empty {
+  background: transparent;
+  border: none;
+  cursor: default;
+  pointer-events: none;
+}
+
+.pin-key--back {
+  font-size: 18px;
+}
+
+.pin-key:disabled {
+  opacity: 0.5;
+}
+
+/* ── Login landing (two-option screen) ── */
+.login-landing {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 8px;
+  /* Buttons slide up as a unit — ~200ms after the subtitle appears */
+  animation: login-fade-up 500ms cubic-bezier(0.22, 1, 0.36, 1) 680ms both;
+}
+
+/* Secondary (ghost) button — used for Add Account & Back to Sign In */
+.login-btn-secondary {
+  width: 100%;
+  padding: 16px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 14px;
+  color: rgba(255,255,255,0.85);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms, transform 100ms, opacity 150ms;
+  -webkit-tap-highlight-color: transparent;
+  letter-spacing: 0.01em;
+}
+
+.login-btn-secondary:hover {
+  background: rgba(255,255,255,0.11);
+  border-color: rgba(255,255,255,0.25);
+}
+
+.login-btn-secondary:active {
+  transform: scale(0.98);
+}
+
+.login-btn-secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ── Pending approval screen ── */
+.login-pending {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+  padding: 8px 0 16px;
+}
+
+.login-pending-icon {
+  font-size: 52px;
+  line-height: 1;
+}
+
+.login-pending-title {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.login-pending-body {
+  font-size: 15px;
+  color: rgba(255,255,255,0.65);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* ── Setup page ── */
+.setup-title {
+  font-size: 26px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.setup-subtitle {
+  font-size: 15px;
+  color: rgba(255,255,255,0.55);
+  margin: 0;
+}
+
+.setup-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.setup-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: rgba(255,255,255,0.85);
+}
+
+.setup-option-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.setup-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 150ms, background 150ms;
+}
+
+.setup-option--selected {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.setup-option input[type="radio"] {
+  margin-top: 2px;
+  accent-color: #3b82f6;
+  flex-shrink: 0;
+}
+
+.setup-option-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.setup-option-label {
+  font-size: 15px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.9);
+}
+
+.setup-option-desc {
+  font-size: 13px;
+  color: rgba(255,255,255,0.5);
+}
+
+.setup-plex-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+}
+
+.setup-help-link {
+  font-size: 12px;
+  color: #60a5fa;
+  text-decoration: none;
+}
+
+.setup-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='rgba(255,255,255,0.5)' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
+}
+
+.setup-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.setup-btn-secondary {
+  flex: 1;
+  padding: 14px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  color: rgba(255,255,255,0.7);
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 150ms;
+}
+
+.setup-btn-secondary:hover {
+  background: rgba(255,255,255,0.12);
+}
+
+.setup-btn-primary {
+  flex: 2;
+  padding: 14px;
+}
+
+/* ── Admin page ── */
+.admin-page {
+  flex-direction: column;
+  gap: 24px;
+  padding: 32px 20px;
+  align-items: stretch;
+  max-width: 600px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.admin-back-btn {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  color: rgba(255,255,255,0.8);
+  padding: 10px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.admin-title {
+  flex: 1;
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.admin-add-btn {
+  background: #3b82f6;
+  border: none;
+  border-radius: 10px;
+  color: white;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-user-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+}
+
+.admin-user-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-user-name {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.admin-badge {
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 6px;
+  padding: 2px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.admin-user-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.admin-action-btn {
+  padding: 8px 14px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  color: rgba(255,255,255,0.8);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.admin-action-btn--danger {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+
+/* ── Admin modal ── */
+.admin-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 9999;
+}
+
+.admin-modal {
+  background: #111115;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 20px;
+  padding: 28px 24px;
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.admin-modal-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.admin-modal-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.7);
+}
+
+.admin-modal-body {
+  font-size: 14px;
+  color: rgba(255,255,255,0.6);
+  margin: 0;
+}
+
+.admin-modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.admin-modal-cancel {
+  flex: 1;
+  padding: 13px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  color: rgba(255,255,255,0.7);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.admin-modal-confirm {
+  flex: 2;
+  padding: 13px;
+  background: #3b82f6;
+  border: none;
+  border-radius: 10px;
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.admin-modal-confirm--danger {
+  background: #dc2626;
+}
+
+.admin-modal-confirm:disabled,
+.admin-modal-cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

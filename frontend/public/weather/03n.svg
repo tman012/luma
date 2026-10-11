@@ -1,0 +1,15 @@
+<svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- Scattered clouds night -->
+<g>
+  <!-- Small background cloud -->
+  <path d="M98 44C98 39.6 94.4 36 90 36C89.2 36 88.5 36.1 87.8 36.3C85.9 32.3 81.8 29.5 77 29.5C70.6 29.5 65.5 34.6 65.5 41C65.5 41.3 65.5 41.6 65.5 41.9C62.5 43 60.5 45.8 60.5 49C60.5 53.1 63.9 56.5 68 56.5H93C95.8 56.5 98 54.3 98 51.5C98 49.3 96.6 47.4 94.6 46.7C96.6 45.9 98 44.1 98 44Z" fill="#78909C" opacity="0.5"/>
+  <!-- Main cloud -->
+  <path d="M100 72C100 63.7 93.3 57 85 57C83.5 57 82 57.2 80.6 57.7C77.3 50.5 70 45.5 61.5 45.5C50 45.5 40.5 54.8 40.5 66.3C40.5 66.8 40.5 67.3 40.6 67.8C35.2 69.6 31.5 74.7 31.5 80.5C31.5 88 37.5 94 45 94H93C97.4 94 101 90.4 101 86C101 82.2 98.5 79 95 77.7C98 76.3 100 73.4 100 72Z" fill="url(#cloud_03n)"/>
+</g>
+<defs>
+  <linearGradient id="cloud_03n" x1="66" y1="45" x2="66" y2="94" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#E0E0E0"/>
+    <stop offset="1" stop-color="#BDBDBD"/>
+  </linearGradient>
+</defs>
+</svg>

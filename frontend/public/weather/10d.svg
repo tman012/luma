@@ -1,0 +1,25 @@
+<svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- Rain day - sun behind rain cloud, no transforms -->
+<g>
+  <!-- Sun peeking -->
+  <circle cx="40" cy="38" r="14" fill="#FFB300"/>
+  <circle cx="40" cy="38" r="11" fill="#FFC107"/>
+  <path d="M36 14h8v10a4 4 0 01-8 0V14z" fill="#FFB300"/>
+  <path d="M16 34v8h10a4 4 0 000-8H16z" fill="#FFB300"/>
+  <path d="M27 19a4 4 0 015.6 0l6 6a4 4 0 01-5.6 5.6l-6-6A4 4 0 0127 19z" fill="#FFB300"/>
+  <!-- Cloud -->
+  <path d="M100 58C100 49.7 93.3 43 85 43C83.5 43 82 43.2 80.6 43.7C77.3 36.5 70 31.5 61.5 31.5C50 31.5 40.5 40.8 40.5 52.3C40.5 52.8 40.5 53.3 40.6 53.8C35.2 55.6 31.5 60.7 31.5 66.5C31.5 74 37.5 80 45 80H93C97.4 80 101 76.4 101 72C101 68.2 98.5 65 95 63.7C98 62.3 100 59.4 100 58Z" fill="url(#cloud_10d)"/>
+  <!-- Rain drops -->
+  <ellipse cx="50" cy="90" rx="2.5" ry="4.5" fill="#42A5F5"/>
+  <ellipse cx="62" cy="94" rx="2.5" ry="4.5" fill="#42A5F5"/>
+  <ellipse cx="74" cy="88" rx="2.5" ry="4.5" fill="#42A5F5"/>
+  <ellipse cx="56" cy="104" rx="2" ry="3.5" fill="#42A5F5" opacity="0.7"/>
+  <ellipse cx="68" cy="101" rx="2" ry="3.5" fill="#42A5F5" opacity="0.7"/>
+</g>
+<defs>
+  <linearGradient id="cloud_10d" x1="66" y1="31" x2="66" y2="80" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#ECEFF1"/>
+    <stop offset="1" stop-color="#B0BEC5"/>
+  </linearGradient>
+</defs>
+</svg>

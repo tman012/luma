@@ -1,0 +1,87 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Trivia Screensaver — Dark Cinema UI Styles
+   ───────────────────────────────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Luckiest+Guy&display=swap');
+
+/* ─── Background: slow drifting highlight blobs ─── */
+@keyframes trivia-blob-drift-1 {
+  0%   { transform: translate(0%, 0%) scale(1); }
+  50%  { transform: translate(5%, -4%) scale(1.12); }
+  100% { transform: translate(0%, 0%) scale(1); }
+}
+
+@keyframes trivia-blob-drift-2 {
+  0%   { transform: translate(0%, 0%) scale(1.05); }
+  50%  { transform: translate(-6%, 3%) scale(0.95); }
+  100% { transform: translate(0%, 0%) scale(1.05); }
+}
+
+@keyframes trivia-blob-drift-3 {
+  0%   { transform: translate(0%, 0%) scale(1); }
+  50%  { transform: translate(3%, 5%) scale(1.08); }
+  100% { transform: translate(0%, 0%) scale(1); }
+}
+
+/* ─── Ambient hue-rotate drift on blob layer ─── */
+@keyframes trivia-ambient-shift {
+  0%   { filter: hue-rotate(0deg); }
+  25%  { filter: hue-rotate(15deg); }
+  50%  { filter: hue-rotate(0deg); }
+  75%  { filter: hue-rotate(-15deg); }
+  100% { filter: hue-rotate(0deg); }
+}
+
+/* ─── Floating embers ─── */
+@keyframes trivia-float-up {
+  0%   { transform: translateY(0) rotate(0deg); opacity: 0.3; }
+  50%  { opacity: 0.4; }
+  100% { transform: translateY(-100vh) rotate(360deg); opacity: 0; }
+}
+
+/* ─── Subtle glass breathing shadow ─── */
+@keyframes trivia-pill-breathe {
+  0%, 100% {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.40),
+                0 2px 8px rgba(0, 0, 0, 0.20),
+                inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  }
+  50% {
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.50),
+                0 2px 8px rgba(0, 0, 0, 0.20),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+}
+
+/* ─── Correct answer reveal: pulse + green glow on dark glass ─── */
+@keyframes trivia-correct-reveal {
+  0% {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.40),
+                0 2px 8px rgba(0, 0, 0, 0.20),
+                inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transform: scale(1);
+  }
+  35% {
+    box-shadow: 0 4px 32px rgba(34, 197, 94, 0.35),
+                0 0 60px rgba(34, 197, 94, 0.20),
+                0 2px 8px rgba(0, 0, 0, 0.20),
+                inset 0 1px 0 rgba(34, 197, 94, 0.15);
+    transform: scale(1.04);
+  }
+  100% {
+    box-shadow: 0 4px 24px rgba(34, 197, 94, 0.25),
+                0 0 40px rgba(34, 197, 94, 0.12),
+                0 2px 8px rgba(0, 0, 0, 0.20),
+                inset 0 1px 0 rgba(34, 197, 94, 0.10);
+    transform: scale(1.02);
+  }
+}
+
+/* ─── Countdown number: fade in, hold, fade out within 1s ─── */
+@keyframes trivia-countdown-pulse {
+  0%   { opacity: 0; transform: scale(0.85); }
+  15%  { opacity: 1; transform: scale(1.02); }
+  25%  { opacity: 1; transform: scale(1); }
+  80%  { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.92); }
+}
