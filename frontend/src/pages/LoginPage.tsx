@@ -12,7 +12,7 @@ type SignInStep = 'email' | 'pin';
 type SignUpStep = 'email' | 'pin' | 'confirm' | 'pending';
 
 export function LoginPage() {
-  const { login, authenticated, loading } = useAuth();
+  const { login, authenticated, loading, needsStart, pinUnlock } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -40,6 +40,13 @@ export function LoginPage() {
       navigate(from, { replace: true });
     }
   }, [authenticated, loading, navigate, location]);
+
+  // Fresh install → Start flow; single-account install → PIN keypad.
+  useEffect(() => {
+    if (loading || authenticated) return;
+    if (needsStart) navigate('/start', { replace: true });
+    else if (pinUnlock) navigate('/unlock', { replace: true });
+  }, [needsStart, pinUnlock, authenticated, loading, navigate]);
 
   useEffect(() => {
     if (flow === 'signin') {

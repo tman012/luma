@@ -10,6 +10,8 @@
  */
 
 import { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
+import { useRequireService } from '@/components/connect/connectService';
+import { ConnectServiceCard } from '@/components/connect/ConnectServiceCard';
 import { useNavigate } from 'react-router';
 import { useModalHost, type ModalSource } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
@@ -820,6 +822,9 @@ export function WatchlistPage() {
 
   const [tab, setTab] = useState<Tab>('watchlist');
   const [wlMode, setWlMode] = useState<'movie' | 'tv'>('movie');
+  const radarrOk = useRequireService('radarr', false);
+  const sonarrOk = useRequireService('sonarr', false);
+  const arrConnected = wlMode === 'tv' ? sonarrOk : radarrOk;
   const [movies, setMovies] = useState<WatchlistMovie[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [upcoming, setUpcoming] = useState<UpcomingEpisode[]>([]);
@@ -1036,8 +1041,12 @@ export function WatchlistPage() {
 
   const tabContent = (
     <>
+      {/* Watchlist needs Radarr (movies) / Sonarr (TV) */}
+      {tab === 'watchlist' && arrConnected === false && (
+        <ConnectServiceCard service={wlMode === 'tv' ? 'sonarr' : 'radarr'} fullPage={false} />
+      )}
       {/* ===== WATCHLIST TAB ===== */}
-      {tab === 'watchlist' && (
+      {tab === 'watchlist' && arrConnected !== false && (
         <>
           {/* Movie / TV segmented toggle */}
           <div className="mb-4 mt-1 inline-flex rounded-full border border-white/10 bg-white/5 p-1">

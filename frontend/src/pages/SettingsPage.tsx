@@ -4,7 +4,7 @@
  * Desktop: Back button + fixed left sidebar (260px) with tab list + scrollable right content.
  * Mobile: MobileHeader + horizontal scrollable pill tab bar.
  *
- * Tabs: Services | Rooms | UI | Media | Network
+ * Tabs: Services | Rooms | UI | Media | Network | Security | Automation
  */
 
 import { Component, useState, useCallback, useMemo, type ReactNode } from 'react';
@@ -20,6 +20,7 @@ import { UiKioskTab } from './settings/UiKioskTab';
 import { MediaPathsTab } from './settings/MediaPathsTab';
 import { NetworkTab } from './settings/NetworkTab';
 import { AutomationTab } from './settings/AutomationTab';
+import { SecurityTab } from './settings/SecurityTab';
 import { cn } from '@/utils/cn';
 
 // ── Error boundary to catch and display render crashes ──────────
@@ -59,7 +60,7 @@ class SettingsErrorBoundary extends Component<
 
 // ── Tab definitions ──────────────────────────────────────────────
 
-type TabId = 'services' | 'rooms' | 'ui' | 'media' | 'network' | 'automation';
+type TabId = 'services' | 'rooms' | 'ui' | 'media' | 'network' | 'security' | 'automation';
 
 interface TabDef {
   id: TabId;
@@ -128,6 +129,17 @@ const TABS: TabDef[] = [
     ),
   },
   {
+    id: 'security',
+    label: 'Security',
+    subtitle: 'Require PIN \u00b7 Trusted proxies',
+    section: 'Application',
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+      </svg>
+    ),
+  },
+  {
     id: 'automation',
     label: 'Automation',
     subtitle: 'Trending watchlists \u00b7 Scheduling',
@@ -148,6 +160,7 @@ const TAB_CONTENT: Record<TabId, React.ReactNode> = {
   ui: <UiKioskTab />,
   media: <MediaPathsTab />,
   network: <NetworkTab />,
+  security: <SecurityTab />,
   automation: <AutomationTab />,
 };
 
@@ -159,7 +172,11 @@ function SettingsPageInner() {
   const isMobile = d.mode === 'compact';
   useBodyScroll();
 
-  const [activeTab, setActiveTab] = useState<TabId | null>(null);
+  // ?tab=<id> opens a tab directly (e.g. from a "Connect Radarr" card).
+  const [activeTab, setActiveTab] = useState<TabId | null>(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    return TABS.some(x => x.id === t) ? (t as TabId) : null;
+  });
   const [activeCard, setActiveCard] = useState<number | null>(null);
   const [activeCardTitle, setActiveCardTitle] = useState<string>('');
 

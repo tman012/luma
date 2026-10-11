@@ -21,6 +21,9 @@ import { LandingPage } from '@/pages/LandingPage';
 import { RatePage } from '@/pages/RatePage';
 import { TastePromptHost } from '@/components/taste/TastePromptHost';
 import { AuthenticatedHomePage } from '@/pages/AuthenticatedHomePage';
+import { StartPage } from '@/pages/StartPage';
+import { UnlockPage } from '@/pages/UnlockPage';
+import { ConnectServiceHost } from '@/components/connect/ConnectServiceHost';
 
 // Lazy-load non-home routes — keeps initial bundle small
 const ExploreKioskPage = lazy(() => import('@/pages/ExploreKioskPage').then(m => ({ default: m.ExploreKioskPage })));
@@ -34,15 +37,19 @@ const MySettingsPage = lazy(() => import('@/pages/MySettingsPage').then(m => ({ 
  * AuthGate — redirects unauthenticated users to /login.
  * Renders nothing while the auth state is loading.
  */
+function signInPath(needsStart: boolean, pinUnlock: boolean) {
+  return needsStart ? '/start' : pinUnlock ? '/unlock' : '/login';
+}
+
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { authenticated, loading } = useAuth();
+  const { authenticated, loading, needsStart, pinUnlock } = useAuth();
 
   if (loading) {
     return null;
   }
 
   if (!authenticated) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={signInPath(needsStart, pinUnlock)} replace />;
   }
 
   return <>{children}</>;
@@ -52,10 +59,10 @@ function AuthGate({ children }: { children: React.ReactNode }) {
  * AdminGate — redirects non-admin users to home.
  */
 function AdminGate({ children }: { children: React.ReactNode }) {
-  const { authenticated, loading, user } = useAuth();
+  const { authenticated, loading, user, needsStart, pinUnlock } = useAuth();
 
   if (loading) return null;
-  if (!authenticated) return <Navigate to="/login" replace />;
+  if (!authenticated) return <Navigate to={signInPath(needsStart, pinUnlock)} replace />;
   if (!user?.is_admin) return <Navigate to="/" replace />;
 
   return <>{children}</>;
@@ -160,12 +167,16 @@ function KioskModeToggle() {
  * - Authenticated + compact (mobile) → AuthenticatedHomePage (rails + inline search)
  */
 function Home() {
-  const { authenticated, loading, needsSetup } = useAuth();
+  const { authenticated, loading, needsSetup, needsStart, startInProgress, pinUnlock } = useAuth();
   const { mode } = useLayoutMode();
   const kioskMode = useKioskMode();
 
   if (loading) {
     return null;
+  }
+
+  if (authenticated && startInProgress) {
+    return <Navigate to="/start" replace />;
   }
 
   if (authenticated) {
@@ -193,6 +204,8 @@ function Home() {
     );
   }
 
+  if (needsStart) return <Navigate to="/start" replace />;
+  if (pinUnlock) return <Navigate to="/unlock" replace />;
   return <LandingPage />;
 }
 
@@ -215,11 +228,14 @@ export default function App() {
                     AppRoutes — anything mounted inside AppRoutes is dead on the
                     one screen this prompt most needs to appear on. */}
                 <TastePromptHost />
+                <ConnectServiceHost />
                 <Suspense fallback={null}>
                   <Routes>
                     {/* Home — conditional: PublicHomePage if not auth, AuthenticatedHomePage if auth */}
                     <Route path="/" element={<Home />} />
                     <Route path="/login" element={<LoginPage />} />
+                    <Route path="/start" element={<StartPage />} />
+                    <Route path="/unlock" element={<UnlockPage />} />
 
                     {/* Setup — requires auth */}
                     <Route
