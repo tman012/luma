@@ -24,6 +24,13 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 import requests
 
+# First-run bootstrap: install secrets in the data dir, and settings saved in
+# the UI exported to the environment before modules that read it are imported.
+from app import first_run
+from app import access as _access
+first_run.export_settings_to_env()
+_INSTALL_SECRETS = first_run.load_or_create_secrets()
+
 # Import explore cache
 from app.explore_cache import explore_cache
 from app.fast_search import fast_search_index
@@ -77,7 +84,7 @@ logger = logging.getLogger(__name__)
 # Flask app setup
 app = Flask(__name__,
             static_folder='/app/static')
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', '')
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or _INSTALL_SECRETS['flask_secret_key']
 CORS(app)
 
 # ---------------------------------------------------------------------------
@@ -98,7 +105,7 @@ LUMA_SESSION_COOKIE = "luma_session"
 # These paths don't need auth
 _AUTH_EXEMPT = {
     "/health", "/api/auth/login", "/api/auth/me", "/api/auth/check-user",
-    "/api/auth/register",
+    "/api/auth/register", "/api/auth/unlock",
     "/manifest.json", "/sw.js", "/ca.crt",
 }
 
@@ -107,7 +114,7 @@ _AUTH_EXEMPT = {
 _AUTOMATIONS_DISABLED = os.environ.get('LUMA_DISABLE_AUTOMATIONS', '').strip().lower() in ('1', 'true', 'yes', 'on')
 
 # Service-to-service API key (used by companion apps)
-_SERVICE_API_KEY = os.environ.get("SERVICE_API_KEY", "")
+_SERVICE_API_KEY = os.environ.get("SERVICE_API_KEY") or _INSTALL_SECRETS["service_api_key"]
 
 
 @app.before_request
@@ -126,6 +133,16 @@ def load_current_user():
 
     token = request.cookies.get(LUMA_SESSION_COOKIE)
     g.current_user = user_auth.validate_session(token) if token else None
+    g.implicit_user = False
+    if g.current_user is None and not _access.needs_pin(settings, request):
+        # Open access (Settings → Security): act as the owner without a sign-in.
+        owner = _access.owner(user_auth)
+        if owner:
+            g.current_user = {
+                "id": owner["id"], "name": owner["name"], "is_admin": owner["is_admin"],
+                "created_at": owner.get("created_at"), "token": None, "expires_at": None,
+            }
+            g.implicit_user = True
 
 
 def _get_current_user() -> Optional[Dict]:
@@ -666,7 +683,7 @@ class TMDBClient:
     def search_movies(self, query: str, year: Optional[int] = None) -> List[Dict]:
         """Search for movies on TMDB."""
         if not self.api_key:
-            logger.warning("TMDB API key not configured")
+            logger.debug("TMDB API key not configured")
             return []
 
         params = {
@@ -689,7 +706,7 @@ class TMDBClient:
     def search_tv(self, query: str, year: Optional[int] = None) -> List[Dict]:
         """Search for TV shows on TMDB."""
         if not self.api_key:
-            logger.warning("TMDB API key not configured")
+            logger.debug("TMDB API key not configured")
             return []
 
         params = {
@@ -722,7 +739,7 @@ class TMDBClient:
         Returns raw results, each carrying TMDb's own `media_type`.
         """
         if not self.api_key:
-            logger.warning("TMDB API key not configured")
+            logger.debug("TMDB API key not configured")
             return []
 
         params = {
@@ -746,7 +763,7 @@ class TMDBClient:
         import concurrent.futures
 
         if not self.api_key:
-            logger.warning("TMDB API key not configured")
+            logger.debug("TMDB API key not configured")
             return []
 
         def fetch_page(page: int) -> List[Dict]:
@@ -985,7 +1002,7 @@ def get_radarr_quality_profiles():
     try:
         radarr = get_radarr_for_request()
         if not radarr:
-            return jsonify({'error': 'Radarr not configured'}), 400
+            return jsonify({'error': 'Radarr not configured', 'needs_setup': 'radarr'}), 400
         profiles = radarr.get_quality_profiles()
         return jsonify(profiles if profiles else [])
     except Exception as e:
@@ -1003,7 +1020,7 @@ def get_radarr_upgrade_profiles():
     try:
         radarr = get_radarr_for_request()
         if not radarr:
-            return jsonify({'error': 'Radarr not configured'}), 400
+            return jsonify({'error': 'Radarr not configured', 'needs_setup': 'radarr'}), 400
         profiles = radarr.get_quality_profiles()
         return jsonify([{'id': p['id'], 'name': p['name']} for p in (profiles or [])])
     except Exception as e:
@@ -1016,7 +1033,7 @@ def get_radarr_root_folders():
     try:
         radarr = get_radarr_for_request()
         if not radarr:
-            return jsonify({'error': 'Radarr not configured'}), 400
+            return jsonify({'error': 'Radarr not configured', 'needs_setup': 'radarr'}), 400
         folders = radarr.get_root_folders()
         return jsonify(folders if folders else [])
     except Exception as e:
@@ -1105,7 +1122,7 @@ def radarr_movie_releases():
     try:
         radarr = get_radarr_for_request()
         if not radarr:
-            return jsonify({'error': 'Radarr is not configured'}), 503
+            return jsonify({'error': 'Radarr is not configured', 'needs_setup': 'radarr'}), 503
 
         tmdb_id = request.args.get('tmdb_id', type=int)
         title = request.args.get('title', '')
@@ -1504,7 +1521,7 @@ def tmdb_match_search():
 
         api_key = settings.get('apis.tmdb.api_key')
         if not api_key:
-            return jsonify({'error': 'TMDb not configured'}), 503
+            return jsonify({'error': 'TMDb not configured', 'needs_setup': 'tmdb'}), 503
 
         if media_type not in ('movie', 'tv'):
             media_type = ''  # search both
@@ -2029,7 +2046,7 @@ def indexer_grab():
     try:
         radarr = get_radarr_for_request()
         if not radarr:
-            return jsonify({'error': 'Radarr is not configured'}), 503
+            return jsonify({'error': 'Radarr is not configured', 'needs_setup': 'radarr'}), 503
 
         data = request.get_json() or {}
         guid = data.get('guid')
@@ -2249,7 +2266,7 @@ def radarr_movie_grab():
     try:
         radarr = get_radarr_for_request()
         if not radarr:
-            return jsonify({'error': 'Radarr is not configured'}), 503
+            return jsonify({'error': 'Radarr is not configured', 'needs_setup': 'radarr'}), 503
 
         data = request.get_json()
         if not data:
@@ -2558,7 +2575,7 @@ def get_watchlist():
     try:
         radarr = get_radarr_for_request()
         if not radarr:
-            return jsonify({'error': 'Radarr not configured', 'watchlist': []}), 400
+            return jsonify({'error': 'Radarr not configured', 'needs_setup': 'radarr', 'watchlist': []}), 400
         movies = radarr.get_movies()
 
         # Cache quality profiles to avoid repeated calls
@@ -2711,7 +2728,7 @@ def canon_build():
     from app import canon_index
     api_key = settings.get('apis.tmdb.api_key') or Config.TMDB_API_KEY
     if not api_key:
-        return jsonify({'error': 'TMDb API key not configured'}), 400
+        return jsonify({'error': 'TMDb API key not configured', 'needs_setup': 'tmdb'}), 400
     force = bool((request.get_json(silent=True) or {}).get('force'))
     try:
         return jsonify(canon_index.build_index(api_key, force=force))
@@ -3101,7 +3118,7 @@ def add_to_watchlist():
 
         radarr = get_radarr_for_request()
         if not radarr:
-            return jsonify({'error': 'Radarr not configured'}), 400
+            return jsonify({'error': 'Radarr not configured', 'needs_setup': 'radarr'}), 400
 
         # ----- Resolve quality profile name → ID -----
         profiles = radarr.get_quality_profiles()
@@ -3295,7 +3312,7 @@ def add_tv_to_watchlist():
         # ----- Get Sonarr -----
         sonarr = get_sonarr_for_request()
         if not sonarr:
-            return jsonify({'error': 'Sonarr not configured'}), 503
+            return jsonify({'error': 'Sonarr not configured', 'needs_setup': 'sonarr'}), 503
 
         # ----- Resolve quality profile -----
         profiles = sonarr.get_quality_profiles()
@@ -3439,7 +3456,7 @@ def remove_from_watchlist(tmdb_id):
     try:
         radarr = get_radarr_for_request()
         if not radarr:
-            return jsonify({'error': 'Radarr not configured'}), 400
+            return jsonify({'error': 'Radarr not configured', 'needs_setup': 'radarr'}), 400
 
         movie = radarr.get_movie_by_tmdb_id(tmdb_id)
 
@@ -3482,7 +3499,7 @@ def check_watchlist(tmdb_id):
 
         radarr = get_radarr_for_request()
         if not radarr:
-            return jsonify({'error': 'Radarr not configured'}), 400
+            return jsonify({'error': 'Radarr not configured', 'needs_setup': 'radarr'}), 400
         movie = radarr.get_movie_by_tmdb_id(tmdb_id)
 
         # Also check local library
@@ -3510,7 +3527,7 @@ def trigger_watchlist_search(tmdb_id):
     try:
         radarr = get_radarr_for_request()
         if not radarr:
-            return jsonify({'error': 'Radarr not configured'}), 400
+            return jsonify({'error': 'Radarr not configured', 'needs_setup': 'radarr'}), 400
         movie = radarr.get_movie_by_tmdb_id(tmdb_id)
 
         if not movie:
@@ -3542,7 +3559,7 @@ def update_watchlist_quality_profile(tmdb_id):
     try:
         radarr = get_radarr_for_request()
         if not radarr:
-            return jsonify({'error': 'Radarr not configured'}), 400
+            return jsonify({'error': 'Radarr not configured', 'needs_setup': 'radarr'}), 400
 
         data = request.get_json(force=True) if request.data else {}
         new_profile_id = data.get('quality_profile_id')
@@ -4213,6 +4230,75 @@ def _evict_tmdb_detail_cache():
             for k in sorted_keys[:len(_tmdb_detail_cache) - _TMDB_DETAIL_CACHE_MAX]:
                 del _tmdb_detail_cache[k]
 
+def _plex_img(path):
+    return f'/api/img/plex?url={urllib.parse.quote(path, safe="/")}' if path else None
+
+
+def _plex_details(kind: str, tmdb_id: int) -> Optional[Dict]:
+    """TMDb-shaped details for an owned title, built only from Plex.
+
+    Used when no TMDB key is set (or TMDb fails) so owned movies and shows
+    still open with full artwork, cast and seasons.
+    """
+    try:
+        index = plex_service.build_ownership_index() or {}
+    except Exception as e:
+        logger.debug(f"Plex details: ownership index unavailable: {e}")
+        return None
+    entry = (index.get('movies_by_tmdb' if kind == 'movie' else 'tv_by_tmdb') or {}).get(int(tmdb_id))
+    rk = (entry or {}).get('rating_key')
+    if not rk:
+        return None
+    meta = plex_service.get_metadata(int(rk))
+    if not meta:
+        return None
+    date = meta.get('originallyAvailableAt') or (f"{meta['year']}" if meta.get('year') else '')
+    rating = meta.get('audienceRating') or meta.get('rating')
+    out: Dict[str, Any] = {
+        'id': int(tmdb_id),
+        'overview': meta.get('summary', ''),
+        'tagline': meta.get('tagline', ''),
+        'poster_path': _plex_img(meta.get('thumbPath')),
+        'backdrop_path': _plex_img(meta.get('artPath')),
+        'genres': [{'id': 0, 'name': g} for g in meta.get('genres') or []],
+        'vote_average': rating or 0,
+        'vote_count': 0,
+        'imdb_id': meta.get('imdb_id'),
+        'credits': {
+            'cast': [{'id': c.get('actor_id') or 0, 'name': c.get('tag', ''), 'character': c.get('role', ''),
+                      'profile_path': _plex_img(c.get('thumb')) if (c.get('thumb') or '').startswith('/') else c.get('thumb')}
+                     for c in (meta.get('cast') or [])[:30]],
+            'crew': [{'id': 0, 'name': d.get('name', ''), 'job': 'Director', 'department': 'Directing'}
+                     for d in meta.get('directors') or []],
+        },
+        'videos': {'results': []},
+        'production_companies': [{'id': 0, 'name': meta['studio']}] if meta.get('studio') else [],
+        'plex_rating_key': int(rk),
+        '_source': 'plex',
+    }
+    if kind == 'movie':
+        out.update(title=meta.get('title', ''), release_date=date,
+                   runtime=round((meta.get('duration_ms') or 0) / 60000) or None,
+                   release_dates={'results': [{'iso_3166_1': 'US', 'release_dates': [
+                       {'certification': meta.get('content_rating', ''), 'type': 3}]}]})
+    else:
+        seasons = []
+        try:
+            for se in plex_service.get_show_children(int(rk)):
+                seasons.append({'season_number': se.get('index'), 'name': se.get('title', ''),
+                                'episode_count': se.get('leafCount', 0),
+                                'poster_path': _plex_img(se.get('thumbPath')), 'id': se.get('ratingKey')})
+        except Exception:
+            pass
+        out.update(name=meta.get('title', ''), first_air_date=date,
+                   number_of_seasons=len([x for x in seasons if x.get('season_number')]),
+                   number_of_episodes=meta.get('leafCount') or sum(x.get('episode_count') or 0 for x in seasons),
+                   seasons=seasons, episode_run_time=[],
+                   external_ids={'tvdb_id': meta.get('tvdb_id'), 'imdb_id': meta.get('imdb_id')},
+                   content_ratings={'results': [{'iso_3166_1': 'US', 'rating': meta.get('content_rating', '')}]})
+    return out
+
+
 @app.route('/api/movie/<int:tmdb_id>')
 def movie_details(tmdb_id):
     """Get detailed information about a specific movie (cached 30m)."""
@@ -4225,8 +4311,10 @@ def movie_details(tmdb_id):
         if time.time() - ts < _TMDB_DETAIL_TTL:
             return jsonify(data)
 
-    details = tmdb.get_movie_details(tmdb_id)
+    details = tmdb.get_movie_details(tmdb_id) or _plex_details('movie', tmdb_id)
     if not details:
+        if not tmdb.api_key:
+            return jsonify({'error': 'TMDb not configured', 'needs_setup': 'tmdb'}), 404
         return jsonify({'error': 'Movie not found'}), 404
 
     with _tmdb_detail_cache_lock:
@@ -4655,8 +4743,10 @@ def tv_details(tmdb_id):
             if isinstance(data, dict) and data.get("credits") is not None:
                 return jsonify(data)
 
-    details = tmdb.get_tv_details(tmdb_id)
+    details = tmdb.get_tv_details(tmdb_id) or _plex_details('tv', tmdb_id)
     if not details:
+        if not tmdb.api_key:
+            return jsonify({'error': 'TMDb not configured', 'needs_setup': 'tmdb'}), 404
         return jsonify({'error': 'TV show not found'}), 404
 
     with _tmdb_detail_cache_lock:
@@ -7115,6 +7205,14 @@ def auth_login():
         if not identifier or not pin:
             return jsonify({'success': False, 'error': 'Email and password are required'}), 400
 
+        from app import login_limiter
+        client_ip = request.remote_addr or ''
+        wait = login_limiter.retry_after(client_ip, identifier)
+        if wait:
+            mins = max(1, (wait + 59) // 60)
+            return jsonify({'success': False, 'error': f'Too many attempts. Try again in {mins} min.',
+                            'retry_after': wait}), 429
+
         # Check user status before full auth — try email first, then name
         _pre = None
         if email:
@@ -7128,7 +7226,9 @@ def auth_login():
 
         user = user_auth.authenticate(identifier, pin, email=email)
         if not user:
+            login_limiter.record_failure(client_ip, identifier)
             return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
+        login_limiter.record_success(client_ip, identifier)
 
         token = user_auth.create_session(user['id'])
 
@@ -7172,6 +7272,8 @@ def auth_register():
         email = (data.get('email') or '').strip().lower()
         pin = str(data.get('pin') or '').strip()
 
+        if not user_auth.list_users():
+            return jsonify({'success': False, 'error': 'Luma is not set up yet', 'needs_start': True}), 409
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
         if not email:
@@ -7404,7 +7506,11 @@ def auth_me():
     """Return current user info, or 401 if not logged in."""
     user = _get_current_user()
     if not user:
-        return jsonify({'authenticated': False}), 401
+        return jsonify({
+            'authenticated': False,
+            'needs_start': _start_flow.needs_start(),
+            'pin_unlock': _start_flow.created_by_start(),
+        }), 401
     # Include user settings
     user_settings_data = user_auth.get_user_settings(user['id'])
     # Fetch full user record to get email
@@ -7429,7 +7535,111 @@ def auth_me():
         'user_settings': user_settings_data,
         'needs_setup': needs_setup,
         'plex_access_status': plex_access_status,
+        'implicit': bool(getattr(g, 'implicit_user', False)),
+        'access_mode': _access.mode(settings),
+        'start_in_progress': _start_flow._in_progress(user),
     })
+
+
+# ---------------------------------------------------------------------------
+# Security: access mode and the owner PIN (Settings → Security)
+# ---------------------------------------------------------------------------
+
+def _pin_state() -> bool:
+    """Whether a sign-in PIN exists (Start-flow installs begin without one)."""
+    if not _start_flow.created_by_start():
+        return True
+    return bool(_start_flow._load_state().get('pin_set'))
+
+
+@app.route('/api/auth/unlock', methods=['POST'])
+def auth_unlock():
+    """PIN-only sign-in for the owner of a single-account install."""
+    from app import login_limiter
+    if not _start_flow.created_by_start() or not _pin_state():
+        return jsonify({'success': False, 'error': 'PIN sign-in is not available'}), 400
+    pin = str((request.get_json(silent=True) or {}).get('pin') or '')
+    ip = _access.client_ip(request, settings) or (request.remote_addr or "")
+    wait = login_limiter.retry_after(ip, 'owner')
+    if wait:
+        mins = max(1, (wait + 59) // 60)
+        return jsonify({'success': False, 'error': f'Too many attempts. Try again in {mins} min.',
+                        'retry_after': wait}), 429
+    owner = _access.owner(user_auth)
+    user = user_auth.authenticate(owner['name'], pin) if owner and pin else None
+    if not user:
+        login_limiter.record_failure(ip, 'owner')
+        return jsonify({'success': False, 'error': 'Wrong PIN'}), 401
+    login_limiter.record_success(ip, 'owner')
+    token = user_auth.create_session(user['id'])
+    resp = make_response(jsonify({'success': True}))
+    resp.set_cookie(LUMA_SESSION_COOKIE, token, max_age=60 * 60 * 24 * 30,
+                    httponly=False, samesite='Lax', secure=False, path='/')
+    return resp
+
+
+def _valid_net(value: str) -> bool:
+    import ipaddress
+    try:
+        ipaddress.ip_network(value, strict=False)
+        return True
+    except ValueError:
+        return False
+
+
+@app.route('/api/security', methods=['GET'])
+def security_get():
+    err = _require_admin()
+    if err:
+        return err
+    return jsonify({
+        'mode': _access.mode(settings),
+        'pin_set': _pin_state(),
+        'single_account': _start_flow.created_by_start(),
+        'local_request': _access.is_local_request(request, settings),
+        'trusted_proxies': settings.get('security.trusted_proxies') or '',
+    })
+
+
+@app.route('/api/security', methods=['PUT'])
+def security_put():
+    err = _require_admin()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    mode = str(body.get('mode') or '')
+    pin = str(body.get('pin') or '')
+    if mode not in _access.MODES:
+        return jsonify({'error': 'Unknown access mode'}), 400
+    if pin and (len(pin) != 4 or not pin.isdigit()):
+        return jsonify({'error': 'Enter 4 digits'}), 400
+    if pin and 'confirm' in body and str(body.get('confirm') or '') != pin:
+        return jsonify({'error': "PINs don't match"}), 400
+    if 'trusted_proxies' in body:
+        proxies = str(body.get('trusted_proxies') or '').strip()
+        bad = [p for p in proxies.replace(';', ',').split(',') if p.strip() and not _valid_net(p.strip())]
+        if bad:
+            return jsonify({'error': f'Not an IP address or range: {bad[0].strip()}'}), 400
+        settings.update({'security': {'trusted_proxies': proxies}})
+    user = _get_current_user()
+    if not user or not user.get('id'):
+        return jsonify({'error': 'Sign in first'}), 400
+    if mode != 'open' and not pin and not _pin_state():
+        return jsonify({'error': 'Set a PIN first'}), 400
+    if pin:
+        user_auth.update_pin(user['id'], pin)
+        if _start_flow.created_by_start():
+            st = _start_flow._load_state()
+            st['pin_set'] = True
+            _start_flow._save_state(st)
+    settings.update({'security': {'access_mode': mode}})
+    resp = make_response(jsonify({'ok': True, 'mode': mode, 'pin_set': _pin_state()}))
+    if mode != 'open' and getattr(g, 'implicit_user', False):
+        # Keep this browser signed in after turning the PIN on.
+        token = user_auth.create_session(user['id'])
+        resp.set_cookie(LUMA_SESSION_COOKIE, token, max_age=60 * 60 * 24 * 30,
+                        httponly=False, samesite='Lax', secure=False, path='/')
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -12935,7 +13145,7 @@ def remove_from_tracking(torrent_hash):
 
         qbit_url = settings.get('qbittorrent.url')
         if not qbit_url:
-            return jsonify({'success': False, 'error': 'qBittorrent not configured'}), 500
+            return jsonify({'success': False, 'error': 'qBittorrent not configured', 'needs_setup': 'qbittorrent'}), 500
 
         qs = req.Session()
         lr = qs.post(
@@ -13298,7 +13508,7 @@ def sonarr_add_series():
             return jsonify({'error': 'Missing tvdb_id'}), 400
 
         if not sonarr:
-            return jsonify({'error': 'Sonarr is not configured'}), 503
+            return jsonify({'error': 'Sonarr is not configured', 'needs_setup': 'sonarr'}), 503
 
         # Resolve quality profile: explicit ID, else settings default → preferred name → first
         if not quality_profile_id:
@@ -13457,7 +13667,7 @@ def sonarr_monitor_episodes():
         return denied
     sonarr = get_sonarr_for_request()
     if not sonarr:
-        return jsonify({'error': 'Sonarr is not configured'}), 503
+        return jsonify({'error': 'Sonarr is not configured', 'needs_setup': 'sonarr'}), 503
     data = request.get_json() or {}
     series_id = data.get('series_id')
     episode_ids = data.get('episode_ids') or []
@@ -13481,7 +13691,7 @@ def sonarr_monitor_series():
         return denied
     sonarr = get_sonarr_for_request()
     if not sonarr:
-        return jsonify({'error': 'Sonarr is not configured'}), 503
+        return jsonify({'error': 'Sonarr is not configured', 'needs_setup': 'sonarr'}), 503
     data = request.get_json() or {}
     series_id = data.get('series_id')
     mode = data.get('mode')
@@ -13518,7 +13728,7 @@ def sonarr_monitor_season():
         return denied
     sonarr = get_sonarr_for_request()
     if not sonarr:
-        return jsonify({'error': 'Sonarr is not configured'}), 503
+        return jsonify({'error': 'Sonarr is not configured', 'needs_setup': 'sonarr'}), 503
     data = request.get_json() or {}
     series_id = data.get('series_id')
     season = data.get('season')
@@ -13541,7 +13751,7 @@ def sonarr_quality_profiles():
         sonarr = get_sonarr_for_request()
 
         if not sonarr:
-            return jsonify({'error': 'Sonarr is not configured'}), 503
+            return jsonify({'error': 'Sonarr is not configured', 'needs_setup': 'sonarr'}), 503
 
         profiles = sonarr.get_quality_profiles()
         return jsonify(profiles)
@@ -13761,7 +13971,7 @@ def sonarr_search_episode():
         sonarr = get_sonarr_for_request()
 
         if not sonarr:
-            return jsonify({'error': 'Sonarr is not configured'}), 503
+            return jsonify({'error': 'Sonarr is not configured', 'needs_setup': 'sonarr'}), 503
 
         tvdb_id = request.args.get('tvdb_id', type=int)
         season = request.args.get('season', type=int)
@@ -13857,7 +14067,7 @@ def sonarr_download_episode():
         sonarr = get_sonarr_for_request()
 
         if not sonarr:
-            return jsonify({'error': 'Sonarr is not configured'}), 503
+            return jsonify({'error': 'Sonarr is not configured', 'needs_setup': 'sonarr'}), 503
 
         data = request.get_json() or {}
         guid = data.get('guid')
@@ -14265,7 +14475,7 @@ def sonarr_search_season():
         sonarr = get_sonarr_for_request()
 
         if not sonarr:
-            return jsonify({'error': 'Sonarr is not configured'}), 503
+            return jsonify({'error': 'Sonarr is not configured', 'needs_setup': 'sonarr'}), 503
 
         tvdb_id = request.args.get('tvdb_id', type=int)
         season = request.args.get('season', type=int)
@@ -14330,7 +14540,7 @@ def sonarr_auto_search_season():
         sonarr = get_sonarr_for_request()
 
         if not sonarr:
-            return jsonify({'error': 'Sonarr is not configured'}), 503
+            return jsonify({'error': 'Sonarr is not configured', 'needs_setup': 'sonarr'}), 503
 
         data = request.get_json() or {}
         tvdb_id = data.get('tvdb_id')
@@ -14403,7 +14613,7 @@ def sonarr_auto_search_episode():
         sonarr = get_sonarr_for_request()
 
         if not sonarr:
-            return jsonify({'error': 'Sonarr is not configured'}), 503
+            return jsonify({'error': 'Sonarr is not configured', 'needs_setup': 'sonarr'}), 503
 
         data = request.get_json() or {}
         tvdb_id = data.get('tvdb_id')
@@ -14882,7 +15092,7 @@ def tmdb_episode_detail(tmdb_show_id, season, episode):
 
     tmdb_api_key = settings.get('apis.tmdb.api_key', '') or Config.TMDB_API_KEY
     if not tmdb_api_key:
-        return jsonify({'error': 'TMDb API key not configured'}), 503
+        return jsonify({'error': 'TMDb API key not configured', 'needs_setup': 'tmdb'}), 503
 
     try:
         resp = requests.get(
@@ -17126,6 +17336,96 @@ def spa_trending(rest=''):
     return _serve_spa()
 
 # Initialize app
+# ---------------------------------------------------------------------------
+# Start flow (first run: Sign in with Plex, create PIN)
+# ---------------------------------------------------------------------------
+
+def _start_plex_saved(url: str, token: str, machine_id: str) -> int:
+    """Save the Plex server picked in the Start flow and sync its libraries."""
+    settings.update({'plex': {'url': url, 'token': token, 'machine_id': machine_id}})
+    os.environ['PLEX_URL'], os.environ['PLEX_TOKEN'] = url, token
+    os.environ['PLEX_MACHINE_ID'] = machine_id
+    try:
+        plex_service.update_config(url, token)
+    except Exception as e:
+        logger.warning(f"Start: plex_service update failed: {e}")
+    try:
+        sections = plex_service.get_sections_with_locations() or []
+        paths = [{
+            'name': sec.get('title') or f"Library {sec['id']}",
+            'path': '', 'kodi_path': '',
+            'type': _infer_type_from_plex_section(sec),
+            'plex_section_id': sec['id'],
+            'plex_locations': sec.get('locations', []),
+        } for sec in sections]
+        if paths:
+            settings.update({'media': {'paths': paths}})
+        return len(paths)
+    except Exception as e:
+        logger.warning(f"Start: library sync failed: {e}")
+        return 0
+
+
+@app.route('/api/integrations/status')
+def integrations_status():
+    """Which optional services are connected (settings presence only, no network calls)."""
+    err = _require_auth()
+    if err:
+        return err
+    def _set(*paths):
+        return all(bool((settings.get(p) or '').strip()) if isinstance(settings.get(p), str) else bool(settings.get(p)) for p in paths)
+    return jsonify({
+        'plex': _set('plex.url', 'plex.token'),
+        'tmdb': bool(settings.get('apis.tmdb.api_key') or os.environ.get('TMDB_API_KEY')),
+        'radarr': _set('radarr.url', 'radarr.api_key'),
+        'sonarr': _set('sonarr.url', 'sonarr.api_key'),
+        'qbittorrent': _set('qbittorrent.url'),
+        'indexer': _set('indexer.base_url', 'indexer.api_key'),
+        'home_assistant': _set('homeassistant.url', 'homeassistant.access_token'),
+        'rooms': len(settings.get('devices.rooms') or []),
+    })
+
+
+@app.route('/api/integrations/tmdb', methods=['POST'])
+def integrations_tmdb():
+    """Test (and optionally save) a TMDB API key from the Connect TMDB sheet."""
+    err = _require_admin()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    key = str(body.get('api_key') or '').strip()
+    if not key:
+        return jsonify({'ok': False, 'error': 'Enter an API key'}), 400
+    if key.startswith('eyJ'):
+        return jsonify({'ok': False, 'error': 'Use the API Key, not the Read Access Token'}), 400
+    try:
+        r = requests.get('https://api.themoviedb.org/3/configuration', params={'api_key': key}, timeout=8)
+    except Exception:
+        return jsonify({'ok': False, 'error': "Couldn't reach TMDB"}), 502
+    if r.status_code != 200:
+        return jsonify({'ok': False, 'error': 'Key not accepted'}), 400
+    if not body.get('save'):
+        return jsonify({'ok': True})
+    settings.update({'apis': {'tmdb': {'api_key': key}}})
+    os.environ['TMDB_API_KEY'] = key
+    Config.TMDB_API_KEY = key
+    logger.info('TMDB connected')
+    restart = os.environ.get('LUMA_NO_RESTART', '') not in ('1', 'true')
+    if restart:
+        # Several caches read the key once at startup; a quick restart picks it up everywhere.
+        threading.Thread(target=_start_flow._restart_soon, daemon=True).start()
+    return jsonify({'ok': True, 'restarting': restart})
+
+
+from app import start_flow as _start_flow
+_start_flow.init(
+    settings=settings, user_auth=user_auth, session_cookie=LUMA_SESSION_COOKIE,
+    client_id=_INSTALL_SECRETS['plex_client_id'], on_plex_saved=_start_plex_saved,
+    get_current_user=_get_current_user,
+)
+app.register_blueprint(_start_flow.bp)
+
+
 if __name__ == '__main__':
     # Initialize database
     init_database()
@@ -17136,6 +17436,22 @@ if __name__ == '__main__':
         logger.info("✅ User auth database initialized")
     except Exception as e:
         logger.error(f"❌ User auth DB init failed: {e}")
+
+    # Installs that already had accounts before access modes existed keep
+    # requiring sign-in (an unset mode already means "pin"; save it explicitly).
+    try:
+        if not (settings.get('security.access_mode') or '') and user_auth.list_users():
+            settings.update({'security': {'access_mode': 'pin'}})
+            logger.info("Security: existing accounts found, sign-in stays required")
+    except Exception as e:
+        logger.warning(f"Security migration skipped: {e}")
+
+    # First run: generate the Web Push (VAPID) key pair up front
+    try:
+        from app.push_service import ensure_vapid_keys
+        ensure_vapid_keys(settings)
+    except Exception as e:
+        logger.warning(f"VAPID key setup skipped: {e}")
 
     # Database sync service disabled - using direct remote database access
     # to avoid corruption issues during container restarts

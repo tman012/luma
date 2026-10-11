@@ -31,12 +31,12 @@ class SonarrAPI:
         if self.enabled:
             logger.info(f"✅ Sonarr integration enabled: {self.url}")
         else:
-            logger.warning("⚠️ Sonarr integration disabled (missing API key)")
+            logger.info("Sonarr not connected")
 
     def _request(self, method: str, endpoint: str, data: Optional[Dict] = None, timeout: int = 10) -> Optional[Dict]:
         """Make a request to Sonarr API"""
         if not self.enabled:
-            logger.error("Sonarr API key not configured")
+            logger.debug("Sonarr API key not configured")
             return None
 
         url = f"{self.url}/api/v3/{endpoint}"

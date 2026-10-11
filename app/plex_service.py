@@ -291,6 +291,9 @@ class PlexService:
             'type': video.get('type', 'movie'),
             'librarySectionID': lib_section_id,
             'librarySectionTitle': video.get('librarySectionTitle', ''),
+            'originallyAvailableAt': video.get('originallyAvailableAt', ''),
+            'tagline': video.get('tagline', ''),
+            'studio': video.get('studio', ''),
         }
 
         # Media quality info from first <Media> element
@@ -635,6 +638,12 @@ class PlexService:
                         for r in directory.findall('.//Role')
                     ],
                     'directors': [{'name': d.get('tag', '')} for d in directory.findall('.//Director')],
+                    'audienceRating': float(directory.get('audienceRating', 0)) if directory.get('audienceRating') else None,
+                    'originallyAvailableAt': directory.get('originallyAvailableAt', ''),
+                    'tagline': directory.get('tagline', ''),
+                    'studio': directory.get('studio', ''),
+                    'leafCount': int(directory.get('leafCount', 0) or 0),
+                    'childCount': int(directory.get('childCount', 0) or 0),
                 }
                 # Extract external IDs from guid attr
                 guid = directory.get('guid', '')

@@ -4,7 +4,7 @@
 # Connects to configured ADB devices from settings, then starts Flask.
 
 echo "================================================"
-echo "Media Search App - Starting"
+echo "Luma - Starting"
 echo "================================================"
 
 # Set HOME for ADB

@@ -124,6 +124,14 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "client_secret": {"type": "string",  "default": "",    "sensitive": True,  "description": "Trakt API client secret (optional)"},
         },
     },
+    "security": {
+        "_type": "object",
+        "access_mode": {"type": "string", "default": "", "sensitive": False,
+                        "description": "Who must sign in: open (no sign-in), pin_remote (PIN outside the local network) or pin (everyone). Empty: pin when users already exist.",
+                        "enum": ["", "open", "pin_remote", "pin"]},
+        "trusted_proxies": {"type": "string", "default": "", "sensitive": False,
+                            "description": "Reverse proxies whose X-Forwarded-For / CF-Connecting-IP headers are believed (comma-separated IPs or CIDRs)"},
+    },
     "homeassistant": {
         "_type": "object",
         "url":          {"type": "string", "default": "", "sensitive": False, "description": "Home Assistant base URL (e.g. http://homeassistant.local:8123)"},
