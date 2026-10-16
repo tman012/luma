@@ -176,7 +176,7 @@ export function FranchiseCompleterCard() {
           <path d="M8 7h8M8 11h6" />
         </svg>
       }
-      note="Uses the incomplete TMDb collections cache. Only franchises above the fame floor (IMDb votes on the biggest part) with at most N released gaps qualify; unreleased parts are skipped. Adds on the standard profile, searches, then unmonitors so automation grabs never appear on the intentional Watchlist."
+      note="Uses the incomplete TMDb collections cache. Only franchises above the fame floor (IMDb votes on the biggest part) with at most N released gaps qualify; unreleased parts are skipped. Adds on the TFlix profile, searches, then unmonitors so automation grabs never appear on the intentional Watchlist."
       headerRight={
         <button
           type="button"
@@ -198,7 +198,7 @@ export function FranchiseCompleterCard() {
         path="automation.franchise_completer.quality_profile_id"
         type="select"
         options={profileOptions}
-        hint="Standard profile — 720p/1080p Bluray+WEB only"
+        hint="TFlix (id 7) — 720p/1080p Bluray+WEB only"
       />
       <RunTimeField />
       <FormField

@@ -5,7 +5,7 @@ The counterweight to Movie Night. That one walks a fixed canon best-first and
 holds an absolute 2160p Remux bar, so it is narrow by design and grabs one film
 a week. This one is for breadth: pick a handful of genres at random, ask TMDb for
 films in them that are well-liked but not necessarily canonical, drop everything
-already in the library, and grab a couple in standard quality.
+already in the library, and grab a couple in TFlix quality.
 
 Randomising the *genres* is the whole point; the order *within* a genre is not.
 Discover still uses with_genres, but only films whose PRIMARY TMDb genre
@@ -24,7 +24,7 @@ its way down the ratings over weeks instead of paying to re-read the acclaimed
 films it already owns.
 
 Deliberately *not* configurable, for the same reason Movie Night isn't: how a
-release is scored among several candidates, and the standard resolution/source
+release is scored among several candidates, and the TFlix resolution/source
 rules (which are reused from latest_auto_grab so the two agree).
 
 Everything else is, under automation.genre_roulette.*:
@@ -73,7 +73,7 @@ _MAX_DISCOVER_PAGES_PER_GENRE = 10
 _TOPUP_PAGES = 4
 _MAX_TOPUP_ROUNDS = 3
 # Unowned candidates wanted per film we intend to grab. A candidate can still
-# die at the indexer (no usable standard-quality release), at Radarr (size cap), or at the
+# die at the indexer (no usable TFlix release), at Radarr (size cap), or at the
 # IMDb floors, so the pool has to be a multiple of the target rather than equal
 # to it. Raised from 6 when the IMDb gate arrived, which rejects ~38% at the
 # default floors.
@@ -573,7 +573,7 @@ def _discover_params(api_key: str, genre: str, year_from: int, year_to: int,
         'vote_average.gte': min_rating,
         'vote_count.gte': min_votes,
         # English-audio only, matching the rest of the app (see indexer_latest
-        # and movie_night). The standard profile accepts the original language, so this is a
+        # and movie_night). TFlix accepts the original language, so this is a
         # preference rather than a Radarr constraint.
         'with_original_language': 'en',
         'include_adult': 'false',
@@ -1334,7 +1334,7 @@ def _retry_due(state: Dict[str, Any], now: datetime) -> bool:
 def _search_releases(client, film: Dict[str, Any],
                      indexer_ids: Optional[List[int]],
                      tracker_names: Optional[List[str]]) -> Dict[str, Any]:
-    """standard-eligible, English-audio releases for one film, with reject counts.
+    """TFlix-eligible, English-audio releases for one film, with reject counts.
 
     `ok` False means the search itself failed, which is not the same as
     searching fine and finding nothing usable — collapsing the two is what lets
@@ -1344,7 +1344,7 @@ def _search_releases(client, film: Dict[str, Any],
     most of what an indexer returns (a popular film is mostly 2160p and x265),
     so "found 93, kept 0" and "found 0" need to be distinguishable in the log.
     """
-    from app.latest_auto_grab import _matches_standard
+    from app.latest_auto_grab import _matches_tflix
     from app.movie_night import _is_english_audio
     from app.upgrade_finder import _normalize_title
 
@@ -1380,7 +1380,7 @@ def _search_releases(client, film: Dict[str, Any],
         if not _is_single_film(item):
             reject('multi-film pack')
             continue
-        ok, reason = _matches_standard(item)
+        ok, reason = _matches_tflix(item)
         if not ok:
             reject(reason)
             continue
@@ -1390,7 +1390,7 @@ def _search_releases(client, film: Dict[str, Any],
 
 
 def _score(r: Dict[str, Any]) -> tuple:
-    """Rank standard-eligible releases: 1080p first, then seeders.
+    """Rank TFlix-eligible releases: 1080p first, then seeders.
 
     Seeders carry real weight here, unlike Movie Night. Everything that reaches
     this point already satisfies the same resolution/source rules, so there is
@@ -1465,7 +1465,7 @@ def _undo_failed_grab(radarr, movie: Dict[str, Any], created: bool,
 
     Same contract as Movie Night / latest_auto_grab: a grab either lands a
     release or restores Radarr to how it looked before this attempt. Leaving
-    the film monitored on the standard profile after a refusal is a standing order for RSS
+    the film monitored on TFlix after a refusal is a standing order for RSS
     to mass-download later — which is how ghosts like Far from Heaven /
     Legally Blonde accumulated.
 
@@ -2423,7 +2423,7 @@ def run_cycle(dry_run: bool = False, settings=None,
                 f'All {collection_skips} IMDb passers skipped by collection '
                 f'dedupe (no indexer search)')
         else:
-            result['reason'] = 'No candidate had a usable standard-quality release'
+            result['reason'] = 'No candidate had a usable TFlix release'
     elif dry_run:
         result['reason'] = 'dry run — nothing grabbed'
     elif result['grabbed'] < want:

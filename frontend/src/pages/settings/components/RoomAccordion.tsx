@@ -644,7 +644,7 @@ export function RoomAccordion() {
                                   </div>
                                   {serviceForm.type === 'kodi' && (
                                     <>
-                                      <InlineInput label="Kodi Host" value={serviceForm.kodi_host ?? ''} onChange={(v) => setServiceForm((p) => ({ ...p, kodi_host: v }))} placeholder="e.g. 192.0.2.20" hint="Leave blank to use device IP" />
+                                      <InlineInput label="Kodi Host" value={serviceForm.kodi_host ?? ''} onChange={(v) => setServiceForm((p) => ({ ...p, kodi_host: v }))} placeholder="192.168.1.10" hint="Leave blank to use device IP" />
                                       <InlineInput label="Kodi Port" value={String(serviceForm.kodi_port ?? 8080)} onChange={(v) => setServiceForm((p) => ({ ...p, kodi_port: Number(v) }))} type="number" placeholder="8080" />
                                       <InlineInput label="Username" value={serviceForm.kodi_username ?? ''} onChange={(v) => setServiceForm((p) => ({ ...p, kodi_username: v }))} placeholder="Optional" />
                                       <InlineInput label="Password" value={serviceForm.kodi_password ?? ''} onChange={(v) => setServiceForm((p) => ({ ...p, kodi_password: v }))} placeholder="Optional" />
@@ -694,7 +694,7 @@ export function RoomAccordion() {
                         <div className="mb-3" />
                       )}
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <InlineInput label="Name" value={deviceForm.name ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, name: v }))} placeholder="e.g. TV box" />
+                        <InlineInput label="Name" value={deviceForm.name ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, name: v }))} placeholder="e.g. Shield TV Pro" />
                         <div className="flex flex-col gap-1.5">
                           <label className="text-[13px] font-medium text-white/60">Platform</label>
                           <select
@@ -711,7 +711,7 @@ export function RoomAccordion() {
                           label="Host / IP"
                           value={deviceForm.host ?? ''}
                           onChange={(v) => setDeviceForm((p) => ({ ...p, host: v }))}
-                          placeholder="e.g. 192.0.2.20"
+                          placeholder="192.168.1.10"
                           hint={
                             deviceForm.platform === 'chromecast_gtv'
                               ? 'Settings → System → Developer options → Wireless debugging'
@@ -760,7 +760,7 @@ export function RoomAccordion() {
                           </div>
                         )}
                         {deviceForm.platform !== 'network' && deviceForm.powerMethod === 'homeassistant' && (
-                          <InlineInput label="HA Power Entity" value={deviceForm.haPowerEntity ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, haPowerEntity: v }))} placeholder="e.g. scene.tv_power" hint="Home Assistant entity to fire for power" />
+                          <InlineInput label="HA Power Entity" value={deviceForm.haPowerEntity ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, haPowerEntity: v }))} placeholder="scene.living_room_tv_power" hint="Home Assistant entity to fire for power" />
                         )}
                         {room.useHarmonyHub && (
                           <InlineInput label="Harmony Activity" value={deviceForm.harmonyActivity ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, harmonyActivity: v }))} placeholder="Watch Shield" hint="Harmony activity name for power on" />
@@ -802,7 +802,7 @@ export function RoomAccordion() {
               label="Room Name"
               value={roomForm.name ?? ''}
               onChange={(v) => setRoomForm((p) => ({ ...p, name: v }))}
-              placeholder="e.g. Living Room"
+              placeholder="e.g. Family Room"
             />
           </div>
           <div className="mt-4 flex items-center gap-3">
@@ -822,8 +822,8 @@ export function RoomAccordion() {
           </div>
           {roomForm.useHarmonyHub && (
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <InlineInput label="Harmony Hub IP" value={roomForm.harmonyHubIp ?? ''} onChange={(v) => setRoomForm((p) => ({ ...p, harmonyHubIp: v }))} placeholder="e.g. 192.0.2.30" />
-              <InlineInput label="Volume Device" value={roomForm.harmonyVolumeDevice ?? ''} onChange={(v) => setRoomForm((p) => ({ ...p, harmonyVolumeDevice: v }))} placeholder="e.g. AV Receiver" />
+              <InlineInput label="Harmony Hub IP" value={roomForm.harmonyHubIp ?? ''} onChange={(v) => setRoomForm((p) => ({ ...p, harmonyHubIp: v }))} placeholder="192.168.1.50" />
+              <InlineInput label="Volume Device" value={roomForm.harmonyVolumeDevice ?? ''} onChange={(v) => setRoomForm((p) => ({ ...p, harmonyVolumeDevice: v }))} placeholder="Denon AV Receiver" />
             </div>
           )}
           <div className="mt-4 flex gap-2.5">

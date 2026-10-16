@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Settings Manager for Luma
+Settings Manager for media-search-app
 Handles persistent JSON-based settings with schema validation, thread-safe I/O,
 deep merge for partial updates, secret masking, and bootstrap from env vars.
 
@@ -39,32 +39,29 @@ SECRET_MASK = "********"
 SETTINGS_SCHEMA: Dict[str, Any] = {
     "plex": {
         "_type": "object",
-        "url":              {"type": "string",  "default": "", "sensitive": False, "description": "Plex Media Server base URL"},
+        "url":              {"type": "string",  "default": "http://192.168.1.25:32400", "sensitive": False, "description": "Plex Media Server base URL"},
         "token":            {"type": "string",  "default": "",  "sensitive": True,  "description": "Plex authentication token"},
         "machine_id":       {"type": "string",  "default": "",  "sensitive": False, "description": "Plex server machine identifier (auto-detected)"},
         "client_port":      {"type": "integer", "default": 32500, "sensitive": False, "description": "Plex client HTTP control port", "min": 1, "max": 65535},
-        "search_section_ids": {"type": "array", "default": [], "sensitive": False, "description": "Plex section ids the quick search indexes (empty = every movie and TV section)", "items": {"type": "integer"}},
     },
     "qbittorrent": {
         "_type": "object",
-        "url":             {"type": "string", "default": "", "sensitive": False, "description": "qBittorrent Web UI URL"},
+        "url":             {"type": "string", "default": "http://192.168.1.62:8080", "sensitive": False, "description": "qBittorrent Web UI URL"},
         "username":        {"type": "string", "default": "", "sensitive": False, "description": "qBittorrent login username"},
         "password":        {"type": "string", "default": "", "sensitive": True,  "description": "qBittorrent login password"},
-        "app_category":    {"type": "string", "default": "luma", "sensitive": False, "description": "Category for manual app downloads"},
+        "app_category":    {"type": "string", "default": "media-search-app", "sensitive": False, "description": "Category for manual app downloads"},
         "radarr_category": {"type": "string", "default": "radarr", "sensitive": False, "description": "Category for Radarr downloads"},
     },
     "sonarr": {
         "_type": "object",
-        "url":                        {"type": "string",  "default": "", "sensitive": False, "description": "Sonarr API base URL"},
+        "url":                        {"type": "string",  "default": "http://192.168.1.62:8989", "sensitive": False, "description": "Sonarr API base URL"},
         "api_key":                    {"type": "string",  "default": "", "sensitive": True,  "description": "Sonarr API key"},
-        "preferred_profile_name":     {"type": "string",  "default": "", "sensitive": False, "description": "Quality profile name to use when no default profile id is set (matched case-insensitively)"},
         "default_quality_profile_id": {"type": "integer", "default": 0, "sensitive": False, "description": "Default quality profile for added shows (0 = use first available)", "min": 0},
     },
     "radarr": {
         "_type": "object",
-        "url":                        {"type": "string",  "default": "", "sensitive": False, "description": "Radarr API base URL"},
+        "url":                        {"type": "string",  "default": "http://192.168.1.62:7878", "sensitive": False, "description": "Radarr API base URL"},
         "api_key":                    {"type": "string",  "default": "", "sensitive": True,  "description": "Radarr API key"},
-        "preferred_profile_name":     {"type": "string",  "default": "", "sensitive": False, "description": "Quality profile name to use when no default profile id is set (matched case-insensitively)"},
         "default_quality_profile_id": {"type": "integer", "default": 0, "sensitive": False, "description": "Default quality profile for added movies (0 = use first available)", "min": 0},
         "monitoring_enabled":         {"type": "boolean", "default": True,  "sensitive": False, "description": "Enable Radarr download monitoring"},
         "minimum_availability":       {"type": "string",  "default": "announced", "sensitive": False, "description": "Minimum availability for added movies", "enum": ["announced", "inCinemas", "released"]},
@@ -96,7 +93,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
     "indexer": {
         "_type": "object",
         "provider":         {"type": "string",  "default": "prowlarr", "sensitive": False, "description": "Indexer provider type", "enum": ["prowlarr", "torznab"]},
-        "base_url":         {"type": "string",  "default": "",         "sensitive": False, "description": "Prowlarr base URL (e.g. http://localhost:9696)"},
+        "base_url":         {"type": "string",  "default": "",         "sensitive": False, "description": "Prowlarr base URL (e.g. http://192.168.1.62:9696)"},
         "torznab_url":      {"type": "string",  "default": "",         "sensitive": False, "description": "Torznab endpoint URL (when provider=torznab)"},
         "api_key":          {"type": "string",  "default": "",         "sensitive": True,  "description": "Indexer API key"},
         "movie_categories": {"type": "string",  "default": "2000",     "sensitive": False, "description": "Movie category IDs (comma-separated)"},
@@ -123,17 +120,47 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "client_id":     {"type": "string",  "default": "",    "sensitive": True,  "description": "Trakt API client ID"},
             "client_secret": {"type": "string",  "default": "",    "sensitive": True,  "description": "Trakt API client secret (optional)"},
         },
+        "openai": {
+            "_type": "object",
+            "enabled":  {"type": "boolean", "default": False, "sensitive": False, "description": "Enable AI-powered natural language search"},
+            "api_key":  {"type": "string",  "default": "",    "sensitive": True,  "description": "OpenAI API key"},
+            "model":    {"type": "string",  "default": "gpt-4o-mini", "sensitive": False, "description": "OpenAI model for structured extraction"},
+            "custom_instructions": {"type": "string", "default": "", "sensitive": False, "description": "Custom instructions appended to AI prompt (e.g. content preferences)"},
+            "temperature": {"type": "number", "default": 0.7, "sensitive": False, "description": "AI creativity (0.0 = focused, 1.0 = creative)"},
+            "max_tokens": {"type": "integer", "default": 1500, "sensitive": False, "description": "Maximum response length in tokens"},
+            "voice_enabled": {"type": "boolean", "default": False, "sensitive": False, "description": "Enable voice assistant for playback control"},
+            "wake_word": {"type": "string", "default": "alfred", "sensitive": False, "description": "Wake word to activate voice assistant (e.g. alfred, jarvis, luma)"},
+            "tts_provider": {"type": "string", "default": "openai", "sensitive": False, "description": "TTS provider (openai or elevenlabs)"},
+            "tts_voice": {"type": "string", "default": "nova", "sensitive": False, "description": "OpenAI TTS voice (nova, alloy, echo, fable, onyx, shimmer)"},
+        },
+        "elevenlabs": {
+            "_type": "object",
+            "api_key":  {"type": "string",  "default": "",    "sensitive": True,  "description": "ElevenLabs API key"},
+            "voice_id": {"type": "string",  "default": "",    "sensitive": False, "description": "ElevenLabs voice ID"},
+            "model_id": {"type": "string",  "default": "eleven_multilingual_v2", "sensitive": False, "description": "ElevenLabs model ID"},
+            "stability":    {"type": "number", "default": 0.5, "sensitive": False, "description": "Voice stability (0.0-1.0)"},
+            "similarity":   {"type": "number", "default": 0.75, "sensitive": False, "description": "Similarity boost (0.0-1.0)"},
+        },
+        "alfred": {
+            "_type": "object",
+            "enabled":  {"type": "boolean", "default": False,  "sensitive": False, "description": "Enable Alfred agent for complex voice commands"},
+            "base_url": {"type": "string",  "default": "http://localhost:8990", "sensitive": False, "description": "Alfred API base URL"},
+            "api_key":  {"type": "string",  "default": "",     "sensitive": True,  "description": "Alfred API key (optional)"},
+            "timeout":  {"type": "integer", "default": 90,     "sensitive": False, "description": "Request timeout in seconds"},
+        },
     },
     "homeassistant": {
         "_type": "object",
-        "url":          {"type": "string", "default": "", "sensitive": False, "description": "Home Assistant base URL (e.g. http://homeassistant.local:8123)"},
+        "url":          {"type": "string", "default": "", "sensitive": False, "description": "Home Assistant base URL (e.g. http://192.168.1.50:8123)"},
         "access_token": {"type": "string", "default": "", "sensitive": True,  "description": "Home Assistant long-lived access token"},
     },
     "devices": {
         "_type": "object",
         "rooms": {
             "type": "array",
-            "default": [],
+            "default": [
+                {"name": "Family Room", "ip": "192.168.1.126", "adb_port": 5555, "plex_client_port": 32500, "type": "shield", "plex_machine_id": ""}
+            ],
             "sensitive": False,
             "description": "Room/device configuration array",
             "items": {
@@ -221,14 +248,14 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "sports": {
                 "_type": "object",
                 "enabled":   {"type": "boolean", "default": False, "sensitive": False, "description": "Enable sports widget on Daily Kiosk"},
-                "team_id":   {"type": "integer", "default": 0, "sensitive": False, "description": "MLB team ID"},
-                "team_name": {"type": "string", "default": "", "sensitive": False, "description": "MLB team display name"},
+                "team_id":   {"type": "integer", "default": 110, "sensitive": False, "description": "MLB team ID"},
+                "team_name": {"type": "string", "default": "Baltimore Orioles", "sensitive": False, "description": "MLB team display name"},
             },
             "news": {
                 "_type": "object",
                 "enabled":  {"type": "boolean", "default": False, "sensitive": False, "description": "Enable news widget on Daily Kiosk"},
-                "feed_url": {"type": "string", "default": "", "sensitive": False, "description": "RSS feed URL"},
-                "feed_name": {"type": "string", "default": "", "sensitive": False, "description": "Display name for the feed"},
+                "feed_url": {"type": "string", "default": "https://moxie.foxnews.com/google-publisher/politics.xml", "sensitive": False, "description": "RSS feed URL"},
+                "feed_name": {"type": "string", "default": "Fox News Politics", "sensitive": False, "description": "Display name for the feed"},
             },
         },
         "screensaver": {
@@ -251,7 +278,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
         },
         "kiosk": {
             "_type": "object",
-            "home_area_id": {"type": "string", "default": "", "sensitive": False, "description": "Home Assistant area this device lives in (e.g. 'living_room'). Smart-home panel opens to this area by default."},
+            "home_area_id": {"type": "string", "default": "", "sensitive": False, "description": "Home Assistant area this device lives in (e.g. 'kitchen'). Smart-home panel opens to this area by default."},
         },
     },
     "notifications": {
@@ -261,8 +288,22 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "enabled":           {"type": "boolean", "default": False,  "sensitive": False, "description": "Enable Web Push notifications"},
             "vapid_public_key":  {"type": "string",  "default": "",     "sensitive": False, "description": "VAPID public key (auto-generated)"},
             "vapid_private_key": {"type": "string",  "default": "",     "sensitive": True,  "description": "VAPID private key (auto-generated)"},
-            "vapid_email":       {"type": "string",  "default": "", "sensitive": False, "description": "VAPID contact (mailto:you@example.com); blank = LUMA_ADMIN_EMAIL"},
+            "vapid_email":       {"type": "string",  "default": "mailto:admin@bosley.media", "sensitive": False, "description": "VAPID contact email"},
         },
+    },
+    "requests": {
+        "_type": "object",
+        "enabled":           {"type": "boolean", "default": False, "sensitive": False, "description": "Enable the request page (/request)"},
+        "password_hash":     {"type": "string",  "default": "",    "sensitive": True,  "description": "Hash of the shared request-page password"},
+        "password_version":  {"type": "integer", "default": 1,     "sensitive": False, "description": "Bumped when the password changes (signs requesters out)", "min": 1},
+        "movie_profile":     {"type": "string",  "default": "",    "sensitive": False, "description": "Radarr quality profile name for requests (blank = Luma's default)"},
+        "tv_profile":        {"type": "string",  "default": "",    "sensitive": False, "description": "Sonarr quality profile name for requests (blank = Luma's default)"},
+        "hostname":          {"type": "string",  "default": "",    "sensitive": False, "description": "Dedicated hostname that serves only the request page"},
+        "exclude_libraries": {"type": "array",   "default": ["Full Rips", "4K Movies", "4K TV", "3D", "Remux TV"], "sensitive": False, "description": "Plex libraries that do not count as available"},
+    },
+    "security": {
+        "_type": "object",
+        "remote_lock": {"type": "string", "default": "enforce", "enum": ["enforce", "report", "off"], "sensitive": False, "description": "Tunnel visitors from outside the home network need a session"},
     },
     "network": {
         "_type": "object",
@@ -278,21 +319,6 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
     "automation": {
         "_type": "object",
         "interval_hours":     {"type": "integer", "default": 2,     "sensitive": False, "description": "Global hours between automation checks", "min": 1, "max": 24},
-        # Feature switches (see app/automation_features.py). A grouped job runs
-        # only when its group switch and its own "enabled" flag are both on.
-        "auto_grab": {
-            "_type": "object",
-            "enabled": {"type": "boolean", "default": False, "sensitive": False, "description": "Auto-grab: add/grab new titles from the sources switched on below"},
-        },
-        "upgrades": {
-            "_type": "object",
-            "enabled": {"type": "boolean", "default": False, "sensitive": False, "description": "4K & upgrades: daily upgrade scan and 4K Remux auto-grab"},
-        },
-        "upgrade_scheduler": {
-            "_type": "object",
-            "enabled":  {"type": "boolean", "default": True, "sensitive": False, "description": "Daily upgrade scan (sync Plex, search indexers, enrich ratings)"},
-            "run_hour": {"type": "integer", "default": 3,    "sensitive": False, "description": "Hour (0-23) for the daily upgrade scan", "min": 0, "max": 23},
-        },
         "trending_watchlist": {
             "_type": "object",
             "enabled":            {"type": "boolean", "default": False, "sensitive": False, "description": "Automatically add trending Trakt movies to Radarr"},
@@ -340,7 +366,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "enabled":              {"type": "boolean", "default": False, "sensitive": False, "description": "Auto-grab missing parts of super-popular almost-complete TMDb franchises"},
             "hour":                 {"type": "integer", "default": 23,    "sensitive": False, "description": "Hour (0-23, server clock) for nightly franchise completer run", "min": 0, "max": 23},
             "minute":               {"type": "integer", "default": 30,    "sensitive": False, "description": "Minute (0-59) for nightly franchise completer run", "min": 0, "max": 59},
-            "quality_profile_id":   {"type": "integer", "default": 0,     "sensitive": False, "description": "Radarr quality profile (0 = Radarr default profile from Settings)", "min": 0},
+            "quality_profile_id":   {"type": "integer", "default": 7,     "sensitive": False, "description": "Radarr quality profile (default 7 = TFlix)", "min": 0},
             "min_fame":             {"type": "integer", "default": 500000,"sensitive": False, "description": "Minimum collection fame_score (max IMDb votes across released parts)", "min": 0, "max": 5000000},
             "max_missing_parts":    {"type": "integer", "default": 1,     "sensitive": False, "description": "Only consider franchises missing at most this many released parts", "min": 1, "max": 10},
             "movies_per_night":     {"type": "integer", "default": 1,     "sensitive": False, "description": "Max movies to grab per nightly run", "min": 1, "max": 10},
@@ -348,7 +374,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
         },
         "watchlist_digital_dates": {
             "_type": "object",
-            "enabled": {"type": "boolean", "default": False, "sensitive": False, "description": "Morning check for newly dated watchlist movies (US digital TMDb type-4)"},
+            "enabled": {"type": "boolean", "default": True, "sensitive": False, "description": "Morning check for newly dated watchlist movies (US digital TMDb type-4)"},
             "hour":    {"type": "integer", "default": 6,    "sensitive": False, "description": "Hour (0-23, America/New_York) for morning digital-date check", "min": 0, "max": 23},
             "minute":  {"type": "integer", "default": 0,    "sensitive": False, "description": "Minute (0-59, America/New_York) for morning digital-date check", "min": 0, "max": 59},
         },
@@ -403,6 +429,7 @@ ENV_VAR_MAP: Dict[str, str] = {
     # APIs
     "TMDB_API_KEY":       "apis.tmdb.api_key",
     "OMDB_API_KEY":       "apis.omdb.api_key",
+    "OPENAI_API_KEY":     "apis.openai.api_key",
     # Indexer
     "INDEXER_PROVIDER": "indexer.provider",
     "INDEXER_BASE_URL": "indexer.base_url",
@@ -828,7 +855,7 @@ def _migrate_devices(data: dict) -> bool:
     if not isinstance(rooms, list):
         rooms = []
 
-    shield_ip = old_shield.get("ip", "")
+    shield_ip = old_shield.get("ip", "192.168.1.126")
     adb_port = old_shield.get("adb_port", 5555)
 
     # Check if shield IP already exists in rooms
@@ -841,7 +868,7 @@ def _migrate_devices(data: dict) -> bool:
         rooms[0]["type"] = rooms[0].get("type", "shield")
     elif not rooms:
         rooms.append({
-            "name": "TV",
+            "name": "Family Room",
             "ip": shield_ip,
             "adb_port": adb_port,
             "plex_client_port": 32500,
@@ -1182,78 +1209,6 @@ def _migrate_remove_dead_plex_fields(data: dict) -> bool:
     return False
 
 
-def _migrate_remove_ai_and_alfred(data: dict) -> bool:
-    """Remove retired AI/voice/Alfred settings (apis.openai, apis.elevenlabs,
-    apis.alfred) and the retired Vibe Engine UI block (ui.vibe_engine)."""
-    removed = []
-    apis = data.get("apis")
-    if isinstance(apis, dict):
-        for k in ("openai", "elevenlabs", "alfred"):
-            if k in apis:
-                del apis[k]
-                removed.append(f"apis.{k}")
-    ui = data.get("ui")
-    if isinstance(ui, dict) and "vibe_engine" in ui:
-        del ui["vibe_engine"]
-        removed.append("ui.vibe_engine")
-    if removed:
-        logger.info(f"Removed retired AI/Alfred settings: {', '.join(removed)}")
-        return True
-    return False
-
-
-def _migrate_automation_features(data: dict) -> bool:
-    """Introduce the Auto-grab / 4K & upgrades feature switches.
-
-    Before this, every job had only its own ``enabled`` flag, and two jobs
-    defaulted ON when the key was missing (the daily upgrade scan and the
-    watchlist release-date check). New installs now start with everything
-    OFF, so for an existing settings file this pins each job's effective
-    state explicitly and turns a group switch on when any of its jobs was
-    running. Net effect: exactly the same jobs keep running after upgrade.
-
-    Runs only on settings that predate the switches (no ``auto_grab`` /
-    ``upgrades`` block yet). A fresh bootstrap already has both blocks.
-    """
-    from app.automation_features import GROUPS, MEMBER_DEFAULTS
-
-    auto = data.get("automation")
-    if not isinstance(auto, dict):
-        return False
-    if "auto_grab" in auto and "upgrades" in auto:
-        return False
-
-    # Defaults the jobs used before the switches existed.
-    old_defaults = dict(MEMBER_DEFAULTS)
-    changed = []
-    for group, members in GROUPS.items():
-        if group in auto:
-            continue
-        any_on = False
-        for job in members:
-            block = auto.get(job)
-            if not isinstance(block, dict):
-                block = {}
-                auto[job] = block
-            on = bool(block.get("enabled", old_defaults.get(job, False)))
-            if "enabled" not in block:
-                block["enabled"] = on
-            any_on = any_on or on
-        auto[group] = {"enabled": any_on}
-        changed.append(f"{group}={'on' if any_on else 'off'}")
-
-    wdd = auto.get("watchlist_digital_dates")
-    if not isinstance(wdd, dict):
-        wdd = {}
-        auto["watchlist_digital_dates"] = wdd
-    if "enabled" not in wdd:
-        wdd["enabled"] = True  # was default-on
-        changed.append("watchlist_digital_dates=on (kept)")
-
-    logger.info(f"Automation feature switches added: {', '.join(changed)}")
-    return True
-
-
 def _run_all_migrations(data: dict) -> bool:
     """Run all migrations on *data* (mutated in place).
     Returns True if any migration occurred.
@@ -1273,8 +1228,6 @@ def _run_all_migrations(data: dict) -> bool:
     changed |= _migrate_remove_fanart(data)
     changed |= _migrate_hero_schema(data)
     changed |= _migrate_remove_dead_plex_fields(data)
-    changed |= _migrate_remove_ai_and_alfred(data)
-    changed |= _migrate_automation_features(data)
     return changed
 
 
@@ -1428,8 +1381,8 @@ class SettingsManager:
         """Return the IP of the first room (replaces devices.shield.ip)."""
         room = self.get_room(0)
         if room:
-            return room.get("ip", "")
-        return ""
+            return room.get("ip", "192.168.1.126")
+        return "192.168.1.126"
 
     def get_default_adb_port(self) -> int:
         """Return the ADB port of the first room (replaces devices.shield.adb_port)."""

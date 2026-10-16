@@ -1201,9 +1201,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                   }}
                 >
                   {[
-                    { name: 'Standard', profile: '', desc: 'Streaming optimized' },
-                    { name: '1080p Remux', profile: '1080p Remux', desc: 'Full quality 1080p' },
-                    { name: '2160p Remux', profile: '2160p Remux', desc: 'Full quality 4K' },
+                    { name: 'TFlix', desc: 'Streaming optimized' },
+                    { name: '1080p Remux', desc: 'Full quality 1080p' },
+                    { name: '2160p Remux', desc: 'Full quality 4K' },
                   ].map((opt) => {
                     const isAdding = upgradeAdding === opt.name;
                     const isError = upgradeError === opt.name;
@@ -1226,7 +1226,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                                 media_type: 'movie',
                                 title: detail.title,
                                 year: detail.year,
-                                quality_profile: opt.profile,
+                                quality_profile: opt.name,
                               }),
                             });
                             const result = (await resp.json()) as Record<string, unknown>;

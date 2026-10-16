@@ -8,7 +8,7 @@ should be avoided. This module collects the one signal that carries both:
 a verdict you gave on purpose.
 
 Flow, deliberately confirm-first — nothing is acquired without a tap, matching
-the manual add workflow rather than the fire-and-forget automations:
+the Alfred add workflow rather than the fire-and-forget automations:
 
     finished a film -> push notification -> /rate/<tmdb_id> -> verdict
                     -> if positive, five unowned candidates -> pick one -> grab
@@ -512,7 +512,7 @@ def grab(tmdb_id: int, title: str, year: Optional[int],
          settings=None) -> Dict[str, Any]:
     """Acquire one suggested film, reusing Genre Roulette's proven grab path.
 
-    Same standard bar, English-audio filter, multi-film-pack rejection and
+    Same TFlix bar, English-audio filter, multi-film-pack rejection and
     size-cap retry walk — a suggestion is not a different kind of download, so
     it should not have a different kind of code behind it.
     """

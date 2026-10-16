@@ -1,5 +1,5 @@
 /**
- * AdminPage — User management for the admin.
+ * AdminPage — User management for Taylor.
  * Create users, reset PINs, delete accounts.
  */
 import { useState, useEffect } from 'react';

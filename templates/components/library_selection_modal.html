@@ -1,0 +1,349 @@
+<!-- Library Selection Modal -->
+<!-- IMPORTANT: This modal is designed for iPhone PWA with viewport 393px x 852px -->
+<div class="library-selection-modal" id="librarySelectionModal" style="display: none;">
+    <div class="library-modal-overlay" onclick="closeLibrarySelectionModal()"></div>
+
+    <div class="library-header-text">Select Library</div>
+
+    <div class="library-modal-content" id="libraryModalContent">
+        <div class="library-backdrop" id="libraryBackdrop"></div>
+        <div class="library-backdrop-gradient"></div>
+
+        <div class="library-content-wrapper">
+            <div class="library-buttons-grid" id="libraryButtonsGrid">
+                <!-- Library buttons will be dynamically added here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.library-selection-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 150000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.2s ease;
+    background: #000;
+    padding: 0;
+}
+
+.library-selection-modal::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #000;
+    z-index: -1;
+}
+
+.library-modal-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.library-header-text {
+    position: relative;
+    z-index: 150001;
+    text-align: center;
+    font-family: 'Product Sans', 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 24px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 20px;
+}
+
+.library-modal-content {
+    position: relative;
+    background: #1a1a1a;
+    border-radius: 20px;
+    padding: 0;
+    max-width: 480px;
+    width: 90%;
+    min-height: 400px;
+    max-height: 85vh;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.library-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    z-index: 1;
+}
+
+.library-backdrop-gradient {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        to bottom,
+        rgba(0, 0, 0, 0.3) 0%,
+        rgba(0, 0, 0, 0.7) 50%,
+        rgba(0, 0, 0, 0.95) 100%
+    );
+    z-index: 2;
+}
+
+.library-content-wrapper {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.library-buttons-grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, 180px);
+    gap: 20px;
+    justify-content: center;
+    align-items: center;
+    padding: 30px;
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.library-btn {
+    background: linear-gradient(to bottom, rgba(0,0,0,0.3), rgba(0,0,0,0.7));
+    border: 2px solid rgba(255, 255, 255, 0.9);
+    border-radius: 20px;
+    padding: 20px 15px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    height: 140px !important;
+    width: 180px !important;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+}
+
+.library-btn:hover {
+    background: linear-gradient(to bottom, rgba(0,0,0,0.5), rgba(0,0,0,0.8));
+    border-color: #fff;
+    transform: translateY(-4px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.5);
+}
+
+.library-btn-name {
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    max-width: 100%;
+    line-height: 1.3;
+}
+
+/* Desktop styles - larger modal */
+@media (min-width: 1024px) {
+    .library-header-text {
+        font-size: 36px;
+        margin-bottom: 30px;
+    }
+
+    .library-modal-content {
+        max-width: 700px;
+        width: 85%;
+        min-height: 500px;
+    }
+
+    .library-buttons-grid {
+        grid-template-columns: repeat(2, 240px);
+        gap: 30px;
+        padding: 50px;
+        max-width: 600px;
+    }
+
+    .library-btn {
+        height: 180px !important;
+        width: 240px !important;
+        padding: 25px 20px;
+        border-radius: 24px;
+    }
+
+    .library-btn-name {
+        font-size: 22px;
+    }
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .library-header-text {
+        font-size: 20px;
+        margin-bottom: 15px;
+    }
+
+    .library-modal-content {
+        width: 95%;
+        max-width: 380px;
+        min-height: 380px;
+        max-height: 90vh;
+    }
+
+    .library-content-wrapper {
+        padding: 20px;
+        min-height: 380px;
+    }
+
+    .library-buttons-grid {
+        grid-template-columns: repeat(2, 140px);
+        gap: 12px;
+        max-width: 100%;
+        padding: 20px;
+        justify-content: center;
+    }
+
+    .library-btn {
+        padding: 15px 10px;
+        height: 110px !important;
+        width: 140px !important;
+        box-sizing: border-box;
+    }
+
+    .library-btn-name {
+        font-size: 14px;
+    }
+}
+</style>
+
+<script>
+let currentLibraryMovie = null;
+
+// Make function globally accessible
+window.showLibrarySelectionModal = function(movie) {
+    console.log('showLibrarySelectionModal called with:', movie);
+    currentLibraryMovie = movie;
+
+    const modal = document.getElementById('librarySelectionModal');
+    const backdropElement = document.getElementById('libraryBackdrop');
+    const buttonsGrid = document.getElementById('libraryButtonsGrid');
+
+    // Set backdrop image
+    console.log('Setting backdrop URL:', movie.backdrop_url);
+    if (movie.backdrop_url) {
+        backdropElement.style.backgroundImage = `url("${movie.backdrop_url}")`;
+        console.log('Backdrop style set to:', backdropElement.style.backgroundImage);
+    } else {
+        console.log('No backdrop URL provided, using gradient fallback');
+        backdropElement.style.backgroundImage = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+    }
+
+    // Clear and populate library buttons
+    buttonsGrid.innerHTML = '';
+
+    const libraries = movie.libraries || [];
+    console.log('Movie libraries:', libraries);
+
+    if (libraries.length === 0) {
+        buttonsGrid.innerHTML = '<div style="color: rgba(255,255,255,0.6); text-align: center; grid-column: span 2;">No libraries found</div>';
+    } else {
+        console.log(`Showing ${libraries.length} library options`);
+        libraries.forEach((library, index) => {
+            const libraryBtn = document.createElement('div');
+            libraryBtn.className = 'library-btn';
+
+            libraryBtn.innerHTML = `
+                <div class="library-btn-name">${library}</div>
+            `;
+
+            libraryBtn.onclick = () => selectLibrary(library);
+
+            buttonsGrid.appendChild(libraryBtn);
+        });
+    }
+
+    // Show modal
+    modal.style.display = 'flex';
+    document.body.classList.add('modal-open');
+}
+
+function selectLibrary(libraryName) {
+    console.log('Selected library:', libraryName);
+    closeLibrarySelectionModal();
+    openPlaybackModalForLibrary(libraryName);
+}
+
+function openPlaybackModalForLibrary(libraryName) {
+    if (!currentLibraryMovie) {
+        console.error('No movie selected');
+        return;
+    }
+
+    // Get the rating key for the selected library
+    const libraryKeys = currentLibraryMovie.library_keys || {};
+    const ratingKey = libraryKeys[libraryName] || currentLibraryMovie.rating_key;
+
+    console.log('Using rating key for library', libraryName, ':', ratingKey);
+    console.log('Available library keys:', libraryKeys);
+
+    // Check if showPlaybackModal exists
+    if (typeof window.showPlaybackModal === 'function') {
+        window.showPlaybackModal(
+            ratingKey,  // Use library-specific rating key
+            currentLibraryMovie.title,
+            'movie',
+            currentLibraryMovie.backdrop_url,
+            currentLibraryMovie.clearlogo_url
+        );
+    } else {
+        console.error('showPlaybackModal function not found. Make sure playback_modal.html is included.');
+        alert('Playback modal not available. Please refresh the page.');
+    }
+}
+
+function closeLibrarySelectionModal() {
+    const modal = document.getElementById('librarySelectionModal');
+    modal.style.display = 'none';
+    document.body.classList.remove('modal-open');
+}
+
+// Close modal on escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const modal = document.getElementById('librarySelectionModal');
+        if (modal && modal.style.display === 'flex') {
+            closeLibrarySelectionModal();
+        }
+    }
+});
+</script>

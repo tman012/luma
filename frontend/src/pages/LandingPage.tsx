@@ -31,7 +31,7 @@ export function LandingPage() {
         }}
       >
         <img
-          src="/static/images/luma_text.webp"
+          src="/static/images/luma_text.png"
           alt="Luma"
           style={{
             width: 'clamp(380px, 90vw, 780px)',

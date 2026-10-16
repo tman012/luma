@@ -34,8 +34,8 @@ import {
   displayResolution,
   pinRecommendedFirst,
   pickBestInGroup,
-  isSameRelease,
-} from '@/components/media/releaseRecommend';
+  isSameTflixRelease,
+} from '@/components/media/tflixRecommend';
 import type { SourcesTarget } from './types';
 
 /** Stable per-release identity for grab/expand UI state. Indexer rows can have
@@ -432,7 +432,7 @@ function ExpandedTvSourcesView({
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {rows.map((release) => {
                   const ageDays = release.age != null ? Math.round(release.age) : null;
-                  const isRec = !!recommended && isSameRelease(release, recommended);
+                  const isRec = !!recommended && isSameTflixRelease(release, recommended);
                   return (
                     <div
                       key={release.guid || releaseKey(release)}
@@ -1563,7 +1563,7 @@ function CompactTvSourcesView({
                   grabbed={grabbedGuids.has(rk)}
                   onToggle={handleToggleExpand}
                   onGrab={onGrabRelease}
-                  recommended={!!seeAllRecommended && isSameRelease(release, seeAllRecommended)}
+                  recommended={!!seeAllRecommended && isSameTflixRelease(release, seeAllRecommended)}
                 />
                 </div>
                 );

@@ -1,69 +1,67 @@
-# Luma — production compose file.
-#
-#   docker compose up -d --build
-#
-# Every host-specific value (paths, port, timezone, image name) comes from
-# .env next to this file; see .env.example. Anything personal to one server
-# (a reverse proxy, live-reload source mounts, extra volumes) belongs in an
-# untracked docker-compose.override.yml, which compose loads automatically.
+version: '3.8'
+
 services:
+  caddy:
+    container_name: caddy-proxy
+    image: caddy:2-alpine
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
   luma:
-    container_name: ${LUMA_CONTAINER_NAME:-luma}
-    image: ${LUMA_IMAGE:-luma:latest}
-    build:
-      context: .
-      dockerfile: Dockerfile
+    container_name: luma
+    image: media-search:latest
     init: true  # Prevents zombie processes on container restart
-    # Host networking lets Luma reach LAN devices directly (ADB to Android TV /
-    # Shield, Plex clients, Kodi, Wake-on-LAN broadcasts). The web UI listens
-    # on LUMA_PORT on the host.
+    # network_mode: host — container shares the host network stack.
+    # Required for: ADB to reach Shield at 192.168.1.220, Plex API at 192.168.1.25:32400,
+    # and LAN services (qBittorrent, Sonarr, Radarr, Home Assistant).
+    # Alternative: use bridge mode + extra_hosts for each LAN service.
     network_mode: host
     environment:
-      # Automation schedules (e.g. "run at 22:30") use this timezone.
-      - TZ=${TZ:-UTC}
+      # Matches radarr/sonarr/prowlarr/qbittorrent. The host is Etc/UTC, so
+      # without this every automation's configured hour meant UTC while the
+      # user set it in local time — a "10:30pm" schedule fired at 6:30pm and
+      # its "next run" read as tomorrow. Log timestamps line up with the Arr
+      # logs too. Changing this shifts every scheduler's firing time.
+      - TZ=America/New_York
       - FLASK_ENV=production
-      - PORT=${LUMA_PORT:-5001}
+      - PORT=5001
       - DATABASE_PATH=/app/data/media.db
-      # API keys
-      - TMDB_API_KEY=${TMDB_API_KEY:-}
-      - OMDB_API_KEY=${OMDB_API_KEY:-}
-      - FANART_API_KEY=${FANART_API_KEY:-}
-      - YT_INNERTUBE_KEY=${YT_INNERTUBE_KEY:-}
-      # Plex (library endpoints use the Plex HTTP API: PLEX_URL + PLEX_TOKEN)
-      - PLEX_URL=${PLEX_URL:-}
-      - PLEX_TOKEN=${PLEX_TOKEN:-}
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - OMDB_API_KEY=${OMDB_API_KEY}
+      - FANART_API_KEY=${FANART_API_KEY}
+      # Plex Configuration — library endpoints use Plex HTTP API (PLEX_URL + PLEX_TOKEN)
+      - PLEX_URL=${PLEX_URL:-http://192.168.1.25:32400}
+      - PLEX_TOKEN=${PLEX_TOKEN}
       - PLEX_ACCOUNT_ID=${PLEX_ACCOUNT_ID:-1}
-      - PLEX_MACHINE_ID=${PLEX_MACHINE_ID:-}
-      - PLEX_DB=${PLEX_DB:-}
-      # IP of an Android TV / Shield to seed the first room on first start
-      - SHIELD_PLEX_IP=${SHIELD_PLEX_IP:-}
-      # Sonarr / Radarr (Home Assistant and qBittorrent live in Settings)
-      - SONARR_URL=${SONARR_URL:-}
+      - PLEX_DB=${PLEX_DB:-/mnt/plex-db/com.plexapp.plugins.library.db}
+      - PLEX_MACHINE_ID=${PLEX_MACHINE_ID}
+      - SHIELD_PLEX_IP=${SHIELD_PLEX_IP:-192.168.1.126}
+      # Home Assistant — URL and token live in Settings UI, not here
+      # qBittorrent — URL and credentials live in Settings UI, not here
+      # Sonarr Configuration
+      - SONARR_URL=${SONARR_URL:-http://192.168.1.62:8989}
       - SONARR_API_KEY=${SONARR_API_KEY:-}
-      - RADARR_URL=${RADARR_URL:-}
+      # Radarr Configuration
+      - RADARR_URL=${RADARR_URL:-http://192.168.1.62:7878}
       - RADARR_API_KEY=${RADARR_API_KEY:-}
-      # Kodi: share root for file URLs when no Kodi source covers a path
-      - KODI_NAS_BASE=${KODI_NAS_BASE:-}
-      # Public URL used in e-mails and Telegram links (blank = request host)
-      - APP_URL=${APP_URL:-}
-      # Gmail (account-approval e-mails)
+      # Gmail (approval notifications)
       - GMAIL_ADDRESS=${GMAIL_ADDRESS:-}
       - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD:-}
-      # Telegram admin alerts (bot token lives in data/telegram_bot.json)
-      - TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID:-}
-      - TELEGRAM_ACTION_SECRET=${TELEGRAM_ACTION_SECRET:-}
-      # Service-to-service API key (X-API-Key; companion apps read rooms with it)
+      # Service-to-service API key (Alfred agent access)
       - SERVICE_API_KEY=${SERVICE_API_KEY:-}
-      # Flask session key
-      - SECRET_KEY=${SECRET_KEY:-}
-      # Admin seed (unset = no seeded admin)
-      - LUMA_ADMIN_NAME=${LUMA_ADMIN_NAME:-}
-      - LUMA_ADMIN_EMAIL=${LUMA_ADMIN_EMAIL:-}
-      - LUMA_ADMIN_PIN=${LUMA_ADMIN_PIN:-}
-      # Optional: path (inside the container) of a CA root certificate served
-      # at /ca.crt so phones can trust a local HTTPS proxy
-      - LUMA_CA_CERT_PATH=${LUMA_CA_CERT_PATH:-}
-      # Container-side media paths (the host side is set by the volumes below)
+      # Flask session key, Telegram admin-action HMAC secret, YouTube InnerTube key (values in .env)
+      - SECRET_KEY=${SECRET_KEY}
+      - TELEGRAM_ACTION_SECRET=${TELEGRAM_ACTION_SECRET}
+      - YT_INNERTUBE_KEY=${YT_INNERTUBE_KEY}
+      # Admin seed (values in .env; unset = no seeded admin)
+      - LUMA_ADMIN_NAME=${LUMA_ADMIN_NAME}
+      - LUMA_ADMIN_EMAIL=${LUMA_ADMIN_EMAIL}
+      - LUMA_ADMIN_PIN=${LUMA_ADMIN_PIN}
+      # Media paths (Unraid server paths)
       - DOWNLOADS_ROOT=/downloads
       - MOVIES_ROOT=/media/movies
       - TV_ROOT=/media/tv
@@ -73,26 +71,90 @@ services:
       - TV_4K_ROOT=/media/tv-4k
       - TV_REMUX_ROOT=/media/tv-remux
     volumes:
-      # Persistent data (settings, databases, caches)
-      - ${LUMA_DATA_DIR:-./data}:/app/data
-      # ADB keys (only used when an Android TV / Shield device is added)
-      - ${LUMA_ADB_KEYS_DIR:-./.android}:/app/home/.android
-      # Completed downloads (auto-rename moves files from here)
-      - ${LUMA_DOWNLOADS_DIR:-./media/downloads}:/downloads
-      # Media library folders (write access needed for auto-rename)
-      - ${LUMA_MOVIES_DIR:-./media/movies}:/media/movies
-      - ${LUMA_RECENT_DIR:-./media/recent}:/media/recent
-      - ${LUMA_TV_DIR:-./media/tv}:/media/tv
-      - ${LUMA_4K_DIR:-./media/4k}:/media/4k
-      - ${LUMA_FULLRIPS_DIR:-./media/fullrips}:/media/fullrips
-      - ${LUMA_TV_4K_DIR:-./media/tv-4k}:/media/tv-4k
-      - ${LUMA_TV_REMUX_DIR:-./media/tv-remux}:/media/tv-remux
-      # Optional read-only copy of the Plex database folder (set PLEX_DB to
-      # the .db file inside it). Plex's HTTP API is used for everything else.
-      - ${LUMA_PLEX_DB_DIR:-./plexdb}:/mnt/plexdb:ro
+      # Persistent data
+      - /home/tbosley02/media-search-app/data:/app/data
+      # ADB keys (for Shield authorization)
+      - /home/tbosley02/media-search-app/.android:/app/home/.android
+      # Downloads directory (for auto-rename to access completed torrents)
+      - /storage/downloads:/downloads
+      # Media directories from Unraid server (need write access for auto-rename)
+      - /mnt/media/Video/Movies:/media/movies
+      - "/mnt/media/Video/Recently Released:/media/recent"
+      - /mnt/media/Video/TV:/media/tv
+      - /mnt/media/Video/4K:/media/4k
+      - "/mnt/media/Video/Full Rips:/media/fullrips"
+      - "/mnt/media/Video/4K TV Shows:/media/tv-4k"
+      - "/mnt/media/Video/Remux TV:/media/tv-remux"
+      # Plex database (read-only) — used for TV episode tracking & continue watching.
+      # Library browsing, search, and stats now use the Plex HTTP API instead.
+      - /mnt/plexdb:/mnt/plexdb:ro
+      # For development - mount source files
+      - /home/tbosley02/media-search-app/app:/app/app
+      - /home/tbosley02/media-search-app/templates:/app/templates
+      - /home/tbosley02/media-search-app/static:/app/static
+      # Caddy CA cert (for serving to iOS devices)
+      - caddy_data:/caddy-data:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:$${PORT:-5001}/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 30s
       timeout: 3s
       retries: 3
+
+  alfred:
+    container_name: alfred
+    build:
+      context: ./alfred
+      dockerfile: Dockerfile
+    # host networking — needs access to qBittorrent, Sonarr, Radarr, Plex on LAN
+    network_mode: host
+    env_file:
+      - ./alfred/.env
+    environment:
+      - ALFRED_PORT=8990
+      - ALFRED_API_KEY=${ALFRED_API_KEY:-}
+      # Anthropic API (for complex command fallback)
+      # Lives in alfred/.env (env_file) so Alfred is unaffected by shell ANTHROPIC_API_KEY (used by Claude Code)
+      # ANTHROPIC_API_KEY -> alfred/.env
+      # TMDb API (for title search + popularity scoring)
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      # Service API key (for Flask backend calls)
+      - SERVICE_API_KEY=${SERVICE_API_KEY:-}
+      # qBittorrent
+      - QBIT_URL=${QBIT_URL:-http://localhost:8080}
+      - QBIT_USER=${QBIT_USER:-tbosley02}
+      # QBIT_PASS -> alfred/.env
+      # Radarr
+      - RADARR_URL=${RADARR_URL:-http://192.168.1.62:7878}
+      - RADARR_API_KEY=${RADARR_API_KEY}
+      # Sonarr
+      - SONARR_URL=${SONARR_URL:-http://192.168.1.62:8989}
+      - SONARR_API_KEY=${SONARR_API_KEY}
+      # Plex
+      - PLEX_URL=${PLEX_URL:-http://192.168.1.25:32400}
+      - PLEX_TOKEN=${PLEX_TOKEN}
+      # Telegram bot (long-polling — no public URL needed)
+      # TELEGRAM_BOT_TOKEN -> alfred/.env
+      - TELEGRAM_ALLOWED_CHAT_IDS=${TELEGRAM_ALLOWED_CHAT_IDS:-}
+      # Home Assistant (direct REST API — bypasses LLM for speed)
+      - HA_URL=http://192.168.1.162:8123
+      # HA_TOKEN -> alfred/.env
+      # Storage paths to check
+      - STORAGE_PATHS=/downloads,/mnt/media
+    volumes:
+      # Dev: mount source for live reload
+      - /home/tbosley02/media-search-app/alfred:/app
+      # Downloads volume (read-only — for disk usage reporting)
+      - /storage/downloads:/downloads:ro
+      # Media NAS (read-only — for disk usage reporting)
+      - /mnt/media:/mnt/media:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8990/api/health')"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  caddy_data:
+  caddy_config:

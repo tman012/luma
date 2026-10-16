@@ -12,7 +12,7 @@ Origin is decided server-side, per completed torrent, from real evidence:
    Franchise Completer, Trending, Trending TV, Now Available, Anticipated),
    matched by tmdb id (or title + year) and time relative to the grab.
 
-"Manual" is ONLY a release the user picked in Luma's Sources / Latest sheet /
+"Manual" is ONLY a release Taylor picked in Luma's Sources / Latest sheet /
 All Sources. Anything that can't be attributed gets the neutral "Other".
 """
 from __future__ import annotations
@@ -88,15 +88,6 @@ def _read_json(name: str, default):
 def load_store() -> List[Dict[str, Any]]:
     d = _read_json('grab_origins.json', [])
     return d if isinstance(d, list) else []
-
-
-def _app_category() -> str:
-    """qBittorrent category used for downloads started from Luma."""
-    try:
-        from app.settings_manager import SettingsManager
-        return ((SettingsManager().get('qbittorrent.app_category') or 'luma').strip() or 'luma').lower()
-    except Exception:
-        return 'luma'
 
 
 def _norm_hash(h) -> str:
@@ -420,7 +411,7 @@ def resolve_one(item: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, str]:
             return out('manual', 'manual-log+interactive-grab')
 
     if not g:
-        if (item.get('qb_category') or '').lower() == _app_category():
+        if (item.get('qb_category') or '') == 'media-search-app':
             return out('manual', 'qbit-category')
         return out('other', 'no-arr-grab')
 

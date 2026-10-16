@@ -238,7 +238,7 @@ function LibraryPathsEditor() {
               type="text"
               value={(draft.kodi_path as string) ?? ''}
               onChange={(e) => setDraft({ ...draft, kodi_path: e.target.value })}
-              placeholder="smb://nas/Media/Video/movies"
+              placeholder="smb://192.168.1.25/Media/Video/movies"
               className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] text-white placeholder:text-white/25 outline-none focus:border-white/20"
             />
             <span className="text-[11px] text-white/30">Full SMB/NFS path for Kodi playback</span>

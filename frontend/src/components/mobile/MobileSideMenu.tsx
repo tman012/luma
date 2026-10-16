@@ -4,6 +4,7 @@ interface MobileSideMenuProps {
   open: boolean;
   onClose: () => void;
   onRoomsOpen?: () => void;
+  onVibeOpen?: () => void;
   onLibrariesOpen?: () => void;
 }
 
@@ -11,6 +12,7 @@ interface MobileSideMenuProps {
 const MENU_ITEMS = [
   { label: 'Home', href: '/', icon: 'home', spa: true },
   { label: 'Explore', href: '/explore', icon: 'compass', spa: true },
+  { label: 'Luma AI', href: '/downloads', icon: 'vibe', spa: true },
   { label: 'Library', href: '/browse', icon: 'film', spa: true },
   { label: 'Watchlist', href: '/watchlist', icon: 'bookmark', spa: true },
   { label: 'Rooms', href: '/rooms', icon: 'play', spa: true },
@@ -49,6 +51,13 @@ function MenuIcon({ name }: { name: string }) {
           <circle cx="12" cy="12" r="10" /><polygon points="10 8 16 12 10 16 10 8" />
         </svg>
       );
+    case 'vibe':
+      return (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .963L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+          <path d="M20 3v4" /><path d="M22 5h-4" />
+        </svg>
+      );
     case 'settings':
       return (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -61,7 +70,7 @@ function MenuIcon({ name }: { name: string }) {
   }
 }
 
-export function MobileSideMenu({ open, onClose, onRoomsOpen, onLibrariesOpen }: MobileSideMenuProps) {
+export function MobileSideMenu({ open, onClose, onRoomsOpen, onVibeOpen, onLibrariesOpen }: MobileSideMenuProps) {
   return (
     <>
       {/* Overlay */}
@@ -90,6 +99,19 @@ export function MobileSideMenu({ open, onClose, onRoomsOpen, onLibrariesOpen }: 
               <span className="text-[15px]">{item.label}</span>
             </>
           );
+          // Vibe item opens the modal instead of navigating (avoids iOS swipe-back flash)
+          if (item.label === 'Luma AI' && onVibeOpen) {
+            return (
+              <button
+                key={item.label}
+                type="button"
+                className={cls}
+                onClick={() => { onClose(); onVibeOpen(); }}
+              >
+                {inner}
+              </button>
+            );
+          }
           // Library item opens the bottom sheet instead of navigating
           if (item.label === 'Library' && onLibrariesOpen) {
             return (

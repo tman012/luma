@@ -3,6 +3,7 @@ import { cn } from '@/utils/cn';
 import { formatRuntime } from '@/utils/image';
 import { KenBurnsBackdrop } from './KenBurnsBackdrop';
 import { useModalHost } from '@/contexts/ModalHostContext';
+import { HeroOrb } from '@/components/voice/HeroOrb';
 import { useFocusable } from '@/hooks/useFocusable';
 import { FocusZone } from '@/components/tv/FocusZone';
 import { useTabletPerf } from '@/hooks/useTabletPerf';
@@ -51,7 +52,7 @@ export function HeroSection({ movies, backdropSource = 'plex', className }: Hero
   const d = useUiDensity();
 
   // Search is now hosted globally (GlobalSearchHost) and driven by the
-  // `open-search` / `search-query` window events — no local overlay here.
+  // `open-search` / `voice-search` window events — no local overlay here.
 
   // Pause hero rotation when modal is open (tablet only — reduces background repainting)
   const [modalOpen, setModalOpen] = useState(false);
@@ -117,7 +118,7 @@ export function HeroSection({ movies, backdropSource = 'plex', className }: Hero
         tmdbId: movie.tmdbId ?? undefined,
         origin: 'hero',
         onPersonSearch: (name, personId) => {
-          window.dispatchEvent(new CustomEvent('search-query', { detail: { query: name, tab: 'people', personId } }));
+          window.dispatchEvent(new CustomEvent('voice-search', { detail: { query: name, tab: 'people', personId } }));
         },
       });
     }
@@ -164,6 +165,9 @@ export function HeroSection({ movies, backdropSource = 'plex', className }: Hero
 
       {/* Bottom gradient overlay */}
       <div className="absolute inset-0 bg-gradient-to-t from-kiosk-black via-kiosk-black/50 to-kiosk-black/20" />
+
+      {/* Alfred orb — replaces search bar in expanded mode */}
+      <HeroOrb />
 
       {/* Content overlay — bottom left, entire area clickable */}
       <FocusZone zoneId="home-hero" orientation="vertical">

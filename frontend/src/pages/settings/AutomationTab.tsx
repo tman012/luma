@@ -1,15 +1,12 @@
 /**
- * AutomationTab — one switch per automation feature (see app/automation_features.py).
- * Auto-grab and 4K & Upgrades group several sources/jobs under one switch;
- * Genre Roulette, Movie Night, Franchise Completer and Watchlist Release Dates
- * are single features. Everything is off on a new install.
+ * AutomationTab — Trending Watchlist automation settings.
+ * Global interval + Movie (Radarr) + TV (Sonarr) cards + unified activity log.
  */
 
-import { useState, useEffect, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { SettingsCard } from './components/SettingsCard';
 import { FormField } from './components/FormField';
 import { ToggleSwitch } from './components/ToggleSwitch';
-import { useSettings } from './useSettings';
 import { MobileCardNav, type CardItem } from './components/MobileCardNav';
 import {
   fetchRadarrProfiles,
@@ -46,30 +43,28 @@ import { DownloadsGuardCard } from './DownloadsGuardCard';
 export function AutomationTab() {
   const items: CardItem[] = [
     {
-      title: 'Auto-grab',
-      subtitle: 'Add new titles from Latest, Trending, Anticipated & Now Available',
+      title: 'Automation Schedule',
+      subtitle: 'Shared interval for all automation tasks',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M12 2v4" />
-          <path d="M12 18v4" />
-          <path d="m4.93 4.93 2.83 2.83" />
-          <path d="m16.24 16.24 2.83 2.83" />
-          <circle cx="12" cy="12" r="4" />
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
         </svg>
       ),
-      content: <AutoGrabFeature />,
+      content: <AutomationIntervalCard />,
     },
     {
-      title: '4K & Upgrades',
-      subtitle: 'Daily upgrade scan and 4K Remux auto-grab',
+      title: 'Movie Night',
+      subtitle: 'Weekly canon: 4K remux for you, classics for users',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M3 7l9-4 9 4-9 4-9-4z" />
-          <path d="M3 12l9 4 9-4" />
-          <path d="M3 17l9 4 9-4" />
+          <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+          <line x1="7" y1="2" x2="7" y2="22" />
+          <line x1="17" y1="2" x2="17" y2="22" />
+          <line x1="2" y1="12" x2="22" y2="12" />
         </svg>
       ),
-      content: <UpgradesFeature />,
+      content: <MovieNightCard />,
     },
     {
       title: 'Genre Roulette',
@@ -84,21 +79,8 @@ export function AutomationTab() {
       content: <GenreRouletteCard />,
     },
     {
-      title: 'Movie Night',
-      subtitle: 'Weekly: the best canon film you don’t own, in 4K Remux',
-      icon: (
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
-          <line x1="7" y1="2" x2="7" y2="22" />
-          <line x1="17" y1="2" x2="17" y2="22" />
-          <line x1="2" y1="12" x2="22" y2="12" />
-        </svg>
-      ),
-      content: <MovieNightCard />,
-    },
-    {
       title: 'Franchise Completer',
-      subtitle: 'Fill gaps in popular, almost-complete franchises',
+      subtitle: 'Fill gaps in super-popular almost-complete franchises',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -109,8 +91,8 @@ export function AutomationTab() {
       content: <FranchiseCompleterCard />,
     },
     {
-      title: 'Watchlist Release Dates',
-      subtitle: 'Morning alert when a watchlist movie gets a digital date',
+      title: 'Watchlist Digital Dates',
+      subtitle: 'Morning check for newly dated watchlist movies',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="3" y="4" width="18" height="18" rx="2" />
@@ -122,8 +104,45 @@ export function AutomationTab() {
       content: <WatchlistDigitalDatesCard />,
     },
     {
-      // The only automation that deletes — kept apart from the acquisition
-      // features rather than filed among them.
+      title: 'New Releases',
+      subtitle: 'Latest, Trending, Anticipated & Now Available',
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M12 2v4" />
+          <path d="M12 18v4" />
+          <path d="m4.93 4.93 2.83 2.83" />
+          <path d="m16.24 16.24 2.83 2.83" />
+          <circle cx="12" cy="12" r="4" />
+        </svg>
+      ),
+      content: <NewReleasesCard />,
+    },
+    {
+      title: '4K Remux Auto-Grab',
+      subtitle: 'Upgrade your library to 2160p Remux automatically',
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M3 7l9-4 9 4-9 4-9-4z" />
+          <path d="M3 12l9 4 9-4" />
+          <path d="M3 17l9 4 9-4" />
+        </svg>
+      ),
+      content: <Upgrade4kAutoGrabCard />,
+    },
+    {
+      title: 'Trending TV Shows',
+      subtitle: 'Auto-add trending first-season Trakt shows',
+      icon: (
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <rect x="2" y="7" width="20" height="15" rx="2" ry="2" />
+          <polyline points="17 2 12 7 7 2" />
+        </svg>
+      ),
+      content: <TrendingTvWatchlistCard />,
+    },
+    {
+      // Last of the automations, and the only one that deletes — kept apart
+      // from the acquisition cards rather than filed among them.
       title: 'Downloads Guard',
       subtitle: 'Free space floor: delete oldest downloads to stay above it',
       icon: (
@@ -155,118 +174,11 @@ export function AutomationTab() {
       <div className="settings-tab-header">
         <h2 className="text-xl font-semibold text-white/90">Automation</h2>
         <p className="mt-1 text-[13px] text-white/40">
-          Each feature has its own switch. Everything is off until you turn it on.
+          Acquisition automations, franchise completer, and activity log.
         </p>
       </div>
 
       <MobileCardNav items={items} />
-    </div>
-  );
-}
-
-// -- Feature switch card -------------------------------------------
-
-/** The feature's main switch; its label follows the saved state. */
-function FeatureToggle({ path, hint }: { path: string; hint: string }) {
-  const { getByPath } = useSettings();
-  return <ToggleSwitch label={getByPath(path) ? 'On' : 'Off'} path={path} hint={hint} />;
-}
-
-function FeatureSwitchCard({
-  title,
-  subtitle,
-  path,
-  hint,
-  note,
-  extraPaths = [],
-  children,
-}: {
-  title: string;
-  subtitle: string;
-  path: string;
-  hint: string;
-  note?: string;
-  extraPaths?: string[];
-  children?: ReactNode;
-}) {
-  return (
-    <SettingsCard
-      title={title}
-      subtitle={subtitle}
-      paths={[path, ...extraPaths]}
-      note={note}
-      icon={
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
-          <line x1="12" y1="2" x2="12" y2="12" />
-        </svg>
-      }
-    >
-      <FeatureToggle path={path} hint={hint} />
-      {children}
-    </SettingsCard>
-  );
-}
-
-// -- Auto-grab feature ---------------------------------------------
-
-function AutoGrabFeature() {
-  return (
-    <div className="space-y-4 [&>*]:!mt-0">
-      <FeatureSwitchCard
-        title="Auto-grab"
-        subtitle="One switch for every new-release source below"
-        path="automation.auto_grab.enabled"
-        hint="When off, none of the sources below run"
-        note="Turn on the feature, then pick the sources to use. Titles you already have in Plex, Radarr or Sonarr are always skipped."
-        extraPaths={['automation.interval_hours']}
-      >
-        <FormField
-          label="Check Interval (hours)"
-          path="automation.interval_hours"
-          type="number"
-          min={1}
-          max={24}
-          hint="How often Trending, Anticipated and Now Available run (1-24 hours)"
-        />
-      </FeatureSwitchCard>
-      <LatestAutoGrabCard />
-      <TrendingMovieWatchlistCard />
-      <TrendingTvWatchlistCard />
-      <AnticipatedWatchlistCard />
-      <NowAvailableMovieWatchlistCard />
-    </div>
-  );
-}
-
-// -- 4K & upgrades feature -----------------------------------------
-
-function UpgradesFeature() {
-  return (
-    <div className="space-y-4 [&>*]:!mt-0">
-      <FeatureSwitchCard
-        title="4K & Upgrades"
-        subtitle="Daily upgrade scan and 4K Remux auto-grab"
-        path="automation.upgrades.enabled"
-        hint="When off, neither job below runs"
-        note="The daily scan finds better releases for movies you own (sync Plex, search indexers, add ratings). 4K Remux auto-grab grabs 2160p Remux releases for movies missing from your 4K library."
-        extraPaths={['automation.upgrade_scheduler.enabled', 'automation.upgrade_scheduler.run_hour']}
-      >
-        <ToggleSwitch
-          label="Daily upgrade scan"
-          path="automation.upgrade_scheduler.enabled"
-          hint="Runs once a day at the hour below"
-        />
-        <FormField
-          label="Scan hour (0-23)"
-          path="automation.upgrade_scheduler.run_hour"
-          type="number"
-          min={0}
-          max={23}
-          hint="Server time (default 3)"
-        />
-      </FeatureSwitchCard>
-      <Upgrade4kAutoGrabCard />
     </div>
   );
 }
@@ -327,6 +239,33 @@ function pollStatusUntilLastRun(
   }, intervalMs);
 }
 
+// -- Global Automation Interval card ------------------------------
+
+function AutomationIntervalCard() {
+  return (
+    <SettingsCard
+      title="Automation Schedule"
+      subtitle="Shared interval for all automation tasks"
+      paths={['automation.interval_hours']}
+      icon={
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+      }
+    >
+      <FormField
+        label="Check Interval (hours)"
+        path="automation.interval_hours"
+        type="number"
+        min={1}
+        max={24}
+        hint="How often to run all automation tasks (1-24 hours)"
+      />
+    </SettingsCard>
+  );
+}
+
 // -- Trending Movie Watchlist card --------------------------------
 
 function TrendingMovieWatchlistCard() {
@@ -351,7 +290,7 @@ function TrendingMovieWatchlistCard() {
 
   return (
     <SettingsCard
-      title="Source: Trending movies"
+      title="Trending Movies"
       subtitle="Auto-add trending Trakt movies to Radarr"
       paths={[
         'automation.trending_watchlist.enabled',
@@ -375,9 +314,9 @@ function TrendingMovieWatchlistCard() {
       note="Fetches trending movies from Trakt. Movies already in Plex or Radarr are skipped."
     >
       <ToggleSwitch
-        label="Use this source"
+        label="Enable"
         path="automation.trending_watchlist.enabled"
-        hint="Add trending movies to Radarr (needs Auto-grab on)"
+        hint="Automatically add trending movies to Radarr"
       />
       <ToggleSwitch
         label="Search on Add"
@@ -430,7 +369,7 @@ function NowAvailableMovieWatchlistCard() {
 
   return (
     <SettingsCard
-      title="Source: Now Available"
+      title="Now Available Movies"
       subtitle="Auto-add top available indexer movies to Radarr"
       paths={[
         'automation.now_available_watchlist.enabled',
@@ -449,9 +388,9 @@ function NowAvailableMovieWatchlistCard() {
       note="Fetches top available movies from your indexers. Movies already in Plex or Radarr are skipped."
     >
       <ToggleSwitch
-        label="Use this source"
+        label="Enable"
         path="automation.now_available_watchlist.enabled"
-        hint="Add top available movies to Radarr (needs Auto-grab on)"
+        hint="Automatically add top available movies to Radarr"
       />
       <ToggleSwitch
         label="Search on Add"
@@ -510,7 +449,7 @@ function AnticipatedWatchlistCard() {
 
   return (
     <SettingsCard
-      title="Source: Anticipated"
+      title="Anticipated"
       subtitle="Pre-order anticipated titles to Radarr/Sonarr"
       paths={[
         'automation.anticipated_watchlist.enabled',
@@ -534,9 +473,9 @@ function AnticipatedWatchlistCard() {
       note="Fetches Trakt's most anticipated (unreleased) movies and shows and adds them monitored, so they auto-download the moment they release. Titles already in Plex, Radarr, or Sonarr are skipped."
     >
       <ToggleSwitch
-        label="Use this source"
+        label="Enable"
         path="automation.anticipated_watchlist.enabled"
-        hint="Pre-order anticipated titles so they download on release (needs Auto-grab on)"
+        hint="Pre-order anticipated titles so they download on release"
       />
       <ToggleSwitch
         label="Search on Add"
@@ -605,7 +544,7 @@ function TrendingTvWatchlistCard() {
 
   return (
     <SettingsCard
-      title="Source: Trending TV"
+      title="Trending TV Shows"
       subtitle="Auto-add trending first-season Trakt shows to Sonarr"
       paths={[
         'automation.trending_tv_watchlist.enabled',
@@ -623,9 +562,9 @@ function TrendingTvWatchlistCard() {
       note="Fetches trending TV shows from Trakt, filters to first-season-only via TMDb. Shows in Plex or Sonarr are skipped."
     >
       <ToggleSwitch
-        label="Use this source"
+        label="Enable"
         path="automation.trending_tv_watchlist.enabled"
-        hint="Add trending first-season shows to Sonarr (needs Auto-grab on)"
+        hint="Automatically add trending first-season shows to Sonarr"
       />
       <ToggleSwitch
         label="Search on Add"
@@ -680,7 +619,7 @@ function LatestAutoGrabCard() {
 
   return (
     <SettingsCard
-      title="Source: Latest feed"
+      title="Latest Auto-Grab"
       subtitle="Grab high-seeder releases the moment they trend"
       paths={[
         'automation.latest_auto_grab.enabled',
@@ -696,12 +635,12 @@ function LatestAutoGrabCard() {
         </svg>
       }
       headerRight={<RunNowButton onRun={handleRunNow} running={status?.running} />}
-      note="Scans the Latest feed (browse + 2160p Remux sweep). Grabs any release ≥ seeder threshold inside the age window. Ownership uses Plex: movies in any non-4K movie library are skipped; movies only in your 4K library still get a standard-profile grab."
+      note="Scans the Latest feed (browse + 2160p Remux sweep). Grabs any release ≥ seeder threshold inside the age window. Ownership uses Plex: movies in any non-4K movie library are skipped; movies only in your 4K library still get a TFlix-profile grab."
     >
       <ToggleSwitch
-        label="Use this source"
+        label="Enable"
         path="automation.latest_auto_grab.enabled"
-        hint="Grab matching releases on every scan (needs Auto-grab on)"
+        hint="Automatically grab matching releases on every scan"
       />
       <FormField
         label="Quality Profile"
@@ -807,9 +746,9 @@ function Upgrade4kAutoGrabCard() {
       note="Watches the Latest feed for 2160p Remux releases. Auto-grabs them for any movie not already in your 4K Plex library — even if the movie exists in other libraries. The Radarr quality profile must accept 2160p Remux."
     >
       <ToggleSwitch
-        label="Use 4K Remux auto-grab"
+        label="Enable"
         path="automation.upgrade_4k_auto_grab.enabled"
-        hint="Grab matching 2160p Remux releases (needs 4K & Upgrades on)"
+        hint="Automatically grab matching 2160p Remux releases"
       />
       <FormField
         label="Quality Profile (4K)"
@@ -863,6 +802,29 @@ function Upgrade4kAutoGrabCard() {
   );
 }
 
+
+// -- New Releases (grouped Latest / Trending / Anticipated / Now Available) --
+
+function NewReleasesCard() {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+        <h3 className="text-[15px] font-semibold text-white/90">New Releases</h3>
+        <p className="mt-1 text-[12px] text-white/40">
+          Latest, Trending Movies, Anticipated, and Now Available keep their own
+          schedules and backends — this card groups their settings in one place.
+          Trending TV stays separate below.
+        </p>
+      </div>
+      <div className="space-y-4 [&>*]:!mt-0">
+        <LatestAutoGrabCard />
+        <TrendingMovieWatchlistCard />
+        <AnticipatedWatchlistCard />
+        <NowAvailableMovieWatchlistCard />
+      </div>
+    </div>
+  );
+}
 
 // -- Unified Activity Log -----------------------------------------
 

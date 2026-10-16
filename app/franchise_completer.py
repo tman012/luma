@@ -7,7 +7,7 @@ owned vs missing vs upcoming). Only collections above min_fame with at most
 max_missing_parts released gaps are considered; upcoming/unreleased parts are
 skipped. Caps grabs at movies_per_night.
 
-Quality profile defaults to the Radarr default profile from Settings. After add+search, newly added
+Quality profile defaults to TFlix (Radarr id 7). After add+search, newly added
 titles are unmonitored so they never pollute the intentional Watchlist rail
 (same lesson as Genre Roulette ghosts).
 
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_HOUR = 23
 _DEFAULT_MINUTE = 30
-_DEFAULT_QUALITY_PROFILE_ID = 0  # 0 = radarr.default_quality_profile_id
+_DEFAULT_QUALITY_PROFILE_ID = 7  # TFlix — 720p/1080p Bluray+WEB
 # fame_score is max IMDb votes across released parts (see movie_collections).
 # ~500k keeps only truly huge franchises (Die Hard, Jurassic, Spider-Man…).
 _DEFAULT_MIN_FAME = 500000
@@ -484,7 +484,7 @@ def _pick_radarr_release(releases: List[Dict[str, Any]]) -> Optional[Dict[str, A
 
 
 def _grab(film: Dict[str, Any], settings) -> Dict[str, Any]:
-    """Add on the standard profile, grab a verified Radarr release, unmonitor on success.
+    """Add on TFlix, grab a verified Radarr release, unmonitor on success.
 
     Uses Radarr interactive release search + grab, then movie_download_active
     to confirm a client handoff — never leave monitored ghosts on failure
@@ -497,7 +497,7 @@ def _grab(film: Dict[str, Any], settings) -> Dict[str, Any]:
     if not radarr_url or not radarr_key:
         return {'ok': False, 'detail': 'Radarr not configured'}
 
-    profile_id = _profile_id(settings) or int(settings.get('radarr.default_quality_profile_id') or 0)
+    profile_id = _profile_id(settings)
     if not profile_id:
         return {'ok': False, 'detail': 'Franchise Completer quality profile is not set'}
 

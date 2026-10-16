@@ -6,7 +6,7 @@ digital_release_cache, compares to the previous-run snapshot, and pushes
 when an item newly gains a date or its date changes.
 
 Settings under automation.watchlist_digital_dates.*:
-    enabled (default False), hour (default 6), minute (default 0)
+    enabled (default True), hour (default 6), minute (default 0)
 Schedule uses America/New_York.
 
 State:    data/watchlist_digital_dates_state.json
@@ -60,8 +60,8 @@ def _scheduled_time(settings) -> str:
 
 
 def _enabled(settings) -> bool:
-    # Default OFF on new installs (existing installs were migrated explicitly).
-    raw = settings.get(f"{_SETTING_PREFIX}.enabled", False)
+    # Default ON — missing key should mean enabled.
+    raw = settings.get(f"{_SETTING_PREFIX}.enabled", True)
     if raw is None:
         return True
     return bool(raw)
@@ -591,7 +591,7 @@ def start_watchlist_digital_dates_thread() -> None:
     t.start()
     logger.info(
         "Watchlist Digital Dates scheduler started "
-        "(America/New_York; default 06:00)"
+        "(America/New_York; default 06:00, enabled by default)"
     )
 
 

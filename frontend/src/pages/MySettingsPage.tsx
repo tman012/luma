@@ -153,7 +153,7 @@ export function MySettingsPage() {
               <label style={fieldLabelStyle}>Server URL</label>
               <input
                 type="url"
-                placeholder="http://localhost:32400"
+                placeholder="http://192.168.1.25:32400"
                 value={plexUrl}
                 onChange={e => setPlexUrl(e.target.value)}
                 style={inputStyle}
@@ -213,7 +213,7 @@ export function MySettingsPage() {
           <label style={fieldLabelStyle}>Server URL</label>
           <input
             type="url"
-            placeholder="http://localhost:7878"
+            placeholder="http://192.168.1.25:7878"
             value={radarrUrl}
             onChange={e => setRadarrUrl(e.target.value)}
             style={inputStyle}
@@ -269,7 +269,7 @@ export function MySettingsPage() {
           <label style={fieldLabelStyle}>Server URL</label>
           <input
             type="url"
-            placeholder="http://localhost:8989"
+            placeholder="http://192.168.1.25:8989"
             value={sonarrUrl}
             onChange={e => setSonarrUrl(e.target.value)}
             style={inputStyle}

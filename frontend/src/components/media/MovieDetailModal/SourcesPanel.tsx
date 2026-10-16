@@ -23,8 +23,8 @@ import {
   displayResolution,
   pinRecommendedFirst,
   pickBestInGroup,
-  isSameRelease,
-} from '@/components/media/releaseRecommend';
+  isSameTflixRelease,
+} from '@/components/media/tflixRecommend';
 import {
   getBadgeColor,
   buildQualityGroups,
@@ -716,7 +716,7 @@ function ExpandedSourcesView({
                       index={i}
                       zoneId="sources-level-4"
                       isWeb={isWeb}
-                      recommended={!!recommended && isSameRelease(release, recommended)}
+                      recommended={!!recommended && isSameTflixRelease(release, recommended)}
                     />
                   ))}
                 </div>
@@ -1708,7 +1708,7 @@ function CompactSourcesView({
                   grabbed={grabbedGuids.has(rk)}
                   onToggle={handleToggleExpand}
                   onGrab={handleGrab}
-                  recommended={!!seeAllRecommended && isSameRelease(release, seeAllRecommended)}
+                  recommended={!!seeAllRecommended && isSameTflixRelease(release, seeAllRecommended)}
                 />
                 </div>
                 );

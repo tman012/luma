@@ -14,8 +14,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-from app.automation_features import is_enabled as _automation_enabled
-
 logger = logging.getLogger(__name__)
 
 # ── Module-level state ────────────────────────────────────────────
@@ -169,7 +167,7 @@ def _run_cycle(force: bool = False) -> None:
     settings = SettingsManager()
 
     if not force:
-        enabled = _automation_enabled(settings, 'trending_watchlist')
+        enabled = settings.get('automation.trending_watchlist.enabled', False)
         if not enabled:
             logger.debug('Trending watchlist disabled, skipping cycle')
             return

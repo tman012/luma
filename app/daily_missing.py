@@ -1,4 +1,4 @@
-"""What You're Missing — daily home rail of popular movies the library does not own.
+"""What You're Missing — daily home rail of popular movies Taylor does not own.
 
 Discovery only (NOT an auto-grabber). Builds a large unowned-popular pool from
 Trakt + TMDb, quality-gates for crowd signal, and serves a ~20-title slate that is
@@ -39,7 +39,7 @@ POOL_TARGET = 4000
 # Below this, treat pool as unhealthy (tiny pools reshuffle to ~same slate).
 POOL_MIN_HEALTHY = 400
 TRAKT_PAGE_SIZE = 20
-# A large library (~5k films) owns nearly all of the top Trakt pages. Dig deep.
+# Taylor owns ~4.7k films — top Trakt pages are nearly all owned. Dig deep.
 TRAKT_POPULAR_PAGES = 40
 TRAKT_WATCHED_PAGES = 20
 TRAKT_ANTICIPATED_PAGES = 15

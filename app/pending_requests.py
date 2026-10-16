@@ -1,5 +1,5 @@
 """
-pending_requests.py — Telegram notification registry for Luma
+pending_requests.py — Telegram notification registry for TFlix
 
 Tracks user requests (movie/TV) so that when Radarr/Sonarr fires a Download
 webhook, we can immediately notify the requester via Telegram.
@@ -15,7 +15,7 @@ Schema per entry:
     "episode": null | 4,
     "episode_title": null | "Episode Title",
     "sonarr_series_id": null | 123,
-    "telegram_chat_id": "123456789",
+    "telegram_chat_id": "8574665585",
     "requested_at": 1710000000.0
   }
 
@@ -174,7 +174,7 @@ def _build_message(pending: dict, season: int = None, episode: int = None,
     media_type = pending.get('media_type', 'movie')
 
     if media_type == 'movie':
-        return f"{title} is ready on Luma!"
+        return f"{title} is ready on TFlix!"
 
     # TV — determine effective season/episode
     p_season = pending.get('season')
@@ -185,7 +185,7 @@ def _build_message(pending: dict, season: int = None, episode: int = None,
 
     # No specific episode → plain show notification
     if eff_season is None or eff_episode is None:
-        return f"{title} is ready on Luma!"
+        return f"{title} is ready on TFlix!"
 
     # We have a specific episode — try to get episode title
     # Priority: 1) caller-provided, 2) stored in pending record, 3) Sonarr API lookup
@@ -199,10 +199,10 @@ def _build_message(pending: dict, season: int = None, episode: int = None,
 
     ep_code = f"S{eff_season:02d}E{eff_episode:02d}"
     if ep_title:
-        return f"{title} - {ep_code} - {ep_title} is ready on Luma!"
+        return f"{title} - {ep_code} - {ep_title} is ready on TFlix!"
 
     # Fallback: season/episode numbers only
-    return f"{title} - {ep_code} is ready on Luma!"
+    return f"{title} - {ep_code} is ready on TFlix!"
 
 
 def _get_telegram_bot_token() -> str:

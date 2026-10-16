@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Configuration module for Luma
+Configuration module for media-search-app
 Loads configuration from environment variables
 """
 
@@ -23,11 +23,11 @@ class Config:
     QBITTORRENT_PASS = os.environ.get('QBITTORRENT_PASS', '')
 
     # Sonarr settings
-    SONARR_URL = os.environ.get('SONARR_URL', '')
+    SONARR_URL = os.environ.get('SONARR_URL', 'http://192.168.1.62:8989')
     SONARR_API_KEY = os.environ.get('SONARR_API_KEY', '')
 
     # Radarr settings
-    RADARR_URL = os.environ.get('RADARR_URL', '')
+    RADARR_URL = os.environ.get('RADARR_URL', 'http://192.168.1.62:7878')
     RADARR_API_KEY = os.environ.get('RADARR_API_KEY', '')
 
     # Radarr download monitoring - monitors qBittorrent category for Radarr downloads
@@ -53,7 +53,7 @@ class Config:
     VIDEO_EXTS = ['.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg', '.m2ts']
 
     # Plex settings (from existing config)
-    PLEX_URL = os.environ.get('PLEX_URL', '')
+    PLEX_URL = os.environ.get('PLEX_URL', 'http://192.168.1.25:32400')
     PLEX_TOKEN = os.environ.get('PLEX_TOKEN', '')
     PLEX_ACCOUNT_ID = int(os.environ.get('PLEX_ACCOUNT_ID', '1'))  # Default to account 1 (server owner)
 

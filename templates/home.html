@@ -1,0 +1,1771 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- IMPORTANT: This app is designed for iPhone PWA with viewport 393px x 852px -->
+<head>
+    <!-- PWA Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Media Search">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0a0a0a">
+    <meta name="apple-touch-fullscreen" content="yes">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/images/ic_launcher_round.png">
+    <title>Explore - Bosley Media</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #fff;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            position: relative;
+            min-height: 100vh;
+            min-height: -webkit-fill-available;
+        }
+
+        html {
+            height: 100%;
+        }
+
+        /* Hide scrollbar but keep functionality */
+        ::-webkit-scrollbar {
+            width: 0px;
+        }
+
+        /* Header with hamburger menu */
+        .header {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            padding-top: calc(env(safe-area-inset-top, 0px) + 15px) !important;
+            background: #1a1a1a;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 30;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        /* Hamburger menu */
+        .hamburger {
+            margin-right: 12px;
+            flex-shrink: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 1001;
+        }
+
+        .hamburger-line {
+            width: 22px;
+            height: 2px;
+            background-color: #fff;
+            margin: 3px 0;
+            transition: 0.3s;
+            border-radius: 2px;
+        }
+
+        .hamburger.active .line-1 {
+            transform: rotate(-45deg) translate(-5px, 5px);
+        }
+
+        .hamburger.active .line-2 {
+            opacity: 0;
+        }
+
+        .hamburger.active .line-3 {
+            transform: rotate(45deg) translate(-5px, -5px);
+        }
+
+        /* Side menu */
+        .side-menu {
+            position: fixed;
+            top: 0;
+            left: -100%;
+            width: 280px;
+            height: 100%;
+            background: #1a1a1a;
+            transition: 0.3s;
+            z-index: 1000;
+            padding-top: calc(env(safe-area-inset-top, 0px) + 80px);
+            overflow-y: auto;
+        }
+
+        .side-menu.active {
+            left: 0;
+        }
+
+        .menu-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            display: none;
+        }
+
+        .menu-overlay.active {
+            display: block;
+        }
+
+        .menu-item {
+            padding: 18px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            color: #fff;
+            text-decoration: none;
+        }
+
+        .menu-item:hover {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .menu-item i {
+            width: 20px;
+            text-align: center;
+            color: #888;
+        }
+
+        /* Search bar */
+        .search-container {
+            flex: 1;
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .search-bar {
+            flex: 1;
+            padding: 12px 50px 12px 20px;
+            background: #333;
+            border: none;
+            border-radius: 25px;
+            font-size: 14px;
+            color: #fff;
+            transition: all 0.3s ease;
+        }
+
+        .search-bar::placeholder {
+            color: #666;
+        }
+
+        .search-bar:focus {
+            outline: none;
+            background: #444;
+        }
+
+        .voice-search-btn {
+            position: absolute;
+            right: 10px;
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 18px;
+            cursor: pointer;
+            padding: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .voice-search-btn:active {
+            transform: scale(0.9);
+        }
+
+        .voice-search-btn.recording {
+            color: #FF3B30;
+            animation: pulse 1.5s infinite;
+        }
+
+        /* Sort controls */
+        .sort-controls {
+            padding: 10px 10px 5px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            background: #0a0a0a;
+            position: fixed;
+            top: calc(env(safe-area-inset-top, 0px) + 15px + 32px + 15px + 10px);
+            left: 0;
+            right: 0;
+            z-index: 25;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+        }
+
+        .sort-controls.hidden {
+            display: none !important;
+        }
+
+        .sort-label {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .sort-buttons {
+            display: flex;
+            gap: 5px;
+            flex: 1;
+        }
+
+        .sort-btn {
+            padding: 6px 12px;
+            background: #2a2a2a;
+            border: none;
+            border-radius: 8px;
+            color: #888;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .sort-btn.active {
+            background: #2196F3;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        .sort-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* Quality filter dropdown */
+        .quality-filter {
+            padding: 6px 12px;
+            background: #2a2a2a;
+            border: none;
+            border-radius: 8px;
+            color: #888;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: auto;
+            min-width: 110px;
+        }
+
+        .quality-filter:focus {
+            outline: none;
+            background: #333;
+            color: #fff;
+        }
+
+        .quality-filter option {
+            background: #1a1a1a;
+            color: #fff;
+        }
+
+        /* Tracker filter pills */
+        .tracker-pills {
+            padding: 6px 10px;
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            background: #0a0a0a;
+            position: fixed;
+            top: calc(env(safe-area-inset-top, 0px) + 15px + 32px + 15px + 10px + 38px);
+            left: 0;
+            right: 0;
+            z-index: 24;
+        }
+        .tracker-pills.hidden {
+            display: none !important;
+        }
+        .tracker-pill {
+            padding: 4px 12px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 20px;
+            color: rgba(255,255,255,0.5);
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .tracker-pill.active {
+            background: rgba(33,150,243,0.2);
+            border-color: rgba(33,150,243,0.4);
+            color: #64b5f6;
+        }
+        .tracker-pill:active {
+            transform: scale(0.95);
+        }
+
+        /* Results container */
+        .results {
+            padding: 10px;
+            min-height: calc(100vh - 120px);
+            background: #0a0a0a;
+            margin-top: calc(env(safe-area-inset-top, 0px) + 15px + 32px + 15px + 10px + 35px);
+            padding-top: 10px;
+        }
+        .results.has-tracker-pills {
+            margin-top: calc(env(safe-area-inset-top, 0px) + 15px + 32px + 15px + 10px + 35px + 32px);
+        }
+
+        /* Movie Item */
+        .movie-item {
+            display: flex;
+            align-items: left;
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 12px;
+            background: #1a1a1a;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .movie-item:hover {
+            background: #222;
+        }
+
+        .movie-item:active {
+            transform: translateX(2px);
+        }
+
+        /* Movie poster */
+        .movie-poster {
+            width: 70px;
+            height: 100px;
+            border-radius: 6px;
+            margin-right: 16px;
+            background-color: #333;
+            flex-shrink: 0;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .movie-poster img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        /* Movie info layout */
+        .movie-info {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: flex-start;
+        }
+
+        /* Movie title */
+        .movie-title {
+            font-size: 16px !important;
+            color: #fff;
+            margin-bottom: 10px !important;
+            text-align: left;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            width: 100%;
+        }
+
+        .movie-subtitle {
+            font-size: 13px;
+            color: #888;
+            margin-bottom: 8px;
+            line-height: 1.3;
+        }
+
+        .movie-stats {
+            display: flex;
+            gap: 12px;
+            font-size: 12px;
+            align-items: center;
+            width: 100%;
+        }
+
+        .stat {
+            color: #aaa;
+        }
+
+        .rating {
+            color: #4ade80;
+            font-weight: 600;
+            margin-left: auto;
+        }
+
+        /* Skeleton loader */
+        .skeleton-item {
+            display: flex;
+            align-items: center;
+            padding: 16px;
+            border-radius: 12px;
+            margin-bottom: 12px;
+            background: #1a1a1a;
+        }
+
+        .skeleton {
+            background: linear-gradient(90deg, #333 0%, #555 50%, #333 100%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 4px;
+        }
+
+        .skeleton-poster {
+            width: 70px;
+            height: 100px;
+            border-radius: 6px;
+            margin-right: 16px;
+        }
+
+        .skeleton-info {
+            flex: 1;
+        }
+
+        .skeleton-title {
+            height: 16px;
+            width: 70%;
+            margin-bottom: 8px;
+        }
+
+        .skeleton-details {
+            height: 12px;
+            width: 50%;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* Loading spinner */
+        .loading-spinner {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        /* Error message */
+        .error-message {
+            text-align: center;
+            padding: 40px;
+            color: #f44336;
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+
+        .empty-state h3 {
+            font-size: 18px;
+            margin-bottom: 8px;
+            color: #888;
+        }
+
+        /* Search results overlay */
+        .search-results-overlay {
+            position: fixed;
+            top: calc(env(safe-area-inset-top, 0px) + 76px);
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #0a0a0a;
+            z-index: 20;
+            display: none;
+            overflow-y: auto;
+        }
+
+        .search-results-overlay.active {
+            display: block;
+        }
+
+        .search-results-overlay .results {
+            padding: 10px 0 0 0 !important;
+            margin-top: 0px !important;
+            background: #0a0a0a;
+            min-height: auto;
+        }
+
+        .search-results-overlay .movie-item {
+            margin: 0 10px 12px 10px;
+        }
+
+        /* Pull to refresh */
+        .pull-to-refresh {
+            position: fixed;
+            top: calc(env(safe-area-inset-top, 0px) + 76px);
+            left: 50%;
+            transform: translateX(-50%) translateY(-100%);
+            background: #1a1a1a;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            transition: transform 0.3s ease;
+            z-index: 15;
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        .pull-to-refresh.active {
+            transform: translateX(-50%) translateY(10px);
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Modal styles removed - using mobile_movie_modal component styles instead */
+    </style>
+</head>
+<body>
+    <!-- Side menu -->
+    <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
+    <div class="side-menu" id="sideMenu">
+        <a href="/" class="menu-item">
+            <i class="fas fa-home"></i>
+            <span>Home</span>
+        </a>
+        <a href="/explore" class="menu-item">
+            <i class="fas fa-compass"></i>
+            <span>Explore</span>
+        </a>
+        <a href="/watchlist" class="menu-item">
+            <i class="fas fa-bookmark"></i>
+            <span>Watchlist</span>
+        </a>
+        <a href="/activity" class="menu-item">
+            <i class="fas fa-play-circle"></i>
+            <span>Activity</span>
+        </a>
+        <a href="/settings" class="menu-item">
+            <i class="fas fa-cog"></i>
+            <span>Settings</span>
+        </a>
+    </div>
+
+    <!-- Pull to Refresh indicator -->
+    <div class="pull-to-refresh" id="pullToRefresh">↻ Refreshing...</div>
+
+    <!-- Header with hamburger and search -->
+    <div class="header">
+        <div class="hamburger" id="hamburger" onclick="toggleMenu()">
+            <div class="hamburger-line line-1"></div>
+            <div class="hamburger-line line-2"></div>
+            <div class="hamburger-line line-3"></div>
+        </div>
+        <div class="search-container">
+            <input type="search" class="search-bar" id="searchBar" placeholder="Search movies and shows..." name="media-search-bar" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-form-type="other" data-lpignore="true">
+            <button class="voice-search-btn" id="voiceSearchBtn" onclick="toggleVoiceSearch()">
+                <i class="fas fa-microphone"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Sort controls -->
+    <div class="sort-controls" id="sortControls">
+        <span class="sort-label">Sort:</span>
+        <div class="sort-buttons">
+            <button class="sort-btn active" onclick="sortMovies('popular')">Seeders</button>
+            <button class="sort-btn" onclick="sortMovies('date')">Date Added</button>
+            <select class="quality-filter" id="qualityFilter" onchange="filterByQuality(this.value)">
+                <option value="">All Quality</option>
+                <option value="4k-remux">4K Remux</option>
+                <option value="4k-webdl">4K WEB-DL</option>
+                <option value="1080p-remux">1080p Remux</option>
+                <option value="1080p-webdl">1080p WEB-DL</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Tracker filter pills (shown when 2+ trackers have results) -->
+    <div class="tracker-pills hidden" id="trackerPills"></div>
+
+    <!-- Search results overlay -->
+    <div class="search-results-overlay" id="searchResultsOverlay">
+        <div class="results" id="searchResults"></div>
+    </div>
+
+    <!-- Main results container -->
+    <div class="results" id="results">
+        <!-- Skeleton loaders will be shown initially -->
+    </div>
+
+    <!-- Loading Modal -->
+    <div id="loadingModal" class="loading-modal">
+        <div style="text-align: center;">
+            <div class="loading-spinner"></div>
+            <div style="color: rgba(255,255,255,0.7); font-size: 16px;">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Include the unified movie modal component (for both owned and unowned movies) -->
+    {% include 'components/mobile_movie_modal.html' %}
+
+    <!-- Include the TV show modal component -->
+    {% include 'components/mobile_tv_modal.html' %}
+
+    <!-- Include the season modal component -->
+    {% include 'components/mobile_season_modal.html' %}
+
+    <!-- Include the episode modal component -->
+    {% include 'components/mobile_episode_modal.html' %}
+
+    <!-- Include Library Selection Modal (for choosing playback library) -->
+    {% include 'components/library_selection_modal.html' %}
+
+    <!-- Include Playback Modal (for room selection) -->
+    {% include 'components/playback_modal.html' %}
+
+    <style>
+        .loading-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .loading-modal.active {
+            display: flex;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    </style>
+
+    <!-- Set API key for playback service -->
+    <script>
+        window.API_KEY = '{{ plex_token }}';
+    </script>
+
+    <!-- Load playback service -->
+    <script src="/static/js/playback-service.js"></script>
+
+    <script>
+        // Global variables
+        let allMovies = [];
+        let searchTimeout = null;
+        let isLoading = false;
+        let isSearching = false;
+        let currentSort = 'popular';
+        let currentQuality = '';  // Track current quality filter
+        let currentTrackerFilter = '';  // Track current tracker filter
+        let searchState = {
+            lastQuery: '',
+            lastResults: null,
+            isSearchActive: false
+        };
+
+        // Filter by quality function
+        function filterByQuality(quality) {
+            currentQuality = quality;
+
+            // If a quality is selected, fetch filtered data from API
+            if (quality) {
+                loadMovies(quality);
+            } else {
+                // Load all movies
+                loadMovies();
+            }
+        }
+
+        // Menu functionality
+        function toggleMenu() {
+            const hamburger = document.getElementById('hamburger');
+            const sideMenu = document.getElementById('sideMenu');
+            const menuOverlay = document.getElementById('menuOverlay');
+
+            hamburger.classList.toggle('active');
+            sideMenu.classList.toggle('active');
+            menuOverlay.classList.toggle('active');
+        }
+
+        // Voice search functionality
+        let searchRecognition = null;
+        let isSearchRecording = false;
+
+        // Initialize speech recognition for search
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            searchRecognition = new SpeechRecognition();
+            searchRecognition.continuous = false;
+            searchRecognition.interimResults = false;
+            searchRecognition.lang = 'en-US';
+
+            searchRecognition.onstart = function() {
+                isSearchRecording = true;
+                document.getElementById('voiceSearchBtn').classList.add('recording');
+                console.log('Voice search started');
+            };
+
+            searchRecognition.onresult = function(event) {
+                const transcript = event.results[0][0].transcript;
+                const searchBar = document.getElementById('searchBar');
+                searchBar.value = transcript;
+
+                // Trigger search
+                const inputEvent = new Event('input', { bubbles: true });
+                searchBar.dispatchEvent(inputEvent);
+
+                console.log('Voice search result:', transcript);
+            };
+
+            searchRecognition.onerror = function(event) {
+                console.error('Voice search error:', event.error);
+                isSearchRecording = false;
+                document.getElementById('voiceSearchBtn').classList.remove('recording');
+
+                if (event.error === 'no-speech') {
+                    // Silently handle no speech
+                } else if (event.error === 'not-allowed') {
+                    alert('Microphone permission denied. Please enable it in your browser settings.');
+                }
+            };
+
+            searchRecognition.onend = function() {
+                isSearchRecording = false;
+                document.getElementById('voiceSearchBtn').classList.remove('recording');
+                console.log('Voice search ended');
+            };
+        } else {
+            // Hide voice button if not supported
+            const voiceBtn = document.getElementById('voiceSearchBtn');
+            if (voiceBtn) voiceBtn.style.display = 'none';
+        }
+
+        function toggleVoiceSearch() {
+            if (!searchRecognition) {
+                alert('Voice recognition is not supported on this device/browser.');
+                return;
+            }
+
+            if (isSearchRecording) {
+                searchRecognition.stop();
+            } else {
+                try {
+                    searchRecognition.start();
+                } catch (e) {
+                    console.error('Error starting voice recognition:', e);
+                }
+            }
+        }
+
+        // Show skeleton loaders
+        function showSkeletonLoaders() {
+            const container = document.getElementById('results');
+            let skeletonHTML = '';
+
+            for (let i = 0; i < 10; i++) {
+                skeletonHTML += `
+                    <div class="skeleton-item">
+                        <div class="skeleton skeleton-poster"></div>
+                        <div class="skeleton-info">
+                            <div class="skeleton skeleton-title"></div>
+                            <div class="skeleton skeleton-details"></div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = skeletonHTML;
+        }
+
+        // Load movies from cached explore endpoint
+        async function loadMovies(quality = '') {
+            if (isLoading) return;
+            isLoading = true;
+
+            showSkeletonLoaders();
+
+            try {
+                let url = '/api/explore/cached';
+                if (quality) {
+                    url += '?quality=' + encodeURIComponent(quality);
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+                const movies = data.movies || [];
+
+                // Deduplicate by title and year, keeping highest seeders
+                const movieMap = new Map();
+
+                movies.forEach(movie => {
+                    const key = `${(movie.title || '').toLowerCase()}_${movie.year || ''}`;
+                    const existing = movieMap.get(key);
+
+                    if (!existing || (movie.seeders || 0) > (existing.seeders || 0)) {
+                        movieMap.set(key, movie);
+                    }
+                });
+
+                // Convert back to array
+                allMovies = Array.from(movieMap.values());
+
+                // Apply current sort
+                if (currentSort === 'popular') {
+                    // Sort by seeders (highest first)
+                    allMovies.sort((a, b) => (b.seeders || 0) - (a.seeders || 0));
+                } else if (currentSort === 'date') {
+                    // Sort by date added (newest first)
+                    allMovies.sort((a, b) => {
+                        const getDate = (movie) => {
+                            const dateFields = [
+                                movie.pub_date,
+                                movie.date_added,
+                                movie.created_at
+                            ];
+
+                            for (const field of dateFields) {
+                                if (field) {
+                                    const date = new Date(field);
+                                    if (!isNaN(date.getTime())) {
+                                        return date;
+                                    }
+                                }
+                            }
+                            return new Date('2000-01-01');
+                        };
+
+                        const dateA = getDate(a);
+                        const dateB = getDate(b);
+                        return dateB - dateA;  // Newest first
+                    });
+                }
+
+                // Build tracker filter pills
+                buildTrackerPills(allMovies);
+
+                // Apply tracker filter if active
+                displayMovies(getFilteredMovies());
+
+            } catch (error) {
+                console.error('Error loading movies:', error);
+                document.getElementById('results').innerHTML = `
+                    <div class="error-message">
+                        Failed to load movies. Please try again.
+                    </div>
+                `;
+            } finally {
+                isLoading = false;
+            }
+        }
+
+        function getFilteredMovies() {
+            if (!currentTrackerFilter) return allMovies;
+            return allMovies.filter(m => (m.tracker || '').toUpperCase() === currentTrackerFilter.toUpperCase());
+        }
+
+        function buildTrackerPills(movies) {
+            var pillsEl = document.getElementById('trackerPills');
+            var resultsEl = document.getElementById('results');
+            // Collect unique trackers
+            var trackers = {};
+            movies.forEach(function(m) {
+                var t = (m.tracker || '').toUpperCase();
+                if (t) trackers[t] = (trackers[t] || 0) + 1;
+            });
+            var trackerNames = Object.keys(trackers).sort();
+            // Only show pills if 2+ trackers
+            if (trackerNames.length < 2) {
+                pillsEl.classList.add('hidden');
+                resultsEl.classList.remove('has-tracker-pills');
+                return;
+            }
+            pillsEl.classList.remove('hidden');
+            resultsEl.classList.add('has-tracker-pills');
+            var html = '<span class="tracker-pill' + (!currentTrackerFilter ? ' active' : '') + '" onclick="filterByTracker(\'\')">All (' + movies.length + ')</span>';
+            trackerNames.forEach(function(t) {
+                html += '<span class="tracker-pill' + (currentTrackerFilter === t ? ' active' : '') + '" onclick="filterByTracker(\'' + t + '\')">' + t + ' (' + trackers[t] + ')</span>';
+            });
+            pillsEl.innerHTML = html;
+        }
+
+        function filterByTracker(tracker) {
+            currentTrackerFilter = tracker;
+            buildTrackerPills(allMovies);
+            displayMovies(getFilteredMovies());
+        }
+
+        // Display movies (torrents)
+        function displayMovies(movies) {
+            const container = document.getElementById('results');
+
+            if (movies.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h3>No movies found</h3>
+                        <p>Try refreshing or searching for something specific.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const movieHTML = movies.map(movie => {
+                // Extract key information
+                const resolution = movie.resolution || 'HD';
+                const cleanTitle = movie.title || 'Unknown Title';
+                const year = movie.year || '';
+
+                // Get tracker display
+                let trackerDisplay = movie.tracker || '';
+
+                // Extract type information
+                let type = movie.source || '';
+
+                // Create subtitle line with consolidated info
+                let subtitleParts = [];
+                if (year) subtitleParts.push(year);
+                if (resolution) subtitleParts.push(resolution);
+                if (type) subtitleParts.push(type);
+                if (trackerDisplay) subtitleParts.push(trackerDisplay);
+                const subtitle = subtitleParts.join(' • ');
+
+                // Format file size
+                const sizeGB = parseFloat(movie.size_gb) || 0;
+                const sizeFormatted = sizeGB.toFixed(1) + ' GB';
+
+                // Format upload date
+                let uploadDateFormatted = '';
+                const possibleDateFields = [
+                    movie.pub_date,
+                    movie.date_added,
+                    movie.created_at
+                ];
+
+                let uploadDate = null;
+                for (const dateField of possibleDateFields) {
+                    if (dateField) {
+                        uploadDate = new Date(dateField);
+                        if (!isNaN(uploadDate.getTime())) {
+                            break;
+                        }
+                    }
+                }
+
+                if (uploadDate && !isNaN(uploadDate.getTime())) {
+                    const now = new Date();
+                    const diffTime = Math.abs(now - uploadDate);
+                    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+                    if (diffDays === 0) {
+                        uploadDateFormatted = 'Today';
+                    } else if (diffDays === 1) {
+                        uploadDateFormatted = '1 day ago';
+                    } else if (diffDays < 7) {
+                        uploadDateFormatted = `${diffDays} days ago`;
+                    } else if (diffDays < 30) {
+                        const weeks = Math.floor(diffDays / 7);
+                        uploadDateFormatted = weeks === 1 ? '1 week ago' : `${weeks} weeks ago`;
+                    } else if (diffDays < 365) {
+                        const months = Math.floor(diffDays / 30);
+                        uploadDateFormatted = months === 1 ? '1 month ago' : `${months} months ago`;
+                    } else {
+                        uploadDateFormatted = uploadDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                    }
+                }
+
+                // Use poster URL - either from API or construct from TMDB
+                let posterHTML = '';
+                const posterSrc = movie.poster_url || movie.poster || (movie.poster_path ? `https://image.tmdb.org/t/p/w342${movie.poster_path}` : '');
+                if (posterSrc) {
+                    posterHTML = `<img src="${posterSrc}" alt="${cleanTitle}" onerror="this.style.display='none'">`;
+                }
+
+                // Get tmdb_id and clean it (remove 'movie/' or 'tv/' prefix if present)
+                let tmdbId = movie.tmdb_id || movie.id || 0;
+                if (typeof tmdbId === 'string' && tmdbId.includes('/')) {
+                    tmdbId = tmdbId.split('/').pop();
+                }
+
+                // Store movie data in a data attribute to avoid inline JSON issues
+                const movieDataAttr = encodeURIComponent(JSON.stringify(movie));
+
+                return `
+                    <div class="movie-item"
+                         data-movie="${movieDataAttr}"
+                         data-tmdb-id="${tmdbId}"
+                         data-media-type="movie">
+                        <div class="movie-poster">${posterHTML}</div>
+                        <div class="movie-info">
+                            <div class="movie-title">${cleanTitle}</div>
+                            <div class="movie-subtitle">${subtitle}</div>
+                            <div class="movie-stats">
+                                <span class="stat">${sizeFormatted}</span>
+                                ${uploadDateFormatted ? `<span class="stat">${uploadDateFormatted}</span>` : ''}
+                                <span class="rating">↑${movie.seeders || 0}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = movieHTML;
+
+            // Add click event listeners to all movie items
+            container.querySelectorAll('.movie-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    handleMovieClick(this);
+                });
+            });
+        }
+
+        // Handle movie click event
+        function handleMovieClick(element) {
+            try {
+                const movieData = JSON.parse(decodeURIComponent(element.dataset.movie));
+                const tmdbId = element.dataset.tmdbId;
+                const mediaType = element.dataset.mediaType;
+                showMovieModal(tmdbId, mediaType, movieData);
+            } catch (e) {
+                console.error('Error parsing movie data:', e);
+                const tmdbId = element.dataset.tmdbId;
+                const mediaType = element.dataset.mediaType;
+                showMovieModal(tmdbId, mediaType, null);
+            }
+        }
+
+        // Sort movies
+        function sortMovies(sortType) {
+            currentSort = sortType;
+
+            // Update button states
+            document.querySelectorAll('.sort-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            // Reload movies with new sort
+            loadMovies();
+        }
+
+        // Search functionality
+        const searchBar = document.getElementById('searchBar');
+
+        searchBar.addEventListener('input', function(e) {
+            clearTimeout(searchTimeout);
+            const query = e.target.value.trim();
+
+            if (query.length >= 2) {
+                searchTimeout = setTimeout(() => performSearch(query), 300);
+            } else if (query.length === 0) {
+                closeSearchResults();
+            }
+        });
+
+        searchBar.addEventListener('focus', function() {
+            if (searchState.lastQuery && !this.value) {
+                this.value = searchState.lastQuery;
+                performSearch(searchState.lastQuery);
+            }
+        });
+
+        async function performSearch(query) {
+            if (isSearching) return;
+            isSearching = true;
+
+            searchState.lastQuery = query;
+            searchState.isSearchActive = true;
+
+            const searchOverlay = document.getElementById('searchResultsOverlay');
+            const searchResults = document.getElementById('searchResults');
+            const sortControls = document.getElementById('sortControls');
+
+            sortControls.classList.add('hidden');
+            searchOverlay.classList.add('active');
+            searchResults.innerHTML = '<div style="text-align: center; padding: 40px; color: #666;">Searching...</div>';
+
+            try {
+                const response = await fetch(`/search?q=${encodeURIComponent(query)}&type=all`);
+                const data = await response.json();
+
+                const allResults = [];
+
+                if (data.movies && data.movies.length > 0) {
+                    data.movies.forEach(movie => {
+                        allResults.push({
+                            ...movie,
+                            media_type: 'movie',
+                            display_title: movie.title,
+                            display_date: movie.release_date
+                        });
+                    });
+                }
+
+                if (data.tv_shows && data.tv_shows.length > 0) {
+                    data.tv_shows.forEach(show => {
+                        allResults.push({
+                            ...show,
+                            media_type: 'tv',
+                            display_title: show.name,
+                            display_date: show.first_air_date
+                        });
+                    });
+                }
+
+                if (allResults.length > 0) {
+                    // Calculate weighted rating for better sorting
+                    // Uses Bayesian average: (v/(v+m)) * R + (m/(v+m)) * C
+                    // where R = average rating, v = number of votes, m = minimum votes, C = mean rating
+                    const minVotes = 50; // Minimum votes required to be considered
+                    const meanRating = 6.0; // Average rating across all movies/shows
+
+                    allResults.forEach(item => {
+                        const votes = item.vote_count || 0;
+                        const rating = item.vote_average || 0;
+
+                        // Weighted rating formula
+                        item.weighted_rating = (votes / (votes + minVotes)) * rating + (minVotes / (votes + minVotes)) * meanRating;
+                    });
+
+                    // Sort by weighted rating descending
+                    allResults.sort((a, b) => (b.weighted_rating || 0) - (a.weighted_rating || 0));
+                    displaySearchResults(allResults);
+                    searchState.lastResults = searchResults.innerHTML;
+                } else {
+                    searchResults.innerHTML = `
+                        <div class="empty-state">
+                            <h3>No results found</h3>
+                            <p>Try different keywords.</p>
+                        </div>
+                    `;
+                    searchState.lastResults = searchResults.innerHTML;
+                }
+            } catch (error) {
+                console.error('Search error:', error);
+                searchResults.innerHTML = `
+                    <div class="error-message">
+                        Search failed. Please try again.
+                    </div>
+                `;
+            } finally {
+                isSearching = false;
+            }
+        }
+
+        function displaySearchResults(results) {
+            const container = document.getElementById('searchResults');
+
+            const resultsHTML = results.map(item => {
+                const title = item.display_title || item.title || item.name;
+                const year = (item.display_date || '').substring(0, 4);
+                const posterUrl = item.poster_path ?
+                    `https://image.tmdb.org/t/p/w342${item.poster_path}` : '';
+                const rating = item.vote_average || 0;
+                const itemDataAttr = encodeURIComponent(JSON.stringify(item));
+
+                return `
+                    <div class="movie-item search-result-item"
+                         data-movie="${itemDataAttr}"
+                         data-tmdb-id="${item.id}"
+                         data-media-type="${item.media_type}">
+                        <div class="movie-poster">
+                            ${posterUrl ? `<img src="${posterUrl}" alt="${title}" onerror="this.style.display='none'">` : ''}
+                        </div>
+                        <div class="movie-info">
+                            <div class="movie-title">${title}</div>
+                            <div class="movie-subtitle">${year} • ${item.media_type === 'tv' ? 'TV Series' : 'Movie'}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = resultsHTML;
+
+            // Add click event listeners to search results
+            container.querySelectorAll('.search-result-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    handleSearchResultClick(this);
+                });
+            });
+        }
+
+        function handleSearchResultClick(element) {
+            try {
+                const movieData = JSON.parse(decodeURIComponent(element.dataset.movie));
+                const tmdbId = element.dataset.tmdbId;
+                const mediaType = element.dataset.mediaType;
+
+                // DEBUG: Log what search result was clicked
+                console.log('=== SEARCH RESULT CLICKED ===');
+                console.log('Display Title:', movieData.display_title || movieData.title || movieData.name);
+                console.log('Display Year:', (movieData.display_date || '').substring(0, 4));
+                console.log('TMDB ID:', tmdbId);
+                console.log('Media Type:', mediaType);
+                console.log('Full movieData:', movieData);
+                console.log('============================');
+
+                closeSearchAndShowModal(tmdbId, mediaType, movieData);
+            } catch (e) {
+                console.error('Error parsing search result data:', e);
+                const tmdbId = element.dataset.tmdbId;
+                const mediaType = element.dataset.mediaType;
+                closeSearchAndShowModal(tmdbId, mediaType, null);
+            }
+        }
+
+        function closeSearchAndShowModal(tmdbId, mediaType, movieData) {
+            const searchOverlay = document.getElementById('searchResultsOverlay');
+            searchOverlay.classList.remove('active');
+
+            setTimeout(() => {
+                showMovieModalAdapter(tmdbId, mediaType, movieData);
+            }, 100);
+        }
+
+        function closeSearchResults() {
+            const searchOverlay = document.getElementById('searchResultsOverlay');
+            const sortControls = document.getElementById('sortControls');
+
+            searchOverlay.classList.remove('active');
+            sortControls.classList.remove('hidden');
+
+            searchState.isSearchActive = false;
+        }
+
+        // Adapter function to check ownership and route to correct modal
+        async function showMovieModalAdapter(tmdbId, mediaType, torrentData) {
+            try {
+                console.log('=== showMovieModalAdapter called ===');
+                console.log('TMDB ID:', tmdbId);
+                console.log('Media Type:', mediaType);
+                console.log('Torrent Data:', torrentData);
+                console.log('Torrent Title:', torrentData?.title);
+                console.log('Torrent Year:', torrentData?.year);
+                console.log('Torrent IMDB:', torrentData?.imdb_id);
+
+                // Show loading modal immediately for instant feedback
+                showLoadingModal();
+
+                // Store torrent data separately
+                const torrentInfo = torrentData || {};
+
+                // OPTIMIZATION: Check if we already have TMDB data from search results
+                let tmdbData = {};
+                let title = '';
+                let year = '';
+
+                // Check if torrentInfo is actually TMDB search result data
+                const isFromSearch = torrentInfo.display_title || (torrentInfo.vote_average !== undefined);
+
+                if (isFromSearch) {
+                    // We already have TMDB data from search, no need to fetch again!
+                    console.log('Using existing TMDB data from search results');
+                    tmdbData = torrentInfo;
+                    title = torrentInfo.title || torrentInfo.display_title || torrentInfo.name || '';
+                    year = (torrentInfo.release_date || torrentInfo.display_date || torrentInfo.first_air_date || '').substring(0, 4);
+
+                    // Search results don't have imdb_id in the main object, need to fetch if we want accurate ownership check
+                    // But we can do a quick ownership check with just title/year first
+                } else {
+                    // This is torrent data (from Explore), need to fetch TMDB data
+
+                    // If we have an IMDB ID but no TMDB ID, use it to find the correct TMDB ID
+                    if (torrentInfo.imdb_id && (!tmdbId || tmdbId === 0 || tmdbId === '0')) {
+                        console.log('Using IMDB ID to find TMDB ID:', torrentInfo.imdb_id);
+                        try {
+                            const findResponse = await fetch(`https://api.themoviedb.org/3/find/${torrentInfo.imdb_id}?api_key={{ tmdb_api_key }}&external_source=imdb_id`);
+                            if (findResponse.ok) {
+                                const findData = await findResponse.json();
+                                if (findData.movie_results && findData.movie_results.length > 0) {
+                                    tmdbId = findData.movie_results[0].id;
+                                    mediaType = 'movie';
+                                    console.log('Found TMDB ID:', tmdbId, 'for movie:', findData.movie_results[0].title);
+                                } else if (findData.tv_results && findData.tv_results.length > 0) {
+                                    tmdbId = findData.tv_results[0].id;
+                                    mediaType = 'tv';
+                                    console.log('Found TMDB ID:', tmdbId, 'for TV show:', findData.tv_results[0].name);
+                                }
+                            }
+                        } catch (error) {
+                            console.error('Error finding TMDB ID from IMDB ID:', error);
+                        }
+                    }
+
+                    // Fetch TMDB data if we have a valid ID
+                    if (tmdbId && tmdbId !== 0 && tmdbId !== '0') {
+                        try {
+                            const endpoint = mediaType === 'tv' ?
+                                `https://api.themoviedb.org/3/tv/${tmdbId}?api_key={{ tmdb_api_key }}&append_to_response=external_ids` :
+                                `https://api.themoviedb.org/3/movie/${tmdbId}?api_key={{ tmdb_api_key }}`;
+
+                            const response = await fetch(endpoint);
+                            if (response.ok) {
+                                tmdbData = await response.json();
+                                // IMPORTANT: Use TMDB's clean title for ownership check (not torrent title)
+                                // Torrent titles often have missing punctuation that won't match Plex
+                                title = tmdbData.title || tmdbData.name || torrentInfo.title || '';
+                                // For year, prefer TMDB year for better accuracy
+                                year = (tmdbData.release_date || tmdbData.first_air_date || '').substring(0, 4) || torrentInfo.year || '';
+                                console.log('Fetched TMDB data:', tmdbData);
+                                console.log('Using title for ownership check:', title);
+                                console.log('Using year for ownership check:', year);
+                            }
+                        } catch (error) {
+                            console.error('Error fetching TMDB data:', error);
+                            title = torrentInfo.title || '';
+                            year = torrentInfo.year || '';
+                        }
+                    } else {
+                        // No valid TMDB ID, use torrent data
+                        title = torrentInfo.title || '';
+                        year = torrentInfo.year || '';
+                    }
+                }
+
+                // Get IMDB ID from TMDB data (more reliable) or torrent info
+                const imdbId = tmdbData.imdb_id || torrentInfo.imdb_id || '';
+                const tvdbId = mediaType === 'tv' ? (tmdbData.external_ids?.tvdb_id || null) : null;
+
+                // FAST PATH: For search results, open modal immediately and check ownership in background
+                // For Explore results (torrents), we need to check ownership first
+                if (isFromSearch) {
+                    console.log('Search result - opening modal immediately, checking ownership in background');
+
+                    // Hide loading modal and open TMDB modal immediately
+                    hideLoadingModal();
+
+                    if (mediaType === 'tv') {
+                        openTmdbTvModal(tmdbId, tmdbData);
+                    } else {
+                        openTmdbMovieModal(tmdbId, mediaType, tmdbData, null);
+                    }
+
+                    // Check ownership in background (non-blocking)
+                    if (title) {
+                        setTimeout(async () => {
+                            try {
+                                let ownershipUrl = `/api/check-ownership?`;
+                                const params = [];
+                                if (title) params.push(`title=${encodeURIComponent(title)}`);
+                                if (year) params.push(`year=${year}`);
+                                ownershipUrl += params.join('&');
+
+                                const ownershipResponse = await fetch(ownershipUrl);
+                                const ownershipData = await ownershipResponse.json();
+
+                                if (ownershipData.owned && ownershipData.movie) {
+                                    console.log('Background ownership check: OWNED - switching to Plex modal');
+                                    // Close TMDB modal and open Plex modal
+                                    if (mediaType === 'tv') {
+                                        closeTmdbTvModal();
+                                        if (typeof openTvModal === 'function') {
+                                            openTvModal(ownershipData.movie, true);
+                                        }
+                                    } else {
+                                        closeTmdbMovieModal();
+                                        if (typeof openMovieModal === 'function') {
+                                            openMovieModal(ownershipData.movie, true);
+                                        }
+                                    }
+                                }
+                            } catch (error) {
+                                console.error('Background ownership check error:', error);
+                            }
+                        }, 10);
+                    }
+
+                    return; // Exit early for search results
+                }
+
+                // STANDARD PATH: For Explore results, check ownership first
+                let isOwned = false;
+                let plexItem = null;
+
+                if (title || imdbId) {
+                    try {
+                        let ownershipUrl = `/api/check-ownership?`;
+                        const params = [];
+                        if (title) params.push(`title=${encodeURIComponent(title)}`);
+                        if (year) params.push(`year=${year}`);
+                        if (imdbId) params.push(`imdb_id=${encodeURIComponent(imdbId)}`);
+                        ownershipUrl += params.join('&');
+
+                        console.log('=== Ownership Check ===');
+                        console.log('URL:', ownershipUrl);
+                        console.log('Checking with:');
+                        console.log('  Title:', title);
+                        console.log('  Year:', year);
+                        console.log('  IMDB ID:', imdbId);
+
+                        const ownershipResponse = await fetch(ownershipUrl);
+                        const ownershipData = await ownershipResponse.json();
+
+                        isOwned = ownershipData.owned;
+                        plexItem = ownershipData.movie;
+                        console.log('Result: isOwned =', isOwned);
+                        console.log('Plex Item:', plexItem);
+                        console.log('======================');
+                    } catch (error) {
+                        console.error('Error checking ownership:', error);
+                        // Continue as unowned on error
+                    }
+                }
+
+                // Hide loading modal and route to appropriate modal
+                hideLoadingModal();
+
+                // Handle TV shows
+                if (mediaType === 'tv') {
+                    if (isOwned && plexItem) {
+                        console.log('TV Show is OWNED - opening Plex TV modal');
+                        plexItem.tmdb_id = plexItem.tmdb_id || tmdbId;
+                        plexItem.tvdb_id = plexItem.tvdb_id || tvdbId;
+                        plexItem.name = plexItem.name || plexItem.title;
+
+                        if (typeof openTvModal === 'function') {
+                            openTvModal(plexItem, true);
+                        } else {
+                            console.error('openTvModal function not found!');
+                        }
+                    } else {
+                        console.log('TV Show is NOT OWNED - opening TMDB TV modal');
+                        openTmdbTvModal(tmdbId, tmdbData);
+                    }
+                    return;
+                }
+
+                // Handle movies
+                if (isOwned && plexItem) {
+                    console.log('Movie is OWNED - opening Plex modal');
+                    if (typeof openMovieModal === 'function') {
+                        openMovieModal(plexItem, true);
+                    } else {
+                        console.error('openMovieModal function not found!');
+                    }
+                } else {
+                    console.log('Movie is NOT OWNED - opening TMDB modal');
+                    openTmdbMovieModal(tmdbId, mediaType, tmdbData, torrentInfo);
+                }
+
+            } catch (error) {
+                console.error('Error in showMovieModalAdapter:', error);
+                hideLoadingModal();
+            }
+        }
+
+        // Alias the old function names to the adapter
+        const showMovieModal = showMovieModalAdapter;
+
+        // Loading modal functions
+        function showLoadingModal() {
+            const loadingModal = document.getElementById('loadingModal');
+            if (loadingModal) {
+                loadingModal.classList.add('active');
+                document.body.classList.add('modal-open');
+            }
+        }
+
+        function hideLoadingModal() {
+            const loadingModal = document.getElementById('loadingModal');
+            if (loadingModal) {
+                loadingModal.classList.remove('active');
+            }
+        }
+
+        // closeModal function is now provided by mobile_movie_modal component
+
+        // downloadTorrent function removed - not part of Plex functionality
+
+        function copyToClipboard(text) {
+            if (text && navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(() => {
+                    // Show a temporary success message
+                    const btn = event.target.closest('button');
+                    const originalText = btn.innerHTML;
+                    btn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                    btn.style.background = '#4CAF50';
+                    setTimeout(() => {
+                        btn.innerHTML = originalText;
+                        btn.style.background = '#333';
+                    }, 2000);
+                }).catch(err => {
+                    alert('Failed to copy: ' + err);
+                });
+            } else {
+                alert('No hash available to copy');
+            }
+        }
+
+        // playMovie() function is now provided by mobile_movie_modal.html component
+
+        function addToLibrary(tmdbId) {
+            console.log('Add to library:', tmdbId);
+            alert('Library functionality coming soon!');
+        }
+
+        // Pull to refresh functionality
+        let startY = 0;
+        let currentY = 0;
+        let refreshing = false;
+
+        document.addEventListener('touchstart', function(e) {
+            if (window.scrollY === 0 && !refreshing) {
+                startY = e.touches[0].pageY;
+            }
+        });
+
+        document.addEventListener('touchmove', function(e) {
+            if (!startY || refreshing) return;
+
+            currentY = e.touches[0].pageY;
+            const distance = currentY - startY;
+
+            if (distance > 50 && window.scrollY === 0) {
+                document.getElementById('pullToRefresh').classList.add('active');
+            }
+        });
+
+        document.addEventListener('touchend', function(e) {
+            const distance = currentY - startY;
+            const pullToRefresh = document.getElementById('pullToRefresh');
+
+            if (distance > 100 && window.scrollY === 0 && !refreshing) {
+                refreshing = true;
+                loadMovies().then(() => {
+                    refreshing = false;
+                    pullToRefresh.classList.remove('active');
+                });
+            } else {
+                pullToRefresh.classList.remove('active');
+            }
+
+            startY = 0;
+            currentY = 0;
+        });
+
+        // Handle back button for overlays
+        window.addEventListener('popstate', function(e) {
+            if (document.getElementById('searchResultsOverlay').classList.contains('active')) {
+                e.preventDefault();
+                closeSearchResults();
+            }
+            if (document.getElementById('movieModal').classList.contains('active')) {
+                e.preventDefault();
+                closeModal();
+            }
+        });
+
+        // Function to open TMDB movie in the modal (for unowned movies)
+        async function openTmdbMovieModal(tmdbId, mediaType, tmdbData, torrentInfo = {}) {
+            try {
+                // Fetch full TMDB data including cast
+                const endpoint = mediaType === 'tv' ?
+                    `https://api.themoviedb.org/3/tv/${tmdbId}?api_key={{ tmdb_api_key }}&append_to_response=credits,external_ids` :
+                    `https://api.themoviedb.org/3/movie/${tmdbId}?api_key={{ tmdb_api_key }}&append_to_response=credits,external_ids`;
+
+                const response = await fetch(endpoint);
+                if (!response.ok) {
+                    console.error('Failed to fetch TMDB data');
+                    return;
+                }
+
+                const fullData = await response.json();
+
+                // Try to fetch clearlogo from TMDB images API
+                let clearlogoUrl = null;
+                try {
+                    // Fetch clearlogo using TMDB ID
+                    const clearlogoResponse = await fetch(`/api/clearlogo/${tmdbId}`);
+                    if (clearlogoResponse.ok) {
+                        const clearlogoData = await clearlogoResponse.json();
+                        if (clearlogoData.clearlogo_url) {
+                            clearlogoUrl = clearlogoData.clearlogo_url;
+                        }
+                    }
+                } catch (error) {
+                    console.log('Could not fetch clearlogo:', error);
+                }
+
+                // Log for debugging
+                console.log('Opening TMDB modal with:');
+                console.log('  Torrent info:', torrentInfo);
+                console.log('  TMDB ID:', tmdbId);
+                console.log('  Media Type:', mediaType);
+                console.log('  Torrent Year:', torrentInfo.year);
+                console.log('  TMDB Year:', (fullData.release_date || fullData.first_air_date || '').substring(0, 4));
+
+                // Convert TMDB data to our modal format
+                const movieData = {
+                    title: fullData.title || fullData.name,
+                    // Use torrent year if available, otherwise use TMDB year
+                    year: torrentInfo.year || (fullData.release_date || fullData.first_air_date || '').substring(0, 4),
+                    duration: fullData.runtime ? fullData.runtime * 60000 : null, // Convert minutes to milliseconds
+                    content_rating: fullData.content_rating || '',
+                    summary: fullData.overview || 'No summary available.',
+                    genres: fullData.genres ? fullData.genres.map(g => g.name) : [],
+                    backdrop_url: fullData.backdrop_path ? `https://image.tmdb.org/t/p/w1280${fullData.backdrop_path}` : null,
+                    poster_url: fullData.poster_path ? `https://image.tmdb.org/t/p/w500${fullData.poster_path}` : null,
+                    clearlogo_url: clearlogoUrl,
+                    cast: fullData.credits && fullData.credits.cast ? fullData.credits.cast.slice(0, 10).map(actor => ({
+                        name: actor.name,
+                        role: actor.character,
+                        profile_path: actor.profile_path,
+                        tmdb_person_id: actor.id
+                    })) : [],
+                    directors: fullData.credits && fullData.credits.crew ? fullData.credits.crew.filter(person => person.job === 'Director').map(director => ({
+                        name: director.name,
+                        profile_path: director.profile_path,
+                        tmdb_person_id: director.id
+                    })) : [],
+                    rating_key: null, // No rating key for TMDB movies
+                    tmdb_id: tmdbId
+                };
+
+                // Open the modal with isOwned = false
+                if (typeof openMovieModal === 'function') {
+                    openMovieModal(movieData, false);
+                } else {
+                    console.error('openMovieModal function not found!');
+                }
+
+            } catch (error) {
+                console.error('Error opening TMDB movie modal:', error);
+            }
+        }
+
+        // Function to open TMDB TV show in the TV modal
+        async function openTmdbTvModal(tmdbId, tmdbData) {
+            try {
+                // Fetch full TMDB data including cast and external IDs
+                const endpoint = `https://api.themoviedb.org/3/tv/${tmdbId}?api_key={{ tmdb_api_key }}&append_to_response=credits,external_ids`;
+
+                console.log('=== FETCHING TMDB TV DETAILS ===');
+                console.log('Fetching TMDB ID:', tmdbId);
+                console.log('Endpoint:', endpoint);
+
+                const response = await fetch(endpoint);
+                if (!response.ok) {
+                    console.error('Failed to fetch TMDB TV data');
+                    return;
+                }
+
+                const fullData = await response.json();
+
+                // DEBUG: Log what TMDB actually returned
+                console.log('=== TMDB API RESPONSE ===');
+                console.log('Name from TMDB:', fullData.name);
+                console.log('First Air Date from TMDB:', fullData.first_air_date);
+                console.log('Year from TMDB:', (fullData.first_air_date || '').substring(0, 4));
+                console.log('ID from TMDB:', fullData.id);
+                console.log('Full TMDB Data:', fullData);
+                console.log('=======================');
+
+                // Try to fetch clearlogo from TMDB images API
+                let clearlogoUrl = null;
+                try {
+                    const clearlogoResponse = await fetch(`/api/clearlogo/${tmdbId}?type=tv`);
+                    if (clearlogoResponse.ok) {
+                        const clearlogoData = await clearlogoResponse.json();
+                        if (clearlogoData.clearlogo_url) {
+                            clearlogoUrl = clearlogoData.clearlogo_url;
+                        }
+                    }
+                } catch (error) {
+                    console.log('Could not fetch clearlogo:', error);
+                }
+
+                // Convert TMDB data to our TV modal format
+                const tvData = {
+                    title: fullData.name,
+                    name: fullData.name,
+                    year: (fullData.first_air_date || '').substring(0, 4),
+                    first_air_date: fullData.first_air_date,
+                    number_of_seasons: fullData.number_of_seasons,
+                    number_of_episodes: fullData.number_of_episodes,
+                    content_rating: fullData.content_ratings && fullData.content_ratings.results
+                        ? fullData.content_ratings.results.find(r => r.iso_3166_1 === 'US')?.rating || ''
+                        : '',
+                    summary: fullData.overview || 'No summary available.',
+                    overview: fullData.overview || 'No summary available.',
+                    genres: fullData.genres ? fullData.genres.map(g => g.name) : [],
+                    backdrop_url: fullData.backdrop_path ? `https://image.tmdb.org/t/p/w1280${fullData.backdrop_path}` : null,
+                    poster_url: fullData.poster_path ? `https://image.tmdb.org/t/p/w500${fullData.poster_path}` : null,
+                    clearlogo_url: clearlogoUrl,
+                    cast: fullData.credits && fullData.credits.cast ? fullData.credits.cast.slice(0, 10).map(actor => ({
+                        name: actor.name,
+                        role: actor.character,
+                        profile_path: actor.profile_path,
+                        tmdb_person_id: actor.id
+                    })) : [],
+                    created_by: fullData.created_by ? fullData.created_by.map(creator => ({
+                        name: creator.name,
+                        profile_path: creator.profile_path
+                    })) : [],
+                    tmdb_id: tmdbId,
+                    tvdb_id: fullData.external_ids?.tvdb_id || null,
+                    isOwned: false // Not owned by default
+                };
+
+                // Open the TV modal
+                if (typeof openTvModal === 'function') {
+                    openTvModal(tvData, false);
+                } else {
+                    console.error('openTvModal function not found!');
+                }
+
+            } catch (error) {
+                console.error('Error opening TMDB TV modal:', error);
+            }
+        }
+
+        // Initialize when DOM is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            loadMovies();
+
+            // Register service worker for PWA
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('/static/sw.js')
+                    .then(registration => {
+                        console.log('Service Worker registered:', registration);
+                    })
+                    .catch(error => {
+                        console.log('Service Worker registration failed:', error);
+                    });
+            }
+        });
+    </script>
+
+    <!-- Movie Orb Screensaver Configuration -->
+    <script>
+        // Screensaver settings - adjust before movie-orb-screensaver.js loads
+        window.SCREENSAVER_ENABLED = true;
+        window.SCREENSAVER_IDLE_TIMEOUT_MS = 10000;  // 10 seconds (testing)
+        window.SCREENSAVER_ORB_COUNT = 9;            // Number of orbs
+    </script>
+    <script src="/static/js/movie-orb-screensaver.js"></script>
+</body>
+</html>

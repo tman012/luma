@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#15102a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="robots" content="noindex">
+<meta name="apple-mobile-web-app-title" content="Luma Requests">
+<meta name="application-name" content="Luma Requests">
+<title>Luma Requests</title>
+<link rel="manifest" href="/static/request/manifest.json">
+<link rel="preconnect" href="https://image.tmdb.org" crossorigin>
+<link rel="apple-touch-icon" href="/static/images/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/request/request.css?v=vp1">
+</head>
+<body>
+<div id="bg"></div>
+
+<main id="gate" class="screen" hidden>
+  <h1 class="brand big">T-Flix</h1>
+  <p class="tagline">Request movies and shows for T-Flix.</p>
+  <form id="gate-form" autocomplete="on" novalidate>
+    <div class="group">
+      <input id="gate-pw" name="password" type="password" placeholder="Password" autocomplete="current-password" required>
+    </div>
+    <p id="gate-err" class="err" role="alert"></p>
+    <button class="pill" type="submit" id="gate-go">Continue</button>
+  </form>
+</main>
+
+<main id="home" class="screen" hidden>
+  <div class="ptr" id="ptr" aria-hidden="true"><i></i></div>
+  <!-- Luma home TopBar (logo left | search right; no user icon here) -->
+  <header id="top">
+    <div class="tb">
+      <img class="tb-logo" src="/static/images/luma_text.png" alt="Luma">
+      <div class="tb-sp"></div>
+      <button type="button" class="tb-search" id="search-open" aria-label="Search">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+      </button>
+    </div>
+  </header>
+  <section id="discover"><div class="segwrap" id="segwrap"><div class="seg" id="seg" role="tablist"><button class="on" data-kind="movie" role="tab">Movies</button><button data-kind="tv" role="tab">TV</button></div></div><div id="hero"></div><div id="recent"></div><div id="rails"></div></section>
+</main>
+
+<div id="ss" hidden>
+  <div class="ss-head" id="ss-head">
+    <div class="ss-bar">
+      <button type="button" class="ss-x" id="ss-x" aria-label="Close"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+      <span class="ss-title">Search</span>
+    </div>
+    <div class="ss-in">
+      <input id="q" type="search" inputmode="search" enterkeyhint="search" placeholder="Search for movies and shows..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <button type="button" class="qx" id="qx" aria-label="Clear search" hidden><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9" fill="currentColor"/><path d="M7 7l6 6M13 7l-6 6" stroke="#15102a" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="ss-pills" id="ss-pills"><button data-kind="movie" class="on">Movies</button><button data-kind="tv">TV</button></div>
+  </div>
+  <div class="ss-res" id="results" data-scroll-container aria-live="polite"></div>
+</div>
+<div id="scrim" hidden></div>
+<section id="sheet" role="dialog" aria-modal="true" hidden>
+  <div class="grab"><span></span></div>
+  <button class="x" id="sheet-x" aria-label="Close"><svg viewBox="0 0 14 14"><path d="M2 2l10 10M12 2L2 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+  <div id="sheet-body"></div>
+</section>
+
+<script src="/static/request/request.js?v=vp1"></script>
+</body>
+</html>

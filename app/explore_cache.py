@@ -23,7 +23,7 @@ class ExploreCache:
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(exist_ok=True)
         self.db_path = self.cache_dir / "explore_cache.db"
-        self.update_interval = 900  # 15 minutes
+        self.update_interval = 6 * 3600  # was 15 min (21-query tracker sweep ~100x/day)
         self.last_update = None
         self.updating = False
         self.lock = threading.Lock()

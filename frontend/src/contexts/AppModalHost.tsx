@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ModalHostContext, type ModalOpenOptions } from './ModalHostContext';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
@@ -6,6 +6,9 @@ import { MovieDetailModal } from '@/components/media/MovieDetailModal';
 import { TvDetailModal } from '@/components/media/TvDetailModal';
 import { PersonDetailModal } from '@/components/media/PersonDetailModal';
 
+const VibeEngineModal = lazy(() =>
+  import('@/components/media/VibeEngineModal').then((m) => ({ default: m.VibeEngineModal })),
+);
 
 interface ModalTarget extends ModalOpenOptions {
   mediaType: 'movie' | 'tv';
@@ -21,6 +24,17 @@ interface StackEntry {
   personTarget: PersonTarget | null;
 }
 
+// TEMPORARY DIAGNOSTIC — pair of the `diag()` in static/sw.js; remove with it.
+// The phone PWA has no console we can read, so the deep-link handoff reports
+// itself into the server access log instead. The path 404s by design.
+function appDiag(params: Record<string, string | number>) {
+  try {
+    void fetch('/api/_appdiag?' + new URLSearchParams(
+      Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])),
+    ).toString(), { credentials: 'include' }).catch(() => {});
+  } catch { /* diagnostics must never break the app */ }
+}
+
 export function AppModalHost({ children }: { children: ReactNode }) {
   const { mode } = useLayoutMode();
   const location = useLocation();
@@ -28,6 +42,7 @@ export function AppModalHost({ children }: { children: ReactNode }) {
   const [target, setTarget] = useState<ModalTarget | null>(null);
   const [personTarget, setPersonTarget] = useState<PersonTarget | null>(null);
   const [stack, setStack] = useState<StackEntry[]>([]);
+  const [vibeEngineOpen, setVibeEngineOpen] = useState(false);
   // Set when the modal history entry is being disposed of by something other
   // than a back-nav, so the effect below doesn't also compensate with back().
   const popClosingRef = useRef(false);
@@ -39,7 +54,7 @@ export function AppModalHost({ children }: { children: ReactNode }) {
   // Mirror of "is anything showing", kept in sync on every render so callbacks
   // can read it without taking the state as a dependency.
   const openRef = useRef(false);
-  openRef.current = !!target || !!personTarget;
+  openRef.current = !!target || !!personTarget || vibeEngineOpen;
   // Modal stack mirror for the popstate handler (avoids stale closures).
   const stackRef = useRef(stack);
   stackRef.current = stack;
@@ -86,6 +101,17 @@ export function AppModalHost({ children }: { children: ReactNode }) {
     setPersonTarget({ id: opts.personId, name: opts.personName });
   }, []);
 
+  const openVibeEngine = useCallback(() => {
+    setVibeEngineOpen(true);
+  }, []);
+
+  const closeDetail = useCallback(() => {
+    setTarget(null);
+    setPersonTarget(null);
+    setStack([]);
+    window.dispatchEvent(new Event('modal-closed'));
+  }, []);
+
   const close = useCallback(() => {
     // If we have a stacked modal, pop back to it instead of dismissing entirely.
     const next = stack.length > 0 ? stack[stack.length - 1] : undefined;
@@ -99,11 +125,16 @@ export function AppModalHost({ children }: { children: ReactNode }) {
     }
     setTarget(null);
     setPersonTarget(null);
+    setVibeEngineOpen(false);
     window.dispatchEvent(new Event('modal-closed'));
   }, [stack]);
 
   const closePerson = useCallback(() => {
     setPersonTarget(null);
+  }, []);
+
+  const closeVibeEngine = useCallback(() => {
+    setVibeEngineOpen(false);
   }, []);
 
   /** Tear down every open surface. Returns whether anything was showing.
@@ -114,6 +145,7 @@ export function AppModalHost({ children }: { children: ReactNode }) {
     const was = openRef.current;
     setTarget(null);
     setPersonTarget(null);
+    setVibeEngineOpen(false);
     setStack([]);
     if (was) {
       popClosingRef.current = true;
@@ -176,14 +208,16 @@ export function AppModalHost({ children }: { children: ReactNode }) {
   // if there is one. Delete-on-read, so the several places that call this can
   // race freely — only the first gets the link. Resolves true when one was
   // consumed.
-  const consumePendingDeepLink = useCallback(async (_from: string): Promise<boolean> => {
-    if (!('caches' in window)) return false;
+  const consumePendingDeepLink = useCallback(async (from: string): Promise<boolean> => {
+    if (!('caches' in window)) { appDiag({ e: 'consume', from, r: 'no-caches' }); return false; }
     try {
       const cache = await caches.open('notification-deeplink');
       const resp = await cache.match('/pending-deeplink');
-      if (!resp) return false;
+      if (!resp) { appDiag({ e: 'consume', from, r: 'miss', at: window.location.pathname }); return false; }
       await cache.delete('/pending-deeplink');
       const data: { url: string; ts: number } = await resp.json();
+      appDiag({ e: 'consume', from, r: 'hit', link: data.url,
+                age: Math.round((Date.now() - data.ts) / 1000), at: window.location.pathname });
       // Stale links are dropped so a tap from yesterday doesn't yank the screen
       // away today. Generous, because the slow route here is a cold PWA start —
       // process launch, shell fetch and React mount can easily outlast the 30s
@@ -232,6 +266,7 @@ export function AppModalHost({ children }: { children: ReactNode }) {
 
     // Strategy 2: Check Cache Storage for pending deep link from SW notification click
     // (handles PWA cold start where openWindow() ignores URL params)
+    appDiag({ e: 'boot', at: window.location.pathname, mode: window.matchMedia('(display-mode: standalone)').matches ? 'standalone' : 'browser' });
     consumePendingDeepLink('mount');
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -255,7 +290,7 @@ export function AppModalHost({ children }: { children: ReactNode }) {
     };
   }, [consumePendingDeepLink]);
 
-  // In-app navigation deep links (e.g. navigate('/?modal=movie&tmdb=12345'))
+  // In-app navigation deep links (e.g. voice command → navigate('/?modal=movie&tmdb=12345'))
   // The initial-load effect above only runs once; this watches route changes.
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -275,6 +310,13 @@ export function AppModalHost({ children }: { children: ReactNode }) {
       openMovie({ tmdbId, origin: 'search' });
     }
   }, [location.search]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Close modal on voice navigation (e.g. "go home", "exit")
+  useEffect(() => {
+    const handler = () => close();
+    window.addEventListener('voice-navigate-home', handler);
+    return () => window.removeEventListener('voice-navigate-home', handler);
+  }, [close]);
 
   // Listen for notification clicks forwarded by the service worker
   useEffect(() => {
@@ -301,11 +343,22 @@ export function AppModalHost({ children }: { children: ReactNode }) {
     return () => navigator.serviceWorker?.removeEventListener('message', handler);
   }, [handleDeepLink, consumePendingDeepLink]);
 
+  // Elevate detail modals above the carousel (z-9999) when opened from vibe engine
+  // or the /describe-it route (DescribeItPage with carousel).
+  const isVibeRoute = location.pathname === '/describe-it';
+  useEffect(() => {
+    if (!((vibeEngineOpen || isVibeRoute) && target)) return;
+    const style = document.createElement('style');
+    style.textContent = '[data-modal="MovieDetailModal"], [data-modal="TvDetailModal"] { z-index: 10000 !important; }';
+    document.head.appendChild(style);
+    return () => { document.head.removeChild(style); };
+  }, [vibeEngineOpen, isVibeRoute, target]);
+
   // Android/PWA hardware & gesture back should close/pop an open modal instead of
   // navigating the route away (or exiting the PWA). Maintain one history entry
   // per modal stack level (1 + stack.length) so back pops one level at a time —
   // restoring the parent with restoreSimilar when drilled from More Like This.
-  const anyOpen = !!target || !!personTarget;
+  const anyOpen = !!target || vibeEngineOpen || !!personTarget;
   const stackLen = stack.length;
   useEffect(() => {
     const desired = anyOpen ? 1 + stackLen : 0;
@@ -339,7 +392,8 @@ export function AppModalHost({ children }: { children: ReactNode }) {
       setTarget(null);
       setPersonTarget(null);
       setStack([]);
-        window.dispatchEvent(new Event('modal-closed'));
+      setVibeEngineOpen(false);
+      window.dispatchEvent(new Event('modal-closed'));
     };
 
     window.addEventListener('popstate', onPop);
@@ -365,7 +419,7 @@ export function AppModalHost({ children }: { children: ReactNode }) {
   }, [anyOpen, stackLen]);
 
   // When modal is open, mark app content as inert for focus trapping
-  const anyModalOpen = !!target;
+  const anyModalOpen = !!target || vibeEngineOpen;
   useEffect(() => {
     const appRoot = document.getElementById('root');
     if (!appRoot) return;
@@ -377,15 +431,20 @@ export function AppModalHost({ children }: { children: ReactNode }) {
   }, [anyModalOpen]);
 
   return (
-    <ModalHostContext.Provider value={{ openMovie, openTv, openPerson, close, registerBackHandler }}>
+    <ModalHostContext.Provider value={{ openMovie, openTv, openPerson, openVibeEngine, close, registerBackHandler }}>
       {children}
+      {vibeEngineOpen && (
+        <Suspense fallback={null}>
+          <VibeEngineModal onClose={closeVibeEngine} />
+        </Suspense>
+      )}
       {target && target.mediaType === 'tv' ? (
         <TvDetailModal
           key={`tv-${target.tmdbId ?? target.ratingKey ?? 'x'}-${stack.length}`}
           ratingKey={target.ratingKey}
           tmdbId={target.tmdbId}
           origin={target.origin}
-          onClose={close}
+          onClose={vibeEngineOpen ? closeDetail : close}
           onPersonSearch={target.onPersonSearch}
           episodeContext={target.episodeContext}
           initialSeason={target.initialSeason}
@@ -397,7 +456,7 @@ export function AppModalHost({ children }: { children: ReactNode }) {
           ratingKey={target.ratingKey}
           tmdbId={target.tmdbId}
           origin={target.origin}
-          onClose={close}
+          onClose={vibeEngineOpen ? closeDetail : close}
           onPersonSearch={target.onPersonSearch}
           restoreSimilar={target.restoreSimilar}
           searchQuery={target.searchQuery}

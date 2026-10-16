@@ -184,6 +184,10 @@ def _wait_refreshed(plex, rating_key: int, before: Dict[str, Any], guid: Optiona
                     return latest
                 continue
             if (latest['title'], latest['year'], latest['updated_at']) != (before['title'], before['year'], before['updated_at']):
+                # Plex swaps the main guid/title first and the external ids (tmdb/imdb) a moment later.
+                # Returning before that hands the UI the OLD tmdb id, so the popup reloads the old film.
+                if before.get('tmdb_id') and latest.get('tmdb_id') == before.get('tmdb_id') and time.time() < deadline - 0.75:
+                    continue
                 return latest
         elif latest['guid'] != before['guid']:
             return latest
@@ -202,7 +206,11 @@ def apply(plex, rating_key: int, guid: str, name: str, year: Optional[int]) -> D
         _request(plex, 'PUT', f'/library/metadata/{rating_key}/refresh', params={'force': 1})
     except MatchError as exc:
         logger.warning('Plex refresh after match failed for %s: %s', rating_key, exc)
-    after = _wait_refreshed(plex, rating_key, before, guid)
+    after = _wait_refreshed(plex, rating_key, before, guid, timeout=30.0)
+    if guid != before['guid'] and after['guid'] != guid:
+        # Plex accepted the call but the item never switched: don't report success.
+        logger.warning('Fix Match: %s did not change in Plex (still %s)', rating_key, after['guid'])
+        raise MatchError('Plex did not apply the match. Try again.', 502)
     logger.info('Fix Match: %s %r (%s) → %r (%s) guid %s→%s', rating_key, before['title'], before['year'],
                 after['title'], after['year'], before['guid'], after['guid'])
     return {'before': before, 'after': after}

@@ -232,7 +232,7 @@ export function GenreRouletteCard() {
       <ToggleSwitch label="Enable Genre Roulette" path="automation.genre_roulette.enabled"
         hint="Nothing runs until this is on" />
       <FormField label="Quality profile (Radarr)" path="automation.genre_roulette.quality_profile_id"
-        type="select" options={profileOptions} hint="Standard profile — must permit 720p/1080p" />
+        type="select" options={profileOptions} hint="TFlix — must permit 720p/1080p" />
 
       <FormField label="Movies per night" path="automation.genre_roulette.movies_per_night"
         type="number" min={1} max={20} hint="How many to actually grab (1–20)" />

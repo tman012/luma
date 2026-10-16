@@ -38,7 +38,7 @@ function SonarrCard() {
         </svg>
       }
     >
-      <FormField label="URL" path="sonarr.url" placeholder="http://localhost:8989" />
+      <FormField label="URL" path="sonarr.url" placeholder="http://192.168.1.62:8989" />
       <FormField label="API Key" path="sonarr.api_key" type="password" placeholder="Sonarr API key" />
       <FormField
         label="Quality Profile"
@@ -105,7 +105,7 @@ function RadarrCard() {
         </svg>
       }
     >
-      <FormField label="URL" path="radarr.url" placeholder="http://localhost:7878" />
+      <FormField label="URL" path="radarr.url" placeholder="http://192.168.1.62:7878" />
       <FormField label="API Key" path="radarr.api_key" type="password" placeholder="Radarr API key" />
       <FormField
         label="Quality Profile"
@@ -191,7 +191,7 @@ function IndexerCard() {
         ]}
       />
       {provider === 'prowlarr' ? (
-        <FormField label="Prowlarr URL" path="indexer.base_url" placeholder="http://localhost:9696" />
+        <FormField label="Prowlarr URL" path="indexer.base_url" placeholder="http://192.168.1.62:9696" />
       ) : (
         <FormField label="Torznab URL" path="indexer.torznab_url" placeholder="http://host/api/v2.0/indexers/all/results/torznab" />
       )}
@@ -241,7 +241,7 @@ export function ServicesTab() {
             </svg>
           }
         >
-          <FormField label="Server URL" path="plex.url" placeholder="http://localhost:32400" />
+          <FormField label="Server URL" path="plex.url" placeholder="http://192.168.1.25:32400" />
           <FormField label="Token" path="plex.token" type="password" placeholder="Plex authentication token" />
           <FormField label="Client Port" path="plex.client_port" type="number" placeholder="32500" min={1} max={65535} />
         </SettingsCard>
@@ -308,10 +308,10 @@ export function ServicesTab() {
             </svg>
           }
         >
-          <FormField label="URL" path="qbittorrent.url" placeholder="http://localhost:8080" />
+          <FormField label="URL" path="qbittorrent.url" placeholder="http://192.168.1.62:8080" />
           <FormField label="Username" path="qbittorrent.username" placeholder="Username" />
           <FormField label="Password" path="qbittorrent.password" type="password" placeholder="Password" />
-          <FormField label="App Category" path="qbittorrent.app_category" placeholder="luma" />
+          <FormField label="App Category" path="qbittorrent.app_category" placeholder="media-search-app" />
           <FormField label="Radarr Category" path="qbittorrent.radarr_category" placeholder="radarr" />
         </SettingsCard>
       ),
@@ -444,7 +444,7 @@ export function ServicesTab() {
             </svg>
           }
         >
-          <FormField label="URL" path="homeassistant.url" placeholder="http://homeassistant.local:8123" />
+          <FormField label="URL" path="homeassistant.url" placeholder="http://192.168.1.50:8123" />
           <FormField label="Access Token" path="homeassistant.access_token" type="password" placeholder="Long-lived access token" />
         </SettingsCard>
       ),
@@ -482,7 +482,7 @@ export function ServicesTab() {
           <FormField
             label="Contact Email"
             path="notifications.web_push.vapid_email"
-            placeholder="mailto:you@example.com"
+            placeholder="mailto:admin@bosley.media"
             hint="Required by the push protocol. Not shared publicly."
           />
           {/* -- Setup Guides -- */}
@@ -506,7 +506,7 @@ export function ServicesTab() {
                   </div>
                   <ol className="list-decimal list-outside pl-4 space-y-1.5">
                     <li>Open <strong className="text-white/80">Safari</strong> and go to: <br />
-                      <code className="text-blue-400/90 text-xs bg-white/5 px-1.5 py-0.5 rounded select-all">{`${window.location.origin}/ca.crt`}</code>
+                      <code className="text-blue-400/90 text-xs bg-white/5 px-1.5 py-0.5 rounded select-all">http://192.168.1.62:5001/static/caddy-root.crt</code>
                     </li>
                     <li>Safari will say <strong className="text-white/80">"Profile Downloaded"</strong> — close the prompt</li>
                     <li>Open <strong className="text-white/80">Settings &rarr; General &rarr; VPN & Device Management</strong></li>
@@ -523,7 +523,7 @@ export function ServicesTab() {
                     <p className="text-white/90 font-medium">Add to Home Screen</p>
                   </div>
                   <ol className="list-decimal list-outside pl-4 space-y-1.5">
-                    <li>In <strong className="text-white/80">Safari</strong>, go to <code className="text-blue-400/90 text-xs bg-white/5 px-1.5 py-0.5 rounded select-all">{`https://${window.location.hostname}`}</code></li>
+                    <li>In <strong className="text-white/80">Safari</strong>, go to <code className="text-blue-400/90 text-xs bg-white/5 px-1.5 py-0.5 rounded select-all">https://192.168.1.62</code></li>
                     <li>Verify the <strong className="text-white/80">padlock icon</strong> shows in the address bar (certificate is trusted)</li>
                     <li>Tap the <strong className="text-white/80">Share button</strong> (square with up arrow at the bottom)</li>
                     <li>Scroll down and tap <strong className="text-white/80">"Add to Home Screen"</strong></li>
@@ -574,11 +574,11 @@ export function ServicesTab() {
                   </div>
                   <ol className="list-decimal list-outside pl-4 space-y-1.5">
                     <li>Open <strong className="text-white/80">Chrome</strong> and go to: <br />
-                      <code className="text-blue-400/90 text-xs bg-white/5 px-1.5 py-0.5 rounded select-all">{`${window.location.origin}/ca.crt`}</code>
+                      <code className="text-blue-400/90 text-xs bg-white/5 px-1.5 py-0.5 rounded select-all">http://192.168.1.62:5001/static/caddy-root.crt</code>
                     </li>
                     <li>Chrome will download the certificate file</li>
                     <li>Open <strong className="text-white/80">Settings &rarr; Security &rarr; Encryption & credentials &rarr; Install a certificate &rarr; CA certificate</strong></li>
-                    <li>Select the downloaded <strong className="text-white/80">Luma-CA.crt</strong> file and confirm</li>
+                    <li>Select the downloaded <strong className="text-white/80">caddy-root.crt</strong> file and confirm</li>
                   </ol>
                   <p className="mt-2 text-white/40 text-xs">Path may vary by manufacturer (Samsung: Security &rarr; Other security settings &rarr; Install from storage).</p>
                 </div>
@@ -589,7 +589,7 @@ export function ServicesTab() {
                     <p className="text-white/90 font-medium">Add to Home Screen</p>
                   </div>
                   <ol className="list-decimal list-outside pl-4 space-y-1.5">
-                    <li>In <strong className="text-white/80">Chrome</strong>, go to <code className="text-blue-400/90 text-xs bg-white/5 px-1.5 py-0.5 rounded select-all">{`https://${window.location.hostname}`}</code></li>
+                    <li>In <strong className="text-white/80">Chrome</strong>, go to <code className="text-blue-400/90 text-xs bg-white/5 px-1.5 py-0.5 rounded select-all">https://192.168.1.62</code></li>
                     <li>Verify the <strong className="text-white/80">padlock icon</strong> shows (certificate is trusted)</li>
                     <li>Tap the <strong className="text-white/80">three-dot menu</strong> &rarr; <strong className="text-white/80">"Add to Home screen"</strong> (or accept the install banner if it appears)</li>
                   </ol>
@@ -648,11 +648,11 @@ export function ServicesTab() {
                   </div>
                   <ol className="list-decimal list-outside pl-4 space-y-1.5">
                     <li>Open <strong className="text-white/80">Silk Browser</strong> and go to: <br />
-                      <code className="text-blue-400/90 text-xs bg-white/5 px-1.5 py-0.5 rounded select-all">{`${window.location.origin}/ca.crt`}</code>
+                      <code className="text-blue-400/90 text-xs bg-white/5 px-1.5 py-0.5 rounded select-all">http://192.168.1.62:5001/static/caddy-root.crt</code>
                     </li>
                     <li>The file will download — open it from the notification or Downloads</li>
                     <li>Go to <strong className="text-white/80">Settings &rarr; Security & Privacy &rarr; Install a certificate &rarr; CA certificate</strong></li>
-                    <li>Select <strong className="text-white/80">Luma-CA.crt</strong> and confirm</li>
+                    <li>Select <strong className="text-white/80">caddy-root.crt</strong> and confirm</li>
                   </ol>
                   <p className="mt-2 text-white/40 text-xs">On older Fire OS: Settings &rarr; Security &rarr; Install credentials from storage.</p>
                 </div>
@@ -660,10 +660,41 @@ export function ServicesTab() {
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/90 text-xs font-bold flex items-center justify-center">3</span>
+                    <p className="text-white/90 font-medium">Install the App</p>
+                  </div>
+                  <p className="text-white/50 text-xs mb-2">Download directly to the tablet, or sideload via ADB from a computer.</p>
+
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-white/70 font-medium text-xs mb-1">Option A: Download on the tablet</p>
+                      <ol className="list-decimal list-outside pl-4 space-y-1.5">
+                        <li>In Silk Browser, go to: <br />
+                          <code className="text-blue-400/90 text-xs bg-white/5 px-1.5 py-0.5 rounded select-all">http://192.168.1.62:5001/static/luma.apk</code>
+                        </li>
+                        <li>Tap the downloaded file and tap <strong className="text-white/80">Install</strong></li>
+                      </ol>
+                    </div>
+                    <div>
+                      <p className="text-white/70 font-medium text-xs mb-1">Option B: Sideload via ADB</p>
+                      <ol className="list-decimal list-outside pl-4 space-y-1.5">
+                        <li>On the tablet, enable <strong className="text-white/80">Settings &rarr; Device Options &rarr; Developer Options &rarr; USB Debugging</strong>
+                          <br /><span className="text-white/40 text-xs">(Tap "Device Options" or serial number 7 times to unlock Developer Options)</span>
+                        </li>
+                        <li>Connect the tablet via USB and run: <br />
+                          <code className="text-blue-400/90 text-xs bg-white/5 px-1.5 py-0.5 rounded select-all">adb install luma.apk</code>
+                        </li>
+                      </ol>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/90 text-xs font-bold flex items-center justify-center">4</span>
                     <p className="text-white/90 font-medium">Open & Enable Notifications</p>
                   </div>
                   <ol className="list-decimal list-outside pl-4 space-y-1.5">
-                    <li>Open <strong className="text-white/80">Luma</strong> in Silk Browser (or from the home screen if you added it there)</li>
+                    <li>Open <strong className="text-white/80">Bosley Media</strong> from the app drawer</li>
                     <li>The notification banner will appear — tap <strong className="text-white/80">Enable</strong>, then <strong className="text-white/80">Allow</strong></li>
                     <li>Come back to this page and tap <strong className="text-white/80">Send Test</strong> above to verify</li>
                   </ol>

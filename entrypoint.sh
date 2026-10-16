@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Entrypoint script for Luma
+# Entrypoint script for media-search-app
 # Connects to configured ADB devices from settings, then starts Flask.
 
 echo "================================================"
@@ -10,13 +10,6 @@ echo "================================================"
 # Set HOME for ADB
 export HOME=/app/home
 mkdir -p $HOME/.android
-
-# LUMA_DISABLE_ADB=1 (e.g. a dev instance): never start ADB or connect to devices.
-if [ "${LUMA_DISABLE_ADB}" = "1" ] || [ "${LUMA_DISABLE_ADB}" = "true" ]; then
-    echo "LUMA_DISABLE_ADB is set: skipping ADB server and device connections."
-    echo "================================================"
-    exec python -m app.main
-fi
 
 # Kill any stale ADB server from a previous run, then start fresh.
 # Timeouts prevent hangs when devices are unreachable.

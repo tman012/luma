@@ -15,8 +15,8 @@ Resolution order: env ``PLEX_PATH_MAP`` → settings.json ``plex.path_map``
 (string in the same format, or a {from: to} object) → DEFAULT_PATH_MAP below.
 
 Defaults were derived (Oct 2026) from every Plex library location reported by
-/library/sections and checked against the NAS media share
-(mounted into the container under /media):
+/library/sections and checked against the //192.168.1.25/Media SMB share
+(mounted on docker-server at /mnt/media):
 
     Plex container path        NAS share path
     /movies/<lib folder>   →   /Media/Video/<lib folder>   (Movies, 4K, Full Rips,
@@ -154,7 +154,7 @@ def build_file_info(plex_service: Any, rating_key: int, settings: Any = None,
     """Return File Info for *rating_key*, or None if Plex doesn't know it.
 
     *apply_path_map* is False for a user's own Plex server — the map describes
-    the shared NAS container mounts only.
+    the shared TFlix-NAS container mounts only.
     """
     root = plex_service._get(f'/library/metadata/{rating_key}')
     if root is None:

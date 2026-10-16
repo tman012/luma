@@ -194,7 +194,7 @@ export function UserSetupPage() {
             <label style={fieldLabelStyle}>Plex Server URL</label>
             <input
               type="url"
-              placeholder="http://localhost:32400"
+              placeholder="http://192.168.1.25:32400"
               value={plexUrl}
               onChange={e => setPlexUrl(e.target.value)}
               style={inputStyle}

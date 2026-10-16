@@ -1,5 +1,5 @@
 # =====================================================================
-# Luma — git ignore
+# Luma (media-search-app) — git ignore
 # Goal: back up source only. Secrets, runtime data, caches and build
 # output stay on the server (see data backup notes).
 # =====================================================================
@@ -11,6 +11,7 @@
 settings.json
 **/settings.json
 **/settings-backup.json*
+alfred/users.json
 *.key
 *.pem
 *.p12
@@ -23,9 +24,11 @@ cookies*.txt
 *.cookies
 .android/
 **/.android/
+android-kiosk/local.properties
 
 # ---- Runtime data (databases, state, logs) ----
 /data/
+alfred/data/
 /config/
 *.db
 *.db-journal
@@ -63,9 +66,12 @@ static/spa/
 *.tsbuildinfo
 .vite/
 
-# ---- Android apps (no longer part of this repo; local copies stay untracked) ----
-/android-kiosk/
-/android-tv/
+# ---- Android build output (source IS tracked) ----
+android-kiosk/.gradle/
+android-kiosk/build/
+android-kiosk/app/build/
+android-tv/**/build/
+android-tv/.gradle/
 *.apk
 *.aab
 *.dex
@@ -89,17 +95,6 @@ static/spa/
 .DS_Store
 Thumbs.db
 
-# ---- Retired voice feature: keep any leftover local speech-model copies out of git ----
+# ---- Large third-party speech models (public download: Vosk small en-us) ----
 static/models/
 android-kiosk/app/src/main/assets/model-en-us/
-
-# ---- Retired Alfred agent: keep any leftover local copy (and its .env/users.json) out of git ----
-/alfred/
-
-# ---- Dev instance data (docker-compose.dev.yml) ----
-/.dev-data/
-
-# ---- Per-server compose overrides and proxy config (never committed) ----
-/docker-compose.override.yml
-/Caddyfile
-/Caddyfile.local

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Auto-rename and move system for Luma
+Auto-rename and move system for media-search-app
 Monitors qBittorrent for completed downloads and automatically renames/moves them
 """
 
@@ -825,7 +825,7 @@ class AutoRenamer:
                 destination = self.generate_destination_path(download_info, video_file)
                 logger.info(f"📁 Episode destination: {destination}")
 
-                if self.copy_and_rename_file(video_file, destination, torrent_hash, getattr(download_info, "torrent_name", None)):
+                if self.copy_and_rename_file(video_file, destination, torrent_hash, torrent_name):
                     success_count += 1
                     successful_destinations.append(destination)
                     logger.info(f"✅ Successfully processed: {os.path.basename(video_file)}")
@@ -870,7 +870,7 @@ class AutoRenamer:
         # Check if we're in Docker
         if Config.IS_DOCKER:
             # In Docker, qBittorrent paths should match our container paths
-            # The container sees downloads under /downloads
+            # FIX: Container has /downloads mounted, not /storage/downloads
             possible_mappings = [
                 # Direct mapping should work as both containers see /downloads
                 qbittorrent_path,
@@ -894,9 +894,11 @@ class AutoRenamer:
                 qbittorrent_path.replace('/downloads/', 'D:\\'),
 
                 # Common Docker mappings (for mixed environments)
+                qbittorrent_path.replace('/downloads/', '/storage/downloads/'),
                 qbittorrent_path.replace('/downloads/', Config.DOWNLOADS_ROOT + '/'),
 
                 # Handle case where qBittorrent path is just the filename
+                os.path.join('/storage/downloads/', torrent_folder),
                 os.path.join(Config.DOWNLOADS_ROOT, torrent_folder),
             ]
         
@@ -911,7 +913,7 @@ class AutoRenamer:
             logger.warning(f"  - {test_path}")
 
         # CRITICAL FIX: Return the most likely path instead of qbittorrent_path
-        # Fall back to the first (most likely) mapping
+        # Since we know files are in /storage/downloads, return that mapping
         return possible_mappings[0] if possible_mappings else qbittorrent_path
     
     def is_file_stable(self, filepath: str, check_duration: int = 3) -> bool:

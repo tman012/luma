@@ -106,7 +106,7 @@ function TunnelSetupGuide() {
           <li>Go to <span className="text-white/70">Cloudflare Zero Trust</span> dashboard</li>
           <li>Navigate to <span className="text-white/70">Networks &rarr; Tunnels</span></li>
           <li>Click <span className="text-white/70">Create a tunnel</span> &rarr; choose <span className="text-white/70">Cloudflared</span></li>
-          <li>Name your tunnel (e.g. "luma")</li>
+          <li>Name your tunnel (e.g. "media-search")</li>
           <li>Copy the tunnel token from the install command</li>
           <li>Paste it above, enable the toggle, and save</li>
           <li>Back in Cloudflare, add a <span className="text-white/70">Public Hostname</span> pointing to <code className="text-white/60 bg-white/5 px-1 rounded">http://localhost:5001</code></li>

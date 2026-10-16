@@ -43,6 +43,15 @@ export interface PullToRefreshState {
 /** True when nested UI should own touch — PTR must stay hands-off. */
 function touchOwnedByNestedScroller(e: TouchEvent): boolean {
   const root = document.getElementById('root');
+  // A lock only counts if an overlay is really on screen. After iOS resumes the
+  // PWA, a closed sheet can leave data-modal-open / overflow:hidden behind,
+  // which silently killed pull-to-refresh until the app was force-closed.
+  const overlayOpen = !!document.querySelector('[data-modal], [data-sheet], [role="dialog"], [data-luma-overlay]');
+  if (!overlayOpen) {
+    root?.removeAttribute('data-modal-open');
+    if (document.body.style.overflow === 'hidden') document.body.style.overflow = '';
+    if (document.documentElement.style.overflow === 'hidden') document.documentElement.style.overflow = '';
+  }
   if (root?.hasAttribute('data-modal-open')) return true;
 
   // Sheets lock body overflow while Home remains mounted (often at scrollY 0).

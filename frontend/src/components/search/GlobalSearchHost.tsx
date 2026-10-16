@@ -8,7 +8,7 @@
  *
  * Listens for:
  *   - `open-search`  → opens the empty search overlay
- *   - `search-query` → opens with { query, tab?, personId? } from event detail
+ *   - `voice-search` → opens with { query, tab?, personId? } from event detail
  */
 
 import { useEffect, useRef } from 'react';
@@ -19,7 +19,7 @@ export function GlobalSearchHost() {
 
   useEffect(() => {
     const onOpen = () => searchRef.current?.openSearch('', 'all');
-    const onQuery = (e: Event) => {
+    const onVoice = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.query) {
         searchRef.current?.openSearch(detail.query, detail.tab || 'all', detail.personId);
@@ -28,10 +28,10 @@ export function GlobalSearchHost() {
       }
     };
     window.addEventListener('open-search', onOpen);
-    window.addEventListener('search-query', onQuery);
+    window.addEventListener('voice-search', onVoice);
     return () => {
       window.removeEventListener('open-search', onOpen);
-      window.removeEventListener('search-query', onQuery);
+      window.removeEventListener('voice-search', onVoice);
     };
   }, []);
 

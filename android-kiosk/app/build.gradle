@@ -1,0 +1,62 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.mediasearch.kiosk'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.mediasearch.kiosk"
+        minSdk 26
+        targetSdk 34
+        versionCode 3
+        versionName "2.1.0"
+
+        // vosk-android ships native libs for all four Android ABIs. Fire HD 10
+        // is arm64-v8a; include armeabi-v7a for older Fires. Drop x86 variants
+        // to save APK size.
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    // Vosk memory-maps these model files at runtime. If aapt compresses them
+    // the mmap load will fail with "bad magic" / "cannot stat" errors.
+    androidResources {
+        noCompress 'mdl', 'fst', 'ie', 'mat', 'dubm', 'stats', 'int'
+    }
+
+    packagingOptions {
+        jniLibs {
+            pickFirsts += ['**/libc++_shared.so']
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.webkit:webkit:1.9.0'
+
+    // On-device wake word / offline speech recognition (no Google required)
+    implementation 'com.alphacephei:vosk-android:0.3.47@aar'
+    implementation 'net.java.dev.jna:jna:5.13.0@aar'
+}

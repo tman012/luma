@@ -1,0 +1,1061 @@
+<!-- Playback Room Selection Modal -->
+<!-- IMPORTANT: This modal is designed for iPhone PWA with viewport 393px x 852px -->
+<!-- NOTE: playback-service.js must be loaded by the page AFTER setting window.API_KEY -->
+<div class="playback-modal" id="playbackModal" style="display: none;">
+    <div class="playback-modal-overlay" onclick="closePlaybackModal()"></div>
+    <div class="playback-modal-content" id="playbackModalContent">
+        <div class="playback-backdrop" id="playbackBackdrop"></div>
+        <div class="playback-backdrop-gradient"></div>
+
+        <div class="playback-content-wrapper">
+            <div class="playback-logo-container" id="playbackLogoContainer">
+                <img id="playbackLogo" class="playback-logo" src="" alt="">
+            </div>
+
+            <!-- Show title for TV shows (when no clearlogo) -->
+            <div class="playback-show-title" id="playbackShowTitle" style="display: none;"></div>
+
+            <!-- Episode title for TV shows -->
+            <div class="playback-episode-title" id="playbackEpisodeTitle" style="display: none;"></div>
+
+            <!-- Episode/Season info for TV shows -->
+            <div class="playback-episode-info" id="playbackEpisodeInfo" style="display: none;"></div>
+
+
+            <!-- Watch on this device: opens Plex web player in browser -->
+            <div id="playbackMobileDevice" style="display: none;">
+                <div class="playback-mobile-device-btn" id="playbackMobileBtn" onclick="playOnThisDevice()">
+                    <span class="mobile-btn-icon">▶️</span>
+                    <span class="mobile-btn-text">Watch on this device</span>
+                    <span class="mobile-btn-arrow"><i class="fas fa-chevron-right"></i></span>
+                </div>
+                <div class="playback-mobile-separator">or cast to a TV</div>
+            </div>
+
+            <div class="playback-rooms-grid" id="playbackRoomsGrid">
+                <!-- Rooms will be dynamically added here -->
+            </div>
+
+            <div class="playback-choose-text">Select a room for playback</div>
+
+            <!-- Resume options screen -->
+            <div class="playback-resume-options" id="playbackResumeOptions" style="display: none;">
+                <div class="playback-resume-text">Would you like to resume playback?</div>
+                <button class="playback-resume-btn resume" id="playbackResumeBtn">
+                    <i class="fas fa-play-circle"></i>
+                    <div>Resume from <span id="playbackResumeTime">0:00</span></div>
+                </button>
+                <button class="playback-resume-btn start-over" id="playbackStartOverBtn">
+                    <i class="fas fa-redo"></i>
+                    <div>Play from beginning</div>
+                </button>
+            </div>
+
+            <div class="playback-loading" id="playbackLoading" style="display: none;">
+                <div class="spinner"></div>
+                <span>Starting playback...</span>
+            </div>
+
+            <div class="playback-error" id="playbackError" style="display: none;">
+                <i class="fas fa-exclamation-triangle"></i>
+                <span id="playbackErrorMessage"></span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.playback-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 200000; /* Very high z-index to be above everything */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: fadeIn 0.2s ease;
+    background: #000;
+    padding: 0;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.playback-modal::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #000;
+    z-index: -1;
+}
+
+.playback-modal-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+.playback-modal-content {
+    position: relative;
+    background: #1a1a1a;
+    border-radius: 20px;
+    padding: 0;
+    max-width: 600px;
+    width: 90%;
+    min-height: 650px;
+    max-height: 85vh;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.playback-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    filter: blur(0px);
+    z-index: 1;
+}
+
+.playback-backdrop-gradient {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        to bottom,
+        rgba(0, 0, 0, 0.3) 0%,
+        rgba(0, 0, 0, 0.7) 50%,
+        rgba(0, 0, 0, 0.95) 100%
+    );
+    z-index: 2;
+}
+
+.playback-content-wrapper {
+    position: relative;
+    z-index: 3;
+    padding: 60px 30px 30px 30px;
+    max-height: 85vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    min-height: 650px;
+}
+
+.playback-logo-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 30px;
+    min-height: 80px;
+}
+
+.playback-logo {
+    max-width: 80%;
+    max-height: 120px;
+    object-fit: contain;
+    filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.8));
+}
+
+.playback-show-title {
+    text-align: center;
+    font-family: 'Product Sans', 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 32px;
+    font-weight: 700;
+    color: white;
+    margin-bottom: 10px;
+    padding: 0 20px;
+    line-height: 1.2;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+}
+
+.playback-episode-title {
+    text-align: center;
+    font-family: 'Product Sans', 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 22px;
+    font-weight: 600;
+    color: white;
+    margin-bottom: 8px;
+    padding: 0 20px;
+    line-height: 1.3;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+}
+
+.playback-episode-info {
+    text-align: center;
+    font-family: 'Product Sans', 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 16px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.85);
+    margin-bottom: 25px;
+    padding: 0 20px;
+    line-height: 1.4;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+}
+
+.playback-rooms-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.playback-choose-text {
+    text-align: center;
+    font-family: 'Product Sans', 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 16px;
+    font-weight: 400;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.6);
+    margin-bottom: 20px;
+}
+
+.playback-room-btn {
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 15px;
+    padding: 20px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.playback-room-btn:hover {
+    background: rgba(0, 0, 0, 0.6);
+    border-color: #3b82f6;
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(59, 130, 246, 0.4);
+}
+
+.playback-room-btn.disabled {
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.playback-room-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(45deg, transparent, rgba(59, 130, 246, 0.1), transparent);
+    transform: translateX(-100%);
+    transition: transform 0.5s ease;
+}
+
+.playback-room-btn:hover::before {
+    transform: translateX(100%);
+}
+
+.playback-room-icon {
+    font-size: 36px;
+    color: #3b82f6;
+    margin-bottom: 10px;
+}
+
+.playback-room-name {
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+
+.playback-room-status {
+    color: #666;
+    font-size: 12px;
+}
+
+.playback-room-status.configured {
+    color: #10b981;
+}
+
+.playback-loading {
+    text-align: center;
+    padding: 20px;
+    color: #999;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #333;
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    margin: 0 auto 10px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.playback-error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid #ef4444;
+    border-radius: 10px;
+    padding: 15px;
+    color: #ef4444;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.playback-error i {
+    font-size: 20px;
+}
+
+/* Resume options styling */
+.playback-resume-options {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.playback-resume-text {
+    text-align: center;
+    font-family: 'Product Sans', 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 18px;
+    font-weight: 500;
+    color: white;
+    margin-bottom: 10px;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+}
+
+.playback-resume-btn {
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 15px;
+    padding: 20px 30px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    color: white;
+    font-size: 16px;
+    font-weight: 600;
+    position: relative;
+    overflow: hidden;
+}
+
+.playback-resume-btn.resume {
+    border-color: #10b981;
+}
+
+.playback-resume-btn.resume:hover {
+    background: rgba(16, 185, 129, 0.2);
+    border-color: #10b981;
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(16, 185, 129, 0.4);
+}
+
+.playback-resume-btn.start-over:hover {
+    background: rgba(59, 130, 246, 0.2);
+    border-color: #3b82f6;
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(59, 130, 246, 0.4);
+}
+
+.playback-resume-btn i {
+    font-size: 24px;
+}
+
+.playback-resume-btn.resume i {
+    color: #10b981;
+}
+
+.playback-resume-btn.start-over i {
+    color: #3b82f6;
+}
+
+.playback-resume-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    transform: translateX(-100%);
+    transition: transform 0.5s ease;
+}
+
+.playback-resume-btn:hover::before {
+    transform: translateX(100%);
+}
+
+/* Desktop styles - larger modal */
+@media (min-width: 1024px) {
+    .playback-modal-content {
+        max-width: 800px;
+        width: 85%;
+        min-height: 700px;
+    }
+
+    .playback-content-wrapper {
+        padding: 80px 50px 50px 50px;
+        min-height: 700px;
+    }
+
+    .playback-logo-container {
+        margin-bottom: 50px;
+    }
+
+    .playback-logo {
+        max-width: 450px;
+        max-height: 150px;
+    }
+
+    .playback-rooms-grid {
+        gap: 20px;
+        max-width: 600px;
+        margin: 0 auto 30px auto;
+    }
+
+    .playback-room-btn {
+        padding: 25px 20px;
+        border-radius: 20px;
+    }
+
+    .playback-room-icon {
+        font-size: 42px;
+        margin-bottom: 12px;
+    }
+
+    .playback-room-name {
+        font-size: 18px;
+    }
+
+    .playback-choose-text {
+        font-size: 20px;
+    }
+
+    .playback-resume-options {
+        gap: 20px;
+        max-width: 500px;
+        margin: 0 auto;
+    }
+
+    .playback-resume-text {
+        font-size: 26px;
+        margin-bottom: 20px;
+    }
+
+    .playback-resume-btn {
+        padding: 25px 40px;
+        font-size: 20px;
+        border-radius: 20px;
+    }
+
+    .playback-resume-btn i {
+        font-size: 30px;
+    }
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .playback-modal-content {
+        width: 95%;
+        min-height: 450px;
+        max-height: 90vh;
+    }
+
+    .playback-content-wrapper {
+        padding: 50px 20px 20px 20px;
+        min-height: 450px;
+    }
+
+    .playback-rooms-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+    }
+
+    .playback-room-btn {
+        padding: 15px;
+    }
+
+    .playback-room-icon {
+        font-size: 28px;
+    }
+}
+
+/* Mobile deep link button */
+.playback-mobile-device-btn {
+    background: linear-gradient(135deg, #e2a812 0%, #f5c518 100%);
+    border: 2px solid #f5c518;
+    border-radius: 15px;
+    padding: 18px 20px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    color: #000;
+    font-size: 17px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    position: relative;
+    overflow: hidden;
+    text-decoration: none;
+    font-family: 'Product Sans', 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.playback-mobile-device-btn:active {
+    transform: scale(0.97);
+    background: linear-gradient(135deg, #c99510 0%, #e2a812 100%);
+}
+
+.playback-mobile-device-btn .mobile-btn-icon {
+    font-size: 26px;
+}
+
+.playback-mobile-device-btn .mobile-btn-text {
+    flex: 1;
+}
+
+.playback-mobile-device-btn .mobile-btn-arrow {
+    font-size: 18px;
+    opacity: 0.7;
+}
+
+.playback-mobile-separator {
+    text-align: center;
+    font-family: 'Product Sans', 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 15px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+}
+
+.playback-mobile-fallback {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 10px;
+    padding: 12px 15px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
+    text-align: center;
+    margin-bottom: 15px;
+    display: none;
+    font-family: 'Product Sans', 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+</style>
+
+<script>
+let currentPlaybackRatingKey = null;
+let currentPlaybackRoomId = null;
+let currentPlaybackRoomName = null;
+let currentResumeInfo = null;
+let currentPlaybackTitle = null;
+let currentPlaybackBackdropUrl = null;
+let currentPlaybackLogoUrl = null;
+let currentPlaybackDuration = null;
+let currentPlaybackEpisodeTitle = null;
+let currentPlaybackSeasonEpisode = null;
+let currentPlaybackClientIp = null;
+let currentPlaybackMovieData = null;
+
+
+// Plex server machine identifier for deep links
+const PLEX_MACHINE_ID = 'a6ce22ee1305ed380244886f494bb43c97bbf227';
+
+// Detect mobile device (phone or tablet)
+function isMobileDevice() {
+    const ua = navigator.userAgent || navigator.vendor || window.opera;
+    // Check for phone/tablet user agents
+    if (/android/i.test(ua) && /mobile/i.test(ua)) return true;  // Android phone
+    if (/android/i.test(ua) && !/mobile/i.test(ua)) return true;  // Android tablet
+    if (/iPad|iPhone|iPod/.test(ua)) return true;  // iOS
+    if (/iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) return true;  // iPadOS
+    // Also check screen size as fallback for PWAs
+    if ('ontouchstart' in window && window.innerWidth <= 1024) return true;
+    return false;
+}
+
+// Build Plex web player URL (browser-based playback)
+function buildPlexWebUrl(ratingKey, viewOffset) {
+    let url = 'https://app.plex.tv/desktop/#!/server/' + PLEX_MACHINE_ID + '/playback?key=%2Flibrary%2Fmetadata%2F' + ratingKey + '&context=library';
+    if (viewOffset && viewOffset > 0) {
+        url += '&viewOffset=' + viewOffset;
+    }
+    return url;
+}
+
+// Handle "Watch on this device" tap — opens Plex web player in browser
+async function playOnThisDevice() {
+    const btn = document.getElementById('playbackMobileBtn');
+    const ratingKey = currentPlaybackRatingKey;
+
+    if (!ratingKey) return;
+
+    // Show loading state on button
+    btn.innerHTML = '<span class="mobile-btn-icon"><div class="spinner" style="width:24px;height:24px;border-width:2px;margin:0;"></div></span><span class="mobile-btn-text">Opening Plex...</span><span class="mobile-btn-arrow"></span>';
+
+    try {
+        // Check for resume point first
+        const resumeInfo = await window.playbackService.getResumeInfo(ratingKey);
+        const viewOffset = (resumeInfo && resumeInfo.has_resume_point) ? resumeInfo.offset_ms : 0;
+
+        const webUrl = buildPlexWebUrl(ratingKey, viewOffset);
+        console.log('[PlaybackModal] Opening Plex web player:', webUrl);
+
+        // Open in a new tab
+        window.open(webUrl, '_blank');
+
+        // Show success
+        btn.innerHTML = '<span class="mobile-btn-icon">✅</span><span class="mobile-btn-text">Opened in Plex</span><span class="mobile-btn-arrow"></span>';
+        setTimeout(() => closePlaybackModal(), 1500);
+
+    } catch (error) {
+        console.error('[PlaybackModal] Web player error:', error);
+        // Try with no offset on error
+        const webUrl = buildPlexWebUrl(ratingKey, 0);
+        window.open(webUrl, '_blank');
+
+        btn.innerHTML = '<span class="mobile-btn-icon">✅</span><span class="mobile-btn-text">Opened in Plex</span><span class="mobile-btn-arrow"></span>';
+        setTimeout(() => closePlaybackModal(), 1500);
+    }
+}
+
+// Make function globally accessible
+window.showPlaybackModal = function(ratingKey, movieTitle, libraryType, backdropUrl, logoUrl) {
+    console.log('showPlaybackModal called with:', ratingKey, movieTitle, libraryType, backdropUrl, logoUrl);
+    const modal = document.getElementById('playbackModal');
+    const backdropElement = document.getElementById('playbackBackdrop');
+    const logoContainer = document.getElementById('playbackLogoContainer');
+    const logoElement = document.getElementById('playbackLogo');
+    const roomsGrid = document.getElementById('playbackRoomsGrid');
+    const loadingElement = document.getElementById('playbackLoading');
+    const errorElement = document.getElementById('playbackError');
+
+    // Reset modal state completely
+    loadingElement.style.display = 'none';
+    loadingElement.innerHTML = `
+        <div class="spinner"></div>
+        <span>Starting playback...</span>
+    `;
+    errorElement.style.display = 'none';
+    roomsGrid.style.display = 'grid';
+
+    // Hide resume options
+    const resumeOptions = document.getElementById('playbackResumeOptions');
+    if (resumeOptions) {
+        resumeOptions.style.display = 'none';
+    }
+
+    // Show the choose text when opening modal
+    const chooseText = document.querySelector('.playback-choose-text');
+    if (chooseText) {
+        chooseText.style.display = 'block';
+    }
+
+    // Reset current room tracking
+    currentPlaybackRoomId = null;
+    currentPlaybackRoomName = null;
+    currentResumeInfo = null;
+
+    // Store playback info for now playing modal
+    currentPlaybackTitle = movieTitle;
+    currentPlaybackBackdropUrl = backdropUrl;
+    currentPlaybackLogoUrl = logoUrl;
+    currentPlaybackEpisodeTitle = null;
+    currentPlaybackSeasonEpisode = null;
+
+    // Set backdrop image
+    console.log('Setting backdrop URL:', backdropUrl);
+    if (backdropUrl) {
+        backdropElement.style.backgroundImage = `url("${backdropUrl}")`;
+        console.log('Backdrop style set to:', backdropElement.style.backgroundImage);
+    } else {
+        console.log('No backdrop URL provided, using gradient fallback');
+        backdropElement.style.backgroundImage = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+    }
+
+    // Set logo image
+    console.log('Setting logo URL:', logoUrl);
+    if (logoUrl) {
+        logoElement.src = logoUrl;
+        logoContainer.style.display = 'flex';
+    } else {
+        logoContainer.style.display = 'none';
+    }
+
+    // Handle episode title for TV shows
+    const showTitleElement = document.getElementById('playbackShowTitle');
+    const episodeTitleElement = document.getElementById('playbackEpisodeTitle');
+    const episodeInfoElement = document.getElementById('playbackEpisodeInfo');
+
+    if (movieTitle && movieTitle.includes(' - S')) {
+        // This is a TV episode (format: "Show Name - S01E01: Episode Title")
+        const parts = movieTitle.split(' - ');
+        if (parts.length >= 2) {
+            const showName = parts[0];
+            const episodePart = parts[1]; // e.g., "S01E01: Episode Title"
+
+            // Parse S01E01: Episode Title
+            const match = episodePart.match(/S(\d+)E(\d+):\s*(.+)/);
+            if (match) {
+                const seasonNum = parseInt(match[1]);
+                const episodeNum = parseInt(match[2]);
+                const episodeName = match[3] || '';
+                const formattedInfo = `Season ${seasonNum} • Episode ${episodeNum}`;
+
+                // Show title only if no clearlogo
+                if (!logoUrl) {
+                    showTitleElement.textContent = showName;
+                    showTitleElement.style.display = 'block';
+                } else {
+                    showTitleElement.style.display = 'none';
+                }
+
+                // Show episode title
+                if (episodeName) {
+                    episodeTitleElement.textContent = episodeName;
+                    episodeTitleElement.style.display = 'block';
+                } else {
+                    episodeTitleElement.style.display = 'none';
+                }
+
+                episodeInfoElement.textContent = formattedInfo;
+                episodeInfoElement.style.display = 'block';
+            } else {
+                showTitleElement.style.display = 'none';
+                episodeTitleElement.style.display = 'none';
+                episodeInfoElement.style.display = 'none';
+            }
+        } else {
+            showTitleElement.style.display = 'none';
+            episodeTitleElement.style.display = 'none';
+            episodeInfoElement.style.display = 'none';
+        }
+    } else {
+        // Movie - hide episode info
+        showTitleElement.style.display = 'none';
+        episodeTitleElement.style.display = 'none';
+        episodeInfoElement.style.display = 'none';
+    }
+
+    currentPlaybackRatingKey = ratingKey;
+
+    // Check if playbackService is loaded
+    if (!window.playbackService || typeof window.playbackService.getAllRooms !== 'function') {
+        console.error('[PlaybackModal] playbackService not initialized yet.');
+        console.log('[PlaybackModal] window.playbackService:', window.playbackService);
+        console.log('[PlaybackModal] Attempting to wait for initialization...');
+
+        // Try waiting a bit for initialization
+        let attempts = 0;
+        const checkInterval = setInterval(() => {
+            attempts++;
+            if (window.playbackService && typeof window.playbackService.getAllRooms === 'function') {
+                console.log('[PlaybackModal] playbackService initialized after', attempts, 'attempts');
+                clearInterval(checkInterval);
+                // Re-call the function now that service is ready
+                showPlaybackModal(ratingKey, movieTitle, libraryType, backdropUrl, logoUrl);
+            } else if (attempts >= 10) {
+                console.error('[PlaybackModal] playbackService failed to initialize after 10 attempts');
+                errorElement.innerHTML = 'Playback service is not ready. Please refresh the page and try again.';
+                errorElement.style.display = 'block';
+                roomsGrid.style.display = 'none';
+                modal.style.display = 'block';
+                clearInterval(checkInterval);
+            }
+        }, 100);
+
+        return;
+    }
+
+    // Get all rooms
+    const rooms = window.playbackService.getAllRooms();
+
+    // Clear and populate rooms grid
+    roomsGrid.innerHTML = '';
+
+    rooms.forEach(room => {
+        const roomBtn = document.createElement('div');
+        roomBtn.className = 'playback-room-btn';
+        if (!room.ip) {
+            roomBtn.classList.add('disabled');
+        }
+
+        roomBtn.innerHTML = `
+            <div class="playback-room-icon">
+                <i class="${room.icon}"></i>
+            </div>
+            <div class="playback-room-name">${room.name}</div>
+            <div class="playback-room-status ${room.ip ? 'configured' : ''}">
+                ${room.ip ? 'Available' : 'Not Configured'}
+            </div>
+        `;
+
+        if (room.ip) {
+            roomBtn.onclick = () => playInRoom(room.id, room.name);
+        }
+
+        roomsGrid.appendChild(roomBtn);
+    });
+
+
+    // Show "Watch on this device" on all devices (browser-based playback)
+    const mobileDeviceSection = document.getElementById('playbackMobileDevice');
+    if (mobileDeviceSection) {
+        mobileDeviceSection.style.display = 'block';
+        // Reset the button text
+        const mobileBtn = document.getElementById('playbackMobileBtn');
+        if (mobileBtn) {
+            mobileBtn.innerHTML = '<span class="mobile-btn-icon">▶️</span><span class="mobile-btn-text">Watch on this device</span><span class="mobile-btn-arrow"><i class="fas fa-chevron-right"></i></span>';
+        }
+    }
+
+    // Show modal
+    modal.style.display = 'flex';
+}
+
+async function playInRoom(roomId, roomName) {
+    const roomsGrid = document.getElementById('playbackRoomsGrid');
+    const loadingElement = document.getElementById('playbackLoading');
+    const errorElement = document.getElementById('playbackError');
+    const errorMessage = document.getElementById('playbackErrorMessage');
+    const chooseText = document.querySelector('.playback-choose-text');
+    const resumeOptions = document.getElementById('playbackResumeOptions');
+
+    // Save room info for later
+    currentPlaybackRoomId = roomId;
+    currentPlaybackRoomName = roomName;
+
+    // Store the room's IP for the now playing modal
+    const room = window.playbackService.getRoom(roomId);
+    if (room) {
+        currentPlaybackClientIp = room.ip;
+    }
+
+    // Hide room grid and show loading
+    roomsGrid.style.display = 'none';
+    if (chooseText) {
+        chooseText.style.display = 'none';
+    }
+    loadingElement.style.display = 'block';
+    loadingElement.innerHTML = `
+        <div class="spinner"></div>
+        <span>Checking resume point...</span>
+    `;
+
+    try {
+        // Fetch resume info
+        const resumeInfo = await window.playbackService.getResumeInfo(currentPlaybackRatingKey);
+        currentResumeInfo = resumeInfo;
+
+        // Hide loading
+        loadingElement.style.display = 'none';
+
+        // If there's a resume point, show options
+        if (resumeInfo.has_resume_point) {
+            document.getElementById('playbackResumeTime').textContent = resumeInfo.time_string;
+            resumeOptions.style.display = 'flex';
+        } else {
+            // No resume point, start playback immediately
+            startPlayback(0);
+        }
+    } catch (error) {
+        console.error('Error checking resume info:', error);
+        // On error, just start from beginning
+        startPlayback(0);
+    }
+}
+
+async function startPlayback(resumeOffset) {
+    const loadingElement = document.getElementById('playbackLoading');
+    const errorElement = document.getElementById('playbackError');
+    const errorMessage = document.getElementById('playbackErrorMessage');
+    const resumeOptions = document.getElementById('playbackResumeOptions');
+
+    console.log('[PlaybackModal] Starting playback:', {
+        roomId: currentPlaybackRoomId,
+        ratingKey: currentPlaybackRatingKey,
+        resumeOffset: resumeOffset
+    });
+
+    // Hide resume options
+    resumeOptions.style.display = 'none';
+
+    // Show loading state
+    loadingElement.style.display = 'block';
+    loadingElement.innerHTML = `
+        <div class="spinner"></div>
+        <span>Starting playback...</span>
+    `;
+    errorElement.style.display = 'none';
+
+    try {
+        // Attempt to play in the selected room (await the promise to catch errors)
+        console.log('[PlaybackModal] Calling playInRoom...');
+        await window.playbackService.playInRoom(currentPlaybackRoomId, currentPlaybackRatingKey, resumeOffset);
+        console.log('[PlaybackModal] playInRoom returned successfully');
+
+        // Poll Plex to check when playback actually starts
+        let pollCount = 0;
+        const maxPolls = 30; // Poll for up to 30 seconds
+        const pollInterval = setInterval(async () => {
+            pollCount++;
+
+            try {
+                // Check Plex player status
+                const response = await fetch(`/api/player/status/${currentPlaybackRatingKey}`);
+                const data = await response.json();
+
+                if (data.playing) {
+                    // Playback confirmed!
+                    clearInterval(pollInterval);
+
+                    loadingElement.innerHTML = `
+                        <i class="fas fa-check-circle" style="color: #10b981; font-size: 40px; margin-bottom: 10px;"></i>
+                        <div style="color: #10b981;">Playing in ${currentPlaybackRoomName}</div>
+                    `;
+
+                    // Store duration if available
+                    currentPlaybackDuration = data.duration || 0;
+
+                    // Show now playing modal (desktop only)
+                    if (window.innerWidth >= 1024 && typeof window.showNowPlayingModal === 'function') {
+                        // Capture all values BEFORE closing modal (which nulls them)
+                        const nowPlayingOptions = {
+                            ratingKey: currentPlaybackRatingKey,
+                            clientId: currentPlaybackRoomId,
+                            clientIp: currentPlaybackClientIp,
+                            title: currentPlaybackTitle,
+                            backdropUrl: currentPlaybackBackdropUrl,
+                            clearlogoUrl: currentPlaybackLogoUrl,
+                            roomName: currentPlaybackRoomName,
+                            duration: currentPlaybackDuration,
+                            episodeTitle: currentPlaybackEpisodeTitle,
+                            seasonEpisode: currentPlaybackSeasonEpisode,
+                            movieData: currentPlaybackMovieData
+                        };
+                        setTimeout(() => {
+                            closePlaybackModal();
+                            window.showNowPlayingModal(nowPlayingOptions);
+                        }, 1000);
+                    } else {
+                        // Close modal after showing success message (mobile)
+                        setTimeout(() => {
+                            closePlaybackModal();
+                        }, 2000);
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking playback status:', error);
+            }
+
+            // Timeout after max polls
+            if (pollCount >= maxPolls) {
+                clearInterval(pollInterval);
+
+                // Show success anyway (best effort)
+                loadingElement.innerHTML = `
+                    <i class="fas fa-check-circle" style="color: #10b981; font-size: 40px; margin-bottom: 10px;"></i>
+                    <div style="color: #10b981;">Playing in ${currentPlaybackRoomName}</div>
+                `;
+
+                // Show now playing modal (desktop only)
+                if (window.innerWidth >= 1024 && typeof window.showNowPlayingModal === 'function') {
+                    // Capture all values BEFORE closing modal (which nulls them)
+                    const nowPlayingOptions = {
+                        ratingKey: currentPlaybackRatingKey,
+                        clientId: currentPlaybackRoomId,
+                        clientIp: currentPlaybackClientIp,
+                        title: currentPlaybackTitle,
+                        backdropUrl: currentPlaybackBackdropUrl,
+                        clearlogoUrl: currentPlaybackLogoUrl,
+                        roomName: currentPlaybackRoomName,
+                        duration: currentPlaybackDuration || 0,
+                        episodeTitle: currentPlaybackEpisodeTitle,
+                        seasonEpisode: currentPlaybackSeasonEpisode,
+                        movieData: currentPlaybackMovieData
+                    };
+                    setTimeout(() => {
+                        closePlaybackModal();
+                        window.showNowPlayingModal(nowPlayingOptions);
+                    }, 1000);
+                } else {
+                    setTimeout(() => {
+                        closePlaybackModal();
+                    }, 2000);
+                }
+            }
+        }, 1000); // Poll every second
+
+    } catch (error) {
+        console.error('Playback error:', error);
+
+        // Show error
+        loadingElement.style.display = 'none';
+        errorElement.style.display = 'block';
+        errorMessage.textContent = error.message || 'Failed to start playback';
+
+        // Show resume options again after error
+        setTimeout(() => {
+            errorElement.style.display = 'none';
+            resumeOptions.style.display = 'flex';
+        }, 3000);
+    }
+}
+
+// Event listeners for resume buttons
+document.getElementById('playbackResumeBtn').addEventListener('click', () => {
+    if (currentResumeInfo) {
+        startPlayback(currentResumeInfo.offset_ms);
+    }
+});
+
+document.getElementById('playbackStartOverBtn').addEventListener('click', () => {
+    startPlayback(0);
+});
+
+function closePlaybackModal() {
+    const modal = document.getElementById('playbackModal');
+    modal.style.display = 'none';
+    currentPlaybackRatingKey = null;
+}
+
+// Close modal on escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closePlaybackModal();
+    }
+});
+</script>

@@ -116,9 +116,9 @@ def get_area_entities(ha_url: str, access_token: str, area_id: str) -> list[dict
     considered part of a room if any of the following is true —
       1. Home Assistant has it registered to that area (``area_entities()``)
       2. Its ``entity_id`` slug starts with or contains the area slug
-         (e.g. ``light.office_desk`` for area ``office``)
+         (e.g. ``light.kitchen_sink`` for area ``kitchen``)
       3. Its friendly name contains the area's human-readable name
-         (e.g. "Office Desk" for area "Office")
+         (e.g. "Kitchen Sink" for area "Kitchen")
 
     This covers entities the user forgot to assign in HA's UI but clearly
     belong to a room by name, which matches expectations for a kiosk panel.
@@ -146,7 +146,7 @@ def get_area_entities(ha_url: str, access_token: str, area_id: str) -> list[dict
 
     # Name-match tokens. We require word boundaries so "bed" in area "Bed"
     # doesn't claim "bedroom.x" incorrectly; we also allow the slug form that
-    # appears in entity IDs (``office_desk``, ``living_room_lamp``).
+    # appears in entity IDs (``kitchen_sink``, ``living_room_lamp``).
     slug_token = area_slug.replace('-', '_')
     name_token = area_name_lc
 
@@ -162,7 +162,7 @@ def get_area_entities(ha_url: str, access_token: str, area_id: str) -> list[dict
         # with underscore boundaries.
         if '_' in slug_token and slug_token in slug_part:
             return True
-        # Friendly name case-insensitive substring — "Office Desk" for "Office".
+        # Friendly name case-insensitive substring — "Kitchen Sink" for "Kitchen".
         if name_token and friendly and name_token in friendly.lower():
             return True
         return False

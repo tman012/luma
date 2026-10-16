@@ -5,7 +5,7 @@ Background daemon that runs once per day at a configurable hour:
   2. Run a full batch search against indexers
   3. Enrich results with Rotten Tomatoes scores
 
-Designed to finish before any downstream upgrade-grab job runs.
+Designed to finish before Alfred's auto-grab cron runs.
 """
 
 import json
@@ -15,8 +15,6 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict
-
-from app.automation_features import is_enabled as _automation_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +167,7 @@ def _run_pipeline(force: bool = False) -> None:
     settings = SettingsManager()
 
     if not force:
-        enabled = _automation_enabled(settings, 'upgrade_scheduler')
+        enabled = settings.get('automation.upgrade_scheduler.enabled', True)
         if not enabled:
             logger.debug('Upgrade scheduler disabled, skipping')
             return
@@ -202,7 +200,7 @@ def _run_pipeline(force: bool = False) -> None:
         logger.info('[upgrade-scheduler] Step 2: Running batch searches...')
         total_searched = 0
         total_upgrades = 0
-        max_batches = 20  # safety cap (~2000 movies)
+        max_batches = 2   # was 20 (~2000 per-title tracker searches a night); 200/night, a full pass in ~25 days
 
         for i in range(max_batches):
             batch_result = finder.run_batch(batch_size=_BATCH_SIZE)

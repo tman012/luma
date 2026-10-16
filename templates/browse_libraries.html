@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- IMPORTANT: This app is designed for iPhone PWA with viewport 393px x 852px -->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/images/ic_launcher_round.png">
+    <title>Library - Bosley Media</title>
+
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            max-width: 100vw;
+        }
+
+        :root {
+            --safe-area-top: env(safe-area-inset-top, 0px);
+            --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #121212;
+            color: #e0e0e0;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            min-height: 100vh;
+            min-height: -webkit-fill-available;
+        }
+
+        ::-webkit-scrollbar { width: 0px; }
+
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            padding-top: calc(env(safe-area-inset-top, 0px) + 15px) !important;
+            background: #1a1a1a;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            gap: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .back-btn {
+            background: none;
+            border: none;
+            color: rgba(255,255,255,0.8);
+            font-size: 22px;
+            cursor: pointer;
+            padding: 4px 8px;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .header-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: white;
+        }
+
+        /* Content area */
+        .content {
+            padding: calc(env(safe-area-inset-top, 0px) + 70px) 16px calc(env(safe-area-inset-bottom, 0px) + 40px);
+        }
+
+        /* Section headers */
+        .section-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.4);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 28px 0 10px;
+            padding: 0 4px;
+        }
+        .section-title:first-child {
+            margin-top: 8px;
+        }
+
+        /* Library list */
+        .library-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 14px;
+            overflow: hidden;
+        }
+
+        .library-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #1a1a1a;
+            padding: 16px 18px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .library-item:active {
+            background: #222;
+        }
+
+        .library-item .item-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .library-item .item-icon {
+            font-size: 18px;
+            width: 28px;
+            text-align: center;
+        }
+
+        .library-item.movie .item-icon {
+            color: #2196F3;
+        }
+
+        .library-item.tv .item-icon {
+            color: #4CAF50;
+        }
+
+        .library-item .item-name {
+            font-size: 16px;
+            font-weight: 500;
+            color: #e0e0e0;
+        }
+
+        .library-item .item-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .library-item .item-count {
+            color: rgba(255,255,255,0.35);
+            font-size: 15px;
+            font-weight: 400;
+        }
+
+        .library-item .item-chevron {
+            color: rgba(255,255,255,0.2);
+            font-size: 13px;
+        }
+
+        /* Skeleton */
+        .skeleton {
+            background: linear-gradient(90deg, #1a1a1a 25%, #252525 50%, #1a1a1a 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+        }
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        .skeleton-item {
+            height: 54px;
+            background: #1a1a1a;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <button class="back-btn" onclick="window.history.back()">
+            <i class="fas fa-arrow-left"></i>
+        </button>
+        <span class="header-title">Library</span>
+    </div>
+
+    <div class="content">
+        <div class="section-title" id="movieSectionTitle" style="display:none;">Movies</div>
+        <div class="library-list" id="movieList">
+            <div class="skeleton-item skeleton"></div>
+            <div class="skeleton-item skeleton"></div>
+            <div class="skeleton-item skeleton"></div>
+        </div>
+
+        <div class="section-title" id="tvSectionTitle" style="display:none;">TV Shows</div>
+        <div class="library-list" id="tvList">
+            <div class="skeleton-item skeleton"></div>
+        </div>
+    </div>
+
+    <script>
+        async function loadLibraries() {
+            try {
+                const response = await fetch('/api/library/stats/cached');
+                const data = await response.json();
+
+                if (data.error) {
+                    console.error('Failed to load library stats:', data.error);
+                    return;
+                }
+
+                const movieList = document.getElementById('movieList');
+                const tvList = document.getElementById('tvList');
+                movieList.innerHTML = '';
+                tvList.innerHTML = '';
+
+                // Movie libraries
+                if (data.movies && Object.keys(data.movies).length > 0) {
+                    document.getElementById('movieSectionTitle').style.display = 'block';
+
+                    const order = ['Recently Released', 'Movies', 'Full Rips', '4K Movies'];
+                    const movieEntries = Object.entries(data.movies)
+                        .filter(([library]) => !library.toLowerCase().includes('home') && !library.toLowerCase().includes('3d'));
+
+                    const sortedMovies = [];
+                    for (const orderName of order) {
+                        const found = movieEntries.find(([lib]) =>
+                            lib.toLowerCase() === orderName.toLowerCase() ||
+                            lib.toLowerCase().includes(orderName.toLowerCase())
+                        );
+                        if (found) sortedMovies.push(found);
+                    }
+                    for (const entry of movieEntries) {
+                        if (!sortedMovies.includes(entry)) sortedMovies.push(entry);
+                    }
+
+                    for (const [library, count] of sortedMovies) {
+                        const displayName = library.toLowerCase().includes('recently released') ? 'Recently Released' : library;
+                        const item = document.createElement('div');
+                        item.className = 'library-item movie';
+                        item.innerHTML = `
+                            <div class="item-left">
+                                <i class="fas fa-film item-icon"></i>
+                                <span class="item-name">${displayName}</span>
+                            </div>
+                            <div class="item-right">
+                                <span class="item-count">${count.toLocaleString()}</span>
+                                <i class="fas fa-chevron-right item-chevron"></i>
+                            </div>
+                        `;
+                        item.onclick = () => {
+                            const actualName = library.toLowerCase().includes('recently released') ? 'Recently Released' : library;
+                            window.location.href = '/browse_media?library=' + encodeURIComponent(actualName);
+                        };
+                        movieList.appendChild(item);
+                    }
+                }
+
+                // TV libraries
+                if (data.tv_shows && Object.keys(data.tv_shows).length > 0) {
+                    document.getElementById('tvSectionTitle').style.display = 'block';
+
+                    const sortedTV = Object.entries(data.tv_shows)
+                        .sort((a, b) => (b[1].shows || 0) - (a[1].shows || 0));
+
+                    for (const [library, info] of sortedTV) {
+                        const item = document.createElement('div');
+                        item.className = 'library-item tv';
+                        item.innerHTML = `
+                            <div class="item-left">
+                                <i class="fas fa-tv item-icon"></i>
+                                <span class="item-name">${library}</span>
+                            </div>
+                            <div class="item-right">
+                                <span class="item-count">${(info.shows || 0).toLocaleString()}</span>
+                                <i class="fas fa-chevron-right item-chevron"></i>
+                            </div>
+                        `;
+                        item.onclick = () => {
+                            window.location.href = '/browse_media?library=' + encodeURIComponent(library);
+                        };
+                        tvList.appendChild(item);
+                    }
+                }
+
+            } catch (error) {
+                console.error('Error loading libraries:', error);
+                document.getElementById('movieList').innerHTML = '<div style="color:#888;padding:20px;text-align:center;">Failed to load libraries</div>';
+                document.getElementById('tvList').innerHTML = '';
+            }
+        }
+
+        loadLibraries();
+    </script>
+</body>
+</html>

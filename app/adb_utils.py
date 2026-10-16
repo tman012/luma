@@ -45,8 +45,6 @@ def run_adb(args: list[str], timeout: int = ADB_TIMEOUT,
 
     Returns: {"ok": bool, "stdout": str, "stderr": str, "returncode": int}
     """
-    if os.environ.get("LUMA_DISABLE_ADB", "").strip().lower() in ("1", "true", "yes", "on"):
-        return {"ok": False, "stdout": "", "stderr": "ADB disabled (LUMA_DISABLE_ADB)", "returncode": -1}
     try:
         result = subprocess.run(
             args,

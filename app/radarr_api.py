@@ -19,7 +19,7 @@ class RadarrAPI:
         Initialize Radarr API client
 
         Args:
-            url: Radarr base URL (e.g., http://localhost:7878)
+            url: Radarr base URL (e.g., http://192.168.1.62:7878)
             api_key: Radarr API key
         """
         self.url = url.rstrip('/')

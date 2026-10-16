@@ -28,7 +28,7 @@ export interface UiDensityTokens {
     headerPadX: string;
     /** Top-bar nav items gap */
     navGap: string;
-    /** Top-bar right-side actions gap (time, bell) */
+    /** Top-bar right-side actions gap (time, bell, voice) */
     actionsGap: string;
     /** Search panel horizontal padding */
     searchPadX: string;

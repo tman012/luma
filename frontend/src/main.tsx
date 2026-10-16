@@ -79,6 +79,13 @@ if (new URLSearchParams(window.location.search).has('sw_reset')) {
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (refreshing) return;
     refreshing = true;
+    // TEMPORARY DIAGNOSTIC (pairs with /api/_swdiag in static/sw.js) — a reload
+    // here throws away any deep-link navigation the app just made, so we need to
+    // know whether it fires during a notification launch.
+    try {
+      void fetch('/api/_appdiag?e=controllerchange-reload&at=' +
+        encodeURIComponent(location.pathname), { credentials: 'include' }).catch(() => {});
+    } catch { /* ignore */ }
     window.location.reload();
   });
 }
@@ -159,3 +166,8 @@ function showUpdateToast(waitingSW: ServiceWorker) {
     }
   }, 10_000);
 }
+
+// iOS PWA: nudge layout after returning from background so fixed layers re-measure.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) requestAnimationFrame(() => window.scrollTo(window.scrollX, window.scrollY));
+});

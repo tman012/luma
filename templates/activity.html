@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/images/ic_launcher_round.png">
+    <title>Activity - Bosley Media</title>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --safe-area-top: env(safe-area-inset-top, 0px);
+            --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+        }
+
+        body {
+            background: #0a0a0a;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            padding-top: var(--safe-area-top);
+            overflow-x: hidden;
+        }
+
+        /* Header with hamburger menu */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 15px;
+            padding-top: calc(env(safe-area-inset-top, 0px) + 15px) !important;
+            background: #1a1a1a;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 30;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        /* Hamburger menu */
+        .hamburger {
+            position: absolute;
+            left: 15px;
+            flex-shrink: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 1001;
+        }
+
+        .hamburger-line {
+            width: 22px;
+            height: 2px;
+            background-color: #fff;
+            margin: 3px 0;
+            transition: 0.3s;
+            border-radius: 2px;
+        }
+
+        .hamburger.active .line-1 {
+            transform: rotate(-45deg) translate(-5px, 5px);
+        }
+
+        .hamburger.active .line-2 {
+            opacity: 0;
+        }
+
+        .hamburger.active .line-3 {
+            transform: rotate(45deg) translate(-5px, -5px);
+        }
+
+        /* Side menu */
+        .side-menu {
+            position: fixed;
+            top: 0;
+            left: -100%;
+            width: 280px;
+            height: 100%;
+            background: #1a1a1a;
+            transition: 0.3s;
+            z-index: 1000;
+            padding-top: calc(env(safe-area-inset-top, 0px) + 80px);
+            overflow-y: auto;
+        }
+
+        .side-menu.active {
+            left: 0;
+        }
+
+        .menu-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            display: none;
+        }
+
+        .menu-overlay.active {
+            display: block;
+        }
+
+        .menu-item {
+            padding: 18px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            color: #fff;
+            text-decoration: none;
+        }
+
+        .menu-item:hover {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .menu-item i {
+            width: 20px;
+            text-align: center;
+            color: #888;
+        }
+
+        .header-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: white;
+            text-align: center;
+        }
+
+        /* Main content */
+        .content {
+            padding: 80px 15px 30px 15px;
+            min-height: 100vh;
+        }
+
+        /* Mini Media Player Card - HA Style (Compact Pill) */
+        .media-player-card {
+            background: #1a1a1a;
+            border-radius: 16px;
+            overflow: visible;
+            margin-bottom: 20px;
+            position: relative;
+            min-height: 160px;
+            padding-bottom: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        /* YouTube gets a gradient and large logo background */
+        .media-player-card[data-app="YouTube"] {
+            background: linear-gradient(to right, #c9302c 0%, #ffffff 100%);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .media-player-card[data-app="YouTube"]::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: url('/static/images/yt.png');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            opacity: 0.25;
+            z-index: 0;
+            pointer-events: none;
+            border-radius: 16px;
+        }
+
+        /* Netflix gets its red gradient */
+        .media-player-card[data-app="Netflix"] {
+            background: linear-gradient(135deg, #E50914 0%, #B20710 50%, #831010 100%);
+        }
+
+        /* Plex gets its orange gradient with logo background (when no backdrop) */
+        .media-player-card[data-app="Plex"] {
+            background: linear-gradient(to right, #E5A00D 0%, #ffffff 100%);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .media-player-card[data-app="Plex"]::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: url('/static/images/plex.png');
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            opacity: 0.25;
+            z-index: 0;
+            pointer-events: none;
+            border-radius: 16px;
+        }
+
+        /* When Plex has a backdrop, use it instead */
+        .media-player-card[data-app="Plex"].has-backdrop {
+            background: #000;
+        }
+
+        .media-player-card[data-app="Plex"].has-backdrop::before {
+            display: none;
+        }
+
+        .media-player-card[data-app="Plex"].has-backdrop .backdrop-bg {
+            display: block !important;
+        }
+
+        /* TiViMate gets a purple gradient */
+        .media-player-card[data-app="TiViMate"] {
+            background: linear-gradient(135deg, #7C3AED 0%, #5B21B6 50%, #4C1D95 100%);
+        }
+
+        /* Full cover artwork - smaller and contained for pill style */
+        .artwork-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            object-position: left center;
+            filter: brightness(0.4) opacity(0.3);
+            max-width: 200px;
+        }
+
+        /* Backdrop for Plex - full width backdrop image */
+        .backdrop-bg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center;
+            filter: brightness(0.6);
+            z-index: 0;
+            border-radius: 16px;
+            display: none;
+        }
+
+        /* YouTube logo - hide it since we have nice gradient background */
+        .media-player-card[data-app="YouTube"] .artwork-bg {
+            display: none;
+        }
+
+        /* Plex artwork - hide poster, use gradient */
+        .media-player-card[data-app="Plex"] .artwork-bg {
+            display: none;
+        }
+
+        /* Dark overlay - lighter for compact pill */
+        .artwork-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to right,
+                rgba(0,0,0,0.1) 0%,
+                rgba(0,0,0,0.4) 40%,
+                rgba(0,0,0,0.6) 100%
+            );
+            z-index: 1;
+        }
+
+        /* All content overlaid - compact layout */
+        .player-content {
+            position: relative;
+            z-index: 2;
+            min-height: 100%;
+            display: flex;
+            flex-direction: column;
+            padding: 10px 15px 12px 15px;
+            justify-content: flex-start;
+            gap: 6px;
+        }
+
+        /* Room name at top - centered and larger */
+        .room-name {
+            font-size: 16px;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.95);
+            text-align: center;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+            margin-bottom: 2px;
+        }
+
+        /* Now Playing text */
+        .now-playing {
+            font-size: 9px;
+            font-weight: 600;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+
+        /* App-specific colors for Now Playing */
+        .media-player-card[data-app="YouTube"] .now-playing {
+            color: #FF6B6B;
+        }
+
+        .media-player-card[data-app="Plex"] .now-playing {
+            color: #E5A00D;
+        }
+
+        .media-player-card[data-app="TiViMate"] .now-playing {
+            color: #A78BFA;
+        }
+
+        .media-player-card[data-app="Netflix"] .now-playing {
+            color: #E50914;
+        }
+
+        /* Default for other apps */
+        .now-playing {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        /* Media info at bottom - compact */
+        .media-info-overlay {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: auto;
+            position: relative;
+            z-index: 1;
+        }
+
+        .media-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: white;
+            text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+            line-height: 1.3;
+            margin-bottom: 6px;
+            text-align: center;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .media-subtitle {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.75);
+            text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+            text-align: center;
+        }
+
+        /* Controls and time counter container */
+        .controls-and-progress {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            align-items: center;
+        }
+
+        /* Controls row */
+        .controls-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            position: relative;
+        }
+
+        .control-group-left {
+            position: absolute;
+            left: 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .control-group-center {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        /* Time counter */
+        .time-counter {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.8);
+            text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+        }
+
+        .control-btn {
+            width: 50px;
+            height: 50px;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            color: white;
+            font-size: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        .control-btn:active {
+            transform: scale(0.9);
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        .control-btn.play-pause {
+            width: 60px;
+            height: 60px;
+            font-size: 26px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+        }
+
+        /* App-specific play button colors */
+        .media-player-card[data-app="YouTube"] .control-btn.play-pause {
+            background: rgba(255, 107, 107, 0.25);
+            color: #FF6B6B;
+        }
+
+        .media-player-card[data-app="YouTube"] .control-btn.play-pause:active {
+            background: rgba(255, 107, 107, 0.4);
+        }
+
+        .media-player-card[data-app="Plex"] .control-btn.play-pause {
+            background: rgba(229, 160, 13, 0.25);
+            color: #E5A00D;
+        }
+
+        .media-player-card[data-app="Plex"] .control-btn.play-pause:active {
+            background: rgba(229, 160, 13, 0.4);
+        }
+
+        .media-player-card[data-app="TiViMate"] .control-btn.play-pause {
+            background: rgba(167, 139, 250, 0.25);
+            color: #A78BFA;
+        }
+
+        .media-player-card[data-app="TiViMate"] .control-btn.play-pause:active {
+            background: rgba(167, 139, 250, 0.4);
+        }
+
+        .media-player-card[data-app="Netflix"] .control-btn.play-pause {
+            background: rgba(229, 9, 20, 0.25);
+            color: #E50914;
+        }
+
+        .media-player-card[data-app="Netflix"] .control-btn.play-pause:active {
+            background: rgba(229, 9, 20, 0.4);
+        }
+
+        /* Progress bar - compact, to the right of controls */
+        .progress-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+        }
+
+        .progress-bar {
+            flex: 1;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.25);
+            border-radius: 2px;
+            overflow: hidden;
+            cursor: pointer;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: white;
+            transition: width 0.3s;
+        }
+
+        .progress-time {
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.7);
+            text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+            white-space: nowrap;
+        }
+
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .empty-state i {
+            font-size: 60px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+
+        .empty-state p {
+            font-size: 16px;
+            line-height: 1.5;
+        }
+
+        /* Loading spinner */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top: 3px solid #e50914;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Side menu -->
+    <div class="menu-overlay" id="menuOverlay" onclick="toggleMenu()"></div>
+    <div class="side-menu" id="sideMenu">
+        <a href="/" class="menu-item">
+            <i class="fas fa-home"></i>
+            <span>Home</span>
+        </a>
+        <a href="/explore" class="menu-item">
+            <i class="fas fa-compass"></i>
+            <span>Explore</span>
+        </a>
+        <a href="/watchlist" class="menu-item">
+            <i class="fas fa-bookmark"></i>
+            <span>Watchlist</span>
+        </a>
+        <a href="/activity" class="menu-item">
+            <i class="fas fa-play-circle"></i>
+            <span>Activity</span>
+        </a>
+        <a href="/settings" class="menu-item">
+            <i class="fas fa-cog"></i>
+            <span>Settings</span>
+        </a>
+    </div>
+
+    <div class="header">
+        <div class="hamburger" id="hamburger" onclick="toggleMenu()">
+            <div class="hamburger-line line-1"></div>
+            <div class="hamburger-line line-2"></div>
+            <div class="hamburger-line line-3"></div>
+        </div>
+        <div class="header-title">Activity</div>
+    </div>
+
+    <div class="content">
+        <div id="devicesContainer">
+            <div class="loading">
+                <div class="spinner"></div>
+                <div>Loading activity...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let autoRefreshInterval = null;
+
+        // Devices are loaded dynamically from settings
+        let devices = [];
+        async function loadDeviceList() {
+            try {
+                const resp = await fetch('/api/settings/rooms');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    devices = (data.rooms || []).map(r => ({ name: r.name, ip: r.host || r.ip, id: r.id }));
+                }
+            } catch (e) { console.warn('Failed to load rooms:', e); }
+        }
+        loadDeviceList();
+
+        async function loadActivity() {
+            try {
+                const container = document.getElementById('devicesContainer');
+                let hasActivity = false;
+                let cardsHTML = '';
+
+                // Query each device
+                for (const device of devices) {
+                    try {
+                        const response = await fetch(`/api/adb/shield_activity?device_ip=${device.ip}`);
+                        const data = await response.json();
+
+                        if (data.error) {
+                            console.error(`Error loading ${device.name}:`, data.error);
+                            continue;
+                        }
+
+                        // Check if there's active media (ADB format)
+                        const mediaData = data.media || {};
+                        const isActive = mediaData.is_active || (data.current_app && data.current_app !== 'Home Screen');
+
+                        if (isActive) {
+                            hasActivity = true;
+
+                            const isPlaying = mediaData.state === 'playing';
+                            const isPaused = mediaData.state === 'paused';
+
+                            // Format title - use media title if available, otherwise show app name
+                            let displayTitle = mediaData.title || data.current_app || 'Unknown';
+                            let displaySubtitle = mediaData.artist || '';
+
+                            // Format time (HA returns seconds, not ms)
+                            const formatTime = (seconds) => {
+                                if (!seconds) return '0:00';
+                                const hrs = Math.floor(seconds / 3600);
+                                const mins = Math.floor((seconds % 3600) / 60);
+                                const secs = Math.floor(seconds % 60);
+                                if (hrs > 0) {
+                                    return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+                                }
+                                return `${mins}:${String(secs).padStart(2, '0')}`;
+                            };
+
+                            const currentTime = formatTime(mediaData.position);
+                            const totalTime = formatTime(mediaData.duration);
+                            const progressPercent = mediaData.progress_percent || 0;
+
+                            // Get artwork URL if available
+                            let artworkUrl = mediaData.artwork_url;
+
+                            // Check if Plex has a backdrop
+                            const backdropUrl = mediaData.backdrop_url;
+                            const hasBackdrop = (data.current_app === 'Plex' || mediaData.app_name === 'Plex') && backdropUrl;
+
+                            cardsHTML += `
+                                <div class="media-player-card ${hasBackdrop ? 'has-backdrop' : ''}" data-app="${data.current_app || mediaData.app_name || 'Unknown'}">
+                                    ${hasBackdrop ? `<img src="${backdropUrl}" alt="${displayTitle}" class="backdrop-bg" onerror="this.classList.remove('has-backdrop')">` : ''}
+                                    ${artworkUrl && !hasBackdrop ? `<img src="${artworkUrl}" alt="${displayTitle}" class="artwork-bg" onerror="this.style.display='none'">` : ''}
+                                    <div class="artwork-overlay"></div>
+
+                                    <div class="player-content">
+                                        <div class="room-name">
+                                            ${device.name}
+                                        </div>
+                                        <div class="now-playing">
+                                            Now Playing
+                                        </div>
+
+                                        <div class="media-info-overlay">
+                                            <div class="media-title">${displayTitle}</div>
+                                            ${displaySubtitle ? `<div class="media-subtitle">${displaySubtitle}</div>` : ''}
+
+                                            <div class="controls-and-progress">
+                                                <div class="controls-row">
+                                                    <div class="control-group-left">
+                                                        <button class="control-btn" onclick="sendAdbCommand('stop', '${device.ip}')" title="Stop">
+                                                            <i class="fas fa-stop"></i>
+                                                        </button>
+                                                    </div>
+                                                    <div class="control-group-center">
+                                                        <button class="control-btn" onclick="sendAdbCommand('previous', '${device.ip}')" title="Previous">
+                                                            <i class="fas fa-step-backward"></i>
+                                                        </button>
+                                                        <button class="control-btn play-pause" onclick="sendAdbCommand('play_pause', '${device.ip}')" title="Play/Pause">
+                                                            <i class="fas ${isPlaying ? 'fa-pause' : 'fa-play'}"></i>
+                                                        </button>
+                                                        <button class="control-btn" onclick="sendAdbCommand('next', '${device.ip}')" title="Next">
+                                                            <i class="fas fa-step-forward"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                ${mediaData.duration > 0 ? `<div class="time-counter">${currentTime} / ${totalTime}</div>` : ''}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                    } catch (error) {
+                        console.error(`Error checking ${device.name}:`, error);
+                    }
+                }
+
+                if (!hasActivity) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-tv"></i>
+                            <p>No active playback<br>Nothing is currently playing</p>
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML = cardsHTML;
+                }
+
+            } catch (error) {
+                console.error('Error loading activity:', error);
+                const container = document.getElementById('devicesContainer');
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <p>Error loading activity</p>
+                    </div>
+                `;
+            }
+        }
+
+        async function sendAdbCommand(action, deviceIp) {
+            try {
+                console.log('Sending ADB command:', action, 'to', deviceIp);
+                const response = await fetch('/api/adb/control', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        device_ip: deviceIp,
+                        command: action
+                    })
+                });
+
+                console.log('Response status:', response.status);
+                const result = await response.json();
+                console.log('Response data:', result);
+
+                if (!result.success) {
+                    console.error('Command failed:', result.error);
+                    alert('Command failed: ' + result.error);
+                } else {
+                    // Reload activity after brief delay
+                    setTimeout(loadActivity, 500);
+                }
+            } catch (error) {
+                console.error('Error sending command:', error);
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // Initial load
+        loadActivity();
+
+        // Auto-refresh every 3 seconds
+        autoRefreshInterval = setInterval(loadActivity, 3000);
+
+        // Clear interval when page is hidden
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    autoRefreshInterval = null;
+                }
+            } else {
+                loadActivity();
+                if (!autoRefreshInterval) {
+                    autoRefreshInterval = setInterval(loadActivity, 3000);
+                }
+            }
+        });
+
+        // Toggle menu function
+        function toggleMenu() {
+            const sideMenu = document.getElementById('sideMenu');
+            const menuOverlay = document.getElementById('menuOverlay');
+            const hamburger = document.getElementById('hamburger');
+
+            sideMenu.classList.toggle('active');
+            menuOverlay.classList.toggle('active');
+            hamburger.classList.toggle('active');
+        }
+    </script>
+</body>
+</html>

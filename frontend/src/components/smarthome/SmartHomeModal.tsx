@@ -824,7 +824,7 @@ export function SmartHomeModal({ open, onClose, defaultAreaId }: SmartHomeModalP
   }, [open, activeAreaId, loadEntities]);
 
   // Live state — poll the active area every 2.5s while the modal is open
-  // so the UI reflects out-of-band changes (other apps,
+  // so the UI reflects out-of-band changes (voice commands via Nova/Alfred,
   // the HA app, automations, etc.) without requiring the user to close and
   // reopen. The sheets guard their sliders against mid-drag overwrites.
   useEffect(() => {

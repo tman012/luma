@@ -87,9 +87,7 @@ def resolve_kodi_file_url(
     return None
 
 
-# Fallback share root for Kodi file URLs when no Kodi source covers a path
-# (e.g. smb://nas). Set KODI_NAS_BASE or the kodi.nas_base setting.
-DEFAULT_NAS_BASE = os.environ.get('KODI_NAS_BASE', '')
+DEFAULT_NAS_BASE = 'smb://192.168.1.25'
 
 
 def kodi_url_for_nas_path(nas_path: str, sources: list | None = None,
@@ -169,7 +167,7 @@ class KodiService:
         """Start playback of a file by its direct URL.
 
         Args:
-            file_url: Full file URL (e.g. "smb://nas/Media/Video/4k/Movie.mkv")
+            file_url: Full file URL (e.g. "smb://192.168.1.25/Media/Video/4k/Movie.mkv")
             resume_offset_ms: Resume position in milliseconds (0 = play from start)
         """
         params: dict = {"item": {"file": file_url}}

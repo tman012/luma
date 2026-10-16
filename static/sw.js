@@ -1,4 +1,4 @@
-// Service Worker for the Luma PWA
+// Service Worker for Bosley Media PWA
 // ============================================================================
 // Cache strategy summary:
 //   Navigation (HTML)       → NetworkFirst (fallback to cached shell)
@@ -17,7 +17,7 @@
 
 // BUILD_ID is replaced at build time or bumped manually per deploy.
 // When sw.js byte-content changes, the browser installs a new SW.
-const CACHE_VERSION = 'media-kiosk-v101';
+const CACHE_VERSION = 'media-kiosk-v100';
 
 // Separate cache for large immutable assets — purged when version bumps
 const IMMUTABLE_CACHE = 'media-immutable-v24';
@@ -238,6 +238,20 @@ const DEEPLINK_KEY = '/pending-deeplink';
 // slower is a page that isn't going to answer at all.
 const ACK_TIMEOUT_MS = 1200;
 
+// TEMPORARY DIAGNOSTIC — remove once the phone deep-link path is understood.
+// An iOS standalone PWA has no reachable console, so the only way to see which
+// branch notificationclick actually took is to make it leave a mark in the
+// server's access log. The path 404s on purpose; the query string is the
+// payload.
+function diag(params) {
+  try {
+    return fetch('/api/_swdiag?' + new URLSearchParams(params).toString(),
+                 { credentials: 'include' }).catch(() => {});
+  } catch (e) {
+    return Promise.resolve();
+  }
+}
+
 function storeDeepLink(url) {
   return caches.open(DEEPLINK_CACHE)
     .then(cache => cache.put(
@@ -290,9 +304,18 @@ self.addEventListener('notificationclick', event => {
   const absoluteUrl = new URL(relativeUrl, self.location.origin).href;
 
   event.waitUntil(
-    storeDeepLink(relativeUrl)
+    diag({ e: 'click', v: CACHE_VERSION, link: relativeUrl })
+      .then(() => storeDeepLink(relativeUrl))
+      .then(() => caches.open(DEEPLINK_CACHE))
+      .then(c => c.match(DEEPLINK_KEY))
+      .then(r => diag({ e: 'stored', v: CACHE_VERSION, ok: r ? 1 : 0 }))
       .then(() => clients.matchAll({ type: 'window', includeUncontrolled: true }))
       .then(async windowClients => {
+      await diag({
+        e: 'clients', v: CACHE_VERSION, n: windowClients.length,
+        urls: windowClients.map(c => c.url.replace(self.location.origin, '')).join(',').slice(0, 120),
+        vis: windowClients.map(c => c.visibilityState || '?').join(','),
+      });
       // Try to find an existing app window to reuse
       for (const client of windowClients) {
         if (new URL(client.url).origin === self.location.origin) {
@@ -307,24 +330,31 @@ self.addEventListener('notificationclick', event => {
           // focus() has to happen promptly while the click still counts as user
           // activation — before we start waiting on anything.
           await client.focus().catch(() => {});
-          if (await acked) return;
+          if (await acked) {
+            await diag({ e: 'branch', v: CACHE_VERSION, b: 'postMessage', acked: 1 });
+            return;
+          }
           // No answer. The page is suspended, or running a build that doesn't
           // know about this message, or the queue never started. Either way the
           // tap must not silently do nothing, so force the window to the link.
           // Costs a reload; landing on the wrong screen costs the whole feature.
+          await diag({ e: 'branch', v: CACHE_VERSION, b: 'no-ack->navigate',
+                       canNav: client.navigate ? 1 : 0 });
           if (client.navigate) {
             try {
               await client.navigate(absoluteUrl);
               return;
             } catch (e) {
-              // fall through to openWindow
+              await diag({ e: 'navfail', v: CACHE_VERSION, msg: String(e).slice(0, 80) });
             }
           }
           return clients.openWindow(absoluteUrl);
         }
       }
+      await diag({ e: 'branch', v: CACHE_VERSION, b: 'openWindow', to: absoluteUrl });
       return clients.openWindow(absoluteUrl);
     }).catch(err => {
+      diag({ e: 'error', v: CACHE_VERSION, msg: String(err).slice(0, 100) });
       console.error('[SW] Notification click error:', err);
       return clients.openWindow(absoluteUrl);
     })

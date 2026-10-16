@@ -295,12 +295,7 @@ def _prepare_vapid(settings_manager):
     if not vapid_pub or not vapid_priv:
         return None
 
-    vapid_email = settings_manager.get("notifications.web_push.vapid_email") or ""
-    if not vapid_email:
-        admin_email = os.environ.get("LUMA_ADMIN_EMAIL", "").strip()
-        vapid_email = f"mailto:{admin_email}" if admin_email else "mailto:admin@example.com"
-    elif not vapid_email.startswith("mailto:"):
-        vapid_email = f"mailto:{vapid_email}"
+    vapid_email = settings_manager.get("notifications.web_push.vapid_email") or "mailto:admin@bosley.media"
     return vapid_pub, vapid_priv, vapid_email
 
 

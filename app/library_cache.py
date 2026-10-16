@@ -886,6 +886,61 @@ class LibraryCache:
             except Exception:
                 pass
 
+    def get_library_stats(self) -> Optional[Dict]:
+        """Get cached library stats"""
+        try:
+            conn = sqlite3.connect(str(self.db_path))
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT stats_json FROM library_stats_cache WHERE id = 1")
+            row = cursor.fetchone()
+            conn.close()
+
+            if row and row['stats_json']:
+                return json.loads(row['stats_json'])
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting cached library stats: {e}")
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return None
+
+    def update_library_stats(self, stats: Dict):
+        """Update library stats cache"""
+        try:
+            start_time = time.time()
+            conn = sqlite3.connect(str(self.db_path))
+            cursor = conn.cursor()
+
+            stats_json = json.dumps(stats)
+            cursor.execute("""
+                INSERT OR REPLACE INTO library_stats_cache (id, stats_json, cached_at)
+                VALUES (1, ?, CURRENT_TIMESTAMP)
+            """, (stats_json,))
+
+            # Update metadata
+            duration_ms = int((time.time() - start_time) * 1000)
+            cursor.execute("""
+                INSERT OR REPLACE INTO cache_metadata (cache_key, last_update, item_count, update_duration_ms)
+                VALUES (?, ?, ?, ?)
+            """, ('library_stats', datetime.now().isoformat(), 1, duration_ms))
+
+            conn.commit()
+            conn.close()
+
+            logger.info(f"Updated library stats cache in {duration_ms}ms")
+
+        except Exception as e:
+            logger.error(f"Error updating library stats cache: {e}")
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     def get_cache_info(self) -> Dict:
         """Get information about all caches"""
         try:

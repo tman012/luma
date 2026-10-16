@@ -58,6 +58,77 @@ _RATE_LIMITED_QUERY_TTL = 3600       # seconds an identical query is served from
 _INTERACTIVE_QUERY_TTL = 600        # user searches: fresher cache
 _INDEXER_STATUS_TTL = 60             # seconds to cache /api/v1/indexerstatus
 
+# --- Universal tracker guard (added 2026-10-13 after IPTorrents warned about ~6000 hits/day) ---
+# Every indexer (not just the AvistaZ family) now gets: an identical-query cache, a background
+# token bucket, a rolling 24 h per-indexer cap, an hourly cap for user searches, and a global
+# hourly cap across all indexers. Counters persist to /app/data so a restart can't reset them.
+_GUARD_QUERY_TTL_BG = 3 * 3600        # identical background query served from cache for 3 h
+_GUARD_QUERY_TTL_USER = 900           # user searches: 15 min
+_GUARD_BUCKET_CAPACITY = 10           # background burst per indexer
+_GUARD_BUCKET_REFILL = 120.0          # one background token per 2 min = 30/h per indexer
+_GUARD_USER_PER_HOUR = 60             # user-initiated searches per indexer per hour
+_GUARD_PER_DAY = 300                  # all searches per indexer per rolling 24 h
+_GUARD_GLOBAL_PER_HOUR = 120          # all searches, all indexers, per hour
+_guard_log: Dict[int, List[float]] = {}   # ix -> send timestamps (24 h)
+_guard_buckets: Dict[int, List[float]] = {}
+_guard_loaded = [False]
+
+
+def _guard_path() -> str:
+    import os
+    return '/app/data/indexer_guard.json' if os.path.isdir('/app/data') else os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'indexer_guard.json')
+
+
+def _guard_load() -> None:
+    if _guard_loaded[0]:
+        return
+    _guard_loaded[0] = True
+    try:
+        import json
+        with open(_guard_path()) as fh:
+            raw = json.load(fh)
+        cutoff = time.time() - 86400
+        for k, v in (raw.get('log') or {}).items():
+            _guard_log[int(k)] = [float(t) for t in v if float(t) > cutoff]
+    except Exception:
+        pass
+
+
+def _guard_save() -> None:
+    try:
+        import json, os
+        path = _guard_path()
+        tmp = path + '.tmp'
+        with open(tmp, 'w') as fh:
+            json.dump({'log': {str(k): v for k, v in _guard_log.items()}}, fh)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+def _guard_counts(ix: int, now: float) -> tuple:
+    """(this indexer last hour, this indexer last 24 h, all indexers last hour). Call under lock."""
+    cutoff_day, cutoff_hr = now - 86400, now - 3600
+    for k in list(_guard_log):
+        _guard_log[k] = [t for t in _guard_log[k] if t > cutoff_day]
+    mine = _guard_log.get(ix, [])
+    return (sum(1 for t in mine if t > cutoff_hr), len(mine),
+            sum(1 for v in _guard_log.values() for t in v if t > cutoff_hr))
+
+
+def _guard_take(ix: int, now: float) -> bool:
+    b = _guard_buckets.get(ix)
+    if b is None:
+        b = _guard_buckets[ix] = [float(_GUARD_BUCKET_CAPACITY), now]
+    b[0] = min(float(_GUARD_BUCKET_CAPACITY), b[0] + (now - b[1]) / _GUARD_BUCKET_REFILL)
+    b[1] = now
+    if b[0] >= 1.0:
+        b[0] -= 1.0
+        return True
+    return False
+
+
 _indexer_locks: Dict[int, threading.Lock] = {}
 _indexer_last_ts: Dict[int, float] = {}
 _indexer_locks_guard = threading.Lock()
@@ -307,6 +378,10 @@ class ProwlarrClient:
         return ids
 
     def _is_rate_limited(self, ix: int) -> bool:
+        # Every indexer is metered (token bucket + query cache + hourly cap).
+        # Previously only AvistaZ-network trackers were, and IPT got ~6000
+        # background searches in a day.
+        return True
         limited = getattr(self, '_ix_rate_limited', None)
         if limited is None:
             self._enabled_indexer_ids()
@@ -382,9 +457,27 @@ class ProwlarrClient:
         """
         single = int(indexer_ids[0]) if indexer_ids and len(indexer_ids) == 1 else None
         if single is None:
+            # unscoped (all indexers at once): same caps, counted under pseudo-indexer -1
+            now = time.time()
+            with _budget_state_guard:
+                _guard_load()
+                hit = _query_cache.get((-1, tuple(params)))
+                if hit and now - hit[0] < (_GUARD_QUERY_TTL_USER if interactive else _GUARD_QUERY_TTL_BG):
+                    return hit[1]
+                hr, day, glob = _guard_counts(-1, now)
+                if day >= _GUARD_PER_DAY or glob >= _GUARD_GLOBAL_PER_HOUR or (
+                        interactive and hr >= _GUARD_USER_PER_HOUR) or (not interactive and not _guard_take(-1, now)):
+                    if hit:
+                        return hit[1]
+                    raise IndexerSkipped('unscoped search over tracker guard')
+                _guard_log.setdefault(-1, []).append(now)
+                _guard_save()
             resp = self.session.get(f'{self.base_url}/api/v1/search', params=params, timeout=60)
             resp.raise_for_status()
-            return resp.json()
+            items = resp.json()
+            with _budget_state_guard:
+                _query_cache[(-1, tuple(params))] = (time.time(), items)
+            return items
 
         till = self._backed_off_until(single)
         if till:
@@ -396,6 +489,35 @@ class ProwlarrClient:
 
         throttle = self._is_rate_limited(single)
         cache_key = (single, tuple(params))
+        # Universal guard: applies to EVERY indexer (IPT included) before anything is sent.
+        now = time.time()
+        with _budget_state_guard:
+            _guard_load()
+            hit = _query_cache.get(cache_key)
+            ttl = _GUARD_QUERY_TTL_USER if interactive else _GUARD_QUERY_TTL_BG
+            if hit and now - hit[0] < ttl:
+                return hit[1]
+            hr, day, glob = _guard_counts(single, now)
+            reason = None
+            if day >= _GUARD_PER_DAY:
+                reason = f'daily cap {_GUARD_PER_DAY}'
+            elif glob >= _GUARD_GLOBAL_PER_HOUR:
+                reason = f'global hourly cap {_GUARD_GLOBAL_PER_HOUR}'
+            elif interactive and hr >= _GUARD_USER_PER_HOUR:
+                reason = f'hourly cap {_GUARD_USER_PER_HOUR}'
+            elif not interactive and not _guard_take(single, now):
+                reason = 'background rate (30/h)'
+        if reason:
+            self._log_skip_once(
+                single, 'guard', int(now // 900),
+                f'{self._indexer_name(single)} (id {single}) search not sent: {reason} '
+                f'({hr} last hour, {day} last 24 h, {glob} all indexers last hour)')
+            if hit:
+                return hit[1]
+            raise IndexerSkipped(f'indexer {single} guard: {reason}')
+        with _budget_state_guard:
+            _guard_log.setdefault(single, []).append(now)
+            _guard_save()
         if throttle:
             now = time.time()
             with _budget_state_guard:
@@ -455,7 +577,7 @@ class ProwlarrClient:
             self._invalidate_backoffs()
         resp.raise_for_status()
         items = resp.json()
-        if throttle:
+        if True:  # universal guard: cache every indexer's answer
             with _budget_state_guard:
                 _query_cache[cache_key] = (time.time(), items)
                 if len(_query_cache) > 500:

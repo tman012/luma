@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-User authentication for Luma.
+User authentication for Luma (TFlix).
 
 Name + PIN login with server-side session tokens stored in SQLite.
 Admin account is seeded on startup only when LUMA_ADMIN_NAME / LUMA_ADMIN_PIN are set.

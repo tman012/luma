@@ -10,9 +10,11 @@ import { uiDensityTokens } from '@/ui/uiDensityTokens';
 import { posterUrl } from '@/utils/image';
 import { useFocusable } from '@/hooks/useFocusable';
 import { FocusZone } from '@/components/tv/FocusZone';
+import { useVoice } from '@/contexts/VoiceContext';
 
 const NAV_ITEMS = [
   { label: 'Explore', to: '/explore' },
+  { label: 'AI', to: null as string | null },   // Opens the Vibe Engine (AI discovery) modal
   { label: 'Library', to: '/browse' },           // Browse the actual Plex library
   { label: 'Watchlist', to: '/watchlist' },
 ] as const;
@@ -24,6 +26,7 @@ function NavItem({ item, isActive }: { item: NavItemType; isActive: boolean }) {
     focusKey: `topbar-${item.label.toLowerCase()}`,
     zoneId: 'topbar-nav',
   });
+  const { openVibeEngine } = useModalHost();
   const d = useUiDensity();
   const tk = uiDensityTokens(d);
 
@@ -34,6 +37,22 @@ function NavItem({ item, isActive }: { item: NavItemType; isActive: boolean }) {
     isActive ? 'text-white' : 'text-white/85',
     focusProps.className,
   );
+
+  // Library opens as a modal instead of navigating
+  if (!item.to) {
+    return (
+      <button
+        ref={ref as React.RefCallback<HTMLButtonElement>}
+        type="button"
+        onClick={openVibeEngine}
+        data-focus-key={focusProps['data-focus-key']}
+        tabIndex={focusProps.tabIndex}
+        className={className}
+      >
+        {item.label}
+      </button>
+    );
+  }
 
   return (
     <Link
@@ -473,6 +492,7 @@ export function TopBar() {
   const { count, items, downloads, rooms, markSeen, clearItems, removeDownload } = useNotificationsContext();
   const [expandedRoom, setExpandedRoom] = useState<string | null>(null);
   const [roomsOpen, setRoomsOpen] = useState(false);
+  useVoice(); // keep context active for wake word
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { openMovie, openTv } = useModalHost();
   const d = useUiDensity();

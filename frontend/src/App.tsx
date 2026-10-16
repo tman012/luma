@@ -14,6 +14,7 @@ import { useKioskMode, invalidateKioskMode } from '@/hooks/useKioskMode';
 import { PageModal } from '@/components/layout/PageModal';
 import { ScreensaverManager } from '@/components/screensaver/ScreensaverManager';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { VoiceProvider } from '@/contexts/VoiceContext';
 import { LoginPage } from '@/pages/LoginPage';
 import { AdminPage } from '@/pages/AdminPage';
 import { UserSetupPage } from '@/pages/UserSetupPage';
@@ -24,8 +25,11 @@ import { AuthenticatedHomePage } from '@/pages/AuthenticatedHomePage';
 
 // Lazy-load non-home routes — keeps initial bundle small
 const ExploreKioskPage = lazy(() => import('@/pages/ExploreKioskPage').then(m => ({ default: m.ExploreKioskPage })));
+const VibeEnginePage = lazy(() => import('@/pages/VibeEnginePage').then(m => ({ default: m.VibeEnginePage })));
 const NowAvailablePage = lazy(() => import('@/pages/NowAvailablePage').then(m => ({ default: m.NowAvailablePage })));
 const WatchlistPage = lazy(() => import('@/pages/WatchlistPage').then(m => ({ default: m.WatchlistPage })));
+const DownloadHistoryPage = lazy(() => import('@/pages/DownloadHistoryPage').then(m => ({ default: m.DownloadHistoryPage })));
+const DescribeItPage = lazy(() => import('@/pages/DescribeItPage').then(m => ({ default: m.DescribeItPage })));
 const BrowseLibraryPage = lazy(() => import('@/pages/BrowseLibraryPage').then(m => ({ default: m.BrowseLibraryPage })));
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const MySettingsPage = lazy(() => import('@/pages/MySettingsPage').then(m => ({ default: m.MySettingsPage })));
@@ -206,6 +210,7 @@ export default function App() {
           <LayoutModeProvider>
             <SpatialNavProvider>
               <AppModalHost>
+                <VoiceProvider>
                 <NotificationsProvider>
                 {/* Always-mounted search overlay so the TopBar search works on
                     every page/state (was in HeroSection → dead when no Hero). */}
@@ -253,6 +258,7 @@ export default function App() {
                   </Routes>
                 </Suspense>
                 </NotificationsProvider>
+                </VoiceProvider>
                 {/* ScreensaverManager outside auth gate — harmless when not logged in */}
               </AppModalHost>
             </SpatialNavProvider>
@@ -288,10 +294,12 @@ function AppRoutes() {
         <Routes>
           {/* Pages — wrapped in PageModal for expanded mode */}
           <Route path="explore" element={isExpanded ? <PageModal><ExploreKioskPage /></PageModal> : <ExploreKioskPage />} />
-          <Route path="library" element={<Navigate to="/browse" replace />} />
+          <Route path="library" element={isExpanded ? <Navigate to="/browse" replace /> : <VibeEnginePage />} />
           <Route path="rooms" element={<Navigate to="/" replace />} />
           <Route path="now-available" element={isExpanded ? <PageModal><NowAvailablePage /></PageModal> : <NowAvailablePage />} />
           <Route path="watchlist" element={isExpanded ? <PageModal><WatchlistPage /></PageModal> : <WatchlistPage />} />
+          <Route path="downloads" element={isExpanded ? <PageModal><DownloadHistoryPage /></PageModal> : <DownloadHistoryPage />} />
+          <Route path="describe-it" element={isExpanded ? <PageModal><DescribeItPage /></PageModal> : <DescribeItPage />} />
           <Route path="browse" element={isExpanded ? <PageModal><BrowseLibraryPage /></PageModal> : <BrowseLibraryPage />} />
           <Route path="upgrades" element={<Navigate to="/" replace />} />
           <Route path="settings" element={isExpanded ? <PageModal><AdminGate><SettingsPage /></AdminGate></PageModal> : <AdminGate><SettingsPage /></AdminGate>} />

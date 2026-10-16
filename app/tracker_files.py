@@ -8,7 +8,7 @@ returns the mapping keyed the way the filesystem is keyed — by top-level entry
 name.
 
 Attribution is by ANNOUNCE HOST, not by qBittorrent category. The categories
-here say who *asked* for the download (radarr / tv-sonarr / the Luma app category),
+here say who *asked* for the download (radarr / tv-sonarr / media-search-app),
 which is orthogonal: a Sonarr grab and a Radarr grab can both come from
 IPTorrents. The announce URL is the only field that identifies the tracker.
 

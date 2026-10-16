@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Sonarr API integration for Luma
+Sonarr API integration for media-search-app
 Handles TV show management through Sonarr
 """
 

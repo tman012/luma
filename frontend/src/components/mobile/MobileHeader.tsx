@@ -3,6 +3,7 @@ import { MobileSearchOverlay } from './MobileSearchOverlay';
 import { MobileSideMenu } from './MobileSideMenu';
 import { RoomsSheet } from '@/components/rooms/RoomsSheet';
 import { LibrariesSheet } from '@/components/libraries/LibrariesSheet';
+import { useModalHost } from '@/contexts/ModalHostContext';
 
 interface PersonSearchRequest {
   name: string;
@@ -29,6 +30,7 @@ export function MobileHeader({ scrolled = false, hideSearch = false, onHeightCha
   const [personRequest, setPersonRequest] = useState<PersonSearchRequest | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const headerRef = useRef<HTMLElement>(null);
+  const { openVibeEngine } = useModalHost();
 
   // Measure and report header height after mount and on resize
   useLayoutEffect(() => {
@@ -132,7 +134,7 @@ export function MobileHeader({ scrolled = false, hideSearch = false, onHeightCha
       </header>
 
       {/* Side menu */}
-      <MobileSideMenu open={menuOpen} onClose={() => setMenuOpen(false)} onRoomsOpen={() => setRoomsOpen(true)} onLibrariesOpen={() => setLibrariesOpen(true)} />
+      <MobileSideMenu open={menuOpen} onClose={() => setMenuOpen(false)} onRoomsOpen={() => setRoomsOpen(true)} onVibeOpen={openVibeEngine} onLibrariesOpen={() => setLibrariesOpen(true)} />
 
       {/* Rooms bottom sheet */}
       <RoomsSheet open={roomsOpen} onClose={() => setRoomsOpen(false)} />

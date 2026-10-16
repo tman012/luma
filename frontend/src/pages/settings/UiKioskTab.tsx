@@ -74,14 +74,14 @@ const NEWS_PATHS = [
 ];
 
 const NEWS_FEEDS = [
-  { value: 'https://feeds.bbci.co.uk/news/rss.xml', label: 'BBC News: Top Stories' },
-  { value: 'https://feeds.bbci.co.uk/news/world/rss.xml', label: 'BBC News: World' },
-  { value: 'https://feeds.bbci.co.uk/news/technology/rss.xml', label: 'BBC News: Technology' },
-  { value: 'https://feeds.bbci.co.uk/news/science_and_environment/rss.xml', label: 'BBC News: Science' },
-  { value: 'https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml', label: 'BBC News: Entertainment' },
-  { value: 'https://feeds.bbci.co.uk/news/health/rss.xml', label: 'BBC News: Health' },
-  { value: 'https://feeds.npr.org/1001/rss.xml', label: 'NPR News' },
-]
+  { value: 'https://moxie.foxnews.com/google-publisher/politics.xml', label: 'Fox News Politics' },
+  { value: 'https://moxie.foxnews.com/google-publisher/latest.xml', label: 'Fox News Latest' },
+  { value: 'https://moxie.foxnews.com/google-publisher/us.xml', label: 'Fox News US' },
+  { value: 'https://moxie.foxnews.com/google-publisher/world.xml', label: 'Fox News World' },
+  { value: 'https://moxie.foxnews.com/google-publisher/entertainment.xml', label: 'Fox News Entertainment' },
+  { value: 'https://moxie.foxnews.com/google-publisher/sports.xml', label: 'Fox News Sports' },
+  { value: 'https://moxie.foxnews.com/google-publisher/health.xml', label: 'Fox News Health' },
+];
 
 const MLB_TEAMS = [
   { id: 108, name: 'Los Angeles Angels' },
@@ -267,7 +267,7 @@ export function UiKioskTab() {
             </select>
             <span className="text-[11px] text-white/30">
               {haEnabled
-                ? 'Pulled from Home Assistant. Examples: Living Room, Office, Bedroom.'
+                ? 'Pulled from Home Assistant. Examples: Kitchen, Living Room, Master Bedroom.'
                 : 'Home Assistant not connected.'}
             </span>
           </div>
@@ -393,7 +393,7 @@ export function UiKioskTab() {
                 <div className="sm:col-span-2 flex flex-col gap-1.5">
                   <label className="text-[14px] font-medium text-white/60">Team</label>
                   <select
-                    value={String(getByPath('ui.daily_kiosk.sports.team_id') ?? 0)}
+                    value={String(getByPath('ui.daily_kiosk.sports.team_id') ?? 110)}
                     onChange={(e) => {
                       const id = Number(e.target.value);
                       const team = MLB_TEAMS.find((t) => t.id === id);
@@ -402,7 +402,6 @@ export function UiKioskTab() {
                     }}
                     className="w-full min-h-[44px] rounded-lg border border-white/10 bg-white/5 px-3 py-3 text-[15px] text-white outline-none transition-colors focus:border-white/20 focus:bg-white/8 cursor-pointer"
                   >
-                    <option value="0" className="bg-kiosk-black text-white">Choose a team…</option>
                     {MLB_TEAMS.map((t) => (
                       <option key={t.id} value={t.id} className="bg-kiosk-black text-white">
                         {t.name}
@@ -450,15 +449,6 @@ export function UiKioskTab() {
                     }}
                     className="w-full min-h-[44px] rounded-lg border border-white/10 bg-white/5 px-3 py-3 text-[15px] text-white outline-none transition-colors focus:border-white/20 focus:bg-white/8 cursor-pointer"
                   >
-                    <option value="" className="bg-kiosk-black text-white">Choose a feed…</option>
-                    {(() => {
-                      const cur = String(getByPath('ui.daily_kiosk.news.feed_url') ?? '');
-                      return cur && !NEWS_FEEDS.some((f) => f.value === cur) ? (
-                        <option value={cur} className="bg-kiosk-black text-white">
-                          {String(getByPath('ui.daily_kiosk.news.feed_name') ?? '') || cur}
-                        </option>
-                      ) : null;
-                    })()}
                     {NEWS_FEEDS.map((f) => (
                       <option key={f.value} value={f.value} className="bg-kiosk-black text-white">
                         {f.label}
@@ -470,7 +460,7 @@ export function UiKioskTab() {
                 <FormField
                   label="Display Name"
                   path="ui.daily_kiosk.news.feed_name"
-                  placeholder="BBC News"
+                  placeholder="Fox News Politics"
                   hint="Label shown on the widget"
                 />
               </SettingsCard>

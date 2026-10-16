@@ -531,6 +531,10 @@ class UpgradeFinder:
                     results = client._search_single(query, '2000', 100)
                     parsed = client._parse_items(results)
                 except Exception as e:
+                    if type(e).__name__ == 'IndexerSkipped':
+                        # tracker guard / backoff: stop here, don't mark the rest as searched
+                        logger.info(f"Upgrade batch paused at '{title}': {e}")
+                        break
                     logger.warning(f"Indexer search failed for '{title}': {e}")
                     conn.execute("""
                         INSERT OR REPLACE INTO upgrade_results
@@ -1051,7 +1055,7 @@ class UpgradeFinder:
     def get_top_rated_upgrades(self, quality: str = '4k_remux',
                                min_rt_score: int = 70,
                                limit: int = 20) -> Dict:
-        """Get upgrades sorted by RT score.
+        """Get upgrades sorted by RT score for Alfred auto-grab.
 
         Returns upgrades that have RT scores above the threshold,
         sorted by combined RT score (critic + audience average).

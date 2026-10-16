@@ -14,8 +14,17 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-# Plex section type → (media_type, plex_type). plex_type: 1 = movies, 2 = shows
-_SECTION_TYPES = {'movie': ('movie', 1), 'show': ('show', 2)}
+# Sections to index: id → (name, media_type, plex_type)
+# plex_type: 1 = movies, 2 = shows
+INDEXED_SECTIONS = {
+    1: ('Recently Released', 'movie', 1),
+    2: ('Movies', 'movie', 1),
+    4: ('4K Movies', 'movie', 1),
+    7: ('Full Rips', 'movie', 1),
+    3: ('TV Shows', 'show', 2),
+    9: ('Remux TV', 'show', 2),
+    13: ('4K TV', 'show', 2),
+}
 
 REFRESH_INTERVAL = 900  # 15 minutes
 
@@ -29,45 +38,10 @@ class FastSearchIndex:
         self._last_refresh: float = 0.0
         self._refreshing = False
         self._initialized = False
-        self._sections: List[int] = []
 
     # ------------------------------------------------------------------
     # Config (pulled lazily from settings each refresh so token changes work)
     # ------------------------------------------------------------------
-
-    def _wanted_section_ids(self) -> List[int]:
-        """``plex.search_section_ids`` from settings; empty = every movie/show section."""
-        try:
-            from app.settings_manager import SettingsManager
-            ids = SettingsManager().get('plex.search_section_ids', []) or []
-            return [int(x) for x in ids]
-        except Exception:
-            return []
-
-    def _discover_sections(self, plex_url: str, plex_token: str):
-        """Return [(section_id, title, media_type, plex_type)] for the sections to index."""
-        try:
-            resp = requests.get(f"{plex_url}/library/sections",
-                                params={'X-Plex-Token': plex_token},
-                                headers={'Accept': 'application/json'}, timeout=15)
-            resp.raise_for_status()
-            dirs = resp.json().get('MediaContainer', {}).get('Directory', []) or []
-        except Exception as e:
-            logger.error(f"fast_search: could not list Plex sections: {e}")
-            return []
-        found = {}
-        for d in dirs:
-            kind = _SECTION_TYPES.get(d.get('type'))
-            try:
-                sid = int(d.get('key'))
-            except (TypeError, ValueError):
-                continue
-            if kind:
-                found[sid] = (sid, d.get('title') or f'Section {sid}', kind[0], kind[1])
-        wanted = self._wanted_section_ids()
-        if wanted:
-            return [found[s] for s in wanted if s in found]
-        return list(found.values())
 
     def _get_plex_config(self):
         """Return (plex_url, plex_token) from settings manager."""
@@ -79,7 +53,7 @@ class FastSearchIndex:
             return url.rstrip('/'), token
         except Exception as e:
             logger.warning(f"fast_search: could not load settings ({e}), using defaults")
-            return '', ''
+            return '', ''  # scrubbed: hardcoded Plex URL/token removed for repo
 
     # ------------------------------------------------------------------
     # Index loading
@@ -167,11 +141,7 @@ class FastSearchIndex:
         def fetch(sid, sname, media_type, plex_type):
             results[sid] = self._fetch_section(plex_url, plex_token, sid, sname, media_type, plex_type)
 
-        sections = self._discover_sections(plex_url, plex_token)
-        if not sections:
-            logger.warning("fast_search: no Plex movie/show sections found, skipping index build")
-            return
-        for sid, sname, media_type, plex_type in sections:
+        for sid, (sname, media_type, plex_type) in INDEXED_SECTIONS.items():
             t = threading.Thread(target=fetch, args=(sid, sname, media_type, plex_type), daemon=True)
             t.start()
             threads.append(t)
@@ -179,11 +149,10 @@ class FastSearchIndex:
         for t in threads:
             t.join()
 
-        for sid, *_ in sections:
+        for sid in INDEXED_SECTIONS:
             all_items.extend(results.get(sid, []))
 
         with self._lock:
-            self._sections = [sid for sid, *_ in sections]
             self._index = all_items
             self._last_refresh = time.time()
             self._initialized = True
@@ -298,7 +267,7 @@ class FastSearchIndex:
                 'total_shows': show_count,
                 'last_refresh': self._last_refresh,
                 'last_refresh_age_seconds': int(time.time() - self._last_refresh) if self._last_refresh else None,
-                'sections': list(self._sections),
+                'sections': list(INDEXED_SECTIONS.keys()),
             }
 
 

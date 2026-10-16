@@ -6,7 +6,7 @@ Latest sheet in the kiosk UI) and auto-grabs releases that:
 
   • were published within the configured max_age window (default 24h),
   • have at least min_seeders seeders (default 60),
-  • match the configured quality profile (the user's standard profile by default).
+  • match the configured quality profile (the user's TFlix profile by default).
 
 The grab path is identical to what the Latest sheet's download button uses
 (`/api/indexer/grab` semantics → add-if-missing → Radarr push_release), so
@@ -29,35 +29,33 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
-from app.automation_features import is_enabled as _automation_enabled
-
 logger = logging.getLogger(__name__)
 
-# ── standard release eligibility ─────────────────────────────────────────────
-# Mirror the standard (720p/1080p) Radarr quality profile so we only ever grab (and add to
+# ── TFlix release eligibility ─────────────────────────────────────────────
+# Mirror the Radarr "TFlix" quality profile so we only ever grab (and add to
 # Radarr) releases that actually qualify — instead of adding first and letting
 # Radarr reject them, which left "ghost" monitored-but-empty movies behind.
 #
-# The standard profile accepts: 720p / 1080p, from WEB-DL / WEBRip / Bluray, NOT remux, and
+# TFlix accepts: 720p / 1080p, from WEB-DL / WEBRip / Bluray, NOT remux, and
 # NOT x265/HEVC (the profile's "no x265" custom format scores those out).
-_STANDARD_RESOLUTIONS = {'720p', '1080p'}
-_STANDARD_SOURCES = {'WEBDL', 'WEBRIP', 'BLURAY'}
+_TFLIX_RESOLUTIONS = {'720p', '1080p'}
+_TFLIX_SOURCES = {'WEBDL', 'WEBRIP', 'BLURAY'}
 _X265_RE = re.compile(r'(x\.?\s?265|h\.?\s?265|hevc)', re.IGNORECASE)
 
 
-def _matches_standard(item: Dict[str, Any]) -> tuple[bool, str]:
-    """Return (eligible, reason). Eligible means the release matches the standard
+def _matches_tflix(item: Dict[str, Any]) -> tuple[bool, str]:
+    """Return (eligible, reason). Eligible means the release matches the TFlix
     profile, so it's worth adding to Radarr and grabbing."""
     resolution = (item.get('resolution') or '').lower()
     # Normalize source: drop spaces/hyphens so 'WEB-DL' -> 'WEBDL', 'Blu-Ray' -> 'BLURAY'.
     source = (item.get('source') or '').upper().replace(' ', '').replace('-', '')
     name = item.get('torrent_name') or item.get('title') or ''
 
-    if resolution not in _STANDARD_RESOLUTIONS:
+    if resolution not in _TFLIX_RESOLUTIONS:
         return False, f"{resolution or '?'} (only 720p/1080p)"
     if 'REMUX' in source:
         return False, 'remux'
-    if source not in _STANDARD_SOURCES:
+    if source not in _TFLIX_SOURCES:
         return False, f"{item.get('source') or '?'} (only WEB-DL/WEBRip/Bluray)"
     if _X265_RE.search(name):
         return False, 'x265/HEVC'
@@ -228,7 +226,7 @@ def _run_cycle(force: bool = False) -> None:
     settings = SettingsManager()
 
     if not force:
-        enabled = _automation_enabled(settings, 'latest_auto_grab')
+        enabled = settings.get('automation.latest_auto_grab.enabled', False)
         if not enabled:
             logger.debug('Latest auto-grab disabled, skipping cycle')
             return
@@ -281,11 +279,11 @@ def _pub_date_age_hours(pub_date_str: str) -> float:
 
 def _build_non_4k_plex_tmdb_ids(plex_service, section_4k_id: int) -> set:
     """Walk every Plex movie section EXCEPT the configured 4K one and collect
-    tmdb_ids. A candidate that hits this set is one we already own in standard-
+    tmdb_ids. A candidate that hits this set is one we already own in TFlix-
     profile terms (1080p / mixed quality), so Latest auto-grab skips it.
 
     Movies that exist ONLY in the 4K section are intentionally NOT in this
-    set — standard profile doesn't include 2160p Remux, so we still want to
+    set — TFlix profile doesn't include 2160p Remux, so we still want to
     grab the matching 1080p/Remux version for the rest of the library.
     """
     tmdb_ids: set = set()
@@ -402,7 +400,7 @@ def _do_cycle(settings) -> Dict[str, Any]:
 
     # ── Filter to candidates ──────────────────────────────────────
     candidates = []
-    skipped_not_standard = 0
+    skipped_not_tflix = 0
     for item in items:
         seeders = item.get('seeders') or 0
         if seeders < min_seeders:
@@ -420,14 +418,14 @@ def _do_cycle(settings) -> Dict[str, Any]:
             # We already grabbed *something* for this movie via this
             # automation — skip even if it's a different release.
             continue
-        # Only consider releases that actually match the standard profile. This is
+        # Only consider releases that actually match the TFlix profile. This is
         # done up front so non-matching releases (2160p, remux, x265, etc.) are
         # never added to Radarr just to be rejected.
-        eligible, reason = _matches_standard(item)
+        eligible, reason = _matches_tflix(item)
         if not eligible:
-            skipped_not_standard += 1
+            skipped_not_tflix += 1
             title = item.get('display_title') or item.get('title') or '?'
-            logger.debug(f"Latest auto-grab: skipped '{title}' — not standard-eligible: {reason}")
+            logger.debug(f"Latest auto-grab: skipped '{title}' — not TFlix-eligible: {reason}")
             continue
         candidates.append(item)
 
@@ -437,14 +435,14 @@ def _do_cycle(settings) -> Dict[str, Any]:
 
     logger.info(
         f'Latest auto-grab: checked={len(items)} candidates_in_window='
-        f'{len(candidates)} skipped_not_standard={skipped_not_standard} '
+        f'{len(candidates)} skipped_not_tflix={skipped_not_tflix} '
         f'min_seeders={min_seeders} max_age_hours={max_age_hours}'
     )
 
     # ── Build the Plex "non-4K ownership" set once per cycle ──────────
     # A movie that exists in any movie section EXCEPT the 4K one counts as
     # already-owned for Latest's purposes. Movies that exist ONLY in the 4K
-    # section are still grab targets, because the standard profile doesn't
+    # section are still grab targets, because the TFlix profile doesn't
     # overlap with 2160p Remux.
     non_4k_tmdb_ids = _build_non_4k_plex_tmdb_ids(plex_service, section_4k_id)
     logger.info(
@@ -476,7 +474,7 @@ def _do_cycle(settings) -> Dict[str, Any]:
         if tmdb_id in grabbed_this_cycle:
             continue
 
-        # Plex-based ownership skip: we already have a standard-quality copy.
+        # Plex-based ownership skip: we already have a TFlix-quality copy.
         # IMPORTANT: do NOT write to state here — Plex is the source of truth
         # and we want to re-check Plex every cycle. If we marked this in
         # state, a later library re-org or section move would never re-grab.
@@ -514,7 +512,7 @@ def _do_cycle(settings) -> Dict[str, Any]:
             else:
                 # Movie already exists in Radarr (possibly from the 4K auto-
                 # grab which set the 4K-only profile). Force the profile to
-                # this automation's standard profile so Radarr will accept our
+                # this automation's TFlix profile so Radarr will accept our
                 # 1080p/mixed-quality push. The 4K release is already on disk
                 # at this point — the profile change only affects future
                 # Radarr-initiated upgrades, which is harmless.
@@ -531,7 +529,7 @@ def _do_cycle(settings) -> Dict[str, Any]:
                         existing = updated
                         logger.info(
                             f"Latest auto-grab: flipped Radarr movie tmdb_id={tmdb_id} "
-                            f"to standard profile {quality_profile_id} for push"
+                            f"to TFlix profile {quality_profile_id} for push"
                         )
 
             movie_id = existing.get('id')
