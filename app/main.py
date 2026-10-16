@@ -87,6 +87,17 @@ app = Flask(__name__,
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or _INSTALL_SECRETS['flask_secret_key']
 CORS(app)
 
+# Apply URL base via WSGI middleware
+from app.server_config import get_url_base
+_URL_BASE = get_url_base()
+if _URL_BASE:
+    from werkzeug.middleware.dispatcher import DispatcherMiddleware
+    # Wrap the app so all routes are prefixed with URL base
+    app.wsgi_app = DispatcherMiddleware(
+        lambda environ, start_response: [b'Not Found'],
+        {_URL_BASE: app.wsgi_app}
+    )
+
 # Lazy import after constants are defined
 def _register_bot_api():
     """Register bot API routes after LUMA_SESSION_COOKIE and _INSTALL_SECRETS are available."""
@@ -15596,14 +15607,16 @@ def screensaver_image_proxy():
 @app.route('/manifest.json')
 def manifest():
     """PWA manifest — app is always Luma."""
+    from app.server_config import get_url_base
     sm = SettingsManager()
     theme = sm.get("ui.theme_color") or "#0a0a0a"
+    url_base = get_url_base() or '/'
     data = {
         "name": "Luma",
         "short_name": "Luma",
         "description": "Your personal media library and search",
-        "start_url": "/",
-        "scope": "/",
+        "start_url": url_base if url_base != '/' else "/",
+        "scope": url_base if url_base != '/' else "/",
         "display": "standalone",
         "background_color": "#1a1a1a",
         "theme_color": theme,
@@ -15618,9 +15631,11 @@ def manifest():
 @app.route('/sw.js')
 def service_worker():
     """Service Worker file — short cache so updates propagate quickly."""
+    from app.server_config import get_url_base
     resp = send_from_directory('/app/static', 'sw.js')
     resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
-    resp.headers['Service-Worker-Allowed'] = '/'
+    url_base = get_url_base() or '/'
+    resp.headers['Service-Worker-Allowed'] = url_base
     return resp
 
 @app.route('/ca.crt')
@@ -17726,8 +17741,36 @@ if __name__ == '__main__':
             logger.error(f"Cloudflare Tunnel auto-start failed: {e}")
 
     # Run the app
-    port = settings.get('network.flask_port', 5001)
+    from app.server_config import get_port, get_bind_address, get_https_cert
+    
+    port = get_port()
+    bind = get_bind_address()
+    https_config = get_https_cert()
     debug = os.environ.get('FLASK_ENV', 'production') == 'development'
 
-    logger.info(f"Starting Media Search App on port {port}")
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    if https_config:
+        # HTTPS: use gunicorn with cert and key
+        cert_path, key_path = https_config
+        logger.info(f"Starting Media Search App on https://{bind}:{port} with TLS")
+        
+        # Build gunicorn command
+        import sys
+        gunicorn_cmd = [
+            sys.executable, '-m', 'gunicorn',
+            '--bind', f'{bind}:{port}',
+            '--certfile', cert_path,
+            '--keyfile', key_path,
+            '--workers', '4',
+            '--worker-class', 'sync',
+            '--timeout', '120',
+            '--access-logfile', '-',
+            '--error-logfile', '-',
+            'app.main:app'
+        ]
+        
+        import subprocess
+        os.execvp(sys.executable, gunicorn_cmd)
+    else:
+        # HTTP: use Flask dev server
+        logger.info(f"Starting Media Search App on http://{bind}:{port}")
+        app.run(host=bind, port=port, debug=debug)

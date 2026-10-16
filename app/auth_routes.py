@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, make_response, redirect, url_for, render_template_string
 from werkzeug.security import check_password_hash
 import app.user_auth as user_auth
+from app.server_config import get_url_base
 
 logger = logging.getLogger(__name__)
 
@@ -253,13 +254,17 @@ def login():
     # Secure flag if HTTPS
     secure = request.is_secure
     
+    # Cookie path respects URL base
+    url_base = get_url_base() or '/'
+    
     response.set_cookie(
         AUTH_COOKIE,
         token,
         max_age=max_age,
         httponly=True,
         samesite='Lax',
-        secure=secure
+        secure=secure,
+        path=url_base
     )
     
     logger.info(f"[auth] Successful login for user {username} from {client_ip}")
@@ -274,8 +279,11 @@ def logout():
     if token:
         user_auth.delete_session(token)
     
-    response = make_response(redirect('/login'))
-    response.delete_cookie(AUTH_COOKIE)
+    url_base = get_url_base() or '/'
+    login_url = (url_base.rstrip('/') + '/login') if url_base != '/' else '/login'
+    
+    response = make_response(redirect(login_url))
+    response.delete_cookie(AUTH_COOKIE, path=url_base)
     
     return response
 
