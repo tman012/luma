@@ -167,14 +167,14 @@ export function IndexerCard() {
 
   if (backend !== 'luma') {
     return (
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6">
+      <div className="rounded-lg border border-white/10 bg-white/[0.04] p-6">
         <h3 className="text-lg font-medium text-white mb-4">Indexers</h3>
         <label className="flex items-center gap-3 text-sm text-zinc-300">
           <input
             type="checkbox"
             checked={backend === 'luma'}
             onChange={(e) => setByPath('indexer.backend', e.target.checked ? 'luma' : 'prowlarr')}
-            className="rounded bg-zinc-800 border-zinc-700"
+            className="rounded bg-white/10 border-white/20"
           />
           Use Luma backend
         </label>
@@ -183,14 +183,14 @@ export function IndexerCard() {
   }
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6">
+    <div className="rounded-lg border border-white/10 bg-white/[0.04] p-6">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-medium text-white">Indexers</h3>
         <div className="flex gap-2">
           <button
             onClick={handleImport}
             disabled={importing}
-            className="px-3 py-1 text-xs bg-zinc-800 hover:bg-zinc-700 text-white rounded"
+            className="px-3 py-1 text-xs bg-white/10 hover:bg-white/15 text-white rounded"
           >
             {importing ? 'Importing...' : 'Import from Prowlarr'}
           </button>
@@ -204,7 +204,7 @@ export function IndexerCard() {
       </div>
 
       {importResult && (
-        <div className="mb-4 p-3 text-sm bg-zinc-800 border border-zinc-700 rounded">
+        <div className="mb-4 p-3 text-sm bg-white/5 border border-white/10 rounded">
           {importResult}
         </div>
       )}
@@ -252,7 +252,7 @@ function IndexerRow({
   testResult?: { success: boolean; message: string };
 }) {
   return (
-    <div className="p-3 bg-zinc-800/50 rounded border border-zinc-700 space-y-2">
+    <div className="p-3 bg-white/5 rounded border border-white/10 space-y-2">
       <div className="flex items-center gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -269,13 +269,13 @@ function IndexerRow({
         <div className="flex gap-1">
           <button
             onClick={() => onTest(indexer.id)}
-            className="px-2 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 text-white rounded"
+            className="px-2 py-1 text-xs bg-white/10 hover:bg-white/15 text-white rounded"
           >
             Test
           </button>
           <button
             onClick={() => onEdit(indexer)}
-            className="px-2 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 text-white rounded"
+            className="px-2 py-1 text-xs bg-white/10 hover:bg-white/15 text-white rounded"
           >
             Edit
           </button>
@@ -325,18 +325,18 @@ function IndexerForm({
   };
 
   return (
-    <div className="p-4 bg-zinc-800 rounded border border-zinc-700 space-y-3">
+    <div className="p-4 bg-white/5 rounded border border-white/10 space-y-3">
       <input
         type="text"
         placeholder="Name"
         value={form.name || ''}
         onChange={(e) => setForm({ ...form, name: e.target.value })}
-        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white placeholder:text-zinc-600"
+        className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-zinc-600"
       />
       <select
         value={form.type || 'torznab'}
         onChange={(e) => setForm({ ...form, type: e.target.value as 'torznab' | 'newznab' })}
-        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white"
+        className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white"
       >
         <option value="torznab">Torznab</option>
         <option value="newznab">Newznab</option>
@@ -346,14 +346,14 @@ function IndexerForm({
         placeholder="URL"
         value={form.url || ''}
         onChange={(e) => setForm({ ...form, url: e.target.value })}
-        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white placeholder:text-zinc-600"
+        className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-zinc-600"
       />
       <input
         type="password"
         placeholder="API Key"
         value={form.api_key === '********' ? '' : (form.api_key || '')}
         onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white placeholder:text-zinc-600"
+        className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-zinc-600"
       />
       <div className="flex gap-3">
         <input
@@ -361,14 +361,14 @@ function IndexerForm({
           placeholder="Categories"
           value={form.categories || ''}
           onChange={(e) => setForm({ ...form, categories: e.target.value })}
-          className="flex-1 px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white placeholder:text-zinc-600"
+          className="flex-1 px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-zinc-600"
         />
         <input
           type="number"
           placeholder="Priority"
           value={form.priority ?? 100}
           onChange={(e) => setForm({ ...form, priority: parseInt(e.target.value) || 100 })}
-          className="w-24 px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white placeholder:text-zinc-600"
+          className="w-24 px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-zinc-600"
         />
       </div>
       <label className="flex items-center gap-2 text-sm text-zinc-300">
@@ -376,7 +376,7 @@ function IndexerForm({
           type="checkbox"
           checked={form.enabled ?? true}
           onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-          className="rounded bg-zinc-700 border-zinc-600"
+          className="rounded bg-white/10 border-white/20"
         />
         Enabled
       </label>
@@ -385,7 +385,7 @@ function IndexerForm({
           type="checkbox"
           checked={hasRateLimit}
           onChange={(e) => handleRateLimitToggle(e.target.checked)}
-          className="rounded bg-zinc-700 border-zinc-600"
+          className="rounded bg-white/10 border-white/20"
         />
         Rate limit
       </label>
@@ -405,7 +405,7 @@ function IndexerForm({
                     rate_limit: { ...form.rate_limit!, requests: parseInt(e.target.value) || 10 },
                   })
                 }
-                className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white"
+                className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white"
               />
             </div>
             <div className="flex-1">
@@ -421,14 +421,14 @@ function IndexerForm({
                     rate_limit: { ...form.rate_limit!, period_seconds: parseInt(e.target.value) || 3600 },
                   })
                 }
-                className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white"
+                className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white"
               />
             </div>
           </div>
         </div>
       )}
       <div className="flex gap-2 justify-end">
-        <button onClick={onCancel} className="px-3 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 text-white rounded">
+        <button onClick={onCancel} className="px-3 py-1 text-xs bg-white/10 hover:bg-white/15 text-white rounded">
           Cancel
         </button>
         <button onClick={onSave} className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white rounded">
