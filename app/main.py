@@ -1540,8 +1540,12 @@ def tmdb_match_search():
         for mtype in types:
             _, items = _fetch(mtype)
             
-            # If results are weak, try spelling correction
-            if len(items) < 3 and len(query) > 3:
+            # Calculate best popularity from results
+            best_pop = max((item.get('popularity', 0) or 0 for item in items[:5]), default=0)
+            weak_results = len(items) < 3 or (len(items) > 0 and best_pop < 20)
+            
+            # If results are weak (low count or low popularity), try spelling correction
+            if weak_results and len(query) > 3:
                 try:
                     corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
                     if corrected and corrected != query.lower():
@@ -4092,9 +4096,21 @@ def search():
 
     results['people'] = raw.get('people', [])
 
-    # Spelling correction fallback: if TMDb results are weak or empty, try corrected query
+    # Spelling correction fallback: if TMDb results are weak (low count or low popularity), try corrected query
     total_results = len(raw.get('multi', [])) + len(raw.get('movies', [])) + len(raw.get('tv_shows', []))
-    if total_results < 3 and len(query) > 3:  # Weak results, try spelling correction
+    
+    # Calculate best popularity score from results
+    best_popularity = 0.0
+    for item_list in [raw.get('multi', []), raw.get('movies', []), raw.get('tv_shows', [])]:
+        for item in item_list[:5]:  # Check top 5 results
+            pop = item.get('popularity', 0) or 0
+            if pop > best_popularity:
+                best_popularity = pop
+    
+    # Trigger correction if results are weak: < 3 items OR best popularity < 20
+    weak_results = total_results < 3 or (total_results > 0 and best_popularity < 20)
+    
+    if weak_results and len(query) > 3:  # Weak results, try spelling correction
         try:
             corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
             if corrected and corrected != query.lower():

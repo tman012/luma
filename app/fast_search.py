@@ -167,13 +167,27 @@ def fuzzy_match_score(query: str, title: str, query_norm: str, title_norm: str) 
 def calculate_popularity_score(item: Dict[str, Any]) -> float:
     """
     Calculate popularity score for ranking.
-    Uses viewCount as a proxy for popularity/quality.
+    Uses IMDb/TMDb ratings, audience ratings, and viewCount.
+    Priority: rating > audienceRating > viewCount.
     """
+    import math
+    
+    # Use IMDb/TMDb rating if available (0-10 scale)
+    rating = item.get('rating', 0.0) or 0.0
+    if rating > 0:
+        # Normalize to 0-1 range and boost high ratings
+        return (rating / 10.0) ** 1.5 * 10
+    
+    # Fall back to audience rating
+    audience_rating = item.get('audienceRating', 0.0) or 0.0
+    if audience_rating > 0:
+        return (audience_rating / 10.0) ** 1.5 * 8
+    
+    # Fall back to viewCount (logarithmic scale)
     view_count = item.get('viewCount', 0)
-    # Logarithmic scale to avoid extreme differences
     if view_count > 0:
-        import math
         return math.log10(view_count + 1)
+    
     return 0.0
 
 
@@ -188,6 +202,8 @@ class FastSearchIndex:
         self._initialized = False
         self._sections: List[int] = []
         self._title_dictionary: Set[str] = set()  # Normalized titles for spelling correction
+        self._tmdb_titles_cached: bool = False
+        self._tmdb_cache_time: float = 0.0
 
     # ------------------------------------------------------------------
     # Config (pulled lazily from settings each refresh so token changes work)
@@ -302,6 +318,8 @@ class FastSearchIndex:
                     'viewCount': item.get('viewCount', 0),
                     'viewOffset': item.get('viewOffset', 0),
                     'thumb': thumb,
+                    'rating': item.get('rating', 0.0),  # IMDb/TMDb rating if available
+                    'audienceRating': item.get('audienceRating', 0.0),  # Rotten Tomatoes audience
                 })
 
             start += page_size
@@ -356,6 +374,75 @@ class FastSearchIndex:
         movie_count = sum(1 for i in all_items if i.get('media_type') == 'movie')
         show_count = sum(1 for i in all_items if i.get('media_type') == 'show')
         logger.info(f"fast_search: index built with {len(all_items)} total items ({movie_count} movies, {show_count} shows)")
+        
+        # Start background TMDb popular titles cache refresh (non-blocking)
+        if not self._tmdb_titles_cached or time.time() - self._tmdb_cache_time > 86400:  # 24h TTL
+            threading.Thread(target=self._refresh_tmdb_titles, daemon=True, name="tmdb-titles-cache").start()
+
+    def _refresh_tmdb_titles(self):
+        """
+        Background refresh of TMDb popular titles for spelling correction dictionary.
+        Fetches popular movies and TV shows, adds normalized titles to the dictionary.
+        Handles missing API key gracefully - never blocks requests.
+        """
+        try:
+            from app.settings_manager import SettingsManager
+            settings = SettingsManager()
+            api_key = settings.get('apis.tmdb.api_key', '') or ''
+            
+            if not api_key:
+                logger.info("fast_search: TMDb API key not configured, skipping popular titles cache")
+                return
+            
+            tmdb_base = settings.get('apis.tmdb.base_url', '') or 'https://api.themoviedb.org/3'
+            tmdb_titles = set()
+            
+            # Fetch popular movies (3 pages = ~60 titles)
+            for page in range(1, 4):
+                try:
+                    resp = requests.get(
+                        f'{tmdb_base}/movie/popular',
+                        params={'api_key': api_key, 'language': 'en-US', 'page': page},
+                        timeout=10
+                    )
+                    if resp.status_code == 200:
+                        results = resp.json().get('results', [])
+                        for movie in results:
+                            title = movie.get('title', '').strip()
+                            if title:
+                                tmdb_titles.add(normalize_text(title))
+                except Exception as e:
+                    logger.warning(f"fast_search: failed to fetch TMDb popular movies page {page}: {e}")
+                    break
+            
+            # Fetch popular TV shows (3 pages = ~60 titles)
+            for page in range(1, 4):
+                try:
+                    resp = requests.get(
+                        f'{tmdb_base}/tv/popular',
+                        params={'api_key': api_key, 'language': 'en-US', 'page': page},
+                        timeout=10
+                    )
+                    if resp.status_code == 200:
+                        results = resp.json().get('results', [])
+                        for show in results:
+                            name = show.get('name', '').strip()
+                            if name:
+                                tmdb_titles.add(normalize_text(name))
+                except Exception as e:
+                    logger.warning(f"fast_search: failed to fetch TMDb popular TV page {page}: {e}")
+                    break
+            
+            # Merge with existing dictionary
+            with self._lock:
+                self._title_dictionary.update(tmdb_titles)
+                self._tmdb_titles_cached = True
+                self._tmdb_cache_time = time.time()
+            
+            logger.info(f"fast_search: cached {len(tmdb_titles)} TMDb popular titles for spelling correction")
+        
+        except Exception as e:
+            logger.warning(f"fast_search: TMDb popular titles cache refresh failed: {e}")
 
     def _refresh_worker(self):
         """Background thread: build index once, then refresh every 15 min."""
@@ -506,6 +593,8 @@ class FastSearchIndex:
                 'viewCount': m['viewCount'],
                 'viewOffset': m['viewOffset'],
                 'thumb': m['thumb'],
+                'rating': m.get('rating', 0.0),
+                'audienceRating': m.get('audienceRating', 0.0),
             })
         return clean
 

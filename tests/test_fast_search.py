@@ -6,7 +6,7 @@ Tests normalization, fuzzy matching, and ranking.
 
 import time
 import unittest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch, MagicMock, call
 from typing import Dict, Any
 
 from app.fast_search import (
@@ -310,6 +310,70 @@ class TestFastSearchIndexFuzzy(unittest.TestCase):
         """Test spelling correction suggestion."""
         correction = self.index.find_spelling_correction('Interstelar')
         self.assertEqual(correction, 'interstellar')
+    
+    def test_accent_difference_library(self):
+        """Test accent difference: 'Amelie' should match 'Amélie' if in library."""
+        # Add Amélie to test index
+        amelie_item = {
+            'rating_key': '10',
+            'title': 'Amélie',
+            'title_lower': 'amélie',
+            'title_normalized': normalize_text('Amélie'),
+            'year': 2001,
+            'content_rating': 'R',
+            'genres': ['Romance', 'Comedy'],
+            'genres_lower': ['romance', 'comedy'],
+            'section_id': 1,
+            'section_name': 'Movies',
+            'media_type': 'movie',
+            'viewCount': 30,
+            'viewOffset': 0,
+            'thumb': '/thumb10.jpg',
+            'rating': 8.3,
+            'audienceRating': 0.0,
+        }
+        self.index._index.append(amelie_item)
+        self.index._title_dictionary.add(amelie_item['title_normalized'])
+        
+        # Search without accent should find it
+        results = self.index.search(q='Amelie')
+        self.assertGreater(len(results), 0)
+        titles = [r['title'] for r in results]
+        self.assertIn('Amélie', titles)
+    
+    def test_ampersand_vs_and_library(self):
+        """Test '&' vs 'and': 'Tom & Jerry' should match 'Tom and Jerry'."""
+        # Add both variants to test
+        item1 = {
+            'rating_key': '11',
+            'title': 'Tom & Jerry',
+            'title_lower': 'tom & jerry',
+            'title_normalized': normalize_text('Tom & Jerry'),
+            'year': 2021,
+            'content_rating': 'PG',
+            'genres': ['Comedy'],
+            'genres_lower': ['comedy'],
+            'section_id': 1,
+            'section_name': 'Movies',
+            'media_type': 'movie',
+            'viewCount': 20,
+            'viewOffset': 0,
+            'thumb': '/thumb11.jpg',
+            'rating': 5.3,
+            'audienceRating': 0.0,
+        }
+        self.index._index.append(item1)
+        self.index._title_dictionary.add(item1['title_normalized'])
+        
+        # Search with 'and' should find '&' version
+        results = self.index.search(q='Tom and Jerry')
+        self.assertGreater(len(results), 0)
+        titles = [r['title'] for r in results]
+        self.assertIn('Tom & Jerry', titles)
+        
+        # Search with '&' should also work
+        results2 = self.index.search(q='Tom & Jerry')
+        self.assertGreater(len(results2), 0)
 
 
 class TestPerformance(unittest.TestCase):
@@ -407,6 +471,88 @@ class TestTMDbIntegration(unittest.TestCase):
         
         correction = index.find_spelling_correction('Interstelar')
         self.assertEqual(correction, 'interstellar')
+    
+    @patch('app.settings_manager.SettingsManager')
+    @patch('app.fast_search.requests.get')
+    def test_tmdb_popular_titles_cache(self, mock_get, mock_settings_class):
+        """Test that TMDb popular titles are cached for spelling correction."""
+        # Mock settings
+        mock_settings = Mock()
+        mock_settings.get.side_effect = lambda key, default='': {
+            'apis.tmdb.api_key': 'test_api_key',
+            'apis.tmdb.base_url': 'https://api.themoviedb.org/3'
+        }.get(key, default)
+        mock_settings_class.return_value = mock_settings
+        
+        # Mock TMDb API responses
+        mock_movie_response = Mock()
+        mock_movie_response.status_code = 200
+        mock_movie_response.json.return_value = {
+            'results': [
+                {'title': 'Amélie', 'popularity': 45.6},
+                {'title': 'Fast & Furious', 'popularity': 89.2},
+                {'title': 'The Matrix', 'popularity': 120.5},
+            ]
+        }
+        
+        mock_tv_response = Mock()
+        mock_tv_response.status_code = 200
+        mock_tv_response.json.return_value = {
+            'results': [
+                {'name': 'Game of Thrones', 'popularity': 200.1},
+                {'name': 'Breaking Bad', 'popularity': 150.3},
+            ]
+        }
+        
+        mock_get.side_effect = [
+            mock_movie_response, mock_movie_response, mock_movie_response,  # 3 pages of movies
+            mock_tv_response, mock_tv_response, mock_tv_response,  # 3 pages of TV
+        ]
+        
+        index = FastSearchIndex()
+        index._initialized = True
+        
+        # Manually trigger TMDb cache refresh
+        index._refresh_tmdb_titles()
+        
+        # Verify titles were added to dictionary
+        self.assertIn('amelie', index._title_dictionary)  # Accent normalized
+        self.assertIn('fast and furious', index._title_dictionary)  # & -> and
+        self.assertIn('matrix', index._title_dictionary)  # "The" removed
+        self.assertIn('game of thrones', index._title_dictionary)
+        self.assertIn('breaking bad', index._title_dictionary)
+        self.assertTrue(index._tmdb_titles_cached)
+    
+    @patch('app.settings_manager.SettingsManager')
+    @patch('app.fast_search.requests.get')
+    def test_tmdb_cache_graceful_api_key_missing(self, mock_get, mock_settings_class):
+        """Test that missing TMDb API key is handled gracefully."""
+        # Mock settings with empty API key
+        mock_settings = Mock()
+        mock_settings.get.return_value = ''
+        mock_settings_class.return_value = mock_settings
+        
+        index = FastSearchIndex()
+        index._initialized = True
+        
+        # Should not raise exception
+        index._refresh_tmdb_titles()
+        
+        # Should not have made any API calls
+        mock_get.assert_not_called()
+    
+    @patch('app.fast_search.requests.get')
+    def test_tmdb_cache_network_failure(self, mock_get):
+        """Test that network failures during TMDb cache are handled gracefully."""
+        mock_get.side_effect = Exception("Network error")
+        
+        index = FastSearchIndex()
+        index._initialized = True
+        
+        # Should not raise exception
+        index._refresh_tmdb_titles()
+        
+        # Should log warning but continue
 
 
 if __name__ == '__main__':
