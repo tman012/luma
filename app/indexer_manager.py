@@ -13,17 +13,17 @@ import json
 import logging
 import os
 import re
+import secrets
 import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 import requests
 from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.connection import create_connection
 from defusedxml import ElementTree as ET
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,10 @@ LOOPBACK_RANGES = [
     ipaddress.ip_network('::1/128'),
 ]
 
+# Download tokens: lifetime and cap on how many are kept
+DOWNLOAD_TOKEN_TTL = 3600
+MAX_DOWNLOAD_TOKENS = 20000
+
 # 5 MB response body limit
 MAX_RESPONSE_SIZE = 5 * 1024 * 1024
 
@@ -63,36 +67,58 @@ def sanitize_api_key(text: str) -> str:
     return text
 
 
+def data_dir() -> Path:
+    """Directory for indexer state files (LUMA_DATA_DIR, default /app/data)."""
+    path = Path(os.environ.get('LUMA_DATA_DIR') or '/app/data')
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 class PinnedIPHTTPAdapter(HTTPAdapter):
-    """HTTP adapter that connects to a pinned IP while preserving Host header and SNI."""
-    
-    def __init__(self, pinned_ip: str, original_hostname: str, *args, **kwargs):
+    """Connect to an already-validated IP while keeping the original hostname.
+
+    The request URL is rewritten to the pinned IP so no second DNS lookup can
+    happen at connect time (DNS rebinding). The Host header carries the
+    original host, and for HTTPS the TLS SNI and certificate check use the
+    original hostname, so virtual hosting and certificate validation still work.
+    """
+
+    def __init__(self, pinned_ip: str, original_hostname: str, scheme: str = 'https', *args, **kwargs):
         self.pinned_ip = pinned_ip
-        self.original_hostname = original_hostname
+        self.original_hostname = (original_hostname or '').lower()
+        self.scheme = scheme
         super().__init__(*args, **kwargs)
-    
+
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        if self.scheme == 'https':
+            pool_kwargs['server_hostname'] = self.original_hostname
+            pool_kwargs['assert_hostname'] = self.original_hostname
+        super().init_poolmanager(connections, maxsize, block=block, **pool_kwargs)
+
     def send(self, request, *args, **kwargs):
-        """Override send to connect to pinned IP while keeping original hostname for Host header and SNI."""
-        from urllib.parse import urlparse, urlunparse
-        
-        # Parse the original URL
-        parsed = urlparse(request.url)
-        
-        # Build new netloc with pinned IP
-        if parsed.port:
-            new_netloc = f'{self.pinned_ip}:{parsed.port}'
-        else:
-            new_netloc = self.pinned_ip
-        
-        # Rebuild URL with pinned IP
-        pinned_parts = (parsed.scheme, new_netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
-        pinned_url = urlunparse(pinned_parts)
-        request.url = pinned_url
-        
-        # Set Host header to original hostname to ensure proper virtual hosting and SNI
-        request.headers['Host'] = self.original_hostname
-        
+        parts = urlsplit(request.url)
+        if (parts.hostname or '').lower() != self.original_hostname:
+            raise requests.exceptions.ConnectionError(
+                f'Pinned adapter refuses host {parts.hostname!r}')
+        ip = self.pinned_ip
+        host = f'[{ip}]' if ':' in ip else ip
+        netloc = f'{host}:{parts.port}' if parts.port else host
+        request.headers['Host'] = (
+            f'{self.original_hostname}:{parts.port}' if parts.port else self.original_hostname)
+        request.url = urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
         return super().send(request, *args, **kwargs)
+
+
+def pinned_get(url: str, pinned_ip: str, **kwargs) -> requests.Response:
+    """GET *url* over a connection pinned to *pinned_ip* (from validate_indexer_url).
+
+    Redirects are never followed, because a redirect target was not validated.
+    """
+    parts = urlsplit(url)
+    session = requests.Session()
+    session.mount(f'{parts.scheme}://', PinnedIPHTTPAdapter(pinned_ip, parts.hostname, parts.scheme))
+    kwargs['allow_redirects'] = False
+    return session.get(url, **kwargs)
 
 
 def parse_retry_after(retry_after_value: str) -> Optional[float]:
@@ -174,11 +200,12 @@ def validate_indexer_url(url: str, allow_lan: bool = False, allow_loopback_for_h
             # Check loopback (NEVER allowed, even with allow_lan, EXCEPT for configured Prowlarr host)
             is_loopback = any(ip in network for network in LOOPBACK_RANGES)
             if is_loopback:
-                if allow_loopback_for_host and hostname == allow_loopback_for_host:
-                    # Allow loopback ONLY for the configured Prowlarr URL's host
-                    pass
-                else:
-                    return False, f'Loopback IP blocked: {ip_str}', None
+                if allow_loopback_for_host and hostname.lower() == allow_loopback_for_host.lower():
+                    # Loopback is allowed ONLY for the configured Prowlarr host
+                    if pinned_ip is None:
+                        pinned_ip = str(ip)
+                    continue
+                return False, f'Loopback IP blocked: {ip_str}', None
             
             # Check other disallowed ranges
             for network in DISALLOWED_IP_RANGES:
@@ -419,10 +446,7 @@ class IndexerManager:
         if self._state_file:
             return self._state_file
         
-        # Use LUMA_DATA_DIR or default to /app/data
-        data_dir = Path(os.environ.get('LUMA_DATA_DIR', '/app/data'))
-        data_dir.mkdir(parents=True, exist_ok=True)
-        self._state_file = data_dir / 'indexer_state.json'
+        self._state_file = data_dir() / 'indexer_state.json'
         return self._state_file
     
     def _compute_config_hash(self) -> str:
@@ -499,40 +523,46 @@ class IndexerManager:
         except Exception as e:
             logger.warning(f'Failed to save indexer state: {sanitize_api_key(str(e))}')
 
-    def _store_download_token(self, token: str, url: str, indexer_id: str, ttl: int = 3600) -> None:
-        """Store opaque download token with server-side mapping."""
-        expiry = time.time() + ttl
+    def issue_download_token(self, url: str, indexer_id: str, ttl: int = DOWNLOAD_TOKEN_TTL,
+                             persist: bool = True) -> str:
+        """Return an opaque token mapped server-side to (url, indexer_id) until it expires."""
+        token = secrets.token_urlsafe(32)
         with self._download_tokens_lock:
-            self._download_tokens[token] = (url, indexer_id, expiry)
+            self._download_tokens[token] = (url, indexer_id, time.time() + ttl)
             self._prune_download_tokens()
+            if persist:
+                self._persist_download_tokens()
+        return token
+
+    def persist_download_tokens(self) -> None:
+        """Write the token map to disk (after issuing a batch with persist=False)."""
+        with self._download_tokens_lock:
             self._persist_download_tokens()
-    
-    def _get_download_token(self, token: str) -> Optional[Tuple[str, str]]:
-        """Retrieve download token mapping, returns (url, indexer_id) or None if expired/invalid."""
+
+    def resolve_download_token(self, token: str) -> Optional[Tuple[str, str]]:
+        """Return (url, indexer_id) for a live token, or None if unknown or expired."""
         with self._download_tokens_lock:
             self._prune_download_tokens()
             entry = self._download_tokens.get(token)
-            if entry:
-                url, indexer_id, expiry = entry
-                if time.time() < expiry:
-                    return (url, indexer_id)
-                else:
-                    del self._download_tokens[token]
+            if entry and time.time() < entry[2]:
+                return entry[0], entry[1]
             return None
-    
+
     def _prune_download_tokens(self) -> None:
-        """Remove expired download tokens (call with lock held)."""
+        """Drop expired tokens, then the oldest beyond MAX_DOWNLOAD_TOKENS (lock held)."""
         now = time.time()
-        expired = [tok for tok, (_, _, exp) in self._download_tokens.items() if exp < now]
-        for tok in expired:
+        for tok in [t for t, (_, _, exp) in self._download_tokens.items() if exp <= now]:
             del self._download_tokens[tok]
-    
+        overflow = len(self._download_tokens) - MAX_DOWNLOAD_TOKENS
+        if overflow > 0:
+            oldest = sorted(self._download_tokens, key=lambda t: self._download_tokens[t][2])[:overflow]
+            for tok in oldest:
+                del self._download_tokens[tok]
+
     def _persist_download_tokens(self) -> None:
         """Persist download tokens to disk (call with lock held)."""
         try:
-            data_dir = Path(os.environ.get('LUMA_DATA_DIR', '/app/data'))
-            data_dir.mkdir(parents=True, exist_ok=True)
-            tokens_file = data_dir / 'download_tokens.json'
+            tokens_file = data_dir() / 'download_tokens.json'
             temp_file = tokens_file.with_suffix('.tmp')
             
             with open(temp_file, 'w') as f:
@@ -544,8 +574,7 @@ class IndexerManager:
     def _load_download_tokens(self) -> None:
         """Load download tokens from disk."""
         try:
-            data_dir = Path(os.environ.get('LUMA_DATA_DIR', '/app/data'))
-            tokens_file = data_dir / 'download_tokens.json'
+            tokens_file = data_dir() / 'download_tokens.json'
             if not tokens_file.exists():
                 return
             
@@ -553,7 +582,11 @@ class IndexerManager:
                 data = json.load(f)
             
             with self._download_tokens_lock:
-                self._download_tokens = data
+                self._download_tokens = {
+                    str(tok): (str(v[0]), str(v[1]), float(v[2]))
+                    for tok, v in data.items()
+                    if isinstance(v, (list, tuple)) and len(v) == 3
+                }
                 self._prune_download_tokens()
         except Exception as e:
             logger.warning(f'Failed to load download tokens: {sanitize_api_key(str(e))}')
@@ -634,21 +667,16 @@ class IndexerManager:
 
             # Test with caps request - send both header and query param for compatibility
             # Many Torznab/Newznab servers only accept query param
-            from urllib.parse import quote, urlparse
+            from urllib.parse import quote
             headers = {'X-Api-Key': api_key}
             encoded_key = quote(api_key, safe='')
             
-            # Create session with pinned IP adapter
-            session = requests.Session()
-            parsed = urlparse(url)
-            session.mount(f'{parsed.scheme}://', PinnedIPHTTPAdapter(pinned_ip, parsed.hostname))
-            
-            resp = session.get(
+            resp = pinned_get(
                 f'{url}?t=caps&apikey={encoded_key}',
+                pinned_ip,
                 headers=headers,
                 timeout=10,
                 stream=True,
-                allow_redirects=False,  # Prevent redirect attacks
             )
             
             # Cap response size at 5 MB (decode gzip automatically)
@@ -901,18 +929,14 @@ class IndexerManager:
                 'apikey': api_key,
             }
             
-            # Create session with pinned IP adapter
-            session = requests.Session()
-            parsed = urlparse(url)
-            session.mount(f'{parsed.scheme}://', PinnedIPHTTPAdapter(pinned_ip, parsed.hostname))
-            
-            resp = session.get(
+            # Connect to the validated IP (no second DNS lookup)
+            resp = pinned_get(
                 url,
+                pinned_ip,
                 params=params,
                 headers=headers,
                 timeout=60,
                 stream=True,
-                allow_redirects=False,  # Prevent redirect attacks
             )
 
             # Handle rate limit / errors
@@ -1219,48 +1243,22 @@ class IndexerManager:
         return len(imported), len(proxied_indexers), errors
 
 
-# Global singleton instance
+# Shared instance, reached only through get_indexer_client()
 _indexer_manager_instance: Optional[IndexerManager] = None
 _indexer_manager_lock = threading.Lock()
 
 
-def get_indexer_manager(settings_manager=None) -> IndexerManager:
-    """
-    Get or create the global IndexerManager singleton.
-    
-    DEPRECATED: Use get_indexer_client() instead for external access.
-    This function is retained for internal use only.
-    
-    Args:
-        settings_manager: SettingsManager instance (required for first call)
-    
-    Returns:
-        The global IndexerManager instance
-    """
+def _shared_manager(settings_manager=None) -> IndexerManager:
     global _indexer_manager_instance
-    
     with _indexer_manager_lock:
         if _indexer_manager_instance is None:
             if settings_manager is None:
-                raise ValueError('settings_manager required for first call to get_indexer_manager()')
+                raise ValueError('settings_manager required on first use')
             _indexer_manager_instance = IndexerManager(settings_manager)
-        
         return _indexer_manager_instance
 
 
 def get_indexer_client(settings_manager=None):
-    """
-    Public API: Get the indexer client adapter.
-    
-    This is the ONLY function external modules should call.
-    Never import private (_underscore) methods from indexer_manager.
-    
-    Args:
-        settings_manager: SettingsManager instance (required for first call)
-    
-    Returns:
-        LumaBackendAdapter instance with public API
-    """
+    """Public API: the Luma indexer backend wrapped in the Prowlarr-compatible adapter."""
     from app.indexer_backend import LumaBackendAdapter
-    manager = get_indexer_manager(settings_manager)
-    return LumaBackendAdapter(manager)
+    return LumaBackendAdapter(_shared_manager(settings_manager))

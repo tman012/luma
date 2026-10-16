@@ -20,3 +20,7 @@ def temp_data_dir(tmp_path, monkeypatch):
     data_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv('LUMA_DATA_DIR', str(data_dir))
     yield data_dir
+
+
+def pytest_configure(config):
+    config.addinivalue_line('markers', 'no_ssrf_mock: use real SSRF validation in this test')

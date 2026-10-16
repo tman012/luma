@@ -17205,85 +17205,74 @@ def import_indexers_from_prowlarr():
         return jsonify({'error': sanitize_api_key(str(e))}), 500
 
 
+def _url_host_port(url: str):
+    """(lowercased hostname, effective port) for comparing download hosts."""
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    port = parts.port or {'http': 80, 'https': 443}.get(parts.scheme)
+    return (parts.hostname or '').lower(), port
+
+
 @app.route('/api/indexer/download/<token>', methods=['GET'])
 def download_torrent_proxy(token: str):
-    """Proxy for downloading torrents without exposing API keys in URLs."""
-    err = _require_login()
+    """Stream a torrent for an opaque download token without exposing indexer API keys.
+
+    Open to any signed-in user; anonymous requests are refused.
+    """
+    err = _require_auth()
     if err:
         return err
     
     try:
-        from app.indexer_manager import sanitize_api_key, validate_indexer_url
-        from urllib.parse import urlparse
-        import requests
+        from app.indexer_manager import sanitize_api_key, validate_indexer_url, pinned_get
         from flask import Response
         
-        # Get indexer client
         from app.indexer_api import get_indexer_client
         client = get_indexer_client(settings)
         
-        # Check if using Luma backend
         if not hasattr(client, 'get_download_token'):
             return jsonify({'error': 'Download proxy only available with Luma backend'}), 400
         
-        # Retrieve token mapping (opaque token -> url, indexer_id)
         token_data = client.get_download_token(token)
         if not token_data:
             return jsonify({'error': 'Invalid or expired download token'}), 403
         
         download_url, indexer_id = token_data
         
-        # Get indexer config
-        all_indexers = settings.get('indexer.indexers') or []
-        config = None
-        for ix in all_indexers:
-            if ix.get('id') == indexer_id:
-                config = ix
-                break
-        
+        config = next((ix for ix in (settings.get('indexer.indexers') or [])
+                       if ix.get('id') == indexer_id), None)
         if not config:
             return jsonify({'error': 'Indexer not found'}), 404
         
-        # Validate download URL
+        # Proxied entries must point at the configured Prowlarr host,
+        # direct entries at the indexer's own host.
+        loopback_host = None
+        if config.get('prowlarr_proxy'):
+            expected_url = settings.get('indexer.base_url', '')
+            if not expected_url:
+                return jsonify({'error': 'Prowlarr URL not configured for proxied indexer'}), 500
+            loopback_host = _url_host_port(expected_url)[0]
+            api_key = settings.get('indexer.api_key', '')
+        else:
+            expected_url = config.get('url', '')
+            if not expected_url:
+                return jsonify({'error': 'Indexer URL not configured'}), 500
+            api_key = config.get('api_key', '')
+        
+        if _url_host_port(download_url) != _url_host_port(expected_url):
+            logger.warning('Download host does not match the configured host for indexer %s', indexer_id)
+            return jsonify({'error': 'Download URL does not match the configured host'}), 403
+        
         allow_lan = settings.get('indexer.allow_lan', False)
-        valid, error, pinned_ip = validate_indexer_url(download_url, allow_lan=allow_lan)
+        valid, error, pinned_ip = validate_indexer_url(
+            download_url, allow_lan=allow_lan, allow_loopback_for_host=loopback_host)
         if not valid:
             return jsonify({'error': f'URL validation failed: {error}'}), 403
         
-        # Validate download host against indexer configuration
-        download_host = urlparse(download_url).netloc
-        
-        if config.get('prowlarr_proxy'):
-            # Proxied entry: validate against Prowlarr URL
-            prowlarr_url = settings.get('indexer.base_url', '')
-            if not prowlarr_url:
-                return jsonify({'error': 'Prowlarr URL not configured for proxied indexer'}), 500
-            prowlarr_host = urlparse(prowlarr_url).netloc
-            if download_host != prowlarr_host:
-                logger.warning(f'Proxied download host {download_host} does not match Prowlarr {prowlarr_host}')
-                return jsonify({'error': 'Download URL does not match configured Prowlarr host'}), 403
-        else:
-            # Direct entry: validate against indexer URL
-            indexer_url = config.get('url', '')
-            if not indexer_url:
-                return jsonify({'error': 'Indexer URL not configured'}), 500
-            indexer_host = urlparse(indexer_url).netloc
-            if download_host != indexer_host:
-                logger.warning(f'Download host {download_host} does not match indexer {indexer_host}')
-                return jsonify({'error': 'Download URL does not match configured indexer host'}), 403
-        
-        # Get API key (resolve for proxied entries)
-        if config.get('prowlarr_proxy'):
-            api_key = settings.get('indexer.api_key', '')
-        else:
-            api_key = config.get('api_key', '')
-        
-        # Stream the download with allow_redirects=False to prevent redirect attacks
         headers = {'X-Api-Key': api_key} if api_key else {}
-        resp = requests.get(download_url, headers=headers, stream=True, timeout=30, allow_redirects=False)
+        resp = pinned_get(download_url, pinned_ip, headers=headers, stream=True, timeout=30)
         resp.raise_for_status()
         
-        # Stream response back to client
         return Response(
             resp.iter_content(chunk_size=8192),
             content_type=resp.headers.get('Content-Type', 'application/x-bittorrent'),

@@ -21,13 +21,12 @@ def get_indexer_backend(settings):
     backend = settings.get('indexer.backend', 'prowlarr')
     
     if backend == 'luma':
-        from app.indexer_manager import get_indexer_manager
+        from app.indexer_manager import get_indexer_client
         from app.settings_manager import SettingsManager
         
         # Get or create settings manager instance
         sm = SettingsManager() if not hasattr(settings, 'get_all') else settings
-        manager = get_indexer_manager(sm)
-        return LumaBackendAdapter(manager)
+        return get_indexer_client(sm)
     else:
         # Legacy Prowlarr/Torznab backend
         from app import indexer_api
@@ -67,8 +66,8 @@ class LumaBackendAdapter:
         return self.manager.import_from_prowlarr(prowlarr_url, prowlarr_api_key)
     
     def get_download_token(self, token: str) -> Optional[Tuple[str, str]]:
-        """Retrieve download token mapping."""
-        return self.manager._get_download_token(token)
+        """Resolve an opaque download token to (url, indexer_id), or None."""
+        return self.manager.resolve_download_token(token)
     
     def get_indexers(self) -> List[Dict]:
         """List indexers in Prowlarr-compatible format."""
@@ -118,6 +117,7 @@ class LumaBackendAdapter:
         
         normalized = self._normalize_results(all_results)
         logger.info(f'sweep_movies: {len(normalized)} unique results from {len(queries)} queries')
+        self.manager.persist_download_tokens()
         return normalized
     
     def search_all(self, query: str, media_type: str,
@@ -184,6 +184,7 @@ class LumaBackendAdapter:
                     'imdb_id': r.get('imdb_id', ''),
                 })
             
+            self.manager.persist_download_tokens()
             logger.info(f'search_all q={q!r}: {len(out)} results')
             return out
         
@@ -251,16 +252,10 @@ class LumaBackendAdapter:
                 'protocol': r.get('protocol', 'torrent'),
             })
         
+        self.manager.persist_download_tokens()
         return normalized
     
     def _sign_download_url(self, download_url: str, indexer_id: str) -> str:
-        """Create an opaque token for a download URL with server-side mapping."""
-        import secrets
-        
-        # Generate opaque token
-        token = secrets.token_urlsafe(32)
-        
-        # Store mapping in manager's token store
-        self.manager._store_download_token(token, download_url, indexer_id)
-        
+        """Replace a raw download URL with an opaque, server-side-mapped token link."""
+        token = self.manager.issue_download_token(download_url, indexer_id, persist=False)
         return f'/api/indexer/download/{token}'

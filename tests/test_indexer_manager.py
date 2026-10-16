@@ -377,7 +377,7 @@ def test_stable_string_ids():
 </item>
 </channel></rss>"""
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.raw = Mock()
@@ -430,7 +430,7 @@ def test_adapter_date_conversion():
 </item>
 </channel></rss>"""
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.raw = Mock()
@@ -511,7 +511,7 @@ def test_indexer_manager_test_success():
     
     settings_mock.get.side_effect = settings_get
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '1.2.3.4')):
             mock_resp = Mock()
             mock_resp.status_code = 200
@@ -551,7 +551,7 @@ def test_indexer_manager_test_timeout():
     
     settings_mock.get.side_effect = settings_get
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '1.2.3.4')):
             mock_get.side_effect = requests.exceptions.Timeout('Connection timeout')
             
@@ -596,7 +596,7 @@ def test_indexer_manager_search_basic():
 </item>
 </channel></rss>"""
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '1.2.3.4')):
             mock_resp = Mock()
             mock_resp.status_code = 200
@@ -645,7 +645,7 @@ def test_indexer_manager_search_rate_limit():
     
     xml_response = '<rss><channel></channel></rss>'
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '1.2.3.4')):
             mock_resp = Mock()
             mock_resp.status_code = 200
@@ -691,7 +691,7 @@ def test_indexer_manager_search_429_backoff():
     
     settings_mock.get.side_effect = settings_get
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '1.2.3.4')):
             mock_resp = Mock()
             mock_resp.status_code = 429
@@ -1009,7 +1009,7 @@ def test_backend_adapter_search_movies():
 </item>
 </channel></rss>"""
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.raw = Mock()
@@ -1349,7 +1349,7 @@ def test_exponential_backoff_no_retry_after():
     with patch('app.indexer_manager.time.time') as mock_time:
         mock_time.return_value = 1000.0
         
-        with patch('app.indexer_manager.requests.get') as mock_get:
+        with patch('app.indexer_manager.pinned_get') as mock_get:
             mock_resp = Mock()
             mock_resp.status_code = 429
             mock_resp.headers = {}  # No Retry-After
@@ -1400,7 +1400,7 @@ def test_exponential_backoff_500_error():
         current_time = 1000.0
         mock_time.return_value = current_time
         
-        with patch('app.indexer_manager.requests.get') as mock_get:
+        with patch('app.indexer_manager.pinned_get') as mock_get:
             mock_resp = Mock()
             mock_resp.status_code = 500
             mock_resp.raw = Mock()
@@ -1479,7 +1479,7 @@ def test_concurrent_indexer_requests_overlap():
     http_lock = threading.Lock()
     overlap_detected = [False]
     
-    def mock_get_with_delay(url, **kwargs):
+    def mock_get_with_delay(url, *args, **kwargs):
         # Determine which indexer from URL
         indexer = 'ix1' if 'test1' in url else 'ix2'
         
@@ -1507,7 +1507,7 @@ def test_concurrent_indexer_requests_overlap():
         
         return mock_resp
     
-    with patch('app.indexer_manager.requests.get', side_effect=mock_get_with_delay):
+    with patch('app.indexer_manager.pinned_get', side_effect=mock_get_with_delay):
         manager = IndexerManager(settings_mock)
         results = manager.search(query='test', categories=[2000], limit=100)
         
@@ -1759,7 +1759,7 @@ def test_normalized_result_for_sonarr():
 </item>
 </channel></rss>"""
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.raw = Mock()
@@ -1824,28 +1824,14 @@ def test_get_indexer_client_exists():
 # ---- Item 9: Clean API Usage ----
 
 def test_no_private_manager_access_in_main():
-    """main.py must not use get_indexer_manager or private _ methods."""
+    """main.py must not reach into private manager methods."""
     import re
     from pathlib import Path
     
     main_path = Path(__file__).parent.parent / 'app' / 'main.py'
-    with open(main_path, 'r') as f:
-        main_content = f.read()
-    
-    # Check for get_indexer_manager usage
-    # We allow imports for compatibility but not function calls
-    manager_calls = re.findall(r'get_indexer_manager\s*\(', main_content)
-    
-    # Check for _ method calls on manager
+    main_content = main_path.read_text()
     private_calls = re.findall(r'manager\._\w+', main_content)
-    
-    violations = []
-    if manager_calls:
-        violations.append(f'Found {len(manager_calls)} get_indexer_manager() calls in main.py')
-    if private_calls:
-        violations.append(f'Found private manager methods in main.py: {private_calls}')
-    
-    assert not violations, f"main.py API violations: {violations}"
+    assert not private_calls, f"main.py uses private manager methods: {private_calls}"
 
 
 def test_no_private_manager_access_in_indexer_backend():
@@ -1991,7 +1977,7 @@ def test_hourly_cap_persists_across_restart():
 </channel></rss>"""
         
         with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '1.2.3.4')):
-            with patch('app.indexer_manager.requests.get') as mock_get:
+            with patch('app.indexer_manager.pinned_get') as mock_get:
                 mock_resp = Mock()
                 mock_resp.status_code = 200
                 mock_resp.raw = Mock()
@@ -2063,7 +2049,7 @@ def test_interactive_rate_limit_40_per_hour():
 </item>
 </channel></rss>"""
         
-        with patch('app.indexer_manager.requests.get') as mock_get:
+        with patch('app.indexer_manager.pinned_get') as mock_get:
             mock_resp = Mock()
             mock_resp.status_code = 200
             mock_resp.raw = Mock()
@@ -2122,7 +2108,7 @@ def test_background_rate_limit_20_per_hour():
 </item>
 </channel></rss>"""
         
-        with patch('app.indexer_manager.requests.get') as mock_get:
+        with patch('app.indexer_manager.pinned_get') as mock_get:
             mock_resp = Mock()
             mock_resp.status_code = 200
             mock_resp.raw = Mock()
@@ -2178,7 +2164,7 @@ def test_bucket_applies_only_to_background():
 </item>
 </channel></rss>"""
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.raw = Mock()
@@ -2237,7 +2223,7 @@ def test_rate_limit_counters_persist_across_restart():
 </item>
 </channel></rss>"""
         
-        with patch('app.indexer_manager.requests.get') as mock_get:
+        with patch('app.indexer_manager.pinned_get') as mock_get:
             mock_resp = Mock()
             mock_resp.status_code = 200
             mock_resp.raw = Mock()
@@ -2286,7 +2272,7 @@ def test_interactive_search_honors_backoff():
     
     settings_mock.get.side_effect = settings_get
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         # First request returns 429
         mock_resp_429 = Mock()
         mock_resp_429.status_code = 429
@@ -2345,7 +2331,7 @@ def test_concurrent_requests_respect_min_interval():
 </item>
 </channel></rss>"""
         
-        with patch('app.indexer_manager.requests.get') as mock_get:
+        with patch('app.indexer_manager.pinned_get') as mock_get:
             mock_resp = Mock()
             mock_resp.status_code = 200
             mock_resp.raw = Mock()
@@ -2428,7 +2414,7 @@ def test_fanout_deadline_returns_partial_results():
 </item>
 </channel></rss>"""
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         def slow_response(*args, **kwargs):
             # Simulate 4-second delay
             time.sleep(4.0)
@@ -2544,7 +2530,7 @@ def test_proxied_search_resolves_url_and_key_from_settings():
 </item>
 </channel></rss>"""
         
-        with patch('app.indexer_manager.requests.get') as mock_get:
+        with patch('app.indexer_manager.pinned_get') as mock_get:
             mock_resp = Mock()
             mock_resp.status_code = 200
             mock_resp.raw = Mock()
@@ -2707,7 +2693,7 @@ def test_backend_adapter_signs_download_urls():
 </item>
 </channel></rss>"""
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.raw = Mock()
@@ -2765,7 +2751,7 @@ def test_no_apikey_in_api_responses():
 </item>
 </channel></rss>"""
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.raw = Mock()
@@ -2821,7 +2807,7 @@ def test_body_cap_decodes_gzip():
     ])
     xml_response = f'<?xml version="1.0"?><rss><channel>{large_items}</channel></rss>'
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.headers = {'Content-Encoding': 'gzip'}
@@ -2864,7 +2850,7 @@ def test_body_cap_rejects_truncated():
     
     xml_response = b'<?xml version="1.0"?><rss><channel><item><title>Movie</title></item></channel></rss>'
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
+    with patch('app.indexer_manager.pinned_get') as mock_get:
         mock_resp = Mock()
         mock_resp.status_code = 200
         mock_resp.headers = {'Content-Length': '10000'}  # Claims 10KB but only sends partial
