@@ -34,6 +34,10 @@ read-only or wrongly owned mount fails the deploy instead of logging
 
 ## Reverse proxy
 
+`telegram_bot.json` in the data directory holds the Telegram bot token; keep
+it private with `chmod 600 telegram_bot.json`. Luma logs a warning at startup
+when it is readable by group or others.
+
 `security.trusted_proxies` starts empty, so `X-Forwarded-For` is ignored and
 every proxied request looks like it comes from the proxy. Behind a reverse
 proxy, set it (Settings, or `security.trusted_proxies` in settings.json,
@@ -45,10 +49,11 @@ comma-separated) or LAN users get 401:
 
 List only proxies you control.
 
-The proxy must also pass the original `Host` (or `X-Forwarded-Host`): Luma
-uses it to tell the main site from the request-portal host name and LAN names
-from public ones. Caddy's `reverse_proxy` keeps the client's `Host` and sets
-`X-Forwarded-For` / `X-Forwarded-Host` by default; don't override them with
+The proxy must pass the original `Host`: Luma uses it to tell the main site
+from the request-portal host name and LAN names from public ones. If the proxy
+also sends `X-Forwarded-Host`, it must be a single value equal to that `Host`.
+Caddy's `reverse_proxy` keeps the client's `Host` and sets `X-Forwarded-For` /
+`X-Forwarded-Host` by default; don't override them with
 `header_up Host {upstream_hostport}`. Example (replace the placeholders; with
 host networking Luma listens on the host's port):
 

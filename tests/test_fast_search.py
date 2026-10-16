@@ -1,3 +1,4 @@
+import threading
 #!/usr/bin/env python3
 """
 Tests for fast_search typo-tolerant fuzzy search functionality.
@@ -2202,10 +2203,20 @@ class TestTMDbSearchesHonorRetryAfter(unittest.TestCase):
     def test_match_search_fetch_makes_no_calls(self, mock_settings):
         mock_settings.get.side_effect = api_key_settings()
         self.main._tmdb_match_cache.clear()
-        with patch('app.main.requests.get') as get:
+        # Count only calls made by this request: a background thread left over
+        # from another test may call requests.get while the patch is active.
+        me = threading.get_ident()
+        calls = []
+        def _get(*a, **k):
+            if threading.get_ident() == me:
+                calls.append((a, k))
+            return Mock(status_code=200, json=Mock(return_value={'results': []}))
+        self.index._tmdb_retry_after = time.time() + 3600
+        with patch('app.main.requests.get', side_effect=_get), \
+                patch.object(self.index, '_is_tmdb_rate_limited', return_value=True):
             r = local_client(self.main.app).get('/api/tmdb/match-search?query=Retryafterprobe')
         self.assertEqual(r.status_code, 200)
-        get.assert_not_called()
+        self.assertEqual(calls, [])
 
     def test_refresh_tmdb_titles_skipped_when_backed_off(self):
         index = FastSearchIndex()

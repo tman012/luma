@@ -84,6 +84,13 @@ def pytest_configure(config):
         'LUMA_SKIP_BACKGROUND_THREADS': '1',
         'BASE_DIR': data,
     })
+    # Never fall back to a real /app/data file (database, telegram_bot.json).
+    legacy = tempfile.mkdtemp(prefix='luma_test_legacy_')
+    _TEMP_DIRS.append(legacy)
+    _SANDBOX['legacy'] = legacy
+    from app import paths as _paths
+    _paths.LEGACY_DATA_DIR = legacy
+    _paths.LEGACY_DATABASE_PATH = os.path.join(legacy, 'media.db')
     os.environ.setdefault('LUMA_DISABLE_AUTOMATIONS', '1')
     os.environ.setdefault('LUMA_DISABLE_ADB', '1')
     os.environ.setdefault('FLASK_STATIC_FOLDER', str(_REPO_ROOT / 'static'))
@@ -126,10 +133,6 @@ def reset_shared_state(request):
     request_portal._fails.clear()
     # Some tests swap in a mock settings object; put the real one back after
     saved_portal_settings = request_portal._settings
-    # Several tests set app.config['URL_BASE'] directly; restore it so later
-    # tests (and code that reads it, like indexer download links) see the default.
-    import app.main as _main
-    saved_url_base = _main.app.config.get('URL_BASE', '')
     
     # Clear user database between tests (sandbox only; UnsafeDatabaseReset
     # propagates and fails the test rather than touching another database)
@@ -146,7 +149,20 @@ def reset_shared_state(request):
     login_limiter._fail.clear()
     request_portal._fails.clear()
     request_portal._settings = saved_portal_settings
-    _main.app.config['URL_BASE'] = saved_url_base
+
+
+@pytest.fixture(autouse=True)
+def restore_url_base(request):
+    """Several tests set app.config['URL_BASE'] directly; put it back after
+    every sandbox test (unittest.TestCase ones too) so later tests, and code
+    that reads it like hero and download URLs, see the default."""
+    if not _SANDBOX['data'] or _is_e2e_item(request.node):
+        yield
+        return
+    import app.main as _main
+    saved = _main.app.config.get('URL_BASE', '')
+    yield
+    _main.app.config['URL_BASE'] = saved
 
 
 @pytest.fixture

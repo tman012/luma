@@ -535,6 +535,12 @@ def start_services(app_instance):
     
     # Initialize database
     init_database()
+
+    try:
+        from app.paths import warn_if_telegram_config_exposed
+        warn_if_telegram_config_exposed()
+    except Exception as e:
+        logger.debug(f"telegram_bot.json permission check failed: {e}")
     
     # Initialize user auth tables
     try:

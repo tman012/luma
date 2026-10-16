@@ -5,8 +5,7 @@ playwright = pytest.importorskip("playwright")
 from playwright.sync_api import sync_playwright
 
 # No shared defaults (5199/5299 may be a live instance): both URLs are required.
-BASE = os.environ.get("LUMA_E2E_BASE_URL")
-MOCK = os.environ.get("LUMA_MOCK_URL")
+from e2e_env import BASE, MOCK, SHOTS
 if not BASE or not MOCK:
     pytest.exit("Set LUMA_E2E_BASE_URL and LUMA_MOCK_URL to a private Luma + mock on spare ports "
                 "(see tests/e2e/README.md); refusing to default to shared 127.0.0.1:5199/5299.", returncode=4)
@@ -22,7 +21,6 @@ def pytest_collection_modifyitems(session, config, items):
 API_KEY = os.environ.get("LUMA_E2E_API_KEY", "qa-key")
 USER, PIN = os.environ.get("LUMA_E2E_USER", "qa"), os.environ.get("LUMA_E2E_PIN", "1234")
 # LUMA_E2E_SHOTS must be set in environment; no hard-coded default
-SHOTS = os.environ.get("LUMA_E2E_SHOTS")
 if SHOTS:
     os.makedirs(SHOTS, exist_ok=True)
 

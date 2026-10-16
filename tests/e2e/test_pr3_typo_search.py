@@ -4,7 +4,7 @@ Start the mock upstreams + Luma first (see tests/e2e/README.md).
 Timings are appended to $LUMA_E2E_SHOTS/timings.jsonl.
 """
 import json, os, re, time, pytest
-from conftest import BASE, SHOTS
+from e2e_env import BASE, SHOTS
 
 pytestmark = pytest.mark.e2e
 
