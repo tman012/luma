@@ -1386,21 +1386,24 @@ def _is_auth_exempt(path: str, method: str) -> bool:
         return portal_guard.is_portal_allowed(path, method)
     if path == '/api/version' and method in ('GET', 'HEAD'):
         return True  # kiosks poll it to know when to reload; it holds no data
-    if path == '/api/admin/telegram-action' and method == 'GET':
+    if path == '/api/admin/telegram-action' and method in ('GET', 'POST'):
         # Approve/deny buttons open in Telegram's browser with no Luma
-        # session. Only a correctly signed link skips sign-in.
+        # session. Only a correctly signed, unexpired, unused link skips
+        # sign-in; the GET only shows a confirm page.
         return _telegram_action_link_signed()
     return False
 
 
 def _telegram_action_link_signed() -> bool:
-    try:
-        uid = int(request.args.get('uid', ''))
-    except ValueError:
-        return False
-    action = (request.args.get('action') or '').strip()
-    sig = request.args.get('sig', '')
-    return bool(action and sig) and _verify_admin_action_sig(action, uid, sig)
+    from app import action_tokens
+    fields = request.form if request.method == 'POST' else request.args
+    tok, _ = action_tokens.check(app.config['SECRET_KEY'], fields, _action_token_dir())
+    return tok is not None
+
+
+def _action_token_dir():
+    from app.first_run import data_dir
+    return data_dir()
 
 
 # Authentication guard (must run after portal guard and load_current_user)
@@ -1532,7 +1535,6 @@ def _serve_spa():
 @app.route('/browse')
 @app.route('/settings')
 @app.route('/upgrades')
-@app.route('/login')
 @app.route('/start')
 @app.route('/unlock')
 @app.route('/admin')
@@ -9026,24 +9028,15 @@ def _telegram_admin_chat_id() -> str:
 
 
 def _make_admin_action_url(action: str, user_id: int) -> str:
-    """Generate an HMAC-signed URL for admin actions (approve/deny) via Telegram buttons."""
-    import hashlib, hmac
-    app_url = _public_app_url()
-    secret = _TELEGRAM_ACTION_SECRET
-    msg = f"{action}:{user_id}"
-    sig = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()[:16]
-    return f"{app_url}/api/admin/telegram-action?action={action}&uid={user_id}&sig={sig}"
+    """Signed, single-use link (24 h) for an admin action button in Telegram.
 
-
-def _verify_admin_action_sig(action: str, user_id: int, sig: str) -> bool:
-    """Verify the HMAC signature on a Telegram admin action URL."""
-    import hashlib, hmac
-    secret = _TELEGRAM_ACTION_SECRET
-    if not secret:
-        return False
-    msg = f"{action}:{user_id}"
-    expected = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()[:16]
-    return hmac.compare_digest(sig, expected)
+    Opening it shows a confirm page; only the button on that page (a POST)
+    changes anything. See app.action_tokens.
+    """
+    from urllib.parse import urlencode
+    from app import action_tokens
+    fields = action_tokens.sign(app.config['SECRET_KEY'], action, user_id)
+    return f"{_public_app_url()}/api/admin/telegram-action?{urlencode(fields)}"
 
 
 def _send_account_request_notification(user_id: int, name: str, email: str = None) -> None:
@@ -9833,50 +9826,101 @@ def _send_plex_access_email(to_email: str, display_name: str) -> None:
 # Clicking Approve/Deny in Telegram opens the URL in a browser, which hits this
 # endpoint directly — no webhook needed.
 
-_TELEGRAM_ACTION_SECRET = os.environ.get('TELEGRAM_ACTION_SECRET', '')
+_ADMIN_ACTION_CSP = ("default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
+                     "frame-ancestors 'none'; base-uri 'none'")
+_ADMIN_ACTION_LABELS = {
+    'approve_user': ('Approve account', 'Approve {name} so they can sign in?', 'Approve'),
+    'deny_user': ('Deny account', 'Deny {name} and remove the account?', 'Deny'),
+    'approve_plex': ('Grant Plex access', 'Give {name} access to the shared Plex server?', 'Grant access'),
+    'deny_plex': ('Deny Plex access', 'Deny {name} shared Plex access?', 'Deny'),
+}
 
 
-def _admin_action_page(title: str, message: str, success: bool = True) -> str:
-    """Return a minimal HTML page shown after an admin action from Telegram."""
+def _admin_action_page(title: str, message: str, success: bool = True, status: int = 200,
+                       form: dict = None, button: str = '') -> Response:
+    """Minimal HTML page for a Telegram admin action. Every interpolated value
+    is HTML-escaped; the response forbids scripts (CSP) and MIME sniffing."""
+    import html as _html
+    esc = lambda v: _html.escape(str(v), quote=True)
     color = '#22c55e' if success else '#ef4444'
-    icon = '✅' if success else '❌'
-    return f"""\
+    form_html = ''
+    if form:
+        hidden = ''.join(f'<input type="hidden" name="{esc(k)}" value="{esc(v)}">' for k, v in form.items())
+        action_url = esc(request.script_root + request.path)
+        form_html = (f'<form method="post" action="{action_url}" style="margin-top:24px;">{hidden}'
+                     f'<button type="submit" style="font-size:16px;font-weight:600;padding:12px 28px;'
+                     f'border:0;border-radius:10px;background:{color};color:#fff;">{esc(button)}</button></form>')
+    page = f"""\
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{title} — Luma</title></head>
+<meta name="referrer" content="no-referrer">
+<title>{esc(title)} - Luma</title></head>
 <body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
 background:radial-gradient(ellipse at 50% 40%,#1a1a1c 0%,#111113 40%,#050507 100%);
 font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#fff;">
 <div style="text-align:center;padding:40px;max-width:400px;">
-<div style="font-size:48px;margin-bottom:16px;">{icon}</div>
-<h1 style="font-size:20px;font-weight:700;margin:0 0 8px;">{title}</h1>
-<p style="font-size:14px;color:rgba(255,255,255,0.5);line-height:1.6;margin:0;">{message}</p>
+<h1 style="font-size:20px;font-weight:700;margin:0 0 8px;color:{color};">{esc(title)}</h1>
+<p style="font-size:14px;color:rgba(255,255,255,0.7);line-height:1.6;margin:0;">{esc(message)}</p>
+{form_html}
 </div></body></html>"""
+    resp = Response(page, status=status, mimetype='text/html')
+    resp.headers['Content-Security-Policy'] = _ADMIN_ACTION_CSP
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Cache-Control'] = 'no-store'
+    resp.headers['Referrer-Policy'] = 'no-referrer'
+    return resp
 
 
-@app.route('/api/admin/telegram-action', methods=['GET'])
+_ADMIN_LINK_ERRORS = {
+    'malformed': ('Invalid Link', 'This link is missing required parameters.', 400),
+    'not configured': ('Invalid Link', 'Admin links are not configured on this server.', 403),
+    'bad signature': ('Invalid Link', 'This link has an invalid signature.', 403),
+    'expired': ('Link Expired', 'This link has expired. Open the request in Luma instead.', 410),
+    'used': ('Link Already Used', 'This link has already been used.', 410),
+}
+
+
+def _admin_link_error(reason: str) -> Response:
+    title, message, status = _ADMIN_LINK_ERRORS.get(reason, _ADMIN_LINK_ERRORS['malformed'])
+    return _admin_action_page(title, message, False, status)
+
+
+@app.route('/api/admin/telegram-action', methods=['GET', 'POST'])
 def admin_telegram_action():
-    """Handle admin approve/deny actions from Telegram URL buttons."""
-    action = (request.args.get('action') or '').strip()
-    uid_str = request.args.get('uid', '')
-    sig = request.args.get('sig', '')
+    """Admin approve/deny from Telegram URL buttons.
 
-    if not action or not uid_str or not sig:
-        return _admin_action_page('Invalid Link', 'This link is missing required parameters.', False), 400
+    GET (opening the link) never changes state: it checks the link and shows a
+    confirm page whose button POSTs the same signed fields. The POST consumes
+    the single-use link and performs the action.
+    """
+    from app import action_tokens
+    secret = app.config['SECRET_KEY']
+    if request.method == 'GET':
+        tok, reason = action_tokens.check(secret, request.args, _action_token_dir())
+        if tok is None:
+            return _admin_link_error(reason)
+        u = user_auth.get_user_by_id(tok['uid'])
+        if not u:
+            return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
+        title, question, button = _ADMIN_ACTION_LABELS[tok['action']]
+        fields = {k: request.args.get(k, '') for k in ('action', 'uid', 'exp', 'nonce', 'sig')}
+        return _admin_action_page(title, question.format(name=u['name']), tok['action'].startswith('approve'),
+                                  form=fields, button=button)
 
-    try:
-        uid = int(uid_str)
-    except ValueError:
-        return _admin_action_page('Invalid Link', 'Invalid user ID.', False), 400
-
-    if not _verify_admin_action_sig(action, uid, sig):
-        return _admin_action_page('Invalid Link', 'This link has an invalid signature.', False), 403
-
+    from app.auth_routes import is_same_origin
+    origin = request.headers.get('Origin')
+    if (origin and origin != 'null' and not is_same_origin(origin)) or \
+            request.headers.get('Sec-Fetch-Site', '').lower() == 'cross-site':
+        return _admin_action_page('Invalid Request', 'This request came from another site.', False, 403)
+    tok, reason = action_tokens.consume(secret, request.form, _action_token_dir())
+    if tok is None:
+        return _admin_link_error(reason)
+    action, uid = tok['action'], tok['uid']
     try:
         if action == 'approve_user':
             ok = user_auth.approve_user(uid)
             if not ok:
-                return _admin_action_page('User Not Found', 'This user no longer exists.', False), 404
+                return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
             u = user_auth.get_user_by_id(uid)
             name = u['name'] if u else '?'
             if u and u.get('email'):
@@ -9884,53 +9928,36 @@ def admin_telegram_action():
                     _send_approval_email(u['email'], name)
                 except Exception:
                     pass
-            logger.info(f"User {uid} ({name}) approved via Telegram URL action")
+            logger.info(f"User {uid} approved via Telegram link")
             return _admin_action_page('Account Approved', f'{name} has been approved and can now sign in.')
 
-        elif action == 'deny_user':
+        if action == 'deny_user':
             u = user_auth.get_user_by_id(uid)
             name = u['name'] if u else '?'
-            ok = user_auth.deny_user(uid)
-            if not ok:
-                return _admin_action_page('User Not Found', 'This user no longer exists.', False), 404
-            logger.info(f"User {uid} ({name}) denied via Telegram URL action")
+            if not user_auth.deny_user(uid):
+                return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
+            logger.info(f"User {uid} denied via Telegram link")
             return _admin_action_page('Account Denied', f'{name} has been denied and removed.', False)
 
-        elif action == 'approve_plex':
-            u = user_auth.get_user_by_id(uid)
-            if not u:
-                return _admin_action_page('User Not Found', 'This user no longer exists.', False), 404
-            name = u['name']
-            user_auth.save_user_settings(uid, {
-                'use_shared_server': True,
-                'plex_access_status': 'approved',
-            })
+        u = user_auth.get_user_by_id(uid)
+        if not u:
+            return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
+        name = u['name']
+        if action == 'approve_plex':
+            user_auth.save_user_settings(uid, {'use_shared_server': True, 'plex_access_status': 'approved'})
             if u.get('email'):
                 try:
                     _send_plex_access_email(u['email'], name)
                 except Exception:
                     pass
-            logger.info(f"User {uid} ({name}) granted Plex access via Telegram URL action")
+            logger.info(f"User {uid} granted Plex access via Telegram link")
             return _admin_action_page('Access Granted', f'{name} now has access to the shared Plex server.')
-
-        elif action == 'deny_plex':
-            u = user_auth.get_user_by_id(uid)
-            if not u:
-                return _admin_action_page('User Not Found', 'This user no longer exists.', False), 404
-            name = u['name']
-            user_auth.save_user_settings(uid, {
-                'use_shared_server': False,
-                'plex_access_status': 'denied',
-            })
-            logger.info(f"User {uid} ({name}) denied Plex access via Telegram URL action")
-            return _admin_action_page('Access Denied', f'{name} was denied shared Plex access.', False)
-
-        else:
-            return _admin_action_page('Unknown Action', f'Action "{action}" is not recognized.', False), 400
-
+        user_auth.save_user_settings(uid, {'use_shared_server': False, 'plex_access_status': 'denied'})
+        logger.info(f"User {uid} denied Plex access via Telegram link")
+        return _admin_action_page('Access Denied', f'{name} was denied shared Plex access.', False)
     except Exception as e:
         logger.error(f"admin_telegram_action error: {e}")
-        return _admin_action_page('Error', 'Something went wrong processing this action.', False), 500
+        return _admin_action_page('Error', 'Something went wrong processing this action.', False, 500)
 
 
 # ── App version endpoint (used by KioskHub wrapper for auto-reload) ──────────

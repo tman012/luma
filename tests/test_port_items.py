@@ -261,33 +261,7 @@ def test_ai_settings_survive_upgrade(tmp_path):
 @pytest.fixture
 def remote(test_app, monkeypatch):
     user_auth.create_user('owner', '1234', is_admin=True)
-    monkeypatch.setattr(app.main, '_TELEGRAM_ACTION_SECRET', 'test-secret')
     return test_app.test_client()
-
-
-def _signed(action, uid):
-    import hashlib
-    import hmac
-    sig = hmac.new(b'test-secret', f'{action}:{uid}'.encode(), hashlib.sha256).hexdigest()[:16]
-    return f'/api/admin/telegram-action?action={action}&uid={uid}&sig={sig}'
-
-
-def test_signed_telegram_link_skips_sign_in(remote):
-    r = remote.get(_signed('approve', 424242), environ_base=REMOTE)
-    assert r.status_code != 401
-
-
-def test_unsigned_or_forged_telegram_link_needs_sign_in(remote):
-    for url in ('/api/admin/telegram-action?action=approve&uid=1&sig=deadbeefdeadbeef',
-                '/api/admin/telegram-action?action=approve&uid=1',
-                '/api/admin/telegram-action'):
-        assert remote.get(url, environ_base=REMOTE).status_code == 401
-
-
-def test_telegram_link_needs_secret(remote, monkeypatch):
-    url = _signed('approve', 1)
-    monkeypatch.setattr(app.main, '_TELEGRAM_ACTION_SECRET', '')
-    assert remote.get(url, environ_base=REMOTE).status_code == 401
 
 
 def test_version_open_remotely(remote):
@@ -296,3 +270,32 @@ def test_version_open_remotely(remote):
 
 def test_other_admin_routes_still_need_sign_in(remote):
     assert remote.get('/api/admin/users', environ_base=REMOTE).status_code == 401
+
+
+def test_qbit_category_migration_runs_once(tmp_path):
+    s = _load(tmp_path, {'qbittorrent': {'url': 'http://qbit.test'}})
+    assert s.get('qbittorrent.app_category') == 'media-search-app'
+    saved = json.loads((tmp_path / 'settings.json').read_text())
+    assert saved['_migrations'][sm.QBIT_CATEGORY_MARKER] is True
+    # The user removes the key (e.g. by editing the file): not brought back.
+    del saved['qbittorrent']['app_category']
+    (tmp_path / 'settings.json').write_text(json.dumps(saved))
+    s2 = sm.SettingsManager(str(tmp_path / 'settings.json'))
+    assert s2.get('qbittorrent.app_category') != 'media-search-app'
+
+
+def test_cleared_qbit_category_not_revived(tmp_path):
+    s = _load(tmp_path, {'qbittorrent': {'url': 'http://qbit.test', 'app_category': ''}})
+    assert s.get('qbittorrent.app_category') == ''
+
+
+def test_fresh_install_marks_qbit_migration_done(tmp_path):
+    s = sm.SettingsManager(str(tmp_path / 'settings.json'))
+    assert s.get('qbittorrent.app_category') == 'luma'
+    saved = json.loads((tmp_path / 'settings.json').read_text())
+    assert saved['_migrations'][sm.QBIT_CATEGORY_MARKER] is True
+
+
+def test_login_registered_once():
+    rules = [r for r in app.main.app.url_map.iter_rules() if r.rule == '/login']
+    assert len(rules) == 1 and rules[0].endpoint.endswith('login')

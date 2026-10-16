@@ -1428,21 +1428,27 @@ def _migrate_legacy_request_excludes(data: dict, existing: bool) -> bool:
     return True
 
 
+QBIT_CATEGORY_MARKER = 'legacy_qbit_category'
+
+
 def _migrate_legacy_qbit_category(data: dict, existing: bool) -> bool:
-    """Keep qBittorrent's old app category on an upgraded install.
+    """Keep qBittorrent's old app category on an upgraded install, once.
 
     The category default changed to 'luma'. An existing settings file with no
-    saved qbittorrent.app_category used LEGACY_QBIT_APP_CATEGORY, and its
+    qbittorrent.app_category key used LEGACY_QBIT_APP_CATEGORY, and its
     torrents carry that category, so it is written out explicitly. Otherwise
     those torrents would drop out of Activity, origin badges and auto-rename.
+    Runs once (a marker under _migrations persists), and a category the user
+    cleared on purpose (key present, empty) is left alone.
     """
-    if not existing:
+    done = data.setdefault('_migrations', {})
+    if not isinstance(done, dict) or done.get(QBIT_CATEGORY_MARKER):
         return False
+    done[QBIT_CATEGORY_MARKER] = True
     qbit = data.setdefault('qbittorrent', {})
-    if not isinstance(qbit, dict) or qbit.get('app_category'):
-        return False
-    qbit['app_category'] = LEGACY_QBIT_APP_CATEGORY
-    logger.info("Kept the previous qBittorrent app category: %s", LEGACY_QBIT_APP_CATEGORY)
+    if existing and isinstance(qbit, dict) and 'app_category' not in qbit:
+        qbit['app_category'] = LEGACY_QBIT_APP_CATEGORY
+        logger.info("Kept the previous qBittorrent app category: %s", LEGACY_QBIT_APP_CATEGORY)
     return True
 
 

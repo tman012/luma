@@ -58,7 +58,6 @@ services:
       - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD:-}
       # Telegram admin alerts (bot token lives in data/telegram_bot.json)
       - TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID:-}
-      - TELEGRAM_ACTION_SECRET=${TELEGRAM_ACTION_SECRET:-}
       # Service-to-service API key (X-API-Key; companion apps read rooms with it)
       - SERVICE_API_KEY=${SERVICE_API_KEY:-}
       # Flask session key

@@ -16,6 +16,7 @@ variables reach the container.
 |---|---|---|
 | `APP_URL` | The hardcoded public URL in e-mail and Telegram links | You want links to use your public URL. If it is blank, the request's own URL is used. |
 | `TELEGRAM_ADMIN_CHAT_ID` | The hardcoded admin chat id | You get Telegram admin alerts (new requests, pending users). It can also go in `data/telegram_bot.json` as `admin_chat_id`. If it is blank, alerts are skipped. |
+| `TELEGRAM_ACTION_SECRET` | Signed the Telegram approve/deny links | Removed. Links are now signed with `SECRET_KEY` (full HMAC-SHA256), expire after 24 hours, work once, and open a confirm page; nothing changes until you press its button. Links sent before the upgrade no longer work. |
 | `KODI_NAS_BASE` | The hardcoded `smb://<nas>` share root | You play through Kodi and rely on the share fallback. `settings.kodi.nas_base` still wins when it is set. |
 | `TZ` | It was set in compose | Schedules (03:00 scan, 22:50 roulette, ...) follow the container clock. **Set it**, otherwise it is UTC. |
 | `PLEX_DB`, `LUMA_PLEX_DB_DIR` | Compose `environment:` and the `/mnt/plexdb` mount | You use the read-only Plex DB. |
