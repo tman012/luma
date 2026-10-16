@@ -139,8 +139,11 @@ class TestRemoteLockModes:
             g.current_user = None
             result = remote_lock.guard()
             assert result is not None
-            # Should be a redirect to login
-            assert result[1] == 302
+            # Should be a redirect to login (check tuple or Response)
+            if isinstance(result, tuple):
+                assert result[1] == 302
+            else:
+                assert result.status_code == 302
     
     def test_mode_enforce_allows_authenticated(self, app, settings_mock):
         """Mode 'enforce' allows authenticated users."""
