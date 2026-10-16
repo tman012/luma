@@ -5,6 +5,7 @@ Similar to the ExploreCache but for library browsing, continue watching, and rec
 
 import sqlite3
 import json
+import os
 import threading
 import logging
 from datetime import datetime, timedelta
@@ -18,9 +19,17 @@ logger = logging.getLogger(__name__)
 class LibraryCache:
     """Manages cached library data for lightning-fast loading"""
 
-    def __init__(self, cache_dir: str = "/app/cache"):
+    def __init__(self, cache_dir: Optional[str] = None):
+        if cache_dir is None:
+            # Try env var, then /app/cache if it exists, else fall back to /tmp
+            cache_dir = os.environ.get('LUMA_CACHE_DIR')
+            if not cache_dir:
+                if os.path.exists('/app') and os.access('/app', os.W_OK):
+                    cache_dir = '/app/cache'
+                else:
+                    cache_dir = '/tmp/luma_cache'
         self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.cache_dir / "library_cache.db"
         self.update_interval = 60  # 1 minute for library data
         self.last_update = {}

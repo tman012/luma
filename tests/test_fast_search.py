@@ -121,6 +121,87 @@ class TestFuzzyMatching(unittest.TestCase):
         self.assertGreater(score_popular, 0)
 
 
+class TestShortQueryMatching(unittest.TestCase):
+    """Test 3-letter query matching behavior."""
+    
+    def setUp(self):
+        """Set up search index with test data."""
+        self.index = FastSearchIndex()
+        self.index._index = [
+            {
+                'title': 'Dark Knight',
+                'title_lower': 'dark knight',
+                'title_normalized': 'dark knight',
+                'year': 2008,
+                'genres_lower': ['action'],
+                'content_rating': 'PG-13',
+                'section_id': 1,
+                'media_type': 'movie',
+                'popularity_score': 1.0,
+                'rating_key': 1,
+            },
+            {
+                'title': 'Ark',
+                'title_lower': 'ark',
+                'title_normalized': 'ark',
+                'year': 2021,
+                'genres_lower': ['action'],
+                'content_rating': 'PG-13',
+                'section_id': 1,
+                'media_type': 'movie',
+                'popularity_score': 0.5,
+                'rating_key': 2,
+            },
+            {
+                'title': 'The Park',
+                'title_lower': 'the park',
+                'title_normalized': 'park',
+                'year': 2015,
+                'genres_lower': ['drama'],
+                'content_rating': 'R',
+                'section_id': 1,
+                'media_type': 'movie',
+                'popularity_score': 0.3,
+                'rating_key': 3,
+            }
+        ]
+        self.index._initialized = True
+    
+    def test_ark_exact_match_first(self):
+        """Test 'ark' query returns exact match 'Ark' before substring match 'Dark Knight'."""
+        results = self.index.search(q='ark', fuzzy=True)
+        
+        # Should have at least 2 results
+        self.assertGreaterEqual(len(results), 2)
+        
+        # First result should be exact match 'Ark'
+        self.assertEqual(results[0]['title'], 'Ark')
+        
+        # 'Dark Knight' should be in results (substring match)
+        titles = [r['title'] for r in results]
+        self.assertIn('Dark Knight', titles)
+    
+    def test_ark_substring_not_false_positive(self):
+        """Test 'ark' substring matches are intentional, not false positives."""
+        # When there's an exact match, it comes first
+        results = self.index.search(q='ark', fuzzy=True)
+        self.assertEqual(results[0]['title'], 'Ark')
+        
+        # Substring matches should be ranked by tier
+        from app.fast_search import fuzzy_match_score, normalize_text
+        
+        # 'ark' vs 'Ark' is exact match (tier 1)
+        score1, type1 = fuzzy_match_score('ark', 'Ark', 'ark', 'ark')
+        self.assertEqual(type1, 'exact')
+        
+        # 'ark' vs 'Dark Knight' is substring match (tier 3)
+        score2, type2 = fuzzy_match_score('ark', 'Dark Knight', 'ark', 'dark knight')
+        self.assertEqual(type2, 'substring')
+        
+        # Exact match should be ranked higher than substring
+        self.assertGreater(score1, score2)
+
+
 class TestFastSearchIndexFuzzy(unittest.TestCase):
     """Test FastSearchIndex fuzzy search capabilities."""
 
@@ -906,117 +987,340 @@ class TestTMDbIntegration(unittest.TestCase):
         # Should log warning but continue
 
 
+class TestTMDb429Handling(unittest.TestCase):
+    """Test TMDb rate limit handling with Retry-After header and exponential backoff."""
+    
+    def setUp(self):
+        """Set up FastSearchIndex for testing."""
+        self.index = FastSearchIndex()
+    
+    def test_parse_retry_after_seconds(self):
+        """Test parsing Retry-After header as integer seconds."""
+        mock_response = Mock()
+        mock_response.headers = {'Retry-After': '120'}
+        
+        # Should return timestamp 120 seconds from now
+        t_before = time.time()
+        retry_after = self.index._parse_retry_after(mock_response)
+        t_after = time.time()
+        
+        self.assertGreater(retry_after, t_before + 119)
+        self.assertLess(retry_after, t_after + 121)
+    
+    def test_parse_retry_after_http_date(self):
+        """Test parsing Retry-After header as HTTP-date."""
+        from email.utils import formatdate
+        
+        # Create HTTP date 180 seconds from now
+        future_time = time.time() + 180
+        http_date = formatdate(timeval=future_time, usegmt=True)
+        
+        mock_response = Mock()
+        mock_response.headers = {'Retry-After': http_date}
+        
+        retry_after = self.index._parse_retry_after(mock_response)
+        
+        # Should be within a couple seconds of the target time
+        self.assertGreater(retry_after, future_time - 2)
+        self.assertLess(retry_after, future_time + 2)
+    
+    def test_parse_retry_after_missing(self):
+        """Test handling missing Retry-After header."""
+        mock_response = Mock()
+        mock_response.headers = {}
+        
+        retry_after = self.index._parse_retry_after(mock_response)
+        self.assertEqual(retry_after, 0.0)
+    
+    def test_exponential_backoff_sequence(self):
+        """Test exponential backoff sequence: 60s, 120s, 240s, ..., capped at 3600s."""
+        # First backoff: 60s
+        self.index._tmdb_backoff_count = 0
+        self.assertEqual(self.index._calculate_backoff(), 60)
+        
+        # Second: 120s
+        self.index._tmdb_backoff_count = 1
+        self.assertEqual(self.index._calculate_backoff(), 120)
+        
+        # Third: 240s
+        self.index._tmdb_backoff_count = 2
+        self.assertEqual(self.index._calculate_backoff(), 240)
+        
+        # Fourth: 480s
+        self.index._tmdb_backoff_count = 3
+        self.assertEqual(self.index._calculate_backoff(), 480)
+        
+        # Very high count: capped at 3600s
+        self.index._tmdb_backoff_count = 10
+        self.assertEqual(self.index._calculate_backoff(), 3600)
+    
+    def test_handle_429_with_retry_after_header(self):
+        """Test 429 handling uses Retry-After header when present."""
+        mock_response = Mock()
+        mock_response.headers = {'Retry-After': '90'}
+        
+        t_before = time.time()
+        self.index._handle_tmdb_429(mock_response)
+        
+        # Should set retry_after from header, not backoff
+        self.assertGreater(self.index._tmdb_retry_after, t_before + 89)
+        self.assertLess(self.index._tmdb_retry_after, t_before + 91)
+        
+        # Backoff count should still be 0 since header was used
+        self.assertEqual(self.index._tmdb_backoff_count, 0)
+    
+    def test_handle_429_without_retry_after_header(self):
+        """Test 429 handling uses exponential backoff without header."""
+        mock_response = Mock()
+        mock_response.headers = {}
+        
+        t_before = time.time()
+        self.index._handle_tmdb_429(mock_response)
+        
+        # Should use 60s backoff for first failure
+        self.assertGreater(self.index._tmdb_retry_after, t_before + 59)
+        self.assertLess(self.index._tmdb_retry_after, t_before + 61)
+        
+        # Backoff count should increment
+        self.assertEqual(self.index._tmdb_backoff_count, 1)
+        
+        # Second failure should double the backoff
+        self.index._handle_tmdb_429(mock_response)
+        self.assertEqual(self.index._tmdb_backoff_count, 2)
+    
+    def test_reset_backoff_on_success(self):
+        """Test backoff resets after successful request."""
+        # Simulate failures
+        self.index._tmdb_backoff_count = 3
+        self.index._tmdb_retry_after = time.time() + 240
+        
+        # Reset on success
+        self.index._reset_tmdb_backoff()
+        
+        self.assertEqual(self.index._tmdb_backoff_count, 0)
+        # retry_after should remain (it's checked with time.time() comparison)
+    
+    def test_is_rate_limited(self):
+        """Test rate limit check."""
+        # Not rate limited initially
+        self.assertFalse(self.index._is_tmdb_rate_limited())
+        
+        # Set rate limit in future
+        self.index._tmdb_retry_after = time.time() + 100
+        self.assertTrue(self.index._is_tmdb_rate_limited())
+        
+        # Set rate limit in past
+        self.index._tmdb_retry_after = time.time() - 1
+        self.assertFalse(self.index._is_tmdb_rate_limited())
+    
+    @patch('app.fast_search.requests.get')
+    @patch('app.settings_manager.SettingsManager')
+    def test_refresh_tmdb_handles_429_with_header(self, mock_settings_class, mock_get):
+        """Test TMDb titles refresh handles 429 with Retry-After header."""
+        # Mock settings
+        mock_settings = Mock()
+        mock_settings.get.side_effect = lambda k, default='': {
+            'apis.tmdb.api_key': 'test_key',
+            'apis.tmdb.base_url': 'https://api.themoviedb.org/3'
+        }.get(k, default)
+        mock_settings_class.return_value = mock_settings
+        
+        # Mock 429 response with Retry-After header
+        mock_response = Mock()
+        mock_response.status_code = 429
+        mock_response.headers = {'Retry-After': '300'}
+        mock_get.return_value = mock_response
+        
+        t_before = time.time()
+        self.index._refresh_tmdb_titles()
+        
+        # Should have set retry_after from header
+        self.assertGreater(self.index._tmdb_retry_after, t_before + 299)
+        self.assertLess(self.index._tmdb_retry_after, t_before + 301)
+    
+    @patch('app.fast_search.requests.get')
+    @patch('app.settings_manager.SettingsManager')
+    def test_refresh_tmdb_handles_429_without_header(self, mock_settings_class, mock_get):
+        """Test TMDb titles refresh handles 429 with exponential backoff."""
+        # Mock settings
+        mock_settings = Mock()
+        mock_settings.get.side_effect = lambda k, default='': {
+            'apis.tmdb.api_key': 'test_key',
+            'apis.tmdb.base_url': 'https://api.themoviedb.org/3'
+        }.get(k, default)
+        mock_settings_class.return_value = mock_settings
+        
+        # Mock 429 response without Retry-After header
+        mock_response = Mock()
+        mock_response.status_code = 429
+        mock_response.headers = {}
+        mock_get.return_value = mock_response
+        
+        t_before = time.time()
+        self.index._refresh_tmdb_titles()
+        
+        # Should use exponential backoff (60s for first failure)
+        self.assertGreater(self.index._tmdb_retry_after, t_before + 59)
+        self.assertLess(self.index._tmdb_retry_after, t_before + 61)
+        self.assertEqual(self.index._tmdb_backoff_count, 1)
+    
+    @patch('app.fast_search.requests.get')
+    @patch('app.settings_manager.SettingsManager')
+    def test_refresh_tmdb_resets_backoff_on_success(self, mock_settings_class, mock_get):
+        """Test TMDb titles refresh resets backoff on successful request."""
+        # Mock settings
+        mock_settings = Mock()
+        mock_settings.get.side_effect = lambda k, default='': {
+            'apis.tmdb.api_key': 'test_key',
+            'apis.tmdb.base_url': 'https://api.themoviedb.org/3'
+        }.get(k, default)
+        mock_settings_class.return_value = mock_settings
+        
+        # Start with backoff count
+        self.index._tmdb_backoff_count = 3
+        
+        # Mock successful response
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'results': [{'title': 'Test Movie'}]
+        }
+        mock_get.return_value = mock_response
+        
+        self.index._refresh_tmdb_titles()
+        
+        # Backoff should be reset
+        self.assertEqual(self.index._tmdb_backoff_count, 0)
+
+
 class TestFlaskEndpoints(unittest.TestCase):
     """Test Flask endpoints with mocked TMDb."""
     
     def setUp(self):
-        """Set up Flask test client."""
-        # Skip if cache directory doesn't exist (environment issue)
+        """Set up Flask test client with temp cache directory."""
         import os
-        if not os.path.exists('/app'):
-            self.skipTest("Flask app requires /app directory")
+        import tempfile
+        
+        # Create temp cache directory for tests
+        self.temp_dir = tempfile.mkdtemp()
+        os.environ['LUMA_CACHE_DIR'] = self.temp_dir
         
         # Import here to avoid circular imports
-        try:
-            from app import main as app_main
-            self.app = app_main.app
-            self.app.config['TESTING'] = True
-            self.client = self.app.test_client()
-        except Exception as e:
-            self.skipTest(f"Flask app initialization failed: {e}")
+        from app import main as app_main
+        self.app = app_main.app
+        self.app.config['TESTING'] = True
+        self.client = self.app.test_client()
     
-    @patch('app.main.tmdb')
+    def tearDown(self):
+        """Clean up temp directory."""
+        import shutil
+        if hasattr(self, 'temp_dir'):
+            shutil.rmtree(self.temp_dir, ignore_errors=True)
+    
     @patch('app.main.fast_search_index')
-    def test_search_endpoint_correction_triggered(self, mock_index, mock_tmdb):
-        """Test /api/search triggers correction on weak results."""
-        # Mock weak direct results
-        mock_tmdb.search_multi.side_effect = [
-            [],  # Direct search: empty
-            [{'id': 2, 'title': 'Interstellar', 'media_type': 'movie', 'popularity': 120}]  # Corrected
+    def test_library_search_fast_endpoint(self, mock_index):
+        """Test /api/library/search/fast endpoint returns results."""
+        # Mock search results
+        mock_index.search.return_value = [
+            {'title': 'Interstellar', 'rating_key': 1, 'year': 2014}
         ]
-        mock_tmdb.search_movies.side_effect = [
-            [],  # Direct search: empty
-            [{'id': 2, 'title': 'Interstellar', 'popularity': 120}]  # Corrected
-        ]
-        mock_tmdb.search_tv.side_effect = [[], []]
-        mock_tmdb.search_people.return_value = []
+        mock_index.status.return_value = {
+            'initialized': True,
+            'total_items': 1000,
+            'total_movies': 500,
+            'total_shows': 500,
+            'last_refresh': 0,
+            'last_refresh_age_seconds': 0,
+            'sections': []
+        }
+        
+        response = self.client.get('/api/library/search/fast?q=Interstellar')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        
+        # Should have results
+        self.assertGreaterEqual(data.get('total', 0), 1)
+        self.assertIn('results', data)
+        mock_index.search.assert_called_once()
+    
+    @patch('app.main.settings')
+    @patch('app.main.fast_search_index')
+    def test_tmdb_match_search_correction_triggered(self, mock_index, mock_settings):
+        """Test /api/tmdb/match-search triggers correction on weak results."""
+        # Mock settings
+        mock_settings.get.return_value = 'test_api_key'
+        
+        # Mock weak direct results, then better corrected results
+        mock_response_weak = Mock()
+        mock_response_weak.status_code = 200
+        mock_response_weak.json.return_value = {'results': []}
+        
+        mock_response_corrected = Mock()
+        mock_response_corrected.status_code = 200
+        mock_response_corrected.json.return_value = {
+            'results': [{'id': 1, 'title': 'Interstellar', 'release_date': '2014-11-07'}]
+        }
         
         # Mock spelling correction
         mock_index.find_spelling_correction.return_value = 'Interstellar'
+        mock_index._is_tmdb_rate_limited.return_value = False
+        mock_index._reset_tmdb_backoff.return_value = None
         
-        response = self.client.get('/api/search?q=Interstelar&type=movie')
-        self.assertEqual(response.status_code, 200)
-        data = response.get_json()
-        
-        # Should have results from corrected search
-        self.assertGreater(len(data.get('movies', [])), 0)
-        mock_index.find_spelling_correction.assert_called_once()
+        with patch('app.main.requests.get', side_effect=[mock_response_weak, mock_response_corrected]):
+            response = self.client.get('/api/tmdb/match-search?query=Interstelar&media_type=movie')
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            
+            # Should have corrected results
+            self.assertGreaterEqual(len(data.get('results', [])), 1)
+            mock_index.find_spelling_correction.assert_called_once()
     
-    @patch('app.main.tmdb')
+    @patch('app.main.settings')
     @patch('app.main.fast_search_index')
-    def test_search_endpoint_correction_not_triggered(self, mock_index, mock_tmdb):
-        """Test /api/search doesn't trigger correction when results are good."""
-        # Mock good direct results
-        mock_tmdb.search_multi.return_value = [
-            {'id': 1, 'title': 'Interstellar', 'media_type': 'movie', 'popularity': 120},
-            {'id': 2, 'title': 'Interstellar 2', 'media_type': 'movie', 'popularity': 80},
-            {'id': 3, 'title': 'Interstellar 3', 'media_type': 'movie', 'popularity': 60}
-        ]
-        mock_tmdb.search_movies.return_value = [
-            {'id': 1, 'title': 'Interstellar', 'popularity': 120}
-        ]
-        mock_tmdb.search_tv.return_value = []
-        mock_tmdb.search_people.return_value = []
+    def test_tmdb_match_search_correction_not_triggered_good_results(self, mock_index, mock_settings):
+        """Test /api/tmdb/match-search doesn't trigger correction when results are good."""
+        # Mock settings
+        mock_settings.get.return_value = 'test_api_key'
         
-        response = self.client.get('/api/search?q=Interstellar&type=movie')
-        self.assertEqual(response.status_code, 200)
-        
-        # Correction should NOT be called (good results)
-        mock_index.find_spelling_correction.assert_not_called()
-    
-    @patch('app.main.tmdb')
-    @patch('app.main.fast_search_index')
-    def test_search_endpoint_corrected_after_direct(self, mock_index, mock_tmdb):
-        """Test corrected results come after ALL direct results."""
-        # Mock direct + corrected results
-        mock_tmdb.search_multi.side_effect = [
-            [{'id': 1, 'title': 'Star Wars', 'media_type': 'movie', 'popularity': 100}],  # Direct: 1 result
-            [{'id': 2, 'title': 'Star Trek', 'media_type': 'movie', 'popularity': 90}]  # Corrected
-        ]
-        mock_tmdb.search_movies.side_effect = [
-            [{'id': 1, 'title': 'Star Wars', 'popularity': 100}],  # Direct
-            [{'id': 2, 'title': 'Star Trek', 'popularity': 90}]  # Corrected
-        ]
-        mock_tmdb.search_tv.side_effect = [[], []]
-        mock_tmdb.search_people.return_value = []
-        
-        mock_index.find_spelling_correction.return_value = 'Star Trek'
-        
-        response = self.client.get('/api/search?q=Star%20Warz&type=movie')
-        self.assertEqual(response.status_code, 200)
-        data = response.get_json()
-        
-        movies = data.get('movies', [])
-        self.assertGreaterEqual(len(movies), 2)
-        # Direct result (Star Wars) should have lower relevance_rank than corrected (Star Trek)
-        # Meaning direct comes first
-        ranks = {m['title']: m.get('relevance_rank', 999) for m in movies}
-        if 'Star Wars' in ranks and 'Star Trek' in ranks:
-            self.assertLess(ranks['Star Wars'], ranks['Star Trek'])
-    
-    @patch('app.main.tmdb')
-    def test_tmdb_match_search_endpoint(self, mock_tmdb):
-        """Test /api/tmdb/match-search endpoint."""
-        mock_tmdb_response = Mock()
-        mock_tmdb_response.status_code = 200
-        mock_tmdb_response.json.return_value = {
-            'results': [{'id': 1, 'title': 'Interstellar', 'popularity': 120}]
+        # Mock good direct results (query 'Interstellar' matches title 'Interstellar')
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'results': [
+                {'id': 1, 'title': 'Interstellar', 'release_date': '2014-11-07'},
+                {'id': 2, 'title': 'Interstellar 2', 'release_date': '2024-01-01'},
+                {'id': 3, 'title': 'Interstellar 3', 'release_date': '2025-01-01'}
+            ]
         }
         
-        with patch('app.main.requests.get', return_value=mock_tmdb_response):
+        mock_index._is_tmdb_rate_limited.return_value = False
+        mock_index._reset_tmdb_backoff.return_value = None
+        
+        with patch('app.main.requests.get', return_value=mock_response):
             response = self.client.get('/api/tmdb/match-search?query=Interstellar&media_type=movie')
             self.assertEqual(response.status_code, 200)
-            # Just verify it doesn't crash
+            
+            # Correction should NOT be called (good results: >2 results and query matches title)
+            mock_index.find_spelling_correction.assert_not_called()
+    
+    @patch('app.main.settings')
+    def test_tmdb_match_search_endpoint_basic(self, mock_settings):
+        """Test /api/tmdb/match-search endpoint basic functionality."""
+        # Mock settings
+        mock_settings.get.return_value = 'test_api_key'
+        
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'results': [{'id': 1, 'title': 'Interstellar', 'release_date': '2014-11-07'}]
+        }
+        
+        with patch('app.main.requests.get', return_value=mock_response):
+            with patch('app.main.fast_search_index._reset_tmdb_backoff'):
+                response = self.client.get('/api/tmdb/match-search?query=Interstellar&media_type=movie')
+                self.assertEqual(response.status_code, 200)
+                data = response.get_json()
+                self.assertIn('results', data)
 
 
 if __name__ == '__main__':

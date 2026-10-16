@@ -1562,7 +1562,11 @@ def tmdb_match_search():
                     timeout=10,
                 )
                 if resp.status_code == 200:
+                    fast_search_index._reset_tmdb_backoff()
                     return mtype, resp.json().get('results', [])
+                elif resp.status_code == 429:
+                    logger.warning(f"tmdb_match_search {mtype} hit rate limit")
+                    fast_search_index._handle_tmdb_429(resp)
             except Exception as e:
                 logger.warning(f"tmdb_match_search {mtype} lookup failed: {e}")
             return mtype, []
@@ -1572,7 +1576,10 @@ def tmdb_match_search():
             _, items = _fetch(mtype)
             
             # If results are weak, try spelling correction (silent - no UI text)
-            if len(query) > 3 and _tmdb_needs_spelling_correction(items, query):
+            # Skip correction retry if we're currently rate limited
+            if (len(query) > 3 and 
+                not fast_search_index._is_tmdb_rate_limited() and 
+                _tmdb_needs_spelling_correction(items, query)):
                 try:
                     corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
                     if corrected and corrected.lower() != query.lower():

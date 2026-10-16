@@ -24,8 +24,26 @@ from typing import List, Dict, Optional
 logger = logging.getLogger(__name__)
 
 # Configuration defaults (will be overridden by settings when available)
-CACHE_DIR = Path('/app/static/hero_cache')
-CACHE_JSON = Path('/app/data/hero_content.json')
+def _get_cache_dir():
+    cache_base = os.environ.get('LUMA_CACHE_DIR')
+    if not cache_base:
+        if os.path.exists('/app') and os.access('/app', os.W_OK):
+            cache_base = '/app'
+        else:
+            cache_base = '/tmp/luma_cache'
+    return Path(cache_base) / 'static' / 'hero_cache'
+
+def _get_cache_json():
+    cache_base = os.environ.get('LUMA_CACHE_DIR')
+    if not cache_base:
+        if os.path.exists('/app') and os.access('/app', os.W_OK):
+            cache_base = '/app'
+        else:
+            cache_base = '/tmp/luma_cache'
+    return Path(cache_base) / 'data' / 'hero_content.json'
+
+CACHE_DIR = _get_cache_dir()
+CACHE_JSON = _get_cache_json()
 
 
 class HeroCache:

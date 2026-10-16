@@ -14,6 +14,7 @@ import time
 import unicodedata
 from collections import Counter
 from difflib import SequenceMatcher
+from email.utils import parsedate_to_datetime
 from typing import List, Dict, Optional, Any, Set, Tuple
 
 import requests
@@ -215,6 +216,8 @@ class FastSearchIndex:
         self._title_map: Dict[str, str] = {}  # Normalized -> display title map (library + TMDb)
         self._tmdb_titles_cached: bool = False
         self._tmdb_cache_time: float = 0.0
+        self._tmdb_retry_after: float = 0.0  # Unix timestamp when we can retry after 429
+        self._tmdb_backoff_count: int = 0  # Number of consecutive failures for exponential backoff
 
     # ------------------------------------------------------------------
     # Config (pulled lazily from settings each refresh so token changes work)
@@ -398,6 +401,77 @@ class FastSearchIndex:
         if not cached or cache_age > ttl:
             threading.Thread(target=self._refresh_tmdb_titles, daemon=True, name="tmdb-titles-cache").start()
 
+    def _parse_retry_after(self, response) -> float:
+        """Parse Retry-After header and return Unix timestamp when we can retry.
+        
+        Args:
+            response: requests.Response object from a 429 error
+            
+        Returns:
+            Unix timestamp when we can retry, or 0.0 if no header present
+        """
+        retry_after = response.headers.get('Retry-After')
+        if not retry_after:
+            return 0.0
+        
+        # Try parsing as seconds (integer)
+        try:
+            seconds = int(retry_after)
+            return time.time() + seconds
+        except ValueError:
+            pass
+        
+        # Try parsing as HTTP-date
+        try:
+            dt = parsedate_to_datetime(retry_after)
+            return dt.timestamp()
+        except (TypeError, ValueError):
+            pass
+        
+        return 0.0
+    
+    def _calculate_backoff(self) -> float:
+        """Calculate exponential backoff delay in seconds.
+        
+        Returns:
+            Delay in seconds (60s * 2^count, capped at 3600s)
+        """
+        # Start at 60s, double each time, cap at 1h
+        delay = 60 * (2 ** self._tmdb_backoff_count)
+        return min(delay, 3600)
+    
+    def _handle_tmdb_429(self, response) -> None:
+        """Handle TMDb 429 rate limit response.
+        
+        Sets retry_after timestamp from header or exponential backoff.
+        """
+        with self._lock:
+            # Try to get Retry-After from header
+            retry_after_ts = self._parse_retry_after(response)
+            
+            if retry_after_ts > 0:
+                # Use header value
+                self._tmdb_retry_after = retry_after_ts
+            else:
+                # Use exponential backoff
+                backoff_seconds = self._calculate_backoff()
+                self._tmdb_retry_after = time.time() + backoff_seconds
+                self._tmdb_backoff_count += 1
+    
+    def _reset_tmdb_backoff(self) -> None:
+        """Reset backoff state after successful request."""
+        with self._lock:
+            self._tmdb_backoff_count = 0
+    
+    def _is_tmdb_rate_limited(self) -> bool:
+        """Check if we're currently rate limited by TMDb.
+        
+        Returns:
+            True if we should wait before making requests
+        """
+        with self._lock:
+            return time.time() < self._tmdb_retry_after
+    
     def _refresh_tmdb_titles(self):
         """
         Background refresh of TMDb popular titles for spelling correction dictionary.
@@ -442,8 +516,11 @@ class FastSearchIndex:
                                 normalized = normalize_text(title)
                                 tmdb_titles_list.append(normalized)
                                 tmdb_title_map[normalized] = title
+                        # Reset backoff on successful request
+                        self._reset_tmdb_backoff()
                     elif resp.status_code == 429:
                         logger.warning(f"fast_search: TMDb rate limit hit on movies page {page}")
+                        self._handle_tmdb_429(resp)
                         failed = True
                         break
                 except Exception as e:
@@ -468,8 +545,11 @@ class FastSearchIndex:
                                     normalized = normalize_text(name)
                                     tmdb_titles_list.append(normalized)
                                     tmdb_title_map[normalized] = name
+                            # Reset backoff on successful request
+                            self._reset_tmdb_backoff()
                         elif resp.status_code == 429:
                             logger.warning(f"fast_search: TMDb rate limit hit on TV page {page}")
+                            self._handle_tmdb_429(resp)
                             failed = True
                             break
                     except Exception as e:
