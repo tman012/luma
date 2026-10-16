@@ -2274,6 +2274,25 @@ def _normalize_latest_tracker(name: str) -> str:
     return _LATEST_TRACKER_NORMALIZE.get(key, t)
 
 
+def latest_releases(params=None) -> list:
+    """The /api/indexer/latest results for in-process jobs (auto-grab).
+
+    Runs the view function directly in a synthetic request context, so no
+    HTTP request, auth check, Host or loopback trust is involved. Raises
+    RuntimeError when the view reports an error.
+    """
+    with app.test_request_context('/api/indexer/latest', query_string=dict(params or {})):
+        rv = indexer_latest()
+    status = 200
+    if isinstance(rv, tuple):
+        rv, status = rv[0], rv[1]
+    resp = app.make_response(rv)
+    if status >= 400 or resp.status_code >= 400:
+        payload = resp.get_json(silent=True) or {}
+        raise RuntimeError(payload.get('error') or f'status {max(status, resp.status_code)}')
+    return (resp.get_json(silent=True) or {}).get('results') or []
+
+
 @app.route('/api/indexer/latest')
 def indexer_latest():
     """Return the most recently published torrents across all configured

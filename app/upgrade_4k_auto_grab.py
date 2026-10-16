@@ -333,13 +333,9 @@ def _do_cycle(settings) -> Dict[str, Any]:
     # 300-item cap. sweep=remux2160p runs Prowlarr keyword searches for
     # "2160p REMUX", "UHD REMUX", etc. and surfaces those reliably.
     try:
-        resp = requests.get(
-            'http://localhost:5001/api/indexer/latest',
-            params={'limit': 600, 'sweep': 'remux2160p'},
-            timeout=180,  # sweeps run ~5–10s — give them more headroom
-        )
-        resp.raise_for_status()
-        payload = resp.json()
+        # In-process call: no HTTP round trip through the auth layer.
+        from app.main import latest_releases
+        payload = {'results': latest_releases({'limit': 600, 'sweep': 'remux2160p'})}
     except Exception as e:
         logger.error(f'4K auto-grab: failed to fetch /api/indexer/latest sweep: {e}')
         return {'error': f'Latest sweep fetch failed: {e}', 'checked': 0, 'grabbed': 0,

@@ -365,13 +365,9 @@ def _do_cycle(settings) -> Dict[str, Any]:
     #      otherwise get crowded out of browse by high-volume indexers (IPT)
     # Results are deduped by guid so anything in both sources counts once.
     def _fetch(params):
-        r = requests.get(
-            'http://localhost:5001/api/indexer/latest',
-            params=params,
-            timeout=180,
-        )
-        r.raise_for_status()
-        return r.json().get('results') or []
+        # In-process call: no HTTP round trip through the auth layer.
+        from app.main import latest_releases
+        return latest_releases(params)
 
     items: List[Dict[str, Any]] = []
     seen_guids: set = set()
