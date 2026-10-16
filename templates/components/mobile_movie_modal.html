@@ -1,0 +1,2643 @@
+<!-- Plex Movie Details Modal -->
+<!-- IMPORTANT: This modal is designed for iPhone PWA with viewport 393px x 852px -->
+<div class="movie-modal" id="movieModal" style="display: none;">
+    <div class="movie-modal-overlay">
+        <!-- Top safe area overlay - prevents content from showing through status bar -->
+        <div class="safe-area-top-overlay"></div>
+
+        <!-- Sticky header that appears on scroll -->
+        <div class="sticky-header" id="stickyHeader">
+            <button class="modal-close-btn-header" onclick="closeMovieModal()">
+                <i class="fas fa-times"></i>
+            </button>
+            <h2 class="sticky-header-title" id="stickyHeaderTitle"></h2>
+        </div>
+
+        <!-- Fixed Backdrop - Never scrolls -->
+        <div class="backdrop-section">
+            <!-- Close button in top left -->
+            <button class="modal-close-btn-backdrop" onclick="closeMovieModal()">
+                <i class="fas fa-times"></i>
+            </button>
+
+            <!-- Watchlist button in top right -->
+            <button class="modal-watchlist-btn-backdrop" onclick="toggleWatchlist()">
+                <i class="fas fa-bookmark"></i>
+            </button>
+
+            <img id="modalBackdropImage" class="backdrop-image" alt="Movie Backdrop" src="" style="opacity: 0;">
+            <div class="backdrop-gradient"></div>
+        </div>
+
+        <!-- Scrollable Content - starts right under backdrop -->
+        <div class="mockup">
+            <div class="content-container">
+
+                <!-- Clearlogo positioned above movie info -->
+                <div class="clearlogo-container">
+                    <img id="modalClearlogo" class="clearlogo-image" alt="" src="" style="display: none;">
+                    <h1 id="modalClearlogoFallback" class="clearlogo-fallback-title"></h1>
+                </div>
+
+                <!-- Movie Info Section (Centered) -->
+                <div class="movie-bottom-info">
+                    <!-- Title -->
+                    <div class="movie-title-container">
+                        <h1 class="movie-title" id="modalTitle">Loading...</h1>
+                    </div>
+
+                    <!-- Meta Info Line (includes genres) -->
+                    <div class="movie-meta-info">
+                        <span id="modalYear"></span>
+                        <span id="modalRuntime"></span>
+                        <span id="modalRating"></span>
+                        <span id="modalGenres"></span>
+                    </div>
+                </div>
+
+                <!-- Ratings Bar -->
+                <div class="ratings-bar" id="ratingsBar">
+                    <div class="rating-item" id="imdbRating" style="display: none;">
+                        <img src="/static/images/imdb-logo.png" alt="IMDb" class="rating-icon">
+                        <span class="rating-score" id="imdbScore">-</span>
+                    </div>
+
+                    <div class="rating-item" id="rtCriticRating" style="display: none;">
+                        <img id="rtCriticIcon" src="/static/images/rotten-tomatoes-logo.png" alt="RT Critics" class="rating-icon">
+                        <span class="rating-score" id="rtCriticScore">-</span>
+                    </div>
+
+                    <div class="rating-item" id="rtAudienceRating" style="display: none;">
+                        <img id="rtAudienceIcon" src="/static/images/rotten-tomatoes-popcorn-good.png" alt="RT Audience" class="rating-icon">
+                        <span class="rating-score" id="rtAudienceScore">-</span>
+                    </div>
+
+                    <div class="rating-item" id="metacriticRating" style="display: none;">
+                        <img src="/static/images/metacritic.png" alt="Metacritic" class="rating-icon">
+                        <span class="rating-score" id="metacriticScore">-</span>
+                    </div>
+                </div>
+
+                <!-- Play/Action Button (like Add to Sonarr style) -->
+                <button class="primary-action-button" id="primaryActionButton" onclick="handlePrimaryAction()" style="display: none;">
+                    <i class="fas fa-play"></i>
+                    <span>Watch</span>
+                </button>
+
+                <!-- Action Buttons Row (Plex-style circular icons) -->
+                <div class="action-buttons-row" id="actionButtonsRow" style="display: none;">
+                    <div class="action-btn-item" onclick="upgradeQuality()">
+                        <div class="action-btn-circle">
+                            <i class="fas fa-arrow-up"></i>
+                        </div>
+                        <span class="action-btn-label">Upgrade</span>
+                    </div>
+                    <div class="action-btn-item" onclick="openSourcesModal()">
+                        <div class="action-btn-circle">
+                            <i class="fas fa-download"></i>
+                        </div>
+                        <span class="action-btn-label">Sources</span>
+                    </div>
+                    <div class="action-btn-item" onclick="openReviewsModal()">
+                        <div class="action-btn-circle">
+                            <i class="fas fa-star"></i>
+                        </div>
+                        <span class="action-btn-label">Reviews</span>
+                    </div>
+                </div>
+
+                <!-- Plot section -->
+                <div class="plot-section">
+                    <div class="plot-text" id="modalDescription">
+                        Loading plot information...
+                    </div>
+                    <button class="more-button" id="moreButton" onclick="toggleSummary()" style="display: none;">
+                        More
+                    </button>
+                </div>
+
+
+                <!-- Cast & Crew Section (Director first, then cast) -->
+                <div class="cast-section" id="castCrewSection" style="display: none;">
+                    <h3 class="section-title">Cast & Crew</h3>
+                    <div class="cast-grid" id="castCrewGrid">
+                        <!-- Director(s) and cast members will be dynamically added here -->
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Sources Drill-Down Container (screens are injected dynamically) -->
+        <div id="sourcesContainer"></div>
+
+        <!-- Reviews Full-Screen Modal -->
+        <div class="action-modal" id="reviewsModal" style="display: none;">
+            <div class="action-modal-header">
+                <button class="action-modal-back" onclick="closeReviewsModal()">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <h2 class="action-modal-title">Reviews</h2>
+            </div>
+            <div class="action-modal-body" id="reviewsModalBody">
+                <div class="sources-loading" id="reviewsModalLoading" style="display: none; text-align: center; color: rgba(255,255,255,0.5); padding: 40px 20px;">
+                    <i class="fas fa-circle-notch fa-spin" style="font-size: 24px; margin-bottom: 10px; display: block;"></i>
+                    Loading reviews...
+                </div>
+                <div id="reviewsModalContent"></div>
+                <div class="sources-empty" id="reviewsModalEmpty" style="display: none; text-align: center; color: rgba(255,255,255,0.5); padding: 40px 20px;">
+                    No reviews available
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Movie Modal Styles */
+.movie-modal {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    height: 100dvh; /* Dynamic viewport height for mobile */
+    background: #000;
+    z-index: 10000;
+    overflow: hidden;
+    overflow-x: hidden !important;
+}
+
+.movie-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh; /* Dynamic viewport height for mobile */
+    background: #000;
+    overflow-y: auto;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE and Edge */
+}
+
+.movie-modal-overlay::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
+}
+
+/* Top safe area overlay */
+.safe-area-top-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: env(safe-area-inset-top, 0);
+    background: #000;
+    z-index: 100000;
+}
+
+/* Sticky header */
+.sticky-header {
+    position: fixed;
+    top: env(safe-area-inset-top, 0);
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 99999;
+    opacity: 0;
+    transform: translateY(-100%);
+    transition: all 0.3s ease;
+}
+
+.sticky-header.active {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.modal-close-btn-header {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 20px;
+    padding: 10px;
+    cursor: pointer;
+    position: absolute;
+    left: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+}
+
+.sticky-header-title {
+    position: absolute;
+    left: 60px;
+    right: 60px;
+    top: 50%;
+    transform: translateY(-50%);
+    text-align: center;
+    font-size: 16px;
+    font-weight: 600;
+    color: white;
+    margin: 0;
+    padding: 0 10px;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* Backdrop section */
+.backdrop-section {
+    position: sticky;
+    top: 0;
+    width: 100%;
+    min-height: 300px;
+    height: calc(300px + env(safe-area-inset-top, 0));
+    overflow: hidden;
+    padding-top: env(safe-area-inset-top, 0);
+    z-index: 100;
+}
+
+.backdrop-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 30%;
+    transition: opacity 0.3s ease;
+}
+
+.backdrop-gradient {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 40%;
+    background: linear-gradient(to bottom,
+        transparent 0%,
+        transparent 50%,
+        rgba(0,0,0,0.1) 80%,
+        rgba(0,0,0,0.25) 100%);
+    pointer-events: none;
+}
+
+/* Close button on backdrop */
+.modal-close-btn-backdrop {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0) + 15px);
+    left: 15px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(20, 20, 20, 0.7);
+    backdrop-filter: blur(20px) saturate(1.8);
+    -webkit-backdrop-filter: blur(20px) saturate(1.8);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 300;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.modal-close-btn-backdrop:hover {
+    background: rgba(40, 40, 40, 0.9);
+    transform: scale(1.1);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.5);
+}
+
+.modal-close-btn-backdrop:active {
+    transform: scale(0.95);
+}
+
+/* Watchlist button on backdrop */
+.modal-watchlist-btn-backdrop {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0) + 15px);
+    right: 15px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: rgba(20, 20, 20, 0.7);
+    backdrop-filter: blur(20px) saturate(1.8);
+    -webkit-backdrop-filter: blur(20px) saturate(1.8);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 300;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.modal-watchlist-btn-backdrop:hover {
+    background: rgba(40, 40, 40, 0.9);
+    transform: scale(1.1);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.5);
+}
+
+.modal-watchlist-btn-backdrop:active {
+    transform: scale(0.95);
+}
+
+.modal-watchlist-btn-backdrop.active {
+    background: rgba(255, 193, 7, 0.3);
+    color: #ffc107;
+    border-color: #ffc107;
+}
+
+/* Removed backdrop play button - now using primary action button below ratings */
+
+/* Clearlogo positioned above movie info */
+.clearlogo-container {
+    position: relative;
+    width: 95%;
+    max-width: 700px;
+    margin: -50px auto 5px auto;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 60px;
+}
+
+.clearlogo-image {
+    width: 100%;
+    height: auto;
+    max-height: 300px;
+    object-fit: contain;
+    filter: drop-shadow(0 8px 16px rgba(0,0,0,0.9)) drop-shadow(0 2px 4px rgba(0,0,0,0.8));
+}
+
+.clearlogo-fallback-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: white;
+    text-align: center;
+    line-height: 1.2;
+    padding: 0 20px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    text-shadow: 0 4px 8px rgba(0,0,0,0.9), 0 2px 4px rgba(0,0,0,0.8);
+}
+
+/* Content container */
+.mockup {
+    position: relative;
+    margin-top: -150px;
+    padding: 20px 0 0;
+    background: transparent;
+    min-height: calc(100vh - 300px);
+    z-index: 200;
+}
+
+.content-container {
+    position: relative;
+    width: 100%;
+    margin: 0 auto;
+}
+
+/* Movie info - CENTERED */
+.movie-bottom-info {
+    margin-bottom: 0px !important;
+    text-align: center;
+}
+
+.movie-title-container {
+    margin-bottom: 15px;
+}
+
+.movie-title {
+    font-size: 32px;
+    font-weight: 700;
+    color: white;
+    margin: 0;
+    line-height: 1.2;
+}
+
+/* Meta info (includes inline genres) */
+.movie-meta-info {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 10px;
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 14px;
+    justify-content: center;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.movie-meta-info span {
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.movie-meta-info span:not(:last-child)::after {
+    content: "•";
+    margin-left: 10px;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+.movie-meta-info span:empty {
+    display: none;
+}
+
+.movie-meta-info span:empty + span::after {
+    display: none;
+}
+
+/* Library badges - REMOVED/HIDDEN (not used anymore) */
+.library-badges {
+    display: none;
+}
+
+.library-badge {
+    background: rgba(33, 150, 243, 0.2);
+    color: #2196F3;
+    padding: 4px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid #2196F3;
+}
+
+/* Ratings bar */
+.ratings-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    margin-bottom: 0 !important;
+    margin-top: 12px !important;
+    padding: 0 0 10px 0 !important;
+    padding-top: 0 !important;
+    background: transparent;
+    justify-content: center;
+}
+
+/* Watch Button */
+.watch-button-container {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 40px;
+    margin-top: 10px;
+}
+
+.watch-button {
+    background: white;
+    color: black;
+    border: none;
+    border-radius: 50px;
+    padding: 14px 160px;
+    font-size: 16px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
+    min-width: 320px;
+    justify-content: center;
+    white-space: nowrap;
+}
+
+.watch-button:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 16px rgba(255, 255, 255, 0.3);
+}
+
+.watch-button:active {
+    transform: scale(0.98);
+}
+
+.watch-button i {
+    font-size: 14px;
+    color: black;
+}
+
+.watch-button span {
+    color: black;
+}
+
+.rating-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    opacity: 0.9;
+    transition: opacity 0.2s ease;
+}
+
+.rating-item:hover {
+    opacity: 1;
+}
+
+.rating-icon {
+    height: 20px;
+    width: auto;
+    object-fit: contain;
+}
+
+.rating-score {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+/* Primary Action Button (Play/Add to Watchlist) - styled like Sonarr button */
+.primary-action-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: calc(100% - 32px);
+    margin: 20px 16px;
+    padding: 14px 20px;
+    background: #ffffff;
+    color: #000000;
+    border: none;
+    border-radius: 50px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.primary-action-button:hover {
+    background: rgba(255, 255, 255, 0.85);
+    transform: scale(1.02);
+}
+
+.primary-action-button:active {
+    transform: scale(0.98);
+}
+
+.primary-action-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.primary-action-button i {
+    font-size: 18px;
+    color: #000000;
+}
+
+/* Action Buttons Row (Plex-style circular icons) */
+.action-buttons-row {
+    display: flex;
+    justify-content: flex-start;
+    gap: 32px;
+    padding: 8px 16px 20px;
+}
+.action-btn-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.action-btn-circle {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+.action-btn-circle i {
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.9);
+}
+.action-btn-item:active .action-btn-circle {
+    transform: scale(0.92);
+    background: rgba(255, 255, 255, 0.15);
+}
+.action-btn-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 500;
+}
+
+/* Full-screen action modals */
+.action-modal {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #000;
+    z-index: 100001;
+    display: flex;
+    flex-direction: column;
+    animation: slideInRight 0.25s ease;
+}
+@keyframes slideInRight {
+    from { transform: translateX(100%); }
+    to   { transform: translateX(0); }
+}
+.action-modal-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    flex-shrink: 0;
+}
+.action-modal-back {
+    background: none; border: none;
+    color: white; font-size: 20px;
+    padding: 8px; cursor: pointer;
+}
+.action-modal-title {
+    font-size: 18px; font-weight: 600;
+    color: white; margin: 0 0 0 12px;
+}
+.action-modal-body {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 16px;
+}
+
+/* Plot section */
+.plot-section {
+    margin-bottom: 30px;
+    padding: 0 10px;
+}
+
+.section-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: white;
+    margin-bottom: 10px;
+    padding: 0 10px;
+    text-align: left; /* Default left alignment */
+}
+
+
+.plot-text {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 16px;
+    line-height: 1.6;
+    margin-top: 0;
+}
+
+.plot-text.collapsed {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* More button */
+.more-button {
+    background: transparent;
+    border: none;
+    color: #2196F3;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 8px 0;
+    margin-top: 8px;
+    cursor: pointer;
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+.more-button:hover {
+    color: #1976D2;
+}
+
+/* Cast Section */
+.cast-section {
+    margin-bottom: 20px;
+    margin-left: 0;
+    margin-right: 0;
+    padding: 0;
+    width: 100vw;
+    position: relative;
+    left: 50%;
+    right: 50%;
+    margin-left: -50vw;
+    margin-right: -50vw;
+}
+
+.cast-grid {
+    display: flex;
+    gap: 20px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 10px 16px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.cast-grid::-webkit-scrollbar {
+    display: none;
+}
+
+.cast-member {
+    flex-shrink: 0;
+    width: 90px;
+    text-align: center;
+}
+
+.cast-photo {
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: rgba(255, 255, 255, 0.1);
+    margin-bottom: 8px;
+}
+
+.cast-name {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 500;
+    margin-bottom: 2px;
+    line-height: 1.3;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.cast-character {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.3;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+
+/* Sources drill-down screen (full-screen overlay, stacked) */
+.sources-screen {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 70px 16px 40px;
+}
+.sources-screen-backdrop {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 20%;
+    opacity: 0.25;
+    pointer-events: none;
+}
+.sources-screen-back {
+    position: absolute;
+    top: calc(env(safe-area-inset-top, 0px) + 12px);
+    left: 12px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: #555;
+    border: none;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    -webkit-tap-highlight-color: transparent;
+}
+.sources-screen-back:active {
+    background: #666;
+}
+
+/* Tile area with backdrop panel */
+.sources-tile-panel {
+    position: relative;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+    padding: 40px 24px;
+    border-radius: 24px;
+    overflow: hidden;
+    width: 100%;
+    max-width: 400px;
+}
+.sources-tile-panel-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 30%;
+    opacity: 0.3;
+    pointer-events: none;
+}
+.sources-tile-panel::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+    pointer-events: none;
+}
+.sources-tile-panel-border {
+    position: absolute;
+    inset: 0;
+    border-radius: 24px;
+    border: 1px solid #555;
+    pointer-events: none;
+    z-index: 2;
+}
+
+/* Tile buttons */
+.sources-tile {
+    width: calc(50% - 8px);
+    aspect-ratio: 1.3;
+    border-radius: 20px;
+    border: 1px solid #666;
+    background: #3a3a3a;
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
+    position: relative;
+    z-index: 1;
+}
+.sources-tile:active {
+    background: #4a4a4a;
+    border-color: #888;
+}
+.sources-tile-label {
+    font-size: 28px;
+    font-weight: 700;
+}
+.sources-tile-count {
+    font-size: 15px;
+    color: #ccc;
+}
+
+/* Release list items */
+.sources-release-item {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px 18px;
+    background: #2a2a2a;
+    border: 1px solid #555;
+    border-radius: 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+}
+.sources-release-item:active {
+    background: #383838;
+    border-color: #777;
+}
+.sources-release-badge {
+    display: inline-block;
+    padding: 5px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+.sources-release-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: #fff;
+    line-height: 1.4;
+    word-break: break-all;
+}
+.sources-release-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    font-size: 14px;
+    padding-left: 2px;
+}
+
+/* Confirm card */
+.sources-confirm-card {
+    background: #222;
+    border-radius: 20px;
+    padding: 28px 24px;
+    width: 100%;
+    max-width: 400px;
+    border: 1px solid #555;
+}
+.sources-confirm-cancel {
+    padding: 14px 28px;
+    border-radius: 50px;
+    border: 1px solid #777;
+    background: #444;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    min-height: 48px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.sources-confirm-cancel:active {
+    background: #555;
+}
+.sources-confirm-download {
+    padding: 14px 32px;
+    border-radius: 50px;
+    border: 1px solid #999;
+    background: #555;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    min-height: 48px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+.sources-confirm-download:active {
+    background: #666;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Body modal open state */
+body.modal-open {
+    overflow: hidden;
+    overflow-x: hidden !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .backdrop-section {
+        height: 240px;
+    }
+
+    .movie-title {
+        font-size: 24px;
+    }
+}
+
+/* Review card styles (reused in Reviews modal) */
+.rt-reviews-subtitle {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 0 0 12px 0;
+}
+
+.rt-reviews-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.rt-review-card {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.rt-review-quote {
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 14px;
+    line-height: 1.5;
+    margin: 0 0 8px 0;
+}
+
+.rt-review-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.rt-review-author {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+}
+
+.rt-review-author .publication {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.rt-review-freshness {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+}
+
+.rt-review-rating-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.rt-review-score {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.rt-review-rating {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #ffc107;
+    font-size: 12px;
+}
+
+.rt-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px;
+    background: rgba(250, 50, 10, 0.1);
+    border: 1px solid rgba(250, 50, 10, 0.3);
+    border-radius: 8px;
+    color: #fa320a;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.2s ease;
+}
+
+.rt-link:hover {
+    background: rgba(250, 50, 10, 0.2);
+    border-color: rgba(250, 50, 10, 0.5);
+}
+</style>
+
+<script>
+// Movie Modal Functions
+let currentMovie = null;
+
+// ---------------------------------------------------------------------------
+// UltraBlurColors — Plex-style colored background
+// ---------------------------------------------------------------------------
+async function fetchUltraBlurColors(movie) {
+    // Reset to default first
+    resetUltraBlurColors();
+
+    const ratingKey = movie.rating_key;
+    const tmdbId = movie.tmdb_id;
+    if (!ratingKey && !tmdbId) return;
+
+    try {
+        // Try Plex UltraBlurColors first (works for owned movies)
+        if (ratingKey) {
+            const resp = await fetch(`/api/plex/ultrablur/${ratingKey}`);
+            if (resp.ok) {
+                const colors = await resp.json();
+                if (colors.topLeft || colors.topRight || colors.bottomRight || colors.bottomLeft) {
+                    applyUltraBlurColors(colors);
+                    return;
+                }
+            }
+        }
+
+        // Fallback: extract colors from TMDb backdrop image
+        if (tmdbId) {
+            const resp = await fetch(`/api/tmdb/colors/${tmdbId}`);
+            if (resp.ok) {
+                const colors = await resp.json();
+                if (colors.topLeft || colors.topRight || colors.bottomRight || colors.bottomLeft) {
+                    applyUltraBlurColors(colors);
+                    return;
+                }
+            }
+        }
+    } catch (e) {
+        // Non-critical — keep default dark background
+    }
+}
+
+function applyUltraBlurColors(colors) {
+    const tl = colors.topLeft || '#1a1a1a';
+    const tr = colors.topRight || '#1a1a1a';
+    const br = colors.bottomRight || '#0f0f0f';
+    const bl = colors.bottomLeft || '#0f0f0f';
+
+    const overlay = document.querySelector('.movie-modal-overlay');
+    const mockup = document.querySelector('.mockup');
+    const backdropSection = document.querySelector('.backdrop-section');
+
+    if (overlay) {
+        overlay.style.backgroundColor = '#0a0a0a';
+        overlay.style.backgroundImage = [
+            `radial-gradient(circle at 0% 0%, ${tl}, transparent 70%)`,
+            `radial-gradient(circle at 100% 0%, ${tr}, transparent 70%)`,
+            `radial-gradient(circle at 100% 100%, ${br}, transparent 70%)`,
+            `radial-gradient(circle at 0% 100%, ${bl}, transparent 70%)`,
+        ].join(', ');
+    }
+    if (mockup) {
+        mockup.style.background = 'none';
+    }
+    if (backdropSection) {
+        backdropSection.style.webkitMaskImage = 'linear-gradient(to bottom, black 20%, transparent 100%)';
+        backdropSection.style.maskImage = 'linear-gradient(to bottom, black 20%, transparent 100%)';
+    }
+}
+
+function resetUltraBlurColors() {
+    const overlay = document.querySelector('.movie-modal-overlay');
+    const mockup = document.querySelector('.mockup');
+    const backdropSection = document.querySelector('.backdrop-section');
+
+    if (overlay) {
+        overlay.style.backgroundColor = '';
+        overlay.style.backgroundImage = '';
+    }
+    if (mockup) {
+        mockup.style.background = '';
+    }
+    if (backdropSection) {
+        backdropSection.style.webkitMaskImage = '';
+        backdropSection.style.maskImage = '';
+    }
+}
+
+function openMovieModal(movie, isOwned = true) {
+    console.log('openMovieModal called with:', movie, 'isOwned:', isOwned);
+    currentMovie = movie;
+    currentMovie.isOwned = isOwned;
+    currentMovie.inWatchlist = false;
+
+    // Check if modal exists
+    const modal = document.getElementById('movieModal');
+    if (!modal) {
+        console.error('Modal element not found!');
+        return;
+    }
+
+    // Update primary action button based on ownership
+    const primaryActionBtn = document.getElementById('primaryActionButton');
+    const actionButtonsRow = document.getElementById('actionButtonsRow');
+
+    // Reset sources/reviews modal state for new movie
+    sourcesModalLoaded = false;
+    window._cachedReviews = null;
+
+    // Update corner watchlist button visibility
+    const cornerWatchlistBtn = document.querySelector('.modal-watchlist-btn-backdrop');
+
+    // Find the Upgrade button item inside the action row
+    const upgradeActionItem = actionButtonsRow ? actionButtonsRow.querySelector('.action-btn-item:first-child') : null;
+
+    if (isOwned) {
+        // Owned movie - Show play button and action row with Upgrade visible
+        if (primaryActionBtn) {
+            primaryActionBtn.style.display = 'flex';
+            primaryActionBtn.querySelector('i').className = 'fas fa-play';
+            primaryActionBtn.querySelector('span').textContent = 'Watch';
+            primaryActionBtn.onclick = handlePrimaryAction;
+            primaryActionBtn.style.background = '#ffffff';
+            primaryActionBtn.style.color = '#000000';
+        }
+        // Show action buttons row with Upgrade
+        if (actionButtonsRow) actionButtonsRow.style.display = 'flex';
+        if (upgradeActionItem) upgradeActionItem.style.display = 'flex';
+        // Hide corner watchlist button for owned movies
+        if (cornerWatchlistBtn) cornerWatchlistBtn.style.display = 'none';
+    } else {
+        // Not owned - Show "Add to Watchlist" button initially
+        if (primaryActionBtn) {
+            primaryActionBtn.style.display = 'flex';
+            primaryActionBtn.querySelector('i').className = 'fas fa-plus';
+            primaryActionBtn.querySelector('span').textContent = 'Add to Watchlist';
+            primaryActionBtn.onclick = handlePrimaryAction;
+            primaryActionBtn.style.background = '';
+            primaryActionBtn.style.pointerEvents = 'auto';
+        }
+        // Show action buttons row but hide Upgrade for unowned
+        if (actionButtonsRow) actionButtonsRow.style.display = 'flex';
+        if (upgradeActionItem) upgradeActionItem.style.display = 'none';
+        // Hide corner watchlist button
+        if (cornerWatchlistBtn) cornerWatchlistBtn.style.display = 'none';
+
+        // Check if movie is already in watchlist (async)
+        if (movie.tmdb_id) {
+            checkWatchlistStatus(movie.tmdb_id, primaryActionBtn);
+        }
+    }
+
+    // Update modal content
+    document.getElementById('modalTitle').textContent = movie.title || 'Unknown Title';
+    document.getElementById('stickyHeaderTitle').textContent = movie.title || 'Unknown Title';
+
+    // Meta info
+    document.getElementById('modalYear').textContent = movie.year || '';
+    document.getElementById('modalRuntime').textContent = movie.duration ? formatDuration(movie.duration) : '';
+    document.getElementById('modalRating').textContent = movie.content_rating || '';
+
+    // Description with collapse functionality (3 lines max)
+    const descriptionElement = document.getElementById('modalDescription');
+    const moreButton = document.getElementById('moreButton');
+    const summary = movie.summary || 'No summary available.';
+
+    descriptionElement.textContent = summary;
+
+    // Always start collapsed
+    descriptionElement.classList.add('collapsed');
+
+    // Check if content overflows 3 lines after render
+    setTimeout(() => {
+        const isOverflowing = descriptionElement.scrollHeight > descriptionElement.clientHeight;
+        if (isOverflowing) {
+            moreButton.style.display = 'block';
+            moreButton.textContent = 'More';
+        } else {
+            // Content fits in 3 lines, no need for button
+            descriptionElement.classList.remove('collapsed');
+            moreButton.style.display = 'none';
+        }
+    }, 0);
+
+    // Genres (inline text, first 2 only)
+    const genresContainer = document.getElementById('modalGenres');
+    if (movie.genres && movie.genres.length > 0) {
+        // Handle both string array and object array formats
+        const genresList = Array.isArray(movie.genres)
+            ? movie.genres.map(g => typeof g === 'string' ? g : g.tag || g.name || g)
+            : [];
+
+        if (genresList.length > 0) {
+            // Show only first 2 genres as text
+            const firstTwoGenres = genresList.slice(0, 2).join(', ');
+            genresContainer.textContent = firstTwoGenres;
+        } else {
+            genresContainer.textContent = '';
+        }
+    } else {
+        genresContainer.textContent = '';
+    }
+
+    // Populate Cast & Crew Section (Director first, then cast)
+    const castCrewSection = document.getElementById('castCrewSection');
+    const castCrewGrid = document.getElementById('castCrewGrid');
+    castCrewGrid.innerHTML = '';
+
+    // Helper: create a person element (used for both directors and cast)
+    function createPersonElement(person, role, clickId) {
+        const el = document.createElement('div');
+        el.className = 'cast-member';
+
+        let finalPhotoUrl = '';
+        if (person.profile_path) {
+            finalPhotoUrl = `https://image.tmdb.org/t/p/w185${person.profile_path}`;
+        } else if (person.thumb && (person.thumb.startsWith('http') || person.thumb.startsWith('//'))) {
+            finalPhotoUrl = person.thumb;
+        } else if (person.photo && (person.photo.startsWith('http') || person.photo.startsWith('//'))) {
+            finalPhotoUrl = person.photo;
+        }
+
+        const personName = person.tag || person.name || 'Unknown';
+
+        el.innerHTML = `
+            <img class="cast-photo" src="${finalPhotoUrl}" alt="${personName}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ccircle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%23333%22/%3E%3Cpath d=%22M50 45c8.3 0 15-6.7 15-15s-6.7-15-15-15-15 6.7-15 15 6.7 15 15 15zm0 7.5c-12.5 0-37.5 6.3-37.5 18.8v9.4h75v-9.4c0-12.5-25-18.8-37.5-18.8z%22 fill=%22%23666%22/%3E%3C/svg%3E'">
+            <div class="cast-name">${personName}</div>
+            <div class="cast-character">${role}</div>
+        `;
+
+        el.style.cursor = 'pointer';
+        el.onclick = function() {
+            closeMovieModal();
+            const pid = person.director_id || person.actor_id;
+            const tmdbPid = person.tmdb_person_id || person.id;
+            if (pid) {
+                window.location.href = `/library?actor=${encodeURIComponent(personName)}&actor_id=${pid}`;
+            } else if (tmdbPid) {
+                window.location.href = `/library?actor=${encodeURIComponent(personName)}&tmdb_person_id=${tmdbPid}`;
+            } else {
+                window.location.href = `/library?search=${encodeURIComponent(personName)}&filter=people`;
+            }
+        };
+
+        return el;
+    }
+
+    // Render the full Cast & Crew grid
+    function renderCastCrew() {
+        castCrewGrid.innerHTML = '';
+        let hasContent = false;
+
+        // Directors first
+        if (movie.directors && movie.directors.length > 0) {
+            movie.directors.forEach(d => {
+                castCrewGrid.appendChild(createPersonElement(d, 'Director'));
+            });
+            hasContent = true;
+        }
+
+        // Then cast
+        if (movie.cast && movie.cast.length > 0) {
+            const castToShow = movie.cast.slice(0, 10);
+            castToShow.forEach(actor => {
+                castCrewGrid.appendChild(createPersonElement(actor, actor.role || actor.character || ''));
+            });
+            hasContent = true;
+        }
+
+        castCrewSection.style.display = hasContent ? 'block' : 'none';
+    }
+
+    // Render with whatever data we have now
+    renderCastCrew();
+
+    // If no directors yet, try fetching from TMDB
+    if ((!movie.directors || movie.directors.length === 0) && movie.tmdb_id) {
+        fetch(`/api/movie/${movie.tmdb_id}`)
+            .then(response => response.ok ? response.json() : null)
+            .then(data => {
+                if (data && data.credits && data.credits.crew) {
+                    const directors = data.credits.crew
+                        .filter(person => person.job === 'Director')
+                        .map(d => ({ name: d.name, profile_path: d.profile_path, tmdb_person_id: d.id }));
+                    if (directors.length > 0) {
+                        movie.directors = directors;
+                        renderCastCrew();
+                    }
+                }
+            })
+            .catch(err => console.log('Could not fetch directors:', err));
+    }
+
+    // Set backdrop (use backdrop_url if available, otherwise use poster as fallback)
+    const backdropImg = document.getElementById('modalBackdropImage');
+    if (movie.backdrop_url) {
+        backdropImg.src = movie.backdrop_url;
+        backdropImg.style.opacity = '0.7';
+    } else if (movie.poster_url && !movie.poster_url.includes('placeholder')) {
+        backdropImg.src = movie.poster_url;
+        backdropImg.style.opacity = '0.6';
+    } else {
+        backdropImg.style.opacity = '0';
+    }
+
+    // Set clearlogo if available
+    const clearlogoImg = document.getElementById('modalClearlogo');
+    const clearlogoFallback = document.getElementById('modalClearlogoFallback');
+    if (movie.clearlogo_url) {
+        clearlogoImg.src = movie.clearlogo_url;
+        clearlogoImg.style.display = 'block';
+        clearlogoFallback.style.display = 'none';
+        // Hide title in bottom section if we have a clearlogo
+        document.getElementById('modalTitle').style.display = 'none';
+    } else {
+        // No clearlogo, show title in the clearlogo container
+        clearlogoImg.style.display = 'none';
+        clearlogoFallback.textContent = movie.title || 'Unknown Title';
+        clearlogoFallback.style.display = 'block';
+        // Also hide the title in the bottom section to avoid duplication
+        document.getElementById('modalTitle').style.display = 'none';
+    }
+
+    // Reset ratings (hide all initially)
+    document.getElementById('imdbRating').style.display = 'none';
+    document.getElementById('rtCriticRating').style.display = 'none';
+    document.getElementById('rtAudienceRating').style.display = 'none';
+    document.getElementById('metacriticRating').style.display = 'none';
+
+    // Fetch ratings - either from Plex or TMDB
+    if (movie.rating_key) {
+        // Owned movie - fetch from Plex
+        fetchRatings(movie.rating_key);
+    } else if (movie.tmdb_id) {
+        // TMDB movie - fetch from TMDB/OMDB
+        fetchTmdbRatings(movie.tmdb_id, movie.title, movie.year);
+    }
+
+    // Fetch UltraBlurColors from Plex for colored background
+    fetchUltraBlurColors(movie);
+
+    // Pre-fetch RT reviews (cached for Reviews modal)
+    fetchRTReviews(movie.title, movie.year);
+
+    // Show modal
+    console.log('Showing modal...');
+    document.getElementById('movieModal').style.display = 'block';
+    document.body.classList.add('modal-open');
+    console.log('Modal display style:', document.getElementById('movieModal').style.display);
+
+    // Scroll to top
+    const modalOverlay = document.querySelector('.movie-modal-overlay');
+    modalOverlay.scrollTop = 0;
+
+    // Setup scroll listener for sticky header
+    modalOverlay.addEventListener('scroll', handleModalScroll);
+}
+
+async function fetchRatings(ratingKey) {
+    try {
+        // Fetch ratings from Plex database
+        const response = await fetch(`/api/plex/ratings/${ratingKey}`);
+
+        if (response.ok) {
+            const data = await response.json();
+            console.log('Ratings data:', data);
+
+            // Display IMDB rating
+            if (data.imdb) {
+                document.getElementById('imdbScore').textContent = data.imdb.score;
+                document.getElementById('imdbRating').style.display = 'flex';
+            }
+
+            // Display Rotten Tomatoes Critic score (Tomatometer)
+            if (data.rotten_tomatoes_critic) {
+                const score = data.rotten_tomatoes_critic.score;
+                document.getElementById('rtCriticScore').textContent = `${score}%`;
+
+                // Use splat icon for rotten (<60%), fresh tomato for fresh
+                const iconElement = document.getElementById('rtCriticIcon');
+                if (score < 60) {
+                    iconElement.src = '/static/images/rotten-tomatoes-splat.png';
+                } else {
+                    iconElement.src = '/static/images/rotten-tomatoes-logo.png';
+                }
+
+                document.getElementById('rtCriticRating').style.display = 'flex';
+            }
+
+            // Display Rotten Tomatoes Audience score (Popcorn)
+            if (data.rotten_tomatoes_audience) {
+                const score = data.rotten_tomatoes_audience.score;
+                document.getElementById('rtAudienceScore').textContent = `${score}%`;
+
+                // Use spilled popcorn for bad (<60%), upright popcorn for good
+                const iconElement = document.getElementById('rtAudienceIcon');
+                if (score < 60) {
+                    iconElement.src = '/static/images/rotten-tomatoes-popcorn-bad.png';
+                } else {
+                    iconElement.src = '/static/images/rotten-tomatoes-popcorn-good.png';
+                }
+
+                document.getElementById('rtAudienceRating').style.display = 'flex';
+            }
+
+            // Display Metacritic score
+            if (data.metacritic) {
+                document.getElementById('metacriticScore').textContent = data.metacritic.score;
+                document.getElementById('metacriticRating').style.display = 'flex';
+            }
+
+            // Display TMDB rating (if no other ratings available)
+            if (data.tmdb && !data.imdb && !data.rotten_tomatoes_critic) {
+                // Use IMDB slot for TMDB rating for now
+                document.getElementById('imdbScore').textContent = data.tmdb.score;
+                document.getElementById('imdbRating').style.display = 'flex';
+            }
+        }
+    } catch (error) {
+        console.error('Failed to fetch ratings from Plex:', error);
+    }
+}
+
+async function fetchTmdbRatings(tmdbId, title, year) {
+    try {
+        // For TMDB movies, we can show TMDB rating directly
+        const tmdbResponse = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key={{ tmdb_api_key }}`);
+        if (tmdbResponse.ok) {
+            const tmdbData = await tmdbResponse.json();
+            if (tmdbData.vote_average) {
+                document.getElementById('imdbScore').textContent = tmdbData.vote_average.toFixed(1);
+                document.getElementById('imdbRating').style.display = 'flex';
+            }
+        }
+
+        // Optionally fetch from OMDB for more detailed ratings
+        if (title && year) {
+            const omdbResponse = await fetch(`/api/ratings/${encodeURIComponent(title)}?year=${year}`);
+            if (omdbResponse.ok) {
+                const omdbData = await omdbResponse.json();
+
+                // Display IMDb rating if available
+                if (omdbData.imdb && omdbData.imdb.score) {
+                    document.getElementById('imdbScore').textContent = omdbData.imdb.score;
+                    document.getElementById('imdbRating').style.display = 'flex';
+                }
+
+                // Display RT ratings if available
+                if (omdbData.rotten_tomatoes_critic) {
+                    const score = parseInt(omdbData.rotten_tomatoes_critic.score);
+                    document.getElementById('rtCriticScore').textContent = `${score}%`;
+                    const iconElement = document.getElementById('rtCriticIcon');
+                    if (score < 60) {
+                        iconElement.src = '/static/images/rotten-tomatoes-splat.png';
+                    } else {
+                        iconElement.src = '/static/images/rotten-tomatoes-logo.png';
+                    }
+                    document.getElementById('rtCriticRating').style.display = 'flex';
+                }
+
+                if (omdbData.metacritic && omdbData.metacritic.score) {
+                    document.getElementById('metacriticScore').textContent = omdbData.metacritic.score;
+                    document.getElementById('metacriticRating').style.display = 'flex';
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Failed to fetch TMDB ratings:', error);
+    }
+}
+
+// RT Reviews Functions
+async function fetchRTReviews(title, year) {
+    console.log('fetchRTReviews called with:', title, year);
+    window._cachedReviews = null;
+
+    try {
+        const params = new URLSearchParams({ title: title });
+        if (year) params.append('year', year);
+        params.append('limit', '20');
+
+        const response = await fetch(`/api/rt/reviews?${params.toString()}`);
+
+        if (!response.ok) throw new Error('Failed to fetch reviews');
+
+        const data = await response.json();
+
+        if (!data.success) {
+            console.log('RT reviews: No reviews found for this movie');
+            window._cachedReviews = false; // Signal: fetch done, no reviews
+            return;
+        }
+
+        // Cache review data for the Reviews modal
+        window._cachedReviews = data;
+        console.log('RT reviews cached successfully');
+
+    } catch (error) {
+        console.error('Failed to fetch RT reviews:', error);
+        window._cachedReviews = false; // Signal: fetch done, failed
+    }
+}
+
+function createCriticReviewCard(review) {
+    const card = document.createElement('div');
+    card.className = 'rt-review-card';
+
+    const freshIcon = review.fresh
+        ? '/static/images/rotten-tomatoes-logo.png'
+        : '/static/images/rotten-tomatoes-splat.png';
+
+    // Build score display if available
+    let scoreHtml = '';
+    if (review.score) {
+        scoreHtml = `<span class="rt-review-score">${escapeHtml(review.score)}</span>`;
+    }
+
+    card.innerHTML = `
+        <p class="rt-review-quote">"${escapeHtml(review.quote)}"</p>
+        <div class="rt-review-meta">
+            <span class="rt-review-author">
+                ${escapeHtml(review.critic)}
+                ${review.publication ? `<span class="publication">- ${escapeHtml(review.publication)}</span>` : ''}
+            </span>
+            <div class="rt-review-rating-info">
+                ${scoreHtml}
+                <img class="rt-review-freshness" src="${freshIcon}" alt="${review.fresh ? 'Fresh' : 'Rotten'}">
+            </div>
+        </div>
+    `;
+
+    return card;
+}
+
+function createAudienceReviewCard(review) {
+    const card = document.createElement('div');
+    card.className = 'rt-review-card';
+
+    let ratingHtml = '';
+    if (review.rating !== null && review.rating !== undefined) {
+        const stars = '★'.repeat(Math.round(review.rating));
+        ratingHtml = `<span class="rt-review-rating">${stars} ${review.rating}/5</span>`;
+    }
+
+    card.innerHTML = `
+        <p class="rt-review-quote">"${escapeHtml(review.quote)}"</p>
+        <div class="rt-review-meta">
+            <span class="rt-review-author">${escapeHtml(review.user)}</span>
+            ${ratingHtml}
+        </div>
+    `;
+
+    return card;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function closeMovieModal() {
+    // Close sub-modals if open
+    closeSourcesModal();
+    document.getElementById('reviewsModal').style.display = 'none';
+
+    document.getElementById('movieModal').style.display = 'none';
+    document.body.classList.remove('modal-open');
+
+    // Reset UltraBlurColors
+    resetUltraBlurColors();
+
+    // Remove scroll listener
+    const modalOverlay = document.querySelector('.movie-modal-overlay');
+    modalOverlay.removeEventListener('scroll', handleModalScroll);
+
+    // Hide sticky header
+    document.getElementById('stickyHeader').classList.remove('active');
+}
+
+// Alias for backward compatibility
+const closeModal = closeMovieModal;
+
+async function toggleWatchlist() {
+    if (!currentMovie) return;
+
+    const watchlistBtn = document.querySelector('.modal-watchlist-btn-backdrop');
+    const icon = watchlistBtn.querySelector('i');
+    const isCurrentlyInWatchlist = watchlistBtn.classList.contains('active');
+
+    try {
+        if (isCurrentlyInWatchlist) {
+            // Remove from watchlist
+            const response = await fetch(`/api/watchlist/${currentMovie.tmdb_id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    media_type: currentMovie.media_type || 'movie'
+                })
+            });
+
+            if (response.ok) {
+                watchlistBtn.classList.remove('active');
+                icon.classList.remove('fas');
+                icon.classList.add('far', 'fa-bookmark');
+                console.log('Removed from watchlist');
+            } else {
+                console.error('Failed to remove from watchlist');
+                alert('Failed to remove from watchlist');
+            }
+        } else {
+            // Add to watchlist - show quality selection modal
+            showWatchlistQualityModal();
+        }
+    } catch (error) {
+        console.error('Error toggling watchlist:', error);
+        alert('Error updating watchlist');
+    }
+}
+
+function handleModalScroll(e) {
+    const scrollTop = e.target.scrollTop;
+    const stickyHeader = document.getElementById('stickyHeader');
+
+    // Backdrop is 370px, mockup margin-top is -90px, so mockup top is at 280px
+    if (scrollTop > 280) {
+        stickyHeader.classList.add('active');
+    } else {
+        stickyHeader.classList.remove('active');
+    }
+}
+
+function toggleSummary() {
+    const descriptionElement = document.getElementById('modalDescription');
+    const moreButton = document.getElementById('moreButton');
+
+    if (descriptionElement.classList.contains('collapsed')) {
+        descriptionElement.classList.remove('collapsed');
+        moreButton.textContent = 'Less';
+    } else {
+        descriptionElement.classList.add('collapsed');
+        moreButton.textContent = 'More';
+    }
+}
+
+function handlePrimaryAction() {
+    if (currentMovie && currentMovie.isOwned) {
+        // Owned movie - Play it
+        playMovie();
+    } else {
+        // Not owned - Add to watchlist
+        addToWatchlist();
+    }
+}
+
+function playMovie() {
+    console.log('Play movie:', currentMovie);
+
+    // Always show library selection if the movie has library information
+    if (currentMovie.libraries && currentMovie.libraries.length > 0) {
+        // Show library selection modal
+        if (typeof window.showLibrarySelectionModal === 'function') {
+            window.showLibrarySelectionModal(currentMovie);
+        } else {
+            console.error('Library selection modal not found. Make sure library_selection_modal.html is included.');
+            alert('Library selection modal not available. Please refresh the page.');
+        }
+    } else {
+        // No library info available, try direct playback
+        console.log('No library info available, attempting direct playback');
+        if (typeof window.showPlaybackModal === 'function') {
+            window.showPlaybackModal(
+                currentMovie.rating_key,
+                currentMovie.title,
+                'movie',
+                currentMovie.backdrop_url,
+                currentMovie.clearlogo_url
+            );
+        } else {
+            console.error('Playback modal not found.');
+            alert('Playback modal not available. Please refresh the page.');
+        }
+    }
+}
+
+async function checkWatchlistStatus(tmdbId, primaryActionBtn) {
+    try {
+        const response = await fetch(`/api/watchlist/${tmdbId}/check`);
+        const result = await response.json();
+
+        if (result.in_watchlist && currentMovie && !currentMovie.isOwned) {
+            currentMovie.inWatchlist = true;
+            currentMovie.radarrId = result.radarr_id;
+
+            // Update button to show "In Watchlist" state
+            if (primaryActionBtn) {
+                primaryActionBtn.querySelector('i').className = 'fas fa-clock';
+                primaryActionBtn.querySelector('span').textContent = 'In Watchlist';
+                primaryActionBtn.style.background = 'linear-gradient(135deg, rgba(255, 152, 0, 0.9), rgba(245, 124, 0, 0.8))';
+                primaryActionBtn.onclick = () => showWatchlistQualityModal(true);
+            }
+        }
+    } catch (error) {
+        console.error('Error checking watchlist status:', error);
+    }
+}
+
+async function addToWatchlist() {
+    console.log('Add to watchlist:', currentMovie);
+    if (!currentMovie) return;
+
+    // Show quality selection modal instead of adding directly
+    showWatchlistQualityModal();
+}
+
+async function showWatchlistQualityModal(isUpgrade = false) {
+    // Show three quality profile options matching Radarr profiles
+    const title = isUpgrade ? 'Upgrade Quality' : 'Select Quality';
+    const qualityOptionsHTML = `
+        <button class="quality-option" onclick="addToWatchlistWithQuality('tflix', ${isUpgrade})">
+            <div class="quality-option-title">TFlix</div>
+            <div class="quality-option-desc">Streaming optimized</div>
+        </button>
+        <button class="quality-option" onclick="addToWatchlistWithQuality('1080p Remux', ${isUpgrade})">
+            <div class="quality-option-title">1080p Remux</div>
+            <div class="quality-option-desc">Full quality 1080p</div>
+        </button>
+        <button class="quality-option" onclick="addToWatchlistWithQuality('2160p Remux', ${isUpgrade})">
+            <div class="quality-option-title">2160p Remux</div>
+            <div class="quality-option-desc">Full quality 4K</div>
+        </button>
+    `;
+
+    // Create modal HTML
+    const modalHTML = `
+        <div class="quality-modal-overlay" id="qualityModalOverlay" onclick="closeQualityModal()">
+            <div class="quality-modal" onclick="event.stopPropagation()">
+                <h2 style="margin-bottom: 20px; font-size: 20px; font-weight: 600; text-align: center;">${title}</h2>
+                <div class="quality-options">
+                    ${qualityOptionsHTML}
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Add styles if not already present
+    if (!document.getElementById('quality-modal-styles')) {
+        const styles = document.createElement('style');
+        styles.id = 'quality-modal-styles';
+        styles.textContent = `
+            .quality-modal-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.8);
+                z-index: 100000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            }
+            .quality-modal {
+                background: #1a1a1a;
+                border-radius: 16px;
+                padding: 24px;
+                max-width: 400px;
+                width: 100%;
+            }
+            .quality-options {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+            .quality-option {
+                background: #2a2a2a;
+                border: 2px solid #555;
+                border-radius: 12px;
+                padding: 16px;
+                cursor: pointer;
+                transition: all 0.2s;
+                text-align: center;
+            }
+            .quality-option:hover {
+                background: #383838;
+                border-color: #777;
+            }
+            .quality-option-title {
+                font-size: 16px;
+                font-weight: 600;
+                margin-bottom: 6px;
+                color: #fff;
+            }
+            .quality-option-desc {
+                font-size: 13px;
+                color: #999;
+                line-height: 1.4;
+            }
+        `;
+        document.head.appendChild(styles);
+    }
+
+    // Add modal to body
+    const modalContainer = document.createElement('div');
+    modalContainer.innerHTML = modalHTML;
+    document.body.appendChild(modalContainer);
+}
+
+function closeQualityModal() {
+    const overlay = document.getElementById('qualityModalOverlay');
+    if (overlay) {
+        overlay.parentElement.remove();
+    }
+}
+
+async function addToWatchlistWithQuality(qualityProfileName, isUpgrade = false) {
+    if (!currentMovie) return;
+
+    // Close the quality modal immediately
+    closeQualityModal();
+
+    // Use primary button for status feedback (unowned movies)
+    const primaryBtn = document.getElementById('primaryActionButton');
+    const targetBtn = (!currentMovie.isOwned && primaryBtn) ? primaryBtn : null;
+    const originalBtnContent = targetBtn ? targetBtn.innerHTML : '';
+
+    if (targetBtn) {
+        targetBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Adding to Radarr...</span>';
+        targetBtn.style.pointerEvents = 'none';
+    } else if (isUpgrade && currentMovie.isOwned) {
+        showToast('Adding to Radarr...', 'info');
+    }
+
+    try {
+        const data = {
+            tmdb_id: currentMovie.tmdb_id,
+            media_type: currentMovie.media_type || 'movie',
+            title: currentMovie.title,
+            year: currentMovie.year || (currentMovie.release_date ? currentMovie.release_date.split('-')[0] : null),
+            poster_path: currentMovie.poster_path,
+            imdb_id: currentMovie.imdb_id,
+            quality_profile: qualityProfileName  // Pass the Radarr quality profile name
+        };
+
+        const response = await fetch('/api/watchlist', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            // Mark movie as in watchlist
+            currentMovie.inWatchlist = true;
+            currentMovie.watchlistQuality = qualityProfileName;
+
+            // Update UI to show it's in watchlist
+            const watchlistBtn = document.querySelector('.modal-watchlist-btn-backdrop');
+
+            if (watchlistBtn) {
+                watchlistBtn.classList.add('active');
+                const icon = watchlistBtn.querySelector('i');
+                icon.classList.remove('far');
+                icon.classList.add('fas', 'fa-bookmark');
+            }
+
+            // Show success state
+            if (isUpgrade && currentMovie.isOwned) {
+                showToast('Added to Radarr!', 'success');
+            } else if (primaryBtn && !currentMovie.isOwned) {
+                // For non-owned movies, show "In Watchlist" on primary button
+                primaryBtn.innerHTML = '<i class="fas fa-clock"></i><span>In Watchlist</span>';
+                primaryBtn.style.background = 'linear-gradient(135deg, rgba(255, 152, 0, 0.9), rgba(245, 124, 0, 0.8))';
+                primaryBtn.onclick = () => showWatchlistQualityModal(true);  // Allow upgrade
+                primaryBtn.style.pointerEvents = 'auto';
+            }
+
+            console.log('Added to Radarr:', result);
+        } else {
+            console.error('Failed to add to watchlist:', result);
+
+            // Check if already exists
+            if (result.already_exists) {
+                currentMovie.inWatchlist = true;
+                if (isUpgrade && currentMovie.isOwned) {
+                    showToast('Already in Radarr', 'success');
+                } else if (primaryBtn && !currentMovie.isOwned) {
+                    primaryBtn.innerHTML = '<i class="fas fa-clock"></i><span>In Watchlist</span>';
+                    primaryBtn.style.background = 'linear-gradient(135deg, rgba(255, 152, 0, 0.9), rgba(245, 124, 0, 0.8))';
+                    primaryBtn.onclick = () => showWatchlistQualityModal(true);
+                    primaryBtn.style.pointerEvents = 'auto';
+                }
+            } else {
+                // Show error state
+                if (targetBtn) {
+                    targetBtn.innerHTML = '<i class="fas fa-times"></i><span>Failed - Try Again</span>';
+                    targetBtn.style.background = 'rgba(244, 67, 54, 0.8)';
+                    targetBtn.style.pointerEvents = 'auto';
+                    setTimeout(() => {
+                        targetBtn.innerHTML = originalBtnContent;
+                        targetBtn.style.background = '';
+                        targetBtn.style.pointerEvents = 'auto';
+                    }, 3000);
+                } else {
+                    showToast('Failed to add to Radarr', 'error');
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error adding to watchlist:', error);
+        if (targetBtn) {
+            targetBtn.innerHTML = '<i class="fas fa-times"></i><span>Error - Try Again</span>';
+            targetBtn.style.background = 'rgba(244, 67, 54, 0.8)';
+            targetBtn.style.pointerEvents = 'auto';
+            setTimeout(() => {
+                targetBtn.innerHTML = originalBtnContent;
+                targetBtn.style.background = '';
+                targetBtn.style.pointerEvents = 'auto';
+            }, 3000);
+        } else {
+            showToast('Error adding to Radarr', 'error');
+        }
+    }
+}
+
+async function upgradeQuality() {
+    console.log('Upgrade quality for:', currentMovie);
+    if (!currentMovie) return;
+
+    // First ensure we have a TMDB ID
+    if (!currentMovie.tmdb_id && currentMovie.title) {
+        try {
+            const searchUrl = `https://api.themoviedb.org/3/search/movie?api_key={{ tmdb_api_key }}&query=${encodeURIComponent(currentMovie.title)}${currentMovie.year ? `&year=${currentMovie.year}` : ''}`;
+            const searchResponse = await fetch(searchUrl);
+            const searchData = await searchResponse.json();
+
+            if (searchData.results && searchData.results.length > 0) {
+                currentMovie.tmdb_id = searchData.results[0].id;
+                console.log('Found TMDB ID:', currentMovie.tmdb_id, 'for', currentMovie.title);
+            } else {
+                throw new Error('Movie not found on TMDB');
+            }
+        } catch (error) {
+            console.error('Error looking up TMDB ID:', error);
+            showToast('Movie not found on TMDB', 'error');
+            return;
+        }
+    }
+
+    // Show quality selection modal for upgrade
+    showWatchlistQualityModal(true);
+}
+
+function showToast(message, type = 'info') {
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    toast.style.cssText = `
+        position: fixed;
+        bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: ${type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6'};
+        color: white;
+        padding: 12px 24px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        z-index: 100002;
+        animation: slideUp 0.3s ease;
+    `;
+
+    // Add animation keyframes if not present
+    if (!document.getElementById('toast-animations')) {
+        const style = document.createElement('style');
+        style.id = 'toast-animations';
+        style.textContent = `
+            @keyframes slideUp {
+                from {
+                    opacity: 0;
+                    transform: translateX(-50%) translateY(20px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateX(-50%) translateY(0);
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    document.body.appendChild(toast);
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+        toast.style.animation = 'slideUp 0.3s ease reverse';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+function formatDuration(milliseconds) {
+    const minutes = Math.floor(milliseconds / 60000);
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+}
+
+// Sources modal functionality
+let sourcesModalLoaded = false;
+
+// Helper: extract resolution from Radarr quality name or title
+// --- Sources Drill-Down (kiosk-style 4-level) ---
+
+const BADGE_PALETTE = [
+    { bg: 'rgba(187, 134, 252, 0.15)', fg: '#bb86fc', border: 'rgba(187, 134, 252, 0.3)' },
+    { bg: 'rgba(96, 165, 250, 0.15)',  fg: '#60a5fa', border: 'rgba(96, 165, 250, 0.3)' },
+    { bg: 'rgba(52, 211, 153, 0.15)',  fg: '#34d399', border: 'rgba(52, 211, 153, 0.3)' },
+    { bg: 'rgba(251, 191, 36, 0.15)',  fg: '#fbbf24', border: 'rgba(251, 191, 36, 0.3)' },
+    { bg: 'rgba(248, 113, 113, 0.15)', fg: '#f87171', border: 'rgba(248, 113, 113, 0.3)' },
+    { bg: 'rgba(45, 212, 191, 0.15)',  fg: '#2dd4bf', border: 'rgba(45, 212, 191, 0.3)' },
+    { bg: 'rgba(244, 114, 182, 0.15)', fg: '#f472b6', border: 'rgba(244, 114, 182, 0.3)' },
+    { bg: 'rgba(163, 230, 53, 0.15)',  fg: '#a3e635', border: 'rgba(163, 230, 53, 0.3)' },
+];
+const _badgeColorCache = {};
+function getBadgeColor(indexer) {
+    if (_badgeColorCache[indexer]) return _badgeColorCache[indexer];
+    const idx = Object.keys(_badgeColorCache).length % BADGE_PALETTE.length;
+    _badgeColorCache[indexer] = BADGE_PALETTE[idx];
+    return _badgeColorCache[indexer];
+}
+
+function extractResolution(qualityName, title) {
+    const match = (qualityName || '').match(/(\d{3,4}p)/i);
+    if (match) return match[1];
+    const titleMatch = (title || '').match(/(\d{3,4}p)/i);
+    if (titleMatch) return titleMatch[1];
+    return 'Unknown';
+}
+
+function getSourceType(name) {
+    const upper = (name || '').toUpperCase();
+    if (upper.includes('REMUX')) return 'REMUX';
+    if (upper.includes('WEB')) return 'WEB-DL';
+    if (upper.includes('BLURAY') || upper.includes('BLU-RAY') || upper.includes('BDRIP') || upper.includes('BD')) return 'BluRay';
+    return 'Other';
+}
+
+function buildQualityGroups(releases) {
+    const grouped = {};
+    for (const r of releases) {
+        if (!grouped[r.resolution]) grouped[r.resolution] = {};
+        if (!grouped[r.resolution][r.sourceType]) grouped[r.resolution][r.sourceType] = [];
+        grouped[r.resolution][r.sourceType].push(r);
+    }
+    const qualityOrder = ['2160p', '1080p', '720p', '480p', 'Unknown'];
+    const sourceTypeOrder = ['REMUX', 'WEB-DL', 'BluRay', 'Other'];
+    const sortedQualities = Object.keys(grouped).sort((a, b) => {
+        const aIdx = qualityOrder.indexOf(a);
+        const bIdx = qualityOrder.indexOf(b);
+        return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
+    });
+    return sortedQualities.map(quality => {
+        const sourceTypes = grouped[quality];
+        const sortedTypes = Object.keys(sourceTypes).sort((a, b) => {
+            const aIdx = sourceTypeOrder.indexOf(a);
+            const bIdx = sourceTypeOrder.indexOf(b);
+            return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
+        });
+        const totalCount = Object.values(sourceTypes).reduce((sum, arr) => sum + arr.length, 0);
+        return {
+            quality,
+            totalCount,
+            sourceTypes: sortedTypes.map(type => ({
+                type,
+                items: sourceTypes[type].sort((a, b) => b.seeders - a.seeders),
+            })),
+        };
+    });
+}
+
+// Drill-down state
+let _sourcesReleases = [];
+let _sourcesMovieId = 0;
+let _sourcesConfirmTarget = null;
+let _sourcesConfirmLoading = false;
+
+function openSourcesModal() {
+    if (!sourcesModalLoaded) {
+        sourcesModalLoaded = true;
+        loadSourcesForModal();
+    } else {
+        // Already loaded, push level 1
+        sourcesPushLevel1();
+    }
+}
+
+function closeSourcesModal() {
+    const container = document.getElementById('sourcesContainer');
+    container.innerHTML = '';
+    _sourcesConfirmTarget = null;
+    _sourcesConfirmLoading = false;
+}
+
+function sourcesGoBack() {
+    const container = document.getElementById('sourcesContainer');
+    if (container.children.length > 1) {
+        // Pop the top screen
+        container.removeChild(container.lastElementChild);
+        _sourcesConfirmTarget = null;
+        _sourcesConfirmLoading = false;
+    } else {
+        // Last screen — close entirely
+        closeSourcesModal();
+    }
+}
+
+function isSourcesOpen() {
+    const container = document.getElementById('sourcesContainer');
+    return container && container.children.length > 0;
+}
+
+function _getBackdropUrl() {
+    return currentMovie ? (currentMovie.backdrop_url || currentMovie.poster_url || '') : '';
+}
+
+function createSourcesScreen(zIndex) {
+    const screen = document.createElement('div');
+    screen.className = 'sources-screen';
+    screen.style.zIndex = zIndex;
+
+    // Backdrop image
+    const bdUrl = _getBackdropUrl();
+    if (bdUrl) {
+        const bd = document.createElement('img');
+        bd.className = 'sources-screen-backdrop';
+        bd.src = bdUrl;
+        bd.alt = '';
+        screen.appendChild(bd);
+    }
+
+    // Back button
+    const backBtn = document.createElement('button');
+    backBtn.className = 'sources-screen-back';
+    backBtn.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>';
+    backBtn.onclick = sourcesGoBack;
+    screen.appendChild(backBtn);
+
+    return screen;
+}
+
+function _createTilePanel() {
+    const panel = document.createElement('div');
+    panel.className = 'sources-tile-panel';
+
+    // Backdrop inside panel
+    const bdUrl = _getBackdropUrl();
+    if (bdUrl) {
+        const bg = document.createElement('img');
+        bg.className = 'sources-tile-panel-bg';
+        bg.src = bdUrl;
+        bg.alt = '';
+        panel.appendChild(bg);
+    }
+
+    // Border overlay
+    const border = document.createElement('div');
+    border.className = 'sources-tile-panel-border';
+    panel.appendChild(border);
+
+    return panel;
+}
+
+async function loadSourcesForModal() {
+    // Show loading screen
+    const container = document.getElementById('sourcesContainer');
+    container.innerHTML = '';
+    const screen = createSourcesScreen(100001);
+    const center = document.createElement('div');
+    center.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:20px;color:rgba(255,255,255,0.5);font-size:18px;position:relative;z-index:1;';
+    center.innerHTML = '<div style="width:36px;height:36px;border:3px solid rgba(255,255,255,0.15);border-top-color:rgba(255,255,255,0.7);border-radius:50%;animation:spin 0.8s linear infinite"></div>Searching for sources...';
+    screen.appendChild(center);
+    container.appendChild(screen);
+
+    const movie = currentMovie;
+    const params = new URLSearchParams();
+    if (movie.tmdb_id) params.set('tmdb_id', String(movie.tmdb_id));
+    if (movie.title) params.set('title', movie.title);
+    if (movie.year) params.set('year', String(movie.year));
+
+    try {
+        const response = await fetch(`/api/radarr/movie/releases?${params.toString()}`);
+        if (!response.ok) throw new Error('Radarr error');
+        const data = await response.json();
+        _sourcesMovieId = data.movie_id || 0;
+
+        _sourcesReleases = [];
+        if (data.releases && data.releases.length > 0) {
+            _sourcesReleases = data.releases
+                .map(r => {
+                    const title = r.title || '';
+                    const qualityName = r.quality || '';
+                    const resolution = extractResolution(qualityName, title);
+                    const sourceType = getSourceType(title);
+                    const size = r.size || 0;
+                    const sizeGb = size ? (size / (1024 * 1024 * 1024)).toFixed(2) : null;
+                    return {
+                        guid: r.guid || '',
+                        title: title,
+                        indexer: r.indexer || 'Unknown',
+                        indexerId: r.indexer_id || r.indexerId || 0,
+                        size: size,
+                        seeders: r.seeders || 0,
+                        leechers: r.leechers || 0,
+                        quality: qualityName,
+                        customFormatScore: r.custom_format_score || r.customFormatScore || 0,
+                        age: r.age != null ? r.age : null,
+                        protocol: r.protocol || 'torrent',
+                        resolution: resolution,
+                        sourceType: sourceType,
+                        sizeGb: sizeGb,
+                    };
+                });
+        }
+
+        // Replace loading screen with level 1
+        container.innerHTML = '';
+
+        if (_sourcesReleases.length === 0) {
+            const emptyScreen = createSourcesScreen(100001);
+            const emptyMsg = document.createElement('div');
+            emptyMsg.style.cssText = 'color:rgba(255,255,255,0.5);font-size:18px;position:relative;z-index:1;';
+            emptyMsg.textContent = 'No sources found';
+            emptyScreen.appendChild(emptyMsg);
+            container.appendChild(emptyScreen);
+            return;
+        }
+
+        sourcesPushLevel1();
+    } catch (e) {
+        console.error('Failed to load sources:', e);
+        container.innerHTML = '';
+        const errScreen = createSourcesScreen(100001);
+        const errMsg = document.createElement('div');
+        errMsg.style.cssText = 'color:rgba(255,255,255,0.5);font-size:18px;position:relative;z-index:1;';
+        errMsg.textContent = 'Failed to load sources';
+        errScreen.appendChild(errMsg);
+        container.appendChild(errScreen);
+    }
+}
+
+function sourcesPushLevel1() {
+    const container = document.getElementById('sourcesContainer');
+    // Clear everything and build base level
+    container.innerHTML = '';
+
+    const qualityGroups = buildQualityGroups(_sourcesReleases);
+    const screen = createSourcesScreen(100001);
+
+    const panel = _createTilePanel();
+    qualityGroups.forEach(group => {
+        const tile = document.createElement('button');
+        tile.className = 'sources-tile';
+        tile.innerHTML = `<span class="sources-tile-label">${group.quality}</span><span class="sources-tile-count">${group.totalCount} sources</span>`;
+        tile.onclick = () => sourcesPushLevel2(group.quality);
+        panel.appendChild(tile);
+    });
+
+    screen.appendChild(panel);
+    container.appendChild(screen);
+}
+
+function sourcesPushLevel2(quality) {
+    const container = document.getElementById('sourcesContainer');
+    const qualityGroups = buildQualityGroups(_sourcesReleases);
+    const selectedGroup = qualityGroups.find(g => g.quality === quality);
+    if (!selectedGroup) return;
+
+    const screen = createSourcesScreen(100002);
+
+    const panel = _createTilePanel();
+    selectedGroup.sourceTypes.forEach(st => {
+        const tile = document.createElement('button');
+        tile.className = 'sources-tile';
+        tile.innerHTML = `<span class="sources-tile-label">${st.type}</span><span class="sources-tile-count">${st.items.length} sources</span>`;
+        tile.onclick = () => sourcesPushLevel3(quality, st.type);
+        panel.appendChild(tile);
+    });
+
+    screen.appendChild(panel);
+    container.appendChild(screen);
+}
+
+function sourcesPushLevel3(quality, sourceType) {
+    const container = document.getElementById('sourcesContainer');
+    const qualityGroups = buildQualityGroups(_sourcesReleases);
+    const selectedGroup = qualityGroups.find(g => g.quality === quality);
+    if (!selectedGroup) return;
+    const selectedST = selectedGroup.sourceTypes.find(st => st.type === sourceType);
+    if (!selectedST) return;
+
+    const screen = createSourcesScreen(100003);
+
+    const listWrap = document.createElement('div');
+    listWrap.style.cssText = 'flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;width:100%;max-width:600px;padding-top:10px;position:relative;z-index:1;';
+
+    const list = document.createElement('div');
+    list.style.cssText = 'display:flex;flex-direction:column;gap:10px;';
+
+    selectedST.items.forEach(release => {
+        const ageDays = release.age != null ? Math.round(release.age) : null;
+        const badge = getBadgeColor(release.indexer);
+
+        const item = document.createElement('div');
+        item.className = 'sources-release-item';
+        item.onclick = () => sourcesPushLevel4(release);
+
+        item.innerHTML = `
+            <div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:4px">
+                <span class="sources-release-badge" style="background:${badge.bg};color:${badge.fg};border:1px solid ${badge.border}">${release.indexer}</span>
+            </div>
+            <div class="sources-release-title">${release.title}</div>
+            <div class="sources-release-stats">
+                <span style="color:#fff;font-weight:600;text-align:left">${release.sizeGb ? release.sizeGb + ' GB' : '—'}</span>
+                <span style="color:#ccc;text-align:center">${ageDays != null ? ageDays + 'd ago' : '—'}</span>
+                <span style="color:#4ade80;text-align:right;font-weight:600">${release.seeders} seeders</span>
+            </div>
+        `;
+
+        list.appendChild(item);
+    });
+
+    listWrap.appendChild(list);
+    screen.appendChild(listWrap);
+    container.appendChild(screen);
+}
+
+function sourcesPushLevel4(release) {
+    _sourcesConfirmTarget = release;
+    const container = document.getElementById('sourcesContainer');
+    const badge = getBadgeColor(release.indexer);
+
+    const screen = createSourcesScreen(100004);
+
+    // Centered content wrapper
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;position:relative;z-index:1;';
+
+    // Badge above card
+    const badgeEl = document.createElement('span');
+    badgeEl.className = 'sources-release-badge';
+    badgeEl.style.cssText = `padding:6px 18px;border-radius:12px;font-size:15px;margin-bottom:16px;background:${badge.bg};color:${badge.fg};border:1px solid ${badge.border}`;
+    badgeEl.textContent = release.indexer;
+    wrap.appendChild(badgeEl);
+
+    // Confirm card
+    const card = document.createElement('div');
+    card.className = 'sources-confirm-card';
+    card.innerHTML = `
+        <p style="margin:0 0 14px;font-size:14px;font-weight:500;color:#fff;line-height:1.5;word-break:break-word;text-align:center">${release.title}</p>
+        <div style="display:flex;gap:16px;font-size:14px;justify-content:center;flex-wrap:wrap;margin-bottom:24px">
+            <span style="color:#fff;font-weight:600">${release.sizeGb ? release.sizeGb + ' GB' : '—'}</span>
+            <span style="color:#ccc">${release.seeders} seeders</span>
+        </div>
+        <div style="display:flex;gap:14px;justify-content:center">
+            <button class="sources-confirm-cancel" onclick="sourcesGoBack()">Cancel</button>
+            <button class="sources-confirm-download" id="sourcesDownloadBtn" onclick="handleSourcesDownload()">Download</button>
+        </div>
+    `;
+    wrap.appendChild(card);
+    screen.appendChild(wrap);
+    container.appendChild(screen);
+}
+
+async function handleSourcesDownload() {
+    if (!_sourcesConfirmTarget || _sourcesConfirmLoading) return;
+    _sourcesConfirmLoading = true;
+
+    const btn = document.getElementById('sourcesDownloadBtn');
+    if (btn) {
+        btn.textContent = 'Sending...';
+        btn.style.opacity = '0.7';
+        btn.disabled = true;
+    }
+
+    try {
+        const resp = await fetch('/api/radarr/movie/grab', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                guid: _sourcesConfirmTarget.guid,
+                indexer_id: _sourcesConfirmTarget.indexerId,
+                movie_id: _sourcesMovieId,
+            }),
+        });
+
+        if (resp.ok) {
+            showToast('Download started', 'success');
+            closeSourcesModal();
+        } else {
+            const data = await resp.json().catch(() => ({}));
+            showToast(data.error || 'Failed to grab release', 'error');
+            _sourcesConfirmLoading = false;
+            if (btn) {
+                btn.textContent = 'Download';
+                btn.style.opacity = '1';
+                btn.disabled = false;
+            }
+        }
+    } catch (e) {
+        console.error('Grab failed:', e);
+        showToast('Failed to grab release', 'error');
+        _sourcesConfirmLoading = false;
+        if (btn) {
+            btn.textContent = 'Download';
+            btn.style.opacity = '1';
+            btn.disabled = false;
+        }
+    }
+}
+
+// --- Reviews Modal ---
+function openReviewsModal() {
+    document.getElementById('reviewsModal').style.display = 'flex';
+    renderReviewsInModal();
+}
+
+function closeReviewsModal() {
+    document.getElementById('reviewsModal').style.display = 'none';
+}
+
+function renderReviewsInModal() {
+    const content = document.getElementById('reviewsModalContent');
+    const loading = document.getElementById('reviewsModalLoading');
+    const empty = document.getElementById('reviewsModalEmpty');
+
+    if (window._cachedReviews) {
+        loading.style.display = 'none';
+        empty.style.display = 'none';
+        content.innerHTML = '';
+
+        const data = window._cachedReviews;
+
+        // Critic Reviews
+        if (data.critic_reviews && data.critic_reviews.length > 0) {
+            const subtitle = document.createElement('h4');
+            subtitle.className = 'rt-reviews-subtitle';
+            subtitle.textContent = 'Critic Reviews';
+            content.appendChild(subtitle);
+
+            const list = document.createElement('div');
+            list.className = 'rt-reviews-list';
+            data.critic_reviews.forEach(review => {
+                list.appendChild(createCriticReviewCard(review));
+            });
+            content.appendChild(list);
+        }
+
+        // Audience Reviews
+        if (data.audience_reviews && data.audience_reviews.length > 0) {
+            const subtitle = document.createElement('h4');
+            subtitle.className = 'rt-reviews-subtitle';
+            subtitle.textContent = 'Audience Reviews';
+            content.appendChild(subtitle);
+
+            const list = document.createElement('div');
+            list.className = 'rt-reviews-list';
+            data.audience_reviews.forEach(review => {
+                list.appendChild(createAudienceReviewCard(review));
+            });
+            content.appendChild(list);
+        }
+
+        // RT Link
+        if (data.reviews_url || data.url) {
+            const link = document.createElement('a');
+            link.className = 'rt-link';
+            link.href = data.reviews_url || data.url;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.innerHTML = 'Read Reviews on Rotten Tomatoes <i class="fas fa-external-link-alt"></i>';
+            content.appendChild(link);
+        }
+
+        if (content.children.length === 0) {
+            empty.style.display = 'block';
+        }
+    } else if (window._cachedReviews === false) {
+        // Fetch completed but no reviews found or failed
+        loading.style.display = 'none';
+        content.innerHTML = '';
+        empty.style.display = 'block';
+    } else {
+        // Reviews not yet cached (null) — show loading and poll
+        loading.style.display = 'block';
+        content.innerHTML = '';
+        empty.style.display = 'none';
+
+        const pollInterval = setInterval(() => {
+            if (window._cachedReviews && window._cachedReviews !== false) {
+                clearInterval(pollInterval);
+                renderReviewsInModal();
+            } else if (window._cachedReviews === false) {
+                clearInterval(pollInterval);
+                loading.style.display = 'none';
+                empty.style.display = 'block';
+            }
+        }, 500);
+
+        // Timeout after 15 seconds
+        setTimeout(() => {
+            clearInterval(pollInterval);
+            if (!window._cachedReviews) {
+                loading.style.display = 'none';
+                empty.style.display = 'block';
+            }
+        }, 15000);
+    }
+}
+
+
+// Close modal on escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        // Sources drill-down: go back one level
+        if (isSourcesOpen()) {
+            e.stopPropagation();
+            sourcesGoBack();
+        } else if (document.getElementById('reviewsModal').style.display === 'flex') {
+            closeReviewsModal();
+        } else if (document.getElementById('movieModal').style.display === 'block') {
+            closeMovieModal();
+        }
+    }
+});
+</script>

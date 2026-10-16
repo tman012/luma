@@ -1,0 +1,126 @@
+/* ---------------------------------------------------------------------------
+   TV Mode — 10-foot UI overrides
+   Scoped under .kiosk-tv on <html>.
+   Bumps typography, spacing, and hit targets for couch viewing distance.
+   --------------------------------------------------------------------------- */
+
+/* ---- Focus ring ---- */
+.kiosk-tv .tv-focus-ring {
+  outline: none !important;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.85),
+    0 0 24px 4px rgba(59, 130, 246, 0.3) !important;
+  z-index: 5;
+  border-radius: inherit;
+  transition: box-shadow 0.15s ease-out, transform 0.15s ease-out;
+}
+
+/* Subtle scale on focus for cards/tiles */
+.kiosk-tv .explore-tile.tv-focus-ring,
+.kiosk-tv [data-explore-tile].tv-focus-ring {
+  transform: scale(1.05) !important;
+  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.85),
+    0 12px 40px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* Disable hover effects in TV mode — DPAD devices don't hover */
+.kiosk-tv .explore-tile:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+/* ---- Overscan safe area ---- */
+.kiosk-tv {
+  --tv-overscan: 24px;
+}
+
+/* ---- Hit targets — minimum 56px for DPAD ---- */
+.kiosk-tv button,
+.kiosk-tv [role="button"],
+.kiosk-tv a {
+  min-height: 56px;
+  min-width: 56px;
+}
+
+/* Navigation links in TopBar */
+.kiosk-tv [data-topbar-nav] a,
+.kiosk-tv [data-topbar-nav] button {
+  padding: 12px 24px !important;
+  font-size: 22px !important;
+}
+
+/* ---- Rail sizing ---- */
+.kiosk-tv [data-explore-tile] {
+  width: 480px !important;
+}
+
+/* Rail titles */
+.kiosk-tv .explore-rail h2 {
+  font-size: 52px !important;
+  padding-left: var(--tv-overscan) !important;
+}
+
+/* Rail scroll container left spacer */
+.kiosk-tv .explore-rail > div > div:first-child {
+  width: var(--tv-overscan) !important;
+}
+
+/* ---- Modal action buttons ---- */
+.kiosk-tv [data-modal-actions] button {
+  padding: 14px 28px !important;
+  font-size: 20px !important;
+  min-height: 56px !important;
+}
+
+/* ---- Page padding for overscan ---- */
+.kiosk-tv .pt-24 {
+  padding-top: calc(96px + var(--tv-overscan)) !important;
+}
+
+.kiosk-tv .pb-20 {
+  padding-bottom: calc(80px + var(--tv-overscan)) !important;
+}
+
+/* ---- Search bar in TV mode ---- */
+.kiosk-tv input[type="search"],
+.kiosk-tv input[type="text"] {
+  font-size: 24px !important;
+  padding: 16px 24px !important;
+  min-height: 56px !important;
+}
+
+/* ---- TopBar height ---- */
+.kiosk-tv [data-topbar] {
+  height: 80px !important;
+  padding: 0 var(--tv-overscan) !important;
+}
+
+/* ---- Scroll indicator for rails (visual hint that more content exists) ---- */
+.kiosk-tv .explore-rail::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 80px;
+  background: linear-gradient(to right, transparent, rgba(5, 5, 7, 0.8));
+  pointer-events: none;
+  z-index: 2;
+}
+
+.kiosk-tv .explore-rail {
+  position: relative;
+}
+
+/* ---- TopBar DPAD focus — high-contrast ring over bright/gradient backdrops ---- */
+.kiosk-tv [data-topbar] .tv-focus-ring {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.95),
+              0 0 0 6px rgba(59, 130, 246, 0.7),
+              0 0 20px 4px rgba(59, 130, 246, 0.3) !important;
+  border-radius: 12px;
+}
+
+/* ---- Modal DPAD focus ---- */
+.kiosk-tv [data-modal] .tv-focus-ring {
+  z-index: 11;
+  position: relative;
+}

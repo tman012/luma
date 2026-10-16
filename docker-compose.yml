@@ -1,0 +1,160 @@
+version: '3.8'
+
+services:
+  caddy:
+    container_name: caddy-proxy
+    image: caddy:2-alpine
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+  luma:
+    container_name: luma
+    image: media-search:latest
+    init: true  # Prevents zombie processes on container restart
+    # network_mode: host — container shares the host network stack.
+    # Required for: ADB to reach Shield at 192.168.1.220, Plex API at 192.168.1.25:32400,
+    # and LAN services (qBittorrent, Sonarr, Radarr, Home Assistant).
+    # Alternative: use bridge mode + extra_hosts for each LAN service.
+    network_mode: host
+    environment:
+      # Matches radarr/sonarr/prowlarr/qbittorrent. The host is Etc/UTC, so
+      # without this every automation's configured hour meant UTC while the
+      # user set it in local time — a "10:30pm" schedule fired at 6:30pm and
+      # its "next run" read as tomorrow. Log timestamps line up with the Arr
+      # logs too. Changing this shifts every scheduler's firing time.
+      - TZ=America/New_York
+      - FLASK_ENV=production
+      - PORT=5001
+      - DATABASE_PATH=/app/data/media.db
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - OMDB_API_KEY=${OMDB_API_KEY}
+      - FANART_API_KEY=${FANART_API_KEY}
+      # Plex Configuration — library endpoints use Plex HTTP API (PLEX_URL + PLEX_TOKEN)
+      - PLEX_URL=${PLEX_URL:-http://192.168.1.25:32400}
+      - PLEX_TOKEN=${PLEX_TOKEN}
+      - PLEX_ACCOUNT_ID=${PLEX_ACCOUNT_ID:-1}
+      - PLEX_DB=${PLEX_DB:-/mnt/plex-db/com.plexapp.plugins.library.db}
+      - PLEX_MACHINE_ID=${PLEX_MACHINE_ID}
+      - SHIELD_PLEX_IP=${SHIELD_PLEX_IP:-192.168.1.126}
+      # Home Assistant — URL and token live in Settings UI, not here
+      # qBittorrent — URL and credentials live in Settings UI, not here
+      # Sonarr Configuration
+      - SONARR_URL=${SONARR_URL:-http://192.168.1.62:8989}
+      - SONARR_API_KEY=${SONARR_API_KEY:-}
+      # Radarr Configuration
+      - RADARR_URL=${RADARR_URL:-http://192.168.1.62:7878}
+      - RADARR_API_KEY=${RADARR_API_KEY:-}
+      # Gmail (approval notifications)
+      - GMAIL_ADDRESS=${GMAIL_ADDRESS:-}
+      - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD:-}
+      # Service-to-service API key (Alfred agent access)
+      - SERVICE_API_KEY=${SERVICE_API_KEY:-}
+      # Flask session key, Telegram admin-action HMAC secret, YouTube InnerTube key (values in .env)
+      - SECRET_KEY=${SECRET_KEY}
+      - TELEGRAM_ACTION_SECRET=${TELEGRAM_ACTION_SECRET}
+      - YT_INNERTUBE_KEY=${YT_INNERTUBE_KEY}
+      # Admin seed (values in .env; unset = no seeded admin)
+      - LUMA_ADMIN_NAME=${LUMA_ADMIN_NAME}
+      - LUMA_ADMIN_EMAIL=${LUMA_ADMIN_EMAIL}
+      - LUMA_ADMIN_PIN=${LUMA_ADMIN_PIN}
+      # Media paths (Unraid server paths)
+      - DOWNLOADS_ROOT=/downloads
+      - MOVIES_ROOT=/media/movies
+      - TV_ROOT=/media/tv
+      - RECENT_ROOT=/media/recent
+      - FOURKAY_ROOT=/media/4k
+      - FULLRIPS_ROOT=/media/fullrips
+      - TV_4K_ROOT=/media/tv-4k
+      - TV_REMUX_ROOT=/media/tv-remux
+    volumes:
+      # Persistent data
+      - /home/tbosley02/media-search-app/data:/app/data
+      # ADB keys (for Shield authorization)
+      - /home/tbosley02/media-search-app/.android:/app/home/.android
+      # Downloads directory (for auto-rename to access completed torrents)
+      - /storage/downloads:/downloads
+      # Media directories from Unraid server (need write access for auto-rename)
+      - /mnt/media/Video/Movies:/media/movies
+      - "/mnt/media/Video/Recently Released:/media/recent"
+      - /mnt/media/Video/TV:/media/tv
+      - /mnt/media/Video/4K:/media/4k
+      - "/mnt/media/Video/Full Rips:/media/fullrips"
+      - "/mnt/media/Video/4K TV Shows:/media/tv-4k"
+      - "/mnt/media/Video/Remux TV:/media/tv-remux"
+      # Plex database (read-only) — used for TV episode tracking & continue watching.
+      # Library browsing, search, and stats now use the Plex HTTP API instead.
+      - /mnt/plexdb:/mnt/plexdb:ro
+      # For development - mount source files
+      - /home/tbosley02/media-search-app/app:/app/app
+      - /home/tbosley02/media-search-app/templates:/app/templates
+      - /home/tbosley02/media-search-app/static:/app/static
+      # Caddy CA cert (for serving to iOS devices)
+      - caddy_data:/caddy-data:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  alfred:
+    container_name: alfred
+    build:
+      context: ./alfred
+      dockerfile: Dockerfile
+    # host networking — needs access to qBittorrent, Sonarr, Radarr, Plex on LAN
+    network_mode: host
+    env_file:
+      - ./alfred/.env
+    environment:
+      - ALFRED_PORT=8990
+      - ALFRED_API_KEY=${ALFRED_API_KEY:-}
+      # Anthropic API (for complex command fallback)
+      # Lives in alfred/.env (env_file) so Alfred is unaffected by shell ANTHROPIC_API_KEY (used by Claude Code)
+      # ANTHROPIC_API_KEY -> alfred/.env
+      # TMDb API (for title search + popularity scoring)
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      # Service API key (for Flask backend calls)
+      - SERVICE_API_KEY=${SERVICE_API_KEY:-}
+      # qBittorrent
+      - QBIT_URL=${QBIT_URL:-http://localhost:8080}
+      - QBIT_USER=${QBIT_USER:-tbosley02}
+      # QBIT_PASS -> alfred/.env
+      # Radarr
+      - RADARR_URL=${RADARR_URL:-http://192.168.1.62:7878}
+      - RADARR_API_KEY=${RADARR_API_KEY}
+      # Sonarr
+      - SONARR_URL=${SONARR_URL:-http://192.168.1.62:8989}
+      - SONARR_API_KEY=${SONARR_API_KEY}
+      # Plex
+      - PLEX_URL=${PLEX_URL:-http://192.168.1.25:32400}
+      - PLEX_TOKEN=${PLEX_TOKEN}
+      # Telegram bot (long-polling — no public URL needed)
+      # TELEGRAM_BOT_TOKEN -> alfred/.env
+      - TELEGRAM_ALLOWED_CHAT_IDS=${TELEGRAM_ALLOWED_CHAT_IDS:-}
+      # Home Assistant (direct REST API — bypasses LLM for speed)
+      - HA_URL=http://192.168.1.162:8123
+      # HA_TOKEN -> alfred/.env
+      # Storage paths to check
+      - STORAGE_PATHS=/downloads,/mnt/media
+    volumes:
+      # Dev: mount source for live reload
+      - /home/tbosley02/media-search-app/alfred:/app
+      # Downloads volume (read-only — for disk usage reporting)
+      - /storage/downloads:/downloads:ro
+      # Media NAS (read-only — for disk usage reporting)
+      - /mnt/media:/mnt/media:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8990/api/health')"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  caddy_data:
+  caddy_config:

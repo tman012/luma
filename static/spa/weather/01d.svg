@@ -1,0 +1,26 @@
+<svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- Clear sky day - Alexa style sun, no transforms -->
+<g>
+  <!-- Rays as pre-positioned paths (no transform attributes) -->
+  <!-- Top -->
+  <path d="M60 10h8v18a4 4 0 01-8 0V10z" fill="#FFB300"/>
+  <!-- Bottom -->
+  <path d="M60 100a4 4 0 018 0v18h-8v-18z" fill="#FFB300"/>
+  <!-- Left -->
+  <path d="M10 60v8h18a4 4 0 000-8H10z" fill="#FFB300"/>
+  <!-- Right -->
+  <path d="M100 60a4 4 0 010 8h18v-8h-18z" fill="#FFB300"/>
+  <!-- Top-left diagonal -->
+  <path d="M29.4 17.4a4 4 0 015.6 0l12.8 12.8a4 4 0 01-5.6 5.6L29.4 23a4 4 0 010-5.6z" fill="#FFB300"/>
+  <!-- Top-right diagonal -->
+  <path d="M98.6 17.4a4 4 0 010 5.6L85.8 35.8a4 4 0 01-5.6-5.6L93 17.4a4 4 0 015.6 0z" fill="#FFB300"/>
+  <!-- Bottom-left diagonal -->
+  <path d="M29.4 110.6a4 4 0 010-5.6l12.8-12.8a4 4 0 015.6 5.6L35 110.6a4 4 0 01-5.6 0z" fill="#FFB300"/>
+  <!-- Bottom-right diagonal -->
+  <path d="M98.6 110.6a4 4 0 01-5.6 0L80.2 97.8a4 4 0 015.6-5.6l12.8 12.8a4 4 0 010 5.6z" fill="#FFB300"/>
+  <!-- Sun body -->
+  <circle cx="64" cy="64" r="24" fill="#FFB300"/>
+  <circle cx="64" cy="64" r="20" fill="#FFC107"/>
+  <circle cx="58" cy="56" r="6" fill="#FFD54F" opacity="0.5"/>
+</g>
+</svg>

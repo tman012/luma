@@ -1,0 +1,1198 @@
+<!DOCTYPE html>
+<html lang="en">
+<!-- IMPORTANT: This app is designed for iPhone PWA with viewport 393px x 852px -->
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/images/ic_launcher_round.png">
+    <title>Browse Library - Bosley Media</title>
+
+    <!-- Preconnect to speed up external resources -->
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+    <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Include playback service early to ensure it's available for modals -->
+    <script src="/static/js/playback-service.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            max-width: 100vw;
+        }
+
+        :root {
+            --safe-area-top: env(safe-area-inset-top, 0px);
+            --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+        }
+
+        html {
+            height: 100%;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #121212;
+            color: #e0e0e0;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+            position: relative;
+            min-height: 100vh;
+            min-height: -webkit-fill-available;
+        }
+
+        /* Hide scrollbar but keep functionality */
+        ::-webkit-scrollbar {
+            width: 0px;
+        }
+
+        /* Header - exactly like library.html */
+        .header {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            padding-top: calc(env(safe-area-inset-top, 0px) + 15px) !important;
+            background: #1a1a1a;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 30;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            transition: transform 0.3s ease;
+        }
+
+        /* Hamburger menu - exactly from library.html */
+        .hamburger {
+            margin-right: 12px;
+            flex-shrink: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 1001;
+        }
+
+        .hamburger-line {
+            width: 22px;
+            height: 2px;
+            background-color: #fff;
+            margin: 3px 0;
+            transition: 0.3s;
+            border-radius: 2px;
+        }
+
+        .hamburger.active .line-1 {
+            transform: rotate(-45deg) translate(-5px, 5px);
+        }
+
+        .hamburger.active .line-2 {
+            opacity: 0;
+        }
+
+        .hamburger.active .line-3 {
+            transform: rotate(45deg) translate(-5px, -5px);
+        }
+
+        /* Side menu - exactly from library.html */
+        .side-menu {
+            position: fixed;
+            top: 0;
+            left: -100%;
+            width: 280px;
+            height: 100%;
+            background: #1a1a1a;
+            transition: 0.3s;
+            z-index: 1000;
+            padding-top: calc(env(safe-area-inset-top, 0px) + 80px);
+            overflow-y: auto;
+        }
+
+        .side-menu.active {
+            left: 0;
+        }
+
+        .menu-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            display: none;
+        }
+
+        .menu-overlay.active {
+            display: block;
+        }
+
+        .menu-item {
+            padding: 18px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            color: #fff;
+            text-decoration: none;
+        }
+
+        .menu-item:hover {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .menu-item i {
+            width: 20px;
+            text-align: center;
+            color: #888;
+        }
+
+        /* Header title */
+        .library-title {
+            flex: 1;
+            text-align: center;
+            font-size: 20px;
+            font-weight: 600;
+            color: #fff;
+            padding-right: 42px; /* Balance hamburger width */
+        }
+
+        /* Sort controls */
+        .sort-container {
+            position: fixed;
+            top: calc(var(--safe-area-top) + 60px);
+            left: 0;
+            right: 0;
+            background: #1a1a1a;
+            padding: 8px 16px;
+            z-index: 25;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .sort-dropdown {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            padding: 10px 14px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+        }
+
+        .sort-dropdown:active {
+            background: rgba(255,255,255,0.08);
+        }
+
+        .sort-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .sort-direction {
+            font-size: 11px;
+            color: #2196F3;
+            margin-left: 4px;
+        }
+
+        /* Dropdown menu */
+        .dropdown-menu {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            margin-top: 0; /* Removed gap */
+            background: #1e1e1e;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            display: none;
+            overflow: hidden;
+        }
+
+        .dropdown-menu.open {
+            display: block;
+        }
+
+        .dropdown-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .dropdown-item:last-child {
+            border-bottom: none;
+        }
+
+        .dropdown-item:hover,
+        .dropdown-item:active {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .dropdown-item.active {
+            background: rgba(33, 150, 243, 0.1);
+            color: #2196F3;
+        }
+
+        /* Genre dropdown */
+        .genre-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            margin-top: 0;
+            background: #1e1e1e;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            display: none;
+            z-index: 100;
+            max-height: 70vh;  /* Much longer dropdown - 70% of viewport height */
+            overflow-y: auto;
+        }
+
+        .genre-dropdown.open {
+            display: block;
+        }
+
+        .genre-header {
+            padding: 12px 16px;
+            background: #222;
+            font-size: 14px;
+            font-weight: 600;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            position: sticky;
+            top: 0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .genre-close {
+            font-size: 16px;
+            cursor: pointer;
+            color: #888;
+        }
+
+        .genre-list {
+            padding: 4px 0;
+            max-height: 400px;  /* Increased from 250px */
+            overflow-y: auto;
+        }
+
+        .genre-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 14px;
+        }
+
+        .genre-item:hover,
+        .genre-item:active {
+            background: rgba(255,255,255,0.05);
+        }
+
+        /* Content area - matching library.html */
+        .content {
+            padding-top: calc(var(--safe-area-top) + 135px); /* Slightly reduced padding */
+            min-height: 100vh;
+            background: #0a0a0a;
+        }
+
+        /* Movie grid - 3x3 layout with fixed widths like library.html */
+        .movie-grid-browse {
+            display: grid;
+            grid-template-columns: repeat(3, 110px);
+            gap: 12px;
+            padding: 0 16px;
+            justify-content: center;
+        }
+
+        /* Movie card - exactly from library.html */
+        .movie-card {
+            position: relative;
+            cursor: pointer;
+            transition: transform 0.1s ease, opacity 0.1s ease;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .movie-card:active,
+        .movie-card.pressed {
+            transform: scale(0.92);
+            opacity: 0.6;
+        }
+
+        .movie-poster {
+            aspect-ratio: 2/3;
+            width: 100%;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            margin-bottom: 8px;
+        }
+
+        .movie-poster img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .movie-info {
+            text-align: left; /* Changed to left align */
+        }
+
+        .movie-card .movie-title {
+            font-size: 12px !important;  /* Force 12px to override modal CSS */
+            font-weight: 500;
+            color: #fff;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            line-height: 1.4;
+        }
+
+        .movie-year {
+            font-size: 11px;
+            color: #888;
+            margin-top: 2px;
+        }
+
+        /* Skeleton loader */
+        .skeleton {
+            background: linear-gradient(90deg, #1a1a1a 25%, #2a2a2a 50%, #1a1a1a 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+        }
+
+        .skeleton-card {
+            aspect-ratio: 2/3;
+            border-radius: 8px;
+        }
+
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* Loading Modal */
+        .loading-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.9);
+            z-index: 10000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .loading-modal.active {
+            display: flex;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top: 3px solid #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Load more button */
+        .load-more {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .load-more-button {
+            padding: 12px 30px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 25px;
+            color: #e0e0e0;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid rgba(255,255,255,0.1);
+            outline: none;
+        }
+
+        .load-more-button:active {
+            background: rgba(255,255,255,0.1);
+        }
+
+        /* Alphabet sidebar */
+        .alphabet-sidebar {
+            position: fixed;
+            right: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 20;
+            display: none;
+            flex-direction: column;
+            background: rgba(26, 26, 26, 0.9);
+            border-radius: 10px;
+            padding: 4px 6px;
+        }
+
+        .alphabet-sidebar.visible {
+            display: flex;
+        }
+
+        .alphabet-letter {
+            font-size: 10px;
+            color: #666;
+            cursor: pointer;
+            padding: 2px 4px;
+            text-align: center;
+            transition: all 0.1s ease;
+            font-weight: 600;
+        }
+
+        .alphabet-letter:active {
+            color: #2196F3;
+            transform: scale(1.2);
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(255,255,255,0.1);
+            border-top-color: #2196F3;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="hamburger" id="hamburger">
+            <div class="hamburger-line line-1"></div>
+            <div class="hamburger-line line-2"></div>
+            <div class="hamburger-line line-3"></div>
+        </div>
+        <div class="library-title" id="libraryTitle">Library</div>
+    </div>
+
+    <!-- Side Menu - exactly from library.html -->
+    <div class="side-menu" id="sideMenu">
+        <a href="/" class="menu-item">
+            <i class="fas fa-home"></i>
+            <span>Home</span>
+        </a>
+        <a href="/browse_libraries" class="menu-item">
+            <i class="fas fa-film"></i>
+            <span>Browse Libraries</span>
+        </a>
+        <a href="/watchlist" class="menu-item">
+            <i class="fas fa-bookmark"></i>
+            <span>Watchlist</span>
+        </a>
+        <a href="/activity" class="menu-item">
+            <i class="fas fa-chart-line"></i>
+            <span>Activity</span>
+        </a>
+        <a href="/calendar" class="menu-item">
+            <i class="fas fa-calendar"></i>
+            <span>Calendar</span>
+        </a>
+        <a href="/settings" class="menu-item">
+            <i class="fas fa-cog"></i>
+            <span>Settings</span>
+        </a>
+    </div>
+    <div class="menu-overlay" id="menuOverlay"></div>
+
+    <!-- Sort Controls -->
+    <div class="sort-container">
+        <div class="sort-dropdown" id="sortDropdown">
+            <div class="sort-label">
+                <span id="sortLabel">Recently Added</span>
+                <span class="sort-direction" id="sortDirection" style="display: none;"></span>
+            </div>
+            <i class="fas fa-chevron-down" style="font-size: 12px; color: #999;"></i>
+        </div>
+        <div class="dropdown-menu" id="dropdownMenu">
+            <div class="dropdown-item active" data-sort="added_date">Recently Added</div>
+            <div class="dropdown-item" data-sort="title">Title (A-Z)</div>
+            <div class="dropdown-item" data-sort="year">Year</div>
+            <div class="dropdown-item" data-sort="rating">Rating</div>
+            <div class="dropdown-item" id="genreOption">Genre</div>
+        </div>
+        <!-- Genre Dropdown -->
+        <div class="genre-dropdown" id="genreDropdown">
+            <div class="genre-header">
+                <span>Select Genre</span>
+                <span class="genre-close" onclick="closeGenreDropdown()">×</span>
+            </div>
+            <div class="genre-list" id="genreList">
+                <div class="genre-item" onclick="selectGenre(null, 'All Genres')">All Genres</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alphabet Sidebar -->
+    <div class="alphabet-sidebar" id="alphabetSidebar">
+        <div class="alphabet-letter" data-letter="#">#</div>
+        <div class="alphabet-letter" data-letter="A">A</div>
+        <div class="alphabet-letter" data-letter="B">B</div>
+        <div class="alphabet-letter" data-letter="C">C</div>
+        <div class="alphabet-letter" data-letter="D">D</div>
+        <div class="alphabet-letter" data-letter="E">E</div>
+        <div class="alphabet-letter" data-letter="F">F</div>
+        <div class="alphabet-letter" data-letter="G">G</div>
+        <div class="alphabet-letter" data-letter="H">H</div>
+        <div class="alphabet-letter" data-letter="I">I</div>
+        <div class="alphabet-letter" data-letter="J">J</div>
+        <div class="alphabet-letter" data-letter="K">K</div>
+        <div class="alphabet-letter" data-letter="L">L</div>
+        <div class="alphabet-letter" data-letter="M">M</div>
+        <div class="alphabet-letter" data-letter="N">N</div>
+        <div class="alphabet-letter" data-letter="O">O</div>
+        <div class="alphabet-letter" data-letter="P">P</div>
+        <div class="alphabet-letter" data-letter="Q">Q</div>
+        <div class="alphabet-letter" data-letter="R">R</div>
+        <div class="alphabet-letter" data-letter="S">S</div>
+        <div class="alphabet-letter" data-letter="T">T</div>
+        <div class="alphabet-letter" data-letter="U">U</div>
+        <div class="alphabet-letter" data-letter="V">V</div>
+        <div class="alphabet-letter" data-letter="W">W</div>
+        <div class="alphabet-letter" data-letter="X">X</div>
+        <div class="alphabet-letter" data-letter="Y">Y</div>
+        <div class="alphabet-letter" data-letter="Z">Z</div>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+        <div class="movie-grid-browse" id="movieGrid">
+            <!-- Movies will be loaded here -->
+        </div>
+        <div class="load-more" id="loadMore" style="display: none;">
+            <button class="load-more-button" id="loadMoreButton">Load More</button>
+        </div>
+    </div>
+
+    <script>
+        // Get library name from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const libraryName = urlParams.get('library') || 'Movies';
+        document.getElementById('libraryTitle').textContent = libraryName;
+
+        // State management
+        let currentSort = 'added_date';
+        let currentDirection = 'desc';
+        let currentGenre = null;
+        let currentOffset = 0;
+        let isLoading = false;
+        let hasMore = true;
+        const itemsPerPage = 30;
+        let allMovies = [];
+
+        // Sort directions for toggling
+        const sortDirections = {
+            'title': 'asc',
+            'year': 'desc',
+            'rating': 'desc',
+            'added_date': 'desc'
+        };
+
+        // Hamburger menu
+        const hamburger = document.getElementById('hamburger');
+        const sideMenu = document.getElementById('sideMenu');
+        const menuOverlay = document.getElementById('menuOverlay');
+
+        hamburger.addEventListener('click', () => {
+            hamburger.classList.toggle('active');
+            sideMenu.classList.toggle('active');
+            menuOverlay.classList.toggle('active');
+        });
+
+        menuOverlay.addEventListener('click', () => {
+            hamburger.classList.remove('active');
+            sideMenu.classList.remove('active');
+            menuOverlay.classList.remove('active');
+        });
+
+        // Sort dropdown
+        const sortDropdown = document.getElementById('sortDropdown');
+        const dropdownMenu = document.getElementById('dropdownMenu');
+        const sortLabel = document.getElementById('sortLabel');
+        const sortDirection = document.getElementById('sortDirection');
+        const alphabetSidebar = document.getElementById('alphabetSidebar');
+
+        sortDropdown.addEventListener('click', () => {
+            dropdownMenu.classList.toggle('open');
+        });
+
+        // Handle sort selection
+        document.querySelectorAll('.dropdown-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                const sortBy = item.dataset.sort;
+
+                if (item.id === 'genreOption') {
+                    // Open genre panel
+                    openGenrePanel();
+                    return;
+                }
+
+                if (sortBy) {
+                    // Toggle direction if same sort selected
+                    if (sortBy === currentSort && currentGenre === null) {
+                        currentDirection = currentDirection === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        currentDirection = sortDirections[sortBy];
+                    }
+
+                    currentSort = sortBy;
+                    currentGenre = null;
+
+                    // Update UI
+                    document.querySelector('.dropdown-item.active')?.classList.remove('active');
+                    item.classList.add('active');
+
+                    if (sortBy === 'added_date') {
+                        sortLabel.textContent = 'Recently Added';
+                        sortDirection.style.display = 'none';
+                        alphabetSidebar.classList.remove('visible');
+                    } else if (sortBy === 'title') {
+                        sortLabel.textContent = 'Title';
+                        sortDirection.textContent = currentDirection === 'asc' ? '↑' : '↓';
+                        sortDirection.style.display = 'inline';
+                        alphabetSidebar.classList.add('visible');
+                    } else if (sortBy === 'year') {
+                        sortLabel.textContent = 'Year';
+                        sortDirection.textContent = currentDirection === 'asc' ? '↑' : '↓';
+                        sortDirection.style.display = 'inline';
+                        alphabetSidebar.classList.remove('visible');
+                    } else if (sortBy === 'rating') {
+                        sortLabel.textContent = 'Rating';
+                        sortDirection.textContent = currentDirection === 'asc' ? '↑' : '↓';
+                        sortDirection.style.display = 'inline';
+                        alphabetSidebar.classList.remove('visible');
+                    }
+
+                    dropdownMenu.classList.remove('open');
+
+                    // Reload movies
+                    currentOffset = 0;
+                    allMovies = [];
+                    loadMovies(true);
+                }
+            });
+        });
+
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!sortDropdown.contains(e.target) && !dropdownMenu.contains(e.target) && !document.getElementById('genreDropdown').contains(e.target)) {
+                dropdownMenu.classList.remove('open');
+                document.getElementById('genreDropdown').classList.remove('open');
+            }
+        });
+
+        // Genre dropdown functions
+        function openGenrePanel() {
+            document.getElementById('genreDropdown').classList.add('open');
+            dropdownMenu.classList.remove('open');
+            loadGenres();
+        }
+
+        function closeGenreDropdown() {
+            document.getElementById('genreDropdown').classList.remove('open');
+        }
+
+        async function loadGenres() {
+            try {
+                const response = await fetch(`/api/library/genres?library=${encodeURIComponent(libraryName)}`);
+                const data = await response.json();
+
+                const genreList = document.getElementById('genreList');
+                genreList.innerHTML = '<div class="genre-item" onclick="selectGenre(null, \'All Genres\')">All Genres</div>';
+
+                data.genres.forEach(genre => {
+                    const genreItem = document.createElement('div');
+                    genreItem.className = 'genre-item';
+                    genreItem.textContent = genre;
+                    genreItem.onclick = () => selectGenre(genre, genre);
+                    genreList.appendChild(genreItem);
+                });
+            } catch (error) {
+                console.error('Error loading genres:', error);
+            }
+        }
+
+        function selectGenre(genre, label) {
+            currentGenre = genre;
+
+            if (genre) {
+                // When genre selected, sort by rating desc
+                currentSort = 'rating';
+                currentDirection = 'desc';
+                sortLabel.textContent = `Genre: ${label}`;
+                sortDirection.style.display = 'none';
+            } else {
+                // Back to recently added
+                currentSort = 'added_date';
+                currentDirection = 'desc';
+                sortLabel.textContent = 'Recently Added';
+                sortDirection.style.display = 'none';
+            }
+
+            // Update active state
+            document.querySelector('.dropdown-item.active')?.classList.remove('active');
+            if (genre) {
+                document.getElementById('genreOption').classList.add('active');
+            } else {
+                document.querySelector('[data-sort="added_date"]').classList.add('active');
+            }
+
+            closeGenreDropdown();
+            alphabetSidebar.classList.remove('visible');
+
+            // Reload movies
+            currentOffset = 0;
+            allMovies = [];
+            loadMovies(true);
+        }
+
+        // Alphabet sidebar
+        document.querySelectorAll('.alphabet-letter').forEach(letter => {
+            letter.addEventListener('click', () => {
+                scrollToLetter(letter.dataset.letter);
+            });
+        });
+
+        function scrollToLetter(letter) {
+            const movieCards = document.querySelectorAll('.movie-card');
+            for (const card of movieCards) {
+                const title = card.querySelector('.movie-title')?.textContent || '';
+                const firstChar = title.charAt(0).toUpperCase();
+
+                if (letter === '#' && !isNaN(firstChar)) {
+                    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    break;
+                } else if (firstChar === letter) {
+                    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    break;
+                }
+            }
+        }
+
+        // Load movies
+        async function loadMovies(reset = false) {
+            if (isLoading) return;
+            isLoading = true;
+
+            const movieGrid = document.getElementById('movieGrid');
+            const loadMoreDiv = document.getElementById('loadMore');
+            const loadMoreButton = document.getElementById('loadMoreButton');
+
+            if (reset) {
+                movieGrid.innerHTML = '';
+                // Add skeleton loaders
+                for (let i = 0; i < 9; i++) {
+                    const skeleton = document.createElement('div');
+                    skeleton.className = 'movie-card';
+                    skeleton.innerHTML = `
+                        <div class="movie-poster skeleton"></div>
+                        <div class="movie-info">
+                            <div class="skeleton" style="height: 14px; margin-bottom: 4px; border-radius: 2px;"></div>
+                            <div class="skeleton" style="height: 12px; width: 60%; margin: 0 auto; border-radius: 2px;"></div>
+                        </div>
+                    `;
+                    movieGrid.appendChild(skeleton);
+                }
+            } else {
+                loadMoreButton.innerHTML = '<div class="loading-spinner"></div>';
+            }
+
+            try {
+                let url = `/api/library/browse?library=${encodeURIComponent(libraryName)}&offset=${currentOffset}&limit=${itemsPerPage}`;
+
+                if (currentGenre) {
+                    url += `&genre=${encodeURIComponent(currentGenre)}&sort=rating&direction=desc`;
+                } else {
+                    url += `&sort=${currentSort}&direction=${currentDirection}`;
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (reset) {
+                    movieGrid.innerHTML = '';
+                }
+
+                if (data.movies && data.movies.length > 0) {
+                    data.movies.forEach(movie => {
+                        const movieCard = createMovieCard(movie);
+                        movieGrid.appendChild(movieCard);
+                        allMovies.push(movie);
+                    });
+
+                    hasMore = data.movies.length === itemsPerPage;
+                    currentOffset += data.movies.length;
+
+                    if (hasMore) {
+                        loadMoreDiv.style.display = 'block';
+                        loadMoreButton.innerHTML = 'Load More';
+                    } else {
+                        loadMoreDiv.style.display = 'none';
+                    }
+                } else {
+                    hasMore = false;
+                    loadMoreDiv.style.display = 'none';
+
+                    if (reset && (!data.movies || data.movies.length === 0)) {
+                        movieGrid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #666; font-size: 14px;">No items found</div>';
+                    }
+                }
+
+            } catch (error) {
+                console.error('Error loading movies:', error);
+                if (reset) {
+                    movieGrid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #666; font-size: 14px;">Error loading library</div>';
+                }
+                loadMoreDiv.style.display = 'none';
+            } finally {
+                isLoading = false;
+            }
+        }
+
+        function createMovieCard(movie) {
+            const card = document.createElement('div');
+            card.className = 'movie-card';
+
+            const posterUrl = movie.poster_url || 'https://via.placeholder.com/342x513/2a2a2a/808080?text=No+Poster';
+
+            card.innerHTML = `
+                <div class="movie-poster">
+                    <img src="${posterUrl}"
+                         alt="${movie.title || 'Movie'}"
+                         loading="lazy"
+                         onerror="this.src='https://via.placeholder.com/342x513/2a2a2a/808080?text=No+Poster'">
+                </div>
+                <div class="movie-info">
+                    <div class="movie-title">${movie.title || 'Unknown Title'}</div>
+                    <div class="movie-year">${movie.year || ''}</div>
+                </div>
+            `;
+
+            card.addEventListener('click', () => {
+                if (movie.rating_key) {
+                    // Use the same modal as library.html
+                    handleMovieClick(movie);
+                }
+            });
+
+            return card;
+        }
+
+        // Load more button
+        document.getElementById('loadMoreButton').addEventListener('click', () => {
+            loadMovies(false);
+        });
+
+        // Initial load
+        loadMovies(true);
+
+        // Add secondary sort handling
+        let secondarySort = 'rating_desc';
+
+        // Show/hide secondary sort when genre is selected
+        document.querySelectorAll('.dropdown-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const sortValue = item.dataset.sort;
+                const secondarySortContainer = document.createElement('div');
+                secondarySortContainer.className = 'sort-container';
+                secondarySortContainer.style.marginTop = '10px';
+
+                if (sortValue === 'genre' || currentGenre) {
+                    // Show secondary sort options when genre is selected
+                    if (!document.getElementById('secondarySort')) {
+                        secondarySortContainer.id = 'secondarySort';
+                        secondarySortContainer.innerHTML = `
+                            <select id="secondarySortDropdown" class="sort-dropdown" style="padding: 8px 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: white;">
+                                <option value="rating_desc">Rating (High to Low)</option>
+                                <option value="rating">Rating (Low to High)</option>
+                                <option value="title">Title A-Z</option>
+                                <option value="title_desc">Title Z-A</option>
+                                <option value="year_desc">Year (Newest)</option>
+                                <option value="year">Year (Oldest)</option>
+                                <option value="recently_added">Recently Added</option>
+                            </select>
+                        `;
+                        document.querySelector('.sort-container').after(secondarySortContainer);
+
+                        document.getElementById('secondarySortDropdown').addEventListener('change', (e) => {
+                            secondarySort = e.target.value;
+                            currentOffset = 0;
+                            allMovies = [];
+                            loadMovies(true);
+                        });
+                    }
+                } else {
+                    // Hide secondary sort for other options
+                    const existing = document.getElementById('secondarySort');
+                    if (existing) existing.remove();
+                }
+            });
+        });
+
+        // Modal functions from library.html
+        function handleMovieClick(movie) {
+            console.log('Movie clicked:', movie);
+
+            // Create an item object that matches library.html format
+            const item = {
+                id: movie.rating_key,
+                rating_key: movie.rating_key,
+                title: movie.title,
+                year: movie.year,
+                poster_url: movie.poster_url,
+                backdrop_url: movie.backdrop_url,
+                summary: movie.summary || '',
+                rating: movie.rating,
+                duration: movie.duration,
+                media_type: 'movie',
+                type: 'movie'
+            };
+
+            // Call the same function used in library.html
+            if (typeof window.showMovieModal === 'function') {
+                window.showMovieModal(movie.rating_key, 'movie', item);
+            } else {
+                console.error('showMovieModal not found, using direct playback');
+                // Fallback to direct playback
+                handleItemClick(movie.rating_key, false, null, item);
+            }
+        }
+
+        // Include playback handler from library.html
+        async function handleItemClick(ratingKey, isEpisode, showRatingKey, item) {
+            console.log('Movie item clicked:', { ratingKey, isEpisode, showRatingKey, item });
+
+            try {
+                // For movies, use title+year to find ALL libraries (same as library.html)
+                let ownershipUrl = `/api/check-ownership?`;
+                const params = [];
+                if (item.title) params.push(`title=${encodeURIComponent(item.title)}`);
+                if (item.year) params.push(`year=${item.year}`);
+                ownershipUrl += params.join('&');
+
+                const response = await fetch(ownershipUrl);
+                const data = await response.json();
+
+                if (data.owned && data.movie && data.movie.libraries && data.movie.libraries.length > 0) {
+                    // Show library selection modal
+                    if (typeof window.showLibrarySelectionModal === 'function') {
+                        window.showLibrarySelectionModal({
+                            title: item.title,
+                            libraries: data.movie.libraries,
+                            library_keys: data.movie.library_keys,
+                            rating_key: ratingKey,
+                            backdrop_url: item.backdrop_url,
+                            clearlogo_url: item.clearlogo_url
+                        });
+                    } else {
+                        console.error('showLibrarySelectionModal not found');
+                    }
+                } else {
+                    // Show playback modal
+                    if (typeof window.showPlaybackModal === 'function') {
+                        window.showPlaybackModal(ratingKey, item.title, 'movie', item.backdrop_url, item.clearlogo_url);
+                    } else {
+                        console.error('showPlaybackModal not found');
+                    }
+                }
+            } catch (error) {
+                console.error('Error getting library info:', error);
+                // Fallback to direct playback
+                if (typeof window.showPlaybackModal === 'function') {
+                    window.showPlaybackModal(ratingKey, item.title, 'movie', item.backdrop_url, item.clearlogo_url);
+                }
+            }
+        }
+
+        // Adapter function to check ownership and route to correct modal
+        async function showMovieModalAdapter(tmdbId, mediaType, torrentData) {
+            try {
+                console.log('showMovieModalAdapter called with:', tmdbId, mediaType, torrentData);
+
+                // Show loading modal immediately for instant feedback
+                showLoadingModal();
+
+                // Special handling for Plex items (from browse_media grid)
+                if (torrentData && (torrentData.rating_key || torrentData.id)) {
+                    // This is a Plex item - fetch full metadata and open the movie modal directly
+                    console.log('Plex item detected, fetching full metadata');
+
+                    try {
+                        // Fetch full movie metadata from Plex API (like library.html does)
+                        const ratingKey = torrentData.rating_key || torrentData.id;
+                        const response = await fetch(`/api/plex/movie/${ratingKey}`);
+
+                        if (response.ok) {
+                            const movieData = await response.json();
+                            console.log('Fetched movie data from Plex:', movieData);
+
+                            // Hide loading modal
+                            hideLoadingModal();
+
+                            // Call openMovieModal directly with full Plex data
+                            if (typeof openMovieModal === 'function') {
+                                openMovieModal(movieData, true);
+                            } else {
+                                console.error('openMovieModal function not found!');
+                                alert(`Unable to open modal for "${torrentData.title}".`);
+                            }
+                        } else {
+                            // Fallback to using the data we have
+                            console.warn('Failed to fetch full metadata, using existing data');
+                            hideLoadingModal();
+
+                            // Enhance the existing data with required fields
+                            const movieData = {
+                                rating_key: torrentData.rating_key || torrentData.id,
+                                title: torrentData.title,
+                                year: torrentData.year,
+                                duration: torrentData.duration,
+                                rating: torrentData.rating,
+                                content_rating: torrentData.content_rating,
+                                summary: torrentData.summary,
+                                poster_url: torrentData.poster_url,
+                                backdrop_url: torrentData.backdrop_url,
+                                clearlogo_url: torrentData.clearlogo_url,
+                                genre: torrentData.genre,
+                                all_genres: torrentData.all_genres || (torrentData.genre ? [torrentData.genre] : []),
+                                library_name: currentLibrary,
+                                libraries: [currentLibrary],
+                                library_keys: {[currentLibrary]: torrentData.rating_key || torrentData.id}
+                            };
+
+                            if (typeof openMovieModal === 'function') {
+                                openMovieModal(movieData, true);
+                            } else {
+                                console.error('openMovieModal function not found!');
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error fetching movie metadata:', error);
+                        hideLoadingModal();
+                        alert(`Failed to load "${torrentData.title}". Please try again.`);
+                    }
+                    return;
+                }
+
+                // For non-Plex items, check ownership
+                const ownershipResponse = await fetch(`/api/check-ownership?tmdb_id=${tmdbId}&media_type=${mediaType}`);
+                const ownershipData = await ownershipResponse.json();
+
+                hideLoadingModal();
+
+                if (ownershipData.owned) {
+                    // Movie is owned, open the Plex movie modal
+                    if (typeof openMovieModal === 'function') {
+                        openMovieModal(ownershipData.movie, true);
+                    } else {
+                        console.error('openMovieModal not found');
+                    }
+                } else {
+                    // Show mobile movie/TV modal for non-owned content
+                    if (mediaType === 'movie') {
+                        if (typeof window.showMobileMovieModal === 'function') {
+                            window.showMobileMovieModal(tmdbId);
+                        }
+                    } else if (mediaType === 'tv') {
+                        if (typeof window.showMobileTVModal === 'function') {
+                            window.showMobileTVModal(tmdbId);
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Error in showMovieModalAdapter:', error);
+                hideLoadingModal();
+            }
+        }
+
+        // Alias the function
+        window.showMovieModal = showMovieModalAdapter;
+
+        // Loading modal functions
+        function showLoadingModal() {
+            const modal = document.getElementById('loadingModal');
+            if (modal) {
+                modal.classList.add('active');
+            }
+        }
+
+        function hideLoadingModal() {
+            const modal = document.getElementById('loadingModal');
+            if (modal) {
+                modal.classList.remove('active');
+            }
+        }
+
+        // Update loadMovies to use secondary sort for genre
+        const originalLoadMovies = loadMovies;
+        loadMovies = async function(reset = false) {
+            // Modify the API call to include secondary sort when in genre mode
+            if (currentGenre || currentSort === 'genre') {
+                const actualSort = secondarySort || 'rating_desc';
+                // Temporarily override the sort for the API call
+                const tempSort = currentSort;
+                currentSort = actualSort;
+                await originalLoadMovies.call(this, reset);
+                currentSort = tempSort; // Restore
+            } else {
+                await originalLoadMovies.call(this, reset);
+            }
+        };
+    </script>
+
+    <!-- Loading Modal -->
+    <div id="loadingModal" class="loading-modal">
+        <div style="text-align: center;">
+            <div class="loading-spinner"></div>
+            <div style="color: rgba(255,255,255,0.7); font-size: 16px;">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Include Modal Components -->
+    {% include 'components/mobile_movie_modal.html' %}
+    {% include 'components/mobile_tv_modal.html' %}
+    {% include 'components/mobile_season_modal.html' %}
+    {% include 'components/mobile_episode_modal.html' %}
+    {% include 'components/library_selection_modal.html' %}
+    {% include 'components/playback_modal.html' %}
+
+</body>
+</html>

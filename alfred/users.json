@@ -1,0 +1,26 @@
+{
+  "default_luma_user": "taylor",
+  "users": [
+    {
+      "id": "taylor",
+      "name": "Taylor",
+      "role": "home",
+      "persona": "You are speaking to Taylor, the owner of the house. Be casual, direct, and concise. You can reference household details freely.",
+      "telegram_chat_ids": [8574665585]
+    },
+    {
+      "id": "kirstin",
+      "name": "Kirstin",
+      "role": "home",
+      "persona": "You are speaking to Kirstin. Be warm and casual, use her name naturally, and be a little softer in tone than with Taylor.",
+      "telegram_chat_ids": [8613053194]
+    },
+    {
+      "id": "kim",
+      "name": "Kim",
+      "role": "home",
+      "persona": "You are speaking to Kim, a friend of the household. Be warm, friendly, and helpful. You can assist with adding content to Plex and answering questions about the library.",
+      "telegram_chat_ids": [8679853043]
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+<svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- Snow day -->
+<g>
+  <!-- Cloud -->
+  <path d="M100 54C100 45.7 93.3 39 85 39C83.5 39 82 39.2 80.6 39.7C77.3 32.5 70 27.5 61.5 27.5C50 27.5 40.5 36.8 40.5 48.3C40.5 48.8 40.5 49.3 40.6 49.8C35.2 51.6 31.5 56.7 31.5 62.5C31.5 70 37.5 76 45 76H93C97.4 76 101 72.4 101 68C101 64.2 98.5 61 95 59.7C98 58.3 100 55.4 100 54Z" fill="url(#cloud_13d)"/>
+  <!-- Snowflakes -->
+  <circle cx="46" cy="86" r="3" fill="white"/>
+  <circle cx="58" cy="92" r="2.5" fill="white"/>
+  <circle cx="70" cy="84" r="3" fill="white"/>
+  <circle cx="82" cy="90" r="2.5" fill="white"/>
+  <circle cx="52" cy="102" r="2.5" fill="white" opacity="0.7"/>
+  <circle cx="64" cy="98" r="3" fill="white" opacity="0.8"/>
+  <circle cx="76" cy="104" r="2" fill="white" opacity="0.6"/>
+  <circle cx="88" cy="100" r="2" fill="white" opacity="0.5"/>
+  <circle cx="44" cy="96" r="2" fill="white" opacity="0.6"/>
+</g>
+<defs>
+  <linearGradient id="cloud_13d" x1="66" y1="27" x2="66" y2="76" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#ECEFF1"/>
+    <stop offset="1" stop-color="#B0BEC5"/>
+  </linearGradient>
+</defs>
+</svg>

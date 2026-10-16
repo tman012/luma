@@ -1,0 +1,1325 @@
+<!-- Episode Details Modal -->
+<!-- Plex-style layout: backdrop + clearlogo + UltraBlur, matching season/movie/TV modal pattern -->
+<div class="episode-modal" id="episodeModal" style="display: none;">
+    <div class="episode-modal-overlay">
+        <!-- Top safe area overlay -->
+        <div class="safe-area-top-overlay"></div>
+
+        <!-- Fixed Backdrop - show's backdrop image -->
+        <div class="ep-backdrop-section">
+            <button class="modal-close-btn-backdrop" onclick="closeEpisodeModal()" style="z-index: 350;">
+                <i class="fas fa-times"></i>
+            </button>
+            <img id="episodeModalBackdropImage" class="ep-backdrop-image" alt="Episode Backdrop" src="" style="opacity: 0;">
+            <div class="ep-backdrop-gradient"></div>
+        </div>
+
+        <!-- Scrollable Content - overlaps backdrop -->
+        <div class="ep-mockup">
+            <div class="ep-content-container">
+
+                <!-- Clearlogo or fallback show title -->
+                <div class="ep-clearlogo-container">
+                    <img id="episodeShowClearlogo" class="ep-clearlogo-image" alt="" src="" style="display: none;">
+                    <h1 id="episodeShowTitle" class="ep-clearlogo-fallback-title"></h1>
+                </div>
+
+                <!-- Episode name (directly beneath clearlogo) -->
+                <div class="ep-title-block">
+                    <h2 class="ep-title" id="episodeModalTitle">Episode Title</h2>
+                </div>
+
+                <!-- Single meta line: S01 · E05 · Jul 15, 2016 · 47m · TV-MA -->
+                <div class="ep-meta-line" id="episodeMetaLine">
+                    <span id="episodeSeasonEpisode">S01 &middot; E01</span>
+                </div>
+
+                <!-- Primary Action: Watch pill (owned only) -->
+                <button class="ep-primary-action-button" id="episodePrimaryButton" onclick="handleEpisodePrimaryAction()" style="display: none;">
+                    <i class="fas fa-play"></i>
+                    <span>Play Episode</span>
+                </button>
+
+                <!-- Action Buttons Row (circular icons - left aligned) -->
+                <div class="ep-action-buttons-row" id="episodeActionButtonsRow">
+                    <div class="ep-action-btn-item" onclick="openEpisodeSourcesModal()">
+                        <div class="ep-action-btn-circle">
+                            <i class="fas fa-download"></i>
+                        </div>
+                        <span class="ep-action-btn-label">Sources</span>
+                    </div>
+                </div>
+
+                <!-- Episode plot -->
+                <div class="ep-plot-section" id="episodePlotSection">
+                    <div class="ep-plot-text" id="episodeModalOverview">Loading episode information...</div>
+                    <button class="ep-plot-more-btn" id="episodeMoreButton" onclick="toggleEpisodePlot()" style="display: none;">More</button>
+                </div>
+
+                <!-- Cast & Crew Section -->
+                <div class="ep-cast-section" id="episodeCastSection" style="display: none;">
+                    <h3 class="ep-cast-heading">Cast &amp; Crew</h3>
+                    <div class="ep-cast-scroll" id="episodeCastScroll">
+                        <!-- Cast/crew cards will be dynamically added here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sources Full-Screen Modal (slide-in overlay) -->
+        <div class="ep-sources-modal" id="episodeSourcesModal" style="display: none;">
+            <div class="ep-sources-modal-header">
+                <button class="ep-sources-back-btn" onclick="closeEpisodeSourcesModal()">
+                    <i class="fas fa-arrow-left"></i>
+                </button>
+                <h3 class="ep-sources-modal-title">Episode Sources</h3>
+            </div>
+            <div class="ep-sources-modal-body">
+                <div class="search-loading" id="episodeSearchLoading" style="display: none; text-align: center; padding: 40px 20px;">
+                    <i class="fas fa-circle-notch fa-spin" style="font-size: 24px; margin-bottom: 10px; display: block; color: rgba(255,255,255,0.5);"></i>
+                    <div style="color: rgba(255,255,255,0.5);">Searching for releases...</div>
+                </div>
+
+                <div class="search-results" id="epSourcesContent" style="padding: 10px 20px 80px;">
+                    <!-- Search results will be dynamically added here -->
+                </div>
+
+                <div class="search-empty" id="episodeSearchEmpty" style="display: none; text-align: center; padding: 40px 20px; color: rgba(255,255,255,0.5);">
+                    No releases found
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+/* ============================================================
+   Episode Modal Styles — Plex-style layout
+   All scoped under .episode-modal to avoid collision
+   ============================================================ */
+
+.episode-modal {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    background: #000;
+    z-index: 10002;
+    overflow: hidden;
+    overflow-x: hidden !important;
+}
+
+.episode-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    background: #000;
+    overflow-y: auto;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.episode-modal-overlay::-webkit-scrollbar {
+    display: none;
+}
+
+/* --- Backdrop Section (mirrors season modal) --- */
+.ep-backdrop-section {
+    position: sticky;
+    top: 0;
+    width: 100%;
+    min-height: 300px;
+    height: calc(300px + env(safe-area-inset-top, 0));
+    overflow: hidden;
+    padding-top: env(safe-area-inset-top, 0);
+    z-index: 100;
+}
+
+.ep-backdrop-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 30%;
+    transition: opacity 0.3s ease;
+}
+
+.ep-backdrop-gradient {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 40%;
+    background: linear-gradient(to bottom,
+        transparent 0%,
+        transparent 50%,
+        rgba(0,0,0,0.1) 80%,
+        rgba(0,0,0,0.25) 100%);
+    pointer-events: none;
+}
+
+@media (max-width: 768px) {
+    .ep-backdrop-section {
+        height: 240px;
+    }
+}
+
+/* --- Mockup (content overlapping backdrop) --- */
+.ep-mockup {
+    position: relative;
+    margin-top: -150px;
+    padding: 20px 0 0;
+    background: transparent;
+    min-height: calc(100vh - 300px);
+    z-index: 200;
+    padding-bottom: 80px;
+}
+
+.ep-content-container {
+    position: relative;
+    width: 100%;
+    margin: 0 auto;
+}
+
+/* --- Clearlogo --- */
+.ep-clearlogo-container {
+    position: relative;
+    width: 95%;
+    max-width: 700px;
+    margin: -30px auto 5px auto;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 60px;
+    overflow: visible;
+}
+
+.ep-clearlogo-image {
+    width: 100%;
+    height: auto;
+    max-height: 300px;
+    object-fit: contain;
+    filter: drop-shadow(0 8px 16px rgba(0,0,0,0.9)) drop-shadow(0 2px 4px rgba(0,0,0,0.8));
+}
+
+.ep-clearlogo-fallback-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: white;
+    text-align: center;
+    line-height: 1.2;
+    padding: 0 20px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    text-shadow: 0 4px 8px rgba(0,0,0,0.9), 0 2px 4px rgba(0,0,0,0.8);
+    display: none;
+    margin: 0;
+}
+
+/* --- Episode Title Block (directly beneath clearlogo) --- */
+.ep-title-block {
+    text-align: center;
+    padding: 8px 20px 0;
+}
+
+.ep-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: white;
+    margin: 0;
+    line-height: 1.2;
+}
+
+/* --- Single Meta Line (S01 · E05 · date · runtime · MPAA) --- */
+.ep-meta-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    justify-content: center;
+    padding: 8px 16px 0;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.ep-meta-line span:not(:last-child)::after {
+    content: "\00b7";
+    margin: 0 8px;
+    color: rgba(255, 255, 255, 0.3);
+}
+
+/* --- Primary Action Button (white Watch pill, mirrors season modal) --- */
+.ep-primary-action-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: calc(100% - 32px);
+    margin: 16px 16px 0 16px;
+    padding: 14px 20px;
+    background: #ffffff;
+    color: #000000;
+    border: none;
+    border-radius: 50px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.ep-primary-action-button:hover {
+    background: rgba(255, 255, 255, 0.85);
+    transform: scale(1.02);
+}
+
+.ep-primary-action-button:active {
+    transform: scale(0.98);
+}
+
+.ep-primary-action-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.ep-primary-action-button i {
+    font-size: 18px;
+    color: #000000;
+}
+
+/* --- Action Buttons Row (circular icons, left-aligned) --- */
+.ep-action-buttons-row {
+    display: flex;
+    justify-content: flex-start;
+    gap: 32px;
+    padding: 16px 16px 8px;
+}
+
+.ep-action-btn-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.ep-action-btn-circle {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.25s ease;
+}
+
+.ep-action-btn-circle:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.1);
+}
+
+.ep-action-btn-circle i {
+    font-size: 16px;
+    color: white;
+}
+
+.ep-action-btn-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
+}
+
+/* --- Episode Plot Section --- */
+.ep-plot-section {
+    padding: 12px 20px 0;
+    text-align: left;
+}
+
+.ep-plot-text {
+    font-size: 14px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: all 0.3s ease;
+    max-height: 63px; /* 3 lines × 1.5 line-height × 14px */
+}
+
+.ep-plot-text.expanded {
+    -webkit-line-clamp: unset;
+    overflow: visible;
+    max-height: none;
+}
+
+.ep-plot-more-btn {
+    display: inline-block;
+    color: #3b82f6;
+    background: none;
+    border: none;
+    padding: 4px 8px;
+    margin-top: 4px;
+    margin-bottom: 0;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.ep-plot-more-btn:hover {
+    color: #2563eb;
+}
+
+/* --- Cast & Crew Section --- */
+.ep-cast-section {
+    padding: 20px 0 0;
+}
+
+.ep-cast-heading {
+    font-size: 18px;
+    font-weight: 600;
+    color: white;
+    margin: 0 0 12px 20px;
+}
+
+.ep-cast-scroll {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    padding: 0 20px 8px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    -webkit-overflow-scrolling: touch;
+}
+
+.ep-cast-scroll::-webkit-scrollbar {
+    display: none;
+}
+
+.ep-cast-card {
+    flex-shrink: 0;
+    width: 100px;
+    text-align: center;
+}
+
+.ep-cast-photo {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    object-fit: cover;
+    background: rgba(255, 255, 255, 0.08);
+    margin: 0 auto 8px;
+    display: block;
+}
+
+.ep-cast-photo-placeholder {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    margin: 0 auto 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 28px;
+}
+
+.ep-cast-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: white;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.ep-cast-role {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.3;
+    margin-top: 2px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* ============================================================
+   Sources Full-Screen Slide-In Modal
+   ============================================================ */
+.ep-sources-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: #000;
+    z-index: 10003;
+    display: flex;
+    flex-direction: column;
+    animation: epSlideInRight 0.25s ease;
+}
+
+@keyframes epSlideInRight {
+    from { transform: translateX(100%); }
+    to   { transform: translateX(0); }
+}
+
+.ep-sources-modal-header {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
+}
+
+.ep-sources-back-btn {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 20px;
+    padding: 8px;
+    cursor: pointer;
+}
+
+.ep-sources-modal-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: white;
+    margin: 0 0 0 12px;
+}
+
+.ep-sources-modal-body {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* --- Source Item Styles (matching season modal) --- */
+.episode-modal .source-item {
+    background: #2a2a2a;
+    border: 1px solid #555;
+    border-radius: 12px;
+    padding: 18px;
+    margin-bottom: 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: background 0.2s ease, transform 0.2s ease;
+    cursor: pointer;
+}
+
+.episode-modal .source-item:hover {
+    background: #383838;
+    transform: translateX(4px);
+}
+
+.episode-modal .source-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.episode-modal .source-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: white;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+}
+
+.episode-modal .tracker-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 8px;
+    flex-shrink: 0;
+}
+
+.episode-modal .tracker-badge.beyondhd {
+    background: rgba(30, 64, 175, 0.15);
+    color: #60a5fa;
+    border: 1px solid rgba(30, 64, 175, 0.3);
+}
+
+.episode-modal .tracker-badge.privatehd {
+    background: rgba(22, 163, 74, 0.15);
+    color: #4ade80;
+    border: 1px solid rgba(22, 163, 74, 0.3);
+}
+
+.episode-modal .tracker-badge.iptorrents {
+    background: rgba(225, 29, 72, 0.15);
+    color: #fb7185;
+    border: 1px solid rgba(225, 29, 72, 0.3);
+}
+
+.episode-modal .tracker-badge.morethantv {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.episode-modal .source-meta {
+    display: flex;
+    gap: 12px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+    flex-wrap: wrap;
+}
+
+.episode-modal .download-btn {
+    background: #2563eb;
+    border: 1px solid #3b82f6;
+    color: #fff;
+    padding: 10px;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.episode-modal .download-btn:hover {
+    background: #3b82f6;
+    border-color: #60a5fa;
+    transform: scale(1.1);
+}
+
+.episode-modal .download-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.episode-modal .download-btn i {
+    font-size: 16px;
+}
+
+/* Body modal open state */
+body.episode-modal-open {
+    overflow: hidden;
+}
+</style>
+
+<script>
+// Episode Modal Functions
+let currentEpisodeData = null;
+let currentShowId = null;
+let episodeSourcesLoaded = false;
+
+function toggleEpisodePlot() {
+    const plotText = document.getElementById('episodeModalOverview');
+    const plotMoreBtn = document.getElementById('episodeMoreButton');
+
+    if (plotText.classList.contains('expanded')) {
+        plotText.classList.remove('expanded');
+        plotMoreBtn.textContent = 'More';
+    } else {
+        plotText.classList.add('expanded');
+        plotMoreBtn.textContent = 'Less';
+    }
+}
+
+function openEpisodeModal(episode, seasonNumber, isOwned) {
+    console.log('Opening episode modal for:', episode, 'Season:', seasonNumber, 'Owned:', isOwned);
+    console.log('currentTvShow at modal open:', window.currentTvShow);
+
+    currentEpisodeData = episode;
+    currentEpisodeData.season_number = seasonNumber;
+    currentEpisodeData.is_owned = isOwned;
+    episodeSourcesLoaded = false;
+
+    // Reset UltraBlur
+    resetEpisodeUltraBlurColors();
+
+    // --- Backdrop image (show's backdrop) ---
+    const backdropImg = document.getElementById('episodeModalBackdropImage');
+    const backdropUrl = window.currentTvShow ? (window.currentTvShow.backdrop_url || '') : '';
+    if (backdropUrl) {
+        backdropImg.src = backdropUrl;
+        backdropImg.onload = function() { backdropImg.style.opacity = '1'; };
+        backdropImg.onerror = function() { backdropImg.style.opacity = '0'; };
+    } else if (episode.still_path) {
+        backdropImg.src = `https://image.tmdb.org/t/p/w780${episode.still_path}`;
+        backdropImg.onload = function() { backdropImg.style.opacity = '1'; };
+        backdropImg.onerror = function() { backdropImg.style.opacity = '0'; };
+    } else {
+        backdropImg.src = '';
+        backdropImg.style.opacity = '0';
+    }
+
+    // --- Clearlogo or fallback title ---
+    const clearlogoImg = document.getElementById('episodeShowClearlogo');
+    const clearlogoFallback = document.getElementById('episodeShowTitle');
+    const clearlogoUrl = window.currentTvShow ? (window.currentTvShow.clearlogo_url || '') : '';
+
+    if (clearlogoUrl) {
+        clearlogoImg.src = clearlogoUrl;
+        clearlogoImg.style.display = 'block';
+        clearlogoFallback.style.display = 'none';
+    } else {
+        clearlogoImg.style.display = 'none';
+        clearlogoFallback.textContent = window.currentTvShow?.title || 'Unknown Show';
+        clearlogoFallback.style.display = 'block';
+    }
+
+    // --- Episode title (directly beneath clearlogo) ---
+    document.getElementById('episodeModalTitle').textContent = episode.name || `Episode ${episode.episode_number}`;
+
+    // --- Single meta line: S01 · E05 · date · runtime · MPAA ---
+    const metaLine = document.getElementById('episodeMetaLine');
+    metaLine.innerHTML = '';
+
+    // S/E
+    const seSpan = document.createElement('span');
+    seSpan.textContent = `S${String(seasonNumber).padStart(2, '0')} \u00b7 E${String(episode.episode_number).padStart(2, '0')}`;
+    metaLine.appendChild(seSpan);
+
+    // Air date
+    let airDate = '';
+    if (episode.air_date) {
+        try {
+            if (!isNaN(episode.air_date)) {
+                airDate = new Date(episode.air_date * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            } else {
+                airDate = new Date(episode.air_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+            }
+            if (airDate === 'Invalid Date') airDate = '';
+        } catch (e) {
+            airDate = '';
+        }
+    }
+    if (airDate) {
+        const dateSpan = document.createElement('span');
+        dateSpan.textContent = airDate;
+        metaLine.appendChild(dateSpan);
+    }
+
+    // Runtime
+    if (episode.runtime) {
+        const rtSpan = document.createElement('span');
+        rtSpan.textContent = `${episode.runtime}m`;
+        metaLine.appendChild(rtSpan);
+    }
+
+    // MPAA / Content rating (from show)
+    const contentRating = window.currentTvShow?.content_rating || window.currentTvShow?.contentRating || '';
+    if (contentRating) {
+        const ratingSpan = document.createElement('span');
+        ratingSpan.textContent = contentRating;
+        metaLine.appendChild(ratingSpan);
+    }
+
+    // --- Plot with More/Less ---
+    const plotText = document.getElementById('episodeModalOverview');
+    const plotMoreBtn = document.getElementById('episodeMoreButton');
+    const overviewText = episode.overview || 'No overview available.';
+
+    plotText.textContent = overviewText;
+    plotText.classList.remove('expanded');
+
+    setTimeout(() => {
+        if (plotText.scrollHeight > plotText.clientHeight) {
+            plotMoreBtn.style.display = 'inline-block';
+            plotMoreBtn.textContent = 'More';
+        } else {
+            plotMoreBtn.style.display = 'none';
+        }
+    }, 0);
+
+    // --- Primary action button (white pill, owned only) ---
+    const primaryButton = document.getElementById('episodePrimaryButton');
+    if (isOwned && episode.rating_key) {
+        primaryButton.style.display = 'flex';
+        primaryButton.innerHTML = '<i class="fas fa-play"></i><span>Play Episode</span>';
+    } else {
+        primaryButton.style.display = 'none';
+    }
+
+    // --- Show action buttons row (always visible) ---
+    document.getElementById('episodeActionButtonsRow').style.display = 'flex';
+
+    // --- Cast & Crew ---
+    populateEpisodeCastCrew(episode);
+
+    // --- Show modal ---
+    const episodeModal = document.getElementById('episodeModal');
+    episodeModal.style.display = 'block';
+    document.body.classList.add('episode-modal-open');
+
+    // Scroll to top
+    const modalOverlay = episodeModal.querySelector('.episode-modal-overlay');
+    if (modalOverlay) {
+        modalOverlay.scrollTop = 0;
+    }
+
+    // Fetch UltraBlur colors
+    fetchEpisodeUltraBlurColors();
+}
+
+function populateEpisodeCastCrew(episode) {
+    const castSection = document.getElementById('episodeCastSection');
+    const castScroll = document.getElementById('episodeCastScroll');
+    castScroll.innerHTML = '';
+
+    const guestStars = episode.guest_stars || [];
+    const crew = episode.crew || [];
+
+    // Dedupe crew: only keep Director, Writer, and key roles
+    const keyJobs = ['Director', 'Writer', 'Teleplay', 'Story', 'Screenplay'];
+    const keyCrew = crew.filter(c => keyJobs.includes(c.job));
+
+    // Build combined list: key crew first, then guest stars
+    const people = [];
+    const seenIds = new Set();
+
+    for (const c of keyCrew) {
+        if (c.id && !seenIds.has(c.id)) {
+            seenIds.add(c.id);
+            people.push({ name: c.name, role: c.job, profile_path: c.profile_path });
+        }
+    }
+    for (const gs of guestStars) {
+        if (gs.id && !seenIds.has(gs.id)) {
+            seenIds.add(gs.id);
+            people.push({ name: gs.name, role: gs.character, profile_path: gs.profile_path });
+        }
+    }
+
+    if (people.length === 0) {
+        castSection.style.display = 'none';
+        return;
+    }
+
+    castSection.style.display = 'block';
+
+    people.forEach(person => {
+        const card = document.createElement('div');
+        card.className = 'ep-cast-card';
+
+        if (person.profile_path) {
+            const img = document.createElement('img');
+            img.className = 'ep-cast-photo';
+            img.src = `https://image.tmdb.org/t/p/w185${person.profile_path}`;
+            img.alt = person.name;
+            img.loading = 'lazy';
+            img.onerror = function() {
+                // Replace with placeholder on error
+                const ph = document.createElement('div');
+                ph.className = 'ep-cast-photo-placeholder';
+                ph.innerHTML = '<i class="fas fa-user"></i>';
+                this.replaceWith(ph);
+            };
+            card.appendChild(img);
+        } else {
+            const ph = document.createElement('div');
+            ph.className = 'ep-cast-photo-placeholder';
+            ph.innerHTML = '<i class="fas fa-user"></i>';
+            card.appendChild(ph);
+        }
+
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'ep-cast-name';
+        nameDiv.textContent = person.name;
+        card.appendChild(nameDiv);
+
+        if (person.role) {
+            const roleDiv = document.createElement('div');
+            roleDiv.className = 'ep-cast-role';
+            roleDiv.textContent = person.role;
+            card.appendChild(roleDiv);
+        }
+
+        castScroll.appendChild(card);
+    });
+}
+
+function closeEpisodeModal() {
+    // Close sources modal if open
+    document.getElementById('episodeSourcesModal').style.display = 'none';
+
+    // Close main modal
+    const episodeModal = document.getElementById('episodeModal');
+    episodeModal.style.display = 'none';
+    document.body.classList.remove('episode-modal-open');
+
+    // Reset UltraBlur
+    resetEpisodeUltraBlurColors();
+
+    // Clear episode data
+    currentEpisodeData = null;
+    episodeSourcesLoaded = false;
+}
+
+// --- UltraBlur Functions (mirror season modal pattern) ---
+async function fetchEpisodeUltraBlurColors() {
+    if (!window.currentTvShow) return;
+
+    const ratingKey = window.currentTvShow.rating_key;
+    const tmdbId = window.currentTvShow.tmdb_id || window.currentTvShow.id;
+    if (!ratingKey && !tmdbId) return;
+
+    try {
+        const url = ratingKey
+            ? `/api/plex/ultrablur/${ratingKey}`
+            : `/api/plex/ultrablur/resolve?tmdb_id=${tmdbId}`;
+        const resp = await fetch(url);
+        if (!resp.ok) return;
+        const colors = await resp.json();
+        if (!colors.topLeft && !colors.topRight && !colors.bottomRight && !colors.bottomLeft) return;
+        applyEpisodeUltraBlurColors(colors);
+    } catch (e) {
+        // Non-critical
+    }
+}
+
+function applyEpisodeUltraBlurColors(colors) {
+    const tl = colors.topLeft || '#1a1a1a';
+    const tr = colors.topRight || '#1a1a1a';
+    const br = colors.bottomRight || '#0f0f0f';
+    const bl = colors.bottomLeft || '#0f0f0f';
+
+    const overlay = document.querySelector('#episodeModal .episode-modal-overlay');
+    const mockup = overlay ? overlay.querySelector('.ep-mockup') : null;
+    const backdropSection = overlay ? overlay.querySelector('.ep-backdrop-section') : null;
+
+    if (overlay) {
+        overlay.style.backgroundColor = '#0a0a0a';
+        overlay.style.backgroundImage = [
+            `radial-gradient(circle at 0% 0%, ${tl}, transparent 70%)`,
+            `radial-gradient(circle at 100% 0%, ${tr}, transparent 70%)`,
+            `radial-gradient(circle at 100% 100%, ${br}, transparent 70%)`,
+            `radial-gradient(circle at 0% 100%, ${bl}, transparent 70%)`,
+        ].join(', ');
+    }
+    if (mockup) {
+        mockup.style.background = 'none';
+    }
+    if (backdropSection) {
+        backdropSection.style.webkitMaskImage = 'linear-gradient(to bottom, black 20%, transparent 100%)';
+        backdropSection.style.maskImage = 'linear-gradient(to bottom, black 20%, transparent 100%)';
+    }
+}
+
+function resetEpisodeUltraBlurColors() {
+    const overlay = document.querySelector('#episodeModal .episode-modal-overlay');
+    const mockup = overlay ? overlay.querySelector('.ep-mockup') : null;
+    const backdropSection = overlay ? overlay.querySelector('.ep-backdrop-section') : null;
+
+    if (overlay) {
+        overlay.style.backgroundColor = '';
+        overlay.style.backgroundImage = '';
+    }
+    if (mockup) {
+        mockup.style.background = '';
+    }
+    if (backdropSection) {
+        backdropSection.style.webkitMaskImage = '';
+        backdropSection.style.maskImage = '';
+    }
+}
+
+// --- Sources Modal Functions ---
+function openEpisodeSourcesModal() {
+    const sourcesModal = document.getElementById('episodeSourcesModal');
+    sourcesModal.style.display = 'flex';
+
+    if (!episodeSourcesLoaded) {
+        episodeSourcesLoaded = true;
+        searchEpisode();
+    }
+}
+
+function closeEpisodeSourcesModal() {
+    document.getElementById('episodeSourcesModal').style.display = 'none';
+}
+
+// --- Primary Action ---
+async function handleEpisodePrimaryAction() {
+    await handleWatchEpisode();
+}
+
+async function handleWatchEpisode() {
+    try {
+        if (!currentEpisodeData || !window.currentTvShow) {
+            throw new Error('Episode or show data not available');
+        }
+
+        const title = window.currentTvShow.title || window.currentTvShow.name;
+        const season = currentEpisodeData.season_number;
+        const episode = currentEpisodeData.episode_number;
+        const episodeRatingKey = currentEpisodeData.rating_key;
+
+        console.log('Starting playback for episode:', title, `S${season}E${episode}`, 'Rating Key:', episodeRatingKey);
+
+        if (!episodeRatingKey) {
+            throw new Error('Episode rating key not available');
+        }
+
+        const backdropUrl = window.currentTvShow.backdrop_url ||
+                           (window.currentTvShow.backdrop_path ? `https://image.tmdb.org/t/p/w1280${window.currentTvShow.backdrop_path}` : null);
+        const clearlogoUrl = window.currentTvShow.clearlogo_url || null;
+
+        const response = await fetch(`/api/plex/episode_libraries/${episodeRatingKey}`);
+        const data = await response.json();
+
+        if (data.owned && data.libraries && data.libraries.length > 0) {
+            const episodeTitle = currentEpisodeData.name || `Episode ${episode}`;
+            window.showLibrarySelectionModal({
+                title: `${title} - S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}: ${episodeTitle}`,
+                libraries: data.libraries,
+                library_keys: data.library_keys,
+                rating_key: episodeRatingKey,
+                backdrop_url: backdropUrl,
+                clearlogo_url: clearlogoUrl
+            });
+        } else {
+            const episodeTitle = currentEpisodeData.name || `Episode ${episode}`;
+            const fullTitle = `${title} - S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}: ${episodeTitle}`;
+
+            window.showPlaybackModal(
+                episodeRatingKey,
+                fullTitle,
+                'tv',
+                backdropUrl,
+                clearlogoUrl
+            );
+        }
+
+    } catch (error) {
+        console.error('Error playing episode:', error);
+        alert(error.message || 'Failed to start playback');
+    }
+}
+
+// --- Episode Search ---
+async function searchEpisode() {
+    const searchLoading = document.getElementById('episodeSearchLoading');
+    const searchResults = document.getElementById('epSourcesContent');
+    const searchEmpty = document.getElementById('episodeSearchEmpty');
+
+    searchLoading.style.display = 'block';
+    searchResults.innerHTML = '';
+    searchEmpty.style.display = 'none';
+
+    try {
+        const tvdbId = window.currentTvShow.tvdb_id;
+
+        if (!tvdbId) {
+            throw new Error('TVDB ID not available for this show');
+        }
+
+        console.log('Searching for episode:', tvdbId, 'Season:', currentEpisodeData.season_number, 'Episode:', currentEpisodeData.episode_number);
+
+        const response = await fetch(`/api/sonarr/episode/search?tvdb_id=${tvdbId}&season=${currentEpisodeData.season_number}&episode=${currentEpisodeData.episode_number}`);
+
+        const data = await response.json();
+
+        console.log('Episode search response:', data);
+
+        searchLoading.style.display = 'none';
+
+        if (response.ok && data.success) {
+            if (data.releases && data.releases.length > 0) {
+                window.currentEpisodeContext = {
+                    episode_id: data.episode_id
+                };
+                displayEpisodeSearchResults(data.releases);
+            } else {
+                searchEmpty.style.display = 'block';
+                searchEmpty.textContent = 'No releases found for this episode';
+            }
+        } else {
+            searchEmpty.style.display = 'block';
+            searchEmpty.textContent = data.message || 'Error searching for episode';
+
+            if (response.status === 404 && data.message?.includes('not found in Sonarr')) {
+                searchEmpty.innerHTML = `
+                    <div style="color: rgba(255,255,255,0.7); line-height: 1.6;">
+                        <i class="fas fa-info-circle" style="color: #3b82f6; margin-bottom: 10px; display: block; font-size: 32px;"></i>
+                        <strong>Show Not In Sonarr</strong><br>
+                        This show needs to be added to Sonarr before you can search for individual episodes.<br><br>
+                        Please go back and click "Add to Sonarr" on the show page first.
+                    </div>
+                `;
+            }
+        }
+    } catch (error) {
+        console.error('Error searching for episode:', error);
+        searchLoading.style.display = 'none';
+        searchEmpty.style.display = 'block';
+        searchEmpty.textContent = error.message || 'Error searching for releases';
+    }
+}
+
+function formatUploadDate(dateStr, ageMinutes) {
+    if (ageMinutes !== undefined && ageMinutes !== null) {
+        const days = Math.floor(ageMinutes / (60 * 24));
+        if (days === 0) return 'Today';
+        if (days === 1) return '1d ago';
+        if (days < 7) return `${days}d ago`;
+        if (days < 30) {
+            const weeks = Math.floor(days / 7);
+            return `${weeks}w ago`;
+        }
+        if (days < 365) {
+            const months = Math.floor(days / 30);
+            return `${months}mo ago`;
+        }
+        const years = Math.floor(days / 365);
+        return `${years}y ago`;
+    }
+
+    if (!dateStr) return null;
+    try {
+        let normalizedDate = dateStr;
+        if (dateStr.match(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/)) {
+            normalizedDate = dateStr.replace(' ', 'T');
+        }
+        const date = new Date(normalizedDate);
+        if (isNaN(date.getTime())) return null;
+
+        const now = new Date();
+        const diffMs = now - date;
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+        if (diffDays === 0) return 'Today';
+        if (diffDays === 1) return '1d ago';
+        if (diffDays < 7) return `${diffDays}d ago`;
+        if (diffDays < 30) {
+            const weeks = Math.floor(diffDays / 7);
+            return `${weeks}w ago`;
+        }
+        if (diffDays < 365) {
+            const months = Math.floor(diffDays / 30);
+            return `${months}mo ago`;
+        }
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                           'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
+    } catch (e) {
+        return null;
+    }
+}
+
+function displayEpisodeSearchResults(releases) {
+    const searchResults = document.getElementById('epSourcesContent');
+    searchResults.innerHTML = '';
+
+    window.currentEpisodeReleases = releases;
+
+    function getQualityScore(release) {
+        if (release.quality && release.quality.quality && release.quality.quality.name) {
+            const qualityName = release.quality.quality.name;
+            if (qualityName.includes('2160') || qualityName.toLowerCase().includes('uhd')) return 4;
+            if (qualityName.includes('1080')) return 3;
+            if (qualityName.includes('720')) return 2;
+            if (qualityName.includes('480')) return 1;
+        }
+
+        const title = (release.title || '').toUpperCase();
+        if (title.includes('2160P') || title.includes('4K') || title.includes('UHD')) return 4;
+        if (title.includes('1080P')) return 3;
+        if (title.includes('720P')) return 2;
+        if (title.includes('480P')) return 1;
+        return 0;
+    }
+
+    const sortedReleases = [...releases].sort((a, b) => {
+        const qualityDiff = getQualityScore(b) - getQualityScore(a);
+        if (qualityDiff !== 0) return qualityDiff;
+
+        const ageA = a.ageMinutes || a.age * 24 * 60 || Infinity;
+        const ageB = b.ageMinutes || b.age * 24 * 60 || Infinity;
+        return ageA - ageB;
+    });
+
+    const releasesContainer = document.createElement('div');
+    releasesContainer.style.display = 'flex';
+    releasesContainer.style.flexDirection = 'column';
+    releasesContainer.style.gap = '12px';
+    releasesContainer.style.width = '100%';
+
+    sortedReleases.forEach((release, index) => {
+        const originalIndex = releases.indexOf(release);
+        const releaseItem = createEpisodeReleaseElement(release, originalIndex);
+        releasesContainer.appendChild(releaseItem);
+    });
+
+    searchResults.appendChild(releasesContainer);
+}
+
+function createEpisodeReleaseElement(release, index) {
+    const sourceItem = document.createElement('div');
+    sourceItem.className = 'source-item';
+
+    const sourceInfo = document.createElement('div');
+    sourceInfo.className = 'source-info';
+
+    const sourceName = document.createElement('div');
+    sourceName.className = 'source-name';
+
+    const trackerBadge = document.createElement('span');
+    const indexerName = (release.indexer || 'Unknown').toLowerCase();
+    trackerBadge.className = `tracker-badge ${indexerName}`;
+
+    const trackerMap = {
+        'beyondhd': 'BHD',
+        'morethantv': 'MTV',
+        'privatehd': 'PHD',
+        'iptorrents': 'IPT'
+    };
+    trackerBadge.textContent = trackerMap[indexerName] || release.indexer || 'Unknown';
+
+    const titleSpan = document.createElement('span');
+    titleSpan.style.flex = '1';
+    titleSpan.style.minWidth = '0';
+    titleSpan.style.wordBreak = 'break-word';
+    titleSpan.style.overflowWrap = 'break-word';
+    titleSpan.textContent = release.title || 'Unknown Release';
+
+    sourceName.appendChild(trackerBadge);
+    sourceName.appendChild(titleSpan);
+
+    const sourceMeta = document.createElement('div');
+    sourceMeta.className = 'source-meta';
+
+    const sizeGB = (release.size / (1024 * 1024 * 1024)).toFixed(2);
+    const sizeSpan = document.createElement('span');
+    sizeSpan.textContent = `${sizeGB} GB`;
+
+    const seedersSpan = document.createElement('span');
+    seedersSpan.style.color = '#10b981';
+    seedersSpan.textContent = `${release.seeders || 0} seeders`;
+
+    sourceMeta.appendChild(sizeSpan);
+    sourceMeta.appendChild(seedersSpan);
+
+    const uploadDate = formatUploadDate(release.publishDate, release.ageMinutes);
+    if (uploadDate) {
+        const dateSpan = document.createElement('span');
+        dateSpan.style.color = '#9ca3af';
+        dateSpan.textContent = uploadDate;
+        sourceMeta.appendChild(dateSpan);
+    }
+
+    sourceInfo.appendChild(sourceName);
+    sourceInfo.appendChild(sourceMeta);
+
+    const downloadBtn = document.createElement('button');
+    downloadBtn.className = 'download-btn';
+    downloadBtn.innerHTML = '<i class="fas fa-download"></i>';
+    downloadBtn.onclick = (e) => {
+        e.stopPropagation();
+        downloadEpisodeRelease(index, downloadBtn);
+    };
+
+    sourceItem.appendChild(sourceInfo);
+    sourceItem.appendChild(downloadBtn);
+
+    return sourceItem;
+}
+
+async function downloadEpisodeRelease(index, downloadBtn) {
+    const releases = window.currentEpisodeReleases;
+    const context = window.currentEpisodeContext || {};
+    if (!releases || !releases[index]) {
+        alert('Release not found');
+        return;
+    }
+
+    const release = releases[index];
+
+    downloadBtn.disabled = true;
+    downloadBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+
+    try {
+        const response = await fetch('/api/sonarr/episode/download', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                guid: release.guid,
+                indexer_id: release.indexer_id,
+                episode_id: context.episode_id
+            })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            downloadBtn.style.background = '#22c55e';
+            downloadBtn.style.borderColor = '#22c55e';
+            downloadBtn.innerHTML = '<i class="fas fa-check"></i>';
+
+            setTimeout(() => {
+                downloadBtn.style.background = '';
+                downloadBtn.style.borderColor = '';
+                downloadBtn.innerHTML = '<i class="fas fa-download"></i>';
+                downloadBtn.disabled = false;
+            }, 2000);
+        } else {
+            throw new Error(data.message || 'Failed to download');
+        }
+    } catch (error) {
+        console.error('Error downloading release:', error);
+
+        downloadBtn.style.background = '#ef4444';
+        downloadBtn.style.borderColor = '#ef4444';
+        downloadBtn.innerHTML = '<i class="fas fa-times"></i>';
+
+        alert(error.message || 'Failed to download release');
+
+        setTimeout(() => {
+            downloadBtn.style.background = '';
+            downloadBtn.style.borderColor = '';
+            downloadBtn.innerHTML = '<i class="fas fa-download"></i>';
+            downloadBtn.disabled = false;
+        }, 2000);
+    }
+}
+
+// Close modal on escape key (cascading: sources → episode)
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('episodeModal').style.display === 'block') {
+        if (document.getElementById('episodeSourcesModal').style.display === 'flex') {
+            closeEpisodeSourcesModal();
+        } else {
+            closeEpisodeModal();
+        }
+    }
+});
+</script>

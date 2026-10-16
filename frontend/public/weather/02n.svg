@@ -1,0 +1,15 @@
+<svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- Few clouds night - moon behind cloud -->
+<g>
+  <!-- Moon behind -->
+  <path d="M52 22C40.5 22 31 31.5 31 43C31 54.5 40.5 64 52 64C55.8 64 59.4 62.9 62.4 61C57.8 66.6 50.9 70 43.2 70C29.4 70 18 58.6 18 44.8C18 31 29.4 19.6 43.2 19.6C46.2 19.6 49 20.1 51.7 21C51.8 21.3 52 22 52 22Z" fill="#B0BEC5"/>
+  <!-- Cloud -->
+  <path d="M100 62C100 53.7 93.3 47 85 47C83.5 47 82 47.2 80.6 47.7C77.3 40.5 70 35.5 61.5 35.5C50 35.5 40.5 44.8 40.5 56.3C40.5 56.8 40.5 57.3 40.6 57.8C35.2 59.6 31.5 64.7 31.5 70.5C31.5 78 37.5 84 45 84H93C97.4 84 101 80.4 101 76C101 72.2 98.5 69 95 67.7C98 66.3 100 63.4 100 62Z" fill="url(#cloud_02n)"/>
+</g>
+<defs>
+  <linearGradient id="cloud_02n" x1="66" y1="35" x2="66" y2="84" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#E0E0E0"/>
+    <stop offset="1" stop-color="#BDBDBD"/>
+  </linearGradient>
+</defs>
+</svg>

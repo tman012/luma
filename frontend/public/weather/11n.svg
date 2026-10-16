@@ -1,0 +1,24 @@
+<svg viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- Thunderstorm night -->
+<g>
+  <!-- Dark cloud -->
+  <path d="M100 52C100 43.7 93.3 37 85 37C83.5 37 82 37.2 80.6 37.7C77.3 30.5 70 25.5 61.5 25.5C50 25.5 40.5 34.8 40.5 46.3C40.5 46.8 40.5 47.3 40.6 47.8C35.2 49.6 31.5 54.7 31.5 60.5C31.5 68 37.5 74 45 74H93C97.4 74 101 70.4 101 66C101 62.2 98.5 59 95 57.7C98 56.3 100 53.4 100 52Z" fill="url(#cloud_11n)"/>
+  <!-- Lightning bolt -->
+  <polygon points="68,72 58,92 66,92 56,114 74,88 66,88 74,72" fill="url(#bolt_11n)"/>
+  <!-- Rain drops -->
+  <ellipse cx="42" cy="84" rx="2" ry="3.5" fill="#42A5F5" opacity="0.8"/>
+  <ellipse cx="50" cy="88" rx="2" ry="3.5" fill="#42A5F5" opacity="0.8"/>
+  <ellipse cx="82" cy="82" rx="2" ry="3.5" fill="#42A5F5" opacity="0.8"/>
+  <ellipse cx="90" cy="86" rx="2" ry="3.5" fill="#42A5F5" opacity="0.8"/>
+</g>
+<defs>
+  <linearGradient id="cloud_11n" x1="66" y1="25" x2="66" y2="74" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#546E7A"/>
+    <stop offset="1" stop-color="#37474F"/>
+  </linearGradient>
+  <linearGradient id="bolt_11n" x1="62" y1="72" x2="62" y2="114" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFD54F"/>
+    <stop offset="1" stop-color="#FFB300"/>
+  </linearGradient>
+</defs>
+</svg>

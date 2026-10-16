@@ -1,0 +1,45 @@
+{
+	# Plain-HTTP requests that hit the HTTPS-only ports (5443 P1S, 5453 sports) get a redirect to https
+	# instead of "Client sent an HTTP request to an HTTPS server."
+	servers 192.168.1.62:5443 {
+		listener_wrappers {
+			http_redirect
+			tls
+		}
+	}
+	servers 192.168.1.62:5453 {
+		listener_wrappers {
+			http_redirect
+			tls
+		}
+	}
+}
+
+https://192.168.1.62 {
+	bind 192.168.1.62
+	tls internal
+	reverse_proxy localhost:5001
+}
+
+http://192.168.1.62 {
+	bind 192.168.1.62
+	redir https://192.168.1.62{uri} permanent
+}
+
+# P1S Monitor PWA over HTTPS (own port; does not touch :443)
+https://192.168.1.62:5443 {
+	bind 192.168.1.62
+	tls internal
+	reverse_proxy localhost:5080 {
+		flush_interval -1
+	}
+}
+
+# Game Day sports PWA over HTTPS (own port; does not touch :443 or :5443)
+https://192.168.1.62:5453 {
+	bind 192.168.1.62
+	tls internal
+	reverse_proxy localhost:5090 {
+		flush_interval -1
+	}
+}
