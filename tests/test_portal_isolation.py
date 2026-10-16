@@ -20,25 +20,21 @@ class TestPortalIsolation:
         app.user_auth.init_db()
         app.user_auth.create_user('owner', 'password123', is_admin=True)
         
-        # Mock settings for portal
+        # Update settings directly in memory
         settings = app.main.settings
-        original_get = settings.get
+        settings.update({
+            'request_portal': {
+                'enabled': True,
+                'hostname': 'requests.example.com',
+                'password_hash': generate_password_hash('testpass'),
+            },
+            'security': {
+                'access_mode': 'open',
+                'trusted_proxies': '',
+            }
+        })
         
-        def mock_get(key, default=None):
-            if key == 'request_portal.hostname':
-                return 'requests.example.com'
-            if key == 'request_portal.password_hash':
-                return generate_password_hash('testpass')
-            if key == 'request_portal.enabled':
-                return True
-            if key == 'security.access_mode':
-                return 'open'
-            if key == 'security.trusted_proxies':
-                return ''
-            return original_get(key, default)
-        
-        with patch.object(settings, 'get', side_effect=mock_get):
-            yield
+        yield
     
     def test_portal_host_can_access_request_page(self, test_app):
         """Portal host can GET /request."""

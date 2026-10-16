@@ -41,10 +41,10 @@ def test_app():
     import app.main
     import app.user_auth
     
-    app = app.main.app
-    app.config['TESTING'] = True
+    flask_app = app.main.app
+    flask_app.config['TESTING'] = True
     
     # Initialize database schema
     app.user_auth.init_db()
     
-    return app
+    return flask_app
