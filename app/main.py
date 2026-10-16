@@ -6724,12 +6724,46 @@ def library_search_fast():
 
 @app.route('/api/library/search')
 def library_search():
-    """Search library for movies and TV shows via Plex API."""
+    """Search library for movies and TV shows with typo tolerance via fast_search index.
+    Falls back to Plex API if index isn't ready."""
     query = request.args.get('q', '').strip()
     if not query:
         return jsonify({'movies': [], 'tv_shows': []})
 
     try:
+        # Try fast_search if index is initialized (typo-tolerant)
+        status = fast_search_index.status()
+        if status.get('initialized'):
+            # Use fast search with fuzzy matching
+            results = fast_search_index.search(q=query, limit=100, fuzzy=True)
+            
+            # Separate by media type
+            all_movies = []
+            all_tv = []
+            
+            for item in results:
+                # Format for frontend (matches Plex format)
+                formatted = {
+                    'title': item.get('title'),
+                    'year': item.get('year'),
+                    'rating_key': item.get('rating_key'),
+                    'library_name': item.get('section_name', 'Library'),
+                    'libraries': [item.get('section_name', 'Library')],
+                    'poster_url': f"/api/img/plex?url={item['thumb']}" if item.get('thumb') else None,
+                    'backdrop_url': f"/api/img/plex?url={item['art']}" if item.get('art') else None,
+                    'clearlogo_url': None,
+                }
+                if item.get('added_at'):
+                    formatted['added_date'] = datetime.fromtimestamp(item['added_at']).strftime('%Y-%m-%d')
+                
+                if item.get('media_type') == 'movie':
+                    all_movies.append(formatted)
+                elif item.get('media_type') == 'show':
+                    all_tv.append(formatted)
+            
+            return jsonify({'movies': all_movies, 'tv_shows': all_tv})
+        
+        # Fallback to Plex API if index not ready
         plex = get_plex_for_request()
         sections = plex.get_library_sections()
         movie_sections = [s for s in sections if s['type'] == 'movie']

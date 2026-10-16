@@ -530,11 +530,33 @@ class HeroCache:
         return []
 
     def get_hero_content(self) -> List[Dict]:
-        """Get cached hero content, refreshing if needed."""
+        """Get cached hero content, refreshing if needed or if images are missing."""
         content = self.load_cache()
-        if not content:
+        
+        # Check if content exists and all referenced image files exist
+        if content:
+            missing_images = False
+            for item in content:
+                if item.get('backdrop_cache'):
+                    backdrop_path = self.cache_dir / item['backdrop_cache']
+                    if not backdrop_path.exists():
+                        logger.warning(f"Missing backdrop image: {backdrop_path}")
+                        missing_images = True
+                        break
+                if item.get('poster_cache'):
+                    poster_path = self.cache_dir / item['poster_cache']
+                    if not poster_path.exists():
+                        logger.warning(f"Missing poster image: {poster_path}")
+                        missing_images = True
+                        break
+            
+            if missing_images:
+                logger.info("Cached content has missing images, refreshing...")
+                content = self.refresh_hero_content()
+        else:
             logger.info("No cached content found, refreshing...")
             content = self.refresh_hero_content()
+        
         return content
 
 

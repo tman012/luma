@@ -1015,8 +1015,12 @@ class TestTMDbIntegration(unittest.TestCase):
         }
         
         mock_get.side_effect = [
-            mock_movie_response, mock_movie_response, mock_movie_response,  # 3 pages of movies
-            mock_tv_response, mock_tv_response, mock_tv_response,  # 3 pages of TV
+            mock_movie_response, mock_movie_response, mock_movie_response,  # Pages 1-3
+            mock_movie_response, mock_movie_response, mock_movie_response,  # Pages 4-6
+            mock_movie_response, mock_movie_response, mock_movie_response, mock_movie_response,  # Pages 7-10
+            mock_tv_response, mock_tv_response, mock_tv_response,  # Pages 1-3
+            mock_tv_response, mock_tv_response, mock_tv_response,  # Pages 4-6
+            mock_tv_response, mock_tv_response, mock_tv_response, mock_tv_response,  # Pages 7-10
         ]
         
         index = FastSearchIndex()
@@ -1523,6 +1527,305 @@ class TestFlaskEndpoints(unittest.TestCase):
                        f"Image should be served at {image_url}")
         self.assertEqual(response.data, test_image_data,
                        "Served image data should match cached data")
+
+
+class TestLibraryEndpointTypoTolerance(unittest.TestCase):
+    """Test /api/library/search endpoint with typo tolerance."""
+    
+    def setUp(self):
+        """Set up Flask test client."""
+        from app import main as app_main
+        self.app = app_main.app
+        self.app.config['TESTING'] = True
+        self.client = self.app.test_client()
+    
+    @patch('app.main.fast_search_index')
+    def test_library_search_openheimer(self, mock_index):
+        """Test library search with typo: Openheimer -> Oppenheimer."""
+        mock_index.status.return_value = {'initialized': True}
+        mock_index.search.return_value = [
+            {'title': 'Oppenheimer', 'year': 2023, 'rating_key': 1, 'media_type': 'movie',
+             'section_name': 'Movies', 'thumb': '/thumb1.jpg', 'art': '/art1.jpg', 'added_at': 1234567890}
+        ]
+        
+        response = self.client.get('/api/library/search?q=Openheimer')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        
+        self.assertGreaterEqual(len(data.get('movies', [])), 1)
+        self.assertEqual(data['movies'][0]['title'], 'Oppenheimer')
+        mock_index.search.assert_called_once()
+    
+    @patch('app.main.fast_search_index')
+    def test_library_search_interstelar(self, mock_index):
+        """Test library search with typo: Interstelar -> Interstellar."""
+        mock_index.status.return_value = {'initialized': True}
+        mock_index.search.return_value = [
+            {'title': 'Interstellar', 'year': 2014, 'rating_key': 2, 'media_type': 'movie',
+             'section_name': 'Movies', 'thumb': '/thumb2.jpg', 'art': '/art2.jpg', 'added_at': 1234567890}
+        ]
+        
+        response = self.client.get('/api/library/search?q=Interstelar')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        
+        self.assertGreaterEqual(len(data.get('movies', [])), 1)
+        self.assertEqual(data['movies'][0]['title'], 'Interstellar')
+    
+    @patch('app.main.fast_search_index')
+    def test_library_search_godfahter(self, mock_index):
+        """Test library search with typo: Godfahter -> The Godfather."""
+        mock_index.status.return_value = {'initialized': True}
+        mock_index.search.return_value = [
+            {'title': 'The Godfather', 'year': 1972, 'rating_key': 3, 'media_type': 'movie',
+             'section_name': 'Movies', 'thumb': '/thumb3.jpg', 'art': '/art3.jpg', 'added_at': 1234567890}
+        ]
+        
+        response = self.client.get('/api/library/search?q=Godfahter')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        
+        self.assertGreaterEqual(len(data.get('movies', [])), 1)
+        self.assertEqual(data['movies'][0]['title'], 'The Godfather')
+    
+    @patch('app.main.fast_search_index')
+    def test_library_search_shawshank_redemtion(self, mock_index):
+        """Test library search with typo: Shawshank Redemtion -> The Shawshank Redemption."""
+        mock_index.status.return_value = {'initialized': True}
+        mock_index.search.return_value = [
+            {'title': 'The Shawshank Redemption', 'year': 1994, 'rating_key': 4, 'media_type': 'movie',
+             'section_name': 'Movies', 'thumb': '/thumb4.jpg', 'art': '/art4.jpg', 'added_at': 1234567890}
+        ]
+        
+        response = self.client.get('/api/library/search?q=Shawshank Redemtion')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        
+        self.assertGreaterEqual(len(data.get('movies', [])), 1)
+        self.assertEqual(data['movies'][0]['title'], 'The Shawshank Redemption')
+
+
+class TestShortQueriesPrefixOnly(unittest.TestCase):
+    """Test that 1-2 character queries are prefix-only on word/title starts."""
+    
+    def setUp(self):
+        """Set up search index with test data."""
+        self.index = FastSearchIndex()
+        self.index._index = [
+            {'title': 'Up', 'title_lower': 'up', 'title_normalized': 'up',
+             'year': 2009, 'genres_lower': ['animation'], 'content_rating': 'PG',
+             'section_id': 1, 'media_type': 'movie', 'popularity_score': 1.0, 'rating_key': 1},
+            {'title': 'Superbad', 'title_lower': 'superbad', 'title_normalized': 'superbad',
+             'year': 2007, 'genres_lower': ['comedy'], 'content_rating': 'R',
+             'section_id': 1, 'media_type': 'movie', 'popularity_score': 0.8, 'rating_key': 2},
+            {'title': 'Summer', 'title_lower': 'summer', 'title_normalized': 'summer',
+             'year': 2020, 'genres_lower': ['drama'], 'content_rating': 'PG',
+             'section_id': 1, 'media_type': 'movie', 'popularity_score': 0.5, 'rating_key': 3},
+            {'title': 'Winter', 'title_lower': 'winter', 'title_normalized': 'winter',
+             'year': 2019, 'genres_lower': ['drama'], 'content_rating': 'PG',
+             'section_id': 1, 'media_type': 'movie', 'popularity_score': 0.5, 'rating_key': 4},
+            {'title': 'Inception', 'title_lower': 'inception', 'title_normalized': 'inception',
+             'year': 2010, 'genres_lower': ['action'], 'content_rating': 'PG-13',
+             'section_id': 1, 'media_type': 'movie', 'popularity_score': 1.0, 'rating_key': 5},
+        ]
+        self.index._initialized = True
+    
+    def test_query_up_returns_up_not_superbad(self):
+        """Test q=Up returns 'Up' but not 'Superbad' (substring)."""
+        results = self.index.search(q='Up', fuzzy=False)
+        titles = [r['title'] for r in results]
+        
+        self.assertIn('Up', titles, "Must return 'Up'")
+        self.assertNotIn('Superbad', titles, "Must not return 'Superbad' (substring match)")
+    
+    def test_query_u_returns_up_not_summer(self):
+        """Test q=u returns 'Up' but not 'Summer' (substring)."""
+        results = self.index.search(q='u', fuzzy=False)
+        titles = [r['title'] for r in results]
+        
+        self.assertIn('Up', titles, "Must return 'Up'")
+        self.assertNotIn('Summer', titles, "Must not return 'Summer' (substring match)")
+    
+    def test_query_in_returns_inception_not_winter(self):
+        """Test q=in returns 'Inception' but not 'Winter' (substring)."""
+        results = self.index.search(q='in', fuzzy=False)
+        titles = [r['title'] for r in results]
+        
+        self.assertIn('Inception', titles, "Must return 'Inception' (word start)")
+        self.assertNotIn('Winter', titles, "Must not return 'Winter' (substring match)")
+
+
+class TestPerformanceBenchmark(unittest.TestCase):
+    """Test search performance on large library."""
+    
+    def test_10k_library_under_50ms_median(self):
+        """Test that 10k item library searches complete in under 50ms median."""
+        import time
+        from statistics import median
+        
+        # Create 10k item library
+        index = FastSearchIndex()
+        items = []
+        base_titles = ['Dream', 'Fire', 'Shadow', 'River', 'Golden', 'Winter', 'Dark', 'White',
+                      'Star', 'Iron', 'Broken', 'Summer', 'Love', 'Ghost', 'Night']
+        
+        for i in range(10000):
+            title_words = [base_titles[i % len(base_titles)], 
+                          base_titles[(i // 15) % len(base_titles)],
+                          base_titles[(i // 225) % len(base_titles)]]
+            title = ' '.join(title_words)
+            items.append({
+                'title': title,
+                'title_lower': title.lower(),
+                'title_normalized': normalize_text(title),
+                'year': 2000 + (i % 24),
+                'genres_lower': ['action'],
+                'content_rating': 'PG-13',
+                'section_id': 1,
+                'media_type': 'movie',
+                'popularity_score': 0.5,
+                'rating_key': i,
+            })
+        
+        # Add some specific titles
+        specific_titles = ['Oppenheimer', 'Interstellar', 'The Godfather', 
+                          'The Shawshank Redemption', 'Amélie']
+        for i, title in enumerate(specific_titles):
+            items.append({
+                'title': title,
+                'title_lower': title.lower(),
+                'title_normalized': normalize_text(title),
+                'year': 2000,
+                'genres_lower': ['drama'],
+                'content_rating': 'PG-13',
+                'section_id': 1,
+                'media_type': 'movie',
+                'popularity_score': 1.0,
+                'rating_key': 10000 + i,
+            })
+        
+        index._index = items
+        index._initialized = True
+        
+        # Benchmark queries
+        queries = ['amelie', 'Openheimer', 'Interstelar', 'Godfahter', 'Shawshank Redemtion']
+        timings = []
+        
+        for query in queries:
+            query_timings = []
+            for _ in range(5):
+                start = time.perf_counter()
+                results = index.search(q=query, limit=50, fuzzy=True)
+                elapsed_ms = (time.perf_counter() - start) * 1000
+                query_timings.append(elapsed_ms)
+            
+            med = median(query_timings)
+            timings.append(med)
+            print(f"Query '{query}': median {med:.2f}ms")
+        
+        overall_median = median(timings)
+        print(f"Overall median: {overall_median:.2f}ms")
+        
+        self.assertLess(overall_median, 50.0, 
+                       f"Median search time {overall_median:.2f}ms must be under 50ms for 10k library")
+
+
+class TestHeroCacheMissingImages(unittest.TestCase):
+    """Test hero cache checks for missing image files."""
+    
+    def test_hero_cache_refreshes_on_missing_images(self):
+        """Test that get_hero_content refreshes when image files are missing."""
+        import tempfile
+        import json
+        from pathlib import Path
+        from app.hero_cache import HeroCache
+        
+        # Create temp directories
+        temp_dir = Path(tempfile.mkdtemp())
+        cache_dir = temp_dir / 'static' / 'hero_cache'
+        data_dir = temp_dir / 'data'
+        cache_dir.mkdir(parents=True)
+        data_dir.mkdir(parents=True)
+        
+        # Create hero cache instance
+        hero = HeroCache()
+        original_cache_dir = hero.cache_dir
+        original_cache_json = hero.cache_json
+        
+        try:
+            hero.cache_dir = cache_dir
+            hero.cache_json = data_dir / 'hero_content.json'
+            
+            # Write JSON with references to images
+            content = [
+                {
+                    'title': 'Test Movie',
+                    'backdrop_cache': 'test_backdrop.jpg',
+                    'poster_cache': 'test_poster.jpg',
+                }
+            ]
+            with open(hero.cache_json, 'w') as f:
+                json.dump(content, f)
+            
+            # Mock refresh_hero_content to track if it was called
+            refresh_called = False
+            def mock_refresh():
+                nonlocal refresh_called
+                refresh_called = True
+                return []
+            
+            hero.refresh_hero_content = mock_refresh
+            
+            # get_hero_content should detect missing images and refresh
+            result = hero.get_hero_content()
+            
+            self.assertTrue(refresh_called, "refresh_hero_content should be called when images missing")
+            
+        finally:
+            # Cleanup
+            hero.cache_dir = original_cache_dir
+            hero.cache_json = original_cache_json
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class TestFuzzyNoiseReduction(unittest.TestCase):
+    """Test that fuzzy matching doesn't produce false positives."""
+    
+    def setUp(self):
+        """Set up search index."""
+        self.index = FastSearchIndex()
+        self.index._index = [
+            {'title': 'Amélie', 'title_lower': 'amélie', 'title_normalized': 'amelie',
+             'year': 2001, 'genres_lower': ['romance'], 'content_rating': 'R',
+             'section_id': 1, 'media_type': 'movie', 'popularity_score': 1.0, 'rating_key': 1},
+            {'title': 'Dream Fire', 'title_lower': 'dream fire', 'title_normalized': 'dream fire',
+             'year': 2020, 'genres_lower': ['action'], 'content_rating': 'PG-13',
+             'section_id': 1, 'media_type': 'movie', 'popularity_score': 0.5, 'rating_key': 2},
+            {'title': 'Oppenheimer', 'title_lower': 'oppenheimer', 'title_normalized': 'oppenheimer',
+             'year': 2023, 'genres_lower': ['biography'], 'content_rating': 'R',
+             'section_id': 1, 'media_type': 'movie', 'popularity_score': 1.0, 'rating_key': 3},
+            {'title': 'The Godfather', 'title_lower': 'the godfather', 'title_normalized': 'godfather',
+             'year': 1972, 'genres_lower': ['crime'], 'content_rating': 'R',
+             'section_id': 1, 'media_type': 'movie', 'popularity_score': 1.0, 'rating_key': 4},
+        ]
+        self.index._initialized = True
+    
+    def test_amelie_does_not_match_dream_fire(self):
+        """Test 'amelie' does not match 'Dream Fire' (no token overlap)."""
+        results = self.index.search(q='amelie', fuzzy=True)
+        titles = [r['title'] for r in results]
+        
+        self.assertIn('Amélie', titles, "Must return 'Amélie'")
+        self.assertNotIn('Dream Fire', titles, "Must not return 'Dream Fire' (unrelated)")
+    
+    def test_openheimer_does_not_match_godfather(self):
+        """Test 'Openheimer' does not match 'The Godfather' (different tokens)."""
+        results = self.index.search(q='Openheimer', fuzzy=True)
+        titles = [r['title'] for r in results]
+        
+        self.assertIn('Oppenheimer', titles, "Must return 'Oppenheimer'")
+        self.assertNotIn('The Godfather', titles, "Must not return 'The Godfather' (unrelated)")
 
 
 if __name__ == '__main__':

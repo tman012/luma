@@ -20,10 +20,11 @@ from typing import List, Dict, Optional, Any, Set, Tuple
 import requests
 
 try:
-    from rapidfuzz import fuzz
+    from rapidfuzz import fuzz, process
     HAS_RAPIDFUZZ = True
 except ImportError:
     HAS_RAPIDFUZZ = False
+    process = None
 
 logger = logging.getLogger(__name__)
 
@@ -175,10 +176,33 @@ def fuzzy_match_score(query: str, title: str, query_norm: str, title_norm: str) 
     if token_score >= 0.6:
         return (token_score, 'token')
     
-    # Tier 5: Fuzzy matching (typos) - use rapidfuzz for performance if available
+    # Tier 5: Fuzzy matching (typos) with stricter token-aware scoring
+    # Require: (1) good overall ratio AND (2) good per-token similarity
     if HAS_RAPIDFUZZ:
-        # rapidfuzz is much faster, especially for large datasets
-        fuzzy_score = fuzz.ratio(query_norm, title_norm) / 100.0
+        # Overall similarity
+        overall_ratio = fuzz.ratio(query_norm, title_norm) / 100.0
+        
+        # Per-token similarity: each query token must match at least one title token well
+        if len(query_tokens) > 0:
+            min_token_scores = []
+            for q_token in query_tokens:
+                best_match = 0.0
+                for t_token in title_tokens:
+                    token_ratio = fuzz.ratio(q_token, t_token) / 100.0
+                    best_match = max(best_match, token_ratio)
+                min_token_scores.append(best_match)
+            
+            # Require each token to have at least 0.7 match with some title token
+            min_token_match = min(min_token_scores) if min_token_scores else 0.0
+            
+            # Combined score: overall ratio weighted with minimum token similarity
+            # This prevents "amelie" from matching "dream fire" (no token overlap)
+            if min_token_match < 0.7:
+                return (0.0, 'none')
+            
+            fuzzy_score = (overall_ratio * 0.7) + (min_token_match * 0.3)
+        else:
+            fuzzy_score = overall_ratio
     else:
         # Fallback to difflib
         trigram_score = trigram_similarity(query_norm, title_norm)
@@ -503,8 +527,8 @@ class FastSearchIndex:
             tmdb_title_map = {}  # normalized -> display for TMDb titles
             failed = False
             
-            # Fetch popular movies (3 pages = ~60 titles)
-            for page in range(1, 4):
+            # Fetch popular movies (10 pages = ~200 titles)
+            for page in range(1, 11):
                 try:
                     resp = requests.get(
                         f'{tmdb_base}/movie/popular',
@@ -531,9 +555,9 @@ class FastSearchIndex:
                     failed = True
                     break
             
-            # Fetch popular TV shows (3 pages = ~60 titles)
+            # Fetch popular TV shows (10 pages = ~200 titles)
             if not failed:
-                for page in range(1, 4):
+                for page in range(1, 11):
                     try:
                         resp = requests.get(
                             f'{tmdb_base}/tv/popular',
@@ -663,7 +687,21 @@ class FastSearchIndex:
         
         # For very short queries (1-2 chars), use only prefix/substring matching
         use_fuzzy = len(q) > 2 and fuzzy
-
+        
+        # Prefilter by first letter for performance (only for longer queries)
+        # Skip prefiltering for queries < 5 chars to avoid missing substring matches
+        if len(q) >= 5:
+            first_letter = q_norm[0] if q_norm else ''
+            # Check items that start with the same letter (normalized or with articles)
+            filtered = []
+            for item in snapshot:
+                title_norm = item.get('title_normalized', '')
+                # Check if any word in the title starts with query first letter
+                words = title_norm.split()
+                if any(word.startswith(first_letter) for word in words):
+                    filtered.append(item)
+            snapshot = filtered if filtered else snapshot  # Fallback to full snapshot if no matches
+        
         scored_results = []
         
         for item in snapshot:
@@ -691,12 +729,26 @@ class FastSearchIndex:
                 if match_score < min_threshold:
                     continue
             else:
-                # For short queries or when fuzzy disabled, use exact/prefix/substring only
+                # For short queries (1-2 chars): prefix-only on word starts or title start
+                # For fuzzy disabled: exact/prefix/substring
                 t_lower = item['title_lower']
                 if q_lower == t_lower:
                     match_score, match_type = 1.0, 'exact'
                 elif t_lower.startswith(q_lower):
                     match_score, match_type = 1.0, 'prefix'
+                elif len(q) <= 2:
+                    # For 1-2 char queries: only match at word boundaries
+                    # Check if query starts any word in the title
+                    words = t_lower.split()
+                    found = False
+                    for word in words:
+                        if word.startswith(q_lower):
+                            found = True
+                            break
+                    if found:
+                        match_score, match_type = 0.9, 'prefix'
+                    else:
+                        continue
                 elif q_lower in t_lower:
                     position_score = 1.0 - (t_lower.index(q_lower) / len(t_lower))
                     match_score, match_type = position_score, 'substring'
