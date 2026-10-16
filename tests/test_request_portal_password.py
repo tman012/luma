@@ -49,8 +49,8 @@ class TestRequestPortalPasswordHashing:
         password = 'test1234'
         hashed = generate_password_hash(password)
         
-        # Verify it's properly hashed
-        assert hashed.startswith('pbkdf2:')
+        # Verify it's properly hashed (werkzeug uses scrypt or pbkdf2)
+        assert hashed.startswith(('pbkdf2:', 'scrypt:'))
         assert len(hashed) > 50
         assert check_password_hash(hashed, password)
         assert not check_password_hash(hashed, 'wrongpass')
