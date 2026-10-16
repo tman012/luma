@@ -36,6 +36,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { FixMatchSheet, type FixMatchResult } from './FixMatchSheet';
 import { FileInfoSheet, FileInfoIcon } from './FileInfoSheet';
 import { TopReviewsRow, ReviewSheet, useTopReviews, type TopReview } from '@/components/media/TopReviews';
+import { apiFetch } from '../../../apiClient';
 
 // ---------------------------------------------------------------------------
 // CastShelf — slide-up shelf with preloaded circular cast photos
@@ -508,7 +509,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
         return;
       }
 
-      const resp = await fetch('/api/radarr/movie/grab', {
+      const resp = await apiFetch('/api/radarr/movie/grab', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1218,7 +1219,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                           setUpgradeError(null);
                           setUpgradeErrorMsg(null);
                           try {
-                            const resp = await fetch('/api/watchlist', {
+                            const resp = await apiFetch('/api/watchlist', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({

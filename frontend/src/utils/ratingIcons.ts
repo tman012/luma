@@ -1,17 +1,18 @@
 import type { Ratings } from '@/utils/modalParsers';
+import { assetUrl } from '@/urlHelpers';
 
 /** Cache-bust version — bump when icon files change on disk */
 const V = '?v=3';
 
 /** Static asset paths for rating service icons */
 export const RATING_ICONS = {
-  imdb: `/static/images/imdb-logo.png${V}`,
-  rtCriticFresh: `/static/images/rotten-tomatoes-logo.png${V}`,
-  rtCriticRotten: `/static/images/rotten-tomatoes-splat.png${V}`,
-  rtAudienceGood: `/static/images/rotten-tomatoes-popcorn-good.png${V}`,
-  rtAudienceBad: `/static/images/rotten-tomatoes-popcorn-bad.png${V}`,
-  metacritic: `/static/images/metacritic.png${V}`,
-  tmdb: `/static/images/tmdb-logo-short.svg${V}`,
+  imdb: assetUrl(`/static/images/imdb-logo.png${V}`),
+  rtCriticFresh: assetUrl(`/static/images/rotten-tomatoes-logo.png${V}`),
+  rtCriticRotten: assetUrl(`/static/images/rotten-tomatoes-splat.png${V}`),
+  rtAudienceGood: assetUrl(`/static/images/rotten-tomatoes-popcorn-good.png${V}`),
+  rtAudienceBad: assetUrl(`/static/images/rotten-tomatoes-popcorn-bad.png${V}`),
+  metacritic: assetUrl(`/static/images/metacritic.png${V}`),
+  tmdb: assetUrl(`/static/images/tmdb-logo-short.svg${V}`),
 } as const;
 
 /** Freshness threshold (>= means fresh/good, < means rotten/bad) */

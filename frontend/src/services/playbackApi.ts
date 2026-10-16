@@ -1,3 +1,4 @@
+import { apiFetch } from '../apiClient';
 // ---------------------------------------------------------------------------
 // Playback API service — wraps backend Kodi playback endpoints
 // ---------------------------------------------------------------------------
@@ -72,7 +73,7 @@ export async function fetchRooms(): Promise<{
   rooms: Room[];
   defaultPlaybackTarget: PlaybackTarget;
 }> {
-  const resp = await fetch('/api/settings/rooms');
+  const resp = await apiFetch('/api/settings/rooms');
   if (!resp.ok) return { rooms: [], defaultPlaybackTarget: { roomId: '', deviceId: '', serviceId: '' } };
   const data = await resp.json();
   return {
@@ -82,7 +83,7 @@ export async function fetchRooms(): Promise<{
 }
 
 export async function getResumeInfo(ratingKey: number): Promise<ResumeInfo> {
-  const resp = await fetch(`/api/plex/resume_info/${ratingKey}`);
+  const resp = await apiFetch(`/api/plex/resume_info/${ratingKey}`);
   if (!resp.ok) {
     return {
       has_resume_point: false,
@@ -114,7 +115,7 @@ export async function startPlayback(
   if (deviceId) body.device_id = deviceId;
   if (serviceId) body.service_id = serviceId;
 
-  const resp = await fetch('/api/player/play', {
+  const resp = await apiFetch('/api/player/play', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -125,7 +126,7 @@ export async function startPlayback(
 export async function fetchPlexSeasons(
   showRatingKey: number,
 ): Promise<PlexSeason[]> {
-  const resp = await fetch(`/api/plex/tv/${showRatingKey}/seasons`);
+  const resp = await apiFetch(`/api/plex/tv/${showRatingKey}/seasons`);
   if (!resp.ok) return [];
   const data = await resp.json();
   return (data.seasons ?? []) as PlexSeason[];
@@ -135,7 +136,7 @@ export async function createPlayQueue(
   ratingKey: number,
   shuffle: boolean = true,
 ): Promise<{ success: boolean; play_queue_id?: number; error?: string }> {
-  const resp = await fetch('/api/plex/playqueue', {
+  const resp = await apiFetch('/api/plex/playqueue', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rating_key: ratingKey, shuffle }),

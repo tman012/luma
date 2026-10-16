@@ -1,0 +1,16 @@
+{
+ "name": "Luma Requests",
+ "short_name": "Luma Requests",
+ "start_url": "../../request",
+ "scope": "../../",
+ "display": "standalone",
+ "background_color": "#15102a",
+ "theme_color": "#15102a",
+ "icons": [
+  {
+   "src": "../images/apple-touch-icon.png",
+   "sizes": "180x180",
+   "type": "image/png"
+  }
+ ]
+}

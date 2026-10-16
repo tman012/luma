@@ -9,6 +9,7 @@ import { ToggleSwitch } from './components/ToggleSwitch';
 import { MobileCardNav, type CardItem } from './components/MobileCardNav';
 import { useSettings } from './useSettings';
 import { fetchPlexHealth, type PlexLibrary } from '@/services/settingsApi';
+import { apiFetch } from '../../apiClient';
 
 // -- Kiosk mode paths -----------------------------------------------
 
@@ -133,7 +134,7 @@ export function UiKioskTab() {
   // render a helpful hint instead of an empty picker.
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/ha/areas')
+    apiFetch('/api/ha/areas')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return;

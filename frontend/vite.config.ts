@@ -8,7 +8,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  base: '/',
+  // Relative base: the bundle works under any URL base (e.g. /luma). The
+  // server rewrites ./assets/ in index.html to <URL_BASE>/assets/.
+  base: './',
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),

@@ -9,6 +9,7 @@ import {
   type Ratings,
   type UltraBlurColors,
 } from '@/utils/modalParsers';
+import { apiFetch } from '../apiClient';
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -63,11 +64,11 @@ export function useMovieDetail(
       try {
         if (ratingKey) {
           // Plex path — also fetch TMDb in parallel when tmdbId is known
-          const plexPromise = fetch(`/api/plex/movie/${ratingKey}`, { signal: controller.signal })
+          const plexPromise = apiFetch(`/api/plex/movie/${ratingKey}`, { signal: controller.signal })
             .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }) as Promise<Record<string, unknown>>;
 
           const tmdbPromise: Promise<Record<string, unknown> | null> = tmdbId
-            ? fetch(`/api/movie/${tmdbId}`, { signal: controller.signal })
+            ? apiFetch(`/api/movie/${tmdbId}`, { signal: controller.signal })
                 .then((r) => (r.ok ? r.json() : null))
                 .catch(() => null)
             : Promise.resolve(null);
@@ -129,7 +130,7 @@ export function useMovieDetail(
           setDetail(parsed);
         } else if (tmdbId) {
           // TMDb-only path (unowned movies)
-          const resp = await fetch(`/api/movie/${tmdbId}`, { signal: controller.signal });
+          const resp = await apiFetch(`/api/movie/${tmdbId}`, { signal: controller.signal });
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const data = (await resp.json()) as Record<string, unknown>;
           if (!cancelled) {
@@ -180,7 +181,7 @@ export function useMovieDetail(
     if (ownershipYear) params.set('year', String(ownershipYear));
     if (tmdbId) params.set('tmdb_id', String(tmdbId));
 
-    fetch(`/api/plex/lookup?${params}`)
+    apiFetch(`/api/plex/lookup?${params}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: { owned: boolean; rating_key?: number; libraries?: string[]; library_keys?: Record<string, number> } | null) => {
         if (cancelled || !data?.owned) return;
@@ -212,14 +213,14 @@ export function useMovieDetail(
     async function fetchAllRatings() {
       // Fire Plex + OMDb in parallel
       const plexPromise: Promise<Record<string, unknown> | null> = ratingKey
-        ? fetch(`/api/plex/ratings/${ratingKey}`, { signal: controller.signal })
+        ? apiFetch(`/api/plex/ratings/${ratingKey}`, { signal: controller.signal })
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null)
         : Promise.resolve(null);
 
       const params = new URLSearchParams();
       if (movieYear) params.set('year', String(movieYear));
-      const omdbPromise: Promise<Record<string, unknown> | null> = fetch(
+      const omdbPromise: Promise<Record<string, unknown> | null> = apiFetch(
         `/api/ratings/${encodeURIComponent(movieTitle!)}?${params}`,
         { signal: controller.signal },
       )
@@ -263,7 +264,7 @@ export function useMovieDetail(
       if (missingRtCritic || missingRtAudience) {
         const rtParams = new URLSearchParams({ title: movieTitle! });
         if (movieYear) rtParams.set('year', String(movieYear));
-        fetch(`/api/rt/reviews?${rtParams}`, { signal: controller.signal })
+        apiFetch(`/api/rt/reviews?${rtParams}`, { signal: controller.signal })
           .then((r) => (r.ok ? r.json() : null))
           .then((rt: Record<string, unknown> | null) => {
             if (cancelled || !rt || !rt.success) return;
@@ -307,7 +308,7 @@ export function useMovieDetail(
 
     // Plex: instant (metadata lookup, no image processing)
     if (ratingKey) {
-      fetch(`/api/plex/ultrablur/${ratingKey}`, { signal: controller.signal })
+      apiFetch(`/api/plex/ultrablur/${ratingKey}`, { signal: controller.signal })
         .then((r) => (r.ok ? r.json() : null))
         .then((data: UltraBlurColors | null) => {
           if (!cancelled && data && hasColors(data) && !resolved) {
@@ -320,7 +321,7 @@ export function useMovieDetail(
 
     // TMDb: slower (downloads image + extracts palette) but matches HD backdrop
     if (tmdbId) {
-      fetch(`/api/tmdb/colors/${tmdbId}`, { signal: controller.signal })
+      apiFetch(`/api/tmdb/colors/${tmdbId}`, { signal: controller.signal })
         .then((r) => (r.ok ? r.json() : null))
         .then((data: UltraBlurColors | null) => {
           if (!cancelled && data && hasColors(data)) {
@@ -349,7 +350,7 @@ export function useMovieDetail(
     const id = tmdbId ?? detail.tmdbId;
     if (!id) return;
     let cancelled = false;
-    fetch(`/api/clearlogo/${id}`)
+    apiFetch(`/api/clearlogo/${id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data?.clearlogo_url) return;
@@ -372,7 +373,7 @@ export function useMovieDetail(
   useEffect(() => {
     if (!resolvedTmdbId || tmdbFetchedRef.current) return;
     let cancelled = false;
-    fetch(`/api/movie/${resolvedTmdbId}`)
+    apiFetch(`/api/movie/${resolvedTmdbId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return;

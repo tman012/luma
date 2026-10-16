@@ -7,6 +7,7 @@ import { SettingsCard } from './components/SettingsCard';
 import { FormField } from './components/FormField';
 import { ToggleSwitch } from './components/ToggleSwitch';
 import { MobileCardNav, type CardItem } from './components/MobileCardNav';
+import { apiFetch } from '../../apiClient';
 
 const SERVER_PATHS = [
   'network.flask_port',
@@ -44,7 +45,7 @@ function TunnelStatusBadge() {
     let active = true;
     const poll = async () => {
       try {
-        const res = await fetch('/api/tunnel/status');
+        const res = await apiFetch('/api/tunnel/status');
         if (res.ok && active) setStatus(await res.json());
       } catch { /* ignore */ }
     };

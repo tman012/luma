@@ -1,6 +1,7 @@
 import type { NormalizedMediaItem } from '@/types/media';
 import { posterUrl, backdropUrl } from '@/utils/image';
 import { fetchWithTimeout } from '@/utils/fetchWithTimeout';
+import { apiFetch } from '../../apiClient';
 
 /** Map What You're Missing API movies → home rail items. */
 export function mapWhatYoureMissingMovies(movies: Record<string, unknown>[]): NormalizedMediaItem[] {
@@ -34,7 +35,7 @@ export async function dismissWhatYoureMissing(
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), 10_000);
   try {
-    const resp = await fetch('/api/rails/what-youre-missing/dismiss', {
+    const resp = await apiFetch('/api/rails/what-youre-missing/dismiss', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',

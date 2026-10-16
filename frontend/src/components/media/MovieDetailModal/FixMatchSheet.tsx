@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
+import { apiFetch } from '../../../apiClient';
 
 export interface FixMatchResult {
   rating_key: number;
@@ -106,7 +107,7 @@ export function FixMatchSheet({ ratingKey, title, year, variant, onClose, onMatc
     setError(null);
     const params = new URLSearchParams({ title: t.trim() });
     if (/^\d{4}$/.test(y.trim())) params.set('year', y.trim());
-    fetch(`/api/plex/match/${ratingKey}/search?${params}`, { credentials: 'same-origin' })
+    apiFetch(`/api/plex/match/${ratingKey}/search?${params}`, { credentials: 'same-origin' })
       .then(async (r) => {
         if (r.status === 401 || r.status === 403) throw new Error('Owner only');
         if (!r.ok) throw new Error('Search failed');
@@ -157,7 +158,7 @@ export function FixMatchSheet({ ratingKey, title, year, variant, onClose, onMatc
     if (busy) return;
     setApplying(c.guid);
     setError(null);
-    fetch(`/api/plex/match/${ratingKey}/apply`, {
+    apiFetch(`/api/plex/match/${ratingKey}/apply`, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
@@ -178,7 +179,7 @@ export function FixMatchSheet({ ratingKey, title, year, variant, onClose, onMatc
     if (busy) return;
     setApplying('__unmatch__');
     setError(null);
-    fetch(`/api/plex/match/${ratingKey}/unmatch`, { method: 'POST', credentials: 'same-origin' })
+    apiFetch(`/api/plex/match/${ratingKey}/unmatch`, { method: 'POST', credentials: 'same-origin' })
       .then(async (r) => {
         if (!r.ok) throw new Error('Couldn’t unmatch');
         return r.json() as Promise<FixMatchResult>;

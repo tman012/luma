@@ -1,3 +1,4 @@
+import { apiFetch } from '../../apiClient';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import '@/styles/trivia.css';
 
@@ -70,7 +71,7 @@ const TRIVIA_URL =
   'https://opentdb.com/api.php?amount=10&category=11&type=multiple';
 
 async function fetchTriviaBatch(): Promise<TriviaQuestion[]> {
-  const res = await fetch(TRIVIA_URL);
+  const res = await apiFetch(TRIVIA_URL);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
   if (data.response_code !== 0 || !Array.isArray(data.results)) return [];

@@ -1,3 +1,5 @@
+import { getUrlBase, withBase } from '@/urlHelpers';
+
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
 type PosterSize = 'w185' | 'w342' | 'w500' | 'w780' | 'original';
@@ -13,8 +15,9 @@ function resolveImageUrl(
   size: string,
 ): string | null {
   if (!path) return null;
-  // Already a proxy URL — use as-is
-  if (path.startsWith('/api/') || path.startsWith('http')) return path;
+  // Already a proxy URL — keep it, under the URL base
+  if (path.startsWith('/api/')) return withBase(path);
+  if (path.startsWith('http')) return path;
   // TMDB path — prepend base
   return `${TMDB_IMAGE_BASE}/${size}${path}`;
 }
@@ -45,7 +48,10 @@ export function sizedPlexImg(
   h?: number,
 ): string | null {
   if (!url) return null;
-  if (!url.startsWith('/api/img/plex')) return url;
+  const base = getUrlBase();
+  const local = base && url.startsWith(`${base}/`) ? url.slice(base.length) : url;
+  if (!local.startsWith('/api/img/plex')) return url;
+  url = withBase(local);
   if (/[?&]w=/.test(url)) return url; // already sized
   const sep = url.includes('?') ? '&' : '?';
   return `${url}${sep}w=${w}${h ? `&h=${h}` : ''}`;

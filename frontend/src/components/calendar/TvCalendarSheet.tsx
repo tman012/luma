@@ -12,6 +12,7 @@ import { useModalHost, type ModalSource } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { posterUrl } from '@/utils/image';
 import { cn } from '@/utils/cn';
+import { apiFetch } from '../../apiClient';
 
 const DISMISS_THRESHOLD = 120;
 const ENTER_DURATION = 600;
@@ -81,7 +82,7 @@ async function fetchWeek(start: Date): Promise<CalendarEpisode[]> {
   const from = localKey(start);
   const to = localKey(addDays(start, 7));
   try {
-    const resp = await fetch(`/api/sonarr/calendar?start=${from}&end=${to}&limit=200`);
+    const resp = await apiFetch(`/api/sonarr/calendar?start=${from}&end=${to}&limit=200`);
     if (!resp.ok) return [];
     const data = await resp.json();
     if (!data.enabled) return [];

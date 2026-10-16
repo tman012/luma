@@ -3,6 +3,7 @@ Library Cache Module - Caches frequently accessed library data for fast loading
 Similar to the ExploreCache but for library browsing, continue watching, and recent items.
 """
 
+import os
 import sqlite3
 import json
 import os
@@ -901,6 +902,61 @@ class LibraryCache:
             except Exception:
                 pass
 
+    def get_library_stats(self) -> Optional[Dict]:
+        """Get cached library stats"""
+        try:
+            conn = sqlite3.connect(str(self.db_path))
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+
+            cursor.execute("SELECT stats_json FROM library_stats_cache WHERE id = 1")
+            row = cursor.fetchone()
+            conn.close()
+
+            if row and row['stats_json']:
+                return json.loads(row['stats_json'])
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting cached library stats: {e}")
+            try:
+                conn.close()
+            except Exception:
+                pass
+            return None
+
+    def update_library_stats(self, stats: Dict):
+        """Update library stats cache"""
+        try:
+            start_time = time.time()
+            conn = sqlite3.connect(str(self.db_path))
+            cursor = conn.cursor()
+
+            stats_json = json.dumps(stats)
+            cursor.execute("""
+                INSERT OR REPLACE INTO library_stats_cache (id, stats_json, cached_at)
+                VALUES (1, ?, CURRENT_TIMESTAMP)
+            """, (stats_json,))
+
+            # Update metadata
+            duration_ms = int((time.time() - start_time) * 1000)
+            cursor.execute("""
+                INSERT OR REPLACE INTO cache_metadata (cache_key, last_update, item_count, update_duration_ms)
+                VALUES (?, ?, ?, ?)
+            """, ('library_stats', datetime.now().isoformat(), 1, duration_ms))
+
+            conn.commit()
+            conn.close()
+
+            logger.info(f"Updated library stats cache in {duration_ms}ms")
+
+        except Exception as e:
+            logger.error(f"Error updating library stats cache: {e}")
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     def get_cache_info(self) -> Dict:
         """Get information about all caches"""
         try:
@@ -935,5 +991,24 @@ class LibraryCache:
             return {}
 
 
-# Create global instance
-library_cache = LibraryCache()
+# Global instance (lazy initialization)
+_library_cache_instance = None
+
+def _get_library_cache():
+    """Get or create the global library cache instance."""
+    global _library_cache_instance
+    if _library_cache_instance is None:
+        _library_cache_instance = LibraryCache()
+    return _library_cache_instance
+
+
+class _LibraryCacheLazy:
+    """Lazy wrapper for library cache to defer initialization until first use."""
+    def __getattr__(self, name):
+        return getattr(_get_library_cache(), name)
+    
+    def __call__(self, *args, **kwargs):
+        return _get_library_cache()(*args, **kwargs)
+
+
+library_cache = _LibraryCacheLazy()

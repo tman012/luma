@@ -32,6 +32,38 @@ read-only or wrongly owned mount fails the deploy instead of logging
   recreate with a fresh cache) -> heal immediately. Then a daily refresh at
   05:00 plus a heal check every 5 minutes.
 
+## Reverse proxy
+
+`security.trusted_proxies` starts empty, so `X-Forwarded-For` is ignored and
+every proxied request looks like it comes from the proxy. Behind a reverse
+proxy, set it (Settings, or `security.trusted_proxies` in settings.json,
+comma-separated) or LAN users get 401:
+
+- proxy on the same host with host networking (for example Caddy):
+  `127.0.0.1/32, ::1/128`
+- otherwise: the proxy's own IP as a single address (`/32` or `/128`)
+
+List only proxies you control.
+
+The proxy must also pass the original `Host` (or `X-Forwarded-Host`): Luma
+uses it to tell the main site from the request-portal host name and LAN names
+from public ones. Caddy's `reverse_proxy` keeps the client's `Host` and sets
+`X-Forwarded-For` / `X-Forwarded-Host` by default; don't override them with
+`header_up Host {upstream_hostport}`. Example (replace the placeholders; with
+host networking Luma listens on the host's port):
+
+```caddyfile
+luma.example.com, requests.example.com {
+    reverse_proxy 127.0.0.1:<luma port> {
+        header_up Host {host}
+        header_up X-Forwarded-Host {host}
+    }
+}
+```
+
+Then set `security.trusted_proxies` to `127.0.0.1/32, ::1/128` and
+`request_portal.hostname` to the portal name.
+
 ## First deploy / upgrade
 
 ```bash

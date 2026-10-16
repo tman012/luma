@@ -19,6 +19,7 @@ export type ModalSource =
   | 'trakt_movies'
   | 'trakt_shows'
   | 'trending'
+  | 'vibe_engine'
   | 'watchlist'
   | 'tv_calendar'
   | 'browse'
@@ -73,6 +74,7 @@ export interface ModalHostContextValue {
   /** Opens PersonDetailModal at the host level; participates in the modal stack
    *  so closing a credit modal returns to the originating person view. */
   openPerson: (opts: { personId: number; personName: string }) => void;
+  openVibeEngine: () => void;
   close: () => void;
   /**
    * Register a nested UI back handler (e.g. Sources sheet). When the user

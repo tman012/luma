@@ -2,6 +2,15 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import './index.css';
+import { installConnectServiceFetchHook } from '@/components/connect/connectService';
+import { getUrlBase } from './urlHelpers';
+
+// TODO: Migrate all apiFetch('/api/...') calls in service files to use apiFetch from apiClient.ts
+// This ensures URL base is correctly applied. For now, services use native fetch which works
+// in production because the server handles URL base via WSGI DispatcherMiddleware, but
+// proper migration to apiFetch is needed for consistency.
+
+installConnectServiceFetchHook();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -45,7 +54,11 @@ if (new URLSearchParams(window.location.search).has('sw_reset')) {
   // =============================================================================
   // Normal SW registration + update listener
   // =============================================================================
-  navigator.serviceWorker.register('/sw.js', { scope: '/' }).then((reg) => {
+  const urlBase = getUrlBase();
+  const swUrl = urlBase ? `${urlBase}/sw.js` : '/sw.js';
+  const swScope = urlBase ? `${urlBase}/` : '/';
+  
+  navigator.serviceWorker.register(swUrl, { scope: swScope }).then((reg) => {
     // Force check for update on every page load
     reg.update().catch(() => {});
 
@@ -159,3 +172,8 @@ function showUpdateToast(waitingSW: ServiceWorker) {
     }
   }, 10_000);
 }
+
+// iOS PWA: nudge layout after returning from background so fixed layers re-measure.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) requestAnimationFrame(() => window.scrollTo(window.scrollX, window.scrollY));
+});

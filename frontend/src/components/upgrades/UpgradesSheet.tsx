@@ -4,6 +4,8 @@ import { useModalHost, type ModalSource } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
 import { cn } from '@/utils/cn';
+import { apiFetch } from '../../apiClient';
+import { assetUrl, apiUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -112,7 +114,7 @@ function sortUpgrades(items: UpgradeCandidate[], sort: SortMode, qualityFilter: 
 
 function getPosterUrl(item: UpgradeCandidate): string | null {
   if (item.tmdb_poster) return item.tmdb_poster;
-  if (item.poster_path) return `/api/img/plex?url=${encodeURIComponent(item.poster_path)}&width=300`;
+  if (item.poster_path) return apiUrl(`/api/img/plex?url=${encodeURIComponent(item.poster_path)}&width=300`);
   return null;
 }
 
@@ -277,8 +279,8 @@ function UpgradeRow({
               <span className="inline-flex items-center gap-0.5">
                 <img
                   src={item.rt_critic != null && item.rt_critic > 0
-                    ? (item.rt_critic >= 60 ? '/static/images/rotten-tomatoes-logo.png' : '/static/images/rotten-tomatoes-splat.png')
-                    : '/static/images/rotten-tomatoes-logo.png'}
+                    ? (item.rt_critic >= 60 ? assetUrl('/static/images/rotten-tomatoes-logo.png') : assetUrl('/static/images/rotten-tomatoes-splat.png'))
+                    : assetUrl('/static/images/rotten-tomatoes-logo.png')}
                   alt="" width="16" height="16" className="shrink-0"
                   style={!(item.rt_critic != null && item.rt_critic > 0) ? { opacity: 0.4 } : undefined}
                 />
@@ -289,8 +291,8 @@ function UpgradeRow({
               <span className="inline-flex items-center gap-0.5">
                 <img
                   src={item.rt_audience != null && item.rt_audience > 0
-                    ? (item.rt_audience >= 60 ? '/static/images/rotten-tomatoes-popcorn-good.png' : '/static/images/rotten-tomatoes-popcorn-bad.png')
-                    : '/static/images/rotten-tomatoes-popcorn-good.png'}
+                    ? (item.rt_audience >= 60 ? assetUrl('/static/images/rotten-tomatoes-popcorn-good.png') : assetUrl('/static/images/rotten-tomatoes-popcorn-bad.png'))
+                    : assetUrl('/static/images/rotten-tomatoes-popcorn-good.png')}
                   alt="" width="16" height="16" className="shrink-0"
                   style={!(item.rt_audience != null && item.rt_audience > 0) ? { opacity: 0.4 } : undefined}
                 />
@@ -445,7 +447,7 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
 
   const fetchAllUpgrades = useCallback(() => {
     setAllLoading(true);
-    fetch('/api/upgrades/list?sort=title&limit=500')
+    apiFetch('/api/upgrades/list?sort=title&limit=500')
       .then(r => r.json())
       .then(data => {
         setAllUpgrades(data.upgrades || []);
@@ -457,7 +459,7 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
 
   const fetchNewUpgrades = useCallback(() => {
     setNewLoading(true);
-    fetch('/api/upgrades/new/list?limit=100')
+    apiFetch('/api/upgrades/new/list?limit=100')
       .then(r => r.json())
       .then(data => { setNewUpgrades(data.upgrades || []); setNewLoading(false); })
       .catch(() => setNewLoading(false));
@@ -466,7 +468,7 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
   // Check scan status on open — restores scanning state if backend is still running
   useEffect(() => {
     if (!open) return;
-    fetch('/api/upgrades/progress')
+    apiFetch('/api/upgrades/progress')
       .then(r => r.json())
       .then(data => { if (data.is_running) setScanning(true); })
       .catch(() => {});
@@ -476,7 +478,7 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
   useEffect(() => {
     if (!open) return;
     if (!stats) {
-      fetch('/api/upgrades/list?sort=title&limit=1')
+      apiFetch('/api/upgrades/list?sort=title&limit=1')
         .then(r => r.json())
         .then(data => { if (data.stats) setStats(data.stats); })
         .catch(() => {});
@@ -493,7 +495,7 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
   useEffect(() => {
     if (!scanning) return;
     pollRef.current = setInterval(() => {
-      fetch('/api/upgrades/progress').then(r => r.json()).then(data => {
+      apiFetch('/api/upgrades/progress').then(r => r.json()).then(data => {
         if (data.total_upgrades != null) {
           setStats(prev => prev ? { ...prev, total_upgrades: data.total_upgrades, total_searched: data.total_searched, total_in_library: data.total_in_library } : { total_upgrades: data.total_upgrades, total_grabbed: 0, total_in_library: data.total_in_library, total_searched: data.total_searched });
         }
@@ -504,12 +506,12 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
         } else {
           // Progressively load results while scan is running
           if (tab === 'all') {
-            fetch('/api/upgrades/list?sort=title&limit=500')
+            apiFetch('/api/upgrades/list?sort=title&limit=500')
               .then(r => r.json())
               .then(d => { if (d.upgrades?.length) setAllUpgrades(d.upgrades); })
               .catch(() => {});
           } else {
-            fetch('/api/upgrades/new/list?limit=100')
+            apiFetch('/api/upgrades/new/list?limit=100')
               .then(r => r.json())
               .then(d => { if (d.upgrades?.length) setNewUpgrades(d.upgrades); })
               .catch(() => {});
@@ -527,11 +529,11 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
     const opts: RequestInit = tab === 'all'
       ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
       : { method: 'POST' };
-    fetch(endpoint, opts)
+    apiFetch(endpoint, opts)
       .then(() => {
         // Poll quickly until scan finishes (handles both fast and slow scans)
         const quickPoll = setInterval(() => {
-          fetch('/api/upgrades/progress').then(r => r.json()).then(data => {
+          apiFetch('/api/upgrades/progress').then(r => r.json()).then(data => {
             if (!data.is_running) {
               clearInterval(quickPoll);
               setScanning(false);
@@ -552,7 +554,7 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
     const profile = item.best_quality.includes('2160p') ? '2160p Remux' : '1080p Remux';
     setUpgradingIds(prev => new Set(prev).add(tmdbId));
     try {
-      const resp = await fetch('/api/watchlist', {
+      const resp = await apiFetch('/api/watchlist', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tmdb_id: parseInt(tmdbId), title: item.title, year: parseInt(item.year) || undefined, quality_profile: profile }),
       });
@@ -560,7 +562,7 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
         setUpgradedIds(prev => new Set(prev).add(tmdbId));
         setToast(`${item.title} added to Watchlist`);
         setTimeout(() => setToast(null), 2500);
-        fetch('/api/upgrades/mark-grabbed', {
+        apiFetch('/api/upgrades/mark-grabbed', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tmdb_id: tmdbId }),
         }).catch(() => {});
@@ -574,7 +576,7 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
     const tmdbId = item.tmdb_id;
     if (!tmdbId) return;
     setUpgradedIds(prev => new Set(prev).add(tmdbId));
-    fetch('/api/upgrades/dismiss', {
+    apiFetch('/api/upgrades/dismiss', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tmdb_id: tmdbId }),
     }).catch(() => {});

@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # Entrypoint script for Luma
-# Connects to configured ADB devices from settings, then starts Flask.
+# Connects to configured ADB devices from settings, then starts gunicorn.
 
 echo "================================================"
-echo "Media Search App - Starting"
+echo "Luma - Starting"
 echo "================================================"
 
 # Set HOME for ADB
@@ -15,7 +15,7 @@ mkdir -p $HOME/.android
 if [ "${LUMA_DISABLE_ADB}" = "1" ] || [ "${LUMA_DISABLE_ADB}" = "true" ]; then
     echo "LUMA_DISABLE_ADB is set: skipping ADB server and device connections."
     echo "================================================"
-    exec python -m app.main
+    exec gunicorn -c gunicorn.conf.py app.main:app
 fi
 
 # Kill any stale ADB server from a previous run, then start fresh.
@@ -67,8 +67,8 @@ else
 fi
 
 echo "================================================"
-echo "Starting Flask application..."
+echo "Starting Luma application..."
 echo "================================================"
 
-# Start the Flask application
-exec python -m app.main
+# Start the application with gunicorn (see gunicorn.conf.py)
+exec gunicorn -c gunicorn.conf.py app.main:app

@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { apiFetch } from '../../apiClient';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -186,7 +187,7 @@ export function UsersStatusCard() {
   useEffect(() => {
     let cancelled = false;
 
-    fetch('/api/admin/users/status')
+    apiFetch('/api/admin/users/status')
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();

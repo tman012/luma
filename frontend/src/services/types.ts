@@ -129,4 +129,8 @@ export interface KioskSettings {
   vibe_tonight_max_runtime: number;
   vibe_premium_rating_threshold: number;
   vibe_unwatched_boost_weight: number;
+  /** Describe It needs OpenAI; false when no key is configured. */
+  ai_search_available?: boolean;
+  voice_enabled?: boolean;
+  wake_word?: string;
 }

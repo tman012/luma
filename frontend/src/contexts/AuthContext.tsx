@@ -12,6 +12,7 @@ import {
   useCallback,
   ReactNode,
 } from 'react';
+import { apiFetch } from '../apiClient';
 
 export interface UserInfo {
   id: number;
@@ -45,6 +46,17 @@ interface AuthState {
   authenticated: boolean;
   needsSetup: boolean;
   plexAccessStatus: string | null; // 'pending' | 'approved' | 'denied' | null
+  /** Fresh install with no accounts: only the Start flow is available. */
+  needsStart: boolean;
+  /** Owner was just created by the Start flow and hasn't tapped Done yet. */
+  startInProgress: boolean;
+  /** Single-account install: sign in with the PIN keypad instead of the login form. */
+  pinUnlock: boolean;
+  /** Signed in implicitly because access is open (no sign-in needed). */
+  implicit: boolean;
+  authRequired: 'disabled_local' | 'enabled' | null;
+  /** Account requests are accepted from this device. */
+  signupOpen: boolean;
 }
 
 interface AuthContextValue extends AuthState {
@@ -56,6 +68,8 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+const NO_START = { needsStart: false, startInProgress: false, pinUnlock: false, implicit: false, authRequired: null, signupOpen: false } as const;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
     user: null,
@@ -64,29 +78,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     authenticated: false,
     needsSetup: false,
     plexAccessStatus: null,
+    ...NO_START,
   });
 
   const refreshUser = useCallback(async () => {
     try {
-      const res = await fetch('/api/auth/me');
-      if (res.ok) {
-        const data = await res.json();
-        if (data.authenticated) {
-          setState({
-            user: data.user,
-            userSettings: data.user_settings || {},
-            loading: false,
-            authenticated: true,
-            needsSetup: !!data.needs_setup,
-            plexAccessStatus: data.plex_access_status || null,
-          });
-          return;
-        }
+      const res = await apiFetch('/api/auth/me');
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.authenticated) {
+        setState({
+          user: data.user,
+          userSettings: data.user_settings || {},
+          loading: false,
+          authenticated: true,
+          needsSetup: !!data.needs_setup,
+          plexAccessStatus: data.plex_access_status || null,
+          needsStart: false,
+          startInProgress: !!data.start_in_progress,
+          pinUnlock: false,
+          implicit: !!data.implicit,
+          authRequired: data.auth_required || null,
+          signupOpen: false,
+        });
+        return;
       }
+      setState({
+        user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null,
+        ...NO_START, needsStart: !!data.needs_start, pinUnlock: !!data.pin_unlock, signupOpen: !!data.signup,
+      });
+      return;
     } catch {
       // network error — stay unauthenticated
     }
-    setState({ user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null });
+    setState({ user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null, ...NO_START });
   }, []);
 
   // Restore session on mount
@@ -96,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (identifier: string, pin: string) => {
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: identifier, name: identifier, pin }),
@@ -111,6 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           authenticated: true,
           needsSetup: false,
           plexAccessStatus: null,
+          ...NO_START,
         });
         await refreshUser();
         return { success: true };
@@ -123,14 +148,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch {}
-    setState({ user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null });
+    setState({ user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null, ...NO_START });
   }, []);
 
   const saveUserSettings = useCallback(async (updates: Partial<UserSettings>) => {
     try {
-      const res = await fetch('/api/user/settings', {
+      const res = await apiFetch('/api/user/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),

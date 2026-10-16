@@ -31,41 +31,305 @@ MOVIE_CATEGORIES_EXPANDED = [
 TV_SPORTS_CATEGORIES = [5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060, 5070, 5080]
 
 
-# AvistaZ-network trackers (PrivateHD, AvistaZ, CinemaZ, ExoticaZ) rate-limit
-# their API hard. Besides a short burst limit (Prowlarr: "Request Limit reached
-# ... Disabled for 00:00:01") they enforce a per-account rolling request cap:
-# once Luma's background sweeps (Explore 21 queries + Latest/4K REMUX sweeps +
-# browse, every ~15 min, ~90-100 PrivateHD requests/hour) pass roughly 45-60
-# requests the tracker answers 429 and Prowlarr parks the indexer for an hour.
-# Every search Luma sent during that hour came back 400 from Prowlarr.
+# Tracker guard. Private trackers (the AvistaZ network first among them)
+# enforce short burst limits and rolling per-account request caps; past them
+# the tracker answers 429 and Prowlarr parks the indexer for an hour, so every
+# later search comes back 400. Luma's background sweeps (Explore, Latest,
+# REMUX sweeps, browse) easily exceed those caps if left unmetered.
 #
-# So for these indexers we:
-#   * serialise and space requests (burst limit),
-#   * meter background traffic through a token bucket (<=20/hour, 5 burst),
-#   * cache identical queries so repeat sweeps don't re-hit the tracker,
-#   * and, for EVERY indexer, honour Prowlarr's own backoff
-#     (/api/v1/indexerstatus disabledTill) instead of sending doomed searches.
-_RATE_LIMITED_INDEXER_NAMES = ('privatehd', 'avistaz', 'cinemaz', 'exoticaz')
-_RATE_LIMITED_MIN_INTERVAL = 2.0     # seconds between requests to one such indexer
-# Background traffic goes through a token bucket so it is spread out: the
-# tracker 429'd after 27 requests in ~7 min even though that was well under
-# any plausible hourly figure. 5-request burst, one token every 3 min
-# (= 20/hour max, never more than 5 back to back).
-_RATE_LIMITED_BUCKET_CAPACITY = 5
-_RATE_LIMITED_BUCKET_REFILL = 180.0  # seconds per token
-_RATE_LIMITED_INTERACTIVE_CAP = 40   # hard ceiling incl. user-initiated searches
-_RATE_LIMITED_QUERY_TTL = 3600       # seconds an identical query is served from cache
-_INTERACTIVE_QUERY_TTL = 600        # user searches: fresher cache
+# So, for EVERY indexer:
+#   * identical queries are served from cache,
+#   * user (interactive) searches are capped per hour,
+#   * background searches go through a token bucket (spread out, small burst),
+#   * all searches are capped per rolling 24 h and across all indexers per hour,
+#   * requests to one indexer are serialised and spaced,
+#   * Prowlarr's own backoff (/api/v1/indexerstatus disabledTill) is honored,
+# and the counters persist in the data directory, so a restart can't reset them.
+#
+# All limits live in this one table.
+GUARD_LIMITS = {
+    'interactive_per_hour': 40,     # user searches per indexer per hour (no bucket)
+    'background_burst': 5,          # background token bucket size per indexer
+    'background_refill_s': 180.0,   # one background token per 180 s = 20/h
+    'per_day': 300,                 # all searches per indexer per rolling 24 h
+    'global_per_hour': 120,         # all searches, all indexers, per hour
+    'query_ttl_background': 3 * 3600,   # identical background query cached 3 h
+    'query_ttl_interactive': 900,       # identical user query cached 15 min
+    'min_interval_s': 2.0,          # spacing between requests to one indexer
+    # Pause after a 400/429 when the answer has no Retry-After and Prowlarr
+    # set no disabledTill. Each consecutive 400/429 from the same indexer
+    # doubles it, up to cooldown_max_s; a successful search resets the streak.
+    'cooldown_429_s': 3600,         # 429, any indexer
+    'cooldown_400_s': 900,          # 400, most indexers
+    'cooldown_400_strict_s': 3600,  # 400 from a strict tracker (below) or an unscoped search
+    'cooldown_max_s': 6 * 3600,
+    # Strict trackers, matched on Prowlarr's definitionName / implementation
+    # (case-insensitive) or the host of the indexer's site URL, never on the
+    # display name alone. AvistaZ family (AvistaZ, PrivateHD, PixelHD, CinemaZ,
+    # ExoticaZ) and IPTorrents.
+    'strict_400_definitions': ('avistaz', 'privatehd', 'pixelhd', 'cinemaz', 'exoticaz', 'iptorrents'),
+    'strict_400_hosts': ('avistaz.to', 'privatehd.to', 'pixelhd.me', 'cinemaz.to', 'exoticaz.to',
+                         'iptorrents.com', 'iptorrents.me'),
+}
+LOADED_COOLDOWN_MAX_S = 24 * 3600    # a saved cooldown never reaches further than this
+LOG_BODY_MAX = 300                   # characters of a 400 body written to the log
 _INDEXER_STATUS_TTL = 60             # seconds to cache /api/v1/indexerstatus
+UNSCOPED = -1                        # pseudo-indexer for a search across all indexers
+
+# Persisted state (see _guard_save): send log per indexer as [ts, kind]
+# (kind 'i' interactive, 'b' background), background buckets, unscoped cooldown.
+_guard_log: Dict[int, List[list]] = {}
+_guard_buckets: Dict[int, List[float]] = {}
+_guard_cooldown: Dict[int, float] = {}
+_guard_streak: Dict[int, int] = {}   # consecutive 400/429 answers per indexer
+_guard_loaded = [False]
+
+GUARD_FILENAME = 'indexer_guard.json'
+
+
+def _guard_path() -> str:
+    from app.first_run import data_dir
+    return str(data_dir() / GUARD_FILENAME)
+
+
+def _guard_reset_memory() -> None:
+    _guard_log.clear()
+    _guard_buckets.clear()
+    _guard_cooldown.clear()
+    _guard_streak.clear()
+    _guard_loaded[0] = False
+
+
+FAIL_CLOSED = -2                     # pseudo-indexer: guard state lost, refuse searches until then
+FAIL_CLOSED_S = 3600
+
+
+def _valid_ts(v) -> Optional[float]:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    v = float(v)
+    return v if v == v and 0 < v < 1e11 else None   # not NaN, plausible epoch
+
+
+def _guard_fail_closed(reason: str) -> None:
+    """The saved counters are lost: refuse searches for FAIL_CLOSED_S instead
+    of starting over with empty counters (that could blow through the tracker
+    caps). Recorded in the new state file, so a restart keeps it."""
+    until = time.time() + FAIL_CLOSED_S
+    _guard_cooldown[FAIL_CLOSED] = max(until, _guard_cooldown.get(FAIL_CLOSED, 0.0))
+    logger.error('Tracker guard state lost (%s): no indexer searches until %s',
+                 reason, datetime.fromtimestamp(until).strftime('%H:%M:%S'))
+    try:
+        _guard_save()
+    except Exception:  # never let a save problem escape the load path
+        pass
+
+
+def _guard_load() -> None:
+    """Load persisted guard state once per process (call under _budget_state_guard).
+
+    Bad entries are dropped one by one. An unreadable or wrongly shaped file
+    is moved aside (<name>.bad-<ts>) and searches are refused for an hour
+    (fail closed). Never raises."""
+    if _guard_loaded[0]:
+        return
+    _guard_loaded[0] = True
+    import json
+    from app.paths import quarantine
+    path = _guard_path()
+    try:
+        with open(path) as fh:
+            raw = json.load(fh)
+    except FileNotFoundError:
+        return
+    except (OSError, ValueError, UnicodeDecodeError) as e:
+        quarantine(path, f'unreadable: {e}', logger)
+        _guard_fail_closed('state file unreadable')
+        return
+    sections = ('log', 'buckets', 'cooldown', 'streak')
+    if not isinstance(raw, dict) or any(not isinstance(raw.get(k, {}), dict) for k in sections):
+        quarantine(path, 'wrong shape', logger)
+        _guard_fail_closed('state file has the wrong shape')
+        return
+    cutoff, dropped = time.time() - 86400, 0
+    burst = float(GUARD_LIMITS['background_burst'])
+
+    def _key(k):
+        try:
+            return int(k)
+        except (TypeError, ValueError):
+            return None
+
+    for k, entries in raw.get('log', {}).items():
+        ix = _key(k)
+        if ix is None or not isinstance(entries, list):
+            dropped += 1
+            continue
+        kept = []
+        for e in entries:
+            if isinstance(e, list) and len(e) == 2 and e[1] in ('i', 'b'):
+                ts, kind = _valid_ts(e[0]), e[1]
+            else:
+                ts, kind = _valid_ts(e), 'b'      # older format: bare timestamps
+            if ts is None:
+                dropped += 1
+            elif ts > cutoff:
+                kept.append([ts, kind])
+        _guard_log[ix] = kept
+    for k, v in raw.get('buckets', {}).items():
+        ix = _key(k)
+        ok = ix is not None and isinstance(v, list) and len(v) == 2
+        tokens = v[0] if ok else None
+        ts = _valid_ts(v[1]) if ok else None
+        if not ok or isinstance(tokens, bool) or not isinstance(tokens, (int, float)) \
+                or not 0 <= tokens <= burst or ts is None:
+            dropped += 1
+            if ix is not None:
+                _guard_buckets[ix] = [0.0, time.time()]   # unknown: treat as empty, not full
+            continue
+        _guard_buckets[ix] = [float(tokens), ts]
+    now = time.time()
+    for k, v in raw.get('cooldown', {}).items():
+        ix, ts = _key(k), _valid_ts(v)
+        if ix is None or ts is None:
+            dropped += 1
+            continue
+        # A clock jump or a bad write must not park an indexer for years.
+        _guard_cooldown[ix] = min(ts, now + (FAIL_CLOSED_S if ix == FAIL_CLOSED else LOADED_COOLDOWN_MAX_S))
+    for k, v in raw.get('streak', {}).items():
+        ix = _key(k)
+        if ix is None or isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 64:
+            dropped += 1
+            continue
+        _guard_streak[ix] = v
+    if dropped:
+        logger.warning('Tracker guard state: dropped %d invalid entr%s', dropped, 'y' if dropped == 1 else 'ies')
+
+
+def _guard_save() -> None:
+    """Write all guard state atomically (app.paths.atomic_write_json)."""
+    from app.paths import atomic_write_json
+    state = {
+        'log': {str(k): v for k, v in _guard_log.items()},
+        'buckets': {str(k): v for k, v in _guard_buckets.items()},
+        'cooldown': {str(k): v for k, v in _guard_cooldown.items()},
+        'streak': {str(k): v for k, v in _guard_streak.items() if v},
+    }
+    try:
+        atomic_write_json(_guard_path(), state)
+    except OSError as e:
+        logger.warning('Tracker guard state not saved: %s', e)
+
+
+_SECRET_PATTERNS = [
+    re.compile(r'(?i)((?:api[_-]?key|apikey|passkey|token|secret|password|auth|cookie|sid|uid|pid)'
+               r'["\']?\s*[=:]\s*["\']?)[^\s&"\'<>,;]+'),
+    re.compile(r'(?i)(bearer\s+)[^\s"\'<>,;]+'),
+    re.compile(r'()\b[A-Za-z0-9]{24,}\b'),          # long keys and hashes
+]
+
+
+def _redacted_snippet(text: str, limit: int = LOG_BODY_MAX) -> str:
+    """*text* for a log line: secrets and keys replaced, one line, truncated."""
+    out = ' '.join((text or '').split())
+    for pat in _SECRET_PATTERNS:
+        out = pat.sub(lambda m: m.group(1) + '[redacted]', out)
+    return out if len(out) <= limit else out[:limit] + '...'
+
+
+def _indexer_identity(ix: dict) -> tuple:
+    """(definition/implementation names, site hosts) of a Prowlarr indexer."""
+    from urllib.parse import urlsplit
+    names = {str(ix.get(k) or '').strip().lower() for k in ('definitionName', 'implementation')} - {''}
+    urls = list(ix.get('indexerUrls') or [])
+    for f in ix.get('fields') or []:
+        if isinstance(f, dict) and f.get('name') in ('baseUrl', 'definitionFile'):
+            if f.get('name') == 'definitionFile' and f.get('value'):
+                names.add(str(f['value']).strip().lower())
+            elif f.get('value'):
+                urls.append(f['value'])
+    hosts = set()
+    for u in urls:
+        try:
+            h = (urlsplit(str(u)).hostname or '').lower().rstrip('.')
+        except ValueError:
+            h = ''
+        if h:
+            hosts.add(h[4:] if h.startswith('www.') else h)
+    return names, hosts
+
+
+def _retry_after_seconds(value: Optional[str], now: float) -> Optional[float]:
+    """Seconds to wait from a Retry-After header (delta-seconds or HTTP-date),
+    capped at 24 h; None when absent or unparsable."""
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        secs = float(value)
+    else:
+        from email.utils import parsedate_to_datetime
+        try:
+            secs = parsedate_to_datetime(value).timestamp() - now
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
+    return min(max(secs, 1.0), 86400.0)
+
+
+def _guard_counts(ix: int, now: float) -> tuple:
+    """(interactive this indexer last hour, this indexer last 24 h, all indexers
+    last hour). Call under _budget_state_guard."""
+    cutoff_day, cutoff_hr = now - 86400, now - 3600
+    for k in list(_guard_log):
+        _guard_log[k] = [e for e in _guard_log[k] if e[0] > cutoff_day]
+    mine = _guard_log.get(ix, [])
+    return (sum(1 for t, kind in mine if t > cutoff_hr and kind == 'i'), len(mine),
+            sum(1 for v in _guard_log.values() for t, _ in v if t > cutoff_hr))
+
+
+def _guard_tokens(ix: int, now: float) -> List[float]:
+    burst = float(GUARD_LIMITS['background_burst'])
+    b = _guard_buckets.get(ix)
+    if b is None:
+        b = _guard_buckets[ix] = [burst, now]
+    b[0] = min(burst, b[0] + max(0.0, now - b[1]) / GUARD_LIMITS['background_refill_s'])
+    b[1] = now
+    return b
+
+
+def _guard_decide(ix: int, interactive: bool, now: float) -> Optional[str]:
+    """None when a search to *ix* may be sent now (and records it), else the
+    reason it may not. Call under _budget_state_guard."""
+    _guard_load()
+    if _guard_cooldown.get(FAIL_CLOSED, 0.0) > now:
+        return 'guard state lost: searches paused'
+    hr, day, glob = _guard_counts(ix, now)
+    if day >= GUARD_LIMITS['per_day']:
+        return f"daily cap {GUARD_LIMITS['per_day']}"
+    if glob >= GUARD_LIMITS['global_per_hour']:
+        return f"global hourly cap {GUARD_LIMITS['global_per_hour']}"
+    if interactive:
+        if hr >= GUARD_LIMITS['interactive_per_hour']:
+            return f"interactive hourly cap {GUARD_LIMITS['interactive_per_hour']}"
+    else:
+        b = _guard_tokens(ix, now)
+        if b[0] < 1.0:
+            return 'background rate (token bucket empty)'
+        b[0] -= 1.0
+    _guard_log.setdefault(ix, []).append([now, 'i' if interactive else 'b'])
+    _guard_save()
+    return None
+
+
+def _cache_ttl(interactive: bool) -> float:
+    return GUARD_LIMITS['query_ttl_interactive' if interactive else 'query_ttl_background']
+
 
 _indexer_locks: Dict[int, threading.Lock] = {}
 _indexer_last_ts: Dict[int, float] = {}
 _indexer_locks_guard = threading.Lock()
 
-# Rolling request timestamps + query cache for rate-limited indexers.
-_indexer_req_log: Dict[int, List[float]] = {}
-_query_cache: Dict[tuple, tuple] = {}          # key -> (ts, items)
-_buckets: Dict[int, List[float]] = {}          # ix -> [tokens, last_refill_ts]
+_query_cache: Dict[tuple, tuple] = {}          # (ix, params) -> (ts, items)
 _budget_state_guard = threading.Lock()
 
 # Prowlarr base_url -> (fetched_at, {indexerId: disabledTill epoch})
@@ -98,28 +362,6 @@ def _parse_iso(ts: Optional[str]) -> Optional[float]:
         return dt.timestamp()
     except Exception:
         return None
-
-
-def _take_token(ix: int, now: float) -> bool:
-    """Token-bucket gate for background requests (call under _budget_state_guard)."""
-    b = _buckets.get(ix)
-    if b is None:
-        b = _buckets[ix] = [float(_RATE_LIMITED_BUCKET_CAPACITY), now]
-    b[0] = min(float(_RATE_LIMITED_BUCKET_CAPACITY),
-               b[0] + (now - b[1]) / _RATE_LIMITED_BUCKET_REFILL)
-    b[1] = now
-    if b[0] >= 1.0:
-        b[0] -= 1.0
-        return True
-    return False
-
-
-def _requests_last_hour(ix: int, now: float) -> int:
-    log = _indexer_req_log.setdefault(ix, [])
-    cutoff = now - 3600
-    while log and log[0] < cutoff:
-        log.pop(0)
-    return len(log)
 
 
 def _build_search_query(query: str, year: Optional[int] = None) -> str:
@@ -280,6 +522,8 @@ class ProwlarrClient:
                     'name': ix.get('name') or f"Indexer {ix['id']}",
                     'enabled': bool(ix.get('enable', True)),
                 })
+                self._ix_meta = getattr(self, '_ix_meta', None) or {}
+                self._ix_meta[int(ix['id'])] = _indexer_identity(ix)
             return sorted(out, key=lambda i: i['name'].lower())
         except Exception as e:
             logger.error(f'Prowlarr get_indexers failed: {e}')
@@ -299,19 +543,7 @@ class ProwlarrClient:
             self._ix_ids_cache = ids
             self._ix_ids_ts = now
             self._ix_names = {ix['id']: ix['name'] for ix in indexers}
-            self._ix_rate_limited = {
-                ix['id'] for ix in indexers
-                if any(n in (ix.get('name') or '').lower()
-                       for n in _RATE_LIMITED_INDEXER_NAMES)
-            }
         return ids
-
-    def _is_rate_limited(self, ix: int) -> bool:
-        limited = getattr(self, '_ix_rate_limited', None)
-        if limited is None:
-            self._enabled_indexer_ids()
-            limited = getattr(self, '_ix_rate_limited', None) or set()
-        return ix in limited
 
     # -- Prowlarr backoff awareness ----------------------------------------
 
@@ -348,10 +580,28 @@ class ProwlarrClient:
             _status_cache[self.base_url] = (0.0, ent[1])
 
     def _backed_off_until(self, ix: int) -> Optional[float]:
-        till = self._indexer_backoffs().get(int(ix))
-        if till and till > time.time():
-            return till
-        return None
+        """Until when *ix* must not be searched: Prowlarr's backoff, Luma's
+        own cooldown after a 400/429, or the fail-closed window."""
+        now = time.time()
+        with _budget_state_guard:
+            _guard_load()
+            own = max(_guard_cooldown.get(int(ix), 0.0), _guard_cooldown.get(FAIL_CLOSED, 0.0))
+        till = max(self._indexer_backoffs().get(int(ix)) or 0.0, own)
+        return till if till > now else None
+
+    def _is_strict_tracker(self, ix: int) -> bool:
+        """Whether *ix* is in GUARD_LIMITS' strict-tracker list (by Prowlarr
+        definition, implementation or site host)."""
+        if ix < 0:
+            return False
+        meta = getattr(self, '_ix_meta', None) or {}
+        if int(ix) not in meta:
+            self.get_indexers()      # Prowlarr's own config; never reaches a tracker
+            meta = getattr(self, '_ix_meta', None) or {}
+        names, hosts = meta.get(int(ix), (set(), set()))
+        if names & set(GUARD_LIMITS['strict_400_definitions']):
+            return True
+        return any(h == s or h.endswith('.' + s) for h in hosts for s in GUARD_LIMITS['strict_400_hosts'])
 
     def _indexer_name(self, ix: int) -> str:
         names = getattr(self, '_ix_names', None) or {}
@@ -370,98 +620,131 @@ class ProwlarrClient:
                     interactive: bool = False) -> List[dict]:
         """GET /api/v1/search for ONE indexer (or an unscoped request).
 
-        * Indexers Prowlarr has in backoff (indexerstatus.disabledTill in the
-          future) are skipped — no request is sent.
-        * AvistaZ-family indexers are serialised/spaced, served from a query
-          cache when the same search ran within the last hour, and background
-          searches are metered by a token bucket (user searches bypass it but
-          share a hard 40/hour ceiling). Over budget, a stale cached answer is
-          returned if any.
-        * No blind retry: a 400/429 means Prowlarr just parked the indexer,
-          so the status cache is refreshed and later calls skip it.
+        The tracker guard (GUARD_LIMITS) applies to every indexer, and to an
+        unscoped search under pseudo-indexer UNSCOPED:
+        * identical queries are served from cache (3 h background, 15 min user);
+        * an indexer Prowlarr has in backoff (indexerstatus.disabledTill) is
+          skipped; an unscoped search is skipped while any indexer is in
+          backoff, or during its own cooldown after a 400/429;
+        * past the caps (40 user searches per indexer per hour, background
+          bucket of 5 refilling one per 180 s, 300 per indexer per day, 120 per
+          hour across all indexers) nothing is sent: a stale cached answer is
+          returned if there is one, else IndexerSkipped;
+        * requests to one indexer are serialised and spaced;
+        * no blind retry: a 400/429 means Prowlarr just parked the indexer, so
+          the status cache is refreshed and later calls skip it.
         """
         single = int(indexer_ids[0]) if indexer_ids and len(indexer_ids) == 1 else None
-        if single is None:
-            resp = self.session.get(f'{self.base_url}/api/v1/search', params=params, timeout=60)
-            resp.raise_for_status()
-            return resp.json()
+        ix = UNSCOPED if single is None else single
+        cache_key = (ix, tuple(params))
+        now = time.time()
+        with _budget_state_guard:
+            _guard_load()
+            hit = _query_cache.get(cache_key)
+            if hit and now - hit[0] < _cache_ttl(interactive):
+                return hit[1]
 
-        till = self._backed_off_until(single)
+        till = self._unscoped_blocked_until(now) if single is None else self._backed_off_until(single)
         if till:
+            name = 'unscoped search' if single is None else f'{self._indexer_name(single)} (id {single})'
             self._log_skip_once(
-                single, 'backoff', round(till),
-                f'Prowlarr has {self._indexer_name(single)} (id {single}) backed off until '
-                f'{datetime.fromtimestamp(till).strftime("%H:%M:%S")} — skipping its searches until then')
-            raise IndexerSkipped(f'indexer {single} backed off')
+                ix, 'backoff', round(till),
+                f'Prowlarr backoff: {name} skipped until '
+                f'{datetime.fromtimestamp(till).strftime("%H:%M:%S")}')
+            if hit:
+                return hit[1]
+            raise IndexerSkipped(f'indexer {ix} backed off')
 
-        throttle = self._is_rate_limited(single)
-        cache_key = (single, tuple(params))
-        if throttle:
-            now = time.time()
-            with _budget_state_guard:
-                hit = _query_cache.get(cache_key)
-                ttl = _INTERACTIVE_QUERY_TTL if interactive else _RATE_LIMITED_QUERY_TTL
-                if hit and now - hit[0] < ttl:
-                    return hit[1]
-                used = _requests_last_hour(single, now)
-                over = used >= _RATE_LIMITED_INTERACTIVE_CAP
-                if not over and not interactive:
-                    over = not _take_token(single, now)
-            if over:
-                self._log_skip_once(
-                    single, 'budget', int(now // 900),
-                    f'{self._indexer_name(single)} (id {single}) request budget in use '
-                    f'({used} in last hour) — serving cached/no results for background '
-                    f'searches until it refills')
+        with _indexer_lock(ix):
+            # Re-check after waiting for the lock: the request ahead of us may
+            # have just tripped the tracker limit, or answered this query.
+            if (self._unscoped_blocked_until(time.time()) if single is None
+                    else self._backed_off_until(single)):
                 if hit:
                     return hit[1]
-                raise IndexerSkipped(f'indexer {single} over request budget')
-
-        def _send():
-            return self.session.get(
-                f'{self.base_url}/api/v1/search',
-                params=params,
-                timeout=60,
-            )
-
-        if not throttle:
-            resp = _send()
-        else:
-            with _indexer_lock(single):
-                # Re-check backoff after waiting for the lock: the request
-                # ahead of us may have just tripped the tracker limit.
-                if self._backed_off_until(single):
-                    raise IndexerSkipped(f'indexer {single} backed off')
-                with _budget_state_guard:
-                    if _requests_last_hour(single, time.time()) >= _RATE_LIMITED_INTERACTIVE_CAP:
-                        hit = _query_cache.get(cache_key)
-                        if hit:
-                            return hit[1]
-                        raise IndexerSkipped(f'indexer {single} over hourly budget')
-                wait = _RATE_LIMITED_MIN_INTERVAL - (
-                    time.time() - _indexer_last_ts.get(single, 0.0))
-                if wait > 0:
-                    time.sleep(wait)
-                try:
-                    with _budget_state_guard:
-                        _indexer_req_log.setdefault(single, []).append(time.time())
-                    resp = _send()
-                finally:
-                    _indexer_last_ts[single] = time.time()
+                raise IndexerSkipped(f'indexer {ix} backed off')
+            now = time.time()
+            with _budget_state_guard:
+                fresh = _query_cache.get(cache_key)
+                if fresh and now - fresh[0] < _cache_ttl(interactive):
+                    return fresh[1]
+                reason = _guard_decide(ix, interactive, now)
+                if reason:
+                    hr, day, glob = _guard_counts(ix, now)
+            if reason:
+                self._log_skip_once(
+                    ix, 'guard', int(now // 900),
+                    f'{self._indexer_name(ix)} (id {ix}) search not sent: {reason} '
+                    f'({hr} user last hour, {day} last 24 h, {glob} all indexers last hour)')
+                if hit:
+                    return hit[1]
+                raise IndexerSkipped(f'indexer {ix} guard: {reason}')
+            wait = GUARD_LIMITS['min_interval_s'] - (time.time() - _indexer_last_ts.get(ix, 0.0))
+            if wait > 0:
+                time.sleep(wait)
+            try:
+                resp = self.session.get(f'{self.base_url}/api/v1/search', params=params, timeout=60)
+            finally:
+                _indexer_last_ts[ix] = time.time()
 
         if resp.status_code in (400, 429):
-            # Prowlarr parked the indexer (tracker 429) — pick that up now so
+            # Prowlarr parked the indexer (tracker 429): pick that up now so
             # every following call skips it instead of collecting more 400s.
             self._invalidate_backoffs()
+            self._start_cooldown(ix, resp)
         resp.raise_for_status()
         items = resp.json()
-        if throttle:
-            with _budget_state_guard:
-                _query_cache[cache_key] = (time.time(), items)
-                if len(_query_cache) > 500:
-                    for k, _ in sorted(_query_cache.items(), key=lambda kv: kv[1][0])[:100]:
-                        _query_cache.pop(k, None)
+        with _budget_state_guard:
+            if _guard_streak.pop(ix, 0):
+                _guard_save()            # a good answer ends the 400/429 streak
+            _query_cache[cache_key] = (time.time(), items)
+            if len(_query_cache) > 500:
+                for k, _ in sorted(_query_cache.items(), key=lambda kv: kv[1][0])[:100]:
+                    _query_cache.pop(k, None)
         return items
+
+    def _unscoped_blocked_until(self, now: float) -> Optional[float]:
+        """Until when an unscoped search must not be sent: its own cooldown,
+        the fail-closed window, or the latest backoff of any indexer."""
+        tills = [t for t in self._indexer_backoffs().values() if t > now]
+        till = max([self._backed_off_until(UNSCOPED) or 0.0] + tills)
+        return till if till > now else None
+
+    def _start_cooldown(self, ix: int, resp) -> None:
+        """After a 400/429: no searches to *ix* until Retry-After (seconds or
+        HTTP-date), else Prowlarr's disabledTill, else the GUARD_LIMITS
+        fallback (429: 1 h; 400: 1 h strict tracker or unscoped, 15 min
+        otherwise), doubled for each earlier consecutive 400/429 and capped at
+        cooldown_max_s. Cooldown and streak are persisted."""
+        now = time.time()
+        status = resp.status_code
+        if status == 400:
+            logger.warning('%s (id %s) answered 400: %s', self._indexer_name(ix), ix,
+                           _redacted_snippet(getattr(resp, 'text', '') or ''))
+        headers = getattr(resp, 'headers', None) or {}
+        wait = _retry_after_seconds(headers.get('Retry-After'), now)
+        tills = []
+        if wait is None:
+            backoffs = self._indexer_backoffs()
+            tills = [t for t in (backoffs.values() if ix == UNSCOPED else [backoffs.get(ix) or 0.0]) if t > now]
+        strict = status == 400 and (ix == UNSCOPED or self._is_strict_tracker(ix))
+        with _budget_state_guard:
+            _guard_load()
+            streak = _guard_streak.get(ix, 0)
+            _guard_streak[ix] = streak + 1
+            if wait is not None:
+                until = now + wait
+            elif tills:
+                until = max(tills)
+            else:
+                base = GUARD_LIMITS['cooldown_429_s' if status == 429 else
+                                    'cooldown_400_strict_s' if strict else 'cooldown_400_s']
+                until = now + min(base * 2 ** min(streak, 16), GUARD_LIMITS['cooldown_max_s'])
+            _guard_cooldown[ix] = max(until, _guard_cooldown.get(ix, 0.0))
+            _guard_save()
+        self._log_skip_once(ix, 'cooldown', round(until),
+                            f'{self._indexer_name(ix)} (id {ix}) answered {resp.status_code}: no searches until '
+                            f'{datetime.fromtimestamp(until).strftime("%H:%M:%S")}')
 
     def _search_request(self, query: str, categories: str, limit: int,
                         indexer_ids: Optional[List[int]] = None) -> List[dict]:

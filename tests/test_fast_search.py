@@ -13,6 +13,8 @@ os.environ['LUMA_CACHE_DIR'] = _test_cache_dir
 
 import time
 import unittest
+
+from tests.local_access import api_key_settings, local_client
 import pytest
 from unittest.mock import Mock, patch, MagicMock, call
 from typing import Dict, Any
@@ -1290,7 +1292,7 @@ class TestFlaskEndpoints(unittest.TestCase):
         from app import main as app_main
         self.app = app_main.app
         self.app.config['TESTING'] = True
-        self.client = self.app.test_client()
+        self.client = local_client(self.app)
     
     @patch('app.main.fast_search_index')
     def test_library_search_fast_endpoint(self, mock_index):
@@ -1323,7 +1325,7 @@ class TestFlaskEndpoints(unittest.TestCase):
     def test_tmdb_match_search_correction_triggered(self, mock_index, mock_settings):
         """Test /api/tmdb/match-search triggers correction on weak results."""
         # Mock settings
-        mock_settings.get.return_value = 'test_api_key'
+        mock_settings.get.side_effect = api_key_settings()
         
         # Mock weak direct results, then better corrected results
         mock_response_weak = Mock()
@@ -1355,7 +1357,7 @@ class TestFlaskEndpoints(unittest.TestCase):
     def test_tmdb_match_search_correction_not_triggered_good_results(self, mock_index, mock_settings):
         """Test /api/tmdb/match-search doesn't trigger correction when results are good."""
         # Mock settings
-        mock_settings.get.return_value = 'test_api_key'
+        mock_settings.get.side_effect = api_key_settings()
         
         # Mock good direct results (query 'Interstellar' matches title 'Interstellar')
         mock_response = Mock()
@@ -1382,7 +1384,7 @@ class TestFlaskEndpoints(unittest.TestCase):
     def test_tmdb_match_search_endpoint_basic(self, mock_settings):
         """Test /api/tmdb/match-search endpoint basic functionality."""
         # Mock settings
-        mock_settings.get.return_value = 'test_api_key'
+        mock_settings.get.side_effect = api_key_settings()
         
         mock_response = Mock()
         mock_response.status_code = 200
@@ -1510,7 +1512,7 @@ class TestLibraryEndpointTypoTolerance(unittest.TestCase):
         from app import main as app_main
         self.app = app_main.app
         self.app.config['TESTING'] = True
-        self.client = self.app.test_client()
+        self.client = local_client(self.app)
     
     @patch('app.main.fast_search_index')
     def test_library_search_openheimer(self, mock_index):
@@ -1902,7 +1904,7 @@ class TestHeroCacheHealing(unittest.TestCase):
     def test_endpoint_returns_build_hero_movies_with_all_fields(self):
         """/api/hero/content returns exactly what _build_hero_movies() builds."""
         self._mock_plex()
-        with self.app.test_client() as client:
+        with local_client(self.app) as client:
             resp = client.get('/api/hero/content')
         self.assertEqual(resp.status_code, 200)
         data = resp.get_json()
@@ -1922,13 +1924,13 @@ class TestHeroCacheHealing(unittest.TestCase):
     def test_hero_urls_honor_script_root(self):
         """Under a sub-path (/luma) every hero image URL carries the prefix."""
         self._mock_plex()
-        with self.app.test_client() as client:
+        with local_client(self.app) as client:
             resp = client.get('/api/hero/content', base_url='http://localhost/luma')
         movie = resp.get_json()['movies'][0]
         for key in ('poster_url', 'backdrop_url', 'clearlogo_url'):
             self.assertTrue(movie[key].startswith('/luma/api/img/plex?url='), movie[key])
         # Cached result stays request independent (no prefix leaks into the cache).
-        with self.app.test_client() as client:
+        with local_client(self.app) as client:
             movie = client.get('/api/hero/content').get_json()['movies'][0]
         self.assertTrue(movie['poster_url'].startswith('/api/img/plex?url='), movie['poster_url'])
 
@@ -2076,7 +2078,7 @@ class TestHeroCacheHealing(unittest.TestCase):
                 patch.object(self.hero_cache, 'heal_missing_images') as heal, \
                 patch.object(self.hero_cache, '_heal_missing_images_background') as heal_bg, \
                 patch.object(threading.Thread, 'start', autospec=True) as thread_start:
-            with self.app.test_client() as client:
+            with local_client(self.app) as client:
                 resp = client.get('/api/hero/content')
                 self.assertEqual(resp.status_code, 200)
         refresh.assert_not_called()
@@ -2198,10 +2200,10 @@ class TestTMDbSearchesHonorRetryAfter(unittest.TestCase):
 
     @patch('app.main.settings')
     def test_match_search_fetch_makes_no_calls(self, mock_settings):
-        mock_settings.get.return_value = 'test_api_key'
+        mock_settings.get.side_effect = api_key_settings()
         self.main._tmdb_match_cache.clear()
         with patch('app.main.requests.get') as get:
-            r = self.main.app.test_client().get('/api/tmdb/match-search?query=Retryafterprobe')
+            r = local_client(self.main.app).get('/api/tmdb/match-search?query=Retryafterprobe')
         self.assertEqual(r.status_code, 200)
         get.assert_not_called()
 

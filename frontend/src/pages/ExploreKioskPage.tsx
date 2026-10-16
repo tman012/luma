@@ -27,6 +27,8 @@ import { useTVMode } from '@/contexts/TVModeContext';
 import { useUiDensity } from '@/hooks/useUiDensity';
 import { uiDensityTokens } from '@/ui/uiDensityTokens';
 import { MobileExplorePage } from './MobileExplorePage';
+import { useRequireService } from '@/components/connect/connectService';
+import { ConnectServiceCard } from '@/components/connect/ConnectServiceCard';
 import { normalizeForTiles } from '@/utils/exploreNormalizer';
 import { useExploreRails, type ExploreRailState } from '@/features/explore/useExploreRails';
 import type { RailId } from '@/features/explore/exploreRails';
@@ -339,6 +341,16 @@ function ScrollRail({
 
 export function ExploreKioskPage() {
   const { mode } = useUiDensity();
+  // Discover is built on TMDB; without a key show the Connect TMDB state.
+  const tmdb = useRequireService('tmdb');
+  if (tmdb === null) return <div className="bg-kiosk-black" style={{ minHeight: '100dvh' }} />;
+  if (tmdb === false) {
+    return (
+      <div className="bg-kiosk-black" style={{ minHeight: '100dvh', paddingTop: 60 }}>
+        <ConnectServiceCard service="tmdb" />
+      </div>
+    );
+  }
   if (mode === 'compact') return <MobileExplorePage />;
 
   return <DesktopExplore />;

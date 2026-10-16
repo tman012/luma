@@ -6,19 +6,23 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { apiFetch } from '../apiClient';
 
 type Flow = 'signin' | 'signup';
 type SignInStep = 'email' | 'pin';
 type SignUpStep = 'email' | 'pin' | 'confirm' | 'pending';
 
 export function LoginPage() {
-  const { login, authenticated, loading } = useAuth();
+  const { login, authenticated, loading, needsStart, pinUnlock, signupOpen } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const [flow, setFlow] = useState<Flow>(
     (location.state as any)?.flow === 'signup' ? 'signup' : 'signin',
   );
+  useEffect(() => {
+    if (!loading && !signupOpen && flow === 'signup') setFlow('signin');
+  }, [loading, signupOpen, flow]);
   const [signinStep, setSigninStep] = useState<SignInStep>('email');
   const [signupStep, setSignupStep] = useState<SignUpStep>('email');
   const [name, setName] = useState('');
@@ -41,6 +45,13 @@ export function LoginPage() {
     }
   }, [authenticated, loading, navigate, location]);
 
+  // Fresh install → Start flow; single-account install → PIN keypad.
+  useEffect(() => {
+    if (loading || authenticated) return;
+    if (needsStart) navigate('/start', { replace: true });
+    else if (pinUnlock) navigate('/unlock', { replace: true });
+  }, [needsStart, pinUnlock, authenticated, loading, navigate]);
+
   useEffect(() => {
     if (flow === 'signin') {
       if (signinStep === 'email') setTimeout(() => emailRef.current?.focus(), 100);
@@ -60,22 +71,12 @@ export function LoginPage() {
     setFlow('signin'); setSigninStep('email'); setName(''); setEmail(''); setPin(''); setError(''); setBusy(false);
   }
 
-  async function handleSignInEmail(e: React.FormEvent) {
+  function handleSignInEmail(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = email.trim();
     if (!trimmed) return;
-    setBusy(true); setError('');
-    try {
-      const res = await fetch('/api/auth/check-user', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: trimmed }),
-      });
-      const data = await res.json();
-      if (!data.exists) { setError('No account found with that email.'); setBusy(false); return; }
-      setName(data.name || trimmed);
-      setPin(''); setSigninStep('pin');
-    } catch { setError('Network error. Please try again.'); }
-    finally { setBusy(false); }
+    setError(''); setName(trimmed);
+    setPin(''); setSigninStep('pin');
   }
 
   async function handlePinSubmit(e?: React.FormEvent) {
@@ -107,7 +108,7 @@ export function LoginPage() {
     if (confirmPin !== pin) { setError("Passwords don't match. Try again."); setConfirmPin(''); return; }
     setBusy(true); setError('');
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await apiFetch('/api/auth/register', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), email: email.trim(), pin }),
       });
@@ -171,15 +172,19 @@ export function LoginPage() {
                 </button>
               </form>
             )}
-            <div style={dividerStyle}>
-              <span style={dividerLineStyle} />
-              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', padding: '0 12px' }}>or</span>
-              <span style={dividerLineStyle} />
-            </div>
-            <p style={{ textAlign: 'center', fontSize: 14, color: 'rgba(255,255,255,0.4)', margin: 0 }}>
-              Need an account?{' '}
-              <button type="button" onClick={switchToSignUp} style={textLinkStyle}>Sign up</button>
-            </p>
+            {signupOpen && (
+              <>
+                <div style={dividerStyle}>
+                  <span style={dividerLineStyle} />
+                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', padding: '0 12px' }}>or</span>
+                  <span style={dividerLineStyle} />
+                </div>
+                <p style={{ textAlign: 'center', fontSize: 14, color: 'rgba(255,255,255,0.4)', margin: 0 }}>
+                  Need an account?{' '}
+                  <button type="button" onClick={switchToSignUp} style={textLinkStyle}>Sign up</button>
+                </p>
+              </>
+            )}
           </>
         )}
 

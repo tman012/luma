@@ -37,7 +37,7 @@ class ExploreCache:
             logger.error(error_msg)
             raise RuntimeError(error_msg) from e
         self.db_path = self.cache_dir / "explore_cache.db"
-        self.update_interval = 900  # 15 minutes
+        self.update_interval = 6 * 3600  # was 15 min (21-query tracker sweep ~100x/day)
         self.last_update = None
         self.updating = False
         self.lock = threading.Lock()
@@ -392,5 +392,24 @@ class ExploreCache:
             if conn:
                 conn.close()
 
-# Global instance
-explore_cache = ExploreCache()
+# Global instance (lazy initialization)
+_explore_cache_instance = None
+
+def _get_explore_cache():
+    """Get or create the global explore cache instance."""
+    global _explore_cache_instance
+    if _explore_cache_instance is None:
+        _explore_cache_instance = ExploreCache()
+    return _explore_cache_instance
+
+
+class _ExploreCacheLazy:
+    """Lazy wrapper for explore cache to defer initialization until first use."""
+    def __getattr__(self, name):
+        return getattr(_get_explore_cache(), name)
+    
+    def __call__(self, *args, **kwargs):
+        return _get_explore_cache()(*args, **kwargs)
+
+
+explore_cache = _ExploreCacheLazy()

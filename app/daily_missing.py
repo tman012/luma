@@ -486,7 +486,7 @@ def build_pool(force: bool = False) -> Dict[str, Any]:
                 if norm:
                     _merge_candidate(by_tmdb, norm, owned)
     else:
-        logger.warning('daily_missing: Trakt not configured — relying on TMDb only')
+        logger.info('daily_missing: Trakt not connected; using TMDB lists only')
 
     # TMDb deep coverage — popular / top_rated / multi-sort discover
     if tmdb_key:

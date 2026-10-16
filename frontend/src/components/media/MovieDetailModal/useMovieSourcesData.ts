@@ -1,3 +1,4 @@
+import { apiFetch } from '../../../apiClient';
 /**
  * useMovieSourcesData — the ONE implementation of "search sources for a movie".
  *
@@ -136,7 +137,7 @@ async function loadSources(
     params.set('title', title);
     if (year) params.set('year', String(year));
     try {
-      const resp = await fetch(
+      const resp = await apiFetch(
         `/api/radarr/movie/releases?${params.toString()}`,
         { signal: arrClock.signal },
       );

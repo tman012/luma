@@ -53,4 +53,5 @@ never runs against an old shared build:
     STATIC=$(mktemp -d)/static && mkdir -p $STATIC && cp -r static/. $STATIC/
     (cd frontend && npm ci && npm run build -- --outDir $STATIC/spa --emptyOutDir)
     export FLASK_STATIC_FOLDER=$STATIC
+    export LUMA_SPA_DIR=$STATIC/spa   # else an /app/spa on this machine would win
     export LUMA_DATA_DIR=$(mktemp -d) LUMA_CACHE_DIR=$(mktemp -d)   # hero images go to $LUMA_CACHE_DIR/hero

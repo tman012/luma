@@ -5,6 +5,7 @@
 // ---------------------------------------------------------------------------
 
 import { posterUrl as tmdbPoster, backdropUrl as tmdbBackdrop } from '@/utils/image';
+import { apiUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -453,13 +454,13 @@ export function parsePlexTvResponse(data: Record<string, unknown>): TvShowDetail
     contentRating: (data.content_rating as string) ?? (data.contentRating as string) ?? null,
     rating: (data.rating as number) ?? null,
     backdropUrl: (data.artPath as string)
-      ? `/api/img/plex?url=${data.artPath as string}`
+      ? apiUrl(`/api/img/plex?url=${data.artPath as string}`)
       : (data.backdrop_url as string) ?? null,
     posterUrl: (data.thumbPath as string)
-      ? `/api/img/plex?url=${data.thumbPath as string}`
+      ? apiUrl(`/api/img/plex?url=${data.thumbPath as string}`)
       : (data.poster_url as string) ?? null,
     clearLogoUrl: (data.clearLogoPath as string)
-      ? `/api/img/plex?url=${data.clearLogoPath as string}`
+      ? apiUrl(`/api/img/plex?url=${data.clearLogoPath as string}`)
       : null,
     genres,
     cast,

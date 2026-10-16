@@ -4,7 +4,7 @@
  * Desktop: Back button + fixed left sidebar (260px) with tab list + scrollable right content.
  * Mobile: MobileHeader + horizontal scrollable pill tab bar.
  *
- * Tabs: Services | Rooms | UI | Media | Network
+ * Tabs: Services | Rooms | UI | Media | Network | Security | Automation
  */
 
 import { Component, useState, useCallback, useMemo, type ReactNode } from 'react';
@@ -20,6 +20,8 @@ import { UiKioskTab } from './settings/UiKioskTab';
 import { MediaPathsTab } from './settings/MediaPathsTab';
 import { NetworkTab } from './settings/NetworkTab';
 import { AutomationTab } from './settings/AutomationTab';
+import { SecurityTab } from './settings/SecurityTab';
+import { AiTab } from './settings/AiTab';
 import { cn } from '@/utils/cn';
 
 // ── Error boundary to catch and display render crashes ──────────
@@ -59,7 +61,7 @@ class SettingsErrorBoundary extends Component<
 
 // ── Tab definitions ──────────────────────────────────────────────
 
-type TabId = 'services' | 'rooms' | 'ui' | 'media' | 'network' | 'automation';
+type TabId = 'services' | 'ai' | 'rooms' | 'ui' | 'media' | 'network' | 'security' | 'automation';
 
 interface TabDef {
   id: TabId;
@@ -78,6 +80,19 @@ const TABS: TabDef[] = [
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
         <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+      </svg>
+    ),
+  },
+  {
+    id: 'ai',
+    label: 'AI',
+    subtitle: 'OpenAI \u00b7 Content preferences',
+    section: 'Services',
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <path d="M12 2a8 8 0 0 1 8 8c0 3.4-2.1 6.3-5 7.5V20a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-2.5C6.1 16.3 4 13.4 4 10a8 8 0 0 1 8-8z" />
+        <line x1="10" y1="22" x2="14" y2="22" />
+        <line x1="9" y1="9" x2="9.01" y2="9" /><line x1="15" y1="9" x2="15.01" y2="9" />
       </svg>
     ),
   },
@@ -128,6 +143,17 @@ const TABS: TabDef[] = [
     ),
   },
   {
+    id: 'security',
+    label: 'Security',
+    subtitle: 'Require PIN \u00b7 Trusted proxies',
+    section: 'Application',
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+      </svg>
+    ),
+  },
+  {
     id: 'automation',
     label: 'Automation',
     subtitle: 'Trending watchlists \u00b7 Scheduling',
@@ -138,16 +164,19 @@ const TABS: TabDef[] = [
       </svg>
     ),
   },
+
 ];
 
 // ── Tab content map ──────────────────────────────────────────────
 
 const TAB_CONTENT: Record<TabId, React.ReactNode> = {
   services: <ServicesTab />,
+  ai: <AiTab />,
   rooms: <RoomsTab />,
   ui: <UiKioskTab />,
   media: <MediaPathsTab />,
   network: <NetworkTab />,
+  security: <SecurityTab />,
   automation: <AutomationTab />,
 };
 
@@ -159,7 +188,11 @@ function SettingsPageInner() {
   const isMobile = d.mode === 'compact';
   useBodyScroll();
 
-  const [activeTab, setActiveTab] = useState<TabId | null>(null);
+  // ?tab=<id> opens a tab directly (e.g. from a "Connect Radarr" card).
+  const [activeTab, setActiveTab] = useState<TabId | null>(() => {
+    const t = new URLSearchParams(window.location.search).get('tab');
+    return TABS.some(x => x.id === t) ? (t as TabId) : null;
+  });
   const [activeCard, setActiveCard] = useState<number | null>(null);
   const [activeCardTitle, setActiveCardTitle] = useState<string>('');
 

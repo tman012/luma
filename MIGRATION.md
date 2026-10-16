@@ -16,6 +16,7 @@ variables reach the container.
 |---|---|---|
 | `APP_URL` | The hardcoded public URL in e-mail and Telegram links | You want links to use your public URL. If it is blank, the request's own URL is used. |
 | `TELEGRAM_ADMIN_CHAT_ID` | The hardcoded admin chat id | You get Telegram admin alerts (new requests, pending users). It can also go in `data/telegram_bot.json` as `admin_chat_id`. If it is blank, alerts are skipped. |
+| `TELEGRAM_ACTION_SECRET` | Signed the Telegram approve/deny links | Removed. Links are now signed with `SECRET_KEY` (full HMAC-SHA256), expire after 24 hours, work once, and open a confirm page; nothing changes until you press its button. Links sent before the upgrade no longer work. |
 | `KODI_NAS_BASE` | The hardcoded `smb://<nas>` share root | You play through Kodi and rely on the share fallback. `settings.kodi.nas_base` still wins when it is set. |
 | `TZ` | It was set in compose | Schedules (03:00 scan, 22:50 roulette, ...) follow the container clock. **Set it**, otherwise it is UTC. |
 | `PLEX_DB`, `LUMA_PLEX_DB_DIR` | Compose `environment:` and the `/mnt/plexdb` mount | You use the read-only Plex DB. |
@@ -81,6 +82,52 @@ Activity tags did not change. `GET /api/automation/features` shows the effective
 - `rooms` defaults to empty on a new install. Existing rooms are untouched.
 - `push.vapid_email` defaults to empty and falls back to `LUMA_ADMIN_EMAIL`. Existing values are untouched.
 - The AI/voice keys (OpenAI, ElevenLabs, Anthropic) are dropped from settings by an earlier migration. Remove them from `.env` too.
+
+### Database location
+
+Luma keeps using the database file it used before. The path is chosen in this
+order:
+
+1. `DATABASE_PATH` in the environment. The shipped `docker-compose.yml` sets
+   `DATABASE_PATH=/app/data/media.db`, so a compose install keeps that exact
+   file.
+2. A saved `media.database_path` setting.
+3. `media.db` in the data folder (`LUMA_DATA_DIR`, default `/app/data`).
+   If that file does not exist yet but a database already sits at the old
+   default `/app/data/media.db`, Luma uses the existing file and logs a
+   warning that names both paths. It never creates a new, empty database next
+   to an existing one.
+
+To check, look for one `Database:` line in the container log after start:
+
+    docker compose logs luma | grep "Database:"
+
+It reads `Database: /app/data/media.db (from env)` (or `from setting` /
+`from data dir`). A `Database: using the existing ... instead of ...` warning
+means the old file was picked up; pin it so the choice is explicit.
+
+To pin the path, keep `DATABASE_PATH` in the compose environment, or save
+`media.database_path` (Settings, or `data/settings.json` under `media`) with the
+full container path of the file. Both point at the same file; the environment
+wins if both are set.
+
+### Access and host names
+
+- `security.access_mode` is deleted (an old `pin` becomes `auth_required: enabled`; `pin_remote`/`open` become
+  `disabled_local`).
+- `security.hostnames` is new and seeded **once**, only when the key doesn't exist yet: from names LAN clients
+  used in the last 30 days (`data/lan_hosts.json`, which this release starts writing, so it is empty on the first
+  upgrade); otherwise from private names in `APP_URL` plus the server's host name and its `.local` / `.lan`
+  forms. The log line `Seeded security.hostnames: ...` shows the result. Clearing the field later never re-seeds.
+- Without any setup, a LAN device can use an IP, `localhost`, the server's host name or a home-network name
+  (`docker-server`, `*.local`, `*.lan`, `*.home.arpa`, `*.internal`). Other names need **Host names**. A name never
+  skips sign-in for public, proxied-public or Cloudflare requests.
+- `security.allow_signup` is new (off): sign-up from outside the LAN is refused until it is turned on.
+- `security.trusted_proxies` starts empty, and this upgrade does not fill it in. Behind a reverse proxy, set it
+  (comma-separated) or LAN users get 401: for a proxy on the same host with host networking (for example Caddy),
+  `127.0.0.1/32, ::1/128`; otherwise the proxy's own IP. Only list addresses you control.
+- On the request-portal host name, `/` now redirects (302) to `/request` (URL base and query string kept). Every
+  other non-portal path on that host still returns 404.
 
 ## 4. Visible changes
 

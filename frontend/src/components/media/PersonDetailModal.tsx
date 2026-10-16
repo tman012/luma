@@ -13,6 +13,7 @@ import { useModalHost } from '@/contexts/ModalHostContext';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
 import { batchCheckOwnership } from '@/services/searchApi';
 import { mediaKey } from '@/services/ownership';
+import { apiFetch } from '../../apiClient';
 // PERSON_FALLBACK_SVG no longer needed — profile image removed
 
 // ---------------------------------------------------------------------------
@@ -93,7 +94,7 @@ export function PersonDetailModal({
     let cancelled = false;
     (async () => {
       try {
-        const resp = await fetch(`/api/tmdb/person_by_id/${personId}/credits`);
+        const resp = await apiFetch(`/api/tmdb/person_by_id/${personId}/credits`);
         if (!resp.ok) throw new Error('Failed to fetch');
         const data = await resp.json();
         if (cancelled) return;

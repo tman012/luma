@@ -424,18 +424,23 @@ class HeroCache:
         if not self._refresh_lock.acquire(blocking=False):
             logger.info("Hero refresh already running in this process; skipping")
             return self.load_cache()
-        lock_file = None
+        lock_fd = None
         try:
             try:
-                lock_file = open(self.cache_dir / '.refresh.lock', 'w')
-                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # O_RDWR without O_TRUNC: never truncate a file another process holds
+                lock_fd = os.open(self.cache_dir / '.refresh.lock', os.O_CREAT | os.O_RDWR, 0o644)
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 logger.info("Hero refresh already running in another process; skipping")
                 return self.load_cache()
+            except OSError as e:
+                logger.error("Hero refresh skipped: cannot lock %s: %s",
+                             self.cache_dir / '.refresh.lock', e)
+                return self.load_cache()
             return self._refresh_hero_content_unlocked()
         finally:
-            if lock_file is not None:
-                lock_file.close()  # releases the flock
+            if lock_fd is not None:
+                os.close(lock_fd)  # releases the flock
             self._refresh_lock.release()
 
     def _refresh_hero_content_unlocked(self) -> List[Dict]:
@@ -819,8 +824,8 @@ class HeroCache:
 
     def start_scheduler(self, heal_interval: float = 300) -> threading.Thread:
         """Start the background refresh/heal scheduler (idempotent)."""
-        # Started from main.py's __main__ block for now; on rebase onto PR #2
-        # the start moves to #2's START_BACKGROUND_THREADS hook (gunicorn).
+        # Started from main.start_services() (gunicorn post_worker_init and
+        # the dev server) when background threads are on.
         if self._scheduler_thread and self._scheduler_thread.is_alive():
             return self._scheduler_thread
         self._scheduler_stop.clear()
@@ -835,16 +840,3 @@ class HeroCache:
 
 # Singleton instance
 hero_cache = HeroCache()
-
-
-def refresh_hero_cache():
-    """CLI entry point for refreshing hero cache."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    hero_cache.refresh_hero_content()
-
-
-if __name__ == '__main__':
-    refresh_hero_cache()
