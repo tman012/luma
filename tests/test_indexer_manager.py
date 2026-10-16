@@ -1787,6 +1787,44 @@ def test_get_indexer_client_exists():
     assert callable(get_indexer_client)
 
 
+# ---- Item 9: Clean API Usage ----
+
+def test_no_private_manager_access_in_main():
+    """main.py must not use get_indexer_manager or private _ methods."""
+    import re
+    
+    with open('/workspace/app/main.py', 'r') as f:
+        main_content = f.read()
+    
+    # Check for get_indexer_manager usage
+    # We allow imports for compatibility but not function calls
+    manager_calls = re.findall(r'get_indexer_manager\s*\(', main_content)
+    
+    # Check for _ method calls on manager
+    private_calls = re.findall(r'manager\._\w+', main_content)
+    
+    violations = []
+    if manager_calls:
+        violations.append(f'Found {len(manager_calls)} get_indexer_manager() calls in main.py')
+    if private_calls:
+        violations.append(f'Found private manager methods in main.py: {private_calls}')
+    
+    assert not violations, f"main.py API violations: {violations}"
+
+
+def test_no_private_manager_access_in_indexer_backend():
+    """indexer_backend must not reach into manager internals."""
+    import re
+    
+    with open('/workspace/app/indexer_backend.py', 'r') as f:
+        backend_content = f.read()
+    
+    # Check for _ method calls on manager
+    private_calls = re.findall(r'manager\._\w+', backend_content)
+    
+    assert not private_calls, f"indexer_backend.py uses private manager methods: {private_calls}"
+
+
 def test_prowlarr_import_routing_by_implementation():
     """Prowlarr import routes by implementation: Torznab/Newznab direct, others proxied."""
     from app.indexer_manager import IndexerManager

@@ -16909,8 +16909,15 @@ def list_indexers():
     if err:
         return err
     try:
-        from app.indexer_manager import get_indexer_manager, sanitize_api_key
-        manager = get_indexer_manager(settings)
+        from app.indexer_manager import sanitize_api_key
+        from app.indexer_api import get_indexer_client
+        client = get_indexer_client(settings)
+        
+        # Check if we're using the Luma backend
+        if not hasattr(client, 'manager'):
+            return jsonify({'error': 'Indexer list only available with Luma backend'}), 400
+        
+        manager = client.manager
         indexers = manager.list_indexers()
         # Mask API keys
         for ix in indexers:
@@ -17115,8 +17122,15 @@ def test_single_indexer(indexer_id: str):
     if err:
         return err
     try:
-        from app.indexer_manager import get_indexer_manager, sanitize_api_key
-        manager = get_indexer_manager(settings)
+        from app.indexer_manager import sanitize_api_key
+        from app.indexer_api import get_indexer_client
+        client = get_indexer_client(settings)
+        
+        # Check if we're using the Luma backend
+        if not hasattr(client, 'manager'):
+            return jsonify({'error': 'Indexer test only available with Luma backend'}), 400
+        
+        manager = client.manager
         success, message = manager.test_indexer(indexer_id)
         # Sanitize any keys from the message
         return jsonify({'success': success, 'message': sanitize_api_key(message)})
@@ -17133,7 +17147,8 @@ def import_indexers_from_prowlarr():
     if err:
         return err
     try:
-        from app.indexer_manager import get_indexer_manager, sanitize_api_key, validate_indexer_url
+        from app.indexer_manager import sanitize_api_key, validate_indexer_url
+        from app.indexer_api import get_indexer_client
         body = request.get_json() or {}
         
         # Get Prowlarr credentials
@@ -17159,7 +17174,13 @@ def import_indexers_from_prowlarr():
         if not valid:
             return jsonify({'error': f'Prowlarr URL validation failed: {error}'}), 400
         
-        manager = get_indexer_manager(settings)
+        client = get_indexer_client(settings)
+        
+        # Check if we're using the Luma backend
+        if not hasattr(client, 'manager'):
+            return jsonify({'error': 'Prowlarr import only available with Luma backend'}), 400
+        
+        manager = client.manager
         
         imported, cardigann, errors = manager.import_from_prowlarr(prowlarr_url, prowlarr_api_key)
         
@@ -17237,9 +17258,27 @@ def download_torrent_proxy(token: str):
         if not download_url or not indexer_id:
             return jsonify({'error': 'Invalid download token'}), 400
         
-        # Get indexer config
-        manager = get_indexer_manager(settings)
-        config = manager._get_indexer_by_id(indexer_id)
+        # Get indexer config via public API
+        from app.indexer_api import get_indexer_client
+        client = get_indexer_client(settings)
+        
+        # Check if we're using the Luma backend
+        if not hasattr(client, 'manager'):
+            return jsonify({'error': 'Download proxy only available with Luma backend'}), 400
+        
+        manager = client.manager
+        indexers = manager.list_indexers()
+        config = None
+        for ix in indexers:
+            if ix.get('id') == indexer_id:
+                # Get full config with api_key
+                all_indexers = settings.get('indexer.indexers') or []
+                for full_ix in all_indexers:
+                    if full_ix.get('id') == indexer_id:
+                        config = full_ix
+                        break
+                break
+        
         if not config:
             return jsonify({'error': 'Indexer not found'}), 404
         
