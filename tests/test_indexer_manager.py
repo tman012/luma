@@ -1782,3 +1782,90 @@ def test_get_indexer_client_exists():
     """get_indexer_client() is the public API."""
     from app.indexer_manager import get_indexer_client
     assert callable(get_indexer_client)
+
+
+def test_prowlarr_import_routing_by_implementation():
+    """Prowlarr import routes by implementation: Torznab/Newznab direct, others proxied."""
+    from app.indexer_manager import IndexerManager
+    
+    settings_mock = Mock()
+    settings_mock.get.return_value = []
+    settings_mock.update.return_value = (True, [])
+    
+    # Realistic Prowlarr indexer JSON
+    prowlarr_indexers = [
+        {
+            # AvistaZ: C# native, should be proxied and rate-limited
+            'id': 123,
+            'name': 'AvistaZ',
+            'implementation': 'AvistaZ',
+            'protocol': 'torrent',
+            'enable': True,
+            'priority': 25,
+            'fields': [],
+        },
+        {
+            # 1337x: Cardigann, should be proxied
+            'id': 456,
+            'name': '1337x',
+            'implementation': 'Cardigann',
+            'protocol': 'torrent',
+            'enable': True,
+            'priority': 25,
+            'fields': [],
+        },
+        {
+            # NZBgeek: Newznab, should be direct
+            'id': 789,
+            'name': 'NZBgeek',
+            'implementation': 'Newznab',
+            'protocol': 'usenet',
+            'enable': True,
+            'priority': 25,
+            'fields': [
+                {'name': 'baseUrl', 'value': 'https://api.nzbgeek.info'},
+                {'name': 'apiKey', 'value': 'nzbgeek-key-123'},
+            ],
+        },
+    ]
+    
+    with patch('app.indexer_manager.requests.Session') as mock_session_class:
+        mock_session = Mock()
+        mock_session_class.return_value = mock_session
+        
+        mock_response = Mock()
+        mock_response.json.return_value = prowlarr_indexers
+        mock_response.raise_for_status = Mock()
+        mock_session.get.return_value = mock_response
+        
+        manager = IndexerManager(settings_mock)
+        imported, proxied, errors = manager.import_from_prowlarr('http://prowlarr:9696', 'prowlarr-key')
+        
+        assert imported == 3
+        assert proxied == 2  # AvistaZ and 1337x
+        assert len(errors) == 0
+        
+        # Check what was saved
+        saved_indexers = settings_mock.update.call_args[0][0]['indexer']['indexers']
+        
+        # Find each indexer
+        avistaz = next(ix for ix in saved_indexers if 'AvistaZ' in ix['name'])
+        cardigann = next(ix for ix in saved_indexers if '1337x' in ix['name'])
+        nzbgeek = next(ix for ix in saved_indexers if 'NZBgeek' in ix['name'])
+        
+        # AvistaZ: proxied through Prowlarr, rate-limited
+        assert avistaz['prowlarr_proxy'] is True
+        assert avistaz['prowlarr_id'] == '123'
+        assert 'http://prowlarr:9696/123/api' in avistaz['url']
+        assert avistaz['rate_limited'] is True
+        
+        # 1337x (Cardigann): proxied through Prowlarr
+        assert cardigann['prowlarr_proxy'] is True
+        assert cardigann['prowlarr_id'] == '456'
+        assert 'http://prowlarr:9696/456/api' in cardigann['url']
+        
+        # NZBgeek (Newznab): direct with own URL/key
+        assert nzbgeek.get('prowlarr_proxy', False) is False
+        # URL might or might not have /api appended depending on baseUrl
+        assert 'https://api.nzbgeek.info' in nzbgeek['url']
+        assert nzbgeek['api_key'] == 'nzbgeek-key-123'

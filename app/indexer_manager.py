@@ -886,15 +886,11 @@ class IndexerManager:
             for ix in indexers:
                 indexer_id = str(ix.get('id', ''))
                 name = ix.get('name', f'Indexer {indexer_id}')
-                protocol = ix.get('protocol', 'torznab').lower()
                 implementation = ix.get('implementation', '').lower()
                 
-                # Skip unsupported protocols
-                if protocol not in ('torznab', 'newznab', 'usenet'):
-                    continue
-
-                # Detect if this is a direct Torznab/Newznab indexer
-                # Implementation "torznab" or "newznab" means we can query it directly
+                # Route by implementation only (no protocol filter)
+                # Torznab/Newznab are queried directly with their own URL/key
+                # Everything else (Cardigann, C# native) goes through Prowlarr proxy
                 is_direct_torznab = implementation in ('torznab', 'newznab')
                 
                 # Extract Prowlarr fields
@@ -922,7 +918,7 @@ class IndexerManager:
                     imported.append({
                         'id': f'direct-{indexer_id}',
                         'name': name,
-                        'type': protocol,
+                        'type': implementation,  # torznab or newznab
                         'url': url,
                         'api_key': api_key,
                         'categories': '2000',
@@ -945,14 +941,14 @@ class IndexerManager:
                     imported.append({
                         'id': f'prowlarr-{indexer_id}',
                         'name': f'{name} (via Prowlarr)',
-                        'type': protocol,
+                        'type': 'torznab',  # Prowlarr proxy is Torznab-compatible
                         'url': proxy_url,
                         'api_key': prowlarr_api_key,  # Use Prowlarr's key for proxy
                         'categories': '2000',
                         'priority': 100,
                         'enabled': bool(ix.get('enable', True)),
                         'prowlarr_proxy': True,
-                        'prowlarr_url': prowlarr_url,
+                        'prowlarr_id': indexer_id,  # Store ID to resolve URL/key at request time
                         'implementation': implementation,
                         'rate_limited': is_avistaz_family,
                         'rate_limit_capacity': DEFAULT_CAPACITY if is_avistaz_family else 10,
