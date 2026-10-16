@@ -132,13 +132,13 @@ class TestCookieSecurity:
     
     def test_cookie_secure_when_https(self, test_app):
         """Auth cookie has Secure flag when request is HTTPS."""
-        # Simulate HTTPS request
+        # Simulate HTTPS request by setting base_url
         resp = self.client.post('/login',
                                 data={'username': 'testuser', 'password': 'testpass123'},
                                 environ_base={
                                     'REMOTE_ADDR': '192.168.1.100',
-                                    'wsgi.url_scheme': 'https'
                                 },
+                                base_url='https://localhost',
                                 follow_redirects=False)
         
         cookies = resp.headers.getlist('Set-Cookie')
