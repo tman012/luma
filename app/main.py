@@ -16990,6 +16990,193 @@ def test_indexer_connection():
         return jsonify({'success': False, 'message': str(e)}), 200
 
 
+# ---- Indexer Management (Luma backend) ------------------------------------
+
+@app.route('/api/settings/indexers', methods=['GET'])
+def list_indexers():
+    """List all configured indexers (Luma backend)."""
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        from app.indexer_manager import IndexerManager
+        manager = IndexerManager(settings)
+        indexers = manager.list_indexers()
+        # Mask API keys
+        for ix in indexers:
+            if 'api_key' in ix and ix['api_key']:
+                ix['api_key'] = SECRET_MASK
+        return jsonify(indexers)
+    except Exception as e:
+        logger.exception('Failed to list indexers')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/indexers', methods=['POST'])
+def add_indexer():
+    """Add a new indexer (Luma backend)."""
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        body = request.get_json() or {}
+        
+        # Generate ID if not provided
+        if not body.get('id'):
+            import uuid
+            body['id'] = f"ix-{uuid.uuid4().hex[:8]}"
+        
+        # Get current indexers
+        indexers = settings.get('indexer.indexers') or []
+        
+        # Check for duplicate ID
+        if any(ix.get('id') == body['id'] for ix in indexers):
+            return jsonify({'error': 'Indexer ID already exists'}), 400
+        
+        # Add new indexer
+        indexers.append(body)
+        success, errors = settings.update({'indexer': {'indexers': indexers}})
+        
+        if success:
+            # Mask API key in response
+            if 'api_key' in body and body['api_key']:
+                body['api_key'] = SECRET_MASK
+            return jsonify(body), 201
+        else:
+            return jsonify({'errors': errors}), 400
+    except Exception as e:
+        logger.exception('Failed to add indexer')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/indexers/<indexer_id>', methods=['PUT'])
+def update_indexer(indexer_id: str):
+    """Update an existing indexer (Luma backend)."""
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        body = request.get_json() or {}
+        
+        # Get current indexers
+        indexers = settings.get('indexer.indexers') or []
+        
+        # Find and update
+        found = False
+        for ix in indexers:
+            if ix.get('id') == indexer_id:
+                # Don't overwrite API key if masked
+                if body.get('api_key') == SECRET_MASK:
+                    body.pop('api_key', None)
+                ix.update(body)
+                ix['id'] = indexer_id  # Prevent ID changes
+                found = True
+                break
+        
+        if not found:
+            return jsonify({'error': 'Indexer not found'}), 404
+        
+        success, errors = settings.update({'indexer': {'indexers': indexers}})
+        
+        if success:
+            # Return updated indexer with masked key
+            for ix in indexers:
+                if ix.get('id') == indexer_id:
+                    result = dict(ix)
+                    if 'api_key' in result and result['api_key']:
+                        result['api_key'] = SECRET_MASK
+                    return jsonify(result)
+        else:
+            return jsonify({'errors': errors}), 400
+    except Exception as e:
+        logger.exception('Failed to update indexer')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/indexers/<indexer_id>', methods=['DELETE'])
+def delete_indexer(indexer_id: str):
+    """Delete an indexer (Luma backend)."""
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        indexers = settings.get('indexer.indexers') or []
+        original_count = len(indexers)
+        indexers = [ix for ix in indexers if ix.get('id') != indexer_id]
+        
+        if len(indexers) == original_count:
+            return jsonify({'error': 'Indexer not found'}), 404
+        
+        success, errors = settings.update({'indexer': {'indexers': indexers}})
+        
+        if success:
+            return jsonify({'success': True})
+        else:
+            return jsonify({'errors': errors}), 400
+    except Exception as e:
+        logger.exception('Failed to delete indexer')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/indexers/<indexer_id>/test', methods=['POST'])
+def test_single_indexer(indexer_id: str):
+    """Test connectivity to a specific indexer."""
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        from app.indexer_manager import IndexerManager
+        manager = IndexerManager(settings)
+        success, message = manager.test_indexer(indexer_id)
+        return jsonify({'success': success, 'message': message})
+    except Exception as e:
+        logger.exception('Indexer test failed')
+        return jsonify({'success': False, 'message': str(e)}), 200
+
+
+@app.route('/api/settings/indexers/import-prowlarr', methods=['POST'])
+def import_indexers_from_prowlarr():
+    """Import indexers from Prowlarr (read-only, one-time operation)."""
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        body = request.get_json() or {}
+        
+        # Get Prowlarr credentials
+        prowlarr_url = body.get('prowlarr_url') or settings.get('indexer.base_url', '')
+        prowlarr_api_key = body.get('prowlarr_api_key') or settings.get('indexer.api_key', '')
+        
+        if not prowlarr_url or not prowlarr_api_key:
+            return jsonify({'error': 'Prowlarr URL and API key are required'}), 400
+        
+        from app.indexer_manager import IndexerManager
+        manager = IndexerManager(settings)
+        
+        imported, cardigann, errors = manager.import_from_prowlarr(prowlarr_url, prowlarr_api_key)
+        
+        result = {
+            'success': True,
+            'imported': imported,
+            'cardigann_count': cardigann,
+            'errors': errors,
+        }
+        
+        if imported > 0:
+            result['message'] = f'Imported {imported} indexers'
+            if cardigann > 0:
+                result['message'] += f', flagged {cardigann} Cardigann-only (routed through Prowlarr)'
+        else:
+            result['success'] = False
+            result['message'] = 'No indexers imported'
+        
+        return jsonify(result)
+    except Exception as e:
+        logger.exception('Prowlarr import failed')
+        return jsonify({'error': str(e)}), 500
+
+
+
 @app.route('/api/settings/test/shield-adb', methods=['POST'])
 def test_shield_adb():
     """Test ADB connectivity to a room/device (legacy endpoint, delegates to adb_utils)."""

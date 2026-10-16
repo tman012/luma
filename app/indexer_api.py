@@ -979,7 +979,22 @@ class TorznabClient:
 # ---------------------------------------------------------------------------
 
 def get_indexer_client(settings) -> Optional[Any]:
-    """Return the appropriate indexer client based on settings, or None."""
+    """
+    Return the appropriate indexer client based on settings.
+    
+    Now supports both legacy (Prowlarr/Torznab) and new Luma backend.
+    The backend setting controls which system is used:
+    - 'luma': Use Luma's native indexer manager
+    - 'prowlarr' (default): Use legacy Prowlarr/Torznab client
+    """
+    # Check if we should use the new Luma backend
+    backend = settings.get('indexer.backend', 'prowlarr')
+    
+    if backend == 'luma':
+        from app.indexer_backend import get_indexer_backend
+        return get_indexer_backend(settings)
+    
+    # Legacy Prowlarr/Torznab backend
     provider = settings.get('indexer.provider') or 'prowlarr'
     api_key = settings.get('indexer.api_key') or ''
 
