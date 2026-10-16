@@ -74,6 +74,7 @@ GUARD_LIMITS = {
 LOADED_COOLDOWN_MAX_S = 24 * 3600    # a saved cooldown never reaches further than this
 LOG_BODY_MAX = 300                   # characters of a 400 body written to the log
 _INDEXER_STATUS_TTL = 60             # seconds to cache /api/v1/indexerstatus
+_IX_META_TTL = 3600                  # refresh Prowlarr indexer metadata hourly
 UNSCOPED = -1                        # pseudo-indexer for a search across all indexers
 
 # Persisted state (see _guard_save): send log per indexer as [ts, kind]
@@ -601,6 +602,7 @@ class ProwlarrClient:
             resp = self.session.get(f'{self.base_url}/api/v1/indexer', timeout=20)
             resp.raise_for_status()
             out = []
+            meta = {}
             for ix in resp.json() or []:
                 if ix.get('id') is None:
                     continue
@@ -609,11 +611,13 @@ class ProwlarrClient:
                     'name': ix.get('name') or f"Indexer {ix['id']}",
                     'enabled': bool(ix.get('enable', True)),
                 })
-                self._ix_meta = getattr(self, '_ix_meta', None) or {}
-                self._ix_meta[int(ix['id'])] = _indexer_identity(ix)
+                meta[int(ix['id'])] = _indexer_identity(ix)
+            self._ix_meta = meta
+            self._ix_meta_ts = time.time()
             return sorted(out, key=lambda i: i['name'].lower())
         except Exception as e:
             logger.error(f'Prowlarr get_indexers failed: {e}')
+            self._ix_meta_ts = 0.0       # refresh again on the next lookup
             return []
 
     _INDEXER_IDS_TTL = 60
@@ -682,10 +686,14 @@ class ProwlarrClient:
         if ix < 0:
             return False
         meta = getattr(self, '_ix_meta', None) or {}
-        if int(ix) not in meta:
+        stale = time.time() - (getattr(self, '_ix_meta_ts', 0.0) or 0.0) > _IX_META_TTL
+        if int(ix) not in meta or stale:
             self.get_indexers()      # Prowlarr's own config; never reaches a tracker
             meta = getattr(self, '_ix_meta', None) or {}
-        names, hosts = meta.get(int(ix), (set(), set()))
+        if int(ix) not in meta:
+            # /api/v1/indexer failed or doesn't list it: assume strict (1 h for a 400).
+            return True
+        names, hosts = meta[int(ix)]
         if names & set(GUARD_LIMITS['strict_400_definitions']):
             return True
         return any(h == s or h.endswith('.' + s) for h in hosts for s in GUARD_LIMITS['strict_400_hosts'])
