@@ -51,12 +51,17 @@ class HeroCache:
         # Ensure cache directory exists
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
-        except (FileNotFoundError, PermissionError):
-            # In test environment, use temp directory
-            import tempfile
-            self.cache_dir = Path(tempfile.gettempdir()) / "luma_hero_cache"
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-            self.cache_json = self.cache_dir / "hero_cache.json"
+        except (FileNotFoundError, PermissionError) as e:
+            # Fall back to temp directory only in test environment
+            if os.getenv('PYTEST_CURRENT_TEST') or os.getenv('LUMA_TEST_MODE'):
+                import tempfile
+                self.cache_dir = Path(tempfile.gettempdir()) / "luma_hero_cache"
+                self.cache_dir.mkdir(parents=True, exist_ok=True)
+                self.cache_json = self.cache_dir / "hero_cache.json"
+                logger.warning('[hero_cache] Production cache dir unavailable, using temp: %s', self.cache_dir)
+            else:
+                logger.error('[hero_cache] Cache directory unavailable and not in test mode: %s', e)
+                raise
 
     def init_from_settings(self, settings_manager):
         """Re-initialise API keys and config from a SettingsManager instance.

@@ -23,11 +23,16 @@ class ExploreCache:
         self.cache_dir = Path(cache_dir)
         try:
             self.cache_dir.mkdir(exist_ok=True, parents=True)
-        except (FileNotFoundError, PermissionError):
-            # In test environment, use temp directory
-            import tempfile
-            self.cache_dir = Path(tempfile.gettempdir()) / "luma_cache"
-            self.cache_dir.mkdir(exist_ok=True, parents=True)
+        except (FileNotFoundError, PermissionError) as e:
+            # Fall back to temp directory only in test environment
+            if os.getenv('PYTEST_CURRENT_TEST') or os.getenv('LUMA_TEST_MODE'):
+                import tempfile
+                self.cache_dir = Path(tempfile.gettempdir()) / "luma_cache"
+                self.cache_dir.mkdir(exist_ok=True, parents=True)
+                logger.warning('[explore_cache] Production cache dir unavailable, using temp: %s', self.cache_dir)
+            else:
+                logger.error('[explore_cache] Cache directory unavailable and not in test mode: %s', e)
+                raise
         self.db_path = self.cache_dir / "explore_cache.db"
         self.update_interval = 900  # 15 minutes
         self.last_update = None
