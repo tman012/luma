@@ -76,9 +76,9 @@ function parseTmdbItem(item: Record<string, unknown>, mediaType: 'movie' | 'tv' 
 
 type FetchResult = NormalizedMediaItem[] | null; // null = conditional rail disabled
 
-async function fetchTraktMovies(params: Record<string, string | number>): Promise<FetchResult> {
+async function fetchTraktMovies(params: Record<string, string | number>, signal?: AbortSignal): Promise<FetchResult> {
   const limit = params.limit ?? 20;
-  const resp = await fetchWithTimeout(`/api/trakt/movies/trending?limit=${limit}`);
+  const resp = await fetchWithTimeout(`/api/trakt/movies/trending?limit=${limit}`, undefined, signal);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   if (!data.enabled) return null;
@@ -104,9 +104,9 @@ async function fetchTraktMovies(params: Record<string, string | number>): Promis
   });
 }
 
-async function fetchTraktShows(params: Record<string, string | number>): Promise<FetchResult> {
+async function fetchTraktShows(params: Record<string, string | number>, signal?: AbortSignal): Promise<FetchResult> {
   const limit = params.limit ?? 20;
-  const resp = await fetchWithTimeout(`/api/trakt/shows/trending?limit=${limit}`);
+  const resp = await fetchWithTimeout(`/api/trakt/shows/trending?limit=${limit}`, undefined, signal);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   if (!data.enabled) return null;
@@ -134,9 +134,9 @@ async function fetchTraktShows(params: Record<string, string | number>): Promise
   });
 }
 
-async function fetchTraktAnticipatedMovies(params: Record<string, string | number>): Promise<FetchResult> {
+async function fetchTraktAnticipatedMovies(params: Record<string, string | number>, signal?: AbortSignal): Promise<FetchResult> {
   const limit = params.limit ?? 20;
-  const resp = await fetchWithTimeout(`/api/trakt/movies/anticipated?limit=${limit}`);
+  const resp = await fetchWithTimeout(`/api/trakt/movies/anticipated?limit=${limit}`, undefined, signal);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   if (!data.enabled) return null;
@@ -161,9 +161,9 @@ async function fetchTraktAnticipatedMovies(params: Record<string, string | numbe
   });
 }
 
-async function fetchTraktAnticipatedShows(params: Record<string, string | number>): Promise<FetchResult> {
+async function fetchTraktAnticipatedShows(params: Record<string, string | number>, signal?: AbortSignal): Promise<FetchResult> {
   const limit = params.limit ?? 20;
-  const resp = await fetchWithTimeout(`/api/trakt/shows/anticipated?limit=${limit}`);
+  const resp = await fetchWithTimeout(`/api/trakt/shows/anticipated?limit=${limit}`, undefined, signal);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   if (!data.enabled) return null;
@@ -190,17 +190,17 @@ async function fetchTraktAnticipatedShows(params: Record<string, string | number
   });
 }
 
-async function fetchInTheaters(params: Record<string, string | number>): Promise<FetchResult> {
+async function fetchInTheaters(params: Record<string, string | number>, signal?: AbortSignal): Promise<FetchResult> {
   const limit = params.limit ?? 20;
-  const resp = await fetchWithTimeout('/api/in-theaters');
+  const resp = await fetchWithTimeout('/api/in-theaters', undefined, signal);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   return ((data.movies ?? []) as Record<string, unknown>[]).slice(0, limit as number).map((m) => parseTmdbItem(m));
 }
 
-async function fetchTrackerMovies(params: Record<string, string | number>): Promise<FetchResult> {
+async function fetchTrackerMovies(params: Record<string, string | number>, signal?: AbortSignal): Promise<FetchResult> {
   const limit = params.limit ?? 40;
-  const resp = await fetchWithTimeout(`/api/explore/cached?limit=${limit}`);
+  const resp = await fetchWithTimeout(`/api/explore/cached?limit=${limit}`, undefined, signal);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   const raw = ((data.movies ?? []) as Record<string, unknown>[]).map((m) => {
@@ -248,7 +248,7 @@ async function fetchTrackerMovies(params: Record<string, string | number>): Prom
   return Array.from(deduped.values());
 }
 
-const RAIL_FETCHERS: Record<RailId, (params: Record<string, string | number>) => Promise<FetchResult>> = {
+const RAIL_FETCHERS: Record<RailId, (params: Record<string, string | number>, signal?: AbortSignal) => Promise<FetchResult>> = {
   trakt_movies: fetchTraktMovies,
   trakt_shows: fetchTraktShows,
   trakt_anticipated_movies: fetchTraktAnticipatedMovies,
@@ -276,10 +276,10 @@ export function useExploreRails(options?: UseExploreRailsOptions): ExploreRailSt
     const paramOverrides = opts?.paramOverrides;
 
     // Build fetcher map with params baked in
-    const f = {} as Record<RailId, () => Promise<NormalizedMediaItem[] | null>>;
+    const f = {} as Record<RailId, (signal: AbortSignal) => Promise<NormalizedMediaItem[] | null>>;
     for (const def of defs) {
       const params = { ...def.defaultParams, ...paramOverrides?.[def.id] };
-      f[def.id] = () => RAIL_FETCHERS[def.id](params);
+      f[def.id] = (signal) => RAIL_FETCHERS[def.id](params, signal);
     }
 
     return { activeDefs: defs, fetchers: f, enableOwnership: eo };

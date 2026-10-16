@@ -30,7 +30,8 @@ const defaultTimers: Timers = {
 
 export interface RevealGateOptions<TId extends string, TItem> {
   ids: readonly TId[];
-  fetch: (id: TId) => Promise<TItem[] | null>;
+  /** The signal aborts when the gate reveals (cap) or is cancelled. */
+  fetch: (id: TId, signal: AbortSignal) => Promise<TItem[] | null>;
   capMs?: number;
   retryDelaysMs?: readonly number[];
   timers?: Timers;
@@ -50,6 +51,7 @@ export function runRevealGate<TId extends string, TItem>(
   const ok = new Map<TId, TItem[] | null>();
   const pending = new Set<unknown>();
   let finished = false;
+  const controller = new AbortController();
   let resolveDone!: (r: RevealResult<TId, TItem>) => void;
   const done = new Promise<RevealResult<TId, TItem>>((r) => { resolveDone = r; });
 
@@ -58,6 +60,7 @@ export function runRevealGate<TId extends string, TItem>(
     finished = true;
     for (const h of pending) timers.clear(h);
     pending.clear();
+    controller.abort(); // stragglers can never land after the reveal
     resolveDone({
       ok: new Map(ok),
       failed: opts.ids.filter((id) => !ok.has(id)),
@@ -69,7 +72,7 @@ export function runRevealGate<TId extends string, TItem>(
     if (finished) return;
     let p: Promise<TItem[] | null>;
     try {
-      p = opts.fetch(id);
+      p = opts.fetch(id, controller.signal);
     } catch (e) {
       p = Promise.reject(e);
     }
@@ -106,6 +109,7 @@ export function runRevealGate<TId extends string, TItem>(
       finished = true;
       for (const h of pending) timers.clear(h);
       pending.clear();
+      controller.abort();
     },
   };
 }
@@ -154,6 +158,33 @@ export function revealedRails<TItem, TId extends string>(
     out.push({ id: d.id, title: d.title, items, isLoading: false, fadeIn });
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Storage scope: per user and per URL base, cleared on logout
+// ---------------------------------------------------------------------------
+
+export const RAIL_STORAGE_ROOT = 'luma.rails.';
+
+export function railStorageKey(urlBase: string, userId: number | string | null, key: string): string {
+  return `${RAIL_STORAGE_ROOT}${encodeURIComponent(urlBase || '/')}|${userId ?? 'anon'}|${key}`;
+}
+
+/** Remove every rail snapshot and layout (all users, all bases). */
+export function clearRailStorage(...stores: Array<StorageLike & { length: number; key(i: number): string | null } | null>): void {
+  for (const store of stores) {
+    if (!store) continue;
+    try {
+      const doomed: string[] = [];
+      for (let i = 0; i < store.length; i++) {
+        const k = store.key(i);
+        if (k && k.startsWith(RAIL_STORAGE_ROOT)) doomed.push(k);
+      }
+      for (const k of doomed) store.removeItem(k);
+    } catch {
+      // Storage unavailable.
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

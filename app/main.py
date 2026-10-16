@@ -6371,7 +6371,8 @@ def rails_what_youre_missing():
     try:
         from app import daily_missing
         limit = request.args.get('limit', daily_missing.RAIL_SIZE, type=int)
-        limit = max(1, min(limit or daily_missing.RAIL_SIZE, 40))
+        limit = max(1, min(limit or daily_missing.RAIL_SIZE, daily_missing.RAIL_CACHE_SIZE))
+        # One cached slate (RAIL_CACHE_SIZE titles); the limit only slices it.
         return jsonify(daily_missing.get_rail_cached(limit=limit))
     except Exception as e:
         logger.error(f"what-youre-missing rail error: {e}")

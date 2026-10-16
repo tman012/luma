@@ -1084,132 +1084,170 @@ def refresh_now() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Served-rail cache (stale-while-revalidate)
+# Served-rail cache (stale-while-revalidate, single-flight)
 #
 # Building a slate needs the owned-id set (Plex ownership index, canon index
 # and the full Radarr catalog) on every call, which made this the slowest
-# Home rail. The slate is now precomputed and served from memory; it is
-# rebuilt in the background on a schedule, after the pool is rebuilt, after
-# library changes and on day rollover. Only the very first request after a
-# process start computes synchronously.
+# Home rail. One slate of RAIL_CACHE_SIZE titles is precomputed, kept in
+# memory and sliced per request. It is rebuilt in the background on a
+# schedule, after the pool is rebuilt, after library changes and on day
+# rollover. Every rebuild goes through one single-flight build: concurrent
+# callers that need a fresh slate wait on the build already running instead
+# of starting their own.
 # ---------------------------------------------------------------------------
 
+RAIL_CACHE_SIZE = 40  # max limit the route accepts; requests slice this slate
 RAIL_CACHE_MAX_AGE_SEC = 15 * 60
 RAIL_CACHE_REFRESH_SEC = 10 * 60
+RAIL_BUILD_WAIT_SEC = 120
+_BUILD_ATTEMPTS = 3
 
 _rail_cache_lock = threading.Lock()
-_rail_cache: Dict[int, Dict[str, Any]] = {}
-_rail_refreshing: Set[int] = set()
+_rail_entry: Optional[Dict[str, Any]] = None
+_rail_inflight: Optional[threading.Event] = None
+_rail_last_error: Optional[Dict[str, Any]] = None
 _rail_generation = 0
 _rail_cache_thread_started = False
 
 
 def _spawn(fn) -> None:
-    """Run fn in a daemon thread (patched to run inline in tests)."""
+    """Run fn in a daemon thread (tests may patch this)."""
     threading.Thread(target=fn, name='daily-missing-rail', daemon=True).start()
 
 
-def _store_rail(limit: int, payload: Dict[str, Any], generation: int) -> bool:
-    """Store a computed slate unless the cache was invalidated meanwhile."""
-    with _rail_cache_lock:
-        if generation != _rail_generation:
-            return False
-        _rail_cache[limit] = {
-            'payload': payload,
-            'built_at': time.time(),
-            'day': payload.get('day') or _today_ny(),
-            'stale': False,
-        }
-        return True
-
-
-def _compute_and_store(limit: int) -> Dict[str, Any]:
-    with _rail_cache_lock:
-        generation = _rail_generation
-    payload = get_rail(limit=limit)
-    if not payload.get('error'):
-        _store_rail(limit, payload, generation)
-    return payload
-
-
-def _schedule_rail_refresh(limit: int) -> bool:
-    """Rebuild one slate in the background. Returns False if one is running."""
-    with _rail_cache_lock:
-        if limit in _rail_refreshing:
-            return False
-        _rail_refreshing.add(limit)
-
-    def run():
+def _run_build() -> None:
+    """Owner side of the single flight: build until a result survives."""
+    global _rail_entry, _rail_last_error
+    for _ in range(_BUILD_ATTEMPTS):
+        with _rail_cache_lock:
+            generation = _rail_generation
         try:
-            for _ in range(3):
-                with _rail_cache_lock:
-                    generation = _rail_generation
-                payload = get_rail(limit=limit)
-                if payload.get('error'):
-                    break
-                if _store_rail(limit, payload, generation):
-                    break
-        except Exception as e:
-            logger.error('daily_missing: background rail refresh failed: %s', e)
+            payload = get_rail(limit=RAIL_CACHE_SIZE)
+        except Exception as e:  # get_rail normally returns an error payload
+            logger.error('daily_missing: rail build failed: %s', e)
+            payload = {'rail_id': RAIL_ID, 'title': "What You're Missing",
+                       'movies': [], 'enabled': True, 'empty': True, 'error': str(e)}
+        with _rail_cache_lock:
+            if payload.get('error'):
+                _rail_last_error = payload
+                return
+            if generation != _rail_generation:
+                continue  # invalidated while building: redo
+            _rail_entry = {
+                'payload': payload,
+                'built_at': time.time(),
+                'day': payload.get('day') or _today_ny(),
+                'stale': False,
+            }
+            _rail_last_error = None
+            return
+
+
+def _rebuild(block: bool) -> bool:
+    """Start (or join) the single-flight build.
+
+    Returns True when this call ran the build. With block=True a caller that
+    finds a build in flight waits for it to finish.
+    """
+    global _rail_inflight
+    with _rail_cache_lock:
+        event = _rail_inflight
+        owner = event is None
+        if owner:
+            event = threading.Event()
+            _rail_inflight = event
+    if owner:
+        try:
+            _run_build()
         finally:
             with _rail_cache_lock:
-                _rail_refreshing.discard(limit)
+                _rail_inflight = None
+            event.set()
+    elif block:
+        event.wait(RAIL_BUILD_WAIT_SEC)
+    return owner
 
-    _spawn(run)
+
+def _schedule_rail_refresh() -> bool:
+    """Rebuild in the background unless a build is already running."""
+    with _rail_cache_lock:
+        if _rail_inflight is not None:
+            return False
+    _spawn(lambda: _rebuild(block=False))
     return True
+
+
+def _sliced(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
+    movies = list(payload.get('movies') or [])[:limit]
+    return {**payload, 'movies': movies, 'empty': len(movies) == 0}
+
+
+def _current_or_error(limit: int) -> Dict[str, Any]:
+    with _rail_cache_lock:
+        entry = _rail_entry
+        error = _rail_last_error
+    if entry is not None:
+        return _sliced(entry['payload'], limit)
+    return dict(error or {'rail_id': RAIL_ID, 'title': "What You're Missing",
+                          'movies': [], 'enabled': True, 'empty': True,
+                          'error': 'rail not built yet'})
 
 
 def get_rail_cached(limit: int = RAIL_SIZE) -> Dict[str, Any]:
     """Serve the slate from cache instantly; refresh in the background."""
+    limit = max(1, min(int(limit or RAIL_SIZE), RAIL_CACHE_SIZE))
     with _rail_cache_lock:
-        entry = _rail_cache.get(limit)
+        entry = _rail_entry
     if entry is None:
-        return _compute_and_store(limit)
+        _rebuild(block=True)  # cold start: one build, everyone else waits
+        return _current_or_error(limit)
     expired = (time.time() - entry['built_at']) >= RAIL_CACHE_MAX_AGE_SEC
     if entry['stale'] or expired or entry['day'] != _today_ny():
-        _schedule_rail_refresh(limit)
-    return entry['payload']
+        _schedule_rail_refresh()
+    return _sliced(entry['payload'], limit)
 
 
 def invalidate_rail_cache(reason: str = '') -> None:
-    """Mark every cached slate stale and rebuild them in the background.
+    """Mark the slate stale and rebuild it in the background.
 
-    The stale copies keep being served until the rebuild lands, so callers
-    never wait. A rebuild already in flight that started before this call is
-    discarded and redone.
+    The stale copy keeps being served until the rebuild lands. A build already
+    in flight sees the generation change and redoes its work.
     """
     global _rail_generation
     with _rail_cache_lock:
         _rail_generation += 1
-        for entry in _rail_cache.values():
-            entry['stale'] = True
-        limits = list(_rail_cache.keys())
+        if _rail_entry is not None:
+            _rail_entry['stale'] = True
+        has_entry = _rail_entry is not None
     if reason:
         logger.info('daily_missing: rail cache invalidated (%s)', reason)
-    for limit in limits:
-        _schedule_rail_refresh(limit)
+    if has_entry:
+        _schedule_rail_refresh()
 
 
 def replace_rail_now(limit: int = RAIL_SIZE) -> Dict[str, Any]:
-    """Recompute synchronously (used after a dismiss so the caller sees it)."""
+    """Rebuild synchronously (after a dismiss) through the single flight."""
     global _rail_generation
     with _rail_cache_lock:
         _rail_generation += 1
-        for entry in _rail_cache.values():
-            entry['stale'] = True
-        others = [k for k in _rail_cache.keys() if k != limit]
-    payload = _compute_and_store(limit)
-    for other in others:
-        _schedule_rail_refresh(other)
-    return payload
+        if _rail_entry is not None:
+            _rail_entry['stale'] = True
+    # If a build is already running it redoes itself (generation changed);
+    # waiting on it yields a slate that reflects this call.
+    if not _rebuild(block=True):
+        with _rail_cache_lock:
+            fresh = _rail_entry is not None and not _rail_entry['stale']
+        if not fresh:
+            _rebuild(block=True)
+    return _current_or_error(max(1, min(int(limit or RAIL_SIZE), RAIL_CACHE_SIZE)))
 
 
 def clear_rail_cache() -> None:
-    global _rail_generation
+    global _rail_generation, _rail_entry, _rail_last_error
     with _rail_cache_lock:
         _rail_generation += 1
-        _rail_cache.clear()
-        _rail_refreshing.clear()
+        _rail_entry = None
+        _rail_last_error = None
 
 
 _last_library_signature: Optional[tuple] = None
@@ -1222,8 +1260,9 @@ def note_library_signature(signature: tuple) -> bool:
     first observation only records the baseline.
     """
     global _last_library_signature
-    previous = _last_library_signature
-    _last_library_signature = signature
+    with _rail_cache_lock:
+        previous = _last_library_signature
+        _last_library_signature = signature
     if previous is not None and previous != signature:
         invalidate_rail_cache('library changed')
         return True
@@ -1231,7 +1270,7 @@ def note_library_signature(signature: tuple) -> bool:
 
 
 def start_rail_cache_thread() -> None:
-    """Warm the default slate now and keep it fresh on a schedule."""
+    """Warm the slate now and keep it fresh on a schedule."""
     global _rail_cache_thread_started
     if _rail_cache_thread_started:
         return
@@ -1241,10 +1280,7 @@ def start_rail_cache_thread() -> None:
         time.sleep(5)
         while True:
             try:
-                with _rail_cache_lock:
-                    limits = list(_rail_cache.keys()) or [RAIL_SIZE]
-                for limit in limits:
-                    _compute_and_store(limit)
+                _rebuild(block=True)
             except Exception as e:
                 logger.error('daily_missing: scheduled rail refresh error: %s', e)
             time.sleep(RAIL_CACHE_REFRESH_SEC)

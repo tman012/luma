@@ -275,7 +275,12 @@ def refresh_ownership_index():
 
 
 def _library_signature(index):
-    """Cheap fingerprint of owned movies, so a library change is noticed."""
+    """Cheap fingerprint of owned movies, so a library change is noticed.
+
+    Uses the built-in hash() on purpose: the value is only compared with the
+    previous one inside this process, so per-process hash randomization does
+    not matter and nothing is persisted.
+    """
     tmdb = index.get('movies_by_tmdb') or {}
     keys = []
     for k in tmdb:

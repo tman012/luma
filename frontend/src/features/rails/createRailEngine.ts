@@ -14,9 +14,12 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { getUrlBase } from '@/urlHelpers';
+import { useAuthUserId } from '@/contexts/AuthContext';
 import {
   REVEAL_CAP_MS,
   loadLayout,
+  railStorageKey,
   loadSnapshot,
   revealedRails,
   runRevealGate,
@@ -44,7 +47,7 @@ interface RailEngineConfig<
 > {
   definitions: readonly TDef[];
   /** Map from rail id to fetcher. Throw (or reject) on failure so it is retried. Return `null` for a disabled rail. */
-  fetchers: Record<TRailId, () => Promise<TItem[] | null>>;
+  fetchers: Record<TRailId, (signal: AbortSignal) => Promise<TItem[] | null>>;
   /** Storage key prefix; the snapshot and last layout are kept under it. */
   storageKey: string;
   /** How long a snapshot reveals instantly without refetching. */
@@ -74,8 +77,12 @@ export function useRailEngine<
   TDef extends RailDefinitionBase<TRailId>,
 >(config: RailEngineConfig<TItem, TRailId, TDef>): RailEngineResult<TItem, TRailId> {
   const cfgRef = useRef(config);
-  const snapKey = `${config.storageKey}snapshot`;
-  const layoutKey = `${config.storageKey}layout`;
+  // Scoped per user and URL base so accounts and mounts never share rails;
+  // AuthContext clears every rail key on logout.
+  const userId = useAuthUserId();
+  const scope = railStorageKey(getUrlBase(), userId, config.storageKey);
+  const snapKey = `${scope}snapshot`;
+  const layoutKey = `${scope}layout`;
 
   const [initial] = useState(() => {
     const { definitions, snapshotTtlMs } = cfgRef.current;
@@ -95,7 +102,7 @@ export function useRailEngine<
     gateRef.current?.cancel();
     const gate = runRevealGate<TRailId, TItem>({
       ids: definitions.map((d) => d.id),
-      fetch: (id) => fetchers[id](),
+      fetch: (id, signal) => fetchers[id](signal),
       capMs: capMs ?? REVEAL_CAP_MS,
     });
     gateRef.current = gate;

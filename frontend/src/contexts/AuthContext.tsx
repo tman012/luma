@@ -13,6 +13,7 @@ import {
   ReactNode,
 } from 'react';
 import { apiFetch } from '../apiClient';
+import { clearRailStorage } from '../features/rails/railReveal';
 
 export interface UserInfo {
   id: number;
@@ -147,6 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshUser]);
 
   const logout = useCallback(async () => {
+    clearRailStorage(safeStore('session'), safeStore('local'));
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch {}
@@ -179,6 +181,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
+}
+
+function safeStore(kind: 'session' | 'local'): Storage | null {
+  try { return kind === 'session' ? sessionStorage : localStorage; } catch { return null; }
+}
+
+/** Current user id, or null when signed out or outside the provider (kiosk). */
+export function useAuthUserId(): number | null {
+  return useContext(AuthContext)?.user?.id ?? null;
 }
 
 export function useAuth() {

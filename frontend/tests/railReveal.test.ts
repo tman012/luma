@@ -9,6 +9,9 @@ import {
   loadLayout,
   saveLayout,
   withDeadline,
+  railStorageKey,
+  clearRailStorage,
+  RAIL_STORAGE_ROOT,
   type StorageLike,
 } from '../src/features/rails/railReveal';
 
@@ -216,5 +219,54 @@ describe('withDeadline', () => {
   });
   it('falls back when enrichment fails', async () => {
     expect(await withDeadline(Promise.reject(new Error('x')), 100, 'fb')).toBe('fb');
+  });
+});
+
+describe('abort and storage scope', () => {
+  it('aborts outstanding fetches at the cap', async () => {
+    let sig: AbortSignal | null = null;
+    const gate = runRevealGate<Id, number>({
+      ids: ['a'],
+      fetch: (_id, signal) => { sig = signal; return new Promise(() => {}); },
+      capMs: 100,
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    await gate.done;
+    expect(sig!.aborted).toBe(true);
+  });
+
+  it('aborts outstanding fetches on cancel (unmount)', () => {
+    let sig: AbortSignal | null = null;
+    const gate = runRevealGate<Id, number>({
+      ids: ['a'],
+      fetch: (_id, signal) => { sig = signal; return new Promise(() => {}); },
+    });
+    expect(sig!.aborted).toBe(false);
+    gate.cancel();
+    expect(sig!.aborted).toBe(true);
+  });
+
+  it('scopes keys by URL base and user', () => {
+    const a = railStorageKey('/luma', 1, 'home.');
+    expect(a).not.toBe(railStorageKey('/luma', 2, 'home.'));
+    expect(a).not.toBe(railStorageKey('/', 1, 'home.'));
+    expect(railStorageKey('', null, 'home.')).toContain('anon');
+    expect(a.startsWith(RAIL_STORAGE_ROOT)).toBe(true);
+  });
+
+  it('clears every rail key on logout and nothing else', () => {
+    const m = new Map<string, string>();
+    const store = {
+      get length() { return m.size; },
+      key: (i: number) => [...m.keys()][i] ?? null,
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => { m.set(k, v); },
+      removeItem: (k: string) => { m.delete(k); },
+    };
+    store.setItem(railStorageKey('/', 1, 'home.') + 'snapshot', '{}');
+    store.setItem(railStorageKey('/x', 2, 'explore.') + 'layout', '[]');
+    store.setItem('other', 'keep');
+    clearRailStorage(store, null);
+    expect([...m.keys()]).toEqual(['other']);
   });
 });

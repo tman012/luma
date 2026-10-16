@@ -40,8 +40,8 @@ export type HomeRailState = RailState<NormalizedMediaItem, HomeRailId>;
 // Per-rail fetchers
 // ---------------------------------------------------------------------------
 
-async function fetchContinueWatching(): Promise<NormalizedMediaItem[]> {
-  const resp = await fetchWithTimeout('/api/plex/continue_watching/cached?limit=25');
+async function fetchContinueWatching(signal?: AbortSignal): Promise<NormalizedMediaItem[]> {
+  const resp = await fetchWithTimeout('/api/plex/continue_watching/cached?limit=25', undefined, signal);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   return ((data.items ?? []) as Record<string, unknown>[]).map((item) => {
@@ -74,8 +74,8 @@ async function fetchContinueWatching(): Promise<NormalizedMediaItem[]> {
   });
 }
 
-async function fetchWhatYoureMissing(): Promise<NormalizedMediaItem[]> {
-  const resp = await fetchWithTimeout('/api/rails/what-youre-missing?limit=20');
+async function fetchWhatYoureMissing(signal?: AbortSignal): Promise<NormalizedMediaItem[]> {
+  const resp = await fetchWithTimeout('/api/rails/what-youre-missing?limit=20', undefined, signal);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   if (data.empty) return [];
@@ -97,10 +97,10 @@ function formatUpcomingAirDate(iso: string | null | undefined): string | null {
   return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-async function fetchUpcomingTv(): Promise<NormalizedMediaItem[]> {
+async function fetchUpcomingTv(signal?: AbortSignal): Promise<NormalizedMediaItem[]> {
   // 14-day Sonarr calendar window; dedupe to one tile per show (next air date).
   // Pull a wider episode window so binge-drop days do not starve later shows.
-  const resp = await fetchWithTimeout('/api/sonarr/calendar?days=14&limit=120');
+  const resp = await fetchWithTimeout('/api/sonarr/calendar?days=14&limit=120', undefined, signal);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   if (!data.enabled) return [];
@@ -153,10 +153,10 @@ async function fetchUpcomingTv(): Promise<NormalizedMediaItem[]> {
   return out.map(({ _airSort: _drop, ...item }) => item);
 }
 
-async function fetchWatchlistRail(): Promise<NormalizedMediaItem[]> {
+async function fetchWatchlistRail(signal?: AbortSignal): Promise<NormalizedMediaItem[]> {
   // Same /api/watchlist as WatchlistPage/Sheet. API sorts soonest US
   // digital first (missing dates last). Preserve order; pass badge fields.
-  const resp = await fetchWithTimeout('/api/watchlist');
+  const resp = await fetchWithTimeout('/api/watchlist', undefined, signal);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   const raw = (Array.isArray(data) ? data : []) as Record<string, unknown>[];
@@ -179,8 +179,8 @@ async function fetchWatchlistRail(): Promise<NormalizedMediaItem[]> {
   });
 }
 
-async function fetchRecentMovies(): Promise<NormalizedMediaItem[]> {
-  const resp = await fetchWithTimeout('/api/library/recent/cached?type=movie&limit=25');
+async function fetchRecentMovies(signal?: AbortSignal): Promise<NormalizedMediaItem[]> {
+  const resp = await fetchWithTimeout('/api/library/recent/cached?type=movie&limit=25', undefined, signal);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   const items = (data.items ?? data.movies ?? []) as Record<string, unknown>[];
@@ -197,8 +197,8 @@ async function fetchRecentMovies(): Promise<NormalizedMediaItem[]> {
   }));
 }
 
-async function fetchRecentTv(): Promise<NormalizedMediaItem[]> {
-  const resp = await fetchWithTimeout('/api/library/episodes/cached?limit=20');
+async function fetchRecentTv(signal?: AbortSignal): Promise<NormalizedMediaItem[]> {
+  const resp = await fetchWithTimeout('/api/library/episodes/cached?limit=20', undefined, signal);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   // The endpoint returns individual episodes (newest first), so several
@@ -226,8 +226,8 @@ async function fetchRecentTv(): Promise<NormalizedMediaItem[]> {
   return out;
 }
 
-async function fetchRecentlyWatched(): Promise<NormalizedMediaItem[]> {
-  const resp = await fetchWithTimeout('/api/plex/recently_watched?limit=25');
+async function fetchRecentlyWatched(signal?: AbortSignal): Promise<NormalizedMediaItem[]> {
+  const resp = await fetchWithTimeout('/api/plex/recently_watched?limit=25', undefined, signal);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   return ((data.items ?? []) as Record<string, unknown>[]).map((item) => {
@@ -258,7 +258,7 @@ async function fetchRecentlyWatched(): Promise<NormalizedMediaItem[]> {
 // Fetcher registry
 // ---------------------------------------------------------------------------
 
-const HOME_RAIL_FETCHERS: Record<HomeRailId, () => Promise<NormalizedMediaItem[]>> = {
+const HOME_RAIL_FETCHERS: Record<HomeRailId, (signal?: AbortSignal) => Promise<NormalizedMediaItem[]>> = {
   continue_watching: fetchContinueWatching,
   what_youre_missing: fetchWhatYoureMissing,
   upcoming_tv: fetchUpcomingTv,
@@ -285,11 +285,11 @@ export function useHomeRails(): RailEngineResult<NormalizedMediaItem, HomeRailId
   // Enrichment (ownership + watchlist) is part of each rail's fetch, so the
   // badges are already there at the reveal instead of popping in later.
   const fetchers = useMemo(() => {
-    const out = {} as Record<HomeRailId, () => Promise<NormalizedMediaItem[]>>;
+    const out = {} as Record<HomeRailId, (signal: AbortSignal) => Promise<NormalizedMediaItem[]>>;
     for (const def of HOME_RAILS) {
       const base = HOME_RAIL_FETCHERS[def.id];
-      out[def.id] = !def.enrich ? base : async () => {
-        const items = await base();
+      out[def.id] = !def.enrich ? base : async (signal) => {
+        const items = await base(signal);
         if (items.length === 0) return items;
         const enrich = Promise.all([wlRef.current!, enrichOwnership(items)])
           .then(([wlIds, owned]) => enrichWatchlistByType(owned, wlIds).map((it) => ({ ...it, ownershipKnown: true })));
