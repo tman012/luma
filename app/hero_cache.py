@@ -36,7 +36,7 @@ CACHE_JSON = Path('/app/data/hero_content.json')
 class HeroCache:
     """Manages hero section content caching from user's library."""
 
-    def __init__(self, settings_manager=None):
+    def __init__(self, settings_manager=None, cache_dir=None):
         if settings_manager is not None:
             self.tmdb_api_key = settings_manager.get('apis.tmdb.api_key', '')
             self.fanart_api_key = settings_manager.get('apis.fanart.api_key', '')
@@ -49,7 +49,7 @@ class HeroCache:
             self.plex_url = os.environ.get('PLEX_URL', '')
             self.plex_token = os.environ.get('PLEX_TOKEN', '')
             self.excluded_genres = ['Sport', 'Sports']
-        self.cache_dir = CACHE_DIR
+        self.cache_dir = Path(cache_dir) if cache_dir else CACHE_DIR
         self.cache_json = CACHE_JSON
         self.session = requests.Session()
         

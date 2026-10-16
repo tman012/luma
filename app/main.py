@@ -80,7 +80,13 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__,
             static_folder='/app/static')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', '')
+app.config['HERO_CACHE_DIR'] = os.environ.get('HERO_CACHE_DIR', '/app/static/hero_cache')
 CORS(app)
+
+# Configure hero cache directory from app config
+from pathlib import Path as _Path
+hero_cache.cache_dir = _Path(app.config['HERO_CACHE_DIR'])
+hero_cache.cache_dir.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # Cache-Control headers for static files
@@ -15544,6 +15550,13 @@ def spa_weather(filename):
     """Serve weather icon SVGs from the SPA public/weather directory."""
     resp = send_from_directory(os.path.join(app.static_folder, 'spa', 'weather'), filename)
     resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
+    return resp
+
+@app.route('/static/hero_cache/<path:filename>')
+def hero_cache_files(filename):
+    """Serve hero cache images from the configurable hero cache directory."""
+    resp = send_from_directory(app.config['HERO_CACHE_DIR'], filename)
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
     return resp
 
 # =============================================================================

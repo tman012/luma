@@ -1480,24 +1480,24 @@ class TestFlaskEndpoints(unittest.TestCase):
         
         # Save original paths
         original_cache_dir = hero_cache.cache_dir
-        original_static_folder = self.app.static_folder
+        original_hero_cache_config = self.app.config.get('HERO_CACHE_DIR')
         
         def cleanup():
             """Restore original paths and clean up temp directory."""
             hero_cache.cache_dir = original_cache_dir
-            self.app.static_folder = original_static_folder
+            if original_hero_cache_config:
+                self.app.config['HERO_CACHE_DIR'] = original_hero_cache_config
             shutil.rmtree(temp_dir, ignore_errors=True)
         
         self.addCleanup(cleanup)
         
-        # Point both hero_cache.cache_dir and Flask app.static_folder at temp dir
-        # hero_cache writes to cache_dir (which should be .../hero_cache)
-        # Flask serves from static_folder (which should be the parent, so /static/hero_cache/ maps correctly)
+        # Create temp hero_cache directory
         hero_cache_subdir = temp_dir / 'hero_cache'
         hero_cache_subdir.mkdir(parents=True, exist_ok=True)
         
+        # Configure both hero_cache and Flask app to use temp directory
         hero_cache.cache_dir = hero_cache_subdir
-        self.app.static_folder = str(temp_dir)
+        self.app.config['HERO_CACHE_DIR'] = str(hero_cache_subdir)
         
         # Create test image data
         test_image_data = b'\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00test_data'
@@ -1809,6 +1809,7 @@ class TestHeroCacheHealing(unittest.TestCase):
         """Set up test with mock hero cache and Flask test client."""
         from app.hero_cache import hero_cache
         from app.main import app as flask_app
+        import tempfile
         
         self.app = flask_app
         
@@ -1817,35 +1818,34 @@ class TestHeroCacheHealing(unittest.TestCase):
         self.orig_cache_dir = self.hero_cache.cache_dir
         self.orig_cache_json = self.hero_cache.cache_json
         self.orig_cooldown = self.hero_cache._heal_cooldown
+        self.orig_hero_cache_dir_config = self.app.config.get('HERO_CACHE_DIR')
         
-        # Use /app/static/hero_cache directly so Flask can serve the files
-        # Tests create/delete specific test files to avoid conflicts
-        self.temp_cache_dir = Path('/app/static/hero_cache')
+        # Create temp directory for test files (not shared with production)
+        self.temp_dir = Path(tempfile.mkdtemp())
+        self.temp_cache_dir = self.temp_dir / 'hero_cache'
         self.temp_cache_dir.mkdir(parents=True, exist_ok=True)
-        self.temp_json = Path('/tmp/test_hero_cache.json')
+        self.temp_json = self.temp_dir / 'hero.json'
         
-        # Override cache paths
+        # Configure app and hero_cache to use temp directory
+        self.app.config['HERO_CACHE_DIR'] = str(self.temp_cache_dir)
         self.hero_cache.cache_dir = self.temp_cache_dir
         self.hero_cache.cache_json = self.temp_json
         self.hero_cache._heal_cooldown = 1  # 1 second for tests
         self.hero_cache._last_heal_time = 0  # Reset cooldown
-        
-        # Track test files for cleanup
-        self.test_files = []
     
     def tearDown(self):
         """Clean up test files."""
+        import shutil
         self.hero_cache.cache_dir = self.orig_cache_dir
         self.hero_cache.cache_json = self.orig_cache_json
         self.hero_cache._heal_cooldown = self.orig_cooldown
         self.hero_cache._last_heal_time = 0
+        if self.orig_hero_cache_dir_config:
+            self.app.config['HERO_CACHE_DIR'] = self.orig_hero_cache_dir_config
         
-        # Clean up test files
-        if self.temp_json.exists():
-            self.temp_json.unlink()
-        for test_file in self.test_files:
-            if test_file.exists():
-                test_file.unlink()
+        # Clean up temp directory
+        if self.temp_dir.exists():
+            shutil.rmtree(self.temp_dir)
     
     def test_endpoint_returns_build_hero_movies_with_all_fields(self):
         """Test /api/hero/content returns _build_hero_movies with all required fields preserved."""
@@ -1875,11 +1875,8 @@ class TestHeroCacheHealing(unittest.TestCase):
         }]
         
         # Create the cached images
-        test_file1 = self.temp_cache_dir / 'movie_1_clearart.jpg'
-        test_file2 = self.temp_cache_dir / 'movie_1_backdrop.jpg'
-        test_file1.write_text('fake')
-        test_file2.write_text('fake')
-        self.test_files.extend([test_file1, test_file2])
+        (self.temp_cache_dir / 'movie_1_clearart.jpg').write_text('fake')
+        (self.temp_cache_dir / 'movie_1_backdrop.jpg').write_text('fake')
         
         # Save cache
         with open(self.temp_json, 'w') as f:
@@ -1953,9 +1950,7 @@ class TestHeroCacheHealing(unittest.TestCase):
         def mock_download(url, filename):
             download_calls.append((url, filename))
             # Create actual file so it can be served
-            test_file = self.temp_cache_dir / filename
-            test_file.write_text(f'healed-{filename}')
-            self.test_files.append(test_file)
+            (self.temp_cache_dir / filename).write_text(f'healed-{filename}')
             return f"/static/hero_cache/{filename}"
         self.hero_cache.download_image = mock_download
         
@@ -2097,9 +2092,7 @@ class TestHeroCacheHealing(unittest.TestCase):
         
         # Now make heal succeed
         def mock_download_success(url, filename):
-            test_file = self.temp_cache_dir / filename
-            test_file.write_text('healed')
-            self.test_files.append(test_file)
+            (self.temp_cache_dir / filename).write_text('healed')
             return f"/static/hero_cache/{filename}"
         self.hero_cache.download_image = mock_download_success
         
