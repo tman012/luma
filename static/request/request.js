@@ -2,6 +2,9 @@
   'use strict';
   const $ = (s, el = document) => el.querySelector(s);
   const IMG = 'https://image.tmdb.org/t/p/';
+  // URL base ('' or e.g. '/luma'), injected by the server into the page.
+  const BASE = (document.querySelector('meta[name="url-base"]') || {}).content || '';
+  const url = (path) => BASE + path;
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = {
     want: '', // plain blue orb (no clock)
@@ -14,7 +17,7 @@
   };
 
   async function api(path, opts = {}) {
-    const r = await fetch(path, {
+    const r = await fetch(url(path), {
       credentials: 'same-origin',
       headers: opts.body ? { 'Content-Type': 'application/json' } : {},
       ...opts,
@@ -366,8 +369,8 @@
   }
   // ---- Luma-style detail: backdrop, color blur, clearlogo, meta, ratings, people ----
   const RICON = {
-    imdb: '/static/request/icons/imdb-logo.png', rtF: '/static/request/icons/rotten-tomatoes-logo.png', rtR: '/static/request/icons/rotten-tomatoes-splat.png',
-    auG: '/static/request/icons/rotten-tomatoes-popcorn-good.png', auB: '/static/request/icons/rotten-tomatoes-popcorn-bad.png',
+    imdb: url('/static/request/icons/imdb-logo.png'), rtF: url('/static/request/icons/rotten-tomatoes-logo.png'), rtR: url('/static/request/icons/rotten-tomatoes-splat.png'),
+    auG: url('/static/request/icons/rotten-tomatoes-popcorn-good.png'), auB: url('/static/request/icons/rotten-tomatoes-popcorn-bad.png'),
   };
   function metaLine(d) {
     const rt = d.runtime ? (d.runtime >= 60 ? `${Math.floor(d.runtime / 60)}h ${d.runtime % 60}m` : `${d.runtime}m`) : '';
@@ -721,7 +724,7 @@
 
   // ---------------- boot ----------------
   // start the home payload alongside the session check (a returning visitor sees rails right away)
-  fetch('/api/request/home', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d && !home) home = d; }).catch(() => {});
+  fetch(url('/api/request/home'), { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((d) => { if (d && !home) home = d; }).catch(() => {});
   api('/api/request/session').then((s) => (s.unlocked ? showHome() : showGate())).catch(() => showGate());
 })();
 

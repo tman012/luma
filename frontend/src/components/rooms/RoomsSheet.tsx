@@ -6,6 +6,7 @@ import { useInterpolatedProgress } from '@/hooks/useInterpolatedProgress';
 import { FullScreenRemote } from '@/components/rooms/FullScreenRemote';
 import { fetchRooms, type DeviceData } from '@/services/settingsApi';
 import { cn } from '@/utils/cn';
+import { apiUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -104,7 +105,7 @@ function RoomCard({
   const isTV = !!s?.grandparentTitle;
   const plexThumb = s ? (isTV ? (s.grandparentThumb || s.thumb) : s.thumb) : null;
   const poster = plexThumb
-    ? `/api/img/plex?url=${encodeURIComponent(plexThumb)}`
+    ? apiUrl(`/api/img/plex?url=${encodeURIComponent(plexThumb)}`)
     : a?.thumb || null;
   const isPlaying = s ? s.state === 'playing' : a?.state === 'playing';
 
@@ -276,7 +277,7 @@ function RoomCard({
 function UnmatchedSessionCard({ session }: { session: SessionData }) {
   const isTV = !!session.grandparentTitle;
   const plexThumb = isTV ? (session.grandparentThumb || session.thumb) : session.thumb;
-  const poster = plexThumb ? `/api/img/plex?url=${encodeURIComponent(plexThumb)}` : null;
+  const poster = plexThumb ? apiUrl(`/api/img/plex?url=${encodeURIComponent(plexThumb)}`) : null;
   const isPlaying = session.state === 'playing';
   const pct = session.duration > 0 ? (session.viewOffset / session.duration) * 100 : 0;
 

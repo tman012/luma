@@ -16,6 +16,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { tmdbMatchSearch, type TmdbMatchResult, type MediaType } from '@/services/allSourcesApi';
 import { posterUrl } from '@/utils/image';
+import { apiUrl } from '@/urlHelpers';
 
 interface ManualMatchPickerProps {
   /** Initial query — usually the release title. */
@@ -203,7 +204,7 @@ export function ManualMatchPicker({
                     <div style={{ position: 'relative', width: '100%', aspectRatio: '2 / 3', background: 'rgba(255,255,255,0.06)' }}>
                       {poster ? (
                         <img
-                          src={`/api/img/tmdb?path=${encodeURIComponent(r.poster_path ?? '')}&size=w200`}
+                          src={apiUrl(`/api/img/tmdb?path=${encodeURIComponent(r.poster_path ?? '')}&size=w200`)}
                           alt={r.title}
                           loading="lazy"
                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}

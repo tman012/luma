@@ -23,6 +23,8 @@ services:
       - TZ=${TZ:-UTC}
       - FLASK_ENV=production
       - PORT=${LUMA_PORT:-5001}
+      # Empty: the port saved in Settings (default 5001) is used
+      - LUMA_PORT=${LUMA_PORT:-}
       - DATABASE_PATH=/app/data/media.db
       # API keys
       - TMDB_API_KEY=${TMDB_API_KEY:-}
@@ -92,7 +94,8 @@ services:
       - ${LUMA_PLEX_DB_DIR:-./plexdb}:/mnt/plexdb:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:$${PORT:-5001}/health"]
+      test: ["CMD", "python3", "/app/scripts/healthcheck.py"]
       interval: 30s
-      timeout: 3s
+      timeout: 5s
+      start_period: 20s
       retries: 3

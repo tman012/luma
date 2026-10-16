@@ -20,7 +20,6 @@ from typing import List, Dict, Optional, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, redirect, g, make_response, Response
-from flask_cors import CORS
 from dotenv import load_dotenv
 import requests
 
@@ -85,7 +84,6 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__,
             static_folder=os.environ.get('FLASK_STATIC_FOLDER') or '/app/static')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or _INSTALL_SECRETS['flask_secret_key']
-CORS(app, supports_credentials=False)
 
 # Initialize settings (needed for URL base resolution)
 from app.settings_manager import SettingsManager
@@ -147,15 +145,20 @@ def _register_bot_api():
 # ---------------------------------------------------------------------------
 
 # The only session cookie Luma issues or accepts. The pre-2026 "luma_session"
-# cookie is no longer read; any copy a browser still sends is expired.
-AUTH_COOKIE = "luma_auth_session"
-LEGACY_SESSION_COOKIE = "luma_session"
-# These paths don't need auth
+# cookie is no longer read; any copy a browser still sends is expired by
+# _expire_legacy_session_cookie (the one place that deletes it).
+from app.auth_routes import AUTH_COOKIE, LEGACY_SESSION_COOKIE
+# Exact paths reachable without signing in. Request-portal API paths come from
+# portal_guard's explicit allowlist (see _is_auth_exempt).
 _AUTH_EXEMPT = {
-    "/health", "/api/auth/login", "/api/auth/me", "/api/auth/check-user",
-    "/api/auth/register", "/api/auth/unlock",
+    "/health", "/login", "/logout", "/request", "/request/",
+    "/api/auth/login", "/api/auth/me", "/api/auth/register", "/api/auth/unlock",
     "/manifest.json", "/sw.js", "/ca.crt",
 }
+# Static files a signed-out browser needs: the sign-in page, PWA shell and
+# request portal. Everything else under /static/ requires access.
+_AUTH_EXEMPT_STATIC_PREFIXES = ("/static/request/", "/static/images/")
+_AUTH_EXEMPT_STATIC = {"/static/manifest.json", "/static/sw.js"}
 
 # Dev/test switch: when set, no automations, auto-grabs or scheduled jobs are
 # started (read-only caches still run). See docker-compose.dev.yml.
@@ -1207,24 +1210,28 @@ auth_routes.init_app(app)
 def _portal_traffic_guard():
     return portal_guard.guard_portal_traffic(settings)
 
+def _is_auth_exempt(path: str, method: str) -> bool:
+    """True for the paths a signed-out visitor may reach (see _AUTH_EXEMPT)."""
+    if path in _AUTH_EXEMPT or path in _AUTH_EXEMPT_STATIC:
+        return True
+    if path.startswith(_AUTH_EXEMPT_STATIC_PREFIXES):
+        return True
+    if path.startswith('/static/spa/'):
+        return True  # SPA bundle (hashed assets, no data)
+    if path.startswith('/api/request/'):
+        # Requester endpoints check the request-page cookie themselves.
+        return portal_guard.is_portal_allowed(path, method)
+    return False
+
+
 # Authentication guard (must run after portal guard and load_current_user)
 @app.before_request
 def _auth_guard():
     """Redirect to login if authentication is required and user not authenticated."""
-    # Skip for static files, auth routes, and request portal
-    if (request.path.startswith('/static/') or 
-        request.path in _AUTH_EXEMPT or
-        request.path == '/login' or
-        request.path == '/logout' or
-        request.path == '/api/request/unlock' or
-        request.path.startswith('/api/request/') and not request.path.startswith('/api/request/admin/')):
+    if _is_auth_exempt(request.path, request.method):
         return None
-    
-    # Check if auth is required
-    auth_required = settings.get('security.auth_required', 'disabled_local')
-    
-    # If auth is enabled for everyone, or disabled for local but this is remote
-    if auth_required == 'enabled' or (auth_required == 'disabled_local' and not _access.is_local_request(request, settings)):
+
+    if _access.should_authenticate(settings, request):
         # Check if user is authenticated (not implicit)
         if not getattr(g, 'current_user', None) or getattr(g, 'implicit_user', False):
             # For API calls, return 401
@@ -1233,7 +1240,8 @@ def _auth_guard():
             # For HTML pages, redirect to login
             url_base = app.config.get('URL_BASE', '')
             from urllib.parse import quote
-            return redirect(f'{url_base}/login?next={quote(request.full_path)}')
+            target = request.path + (f'?{request.query_string.decode("latin-1")}' if request.query_string else '')
+            return redirect(f'{url_base}/login?next={quote(target)}')
 
 # CSRF protection for API state-changing requests (must run after load_current_user)
 @app.before_request
@@ -1243,12 +1251,22 @@ def _csrf_api_guard():
     Protects against CSRF attacks by validating same-origin on state-changing requests.
     When Origin or Referer is present, validates it even for implicit users.
     """
-    # Only check state-changing methods
-    if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
-        return None
-    
     # Only check API routes
     if not request.path.startswith('/api/'):
+        return None
+
+    # Implicit (no-cookie) LAN access must never be usable from another site,
+    # reads included: a cross-site fetch or a foreign Origin is refused.
+    if getattr(g, 'implicit_user', False):
+        from app.auth_routes import is_same_origin as _same_origin
+        if request.headers.get('Sec-Fetch-Site', '').lower() in ('cross-site', 'same-site'):
+            return jsonify({"error": "Cross-site request refused"}), 403
+        _origin = request.headers.get('Origin')
+        if _origin and not _same_origin(_origin):
+            return jsonify({"error": "CSRF validation failed: invalid Origin"}), 403
+
+    # Only check state-changing methods
+    if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
         return None
     
     # Skip request portal endpoints (they have their own CSRF protection)
@@ -7549,34 +7567,6 @@ def health():
 # Auth API routes
 # =============================================================================
 
-@app.route('/api/auth/check-user', methods=['POST'])
-def auth_check_user():
-    """Check if a user exists by email (preferred) or name (backwards compat).
-    Returns whether the user needs to set a PIN (new user created by admin with no settings).
-    """
-    try:
-        data = request.get_json(force=True) or {}
-        email = (data.get('email') or '').strip()
-        name = (data.get('name') or '').strip()
-        if not email and not name:
-            return jsonify({'error': 'Email or name is required'}), 400
-        # Try email first, then fall back to name
-        user = None
-        if email:
-            user = user_auth.get_user_by_email(email)
-        if not user and name:
-            user = user_auth.get_user_by_name(name)
-        if not user and email:
-            # Also try email as a name (backwards compat)
-            user = user_auth.get_user_by_name(email)
-        if not user:
-            return jsonify({'exists': False})
-        return jsonify({'exists': True, 'name': user['name']})
-    except Exception as e:
-        logger.error(f"auth_check_user error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
 @app.route('/api/auth/login', methods=['POST'])
 def auth_login():
     """Authenticate with email/name + PIN. Sets a session cookie on success."""
@@ -7629,14 +7619,20 @@ def auth_login():
         
         set_auth_cookie(resp, token)
         
-        # Expire legacy cookie
-        resp.delete_cookie(LEGACY_SESSION_COOKIE, path='/')
         
         return resp
 
     except Exception as e:
         logger.error(f"auth_login error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _signup_open() -> bool:
+    """Account requests: always from the local network, from elsewhere only
+    when security.allow_signup is on. Never on the request-portal host."""
+    if _access.is_portal_traffic(request, settings):
+        return False
+    return bool(settings.get('security.allow_signup')) or _access.is_local_request(request, settings)
 
 
 @app.route('/api/auth/register', methods=['POST'])
@@ -7657,6 +7653,8 @@ def auth_register():
 
         if not user_auth.list_users():
             return jsonify({'success': False, 'error': 'Luma is not set up yet', 'needs_start': True}), 409
+        if not _signup_open():
+            return jsonify({'success': False, 'error': 'Sign-up is off'}), 403
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
         if not email:
@@ -7879,9 +7877,7 @@ def auth_logout():
         resp = make_response(jsonify({'success': True}))
         
         
-        # Delete both new and legacy cookies
         clear_auth_cookie(resp)
-        resp.delete_cookie(LEGACY_SESSION_COOKIE, path='/')
         return resp
     except Exception as e:
         logger.error(f"auth_logout error: {e}")
@@ -7897,6 +7893,7 @@ def auth_me():
             'authenticated': False,
             'needs_start': _start_flow.needs_start(),
             'pin_unlock': _start_flow.created_by_start(),
+            'signup': _signup_open(),
         }), 401
     # Include user settings
     user_settings_data = user_auth.get_user_settings(user['id'])
@@ -7965,8 +7962,6 @@ def auth_unlock():
     
     set_auth_cookie(resp, token)
     
-    # Expire legacy cookie
-    resp.delete_cookie(LEGACY_SESSION_COOKIE, path='/')
     
     return resp
 
@@ -7990,9 +7985,14 @@ def security_get():
         'auth_required': auth_required,
         'pin_set': _pin_state(),
         'single_account': _start_flow.created_by_start(),
-        'local_request': _access.is_local_request(request, settings),
+        'local_request': not _access.should_authenticate(settings, request),
         'trusted_proxies': settings.get('security.trusted_proxies') or '',
+        'hostnames': settings.get('security.hostnames') or '',
+        'allow_signup': bool(settings.get('security.allow_signup')),
     })
+
+
+_HOSTNAME_RE = re.compile(r'^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\.?$', re.I)
 
 
 @app.route('/api/security', methods=['PUT'])
@@ -8021,6 +8021,16 @@ def security_put():
         if bad:
             return jsonify({'error': f'Not an IP address or range: {bad[0].strip()}'}), 400
         settings.update({'security': {'trusted_proxies': proxies}})
+
+    if 'hostnames' in body:
+        names = [n for n in re.split(r'[,;\s]+', str(body.get('hostnames') or '')) if n]
+        bad = [n for n in names if not _HOSTNAME_RE.match(n)]
+        if bad:
+            return jsonify({'error': f'Not a host name: {bad[0]}'}), 400
+        settings.update({'security': {'hostnames': ', '.join(n.lower() for n in names)}})
+
+    if 'allow_signup' in body:
+        settings.update({'security': {'allow_signup': body.get('allow_signup') is True}})
     
     user = _get_current_user()
     if not user or not user.get('id'):
@@ -8050,8 +8060,6 @@ def security_put():
         token = user_auth.create_session(user['id'])
         set_auth_cookie(resp, token)
         
-        # Expire legacy cookie
-        resp.delete_cookie(LEGACY_SESSION_COOKIE, path='/')
     
     return resp
 

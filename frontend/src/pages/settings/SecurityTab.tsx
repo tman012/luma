@@ -1,6 +1,7 @@
 /**
  * SecurityTab — when Luma asks for a PIN (Sonarr/Radarr v4 style
- * "Authentication Required" choice), the PIN itself, and trusted proxies.
+ * "Authentication Required" choice), the PIN itself, trusted proxies, host
+ * names and account requests.
  */
 import { useEffect, useState } from 'react';
 import { ACCESS_CHOICES, type AuthRequired } from '@/pages/StartPage';
@@ -15,6 +16,8 @@ interface SecurityState {
   single_account: boolean;
   local_request: boolean;
   trusted_proxies: string;
+  hostnames: string;
+  allow_signup: boolean;
 }
 
 const digits = (v: string) => v.replace(/\D/g, '').slice(0, 4);
@@ -198,6 +201,8 @@ export function SecurityTab() {
   const [pin, setPin] = useState('');
   const [confirm, setConfirm] = useState('');
   const [proxies, setProxies] = useState('');
+  const [hostnames, setHostnames] = useState('');
+  const [signup, setSignup] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -208,13 +213,16 @@ export function SecurityTab() {
     setState(data);
     setMode(data.auth_required);
     setProxies(data.trusted_proxies || '');
+    setHostnames(data.hostnames || '');
+    setSignup(!!data.allow_signup);
   };
   useEffect(() => { load(); }, []);
 
   if (!state) return null;
 
   const pinNeeded = !state.pin_set;
-  const dirty = mode !== state.auth_required || pin !== '' || proxies !== (state.trusted_proxies || '');
+  const dirty = mode !== state.auth_required || pin !== '' || proxies !== (state.trusted_proxies || '')
+    || hostnames !== (state.hostnames || '') || signup !== !!state.allow_signup;
 
   const save = async () => {
     setMsg(null);
@@ -224,7 +232,9 @@ export function SecurityTab() {
     }
     setBusy(true);
     try {
-      const body: Record<string, string> = { auth_required: mode, trusted_proxies: proxies };
+      const body: Record<string, string | boolean> = {
+        auth_required: mode, trusted_proxies: proxies, hostnames, allow_signup: signup,
+      };
       if (pin) { body.pin = pin; body.confirm = confirm; }
       const res = await apiFetch('/api/security', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -302,6 +312,32 @@ export function SecurityTab() {
             className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
           />
         </label>
+
+        <label className="block space-y-1.5">
+          <span className="block text-[12px] font-medium text-white/50">Host names</span>
+          <input
+            type="text" value={hostnames} onChange={e => setHostnames(e.target.value)} placeholder="Names"
+            spellCheck={false} autoCapitalize="off"
+            className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+          />
+        </label>
+
+        <div className="flex items-center justify-between gap-3 max-w-md">
+          <span className="text-[14px] font-medium text-white/70">Allow sign-up from anywhere</span>
+          <button
+            type="button" role="switch" aria-checked={signup} aria-label="Allow sign-up from anywhere"
+            onClick={() => { setSignup(v => !v); setMsg(null); }}
+            className={cn(
+              'relative h-[28px] w-[50px] shrink-0 rounded-full transition-colors duration-200',
+              signup ? 'bg-emerald-500' : 'bg-white/15',
+            )}
+          >
+            <span className={cn(
+              'absolute top-[4px] left-[4px] h-[20px] w-[20px] rounded-full bg-white shadow-sm transition-transform duration-200',
+              signup && 'translate-x-[22px]',
+            )} />
+          </button>
+        </div>
 
         <div className="flex items-center gap-3">
           <button

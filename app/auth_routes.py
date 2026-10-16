@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 
 bp = Blueprint('auth', __name__)
 
-# Session cookie name
+# Session cookie name, and the retired cookie that is only ever expired
 AUTH_COOKIE = 'luma_auth_session'
+LEGACY_SESSION_COOKIE = 'luma_session'
 
 
 def _get_client_ip(request, settings) -> str:
@@ -23,29 +24,30 @@ def _get_client_ip(request, settings) -> str:
     return ip if ip else request.remote_addr or '0.0.0.0'
 
 
-def _is_safe_redirect(url: str, url_base: str) -> bool:
-    """Check if a redirect URL is safe (no open redirect).
-    
-    Only allows paths that:
-    - Start with exactly one '/' (not '//' or '/\')
-    - Don't contain a scheme (http:, https:, etc.)
-    - Will be prefixed with url_base
+def _is_safe_redirect(url: str, url_base: str = '') -> bool:
+    """True only for a same-site path such as /movies?x=1.
+
+    Refused: empty values, anything not starting with exactly one '/', any
+    backslash or character <= 0x20 (browsers strip tab/newline, so '/\t/evil.com'
+    becomes '//evil.com'), DEL, and anything urlsplit reads as having a scheme
+    or host. The path is checked again after percent-decoding.
     """
-    if not url:
+    from urllib.parse import unquote, urlsplit
+
+    if not url or not isinstance(url, str):
         return False
-    
-    # Reject anything with a scheme
-    if '://' in url or url.startswith('//') or url.startswith('/\\'):
-        return False
-    
-    # Must start with single /
-    if not url.startswith('/'):
-        return False
-    
-    # Check for scheme-like patterns
-    if ':' in url.split('/')[0]:
-        return False
-    
+    decoded_path = unquote(url.split('?', 1)[0].split('#', 1)[0])
+    for candidate in (url, decoded_path):
+        if not candidate.startswith('/') or candidate.startswith('//'):
+            return False
+        if '\\' in candidate or any(ord(ch) <= 0x20 or ord(ch) == 0x7f for ch in candidate):
+            return False
+        try:
+            parts = urlsplit(candidate)
+        except ValueError:
+            return False
+        if parts.scheme or parts.netloc:
+            return False
     return True
 
 
@@ -60,7 +62,7 @@ def _safe_redirect_url(next_param: str, default: str = '/') -> str:
         return url_base + default if url_base else default
     
     # Apply URL base prefix if not already there
-    if url_base and not next_param.startswith(url_base):
+    if url_base and next_param != url_base and not next_param.startswith(url_base + '/'):
         return url_base + next_param
     
     return next_param
@@ -248,7 +250,7 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
             </div>
             
             <div class="remember-me">
-                <input type="checkbox" id="remember" name="remember">
+                <input type="checkbox" id="remember" name="remember" checked>
                 <label for="remember">Remember me for 30 days</label>
             </div>
             
@@ -382,7 +384,6 @@ def logout():
     
     response = make_response(redirect(login_url))
     response.delete_cookie(AUTH_COOKIE, path=url_base)
-    response.delete_cookie('luma_session', path='/')
     
     return response
 

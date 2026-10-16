@@ -88,7 +88,7 @@ def test_forwarded_proto_trusted_only_from_trusted_proxy(test_app, client):
     (cookie,) = [c for c in r.headers.getlist('Set-Cookie') if c.startswith('luma_auth_session=')]
     assert 'Secure' not in cookie
 
-    app.main.settings.update({'security': {'trusted_proxies': '10.0.0.1'}})
+    app.main.settings.update({'security': {'trusted_proxies': '10.0.0.1', 'hostnames': 'luma.example.com'}})
     c2 = test_app.test_client()
     r = _form_login(c2, headers=hdrs, environ_base={'REMOTE_ADDR': '10.0.0.1'})
     (cookie,) = [c for c in r.headers.getlist('Set-Cookie') if c.startswith('luma_auth_session=')]

@@ -4,6 +4,7 @@ import type { Room } from '@/hooks/useNotifications';
 import { useInterpolatedProgress } from '@/hooks/useInterpolatedProgress';
 import { cn } from '@/utils/cn';
 import { apiFetch } from '../../apiClient';
+import { apiUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -375,7 +376,7 @@ function NowPlayingBackdrop({ room }: { room: Room }) {
   // Prefer backdrop (art), fall back to thumb
   const backdropPath = s?.art || null;
   const backdrop = backdropPath
-    ? `/api/img/plex?url=${encodeURIComponent(backdropPath)}`
+    ? apiUrl(`/api/img/plex?url=${encodeURIComponent(backdropPath)}`)
     : a?.art || a?.thumb || null;
   const isPlaying = s ? s.state === 'playing' : a?.state === 'playing';
 

@@ -17,6 +17,7 @@ in Activity with the requester's name.
 """
 from __future__ import annotations
 
+import html
 import ipaddress
 import logging
 import re
@@ -27,7 +28,7 @@ import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-from flask import Blueprint, current_app, g, jsonify, make_response, redirect, request, send_from_directory
+from flask import Blueprint, current_app, g, jsonify, make_response, redirect, request
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -158,7 +159,7 @@ _PUBLIC_PREFIXES = ('/api/request/', '/static/request/')
 _PUBLIC_EXACT = {'/request', '/request/', '/health', '/static/images/luma_text.png',
                  '/static/images/apple-touch-icon.png', '/static/images/icon-192.png', '/favicon.ico',
                  # so the owner can still reach the normal sign-in from a device that has the cookie
-                 '/login', '/api/auth/login', '/api/auth/me', '/api/auth/check-user', '/api/auth/logout',
+                 '/login', '/api/auth/login', '/api/auth/me', '/api/auth/logout',
                  '/manifest.json', '/sw.js',
                  # rating icons used by the request sheet
                  '/static/images/imdb-logo.png', '/static/images/rotten-tomatoes-logo.png',
@@ -182,7 +183,7 @@ def _requester_guard():
         return None  # anonymous: unchanged behavior (see report: lock_remote_anonymous)
     if path.startswith('/api/') or path.startswith('/ws') or request.method != 'GET':
         return jsonify({'error': 'forbidden'}), 403
-    return redirect('/request')
+    return redirect((current_app.config.get('URL_BASE') or '') + '/request')
 
 
 def _need_requester():
@@ -552,10 +553,25 @@ def _log_request(kind: str, tmdb_id: int, title: str, year, scope: str, action: 
 # Routes: page + gate
 # ---------------------------------------------------------------------------
 
+def _cookie_path() -> str:
+    """The request-page cookie is scoped to the URL base, like the sign-in cookie."""
+    return current_app.config.get('URL_BASE') or '/'
+
+
 @bp.route('/request')
 @bp.route('/request/')
 def request_page():
-    resp = make_response(send_from_directory(os.path.join(current_app.static_folder, 'request'), 'index.html'))
+    # Root-relative asset URLs in the page get the URL base, and the base is
+    # published to request.js in a meta tag.
+    base = current_app.config.get('URL_BASE') or ''
+    with open(os.path.join(current_app.static_folder, 'request', 'index.html'), encoding='utf-8') as fh:
+        page = fh.read()
+    if base:
+        page = page.replace('="/static/', f'="{html.escape(base)}/static/')
+    page = page.replace('<meta charset="utf-8">',
+                        f'<meta charset="utf-8">\n<meta name="url-base" content="{html.escape(base)}">', 1)
+    resp = make_response(page)
+    resp.headers['Content-Type'] = 'text/html; charset=utf-8'
     resp.headers['Cache-Control'] = 'no-cache'
     resp.headers['X-Frame-Options'] = 'DENY'
     resp.headers['Referrer-Policy'] = 'same-origin'
@@ -589,7 +605,7 @@ def unlock():
     tok = _serializer().dumps({'n': name, 'v': int(cfg('password_version', 1) or 1), 'i': uuid.uuid4().hex[:10]})
     resp = jsonify({'ok': True, 'name': name})
     resp.set_cookie(COOKIE, tok, max_age=MAX_AGE, httponly=True, samesite='Lax',
-                    secure=request.headers.get('X-Forwarded-Proto', request.scheme) == 'https', path='/')
+                    secure=request.is_secure, path=_cookie_path())
     logger.info('[request] unlocked from %s', ip)
     return resp
 
@@ -597,7 +613,7 @@ def unlock():
 @bp.route('/api/request/signout', methods=['POST'])
 def signout():
     resp = jsonify({'ok': True})
-    resp.delete_cookie(COOKIE, path='/')
+    resp.delete_cookie(COOKIE, path=_cookie_path())
     return resp
 
 

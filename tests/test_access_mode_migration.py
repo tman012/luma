@@ -54,8 +54,8 @@ class TestAccessModeMigration:
         assert result is True
         assert data['security']['auth_required'] == 'disabled_local'
     
-    def test_idempotent_migration(self):
-        """Migration is idempotent - doesn't re-run if auth_required exists."""
+    def test_existing_auth_required_kept_and_access_mode_deleted(self):
+        """A saved auth_required wins; the retired access_mode key is deleted."""
         from app.settings_manager import _migrate_access_mode_to_auth_required
         
         data = {
@@ -67,10 +67,10 @@ class TestAccessModeMigration:
         
         result = _migrate_access_mode_to_auth_required(data)
         
-        # Should not migrate
-        assert result is False
-        # Should keep existing auth_required
-        assert data['security']['auth_required'] == 'disabled_local'
+        assert result is True
+        assert data['security'] == {'auth_required': 'disabled_local'}
+        # Second run: nothing left to do
+        assert _migrate_access_mode_to_auth_required(data) is False
     
     def test_no_migration_when_no_access_mode(self):
         """No migration when access_mode doesn't exist."""
@@ -100,8 +100,8 @@ class TestAccessModeMigration:
         assert result is True
         assert data['security']['auth_required'] == 'enabled'
     
-    def test_empty_string_mode_no_migration(self):
-        """Empty string access_mode doesn't trigger migration."""
+    def test_empty_string_mode_deleted_without_auth_required(self):
+        """An empty access_mode (the old schema default) is deleted, nothing else saved."""
         from app.settings_manager import _migrate_access_mode_to_auth_required
         
         data = {
@@ -112,8 +112,8 @@ class TestAccessModeMigration:
         
         result = _migrate_access_mode_to_auth_required(data)
         
-        assert result is False
-        assert 'auth_required' not in data['security']
+        assert result is True
+        assert data['security'] == {}
     
     def test_migration_in_settings_manager(self):
         """Migration runs automatically when loading settings."""
@@ -140,6 +140,10 @@ class TestAccessModeMigration:
             settings2 = SettingsManager(temp_path)
             auth_required2 = settings2.get('security.auth_required')
             assert auth_required2 == 'disabled_local'
+            # The retired key is gone from memory and from the saved file
+            assert settings2.get('security.access_mode') is None
+            with open(temp_path) as fh:
+                assert 'access_mode' not in json.load(fh).get('security', {})
         finally:
             os.unlink(temp_path)
     

@@ -5,6 +5,7 @@ import { useModalHost, type ModalSource } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { cn } from '@/utils/cn';
 import { apiFetch } from '../../apiClient';
+import { apiUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -152,7 +153,7 @@ function sortTorrents(items: LatestTorrent[], sort: SortMode): LatestTorrent[] {
 function posterUrl(item: LatestTorrent): string | null {
   if (!item.poster_path) return null;
   // TMDb relative path → through our /api/img/tmdb proxy
-  return `/api/img/tmdb?path=${encodeURIComponent(item.poster_path)}&size=w185`;
+  return apiUrl(`/api/img/tmdb?path=${encodeURIComponent(item.poster_path)}&size=w185`);
 }
 
 /**

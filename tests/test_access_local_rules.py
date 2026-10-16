@@ -16,7 +16,8 @@ class _S:
 
 
 def _req(peer, **headers):
-    return SimpleNamespace(remote_addr=peer, headers={k.replace('_', '-'): v for k, v in headers.items()})
+    hdrs = {k.replace('_', '-'): v for k, v in headers.items()}
+    return SimpleNamespace(remote_addr=peer, headers=hdrs, host=hdrs.get('Host', peer))
 
 
 @pytest.mark.parametrize('peer,headers,proxies,local', [
@@ -79,8 +80,10 @@ def test_no_home_wan_logic_left():
     ('open', '192.168.1.20', True),  # legacy/unknown values fail closed
 ])
 def test_should_authenticate(auth_required, peer, expected):
-    s = _S(auth_required=auth_required) if auth_required else _S()
-    assert access.should_authenticate(s, _req(peer, Host='luma.lan')) is expected
+    kv = {'hostnames': 'luma.lan'}
+    if auth_required:
+        kv['auth_required'] = auth_required
+    assert access.should_authenticate(_S(**kv), _req(peer, Host='luma.lan')) is expected
 
 
 def test_portal_hostname_never_implicit():

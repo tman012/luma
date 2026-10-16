@@ -8,6 +8,10 @@
 //   /static/* (other)       → NetworkFirst (JS/CSS may change without hash)
 //   /api/* (data)           → Network only (never cached)
 //
+// All paths above are relative to the URL base. The base is the service
+// worker's own scope (it is registered at <base>/sw.js), so a Luma served
+// under /luma caches /luma/, matches /luma/api/... and so on.
+//
 // Key design choice: /static/ uses NetworkFirst, NOT StaleWhileRevalidate.
 // SWR serves stale immediately and updates in background — but Android WebView
 // (Fully Kiosk) may kill background fetches, so the user gets stuck on old
@@ -17,14 +21,35 @@
 
 // BUILD_ID is replaced at build time or bumped manually per deploy.
 // When sw.js byte-content changes, the browser installs a new SW.
-const CACHE_VERSION = 'media-kiosk-v101';
+const CACHE_VERSION = 'media-kiosk-v102';
 
 // Separate cache for large immutable assets — purged when version bumps
 const IMMUTABLE_CACHE = 'media-immutable-v24';
 
+// URL base without a trailing slash: '' at the root, '/luma' under /luma.
+const BASE = new URL(self.registration.scope).pathname.replace(/\/+$/, '');
+
+// An app path ('/api/x') as a URL path under the base ('/luma/api/x').
+function at(path) {
+  return BASE + path;
+}
+
+// A same-origin URL path as an app path, or null when it is outside the base.
+function appPath(pathname) {
+  if (!BASE) return pathname;
+  if (pathname === BASE) return '/';
+  return pathname.startsWith(BASE + '/') ? pathname.slice(BASE.length) : null;
+}
+
+// A link from a notification as a full URL path (adds the base unless present).
+function linkPath(url) {
+  if (!url.startsWith('/') || url.startsWith('//')) return at('/');
+  return appPath(url) !== null && BASE ? url : at(url);
+}
+
 const SHELL_URLS = [
-  '/',
-  '/static/manifest.json',
+  at('/'),
+  at('/static/manifest.json'),
 ];
 
 // ---------------------------------------------------------------------------
@@ -95,15 +120,18 @@ self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
 
   const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
+  const path = appPath(url.pathname);
+  if (path === null) return; // outside Luma's URL base
 
   // --- API data routes — network only (never cache) ---
-  if (url.pathname.startsWith('/api/') && !url.pathname.startsWith('/api/img/')) {
+  if (path.startsWith('/api/') && !path.startsWith('/api/img/')) {
     return; // Let browser handle normally
   }
 
   // --- Hashed assets (/assets/index-ABC123.js) — CacheFirst (immutable) ---
   // These have content hashes in filenames; a new build = new URL = cache miss.
-  if (url.pathname.startsWith('/assets/')) {
+  if (path.startsWith('/assets/')) {
     event.respondWith(
       caches.match(event.request).then(cached => {
         if (cached) return cached;
@@ -121,7 +149,7 @@ self.addEventListener('fetch', event => {
 
   // --- Image proxy routes (/api/img/*) — CacheFirst ---
   // URL includes the full Plex/TMDb path, so same URL = same image.
-  if (url.pathname.startsWith('/api/img/')) {
+  if (path.startsWith('/api/img/')) {
     event.respondWith(
       caches.match(event.request).then(cached => {
         if (cached) return cached;
@@ -142,9 +170,9 @@ self.addEventListener('fetch', event => {
     event.respondWith(
       fetch(event.request).then(resp => {
         const clone = resp.clone();
-        caches.open(CACHE_VERSION).then(c => c.put('/', clone));
+        caches.open(CACHE_VERSION).then(c => c.put(at('/'), clone));
         return resp;
-      }).catch(() => caches.match('/'))
+      }).catch(() => caches.match(at('/')))
     );
     return;
   }
@@ -153,7 +181,7 @@ self.addEventListener('fetch', event => {
   // Rating icons, logos etc. change without filename hash.
   // MUST go to network first so deploys are picked up immediately.
   // Cache is offline fallback only.
-  if (url.pathname.startsWith('/static/images/')) {
+  if (path.startsWith('/static/images/')) {
     event.respondWith(
       fetch(event.request).then(resp => {
         if (resp.ok) {
@@ -168,7 +196,7 @@ self.addEventListener('fetch', event => {
 
   // --- /static/* (other: JS, CSS, manifest) — NetworkFirst ---
   // Unhashed static files may change between deploys.
-  if (url.pathname.startsWith('/static/')) {
+  if (path.startsWith('/static/')) {
     event.respondWith(
       fetch(event.request).then(resp => {
         if (resp.ok) {
@@ -191,8 +219,8 @@ self.addEventListener('push', event => {
     const title = data.title || 'New media available';
     const options = {
       body: data.body || '',
-      icon: data.icon || '/static/images/ic_launcher_round.png',
-      badge: data.badge || '/static/images/ic_launcher_round.png',
+      icon: data.icon || at('/static/images/ic_launcher_round.png'),
+      badge: data.badge || at('/static/images/ic_launcher_round.png'),
       tag: data.tag || 'default',
       renotify: true,
       // tmdb_id rides along so an action press can be resolved by the worker
@@ -260,7 +288,7 @@ self.addEventListener('notificationclick', event => {
     const verdict = action.slice('verdict:'.length);
     const tmdbId = event.notification.data && event.notification.data.tmdb_id;
     event.waitUntil(
-      fetch('/api/taste/rate', {
+      fetch(at('/api/taste/rate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -275,7 +303,7 @@ self.addEventListener('notificationclick', event => {
               body: n
                 ? `${n} similar film${n === 1 ? '' : 's'} you don't own — tap to review.`
                 : 'Noted. Nothing will be added.',
-              icon: '/static/images/ic_launcher_round.png',
+              icon: at('/static/images/ic_launcher_round.png'),
               tag: `taste-done-${tmdbId}`,
               data: { url: n ? `/rate/${tmdbId}` : '/' },
             },
@@ -287,7 +315,7 @@ self.addEventListener('notificationclick', event => {
   }
 
   const relativeUrl = (event.notification.data && event.notification.data.url) || '/';
-  const absoluteUrl = new URL(relativeUrl, self.location.origin).href;
+  const absoluteUrl = new URL(linkPath(relativeUrl), self.location.origin).href;
 
   event.waitUntil(
     storeDeepLink(relativeUrl)

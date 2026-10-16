@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Entrypoint script for Luma
-# Connects to configured ADB devices from settings, then starts Flask.
+# Connects to configured ADB devices from settings, then starts gunicorn.
 
 echo "================================================"
 echo "Luma - Starting"
@@ -70,5 +70,5 @@ echo "================================================"
 echo "Starting Luma application..."
 echo "================================================"
 
-# Start the application with gunicorn (production) or Flask dev server (dev mode)
+# Start the application with gunicorn (see gunicorn.conf.py)
 exec gunicorn -c gunicorn.conf.py app.main:app

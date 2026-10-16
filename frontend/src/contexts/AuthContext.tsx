@@ -55,6 +55,8 @@ interface AuthState {
   /** Signed in implicitly because access is open (no sign-in needed). */
   implicit: boolean;
   authRequired: 'disabled_local' | 'enabled' | null;
+  /** Account requests are accepted from this device. */
+  signupOpen: boolean;
 }
 
 interface AuthContextValue extends AuthState {
@@ -66,7 +68,7 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const NO_START = { needsStart: false, startInProgress: false, pinUnlock: false, implicit: false, authRequired: null } as const;
+const NO_START = { needsStart: false, startInProgress: false, pinUnlock: false, implicit: false, authRequired: null, signupOpen: false } as const;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
@@ -96,12 +98,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           pinUnlock: false,
           implicit: !!data.implicit,
           authRequired: data.auth_required || null,
+          signupOpen: false,
         });
         return;
       }
       setState({
         user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null,
-        ...NO_START, needsStart: !!data.needs_start, pinUnlock: !!data.pin_unlock,
+        ...NO_START, needsStart: !!data.needs_start, pinUnlock: !!data.pin_unlock, signupOpen: !!data.signup,
       });
       return;
     } catch {

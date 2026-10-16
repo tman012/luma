@@ -15,13 +15,14 @@ class TestFreshInstallDefaults:
             'security': {}
         })
         
+        import app.user_auth as user_auth
+        user_auth.create_user('owner', '1234', is_admin=True)
         client = test_app.test_client()
         
-        # LAN request should NOT get 401 (auth guard should pass)
-        # Use '/' which redirects but doesn't return 401
-        resp = client.get('/', environ_base={'REMOTE_ADDR': '192.168.1.100'}, follow_redirects=False)
-        assert resp.status_code != 401, f"LAN should not get 401 with default auth, got {resp.status_code}"
-        assert resp.status_code in (200, 302, 500), f"LAN should get 200/302/500, got {resp.status_code}"
+        # LAN request: implicit owner, no sign-in
+        resp = client.get('/api/auth/me', environ_base={'REMOTE_ADDR': '192.168.1.100'})
+        assert resp.status_code == 200, f"LAN should be signed in implicitly, got {resp.status_code}"
+        assert resp.get_json()['implicit'] is True
         
         # Remote request to API should get 401 (authentication required)
         resp = client.get('/api/library/movies', environ_base={'REMOTE_ADDR': '203.0.113.100'})

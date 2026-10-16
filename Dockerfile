@@ -38,6 +38,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 COPY static/ ./static/
 COPY entrypoint.sh ./entrypoint.sh
+COPY gunicorn.conf.py ./gunicorn.conf.py
+COPY scripts/healthcheck.py ./scripts/healthcheck.py
 
 # Copy built frontend into static/spa/
 COPY --from=frontend-build /frontend/dist/ ./static/spa/
@@ -51,9 +53,9 @@ RUN chmod +x /app/entrypoint.sh
 # Expose port
 EXPOSE 5001
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:5001/health || exit 1
+# Health check (port, URL base and HTTPS follow the saved settings)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python3 /app/scripts/healthcheck.py
 
 # Run the application via entrypoint (connects ADB first)
 CMD ["/app/entrypoint.sh"]

@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -24,8 +27,8 @@ jobs:
         working-directory: frontend
         run: npm run build
 
-      - name: Check for hard-coded URLs
-        run: bash frontend/check-hardcoded-urls.sh
+      - name: Check the SPA and the request page for hard-coded URLs
+        run: bash frontend/check-hardcoded-urls.sh frontend/dist/assets frontend/src static/request
 
       - name: Place the built SPA where Flask serves it
         run: |

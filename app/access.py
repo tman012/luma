@@ -11,6 +11,12 @@ security.trusted_proxies, the nearest untrusted X-Forwarded-For hop (or the
 header named by the optional security.trusted_proxy_header, off by default).
 No other header (CF-Connecting-IP, X-Real-IP from untrusted peers, ...) and no
 "home WAN" address is ever treated as local.
+
+Implicit owner access also needs a known Host: an IP literal, localhost, or a
+name listed in security.hostnames. A page on any other name (for example a
+DNS-rebinding domain that resolves to a LAN address) gets no implicit access.
+X-Forwarded-Host is only honored from a trusted proxy and only when it names
+such a known host.
 """
 
 import ipaddress
@@ -112,6 +118,40 @@ def is_local_request(request, settings=None) -> bool:
     return bool(ip and _is_private(ip))
 
 
+def configured_hostnames(settings) -> set:
+    """Lower-cased names from security.hostnames (comma or space separated)."""
+    raw = (settings.get('security.hostnames') or '') if settings is not None else ''
+    names = set()
+    for part in str(raw).replace(';', ',').replace(' ', ',').split(','):
+        name = split_host(part.strip())
+        if name:
+            names.add(name)
+    return names
+
+
+def split_host(host: str) -> str:
+    """The lower-cased host name of a Host header value, without port or brackets."""
+    host = (host or '').strip().lower()
+    if not host:
+        return ''
+    if host.startswith('['):
+        end = host.find(']')
+        return host[1:end] if end > 0 else ''
+    if host.count(':') == 1:
+        host = host.split(':', 1)[0]
+    return host.rstrip('.')
+
+
+def is_known_host(host: str, settings=None) -> bool:
+    """True for an IP literal, localhost, or a name in security.hostnames."""
+    name = split_host(host)
+    if not name:
+        return False
+    if _addr(name) is not None or name == 'localhost':
+        return True
+    return name in configured_hostnames(settings)
+
+
 def is_portal_traffic(request, settings) -> bool:
     """Detect if request is portal traffic (via dedicated hostname only).
     
@@ -151,8 +191,9 @@ def should_authenticate(settings, request) -> bool:
         # Everyone must authenticate
         return True
     elif auth_req == 'disabled_local':
-        # Local gets implicit owner, remote must authenticate
-        return not is_local_request(request, settings)
+        # Local gets implicit owner on a known Host; everyone else signs in
+        return not (is_local_request(request, settings)
+                    and is_known_host(request.host, settings))
     else:
         # Unknown value, default to safe (require auth)
         return True
@@ -169,7 +210,8 @@ def owner(user_auth) -> Optional[dict]:
 class TrustedProxyMiddleware:
     """WSGI middleware: honor X-Forwarded-Proto / X-Forwarded-Host only from
     trusted proxies, so request.scheme, request.is_secure and request.host
-    can't be spoofed by a direct client. REMOTE_ADDR is not changed.
+    can't be spoofed by a direct client. X-Forwarded-Host is further limited
+    to known hosts (is_known_host). REMOTE_ADDR is not changed.
     """
 
     def __init__(self, wsgi_app, get_settings):
@@ -178,14 +220,15 @@ class TrustedProxyMiddleware:
 
     def __call__(self, environ, start_response):
         try:
-            nets = trusted_proxies(self._get_settings())
+            settings = self._get_settings()
+            nets = trusted_proxies(settings)
         except Exception:
-            nets = []
+            settings, nets = None, []
         if nets and _in(nets, environ.get('REMOTE_ADDR', '')):
             proto = environ.get('HTTP_X_FORWARDED_PROTO', '').split(',')[-1].strip().lower()
             if proto in ('http', 'https'):
                 environ['wsgi.url_scheme'] = proto
             host = environ.get('HTTP_X_FORWARDED_HOST', '').split(',')[-1].strip()
-            if host:
+            if host and is_known_host(host, settings):
                 environ['HTTP_HOST'] = host
         return self.wsgi_app(environ, start_response)

@@ -40,6 +40,18 @@ export function assetUrl(path: string): string {
   return `${base}${cleanPath}`;
 }
 
+/**
+ * Prefix a root-relative URL (such as an /api/img/... URL sent by the server)
+ * with the URL base. Absolute, protocol-relative, data: and already-prefixed
+ * URLs are returned unchanged.
+ */
+export function withBase(url: string): string {
+  const base = getUrlBase();
+  if (!base || !url.startsWith('/') || url.startsWith('//')) return url;
+  if (url === base || url.startsWith(`${base}/`)) return url;
+  return `${base}${url}`;
+}
+
 // Type declaration for the runtime global
 declare global {
   interface Window {

@@ -11,6 +11,7 @@ import { posterUrl } from '@/utils/image';
 import { useFocusable } from '@/hooks/useFocusable';
 import { FocusZone } from '@/components/tv/FocusZone';
 import { apiFetch } from '../../apiClient';
+import { apiUrl } from '@/urlHelpers';
 
 const NAV_ITEMS = [
   { label: 'Explore', to: '/explore' },
@@ -320,7 +321,7 @@ function RoomRow({
   const isTV = !!s?.grandparentTitle;
   const plexThumb = s ? (isTV ? (s.grandparentThumb || s.thumb) : s.thumb) : null;
   const poster = plexThumb
-    ? `/api/img/plex?url=${encodeURIComponent(plexThumb)}`
+    ? apiUrl(`/api/img/plex?url=${encodeURIComponent(plexThumb)}`)
     : a?.thumb || null;
   const isPlaying = s ? s.state === 'playing' : a?.state === 'playing';
   const send = (cmd: string) => sendRoomCommand(room.roomId, cmd, a?.deviceId);

@@ -238,8 +238,8 @@ class StartFlowTest(unittest.TestCase):
         self.ua.create_user('owner', '1234', is_admin=True)
         s = _Settings()
         # With no auth_required set, defaults to disabled_local
-        lan = SimpleNamespace(remote_addr='10.20.0.5', headers={})
-        wan = SimpleNamespace(remote_addr='203.0.113.9', headers={})
+        lan = SimpleNamespace(remote_addr='10.20.0.5', headers={}, host='10.20.0.5:5001')
+        wan = SimpleNamespace(remote_addr='203.0.113.9', headers={}, host='luma.example.com')
         self.assertFalse(self.access.should_authenticate(s, lan))  # LAN doesn't sign in
         self.assertTrue(self.access.should_authenticate(s, wan))
 

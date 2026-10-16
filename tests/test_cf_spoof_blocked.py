@@ -46,8 +46,8 @@ class TestCFConnectingSpoofBlocked:
         # Presence of CF header marks request as relayed, so client_ip returns None
         assert is_local is False
     
-    def test_cf_connecting_ip_trusted_from_trusted_proxy(self, app_ctx, mock_settings):
-        """CF-Connecting-IP is honored when peer is in trusted_proxies."""
+    def test_xff_trusted_from_trusted_proxy(self, app_ctx, mock_settings):
+        """X-Forwarded-For is honored when the peer is in trusted_proxies."""
         from app import access
         
         # Configure trusted proxies (loopback where CF connector runs)
@@ -57,7 +57,7 @@ class TestCFConnectingSpoofBlocked:
             return default
         mock_settings.get.side_effect = mock_get
         
-        # Request via CF tunnel from trusted proxy
+        # Request relayed by a trusted proxy
         with app_ctx.test_request_context('/', headers={
             'X-Forwarded-For': '192.168.1.100',  # Private IP
         }, environ_base={'REMOTE_ADDR': '127.0.0.1'}):  # Trusted proxy

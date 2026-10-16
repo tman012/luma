@@ -7,31 +7,30 @@ from pathlib import Path
 import shutil
 
 
+# Paths are set at import time, before any test module imports app.main or
+# app.hero_cache (both read them at import), so a bare `pytest` never touches
+# the container-only /app paths.
+_REPO_ROOT = Path(__file__).resolve().parent
+_TEMP_CACHE = tempfile.mkdtemp(prefix='luma_test_cache_')
+_TEMP_DATA = tempfile.mkdtemp(prefix='luma_test_data_')
+_TEST_ENV = {
+    'LUMA_CACHE_DIR': _TEMP_CACHE,
+    'HERO_CACHE_DIR': os.path.join(_TEMP_CACHE, 'hero'),
+    'DATABASE_PATH': os.path.join(_TEMP_DATA, 'media.db'),
+    'SETTINGS_PATH': os.path.join(_TEMP_DATA, 'settings.json'),
+    'LUMA_SKIP_BACKGROUND_THREADS': '1',
+    'BASE_DIR': _TEMP_DATA,
+}
+os.environ.update(_TEST_ENV)
+os.environ.setdefault('FLASK_STATIC_FOLDER', str(_REPO_ROOT / 'static'))
+
+
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
-    """Set up test environment with temp directories and test mode flags."""
-    # Create temp directories
-    temp_cache = tempfile.mkdtemp(prefix='luma_test_cache_')
-    temp_data = tempfile.mkdtemp(prefix='luma_test_data_')
-    
-    # Set environment variables
-    os.environ['LUMA_CACHE_DIR'] = temp_cache
-    os.environ['DATABASE_PATH'] = os.path.join(temp_data, 'media.db')
-    os.environ['SETTINGS_PATH'] = os.path.join(temp_data, 'settings.json')
-    os.environ['LUMA_SKIP_BACKGROUND_THREADS'] = '1'
-    os.environ['BASE_DIR'] = temp_data
-    
+    """Remove the temp directories when the session ends."""
     yield
-    
-    # Cleanup
-    try:
-        shutil.rmtree(temp_cache)
-        shutil.rmtree(temp_data)
-    except Exception:
-        pass
-    
-    for key in ['LUMA_CACHE_DIR', 'DATABASE_PATH', 'SETTINGS_PATH', 'LUMA_SKIP_BACKGROUND_THREADS', 'BASE_DIR']:
-        os.environ.pop(key, None)
+    shutil.rmtree(_TEMP_CACHE, ignore_errors=True)
+    shutil.rmtree(_TEMP_DATA, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
@@ -46,9 +45,12 @@ def reset_shared_state(request):
             yield
             return
     
-    # Reset the sign-in rate limiter
-    from app import login_limiter
+    # Reset the sign-in and request-page rate limiters
+    from app import login_limiter, request_portal
     login_limiter._fail.clear()
+    request_portal._fails.clear()
+    # Some tests swap in a mock settings object; put the real one back after
+    saved_portal_settings = request_portal._settings
     
     # Clear user database between tests
     try:
@@ -65,6 +67,8 @@ def reset_shared_state(request):
     
     # Cleanup after test
     login_limiter._fail.clear()
+    request_portal._fails.clear()
+    request_portal._settings = saved_portal_settings
 
 
 @pytest.fixture
@@ -94,6 +98,8 @@ def test_app():
             'session_secret': '',  # Will be auto-generated
             'trusted_proxies': '',
             'trusted_proxy_header': '',
+            'hostnames': '',
+            'allow_signup': False,
         }
     })
     flask_app.config['URL_BASE'] = ''

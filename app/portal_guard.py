@@ -5,7 +5,8 @@ Portal traffic is identified solely by the Host header matching
 request_portal.hostname (access.is_portal_traffic); the client address plays
 no part. Such requests can reach only:
 - /request and /request/ (portal page)
-- /static/request/* (portal static assets)
+- /static/request/* (portal static assets) and the two shared images it
+  uses (/static/images/apple-touch-icon.png, /static/images/luma_text.png)
 - the explicitly listed /api/request/* endpoints and patterns below
   (never /api/request/admin*)
 
@@ -31,6 +32,9 @@ _PORTAL_PATHS = {
     '/api/request/home',
     '/api/request/recent',
     '/api/request/progress',
+    # Shared images the portal page uses
+    '/static/images/apple-touch-icon.png',
+    '/static/images/luma_text.png',
 }
 
 # Portal-accessible path patterns (for dynamic routes)

@@ -425,9 +425,7 @@ class TestMinorFixes:
         if resp.status_code == 302:
             assert '/login' in resp.location
     
-    def test_remember_me_unchecked_by_default(self, test_app):
-        """FIX 12b: Remember-me checkbox is unchecked by default."""
+    def test_remember_me_checked_by_default(self, test_app):
+        """Round 4 item 8: Remember me is on by default, matching /api/auth/login."""
         resp = self.client.get('/login')
-        
-        # Check that checkbox is NOT checked
-        assert b'checked' not in resp.data or b'<input type="checkbox" id="remember" name="remember">' in resp.data
+        assert b'<input type="checkbox" id="remember" name="remember" checked>' in resp.data

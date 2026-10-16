@@ -136,9 +136,6 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
     },
     "security": {
         "_type": "object",
-        "access_mode": {"type": "string", "default": "", "sensitive": False,
-                        "description": "Who must sign in: open (no sign-in), pin_remote (PIN outside the local network) or pin (everyone). Empty: pin when users already exist.",
-                        "enum": ["", "open", "pin_remote", "pin"]},
         "auth_method": {"type": "string", "default": "forms", "sensitive": False,
                         "description": "Authentication method",
                         "enum": ["forms"]},
@@ -148,7 +145,11 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
         "session_secret": {"type": "string", "default": "", "sensitive": True,
                           "description": "Secret key for session signing (auto-generated on first run)"},
         "trusted_proxies": {"type": "string", "default": "", "sensitive": False,
-                            "description": "Reverse proxies whose X-Forwarded-For / CF-Connecting-IP headers are believed (comma-separated IPs or CIDRs)"},
+                            "description": "Reverse proxies whose X-Forwarded-For and X-Forwarded-Proto headers are believed (comma-separated IPs or CIDRs)"},
+        "hostnames": {"type": "string", "default": "", "sensitive": False,
+                      "description": "Host names Luma is reached by besides IP addresses and localhost (comma-separated). Needed for no-sign-in LAN access by name and for a trusted proxy's X-Forwarded-Host"},
+        "allow_signup": {"type": "boolean", "default": False, "sensitive": False,
+                         "description": "Let visitors outside the local network request an account from the sign-in page"},
     },
     "homeassistant": {
         "_type": "object",
@@ -1300,45 +1301,28 @@ def _migrate_remove_remote_lock(data: dict) -> bool:
 
 
 def _migrate_access_mode_to_auth_required(data: dict) -> bool:
-    """Migrate old access_mode to new auth_required setting.
-    
-    Mapping:
+    """Replace the retired security.access_mode with security.auth_required.
+
+    Mapping (only when auth_required isn't already saved):
     - pin -> enabled (everyone must authenticate)
-    - pin_remote -> disabled_local (LAN no sign-in, remote must authenticate)
-    - open -> disabled_local (open access deprecated, map to disabled_local)
-    
-    Remote never gets implicit access in any case.
-    Migration is idempotent: runs only when access_mode exists and auth_required doesn't.
+    - pin_remote, open -> disabled_local (remote never gets implicit access)
+    - empty -> nothing saved (the auth_required default applies)
+    - anything else -> enabled
+
+    The access_mode key is always deleted. Idempotent.
     """
     security = data.get('security')
-    if not isinstance(security, dict):
+    if not isinstance(security, dict) or 'access_mode' not in security:
         return False
-    
-    # Only migrate if access_mode exists and auth_required doesn't
-    old_mode = security.get('access_mode', '').strip()
-    has_new = 'auth_required' in security
-    
-    if not old_mode or has_new:
-        return False
-    
-    # Perform migration
-    if old_mode == 'pin':
-        security['auth_required'] = 'enabled'
-        logger.info("Migrated access_mode 'pin' -> auth_required 'enabled'")
-    elif old_mode == 'pin_remote':
-        security['auth_required'] = 'disabled_local'
-        logger.info("Migrated access_mode 'pin_remote' -> auth_required 'disabled_local'")
-    elif old_mode == 'open':
-        security['auth_required'] = 'disabled_local'
-        logger.info("Migrated access_mode 'open' -> auth_required 'disabled_local' (open mode deprecated)")
+
+    old_mode = str(security.pop('access_mode') or '').strip()
+    if old_mode and 'auth_required' not in security:
+        new_mode = {'pin': 'enabled', 'pin_remote': 'disabled_local',
+                    'open': 'disabled_local'}.get(old_mode, 'enabled')
+        security['auth_required'] = new_mode
+        logger.info("Migrated access_mode '%s' -> auth_required '%s'", old_mode, new_mode)
     else:
-        # Unknown mode, default to enabled for safety
-        security['auth_required'] = 'enabled'
-        logger.info(f"Migrated unknown access_mode '{old_mode}' -> auth_required 'enabled' (default)")
-    
-    # Keep access_mode for backward compatibility during transition
-    # (will be removed in a future migration)
-    
+        logger.info("Removed security.access_mode")
     return True
 
 

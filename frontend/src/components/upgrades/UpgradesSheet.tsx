@@ -5,7 +5,7 @@ import { openModalForItem } from '@/utils/modalNavigation';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
 import { cn } from '@/utils/cn';
 import { apiFetch } from '../../apiClient';
-import { assetUrl } from '@/urlHelpers';
+import { assetUrl, apiUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -114,7 +114,7 @@ function sortUpgrades(items: UpgradeCandidate[], sort: SortMode, qualityFilter: 
 
 function getPosterUrl(item: UpgradeCandidate): string | null {
   if (item.tmdb_poster) return item.tmdb_poster;
-  if (item.poster_path) return `/api/img/plex?url=${encodeURIComponent(item.poster_path)}&width=300`;
+  if (item.poster_path) return apiUrl(`/api/img/plex?url=${encodeURIComponent(item.poster_path)}&width=300`);
   return null;
 }
 

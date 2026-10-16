@@ -1,12 +1,35 @@
-"""Gunicorn configuration for Luma production deployment."""
+"""Gunicorn configuration for Luma production deployment.
 
-import os
+Bind address, port and HTTPS come from app.server_config, so the values saved
+in Settings apply here too (LUMA_BIND / LUMA_PORT / LUMA_HTTPS_CERT and
+LUMA_HTTPS_KEY in the environment still take precedence).
+"""
+
 import logging
+
+from app import server_config
+from app.settings_manager import SettingsManager
 
 logger = logging.getLogger(__name__)
 
+
+def _bind(settings) -> str:
+    host = server_config.get_bind_address(settings)
+    port = server_config.get_port(settings)
+    if ':' in host and not host.startswith('['):
+        host = f'[{host}]'  # IPv6 literal
+    return f'{host}:{port}'
+
+
+def _tls(settings):
+    cert = server_config.get_https_cert(settings)
+    return cert if cert else (None, None)
+
+
+_settings = SettingsManager()
+
 # Worker configuration
-bind = f"{os.environ.get('LUMA_BIND', '0.0.0.0')}:{os.environ.get('LUMA_PORT', '5001')}"
+bind = _bind(_settings)
 workers = 1
 threads = 8
 worker_class = 'gthread'
@@ -17,9 +40,8 @@ accesslog = '-'
 errorlog = '-'
 loglevel = 'info'
 
-# HTTPS configuration
-certfile = os.environ.get('LUMA_HTTPS_CERT')
-keyfile = os.environ.get('LUMA_HTTPS_KEY')
+# HTTPS configuration (both None means plain HTTP)
+certfile, keyfile = _tls(_settings)
 
 
 def post_worker_init(worker):

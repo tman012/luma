@@ -30,13 +30,14 @@ import {
   SonarrShowStatus, SonarrSeasonNote, SonarrSeasonLine, SonarrEpisodeNote, SonarrEpisodeBadges, SonarrSeasonBadges,
   useSonarrStatusData, sonarrEpisode, sonarrSeason, seasonInFlight, isInFlight, orbWithSonarr,
 } from './SonarrStatus';
+import { apiUrl } from '@/urlHelpers';
 
 function resolveEpisodeThumbnail(ep: TvEpisode): string | null {
   if (ep.still_path) {
     // Prefer bare TMDb path via posterUrl (CDN). Always encode when proxying.
     const direct = posterUrl(ep.still_path, 'w500');
     if (direct) return direct;
-    return `/api/img/tmdb?path=${encodeURIComponent(ep.still_path)}&size=w500`;
+    return apiUrl(`/api/img/tmdb?path=${encodeURIComponent(ep.still_path)}&size=w500`);
   }
   return null;
 }
@@ -1982,7 +1983,7 @@ function SeasonsShelf({
 
                 const plexSeason = plexSeasons.find(ps => ps.index === season.season_number);
                 const plexThumbUrl = plexSeason?.thumbPath
-                  ? `/api/img/plex?url=${encodeURIComponent(plexSeason.thumbPath)}`
+                  ? apiUrl(`/api/img/plex?url=${encodeURIComponent(plexSeason.thumbPath)}`)
                   : null;
                 const tmdbPosterUrl = season.poster_path
                   ? posterUrl(season.poster_path, 'w342')

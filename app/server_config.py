@@ -9,7 +9,7 @@ def get_port(settings=None) -> int:
     
     Priority:
     1. LUMA_PORT env var
-    2. settings['general']['port'] or settings['security']['port']
+    2. settings general.port, network.flask_port (the Network tab) or security.port
     3. Default 5001
     """
     # Env var takes precedence
@@ -19,7 +19,8 @@ def get_port(settings=None) -> int:
     
     # Try settings
     if settings:
-        port = settings.get('general.port') or settings.get('security.port')
+        port = (settings.get('general.port') or settings.get('network.flask_port')
+                or settings.get('security.port'))
         if port:
             return int(port)
     
