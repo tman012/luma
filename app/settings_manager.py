@@ -1299,6 +1299,49 @@ def _migrate_remove_remote_lock(data: dict) -> bool:
     return False
 
 
+def _migrate_access_mode_to_auth_required(data: dict) -> bool:
+    """Migrate old access_mode to new auth_required setting.
+    
+    Mapping:
+    - pin -> enabled (everyone must authenticate)
+    - pin_remote -> disabled_local (LAN no sign-in, remote must authenticate)
+    - open -> disabled_local (open access deprecated, map to disabled_local)
+    
+    Remote never gets implicit access in any case.
+    Migration is idempotent: runs only when access_mode exists and auth_required doesn't.
+    """
+    security = data.get('security')
+    if not isinstance(security, dict):
+        return False
+    
+    # Only migrate if access_mode exists and auth_required doesn't
+    old_mode = security.get('access_mode', '').strip()
+    has_new = 'auth_required' in security
+    
+    if not old_mode or has_new:
+        return False
+    
+    # Perform migration
+    if old_mode == 'pin':
+        security['auth_required'] = 'enabled'
+        logger.info("Migrated access_mode 'pin' -> auth_required 'enabled'")
+    elif old_mode == 'pin_remote':
+        security['auth_required'] = 'disabled_local'
+        logger.info("Migrated access_mode 'pin_remote' -> auth_required 'disabled_local'")
+    elif old_mode == 'open':
+        security['auth_required'] = 'disabled_local'
+        logger.info("Migrated access_mode 'open' -> auth_required 'disabled_local' (open mode deprecated)")
+    else:
+        # Unknown mode, default to enabled for safety
+        security['auth_required'] = 'enabled'
+        logger.info(f"Migrated unknown access_mode '{old_mode}' -> auth_required 'enabled' (default)")
+    
+    # Keep access_mode for backward compatibility during transition
+    # (will be removed in a future migration)
+    
+    return True
+
+
 def _migrate_strip_plaintext_request_password(data: dict) -> bool:
     """Strip any plaintext 'password' field from request_portal.
     
@@ -1354,6 +1397,7 @@ def _run_all_migrations(data: dict) -> bool:
     changed |= _migrate_rename_requests_to_portal(data)
     changed |= _migrate_strip_plaintext_request_password(data)
     changed |= _migrate_remove_remote_lock(data)
+    changed |= _migrate_access_mode_to_auth_required(data)
     return changed
 
 

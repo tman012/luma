@@ -54,117 +54,123 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sign In - Luma</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Google Sans Flex', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #111318;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
             padding: 20px;
+            color: #e8eaed;
         }
         .login-container {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            background: #282a2f;
+            border-radius: 16px;
             padding: 40px;
             width: 100%;
             max-width: 400px;
         }
         h1 {
-            font-size: 28px;
-            font-weight: 600;
-            color: #1a202c;
-            margin-bottom: 8px;
-            text-align: center;
-        }
-        .subtitle {
-            color: #718096;
-            text-align: center;
+            font-size: 32px;
+            font-weight: 500;
+            color: #e8eaed;
             margin-bottom: 32px;
-            font-size: 14px;
+            text-align: center;
+            letter-spacing: -0.5px;
         }
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 24px;
         }
         label {
             display: block;
             font-size: 14px;
             font-weight: 500;
-            color: #4a5568;
+            color: #bdc1c6;
             margin-bottom: 8px;
         }
         input[type="text"],
         input[type="password"] {
             width: 100%;
-            padding: 12px 16px;
-            border: 1px solid #e2e8f0;
+            padding: 14px 16px;
+            background: #111318;
+            border: 1px solid #3c4043;
             border-radius: 8px;
-            font-size: 15px;
-            transition: all 0.2s;
+            font-size: 16px;
+            color: #e8eaed;
+            font-family: 'Google Sans Flex', sans-serif;
+            transition: border-color 0.2s, background 0.2s;
         }
         input:focus {
             outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: #adc7ff;
+            background: #1a1d23;
+        }
+        input::placeholder {
+            color: #5f6368;
         }
         .remember-me {
             display: flex;
             align-items: center;
-            margin-bottom: 24px;
+            margin-bottom: 32px;
         }
         .remember-me input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            margin-right: 8px;
+            width: 20px;
+            height: 20px;
+            margin-right: 12px;
             cursor: pointer;
+            accent-color: #adc7ff;
         }
         .remember-me label {
             margin: 0;
             font-weight: 400;
+            font-size: 15px;
+            color: #bdc1c6;
             cursor: pointer;
         }
         button[type="submit"] {
             width: 100%;
             padding: 14px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            background: #adc7ff;
+            color: #111318;
             border: none;
             border-radius: 8px;
             font-size: 16px;
-            font-weight: 600;
+            font-weight: 500;
             cursor: pointer;
-            transition: transform 0.1s, box-shadow 0.2s;
+            font-family: 'Google Sans Flex', sans-serif;
+            transition: background 0.2s, transform 0.1s;
         }
         button[type="submit"]:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
+            background: #c4d7ff;
         }
         button[type="submit"]:active {
-            transform: translateY(0);
+            transform: scale(0.98);
         }
         .error {
-            background: #fed7d7;
-            color: #c53030;
-            padding: 12px 16px;
+            background: #5c2626;
+            color: #f28b82;
+            padding: 14px 16px;
             border-radius: 8px;
-            margin-bottom: 20px;
+            margin-bottom: 24px;
             font-size: 14px;
-            border-left: 4px solid #f56565;
+            border-left: 4px solid #f28b82;
         }
         .rate-limit-error {
-            background: #feebc8;
-            color: #c05621;
-            border-left-color: #ed8936;
+            background: #5c4526;
+            color: #fdd663;
+            border-left-color: #fdd663;
         }
     </style>
 </head>
 <body>
     <div class="login-container">
         <h1>Luma</h1>
-        <p class="subtitle">Sign in to continue</p>
         
         {% if error %}
         <div class="error {% if rate_limited %}rate-limit-error{% endif %}">
