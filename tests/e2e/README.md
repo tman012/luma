@@ -19,14 +19,28 @@ Or with verbose output:
 
 ### Manual test environment setup
 
+**IMPORTANT**: Always use a private app directory and spare ports. **Never run against a shared /app** that other processes or users depend on.
+
 If you need to run tests with custom mock servers:
 
-    MOCK_SEED_ITEMS=10000 python tests/e2e/mock_upstreams.py 5399 &
-    # Luma at /app paths (static_folder is hard-coded to /app/static); settings point at the mock
-    DATABASE_PATH=/app/data/media.db SERVICE_API_KEY=qa-key LUMA_DISABLE_AUTOMATIONS=1 LUMA_DISABLE_ADB=1 \
-      LUMA_E2E_BASE_URL=http://127.0.0.1:5399 LUMA_MOCK_URL=http://127.0.0.1:5499 \
-      python tests/e2e/run_luma_mock.py &      # listens on 5399
-    # create a login: python -c "from app import user_auth as u; u.init_db(); u.create_user('qa','1234',is_admin=True)"
+    # Use private temp directories and spare ports (NOT 5199/5299)
+    MOCK_SEED_ITEMS=10000 python tests/e2e/mock_upstreams.py 6399 &
+    
+    # Private app dir with spare port
+    mkdir -p /tmp/luma-e2e-test/data /tmp/luma-e2e-test/static/hero_cache
+    DATABASE_PATH=/tmp/luma-e2e-test/data/media.db \
+      SERVICE_API_KEY=qa-key \
+      LUMA_DISABLE_AUTOMATIONS=1 \
+      LUMA_DISABLE_ADB=1 \
+      LUMA_E2E_BASE_URL=http://127.0.0.1:6299 \
+      LUMA_MOCK_URL=http://127.0.0.1:6399 \
+      python tests/e2e/run_luma_mock.py &      # listens on 6299
+    
+    # create a login: 
+    # DATABASE_PATH=/tmp/luma-e2e-test/data/media.db python -c "from app import user_auth as u; u.init_db(); u.create_user('qa','1234',is_admin=True)"
+    
     cd tests/e2e && pytest -q
 
 Env: LUMA_E2E_BASE_URL (default: http://127.0.0.1:5199), LUMA_MOCK_URL (default: http://127.0.0.1:5299), LUMA_E2E_API_KEY, LUMA_E2E_USER/PIN, LUMA_E2E_SHOTS.
+
+**Never use port 5199 or shared /app during testing** - use private directories and spare ports to avoid conflicts.

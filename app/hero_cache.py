@@ -56,7 +56,10 @@ class HeroCache:
         # Background healing state
         self._healing_lock = threading.Lock()
         self._last_heal_time = 0
-        self._heal_cooldown = 600  # 10 minutes
+        self._heal_cooldown = 600  # 10 minutes after successful heal
+        self._heal_failed = False
+        self._heal_backoff = 60  # Start with 60s after failed heal
+        self._heal_backoff_max = 600  # Cap at 10 minutes
 
         # Ensure cache directories exist
         try:
@@ -588,6 +591,7 @@ class HeroCache:
     
     def _heal_missing_images_background(self, content: List[Dict], missing: List[tuple]):
         """Re-download only the missing image files from upstream URLs (runs in background thread)."""
+        success = False
         try:
             logger.info(f"Background healing: re-downloading {len(missing)} missing images")
             
@@ -597,17 +601,30 @@ class HeroCache:
             if needs_full_refresh:
                 logger.warning("Some cached entries lack upstream URLs (old format), triggering full refresh")
                 self.refresh_hero_content()
+                success = True
                 return
             
             # Heal by downloading from upstream URLs
             for idx, field_type, cache_filename, upstream_url in missing:
                 if upstream_url:
                     logger.info(f"Healing {field_type}: {cache_filename} from {upstream_url[:80]}...")
-                    self.download_image(upstream_url, cache_filename)
+                    result = self.download_image(upstream_url, cache_filename)
+                    if not result:
+                        raise Exception(f"Failed to download {cache_filename}")
             
             logger.info("Background healing complete")
+            success = True
         except Exception as e:
             logger.error(f"Background healing failed: {e}")
+        finally:
+            # Update healing state based on success/failure
+            if success:
+                self._heal_failed = False
+                self._heal_backoff = 60  # Reset backoff
+            else:
+                self._heal_failed = True
+                # Double the backoff, capped at max
+                self._heal_backoff = min(self._heal_backoff * 2, self._heal_backoff_max)
     
     def get_hero_content(self) -> List[Dict]:
         """Get cached hero content, triggering background heal for missing images.
@@ -629,8 +646,11 @@ class HeroCache:
             if self._healing_lock.acquire(blocking=False):
                 try:
                     now = time.time()
+                    # Use appropriate cooldown: shorter after failed heal, longer after success
+                    cooldown = self._heal_backoff if self._heal_failed else self._heal_cooldown
+                    
                     # Check cooldown
-                    if now - self._last_heal_time >= self._heal_cooldown:
+                    if now - self._last_heal_time >= cooldown:
                         logger.warning(f"Found {len(missing)} missing hero images, starting background heal")
                         self._last_heal_time = now
                         # Start healing in background thread
@@ -641,7 +661,7 @@ class HeroCache:
                         )
                         heal_thread.start()
                     else:
-                        cooldown_remaining = int(self._heal_cooldown - (now - self._last_heal_time))
+                        cooldown_remaining = int(cooldown - (now - self._last_heal_time))
                         logger.debug(f"Healing in cooldown, {cooldown_remaining}s remaining")
                 finally:
                     self._healing_lock.release()

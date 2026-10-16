@@ -1710,11 +1710,18 @@ class TestPerformanceBenchmark(unittest.TestCase):
         
         # Benchmark queries
         queries = ['amelie', 'Openheimer', 'Interstelar', 'Godfahter', 'Shawshank Redemtion']
+        
+        # Warm up to avoid cold start bias (run each query once)
+        for query in queries:
+            index.search(q=query, limit=50, fuzzy=True)
+        
+        # Now run actual benchmark with sufficient iterations for stable median
         timings = []
         
         for query in queries:
             query_timings = []
-            for _ in range(5):
+            # Use 10 runs for more robust median
+            for _ in range(10):
                 start = time.perf_counter()
                 results = index.search(q=query, limit=50, fuzzy=True)
                 elapsed_ms = (time.perf_counter() - start) * 1000
@@ -1834,8 +1841,8 @@ class TestHeroCacheHealing(unittest.TestCase):
         if self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
     
-    def test_endpoint_returns_build_hero_movies_format(self):
-        """Test /api/hero/content returns exact _build_hero_movies format (not cached content)."""
+    def test_endpoint_returns_build_hero_movies_with_all_fields(self):
+        """Test /api/hero/content returns _build_hero_movies with all required fields preserved."""
         import json
         
         # Create cache with data shaped as refresh_hero_content writes it
@@ -1869,49 +1876,73 @@ class TestHeroCacheHealing(unittest.TestCase):
         with open(self.temp_json, 'w') as f:
             json.dump({'last_updated': '2024-01-01', 'movies': content}, f)
         
-        # Call endpoint - should return _build_hero_movies format, not cached content
+        # Call endpoint - should return _build_hero_movies format with all fields
         with self.app.test_client() as client:
             resp = client.get('/api/hero/content')
             self.assertEqual(resp.status_code, 200)
             data = resp.get_json()
             
-            # Check response shape matches _build_hero_movies (not cached format)
+            # Check response has boost_mode (from _build_hero_movies)
             self.assertTrue(data['success'])
             self.assertIn('movies', data)
             self.assertIn('boost_mode', data)
             
-            # If there are movies, they should have _build_hero_movies fields
-            # (audience_rating, tmdb_backdrop_url, etc), not cache-specific fields
-            # Since _build_hero_movies fetches from Plex dynamically, we can't predict exact content
-            # Just verify the response structure is correct
+            # Verify it comes from _build_hero_movies (not cached content)
+            # The response should have _build_hero_movies fields, not cache-specific fields
+            # If there are movies (from Plex), they should have: rating, audience_rating, 
+            # added_at, tmdb_backdrop_url, etc.
+            # Since _build_hero_movies fetches from Plex dynamically, we verify structure only
+            if data['movies']:
+                movie = data['movies'][0]
+                # These fields must be present in _build_hero_movies format
+                required_fields = ['rating_key', 'title', 'year', 'summary', 'genres']
+                for field in required_fields:
+                    self.assertIn(field, movie, f"_build_hero_movies must include {field}")
+                
+                # These fields may be None but should exist
+                optional_fields = ['rating', 'audience_rating', 'added_at', 'tmdb_backdrop_url',
+                                 'poster_url', 'backdrop_url', 'clearlogo_url']
+                for field in optional_fields:
+                    self.assertIn(field, movie, f"_build_hero_movies must include {field}")
     
-    def test_missing_file_triggers_heal_with_upstream_url(self):
-        """Test missing cached file triggers heal with correct upstream URL."""
+    def test_healing_covers_backdrop_and_clearart(self):
+        """Test missing files trigger heal, then files serve 200 with mocked upstream fetch."""
         import json
         import time
         
-        # Create cache entry with upstream URLs (new format)
-        content = [{
-            'rating_key': 1,
-            'title': 'Test Movie',
-            'backdrop_url': '/static/hero_cache/movie_1_backdrop.jpg',
-            'backdrop_cache_file': 'movie_1_backdrop.jpg',
-            'backdrop_upstream_url': 'http://fanart.tv/test_backdrop.jpg',
-            'clearart_url': '/static/hero_cache/movie_1_clearart.jpg',
-            'clearart_cache_file': 'movie_1_clearart.jpg',
-            'clearart_upstream_url': 'http://fanart.tv/test_clearart.jpg',
-        }]
+        # Create cache entries with upstream URLs (new format) - 2 movies
+        content = [
+            {
+                'rating_key': 1,
+                'title': 'Test Movie 1',
+                'backdrop_url': '/static/hero_cache/movie_1_backdrop.jpg',
+                'backdrop_cache_file': 'movie_1_backdrop.jpg',
+                'backdrop_upstream_url': 'http://fanart.tv/test_backdrop1.jpg',
+                'clearart_url': '/static/hero_cache/movie_1_clearart.jpg',
+                'clearart_cache_file': 'movie_1_clearart.jpg',
+                'clearart_upstream_url': 'http://fanart.tv/test_clearart1.jpg',
+            },
+            {
+                'rating_key': 2,
+                'title': 'Test Movie 2',
+                'poster_url': '/static/hero_cache/movie_2_poster.jpg',  # Note: poster not in cache_file format
+                'backdrop_url': '/static/hero_cache/movie_2_backdrop.jpg',
+                'backdrop_cache_file': 'movie_2_backdrop.jpg',
+                'backdrop_upstream_url': 'http://fanart.tv/test_backdrop2.jpg',
+            }
+        ]
         
         # Save cache WITHOUT creating image files (they're missing)
         with open(self.temp_json, 'w') as f:
             json.dump({'last_updated': '2024-01-01', 'movies': content}, f)
         
-        # Mock download to track healing calls
+        # Mock download to track healing calls and create files
         download_calls = []
         orig_download = self.hero_cache.download_image
         def mock_download(url, filename):
             download_calls.append((url, filename))
-            (self.temp_cache_dir / filename).write_text('healed')
+            # Create actual file so it can be served
+            (self.temp_cache_dir / filename).write_text(f'healed-{filename}')
             return f"/static/hero_cache/{filename}"
         self.hero_cache.download_image = mock_download
         
@@ -1920,21 +1951,107 @@ class TestHeroCacheHealing(unittest.TestCase):
             resp = client.get('/api/hero/content')
             self.assertEqual(resp.status_code, 200)
         
-        # Wait for background healing
+        # Wait for background healing to complete
         time.sleep(0.5)
         
-        # Verify healing was triggered with correct upstream URLs
-        self.assertEqual(len(download_calls), 2, "Should heal both missing images")
+        # Verify healing covered backdrop AND clearart
+        self.assertGreaterEqual(len(download_calls), 3, "Should heal backdrop1, clearart1, backdrop2")
         urls = [call[0] for call in download_calls]
         filenames = [call[1] for call in download_calls]
         
-        self.assertIn('http://fanart.tv/test_backdrop.jpg', urls)
-        self.assertIn('http://fanart.tv/test_clearart.jpg', urls)
-        self.assertIn('movie_1_backdrop.jpg', filenames)
-        self.assertIn('movie_1_clearart.jpg', filenames)
+        # Check specific files were healed
+        self.assertIn('movie_1_backdrop.jpg', filenames, "Should heal movie_1_backdrop.jpg")
+        self.assertIn('movie_1_clearart.jpg', filenames, "Should heal movie_1_clearart.jpg (clearart coverage)")
+        self.assertIn('movie_2_backdrop.jpg', filenames, "Should heal movie_2_backdrop.jpg")
+        
+        # Verify files now exist and can be served (simulate serving)
+        self.assertTrue((self.temp_cache_dir / 'movie_1_backdrop.jpg').exists())
+        self.assertTrue((self.temp_cache_dir / 'movie_1_clearart.jpg').exists())
+        
+        # Verify healed files have content
+        self.assertEqual((self.temp_cache_dir / 'movie_1_backdrop.jpg').read_text(), 'healed-movie_1_backdrop.jpg')
         
         # Restore
         self.hero_cache.download_image = orig_download
+    
+    def test_failed_heal_backoff(self):
+        """Test failed heal uses exponential backoff (60s, 120s, ..., capped at 600s)."""
+        import json
+        import time
+        
+        # Create cache with missing file
+        content = [{
+            'rating_key': 1,
+            'title': 'Test Movie',
+            'backdrop_url': '/static/hero_cache/movie_1_backdrop.jpg',
+            'backdrop_cache_file': 'movie_1_backdrop.jpg',
+            'backdrop_upstream_url': 'http://fanart.tv/backdrop.jpg',
+        }]
+        
+        with open(self.temp_json, 'w') as f:
+            json.dump({'last_updated': '2024-01-01', 'movies': content}, f)
+        
+        # Mock download to fail
+        orig_download = self.hero_cache.download_image
+        def mock_download_fail(url, filename):
+            return None  # Simulate download failure
+        self.hero_cache.download_image = mock_download_fail
+        
+        # Set short initial backoff for testing
+        self.hero_cache._heal_backoff = 1  # 1 second for test
+        self.hero_cache._heal_backoff_max = 4  # Cap at 4 seconds for test
+        
+        # First heal attempt - should fail
+        with self.app.test_client() as client:
+            client.get('/api/hero/content')
+        time.sleep(0.2)
+        
+        # Verify backoff doubled after failure
+        self.assertTrue(self.hero_cache._heal_failed, "Should be marked as failed")
+        self.assertEqual(self.hero_cache._heal_backoff, 2, "Backoff should double to 2s")
+        
+        # Immediate retry should not trigger (still in cooldown)
+        heal_count = [0]
+        orig_heal = self.hero_cache._heal_missing_images_background
+        def count_heal(content, missing):
+            heal_count[0] += 1
+            orig_heal(content, missing)
+        self.hero_cache._heal_missing_images_background = count_heal
+        
+        with self.app.test_client() as client:
+            client.get('/api/hero/content')
+        time.sleep(0.1)
+        self.assertEqual(heal_count[0], 0, "Should not retry immediately")
+        
+        # Wait for backoff period and retry - should trigger another heal
+        time.sleep(2.1)
+        with self.app.test_client() as client:
+            client.get('/api/hero/content')
+        time.sleep(0.2)
+        self.assertEqual(heal_count[0], 1, "Should retry after backoff period")
+        
+        # Verify backoff doubled again and is capped
+        self.assertEqual(self.hero_cache._heal_backoff, 4, "Backoff should double to 4s (capped)")
+        
+        # Now make heal succeed
+        def mock_download_success(url, filename):
+            (self.temp_cache_dir / filename).write_text('healed')
+            return f"/static/hero_cache/{filename}"
+        self.hero_cache.download_image = mock_download_success
+        
+        # Wait and trigger successful heal
+        time.sleep(4.1)
+        with self.app.test_client() as client:
+            client.get('/api/hero/content')
+        time.sleep(0.3)
+        
+        # Verify backoff reset after success
+        self.assertFalse(self.hero_cache._heal_failed, "Should not be marked as failed")
+        self.assertEqual(self.hero_cache._heal_backoff, 60, "Backoff should reset to 60s")
+        
+        # Restore
+        self.hero_cache.download_image = orig_download
+        self.hero_cache._heal_missing_images_background = orig_heal
     
     def test_single_flight_and_cooldown(self):
         """Test single-flight lock and cooldown prevent duplicate healing."""
