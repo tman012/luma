@@ -944,8 +944,14 @@ tmdb = TMDBClient(settings.get('apis.tmdb.api_key'))
 
 # Request page for friends and family
 from app import request_portal as _request_portal
+from app import portal_guard
 _access.init_home_wan_tracking(settings)
 _request_portal.init_app(app, settings)
+
+# Portal traffic guard (must be registered before other routes)
+@app.before_request
+def _portal_traffic_guard():
+    return portal_guard.guard_portal_traffic(settings)
 
 # Routes — React SPA helper
 def _serve_spa():

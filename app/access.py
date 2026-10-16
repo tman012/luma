@@ -145,11 +145,42 @@ def is_local_request(request, settings=None) -> bool:
     return False
 
 
+def is_portal_traffic(request, settings) -> bool:
+    """Detect if request is portal traffic (requests from the internet via tunnel).
+    
+    Portal traffic is identified by:
+    1. Host header matches request_portal.hostname setting, OR
+    2. Has Cloudflare tunnel headers (CF-Ray or CF-Connecting-IP)
+    
+    Portal traffic can ONLY access the request portal routes.
+    """
+    # Check if Host matches portal hostname
+    portal_hostname = (settings.get('request_portal.hostname') or '').strip().lower()
+    if portal_hostname:
+        request_host = (request.headers.get('Host') or '').strip().lower()
+        # Remove port if present
+        request_host = request_host.split(':')[0]
+        if request_host == portal_hostname:
+            return True
+    
+    # Check for Cloudflare tunnel headers
+    if request.headers.get('CF-Ray') or request.headers.get('CF-Connecting-IP'):
+        return True
+    
+    return False
+
+
 def needs_pin(settings, request) -> bool:
     """True when this request must sign in.
     
-    In open mode, only local requests get open access. Remote visitors must sign in.
+    Portal traffic never gets implicit owner session.
+    LAN traffic follows access_mode settings.
+    Other non-local traffic requires sign-in.
     """
+    # Portal traffic is handled separately (never gets implicit owner)
+    if is_portal_traffic(request, settings):
+        return True
+    
     m = mode(settings)
     if m == 'open':
         return not is_local_request(request, settings)
