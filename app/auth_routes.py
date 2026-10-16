@@ -281,7 +281,7 @@ def login():
     next_param = request.args.get('next', '/')
     safe_next = _safe_redirect_url(next_param)
     
-    if request.method == 'GET':
+    if request.method in ('GET', 'HEAD'):
         # Generate CSRF token
         csrf_token = _generate_csrf_token()
         

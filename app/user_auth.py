@@ -119,7 +119,7 @@ def init_db() -> None:
         if not existing:
             conn.execute(
                 "INSERT INTO users (name, pin_hash, is_admin, status, email) VALUES (?, ?, 1, 'active', ?)",
-                (ADMIN_NAME, _hash_pin(ADMIN_PIN), admin_email),
+                (ADMIN_NAME, generate_password_hash(ADMIN_PIN), admin_email),
             )
             logger.info("Seeded admin user: %s", ADMIN_NAME)
         else:
@@ -139,7 +139,7 @@ def init_db() -> None:
             conn.execute(
                 "UPDATE users SET pin_hash = ? WHERE name = ? COLLATE NOCASE"
                 " AND (pin_hash IS NULL OR pin_hash = '')",
-                (_hash_pin(ADMIN_PIN), ADMIN_NAME),
+                (generate_password_hash(ADMIN_PIN), ADMIN_NAME),
             )
             logger.debug("Admin user already exists: %s", ADMIN_NAME)
 
@@ -276,7 +276,7 @@ def update_pin(user_id: int, new_pin: str) -> None:
     with _get_db() as conn:
         conn.execute(
             "UPDATE users SET pin_hash = ? WHERE id = ?",
-            (_hash_pin(new_pin), user_id),
+            (generate_password_hash(new_pin), user_id),
         )
 
 

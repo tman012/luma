@@ -258,3 +258,67 @@ def test_logout_get_405_is_no_store(test_app):
     r = test_app.test_client().get('/logout')
     assert r.status_code == 405
     assert 'no-store' in r.headers.get('Cache-Control', '')
+
+
+
+# --- Tester follow-ups ---
+
+def test_api_lockout_spans_name_and_email(test_app):
+    from app import login_limiter
+    user_auth.create_user('qauser', 'pw-1234', email='qauser@box.test')
+    for i in range(login_limiter.MAX_FAILURES):
+        body = {'name': 'qauser', 'pin': 'wrong'} if i % 2 else {'email': 'qauser@box.test', 'pin': 'wrong'}
+        r = test_app.test_client().post('/api/auth/login', json=body, environ_base={'REMOTE_ADDR': '127.0.0.1'})
+        assert r.status_code == 401
+    for body in ({'name': 'qauser', 'pin': 'pw-1234'}, {'email': 'qauser@box.test', 'pin': 'pw-1234'}):
+        r = test_app.test_client().post('/api/auth/login', json=body, environ_base={'REMOTE_ADDR': '127.0.0.1'})
+        assert r.status_code == 429
+
+
+def test_api_success_clears_every_identifier(test_app):
+    from app import login_limiter
+    user_auth.create_user('qauser', 'pw-1234', email='qauser@box.test')
+    for _ in range(login_limiter.MAX_FAILURES - 1):
+        login_limiter.record_failure('', 'qauser')
+    r = test_app.test_client().post('/api/auth/login', json={'email': 'QAUSER@box.test', 'pin': 'pw-1234'})
+    assert r.status_code == 200
+    assert login_limiter.retry_after('', 'qauser') == 0
+    assert not [k for k in login_limiter._fail if k.startswith('uid:')]
+
+
+def test_head_login_is_200_without_body(test_app):
+    r = test_app.test_client().head('/login')
+    assert r.status_code == 200
+    assert r.get_data() == b''
+
+
+def test_admin_reset_pin_uses_scrypt():
+    user = user_auth.create_user('qauser', 'pw-1234')
+    user_auth.update_pin(user['id'], 'new-pass-5678')
+    stored = user_auth.get_user_by_id(user['id'])['pin_hash']
+    assert stored.startswith('scrypt:') and not user_auth._is_legacy_hash(stored)
+    assert user_auth.authenticate('qauser', 'new-pass-5678') is not None
+
+
+def test_admin_reset_pin_route_uses_scrypt(test_app, monkeypatch):
+    import app.main
+    user = user_auth.create_user('qauser', 'pw-1234')
+    monkeypatch.setattr(app.main, '_require_admin', lambda: None)
+    r = test_app.test_client().put(f"/api/admin/users/{user['id']}/pin", json={'pin': 'new-pass-5678'},
+                                   environ_base={'REMOTE_ADDR': '192.168.1.95'},
+                                   base_url='http://192.168.1.62:5001')
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert user_auth.get_user_by_id(user['id'])['pin_hash'].startswith('scrypt:')
+
+
+def test_seeded_admin_uses_scrypt(monkeypatch):
+    monkeypatch.setattr(user_auth, 'ADMIN_NAME', 'Owner')
+    monkeypatch.setattr(user_auth, 'ADMIN_PIN', 'env-pin-1')
+    monkeypatch.setattr(user_auth, 'ADMIN_EMAIL', '')
+    user_auth.init_db()
+    assert user_auth.get_user_by_name('Owner')['pin_hash'].startswith('scrypt:')
+
+
+def test_no_new_password_uses_legacy_hash():
+    src = (ROOT / 'app/user_auth.py').read_text()
+    assert src.count('_hash_pin(') == 2  # the definition and the legacy comparison
