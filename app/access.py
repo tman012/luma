@@ -32,8 +32,8 @@ logger = logging.getLogger(__name__)
 
 MODES = ('open', 'pin_remote', 'pin')
 
-# Home WAN IP tracking
-_home_ips: Set[str] = set()
+# Home WAN IP tracking (IP -> timestamp dict)
+_home_ips: Dict[str, float] = {}
 _home_lock = threading.Lock()
 _HOME_MAX_SIZE = 10
 _settings = None
@@ -202,7 +202,8 @@ def owner(user_auth) -> Optional[Dict]:
 # ---------------------------------------------------------------------------
 
 def _lookup_wan_ip() -> Optional[str]:
-    """Look up the current WAN IP via Cloudflare's 1.1.1.1 trace."""
+    """Look up the current WAN IP via Cloudflare trace endpoints."""
+    # Try 1.1.1.1 first
     try:
         resp = requests.get('https://1.1.1.1/cdn-cgi/trace', timeout=5)
         for line in resp.text.splitlines():
@@ -210,6 +211,16 @@ def _lookup_wan_ip() -> Optional[str]:
                 return line.split('=', 1)[1].strip()
     except Exception:
         pass
+    
+    # Fallback to cloudflare.com
+    try:
+        resp = requests.get('https://www.cloudflare.com/cdn-cgi/trace', timeout=5)
+        for line in resp.text.splitlines():
+            if line.startswith('ip='):
+                return line.split('=', 1)[1].strip()
+    except Exception:
+        pass
+    
     return None
 
 
@@ -219,14 +230,18 @@ def _refresh_home_wan_ip() -> None:
     if not ip:
         return
     
+    now = time.time()
     with _home_lock:
-        # Add or update timestamp
-        _home_ips.discard(ip)  # Remove if exists
-        _home_ips.add(ip)
+        # Update timestamp for this IP
+        _home_ips[ip] = now
         
-        # LRU eviction: keep only the most recent IPs
+        # Evict oldest IPs if over limit
         if len(_home_ips) > _HOME_MAX_SIZE:
-            _home_ips.pop()  # Set.pop() removes arbitrary element, effectively FIFO
+            # Sort by timestamp and keep only the most recent
+            sorted_ips = sorted(_home_ips.items(), key=lambda x: x[1], reverse=True)
+            _home_ips.clear()
+            _home_ips.update(dict(sorted_ips[:_HOME_MAX_SIZE]))
+            logger.info('[access] evicted old home WAN IPs, now tracking %d', len(_home_ips))
         
         logger.info('[access] home WAN IP updated: %s (tracking %d)', ip, len(_home_ips))
     
@@ -241,26 +256,33 @@ def _periodic_refresh() -> None:
 
 
 def _load_home_ips() -> None:
-    """Load persisted home IPs from state file."""
+    """Load persisted home IPs with timestamps from state file."""
     if not _state_path or not _state_path.exists():
         return
     try:
         data = json.loads(_state_path.read_text())
         with _home_lock:
             _home_ips.clear()
-            _home_ips.update(data.get('home_ips', []))
+            # Load dict of IP -> timestamp
+            home_data = data.get('home_ips', {})
+            if isinstance(home_data, dict):
+                _home_ips.update(home_data)
+            elif isinstance(home_data, list):
+                # Legacy format: list of IPs without timestamps
+                now = time.time()
+                _home_ips.update({ip: now for ip in home_data})
         logger.info('[access] loaded %d home IPs', len(_home_ips))
     except Exception:
         logger.warning('[access] failed to load home IPs', exc_info=True)
 
 
 def _save_home_ips() -> None:
-    """Persist home IPs to state file."""
+    """Persist home IPs with timestamps to state file."""
     if not _state_path:
         return
     try:
         with _home_lock:
-            data = {'home_ips': list(_home_ips)}
+            data = {'home_ips': dict(_home_ips)}
         _state_path.write_text(json.dumps(data, indent=2))
     except Exception:
         logger.warning('[access] failed to save home IPs', exc_info=True)
