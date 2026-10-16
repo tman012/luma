@@ -51,21 +51,15 @@ def guard_portal_traffic(settings):
     from app import access
     
     # Check if this is portal traffic
-    is_portal = access.is_portal_traffic(request, settings)
-    path = request.path
-    print(f'[portal-guard-DEBUG] path={path}, host={request.headers.get("Host")}, is_portal={is_portal}')
-    
-    if not is_portal:
+    if not access.is_portal_traffic(request, settings):
         return None
     
     # Check if path is allowed for portal traffic
-    allowed = is_portal_allowed(path)
-    print(f'[portal-guard-DEBUG] portal traffic to {path}: allowed={allowed}')
-    
-    if not allowed:
+    path = request.path
+    if not is_portal_allowed(path):
         # Portal traffic trying to access non-portal route
-        logger.warning('[portal-guard] Portal traffic blocked from %s (host=%s, cf-ray=%s)',
-                      path, request.headers.get('Host'), request.headers.get('CF-Ray'))
+        logger.warning('[portal-guard] Portal traffic blocked from %s (host=%s)',
+                      path, request.headers.get('Host'))
         abort(404)
     
     return None
