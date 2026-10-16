@@ -390,8 +390,14 @@ config = Config()
 settings = SettingsManager()
 logger.info(f"Settings loaded from {settings.path}")
 
+# Check if background threads should be skipped (for testing or dev environments)
+# Priority: env var > setting > default (False)
+skip_bg = os.getenv('LUMA_SKIP_BACKGROUND_THREADS', '').strip().lower() in ('1', 'true', 'yes')
+if not skip_bg:
+    skip_bg = settings.get('general.skip_background_threads', False)
+
 # Skip initialization in test mode (will be initialized on demand)
-if not os.getenv('LUMA_SKIP_BACKGROUND_THREADS'):
+if not skip_bg:
     # Re-initialise hero_cache with values from settings (it was created at
     # module-import time before the settings object existed).
     hero_cache.init_from_settings(settings)

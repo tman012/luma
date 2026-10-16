@@ -333,8 +333,13 @@ def init_home_wan_tracking(settings) -> None:
     # Load existing state
     _load_home_ips()
     
+    # Check if background threads should be skipped
+    skip_bg = os.getenv('LUMA_SKIP_BACKGROUND_THREADS', '').strip().lower() in ('1', 'true', 'yes')
+    if not skip_bg:
+        skip_bg = settings.get('general.skip_background_threads', False)
+    
     # Start background refresh thread (skip in test mode)
-    if not os.getenv('LUMA_SKIP_BACKGROUND_THREADS'):
+    if not skip_bg:
         def _background_refresh():
             time.sleep(2)  # Small startup delay
             _refresh_home_wan_ip()
