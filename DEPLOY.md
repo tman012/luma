@@ -64,6 +64,17 @@ luma.example.com, requests.example.com {
 Then set `security.trusted_proxies` to `127.0.0.1/32, ::1/128` and
 `request_portal.hostname` to the portal name.
 
+## HTTPS on the plain-HTTP port
+
+Gunicorn serves plain HTTP on the Luma port (5001 by default). Browsers that
+try https:// first used to hang there until timeout. The worker class in
+gunicorn.conf.py (app.tls_guard.TLSRejectingThreadWorker, a gthread worker)
+now closes a connection right away when its first bytes are a TLS
+ClientHello, so the handshake fails at once and the browser can fall back to
+http://. No compose, entrypoint or Caddy change is needed. When Luma itself
+serves HTTPS (a certificate is set) the check is off. Luma never sends
+Strict-Transport-Security; keep it that way.
+
 ## First deploy / upgrade
 
 ```bash
