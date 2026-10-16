@@ -1,8 +1,9 @@
 """Portal traffic guard - restricts portal traffic to portal routes only.
 
 Portal traffic (from the internet via Cloudflare tunnel) can only access:
-- /request and its static assets
-- /api/request/* (excluding /api/request/admin/*)
+- /request and /request/ (portal page)
+- /static/request/* (portal static assets)
+- Specific /api/request/* endpoints (explicit allowlist, no wildcard)
 
 All other routes return 404 for portal traffic.
 """
@@ -11,37 +12,53 @@ from flask import request, abort
 
 logger = logging.getLogger(__name__)
 
-# Portal-accessible routes (allowlist)
+# Portal-accessible routes (explicit allowlist)
 _PORTAL_PATHS = {
     '/request',
+    '/request/',
+    # Public request portal API endpoints
+    '/api/request/session',
     '/api/request/unlock',
+    '/api/request/signout',
+    # Requester API endpoints (after unlock)
     '/api/request/search',
-    '/api/request/tmdb',
-    '/api/request/library',
-    '/api/request/submit',
-    '/api/request/status',
+    '/api/request/discover',
+    '/api/request/home',
+    '/api/request/recent',
+    '/api/request/progress',
 }
 
-_PORTAL_PREFIXES = (
-    '/static/request/',
-)
+# Portal-accessible path patterns (for dynamic routes)
+_PORTAL_PATH_PATTERNS = [
+    # Movie/TV detail and requests
+    ('/api/request/movie/', ['GET', 'POST']),  # /api/request/movie/<id>
+    ('/api/request/tv/', ['GET', 'POST']),     # /api/request/tv/<id> and /api/request/tv/<id>/season/<season>
+    # Additional metadata endpoints
+    ('/api/request/look/', ['GET']),           # /api/request/look/<kind>/<id>
+    ('/api/request/scores/', ['GET']),         # /api/request/scores/<kind>/<id>
+    ('/api/request/extras/', ['GET']),         # /api/request/extras/<kind>/<id>
+]
+
+_PORTAL_STATIC_PREFIX = '/static/request/'
 
 
-def is_portal_allowed(path: str) -> bool:
+def is_portal_allowed(path: str, method: str = 'GET') -> bool:
     """Check if path is allowed for portal traffic (deny-by-default allowlist)."""
     # Exact path matches
     if path in _PORTAL_PATHS:
         return True
     
-    # Prefix matches
-    if any(path.startswith(prefix) for prefix in _PORTAL_PREFIXES):
+    # Static assets
+    if path.startswith(_PORTAL_STATIC_PREFIX):
         return True
     
-    # /api/request/* but NOT /api/request/admin/*
-    if path.startswith('/api/request/'):
-        if path.startswith('/api/request/admin/'):
-            return False
-        return True
+    # Pattern matches with method check
+    for pattern_prefix, allowed_methods in _PORTAL_PATH_PATTERNS:
+        if path.startswith(pattern_prefix):
+            # Extra check: block admin routes even if they match a pattern
+            if '/admin/' in path or path.startswith('/api/request/admin'):
+                return False
+            return method in allowed_methods
     
     return False
 
@@ -56,10 +73,12 @@ def guard_portal_traffic(settings):
     
     # Check if path is allowed for portal traffic
     path = request.path
-    if not is_portal_allowed(path):
+    method = request.method
+    
+    if not is_portal_allowed(path, method):
         # Portal traffic trying to access non-portal route
-        logger.warning('[portal-guard] Portal traffic blocked from %s (host=%s)',
-                      path, request.headers.get('Host'))
+        logger.warning('[portal-guard] Portal traffic blocked from %s %s (host=%s)',
+                      method, path, request.headers.get('Host'))
         abort(404)
     
     return None

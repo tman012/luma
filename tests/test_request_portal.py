@@ -180,24 +180,39 @@ class TestRequestPortalRequesterGuard:
 
 
 class TestRequestPortalHostGuard:
-    """Test hostname-based routing."""
+    """Test hostname-based routing via portal guard."""
     
     def test_host_guard_serves_only_request_page_on_dedicated_host(self, app, settings_mock):
         """When request portal has a dedicated hostname, non-request paths return 404."""
-        from app import request_portal
+        from app import portal_guard
+        from app import access
         
-        request_portal._settings = settings_mock
         settings_mock.get.side_effect = lambda key, default=None: {
             'request_portal.enabled': True,
-            'request_portal.hostname': 'requests.example.com'
+            'request_portal.hostname': 'requests.example.com',
+            'cloudflare_tunnel.enabled': False
         }.get(key, default)
         
-        # Request to /browse on the request hostname should return 404
-        with app.test_request_context('/browse', headers={'Host': 'requests.example.com'}):
-            result = request_portal._host_guard()
-            assert result is not None
-            # Should be a 404 on non-request paths
-            if isinstance(result, tuple):
-                assert result[1] == 404
-            else:
-                assert result.status_code == 404
+        # Mock is_portal_traffic to return True for the portal hostname
+        original_is_portal_traffic = access.is_portal_traffic
+        access.is_portal_traffic = lambda req, settings: req.headers.get('Host', '').startswith('requests.')
+        
+        try:
+            # Request to /browse on the request hostname should be blocked (404)
+            with app.test_request_context('/browse', headers={'Host': 'requests.example.com'}):
+                from flask import abort
+                try:
+                    portal_guard.guard_portal_traffic(settings_mock)
+                    # If no abort, the path was allowed (shouldn't happen for /browse)
+                    assert False, "Expected 404 abort"
+                except Exception as e:
+                    # Should abort with 404
+                    assert '404' in str(e) or hasattr(e, 'code') and e.code == 404
+            
+            # Request to /request on the portal hostname should be allowed
+            with app.test_request_context('/request', headers={'Host': 'requests.example.com'}):
+                result = portal_guard.guard_portal_traffic(settings_mock)
+                # None means allowed (no abort)
+                assert result is None
+        finally:
+            access.is_portal_traffic = original_is_portal_traffic

@@ -1903,29 +1903,12 @@ _HOST_FILES = {'/static/images/luma_text.png', '/static/images/apple-touch-icon.
                '/static/images/rotten-tomatoes-popcorn-good.png', '/static/images/rotten-tomatoes-popcorn-bad.png'}
 
 
-def _host_guard():
-    """On the dedicated request hostname only the request page exists; everything else is 404."""
-    hosts = _request_hosts()
-    if not hosts or (request.host or '').split(':')[0].lower() not in hosts:
-        return None
-    p = request.path
-    if p in ('/', '/request', '/request/') and request.method in ('GET', 'HEAD'):
-        return request_page()
-    if p.startswith('/api/request/') and not p.startswith('/api/request/admin'):
-        return None
-    if request.method in ('GET', 'HEAD') and (p.startswith(_HOST_STATIC) or p in _HOST_FILES):
-        return None
-    if p.startswith('/api/'):
-        return jsonify({'error': 'Not found'}), 404
-    return make_response('Not Found', 404, {'Content-Type': 'text/plain; charset=utf-8'})
-
-
 def init_app(app, settings, record_origin=None) -> None:
     global _settings, _record_origin
     _settings = settings
     _record_origin = record_origin
     app.register_blueprint(bp)
-    app.before_request_funcs.setdefault(None, []).insert(0, _host_guard)  # runs before every other hook
+    # Portal host guard is now handled by portal_guard.guard_portal_traffic() in main.py
     app.before_request(_requester_guard)
 
     def _warm():
