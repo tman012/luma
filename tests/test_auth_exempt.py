@@ -44,9 +44,15 @@ def test_remote_register_when_allowed(client):
 
 
 def test_local_register_always_allowed(client):
+    # Restore the global setting so later tests (e.g. hero file serving)
+    # are not left behind an auth wall; this leaked under some random orders.
+    previous = app.main.settings.get('security.auth_required')
     app.main.settings.update({'security': {'auth_required': 'enabled'}})
-    r = client.post('/api/auth/register', json=NEW, environ_base=LAN)
-    assert r.status_code == 200
+    try:
+        r = client.post('/api/auth/register', json=NEW, environ_base=LAN)
+        assert r.status_code == 200
+    finally:
+        app.main.settings.update({'security': {'auth_required': previous}})
 
 
 def test_portal_host_never_registers(client):
