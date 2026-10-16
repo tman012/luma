@@ -7,6 +7,7 @@ DATABASE_PATH   application SQLite database; see database_path()
 """
 
 import logging
+import itertools
 import os
 import sqlite3
 import tempfile
@@ -105,12 +106,16 @@ def atomic_write_json(path, data, mode: int = 0o644) -> None:
         raise
 
 
+_quarantine_seq = itertools.count(1)
+
+
 def quarantine(path, reason: str, logger: logging.Logger = None) -> Optional[Path]:
-    """Move an unreadable state file aside to <name>.bad-<unix ts> and log an
-    error. Returns the backup path, or None if it could not be moved."""
+    """Move an unreadable state file aside to <name>.bad-<ts>-<pid>-<n> (unique
+    even for two workers in the same second) and log an error. Returns the
+    backup path, or None if it could not be moved."""
     import time
     path = Path(path)
-    backup = path.with_name(f'{path.name}.bad-{int(time.time())}')
+    backup = path.with_name(f'{path.name}.bad-{int(time.time())}-{os.getpid()}-{next(_quarantine_seq)}')
     try:
         os.replace(path, backup)
     except OSError as e:

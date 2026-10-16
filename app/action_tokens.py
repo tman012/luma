@@ -103,18 +103,34 @@ def release(data_dir, nonce: str) -> None:
             _save(data_dir, store)
 
 
+_held = threading.local()
+
+
 class _file_lock:
+    """Cross-process lock on the used-link store. Re-entrant within a thread
+    (flock on a second descriptor would block on our own lock)."""
+
     def __init__(self, data_dir):
         self.path = os.path.join(str(data_dir), NONCE_FILENAME + '.lock')
 
     def __enter__(self):
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        self.fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
-        fcntl.flock(self.fd, fcntl.LOCK_EX)
+        depth = getattr(_held, 'depth', 0)
+        _held.depth = depth + 1
+        if depth:
+            return self
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            self.fd = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
+            fcntl.flock(self.fd, fcntl.LOCK_EX)
+        except BaseException:
+            _held.depth = depth
+            raise
         return self
 
     def __exit__(self, *exc):
-        os.close(self.fd)
+        _held.depth -= 1
+        if not _held.depth:
+            os.close(self.fd)
 
 
 def _empty() -> Dict:
@@ -128,25 +144,35 @@ def _load(data_dir, now: float) -> Dict:
     now is refused from then on (the cutoff is saved right away), since the
     record of which ones were used is gone."""
     path = os.path.join(str(data_dir), NONCE_FILENAME)
-    try:
-        with open(path) as fh:
-            raw = json.load(fh)
-        store = _parse_store(raw)
-    except FileNotFoundError:
-        return _empty()
-    except (OSError, ValueError, TypeError, UnicodeDecodeError) as e:
-        from app.paths import quarantine
-        quarantine(path, f'used-link store unreadable: {e}', logger)
-        store = _empty()
-        store['reject_issued_before'] = int(now) + 1
-        logger.error('Telegram admin links issued before now are refused (used-link record lost)')
-        try:
-            _save(data_dir, store)
-        except OSError as save_err:
-            logger.error('Could not save the link cutoff: %s', save_err)
-        return store
+    store, err = _read(path)
+    if err is not None:
+        with _file_lock(data_dir):
+            # Re-read under the lock: another worker may have handled it.
+            store, err = _read(path)
+            if err is not None:
+                from app.paths import quarantine
+                quarantine(path, f'used-link store unreadable: {err}', logger)
+                store = _empty()
+                store['reject_issued_before'] = int(now) + 1
+                logger.error('Telegram admin links issued before now are refused (used-link record lost)')
+                try:
+                    _save(data_dir, store)
+                except OSError as save_err:
+                    logger.error('Could not save the link cutoff: %s', save_err)
+                return store
     store['used'] = {n: e for n, e in store['used'].items() if e > now}
     return store
+
+
+def _read(path) -> tuple:
+    """(store, None), or (None, error) when the file is unreadable."""
+    try:
+        with open(path) as fh:
+            return _parse_store(json.load(fh)), None
+    except FileNotFoundError:
+        return _empty(), None
+    except (OSError, ValueError, TypeError, UnicodeDecodeError) as e:
+        return None, e
 
 
 def _parse_store(raw) -> Dict:
