@@ -87,10 +87,17 @@ def test_app():
     # Initialize database schema
     app.user_auth.init_db()
     
+    # Clear any existing users from previous tests
+    conn = app.user_auth._get_db()
+    conn.execute('DELETE FROM users')
+    conn.execute('DELETE FROM user_sessions')
+    conn.commit()
+    conn.close()
+    
     # Reset settings to defaults for each test
     app.main.settings.update({
         'security': {
-            'auth_required': 'disabled_local',
+            'auth_required': 'disabled_local',  # Default: LAN no sign-in
             'session_secret': '',  # Will be auto-generated
         }
     })

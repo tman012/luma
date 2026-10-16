@@ -1,3 +1,4 @@
+import { apiFetch } from '../apiClient';
 /**
  * Taste API — explicit verdicts on watched films, and what to acquire next.
  *
@@ -72,7 +73,7 @@ export async function submitVerdict(
   title?: string,
   year?: number | null,
 ): Promise<{ ok: boolean; suggestions: TasteSuggestion[]; pool?: number }> {
-  const resp = await fetch('/api/taste/rate', {
+  const resp = await apiFetch('/api/taste/rate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tmdb_id: tmdbId, verdict, title, year }),
@@ -85,7 +86,7 @@ export async function submitVerdict(
  *  opinion, so it is stored separately from ratings — but it does suppress both
  *  the push and the in-app prompt. */
 export async function dismissFilm(tmdbId: number): Promise<{ ok: boolean }> {
-  const resp = await fetch('/api/taste/dismiss', {
+  const resp = await apiFetch('/api/taste/dismiss', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tmdb_id: tmdbId }),

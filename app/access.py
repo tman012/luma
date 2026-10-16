@@ -167,16 +167,11 @@ def is_portal_traffic(request, settings) -> bool:
 def should_authenticate(settings, request) -> bool:
     """True when this request must authenticate (new auth_required logic).
     
-    Uses security.auth_required instead of legacy access_mode:
+    Uses security.auth_required (migrated from legacy access_mode):
     - 'enabled': everyone must authenticate
     - 'disabled_local': local requests get implicit owner, remote must authenticate
     
-    Falls back to legacy access_mode for backwards compatibility:
-    - 'pin': everyone must authenticate (maps to 'enabled')
-    - 'pin_remote': local gets implicit owner, remote must authenticate (maps to 'disabled_local')
-    - 'open': local gets implicit owner, remote must authenticate (maps to 'disabled_local')
-    
-    Default (when neither setting is present): 'enabled' (secure default, everyone must authenticate)
+    Default: 'disabled_local' (LAN and kiosk don't need sign-in)
     
     Portal traffic always requires authentication (never gets implicit owner).
     """
@@ -184,20 +179,8 @@ def should_authenticate(settings, request) -> bool:
     if is_portal_traffic(request, settings):
         return True
     
-    # Try new auth_required setting first
-    auth_req = settings.get('security.auth_required', '').strip()
-    
-    # Fall back to legacy access_mode for backwards compatibility
-    if not auth_req:
-        legacy_mode = settings.get('security.access_mode', '').strip()
-        if legacy_mode == 'pin':
-            auth_req = 'enabled'
-        elif legacy_mode in ('pin_remote', 'open'):
-            auth_req = 'disabled_local'
-        else:
-            # Default to 'enabled' (secure default - everyone must authenticate)
-            # This matches the old default behavior of 'pin' mode
-            auth_req = 'enabled'
+    # Read auth_required setting (legacy access_mode is migrated at settings load)
+    auth_req = (settings.get('security.auth_required') or 'disabled_local').strip()
     
     if auth_req == 'enabled':
         # Everyone must authenticate
@@ -333,10 +316,9 @@ def init_home_wan_tracking(settings) -> None:
     # Load existing state
     _load_home_ips()
     
-    # Check if background threads should be skipped
+    # Check if background threads should be skipped (for testing)
+    # Uses env var for back-compat; tests should set LUMA_SKIP_BACKGROUND_THREADS=1
     skip_bg = os.getenv('LUMA_SKIP_BACKGROUND_THREADS', '').strip().lower() in ('1', 'true', 'yes')
-    if not skip_bg:
-        skip_bg = settings.get('general.skip_background_threads', False)
     
     # Start background refresh thread (skip in test mode)
     if not skip_bg:

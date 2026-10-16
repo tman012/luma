@@ -203,37 +203,37 @@ class StartFlowTest(unittest.TestCase):
 
     # -- access modes -------------------------------------------------------
 
-    def _who(self, mode, remote_addr, headers=None, proxies=''):
-        self.settings.update({'security': {'access_mode': mode, 'trusted_proxies': proxies}})
+    def _who(self, auth_required, remote_addr, headers=None, proxies=''):
+        self.settings.update({'security': {'auth_required': auth_required, 'trusted_proxies': proxies}})
         r = self.client.get('/whoami', headers=headers or {}, environ_base={'REMOTE_ADDR': remote_addr})
         return r.json['user']
 
     def test_access_modes(self):
         self.ua.create_user('owner', '1234', is_admin=True)
-        # Open mode: remote visitors need sign-in (no implicit owner)
-        self.assertIsNone(self._who('open', '203.0.113.9'))
-        # Open mode: local visitors get implicit owner
-        self.assertEqual(self._who('open', '10.20.0.5'), 'owner')
-        # Pin mode: everyone needs sign-in
-        self.assertIsNone(self._who('pin', '10.20.0.5'))
-        # Pin-remote mode: local gets owner, remote needs sign-in
-        self.assertEqual(self._who('pin_remote', '10.20.0.5'), 'owner')
-        self.assertEqual(self._who('pin_remote', '10.20.0.6'), 'owner')
-        self.assertIsNone(self._who('pin_remote', '203.0.113.9'))
+        # disabled_local mode: remote visitors need sign-in (no implicit owner)
+        self.assertIsNone(self._who('disabled_local', '203.0.113.9'))
+        # disabled_local mode: local visitors get implicit owner
+        self.assertEqual(self._who('disabled_local', '10.20.0.5'), 'owner')
+        # enabled mode: everyone needs sign-in
+        self.assertIsNone(self._who('enabled', '10.20.0.5'))
+        # disabled_local mode: local gets owner, remote needs sign-in
+        self.assertEqual(self._who('disabled_local', '10.20.0.5'), 'owner')
+        self.assertEqual(self._who('disabled_local', '10.20.0.6'), 'owner')
+        self.assertIsNone(self._who('disabled_local', '203.0.113.9'))
         # Relayed by a proxy that isn't trusted: treated as remote, whatever the headers claim.
-        self.assertIsNone(self._who('pin_remote', '127.0.0.1', {'X-Forwarded-For': '10.20.0.5'}))
-        self.assertIsNone(self._who('pin_remote', '172.21.0.1', {'CF-Connecting-IP': '10.20.0.5'}))
+        self.assertIsNone(self._who('disabled_local', '127.0.0.1', {'X-Forwarded-For': '10.20.0.5'}))
+        self.assertIsNone(self._who('disabled_local', '172.21.0.1', {'CF-Connecting-IP': '10.20.0.5'}))
         # Trusted proxy: the forwarded client address decides.
-        self.assertEqual(self._who('pin_remote', '172.20.0.2', {'X-Forwarded-For': '10.20.0.5'}, '172.20.0.0/16'), 'owner')
-        self.assertIsNone(self._who('pin_remote', '172.20.0.2', {'X-Forwarded-For': '10.20.0.5, 198.51.100.7'}, '172.20.0.0/16'))
-        self.assertIsNone(self._who('pin_remote', '172.20.0.2', {'CF-Connecting-IP': '198.51.100.7'}, '172.20.0.0/16'))
+        self.assertEqual(self._who('disabled_local', '172.20.0.2', {'X-Forwarded-For': '10.20.0.5'}, '172.20.0.0/16'), 'owner')
+        self.assertIsNone(self._who('disabled_local', '172.20.0.2', {'X-Forwarded-For': '10.20.0.5, 198.51.100.7'}, '172.20.0.0/16'))
+        self.assertIsNone(self._who('disabled_local', '172.20.0.2', {'CF-Connecting-IP': '198.51.100.7'}, '172.20.0.0/16'))
 
-    def test_unset_mode_requires_pin(self):
+    def test_unset_mode_defaults_to_disabled_local(self):
         self.ua.create_user('owner', '1234', is_admin=True)
         s = _Settings()
-        self.assertEqual(self.access.mode(s), 'pin')
+        # With no auth_required set, defaults to disabled_local
         req = SimpleNamespace(remote_addr='10.20.0.5', headers={})
-        self.assertTrue(self.access.needs_pin(s, req))
+        self.assertFalse(self.access.needs_pin(s, req))  # LAN doesn't need PIN
 
     def test_no_users_no_open_access(self):
         self.assertIsNone(self._who('open', '10.20.0.5'))

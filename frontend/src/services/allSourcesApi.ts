@@ -1,3 +1,4 @@
+import { apiFetch } from '../apiClient';
 /**
  * allSourcesApi — canonical client for the "View all results" sources feature.
  *
@@ -152,7 +153,7 @@ export async function grabToLibrary(
     return { success: false, error: 'This release has no download link.' };
   }
   try {
-    const resp = await fetch('/api/downloads/add', {
+    const resp = await apiFetch('/api/downloads/add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

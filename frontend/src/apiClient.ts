@@ -1,8 +1,8 @@
 /**
  * API client with automatic URL base handling.
  * 
- * This wraps the native fetch to automatically prepend the runtime URL base
- * to all API and static asset requests.
+ * All API calls should use apiFetch instead of native fetch to ensure
+ * the runtime URL base is correctly applied.
  */
 
 import { apiUrl } from './urlHelpers';
@@ -10,8 +10,7 @@ import { apiUrl } from './urlHelpers';
 /**
  * Fetch wrapper that automatically prepends the URL base to relative URLs.
  * 
- * For API calls (/api/*), this ensures the correct base is used even when
- * the app is hosted at a sub-path (e.g. /luma/api/settings).
+ * Use this for all API calls instead of native fetch.
  * 
  * @param input - URL or Request object
  * @param init - Fetch options
@@ -24,6 +23,10 @@ export async function apiFetch(
   // If it's a string URL starting with /, prepend the base
   if (typeof input === 'string' && input.startsWith('/')) {
     input = apiUrl(input);
+  }
+  // If it's a Request object with a relative URL, create a new Request with the base
+  else if (input instanceof Request && input.url.startsWith('/')) {
+    input = new Request(apiUrl(input.url), input);
   }
   
   return fetch(input, init);

@@ -1,3 +1,4 @@
+import { apiFetch } from '../apiClient';
 /**
  * Sonarr TV API — shared service for kiosk TV modal.
  *
@@ -150,7 +151,7 @@ export async function addToSonarr(
   seasons?: number[],
   qualityProfileId?: number,
 ): Promise<{ success: boolean; message: string; series?: Record<string, unknown> }> {
-  const resp = await fetch('/api/sonarr/add', {
+  const resp = await apiFetch('/api/sonarr/add', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -168,7 +169,7 @@ export async function addToSonarr(
 
 export async function fetchQualityProfiles(): Promise<QualityProfile[]> {
   try {
-    const resp = await fetch('/api/sonarr/quality-profiles');
+    const resp = await apiFetch('/api/sonarr/quality-profiles');
     if (!resp.ok) return [];
     return resp.json();
   } catch {
@@ -186,7 +187,7 @@ export async function autoSearchSeason(
   tmdbId?: number,
 ): Promise<{ success: boolean; message: string }> {
   try {
-    const resp = await fetch('/api/sonarr/search/season', {
+    const resp = await apiFetch('/api/sonarr/search/season', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -210,7 +211,7 @@ export async function autoSearchEpisode(
   title?: string,
 ): Promise<{ success: boolean; message: string }> {
   try {
-    const resp = await fetch('/api/sonarr/search/episode', {
+    const resp = await apiFetch('/api/sonarr/search/episode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -280,7 +281,7 @@ export async function downloadRelease(
   opts?: { seriesId?: number; season?: number; episodeId?: number; tmdbId?: number; title?: string },
 ): Promise<{ success: boolean; message: string }> {
   try {
-    const resp = await fetch('/api/sonarr/episode/download', {
+    const resp = await apiFetch('/api/sonarr/episode/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

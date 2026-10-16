@@ -390,11 +390,11 @@ config = Config()
 settings = SettingsManager()
 logger.info(f"Settings loaded from {settings.path}")
 
-# Check if background threads should be skipped (for testing or dev environments)
-# Priority: env var > setting > default (False)
+# Check if background threads should be skipped (for testing)
+# Uses Flask app.config['START_BACKGROUND_THREADS'] or env var for back-compat
 skip_bg = os.getenv('LUMA_SKIP_BACKGROUND_THREADS', '').strip().lower() in ('1', 'true', 'yes')
 if not skip_bg:
-    skip_bg = settings.get('general.skip_background_threads', False)
+    skip_bg = not app.config.get('START_BACKGROUND_THREADS', True)
 
 # Skip initialization in test mode (will be initialized on demand)
 if not skip_bg:

@@ -1,3 +1,4 @@
+import { apiFetch } from '../apiClient';
 /**
  * settingsApi.ts — API functions for the Settings page.
  *
@@ -80,13 +81,13 @@ export interface PlexHealthResponse {
 // ── Settings CRUD ────────────────────────────────────────────────
 
 export async function fetchSettings(): Promise<Record<string, unknown>> {
-  const resp = await fetch('/api/settings');
+  const resp = await apiFetch('/api/settings');
   if (!resp.ok) throw new Error(`Failed to load settings (${resp.status})`);
   return resp.json();
 }
 
 export async function fetchSchema(): Promise<Record<string, unknown>> {
-  const resp = await fetch('/api/settings/schema');
+  const resp = await apiFetch('/api/settings/schema');
   if (!resp.ok) throw new Error(`Failed to load schema (${resp.status})`);
   return resp.json();
 }
@@ -94,7 +95,7 @@ export async function fetchSchema(): Promise<Record<string, unknown>> {
 export async function saveSettings(
   changes: Record<string, unknown>,
 ): Promise<SettingsResponse> {
-  const resp = await fetch('/api/settings', {
+  const resp = await apiFetch('/api/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(changes),
@@ -119,13 +120,13 @@ export async function testConnection(
 // ── Rooms CRUD ───────────────────────────────────────────────────
 
 export async function fetchRooms(): Promise<RoomsResponse> {
-  const resp = await fetch('/api/settings/rooms');
+  const resp = await apiFetch('/api/settings/rooms');
   if (!resp.ok) throw new Error(`Failed to load rooms (${resp.status})`);
   return resp.json();
 }
 
 export async function createRoom(data: Partial<RoomData>): Promise<{ room: RoomData }> {
-  const resp = await fetch('/api/settings/rooms', {
+  const resp = await apiFetch('/api/settings/rooms', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -272,7 +273,7 @@ export async function setDefaultPlaybackTarget(target: {
   deviceId: string;
   serviceId: string;
 }): Promise<void> {
-  const resp = await fetch('/api/settings/rooms/default', {
+  const resp = await apiFetch('/api/settings/rooms/default', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(target),
@@ -316,7 +317,7 @@ export async function pairDevice(
 // ── Radarr quality profiles ─────────────────────────────────────
 
 export async function fetchRadarrProfiles(): Promise<QualityProfile[]> {
-  const resp = await fetch('/api/radarr/quality-profiles');
+  const resp = await apiFetch('/api/radarr/quality-profiles');
   if (!resp.ok) return [];
   const data = await resp.json();
   return (data.profiles ?? data) as QualityProfile[];
@@ -325,7 +326,7 @@ export async function fetchRadarrProfiles(): Promise<QualityProfile[]> {
 // ── Sonarr quality profiles ─────────────────────────────────────
 
 export async function fetchSonarrProfiles(): Promise<QualityProfile[]> {
-  const resp = await fetch('/api/sonarr/quality-profiles');
+  const resp = await apiFetch('/api/sonarr/quality-profiles');
   if (!resp.ok) return [];
   const data = await resp.json();
   return (data.profiles ?? data) as QualityProfile[];
@@ -334,7 +335,7 @@ export async function fetchSonarrProfiles(): Promise<QualityProfile[]> {
 // ── Plex health (for library dropdown) ───────────────────────────
 
 export async function fetchPlexHealth(): Promise<PlexHealthResponse> {
-  const resp = await fetch('/api/plex/health');
+  const resp = await apiFetch('/api/plex/health');
   if (!resp.ok) return { success: false };
   return resp.json();
 }
@@ -346,7 +347,7 @@ export async function syncFromPlex(): Promise<{
   paths?: Record<string, unknown>[];
   message?: string;
 }> {
-  const resp = await fetch('/api/settings/media/sync-from-plex', {
+  const resp = await apiFetch('/api/settings/media/sync-from-plex', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -388,19 +389,19 @@ export interface TrendingWatchlistLogEntry {
 }
 
 export async function fetchTrendingWatchlistStatus(): Promise<TrendingWatchlistStatus> {
-  const resp = await fetch('/api/automation/trending-watchlist/status');
+  const resp = await apiFetch('/api/automation/trending-watchlist/status');
   if (!resp.ok) throw new Error(`Failed to fetch status (${resp.status})`);
   return resp.json();
 }
 
 export async function fetchTrendingWatchlistLog(): Promise<TrendingWatchlistLogEntry[]> {
-  const resp = await fetch('/api/automation/trending-watchlist/log');
+  const resp = await apiFetch('/api/automation/trending-watchlist/log');
   if (!resp.ok) return [];
   return resp.json();
 }
 
 export async function triggerTrendingWatchlistRun(): Promise<{ success: boolean; message: string }> {
-  const resp = await fetch('/api/automation/trending-watchlist/run', { method: 'POST' });
+  const resp = await apiFetch('/api/automation/trending-watchlist/run', { method: 'POST' });
   return resp.json();
 }
 
@@ -438,19 +439,19 @@ export interface TrendingTvWatchlistLogEntry {
 }
 
 export async function fetchTrendingTvWatchlistStatus(): Promise<TrendingTvWatchlistStatus> {
-  const resp = await fetch('/api/automation/trending-tv-watchlist/status');
+  const resp = await apiFetch('/api/automation/trending-tv-watchlist/status');
   if (!resp.ok) throw new Error(`Failed to fetch TV status (${resp.status})`);
   return resp.json();
 }
 
 export async function fetchTrendingTvWatchlistLog(): Promise<TrendingTvWatchlistLogEntry[]> {
-  const resp = await fetch('/api/automation/trending-tv-watchlist/log');
+  const resp = await apiFetch('/api/automation/trending-tv-watchlist/log');
   if (!resp.ok) return [];
   return resp.json();
 }
 
 export async function triggerTrendingTvWatchlistRun(): Promise<{ success: boolean; message: string }> {
-  const resp = await fetch('/api/automation/trending-tv-watchlist/run', { method: 'POST' });
+  const resp = await apiFetch('/api/automation/trending-tv-watchlist/run', { method: 'POST' });
   return resp.json();
 }
 
@@ -484,19 +485,19 @@ export interface NowAvailableWatchlistLogEntry {
 }
 
 export async function fetchNowAvailableWatchlistStatus(): Promise<NowAvailableWatchlistStatus> {
-  const resp = await fetch('/api/automation/now-available-watchlist/status');
+  const resp = await apiFetch('/api/automation/now-available-watchlist/status');
   if (!resp.ok) throw new Error(`Failed to fetch now-available status (${resp.status})`);
   return resp.json();
 }
 
 export async function fetchNowAvailableWatchlistLog(): Promise<NowAvailableWatchlistLogEntry[]> {
-  const resp = await fetch('/api/automation/now-available-watchlist/log');
+  const resp = await apiFetch('/api/automation/now-available-watchlist/log');
   if (!resp.ok) return [];
   return resp.json();
 }
 
 export async function triggerNowAvailableWatchlistRun(): Promise<{ success: boolean; message: string }> {
-  const resp = await fetch('/api/automation/now-available-watchlist/run', { method: 'POST' });
+  const resp = await apiFetch('/api/automation/now-available-watchlist/run', { method: 'POST' });
   return resp.json();
 }
 
@@ -529,19 +530,19 @@ export interface AnticipatedWatchlistLogEntry {
 }
 
 export async function fetchAnticipatedWatchlistStatus(): Promise<AnticipatedWatchlistStatus> {
-  const resp = await fetch('/api/automation/anticipated-watchlist/status');
+  const resp = await apiFetch('/api/automation/anticipated-watchlist/status');
   if (!resp.ok) throw new Error(`Failed to fetch anticipated status (${resp.status})`);
   return resp.json();
 }
 
 export async function fetchAnticipatedWatchlistLog(): Promise<AnticipatedWatchlistLogEntry[]> {
-  const resp = await fetch('/api/automation/anticipated-watchlist/log');
+  const resp = await apiFetch('/api/automation/anticipated-watchlist/log');
   if (!resp.ok) return [];
   return resp.json();
 }
 
 export async function triggerAnticipatedWatchlistRun(): Promise<{ success: boolean; message: string }> {
-  const resp = await fetch('/api/automation/anticipated-watchlist/run', { method: 'POST' });
+  const resp = await apiFetch('/api/automation/anticipated-watchlist/run', { method: 'POST' });
   return resp.json();
 }
 
@@ -595,19 +596,19 @@ export interface LatestAutoGrabLogEntry {
 }
 
 export async function fetchLatestAutoGrabStatus(): Promise<LatestAutoGrabStatus> {
-  const resp = await fetch('/api/automation/latest-auto-grab/status');
+  const resp = await apiFetch('/api/automation/latest-auto-grab/status');
   if (!resp.ok) throw new Error(`Failed to fetch Latest auto-grab status (${resp.status})`);
   return resp.json();
 }
 
 export async function fetchLatestAutoGrabLog(): Promise<LatestAutoGrabLogEntry[]> {
-  const resp = await fetch('/api/automation/latest-auto-grab/log');
+  const resp = await apiFetch('/api/automation/latest-auto-grab/log');
   if (!resp.ok) return [];
   return resp.json();
 }
 
 export async function triggerLatestAutoGrabRun(): Promise<{ success: boolean; message: string }> {
-  const resp = await fetch('/api/automation/latest-auto-grab/run', { method: 'POST' });
+  const resp = await apiFetch('/api/automation/latest-auto-grab/run', { method: 'POST' });
   return resp.json();
 }
 
@@ -661,19 +662,19 @@ export interface Upgrade4kAutoGrabLogEntry {
 }
 
 export async function fetchUpgrade4kAutoGrabStatus(): Promise<Upgrade4kAutoGrabStatus> {
-  const resp = await fetch('/api/automation/upgrade-4k-auto-grab/status');
+  const resp = await apiFetch('/api/automation/upgrade-4k-auto-grab/status');
   if (!resp.ok) throw new Error(`Failed to fetch 4K auto-grab status (${resp.status})`);
   return resp.json();
 }
 
 export async function fetchUpgrade4kAutoGrabLog(): Promise<Upgrade4kAutoGrabLogEntry[]> {
-  const resp = await fetch('/api/automation/upgrade-4k-auto-grab/log');
+  const resp = await apiFetch('/api/automation/upgrade-4k-auto-grab/log');
   if (!resp.ok) return [];
   return resp.json();
 }
 
 export async function triggerUpgrade4kAutoGrabRun(): Promise<{ success: boolean; message: string }> {
-  const resp = await fetch('/api/automation/upgrade-4k-auto-grab/run', { method: 'POST' });
+  const resp = await apiFetch('/api/automation/upgrade-4k-auto-grab/run', { method: 'POST' });
   return resp.json();
 }
 
@@ -749,7 +750,7 @@ export async function fetchMovieNightTrackers(): Promise<{
   trackers: IndexerTracker[];
   selectable: boolean;
 }> {
-  const resp = await fetch('/api/movie-night/trackers');
+  const resp = await apiFetch('/api/movie-night/trackers');
   if (!resp.ok) return { trackers: [], selectable: false };
   return resp.json();
 }
@@ -769,13 +770,13 @@ export interface CanonStats {
 }
 
 export async function fetchCanonStats(): Promise<CanonStats> {
-  const resp = await fetch('/api/canon?limit=1');
+  const resp = await apiFetch('/api/canon?limit=1');
   if (!resp.ok) throw new Error(`Failed to fetch canon stats (${resp.status})`);
   return (await resp.json()).stats;
 }
 
 export async function buildCanonIndex(force = false): Promise<{ resolved: number; unresolved: number }> {
-  const resp = await fetch('/api/canon/build', {
+  const resp = await apiFetch('/api/canon/build', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ force }),
@@ -784,7 +785,7 @@ export async function buildCanonIndex(force = false): Promise<{ resolved: number
 }
 
 export async function fetchMovieNightPreview(): Promise<MovieNightPreview> {
-  const resp = await fetch('/api/movie-night/preview');
+  const resp = await apiFetch('/api/movie-night/preview');
   if (!resp.ok) throw new Error(`Preview failed (${resp.status})`);
   return resp.json();
 }
@@ -793,13 +794,13 @@ export async function fetchMovieNightStatus(): Promise<{
   status: MovieNightStatus;
   log: MovieNightLogEntry[];
 }> {
-  const resp = await fetch('/api/movie-night/status');
+  const resp = await apiFetch('/api/movie-night/status');
   if (!resp.ok) throw new Error(`Failed to fetch Movie Night status (${resp.status})`);
   return resp.json();
 }
 
 export async function triggerMovieNightRun(dryRun = true): Promise<{ ok: boolean; dry_run: boolean }> {
-  const resp = await fetch('/api/movie-night/run', {
+  const resp = await apiFetch('/api/movie-night/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dry_run: dryRun }),
@@ -881,7 +882,7 @@ export async function fetchGenreRouletteGenres(): Promise<{
   genres: string[];
   selected: string[];
 }> {
-  const resp = await fetch('/api/genre-roulette/genres');
+  const resp = await apiFetch('/api/genre-roulette/genres');
   if (!resp.ok) return { genres: [], selected: [] };
   return resp.json();
 }
@@ -890,13 +891,13 @@ export async function fetchGenreRouletteTrackers(): Promise<{
   trackers: IndexerTracker[];
   selectable: boolean;
 }> {
-  const resp = await fetch('/api/genre-roulette/trackers');
+  const resp = await apiFetch('/api/genre-roulette/trackers');
   if (!resp.ok) return { trackers: [], selectable: false };
   return resp.json();
 }
 
 export async function fetchGenreRoulettePreview(): Promise<GenreRouletteResult> {
-  const resp = await fetch('/api/genre-roulette/preview');
+  const resp = await apiFetch('/api/genre-roulette/preview');
   if (!resp.ok) throw new Error(`Preview failed (${resp.status})`);
   return resp.json();
 }
@@ -905,13 +906,13 @@ export async function fetchGenreRouletteStatus(): Promise<{
   status: GenreRouletteStatus;
   log: GenreRouletteLogEntry[];
 }> {
-  const resp = await fetch('/api/genre-roulette/status');
+  const resp = await apiFetch('/api/genre-roulette/status');
   if (!resp.ok) throw new Error(`Failed to fetch Genre Roulette status (${resp.status})`);
   return resp.json();
 }
 
 export async function triggerGenreRouletteRun(dryRun = true): Promise<{ ok: boolean; dry_run: boolean }> {
-  const resp = await fetch('/api/genre-roulette/run', {
+  const resp = await apiFetch('/api/genre-roulette/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dry_run: dryRun }),
@@ -969,7 +970,7 @@ export interface FranchiseCompleterLogEntry {
 }
 
 export async function fetchFranchiseCompleterPreview(): Promise<FranchiseCompleterResult> {
-  const resp = await fetch('/api/franchise-completer/preview');
+  const resp = await apiFetch('/api/franchise-completer/preview');
   if (!resp.ok) throw new Error(`Preview failed (${resp.status})`);
   return resp.json();
 }
@@ -978,13 +979,13 @@ export async function fetchFranchiseCompleterStatus(): Promise<{
   status: FranchiseCompleterStatus;
   log: FranchiseCompleterLogEntry[];
 }> {
-  const resp = await fetch('/api/franchise-completer/status');
+  const resp = await apiFetch('/api/franchise-completer/status');
   if (!resp.ok) throw new Error(`Failed to fetch Franchise Completer status (${resp.status})`);
   return resp.json();
 }
 
 export async function triggerFranchiseCompleterRun(dryRun = true): Promise<{ ok: boolean; dry_run: boolean }> {
-  const resp = await fetch('/api/franchise-completer/run', {
+  const resp = await apiFetch('/api/franchise-completer/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dry_run: dryRun }),
@@ -1046,13 +1047,13 @@ export async function fetchWatchlistDigitalDatesStatus(): Promise<{
   status: WatchlistDigitalDatesStatus;
   log: WatchlistDigitalDatesLogEntry[];
 }> {
-  const resp = await fetch('/api/watchlist-digital-dates/status');
+  const resp = await apiFetch('/api/watchlist-digital-dates/status');
   if (!resp.ok) throw new Error(`Failed to fetch Watchlist Digital Dates status (${resp.status})`);
   return resp.json();
 }
 
 export async function triggerWatchlistDigitalDatesRun(dryRun = false): Promise<{ ok: boolean; dry_run: boolean }> {
-  const resp = await fetch('/api/watchlist-digital-dates/run', {
+  const resp = await apiFetch('/api/watchlist-digital-dates/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dry_run: dryRun }),
@@ -1167,7 +1168,7 @@ export interface DownloadsGuardLogEntry {
 }
 
 export async function fetchDownloadsGuardTrackers(): Promise<DownloadsGuardTrackerSummary> {
-  const resp = await fetch('/api/downloads-guard/trackers');
+  const resp = await apiFetch('/api/downloads-guard/trackers');
   if (!resp.ok) {
     return {
       available: false, trackers: [], unknown_hosts: [],
@@ -1178,7 +1179,7 @@ export async function fetchDownloadsGuardTrackers(): Promise<DownloadsGuardTrack
 }
 
 export async function fetchDownloadsGuardPreview(): Promise<DownloadsGuardPreview> {
-  const resp = await fetch('/api/downloads-guard/preview');
+  const resp = await apiFetch('/api/downloads-guard/preview');
   if (!resp.ok) throw new Error(`Preview failed (${resp.status})`);
   return resp.json();
 }
@@ -1187,13 +1188,13 @@ export async function fetchDownloadsGuardStatus(): Promise<{
   status: DownloadsGuardStatus;
   log: DownloadsGuardLogEntry[];
 }> {
-  const resp = await fetch('/api/downloads-guard/status');
+  const resp = await apiFetch('/api/downloads-guard/status');
   if (!resp.ok) throw new Error(`Failed to fetch Downloads Guard status (${resp.status})`);
   return resp.json();
 }
 
 export async function triggerDownloadsGuardRun(dryRun = true): Promise<{ ok: boolean; dry_run: boolean }> {
-  const resp = await fetch('/api/downloads-guard/run', {
+  const resp = await apiFetch('/api/downloads-guard/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dry_run: dryRun }),

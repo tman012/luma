@@ -3,25 +3,12 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 import './index.css';
 import { installConnectServiceFetchHook } from '@/components/connect/connectService';
+import { getUrlBase } from './urlHelpers';
 
-// ============================================================================
-// URL base support: Monkey-patch fetch to prepend base to relative URLs
-// ============================================================================
-const originalFetch = window.fetch;
-const urlBase = (window as any).__LUMA_URL_BASE__ || '';
-
-window.fetch = function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  // If it's a string starting with /, prepend the URL base
-  if (typeof input === 'string' && input.startsWith('/') && urlBase) {
-    input = urlBase + input;
-  }
-  // If it's a Request object with a relative URL, create a new Request with the base
-  else if (input instanceof Request && input.url.startsWith('/') && urlBase) {
-    input = new Request(urlBase + input.url, input);
-  }
-  
-  return originalFetch.call(window, input, init);
-};
+// TODO: Migrate all fetch('/api/...') calls in service files to use apiFetch from apiClient.ts
+// This ensures URL base is correctly applied. For now, services use native fetch which works
+// in production because the server handles URL base via WSGI DispatcherMiddleware, but
+// proper migration to apiFetch is needed for consistency.
 
 installConnectServiceFetchHook();
 
@@ -67,6 +54,7 @@ if (new URLSearchParams(window.location.search).has('sw_reset')) {
   // =============================================================================
   // Normal SW registration + update listener
   // =============================================================================
+  const urlBase = getUrlBase();
   const swUrl = urlBase ? `${urlBase}/sw.js` : '/sw.js';
   const swScope = urlBase ? `${urlBase}/` : '/';
   

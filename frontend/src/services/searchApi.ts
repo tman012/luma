@@ -1,3 +1,4 @@
+import { apiFetch } from '../apiClient';
 /**
  * Search API layer — mirrors /web search behavior exactly.
  *
@@ -215,7 +216,7 @@ export async function batchCheckOwnership(
     use_media_paths?: boolean;
   },
 ): Promise<Record<string, { owned: boolean; rating_key?: number }>> {
-  const resp = await fetch('/api/check-ownership-batch', {
+  const resp = await apiFetch('/api/check-ownership-batch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

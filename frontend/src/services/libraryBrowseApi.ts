@@ -1,3 +1,4 @@
+import { apiFetch } from '../apiClient';
 /**
  * Library Browse API service.
  *
@@ -49,7 +50,7 @@ export interface BrowseParams {
 
 /** Fetch media.paths from the settings endpoint. */
 export async function fetchMediaPaths(): Promise<MediaPath[]> {
-  const resp = await fetch('/api/settings');
+  const resp = await apiFetch('/api/settings');
   if (!resp.ok) return [];
   const data = await resp.json();
   return (data?.media?.paths ?? []) as MediaPath[];
