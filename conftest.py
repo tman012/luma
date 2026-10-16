@@ -72,6 +72,10 @@ def reset_shared_state(request):
     request_portal._fails.clear()
     # Some tests swap in a mock settings object; put the real one back after
     saved_portal_settings = request_portal._settings
+    # Several tests set app.config['URL_BASE'] directly; restore it so later
+    # tests (and code that reads it, like indexer download links) see the default.
+    import app.main as _main
+    saved_url_base = _main.app.config.get('URL_BASE', '')
     
     # Clear user database between tests
     try:
@@ -90,6 +94,7 @@ def reset_shared_state(request):
     login_limiter._fail.clear()
     request_portal._fails.clear()
     request_portal._settings = saved_portal_settings
+    _main.app.config['URL_BASE'] = saved_url_base
 
 
 @pytest.fixture
