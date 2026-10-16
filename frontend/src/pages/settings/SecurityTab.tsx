@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { ACCESS_CHOICES } from '@/pages/StartPage';
 import { cn } from '@/utils/cn';
+import { apiFetch } from '../../apiClient';
 
 type Mode = 'pin_remote' | 'pin' | 'open';
 
@@ -31,7 +32,7 @@ function RequestPortalCard() {
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
-    fetch('/api/request/admin/settings')
+    apiFetch('/api/request/admin/settings')
       .then(r => r.json())
       .then(data => {
         setEnabled(data.enabled || false);
@@ -67,7 +68,7 @@ function RequestPortalCard() {
       };
       if (password) body.password = password;
       
-      const res = await fetch('/api/request/admin/settings', {
+      const res = await apiFetch('/api/request/admin/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -201,7 +202,7 @@ export function SecurityTab() {
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
-    const res = await fetch('/api/security');
+    const res = await apiFetch('/api/security');
     if (!res.ok) return;
     const data: SecurityState = await res.json();
     setState(data);
@@ -225,7 +226,7 @@ export function SecurityTab() {
     try {
       const body: Record<string, string> = { mode, trusted_proxies: proxies };
       if (pin) { body.pin = pin; body.confirm = confirm; }
-      const res = await fetch('/api/security', {
+      const res = await apiFetch('/api/security', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));

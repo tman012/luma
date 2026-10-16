@@ -13,6 +13,7 @@ import { getBadgeColor } from '@/components/media/TvDetailModal/tvSourcesUtils';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { posterUrl } from '@/utils/image';
+import { apiFetch } from '../../apiClient';
 
 /** A single completed download, badged by its origin. */
 interface ActivityEntry {
@@ -69,7 +70,7 @@ async function removeDownload(hash: string, deleteFiles: boolean): Promise<{ ok:
   if (!hash) return { ok: false, error: 'Missing torrent hash' };
   try {
     const q = deleteFiles ? '?deleteFiles=true' : '?deleteFiles=false';
-    const resp = await fetch(`/api/downloads/remove/${encodeURIComponent(hash)}${q}`, { method: 'DELETE' });
+    const resp = await apiFetch(`/api/downloads/remove/${encodeURIComponent(hash)}${q}`, { method: 'DELETE' });
     const data = await resp.json().catch(() => ({})) as { success?: boolean; error?: string; message?: string };
     if (!resp.ok || data.success === false) {
       return { ok: false, error: data.error || `Remove failed (${resp.status})` };
@@ -273,7 +274,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
       setReloadTick((t) => t + 1);
       // Also re-trigger active poll by bumping — loadActive is interval-bound;
       // kick it via a one-shot fetch below.
-      fetch('/api/downloads/queue')
+      apiFetch('/api/downloads/queue')
         .then((r) => (r.ok ? r.json() : { downloads: [] }))
         .catch(() => ({ downloads: [] }))
         .then((data: { downloads?: Record<string, unknown>[] }) => {
@@ -328,7 +329,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
     const loadActive = () => {
       // Skip polling while hidden (screensaver/background) — resumes on return.
       if (typeof document !== 'undefined' && document.hidden) return;
-      fetch('/api/downloads/queue')
+      apiFetch('/api/downloads/queue')
         .then((r) => (r.ok ? r.json() : { downloads: [] }))
         .catch(() => ({ downloads: [] }))
         .then((data: { downloads?: Record<string, unknown>[] }) => {
@@ -367,7 +368,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
   const load = useCallback(() => {
     setLoading(true);
     setError(false);
-    fetch('/api/downloads/history?limit=30')
+    apiFetch('/api/downloads/history?limit=30')
       .then((r) => (r.ok ? r.json() : { history: [], _error: true }))
       .catch(() => ({ history: [], _error: true }))
       .then((hist) => {

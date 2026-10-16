@@ -50,7 +50,7 @@ export async function fetchTastePending(hours = 24): Promise<{
   /** Fuller unrated list. Diagnostics only. */
   pending: TasteWatch[];
 }> {
-  const resp = await fetch(`/api/taste/pending?hours=${hours}`);
+  const resp = await apiFetch(`/api/taste/pending?hours=${hours}`);
   if (!resp.ok) throw new Error(`Failed to load recent watches (${resp.status})`);
   return resp.json();
 }
@@ -62,7 +62,7 @@ export async function fetchTasteFilm(tmdbId: number): Promise<{
   suggestions: TasteSuggestion[];
   pool?: number;
 }> {
-  const resp = await fetch(`/api/taste/film/${tmdbId}`);
+  const resp = await apiFetch(`/api/taste/film/${tmdbId}`);
   if (!resp.ok) throw new Error(`Failed to load film (${resp.status})`);
   return resp.json();
 }

@@ -15,6 +15,7 @@ import {
   type OwnershipMap,
 } from '@/services/sonarrApi';
 import { resolveOwnership, mediaKey } from '@/services/ownership';
+import { apiFetch } from '../apiClient';
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -160,7 +161,7 @@ export function useTvDetail(
 
     async function fetchClearlogo(id: number, signal: AbortSignal): Promise<string | null> {
       try {
-        const resp = await fetch(`/api/clearlogo/${id}?type=tv`, { signal });
+        const resp = await apiFetch(`/api/clearlogo/${id}?type=tv`, { signal });
         if (!resp.ok) return null;
         const data = (await resp.json()) as { clearlogo_url?: string };
         return data.clearlogo_url ?? null;
@@ -176,7 +177,7 @@ export function useTvDetail(
       try {
         if (tmdbId) {
           // Fetch from TMDb
-          const resp = await fetch(`/api/tv/${tmdbId}`, { signal: controller.signal });
+          const resp = await apiFetch(`/api/tv/${tmdbId}`, { signal: controller.signal });
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const data = (await resp.json()) as Record<string, unknown>;
           if (!cancelled) {
@@ -200,7 +201,7 @@ export function useTvDetail(
           }
         } else if (ratingKey) {
           // Fetch from Plex metadata API (works for any item type)
-          const plexResp = await fetch(`/api/plex/tv/${ratingKey}`, { signal: controller.signal });
+          const plexResp = await apiFetch(`/api/plex/tv/${ratingKey}`, { signal: controller.signal });
           if (!plexResp.ok) throw new Error('Could not fetch show details from Plex');
           const plexData = (await plexResp.json()) as Record<string, unknown>;
           const plexTmdbId = plexData.tmdb_id as number | null;
@@ -220,7 +221,7 @@ export function useTvDetail(
 
           if (plexTmdbId && !cancelled) {
             // We got a TMDb ID from Plex guids — fetch rich details from TMDb
-            const tmdbResp = await fetch(`/api/tv/${plexTmdbId}`, { signal: controller.signal });
+            const tmdbResp = await apiFetch(`/api/tv/${plexTmdbId}`, { signal: controller.signal });
             if (tmdbResp.ok) {
               const tmdbData = (await tmdbResp.json()) as Record<string, unknown>;
               if (!cancelled) {
@@ -394,12 +395,12 @@ export function useTvDetail(
       try {
         // Fire both sources in parallel, prefer TMDb
         const tmdbPromise = resolvedTmdbId
-          ? fetch(`/api/tmdb/colors/${resolvedTmdbId}?type=tv`, { signal: controller.signal })
+          ? apiFetch(`/api/tmdb/colors/${resolvedTmdbId}?type=tv`, { signal: controller.signal })
               .then((r) => r.ok ? r.json() as Promise<UltraBlurColors> : null)
               .catch(() => null)
           : Promise.resolve(null);
         const plexPromise = ratingKey
-          ? fetch(`/api/plex/ultrablur/${ratingKey}`, { signal: controller.signal })
+          ? apiFetch(`/api/plex/ultrablur/${ratingKey}`, { signal: controller.signal })
               .then((r) => r.ok ? r.json() as Promise<UltraBlurColors> : null)
               .catch(() => null)
           : Promise.resolve(null);

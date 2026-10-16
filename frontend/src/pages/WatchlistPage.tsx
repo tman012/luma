@@ -21,6 +21,7 @@ import { type DownloadItem } from '@/hooks/useNotifications';
 import { useNotificationsContext } from '@/contexts/NotificationsContext';
 import { posterUrl } from '@/utils/image';
 import { cn } from '@/utils/cn';
+import { apiFetch } from '../apiClient';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -303,7 +304,7 @@ function CompletedNoticeBanner({ notice }: { notice: CompletedNotice }) {
 // ---------------------------------------------------------------------------
 
 async function fetchWatchlist(): Promise<WatchlistMovie[]> {
-  const resp = await fetch('/api/watchlist');
+  const resp = await apiFetch('/api/watchlist');
   if (!resp.ok) return [];
   const data = await resp.json();
   const raw = (Array.isArray(data) ? data : []) as Record<string, unknown>[];
@@ -328,7 +329,7 @@ async function fetchWatchlist(): Promise<WatchlistMovie[]> {
 }
 
 async function fetchHistory(): Promise<HistoryItem[]> {
-  const resp = await fetch('/api/downloads/history?limit=30');
+  const resp = await apiFetch('/api/downloads/history?limit=30');
   if (!resp.ok) return [];
   const data = await resp.json();
   const raw = ((data.history ?? []) as Record<string, unknown>[]);
@@ -368,7 +369,7 @@ interface UpcomingEpisode {
 
 async function fetchUpcomingTv(): Promise<UpcomingEpisode[]> {
   try {
-    const resp = await fetch('/api/sonarr/calendar?days=7&limit=24');
+    const resp = await apiFetch('/api/sonarr/calendar?days=7&limit=24');
     if (!resp.ok) return [];
     const data = await resp.json();
     if (!data.enabled) return [];

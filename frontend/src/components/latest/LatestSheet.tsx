@@ -4,6 +4,7 @@ import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
 import { useModalHost, type ModalSource } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { cn } from '@/utils/cn';
+import { apiFetch } from '../../apiClient';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -205,7 +206,7 @@ function LatestRow({
     if (!canGrab || grabState === 'grabbing' || grabState === 'grabbed') return;
     setGrabState('grabbing');
     try {
-      const resp = await fetch('/api/indexer/grab', {
+      const resp = await apiFetch('/api/indexer/grab', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -473,7 +474,7 @@ export function LatestSheet({ open, onClose }: LatestSheetProps) {
     setError(null);
     // 300 = the per-search ceiling Prowlarr returns; covers a deep window
     // without paginating. Backend caches for 5min so repeated opens are free.
-    fetch('/api/indexer/latest?limit=300')
+    apiFetch('/api/indexer/latest?limit=300')
       .then(r => {
         if (!r.ok) throw new Error(r.status === 503 ? 'No indexer configured.' : 'Failed to load releases.');
         return r.json();

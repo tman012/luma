@@ -109,7 +109,7 @@ export async function testConnection(
   service: string,
   body?: Record<string, unknown>,
 ): Promise<TestResult> {
-  const resp = await fetch(`/api/settings/test/${service}`, {
+  const resp = await apiFetch(`/api/settings/test/${service}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body ?? {}),
@@ -142,7 +142,7 @@ export async function updateRoom(
   roomId: string,
   data: Partial<RoomData>,
 ): Promise<{ room: RoomData }> {
-  const resp = await fetch(`/api/settings/rooms/${roomId}`, {
+  const resp = await apiFetch(`/api/settings/rooms/${roomId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -155,7 +155,7 @@ export async function updateRoom(
 }
 
 export async function deleteRoom(roomId: string): Promise<void> {
-  const resp = await fetch(`/api/settings/rooms/${roomId}`, { method: 'DELETE' });
+  const resp = await apiFetch(`/api/settings/rooms/${roomId}`, { method: 'DELETE' });
   if (!resp.ok) {
     const err = await resp.json();
     throw new Error(err.error || 'Failed to delete room');
@@ -168,7 +168,7 @@ export async function createDevice(
   roomId: string,
   data: Partial<DeviceData>,
 ): Promise<{ device: DeviceData }> {
-  const resp = await fetch(`/api/settings/rooms/${roomId}/devices`, {
+  const resp = await apiFetch(`/api/settings/rooms/${roomId}/devices`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -185,7 +185,7 @@ export async function updateDevice(
   deviceId: string,
   data: Partial<DeviceData>,
 ): Promise<{ device: DeviceData }> {
-  const resp = await fetch(`/api/settings/rooms/${roomId}/devices/${deviceId}`, {
+  const resp = await apiFetch(`/api/settings/rooms/${roomId}/devices/${deviceId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
@@ -201,7 +201,7 @@ export async function deleteDevice(
   roomId: string,
   deviceId: string,
 ): Promise<void> {
-  const resp = await fetch(`/api/settings/rooms/${roomId}/devices/${deviceId}`, {
+  const resp = await apiFetch(`/api/settings/rooms/${roomId}/devices/${deviceId}`, {
     method: 'DELETE',
   });
   if (!resp.ok) {
@@ -217,7 +217,7 @@ export async function createService(
   deviceId: string,
   data: Partial<ServiceData>,
 ): Promise<{ service: ServiceData }> {
-  const resp = await fetch(
+  const resp = await apiFetch(
     `/api/settings/rooms/${roomId}/devices/${deviceId}/services`,
     {
       method: 'POST',
@@ -238,7 +238,7 @@ export async function updateService(
   serviceId: string,
   data: Partial<ServiceData>,
 ): Promise<{ service: ServiceData }> {
-  const resp = await fetch(
+  const resp = await apiFetch(
     `/api/settings/rooms/${roomId}/devices/${deviceId}/services/${serviceId}`,
     {
       method: 'PUT',
@@ -258,7 +258,7 @@ export async function deleteService(
   deviceId: string,
   serviceId: string,
 ): Promise<void> {
-  const resp = await fetch(
+  const resp = await apiFetch(
     `/api/settings/rooms/${roomId}/devices/${deviceId}/services/${serviceId}`,
     { method: 'DELETE' },
   );
@@ -287,7 +287,7 @@ export async function testDevice(
   roomId: string,
   deviceId: string,
 ): Promise<TestResult> {
-  const resp = await fetch(`/api/rooms/${roomId}/devices/${deviceId}/test`, {
+  const resp = await apiFetch(`/api/rooms/${roomId}/devices/${deviceId}/test`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
   });
@@ -300,7 +300,7 @@ export async function pairDevice(
   pairPort: number,
   pairCode: string,
 ): Promise<TestResult & { ok?: boolean; needsPairing?: boolean; hint?: string }> {
-  const resp = await fetch(`/api/rooms/${roomId}/devices/${deviceId}/pair`, {
+  const resp = await apiFetch(`/api/rooms/${roomId}/devices/${deviceId}/pair`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     // Backend expects camelCase; also send snake_case for compatibility

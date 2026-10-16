@@ -7,6 +7,7 @@
  */
 
 import { fetchWithTimeout } from '@/utils/fetchWithTimeout';
+import { apiFetch } from '../apiClient';
 
 export async function fetchWatchlistTmdbIds(): Promise<Set<number>> {
   try {
@@ -90,7 +91,7 @@ export async function removeFromWatchlist(tmdbId: number): Promise<{ ok: boolean
   try {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 10_000);
-    const resp = await fetch(`/api/watchlist/${tmdbId}`, {
+    const resp = await apiFetch(`/api/watchlist/${tmdbId}`, {
       method: 'DELETE',
       signal: controller.signal,
     }).finally(() => window.clearTimeout(timer));

@@ -66,7 +66,7 @@ export async function fetchLibraryBrowse(params: BrowseParams): Promise<BrowseRe
   if (params.direction) qs.set('direction', params.direction);
   if (params.genre) qs.set('genre', params.genre);
 
-  const resp = await fetch(`/api/library/browse?${qs.toString()}`);
+  const resp = await apiFetch(`/api/library/browse?${qs.toString()}`);
   if (!resp.ok) return { items: [], total: 0 };
   const data = await resp.json();
   // Backend returns { movies: [...], total: N } — normalize to BrowseResponse
@@ -78,7 +78,7 @@ export async function fetchLibraryBrowse(params: BrowseParams): Promise<BrowseRe
 
 /** Fetch available genres for a library. */
 export async function fetchLibraryGenres(library: string): Promise<string[]> {
-  const resp = await fetch(`/api/library/genres?library=${encodeURIComponent(library)}`);
+  const resp = await apiFetch(`/api/library/genres?library=${encodeURIComponent(library)}`);
   if (!resp.ok) return [];
   const data = await resp.json();
   return (data?.genres ?? []) as string[];

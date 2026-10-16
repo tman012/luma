@@ -71,7 +71,7 @@ export async function fetchAllResults(
   if (year) params.set('year', String(year));
   if (tmdbId) params.set('tmdb_id', String(tmdbId));
 
-  const resp = await fetch(`/api/sources/all-results?${params.toString()}`, { signal });
+  const resp = await apiFetch(`/api/sources/all-results?${params.toString()}`, { signal });
   if (!resp.ok) {
     // 503 (no indexer) / 400 (bad request) — degrade to empty rather than
     // blowing up the Arr results the modal already has.
@@ -115,7 +115,7 @@ export async function tmdbMatchSearch(
   params.set('query', query);
   if (mediaType) params.set('media_type', mediaType);
   try {
-    const resp = await fetch(`/api/tmdb/match-search?${params.toString()}`);
+    const resp = await apiFetch(`/api/tmdb/match-search?${params.toString()}`);
     if (!resp.ok) return [];
     const data = (await resp.json()) as { results?: TmdbMatchResult[] };
     return data.results ?? [];

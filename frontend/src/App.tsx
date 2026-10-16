@@ -24,6 +24,7 @@ import { AuthenticatedHomePage } from '@/pages/AuthenticatedHomePage';
 import { StartPage } from '@/pages/StartPage';
 import { UnlockPage } from '@/pages/UnlockPage';
 import { ConnectServiceHost } from '@/components/connect/ConnectServiceHost';
+import { apiFetch } from './apiClient';
 
 // Lazy-load non-home routes — keeps initial bundle small
 const ExploreKioskPage = lazy(() => import('@/pages/ExploreKioskPage').then(m => ({ default: m.ExploreKioskPage })));
@@ -85,7 +86,7 @@ function KioskModeToggle() {
     const newMode = isDaily ? 'movie' : 'daily';
     setPending(true);
     try {
-      await fetch('/api/kiosk/settings', {
+      await apiFetch('/api/kiosk/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kiosk_mode: newMode }),

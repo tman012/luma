@@ -83,7 +83,7 @@ export async function fetchRooms(): Promise<{
 }
 
 export async function getResumeInfo(ratingKey: number): Promise<ResumeInfo> {
-  const resp = await fetch(`/api/plex/resume_info/${ratingKey}`);
+  const resp = await apiFetch(`/api/plex/resume_info/${ratingKey}`);
   if (!resp.ok) {
     return {
       has_resume_point: false,
@@ -126,7 +126,7 @@ export async function startPlayback(
 export async function fetchPlexSeasons(
   showRatingKey: number,
 ): Promise<PlexSeason[]> {
-  const resp = await fetch(`/api/plex/tv/${showRatingKey}/seasons`);
+  const resp = await apiFetch(`/api/plex/tv/${showRatingKey}/seasons`);
   if (!resp.ok) return [];
   const data = await resp.json();
   return (data.seasons ?? []) as PlexSeason[];

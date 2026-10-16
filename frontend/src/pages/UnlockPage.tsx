@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { Navigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { StartShell, Center, ErrorLine, Logo, PinPad } from '@/components/start/StartUI';
+import { apiFetch } from '../apiClient';
 
 export function UnlockPage() {
   const { authenticated, loading, needsStart, refreshUser } = useAuth();
@@ -21,7 +22,7 @@ export function UnlockPage() {
     setBusy(true);
     let msg = 'Wrong PIN';
     try {
-      const res = await fetch('/api/auth/unlock', {
+      const res = await apiFetch('/api/auth/unlock', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: value }),
       });
       const data = await res.json().catch(() => ({}));

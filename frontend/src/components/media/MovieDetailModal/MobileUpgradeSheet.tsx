@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { apiFetch } from '../../../apiClient';
 
 const DISMISS_THRESHOLD = 120;
 
@@ -41,7 +42,7 @@ export function MobileUpgradeSheet({
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/radarr/upgrade-profiles')
+    apiFetch('/api/radarr/upgrade-profiles')
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then((data: QualityProfile[]) => { if (!cancelled) setProfiles(data); })
       .catch(() => { if (!cancelled) setProfiles([]); });
@@ -98,7 +99,7 @@ export function MobileUpgradeSheet({
     setError(null);
     setErrorMsg(null);
     try {
-      const resp = await fetch('/api/watchlist', {
+      const resp = await apiFetch('/api/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

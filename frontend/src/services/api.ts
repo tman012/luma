@@ -1,5 +1,6 @@
 import type { RawHeroMovie, HeroMovie, RawExploreMovie, ExploreMovie } from './types';
 import { posterUrl, backdropUrl } from '@/utils/image';
+import { apiFetch as baseApiFetch } from '../apiClient';
 
 class ApiError extends Error {
   constructor(
@@ -15,7 +16,7 @@ export async function apiFetch<T>(
   endpoint: string,
   options?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(endpoint, {
+  const response = await baseApiFetch(endpoint, {
     headers: {
       'Content-Type': 'application/json',
       ...options?.headers,

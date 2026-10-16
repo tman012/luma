@@ -12,6 +12,7 @@ import {
   useCallback,
   ReactNode,
 } from 'react';
+import { apiFetch } from '../apiClient';
 
 export interface UserInfo {
   id: number;
@@ -80,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      const res = await fetch('/api/auth/me');
+      const res = await apiFetch('/api/auth/me');
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.authenticated) {
         setState({
@@ -116,7 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (identifier: string, pin: string) => {
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: identifier, name: identifier, pin }),
@@ -144,14 +145,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch {}
     setState({ user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null, ...NO_START });
   }, []);
 
   const saveUserSettings = useCallback(async (updates: Partial<UserSettings>) => {
     try {
-      const res = await fetch('/api/user/settings', {
+      const res = await apiFetch('/api/user/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),

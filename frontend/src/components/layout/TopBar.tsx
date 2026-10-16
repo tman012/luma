@@ -10,6 +10,7 @@ import { uiDensityTokens } from '@/ui/uiDensityTokens';
 import { posterUrl } from '@/utils/image';
 import { useFocusable } from '@/hooks/useFocusable';
 import { FocusZone } from '@/components/tv/FocusZone';
+import { apiFetch } from '../../apiClient';
 
 const NAV_ITEMS = [
   { label: 'Explore', to: '/explore' },
@@ -263,7 +264,7 @@ function formatDuration(ms: number): string {
 }
 
 function sendRoomCommand(roomId: string, command: string, deviceId?: string) {
-  fetch(`/api/room/${roomId}/remote`, {
+  apiFetch(`/api/room/${roomId}/remote`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ command, ...(deviceId ? { device_id: deviceId } : {}) }),

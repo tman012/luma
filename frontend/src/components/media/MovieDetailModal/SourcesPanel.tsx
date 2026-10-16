@@ -32,6 +32,7 @@ import {
   type SourceTypeGroup,
   type QualitySegment,
 } from './sourcesUtils';
+import { apiFetch } from '../../../apiClient';
 
 /** Stable per-release identity for grab/expand UI state. Indexer rows can have
  *  an empty guid, so fall back to downloadUrl/infoHash/title — otherwise every
@@ -515,7 +516,7 @@ function ExpandedSourcesView({
     setConfirmLoading(true);
     setGrabError(null);
     try {
-      const resp = await fetch('/api/radarr/movie/grab', {
+      const resp = await apiFetch('/api/radarr/movie/grab', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1182,7 +1183,7 @@ function CompactSourcesView({
     setGrabbingGuid(rk);
     setGrabErrorMsg(null);
     try {
-      const resp = await fetch('/api/radarr/movie/grab', {
+      const resp = await apiFetch('/api/radarr/movie/grab', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

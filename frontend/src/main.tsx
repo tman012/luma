@@ -5,7 +5,7 @@ import './index.css';
 import { installConnectServiceFetchHook } from '@/components/connect/connectService';
 import { getUrlBase } from './urlHelpers';
 
-// TODO: Migrate all fetch('/api/...') calls in service files to use apiFetch from apiClient.ts
+// TODO: Migrate all apiFetch('/api/...') calls in service files to use apiFetch from apiClient.ts
 // This ensures URL base is correctly applied. For now, services use native fetch which works
 // in production because the server handles URL base via WSGI DispatcherMiddleware, but
 // proper migration to apiFetch is needed for consistency.

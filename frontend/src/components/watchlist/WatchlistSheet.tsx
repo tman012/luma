@@ -4,6 +4,7 @@ import { useModalHost, type ModalSource } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { posterUrl } from '@/utils/image';
 import { cn } from '@/utils/cn';
+import { apiFetch } from '../../apiClient';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -105,7 +106,7 @@ function daysUntil(iso: string | null): number | null {
 // ---------------------------------------------------------------------------
 
 async function fetchWatchlist(): Promise<WatchlistMovie[]> {
-  const resp = await fetch('/api/watchlist');
+  const resp = await apiFetch('/api/watchlist');
   if (!resp.ok) return [];
   const data = await resp.json();
   const raw = (Array.isArray(data) ? data : []) as Record<string, unknown>[];
@@ -131,7 +132,7 @@ async function fetchWatchlist(): Promise<WatchlistMovie[]> {
 
 async function fetchTvWatchlist(): Promise<WatchlistSeries[]> {
   try {
-    const resp = await fetch('/api/watchlist/tv');
+    const resp = await apiFetch('/api/watchlist/tv');
     if (!resp.ok) return [];
     const data = await resp.json();
     if (!data.enabled) return [];

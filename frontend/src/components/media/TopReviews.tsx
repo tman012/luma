@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useFocusable } from '@/hooks/useFocusable';
 import { RATING_ICONS } from '@/utils/ratingIcons';
+import { apiFetch } from '../../apiClient';
 
 export interface TopReview {
   id: string;
@@ -49,7 +50,7 @@ export function useTopReviews(title?: string | null, year?: number | null, media
     const params = new URLSearchParams({ title });
     if (year) params.set('year', String(year));
     if (mediaType === 'tv') params.set('media_type', 'tv');
-    fetch(`/api/reviews/top?${params}`, { signal: controller.signal })
+    apiFetch(`/api/reviews/top?${params}`, { signal: controller.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (d && Array.isArray(d.reviews)) setReviews(d.reviews); })
       .catch(() => {});

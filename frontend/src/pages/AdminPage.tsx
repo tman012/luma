@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { apiFetch } from '../apiClient';
 
 interface User {
   id: number;
@@ -36,7 +37,7 @@ export function AdminPage() {
 
   async function fetchUsers() {
     try {
-      const res = await fetch('/api/admin/users');
+      const res = await apiFetch('/api/admin/users');
       if (!res.ok) throw new Error('Failed to load users');
       const data = await res.json();
       setUsers(data.users);
@@ -127,7 +128,7 @@ function AdminModal({
     }
     setBusy(true);
     try {
-      const res = await fetch('/api/admin/users', {
+      const res = await apiFetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), pin }),
@@ -149,7 +150,7 @@ function AdminModal({
     }
     setBusy(true);
     try {
-      const res = await fetch(`/api/admin/users/${modal.user.id}/pin`, {
+      const res = await apiFetch(`/api/admin/users/${modal.user.id}/pin`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ pin }),
@@ -168,7 +169,7 @@ function AdminModal({
     if (modal.type !== 'delete') return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/admin/users/${modal.user.id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/admin/users/${modal.user.id}`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed');
       onDone();

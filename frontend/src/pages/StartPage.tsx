@@ -1,3 +1,4 @@
+import { apiFetch } from '../apiClient';
 /**
  * StartPage — first-run setup for a fresh install.
  *
@@ -26,7 +27,7 @@ export const ACCESS_CHOICES: Array<{ value: Mode; label: string }> = [
 
 async function api<T = Record<string, unknown>>(url: string, init?: RequestInit): Promise<{ ok: boolean; status: number; data: T }> {
   try {
-    const res = await fetch(url, { credentials: 'same-origin', ...init });
+    const res = await apiFetch(url, { credentials: 'same-origin', ...init });
     const data = await res.json().catch(() => ({}));
     return { ok: res.ok, status: res.status, data: data as T };
   } catch {

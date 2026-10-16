@@ -6,6 +6,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { apiFetch } from '../apiClient';
 
 type Flow = 'signin' | 'signup';
 type SignInStep = 'email' | 'pin';
@@ -73,7 +74,7 @@ export function LoginPage() {
     if (!trimmed) return;
     setBusy(true); setError('');
     try {
-      const res = await fetch('/api/auth/check-user', {
+      const res = await apiFetch('/api/auth/check-user', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: trimmed }),
       });
@@ -114,7 +115,7 @@ export function LoginPage() {
     if (confirmPin !== pin) { setError("Passwords don't match. Try again."); setConfirmPin(''); return; }
     setBusy(true); setError('');
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await apiFetch('/api/auth/register', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), email: email.trim(), pin }),
       });

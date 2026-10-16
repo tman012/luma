@@ -11,6 +11,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { SmartHomeModal } from '@/components/smarthome/SmartHomeModal';
+import { apiFetch } from '../apiClient';
 
 // ── Amazon Ember font injection ────────────────────────────────────
 
@@ -1517,7 +1518,7 @@ export function DailyKioskPage() {
 
   const fetchWeather = useCallback(async () => {
     try {
-      const resp = await fetch('/api/weather');
+      const resp = await apiFetch('/api/weather');
       const data = await resp.json();
       if (data.configured && !data.error) setWeather(data);
       else setWeather(null);
@@ -1526,7 +1527,7 @@ export function DailyKioskPage() {
 
   const fetchSports = useCallback(async () => {
     try {
-      const resp = await fetch('/api/sports');
+      const resp = await apiFetch('/api/sports');
       const data = await resp.json();
       if (data.enabled && !data.error) setSports(data);
       else setSports(null);
@@ -1535,7 +1536,7 @@ export function DailyKioskPage() {
 
   const fetchNews = useCallback(async () => {
     try {
-      const resp = await fetch('/api/news');
+      const resp = await apiFetch('/api/news');
       const data = await resp.json();
       if (data.enabled && !data.error && data.items?.length > 0) setNews(data);
       else setNews(null);
@@ -1544,7 +1545,7 @@ export function DailyKioskPage() {
 
   const fetchNowAvailable = useCallback(async () => {
     try {
-      const resp = await fetch('/api/automation/latest');
+      const resp = await apiFetch('/api/automation/latest');
       const data = await resp.json();
       if (data.found && data.backdrop_url) setNowAvailable(data);
       else setNowAvailable(null);
@@ -1553,7 +1554,7 @@ export function DailyKioskPage() {
 
   const fetchTvCalendar = useCallback(async () => {
     try {
-      const resp = await fetch('/api/sonarr/calendar?days=14&limit=4');
+      const resp = await apiFetch('/api/sonarr/calendar?days=14&limit=4');
       const data = await resp.json();
       if (data && data.enabled && Array.isArray(data.episodes) && data.episodes.length > 0) {
         setTvCalendar(data);
@@ -1568,7 +1569,7 @@ export function DailyKioskPage() {
   // the user would have to change it in Settings to invalidate.
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/kiosk/settings')
+    apiFetch('/api/kiosk/settings')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return;

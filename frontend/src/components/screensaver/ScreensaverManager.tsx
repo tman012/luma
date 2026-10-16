@@ -4,6 +4,7 @@ import { DidYouKnowScreensaver } from './DidYouKnowScreensaver';
 import { KioskScreensaver } from './KioskScreensaver';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import type { KioskSettings } from '@/services/types';
+import { apiFetch } from '../../apiClient';
 
 function isTabletViewport(): boolean {
   if (typeof window === 'undefined') return false;
@@ -19,7 +20,7 @@ export function ScreensaverManager() {
   const [settings, setSettings] = useState<KioskSettings | null>(null);
 
   useEffect(() => {
-    fetch('/api/kiosk/settings')
+    apiFetch('/api/kiosk/settings')
       .then((r) => (r.ok ? r.json() : null))
       .then((data: KioskSettings | null) => {
         if (data) setSettings(data);

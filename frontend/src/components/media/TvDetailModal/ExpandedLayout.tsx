@@ -34,6 +34,7 @@ import {
 import { useModalHost } from '@/contexts/ModalHostContext';
 import type { TvModalViewProps } from './types';
 import { useFocusable } from '@/hooks/useFocusable';
+import { apiFetch } from '../../../apiClient';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -55,7 +56,7 @@ function useImdbRatings(title: string | null | undefined, year: number | null | 
     const controller = new AbortController();
     const params = new URLSearchParams();
     if (year) params.set('year', String(year));
-    fetch(`/api/ratings/${encodeURIComponent(title)}?${params}`, { signal: controller.signal })
+    apiFetch(`/api/ratings/${encodeURIComponent(title)}?${params}`, { signal: controller.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (!d || d.error) {

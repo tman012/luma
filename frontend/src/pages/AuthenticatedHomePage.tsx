@@ -40,6 +40,7 @@ import {
   type SearchPerson,
   type SearchResults,
 } from '@/services/searchApi';
+import { apiFetch } from '../apiClient';
 
 // ---------------------------------------------------------------------------
 // Rail ID -> ModalSource mapping
@@ -891,7 +892,7 @@ export function AuthenticatedHomePage() {
         return;
       }
       // Added — refetch rail so digital date + poster land correctly
-      void fetch('/api/watchlist')
+      void apiFetch('/api/watchlist')
         .then((r) => (r.ok ? r.json() : []))
         .then((data: unknown) => {
           const raw = (Array.isArray(data) ? data : []) as Record<string, unknown>[];

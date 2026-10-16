@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { Room } from '@/hooks/useNotifications';
 import { useInterpolatedProgress } from '@/hooks/useInterpolatedProgress';
 import { cn } from '@/utils/cn';
+import { apiFetch } from '../../apiClient';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -32,7 +33,7 @@ const DISMISS_THRESHOLD = 120;
 // ---------------------------------------------------------------------------
 
 function sendCommand(roomId: string, command: Command, deviceId?: string) {
-  fetch(`/api/room/${roomId}/remote`, {
+  apiFetch(`/api/room/${roomId}/remote`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ command, ...(deviceId ? { device_id: deviceId } : {}) }),
