@@ -169,7 +169,7 @@ export function IndexerCard() {
     return (
       <div className="rounded-lg border border-white/10 bg-white/[0.04] p-6">
         <h3 className="text-lg font-medium text-white mb-4">Indexers</h3>
-        <label className="flex items-center gap-3 text-sm text-zinc-300">
+        <label className="flex items-center gap-3 text-sm text-white/70">
           <input
             type="checkbox"
             checked={backend === 'luma'}
@@ -210,9 +210,9 @@ export function IndexerCard() {
       )}
 
       {loading ? (
-        <div className="text-sm text-zinc-500">Loading...</div>
+        <div className="text-sm text-white/50">Loading...</div>
       ) : indexers.length === 0 && !editing ? (
-        <div className="text-sm text-zinc-500">No indexers configured</div>
+        <div className="text-sm text-white/50">No indexers configured</div>
       ) : (
         <div className="space-y-2">
           {indexers.map((ix) =>
@@ -257,14 +257,14 @@ function IndexerRow({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-medium text-white text-sm">{indexer.name}</span>
-            {!indexer.enabled && <span className="text-xs text-zinc-500">(disabled)</span>}
+            {!indexer.enabled && <span className="text-xs text-white/50">(disabled)</span>}
             {indexer.rate_limit && (
               <span className="text-xs text-yellow-500">
                 ({indexer.rate_limit.requests}/{indexer.rate_limit.period_seconds}s)
               </span>
             )}
           </div>
-          <div className="text-xs text-zinc-500 truncate">{indexer.url}</div>
+          <div className="text-xs text-white/50 truncate">{indexer.url}</div>
         </div>
         <div className="flex gap-1">
           <button
@@ -331,7 +331,7 @@ function IndexerForm({
         placeholder="Name"
         value={form.name || ''}
         onChange={(e) => setForm({ ...form, name: e.target.value })}
-        className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-zinc-600"
+        className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-white/40"
       />
       <select
         value={form.type || 'torznab'}
@@ -346,14 +346,14 @@ function IndexerForm({
         placeholder="URL"
         value={form.url || ''}
         onChange={(e) => setForm({ ...form, url: e.target.value })}
-        className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-zinc-600"
+        className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-white/40"
       />
       <input
         type="password"
         placeholder="API Key"
         value={form.api_key === '********' ? '' : (form.api_key || '')}
         onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-        className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-zinc-600"
+        className="w-full px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-white/40"
       />
       <div className="flex gap-3">
         <input
@@ -361,17 +361,17 @@ function IndexerForm({
           placeholder="Categories"
           value={form.categories || ''}
           onChange={(e) => setForm({ ...form, categories: e.target.value })}
-          className="flex-1 px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-zinc-600"
+          className="flex-1 px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-white/40"
         />
         <input
           type="number"
           placeholder="Priority"
           value={form.priority ?? 100}
           onChange={(e) => setForm({ ...form, priority: parseInt(e.target.value) || 100 })}
-          className="w-24 px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-zinc-600"
+          className="w-24 px-3 py-2 text-sm bg-white/5 border border-white/10 rounded text-white placeholder:text-white/40"
         />
       </div>
-      <label className="flex items-center gap-2 text-sm text-zinc-300">
+      <label className="flex items-center gap-2 text-sm text-white/70">
         <input
           type="checkbox"
           checked={form.enabled ?? true}
@@ -380,7 +380,7 @@ function IndexerForm({
         />
         Enabled
       </label>
-      <label className="flex items-center gap-2 text-sm text-zinc-300">
+      <label className="flex items-center gap-2 text-sm text-white/70">
         <input
           type="checkbox"
           checked={hasRateLimit}
@@ -393,7 +393,7 @@ function IndexerForm({
         <div className="pl-6 space-y-2">
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs text-zinc-400 mb-1">Requests</label>
+              <label className="block text-xs text-white/60 mb-1">Requests</label>
               <input
                 type="number"
                 min="1"
@@ -409,7 +409,7 @@ function IndexerForm({
               />
             </div>
             <div className="flex-1">
-              <label className="block text-xs text-zinc-400 mb-1">Period (seconds)</label>
+              <label className="block text-xs text-white/60 mb-1">Period (seconds)</label>
               <input
                 type="number"
                 min="1"
