@@ -43,7 +43,7 @@ class TestRequestPortalPasswordHashing:
     
     def test_password_hashing_works_correctly(self):
         """Password hashing and verification works correctly (unit test)."""
-        from werkzeug.security import generate_password_hash, check_password_hash
+        from werkzeug.security import generate_password_hash
         
         # Test the hash generation directly
         password = 'test1234'
