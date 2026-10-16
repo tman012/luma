@@ -17840,31 +17840,28 @@ if __name__ == '__main__':
     port = get_port()
     bind = get_bind_address()
     https_config = get_https_cert()
-    debug = os.environ.get('FLASK_ENV', 'production') == 'development'
 
+    # Always use gunicorn gthread for production
+    logger.info(f"Starting Media Search App on {'https' if https_config else 'http'}://{bind}:{port}")
+    
+    # Build gunicorn command with gthread worker
+    import sys
+    gunicorn_cmd = [
+        sys.executable, '-m', 'gunicorn',
+        '--bind', f'{bind}:{port}',
+        '--workers', '1',
+        '--threads', '8',
+        '--worker-class', 'gthread',
+        '--timeout', '120',
+        '--access-logfile', '-',
+        '--error-logfile', '-',
+        'app.main:app'
+    ]
+    
+    # Add TLS config if HTTPS is enabled
     if https_config:
-        # HTTPS: use gunicorn with cert and key
         cert_path, key_path = https_config
-        logger.info(f"Starting Media Search App on https://{bind}:{port} with TLS")
-        
-        # Build gunicorn command
-        import sys
-        gunicorn_cmd = [
-            sys.executable, '-m', 'gunicorn',
-            '--bind', f'{bind}:{port}',
-            '--certfile', cert_path,
-            '--keyfile', key_path,
-            '--workers', '4',
-            '--worker-class', 'sync',
-            '--timeout', '120',
-            '--access-logfile', '-',
-            '--error-logfile', '-',
-            'app.main:app'
-        ]
-        
-        import subprocess
-        os.execvp(sys.executable, gunicorn_cmd)
-    else:
-        # HTTP: use Flask dev server
-        logger.info(f"Starting Media Search App on http://{bind}:{port}")
-        app.run(host=bind, port=port, debug=debug)
+        gunicorn_cmd.extend(['--certfile', cert_path, '--keyfile', key_path])
+    
+    import subprocess
+    os.execvp(sys.executable, gunicorn_cmd)
