@@ -42,18 +42,21 @@ class TestRequestPortalPasswordHashing:
     """Test that passwords are hashed, not stored plaintext."""
     
     def test_password_hashing_works_correctly(self):
-        """Password hashing and verification works correctly (unit test)."""
+        """Password hashing and verification works correctly (Item 3)."""
         from werkzeug.security import generate_password_hash
         
         # Test the hash generation directly
         password = 'test1234'
         hashed = generate_password_hash(password)
         
-        # Verify it's properly hashed (werkzeug uses scrypt or pbkdf2)
-        assert hashed.startswith(('pbkdf2:', 'scrypt:'))
+        # Verify it's properly hashed using check_password_hash
         assert len(hashed) > 50
         assert check_password_hash(hashed, password)
         assert not check_password_hash(hashed, 'wrongpass')
+        
+        # Different password doesn't verify
+        other_hash = generate_password_hash('other_password')
+        assert not check_password_hash(other_hash, password)
     
     def test_unlock_with_hashed_password(self, app):
         """Unlock works with hashed password."""

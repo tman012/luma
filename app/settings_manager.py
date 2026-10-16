@@ -141,7 +141,6 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
                         "enum": ["", "open", "pin_remote", "pin"]},
         "trusted_proxies": {"type": "string", "default": "", "sensitive": False,
                             "description": "Reverse proxies whose X-Forwarded-For / CF-Connecting-IP headers are believed (comma-separated IPs or CIDRs)"},
-# remote_lock removed - merged into access.is_local_request with home WAN tracking
     },
     "homeassistant": {
         "_type": "object",
@@ -1282,6 +1281,16 @@ def _migrate_rename_requests_to_portal(data: dict) -> bool:
     return False
 
 
+def _migrate_remove_remote_lock(data: dict) -> bool:
+    """Remove security.remote_lock setting (merged into access.py)."""
+    security = data.get('security')
+    if isinstance(security, dict) and 'remote_lock' in security:
+        del security['remote_lock']
+        logger.info("Removed security.remote_lock (merged into access.py)")
+        return True
+    return False
+
+
 def _migrate_strip_plaintext_request_password(data: dict) -> bool:
     """Strip any plaintext 'password' field from request_portal.
     
@@ -1336,6 +1345,7 @@ def _run_all_migrations(data: dict) -> bool:
     changed |= _migrate_automation_features(data)
     changed |= _migrate_rename_requests_to_portal(data)
     changed |= _migrate_strip_plaintext_request_password(data)
+    changed |= _migrate_remove_remote_lock(data)
     return changed
 
 
