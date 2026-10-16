@@ -223,8 +223,11 @@ class IndexerState:
         else:
             self.bucket = None
             
-        self.max_per_hour = config.get('rate_limit_max_per_hour', DEFAULT_MAX_PER_HOUR)
-        self.request_log: List[float] = []
+        # Separate counters for interactive and background requests
+        self.max_per_hour_interactive = 40
+        self.max_per_hour_background = 20
+        self.interactive_request_log: List[float] = []
+        self.background_request_log: List[float] = []
 
         # Exponential backoff
         self.disabled_until: Optional[float] = None
@@ -234,11 +237,17 @@ class IndexerState:
         # Cache: {query_key: (timestamp, results)}
         self.query_cache: Dict[Tuple, Tuple[float, List[Dict]]] = {}
 
-    def requests_last_hour(self, now: float) -> int:
-        """Count requests in the last hour."""
+    def requests_last_hour_interactive(self, now: float) -> int:
+        """Count interactive requests in the last hour."""
         cutoff = now - 3600
-        self.request_log = [ts for ts in self.request_log if ts >= cutoff]
-        return len(self.request_log)
+        self.interactive_request_log = [ts for ts in self.interactive_request_log if ts >= cutoff]
+        return len(self.interactive_request_log)
+    
+    def requests_last_hour_background(self, now: float) -> int:
+        """Count background requests in the last hour."""
+        cutoff = now - 3600
+        self.background_request_log = [ts for ts in self.background_request_log if ts >= cutoff]
+        return len(self.background_request_log)
 
     def is_backed_off(self, now: float) -> bool:
         """Check if indexer is currently in backoff."""
@@ -292,7 +301,8 @@ class IndexerState:
             'indexer_id': self.indexer_id,
             'last_request_time': self.last_request_time,
             'bucket': self.bucket.to_dict() if self.bucket else None,
-            'request_log': self.request_log,
+            'interactive_request_log': self.interactive_request_log,
+            'background_request_log': self.background_request_log,
             'disabled_until': self.disabled_until,
             'backoff_seconds': self.backoff_seconds,
             'backoff_level': self.backoff_level,
@@ -308,7 +318,8 @@ class IndexerState:
         if bucket_data:
             state.bucket = TokenBucket.from_dict(bucket_data)
         
-        state.request_log = [float(t) for t in data.get('request_log', [])]
+        state.interactive_request_log = [float(t) for t in data.get('interactive_request_log', [])]
+        state.background_request_log = [float(t) for t in data.get('background_request_log', [])]
         state.disabled_until = data.get('disabled_until')
         state.backoff_seconds = float(data.get('backoff_seconds', 0))
         state.backoff_level = int(data.get('backoff_level', 0))
@@ -651,20 +662,29 @@ class IndexerManager:
                 logger.debug(f'Cache hit for {config.get("name")}: {query}')
                 return cached
 
-            # Rate limiting (skip for interactive queries, but enforce hourly cap)
-            used = state.requests_last_hour(now)
-            if used >= state.max_per_hour:
-                logger.info(f'Indexer {config.get("name")} at hourly limit ({used} requests)')
-                raise IndexerRateLimitError('Hourly rate limit exceeded')
-
-            # Check bucket for rate-limited indexers
-            if not interactive and state.bucket:
-                if not state.bucket.take(now):
-                    logger.debug(f'Indexer {config.get("name")} token bucket empty')
-                    raise IndexerRateLimitError('Token bucket empty')
-
-            # Reserve request slot and save state
-            state.request_log.append(time.time())
+            # Rate limiting with separate counters for interactive and background
+            if interactive:
+                used_interactive = state.requests_last_hour_interactive(now)
+                if used_interactive >= state.max_per_hour_interactive:
+                    logger.info(f'Indexer {config.get("name")} at interactive hourly limit ({used_interactive} requests)')
+                    raise IndexerRateLimitError('Interactive hourly rate limit exceeded (40/hour)')
+                
+                # Interactive searches skip the token bucket but still respect backoff
+                state.interactive_request_log.append(time.time())
+            else:
+                used_background = state.requests_last_hour_background(now)
+                if used_background >= state.max_per_hour_background:
+                    logger.info(f'Indexer {config.get("name")} at background hourly limit ({used_background} requests)')
+                    raise IndexerRateLimitError('Background hourly rate limit exceeded (20/hour)')
+                
+                # Check bucket for background searches
+                if state.bucket:
+                    if not state.bucket.take(now):
+                        logger.debug(f'Indexer {config.get("name")} token bucket empty')
+                        raise IndexerRateLimitError('Token bucket empty')
+                
+                # Reserve request slot
+                state.background_request_log.append(time.time())
             
             # Calculate sleep needed for min interval
             min_interval = config.get('rate_limit_min_interval', 2.0) if state.bucket else 0

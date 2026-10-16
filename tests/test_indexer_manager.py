@@ -1935,9 +1935,362 @@ def test_hourly_cap_persists_across_restart():
                 
                 # Verify state was loaded
                 state2 = manager2._get_state('test-ix')
-                assert len(state2.request_log) == 20, f"Expected 20 requests in log, got {len(state2.request_log)}"
+                assert len(state2.background_request_log) == 20, f"Expected 20 requests in log, got {len(state2.background_request_log)}"
                 
                 # 21st request should be blocked (hourly cap reached)
                 from app.indexer_manager import IndexerRateLimitError
-                with pytest.raises(IndexerRateLimitError, match='Hourly rate limit'):
+                with pytest.raises(IndexerRateLimitError, match='Background hourly rate limit'):
                     manager2._search_one_indexer('test-ix', 'test21', [2000], 10, interactive=False)
+
+
+# ---- Item 10: Separate Interactive/Background Rate Limits ----
+
+def test_interactive_rate_limit_40_per_hour():
+    """41st interactive search is refused (40/hour cap)."""
+    import tempfile
+    import os
+    from app.indexer_manager import IndexerManager, IndexerRateLimitError
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.environ['LUMA_DATA_DIR'] = tmpdir
+        
+        settings_mock = Mock()
+        def settings_get(key, default=None):
+            if key == 'indexer.indexers':
+                return [
+                    {
+                        'id': 'test-ix',
+                        'name': 'Test Indexer',
+                        'url': 'http://test.example.com',
+                        'api_key': 'key',
+                        'type': 'torznab',
+                        'enabled': True,
+                        'rate_limited': False,  # No bucket
+                    }
+                ]
+            return default
+        
+        settings_mock.get.side_effect = settings_get
+        
+        xml_response = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Result</title>
+  <link>http://dl.test/1</link>
+  <guid>g1</guid>
+</item>
+</channel></rss>"""
+        
+        with patch('app.indexer_manager.requests.get') as mock_get:
+            mock_resp = Mock()
+            mock_resp.status_code = 200
+            mock_resp.raw = Mock()
+            mock_resp.raw.read.return_value = xml_response.encode()
+            mock_resp.raise_for_status = Mock()
+            mock_get.return_value = mock_resp
+            
+            manager = IndexerManager(settings_mock)
+            
+            # Make 40 interactive requests with different queries to avoid cache
+            for i in range(40):
+                try:
+                    manager._search_one_indexer('test-ix', f'test{i}', [2000], 10, interactive=True)
+                except Exception as e:
+                    pytest.fail(f'Interactive request {i+1} should succeed: {e}')
+            
+            # 41st interactive request should be blocked
+            with pytest.raises(IndexerRateLimitError, match='Interactive hourly rate limit'):
+                manager._search_one_indexer('test-ix', 'test41', [2000], 10, interactive=True)
+
+
+def test_background_rate_limit_20_per_hour():
+    """21st background search is refused (20/hour cap)."""
+    import tempfile
+    import os
+    from app.indexer_manager import IndexerManager, IndexerRateLimitError
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.environ['LUMA_DATA_DIR'] = tmpdir
+        
+        settings_mock = Mock()
+        def settings_get(key, default=None):
+            if key == 'indexer.indexers':
+                return [
+                    {
+                        'id': 'test-ix',
+                        'name': 'Test Indexer',
+                        'url': 'http://test.example.com',
+                        'api_key': 'key',
+                        'type': 'torznab',
+                        'enabled': True,
+                        'rate_limited': False,  # No bucket
+                    }
+                ]
+            return default
+        
+        settings_mock.get.side_effect = settings_get
+        
+        xml_response = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Result</title>
+  <link>http://dl.test/1</link>
+  <guid>g1</guid>
+</item>
+</channel></rss>"""
+        
+        with patch('app.indexer_manager.requests.get') as mock_get:
+            mock_resp = Mock()
+            mock_resp.status_code = 200
+            mock_resp.raw = Mock()
+            mock_resp.raw.read.return_value = xml_response.encode()
+            mock_resp.raise_for_status = Mock()
+            mock_get.return_value = mock_resp
+            
+            manager = IndexerManager(settings_mock)
+            
+            # Make 20 background requests with different queries to avoid cache
+            for i in range(20):
+                try:
+                    manager._search_one_indexer('test-ix', f'test{i}', [2000], 10, interactive=False)
+                except Exception as e:
+                    pytest.fail(f'Background request {i+1} should succeed: {e}')
+            
+            # 21st background request should be blocked
+            with pytest.raises(IndexerRateLimitError, match='Background hourly rate limit'):
+                manager._search_one_indexer('test-ix', 'test21', [2000], 10, interactive=False)
+
+
+def test_bucket_applies_only_to_background():
+    """Token bucket applies only to background searches, not interactive."""
+    from app.indexer_manager import IndexerManager, IndexerRateLimitError
+    
+    settings_mock = Mock()
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'test-ix',
+                    'name': 'AvistaZ',
+                    'url': 'http://avistaz.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'rate_limited': True,
+                    'rate_limit_capacity': 2,  # Only 2 tokens
+                    'rate_limit_refill_seconds': 100,  # Slow refill
+                }
+            ]
+        return default
+    
+    settings_mock.get.side_effect = settings_get
+    
+    xml_response = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Result</title>
+  <link>http://dl.test/1</link>
+  <guid>g1</guid>
+</item>
+</channel></rss>"""
+    
+    with patch('app.indexer_manager.requests.get') as mock_get:
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+        mock_resp.raw = Mock()
+        mock_resp.raw.read.return_value = xml_response.encode()
+        mock_resp.raise_for_status = Mock()
+        mock_get.return_value = mock_resp
+        
+        manager = IndexerManager(settings_mock)
+        
+        # Drain the bucket with 2 background requests
+        for i in range(2):
+            manager._search_one_indexer('test-ix', f'bg{i}', [2000], 10, interactive=False)
+        
+        # 3rd background request should be blocked (bucket empty)
+        with pytest.raises(IndexerRateLimitError, match='Token bucket empty'):
+            manager._search_one_indexer('test-ix', 'bg3', [2000], 10, interactive=False)
+        
+        # But interactive requests should still work (they skip the bucket)
+        manager._search_one_indexer('test-ix', 'interactive1', [2000], 10, interactive=True)
+
+
+def test_rate_limit_counters_persist_across_restart():
+    """Interactive and background counters persist across manager restarts."""
+    import tempfile
+    import os
+    from app.indexer_manager import IndexerManager, IndexerRateLimitError
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.environ['LUMA_DATA_DIR'] = tmpdir
+        
+        settings_mock = Mock()
+        def settings_get(key, default=None):
+            if key == 'indexer.indexers':
+                return [
+                    {
+                        'id': 'test-ix',
+                        'name': 'Test Indexer',
+                        'url': 'http://test.example.com',
+                        'api_key': 'key',
+                        'type': 'torznab',
+                        'enabled': True,
+                        'rate_limited': False,
+                    }
+                ]
+            return default
+        
+        settings_mock.get.side_effect = settings_get
+        
+        xml_response = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Result</title>
+  <link>http://dl.test/1</link>
+  <guid>g1</guid>
+</item>
+</channel></rss>"""
+        
+        with patch('app.indexer_manager.requests.get') as mock_get:
+            mock_resp = Mock()
+            mock_resp.status_code = 200
+            mock_resp.raw = Mock()
+            mock_resp.raw.read.return_value = xml_response.encode()
+            mock_resp.raise_for_status = Mock()
+            mock_get.return_value = mock_resp
+            
+            # Make 10 interactive and 10 background requests
+            manager = IndexerManager(settings_mock)
+            for i in range(10):
+                manager._search_one_indexer('test-ix', f'int{i}', [2000], 10, interactive=True)
+                manager._search_one_indexer('test-ix', f'bg{i}', [2000], 10, interactive=False)
+            
+            # Force save
+            manager._last_save_time = 0
+            manager._save_state()
+            
+            # Create a new manager instance (simulating restart)
+            manager2 = IndexerManager(settings_mock)
+            
+            # Verify state was loaded
+            state2 = manager2._get_state('test-ix')
+            assert len(state2.interactive_request_log) == 10
+            assert len(state2.background_request_log) == 10
+
+
+def test_interactive_search_honors_backoff():
+    """Interactive searches still honor 429/Retry-After backoff."""
+    from app.indexer_manager import IndexerManager, IndexerBackoffError
+    
+    settings_mock = Mock()
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'test-ix',
+                    'name': 'Test Indexer',
+                    'url': 'http://test.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                }
+            ]
+        return default
+    
+    settings_mock.get.side_effect = settings_get
+    
+    with patch('app.indexer_manager.requests.get') as mock_get:
+        # First request returns 429
+        mock_resp_429 = Mock()
+        mock_resp_429.status_code = 429
+        mock_resp_429.headers = {'Retry-After': '60'}
+        mock_resp_429.raise_for_status = Mock()
+        mock_get.return_value = mock_resp_429
+        
+        manager = IndexerManager(settings_mock)
+        
+        # Background request triggers backoff
+        with pytest.raises(IndexerBackoffError):
+            manager._search_one_indexer('test-ix', 'test1', [2000], 10, interactive=False)
+        
+        # Interactive request should also be refused during backoff
+        with pytest.raises(IndexerBackoffError, match='backed off until'):
+            manager._search_one_indexer('test-ix', 'test2', [2000], 10, interactive=True)
+
+
+def test_concurrent_requests_respect_min_interval():
+    """Concurrent requests respect the min interval (reserve under lock, sleep outside)."""
+    import tempfile
+    import os
+    import threading
+    from app.indexer_manager import IndexerManager
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.environ['LUMA_DATA_DIR'] = tmpdir
+        
+        settings_mock = Mock()
+        def settings_get(key, default=None):
+            if key == 'indexer.indexers':
+                return [
+                    {
+                        'id': 'test-ix',
+                        'name': 'AvistaZ',
+                        'url': 'http://avistaz.example.com',
+                        'api_key': 'key',
+                        'type': 'torznab',
+                        'enabled': True,
+                        'rate_limited': True,
+                        'rate_limit_capacity': 100,  # Large bucket
+                        'rate_limit_refill_seconds': 1,
+                        'rate_limit_min_interval': 0.5,  # 0.5s min interval
+                    }
+                ]
+            return default
+        
+        settings_mock.get.side_effect = settings_get
+        
+        xml_response = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Result</title>
+  <link>http://dl.test/1</link>
+  <guid>g1</guid>
+</item>
+</channel></rss>"""
+        
+        with patch('app.indexer_manager.requests.get') as mock_get:
+            mock_resp = Mock()
+            mock_resp.status_code = 200
+            mock_resp.raw = Mock()
+            mock_resp.raw.read.return_value = xml_response.encode()
+            mock_resp.raise_for_status = Mock()
+            mock_get.return_value = mock_resp
+            
+            manager = IndexerManager(settings_mock)
+            
+            # Make 2 concurrent background requests
+            import time
+            start = time.time()
+            results = []
+            
+            def make_request(query):
+                try:
+                    manager._search_one_indexer('test-ix', query, [2000], 10, interactive=False)
+                    results.append(time.time() - start)
+                except Exception as e:
+                    pytest.fail(f'Request {query} failed: {e}')
+            
+            threads = [
+                threading.Thread(target=make_request, args=(f'test{i}',))
+                for i in range(2)
+            ]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            
+            # Second request should complete at least 0.5s after the first
+            # (allowing some tolerance for thread scheduling)
+            assert len(results) == 2
+            assert max(results) >= 0.4  # At least 0.4s total (0.5s with tolerance)
