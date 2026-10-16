@@ -7,6 +7,7 @@ Supports typo-tolerant fuzzy search with normalization and similarity matching.
 """
 
 import logging
+import math
 import re
 import threading
 import time
@@ -16,6 +17,12 @@ from difflib import SequenceMatcher
 from typing import List, Dict, Optional, Any, Set, Tuple
 
 import requests
+
+try:
+    from rapidfuzz import fuzz
+    HAS_RAPIDFUZZ = True
+except ImportError:
+    HAS_RAPIDFUZZ = False
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +42,8 @@ _LEADING_ARTICLES = {'the', 'a', 'an', 'el', 'la', 'le', 'les', 'un', 'une', 'da
 def normalize_text(text: str) -> str:
     """
     Normalize text for fuzzy matching:
-    - Lowercase
+    - Casefold (aggressive lowercase for i18n)
+    - Transliterate special characters (Æ→ae, ß→ss, Ø→o)
     - Remove accents/diacritics
     - Replace '&' with 'and'
     - Remove leading articles (the, a, an, etc.)
@@ -44,8 +52,16 @@ def normalize_text(text: str) -> str:
     if not text:
         return ''
     
-    # Lowercase
-    text = text.lower()
+    # Casefold for better international support
+    text = text.casefold()
+    
+    # Transliterate special characters before NFD normalization
+    transliterations = {
+        'æ': 'ae', 'ß': 'ss', 'ø': 'o',
+        'œ': 'oe', 'ð': 'd', 'þ': 'th',
+    }
+    for old, new in transliterations.items():
+        text = text.replace(old, new)
     
     # Remove accents/diacritics
     text = unicodedata.normalize('NFD', text)
@@ -120,74 +136,67 @@ def fuzzy_match_score(query: str, title: str, query_norm: str, title_norm: str) 
     """
     Calculate fuzzy match score for a query against a title.
     Returns (score, match_type) where:
-    - score: 0.0 to 1.0, higher is better
-    - match_type: 'exact', 'prefix', 'fuzzy', 'none'
+    - score: similarity within tier (0.0 to 1.0)
+    - match_type: 'exact', 'prefix', 'substring', 'token', 'fuzzy', 'none'
+    
+    Ranking is tier-first: exact > prefix > substring > token > fuzzy,
+    with score used as tiebreaker within each tier.
     """
-    # Exact match (original case-insensitive)
-    if query.lower() == title.lower():
+    q_lower = query.lower()
+    t_lower = title.lower()
+    
+    # Tier 1: Exact match
+    if q_lower == t_lower:
+        return (1.0, 'exact')
+    if query_norm == title_norm:
         return (1.0, 'exact')
     
-    # Prefix match
-    if title.lower().startswith(query.lower()):
+    # Tier 2: Prefix match
+    if t_lower.startswith(q_lower):
+        return (1.0, 'prefix')
+    if title_norm.startswith(query_norm):
         return (0.95, 'prefix')
     
-    # Check normalized exact match
-    if query_norm == title_norm:
-        return (0.9, 'exact')
+    # Tier 3: Substring match
+    if q_lower in t_lower:
+        # Score by position (earlier is better)
+        position_score = 1.0 - (t_lower.index(q_lower) / len(t_lower))
+        return (position_score, 'substring')
+    if query_norm in title_norm:
+        position_score = 1.0 - (title_norm.index(query_norm) / len(title_norm))
+        return (position_score * 0.95, 'substring')
     
-    # Check normalized prefix
-    if title_norm.startswith(query_norm):
-        return (0.85, 'prefix')
-    
-    # Token-based matching
+    # Tier 4: Token-based matching
     query_tokens = query_norm.split()
     title_tokens = title_norm.split()
     token_score = token_similarity(query_tokens, title_tokens)
     
-    if token_score >= 0.9:
-        return (0.8, 'fuzzy')
-    elif token_score >= 0.6:
-        return (0.6 + token_score * 0.1, 'fuzzy')
+    if token_score >= 0.6:
+        return (token_score, 'token')
     
-    # Trigram similarity for typos
-    trigram_score = trigram_similarity(query_norm, title_norm)
+    # Tier 5: Fuzzy matching (typos) - use rapidfuzz for performance if available
+    if HAS_RAPIDFUZZ:
+        # rapidfuzz is much faster, especially for large datasets
+        fuzzy_score = fuzz.ratio(query_norm, title_norm) / 100.0
+    else:
+        # Fallback to difflib
+        trigram_score = trigram_similarity(query_norm, title_norm)
+        fuzzy_score = max(trigram_score, SequenceMatcher(None, query_norm, title_norm).ratio())
     
-    # Sequence matcher for edit distance
-    seq_score = SequenceMatcher(None, query_norm, title_norm).ratio()
+    if fuzzy_score >= 0.6:
+        return (fuzzy_score, 'fuzzy')
     
-    # Use the best score
-    best_score = max(trigram_score, seq_score, token_score)
-    
-    if best_score >= 0.6:
-        return (best_score * 0.8, 'fuzzy')
-    
-    return (best_score, 'none')
+    return (fuzzy_score, 'none')
 
 
 def calculate_popularity_score(item: Dict[str, Any]) -> float:
     """
-    Calculate popularity score for ranking.
-    Uses IMDb/TMDb ratings, audience ratings, and viewCount.
-    Priority: rating > audienceRating > viewCount.
+    Calculate popularity score for ranking as a tiebreaker within match tiers.
+    Uses Plex viewCount (logarithmic scale) as primary signal.
     """
-    import math
-    
-    # Use IMDb/TMDb rating if available (0-10 scale)
-    rating = item.get('rating', 0.0) or 0.0
-    if rating > 0:
-        # Normalize to 0-1 range and boost high ratings
-        return (rating / 10.0) ** 1.5 * 10
-    
-    # Fall back to audience rating
-    audience_rating = item.get('audienceRating', 0.0) or 0.0
-    if audience_rating > 0:
-        return (audience_rating / 10.0) ** 1.5 * 8
-    
-    # Fall back to viewCount (logarithmic scale)
     view_count = item.get('viewCount', 0)
     if view_count > 0:
         return math.log10(view_count + 1)
-    
     return 0.0
 
 
@@ -201,7 +210,8 @@ class FastSearchIndex:
         self._refreshing = False
         self._initialized = False
         self._sections: List[int] = []
-        self._title_dictionary: Set[str] = set()  # Normalized titles for spelling correction
+        self._library_titles: Set[str] = set()  # Normalized library titles
+        self._tmdb_titles: Set[str] = set()  # Normalized TMDb popular titles
         self._tmdb_titles_cached: bool = False
         self._tmdb_cache_time: float = 0.0
 
@@ -318,8 +328,6 @@ class FastSearchIndex:
                     'viewCount': item.get('viewCount', 0),
                     'viewOffset': item.get('viewOffset', 0),
                     'thumb': thumb,
-                    'rating': item.get('rating', 0.0),  # IMDb/TMDb rating if available
-                    'audienceRating': item.get('audienceRating', 0.0),  # Rotten Tomatoes audience
                 })
 
             start += page_size
@@ -361,13 +369,13 @@ class FastSearchIndex:
         for sid, *_ in sections:
             all_items.extend(results.get(sid, []))
 
-        # Build title dictionary for spelling correction
-        title_dict = {item['title_normalized'] for item in all_items if item.get('title_normalized')}
+        # Build library title dictionary for spelling correction
+        library_titles = {item['title_normalized'] for item in all_items if item.get('title_normalized')}
 
         with self._lock:
             self._sections = [sid for sid, *_ in sections]
             self._index = all_items
-            self._title_dictionary = title_dict
+            self._library_titles = library_titles
             self._last_refresh = time.time()
             self._initialized = True
 
@@ -376,7 +384,13 @@ class FastSearchIndex:
         logger.info(f"fast_search: index built with {len(all_items)} total items ({movie_count} movies, {show_count} shows)")
         
         # Start background TMDb popular titles cache refresh (non-blocking)
-        if not self._tmdb_titles_cached or time.time() - self._tmdb_cache_time > 86400:  # 24h TTL
+        # Use shorter TTL (1 hour) after failures, normal 24h TTL after success
+        with self._lock:
+            cached = self._tmdb_titles_cached
+            cache_age = time.time() - self._tmdb_cache_time if self._tmdb_cache_time else float('inf')
+        
+        ttl = 86400 if cached else 3600  # 24h if cached successfully, 1h if not
+        if not cached or cache_age > ttl:
             threading.Thread(target=self._refresh_tmdb_titles, daemon=True, name="tmdb-titles-cache").start()
 
     def _refresh_tmdb_titles(self):
@@ -384,7 +398,15 @@ class FastSearchIndex:
         Background refresh of TMDb popular titles for spelling correction dictionary.
         Fetches popular movies and TV shows, adds normalized titles to the dictionary.
         Handles missing API key gracefully - never blocks requests.
+        Thread-safe: only one refresh runs at a time.
         """
+        # Check if refresh is already running
+        with self._lock:
+            if self._refreshing:
+                logger.debug("fast_search: TMDb titles refresh already in progress")
+                return
+            self._refreshing = True
+        
         try:
             from app.settings_manager import SettingsManager
             settings = SettingsManager()
@@ -395,7 +417,8 @@ class FastSearchIndex:
                 return
             
             tmdb_base = settings.get('apis.tmdb.base_url', '') or 'https://api.themoviedb.org/3'
-            tmdb_titles = set()
+            tmdb_titles_list = []
+            failed = False
             
             # Fetch popular movies (3 pages = ~60 titles)
             for page in range(1, 4):
@@ -410,39 +433,58 @@ class FastSearchIndex:
                         for movie in results:
                             title = movie.get('title', '').strip()
                             if title:
-                                tmdb_titles.add(normalize_text(title))
+                                tmdb_titles_list.append(normalize_text(title))
+                    elif resp.status_code == 429:
+                        logger.warning(f"fast_search: TMDb rate limit hit on movies page {page}")
+                        failed = True
+                        break
                 except Exception as e:
                     logger.warning(f"fast_search: failed to fetch TMDb popular movies page {page}: {e}")
+                    failed = True
                     break
             
             # Fetch popular TV shows (3 pages = ~60 titles)
-            for page in range(1, 4):
-                try:
-                    resp = requests.get(
-                        f'{tmdb_base}/tv/popular',
-                        params={'api_key': api_key, 'language': 'en-US', 'page': page},
-                        timeout=10
-                    )
-                    if resp.status_code == 200:
-                        results = resp.json().get('results', [])
-                        for show in results:
-                            name = show.get('name', '').strip()
-                            if name:
-                                tmdb_titles.add(normalize_text(name))
-                except Exception as e:
-                    logger.warning(f"fast_search: failed to fetch TMDb popular TV page {page}: {e}")
-                    break
+            if not failed:
+                for page in range(1, 4):
+                    try:
+                        resp = requests.get(
+                            f'{tmdb_base}/tv/popular',
+                            params={'api_key': api_key, 'language': 'en-US', 'page': page},
+                            timeout=10
+                        )
+                        if resp.status_code == 200:
+                            results = resp.json().get('results', [])
+                            for show in results:
+                                name = show.get('name', '').strip()
+                                if name:
+                                    tmdb_titles_list.append(normalize_text(name))
+                        elif resp.status_code == 429:
+                            logger.warning(f"fast_search: TMDb rate limit hit on TV page {page}")
+                            failed = True
+                            break
+                    except Exception as e:
+                        logger.warning(f"fast_search: failed to fetch TMDb popular TV page {page}: {e}")
+                        failed = True
+                        break
             
-            # Merge with existing dictionary
-            with self._lock:
-                self._title_dictionary.update(tmdb_titles)
-                self._tmdb_titles_cached = True
-                self._tmdb_cache_time = time.time()
-            
-            logger.info(f"fast_search: cached {len(tmdb_titles)} TMDb popular titles for spelling correction")
+            # Build new frozenset and swap under lock
+            if tmdb_titles_list and not failed:
+                new_tmdb_titles = frozenset(tmdb_titles_list)
+                with self._lock:
+                    self._tmdb_titles = new_tmdb_titles
+                    self._tmdb_titles_cached = True
+                    self._tmdb_cache_time = time.time()
+                logger.info(f"fast_search: cached {len(new_tmdb_titles)} TMDb popular titles for spelling correction")
+            elif failed:
+                # Don't mark as cached on failure, retry sooner
+                logger.warning("fast_search: TMDb cache refresh incomplete, will retry sooner")
         
         except Exception as e:
             logger.warning(f"fast_search: TMDb popular titles cache refresh failed: {e}")
+        
+        finally:
+            with self._lock:
+                self._refreshing = False
 
     def _refresh_worker(self):
         """Background thread: build index once, then refresh every 15 min."""
@@ -495,7 +537,11 @@ class FastSearchIndex:
         with self._lock:
             snapshot = list(self._index)  # copy under lock
 
-        # If no query, use simple filtering (browse mode)
+        # Strip query first
+        if q:
+            q = q.strip()
+        
+        # If no query after stripping, use simple filtering (browse mode)
         if not q:
             results = []
             for item in snapshot:
@@ -514,10 +560,12 @@ class FastSearchIndex:
                     break
             return self._clean_results(results)
 
-        # Query-based search with fuzzy matching
-        q = q.strip()
+        # Query-based search
         q_lower = q.lower()
         q_norm = normalize_text(q)
+        
+        # For very short queries (1-2 chars), use only prefix/substring matching
+        use_fuzzy = len(q) > 2 and fuzzy
 
         scored_results = []
         
@@ -534,42 +582,43 @@ class FastSearchIndex:
             if mt_lower and item.get('media_type', 'movie') != mt_lower:
                 continue
 
-            # Calculate fuzzy match score
+            # Calculate match score
             title = item['title']
             title_norm = item.get('title_normalized', normalize_text(title))
             
-            if fuzzy:
+            if use_fuzzy:
                 match_score, match_type = fuzzy_match_score(q, title, q_norm, title_norm)
                 
                 # Filter out very weak matches
                 if match_score < 0.4:
                     continue
             else:
-                # Legacy substring matching
-                if q_lower not in item['title_lower']:
+                # For short queries or when fuzzy disabled, use exact/prefix/substring only
+                t_lower = item['title_lower']
+                if q_lower == t_lower:
+                    match_score, match_type = 1.0, 'exact'
+                elif t_lower.startswith(q_lower):
+                    match_score, match_type = 1.0, 'prefix'
+                elif q_lower in t_lower:
+                    position_score = 1.0 - (t_lower.index(q_lower) / len(t_lower))
+                    match_score, match_type = position_score, 'substring'
+                else:
                     continue
-                match_score = 0.8 if item['title_lower'] == q_lower else 0.7
-                match_type = 'exact' if item['title_lower'] == q_lower else 'fuzzy'
 
-            # Calculate popularity score
+            # Calculate popularity for tiebreaking
             popularity = calculate_popularity_score(item)
-            
-            # Combined score: match score is primary, popularity is tiebreaker
-            # Match score weighted 80%, popularity 20%
-            combined_score = (match_score * 0.8) + (min(popularity / 10.0, 1.0) * 0.2)
             
             scored_results.append({
                 'item': item,
-                'score': combined_score,
                 'match_score': match_score,
                 'match_type': match_type,
                 'popularity': popularity,
             })
 
-        # Sort by score (descending), then by match type priority, then by popularity
-        match_type_priority = {'exact': 0, 'prefix': 1, 'fuzzy': 2, 'none': 3}
+        # Sort by tier first, then score within tier, then popularity as tiebreaker
+        tier_priority = {'exact': 0, 'prefix': 1, 'substring': 2, 'token': 3, 'fuzzy': 4, 'none': 5}
         scored_results.sort(
-            key=lambda x: (-x['score'], match_type_priority.get(x['match_type'], 3), -x['popularity'])
+            key=lambda x: (tier_priority.get(x['match_type'], 5), -x['match_score'], -x['popularity'])
         )
 
         # Extract top results
@@ -582,47 +631,54 @@ class FastSearchIndex:
         clean = []
         for m in results:
             clean.append({
-                'rating_key': m['rating_key'],
-                'title': m['title'],
-                'year': m['year'],
-                'content_rating': m['content_rating'],
-                'genres': m['genres'],
-                'section_id': m['section_id'],
-                'section_name': m['section_name'],
+                'rating_key': m.get('rating_key', ''),
+                'title': m.get('title', ''),
+                'year': m.get('year'),
+                'content_rating': m.get('content_rating', ''),
+                'genres': m.get('genres', []),
+                'section_id': m.get('section_id'),
+                'section_name': m.get('section_name', ''),
                 'media_type': m.get('media_type', 'movie'),
-                'viewCount': m['viewCount'],
-                'viewOffset': m['viewOffset'],
-                'thumb': m['thumb'],
-                'rating': m.get('rating', 0.0),
-                'audienceRating': m.get('audienceRating', 0.0),
+                'viewCount': m.get('viewCount', 0),
+                'viewOffset': m.get('viewOffset', 0),
+                'thumb': m.get('thumb', ''),
             })
         return clean
 
     def find_spelling_correction(self, query: str, threshold: float = 0.6) -> Optional[str]:
         """
-        Find the best spelling correction for a query from the title dictionary.
-        Returns the closest matching title if similarity >= threshold, else None.
+        Find the best spelling correction for a query from the combined title dictionary.
+        Returns the original (pre-normalized) closest matching title if similarity >= threshold, else None.
+        Compares against the normalized query.
         """
         query_norm = normalize_text(query)
         
+        # Get combined dictionary under lock
         with self._lock:
-            title_dict = self._title_dictionary
+            combined_titles = self._library_titles | self._tmdb_titles
 
-        if not query_norm or not title_dict:
+        if not query_norm or not combined_titles:
             return None
 
-        best_match = None
+        best_match_norm = None
         best_score = threshold
 
-        for title_norm in title_dict:
+        for title_norm in combined_titles:
             # Quick trigram similarity check
             score = trigram_similarity(query_norm, title_norm)
             
             if score > best_score:
                 best_score = score
-                best_match = title_norm
+                best_match_norm = title_norm
 
-        return best_match
+        # Return the original title by looking it up in the index
+        if best_match_norm:
+            with self._lock:
+                for item in self._index:
+                    if item.get('title_normalized') == best_match_norm:
+                        return item['title']
+        
+        return None
 
     def status(self) -> Dict[str, Any]:
         """Return index status info."""

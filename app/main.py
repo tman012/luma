@@ -1540,22 +1540,30 @@ def tmdb_match_search():
         for mtype in types:
             _, items = _fetch(mtype)
             
-            # Calculate best popularity from results
-            best_pop = max((item.get('popularity', 0) or 0 for item in items[:5]), default=0)
-            weak_results = len(items) < 3 or (len(items) > 0 and best_pop < 20)
+            # Check if spelling correction needed: 0-2 results OR no close title match
+            def _needs_correction(items_list, query_str):
+                if len(items_list) <= 2:
+                    return True
+                query_lower = query_str.lower()
+                for item in items_list[:3]:
+                    title = (item.get('title') or item.get('name', '')).lower()
+                    if query_lower in title or title.startswith(query_lower):
+                        return False
+                return True
             
-            # If results are weak (low count or low popularity), try spelling correction
-            if weak_results and len(query) > 3:
+            # If results are weak, try spelling correction (silent - no UI text)
+            if len(query) > 3 and _needs_correction(items, query):
                 try:
                     corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
-                    if corrected and corrected != query.lower():
+                    if corrected and corrected.lower() != query.lower():
                         logger.info(f"tmdb_match_search: trying correction '{corrected}' for '{query}'")
                         _, corrected_items = _fetch(mtype, corrected)
-                        # Merge results, avoiding duplicates
+                        # Merge: direct matches first, then dedupe corrected results after
                         existing_ids = {item.get('id') for item in items if item.get('id')}
                         for item in corrected_items:
                             if item.get('id') and item.get('id') not in existing_ids:
                                 items.append(item)
+                                existing_ids.add(item.get('id'))
                 except Exception as e:
                     logger.warning(f"Spelling correction in tmdb_match_search failed: {e}")
             
@@ -4096,26 +4104,28 @@ def search():
 
     results['people'] = raw.get('people', [])
 
-    # Spelling correction fallback: if TMDb results are weak (low count or low popularity), try corrected query
-    total_results = len(raw.get('multi', [])) + len(raw.get('movies', [])) + len(raw.get('tv_shows', []))
+    # Spelling correction fallback: retry only when 0-2 results OR no result title is close to query
+    def _needs_spelling_correction(results_dict, query_str):
+        """Check if results are weak enough to warrant spelling correction."""
+        total = sum(len(results_dict.get(k, [])) for k in ['multi', 'movies', 'tv_shows'])
+        if total <= 2:
+            return True
+        # Check if any top result title is close to query
+        query_lower = query_str.lower()
+        for result_list in [results_dict.get('multi', []), results_dict.get('movies', []), results_dict.get('tv_shows', [])]:
+            for item in result_list[:3]:
+                title = (item.get('title') or item.get('name', '')).lower()
+                if query_lower in title or title.startswith(query_lower):
+                    return False
+        return True
     
-    # Calculate best popularity score from results
-    best_popularity = 0.0
-    for item_list in [raw.get('multi', []), raw.get('movies', []), raw.get('tv_shows', [])]:
-        for item in item_list[:5]:  # Check top 5 results
-            pop = item.get('popularity', 0) or 0
-            if pop > best_popularity:
-                best_popularity = pop
-    
-    # Trigger correction if results are weak: < 3 items OR best popularity < 20
-    weak_results = total_results < 3 or (total_results > 0 and best_popularity < 20)
-    
-    if weak_results and len(query) > 3:  # Weak results, try spelling correction
+    if len(query) > 3 and _needs_spelling_correction(raw, query):
         try:
             corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
-            if corrected and corrected != query.lower():
+            if corrected and corrected.lower() != query.lower():
                 logger.info(f"search: trying spelling correction '{corrected}' for '{query}'")
-                # Retry TMDb searches with corrected query
+                # Retry TMDb searches with corrected query (silent correction - no UI text)
+                corrected_raw = {}
                 with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                     corr_futures = {}
                     if want_movies or want_tv:
@@ -4127,18 +4137,19 @@ def search():
                     
                     for key, future in corr_futures.items():
                         try:
-                            corrected_results = future.result(timeout=10)
-                            # Merge with original results, avoiding duplicates
-                            if key in raw:
-                                existing_ids = {item.get('id') for item in raw[key] if item.get('id')}
-                                for item in corrected_results:
-                                    if item.get('id') and item.get('id') not in existing_ids:
-                                        raw[key].append(item)
-                                        existing_ids.add(item.get('id'))
-                            else:
-                                raw[key] = corrected_results
+                            corrected_raw[key] = future.result(timeout=10)
                         except Exception as e:
                             logger.warning(f"Spelling-corrected search for {key} failed: {e}")
+                            corrected_raw[key] = []
+                
+                # Merge: direct matches first, then dedupe corrected results after
+                for key in ['multi', 'movies', 'tv_shows']:
+                    if key in corrected_raw and corrected_raw[key]:
+                        existing_ids = {item.get('id') for item in raw.get(key, []) if item.get('id')}
+                        for item in corrected_raw[key]:
+                            if item.get('id') and item.get('id') not in existing_ids:
+                                raw[key].append(item)
+                                existing_ids.add(item.get('id'))
         except Exception as e:
             logger.warning(f"Spelling correction failed: {e}")
 
