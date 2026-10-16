@@ -114,17 +114,24 @@ def init_db() -> None:
             )
             logger.info("Seeded admin user: %s", ADMIN_NAME)
         else:
-            # Ensure admin is always active with the configured email and PIN
+            # Keep the admin active and its email current. The stored password
+            # is never replaced: LUMA_ADMIN_PIN only seeds a new admin or an
+            # admin row that has no password at all.
             if ADMIN_EMAIL:
                 conn.execute(
-                    "UPDATE users SET status = 'active', email = ?, pin_hash = ? WHERE name = ? COLLATE NOCASE",
-                    (ADMIN_EMAIL, _hash_pin(ADMIN_PIN), ADMIN_NAME),
+                    "UPDATE users SET status = 'active', email = ? WHERE name = ? COLLATE NOCASE",
+                    (ADMIN_EMAIL, ADMIN_NAME),
                 )
             else:
                 conn.execute(
-                    "UPDATE users SET status = 'active', pin_hash = ? WHERE name = ? COLLATE NOCASE",
-                    (_hash_pin(ADMIN_PIN), ADMIN_NAME),
+                    "UPDATE users SET status = 'active' WHERE name = ? COLLATE NOCASE",
+                    (ADMIN_NAME,),
                 )
+            conn.execute(
+                "UPDATE users SET pin_hash = ? WHERE name = ? COLLATE NOCASE"
+                " AND (pin_hash IS NULL OR pin_hash = '')",
+                (_hash_pin(ADMIN_PIN), ADMIN_NAME),
+            )
             logger.debug("Admin user already exists: %s", ADMIN_NAME)
 
 
@@ -138,6 +145,25 @@ def get_user_by_name(name: str) -> Optional[Dict]:
             "SELECT * FROM users WHERE name = ? COLLATE NOCASE", (name,)
         ).fetchone()
         return dict(row) if row else None
+
+
+def find_user(identifier: str, email: str = None) -> Optional[Dict]:
+    """Look up a user by email or name, case-insensitive.
+
+    An identifier containing '@' is tried as an email first; anything else is
+    tried as a name first. Either way the other lookup is the fallback.
+    """
+    identifier = (identifier or '').strip()
+    email = (email or '').strip()
+    if email:
+        user = get_user_by_email(email)
+        if user:
+            return user
+    if not identifier:
+        return None
+    if '@' in identifier:
+        return get_user_by_email(identifier) or get_user_by_name(identifier)
+    return get_user_by_name(identifier) or get_user_by_email(identifier)
 
 
 def get_user_by_email(email: str) -> Optional[Dict]:
@@ -252,11 +278,7 @@ def authenticate(name: str, pin: str, email: str = None) -> Optional[Dict]:
     Only allows users with status='active'.
     Automatically rehashes legacy SHA-256 passwords to werkzeug format.
     """
-    user = None
-    if email:
-        user = get_user_by_email(email)
-    if not user:
-        user = get_user_by_name(name)
+    user = find_user(name, email)
     if not user:
         return None
     if user.get("status", "active") != "active":

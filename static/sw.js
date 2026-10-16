@@ -21,7 +21,7 @@
 
 // BUILD_ID is replaced at build time or bumped manually per deploy.
 // When sw.js byte-content changes, the browser installs a new SW.
-const CACHE_VERSION = 'media-kiosk-v104';
+const CACHE_VERSION = 'media-kiosk-v105';
 
 // Separate cache for large immutable assets — purged when version bumps
 const IMMUTABLE_CACHE = 'media-immutable-v24';
@@ -131,6 +131,11 @@ self.addEventListener('fetch', event => {
   if (path === null) return; // outside Luma's URL base
 
   // --- API data routes — network only (never cache) ---
+  // Sign-in and sign-out pages: network only, never cached.
+  if (path === '/login' || path === '/logout' || path.startsWith('/auth/')) {
+    return;
+  }
+
   if (path.startsWith('/api/') && !path.startsWith('/api/img/')) {
     return; // Let browser handle normally
   }
@@ -175,8 +180,13 @@ self.addEventListener('fetch', event => {
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).then(resp => {
-        const clone = resp.clone();
-        caches.open(CACHE_VERSION).then(c => c.put(at('/'), clone));
+        // Only a real app page may become the offline shell: never a redirect
+        // to sign-in, an error, or anything marked no-store.
+        const cc = resp.headers.get('Cache-Control') || '';
+        if (resp.ok && !resp.redirected && !/no-store/i.test(cc)) {
+          const clone = resp.clone();
+          caches.open(CACHE_VERSION).then(c => c.put(at('/'), clone));
+        }
         return resp;
       }).catch(() => caches.match(at('/')))
     );

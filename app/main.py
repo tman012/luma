@@ -471,6 +471,14 @@ def _prefix_image_urls(response):
 
 
 @app.after_request
+def _auth_api_no_store(response):
+    """Sign-in, sign-out and session responses are never cached."""
+    if request.path.startswith('/api/auth/'):
+        response.headers['Cache-Control'] = 'no-store, max-age=0'
+    return response
+
+
+@app.after_request
 def set_static_cache_headers(response):
     path = request.path
     if path.startswith('/static/'):
@@ -8902,11 +8910,7 @@ def auth_login():
                             'retry_after': wait}), 429
 
         # Check user status before full auth — try email first, then name
-        _pre = None
-        if email:
-            _pre = user_auth.get_user_by_email(email)
-        if not _pre:
-            _pre = user_auth.get_user_by_name(identifier)
+        _pre = user_auth.find_user(identifier, email)
         if _pre and _pre.get('status', 'active') == 'pending':
             return jsonify({'success': False, 'error': 'Your account is pending admin approval. Please try again later.'}), 403
         if _pre and _pre.get('status', 'active') == 'denied':
