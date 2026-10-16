@@ -41,7 +41,7 @@ If you need to run tests with custom mock servers:
     
     cd tests/e2e && pytest -q
 
-Env: LUMA_E2E_BASE_URL and LUMA_MOCK_URL are required (no defaults; the run exits if unset), LUMA_E2E_API_KEY, LUMA_E2E_USER/PIN, LUMA_E2E_SHOTS.
+Env: LUMA_E2E_BASE_URL and LUMA_MOCK_URL are required (no defaults; the run exits if unset); run_luma_mock.py also requires LUMA_E2E_PORT; set HERO_CACHE_DIR to the same value for Luma and pytest; LUMA_E2E_API_KEY, LUMA_E2E_USER/PIN, LUMA_E2E_SHOTS.
 
 **Never use port 5199 or shared /app during testing** - use private directories and spare ports to avoid conflicts.
 

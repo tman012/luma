@@ -5,7 +5,10 @@ TMDBClient.BASE_URL is hard-coded. Writes a throwaway settings.json.
 """
 import json, os, runpy, sys
 from pathlib import Path
-MOCK = os.environ.get("LUMA_MOCK_URL", "http://127.0.0.1:5299")
+MOCK = os.environ.get("LUMA_MOCK_URL")
+PORT = os.environ.get("LUMA_E2E_PORT")
+if not MOCK or not PORT:
+    sys.exit("Set LUMA_MOCK_URL and LUMA_E2E_PORT (spare port); no shared 5199/5299 defaults.")
 data = Path(os.environ["DATABASE_PATH"]).parent
 data.mkdir(parents=True, exist_ok=True)
 import requests
@@ -19,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.settings_manager import SettingsManager
 s = SettingsManager()
 ok, errs = s.update({"plex": {"url": MOCK, "token": "mock-token"},
-                     "network": {"flask_port": int(os.environ.get("LUMA_E2E_PORT", "5199"))},
+                     "network": {"flask_port": int(PORT)},
                      "apis": {"tmdb": {"api_key": "mock-key", "base_url": MOCK + "/tmdb"}}})
 print("settings update:", ok, errs, flush=True)
 runpy.run_module("app.main", run_name="__main__", alter_sys=True)

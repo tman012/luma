@@ -160,9 +160,11 @@ def test_pwa_manifest_and_sw(page):
 def test_hero_static_served(api):
     """A file in the configured hero cache dir is served at /static/hero_cache/."""
     import pathlib
-    # Same resolution as the app: HERO_CACHE_DIR, else $LUMA_CACHE_DIR/hero.
-    hero_dir = os.environ.get("HERO_CACHE_DIR") or os.path.join(
-        os.environ.get("LUMA_CACHE_DIR", "/app/cache"), "hero")
+    # Required: must be the HERO_CACHE_DIR the Luma under test was started with
+    # (no guessing from LUMA_CACHE_DIR or a shared /app/cache).
+    hero_dir = os.environ.get("HERO_CACHE_DIR")
+    if not hero_dir:
+        pytest.fail("Set HERO_CACHE_DIR to the hero cache dir of the Luma under test")
     p = pathlib.Path(hero_dir) / "__qa_probe.jpg"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(b"\xff\xd8\xff\xe0qa")
