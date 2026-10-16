@@ -60,6 +60,8 @@ def _ok_xml_resp():
 
 DIRECT = {'id': 'ix1', 'name': 'Direct', 'url': 'https://tracker.example.com/api',
           'api_key': 'k', 'type': 'torznab', 'enabled': True}
+NZB = {'id': 'ix3', 'name': 'Usenet', 'url': 'https://nzb.example.com/api',
+       'api_key': 'nk', 'type': 'newznab', 'enabled': True}
 PROXIED = {'id': 'ix2', 'name': 'AvistaZ', 'url': '', 'api_key': '', 'type': 'torznab',
            'enabled': True, 'prowlarr_proxy': True, 'prowlarr_id': '7', 'rate_limited': True}
 
@@ -116,9 +118,11 @@ def route_env():
     from app import main
     from app.indexer_backend import LumaBackendAdapter
     from app.indexer_manager import IndexerManager
-    sm = _settings({'indexer.indexers': [DIRECT, PROXIED],
+    sm = _settings({'indexer.indexers': [DIRECT, PROXIED, NZB],
                     'indexer.base_url': 'http://localhost:9696',
-                    'indexer.api_key': 'pk'})
+                    'indexer.api_key': 'pk',
+                    'qbittorrent.url': 'http://qbit.test:8080',
+                    'qbittorrent.username': 'u', 'qbittorrent.password': 'p'})
     adapter = LumaBackendAdapter(IndexerManager(sm))
     main.app.config['TESTING'] = True
     stream = Mock()
@@ -444,6 +448,7 @@ SSRF_CASES = [
     ('100.64.0.1', False, False), ('100.64.0.1', True, True),
     ('fd12:3456::1', False, False), ('fd12:3456::1', True, True),
     ('8.8.8.8', False, True), ('2606:4700:4700::1111', False, True),
+    ('100.100.100.200', False, False), ('100.100.100.200', True, False),
     ('192.88.99.1', False, False), ('192.88.99.1', True, False), ('2002:c058:6301::', False, False),
     ('::ffff:192.88.99.1', True, False),
 ]
@@ -580,16 +585,6 @@ def test_download_headers_forced_and_sanitized(route_env):
     assert '/' not in name and '\\' not in name and '<' not in name and '..' not in name
 
 
-def test_download_nzb_type(route_env):
-    main, adapter, pg, _ = route_env
-    pg.return_value.headers = {'Content-Type': 'application/x-nzb'}
-    tok = adapter.manager.issue_download_token('https://tracker.example.com/get/1', 'ix1')
-    with _as_user(main, {'id': 2, 'is_admin': False}):
-        r = main.app.test_client().get(f'/api/indexer/download/{tok}')
-    assert r.headers['Content-Type'] == 'application/x-nzb'
-    assert r.headers['Content-Disposition'] == 'attachment; filename="download.nzb"'
-
-
 def test_download_size_cap_while_streaming(route_env, monkeypatch):
     """A body that grows past the cap without a Content-Length is a 502, not a truncated 200."""
     from app import indexer_manager as im
@@ -637,13 +632,47 @@ def test_download_torrent_must_be_bencoded(route_env, payload):
 
 
 def test_download_nzb_skips_bencode_check(route_env):
+    """A newznab indexer serves NZB XML (BOM and leading whitespace allowed)."""
     main, adapter, pg, _ = route_env
-    pg.return_value.headers = {'Content-Type': 'application/x-nzb'}
-    pg.return_value.iter_content.side_effect = lambda chunk_size=8192: iter([b'<?xml version="1.0"?><nzb/>'])
-    tok = adapter.manager.issue_download_token('https://tracker.example.com/get/1', 'ix1')
+    pg.return_value.headers = {'Content-Type': 'text/plain'}
+    pg.return_value.iter_content.side_effect = lambda chunk_size=8192: iter(
+        [b'\xef\xbb\xbf \n<?xml version="1.0"?><nzb/>'])
+    tok = adapter.manager.issue_download_token('https://nzb.example.com/get/1', 'ix3')
     with _as_user(main, {'id': 2, 'is_admin': False}):
         r = main.app.test_client().get(f'/api/indexer/download/{tok}')
-    assert r.status_code == 200 and r.data.startswith(b'<?xml')
+    assert r.status_code == 200
+    assert r.headers['Content-Type'] == 'application/x-nzb'
+    assert r.headers['Content-Disposition'] == 'attachment; filename="download.nzb"'
+
+
+def test_download_nzb_bare_root_and_stored_protocol(route_env):
+    main, adapter, pg, _ = route_env
+    main.settings.store['indexer.indexers'].append(dict(DIRECT, id='ix4', type='torznab', protocol='usenet'))
+    pg.return_value.iter_content.side_effect = lambda chunk_size=8192: iter([b'<nzb xmlns="x"/>'])
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/get/1', 'ix4')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().get(f'/api/indexer/download/{tok}')
+    assert r.status_code == 200 and r.headers['Content-Type'] == 'application/x-nzb'
+
+
+@pytest.mark.parametrize('payload', [b'<html><body>login</body></html>', b'd8:announce'])
+def test_newznab_body_must_be_nzb(route_env, payload):
+    main, adapter, pg, _ = route_env
+    pg.return_value.iter_content.side_effect = lambda chunk_size=8192: iter([payload])
+    tok = adapter.manager.issue_download_token('https://nzb.example.com/get/1', 'ix3')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        assert main.app.test_client().get(f'/api/indexer/download/{tok}').status_code == 502
+
+
+@pytest.mark.parametrize('url', ['https://tracker.example.com/get/1', 'https://tracker.example.com/x.nzb'])
+def test_nzb_cannot_be_spoofed_by_content_type_or_url(route_env, url):
+    """A torznab indexer claiming NZB (header or .nzb URL) still has to serve a torrent."""
+    main, adapter, pg, _ = route_env
+    pg.return_value.headers = {'Content-Type': 'application/x-nzb'}
+    pg.return_value.iter_content.side_effect = lambda chunk_size=8192: iter([b'<?xml version="1.0"?><html/>'])
+    tok = adapter.manager.issue_download_token(url, 'ix1')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        assert main.app.test_client().get(f'/api/indexer/download/{tok}').status_code == 502
 
 
 @pytest.mark.parametrize('url', ['http://tracker.example.com:443/dl/1', 'http://tracker.example.com/dl/1'])
@@ -742,3 +771,198 @@ def test_pinned_get_closes_session_on_error(monkeypatch):
     with pytest.raises(requests.exceptions.ConnectionError):
         pinned_get('http://indexer.invalid:1/', '127.0.0.1', timeout=2)
     assert closes == [1]
+
+
+# ---- Round 4, item 1: magnets and redirects ----
+
+MAGNET = 'magnet:?xt=urn:btih:' + 'ab' * 20 + '&dn=Some.Movie'
+TORRENT = b'd8:announce3:url4:infod4:name1:xee'
+
+
+def _resp(status=200, headers=None, body=b''):
+    r = Mock()
+    r.status_code = status
+    r.headers = headers or {}
+    r.iter_content.side_effect = lambda chunk_size=8192: iter([body] if body else [])
+    return r
+
+
+def _get(main, tok):
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        return main.app.test_client().get(f'/api/indexer/download/{tok}')
+
+
+@pytest.mark.parametrize('status', [301, 302, 303, 307, 308])
+def test_magnet_location_is_returned_not_fetched(route_env, status):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(status, {'Location': MAGNET})]
+    r = _get(main, adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1'))
+    assert r.status_code == 200 and r.get_json() == {'magnet': MAGNET}
+    assert pg.call_count == 1
+
+
+def test_magnet_body_is_returned(route_env):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(200, {'Content-Type': 'text/plain'}, ('  ' + MAGNET + '\n').encode())]
+    r = _get(main, adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1'))
+    assert r.get_json() == {'magnet': MAGNET}
+
+
+def test_redirect_to_other_host_revalidates_and_drops_key(route_env):
+    main, adapter, pg, val = route_env
+    first = _resp(302, {'Location': 'https://cdn.example.net/files/1.torrent'})
+    pg.side_effect = [first, _resp(200, {}, TORRENT)]
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/dl?id=1&apikey=x', 'ix1')
+    r = _get(main, tok)
+    assert r.status_code == 200 and r.data == TORRENT
+    assert [c.args[0] for c in val.call_args_list] == ['https://tracker.example.com/dl?id=1',
+                                                       'https://cdn.example.net/files/1.torrent']
+    (u1, ip1), k1 = pg.call_args_list[0].args, pg.call_args_list[0].kwargs
+    (u2, ip2), k2 = pg.call_args_list[1].args, pg.call_args_list[1].kwargs
+    assert u1.endswith('apikey=k') and k1['headers'] == {'X-Api-Key': 'k'}
+    assert u2 == 'https://cdn.example.net/files/1.torrent' and k2['headers'] == {}
+    first.close.assert_called()
+
+
+def test_redirect_same_origin_keeps_key_scheme_change_drops_it(route_env):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(302, {'Location': '/dl/2'}),
+                      _resp(302, {'Location': 'http://tracker.example.com/dl/3'}),
+                      _resp(200, {}, TORRENT)]
+    r = _get(main, adapter.manager.issue_download_token('https://tracker.example.com/dl/1?apikey=x', 'ix1'))
+    assert r.status_code == 200
+    calls = pg.call_args_list
+    assert calls[1].args[0] == 'https://tracker.example.com/dl/2?apikey=k'
+    assert calls[1].kwargs['headers'] == {'X-Api-Key': 'k'}
+    assert calls[2].args[0] == 'http://tracker.example.com/dl/3' and calls[2].kwargs['headers'] == {}
+
+
+def test_redirects_capped_at_three_hops(route_env):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(302, {'Location': f'https://tracker.example.com/r{i}'}) for i in range(5)]
+    r = _get(main, adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1'))
+    assert r.status_code == 502 and 'too many' in r.get_json()['error']
+    assert pg.call_count == 4
+
+
+def test_three_redirects_then_file_is_allowed(route_env):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(302, {'Location': f'https://tracker.example.com/r{i}'}) for i in range(3)] + \
+        [_resp(200, {}, TORRENT)]
+    assert _get(main, adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1')).status_code == 200
+
+
+def test_redirect_hop_failing_validation_is_refused(route_env):
+    main, adapter, pg, val = route_env
+    val.side_effect = [(True, '', '203.0.113.9'), (False, 'Private/restricted IP blocked: 10.0.0.1', None)]
+    pg.side_effect = [_resp(302, {'Location': 'http://internal.example.com/'})]
+    r = _get(main, adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1'))
+    assert r.status_code == 403 and pg.call_count == 1
+
+
+@pytest.mark.parametrize('loc', ['ftp://tracker.example.com/x', 'file:///etc/passwd', ''])
+def test_redirect_to_unsupported_or_missing_location(route_env, loc):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(302, {'Location': loc} if loc else {})]
+    r = _get(main, adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1'))
+    assert r.status_code == 502 and pg.call_count == 1
+
+
+# ---- Round 4, item 2: grab to library through /api/downloads/add ----
+
+def _no_auto_rename():
+    """Stand in for app.auto_rename, whose import creates directories under /app."""
+    import sys
+    return patch.dict(sys.modules, {'app.auto_rename': Mock(auto_renamer=Mock())})
+
+
+class _FakeQbit:
+    def __init__(self, hash_after_add):
+        self.added = []
+        self.hash_after_add = hash_after_add
+
+    def post(self, url, data=None, files=None, timeout=None):
+        r = Mock(status_code=200, text='Ok.')
+        if url.endswith('/torrents/add'):
+            self.added.append({'data': data, 'files': files})
+        return r
+
+    def get(self, url, params=None, timeout=None):
+        if not url.startswith('http://qbit.test:8080/'):
+            raise AssertionError(f'unexpected fetch {url}')
+        items = [{'hash': self.hash_after_add, 'added_on': 1}] if self.added else []
+        return Mock(status_code=200, json=Mock(return_value=items))
+
+
+@pytest.mark.parametrize('prefix', ['', '/luma'])
+def test_grab_to_library_with_proxy_torrent(route_env, prefix):
+    import hashlib
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(200, {}, TORRENT)]
+    info_hash = hashlib.sha1(b'd4:name1:xe').hexdigest()
+    qbit = _FakeQbit(info_hash)
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1')
+    with patch('requests.Session', return_value=qbit), patch('time.sleep'), _no_auto_rename(), \
+         patch.object(main, '_record_origin'), _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().post('/api/downloads/add',
+                                        json={'torrent_url': f'{prefix}/api/indexer/download/{tok}'})
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()['hash'] == info_hash
+    assert qbit.added[0]['files']['torrents'][1] == TORRENT
+    assert pg.call_count == 1
+
+
+def test_grab_to_library_with_proxy_magnet(route_env):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(302, {'Location': MAGNET})]
+    qbit = _FakeQbit('ab' * 20)
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1')
+    with patch('requests.Session', return_value=qbit), patch('time.sleep'), _no_auto_rename(), \
+         patch.object(main, '_record_origin'), _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().post('/api/downloads/add',
+                                        json={'torrent_url': f'/api/indexer/download/{tok}'})
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()['hash'] == 'ab' * 20
+    assert qbit.added[0]['data']['urls'] == MAGNET and qbit.added[0]['files'] is None
+
+
+def test_grab_to_library_proxy_errors_surface(route_env):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(200, {}, b'<html>expired</html>')]
+    qbit = _FakeQbit('00' * 20)
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1')
+    with patch('requests.Session', return_value=qbit), patch('time.sleep'), _no_auto_rename(), \
+         _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().post('/api/downloads/add',
+                                        json={'torrent_url': f'/api/indexer/download/{tok}'})
+    assert r.status_code == 502 and qbit.added == []
+
+
+@pytest.mark.parametrize('value,token', [
+    ('/api/indexer/download/abc_-1', 'abc_-1'),
+    ('/luma/api/indexer/download/abc', 'abc'),
+    ('https://evil.example.com/api/indexer/download/abc', None),
+    ('/api/indexer/download/abc?x=1', None),
+    ('api/indexer/download/abc', None),
+    ('magnet:?xt=urn:btih:abc', None),
+])
+def test_indexer_download_token_detection(value, token):
+    from app.main import _indexer_download_token
+    assert _indexer_download_token(value) == token
+
+
+def test_prowlarr_import_stores_protocol():
+    from app.indexer_manager import IndexerManager
+    sm = _settings({'indexer.indexers': []})
+    listing = Mock()
+    listing.raise_for_status = Mock()
+    listing.json.return_value = [
+        {'id': 1, 'name': 'Geek', 'implementation': 'Newznab', 'protocol': 'usenet', 'enable': True,
+         'fields': [{'name': 'baseUrl', 'value': 'https://api.nzbgeek.info'}, {'name': 'apiKey', 'value': 'k'}]},
+        {'id': 2, 'name': 'Cardi', 'implementation': 'Cardigann', 'protocol': 'torrent', 'enable': True, 'fields': []},
+    ]
+    with patch('app.indexer_manager.requests.Session') as sess:
+        sess.return_value.get.return_value = listing
+        IndexerManager(sm).import_from_prowlarr('http://prowlarr.example.com:9696', 'pk')
+    protos = {ix['name']: ix['protocol'] for ix in sm.store['indexer.indexers']}
+    assert protos == {'Geek': 'usenet', 'Cardi (via Prowlarr)': 'torrent'}

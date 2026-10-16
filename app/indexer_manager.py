@@ -53,6 +53,7 @@ METADATA_IPS = {
     ipaddress.ip_address('169.254.169.254'),
     ipaddress.ip_address('169.254.170.2'),
     ipaddress.ip_address('fd00:ec2::254'),
+    ipaddress.ip_address('100.100.100.200'),   # Alibaba Cloud metadata
 }
 NAT64_NETWORK = ipaddress.ip_network('64:ff9b::/96')
 
@@ -634,7 +635,6 @@ class IndexerManager:
                 self._download_tokens = tokens
                 self._prune_download_tokens()
                 self._persist_download_tokens()
-                self._prune_download_tokens()
         except Exception as e:
             logger.warning(f'Failed to load download tokens: {sanitize_api_key(str(e))}')
 
@@ -1235,6 +1235,7 @@ class IndexerManager:
                         'priority': 100,
                         'enabled': bool(ix.get('enable', True)),
                         'prowlarr_proxy': False,
+                        'protocol': str(ix.get('protocol') or 'torrent').lower(),
                         'rate_limited': is_avistaz_family,
                         'rate_limit_capacity': DEFAULT_CAPACITY if is_avistaz_family else 10,
                         'rate_limit_refill_seconds': DEFAULT_REFILL_SECONDS if is_avistaz_family else 60,
@@ -1259,6 +1260,7 @@ class IndexerManager:
                         'prowlarr_proxy': True,
                         'prowlarr_id': indexer_id,  # Store ID to resolve URL/key at request time
                         'implementation': implementation,
+                        'protocol': str(ix.get('protocol') or 'torrent').lower(),
                         'rate_limited': is_avistaz_family,
                         'rate_limit_capacity': DEFAULT_CAPACITY if is_avistaz_family else 10,
                         'rate_limit_refill_seconds': DEFAULT_REFILL_SECONDS if is_avistaz_family else 60,
