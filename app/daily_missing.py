@@ -694,13 +694,20 @@ def build_pool(force: bool = False) -> Dict[str, Any]:
         ),
         'imdb_hard_reject': IMDB_HARD_REJECT,
     }
+    _publish_pool(payload)
+    logger.info('daily_missing: pool ready — %d candidates', len(gated))
+    return payload
+
+
+def _publish_pool(payload: Dict[str, Any]) -> None:
+    """Persist a rebuilt pool, reset today's slice and refresh served slates."""
+    global _mem_pool, _mem_day, _mem_seed_ids
     _write_pool(payload)
     with _lock:
         _mem_pool = payload
         _mem_day = None
         _mem_seed_ids = []
-    logger.info('daily_missing: pool ready — %d candidates', len(gated))
-    return payload
+    invalidate_rail_cache('pool rebuilt')
 
 
 def _write_pool(payload: Dict[str, Any]) -> None:
@@ -1068,8 +1075,178 @@ def start_daily_missing_thread() -> None:
             time.sleep(REFRESH_INTERVAL_SEC)
 
     threading.Thread(target=loop, name='daily-missing-pool', daemon=True).start()
+    start_rail_cache_thread()
     logger.info('daily_missing: background pool refresh started (every %sh)', REFRESH_INTERVAL_SEC // 3600)
 
 
 def refresh_now() -> Dict[str, Any]:
     return build_pool(force=True)
+
+
+# ---------------------------------------------------------------------------
+# Served-rail cache (stale-while-revalidate)
+#
+# Building a slate needs the owned-id set (Plex ownership index, canon index
+# and the full Radarr catalog) on every call, which made this the slowest
+# Home rail. The slate is now precomputed and served from memory; it is
+# rebuilt in the background on a schedule, after the pool is rebuilt, after
+# library changes and on day rollover. Only the very first request after a
+# process start computes synchronously.
+# ---------------------------------------------------------------------------
+
+RAIL_CACHE_MAX_AGE_SEC = 15 * 60
+RAIL_CACHE_REFRESH_SEC = 10 * 60
+
+_rail_cache_lock = threading.Lock()
+_rail_cache: Dict[int, Dict[str, Any]] = {}
+_rail_refreshing: Set[int] = set()
+_rail_generation = 0
+_rail_cache_thread_started = False
+
+
+def _spawn(fn) -> None:
+    """Run fn in a daemon thread (patched to run inline in tests)."""
+    threading.Thread(target=fn, name='daily-missing-rail', daemon=True).start()
+
+
+def _store_rail(limit: int, payload: Dict[str, Any], generation: int) -> bool:
+    """Store a computed slate unless the cache was invalidated meanwhile."""
+    with _rail_cache_lock:
+        if generation != _rail_generation:
+            return False
+        _rail_cache[limit] = {
+            'payload': payload,
+            'built_at': time.time(),
+            'day': payload.get('day') or _today_ny(),
+            'stale': False,
+        }
+        return True
+
+
+def _compute_and_store(limit: int) -> Dict[str, Any]:
+    with _rail_cache_lock:
+        generation = _rail_generation
+    payload = get_rail(limit=limit)
+    if not payload.get('error'):
+        _store_rail(limit, payload, generation)
+    return payload
+
+
+def _schedule_rail_refresh(limit: int) -> bool:
+    """Rebuild one slate in the background. Returns False if one is running."""
+    with _rail_cache_lock:
+        if limit in _rail_refreshing:
+            return False
+        _rail_refreshing.add(limit)
+
+    def run():
+        try:
+            for _ in range(3):
+                with _rail_cache_lock:
+                    generation = _rail_generation
+                payload = get_rail(limit=limit)
+                if payload.get('error'):
+                    break
+                if _store_rail(limit, payload, generation):
+                    break
+        except Exception as e:
+            logger.error('daily_missing: background rail refresh failed: %s', e)
+        finally:
+            with _rail_cache_lock:
+                _rail_refreshing.discard(limit)
+
+    _spawn(run)
+    return True
+
+
+def get_rail_cached(limit: int = RAIL_SIZE) -> Dict[str, Any]:
+    """Serve the slate from cache instantly; refresh in the background."""
+    with _rail_cache_lock:
+        entry = _rail_cache.get(limit)
+    if entry is None:
+        return _compute_and_store(limit)
+    expired = (time.time() - entry['built_at']) >= RAIL_CACHE_MAX_AGE_SEC
+    if entry['stale'] or expired or entry['day'] != _today_ny():
+        _schedule_rail_refresh(limit)
+    return entry['payload']
+
+
+def invalidate_rail_cache(reason: str = '') -> None:
+    """Mark every cached slate stale and rebuild them in the background.
+
+    The stale copies keep being served until the rebuild lands, so callers
+    never wait. A rebuild already in flight that started before this call is
+    discarded and redone.
+    """
+    global _rail_generation
+    with _rail_cache_lock:
+        _rail_generation += 1
+        for entry in _rail_cache.values():
+            entry['stale'] = True
+        limits = list(_rail_cache.keys())
+    if reason:
+        logger.info('daily_missing: rail cache invalidated (%s)', reason)
+    for limit in limits:
+        _schedule_rail_refresh(limit)
+
+
+def replace_rail_now(limit: int = RAIL_SIZE) -> Dict[str, Any]:
+    """Recompute synchronously (used after a dismiss so the caller sees it)."""
+    global _rail_generation
+    with _rail_cache_lock:
+        _rail_generation += 1
+        for entry in _rail_cache.values():
+            entry['stale'] = True
+        others = [k for k in _rail_cache.keys() if k != limit]
+    payload = _compute_and_store(limit)
+    for other in others:
+        _schedule_rail_refresh(other)
+    return payload
+
+
+def clear_rail_cache() -> None:
+    global _rail_generation
+    with _rail_cache_lock:
+        _rail_generation += 1
+        _rail_cache.clear()
+        _rail_refreshing.clear()
+
+
+_last_library_signature: Optional[tuple] = None
+
+
+def note_library_signature(signature: tuple) -> bool:
+    """Invalidate when the library's ownership signature changes.
+
+    Called by the ownership-index refresher. Returns True on a change. The
+    first observation only records the baseline.
+    """
+    global _last_library_signature
+    previous = _last_library_signature
+    _last_library_signature = signature
+    if previous is not None and previous != signature:
+        invalidate_rail_cache('library changed')
+        return True
+    return False
+
+
+def start_rail_cache_thread() -> None:
+    """Warm the default slate now and keep it fresh on a schedule."""
+    global _rail_cache_thread_started
+    if _rail_cache_thread_started:
+        return
+    _rail_cache_thread_started = True
+
+    def loop():
+        time.sleep(5)
+        while True:
+            try:
+                with _rail_cache_lock:
+                    limits = list(_rail_cache.keys()) or [RAIL_SIZE]
+                for limit in limits:
+                    _compute_and_store(limit)
+            except Exception as e:
+                logger.error('daily_missing: scheduled rail refresh error: %s', e)
+            time.sleep(RAIL_CACHE_REFRESH_SEC)
+
+    threading.Thread(target=loop, name='daily-missing-rail-cache', daemon=True).start()

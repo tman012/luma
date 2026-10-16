@@ -1,8 +1,8 @@
 /**
  * Shared data hook for Home rails.
  *
- * Progressive loading: each rail fetches independently and renders
- * as its data arrives. Module-level fetchers + registry pattern
+ * Synchronized loading: all rails reveal together (see railReveal.ts).
+ * Fetchers throw on failure so the engine retries them in the background. Module-level fetchers + registry pattern
  * (functions outside hook body).
  *
  * Orchestration is delegated to the shared useRailEngine hook.
@@ -11,7 +11,7 @@
  * Consumers: MobileHomePage (compact layout), HomeKioskPage (expanded layout).
  */
 
-import { useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import type { NormalizedMediaItem } from '@/types/media';
 import { fetchWatchlistIds, enrichWatchlistByType, type WatchlistIds } from '@/services/watchlistApi';
 import { enrichOwnership } from '@/services/ownership';
@@ -21,7 +21,9 @@ import { mapWhatYoureMissingMovies } from './wymDismissApi';
 import {
   useRailEngine,
   type RailState,
+  type RailEngineResult,
 } from '../rails/createRailEngine';
+import { withDeadline } from '../rails/railReveal';
 import {
   type HomeRailId,
   type HomeRailDefinition,
@@ -40,7 +42,7 @@ export type HomeRailState = RailState<NormalizedMediaItem, HomeRailId>;
 
 async function fetchContinueWatching(): Promise<NormalizedMediaItem[]> {
   const resp = await fetchWithTimeout('/api/plex/continue_watching/cached?limit=25');
-  if (!resp.ok) return [];
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   return ((data.items ?? []) as Record<string, unknown>[]).map((item) => {
     const metadataType = item.metadata_type as number;
@@ -74,7 +76,7 @@ async function fetchContinueWatching(): Promise<NormalizedMediaItem[]> {
 
 async function fetchWhatYoureMissing(): Promise<NormalizedMediaItem[]> {
   const resp = await fetchWithTimeout('/api/rails/what-youre-missing?limit=20');
-  if (!resp.ok) return [];
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   if (data.empty) return [];
   return mapWhatYoureMissingMovies((data.movies ?? []) as Record<string, unknown>[]);
@@ -99,7 +101,7 @@ async function fetchUpcomingTv(): Promise<NormalizedMediaItem[]> {
   // 14-day Sonarr calendar window; dedupe to one tile per show (next air date).
   // Pull a wider episode window so binge-drop days do not starve later shows.
   const resp = await fetchWithTimeout('/api/sonarr/calendar?days=14&limit=120');
-  if (!resp.ok) return [];
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   if (!data.enabled) return [];
   const seen = new Set<string>();
@@ -155,7 +157,7 @@ async function fetchWatchlistRail(): Promise<NormalizedMediaItem[]> {
   // Same /api/watchlist as WatchlistPage/Sheet. API sorts soonest US
   // digital first (missing dates last). Preserve order; pass badge fields.
   const resp = await fetchWithTimeout('/api/watchlist');
-  if (!resp.ok) return [];
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   const raw = (Array.isArray(data) ? data : []) as Record<string, unknown>[];
   return raw.slice(0, 25).map((m) => {
@@ -179,7 +181,7 @@ async function fetchWatchlistRail(): Promise<NormalizedMediaItem[]> {
 
 async function fetchRecentMovies(): Promise<NormalizedMediaItem[]> {
   const resp = await fetchWithTimeout('/api/library/recent/cached?type=movie&limit=25');
-  if (!resp.ok) return [];
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   const items = (data.items ?? data.movies ?? []) as Record<string, unknown>[];
   return items.map((m) => ({
@@ -197,7 +199,7 @@ async function fetchRecentMovies(): Promise<NormalizedMediaItem[]> {
 
 async function fetchRecentTv(): Promise<NormalizedMediaItem[]> {
   const resp = await fetchWithTimeout('/api/library/episodes/cached?limit=20');
-  if (!resp.ok) return [];
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   // The endpoint returns individual episodes (newest first), so several
   // episodes of the same show collapse to one tile — dedupe by show so we
@@ -226,7 +228,7 @@ async function fetchRecentTv(): Promise<NormalizedMediaItem[]> {
 
 async function fetchRecentlyWatched(): Promise<NormalizedMediaItem[]> {
   const resp = await fetchWithTimeout('/api/plex/recently_watched?limit=25');
-  if (!resp.ok) return [];
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   return ((data.items ?? []) as Record<string, unknown>[]).map((item) => {
     const isEpisode = (item.metadata_type as number) === 4;
@@ -270,27 +272,37 @@ const HOME_RAIL_FETCHERS: Record<HomeRailId, () => Promise<NormalizedMediaItem[]
 // Hook
 // ---------------------------------------------------------------------------
 
-export function useHomeRails(): HomeRailState[] {
+/** Snapshot lifetime: coming back to Home within this window is instant. */
+const HOME_SNAPSHOT_TTL_MS = 10 * 60 * 1000;
+const HOME_STORAGE_KEY = 'luma.home.rails.';
+const ENRICH_DEADLINE_MS = 3000;
+
+export function useHomeRails(): RailEngineResult<NormalizedMediaItem, HomeRailId> {
   // Start watchlist fetch eagerly (runs in parallel with rail fetches)
   const wlRef = useRef<Promise<WatchlistIds> | null>(null);
   if (!wlRef.current) wlRef.current = fetchWatchlistIds();
 
+  // Enrichment (ownership + watchlist) is part of each rail's fetch, so the
+  // badges are already there at the reveal instead of popping in later.
+  const fetchers = useMemo(() => {
+    const out = {} as Record<HomeRailId, () => Promise<NormalizedMediaItem[]>>;
+    for (const def of HOME_RAILS) {
+      const base = HOME_RAIL_FETCHERS[def.id];
+      out[def.id] = !def.enrich ? base : async () => {
+        const items = await base();
+        if (items.length === 0) return items;
+        const enrich = Promise.all([wlRef.current!, enrichOwnership(items)])
+          .then(([wlIds, owned]) => enrichWatchlistByType(owned, wlIds).map((it) => ({ ...it, ownershipKnown: true })));
+        return withDeadline(enrich, ENRICH_DEADLINE_MS, items);
+      };
+    }
+    return out;
+  }, []);
+
   return useRailEngine<NormalizedMediaItem, HomeRailId, HomeRailDefinition>({
     definitions: HOME_RAILS,
-    fetchers: HOME_RAIL_FETCHERS,
-    safetyTimeoutMs: 3000,
-    onRailFetched: (def, items, update, cancelled) => {
-      if (def.enrich && items.length > 0) {
-        // Enrich ownership (Plex) + watchlist so home tiles show the same
-        // orb/badge treatment as Explore. Both resolve, then a single update.
-        Promise.all([wlRef.current!, enrichOwnership(items)])
-          .then(([wlIds, ownedItems]) => {
-            if (cancelled()) return;
-            // Mark ownership resolved so tiles now render the status orb.
-            update(enrichWatchlistByType(ownedItems, wlIds).map((it) => ({ ...it, ownershipKnown: true })));
-          })
-          .catch(() => {});
-      }
-    },
+    fetchers,
+    storageKey: HOME_STORAGE_KEY,
+    snapshotTtlMs: HOME_SNAPSHOT_TTL_MS,
   });
 }

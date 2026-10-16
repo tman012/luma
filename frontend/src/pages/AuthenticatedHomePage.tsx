@@ -269,7 +269,7 @@ function Rail({ rail, railId, onItemClick, onItemLongPress, trailing }: {
   if (!rail.isLoading && rail.items.length === 0) return null;
 
   return (
-    <section style={{ marginBottom: 28 }}>
+    <section className={rail.fadeIn ? 'luma-rail-fade' : undefined} style={{ marginBottom: 28 }}>
       <div style={{ paddingLeft: 12, paddingRight: 12, marginBottom: 12 }}>
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'rgba(255,255,255,0.92)', letterSpacing: '-0.3px' }}>
           {rail.title}
@@ -810,12 +810,14 @@ const RAIL_ORDER: HomeRailId[] = [
 ];
 
 export function AuthenticatedHomePage() {
-  const rails = useHomeRails();
+  const { rails, refresh: refreshRails } = useHomeRails();
   const modalHost = useModalHost();
-  const handleHomeRefresh = useCallback(() => {
-    // Visual feedback first; soft refetch isn't on useHomeRails.
-    window.setTimeout(() => window.location.reload(), 420);
-  }, []);
+  const handleHomeRefresh = useCallback(async () => {
+    // Current rails stay up; the new set swaps in at once.
+    await refreshRails();
+    setWymOverride(null);
+    setWlOverride(null);
+  }, [refreshRails]);
   const { pullPx, refreshing: ptrRefreshing, progress: ptrProgress } = usePullToRefresh(handleHomeRefresh);
   const [searchOpen, setSearchOpen] = useState(false);
   const [roomsOpen, setRoomsOpen] = useState(false);

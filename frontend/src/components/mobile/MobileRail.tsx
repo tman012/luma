@@ -5,13 +5,43 @@ interface MobileRailProps {
   children: ReactNode;
   /** Rail index used for staggered entrance animation delay */
   index?: number;
+  /**
+   * Entrance style. 'stagger' (default) animates title and cards one after
+   * another; 'fade' is one short fade for the whole rail (synchronized
+   * reveal); 'none' shows it immediately (cached data).
+   */
+  entrance?: 'stagger' | 'fade' | 'none';
 }
 
-export function MobileRail({ title, children, index = 0 }: MobileRailProps) {
+export function MobileRail({ title, children, index = 0, entrance = 'stagger' }: MobileRailProps) {
   // Inject margin on first/last children since padding on overflow-x containers is unreliable
   const items = Children.toArray(children).filter(isValidElement);
   const GAP = 12; // matches gap-3
   const railBaseDelay = index * 100;
+
+  if (entrance !== 'stagger') {
+    return (
+      <section className={entrance === 'fade' ? 'mb-6 luma-rail-fade' : 'mb-6'}>
+        <h2 className="text-lg font-semibold mb-2 text-white" style={{ paddingLeft: GAP }}>
+          {title}
+        </h2>
+        <div
+          className="flex items-start gap-3 overflow-x-auto snap-x snap-mandatory pb-2"
+          style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}
+        >
+          {items.map((child, i) => {
+            if (i !== 0 && i !== items.length - 1) return child;
+            const style: Record<string, unknown> = {};
+            if (i === 0) style.marginLeft = GAP;
+            if (i === items.length - 1) style.marginRight = GAP;
+            return cloneElement(child as ReactElement<{ style?: Record<string, unknown> }>, {
+              style: { ...(child as ReactElement<{ style?: Record<string, unknown> }>).props.style, ...style },
+            });
+          })}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="mb-6">

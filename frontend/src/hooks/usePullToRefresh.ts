@@ -3,8 +3,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 /**
  * Native-feel pull-to-refresh for document/body scroll pages (useBodyScroll).
  * Rubber-bands from the top; only a firm downward pull past the threshold
- * triggers refresh. Soft rail refetch isn't available on useHomeRails, so
- * callers typically reload after showing the spinner.
+ * triggers refresh. When onRefresh returns a promise, the indicator stays
+ * up until it settles; otherwise callers are expected to reload.
  *
  * Gesture rules:
  * - Only arms at (or very near) document scroll top.
@@ -100,7 +100,7 @@ function touchOwnedByNestedScroller(e: TouchEvent): boolean {
   return false;
 }
 
-export function usePullToRefresh(onRefresh: () => void, enabled = true): PullToRefreshState {
+export function usePullToRefresh(onRefresh: () => void | Promise<void>, enabled = true): PullToRefreshState {
   const [pullPx, setPullPx] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const pullRef = useRef(0);
@@ -225,7 +225,15 @@ export function usePullToRefresh(onRefresh: () => void, enabled = true): PullToR
         refreshingRef.current = true;
         setRefreshing(true);
         setPull(Math.max(px, 56));
-        onRefreshRef.current();
+        const pending = onRefreshRef.current();
+        if (pending && typeof (pending as Promise<void>).then === 'function') {
+          // Soft refresh: settle the indicator once the new content is in.
+          void (pending as Promise<void>).catch(() => {}).finally(() => {
+            refreshingRef.current = false;
+            setRefreshing(false);
+            setPull(0);
+          });
+        }
         return;
       }
       setPull(0);
