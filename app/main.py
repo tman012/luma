@@ -16,7 +16,7 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, redirect, g, make_response, Response
@@ -535,6 +535,12 @@ def start_services(app_instance):
     
     # Initialize database
     init_database()
+
+    try:
+        from app.paths import warn_if_telegram_config_exposed
+        warn_if_telegram_config_exposed()
+    except Exception as e:
+        logger.debug(f"telegram_bot.json permission check failed: {e}")
     
     # Initialize user auth tables
     try:
@@ -1715,6 +1721,9 @@ def get_sources_config():
 @app.route('/api/radarr/movie/releases')
 def radarr_movie_releases():
     """Search for available releases for a movie via Radarr interactive search."""
+    err = _require_auth()
+    if err:
+        return err
     try:
         radarr = get_radarr_for_request()
         if not radarr:
@@ -2024,6 +2033,9 @@ def sources_all_results():
         year        – optional int, appended to the search query.
         tmdb_id     – optional int (accepted; not required for the search).
     """
+    err = _require_auth()
+    if err:
+        return err
     try:
         from app.indexer_api import get_indexer_client
 
@@ -2077,7 +2089,9 @@ def sources_all_results():
                 'leechers': item.get('leechers', 0) or 0,
                 'quality': quality_label,
                 'protocol': item.get('protocol', 'torrent') or 'torrent',
-                'download_url': item.get('download_url', '') or '',
+                # Legacy-backend links carry the API key; the browser gets a token.
+                'download_url': _tokenize_legacy_download(item.get('download_url', '') or '',
+                                                          item.get('protocol', 'torrent')),
                 'info_hash': item.get('info_hash', '') or '',
                 'pub_date': item.get('pub_date', '') or '',
                 'origin': 'indexer',
@@ -2085,6 +2099,8 @@ def sources_all_results():
                 'rejection_reasons': [],
             })
 
+        if _legacy_backend_token_id():
+            _token_store().persist_download_tokens()
         payload = {
             'success': True,
             'total': len(releases),
@@ -2280,6 +2296,9 @@ def indexer_latest():
 
     Each result is enriched with a TMDb poster + tmdb_id when available.
     """
+    err = _require_auth()
+    if err:
+        return err
     try:
         import time as _time
 
@@ -9047,7 +9066,8 @@ def _make_admin_action_url(action: str, user_id: int) -> str:
     """
     from urllib.parse import urlencode
     from app import action_tokens
-    fields = action_tokens.sign(app.config['SECRET_KEY'], action, user_id)
+    fields = action_tokens.sign(app.config['SECRET_KEY'], action, user_id,
+                                ver=_admin_action_version(action, user_id))
     return f"{_public_app_url()}/api/admin/telegram-action?{urlencode(fields)}"
 
 
@@ -9545,7 +9565,9 @@ def request_shared_plex():
         return jsonify({'success': True, 'message': 'Request already pending'})
 
     # Save pending status
-    user_auth.save_user_settings(user_id, {'plex_access_status': 'pending'})
+    # requested_at versions this request: Telegram links for an earlier one stop working
+    user_auth.save_user_settings(user_id, {'plex_access_status': 'pending',
+                                           'plex_access_requested_at': f'{time.time():.6f}'})
 
     # Send Telegram notification to admin
     full_user = user_auth.get_user_by_id(user_id)
@@ -9917,8 +9939,10 @@ def admin_telegram_action():
             return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
         if not _admin_action_pending(tok['action'], u):
             return _admin_already_handled(u)
+        if tok['ver'] != _admin_action_version(tok['action'], u['id']):
+            return _admin_link_superseded(u)
         title, question, button = _ADMIN_ACTION_LABELS[tok['action']]
-        fields = {k: request.args.get(k, '') for k in ('action', 'uid', 'exp', 'nonce', 'sig')}
+        fields = {k: request.args.get(k, '') for k in ('action', 'uid', 'exp', 'nonce', 'ver', 'sig')}
         return _admin_action_page(title, question.format(name=u['name']), tok['action'].startswith('approve'),
                                   form=fields, button=button)
 
@@ -9945,6 +9969,8 @@ def admin_telegram_action():
             return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
         if not _admin_action_pending(action, u):
             return _admin_already_handled(u)
+        if tok['ver'] != _admin_action_version(action, uid):
+            return _admin_link_superseded(u)
         name = u['name']
         before = _admin_action_state(uid)
         attempted = True
@@ -10009,7 +10035,24 @@ def _admin_action_pending(action: str, user: dict) -> bool:
     plex = user_auth.get_user_settings(user['id']).get('plex_access_status')
     if action == 'approve_plex':
         return plex == 'pending'
-    return plex != 'denied'
+    return plex in ('pending', 'approved')
+
+
+def _admin_action_version(action: str, uid: int) -> str:
+    """Which request a Telegram link is for: the account's creation time for
+    account actions, the Plex request time for Plex actions. Signed into the
+    link and compared on use, so a link for an earlier request can't act on a
+    newer one."""
+    if action in ('approve_user', 'deny_user'):
+        u = user_auth.get_user_by_id(uid) or {}
+        return 'u:' + str(u.get('created_at') or '')
+    return 'p:' + str(user_auth.get_user_settings(uid).get('plex_access_requested_at') or '')
+
+
+def _admin_link_superseded(user: dict):
+    return _admin_action_page('Link Out of Date',
+                              f"This link was for an earlier request from {user['name']}. "
+                              'Use the link from the newest notification.', False, 410)
 
 
 def _admin_already_handled(user: dict):
@@ -15621,6 +15664,17 @@ def _magnet_info_hash(magnet: str):
         return None
 
 
+_INDEXER_DOWNLOAD_PATH = re.compile(r'^(?:/[^?#]*)?/api/indexer/download/([A-Za-z0-9_-]+)$')
+
+
+def _indexer_download_token(torrent_url: str) -> Optional[str]:
+    """The token if *torrent_url* is a relative link to our own download proxy."""
+    if '://' in torrent_url or not torrent_url.startswith('/'):
+        return None
+    m = _INDEXER_DOWNLOAD_PATH.match(torrent_url)
+    return m.group(1) if m else None
+
+
 @app.route('/api/downloads/add', methods=['POST'])
 def add_torrent_to_qbittorrent():
     """Add a torrent to qBittorrent and track it.
@@ -15637,6 +15691,10 @@ def add_torrent_to_qbittorrent():
     BEFORE lying about success and so qBit never has to reach the indexer), then
     upload the bytes, then poll qBit until the exact hash appears.
     """
+    # NOTE: #2's _csrf_api_guard also covers this route after the rebase.
+    err = _require_auth()
+    if err:
+        return err
     try:
         from app.auto_rename import auto_renamer
         import requests as req
@@ -15669,44 +15727,56 @@ def add_torrent_to_qbittorrent():
         is_magnet = torrent_url.lower().startswith('magnet:')
         expected_hash = None
         torrent_bytes = None
+        proxy_token = _indexer_download_token(torrent_url)
 
-        if is_magnet:
+        if proxy_token:
+            # Our own /api/indexer/download/<token> link (relative, with or
+            # without a URL base): resolve it in-process instead of over HTTP.
+            try:
+                fetched = fetch_indexer_download(proxy_token)
+            except IndexerDownloadError as e:
+                logger.error(f"Indexer download for grab failed: {e.message}")
+                return jsonify({'error': e.message}), e.status
+            if 'magnet' in fetched:
+                is_magnet = True
+                torrent_url = fetched['magnet']
+                expected_hash = _magnet_info_hash(torrent_url)
+            elif fetched['mimetype'] != 'application/x-bittorrent':
+                return jsonify({'error': 'This release is an NZB, which qBittorrent cannot download'}), 400
+            else:
+                torrent_bytes = fetched['body']
+                expected_hash = _torrent_info_hash(torrent_bytes)
+        elif is_magnet:
+            try:
+                torrent_url = _clean_magnet(torrent_url)
+            except IndexerDownloadError as e:
+                return jsonify({'error': e.message}), 400
             expected_hash = _magnet_info_hash(torrent_url)
         else:
-            # Fetch the .torrent ourselves. This is the crux of the fix: if the
-            # indexer link is dead/expired/HTML we find out NOW and fail loudly,
-            # instead of handing qBit a URL it silently fails to fetch.
+            # Any other link is fetched here, never by qBittorrent, with the
+            # same SSRF validation, DNS pinning and manual redirects as the
+            # proxy. LAN/loopback is allowed only on the Prowlarr or Torznab
+            # backend, for a link already on that backend's configured origin.
             try:
-                dl = session.get(torrent_url, timeout=30, allow_redirects=True)
-            except Exception as e:
-                logger.error(f"Failed to fetch torrent from indexer: {e}")
-                return jsonify({'error': f'Could not fetch the torrent from the indexer: {e}'}), 502
-
-            final_url = (dl.url or '').lower()
-            body_head = dl.content[:8].lower() if dl.content else b''
-
-            if final_url.startswith('magnet:'):
+                backend_origin = _active_backend_origin()
+                fetched = _fetch_validated(
+                    torrent_url,
+                    allow_lan=bool(settings.get('indexer.allow_lan', False)),
+                    trusted_origin=backend_origin if backend_origin == _url_host_port(torrent_url) else None,
+                    label='Grab link')
+            except IndexerDownloadError as e:
+                logger.error(f"Failed to fetch torrent from indexer: {e.message}")
+                message = e.message if e.status != 502 else (
+                    'The indexer returned an invalid or expired download link. '
+                    'Nothing was added — re-search for a fresh source and try again.')
+                return jsonify({'error': message}), e.status
+            if 'magnet' in fetched:
                 is_magnet = True
-                torrent_url = dl.url
+                torrent_url = fetched['magnet']
                 expected_hash = _magnet_info_hash(torrent_url)
-            elif body_head.startswith(b'magnet:'):
-                is_magnet = True
-                torrent_url = dl.content.decode('utf-8', 'ignore').strip().splitlines()[0]
-                expected_hash = _magnet_info_hash(torrent_url)
-            elif dl.status_code == 200 and dl.content[:1] == b'd':
-                torrent_bytes = dl.content
-                expected_hash = _torrent_info_hash(torrent_bytes)
             else:
-                ct = dl.headers.get('content-type', '')
-                logger.error(
-                    f"Indexer did not return a valid torrent "
-                    f"(status={dl.status_code}, content-type={ct}, "
-                    f"head={dl.content[:80]!r})"
-                )
-                return jsonify({
-                    'error': 'The indexer returned an invalid or expired download link. '
-                             'Nothing was added — re-search for a fresh source and try again.'
-                }), 502
+                torrent_bytes = fetched['body']
+                expected_hash = _torrent_info_hash(torrent_bytes)
 
         def _qbit_category_torrents():
             try:
@@ -19693,7 +19763,713 @@ def test_indexer_connection():
     except requests.exceptions.ConnectionError:
         return jsonify({'success': False, 'message': 'Could not connect to indexer'}), 200
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        from app.indexer_manager import sanitize_api_key
+        return jsonify({'success': False, 'message': sanitize_api_key(str(e))}), 200
+
+
+# ---- Indexer Management (Luma backend) ------------------------------------
+
+@app.route('/api/settings/indexers', methods=['GET'])
+def list_indexers():
+    """List all configured indexers (Luma backend)."""
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        from app.indexer_manager import sanitize_api_key
+        from app.indexer_api import get_indexer_client
+        client = get_indexer_client(settings)
+        
+        # Check if we're using the Luma backend
+        if not hasattr(client, 'get_indexers'):
+            return jsonify({'error': 'Indexer list only available with Luma backend'}), 400
+        
+        indexers = client.get_indexers()
+        # Mask API keys
+        for ix in indexers:
+            if 'api_key' in ix and ix['api_key']:
+                ix['api_key'] = SECRET_MASK
+        return jsonify(indexers)
+    except Exception as e:
+        logger.exception('Failed to list indexers')
+        return jsonify({'error': sanitize_api_key(str(e))}), 500
+
+
+def _validate_indexer_payload(data: Dict[str, Any], is_update: bool = False) -> Optional[Tuple[Dict, int]]:
+    """
+    Validate indexer configuration payload.
+    
+    Returns None if valid, or (error_response, status_code) tuple if invalid.
+    """
+    from urllib.parse import urlparse
+    
+    # Required fields for new indexers
+    if not is_update:
+        if not data.get('name'):
+            return jsonify({'error': 'Field "name" is required'}), 400
+        if not data.get('url'):
+            return jsonify({'error': 'Field "url" is required'}), 400
+        if not data.get('type'):
+            return jsonify({'error': 'Field "type" is required'}), 400
+    
+    # Type validation
+    if 'name' in data and not isinstance(data['name'], str):
+        return jsonify({'error': 'Field "name" must be a string'}), 400
+    
+    if 'url' in data:
+        if not isinstance(data['url'], str):
+            return jsonify({'error': 'Field "url" must be a string'}), 400
+        
+        # URL scheme validation (http/https only)
+        parsed = urlparse(data['url'])
+        if parsed.scheme not in ('http', 'https'):
+            return jsonify({'error': 'URL must use http or https scheme'}), 400
+    
+    if 'type' in data:
+        if not isinstance(data['type'], str):
+            return jsonify({'error': 'Field "type" must be a string'}), 400
+        if data['type'].lower() not in ('torznab', 'newznab'):
+            return jsonify({'error': 'Field "type" must be "torznab" or "newznab"'}), 400
+    
+    if 'api_key' in data and data['api_key'] not in (None, SECRET_MASK):
+        if not isinstance(data['api_key'], str):
+            return jsonify({'error': 'Field "api_key" must be a string'}), 400
+    
+    if 'enabled' in data and not isinstance(data['enabled'], bool):
+        return jsonify({'error': 'Field "enabled" must be a boolean'}), 400
+    
+    if 'priority' in data:
+        if not isinstance(data['priority'], int):
+            return jsonify({'error': 'Field "priority" must be an integer'}), 400
+        if not (0 <= data['priority'] <= 10000):
+            return jsonify({'error': 'Field "priority" must be between 0 and 10000'}), 400
+    
+    # Rate limit validation
+    if 'rate_limit' in data and data['rate_limit'] is not None:
+        rate_limit = data['rate_limit']
+        if not isinstance(rate_limit, dict):
+            return jsonify({'error': 'Field "rate_limit" must be an object'}), 400
+        
+        if 'requests' in rate_limit:
+            if not isinstance(rate_limit['requests'], int):
+                return jsonify({'error': 'rate_limit.requests must be an integer'}), 400
+            if not (1 <= rate_limit['requests'] <= 10000):
+                return jsonify({'error': 'rate_limit.requests must be between 1 and 10000'}), 400
+        
+        if 'period_seconds' in rate_limit:
+            if not isinstance(rate_limit['period_seconds'], int):
+                return jsonify({'error': 'rate_limit.period_seconds must be an integer'}), 400
+            if not (1 <= rate_limit['period_seconds'] <= 86400):
+                return jsonify({'error': 'rate_limit.period_seconds must be between 1 and 86400 (1 day)'}), 400
+    
+    return None
+
+
+@app.route('/api/settings/indexers', methods=['POST'])
+def add_indexer():
+    """Add a new indexer (Luma backend)."""
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        body = request.get_json() or {}
+        
+        # Validate payload
+        validation_error = _validate_indexer_payload(body, is_update=False)
+        if validation_error:
+            return validation_error
+        
+        # Generate ID if not provided
+        if not body.get('id'):
+            import uuid
+            body['id'] = f"ix-{uuid.uuid4().hex[:8]}"
+        
+        # Get current indexers
+        indexers = settings.get('indexer.indexers') or []
+        
+        # Check for duplicate ID
+        if any(ix.get('id') == body['id'] for ix in indexers):
+            return jsonify({'error': 'Indexer ID already exists'}), 400
+        
+        # Add new indexer
+        indexers.append(body)
+        success, errors = settings.update({'indexer': {'indexers': indexers}})
+        
+        if success:
+            # Mask API key in response
+            if 'api_key' in body and body['api_key']:
+                body['api_key'] = SECRET_MASK
+            return jsonify(body), 201
+        else:
+            return jsonify({'errors': errors}), 400
+    except Exception as e:
+        logger.exception('Failed to add indexer')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/indexers/<indexer_id>', methods=['PUT'])
+def update_indexer(indexer_id: str):
+    """Update an existing indexer (Luma backend)."""
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        body = request.get_json() or {}
+        
+        # Validate payload
+        validation_error = _validate_indexer_payload(body, is_update=True)
+        if validation_error:
+            return validation_error
+        
+        # Get current indexers
+        indexers = settings.get('indexer.indexers') or []
+        
+        # Find and update
+        found = False
+        for ix in indexers:
+            if ix.get('id') == indexer_id:
+                # Don't overwrite API key if masked
+                if body.get('api_key') == SECRET_MASK:
+                    body.pop('api_key', None)
+                ix.update(body)
+                ix['id'] = indexer_id  # Prevent ID changes
+                found = True
+                break
+        
+        if not found:
+            return jsonify({'error': 'Indexer not found'}), 404
+        
+        success, errors = settings.update({'indexer': {'indexers': indexers}})
+        
+        if success:
+            # Return updated indexer with masked key
+            for ix in indexers:
+                if ix.get('id') == indexer_id:
+                    result = dict(ix)
+                    if 'api_key' in result and result['api_key']:
+                        result['api_key'] = SECRET_MASK
+                    return jsonify(result)
+        else:
+            return jsonify({'errors': errors}), 400
+    except Exception as e:
+        logger.exception('Failed to update indexer')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/indexers/<indexer_id>', methods=['DELETE'])
+def delete_indexer(indexer_id: str):
+    """Delete an indexer (Luma backend)."""
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        indexers = settings.get('indexer.indexers') or []
+        original_count = len(indexers)
+        indexers = [ix for ix in indexers if ix.get('id') != indexer_id]
+        
+        if len(indexers) == original_count:
+            return jsonify({'error': 'Indexer not found'}), 404
+        
+        success, errors = settings.update({'indexer': {'indexers': indexers}})
+        
+        if success:
+            return jsonify({'success': True})
+        else:
+            return jsonify({'errors': errors}), 400
+    except Exception as e:
+        logger.exception('Failed to delete indexer')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/indexers/<indexer_id>/test', methods=['POST'])
+def test_single_indexer(indexer_id: str):
+    """Test connectivity to a specific indexer."""
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        from app.indexer_manager import sanitize_api_key
+        from app.indexer_api import get_indexer_client
+        client = get_indexer_client(settings)
+        
+        # Check if we're using the Luma backend
+        if not hasattr(client, 'test_indexer'):
+            return jsonify({'error': 'Indexer test only available with Luma backend'}), 400
+        
+        success, message = client.test_indexer(indexer_id)
+        # Sanitize any keys from the message
+        return jsonify({'success': success, 'message': sanitize_api_key(message)})
+    except Exception as e:
+        from app.indexer_manager import sanitize_api_key
+        logger.exception('Indexer test failed')
+        return jsonify({'success': False, 'message': sanitize_api_key(str(e))}), 200
+
+
+@app.route('/api/settings/indexers/import-prowlarr', methods=['POST'])
+def import_indexers_from_prowlarr():
+    """Import indexers from Prowlarr (read-only, one-time operation)."""
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        from app.indexer_manager import sanitize_api_key, validate_indexer_url
+        from app.indexer_api import get_indexer_client
+        body = request.get_json() or {}
+        
+        # Get Prowlarr credentials
+        prowlarr_url = body.get('prowlarr_url') or settings.get('indexer.base_url', '')
+        prowlarr_api_key = body.get('prowlarr_api_key') or settings.get('indexer.api_key', '')
+        
+        if not prowlarr_url:
+            return jsonify({'error': 'Prowlarr URL is required'}), 400
+        
+        # If URL is supplied via request body, require key via request body too
+        if body.get('prowlarr_url') and not body.get('prowlarr_api_key'):
+            # Try stored key only if URL also matches stored URL
+            stored_url = settings.get('indexer.base_url', '')
+            if prowlarr_url != stored_url:
+                return jsonify({'error': 'Prowlarr API key is required when URL is supplied'}), 400
+        
+        if not prowlarr_api_key:
+            return jsonify({'error': 'Prowlarr API key is required'}), 400
+        
+        # SSRF protection: validate Prowlarr URL
+        allow_lan = settings.get('indexer.allow_lan', False)
+        valid, error, pinned_ip = validate_indexer_url(prowlarr_url, allow_lan=allow_lan)
+        if not valid:
+            return jsonify({'error': f'Prowlarr URL validation failed: {error}'}), 400
+        
+        client = get_indexer_client(settings)
+        
+        # Check if we're using the Luma backend
+        if not hasattr(client, 'import_from_prowlarr'):
+            return jsonify({'error': 'Prowlarr import only available with Luma backend'}), 400
+        
+        imported, cardigann, errors = client.import_from_prowlarr(prowlarr_url, prowlarr_api_key)
+        
+        # Sanitize errors
+        errors = [sanitize_api_key(e) for e in errors]
+        
+        result = {
+            'success': True,
+            'imported': imported,
+            'cardigann_count': cardigann,
+            'errors': errors,
+        }
+        
+        if imported > 0:
+            result['message'] = f'Imported {imported} indexers'
+            if cardigann > 0:
+                result['message'] += f', flagged {cardigann} Cardigann-only (routed through Prowlarr)'
+        else:
+            result['success'] = False
+            result['message'] = 'No indexers imported'
+        
+        return jsonify(result)
+    except Exception as e:
+        from app.indexer_manager import sanitize_api_key
+        logger.exception('Prowlarr import failed')
+        return jsonify({'error': sanitize_api_key(str(e))}), 500
+
+
+def _url_host_port(url: str):
+    """(scheme, lowercased hostname, effective port) for comparing download origins."""
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    scheme = (parts.scheme or '').lower()
+    port = parts.port or {'http': 80, 'https': 443}.get(scheme)
+    return scheme, (parts.hostname or '').lower(), port
+
+
+def _download_filename(content_disposition: str, ext: str) -> str:
+    """A safe attachment filename from an upstream Content-Disposition header."""
+    import re
+    from email.message import Message
+    msg = Message()
+    msg['content-disposition'] = content_disposition or ''
+    raw = msg.get_filename() or ''
+    name = re.sub(r'[^A-Za-z0-9._()\[\] -]+', '_', raw.replace('\\', '/').rsplit('/', 1)[-1])
+    name = name.strip(' ._')[:150] or 'download'
+    if not name.lower().endswith(ext):
+        name += ext
+    return name
+
+
+class IndexerDownloadError(Exception):
+    """A download token could not be turned into a torrent, NZB or magnet."""
+
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+_MAX_DOWNLOAD_REDIRECTS = 3
+_UTF8_BOM = b'\xef\xbb\xbf'
+
+
+_MAX_MAGNET_BYTES = 8 * 1024
+_MAGNET_TOPIC = re.compile(
+    r'(?:^|[?&])xt=urn:(?:btih:(?:[0-9a-f]{40}|[a-z2-7]{32})|btmh:1220[0-9a-f]{64})(?=&|$)',
+    re.IGNORECASE)
+
+
+def _clean_magnet(uri: str) -> str:
+    """Validate a magnet URI: at most 8 KB, no control characters, a BitTorrent topic.
+
+    Surrounding whitespace is stripped. Raises IndexerDownloadError(502).
+    """
+    uri = (uri or '').strip()
+    if len(uri.encode('utf-8', 'surrogatepass')) > _MAX_MAGNET_BYTES:
+        raise IndexerDownloadError(502, 'Magnet link is too long')
+    if any(ord(c) < 32 or ord(c) == 127 for c in uri):
+        raise IndexerDownloadError(502, 'Magnet link contains control characters')
+    if not uri.lower().startswith('magnet:?') or not _MAGNET_TOPIC.search(uri[len('magnet:?') - 1:]):
+        raise IndexerDownloadError(502, 'Magnet link has no BitTorrent info hash')
+    return uri
+
+
+def _magnet_from_body(body: bytes) -> Optional[str]:
+    """The validated magnet URI if *body* is a bare magnet link, else None."""
+    head = body.lstrip(_UTF8_BOM).lstrip()
+    if not head[:8].lower().startswith(b'magnet:?'):
+        return None
+    line = head.split(b'\n', 1)[0].rstrip(b'\r')
+    if len(line) > _MAX_MAGNET_BYTES:
+        raise IndexerDownloadError(502, 'Magnet link is too long')
+    return _clean_magnet(line.decode('utf-8', 'replace'))
+
+
+def _fetch_validated(url: str, *, allow_lan: bool, trusted_origin=None, api_key: str = '',
+                     send_key: bool = False, is_nzb: bool = False, label: str = 'indexer') -> Dict[str, Any]:
+    """Fetch *url* with SSRF validation and DNS pinning on every hop.
+
+    Follows at most _MAX_DOWNLOAD_REDIRECTS http(s) redirects. A hop may reach
+    loopback or LAN addresses only if it and every earlier hop are on
+    *trusted_origin* (the configured Prowlarr or Torznab URL). On the configured
+    Prowlarr origin only Prowlarr's download path (/<indexer id>/download) is
+    fetched; on the configured Torznab origin only its download and results paths. The API key goes only to the first
+    hop's scheme, host and port. Returns {'magnet': uri} or
+    {'body', 'mimetype', 'filename'}; raises IndexerDownloadError.
+    """
+    from urllib.parse import urljoin
+    from app.indexer_manager import (MAX_RESPONSE_SIZE, add_api_key, pinned_get,
+                                     validate_indexer_url)
+    key_origin = _url_host_port(url)
+    path_rules = _backend_path_rules()
+    chain_on_trusted = trusted_origin is not None
+    for hop in range(_MAX_DOWNLOAD_REDIRECTS + 1):
+        origin = _url_host_port(url)
+        rule = path_rules.get(origin)
+        if rule is not None and not rule[0](url):
+            raise IndexerDownloadError(403, rule[1])
+        # Trust (LAN/loopback) holds only while every hop so far stayed on the
+        # trusted origin; a cross-host redirect ends it for good.
+        chain_on_trusted = chain_on_trusted and origin == trusted_origin
+        trusted = chain_on_trusted
+        valid, error, pinned_ip = validate_indexer_url(
+            url, allow_lan=allow_lan or trusted, allow_loopback_for_host=origin[1] if trusted else None)
+        if not valid:
+            raise IndexerDownloadError(403, f'URL validation failed: {error}')
+        key_here = send_key and bool(api_key) and origin == key_origin
+        fetch_url = add_api_key(url, api_key) if key_here else url
+        headers = {'X-Api-Key': api_key} if key_here else {}
+        try:
+            resp = pinned_get(fetch_url, pinned_ip, headers=headers, stream=True, timeout=30)
+        except requests.RequestException as e:
+            from app.indexer_manager import sanitize_api_key
+            logger.warning('Could not reach %s: %s', label, sanitize_api_key(str(e)))
+            raise IndexerDownloadError(502, 'Could not reach indexer')
+
+        if 300 <= resp.status_code < 400:
+            location = (resp.headers.get('Location') or '').strip()
+            resp.close()
+            if location.lower().startswith('magnet:'):
+                return {'magnet': _clean_magnet(location)}
+            if not location:
+                raise IndexerDownloadError(502, f'Indexer returned HTTP {resp.status_code} without a location')
+            next_url = urljoin(url, location)
+            if _url_host_port(next_url)[0] not in ('http', 'https'):
+                raise IndexerDownloadError(502, 'Indexer redirected to an unsupported URL')
+            if hop == _MAX_DOWNLOAD_REDIRECTS:
+                raise IndexerDownloadError(502, 'Indexer redirected too many times')
+            url = next_url
+            continue
+
+        if resp.status_code != 200:
+            resp.close()
+            logger.warning('%s download returned HTTP %s', label, resp.status_code)
+            raise IndexerDownloadError(502, f'Indexer returned HTTP {resp.status_code}')
+        break
+
+    try:
+        declared = int(resp.headers.get('Content-Length') or 0)
+    except ValueError:
+        declared = 0
+    content_disposition = resp.headers.get('Content-Disposition', '')
+    # Buffer the whole file (capped) so an oversized or malformed body is a
+    # clean 502 instead of a truncated 200.
+    buf = bytearray()
+    try:
+        if declared <= MAX_RESPONSE_SIZE:
+            for chunk in resp.iter_content(chunk_size=8192):
+                buf += chunk
+                if len(buf) > MAX_RESPONSE_SIZE:
+                    break
+    except requests.RequestException:
+        raise IndexerDownloadError(502, 'Could not reach indexer')
+    finally:
+        resp.close()
+    if declared > MAX_RESPONSE_SIZE or len(buf) > MAX_RESPONSE_SIZE:
+        logger.warning('%s download exceeded %d bytes', label, MAX_RESPONSE_SIZE)
+        raise IndexerDownloadError(502, 'Download too large')
+    body = bytes(buf)
+
+    if not is_nzb:
+        magnet = _magnet_from_body(body)
+        if magnet:
+            return {'magnet': magnet}
+        if not body.startswith(b'd'):
+            logger.warning('%s download is not a torrent file', label)
+            raise IndexerDownloadError(502, 'Indexer did not return a torrent file')
+        mimetype, ext = 'application/x-bittorrent', '.torrent'
+    else:
+        head = body.lstrip(_UTF8_BOM).lstrip()
+        if not (head.startswith(b'<?xml') or head.startswith(b'<nzb')):
+            logger.warning('%s download is not an NZB file', label)
+            raise IndexerDownloadError(502, 'Indexer did not return an NZB file')
+        mimetype, ext = 'application/x-nzb', '.nzb'
+    return {'body': body, 'mimetype': mimetype,
+            'filename': _download_filename(content_disposition, ext)}
+
+
+def _prowlarr_origin():
+    """(scheme, host, port) of the configured Prowlarr URL, or None if none is configured."""
+    base = (settings.get('indexer.base_url', '') or '').strip()
+    return _url_host_port(base) if base else None
+
+
+def _is_prowlarr_download_path(url: str) -> bool:
+    """True if *url* is Prowlarr's download endpoint: <Prowlarr URL base>/<indexer id>/download."""
+    from urllib.parse import urlsplit
+    base_path = urlsplit((settings.get('indexer.base_url', '') or '').strip()).path.rstrip('/')
+    return re.fullmatch(re.escape(base_path) + r'/\d+/download', urlsplit(url).path or '') is not None
+
+
+def _prowlarr_backend_active() -> bool:
+    """The legacy Prowlarr backend is selected and fully configured."""
+    return (str(settings.get('indexer.backend', 'prowlarr') or 'prowlarr') != 'luma'
+            and str(settings.get('indexer.provider') or 'prowlarr') == 'prowlarr'
+            and bool((settings.get('indexer.base_url') or '').strip())
+            and bool(settings.get('indexer.api_key')))
+
+
+def _torznab_backend_active() -> bool:
+    """The legacy Torznab backend is selected and has a Torznab URL."""
+    return (str(settings.get('indexer.backend', 'prowlarr') or 'prowlarr') != 'luma'
+            and str(settings.get('indexer.provider') or 'prowlarr') == 'torznab'
+            and bool((settings.get('indexer.torznab_url') or '').strip()))
+
+
+def _torznab_origin():
+    url = (settings.get('indexer.torznab_url', '') or '').strip()
+    return _url_host_port(url) if url else None
+
+
+def _is_torznab_download_path(url: str) -> bool:
+    """True if *url* is a download or results path of the configured Torznab server.
+
+    Allowed: the configured Torznab endpoint itself, Jackett's /dl/<indexer>/
+    download path and /api/v2.0/indexers/<id>/results[/torznab][/api], all under
+    the URL base that precedes /api/v2.0/ in the configured URL.
+    """
+    from urllib.parse import unquote, urlsplit
+    tpath = urlsplit((settings.get('indexer.torznab_url', '') or '').strip()).path.rstrip('/')
+    path = urlsplit(url).path or ''
+    # Refuse anything a server could normalize into another path: backslashes,
+    # encoded slashes or backslashes (also double-encoded), and '.'/'..' segments.
+    decoded = path
+    for _ in range(4):
+        if '\\' in decoded or re.search(r'%(?:25)*(?:2f|5c)', decoded, re.IGNORECASE):
+            return False
+        if any(seg in ('.', '..') for seg in decoded.split('/')):
+            return False
+        nxt = unquote(decoded)
+        if nxt == decoded:
+            break
+        decoded = nxt
+    else:
+        return False
+    cut = tpath.find('/api/v2.0/')
+    prefix = re.escape(tpath[:cut] if cut >= 0 else '')
+    return (path.rstrip('/') == tpath
+            or re.fullmatch(prefix + r'/dl/[^/]+/?', path) is not None
+            or re.fullmatch(prefix + r'/api/v2\.0/indexers/[^/]+/results(?:/torznab)?(?:/api)?/?', path) is not None)
+
+
+def _active_backend_origin():
+    """Origin of the active legacy backend (Prowlarr or Torznab), or None."""
+    if _prowlarr_backend_active():
+        return _prowlarr_origin()
+    if _torznab_backend_active():
+        return _torznab_origin()
+    return None
+
+
+def _backend_path_rules():
+    """{origin: (path check, refusal message)} for backend servers that only serve downloads here."""
+    # Both rules apply whenever the backend URL is configured, whichever backend
+    # is active: the path allowlist only ever narrows what may be fetched. LAN
+    # trust is separate and is granted only for the active backend's origin
+    # (see _active_backend_origin and fetch_indexer_download).
+    rules = {}
+    torznab = _torznab_origin()
+    if torznab is not None:
+        rules[torznab] = (_is_torznab_download_path,
+                          'Only Torznab download links may be fetched from the Torznab server')
+    prowlarr = _prowlarr_origin()
+    if prowlarr is not None:
+        if prowlarr in rules:
+            rules[prowlarr] = (lambda u: _is_prowlarr_download_path(u) or _is_torznab_download_path(u),
+                               'Only indexer download links may be fetched from the indexer backend')
+        else:
+            rules[prowlarr] = (_is_prowlarr_download_path,
+                               'Only Prowlarr download links may be fetched from Prowlarr')
+    return rules
+
+
+def _token_store():
+    """The IndexerManager that owns opaque download tokens (for every backend)."""
+    from app import indexer_manager
+    return indexer_manager.get_indexer_client(settings).manager
+
+
+# Tokens for results from the legacy backends carry one of these instead of a
+# Luma indexer id; ':usenet' marks an NZB release.
+_BACKEND_TOKEN_IDS = ('backend:prowlarr', 'backend:torznab')
+
+
+def _legacy_backend_token_id() -> Optional[str]:
+    if str(settings.get('indexer.backend', 'prowlarr') or 'prowlarr') == 'luma':
+        return None
+    provider = str(settings.get('indexer.provider') or 'prowlarr')
+    return 'backend:torznab' if provider == 'torznab' else 'backend:prowlarr'
+
+
+def _legacy_backend_url() -> str:
+    key = 'indexer.torznab_url' if _legacy_backend_token_id() == 'backend:torznab' else 'indexer.base_url'
+    return (settings.get(key, '') or '').strip()
+
+
+def _tokenize_legacy_download(url: str, protocol: str) -> str:
+    """Replace a legacy-backend download URL (which carries its API key) with an opaque token link.
+
+    Magnets and links to any other host are returned unchanged; magnets carry no key.
+    """
+    backend_id = _legacy_backend_token_id()
+    base = _legacy_backend_url()
+    if not backend_id or not base or not url or url.lower().startswith('magnet:'):
+        return url
+    if _url_host_port(url) != _url_host_port(base):
+        return url
+    token_id = backend_id + (':usenet' if str(protocol or '').lower() == 'usenet' else '')
+    token = _token_store().issue_download_token(url, token_id, persist=False)
+    from app.indexer_backend import indexer_download_path
+    return indexer_download_path(token)
+
+
+def fetch_indexer_download(token: str) -> Dict[str, Any]:
+    """Resolve an opaque download token and fetch what it points to.
+
+    Returns {'magnet': uri} for a magnet (from a redirect Location or a bare
+    magnet body; it is never fetched), or {'body', 'mimetype', 'filename'} for a
+    validated .torrent or .nzb. See _fetch_validated for the redirect and SSRF
+    rules. Raises IndexerDownloadError.
+    """
+    token_data = _token_store().resolve_download_token(token)
+    if not token_data:
+        raise IndexerDownloadError(403, 'Invalid or expired download token')
+    download_url, indexer_id, needs_api_key = token_data
+
+    is_usenet_token = indexer_id.endswith(':usenet')
+    backend_id = indexer_id[:-len(':usenet')] if is_usenet_token else indexer_id
+    if backend_id in _BACKEND_TOKEN_IDS:
+        # A result from the legacy Prowlarr/Torznab backend.
+        base_key = 'indexer.torznab_url' if backend_id == 'backend:torznab' else 'indexer.base_url'
+        expected_url = (settings.get(base_key, '') or '').strip()
+        active = (_prowlarr_backend_active() if backend_id == 'backend:prowlarr'
+                  else _torznab_backend_active())
+        if not expected_url or not active:
+            raise IndexerDownloadError(409, 'The indexer for this download is no longer configured')
+        api_key = settings.get('indexer.api_key', '') or ''
+        if _url_host_port(download_url) != _url_host_port(expected_url):
+            # The backend URL changed after this token was issued.
+            raise IndexerDownloadError(409, 'Indexer configuration changed')
+        return _fetch_validated(
+            download_url,
+            allow_lan=bool(settings.get('indexer.allow_lan', False)),
+            trusted_origin=_url_host_port(expected_url),
+            api_key=api_key, send_key=bool(needs_api_key and api_key),
+            is_nzb=is_usenet_token, label='Indexer backend')
+
+    config = next((ix for ix in (settings.get('indexer.indexers') or [])
+                   if ix.get('id') == indexer_id), None)
+    if not config:
+        raise IndexerDownloadError(404, 'Indexer not found')
+
+    # Proxied entries must point at the configured Prowlarr host,
+    # direct entries at the indexer's own host.
+    if config.get('prowlarr_proxy'):
+        expected_url = settings.get('indexer.base_url', '')
+        if not expected_url:
+            raise IndexerDownloadError(409, 'Prowlarr is not configured, so this proxied indexer is unavailable')
+        api_key = settings.get('indexer.api_key', '')
+    else:
+        expected_url = config.get('url', '')
+        if not expected_url:
+            raise IndexerDownloadError(409, 'Indexer URL not configured')
+        api_key = config.get('api_key', '')
+
+    if _url_host_port(download_url) != _url_host_port(expected_url):
+        logger.warning('Download host does not match the configured host for indexer %s', indexer_id)
+        raise IndexerDownloadError(403, 'Download URL does not match the configured host')
+
+    is_nzb = (str(config.get('type', '')).lower() == 'newznab'
+              or str(config.get('protocol', '')).lower() == 'usenet')
+    return _fetch_validated(
+        download_url,
+        allow_lan=bool(settings.get('indexer.allow_lan', False)),
+        trusted_origin=_prowlarr_origin() if config.get('prowlarr_proxy') else None,
+        api_key=api_key, send_key=bool(needs_api_key and api_key),
+        is_nzb=is_nzb, label=f'Indexer {indexer_id}')
+
+
+@app.route('/api/indexer/download/<token>', methods=['GET'])
+def download_torrent_proxy(token: str):
+    """Serve a torrent or NZB for an opaque download token without exposing indexer API keys.
+
+    Magnets come back as {"magnet": uri}. Open to any signed-in user;
+    anonymous requests are refused.
+    """
+    err = _require_auth()
+    if err:
+        return err
+    try:
+        from flask import Response
+        result = fetch_indexer_download(token)
+        if 'magnet' in result:
+            return jsonify({'magnet': result['magnet']})
+        out = Response(result['body'], mimetype=result['mimetype'])
+        out.headers['Content-Length'] = str(len(result['body']))
+        out.headers['X-Content-Type-Options'] = 'nosniff'
+        out.headers['Content-Disposition'] = f'attachment; filename="{result["filename"]}"'
+        return out
+    except IndexerDownloadError as e:
+        return jsonify({'error': e.message}), e.status
+    except Exception as e:
+        from app.indexer_manager import sanitize_api_key
+        logger.exception('Download proxy failed')
+        return jsonify({'error': sanitize_api_key(str(e))}), 500
 
 
 @app.route('/api/settings/test/shield-adb', methods=['POST'])

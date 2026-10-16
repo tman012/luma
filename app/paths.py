@@ -65,6 +65,21 @@ def data_file(name: str) -> Path:
 def telegram_bot_config_path() -> Path:
     """Where the Telegram bot settings (bot_token, admin_chat_id) live."""
     return data_file(TELEGRAM_BOT_FILENAME)
+
+
+def warn_if_telegram_config_exposed() -> bool:
+    """Log a warning when telegram_bot.json (it holds the bot token) is group-
+    or world-readable. Returns True when it warned."""
+    path = telegram_bot_config_path()
+    try:
+        mode = os.stat(path).st_mode
+    except OSError:
+        return False
+    if mode & 0o044:
+        _log.warning('%s is readable by group or others (mode %03o); run chmod 600 on it',
+                     path, mode & 0o777)
+        return True
+    return False
 _log = logging.getLogger(__name__)
 
 

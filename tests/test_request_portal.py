@@ -121,12 +121,12 @@ class TestRequestPortalRateLimit:
 class TestRequestPortalClientIp:
     """Test client IP resolution."""
     
-    def test_client_ip_uses_access_module(self, app, settings_mock):
+    def test_client_ip_uses_access_module(self, app, settings_mock, monkeypatch):
         """client_ip() uses access.client_ip with trusted_proxies."""
         from app import request_portal
         
         # Initialize module
-        request_portal._settings = settings_mock
+        monkeypatch.setattr(request_portal, '_settings', settings_mock)
         
         with app.test_request_context('/'):
             with patch('app.access.client_ip', return_value="1.2.3.4") as mock_client_ip:
@@ -140,12 +140,12 @@ class TestRequestPortalClientIp:
 class TestRequestPortalRequesterGuard:
     """Test requester role enforcement."""
     
-    def test_requester_cannot_access_admin_routes(self, app, settings_mock):
+    def test_requester_cannot_access_admin_routes(self, app, settings_mock, monkeypatch):
         """Requesters are blocked from admin routes."""
         from app import request_portal
         from flask import g
         
-        request_portal._settings = settings_mock
+        monkeypatch.setattr(request_portal, '_settings', settings_mock)
         settings_mock.get.side_effect = lambda key, default=None: {
             'request_portal.enabled': True
         }.get(key, default)
@@ -163,12 +163,12 @@ class TestRequestPortalRequesterGuard:
             response, code = result
             assert code == 403
     
-    def test_requester_can_access_allowed_routes(self, app, settings_mock):
+    def test_requester_can_access_allowed_routes(self, app, settings_mock, monkeypatch):
         """Requesters can access their allowed routes."""
         from app import request_portal
         from flask import g
         
-        request_portal._settings = settings_mock
+        monkeypatch.setattr(request_portal, '_settings', settings_mock)
         
         with app.test_request_context('/api/request/search'):
             g.current_user = None
@@ -182,7 +182,7 @@ class TestRequestPortalRequesterGuard:
 class TestRequestPortalHostGuard:
     """Test hostname-based routing via portal guard."""
     
-    def test_host_guard_serves_only_request_page_on_dedicated_host(self, app, settings_mock):
+    def test_host_guard_serves_only_request_page_on_dedicated_host(self, app, settings_mock, monkeypatch):
         """When request portal has a dedicated hostname, non-request paths return 404."""
         from app import portal_guard
         from app import access

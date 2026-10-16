@@ -44,10 +44,10 @@ def test_link_uses_full_hmac_sha256_with_secret_key(env):
     client, uid, _ = env
     url, f = _fields('approve_plex', uid)
     assert url.startswith('https://luma.example/api/admin/telegram-action?')
-    assert set(f) == {'action', 'uid', 'exp', 'nonce', 'sig'}
+    assert set(f) == {'action', 'uid', 'exp', 'nonce', 'ver', 'sig'}
     assert len(f['sig']) == 64
     import hashlib, hmac
-    msg = f"telegram-action:{f['action']}:{f['uid']}:{f['exp']}:{f['nonce']}".encode()
+    msg = f"telegram-action:{f['action']}:{f['uid']}:{f['exp']}:{f['nonce']}:{f['ver']}".encode()
     assert f['sig'] == hmac.new(b'k' * 40, msg, hashlib.sha256).hexdigest()
     assert abs(int(f['exp']) - (time.time() + 24 * 3600)) < 5
 
@@ -71,6 +71,7 @@ def test_get_shows_confirm_page_and_changes_nothing(env, monkeypatch):
 
 def test_post_performs_once_then_replay_refused(env, monkeypatch):
     client, uid, _ = env
+    _set_plex(uid, 'pending')   # deny_plex needs a pending or approved request
     calls = []
     monkeypatch.setattr(user_auth, 'save_user_settings', lambda u, s: calls.append((u, s)))
     _, f = _fields('deny_plex', uid)
@@ -84,6 +85,7 @@ def test_post_performs_once_then_replay_refused(env, monkeypatch):
 
 def test_used_nonce_survives_restart(env, monkeypatch):
     client, uid, state = env
+    _set_plex(uid, 'pending')   # deny_plex needs a pending or approved request
     monkeypatch.setattr(user_auth, 'save_user_settings', lambda *a: None)
     _, f = _fields('deny_plex', uid)
     assert client.post(PATH, data=f, environ_base=REMOTE).status_code == 200
@@ -169,6 +171,7 @@ def test_signed_out_remote_without_link_needs_sign_in(env):
 
 def test_corrupt_nonce_store_revokes_earlier_links(env, monkeypatch, caplog):
     client, uid, state = env
+    _set_plex(uid, 'pending')   # deny_plex needs a pending or approved request
     monkeypatch.setattr(user_auth, 'save_user_settings', lambda *a: None)
     _, used = _fields('deny_plex', uid)
     assert client.post(PATH, data=used, environ_base=REMOTE).status_code == 200
@@ -201,6 +204,7 @@ def test_wrong_shape_nonce_store_revokes(env, raw):
 
 def test_failed_action_releases_link_for_retry(env, monkeypatch):
     client, uid, state = env
+    _set_plex(uid, 'pending')   # deny_plex needs a pending or approved request
     def boom(*a):
         raise RuntimeError('db locked')
     monkeypatch.setattr(user_auth, 'save_user_settings', boom)
@@ -303,8 +307,45 @@ def test_quarantine_names_are_unique(tmp_path):
     assert all(re.fullmatch(r'state\.json\.bad-\d+-\d+-\d+', n) for n in names)
 
 
+# ---- Links are bound to one request (ver) ----
+
+def _post(client, f):
+    return client.post(PATH, data=f, environ_base=REMOTE)
+
+
+def test_old_approve_plex_link_cannot_approve_newer_request(env):
+    client, uid, _ = env
+    user_auth.save_user_settings(uid, {'plex_access_status': 'pending', 'plex_access_requested_at': '100.000001'})
+    _, old = _fields('approve_plex', uid)
+    # admin denies, user asks again: a new request with a new version
+    user_auth.save_user_settings(uid, {'plex_access_status': 'denied'})
+    user_auth.save_user_settings(uid, {'plex_access_status': 'pending', 'plex_access_requested_at': '200.000002'})
+    r = client.get(PATH, query_string=old, environ_base=REMOTE)
+    assert r.status_code == 410
+    assert _post(client, old).status_code == 410
+    assert user_auth.get_user_settings(uid).get('plex_access_status') == 'pending'
+    _, new = _fields('approve_plex', uid)
+    assert _post(client, new).status_code == 200
+    assert user_auth.get_user_settings(uid).get('plex_access_status') == 'approved'
+
+
+def test_tampered_ver_is_bad_signature(env):
+    client, uid, _ = env
+    user_auth.save_user_settings(uid, {'plex_access_status': 'pending', 'plex_access_requested_at': '1.0'})
+    _, f = _fields('approve_plex', uid)
+    f['ver'] = 'p:2.0'
+    assert client.get(PATH, query_string=f, environ_base=REMOTE).status_code != 200
+
+
+@pytest.mark.parametrize('status,ok', [('pending', True), ('approved', True), ('denied', False), (None, False)])
+def test_deny_plex_needs_pending_or_approved(env, status, ok):
+    _, uid, _ = env
+    user_auth.save_user_settings(uid, {'plex_access_status': status})
+    assert app.main._admin_action_pending('deny_plex', user_auth.get_user_by_id(uid)) is ok
+
 def test_remote_used_link_gets_html_page_not_json(env, monkeypatch):
     client, uid, _ = env
+    user_auth.save_user_settings(uid, {'plex_access_status': 'pending'})  # deny_plex needs pending/approved
     monkeypatch.setattr(user_auth, 'save_user_settings', lambda *a: None)
     _, f = _fields('deny_plex', uid)
     assert client.post(PATH, data=f, environ_base=REMOTE).status_code == 200

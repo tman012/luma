@@ -371,7 +371,7 @@ class SonarrAPI:
         logger.info(f"Sonarr returned {len(all_releases)} releases, {len(season_packs)} are full-season packs")
         return season_packs
 
-    def download_release(self, guid: str, indexer_id: int, series_id: int = None, season: int = None, episode_id: int = None) -> Optional[Dict]:
+    def download_release(self, guid: str, indexer_id, series_id: int = None, season: int = None, episode_id: int = None) -> Optional[Dict]:
         """
         Download a specific release.
 

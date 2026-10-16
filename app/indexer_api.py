@@ -74,6 +74,7 @@ GUARD_LIMITS = {
 LOADED_COOLDOWN_MAX_S = 24 * 3600    # a saved cooldown never reaches further than this
 LOG_BODY_MAX = 300                   # characters of a 400 body written to the log
 _INDEXER_STATUS_TTL = 60             # seconds to cache /api/v1/indexerstatus
+_IX_META_TTL = 3600                  # refresh Prowlarr indexer metadata hourly
 UNSCOPED = -1                        # pseudo-indexer for a search across all indexers
 
 # Persisted state (see _guard_save): send log per indexer as [ts, kind]
@@ -221,9 +222,11 @@ def _guard_save() -> None:
         logger.warning('Tracker guard state not saved: %s', e)
 
 
+_SECRET_NAMES = r'(?:api[_-]?key|apikey|passkey|key|token|secret|password|auth|cookie|sid|uid|pid|rsskey|torrent_pass)'
 _SECRET_PATTERNS = [
-    re.compile(r'(?i)((?:api[_-]?key|apikey|passkey|token|secret|password|auth|cookie|sid|uid|pid)'
-               r'["\']?\s*[=:]\s*["\']?)[^\s&"\'<>,;]+'),
+    # name=value, name: value, "name": "value", and URL-encoded name%3Dvalue
+    # (any value length, so short passkeys and tokens are covered too)
+    re.compile(r'(?i)((?:(?<![A-Za-z0-9_])|(?<=%3[fF])|(?<=%26))' + _SECRET_NAMES + r'["\']?\s*(?:[=:]|%3[dD]|%3[aA])\s*["\']?)[^\s&"\'<>,;%]+(?:%[0-9A-Fa-f]{2}[^\s&"\'<>,;%]*)*'),
     re.compile(r'(?i)(bearer\s+)[^\s"\'<>,;]+'),
     re.compile(r'()\b[A-Za-z0-9]{24,}\b'),          # long keys and hashes
 ]
@@ -319,6 +322,93 @@ def _guard_decide(ix: int, interactive: bool, now: float) -> Optional[str]:
     _guard_log.setdefault(ix, []).append([now, 'i' if interactive else 'b'])
     _guard_save()
     return None
+
+
+# ---- Public guard API for other search paths (indexer_manager) ----
+# One guard for every search Luma sends, whoever sends it. Proxied Prowlarr
+# entries share the Prowlarr indexer id (same tracker, same counters as
+# ProwlarrClient); direct Torznab/Newznab entries get a stable key far above
+# any Prowlarr id. State lives in this process: run gunicorn with one worker.
+DIRECT_KEY_BASE = 1 << 40
+
+
+def guard_key(indexer_id: Any, prowlarr_id: Any = None) -> int:
+    """Guard key for an indexer-manager entry."""
+    if prowlarr_id not in (None, ''):
+        try:
+            return int(prowlarr_id)
+        except (TypeError, ValueError):
+            pass
+    import zlib
+    return DIRECT_KEY_BASE + zlib.crc32(str(indexer_id).encode('utf-8'))
+
+
+def guard_blocked_until(ix: int, now: Optional[float] = None) -> Optional[float]:
+    """Until when *ix* is in a 400/429 cooldown or the fail-closed window."""
+    now = time.time() if now is None else now
+    with _budget_state_guard:
+        _guard_load()
+        till = max(_guard_cooldown.get(ix, 0.0), _guard_cooldown.get(FAIL_CLOSED, 0.0))
+    return till if till > now else None
+
+
+def guard_acquire(ix: int, interactive: bool, now: Optional[float] = None) -> Optional[str]:
+    """None when one search to *ix* may be sent now (and records it, persisted),
+    else why not: cooldown, fail-closed, or a GUARD_LIMITS cap."""
+    now = time.time() if now is None else now
+    till = guard_blocked_until(ix, now)
+    if till:
+        return f'cooldown until {datetime.fromtimestamp(till).strftime("%H:%M:%S")}'
+    with _budget_state_guard:
+        return _guard_decide(ix, interactive, now)
+
+
+def _apply_cooldown(ix: int, status: int, wait: Optional[float], tills: List[float],
+                    strict: bool, now: float) -> float:
+    """Shared 400/429 cooldown rule (ProwlarrClient and indexer_manager):
+    Retry-After, else a known backoff time, else the GUARD_LIMITS tier
+    doubled per consecutive 400/429 and capped. Bumps and persists the streak."""
+    with _budget_state_guard:
+        _guard_load()
+        streak = _guard_streak.get(ix, 0)
+        _guard_streak[ix] = streak + 1
+        if wait is not None:
+            until = now + wait
+        elif tills:
+            until = max(tills)
+        else:
+            base = GUARD_LIMITS['cooldown_429_s' if status == 429 else
+                                'cooldown_400_strict_s' if strict else 'cooldown_400_s']
+            until = now + min(base * 2 ** min(streak, 16), GUARD_LIMITS['cooldown_max_s'])
+        _guard_cooldown[ix] = max(until, _guard_cooldown.get(ix, 0.0))
+        _guard_save()
+    return until
+
+
+def is_strict_host(url: str) -> bool:
+    """Whether *url*'s host is in GUARD_LIMITS['strict_400_hosts']."""
+    from urllib.parse import urlsplit
+    try:
+        h = (urlsplit(str(url)).hostname or '').lower().rstrip('.')
+    except ValueError:
+        return False
+    return any(h == x or h.endswith('.' + x) for x in GUARD_LIMITS['strict_400_hosts'])
+
+
+def guard_start_cooldown(ix: int, status: int, retry_after: Optional[str] = None,
+                         strict: bool = False, now: Optional[float] = None) -> float:
+    """After a 400/429 from an indexer-manager entry: same tiered, streak-
+    doubled, persisted cooldown as ProwlarrClient. Returns the end time."""
+    now = time.time() if now is None else now
+    return _apply_cooldown(ix, status, _retry_after_seconds(retry_after, now), [], strict, now)
+
+
+def guard_note_success(ix: int) -> None:
+    """A good answer from *ix* ends its 400/429 streak."""
+    with _budget_state_guard:
+        _guard_load()
+        if _guard_streak.pop(ix, 0):
+            _guard_save()
 
 
 def _cache_ttl(interactive: bool) -> float:
@@ -514,6 +604,7 @@ class ProwlarrClient:
             resp = self.session.get(f'{self.base_url}/api/v1/indexer', timeout=20)
             resp.raise_for_status()
             out = []
+            meta = {}
             for ix in resp.json() or []:
                 if ix.get('id') is None:
                     continue
@@ -522,11 +613,13 @@ class ProwlarrClient:
                     'name': ix.get('name') or f"Indexer {ix['id']}",
                     'enabled': bool(ix.get('enable', True)),
                 })
-                self._ix_meta = getattr(self, '_ix_meta', None) or {}
-                self._ix_meta[int(ix['id'])] = _indexer_identity(ix)
+                meta[int(ix['id'])] = _indexer_identity(ix)
+            self._ix_meta = meta
+            self._ix_meta_ts = time.time()
             return sorted(out, key=lambda i: i['name'].lower())
         except Exception as e:
             logger.error(f'Prowlarr get_indexers failed: {e}')
+            self._ix_meta_ts = 0.0       # refresh again on the next lookup
             return []
 
     _INDEXER_IDS_TTL = 60
@@ -595,10 +688,14 @@ class ProwlarrClient:
         if ix < 0:
             return False
         meta = getattr(self, '_ix_meta', None) or {}
-        if int(ix) not in meta:
+        stale = time.time() - (getattr(self, '_ix_meta_ts', 0.0) or 0.0) > _IX_META_TTL
+        if int(ix) not in meta or stale:
             self.get_indexers()      # Prowlarr's own config; never reaches a tracker
             meta = getattr(self, '_ix_meta', None) or {}
-        names, hosts = meta.get(int(ix), (set(), set()))
+        if int(ix) not in meta:
+            # /api/v1/indexer failed or doesn't list it: assume strict (1 h for a 400).
+            return True
+        names, hosts = meta[int(ix)]
         if names & set(GUARD_LIMITS['strict_400_definitions']):
             return True
         return any(h == s or h.endswith('.' + s) for h in hosts for s in GUARD_LIMITS['strict_400_hosts'])
@@ -728,20 +825,7 @@ class ProwlarrClient:
             backoffs = self._indexer_backoffs()
             tills = [t for t in (backoffs.values() if ix == UNSCOPED else [backoffs.get(ix) or 0.0]) if t > now]
         strict = status == 400 and (ix == UNSCOPED or self._is_strict_tracker(ix))
-        with _budget_state_guard:
-            _guard_load()
-            streak = _guard_streak.get(ix, 0)
-            _guard_streak[ix] = streak + 1
-            if wait is not None:
-                until = now + wait
-            elif tills:
-                until = max(tills)
-            else:
-                base = GUARD_LIMITS['cooldown_429_s' if status == 429 else
-                                    'cooldown_400_strict_s' if strict else 'cooldown_400_s']
-                until = now + min(base * 2 ** min(streak, 16), GUARD_LIMITS['cooldown_max_s'])
-            _guard_cooldown[ix] = max(until, _guard_cooldown.get(ix, 0.0))
-            _guard_save()
+        until = _apply_cooldown(ix, status, wait, tills, strict, now)
         self._log_skip_once(ix, 'cooldown', round(until),
                             f'{self._indexer_name(ix)} (id {ix}) answered {resp.status_code}: no searches until '
                             f'{datetime.fromtimestamp(until).strftime("%H:%M:%S")}')
@@ -1262,7 +1346,22 @@ class TorznabClient:
 # ---------------------------------------------------------------------------
 
 def get_indexer_client(settings) -> Optional[Any]:
-    """Return the appropriate indexer client based on settings, or None."""
+    """
+    Return the appropriate indexer client based on settings.
+    
+    Now supports both legacy (Prowlarr/Torznab) and new Luma backend.
+    The backend setting controls which system is used:
+    - 'luma': Use Luma's native indexer manager
+    - 'prowlarr' (default): Use legacy Prowlarr/Torznab client
+    """
+    # Check if we should use the new Luma backend
+    backend = settings.get('indexer.backend', 'prowlarr')
+    
+    if backend == 'luma':
+        from app.indexer_backend import get_indexer_backend
+        return get_indexer_backend(settings)
+    
+    # Legacy Prowlarr/Torznab backend
     provider = settings.get('indexer.provider') or 'prowlarr'
     api_key = settings.get('indexer.api_key') or ''
 

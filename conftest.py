@@ -67,6 +67,7 @@ def _only_e2e(config) -> bool:
 
 
 def pytest_configure(config):
+    config.addinivalue_line('markers', 'no_ssrf_mock: use real SSRF validation in this test')
     if _only_e2e(config):
         return
     cache = tempfile.mkdtemp(prefix='luma_test_cache_')
@@ -83,6 +84,13 @@ def pytest_configure(config):
         'LUMA_SKIP_BACKGROUND_THREADS': '1',
         'BASE_DIR': data,
     })
+    # Never fall back to a real /app/data file (database, telegram_bot.json).
+    legacy = tempfile.mkdtemp(prefix='luma_test_legacy_')
+    _TEMP_DIRS.append(legacy)
+    _SANDBOX['legacy'] = legacy
+    from app import paths as _paths
+    _paths.LEGACY_DATA_DIR = legacy
+    _paths.LEGACY_DATABASE_PATH = os.path.join(legacy, 'media.db')
     os.environ.setdefault('LUMA_DISABLE_AUTOMATIONS', '1')
     os.environ.setdefault('LUMA_DISABLE_ADB', '1')
     os.environ.setdefault('FLASK_STATIC_FOLDER', str(_REPO_ROOT / 'static'))
@@ -143,6 +151,20 @@ def reset_shared_state(request):
     request_portal._settings = saved_portal_settings
 
 
+@pytest.fixture(autouse=True)
+def restore_url_base(request):
+    """Several tests set app.config['URL_BASE'] directly; put it back after
+    every sandbox test (unittest.TestCase ones too) so later tests, and code
+    that reads it like hero and download URLs, see the default."""
+    if not _SANDBOX['data'] or _is_e2e_item(request.node):
+        yield
+        return
+    import app.main as _main
+    saved = _main.app.config.get('URL_BASE', '')
+    yield
+    _main.app.config['URL_BASE'] = saved
+
+
 @pytest.fixture
 def test_app():
     """Create a real Flask app from app.main for integration tests."""
@@ -173,3 +195,24 @@ def test_app():
     flask_app.config['START_BACKGROUND_THREADS'] = False
     
     return flask_app
+
+
+@pytest.fixture
+def temp_data_dir(tmp_path, monkeypatch):
+    """A private data directory for one test (LUMA_DATA_DIR). Opt-in: #4's
+    indexer test modules enable it with pytestmark; everything else keeps the
+    session sandbox from pytest_configure."""
+    # Keep the users DB where the session put it: since round 9 the DB path
+    # follows LUMA_DATA_DIR, and a fresh dir would have no tables.
+    if not os.environ.get('DATABASE_PATH'):
+        from app.paths import resolve_database_path
+        monkeypatch.setenv('DATABASE_PATH', str(resolve_database_path()[0]))
+    import app.user_auth
+    app.user_auth.init_db()   # these tests hit routes that read the users table
+    from app import indexer_api
+    indexer_api._guard_reset_memory()   # the tracker guard follows the new data dir
+    indexer_api._query_cache.clear()
+    data_dir = tmp_path / "luma_data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv('LUMA_DATA_DIR', str(data_dir))
+    yield data_dir

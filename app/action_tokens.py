@@ -27,20 +27,21 @@ _DOMAIN = 'telegram-action'
 _lock = threading.Lock()
 
 
-def _message(action: str, uid: int, exp: int, nonce: str) -> bytes:
-    return f'{_DOMAIN}:{action}:{uid}:{exp}:{nonce}'.encode()
+def _message(action: str, uid: int, exp: int, nonce: str, ver: str = '') -> bytes:
+    # ver binds the link to one specific request (see main._admin_action_version)
+    return f'{_DOMAIN}:{action}:{uid}:{exp}:{nonce}:{ver}'.encode()
 
 
-def sign(secret: str, action: str, uid: int, now: Optional[float] = None) -> Dict[str, str]:
-    """Fields for a new link: action, uid, exp, nonce, sig."""
+def sign(secret: str, action: str, uid: int, now: Optional[float] = None, ver: str = '') -> Dict[str, str]:
+    """Fields for a new link: action, uid, exp, nonce, ver, sig."""
     if not secret:
         raise ValueError('SECRET_KEY is not set')
     if action not in ACTIONS:
         raise ValueError(f'unknown action {action}')
     exp = int((now if now is not None else time.time()) + TTL_SECONDS)
     nonce = secrets.token_urlsafe(16)
-    sig = hmac.new(secret.encode(), _message(action, int(uid), exp, nonce), hashlib.sha256).hexdigest()
-    return {'action': action, 'uid': str(int(uid)), 'exp': str(exp), 'nonce': nonce, 'sig': sig}
+    sig = hmac.new(secret.encode(), _message(action, int(uid), exp, nonce, str(ver)), hashlib.sha256).hexdigest()
+    return {'action': action, 'uid': str(int(uid)), 'exp': str(exp), 'nonce': nonce, 'ver': str(ver), 'sig': sig}
 
 
 def parse(fields) -> Optional[Dict]:
@@ -51,11 +52,12 @@ def parse(fields) -> Optional[Dict]:
         exp = int(fields.get('exp') or '')
         nonce = str(fields.get('nonce') or '')
         sig = str(fields.get('sig') or '')
+        ver = str(fields.get('ver') or '')
     except (TypeError, ValueError):
         return None
-    if action not in ACTIONS or not nonce or len(nonce) > 64 or len(sig) != 64:
+    if action not in ACTIONS or not nonce or len(nonce) > 64 or len(sig) != 64 or len(ver) > 64:
         return None
-    return {'action': action, 'uid': uid, 'exp': exp, 'nonce': nonce, 'sig': sig}
+    return {'action': action, 'uid': uid, 'exp': exp, 'nonce': nonce, 'ver': ver, 'sig': sig}
 
 
 def check(secret: str, fields, data_dir, now: Optional[float] = None) -> tuple:
@@ -66,7 +68,7 @@ def check(secret: str, fields, data_dir, now: Optional[float] = None) -> tuple:
         return None, 'malformed'
     if not secret:
         return None, 'not configured'
-    expected = hmac.new(secret.encode(), _message(tok['action'], tok['uid'], tok['exp'], tok['nonce']),
+    expected = hmac.new(secret.encode(), _message(tok['action'], tok['uid'], tok['exp'], tok['nonce'], tok['ver']),
                         hashlib.sha256).hexdigest()
     if not hmac.compare_digest(tok['sig'], expected):
         return None, 'bad signature'

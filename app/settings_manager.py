@@ -95,14 +95,40 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
     },
     "indexer": {
         "_type": "object",
-        "provider":         {"type": "string",  "default": "prowlarr", "sensitive": False, "description": "Indexer provider type", "enum": ["prowlarr", "torznab"]},
+        "backend":          {"type": "string",  "default": "prowlarr", "sensitive": False, "description": "Indexer backend (luma or prowlarr)", "enum": ["luma", "prowlarr"]},
+        "provider":         {"type": "string",  "default": "prowlarr", "sensitive": False, "description": "Indexer provider type (legacy)", "enum": ["prowlarr", "torznab"]},
         "base_url":         {"type": "string",  "default": "",         "sensitive": False, "description": "Prowlarr base URL (e.g. http://localhost:9696)"},
         "torznab_url":      {"type": "string",  "default": "",         "sensitive": False, "description": "Torznab endpoint URL (when provider=torznab)"},
-        "api_key":          {"type": "string",  "default": "",         "sensitive": True,  "description": "Indexer API key"},
+        "api_key":          {"type": "string",  "default": "",         "sensitive": True,  "description": "Indexer API key (legacy)"},
         "movie_categories": {"type": "string",  "default": "2000",     "sensitive": False, "description": "Movie category IDs (comma-separated)"},
         "max_age_days":     {"type": "integer", "default": 30,         "sensitive": False, "description": "Maximum age of results in days", "min": 1, "max": 365},
         "min_seeders":      {"type": "integer", "default": 1,          "sensitive": False, "description": "Minimum seeders to include", "min": 0},
         "limit":            {"type": "integer", "default": 100,        "sensitive": False, "description": "Maximum number of results to fetch", "min": 10, "max": 500},
+        "indexers": {
+            "type": "array",
+            "default": [],
+            "sensitive": False,
+            "description": "Configured Torznab/Newznab indexers",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id":                           {"type": "string",  "description": "Unique indexer ID"},
+                    "name":                         {"type": "string",  "description": "Display name"},
+                    "type":                         {"type": "string",  "description": "torznab or newznab"},
+                    "url":                          {"type": "string",  "description": "Indexer API endpoint URL"},
+                    "api_key":                      {"type": "string",  "description": "API key", "sensitive": True},
+                    "categories":                   {"type": "string",  "description": "Comma-separated category IDs (e.g. 2000)"},
+                    "priority":                     {"type": "integer", "description": "Search priority (lower = higher priority)"},
+                    "enabled":                      {"type": "boolean", "description": "Enable this indexer"},
+                    "rate_limited":                 {"type": "boolean", "description": "Apply strict rate limiting (AvistaZ family)"},
+                    "rate_limit_capacity":          {"type": "integer", "description": "Token bucket capacity"},
+                    "rate_limit_refill_seconds":    {"type": "number",  "description": "Seconds per token refill"},
+                    "rate_limit_max_per_hour":      {"type": "integer", "description": "Maximum requests per hour"},
+                    "rate_limit_min_interval":      {"type": "number",  "description": "Minimum seconds between requests"},
+                },
+                "required": ["id", "name", "type", "url"],
+            },
+        },
     },
     "apis": {
         "_type": "object",
@@ -661,7 +687,7 @@ def _mask_secrets(data: dict, schema: dict, prefix: str = "") -> dict:
                     if isinstance(item, dict):
                         masked_item = copy.deepcopy(item)
                         for sk in sensitive_keys:
-                            if sk in masked_item and masked_item[sk] and str(masked_item[sk]).strip():
+                            if sk in masked_item and masked_item[sk] and str(masked_item[sk]).strip() and masked_item[sk] != SECRET_MASK:
                                 masked_item[sk] = SECRET_MASK
                         masked_list.append(masked_item)
                     else:
@@ -671,7 +697,7 @@ def _mask_secrets(data: dict, schema: dict, prefix: str = "") -> dict:
                 result[key] = copy.deepcopy(value)
         elif isinstance(schema_entry, dict) and schema_entry.get("sensitive"):
             # Replace with mask
-            if value and str(value).strip():
+            if value and str(value).strip() and value != SECRET_MASK:
                 result[key] = SECRET_MASK
             else:
                 result[key] = ""
@@ -1833,34 +1859,54 @@ class SettingsManager:
         """
         # Define which array fields have sensitive item keys
         array_sensitive_map = {
+            'indexer.indexers': ['api_key'],
         }
-        for array_key, sensitive_keys in array_sensitive_map.items():
-            if array_key not in cleaned:
-                continue
-            new_items = cleaned[array_key]
-            old_items = self._settings.get(array_key, [])
-            if not isinstance(new_items, list) or not isinstance(old_items, list):
-                continue
-            for i, new_item in enumerate(new_items):
-                if not isinstance(new_item, dict):
+        
+        # Handle nested paths (e.g. 'indexer.indexers')
+        for dotted_path, sensitive_keys in array_sensitive_map.items():
+            parts = dotted_path.split('.')
+            
+            # Navigate to the array in cleaned data
+            clean_node = cleaned
+            for i, part in enumerate(parts[:-1]):
+                if part not in clean_node:
+                    break
+                clean_node = clean_node[part]
+            else:
+                array_key = parts[-1]
+                if array_key not in clean_node:
                     continue
-                # Try to find the matching old item by index or by name+type
-                old_item = None
-                if i < len(old_items) and isinstance(old_items[i], dict):
-                    old_item = old_items[i]
-                else:
-                    # Fallback: match by name+type
-                    for oi in old_items:
-                        if (isinstance(oi, dict) and
-                                oi.get("name") == new_item.get("name") and
-                                oi.get("type") == new_item.get("type")):
-                            old_item = oi
-                            break
-                if old_item is None:
+                new_items = clean_node[array_key]
+                
+                # Navigate to the array in current settings
+                old_node = self._settings
+                for part in parts[:-1]:
+                    old_node = old_node.get(part, {})
+                old_items = old_node.get(array_key, [])
+                
+                if not isinstance(new_items, list) or not isinstance(old_items, list):
                     continue
-                for sk in sensitive_keys:
-                    if sk not in new_item and sk in old_item:
-                        new_item[sk] = old_item[sk]
+                    
+                for i, new_item in enumerate(new_items):
+                    if not isinstance(new_item, dict):
+                        continue
+                    # Try to find matching old item by index or ID
+                    old_item = None
+                    if i < len(old_items) and isinstance(old_items[i], dict):
+                        old_item = old_items[i]
+                    else:
+                        # Fallback: match by id field
+                        item_id = new_item.get('id')
+                        if item_id:
+                            for oi in old_items:
+                                if isinstance(oi, dict) and oi.get('id') == item_id:
+                                    old_item = oi
+                                    break
+                    if old_item is None:
+                        continue
+                    for sk in sensitive_keys:
+                        if sk not in new_item and sk in old_item:
+                            new_item[sk] = old_item[sk]
 
     def _load_or_bootstrap(self) -> None:
         """Load settings from disk, or bootstrap from env vars + defaults."""

@@ -116,6 +116,8 @@ def test_data_dir_resolvers_use_app_paths(tmp_path, monkeypatch):
 @pytest.fixture
 def hero_client(tmp_path, monkeypatch):
     import app.main as m
+    import app.user_auth
+    app.user_auth.init_db()   # load_current_user reads users; passes when run alone
     hero = tmp_path / 'hero'
     hero.mkdir()
     (hero / 'ok.jpg').write_bytes(b'ok')
