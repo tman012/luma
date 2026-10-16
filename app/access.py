@@ -190,6 +190,14 @@ def should_authenticate(settings, request) -> bool:
         return True
 
 
+def needs_pin(settings, request) -> bool:
+    """Backward compatibility wrapper for should_authenticate.
+    
+    DEPRECATED: Use should_authenticate() instead.
+    """
+    return should_authenticate(settings, request)
+
+
 def owner(user_auth) -> Optional[Dict]:
     """The install owner: the first active admin account."""
     for u in user_auth.list_users():

@@ -108,8 +108,14 @@ class TestCookieSecurity:
     
     def test_cookie_httponly_flag(self, test_app):
         """Auth cookie has HttpOnly flag."""
+        # Get CSRF token
+        get_resp = self.client.get('/login')
+        import re
+        csrf_match = re.search(r'<input type="hidden" name="csrf_token" value="([^"]+)"', get_resp.data.decode())
+        csrf_token = csrf_match.group(1) if csrf_match else ''
+        
         resp = self.client.post('/login',
-                                data={'username': 'testuser', 'password': 'testpass123'},
+                                data={'username': 'testuser', 'password': 'testpass123', 'csrf_token': csrf_token},
                                 environ_base={'REMOTE_ADDR': '192.168.1.100'},
                                 follow_redirects=False)
         
@@ -120,8 +126,13 @@ class TestCookieSecurity:
     
     def test_cookie_samesite_lax(self, test_app):
         """Auth cookie has SameSite=Lax."""
+        get_resp = self.client.get('/login')
+        import re
+        csrf_match = re.search(r'<input type="hidden" name="csrf_token" value="([^"]+)"', get_resp.data.decode())
+        csrf_token = csrf_match.group(1) if csrf_match else ''
+        
         resp = self.client.post('/login',
-                                data={'username': 'testuser', 'password': 'testpass123'},
+                                data={'username': 'testuser', 'password': 'testpass123', 'csrf_token': csrf_token},
                                 environ_base={'REMOTE_ADDR': '192.168.1.100'},
                                 follow_redirects=False)
         
@@ -132,9 +143,14 @@ class TestCookieSecurity:
     
     def test_cookie_secure_when_https(self, test_app):
         """Auth cookie has Secure flag when request is HTTPS."""
+        get_resp = self.client.get('/login', base_url='https://localhost')
+        import re
+        csrf_match = re.search(r'<input type="hidden" name="csrf_token" value="([^"]+)"', get_resp.data.decode())
+        csrf_token = csrf_match.group(1) if csrf_match else ''
+        
         # Simulate HTTPS request by setting base_url
         resp = self.client.post('/login',
-                                data={'username': 'testuser', 'password': 'testpass123'},
+                                data={'username': 'testuser', 'password': 'testpass123', 'csrf_token': csrf_token},
                                 environ_base={
                                     'REMOTE_ADDR': '192.168.1.100',
                                 },
@@ -148,8 +164,13 @@ class TestCookieSecurity:
     
     def test_cookie_not_secure_when_http(self, test_app):
         """Auth cookie does not have Secure flag when request is HTTP."""
+        get_resp = self.client.get('/login')
+        import re
+        csrf_match = re.search(r'<input type="hidden" name="csrf_token" value="([^"]+)"', get_resp.data.decode())
+        csrf_token = csrf_match.group(1) if csrf_match else ''
+        
         resp = self.client.post('/login',
-                                data={'username': 'testuser', 'password': 'testpass123'},
+                                data={'username': 'testuser', 'password': 'testpass123', 'csrf_token': csrf_token},
                                 environ_base={
                                     'REMOTE_ADDR': '192.168.1.100',
                                     'wsgi.url_scheme': 'http'
@@ -186,8 +207,13 @@ class TestRememberMe:
     
     def test_remember_me_checked_30_days(self, test_app):
         """Remember-me checked gives 30-day cookie."""
+        get_resp = self.client.get('/login')
+        import re
+        csrf_match = re.search(r'<input type="hidden" name="csrf_token" value="([^"]+)"', get_resp.data.decode())
+        csrf_token = csrf_match.group(1) if csrf_match else ''
+        
         resp = self.client.post('/login',
-                                data={'username': 'testuser', 'password': 'testpass123', 'remember': 'on'},
+                                data={'username': 'testuser', 'password': 'testpass123', 'remember': 'on', 'csrf_token': csrf_token},
                                 environ_base={'REMOTE_ADDR': '192.168.1.100'},
                                 follow_redirects=False)
         
@@ -200,8 +226,13 @@ class TestRememberMe:
     
     def test_remember_me_unchecked_session_cookie(self, test_app):
         """Remember-me unchecked gives session cookie (no Max-Age)."""
+        get_resp = self.client.get('/login')
+        import re
+        csrf_match = re.search(r'<input type="hidden" name="csrf_token" value="([^"]+)"', get_resp.data.decode())
+        csrf_token = csrf_match.group(1) if csrf_match else ''
+        
         resp = self.client.post('/login',
-                                data={'username': 'testuser', 'password': 'testpass123'},
+                                data={'username': 'testuser', 'password': 'testpass123', 'csrf_token': csrf_token},
                                 environ_base={'REMOTE_ADDR': '192.168.1.100'},
                                 follow_redirects=False)
         

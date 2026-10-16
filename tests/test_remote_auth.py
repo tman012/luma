@@ -59,9 +59,15 @@ class TestRemoteAuthentication:
     
     def test_correct_password_sets_cookie(self, test_app):
         """Correct username/password sets auth cookie and grants access."""
+        # Get CSRF token
+        get_resp = self.client.get('/login')
+        import re
+        csrf_match = re.search(r'<input type="hidden" name="csrf_token" value="([^"]+)"', get_resp.data.decode())
+        csrf_token = csrf_match.group(1) if csrf_match else ''
+        
         # POST to login
         resp = self.client.post('/login', 
-                                data={'username': 'testuser', 'password': 'testpass123', 'remember': 'on'},
+                                data={'username': 'testuser', 'password': 'testpass123', 'remember': 'on', 'csrf_token': csrf_token},
                                 follow_redirects=False)
         
         # Should redirect and set cookie
@@ -121,13 +127,23 @@ class TestAuthenticationDetails:
         """6th failed attempt within 5 minutes is rate limited."""
         # Make 5 failed attempts
         for i in range(5):
+            get_resp = self.client.get('/login')
+            import re
+            csrf_match = re.search(r'<input type="hidden" name="csrf_token" value="([^"]+)"', get_resp.data.decode())
+            csrf_token = csrf_match.group(1) if csrf_match else ''
+            
             self.client.post('/login',
-                           data={'username': 'testuser', 'password': 'wrongpass'},
+                           data={'username': 'testuser', 'password': 'wrongpass', 'csrf_token': csrf_token},
                            environ_base={'REMOTE_ADDR': '203.0.113.200'})
         
         # 6th attempt should be rate limited
+        get_resp = self.client.get('/login')
+        import re
+        csrf_match = re.search(r'<input type="hidden" name="csrf_token" value="([^"]+)"', get_resp.data.decode())
+        csrf_token = csrf_match.group(1) if csrf_match else ''
+        
         resp = self.client.post('/login',
-                                data={'username': 'testuser', 'password': 'testpass123'},
+                                data={'username': 'testuser', 'password': 'testpass123', 'csrf_token': csrf_token},
                                 environ_base={'REMOTE_ADDR': '203.0.113.200'},
                                 follow_redirects=False)
         
@@ -156,12 +172,19 @@ class TestAuthenticationDetails:
     def test_logout_clears_session(self, test_app):
         """Logout clears the session."""
         # Login first
+        get_resp = self.client.get('/login')
+        import re
+        csrf_match = re.search(r'<input type="hidden" name="csrf_token" value="([^"]+)"', get_resp.data.decode())
+        csrf_token = csrf_match.group(1) if csrf_match else ''
+        
         self.client.post('/login',
-                        data={'username': 'testuser', 'password': 'testpass123'},
+                        data={'username': 'testuser', 'password': 'testpass123', 'csrf_token': csrf_token},
                         environ_base={'REMOTE_ADDR': '192.168.1.100'})
         
-        # Logout
-        resp = self.client.post('/logout', follow_redirects=False)
+        # Logout - needs Origin header for CSRF protection
+        resp = self.client.post('/logout', 
+                               headers={'Origin': 'http://localhost', 'Host': 'localhost'},
+                               follow_redirects=False)
         
         # Should redirect and clear cookie
         assert resp.status_code == 302

@@ -289,7 +289,7 @@ def login():
         logger.warning("[auth] CSRF token validation failed")
         return redirect(url_for('auth.login', 
                                error='Invalid request. Please try again.',
-                               next=next_param))
+                               next=safe_next))  # Use safe_next, not raw next_param
     
     client_ip = _get_client_ip(request, settings)
     
@@ -299,7 +299,7 @@ def login():
         return redirect(url_for('auth.login', 
                                error='Too many failed attempts. Try again in 5 minutes.',
                                rate_limited='1',
-                               next=next_param))
+                               next=safe_next))  # Use safe_next
     
     username = request.form.get('username', '').strip()
     password = request.form.get('password', '')
@@ -308,7 +308,7 @@ def login():
     if not username or not password:
         return redirect(url_for('auth.login', 
                                error='Username and password required',
-                               next=next_param))
+                               next=safe_next))  # Use safe_next
     
     # Authenticate user
     user = user_auth.authenticate(username, password)
@@ -318,7 +318,7 @@ def login():
         logger.info(f"[auth] Failed login attempt for user {username} from {client_ip}")
         return redirect(url_for('auth.login', 
                                error='Invalid username or password',
-                               next=next_param))
+                               next=safe_next))  # Use safe_next
     
     # Create session
     token = user_auth.create_session(user['id'])
