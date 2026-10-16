@@ -71,7 +71,11 @@ class TestHomeWANTracking:
         from app import access
         
         # No trusted proxies configured
-        mock_settings.get.return_value = ''
+        def mock_get(key, default=None):
+            if key == 'security.trusted_proxies':
+                return ''
+            return default
+        mock_settings.get.side_effect = mock_get
         
         # Add home WAN IP
         with access._home_lock:
@@ -94,7 +98,11 @@ class TestHomeWANTracking:
         from app import access
         
         # Trusted proxies: only 10.0.0.1
-        mock_settings.get.return_value = '10.0.0.1'
+        def mock_get(key, default=None):
+            if key == 'security.trusted_proxies':
+                return '10.0.0.1'
+            return default
+        mock_settings.get.side_effect = mock_get
         
         # Add home WAN IP
         with access._home_lock:

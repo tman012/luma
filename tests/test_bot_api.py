@@ -140,9 +140,9 @@ class TestBotApiAuth:
                 data = response.get_json()
                 assert "error" in data
     
-    def test_non_admin_via_bot_download_blocked(self, app):
-        """Non-admin calling /api/bot/download can't reach admin views (Item 8)."""
-        from app.bot_api import register_bot_routes
+    def test_non_admin_via_bot_api_cannot_reach_admin_endpoints(self, app):
+        """Non-admin via bot API can't access admin-only endpoints (Item 8)."""
+        from app.bot_api import register_bot_routes, _local
         from app import request_portal
         
         install_secrets = {"service_api_key": "server-key"}
@@ -153,26 +153,13 @@ class TestBotApiAuth:
         mock_settings.get.return_value = {}
         request_portal.init_app(app, mock_settings)
         
-        # Set up non-admin user session
-        with app.test_client() as client:
-            with client.session_transaction() as sess:
-                sess['user_id'] = 2
+        # Set g.current_user to non-admin
+        with app.test_request_context('/'):
+            g.current_user = {"id": 2, "name": "regular", "is_admin": 0}
             
-            # Mock user lookup to return non-admin
-            def mock_get_user(user_id):
-                if user_id == 2:
-                    return {"id": 2, "name": "regular", "is_admin": 0, "status": "active"}
-                return None
-            
-            with patch("app.user_auth.user_auth") as mock_auth:
-                mock_auth.get_user_by_id.side_effect = mock_get_user
+            # Call _local (bot API's internal forwarding) with non-admin user
+            with patch("flask.g.current_user", g.current_user):
+                response = _local(app, "GET", "/api/request/admin/settings")
                 
-                # Try to reach admin endpoint via bot API
-                # Bot API should preserve the non-admin user's identity
-                response = client.post('/api/bot/play',
-                                      json={'room': 'Living Room', 'title': 'Test Movie'})
-                
-                # This should work (bot API allows non-admin to call play)
-                # But trying to reach admin settings should fail
-                response = client.get('/api/request/admin/settings')
-                assert response.status_code in (401, 403)  # Not authorized
+                # Non-admin should be blocked
+                assert response.status_code == 403

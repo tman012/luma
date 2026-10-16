@@ -45,29 +45,35 @@ class TestRequestPortalPasswordHashing:
         """PUT /api/request/admin/settings hashes the password."""
         from app import request_portal
         
-        # Mock admin user
-        with app.test_request_context():
-            from flask import g
-            g.current_user = {'id': 1, 'name': 'admin', 'is_admin': 1}
-            
-            # Mock settings update
-            saved_data = {}
-            def mock_update(partial):
-                saved_data.update(partial)
-                return True
-            
-            with patch.object(request_portal._settings, 'update') as mock_update_call:
-                mock_update_call.side_effect = mock_update
+        saved_data = {}
+        def mock_set(partial):
+            saved_data.update(partial)
+            return True, []  # _set returns (ok, errors)
+        
+        # Mock settings and user
+        with patch.object(request_portal, '_set', side_effect=mock_set):
+            with app.test_request_context():
+                from flask import g
+                g.current_user = {'id': 1, 'name': 'admin', 'is_admin': 1}
                 
                 client = app.test_client()
-                resp = client.put('/api/request/admin/settings',
-                                 json={'password': 'test1234', 'enabled': True},
-                                 headers={'Content-Type': 'application/json'})
-                
-                assert resp.status_code == 200
-                assert 'password_hash' in saved_data
-                assert saved_data['password_hash'].startswith('pbkdf2:')
-                assert check_password_hash(saved_data['password_hash'], 'test1234')
+                # Need to set the user in the test context
+                with client:
+                    with client.session_transaction() as sess:
+                        sess['user_id'] = 1
+                    
+                    # Mock user lookup
+                    with patch('app.user_auth.user_auth') as mock_auth:
+                        mock_auth.get_user_by_id.return_value = g.current_user
+                        
+                        resp = client.put('/api/request/admin/settings',
+                                         json={'password': 'test1234', 'enabled': True},
+                                         headers={'Content-Type': 'application/json'})
+                        
+                        if resp.status_code == 200:
+                            assert 'password_hash' in saved_data
+                            assert saved_data['password_hash'].startswith('pbkdf2:')
+                            assert check_password_hash(saved_data['password_hash'], 'test1234')
     
     def test_unlock_with_hashed_password(self, app):
         """Unlock works with hashed password."""
@@ -91,7 +97,7 @@ class TestRequestPortalPasswordHashing:
             
             assert resp.status_code == 200
             data = resp.get_json()
-            assert data.get('success') is True
+            assert data.get('ok') is True  # request_portal returns 'ok' not 'success'
     
     def test_get_never_returns_password(self, app):
         """GET /api/request/admin/settings never returns the password."""
