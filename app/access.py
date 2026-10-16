@@ -139,6 +139,7 @@ def is_local_request(request, settings=None) -> bool:
     cf_ip = _get_cf_ip(request, settings)
     if cf_ip:
         with _home_lock:
+            # _home_ips is now a dict, check if IP is a key
             if cf_ip in _home_ips:
                 return True
     

@@ -33,10 +33,11 @@ class TestHomeWANTracking:
         # Set up trusted proxies
         mock_settings.get.return_value = '127.0.0.1'
         
-        # Add a home WAN IP
+        # Add a home WAN IP with timestamp
         with access._home_lock:
             access._home_ips.clear()
-            access._home_ips.add('203.0.113.50')
+            import time
+            access._home_ips['203.0.113.50'] = time.time()
         
         with app.test_request_context('/', headers={
             'CF-Connecting-IP': '203.0.113.50',
@@ -56,7 +57,8 @@ class TestHomeWANTracking:
         # Home WAN is different
         with access._home_lock:
             access._home_ips.clear()
-            access._home_ips.add('203.0.113.50')
+            import time
+            access._home_ips['203.0.113.50'] = time.time()
         
         with app.test_request_context('/', headers={
             'CF-Connecting-IP': '198.51.100.25',  # Different IP
@@ -124,11 +126,13 @@ class TestHomeWANTracking:
         mock_settings.path = str(tmp_path / "settings.json")
         access._state_path = state_file
         
-        # Add some IPs and save
+        # Add some IPs with timestamps and save
+        import time
+        now = time.time()
         with access._home_lock:
             access._home_ips.clear()
-            access._home_ips.add('203.0.113.50')
-            access._home_ips.add('203.0.113.51')
+            access._home_ips['203.0.113.50'] = now
+            access._home_ips['203.0.113.51'] = now - 100
         
         access._save_home_ips()
         
@@ -143,6 +147,7 @@ class TestHomeWANTracking:
             assert '203.0.113.50' in access._home_ips
             assert '203.0.113.51' in access._home_ips
             assert len(access._home_ips) == 2
+            assert isinstance(access._home_ips['203.0.113.50'], (int, float))
 
 
 class TestOpenModeRemoteAccess:
