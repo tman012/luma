@@ -17206,11 +17206,12 @@ def import_indexers_from_prowlarr():
 
 
 def _url_host_port(url: str):
-    """(lowercased hostname, effective port) for comparing download hosts."""
+    """(scheme, lowercased hostname, effective port) for comparing download origins."""
     from urllib.parse import urlsplit
     parts = urlsplit(url)
-    port = parts.port or {'http': 80, 'https': 443}.get(parts.scheme)
-    return (parts.hostname or '').lower(), port
+    scheme = (parts.scheme or '').lower()
+    port = parts.port or {'http': 80, 'https': 443}.get(scheme)
+    return scheme, (parts.hostname or '').lower(), port
 
 
 def _download_filename(content_disposition: str, ext: str) -> str:
@@ -17266,7 +17267,7 @@ def download_torrent_proxy(token: str):
             expected_url = settings.get('indexer.base_url', '')
             if not expected_url:
                 return jsonify({'error': 'Prowlarr URL not configured for proxied indexer'}), 500
-            loopback_host = _url_host_port(expected_url)[0]
+            loopback_host = _url_host_port(expected_url)[1]
             api_key = settings.get('indexer.api_key', '')
         else:
             expected_url = config.get('url', '')
@@ -17284,8 +17285,9 @@ def download_torrent_proxy(token: str):
         if not valid:
             return jsonify({'error': f'URL validation failed: {error}'}), 403
         
-        fetch_url = add_api_key(download_url, api_key) if (needs_api_key and api_key) else download_url
-        headers = {'X-Api-Key': api_key} if api_key else {}
+        send_key = bool(needs_api_key and api_key)
+        fetch_url = add_api_key(download_url, api_key) if send_key else download_url
+        headers = {'X-Api-Key': api_key} if send_key else {}
         resp = pinned_get(fetch_url, pinned_ip, headers=headers, stream=True, timeout=30)
         
         if resp.status_code != 200:
@@ -17306,19 +17308,27 @@ def download_torrent_proxy(token: str):
         mimetype, ext = ('application/x-nzb', '.nzb') if is_nzb else ('application/x-bittorrent', '.torrent')
         filename = _download_filename(resp.headers.get('Content-Disposition', ''), ext)
         
-        def body():
-            sent = 0
+        # Buffer the whole file (capped) so an oversized or malformed body is a
+        # clean 502 instead of a truncated 200.
+        buf = bytearray()
+        try:
             for chunk in resp.iter_content(chunk_size=8192):
-                sent += len(chunk)
-                if sent > MAX_RESPONSE_SIZE:
-                    logger.warning('Indexer %s download exceeded %d bytes; stopped', indexer_id, MAX_RESPONSE_SIZE)
-                    return
-                yield chunk
+                buf += chunk
+                if len(buf) > MAX_RESPONSE_SIZE:
+                    break
+        finally:
+            resp.close()
+        if len(buf) > MAX_RESPONSE_SIZE:
+            logger.warning('Indexer %s download exceeded %d bytes', indexer_id, MAX_RESPONSE_SIZE)
+            return jsonify({'error': 'Download too large'}), 502
+        if not is_nzb and not buf.startswith(b'd'):
+            logger.warning('Indexer %s download is not a torrent file', indexer_id)
+            return jsonify({'error': 'Indexer did not return a torrent file'}), 502
         
-        out = Response(body(), mimetype=mimetype)
+        out = Response(bytes(buf), mimetype=mimetype)
+        out.headers['Content-Length'] = str(len(buf))
         out.headers['X-Content-Type-Options'] = 'nosniff'
         out.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
-        out.call_on_close(resp.close)
         return out
         
     except Exception as e:

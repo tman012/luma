@@ -8,6 +8,7 @@ No GPL code from Prowlarr, Jackett, Radarr, or Sonarr.
 """
 
 import hashlib
+import heapq
 import ipaddress
 import json
 import logging
@@ -30,7 +31,8 @@ from defusedxml import ElementTree as ET
 logger = logging.getLogger(__name__)
 
 # SSRF policy (see _ip_block_reason):
-#  * always blocked: unspecified, loopback, link-local, multicast, reserved, 0.0.0.0/8
+#  * always blocked: unspecified, loopback, link-local, multicast, reserved, 0.0.0.0/8,
+#    192.88.99.0/24 (6to4 relay anycast)
 #    and cloud metadata addresses (loopback has one exception: the configured
 #    Prowlarr host);
 #  * IPv4-mapped, NAT64 (64:ff9b::/96) and 6to4 addresses are unwrapped first;
@@ -38,6 +40,7 @@ logger = logging.getLogger(__name__)
 #  * allow_lan opens only RFC1918, IPv6 unique local and CGNAT.
 ALWAYS_BLOCKED_NETWORKS = [
     ipaddress.ip_network('0.0.0.0/8'),
+    ipaddress.ip_network('192.88.99.0/24'),   # deprecated 6to4 relay anycast
 ]
 LAN_NETWORKS = [
     ipaddress.ip_network('10.0.0.0/8'),
@@ -220,19 +223,14 @@ def _unwrap_ip(ip):
 def _ip_block_reason(ip, allow_lan: bool, loopback_ok: bool) -> Optional[str]:
     """Why *ip* may not be contacted, or None if it may."""
     inner = _unwrap_ip(ip)
-    # Judge wrapped IPv6 forms by the IPv4 address they carry.
-    for addr in (inner,):
-        if addr in METADATA_IPS:
-            return 'Cloud metadata endpoint blocked'
-        if addr.is_loopback:
-            if loopback_ok:
-                continue
-            return f'Loopback IP blocked: {ip}'
-        if (addr.is_unspecified or addr.is_link_local or addr.is_multicast or addr.is_reserved
-                or any(addr in net for net in ALWAYS_BLOCKED_NETWORKS)):
-            return f'Private/restricted IP blocked: {ip}'
-    if inner.is_loopback and loopback_ok:
-        return None
+    # Wrapped IPv6 forms are judged by the IPv4 address they carry.
+    if inner in METADATA_IPS:
+        return 'Cloud metadata endpoint blocked'
+    if inner.is_loopback:
+        return None if loopback_ok else f'Loopback IP blocked: {ip}'
+    if (inner.is_unspecified or inner.is_link_local or inner.is_multicast or inner.is_reserved
+            or any(inner in net for net in ALWAYS_BLOCKED_NETWORKS)):
+        return f'Private/restricted IP blocked: {ip}'
     if allow_lan and any(inner in net for net in LAN_NETWORKS):
         return None
     if not inner.is_global:
@@ -605,8 +603,8 @@ class IndexerManager:
             del self._download_tokens[tok]
         overflow = len(self._download_tokens) - MAX_DOWNLOAD_TOKENS
         if overflow > 0:
-            oldest = sorted(self._download_tokens, key=lambda t: self._download_tokens[t][2])[:overflow]
-            for tok in oldest:
+            oldest = heapq.nsmallest(overflow, self._download_tokens.items(), key=lambda kv: kv[1][2])
+            for tok, _entry in oldest:
                 del self._download_tokens[tok]
 
     def _persist_download_tokens(self) -> None:
@@ -634,6 +632,7 @@ class IndexerManager:
                     url, had_key = strip_api_key(str(v[0]))
                     tokens[str(tok)] = (url, str(v[1]), float(v[2]), bool(v[3]) if len(v) == 4 else had_key)
                 self._download_tokens = tokens
+                self._prune_download_tokens()
                 self._persist_download_tokens()
                 self._prune_download_tokens()
         except Exception as e:

@@ -156,7 +156,7 @@ def test_download_open_to_non_admin_user(route_env):
     assert r.data == b'd8:announce'
     args, kwargs = pg.call_args
     assert args == ('https://tracker.example.com/dl/1', '203.0.113.9')
-    assert kwargs['headers'] == {'X-Api-Key': 'k'}
+    assert kwargs['headers'] == {}  # the stored URL carried no key, so none is sent
 
 
 def test_download_bad_token_refused(route_env):
@@ -185,7 +185,12 @@ def test_proxied_entry_host_checked_against_prowlarr_url(route_env):
         assert c.get(f'/api/indexer/download/{bad}').status_code == 403
         assert c.get(f'/api/indexer/download/{good}').status_code == 200
     assert val.call_args.kwargs['allow_loopback_for_host'] == 'localhost'
+    assert pg.call_args.kwargs['headers'] == {}
+    keyed = adapter.manager.issue_download_token('http://localhost:9696/7/download?apikey=old', 'ix2')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        assert main.app.test_client().get(f'/api/indexer/download/{keyed}').status_code == 200
     assert pg.call_args.kwargs['headers'] == {'X-Api-Key': 'pk'}
+    assert pg.call_args.args[0] == 'http://localhost:9696/7/download?apikey=pk'
 
 
 # ---- 3. DNS pinning ----
@@ -439,6 +444,8 @@ SSRF_CASES = [
     ('100.64.0.1', False, False), ('100.64.0.1', True, True),
     ('fd12:3456::1', False, False), ('fd12:3456::1', True, True),
     ('8.8.8.8', False, True), ('2606:4700:4700::1111', False, True),
+    ('192.88.99.1', False, False), ('192.88.99.1', True, False), ('2002:c058:6301::', False, False),
+    ('::ffff:192.88.99.1', True, False),
 ]
 
 
@@ -508,6 +515,7 @@ def test_download_readds_current_key_from_settings(route_env):
     with _as_user(main, {'id': 2, 'is_admin': False}):
         main.app.test_client().get(f'/api/indexer/download/{plain}')
     assert pg.call_args.args[0] == 'https://tracker.example.com/dl?id=2'
+    assert pg.call_args.kwargs['headers'] == {}
 
 
 # ---- Round 2, item 4: concurrent saves ----
@@ -583,17 +591,103 @@ def test_download_nzb_type(route_env):
 
 
 def test_download_size_cap_while_streaming(route_env, monkeypatch):
+    """A body that grows past the cap without a Content-Length is a 502, not a truncated 200."""
     from app import indexer_manager as im
     main, adapter, pg, _ = route_env
     monkeypatch.setattr(im, 'MAX_RESPONSE_SIZE', 20000)
-    pg.return_value.iter_content.side_effect = lambda chunk_size=8192: iter([b'x' * 8192] * 10)
+    pulled = []
+
+    def chunks(chunk_size=8192):
+        for _ in range(100):
+            pulled.append(1)
+            yield b'd' + b'x' * 8191
+    pg.return_value.iter_content.side_effect = chunks
     tok = adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1')
     with _as_user(main, {'id': 2, 'is_admin': False}):
         r = main.app.test_client().get(f'/api/indexer/download/{tok}')
-        body = r.get_data()
-        r.close()
-    assert len(body) <= 20000
+    assert r.status_code == 502
+    assert len(pulled) == 3  # stops reading right after crossing the cap
     pg.return_value.close.assert_called()
+
+
+def test_download_at_cap_is_served_with_length(route_env, monkeypatch):
+    from app import indexer_manager as im
+    main, adapter, pg, _ = route_env
+    monkeypatch.setattr(im, 'MAX_RESPONSE_SIZE', 20000)
+    body = b'd' + b'x' * 19999
+    pg.return_value.iter_content.side_effect = lambda chunk_size=8192: iter([body[:8192], body[8192:]])
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().get(f'/api/indexer/download/{tok}')
+    assert r.status_code == 200
+    assert r.data == body
+    assert r.headers['Content-Length'] == '20000'
+    pg.return_value.close.assert_called()
+
+
+@pytest.mark.parametrize('payload', [b'<html>login</html>', b'', b'{"error":1}'])
+def test_download_torrent_must_be_bencoded(route_env, payload):
+    main, adapter, pg, _ = route_env
+    pg.return_value.iter_content.side_effect = lambda chunk_size=8192: iter([payload] if payload else [])
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().get(f'/api/indexer/download/{tok}')
+    assert r.status_code == 502
+    pg.return_value.close.assert_called()
+
+
+def test_download_nzb_skips_bencode_check(route_env):
+    main, adapter, pg, _ = route_env
+    pg.return_value.headers = {'Content-Type': 'application/x-nzb'}
+    pg.return_value.iter_content.side_effect = lambda chunk_size=8192: iter([b'<?xml version="1.0"?><nzb/>'])
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/get/1', 'ix1')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().get(f'/api/indexer/download/{tok}')
+    assert r.status_code == 200 and r.data.startswith(b'<?xml')
+
+
+@pytest.mark.parametrize('url', ['http://tracker.example.com:443/dl/1', 'http://tracker.example.com/dl/1'])
+def test_download_scheme_must_match_indexer(route_env, url):
+    main, adapter, pg, _ = route_env
+    tok = adapter.manager.issue_download_token(url, 'ix1')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        assert main.app.test_client().get(f'/api/indexer/download/{tok}').status_code == 403
+    pg.assert_not_called()
+
+
+def test_url_host_port_includes_scheme():
+    from app.main import _url_host_port
+    assert _url_host_port('http://h:443/') == ('http', 'h', 443)
+    assert _url_host_port('HTTPS://H/') == ('https', 'h', 443)
+    assert _url_host_port('http://h:443/') != _url_host_port('https://h/')
+
+
+def test_load_prunes_expired_before_persisting(temp_data_dir):
+    from app.indexer_manager import IndexerManager
+    f = temp_data_dir / 'download_tokens.json'
+    now = time.time()
+    f.write_text(json.dumps({'old': ['https://tracker.example.com/a', 'ix1', now - 10, False],
+                             'live': ['https://tracker.example.com/b', 'ix1', now + 600, False]}))
+    m = IndexerManager(_settings({'indexer.indexers': [DIRECT]}))
+    assert set(json.loads(f.read_text())) == {'live'}
+    assert set(m._download_tokens) == {'live'}
+
+
+def test_eviction_drops_expired_first_then_soonest_expiring(temp_data_dir, monkeypatch):
+    from app import indexer_manager as im
+    monkeypatch.setattr(im, 'MAX_DOWNLOAD_TOKENS', 3)
+    m = im.IndexerManager(_settings({'indexer.indexers': [DIRECT]}))
+    now = time.time()
+    m._download_tokens = {'expired': ('u', 'ix1', now - 1, False),
+                          'soon': ('u', 'ix1', now + 10, False),
+                          'mid': ('u', 'ix1', now + 100, False),
+                          'late': ('u', 'ix1', now + 1000, False)}
+    with patch('app.indexer_manager.heapq.nsmallest', wraps=im.heapq.nsmallest) as ns:
+        newest = m.issue_download_token('https://tracker.example.com/z', 'ix1', persist=False)
+    assert set(m._download_tokens) == {'mid', 'late', newest}
+    assert ns.call_args.args[0] == 1  # only the one over the cap is selected
+    m.issue_download_token('https://tracker.example.com/y', 'ix1', persist=False)  # at cap: one evicted
+    assert len(m._download_tokens) == 3
 
 
 def test_download_declared_oversize_rejected(route_env, monkeypatch):
