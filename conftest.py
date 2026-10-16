@@ -125,6 +125,10 @@ def reset_shared_state(request):
     request_portal._fails.clear()
     # Some tests swap in a mock settings object; put the real one back after
     saved_portal_settings = request_portal._settings
+    # Global security settings (auth_required, trusted_proxies, hostnames...)
+    # are restored after the test too, so a test that changes them cannot put
+    # later tests behind sign-in.
+    settings_snapshot = _snapshot_main_settings()
     
     # Clear user database between tests (sandbox only; UnsafeDatabaseReset
     # propagates and fails the test rather than touching another database)
@@ -137,10 +141,44 @@ def reset_shared_state(request):
     
     yield
     
-    # Cleanup after test
+    # Cleanup after test. Accounts are wiped on the way out as well: the
+    # unittest.TestCase suites skip this fixture, so state left behind by the
+    # previous pytest test (an account means "sign-in required") used to make
+    # them return 302/401 depending on the random order.
     login_limiter._fail.clear()
     request_portal._fails.clear()
     request_portal._settings = saved_portal_settings
+    _restore_main_settings(settings_snapshot)
+    try:
+        _wipe_users()
+    except UnsafeDatabaseReset:
+        raise
+    except Exception:
+        pass
+
+
+def _snapshot_main_settings():
+    import copy
+    import sys
+    main = sys.modules.get('app.main')
+    sm = getattr(main, 'settings', None) if main else None
+    if sm is None:
+        return None
+    with sm._lock:
+        return sm, copy.deepcopy(sm._settings)
+
+
+def _restore_main_settings(snapshot) -> None:
+    if snapshot is None:
+        return
+    sm, saved = snapshot
+    with sm._lock:
+        if sm._settings != saved:
+            sm._settings = saved
+            try:
+                sm._save()
+            except Exception:
+                pass
 
 
 @pytest.fixture
