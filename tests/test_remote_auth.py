@@ -15,7 +15,11 @@ class TestRemoteAuthentication:
         
         # Initialize database and create test user
         user_auth.init_db()
-        user_auth.create_user('testuser', 'testpass123', is_admin=True)
+        
+        # Create test user if doesn't exist
+        existing = user_auth.get_user_by_name('testuser')
+        if not existing:
+            user_auth.create_user('testuser', 'testpass123', is_admin=True)
         
         # Configure settings for remote auth
         app.main.settings.update({
