@@ -1,15 +1,24 @@
 """Tests for _resolve_playback_target with rooms/devices add-flow"""
 
 import pytest
-import sys
-import os
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock, MagicMock, patch, PropertyMock
+from pathlib import Path
 
-# Mock the cache directory before importing main
-os.makedirs('/tmp/test_cache', exist_ok=True)
-with patch.dict(os.environ, {'CACHE_DIR': '/tmp/test_cache'}):
-    # Ensure cache directory exists for imports
-    pass
+# Mock the cache directory path before any imports
+import sys
+import tempfile
+temp_cache = tempfile.mkdtemp()
+
+# Patch Path.mkdir to avoid the /app/cache directory issue  
+original_mkdir = Path.mkdir
+def mock_mkdir(self, *args, **kwargs):
+    try:
+        return original_mkdir(self, *args, **kwargs)
+    except FileNotFoundError:
+        # If parent doesn't exist and we're trying to create /app/cache, use temp
+        pass
+
+Path.mkdir = mock_mkdir
 
 
 @pytest.fixture
@@ -33,8 +42,7 @@ class TestResolvePlaybackTargetNestedDevices:
     
     def test_resolve_with_plex_service_in_device(self, mock_settings, mock_plex_service):
         """Resolves device with Plex service from nested devices list."""
-        with patch('app.explore_cache.ExploreCache.__init__', lambda self: None):
-            from app.main import _resolve_playback_target
+        from app.main import _resolve_playback_target
         
         # Room with nested devices list (new add-flow format)
         room = {
@@ -78,8 +86,7 @@ class TestResolvePlaybackTargetNestedDevices:
     
     def test_resolve_fallback_to_first_device_without_plex(self, mock_settings, mock_plex_service):
         """Falls back to first device when no Plex service present."""
-        with patch('app.explore_cache.ExploreCache.__init__', lambda self: None):
-            from app.main import _resolve_playback_target
+        from app.main import _resolve_playback_target
         
         # Room with device but no Plex service
         room = {
@@ -119,8 +126,7 @@ class TestResolvePlaybackTargetNestedDevices:
     
     def test_resolve_prefers_device_with_plex_service(self, mock_settings, mock_plex_service):
         """Prefers device with Plex service over others."""
-        with patch('app.explore_cache.ExploreCache.__init__', lambda self: None):
-            from app.main import _resolve_playback_target
+        from app.main import _resolve_playback_target
         
         # Room with multiple devices, second has Plex
         room = {
@@ -165,8 +171,7 @@ class TestResolvePlaybackTargetLegacyFormat:
     
     def test_resolve_with_room_level_ip(self, mock_settings, mock_plex_service):
         """Resolves using room-level ip and adb_port (legacy format)."""
-        with patch('app.explore_cache.ExploreCache.__init__', lambda self: None):
-            from app.main import _resolve_playback_target
+        from app.main import _resolve_playback_target
         
         # Room with legacy format (no nested devices)
         room = {
@@ -194,8 +199,7 @@ class TestResolvePlaybackTargetLegacyFormat:
     
     def test_resolve_with_host_connectport_legacy(self, mock_settings, mock_plex_service):
         """Resolves using room-level host/connectPort (legacy alternative names)."""
-        with patch('app.explore_cache.ExploreCache.__init__', lambda self: None):
-            from app.main import _resolve_playback_target
+        from app.main import _resolve_playback_target
         
         # Room with host/connectPort instead of ip/adb_port
         room = {
@@ -222,8 +226,7 @@ class TestResolvePlaybackTargetLegacyFormat:
     
     def test_error_when_room_not_found(self, mock_settings):
         """Returns error when room ID doesn't exist."""
-        with patch('app.explore_cache.ExploreCache.__init__', lambda self: None):
-            from app.main import _resolve_playback_target
+        from app.main import _resolve_playback_target
         
         mock_settings.get_room_by_id.return_value = None
         
@@ -235,8 +238,7 @@ class TestResolvePlaybackTargetLegacyFormat:
     
     def test_error_when_no_ip_resolvable(self, mock_settings):
         """Returns error when room has no IP address."""
-        with patch('app.explore_cache.ExploreCache.__init__', lambda self: None):
-            from app.main import _resolve_playback_target
+        from app.main import _resolve_playback_target
         
         # Room with no IP fields
         room = {'id': 'room6', 'name': 'Bad Room'}
