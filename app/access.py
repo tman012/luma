@@ -146,10 +146,13 @@ def is_local_request(request, settings=None) -> bool:
 
 
 def needs_pin(settings, request) -> bool:
-    """True when this request must sign in."""
+    """True when this request must sign in.
+    
+    In open mode, only local requests get open access. Remote visitors must sign in.
+    """
     m = mode(settings)
     if m == 'open':
-        return False
+        return not is_local_request(request, settings)
     if m == 'pin_remote':
         return not is_local_request(request, settings)
     return True
