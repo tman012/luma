@@ -77,7 +77,7 @@ def proxy_range_problem(value: str) -> Optional[str]:
     except ValueError:
         return f'Not an IP address or range: {value.strip()}'
     if net.prefixlen < MIN_PREFIX[net.version]:
-        return f'Range too broad: {value.strip()} (narrowest allowed /{MIN_PREFIX[net.version]})'
+        return f'Range too broad: {value.strip()} (broadest allowed is /{MIN_PREFIX[net.version]})'
     return None
 
 
@@ -244,15 +244,10 @@ def is_portal_traffic(request, settings) -> bool:
     Portal traffic is detected ONLY by Host header matching request_portal.hostname.
     Owner can use the full app remotely via tunnel on the main hostname.
     """
-    portal_hostname = (settings.get('request_portal.hostname') or '').strip().lower()
-    if portal_hostname:
-        request_host = (request.headers.get('Host') or '').strip().lower()
-        # Remove port if present
-        request_host = request_host.split(':')[0]
-        if request_host == portal_hostname:
-            return True
-    
-    return False
+    portal = split_host(str(settings.get('request_portal.hostname') or ''))
+    if not portal:
+        return False
+    return split_host(request.headers.get('Host') or '') == portal
 
 
 def should_authenticate(settings, request) -> bool:
@@ -307,7 +302,7 @@ class TrustedProxyMiddleware:
 
     From a trusted proxy:
     - no X-Forwarded-Host: the Host header is used as is;
-    - X-Forwarded-Host present: only its first value decides. It must be a
+    - X-Forwarded-Host present: it must be a single value, a
       known host AND name the same host as the Host header (the proxy is
       expected to send `Host $host` and overwrite X-Forwarded-Host). Otherwise
       the request is flagged HOST_UNTRUSTED and never gets implicit access.
@@ -327,10 +322,11 @@ class TrustedProxyMiddleware:
             proto = environ.get('HTTP_X_FORWARDED_PROTO', '').split(',')[-1].strip().lower()
             if proto in ('http', 'https'):
                 environ['wsgi.url_scheme'] = proto
-            xfh = environ.get('HTTP_X_FORWARDED_HOST', '').split(',')[0].strip()
+            xfh = environ.get('HTTP_X_FORWARDED_HOST', '').strip()
             if xfh:
+                single = ',' not in xfh
                 same = split_host(xfh) == split_host(environ.get('HTTP_HOST', ''))
-                if same and is_known_host(xfh, settings):
+                if single and same and is_known_host(xfh, settings):
                     environ['HTTP_HOST'] = xfh
                 else:
                     environ[HOST_UNTRUSTED] = True

@@ -32,7 +32,7 @@ def _parse_targets(raw: str):
         if "://" not in part:
             part = "http://" + part
         u = urlsplit(part)
-        host = (u.hostname or "").lower()
+        host = (u.hostname or "").lower().rstrip(".")
         port = u.port or (443 if u.scheme == "https" else 80)
         if host:
             targets.append((host, port, (u.path or "").rstrip("/")))
@@ -44,7 +44,7 @@ def _matches(url: str, targets) -> bool:
         u = urlsplit(url)
     except Exception:
         return False
-    host = (u.hostname or "").lower()
+    host = (u.hostname or "").lower().rstrip(".")
     port = u.port or (443 if u.scheme == "https" else 80)
     path = u.path or ""
     return any(host == h and port == p and path.startswith(pref) for h, p, pref in targets)

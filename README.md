@@ -69,8 +69,8 @@ on (off by default).
 ### Reverse proxy
 
 A trusted proxy must pass the browser's host name through unchanged, in both
-`Host` and `X-Forwarded-Host`. If the first `X-Forwarded-Host` value is not a
-known name, or does not match `Host`, the request signs in. For nginx:
+`Host` and `X-Forwarded-Host`. If `X-Forwarded-Host` holds more than one
+value, is not a known name, or does not match `Host`, the request signs in. For nginx:
 
 ```nginx
 location / {
@@ -81,6 +81,10 @@ location / {
     proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
+
+`X-Forwarded-Prefix` is ignored. When Luma runs under a URL base
+(`LUMA_URL_BASE`), the nginx `location` must use the same path and pass it
+through unchanged.
 
 **Trusted proxies** takes addresses or ranges no broader than `/8` (IPv4) or
 `/32` (IPv6); broader entries are refused on save and ignored if found in the
