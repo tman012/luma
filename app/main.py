@@ -1165,7 +1165,6 @@ tmdb = TMDBClient(settings.get('apis.tmdb.api_key'))
 # Request page for friends and family
 from app import request_portal as _request_portal
 from app import portal_guard
-_access.init_home_wan_tracking(settings)
 _request_portal.init_app(app, settings)
 
 # Authentication routes
