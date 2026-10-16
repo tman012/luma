@@ -15,7 +15,8 @@ def test_conftest_sets_paths_before_app_import():
 def test_app_uses_them():
     import app.hero_cache
     import app.main
-    assert not str(app.hero_cache.CACHE_DIR).startswith('/app')
+    assert not str(app.hero_cache.hero_cache.cache_dir).startswith('/app')
+    assert not str(app.hero_cache.hero_cache.cache_json).startswith('/app')
     assert not app.main.app.static_folder.startswith('/app')
 
 

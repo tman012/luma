@@ -7,30 +7,50 @@ from pathlib import Path
 import shutil
 
 
-# Paths are set at import time, before any test module imports app.main or
-# app.hero_cache (both read them at import), so a bare `pytest` never touches
-# the container-only /app paths.
+# Unit-test sandbox: every Luma data/cache path points at a private temp dir.
+# Set in pytest_configure, before any test module imports app.* (app.main and
+# app.hero_cache read them at import), so a bare `pytest` never touches the
+# container-only /app paths or a LUMA_* dir set in the shell. Skipped when only
+# tests/e2e is collected: e2e talks to a separately started server and must
+# see that server's paths.
 _REPO_ROOT = Path(__file__).resolve().parent
-_TEMP_CACHE = tempfile.mkdtemp(prefix='luma_test_cache_')
-_TEMP_DATA = tempfile.mkdtemp(prefix='luma_test_data_')
-_TEST_ENV = {
-    'LUMA_CACHE_DIR': _TEMP_CACHE,
-    'HERO_CACHE_DIR': os.path.join(_TEMP_CACHE, 'hero'),
-    'DATABASE_PATH': os.path.join(_TEMP_DATA, 'media.db'),
-    'SETTINGS_PATH': os.path.join(_TEMP_DATA, 'settings.json'),
-    'LUMA_SKIP_BACKGROUND_THREADS': '1',
-    'BASE_DIR': _TEMP_DATA,
-}
-os.environ.update(_TEST_ENV)
-os.environ.setdefault('FLASK_STATIC_FOLDER', str(_REPO_ROOT / 'static'))
+_E2E_DIR = _REPO_ROOT / 'tests' / 'e2e'
+_TEMP_DIRS = []
+
+
+def _only_e2e(config) -> bool:
+    base = Path(config.invocation_params.dir)
+    paths = [(base / str(a).split('::')[0]).resolve() for a in config.args] or [base.resolve()]
+    return all(p == _E2E_DIR or _E2E_DIR in p.parents for p in paths)
+
+
+def pytest_configure(config):
+    if _only_e2e(config):
+        return
+    cache = tempfile.mkdtemp(prefix='luma_test_cache_')
+    data = tempfile.mkdtemp(prefix='luma_test_data_')
+    _TEMP_DIRS.extend([cache, data])
+    os.makedirs(os.path.join(cache, 'hero'), exist_ok=True)
+    os.environ.update({
+        'LUMA_DATA_DIR': data,
+        'LUMA_CACHE_DIR': cache,
+        'HERO_CACHE_DIR': os.path.join(cache, 'hero'),
+        'DATABASE_PATH': os.path.join(data, 'media.db'),
+        'SETTINGS_PATH': os.path.join(data, 'settings.json'),
+        'LUMA_SKIP_BACKGROUND_THREADS': '1',
+        'BASE_DIR': data,
+    })
+    os.environ.setdefault('LUMA_DISABLE_AUTOMATIONS', '1')
+    os.environ.setdefault('LUMA_DISABLE_ADB', '1')
+    os.environ.setdefault('FLASK_STATIC_FOLDER', str(_REPO_ROOT / 'static'))
 
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
     """Remove the temp directories when the session ends."""
     yield
-    shutil.rmtree(_TEMP_CACHE, ignore_errors=True)
-    shutil.rmtree(_TEMP_DATA, ignore_errors=True)
+    for d in _TEMP_DIRS:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)

@@ -491,11 +491,13 @@ _ENV_VAR_MIGRATION_MAP: Dict[str, str] = {
 def _infer_data_dir() -> Path:
     """Determine the data directory for settings.json.
 
-    In Docker the canonical path is /app/data/.  Outside Docker we fall back
-    to the ``data/`` directory relative to the project root.
+    In Docker the canonical path is LUMA_DATA_DIR (default /app/data).
+    Outside Docker we fall back to the ``data/`` directory relative to the
+    project root.
     """
-    # Try the Docker path first
-    docker_data = Path("/app/data")
+    from app.paths import data_dir
+    # Try the configured (Docker) path first
+    docker_data = data_dir()
     if docker_data.is_dir():
         return docker_data
 

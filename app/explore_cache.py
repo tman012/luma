@@ -17,16 +17,25 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 class ExploreCache:
-    """Manages cached explore movies for fast loading"""
+    """Manages cached explore movies for fast loading
+    
+    Cache storage: LUMA_CACHE_DIR environment variable sets the cache root (defaults to /app/cache).
+    Explore cache uses the 'explore' subdirectory within the root.
+    """
 
-    def __init__(self):
-        cache_root = Path(os.getenv("LUMA_CACHE_DIR", "/app/cache"))
-        self.cache_dir = cache_root / "explore"
+    def __init__(self, cache_root: Optional[str] = None):
+        if cache_root is None:
+            from app.paths import cache_dir
+            cache_root = str(cache_dir())
+        # Use 'explore' subdirectory within cache root
+        self.cache_dir = Path(cache_root) / 'explore'
         try:
-            self.cache_dir.mkdir(exist_ok=True, parents=True)
-        except (FileNotFoundError, PermissionError) as e:
-            logger.error('[explore_cache] LUMA_CACHE_DIR not writable: %s -> %s', cache_root, self.cache_dir)
-            raise RuntimeError(f"Explore cache directory not writable: LUMA_CACHE_DIR={cache_root} -> {self.cache_dir}") from e
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            error_msg = (f"explore_cache: LUMA_CACHE_DIR={cache_root} not writable "
+                        f"(tried to create {self.cache_dir}): {e}")
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
         self.db_path = self.cache_dir / "explore_cache.db"
         self.update_interval = 6 * 3600  # was 15 min (21-query tracker sweep ~100x/day)
         self.last_update = None

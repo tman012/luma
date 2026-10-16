@@ -41,11 +41,12 @@ COPY entrypoint.sh ./entrypoint.sh
 COPY gunicorn.conf.py ./gunicorn.conf.py
 COPY scripts/healthcheck.py ./scripts/healthcheck.py
 
-# Copy built frontend into static/spa/
-COPY --from=frontend-build /frontend/dist/ ./static/spa/
+# Built frontend lives at /app/spa, outside /app/static, so a bind-mounted
+# ./static (dev/live-reload setups) cannot hide it. Served via SPA_DIR.
+COPY --from=frontend-build /frontend/dist/ ./spa/
 
 # Create data directory and home for ADB
-RUN mkdir -p /app/data /app/home/.android
+RUN mkdir -p /app/data /app/cache /app/home/.android
 
 # Make scripts executable
 RUN chmod +x /app/entrypoint.sh

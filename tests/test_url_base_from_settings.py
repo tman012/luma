@@ -50,6 +50,7 @@ def _run(tmp_path, settings, env_base=None):
         'HERO_CACHE_DIR': str(tmp_path / 'hero'),
         'LUMA_SKIP_BACKGROUND_THREADS': '1',
         'LUMA_STATE_DIR': str(data),
+        'LUMA_DATA_DIR': str(data),
         'BASE_DIR': str(data),
     })
     if env_base is not None:

@@ -166,10 +166,13 @@ def test_versioned_poster_cached_a_day(img):
 
 def test_unversioned_poster_urls_carry_cache_buster():
     import inspect
+    import re
     from app import cache_updater, hero_cache
-    for mod in (cache_updater, hero_cache):
-        src = inspect.getsource(mod)
-        assert '/thumb"' not in src.replace('/thumb&r=2"', '')
+    src = inspect.getsource(cache_updater)
+    assert '/thumb"' not in src.replace('/thumb&r=2"', '')
+    # hero posters are cached as local files; any proxy URL still carries the buster
+    src = inspect.getsource(hero_cache)
+    assert not re.search(r'/api/img/plex\?url=[^"]*/thumb"', src)
 
 
 # --- 8: request-page grab attribution -------------------------------------

@@ -44,6 +44,17 @@ loglevel = 'info'
 certfile, keyfile = _tls(_settings)
 
 
+def on_starting(server):
+    """Fail fast in the master, before any worker imports app.main.
+
+    Workers import app.main (and its caches touch the data and cache dirs)
+    before post_worker_init runs, so the writability probe must run here:
+    exit 1 with a clear message instead of crash-looping workers.
+    """
+    from app.paths import ensure_writable_or_exit
+    ensure_writable_or_exit()
+
+
 def post_worker_init(worker):
     """Initialize services after worker starts.
     

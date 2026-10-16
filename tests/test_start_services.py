@@ -65,7 +65,7 @@ def test_flag_read_at_call_time(test_app, patched):
 
 def test_not_in_main_block():
     src = (ROOT / 'app' / 'main.py').read_text()
-    main_block = src.split("if __name__ == '__main__':", 1)[1]
+    main_block = src.rsplit("if __name__ == '__main__':", 1)[1]
     assert 'start_services(app)' in main_block
     for call in ('init_database()', 'user_auth.init_db()', 'fast_search_index.start()',
                  'start_monitor_thread()', 'threading.Thread('):

@@ -21,7 +21,7 @@ variables reach the container.
 | `PLEX_DB`, `LUMA_PLEX_DB_DIR` | Compose `environment:` and the `/mnt/plexdb` mount | You use the read-only Plex DB. |
 | `SHIELD_PLEX_IP` | The compose default | Optional. It only seeds the first room on a brand-new settings file. |
 | `LUMA_IMAGE`, `LUMA_CONTAINER_NAME`, `LUMA_PORT` | Fixed names in compose | You want to keep your existing image/container name or port (default `luma:latest`, `luma`, `5001`). |
-| `LUMA_DATA_DIR`, `LUMA_ADB_KEYS_DIR`, `LUMA_DOWNLOADS_DIR`, `LUMA_MOVIES_DIR`, `LUMA_RECENT_DIR`, `LUMA_TV_DIR`, `LUMA_4K_DIR`, `LUMA_FULLRIPS_DIR`, `LUMA_TV_4K_DIR`, `LUMA_TV_REMUX_DIR` | Hardcoded host paths | Always: point them at your existing folders (defaults are `./data`, `./.android`, `./media/...`). |
+| `LUMA_DATA_HOST_DIR`, `LUMA_CACHE_HOST_DIR`, `LUMA_ADB_KEYS_DIR`, `LUMA_DOWNLOADS_DIR`, `LUMA_MOVIES_DIR`, `LUMA_RECENT_DIR`, `LUMA_TV_DIR`, `LUMA_4K_DIR`, `LUMA_FULLRIPS_DIR`, `LUMA_TV_4K_DIR`, `LUMA_TV_REMUX_DIR` | Hardcoded host paths | Always: point them at your existing folders (defaults are `./data`, `./cache`, `./.android`, `./media/...`). Older `.env` files used `LUMA_DATA_DIR` for the host data folder: rename it to `LUMA_DATA_HOST_DIR` (inside the container `LUMA_DATA_DIR` is always `/app/data`). |
 | `LUMA_CA_CERT_PATH` | Optional | Your local-CA root lives somewhere other than `/caddy-data/caddy/pki/authorities/local/root.crt`. |
 
 ## 2. Move personal extras into `docker-compose.override.yml`

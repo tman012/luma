@@ -35,7 +35,7 @@ def test_existing_users_no_security_keys_two_restarts(tmp_path):
     data = tmp_path / 'data'
     data.mkdir()
     env = {k: v for k, v in os.environ.items() if k not in ('LUMA_URL_BASE', 'SETTINGS_PATH')}
-    env.update({'DATABASE_PATH': str(data / 'media.db'), 'LUMA_STATE_DIR': str(data),
+    env.update({'DATABASE_PATH': str(data / 'media.db'), 'LUMA_STATE_DIR': str(data), 'LUMA_DATA_DIR': str(data),
                 'BASE_DIR': str(data), 'LUMA_CACHE_DIR': str(tmp_path / 'cache'),
                 'HERO_CACHE_DIR': str(tmp_path / 'hero'), 'LUMA_SKIP_BACKGROUND_THREADS': '1'})
     # Existing install: an admin and a regular user, settings with no security section.

@@ -103,3 +103,5 @@ android-kiosk/app/src/main/assets/model-en-us/
 /docker-compose.override.yml
 /Caddyfile
 /Caddyfile.local
+luma-qa/
+timings.jsonl

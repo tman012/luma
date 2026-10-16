@@ -28,6 +28,8 @@ class TestURLBaseEndToEnd:
         # Update app's static folder temporarily
         original_static = app.main.app.static_folder
         app.main.app.static_folder = temp_static
+        original_spa = app.main.app.config.get('SPA_DIR')
+        app.main.app.config['SPA_DIR'] = spa_dir
         
         # Create a minimal index.html
         index_path = os.path.join(spa_dir, 'index.html')
@@ -48,6 +50,7 @@ class TestURLBaseEndToEnd:
         
         # Cleanup
         app.main.app.static_folder = original_static
+        app.main.app.config['SPA_DIR'] = original_spa
         import shutil
         try:
             shutil.rmtree(temp_static)
