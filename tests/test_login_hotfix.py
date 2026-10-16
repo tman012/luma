@@ -162,3 +162,68 @@ def test_auth_api_responses_are_no_store(test_app):
     _owner()
     r = test_app.test_client().post('/api/auth/login', json={'name': 'owner', 'pin': 'correct-horse'})
     assert 'no-store' in r.headers.get('Cache-Control', '')
+
+
+# --- Tunnel spoof guard: a LAN X-Forwarded-For never makes a tunnel request local ---
+
+from types import SimpleNamespace as _NS
+
+import pytest as _pytest
+
+from app import access as _access
+
+
+class _Cfg:
+    def __init__(self, **kv):
+        self.kv = {f'security.{k}': v for k, v in kv.items()}
+
+    def get(self, key, default=None):
+        return self.kv.get(key, default)
+
+
+_PROXIES = '127.0.0.1/32, ::1/128'
+
+
+def _via(peer, host='luma.lan', **headers):
+    hdrs = {k.replace('_', '-'): v for k, v in headers.items()}
+    hdrs.setdefault('Host', host)
+    from werkzeug.datastructures import Headers
+    return _NS(remote_addr=peer, headers=Headers(hdrs), host=host, environ={})
+
+
+@_pytest.mark.parametrize('headers', [
+    # cloudflared -> Caddy -> app, attacker sent XFF: 192.168.1.95
+    {'X_Forwarded_For': '192.168.1.95', 'Cf_Connecting_Ip': '198.51.100.7', 'Cf_Ray': 'abc-LAX'},
+    {'X_Forwarded_For': '192.168.1.95', 'Cf_Ray': 'abc-LAX'},
+    {'X_Forwarded_For': '192.168.1.95', 'CDN_Loop': 'cloudflare'},
+    # appended chain: the real (public) hop is nearest
+    {'X_Forwarded_For': '192.168.1.95, 198.51.100.7'},
+    {'X_Forwarded_For': '192.168.1.95, 198.51.100.7, 127.0.0.1'},
+    # X-Real-IP is never used to decide locality
+    {'X_Real_IP': '192.168.1.95'},
+])
+def test_tunnel_request_with_spoofed_lan_xff_requires_sign_in(headers):
+    cfg = _Cfg(trusted_proxies=_PROXIES, hostnames='luma.lan', auth_required='disabled_local')
+    for peer in ('127.0.0.1', '::1'):
+        req = _via(peer, **headers)
+        assert _access.is_local_request(req, cfg) is False
+        assert _access.should_authenticate(cfg, req) is True
+
+
+def test_spoofed_lan_xff_from_untrusted_peer_requires_sign_in():
+    cfg = _Cfg(trusted_proxies='', hostnames='luma.lan', auth_required='disabled_local')
+    req = _via('127.0.0.1', X_Forwarded_For='192.168.1.95')
+    assert _access.client_ip(req, cfg) is None
+    assert _access.should_authenticate(cfg, req) is True
+
+
+def test_tunnel_spoof_requires_sign_in_in_app(test_app):
+    import app.main
+    app.main.settings.update({'security': {'trusted_proxies': _PROXIES,
+                                           'auth_required': 'disabled_local'}})
+    r = test_app.test_client().get(
+        '/api/auth/me',
+        headers={'X-Forwarded-For': '192.168.1.95', 'CF-Connecting-IP': '198.51.100.7',
+                 'CF-Ray': 'abc-LAX'},
+        environ_base={'REMOTE_ADDR': '127.0.0.1'})
+    assert r.status_code == 401
