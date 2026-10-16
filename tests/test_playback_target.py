@@ -1,7 +1,15 @@
 """Tests for _resolve_playback_target with rooms/devices add-flow"""
 
 import pytest
+import sys
+import os
 from unittest.mock import Mock, MagicMock, patch
+
+# Mock the cache directory before importing main
+os.makedirs('/tmp/test_cache', exist_ok=True)
+with patch.dict(os.environ, {'CACHE_DIR': '/tmp/test_cache'}):
+    # Ensure cache directory exists for imports
+    pass
 
 
 @pytest.fixture
@@ -25,7 +33,8 @@ class TestResolvePlaybackTargetNestedDevices:
     
     def test_resolve_with_plex_service_in_device(self, mock_settings, mock_plex_service):
         """Resolves device with Plex service from nested devices list."""
-        from app.main import _resolve_playback_target
+        with patch('app.explore_cache.ExploreCache.__init__', lambda self: None):
+            from app.main import _resolve_playback_target
         
         # Room with nested devices list (new add-flow format)
         room = {
