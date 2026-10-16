@@ -495,7 +495,6 @@ def handle_405(e):
 
 # Configuration
 class Config:
-    DATABASE_PATH = os.environ.get('DATABASE_PATH', '/app/data/media.db')
     TMDB_API_KEY = os.environ.get('TMDB_API_KEY', '')
     OMDB_API_KEY = os.environ.get('OMDB_API_KEY', '')
     PLEX_URL = os.environ.get('PLEX_URL', '')
@@ -978,13 +977,20 @@ def enrich_hero_tmdb(items: List[Dict]) -> List[Dict]:
     return items
 
 
+def _database_file() -> Path:
+    """The application database (app.paths.database_path; a saved
+    media.database_path wins over the data-folder default)."""
+    from app.paths import database_path
+    return database_path(settings.get('media.database_path'))
+
+
 # Database setup
 def init_database():
     """Initialize the SQLite database with required tables."""
-    db_dir = Path(settings.get('media.database_path')).parent
-    db_dir.mkdir(parents=True, exist_ok=True)
+    db_file = _database_file()
+    db_file.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(settings.get('media.database_path'))
+    conn = sqlite3.connect(str(db_file))
     cursor = conn.cursor()
 
     # Create movies table
@@ -1030,7 +1036,7 @@ def init_database():
 
 def get_db_connection():
     """Get a connection to the SQLite database."""
-    conn = sqlite3.connect(settings.get('media.database_path'))
+    conn = sqlite3.connect(str(_database_file()))
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -9890,6 +9896,7 @@ _ADMIN_LINK_ERRORS = {
     'bad signature': ('Invalid Link', 'This link has an invalid signature.', 403),
     'expired': ('Link Expired', 'This link has expired. Open the request in Luma instead.', 410),
     'used': ('Link Already Used', 'This link has already been used.', 410),
+    'revoked': ('Link No Longer Valid', 'This link can no longer be used. Open the request in Luma instead.', 410),
 }
 
 
@@ -9925,7 +9932,11 @@ def admin_telegram_action():
     if (origin and origin != 'null' and not is_same_origin(origin)) or \
             request.headers.get('Sec-Fetch-Site', '').lower() == 'cross-site':
         return _admin_action_page('Invalid Request', 'This request came from another site.', False, 403)
-    tok, reason = action_tokens.consume(secret, request.form, _action_token_dir())
+    try:
+        tok, reason = action_tokens.consume(secret, request.form, _action_token_dir())
+    except OSError as e:
+        logger.error(f"admin_telegram_action: could not record the link: {e}")
+        return _admin_action_page('Error', 'Nothing was changed. Try the link again.', False, 500)
     if tok is None:
         return _admin_link_error(reason)
     action, uid = tok['action'], tok['uid']
@@ -9970,7 +9981,13 @@ def admin_telegram_action():
         return _admin_action_page('Access Denied', f'{name} was denied shared Plex access.', False)
     except Exception as e:
         logger.error(f"admin_telegram_action error: {e}")
-        return _admin_action_page('Error', 'Something went wrong processing this action.', False, 500)
+        try:
+            action_tokens.release(_action_token_dir(), tok['nonce'])
+            retry = 'Try the link again.'
+        except OSError:
+            retry = 'Open the request in Luma instead.'
+        return _admin_action_page('Error', f'Something went wrong; the action may not have finished. {retry}',
+                                  False, 500)
 
 
 # ── App version endpoint (used by KioskHub wrapper for auto-reload) ──────────

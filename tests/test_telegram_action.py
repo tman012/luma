@@ -1,6 +1,7 @@
 """Telegram admin links: full HMAC with SECRET_KEY, 24 h expiry, single use,
 GET shows a confirm page only, the page escapes everything and forbids scripts."""
 
+import json
 import re
 import time
 from urllib.parse import parse_qs, urlsplit
@@ -162,3 +163,47 @@ def test_signed_out_remote_without_link_needs_sign_in(env):
     client, _, _ = env
     assert client.get(PATH, environ_base=REMOTE).status_code == 401
     assert client.post(PATH, data={}, environ_base=REMOTE).status_code == 401
+
+
+def test_corrupt_nonce_store_revokes_earlier_links(env, monkeypatch, caplog):
+    client, uid, state = env
+    monkeypatch.setattr(user_auth, 'save_user_settings', lambda *a: None)
+    _, used = _fields('deny_plex', uid)
+    assert client.post(PATH, data=used, environ_base=REMOTE).status_code == 200
+    _, unused_old = _fields('approve_plex', uid)
+    (state / action_tokens.NONCE_FILENAME).write_text('{broken')
+    with caplog.at_level('ERROR'):
+        # replay of the used link after corruption: refused
+        assert client.post(PATH, data=used, environ_base=REMOTE).status_code == 401
+    assert any('moved it to' in r.message for r in caplog.records)
+    assert [p for p in state.iterdir() if p.name.startswith(action_tokens.NONCE_FILENAME + '.bad-')]
+    # every link issued before the corruption is refused, even an unused one
+    assert action_tokens.check('k' * 40, unused_old, state)[1] == 'revoked'
+    # the cutoff is saved: still refused after a fresh read
+    saved = json.loads((state / action_tokens.NONCE_FILENAME).read_text())
+    assert saved['reject_issued_before'] > 0
+    # links issued after the cutoff work
+    later = action_tokens.sign('k' * 40, 'deny_plex', uid, now=saved['reject_issued_before'] + 1)
+    later['exp'] = str(int(later['exp']))
+    tok, reason = action_tokens.check('k' * 40, later, state, now=saved['reject_issued_before'] + 2)
+    assert reason is None
+
+
+@pytest.mark.parametrize('raw', ['[]', '{"used": []}', '{"used": {"n": "x"}}', 'null'])
+def test_wrong_shape_nonce_store_revokes(env, raw):
+    _, uid, state = env
+    _, f = _fields('deny_plex', uid)
+    (state / action_tokens.NONCE_FILENAME).write_text(raw)
+    assert action_tokens.check('k' * 40, f, state) == (None, 'revoked')
+
+
+def test_failed_action_releases_link_for_retry(env, monkeypatch):
+    client, uid, state = env
+    def boom(*a):
+        raise RuntimeError('db locked')
+    monkeypatch.setattr(user_auth, 'save_user_settings', boom)
+    _, f = _fields('deny_plex', uid)
+    r = client.post(PATH, data=f, environ_base=REMOTE)
+    assert r.status_code == 500 and b'already been used' not in r.data and b'Try the link again' in r.data
+    monkeypatch.setattr(user_auth, 'save_user_settings', lambda *a: None)
+    assert client.post(PATH, data=f, environ_base=REMOTE).status_code == 200

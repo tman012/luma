@@ -275,7 +275,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             },
         },
         "downloads_root":   {"type": "string", "default": "/downloads",     "sensitive": False, "description": "Root download directory"},
-        "database_path":    {"type": "string", "default": "/app/data/media.db", "sensitive": False, "description": "Application SQLite database path"},
+        "database_path":    {"type": "string", "default": "", "sensitive": False, "description": "Application SQLite database path (blank: media.db in the data folder)"},
         "video_extensions":  {
             "type": "array",
             "default": [".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg", ".m2ts"],

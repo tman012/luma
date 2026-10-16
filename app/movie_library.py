@@ -20,7 +20,8 @@ class MovieLibrary:
     """Manages the movie library database"""
 
     def __init__(self):
-        self.db_path = Config.DATABASE_PATH
+        from app.paths import database_path
+        self.db_path = Config.DATABASE_PATH or str(database_path())
         self.ensure_database()
 
     def ensure_database(self):

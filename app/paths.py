@@ -3,6 +3,7 @@
 LUMA_DATA_DIR   persistent data (settings, databases, JSON state); default /app/data
 LUMA_CACHE_DIR  rebuildable caches (explore, library, hero); default /app/cache
 HERO_CACHE_DIR  hero images; default $LUMA_CACHE_DIR/hero
+DATABASE_PATH   application SQLite database; see database_path()
 """
 
 import logging
@@ -10,7 +11,7 @@ import os
 import sqlite3
 import tempfile
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 DEFAULT_DATA_DIR = '/app/data'
 DEFAULT_CACHE_DIR = '/app/cache'
@@ -37,6 +38,86 @@ def hero_cache_dir() -> Path:
     if explicit:
         return Path(explicit)
     return cache_dir() / 'hero'
+
+
+LEGACY_DATABASE_PATH = '/app/data/media.db'
+_db_logged = set()
+_log = logging.getLogger(__name__)
+
+
+def resolve_database_path(saved: Optional[str] = None) -> Tuple[Path, str]:
+    """(database path, source). Order:
+
+    1. DATABASE_PATH in the environment ('env');
+    2. a saved media.database_path setting ('setting');
+    3. $LUMA_DATA_DIR/media.db ('data dir'), except when that file does not
+       exist but a database already sits at the old default /app/data/media.db:
+       then the existing file is used ('existing database') and a warning names
+       both paths. A new, empty database is never created next to an old one.
+    """
+    env = (os.environ.get('DATABASE_PATH') or '').strip()
+    if env:
+        return Path(env), 'env'
+    if saved and str(saved).strip():
+        return Path(str(saved).strip()), 'setting'
+    derived = data_path('media.db')
+    legacy = Path(LEGACY_DATABASE_PATH)
+    if derived != legacy and not derived.exists() and legacy.is_file():
+        return legacy, 'existing database'
+    return derived, 'data dir'
+
+
+def database_path(saved: Optional[str] = None) -> Path:
+    """The database path (see resolve_database_path), logged once per path."""
+    path, source = resolve_database_path(saved)
+    key = (str(path), source)
+    if key not in _db_logged:
+        _db_logged.add(key)
+        if source == 'existing database':
+            _log.warning('Database: using the existing %s instead of %s (LUMA_DATA_DIR). '
+                         'Set media.database_path or DATABASE_PATH to pin it.',
+                         path, data_path('media.db'))
+        else:
+            _log.info('Database: %s (from %s)', path, source)
+    return path
+
+
+def atomic_write_json(path, data, mode: int = 0o644) -> None:
+    """Write *data* as JSON to *path* atomically: a temp file in the same
+    directory, flush + fsync, then os.replace. On any error the temp file is
+    removed and the old file is left untouched; the error propagates."""
+    import json
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f'.{path.name}.', dir=str(path.parent))
+    try:
+        with os.fdopen(fd, 'w') as fh:
+            json.dump(data, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def quarantine(path, reason: str, logger: logging.Logger = None) -> Optional[Path]:
+    """Move an unreadable state file aside to <name>.bad-<unix ts> and log an
+    error. Returns the backup path, or None if it could not be moved."""
+    import time
+    path = Path(path)
+    backup = path.with_name(f'{path.name}.bad-{int(time.time())}')
+    try:
+        os.replace(path, backup)
+    except OSError as e:
+        (logger or _log).error('%s is unreadable (%s) and could not be moved aside: %s', path, reason, e)
+        return None
+    (logger or _log).error('%s is unreadable (%s); moved it to %s', path, reason, backup)
+    return backup
 
 
 class StartupCheckError(RuntimeError):

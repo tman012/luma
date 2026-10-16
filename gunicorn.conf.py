@@ -7,8 +7,14 @@ LUMA_HTTPS_KEY in the environment still take precedence).
 
 import logging
 
-from app import server_config
-from app.settings_manager import SettingsManager
+# Fail fast, before anything below can create or write settings.json or a
+# database: gunicorn loads this file in the master, before any worker imports
+# app.main. Exits 1 with a clear message if a data/cache folder is not writable.
+from app.paths import ensure_writable_or_exit
+ensure_writable_or_exit()
+
+from app import server_config  # noqa: E402
+from app.settings_manager import SettingsManager  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +51,7 @@ certfile, keyfile = _tls(_settings)
 
 
 def on_starting(server):
-    """Fail fast in the master, before any worker imports app.main.
-
-    Workers import app.main (and its caches touch the data and cache dirs)
-    before post_worker_init runs, so the writability probe must run here:
-    exit 1 with a clear message instead of crash-looping workers.
-    """
-    from app.paths import ensure_writable_or_exit
-    ensure_writable_or_exit()
+    """The startup check already ran when this file was loaded (top of file)."""
     server.log.info('[gunicorn] Startup check passed: data and cache folders are writable')
 
 

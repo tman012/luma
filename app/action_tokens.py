@@ -14,7 +14,6 @@ import json
 import logging
 import os
 import secrets
-import tempfile
 import threading
 import time
 from typing import Dict, Optional
@@ -74,7 +73,10 @@ def check(secret: str, fields, data_dir, now: Optional[float] = None) -> tuple:
     now = time.time() if now is None else now
     if tok['exp'] <= now or tok['exp'] > now + TTL_SECONDS + 60:
         return None, 'expired'
-    if tok['nonce'] in _load(data_dir, now):
+    store = _load(data_dir, now)
+    if tok['exp'] - TTL_SECONDS < store['reject_issued_before']:
+        return None, 'revoked'   # issued before the used-link record was lost
+    if tok['nonce'] in store['used']:
         return None, 'used'
     return tok, None
 
@@ -86,10 +88,19 @@ def consume(secret: str, fields, data_dir, now: Optional[float] = None) -> tuple
         tok, reason = check(secret, fields, data_dir, now)
         if tok is None:
             return None, reason
-        used = _load(data_dir, now)
-        used[tok['nonce']] = tok['exp']
-        _save(data_dir, used)
+        store = _load(data_dir, now)
+        store['used'][tok['nonce']] = tok['exp']
+        _save(data_dir, store)
     return tok, None
+
+
+def release(data_dir, nonce: str) -> None:
+    """Forget a consumed nonce (the action failed and changed nothing), so the
+    same link can be retried."""
+    with _lock, _file_lock(data_dir):
+        store = _load(data_dir, time.time())
+        if store['used'].pop(nonce, None) is not None:
+            _save(data_dir, store)
 
 
 class _file_lock:
@@ -106,34 +117,54 @@ class _file_lock:
         os.close(self.fd)
 
 
-def _load(data_dir, now: float) -> Dict[str, int]:
+def _empty() -> Dict:
+    return {'used': {}, 'reject_issued_before': 0}
+
+
+def _load(data_dir, now: float) -> Dict:
+    """{'used': {nonce: exp}, 'reject_issued_before': ts}.
+
+    If the store is unreadable, it is moved aside and every link issued before
+    now is refused from then on (the cutoff is saved right away), since the
+    record of which ones were used is gone."""
+    path = os.path.join(str(data_dir), NONCE_FILENAME)
     try:
-        with open(os.path.join(str(data_dir), NONCE_FILENAME)) as fh:
+        with open(path) as fh:
             raw = json.load(fh)
+        store = _parse_store(raw)
     except FileNotFoundError:
-        return {}
-    except (OSError, ValueError) as e:
-        # Fail closed would lock admins out; fail open would allow replays.
-        # A broken file is replaced on the next save; until then links still
-        # need a valid, unexpired signature.
-        logger.warning('Used-link store unreadable: %s', e)
-        return {}
-    return {str(n): int(e) for n, e in raw.items() if int(e) > now}
-
-
-def _save(data_dir, used: Dict[str, int]) -> None:
-    d = str(data_dir)
-    os.makedirs(d, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix='.telegram_action_nonces.', dir=d)
-    try:
-        with os.fdopen(fd, 'w') as fh:
-            json.dump(used, fh)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, os.path.join(d, NONCE_FILENAME))
-    except BaseException:
+        return _empty()
+    except (OSError, ValueError, TypeError, UnicodeDecodeError) as e:
+        from app.paths import quarantine
+        quarantine(path, f'used-link store unreadable: {e}', logger)
+        store = _empty()
+        store['reject_issued_before'] = int(now) + 1
+        logger.error('Telegram admin links issued before now are refused (used-link record lost)')
         try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+            _save(data_dir, store)
+        except OSError as save_err:
+            logger.error('Could not save the link cutoff: %s', save_err)
+        return store
+    store['used'] = {n: e for n, e in store['used'].items() if e > now}
+    return store
+
+
+def _parse_store(raw) -> Dict:
+    if not isinstance(raw, dict):
+        raise ValueError('not an object')
+    if 'used' not in raw and all(isinstance(v, int) for v in raw.values()):
+        raw = {'used': raw}                      # earlier flat format {nonce: exp}
+    used, cutoff = raw.get('used'), raw.get('reject_issued_before', 0)
+    if not isinstance(used, dict) or isinstance(cutoff, bool) or not isinstance(cutoff, (int, float)):
+        raise ValueError('wrong shape')
+    out = {}
+    for n, e in used.items():
+        if isinstance(e, bool) or not isinstance(e, (int, float)):
+            raise ValueError('bad entry')
+        out[str(n)] = int(e)
+    return {'used': out, 'reject_issued_before': int(cutoff)}
+
+
+def _save(data_dir, store: Dict) -> None:
+    from app.paths import atomic_write_json
+    atomic_write_json(os.path.join(str(data_dir), NONCE_FILENAME), store, mode=0o600)
