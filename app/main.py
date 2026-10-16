@@ -16914,11 +16914,10 @@ def list_indexers():
         client = get_indexer_client(settings)
         
         # Check if we're using the Luma backend
-        if not hasattr(client, 'manager'):
+        if not hasattr(client, 'get_indexers'):
             return jsonify({'error': 'Indexer list only available with Luma backend'}), 400
         
-        manager = client.manager
-        indexers = manager.list_indexers()
+        indexers = client.get_indexers()
         # Mask API keys
         for ix in indexers:
             if 'api_key' in ix and ix['api_key']:
@@ -17127,11 +17126,10 @@ def test_single_indexer(indexer_id: str):
         client = get_indexer_client(settings)
         
         # Check if we're using the Luma backend
-        if not hasattr(client, 'manager'):
+        if not hasattr(client, 'test_indexer'):
             return jsonify({'error': 'Indexer test only available with Luma backend'}), 400
         
-        manager = client.manager
-        success, message = manager.test_indexer(indexer_id)
+        success, message = client.test_indexer(indexer_id)
         # Sanitize any keys from the message
         return jsonify({'success': success, 'message': sanitize_api_key(message)})
     except Exception as e:
@@ -17177,12 +17175,10 @@ def import_indexers_from_prowlarr():
         client = get_indexer_client(settings)
         
         # Check if we're using the Luma backend
-        if not hasattr(client, 'manager'):
+        if not hasattr(client, 'import_from_prowlarr'):
             return jsonify({'error': 'Prowlarr import only available with Luma backend'}), 400
         
-        manager = client.manager
-        
-        imported, cardigann, errors = manager.import_from_prowlarr(prowlarr_url, prowlarr_api_key)
+        imported, cardigann, errors = client.import_from_prowlarr(prowlarr_url, prowlarr_api_key)
         
         # Sanitize errors
         errors = [sanitize_api_key(e) for e in errors]
@@ -17211,101 +17207,83 @@ def import_indexers_from_prowlarr():
 
 @app.route('/api/indexer/download/<token>', methods=['GET'])
 def download_torrent_proxy(token: str):
-    """Admin-gated proxy for downloading torrents without exposing API keys in URLs."""
-    err = _require_admin()
+    """Proxy for downloading torrents without exposing API keys in URLs."""
+    err = _require_login()
     if err:
         return err
     
     try:
-        from app.indexer_manager import get_indexer_manager, sanitize_api_key, validate_indexer_url
-        import base64
-        import hashlib
-        import hmac
-        import json
-        import time
+        from app.indexer_manager import sanitize_api_key, validate_indexer_url
+        from urllib.parse import urlparse
+        import requests
+        from flask import Response
         
-        # Get or generate server secret
-        secret = settings.get('indexer.download_proxy_secret')
-        if not secret:
-            import secrets
-            secret = secrets.token_hex(32)
-            settings.update({'indexer': {'download_proxy_secret': secret}})
-            logger.info('Generated download proxy HMAC secret')
-        
-        # Decode token: base64(json({url, indexer_id, exp, sig}))
-        try:
-            decoded = base64.urlsafe_b64decode(token.encode()).decode()
-            data = json.loads(decoded)
-            download_url = data.get('url')
-            indexer_id = data.get('indexer_id')
-            exp = data.get('exp', 0)
-            sig = data.get('sig', '')
-        except Exception as e:
-            logger.warning(f'Invalid download token: {sanitize_api_key(str(e))}')
-            return jsonify({'error': 'Invalid download token'}), 400
-        
-        # Check expiry (tokens valid for 1 hour)
-        if time.time() > exp:
-            return jsonify({'error': 'Download token expired'}), 403
-        
-        # Verify HMAC signature
-        payload = f"{download_url}|{indexer_id}|{exp}"
-        expected_sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expected_sig):
-            logger.warning('Download token HMAC verification failed')
-            return jsonify({'error': 'Invalid token signature'}), 403
-        
-        if not download_url or not indexer_id:
-            return jsonify({'error': 'Invalid download token'}), 400
-        
-        # Get indexer config via public API
+        # Get indexer client
         from app.indexer_api import get_indexer_client
         client = get_indexer_client(settings)
         
-        # Check if we're using the Luma backend
-        if not hasattr(client, 'manager'):
+        # Check if using Luma backend
+        if not hasattr(client, 'get_download_token'):
             return jsonify({'error': 'Download proxy only available with Luma backend'}), 400
         
-        manager = client.manager
-        indexers = manager.list_indexers()
+        # Retrieve token mapping (opaque token -> url, indexer_id)
+        token_data = client.get_download_token(token)
+        if not token_data:
+            return jsonify({'error': 'Invalid or expired download token'}), 403
+        
+        download_url, indexer_id = token_data
+        
+        # Get indexer config
+        all_indexers = settings.get('indexer.indexers') or []
         config = None
-        for ix in indexers:
+        for ix in all_indexers:
             if ix.get('id') == indexer_id:
-                # Get full config with api_key
-                all_indexers = settings.get('indexer.indexers') or []
-                for full_ix in all_indexers:
-                    if full_ix.get('id') == indexer_id:
-                        config = full_ix
-                        break
+                config = ix
                 break
         
         if not config:
             return jsonify({'error': 'Indexer not found'}), 404
         
-        # Re-validate URL with SSRF check and ensure it matches indexer host
+        # Validate download URL
         allow_lan = settings.get('indexer.allow_lan', False)
         valid, error, pinned_ip = validate_indexer_url(download_url, allow_lan=allow_lan)
         if not valid:
             return jsonify({'error': f'URL validation failed: {error}'}), 403
         
-        # Ensure download URL belongs to this indexer (same host)
-        from urllib.parse import urlparse
+        # Validate download host against indexer configuration
         download_host = urlparse(download_url).netloc
-        indexer_host = urlparse(config.get('url', '')).netloc
-        if download_host != indexer_host:
-            logger.warning(f'Download URL host {download_host} does not match indexer {indexer_host}')
-            return jsonify({'error': 'URL does not match configured indexer'}), 403
         
-        api_key = config.get('api_key', '')
+        if config.get('prowlarr_proxy'):
+            # Proxied entry: validate against Prowlarr URL
+            prowlarr_url = settings.get('indexer.base_url', '')
+            if not prowlarr_url:
+                return jsonify({'error': 'Prowlarr URL not configured for proxied indexer'}), 500
+            prowlarr_host = urlparse(prowlarr_url).netloc
+            if download_host != prowlarr_host:
+                logger.warning(f'Proxied download host {download_host} does not match Prowlarr {prowlarr_host}')
+                return jsonify({'error': 'Download URL does not match configured Prowlarr host'}), 403
+        else:
+            # Direct entry: validate against indexer URL
+            indexer_url = config.get('url', '')
+            if not indexer_url:
+                return jsonify({'error': 'Indexer URL not configured'}), 500
+            indexer_host = urlparse(indexer_url).netloc
+            if download_host != indexer_host:
+                logger.warning(f'Download host {download_host} does not match indexer {indexer_host}')
+                return jsonify({'error': 'Download URL does not match configured indexer host'}), 403
+        
+        # Get API key (resolve for proxied entries)
+        if config.get('prowlarr_proxy'):
+            api_key = settings.get('indexer.api_key', '')
+        else:
+            api_key = config.get('api_key', '')
         
         # Stream the download with allow_redirects=False to prevent redirect attacks
-        import requests
         headers = {'X-Api-Key': api_key} if api_key else {}
         resp = requests.get(download_url, headers=headers, stream=True, timeout=30, allow_redirects=False)
         resp.raise_for_status()
         
         # Stream response back to client
-        from flask import Response
         return Response(
             resp.iter_content(chunk_size=8192),
             content_type=resp.headers.get('Content-Type', 'application/x-bittorrent'),

@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
@@ -21,6 +22,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import requests
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.connection import create_connection
 from defusedxml import ElementTree as ET
 
 logger = logging.getLogger(__name__)
@@ -60,6 +63,38 @@ def sanitize_api_key(text: str) -> str:
     return text
 
 
+class PinnedIPHTTPAdapter(HTTPAdapter):
+    """HTTP adapter that connects to a pinned IP while preserving Host header and SNI."""
+    
+    def __init__(self, pinned_ip: str, original_hostname: str, *args, **kwargs):
+        self.pinned_ip = pinned_ip
+        self.original_hostname = original_hostname
+        super().__init__(*args, **kwargs)
+    
+    def send(self, request, *args, **kwargs):
+        """Override send to connect to pinned IP while keeping original hostname for Host header and SNI."""
+        from urllib.parse import urlparse, urlunparse
+        
+        # Parse the original URL
+        parsed = urlparse(request.url)
+        
+        # Build new netloc with pinned IP
+        if parsed.port:
+            new_netloc = f'{self.pinned_ip}:{parsed.port}'
+        else:
+            new_netloc = self.pinned_ip
+        
+        # Rebuild URL with pinned IP
+        pinned_parts = (parsed.scheme, new_netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
+        pinned_url = urlunparse(pinned_parts)
+        request.url = pinned_url
+        
+        # Set Host header to original hostname to ensure proper virtual hosting and SNI
+        request.headers['Host'] = self.original_hostname
+        
+        return super().send(request, *args, **kwargs)
+
+
 def parse_retry_after(retry_after_value: str) -> Optional[float]:
     """
     Parse Retry-After header as either seconds (int) or HTTP-date.
@@ -87,13 +122,13 @@ def parse_retry_after(retry_after_value: str) -> Optional[float]:
     return None
 
 
-def validate_indexer_url(url: str, allow_lan: bool = False) -> Tuple[bool, str, Optional[str]]:
+def validate_indexer_url(url: str, allow_lan: bool = False, allow_loopback_for_host: Optional[str] = None) -> Tuple[bool, str, Optional[str]]:
     """
     Validate indexer URL for SSRF protection.
     
     Returns (valid, error_message, pinned_ip).
     Only http/https allowed. Rejects loopback, link-local, and private IPs unless allow_lan=True.
-    Loopback is NEVER allowed, even with allow_lan=True.
+    Loopback is NEVER allowed, even with allow_lan=True, EXCEPT for the specific host in allow_loopback_for_host.
     Returns the pinned IP address to prevent DNS rebinding attacks.
     """
     try:
@@ -136,10 +171,14 @@ def validate_indexer_url(url: str, allow_lan: bool = False) -> Tuple[bool, str, 
             if ip_str == '169.254.169.254' or str(ip) == '169.254.169.254':
                 return False, 'Cloud metadata endpoint blocked', None
             
-            # Check loopback (NEVER allowed, even with allow_lan)
+            # Check loopback (NEVER allowed, even with allow_lan, EXCEPT for configured Prowlarr host)
             is_loopback = any(ip in network for network in LOOPBACK_RANGES)
             if is_loopback:
-                return False, f'Loopback IP blocked: {ip_str}', None
+                if allow_loopback_for_host and hostname == allow_loopback_for_host:
+                    # Allow loopback ONLY for the configured Prowlarr URL's host
+                    pass
+                else:
+                    return False, f'Loopback IP blocked: {ip_str}', None
             
             # Check other disallowed ranges
             for network in DISALLOWED_IP_RANGES:
@@ -370,7 +409,10 @@ class IndexerManager:
         self._state_file = None
         self._last_save_time = 0.0
         self._save_throttle_seconds = 5.0  # Throttle saves to every 5 seconds
+        self._download_tokens: Dict[str, Tuple[str, str, float]] = {}  # token -> (url, indexer_id, expiry)
+        self._download_tokens_lock = threading.Lock()
         self._load_state()
+        self._load_download_tokens()
 
     def _get_state_file_path(self) -> Path:
         """Get path for state persistence."""
@@ -457,6 +499,65 @@ class IndexerManager:
         except Exception as e:
             logger.warning(f'Failed to save indexer state: {sanitize_api_key(str(e))}')
 
+    def _store_download_token(self, token: str, url: str, indexer_id: str, ttl: int = 3600) -> None:
+        """Store opaque download token with server-side mapping."""
+        expiry = time.time() + ttl
+        with self._download_tokens_lock:
+            self._download_tokens[token] = (url, indexer_id, expiry)
+            self._prune_download_tokens()
+            self._persist_download_tokens()
+    
+    def _get_download_token(self, token: str) -> Optional[Tuple[str, str]]:
+        """Retrieve download token mapping, returns (url, indexer_id) or None if expired/invalid."""
+        with self._download_tokens_lock:
+            self._prune_download_tokens()
+            entry = self._download_tokens.get(token)
+            if entry:
+                url, indexer_id, expiry = entry
+                if time.time() < expiry:
+                    return (url, indexer_id)
+                else:
+                    del self._download_tokens[token]
+            return None
+    
+    def _prune_download_tokens(self) -> None:
+        """Remove expired download tokens (call with lock held)."""
+        now = time.time()
+        expired = [tok for tok, (_, _, exp) in self._download_tokens.items() if exp < now]
+        for tok in expired:
+            del self._download_tokens[tok]
+    
+    def _persist_download_tokens(self) -> None:
+        """Persist download tokens to disk (call with lock held)."""
+        try:
+            data_dir = Path(os.environ.get('LUMA_DATA_DIR', '/app/data'))
+            data_dir.mkdir(parents=True, exist_ok=True)
+            tokens_file = data_dir / 'download_tokens.json'
+            temp_file = tokens_file.with_suffix('.tmp')
+            
+            with open(temp_file, 'w') as f:
+                json.dump(self._download_tokens, f)
+            temp_file.replace(tokens_file)
+        except Exception as e:
+            logger.warning(f'Failed to persist download tokens: {sanitize_api_key(str(e))}')
+    
+    def _load_download_tokens(self) -> None:
+        """Load download tokens from disk."""
+        try:
+            data_dir = Path(os.environ.get('LUMA_DATA_DIR', '/app/data'))
+            tokens_file = data_dir / 'download_tokens.json'
+            if not tokens_file.exists():
+                return
+            
+            with open(tokens_file, 'r') as f:
+                data = json.load(f)
+            
+            with self._download_tokens_lock:
+                self._download_tokens = data
+                self._prune_download_tokens()
+        except Exception as e:
+            logger.warning(f'Failed to load download tokens: {sanitize_api_key(str(e))}')
+
     def _get_indexers(self) -> List[Dict[str, Any]]:
         """Get indexer configurations from settings."""
         indexers = self.settings_manager.get('indexer.indexers') or []
@@ -533,10 +634,16 @@ class IndexerManager:
 
             # Test with caps request - send both header and query param for compatibility
             # Many Torznab/Newznab servers only accept query param
-            from urllib.parse import quote
+            from urllib.parse import quote, urlparse
             headers = {'X-Api-Key': api_key}
             encoded_key = quote(api_key, safe='')
-            resp = requests.get(
+            
+            # Create session with pinned IP adapter
+            session = requests.Session()
+            parsed = urlparse(url)
+            session.mount(f'{parsed.scheme}://', PinnedIPHTTPAdapter(pinned_ip, parsed.hostname))
+            
+            resp = session.get(
                 f'{url}?t=caps&apikey={encoded_key}',
                 headers=headers,
                 timeout=10,
@@ -696,7 +803,7 @@ class IndexerManager:
         cache_key = (query, tuple(sorted(categories)), limit)
 
         # Phase 1: Check state and reserve request slot (acquire lock briefly)
-        sleep_needed = 0.0
+        request_slot = 0.0
         with state.lock:
             # Check backoff
             if state.is_backed_off(now):
@@ -735,14 +842,16 @@ class IndexerManager:
                 # Reserve request slot
                 state.background_request_log.append(time.time())
             
-            # Calculate sleep needed for min interval
+            # Calculate request slot for min interval: slot = max(now, last + interval)
             min_interval = config.get('rate_limit_min_interval', 2.0) if state.bucket else 0
             if min_interval > 0:
-                elapsed = now - state.last_request_time
-                if elapsed < min_interval:
-                    sleep_needed = min_interval - elapsed
+                request_slot = max(now, state.last_request_time + min_interval)
+                state.last_request_time = request_slot
+            else:
+                request_slot = now
         
-        # Phase 2: Sleep OUTSIDE the lock if needed
+        # Phase 2: Sleep OUTSIDE the lock until request slot
+        sleep_needed = request_slot - time.time()
         if sleep_needed > 0:
             time.sleep(sleep_needed)
         
@@ -769,7 +878,15 @@ class IndexerManager:
         
         # SSRF validation
         allow_lan = self.settings_manager.get('indexer.allow_lan', False)
-        valid, error, pinned_ip = validate_indexer_url(url, allow_lan=allow_lan)
+        
+        # For proxied entries, allow loopback for Prowlarr host
+        allow_loopback_for_host = None
+        if config.get('prowlarr_proxy'):
+            prowlarr_url = self.settings_manager.get('indexer.base_url', '')
+            if prowlarr_url:
+                allow_loopback_for_host = urlparse(prowlarr_url).hostname
+        
+        valid, error, pinned_ip = validate_indexer_url(url, allow_lan=allow_lan, allow_loopback_for_host=allow_loopback_for_host)
         if not valid:
             raise IndexerError(f'URL validation failed: {error}')
 
@@ -783,7 +900,13 @@ class IndexerManager:
                 'limit': limit,
                 'apikey': api_key,
             }
-            resp = requests.get(
+            
+            # Create session with pinned IP adapter
+            session = requests.Session()
+            parsed = urlparse(url)
+            session.mount(f'{parsed.scheme}://', PinnedIPHTTPAdapter(pinned_ip, parsed.hostname))
+            
+            resp = session.get(
                 url,
                 params=params,
                 headers=headers,
@@ -791,10 +914,6 @@ class IndexerManager:
                 stream=True,
                 allow_redirects=False,  # Prevent redirect attacks
             )
-            
-            # Phase 4: Update last_request_time (acquire lock briefly)
-            with state.lock:
-                state.last_request_time = time.time()
 
             # Handle rate limit / errors
             if resp.status_code == 429:

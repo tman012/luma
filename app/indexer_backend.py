@@ -6,7 +6,7 @@ Prowlarr and Luma backends.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,18 @@ class LumaBackendAdapter:
         else:
             logger.error(f'Indexer connection test failed: {msg}')
         return success
+    
+    def test_indexer(self, indexer_id: str) -> Tuple[bool, str]:
+        """Test a specific indexer by ID."""
+        return self.manager.test_indexer(indexer_id)
+    
+    def import_from_prowlarr(self, prowlarr_url: str, prowlarr_api_key: str) -> Tuple[int, int, List[str]]:
+        """Import indexers from Prowlarr."""
+        return self.manager.import_from_prowlarr(prowlarr_url, prowlarr_api_key)
+    
+    def get_download_token(self, token: str) -> Optional[Tuple[str, str]]:
+        """Retrieve download token mapping."""
+        return self.manager._get_download_token(token)
     
     def get_indexers(self) -> List[Dict]:
         """List indexers in Prowlarr-compatible format."""
@@ -242,32 +254,13 @@ class LumaBackendAdapter:
         return normalized
     
     def _sign_download_url(self, download_url: str, indexer_id: str) -> str:
-        """Sign a download URL to create a /api/indexer/download/<token> link."""
-        import base64
-        import hashlib
-        import hmac
-        import json
-        import time
+        """Create an opaque token for a download URL with server-side mapping."""
         import secrets
         
-        # Get or generate server secret
-        secret = self.manager.settings_manager.get('indexer.download_proxy_secret')
-        if not secret:
-            secret = secrets.token_hex(32)
-            self.manager.settings_manager.update({'indexer': {'download_proxy_secret': secret}})
+        # Generate opaque token
+        token = secrets.token_urlsafe(32)
         
-        # Create signed token (valid for 1 hour)
-        exp = int(time.time()) + 3600
-        payload = f"{download_url}|{indexer_id}|{exp}"
-        sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        # Store mapping in manager's token store
+        self.manager._store_download_token(token, download_url, indexer_id)
         
-        data = {
-            'url': download_url,
-            'indexer_id': indexer_id,
-            'exp': exp,
-            'sig': sig,
-        }
-        
-        # Encode as base64 URL-safe token
-        token = base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
         return f'/api/indexer/download/{token}'
