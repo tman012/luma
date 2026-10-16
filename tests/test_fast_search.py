@@ -1913,29 +1913,29 @@ class TestHeroCacheHealing(unittest.TestCase):
                 self.assertIn(field, movie, f"_build_hero_movies must include {field}")
     
     def test_healing_covers_backdrop_poster_clearart(self):
-        """Test missing backdrop, poster, and clearart files trigger heal and serve 200."""
+        """Test missing backdrop, poster, and clearart files trigger heal via get_hero_content()."""
         import json
-        import time
+        import threading
         
         # Create cache entries with upstream URLs (new format) - 2 movies
         content = [
             {
                 'rating_key': 1,
                 'title': 'Test Movie 1',
-                'backdrop_url': '/static/hero_cache/movie_1_backdrop.jpg',
+                'backdrop_url': 'movie_1_backdrop.jpg',
                 'backdrop_cache_file': 'movie_1_backdrop.jpg',
                 'backdrop_upstream_url': 'http://fanart.tv/test_backdrop1.jpg',
-                'clearart_url': '/static/hero_cache/movie_1_clearart.jpg',
+                'clearart_url': 'movie_1_clearart.jpg',
                 'clearart_cache_file': 'movie_1_clearart.jpg',
                 'clearart_upstream_url': 'http://fanart.tv/test_clearart1.jpg',
             },
             {
                 'rating_key': 2,
                 'title': 'Test Movie 2',
-                'poster_url': '/static/hero_cache/movie_2_poster.jpg',
+                'poster_url': 'movie_2_poster.jpg',
                 'poster_cache_file': 'movie_2_poster.jpg',
-                'poster_upstream_url': 'http://plex.local/poster2.jpg',
-                'backdrop_url': '/static/hero_cache/movie_2_backdrop.jpg',
+                'poster_upstream_url': '/library/metadata/2/thumb',
+                'backdrop_url': 'movie_2_backdrop.jpg',
                 'backdrop_cache_file': 'movie_2_backdrop.jpg',
                 'backdrop_upstream_url': 'http://fanart.tv/test_backdrop2.jpg',
             }
@@ -1945,64 +1945,52 @@ class TestHeroCacheHealing(unittest.TestCase):
         with open(self.temp_json, 'w') as f:
             json.dump({'last_updated': '2024-01-01', 'movies': content}, f)
         
-        # Mock download to track healing calls and create files
+        # Track healing completion with an event
+        heal_complete = threading.Event()
         download_calls = []
+        
+        # Mock download_image to track calls and signal completion
         orig_download = self.hero_cache.download_image
         def mock_download(url, filename):
             download_calls.append((url, filename))
-            # Create actual file so it can be served
             (self.temp_cache_dir / filename).write_text(f'healed-{filename}')
-            return f"/static/hero_cache/{filename}"
-        self.hero_cache.download_image = mock_download
+            if len(download_calls) >= 4:
+                heal_complete.set()
+            return filename
         
-        # Call endpoint - should trigger background healing
-        with self.app.test_client() as client:
-            resp = client.get('/api/hero/content')
-            self.assertEqual(resp.status_code, 200)
-        
-        # Wait for background healing to complete
-        time.sleep(0.5)
-        
-        # Verify healing covered backdrop, poster AND clearart
-        self.assertGreaterEqual(len(download_calls), 4, "Should heal backdrop1, clearart1, poster2, backdrop2")
-        filenames = [call[1] for call in download_calls]
-        
-        # Check specific files were healed
-        self.assertIn('movie_1_backdrop.jpg', filenames, "Should heal movie_1_backdrop.jpg")
-        self.assertIn('movie_1_clearart.jpg', filenames, "Should heal movie_1_clearart.jpg")
-        self.assertIn('movie_2_poster.jpg', filenames, "Should heal movie_2_poster.jpg (poster coverage)")
-        self.assertIn('movie_2_backdrop.jpg', filenames, "Should heal movie_2_backdrop.jpg")
-        
-        # Now verify files serve 200 through actual test client GET requests
-        with self.app.test_client() as client:
-            # Test each healed file serves successfully
-            resp = client.get('/static/hero_cache/movie_1_backdrop.jpg')
-            self.assertEqual(resp.status_code, 200, "movie_1_backdrop.jpg should serve 200")
-            self.assertIn(b'healed-movie_1_backdrop.jpg', resp.data)
+        try:
+            self.hero_cache.download_image = mock_download
             
-            resp = client.get('/static/hero_cache/movie_1_clearart.jpg')
-            self.assertEqual(resp.status_code, 200, "movie_1_clearart.jpg should serve 200")
+            # Call get_hero_content() directly (not through endpoint) to trigger healing
+            self.hero_cache.get_hero_content()
             
-            resp = client.get('/static/hero_cache/movie_2_poster.jpg')
-            self.assertEqual(resp.status_code, 200, "movie_2_poster.jpg should serve 200")
+            # Wait for healing to complete (max 2 seconds)
+            heal_complete.wait(timeout=2.0)
             
-            resp = client.get('/static/hero_cache/movie_2_backdrop.jpg')
-            self.assertEqual(resp.status_code, 200, "movie_2_backdrop.jpg should serve 200")
+            # Verify healing covered backdrop, poster AND clearart
+            self.assertGreaterEqual(len(download_calls), 4, "Should heal backdrop1, clearart1, poster2, backdrop2")
+            filenames = [call[1] for call in download_calls]
+            
+            # Check specific files were healed
+            self.assertIn('movie_1_backdrop.jpg', filenames, "Should heal movie_1_backdrop.jpg")
+            self.assertIn('movie_1_clearart.jpg', filenames, "Should heal movie_1_clearart.jpg")
+            self.assertIn('movie_2_poster.jpg', filenames, "Should heal movie_2_poster.jpg (poster coverage)")
+            self.assertIn('movie_2_backdrop.jpg', filenames, "Should heal movie_2_backdrop.jpg")
         
-        # Restore
-        self.hero_cache.download_image = orig_download
+        finally:
+            self.hero_cache.download_image = orig_download
     
     def test_old_format_without_upstream_url_heals(self):
         """Test old hero_content.json entries without *_upstream_url still heal via full refresh."""
         import json
-        import time
+        import threading
         
-        # Create cache entry in OLD format (no upstream URLs, only paths)
+        # Create cache entry in OLD format (no upstream URLs, only filenames)
         content = [{
             'rating_key': 1,
             'title': 'Old Format Movie',
-            'backdrop_url': '/static/hero_cache/movie_1_backdrop.jpg',  # Old format: just path
-            'clearart_url': '/static/hero_cache/movie_1_clearart.jpg',  # No cache_file or upstream_url
+            'backdrop_url': 'movie_1_backdrop.jpg',  # Old format: filename without upstream_url
+            'clearart_url': 'movie_1_clearart.jpg',  # No cache_file or upstream_url
             'poster_url': '/api/img/plex?url=/library/metadata/1/thumb',  # Proxy URL (not cached)
         }]
         
@@ -2011,26 +1999,24 @@ class TestHeroCacheHealing(unittest.TestCase):
             json.dump({'last_updated': '2024-01-01', 'movies': content}, f)
         
         # Mock refresh_hero_content to track if full refresh triggered
-        refresh_called = [False]
+        refresh_complete = threading.Event()
         orig_refresh = self.hero_cache.refresh_hero_content
         def mock_refresh():
-            refresh_called[0] = True
+            refresh_complete.set()
             return []  # Return empty to avoid actual Plex calls
-        self.hero_cache.refresh_hero_content = mock_refresh
         
-        # Call endpoint - should detect missing files and trigger full refresh
-        with self.app.test_client() as client:
-            resp = client.get('/api/hero/content')
-            self.assertEqual(resp.status_code, 200)
+        try:
+            self.hero_cache.refresh_hero_content = mock_refresh
+            
+            # Call get_hero_content() - should detect missing files and trigger full refresh
+            self.hero_cache.get_hero_content()
+            
+            # Wait for refresh to complete (max 2 seconds)
+            triggered = refresh_complete.wait(timeout=2.0)
+            self.assertTrue(triggered, "Old format without upstream URLs should trigger full refresh")
         
-        # Wait for background healing
-        time.sleep(0.5)
-        
-        # Verify full refresh was triggered for old format
-        self.assertTrue(refresh_called[0], "Old format without upstream URLs should trigger full refresh")
-        
-        # Restore
-        self.hero_cache.refresh_hero_content = orig_refresh
+        finally:
+            self.hero_cache.refresh_hero_content = orig_refresh
     
     def test_failed_heal_backoff(self):
         """Test failed heal uses exponential backoff (60s, 120s, ..., capped at 600s)."""
@@ -2114,14 +2100,13 @@ class TestHeroCacheHealing(unittest.TestCase):
     def test_single_flight_and_cooldown(self):
         """Test single-flight lock and cooldown prevent duplicate healing."""
         import json
-        import time
         import threading
         
         # Create cache with missing file
         content = [{
             'rating_key': 1,
             'title': 'Test Movie',
-            'backdrop_url': '/static/hero_cache/movie_1_backdrop.jpg',
+            'backdrop_url': 'movie_1_backdrop.jpg',
             'backdrop_cache_file': 'movie_1_backdrop.jpg',
             'backdrop_upstream_url': 'http://fanart.tv/backdrop.jpg',
         }]
@@ -2129,45 +2114,131 @@ class TestHeroCacheHealing(unittest.TestCase):
         with open(self.temp_json, 'w') as f:
             json.dump({'last_updated': '2024-01-01', 'movies': content}, f)
         
-        # Track healing attempts
+        # Track healing attempts with event
         heal_count = [0]
+        heal_event = threading.Event()
         orig_heal = self.hero_cache._heal_missing_images_background
+        
         def mock_heal(content, missing):
             heal_count[0] += 1
-            time.sleep(0.2)  # Slow healing
-        self.hero_cache._heal_missing_images_background = mock_heal
+            heal_event.set()
+            # Don't actually sleep - just count
         
-        # Make 5 concurrent requests - should only trigger one heal (single-flight)
-        def make_request():
+        try:
+            self.hero_cache._heal_missing_images_background = mock_heal
+            self.hero_cache._heal_cooldown = 1  # 1 second cooldown for testing
+            
+            # Make 5 concurrent calls - should only trigger one heal (single-flight)
+            def call_heal():
+                self.hero_cache.get_hero_content()
+            
+            threads = [threading.Thread(target=call_heal) for _ in range(5)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            
+            # Wait for any healing to complete
+            heal_event.wait(timeout=1.0)
+            self.assertEqual(heal_count[0], 1, "Single-flight: only one heal despite concurrent calls")
+            
+            # Immediate retry should not trigger another heal (cooldown)
+            heal_event.clear()
+            self.hero_cache.get_hero_content()
+            # Should not trigger - still in cooldown
+            self.assertEqual(heal_count[0], 1, "Cooldown: no second heal immediately after first")
+            
+            # Wait for cooldown to expire
+            import time
+            time.sleep(1.1)
+            
+            # Now should trigger another heal
+            self.hero_cache.get_hero_content()
+            heal_event.wait(timeout=1.0)
+            self.assertEqual(heal_count[0], 2, "Should heal again after cooldown expires")
+        
+        finally:
+            self.hero_cache._heal_missing_images_background = orig_heal
+            self.hero_cache._heal_cooldown = 600  # Reset to default
+    
+    def test_no_plex_token_persisted(self):
+        """Test that Plex tokens are not persisted in hero_content.json."""
+        import json
+        from unittest.mock import MagicMock, patch
+        
+        # Mock Plex service and fanart responses
+        mock_movie = {
+            'rating_key': 123,
+            'title': 'Test Movie',
+            'year': 2024,
+            'user_thumb_url': '/library/metadata/123/thumb',
+            'genres': []
+        }
+        
+        with patch.object(self.hero_cache, 'get_recently_released_movies', return_value=[mock_movie]):
+            with patch.object(self.hero_cache, 'get_rt_score_from_plex', return_value=85):
+                with patch.object(self.hero_cache, 'has_hd_clearart', return_value=True):
+                    with patch.object(self.hero_cache, 'get_fanart_images', return_value={'clearlogo': None, 'clearart': 'http://fanart.tv/clearart.jpg', 'backdrop': 'http://fanart.tv/backdrop.jpg'}):
+                        with patch.object(self.hero_cache, 'download_image', return_value='movie_123_poster.jpg'):
+                            # Run refresh
+                            self.hero_cache.refresh_hero_content()
+        
+        # Read the persisted JSON
+        self.assertTrue(self.temp_json.exists(), "hero_content.json should be created")
+        with open(self.temp_json, 'r') as f:
+            data = json.load(f)
+        
+        # Verify no X-Plex-Token in any persisted URLs
+        movies = data.get('movies', [])
+        self.assertGreater(len(movies), 0, "Should have at least one movie")
+        
+        for movie in movies:
+            for key, value in movie.items():
+                if isinstance(value, str):
+                    self.assertNotIn('X-Plex-Token', value, f"Field {key} should not contain X-Plex-Token: {value[:100]}")
+    
+    def test_get_endpoint_no_refresh_or_thread(self):
+        """Test that GET /api/hero/content triggers no refresh or background thread."""
+        import threading
+        
+        # Track if any new threads are spawned
+        initial_thread_count = threading.active_count()
+        
+        # Track if refresh_hero_content is called
+        refresh_called = [False]
+        orig_refresh = self.hero_cache.refresh_hero_content
+        def mock_refresh():
+            refresh_called[0] = True
+            return []
+        self.hero_cache.refresh_hero_content = mock_refresh
+        
+        # Track if get_hero_content is called
+        get_called = [False]
+        orig_get = self.hero_cache.get_hero_content
+        def mock_get():
+            get_called[0] = True
+            return []
+        self.hero_cache.get_hero_content = mock_get
+        
+        try:
+            # Call endpoint
             with self.app.test_client() as client:
-                client.get('/api/hero/content')
+                resp = client.get('/api/hero/content')
+                self.assertEqual(resp.status_code, 200)
+            
+            # Verify no refresh was triggered
+            self.assertFalse(refresh_called[0], "Endpoint should not trigger refresh_hero_content")
+            
+            # Verify no get_hero_content was called (no healing)
+            self.assertFalse(get_called[0], "Endpoint should not trigger hero_cache.get_hero_content")
+            
+            # Verify no new threads were spawned
+            final_thread_count = threading.active_count()
+            self.assertEqual(initial_thread_count, final_thread_count, "Endpoint should not spawn background threads")
         
-        threads = [threading.Thread(target=make_request) for _ in range(5)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        
-        time.sleep(0.5)
-        self.assertEqual(heal_count[0], 1, "Single-flight: only one heal despite concurrent requests")
-        
-        # Immediate retry should not trigger another heal (cooldown)
-        with self.app.test_client() as client:
-            client.get('/api/hero/content')
-        time.sleep(0.2)
-        self.assertEqual(heal_count[0], 1, "Cooldown: no second heal immediately after first")
-        
-        # Wait for cooldown to expire
-        time.sleep(1.0)
-        
-        # Now should trigger another heal
-        with self.app.test_client() as client:
-            client.get('/api/hero/content')
-        time.sleep(0.3)
-        self.assertEqual(heal_count[0], 2, "Should heal again after cooldown expires")
-        
-        # Restore
-        self.hero_cache._heal_missing_images_background = orig_heal
+        finally:
+            self.hero_cache.refresh_hero_content = orig_refresh
+            self.hero_cache.get_hero_content = orig_get
 
 
 if __name__ == '__main__':
