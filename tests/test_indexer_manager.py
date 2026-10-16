@@ -1269,6 +1269,59 @@ def test_retry_after_http_date():
     assert 295 <= seconds <= 305
 
 
+def test_429_http_date_end_to_end():
+    """End-to-end 429 with HTTP-date Retry-After through search path."""
+    from app.indexer_manager import IndexerManager
+    from datetime import datetime, timezone, timedelta
+    from email.utils import formatdate
+    
+    settings_mock = Mock()
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Test',
+                    'url': 'http://test.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 10,
+                }
+            ]
+        return default
+    
+    settings_mock.get.side_effect = settings_get
+    
+    # Create HTTP-date 5 minutes in the future
+    future = datetime.now(timezone.utc) + timedelta(minutes=5)
+    http_date = formatdate(future.timestamp(), usegmt=True)
+    
+    with patch('app.indexer_manager.requests.Session') as mock_session_cls:
+        mock_session = Mock()
+        mock_resp = Mock()
+        mock_resp.status_code = 429
+        mock_resp.headers = {'Retry-After': http_date}
+        mock_resp.raw = Mock()
+        mock_resp.raw.stream.return_value = [b'']
+        mock_session.get.return_value = mock_resp
+        mock_session.mount = Mock()
+        mock_session_cls.return_value = mock_session
+        
+        manager = IndexerManager(settings_mock)
+        results = manager.search(query='test', categories=[2000], limit=10)
+        
+        # Should return empty due to 429
+        assert results == []
+        
+        # Should be backed off
+        state = manager._get_state('ix1')
+        assert state.is_backed_off(time.time()) is True
+        
+        # Backoff should be approximately 300 seconds (5 minutes)
+        assert 295 <= state.backoff_seconds <= 305
+
+
 def test_exponential_backoff_no_retry_after():
     """Exponential backoff when Retry-After header is missing, with mocked clock."""
     from app.indexer_manager import IndexerManager, INITIAL_BACKOFF
@@ -1773,8 +1826,10 @@ def test_get_indexer_client_exists():
 def test_no_private_manager_access_in_main():
     """main.py must not use get_indexer_manager or private _ methods."""
     import re
+    from pathlib import Path
     
-    with open('/workspace/app/main.py', 'r') as f:
+    main_path = Path(__file__).parent.parent / 'app' / 'main.py'
+    with open(main_path, 'r') as f:
         main_content = f.read()
     
     # Check for get_indexer_manager usage
@@ -1796,8 +1851,10 @@ def test_no_private_manager_access_in_main():
 def test_no_private_manager_access_in_indexer_backend():
     """indexer_backend must not reach into manager internals."""
     import re
+    from pathlib import Path
     
-    with open('/workspace/app/indexer_backend.py', 'r') as f:
+    backend_path = Path(__file__).parent.parent / 'app' / 'indexer_backend.py'
+    with open(backend_path, 'r') as f:
         backend_content = f.read()
     
     # Check for _ method calls on manager
@@ -1880,6 +1937,7 @@ def test_prowlarr_import_routing_by_implementation():
         assert avistaz['prowlarr_id'] == '123'
         assert avistaz['url'] == ''  # Proxied entries don't store URL (item 5)
         assert avistaz['api_key'] == ''  # Proxied entries don't store key (item 5)
+        assert avistaz['rate_limited'] is True  # AvistaZ is rate-limited
         
         # 1337x (Cardigann): proxied through Prowlarr (stores only prowlarr_id)
         assert cardigann['prowlarr_proxy'] is True
