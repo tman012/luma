@@ -87,12 +87,14 @@ app = Flask(__name__,
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or _INSTALL_SECRETS['flask_secret_key']
 CORS(app)
 
-# Bot API convenience wrapper (room/title resolve → SPA play/download paths)
-try:
-    from app.bot_api import register_bot_routes
-    register_bot_routes(app)
-except Exception as _bot_api_err:
-    logger.error("Failed to register bot API routes: %s", _bot_api_err)
+# Lazy import after constants are defined
+def _register_bot_api():
+    """Register bot API routes after LUMA_SESSION_COOKIE and _INSTALL_SECRETS are available."""
+    try:
+        from app.bot_api import register_bot_routes
+        register_bot_routes(app, LUMA_SESSION_COOKIE, _INSTALL_SECRETS)
+    except Exception as _bot_api_err:
+        logger.error("Failed to register bot API routes: %s", _bot_api_err)
 
 # ---------------------------------------------------------------------------
 # Cache-Control headers for static files
@@ -122,6 +124,9 @@ _AUTOMATIONS_DISABLED = os.environ.get('LUMA_DISABLE_AUTOMATIONS', '').strip().l
 
 # Service-to-service API key (used by companion apps)
 _SERVICE_API_KEY = os.environ.get("SERVICE_API_KEY") or _INSTALL_SECRETS["service_api_key"]
+
+# Register bot API now that constants are available
+_register_bot_api()
 
 
 @app.before_request
@@ -10640,6 +10645,99 @@ def _plex_playqueue_start(play_queue_id, default_rk):
         except Exception as e:
             logger.debug("playQueue start lookup: %s", e)
     return str(default_rk), None
+
+
+def _resolve_playback_target(rating_key: int, room_id: str,
+                              resume: bool = False) -> Dict[str, Any]:
+    """Resolve room → device → service and trigger playback.
+
+    Shared helper for resolving the best playback target within a room.
+    Handles the rooms/devices add-flow: prefers devices with Plex services,
+    falls back to room-level IP/port, and triggers device wake before playback.
+    
+    Returns a dict with success/error info.
+    """
+    room = settings.get_room_by_id(room_id)
+    if not room:
+        return {'success': False, 'error': f'Room not found: {room_id}'}
+
+    device = None
+    service = None
+    client_ip = ''
+    adb_port = settings.get_default_adb_port()
+
+    # New add-flow: check for nested devices list
+    if room and isinstance(room.get('devices'), list):
+        # Prefer a device with a Plex service
+        for dev in room['devices']:
+            if not isinstance(dev, dict):
+                continue
+            for svc in (dev.get('services') or []):
+                if isinstance(svc, dict) and svc.get('type') == 'plex':
+                    device = dev
+                    break
+            if device:
+                break
+        
+        # Fall back to first device if no Plex service found
+        if not device and room['devices']:
+            device = room['devices'][0] if isinstance(room['devices'][0], dict) else None
+
+        if device:
+            client_ip = device.get('host', '')
+            adb_port = device.get('connectPort', adb_port)
+            # Prefer Plex service, fall back to first service
+            for svc in (device.get('services') or []):
+                if isinstance(svc, dict) and svc.get('type') == 'plex':
+                    service = svc
+                    break
+            if not service and device.get('services'):
+                service = device['services'][0] if isinstance(device['services'][0], dict) else None
+    
+    # Legacy format: room-level ip/adb_port
+    elif room:
+        client_ip = room.get('host') or room.get('ip', '')
+        adb_port = room.get('connectPort') or room.get('adb_port', adb_port)
+
+    if not client_ip:
+        return {'success': False, 'error': 'Could not resolve device IP for room'}
+
+    resume_offset = 0
+    if resume:
+        metadata = plex_service.get_metadata(rating_key)
+        if metadata:
+            resume_offset = metadata.get('viewOffset', 0)
+
+    # Wake device before playback
+    try:
+        from app.device_wake import ensure_device_ready
+        wake = ensure_device_ready(device or {}, room or {})
+        logger.info("Playback target wake: ok=%s room=%s", wake.get('ok'), room.get('name'))
+    except Exception as we:
+        logger.warning("Device wake failed: %s", we)
+
+    # Route to appropriate playback method
+    platform = device.get('platform', '') if device else ''
+    room_name = room.get('name', room_id)
+    svc_type = (service or {}).get('type', 'kodi')
+
+    try:
+        if svc_type == 'plex':
+            result = _play_via_plex(service or {}, rating_key, resume_offset, room_name, client_ip, adb_port, platform)
+        else:
+            result = _play_via_kodi(service or {}, rating_key, resume_offset, room_name, client_ip, adb_port, platform)
+        
+        # Extract JSON response from Flask response object
+        if hasattr(result, 'get_json'):
+            return result.get_json()
+        if isinstance(result, tuple):
+            resp, code = result
+            if hasattr(resp, 'get_json'):
+                return resp.get_json()
+        return {'success': True, 'message': f'Playing in {room_name}'}
+    except Exception as e:
+        logger.error("Playback failed for room %s: %s", room_name, e)
+        return {'success': False, 'error': str(e)}
 
 
 def _plex_deeplink_candidates(machine_id, rating_key, offset_ms, play_queue_id=None):

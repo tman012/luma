@@ -124,7 +124,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "client_secret": {"type": "string",  "default": "",    "sensitive": True,  "description": "Trakt API client secret (optional)"},
         },
     },
-    "requests": {
+    "request_portal": {
         "_type": "object",
         "enabled":           {"type": "boolean", "default": False, "sensitive": False, "description": "Enable the request page (/request)"},
         "password_hash":     {"type": "string",  "default": "",    "sensitive": True,  "description": "Hash of the shared request-page password"},
@@ -132,7 +132,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
         "movie_profile":     {"type": "string",  "default": "",    "sensitive": False, "description": "Radarr quality profile name for requests (blank = app's default)"},
         "tv_profile":        {"type": "string",  "default": "",    "sensitive": False, "description": "Sonarr quality profile name for requests (blank = app's default)"},
         "hostname":          {"type": "string",  "default": "",    "sensitive": False, "description": "Dedicated hostname that serves only the request page"},
-        "exclude_libraries": {"type": "array",   "default": ["Full Rips", "4K Movies", "4K TV", "3D", "Remux TV"], "sensitive": False, "description": "Plex libraries that do not count as available"},
+        "exclude_libraries": {"type": "array",   "default": [],    "sensitive": False, "description": "Plex libraries hidden from requester availability checks"},
     },
     "security": {
         "_type": "object",
@@ -141,7 +141,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
                         "enum": ["", "open", "pin_remote", "pin"]},
         "trusted_proxies": {"type": "string", "default": "", "sensitive": False,
                             "description": "Reverse proxies whose X-Forwarded-For / CF-Connecting-IP headers are believed (comma-separated IPs or CIDRs)"},
-        "remote_lock": {"type": "string", "default": "enforce", "enum": ["enforce", "report", "off"], "sensitive": False, "description": "Tunnel visitors from outside the home network need a session"},
+        "remote_lock": {"type": "string", "default": "report", "enum": ["enforce", "report", "off"], "sensitive": False, "description": "Tunnel visitors from outside the home network need a session (report = log-only)"},
     },
     "homeassistant": {
         "_type": "object",
@@ -1273,6 +1273,15 @@ def _migrate_automation_features(data: dict) -> bool:
     return True
 
 
+def _migrate_rename_requests_to_portal(data: dict) -> bool:
+    """Rename top-level 'requests' section to 'request_portal'."""
+    if 'requests' in data:
+        data['request_portal'] = data.pop('requests')
+        logger.info("Renamed 'requests' section to 'request_portal'")
+        return True
+    return False
+
+
 def _run_all_migrations(data: dict) -> bool:
     """Run all migrations on *data* (mutated in place).
     Returns True if any migration occurred.
@@ -1294,6 +1303,7 @@ def _run_all_migrations(data: dict) -> bool:
     changed |= _migrate_remove_dead_plex_fields(data)
     changed |= _migrate_remove_ai_and_alfred(data)
     changed |= _migrate_automation_features(data)
+    changed |= _migrate_rename_requests_to_portal(data)
     return changed
 
 

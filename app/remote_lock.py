@@ -4,13 +4,13 @@ sign-in, the request page and the static files those need.
 
 Classification (cloudflared and Caddy both connect from loopback):
   local   peer is private/loopback and there are no Cloudflare headers
-          (LAN browsers via Caddy, kiosks on the LAN IP, webhooks, sports-hub,
-          Alfred, automations)                                   -> unchanged
+          (LAN browsers via Caddy, kiosks on the LAN IP, webhooks, automations) -> unchanged
   home    via the tunnel, but CF-Connecting-IP is the home WAN IP
-          (home devices that use tflixapp.com, e.g. the kiosk app) -> unchanged
-  remote  via the tunnel from anywhere else, or a public peer      -> locked
+          (home devices using the public domain) -> unchanged
+  remote  via the tunnel from anywhere else, or a public peer -> locked
 
 Mode (settings security.remote_lock): enforce | report | off.
+Defaults to 'report' for new installs (log-only, non-blocking).
 """
 from __future__ import annotations
 
@@ -29,7 +29,8 @@ logger = logging.getLogger(__name__)
 _settings = None
 _home: Set[str] = set()
 _home_lock = threading.Lock()
-_STATE = '/app/data/remote_lock.json'
+_HOME_MAX_SIZE = 10  # Keep only the 10 most recent home IPs
+_state_path = None  # Set during init_app
 
 _OPEN_API = {
     '/api/auth/login', '/api/auth/me', '/api/auth/check-user', '/api/auth/logout', '/api/auth/register',
@@ -41,8 +42,9 @@ _LOCKED_PAGES = ('/search', '/legacy/', '/browse_libraries', '/browse_media', '/
 
 
 def mode() -> str:
-    m = (_settings.get('security.remote_lock') if _settings else '') or 'enforce'
-    return m if m in ('enforce', 'report', 'off') else 'enforce'
+    """Get remote_lock mode from settings. Defaults to 'report' (log-only)."""
+    m = (_settings.get('security.remote_lock') if _settings else '') or 'report'
+    return m if m in ('enforce', 'report', 'off') else 'report'
 
 
 def _private(ip: str) -> bool:
@@ -54,17 +56,25 @@ def _private(ip: str) -> bool:
 
 
 def _cf_ip() -> str:
+    """Get CF-Connecting-IP header, but only trust it from configured trusted proxies."""
+    from app import access
+    # Only trust CF headers if they come through a trusted proxy
+    if not access._trusted_peer(request, _settings):
+        return ''
     return (request.headers.get('CF-Connecting-IP') or '').strip()
 
 
 def classify() -> str:
+    """Classify the current request as 'local', 'home', or 'remote'."""
     peer = request.remote_addr or ''
     via_cf = bool(_cf_ip() or request.headers.get('Cf-Ray'))
     if _private(peer):
         if not via_cf:
             return 'local'
+        cf_ip = _cf_ip()
         with _home_lock:
-            if _cf_ip() in _home:
+            # Check if IP is in home set (stored as (ip, timestamp) tuples)
+            if any(ip == cf_ip for ip, _ in _home):
                 return 'home'
         return 'remote'
     return 'remote'
@@ -99,6 +109,7 @@ def guard():
 # --- home WAN IP -----------------------------------------------------------
 
 def _lookup() -> Optional[str]:
+    """Discover public WAN IP via Cloudflare's trace endpoint."""
     for url in ('https://1.1.1.1/cdn-cgi/trace', 'https://www.cloudflare.com/cdn-cgi/trace'):
         try:
             r = requests.get(url, timeout=5)
@@ -111,38 +122,65 @@ def _lookup() -> Optional[str]:
 
 
 def _refresh() -> None:
+    """Look up current home WAN IP and add it to the home set with LRU eviction."""
     ip = _lookup()
     if not ip:
         return
+    now = time.time()
     with _home_lock:
-        if ip not in _home:
-            logger.info('[remote-lock] home address updated')
-        _home.add(ip)
-        while len(_home) > 3:
-            _home.pop()
-        keep = sorted(_home)
-    try:
-        with open(_STATE, 'w') as f:
-            json.dump({'home': keep, 'ts': time.time()}, f)
-    except OSError:
-        pass
+        # Check if IP already exists (update timestamp)
+        existing = [item for item in _home if item[0] == ip]
+        if existing:
+            _home.discard(existing[0])
+        else:
+            logger.info('[remote-lock] home address updated: %s', ip)
+        
+        # Add with current timestamp
+        _home.add((ip, now))
+        
+        # Evict oldest IPs if over limit (keep most recent)
+        if len(_home) > _HOME_MAX_SIZE:
+            # Sort by timestamp, keep the most recent
+            sorted_ips = sorted(_home, key=lambda x: x[1], reverse=True)
+            _home.clear()
+            _home.update(sorted_ips[:_HOME_MAX_SIZE])
+    
+    _save()
 
 
 def _loop() -> None:
+    """Background thread to refresh home WAN IP every 10 minutes."""
     while True:
         time.sleep(600)
         _refresh()
 
 
 def init_app(app, settings) -> None:
-    global _settings
+    """Initialize remote lock with settings and start background refresh thread."""
+    global _settings, _state_path
     _settings = settings
+    
+    # Determine state file path from settings data directory
     try:
-        with open(_STATE) as f:
-            _home.update(json.load(f).get('home') or [])
-    except (OSError, ValueError):
-        pass
-    _refresh()
-    threading.Thread(target=_loop, name='remote-lock-home-ip', daemon=True).start()
+        from pathlib import Path
+        data_dir = Path(settings.path).parent
+        _state_path = data_dir / 'remote_lock.json'
+    except Exception:
+        logger.warning('remote_lock: could not determine state path, persistence disabled')
+        _state_path = None
+    
+    # Load existing state
+    _load()
+    
+    # Start background refresh thread (non-blocking)
+    def _background_refresh():
+        time.sleep(2)  # Small delay to not block startup
+        _refresh()
+        _loop()
+    
+    threading.Thread(target=_background_refresh, name='remote-lock-home-ip', daemon=True).start()
+    
+    # Register guard
     app.before_request(guard)
-    logger.info('[remote-lock] mode=%s, home address known=%s', mode(), bool(_home))
+    
+    logger.info('[remote-lock] mode=%s, home IPs known=%d', mode(), len(_home))

@@ -26,23 +26,34 @@ from flask import Flask, g, jsonify, request
 
 logger = logging.getLogger(__name__)
 
-_SERVICE_API_KEY = os.environ.get("SERVICE_API_KEY", "")
+# Lazy-loaded from main at init time
+_LUMA_SESSION_COOKIE = None
+_INSTALL_SECRETS = None
 
 
 def _forward_environ_headers() -> Dict[str, str]:
-    """Preserve auth when fanning out to SPA routes via test_client."""
+    """Preserve the caller's auth when fanning out to SPA routes via test_client.
+    
+    SECURITY: Never inject the server's SERVICE_API_KEY on behalf of a caller.
+    Pass the caller's own identity (X-API-Key or session cookie) through unchanged.
+    """
     headers: Dict[str, str] = {"Content-Type": "application/json"}
+    
+    # Pass through caller's API key if present (do NOT add server's key)
     incoming_key = request.headers.get("X-API-Key")
-    key = incoming_key or _SERVICE_API_KEY
-    if key:
-        headers["X-API-Key"] = key
-    token = request.cookies.get("luma_session")
+    if incoming_key:
+        headers["X-API-Key"] = incoming_key
+    
+    # Pass through caller's session cookie if present
+    cookie_name = _LUMA_SESSION_COOKIE or "luma_session"
+    token = request.cookies.get(cookie_name)
     if token:
-        headers["Cookie"] = f"luma_session={token}"
+        headers["Cookie"] = f"{cookie_name}={token}"
+    
     return headers
 
 
-def _local(app: Flask, method: str, path: str, json_body: Optional[dict] = None, timeout: int = 90):
+def _local(app: Flask, method: str, path: str, json_body: Optional[dict] = None):
     """In-process call to an existing route (same view code as the SPA)."""
     client = app.test_client()
     headers = _forward_environ_headers()
@@ -176,8 +187,11 @@ def _pick_library_item(app: Flask, query: str, media_type: Optional[str] = None)
     return score_pool(movies) or score_pool(shows)
 
 
-def register_bot_routes(app: Flask) -> None:
+def register_bot_routes(app: Flask, session_cookie: str = "luma_session", install_secrets: dict = None) -> None:
     """Attach /api/bot/* routes onto the Flask app."""
+    global _LUMA_SESSION_COOKIE, _INSTALL_SECRETS
+    _LUMA_SESSION_COOKIE = session_cookie
+    _INSTALL_SECRETS = install_secrets or {}
 
     @app.route("/api/bot/rooms", methods=["GET"])
     def bot_rooms():

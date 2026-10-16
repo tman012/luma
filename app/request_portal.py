@@ -38,7 +38,6 @@ bp = Blueprint('request_portal', __name__)
 COOKIE = 'luma_req'
 MAX_AGE = 30 * 86400
 TMDB = 'https://api.themoviedb.org/3'
-DEFAULT_EXCLUDE = ['Full Rips', '4K Movies', '4K TV', '3D', 'Remux TV']
 
 _settings = None          # SettingsManager, injected by init_app
 _record_origin = None     # main._record_origin, injected by init_app
@@ -49,16 +48,17 @@ _record_origin = None     # main._record_origin, injected by init_app
 # ---------------------------------------------------------------------------
 
 def cfg(key: str, default: Any = None) -> Any:
-    return _settings.get(f'requests.{key}', default) if _settings else default
+    return _settings.get(f'request_portal.{key}', default) if _settings else default
 
 
 def _set(partial: Dict[str, Any]) -> Tuple[bool, List[str]]:
-    return _settings.update({'requests': partial})
+    return _settings.update({'request_portal': partial})
 
 
 def excluded_libraries() -> List[str]:
-    v = cfg('exclude_libraries')
-    return list(v) if isinstance(v, list) and v else list(DEFAULT_EXCLUDE)
+    """Return the list of Plex libraries excluded from requester availability checks."""
+    v = cfg('exclude_libraries', [])
+    return list(v) if isinstance(v, list) else []
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +66,11 @@ def excluded_libraries() -> List[str]:
 # ---------------------------------------------------------------------------
 
 def _serializer() -> URLSafeTimedSerializer:
-    return URLSafeTimedSerializer(current_app.config['SECRET_KEY'] or 'luma', salt='luma-request')
+    """Create a serializer using the Flask secret key (required)."""
+    secret = current_app.config['SECRET_KEY']
+    if not secret:
+        raise RuntimeError("Flask SECRET_KEY is required for request portal")
+    return URLSafeTimedSerializer(secret, salt='luma-request')
 
 
 def current_requester() -> Optional[Dict[str, Any]]:
@@ -85,52 +89,62 @@ def current_requester() -> Optional[Dict[str, Any]]:
 
 
 def client_ip() -> str:
-    """Real client IP. CF-Connecting-IP / X-Forwarded-For are trusted only from a
-    loopback peer (cloudflared and Caddy run on the same host)."""
-    peer = request.remote_addr or ''
-    try:
-        loop = ipaddress.ip_address(peer).is_loopback
-    except ValueError:
-        loop = False
-    if loop:
-        fwd = request.headers.get('CF-Connecting-IP') or (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
-        if fwd:
-            return fwd
-    return peer
+    """Real client IP using access.client_ip with trusted_proxies from settings."""
+    from app import access
+    return access.client_ip(request, _settings)
 
 
 # ---------------------------------------------------------------------------
-# Rate limiting for the shared password
+# Rate limiting for the shared password (per-IP + soft global backoff)
 # ---------------------------------------------------------------------------
 
 _fail_lock = threading.Lock()
 _fails: Dict[str, List[float]] = {}
-WINDOW, PER_IP, GLOBAL = 15 * 60, 5, 30
+_MAX_PER_IP_ENTRIES = 1000  # Cap dict size to prevent memory exhaustion
+
+WINDOW = 15 * 60  # 15 minutes
+PER_IP_LIMIT = 5   # Max 5 failures per IP per window
+GLOBAL_SOFT_LIMIT = 50  # When global failures exceed this, add extra backoff
 
 
 def _limited(ip: str) -> int:
+    """Check if IP is rate-limited. Returns remaining cooldown seconds, or 0 if not limited."""
     now = time.time()
     with _fail_lock:
+        # Evict expired entries
         for k in list(_fails):
             _fails[k] = [t for t in _fails[k] if now - t < WINDOW]
             if not _fails[k]:
                 del _fails[k]
+        
+        # Check per-IP limit (hard limit)
         mine = _fails.get(ip, [])
-        allf = _fails.get('*', [])
-        if len(mine) >= PER_IP:
+        if len(mine) >= PER_IP_LIMIT:
             return int(WINDOW - (now - mine[0])) + 1
-        if len(allf) >= GLOBAL:
-            return int(WINDOW - (now - allf[0])) + 1
+        
+        # Soft global backoff: if total failures across all IPs > threshold, add delay
+        total_failures = sum(len(v) for v in _fails.values())
+        if total_failures >= GLOBAL_SOFT_LIMIT:
+            # Add 30 seconds of backoff when under attack
+            if mine and (now - mine[-1]) < 30:
+                return 30
+    
     return 0
 
 
 def _fail(ip: str) -> None:
+    """Record a failed authentication attempt for an IP."""
     with _fail_lock:
+        # Prevent unbounded growth if attacker varies IPs
+        if len(_fails) >= _MAX_PER_IP_ENTRIES:
+            # Evict oldest entry
+            oldest_ip = min(_fails, key=lambda k: _fails[k][0] if _fails[k] else float('inf'))
+            del _fails[oldest_ip]
         _fails.setdefault(ip, []).append(time.time())
-        _fails.setdefault('*', []).append(time.time())
 
 
 def _clear(ip: str) -> None:
+    """Clear failed attempts for an IP after successful auth."""
     with _fail_lock:
         _fails.pop(ip, None)
 
