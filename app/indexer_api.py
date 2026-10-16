@@ -56,8 +56,23 @@ GUARD_LIMITS = {
     'query_ttl_background': 3 * 3600,   # identical background query cached 3 h
     'query_ttl_interactive': 900,       # identical user query cached 15 min
     'min_interval_s': 2.0,          # spacing between requests to one indexer
-    'unscoped_cooldown_s': 3600,    # pause after a 400/429 without Retry-After or Prowlarr disabledTill
+    # Pause after a 400/429 when the answer has no Retry-After and Prowlarr
+    # set no disabledTill. Each consecutive 400/429 from the same indexer
+    # doubles it, up to cooldown_max_s; a successful search resets the streak.
+    'cooldown_429_s': 3600,         # 429, any indexer
+    'cooldown_400_s': 900,          # 400, most indexers
+    'cooldown_400_strict_s': 3600,  # 400 from a strict tracker (below) or an unscoped search
+    'cooldown_max_s': 6 * 3600,
+    # Strict trackers, matched on Prowlarr's definitionName / implementation
+    # (case-insensitive) or the host of the indexer's site URL, never on the
+    # display name alone. AvistaZ family (AvistaZ, PrivateHD, PixelHD, CinemaZ,
+    # ExoticaZ) and IPTorrents.
+    'strict_400_definitions': ('avistaz', 'privatehd', 'pixelhd', 'cinemaz', 'exoticaz', 'iptorrents'),
+    'strict_400_hosts': ('avistaz.to', 'privatehd.to', 'pixelhd.me', 'cinemaz.to', 'exoticaz.to',
+                         'iptorrents.com', 'iptorrents.me'),
 }
+LOADED_COOLDOWN_MAX_S = 24 * 3600    # a saved cooldown never reaches further than this
+LOG_BODY_MAX = 300                   # characters of a 400 body written to the log
 _INDEXER_STATUS_TTL = 60             # seconds to cache /api/v1/indexerstatus
 UNSCOPED = -1                        # pseudo-indexer for a search across all indexers
 
@@ -66,6 +81,7 @@ UNSCOPED = -1                        # pseudo-indexer for a search across all in
 _guard_log: Dict[int, List[list]] = {}
 _guard_buckets: Dict[int, List[float]] = {}
 _guard_cooldown: Dict[int, float] = {}
+_guard_streak: Dict[int, int] = {}   # consecutive 400/429 answers per indexer
 _guard_loaded = [False]
 
 GUARD_FILENAME = 'indexer_guard.json'
@@ -80,6 +96,7 @@ def _guard_reset_memory() -> None:
     _guard_log.clear()
     _guard_buckets.clear()
     _guard_cooldown.clear()
+    _guard_streak.clear()
     _guard_loaded[0] = False
 
 
@@ -129,7 +146,7 @@ def _guard_load() -> None:
         quarantine(path, f'unreadable: {e}', logger)
         _guard_fail_closed('state file unreadable')
         return
-    sections = ('log', 'buckets', 'cooldown')
+    sections = ('log', 'buckets', 'cooldown', 'streak')
     if not isinstance(raw, dict) or any(not isinstance(raw.get(k, {}), dict) for k in sections):
         quarantine(path, 'wrong shape', logger)
         _guard_fail_closed('state file has the wrong shape')
@@ -171,12 +188,20 @@ def _guard_load() -> None:
                 _guard_buckets[ix] = [0.0, time.time()]   # unknown: treat as empty, not full
             continue
         _guard_buckets[ix] = [float(tokens), ts]
+    now = time.time()
     for k, v in raw.get('cooldown', {}).items():
         ix, ts = _key(k), _valid_ts(v)
         if ix is None or ts is None:
             dropped += 1
             continue
-        _guard_cooldown[ix] = ts
+        # A clock jump or a bad write must not park an indexer for years.
+        _guard_cooldown[ix] = min(ts, now + (FAIL_CLOSED_S if ix == FAIL_CLOSED else LOADED_COOLDOWN_MAX_S))
+    for k, v in raw.get('streak', {}).items():
+        ix = _key(k)
+        if ix is None or isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= 64:
+            dropped += 1
+            continue
+        _guard_streak[ix] = v
     if dropped:
         logger.warning('Tracker guard state: dropped %d invalid entr%s', dropped, 'y' if dropped == 1 else 'ies')
 
@@ -188,11 +213,50 @@ def _guard_save() -> None:
         'log': {str(k): v for k, v in _guard_log.items()},
         'buckets': {str(k): v for k, v in _guard_buckets.items()},
         'cooldown': {str(k): v for k, v in _guard_cooldown.items()},
+        'streak': {str(k): v for k, v in _guard_streak.items() if v},
     }
     try:
         atomic_write_json(_guard_path(), state)
     except OSError as e:
         logger.warning('Tracker guard state not saved: %s', e)
+
+
+_SECRET_PATTERNS = [
+    re.compile(r'(?i)((?:api[_-]?key|apikey|passkey|token|secret|password|auth|cookie|sid|uid|pid)'
+               r'["\']?\s*[=:]\s*["\']?)[^\s&"\'<>,;]+'),
+    re.compile(r'(?i)(bearer\s+)[^\s"\'<>,;]+'),
+    re.compile(r'()\b[A-Za-z0-9]{24,}\b'),          # long keys and hashes
+]
+
+
+def _redacted_snippet(text: str, limit: int = LOG_BODY_MAX) -> str:
+    """*text* for a log line: secrets and keys replaced, one line, truncated."""
+    out = ' '.join((text or '').split())
+    for pat in _SECRET_PATTERNS:
+        out = pat.sub(lambda m: m.group(1) + '[redacted]', out)
+    return out if len(out) <= limit else out[:limit] + '...'
+
+
+def _indexer_identity(ix: dict) -> tuple:
+    """(definition/implementation names, site hosts) of a Prowlarr indexer."""
+    from urllib.parse import urlsplit
+    names = {str(ix.get(k) or '').strip().lower() for k in ('definitionName', 'implementation')} - {''}
+    urls = list(ix.get('indexerUrls') or [])
+    for f in ix.get('fields') or []:
+        if isinstance(f, dict) and f.get('name') in ('baseUrl', 'definitionFile'):
+            if f.get('name') == 'definitionFile' and f.get('value'):
+                names.add(str(f['value']).strip().lower())
+            elif f.get('value'):
+                urls.append(f['value'])
+    hosts = set()
+    for u in urls:
+        try:
+            h = (urlsplit(str(u)).hostname or '').lower().rstrip('.')
+        except ValueError:
+            h = ''
+        if h:
+            hosts.add(h[4:] if h.startswith('www.') else h)
+    return names, hosts
 
 
 def _retry_after_seconds(value: Optional[str], now: float) -> Optional[float]:
@@ -458,6 +522,8 @@ class ProwlarrClient:
                     'name': ix.get('name') or f"Indexer {ix['id']}",
                     'enabled': bool(ix.get('enable', True)),
                 })
+                self._ix_meta = getattr(self, '_ix_meta', None) or {}
+                self._ix_meta[int(ix['id'])] = _indexer_identity(ix)
             return sorted(out, key=lambda i: i['name'].lower())
         except Exception as e:
             logger.error(f'Prowlarr get_indexers failed: {e}')
@@ -522,6 +588,20 @@ class ProwlarrClient:
             own = max(_guard_cooldown.get(int(ix), 0.0), _guard_cooldown.get(FAIL_CLOSED, 0.0))
         till = max(self._indexer_backoffs().get(int(ix)) or 0.0, own)
         return till if till > now else None
+
+    def _is_strict_tracker(self, ix: int) -> bool:
+        """Whether *ix* is in GUARD_LIMITS' strict-tracker list (by Prowlarr
+        definition, implementation or site host)."""
+        if ix < 0:
+            return False
+        meta = getattr(self, '_ix_meta', None) or {}
+        if int(ix) not in meta:
+            self.get_indexers()      # Prowlarr's own config; never reaches a tracker
+            meta = getattr(self, '_ix_meta', None) or {}
+        names, hosts = meta.get(int(ix), (set(), set()))
+        if names & set(GUARD_LIMITS['strict_400_definitions']):
+            return True
+        return any(h == s or h.endswith('.' + s) for h in hosts for s in GUARD_LIMITS['strict_400_hosts'])
 
     def _indexer_name(self, ix: int) -> str:
         names = getattr(self, '_ix_names', None) or {}
@@ -615,6 +695,8 @@ class ProwlarrClient:
         resp.raise_for_status()
         items = resp.json()
         with _budget_state_guard:
+            if _guard_streak.pop(ix, 0):
+                _guard_save()            # a good answer ends the 400/429 streak
             _query_cache[cache_key] = (time.time(), items)
             if len(_query_cache) > 500:
                 for k, _ in sorted(_query_cache.items(), key=lambda kv: kv[1][0])[:100]:
@@ -630,19 +712,34 @@ class ProwlarrClient:
 
     def _start_cooldown(self, ix: int, resp) -> None:
         """After a 400/429: no searches to *ix* until Retry-After (seconds or
-        HTTP-date), else Prowlarr's disabledTill, else unscoped_cooldown_s.
-        Persisted, so a restart keeps it."""
+        HTTP-date), else Prowlarr's disabledTill, else the GUARD_LIMITS
+        fallback (429: 1 h; 400: 1 h strict tracker or unscoped, 15 min
+        otherwise), doubled for each earlier consecutive 400/429 and capped at
+        cooldown_max_s. Cooldown and streak are persisted."""
         now = time.time()
+        status = resp.status_code
+        if status == 400:
+            logger.warning('%s (id %s) answered 400: %s', self._indexer_name(ix), ix,
+                           _redacted_snippet(getattr(resp, 'text', '') or ''))
         headers = getattr(resp, 'headers', None) or {}
         wait = _retry_after_seconds(headers.get('Retry-After'), now)
-        if wait is not None:
-            until = now + wait
-        else:
+        tills = []
+        if wait is None:
             backoffs = self._indexer_backoffs()
             tills = [t for t in (backoffs.values() if ix == UNSCOPED else [backoffs.get(ix) or 0.0]) if t > now]
-            until = max(tills) if tills else now + GUARD_LIMITS['unscoped_cooldown_s']
+        strict = status == 400 and (ix == UNSCOPED or self._is_strict_tracker(ix))
         with _budget_state_guard:
             _guard_load()
+            streak = _guard_streak.get(ix, 0)
+            _guard_streak[ix] = streak + 1
+            if wait is not None:
+                until = now + wait
+            elif tills:
+                until = max(tills)
+            else:
+                base = GUARD_LIMITS['cooldown_429_s' if status == 429 else
+                                    'cooldown_400_strict_s' if strict else 'cooldown_400_s']
+                until = now + min(base * 2 ** min(streak, 16), GUARD_LIMITS['cooldown_max_s'])
             _guard_cooldown[ix] = max(until, _guard_cooldown.get(ix, 0.0))
             _guard_save()
         self._log_skip_once(ix, 'cooldown', round(until),

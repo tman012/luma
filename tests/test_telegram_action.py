@@ -54,6 +54,8 @@ def test_link_uses_full_hmac_sha256_with_secret_key(env):
 
 def test_get_shows_confirm_page_and_changes_nothing(env, monkeypatch):
     client, uid, _ = env
+    user_auth.set_user_status(uid, 'pending')
+    _set_plex(uid, 'pending')
     calls = []
     monkeypatch.setattr(user_auth, 'save_user_settings', lambda *a, **k: calls.append(a))
     monkeypatch.setattr(user_auth, 'approve_user', lambda *a, **k: calls.append(a))
@@ -207,3 +209,95 @@ def test_failed_action_releases_link_for_retry(env, monkeypatch):
     assert r.status_code == 500 and b'already been used' not in r.data and b'Try the link again' in r.data
     monkeypatch.setattr(user_auth, 'save_user_settings', lambda *a: None)
     assert client.post(PATH, data=f, environ_base=REMOTE).status_code == 200
+
+
+def _set_plex(uid, status):
+    user_auth.save_user_settings(uid, {'plex_access_status': status})
+
+
+def test_partial_write_keeps_link_used_and_replay_is_harmless(env, monkeypatch):
+    """approve_plex saves, then fails; a deny follows; replaying the approve
+    link must not undo the deny."""
+    client, uid, state = env
+    _set_plex(uid, 'pending')
+    real_save = user_auth.save_user_settings
+
+    def save_then_fail(u, s):
+        real_save(u, s)
+        raise RuntimeError('crashed after the write')
+
+    monkeypatch.setattr(user_auth, 'save_user_settings', save_then_fail)
+    _, approve = _fields('approve_plex', uid)
+    r = client.post(PATH, data=approve, environ_base=REMOTE)
+    assert r.status_code == 500 and b'Try the link again' not in r.data
+    assert _settings(uid)['plex_access_status'] == 'approved'
+    monkeypatch.setattr(user_auth, 'save_user_settings', real_save)
+
+    _, deny = _fields('deny_plex', uid)
+    assert client.post(PATH, data=deny, environ_base=REMOTE).status_code == 200
+    assert _settings(uid)['plex_access_status'] == 'denied'
+
+    r = client.post(PATH, data=approve, environ_base=REMOTE)
+    assert r.status_code in (401, 410)          # still used: never released
+    assert _settings(uid)['plex_access_status'] == 'denied'
+    # even if the link were released, the precondition protects the deny
+    action_tokens.release(state, approve['nonce'])
+    r = client.post(PATH, data=approve, environ_base=REMOTE)
+    assert r.status_code == 409 and b'Already Handled' in r.data
+    assert _settings(uid)['plex_access_status'] == 'denied'
+    assert action_tokens.check('k' * 40, approve, state) == (None, 'used')   # consumed
+
+
+@pytest.mark.parametrize('action,setup', [
+    ('approve_user', lambda uid: user_auth.set_user_status(uid, 'active')),
+    ('deny_user', lambda uid: user_auth.set_user_status(uid, 'active')),
+    ('approve_plex', lambda uid: _set_plex(uid, 'approved')),
+    ('approve_plex', lambda uid: _set_plex(uid, 'denied')),
+    ('deny_plex', lambda uid: _set_plex(uid, 'denied')),
+])
+def test_handled_request_shows_already_handled(env, action, setup):
+    client, uid, state = env
+    setup(uid)
+    before = (user_auth.get_user_by_id(uid), _settings(uid))
+    _, f = _fields(action, uid)
+    r = client.get(PATH, query_string=f, environ_base=REMOTE)
+    assert r.status_code == 409 and b'<form' not in r.data
+    r = client.post(PATH, data=f, environ_base=REMOTE)
+    assert r.status_code == 409 and b'already handled' in r.data
+    assert (user_auth.get_user_by_id(uid), _settings(uid)) == before
+    assert action_tokens.check('k' * 40, f, state) == (None, 'used')
+
+
+@pytest.mark.parametrize('action', ['approve_user', 'deny_user'])
+def test_pending_account_actions_still_work(env, action):
+    client, uid, _ = env
+    user_auth.set_user_status(uid, 'pending')
+    _, f = _fields(action, uid)
+    assert client.post(PATH, data=f, environ_base=REMOTE).status_code == 200
+    u = user_auth.get_user_by_id(uid)
+    assert (u and u['status']) == ('active' if action == 'approve_user' else None)
+
+
+def test_quarantine_and_cutoff_happen_under_file_lock(env, monkeypatch):
+    _, uid, state = env
+    import app.paths as paths
+    seen = []
+    real_q, real_save = paths.quarantine, action_tokens._save
+    monkeypatch.setattr(paths, 'quarantine', lambda *a, **k: (seen.append(action_tokens._held.depth), real_q(*a, **k))[1])
+    monkeypatch.setattr(action_tokens, '_save', lambda *a: (seen.append(action_tokens._held.depth), real_save(*a))[1])
+    (state / action_tokens.NONCE_FILENAME).write_text('{broken')
+    _, f = _fields('deny_plex', uid)
+    action_tokens.check('k' * 40, f, state)
+    assert seen and all(d >= 1 for d in seen)
+    assert action_tokens._held.depth == 0
+
+
+def test_quarantine_names_are_unique(tmp_path):
+    from app.paths import quarantine
+    names = set()
+    for _ in range(3):
+        p = tmp_path / 'state.json'
+        p.write_text('x')
+        names.add(quarantine(p, 'test').name)
+    assert len(names) == 3
+    assert all(re.fullmatch(r'state\.json\.bad-\d+-\d+-\d+', n) for n in names)

@@ -9909,6 +9909,8 @@ def admin_telegram_action():
         u = user_auth.get_user_by_id(tok['uid'])
         if not u:
             return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
+        if not _admin_action_pending(tok['action'], u):
+            return _admin_already_handled(u)
         title, question, button = _ADMIN_ACTION_LABELS[tok['action']]
         fields = {k: request.args.get(k, '') for k in ('action', 'uid', 'exp', 'nonce', 'sig')}
         return _admin_action_page(title, question.format(name=u['name']), tok['action'].startswith('approve'),
@@ -9927,14 +9929,22 @@ def admin_telegram_action():
     if tok is None:
         return _admin_link_error(reason)
     action, uid = tok['action'], tok['uid']
+    # The link is released for a retry only when the failure came before any
+    # write, or the stored state is provably unchanged. Otherwise it stays
+    # used: releasing it would let an old approve link undo a later deny.
+    attempted, before = False, None
     try:
+        u = user_auth.get_user_by_id(uid)
+        if not u:
+            return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
+        if not _admin_action_pending(action, u):
+            return _admin_already_handled(u)
+        name = u['name']
+        before = _admin_action_state(uid)
+        attempted = True
         if action == 'approve_user':
-            ok = user_auth.approve_user(uid)
-            if not ok:
-                return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
-            u = user_auth.get_user_by_id(uid)
-            name = u['name'] if u else '?'
-            if u and u.get('email'):
+            user_auth.approve_user(uid)
+            if u.get('email'):
                 try:
                     _send_approval_email(u['email'], name)
                 except Exception:
@@ -9943,17 +9953,10 @@ def admin_telegram_action():
             return _admin_action_page('Account Approved', f'{name} has been approved and can now sign in.')
 
         if action == 'deny_user':
-            u = user_auth.get_user_by_id(uid)
-            name = u['name'] if u else '?'
-            if not user_auth.deny_user(uid):
-                return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
+            user_auth.deny_user(uid)
             logger.info(f"User {uid} denied via Telegram link")
             return _admin_action_page('Account Denied', f'{name} has been denied and removed.', False)
 
-        u = user_auth.get_user_by_id(uid)
-        if not u:
-            return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
-        name = u['name']
         if action == 'approve_plex':
             user_auth.save_user_settings(uid, {'use_shared_server': True, 'plex_access_status': 'approved'})
             if u.get('email'):
@@ -9967,14 +9970,45 @@ def admin_telegram_action():
         logger.info(f"User {uid} denied Plex access via Telegram link")
         return _admin_action_page('Access Denied', f'{name} was denied shared Plex access.', False)
     except Exception as e:
-        logger.error(f"admin_telegram_action error: {e}")
+        unchanged = not attempted
+        if attempted:
+            try:
+                unchanged = _admin_action_state(uid) == before
+            except Exception:
+                unchanged = False
+        logger.error(f"admin_telegram_action error (state unchanged: {unchanged}): {e}")
+        if not unchanged:
+            return _admin_action_page('Error', 'The change was saved, but a later step failed. '
+                                      'Check the request in Luma.', False, 500)
         try:
             action_tokens.release(_action_token_dir(), tok['nonce'])
             retry = 'Try the link again.'
         except OSError:
             retry = 'Open the request in Luma instead.'
-        return _admin_action_page('Error', f'Something went wrong; the action may not have finished. {retry}',
-                                  False, 500)
+        return _admin_action_page('Error', f'Nothing was changed. {retry}', False, 500)
+
+
+def _admin_action_state(uid: int):
+    """What a Telegram action can change: the account row and user settings."""
+    return user_auth.get_user_by_id(uid), user_auth.get_user_settings(uid)
+
+
+def _admin_action_pending(action: str, user: dict) -> bool:
+    """Whether a Telegram link's action still applies to this user.
+
+    Approvals and account denials need a pending request. Denying Plex access
+    also works after an approval (it revokes it), but not twice."""
+    if action in ('approve_user', 'deny_user'):
+        return user.get('status') == 'pending'
+    plex = user_auth.get_user_settings(user['id']).get('plex_access_status')
+    if action == 'approve_plex':
+        return plex == 'pending'
+    return plex != 'denied'
+
+
+def _admin_already_handled(user: dict):
+    return _admin_action_page('Already Handled',
+                              f"This request for {user['name']} was already handled.", False, 409)
 
 
 # ── App version endpoint (used by KioskHub wrapper for auto-reload) ──────────
