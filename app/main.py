@@ -87,6 +87,13 @@ app = Flask(__name__,
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or _INSTALL_SECRETS['flask_secret_key']
 CORS(app)
 
+# Bot API convenience wrapper (room/title resolve → SPA play/download paths)
+try:
+    from app.bot_api import register_bot_routes
+    register_bot_routes(app)
+except Exception as _bot_api_err:
+    logger.error("Failed to register bot API routes: %s", _bot_api_err)
+
 # ---------------------------------------------------------------------------
 # Cache-Control headers for static files
 # ---------------------------------------------------------------------------
@@ -929,6 +936,12 @@ class TMDBClient:
 
 # Initialize TMDB client
 tmdb = TMDBClient(settings.get('apis.tmdb.api_key'))
+
+# Remote lock (tunnel visitors need a session) + request page for friends and family
+from app import remote_lock as _remote_lock
+from app import request_portal as _request_portal
+_remote_lock.init_app(app, settings)
+_request_portal.init_app(app, settings)
 
 # Routes — React SPA helper
 def _serve_spa():

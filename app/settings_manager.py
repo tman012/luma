@@ -124,6 +124,16 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "client_secret": {"type": "string",  "default": "",    "sensitive": True,  "description": "Trakt API client secret (optional)"},
         },
     },
+    "requests": {
+        "_type": "object",
+        "enabled":           {"type": "boolean", "default": False, "sensitive": False, "description": "Enable the request page (/request)"},
+        "password_hash":     {"type": "string",  "default": "",    "sensitive": True,  "description": "Hash of the shared request-page password"},
+        "password_version":  {"type": "integer", "default": 1,     "sensitive": False, "description": "Bumped when the password changes (signs requesters out)", "min": 1},
+        "movie_profile":     {"type": "string",  "default": "",    "sensitive": False, "description": "Radarr quality profile name for requests (blank = app's default)"},
+        "tv_profile":        {"type": "string",  "default": "",    "sensitive": False, "description": "Sonarr quality profile name for requests (blank = app's default)"},
+        "hostname":          {"type": "string",  "default": "",    "sensitive": False, "description": "Dedicated hostname that serves only the request page"},
+        "exclude_libraries": {"type": "array",   "default": ["Full Rips", "4K Movies", "4K TV", "3D", "Remux TV"], "sensitive": False, "description": "Plex libraries that do not count as available"},
+    },
     "security": {
         "_type": "object",
         "access_mode": {"type": "string", "default": "", "sensitive": False,
@@ -131,6 +141,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
                         "enum": ["", "open", "pin_remote", "pin"]},
         "trusted_proxies": {"type": "string", "default": "", "sensitive": False,
                             "description": "Reverse proxies whose X-Forwarded-For / CF-Connecting-IP headers are believed (comma-separated IPs or CIDRs)"},
+        "remote_lock": {"type": "string", "default": "enforce", "enum": ["enforce", "report", "off"], "sensitive": False, "description": "Tunnel visitors from outside the home network need a session"},
     },
     "homeassistant": {
         "_type": "object",
