@@ -29,35 +29,6 @@ from app.explore_cache import explore_cache
 from app.fast_search import fast_search_index
 
 
-# Module-level helper for TMDb spelling correction logic
-def _tmdb_needs_spelling_correction(results, query_str):
-    """
-    Check if TMDb results are weak enough to warrant spelling correction.
-    Triggers on: 0-2 results OR no top-3 title contains/starts-with query.
-    """
-    if isinstance(results, dict):
-        # For /search endpoint (dict with multi/movies/tv_shows)
-        total = sum(len(results.get(k, [])) for k in ['multi', 'movies', 'tv_shows'])
-        if total <= 2:
-            return True
-        query_lower = query_str.lower()
-        for result_list in [results.get('multi', []), results.get('movies', []), results.get('tv_shows', [])]:
-            for item in result_list[:3]:
-                title = (item.get('title') or item.get('name', '')).lower()
-                if query_lower in title or title.startswith(query_lower):
-                    return False
-        return True
-    elif isinstance(results, list):
-        # For /tmdb_match_search endpoint (list of results)
-        if len(results) <= 2:
-            return True
-        query_lower = query_str.lower()
-        for item in results[:3]:
-            title = (item.get('title') or item.get('name', '')).lower()
-            if query_lower in title or title.startswith(query_lower):
-                return False
-        return True
-    return False
 from app.upgrade_finder import UpgradeFinder, BATCH_SIZE
 
 # Import library cache
@@ -684,6 +655,36 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+# Module-level helper for TMDb spelling correction logic
+def _tmdb_needs_spelling_correction(results, query_str):
+    """
+    Check if TMDb results are weak enough to warrant spelling correction.
+    Triggers on: 0-2 results OR no top-3 title contains/starts-with query.
+    """
+    if isinstance(results, dict):
+        # For /search endpoint (dict with multi/movies/tv_shows)
+        total = sum(len(results.get(k, [])) for k in ['multi', 'movies', 'tv_shows'])
+        if total <= 2:
+            return True
+        query_lower = query_str.lower()
+        for result_list in [results.get('multi', []), results.get('movies', []), results.get('tv_shows', [])]:
+            for item in result_list[:3]:
+                title = (item.get('title') or item.get('name', '')).lower()
+                if query_lower in title or title.startswith(query_lower):
+                    return False
+        return True
+    elif isinstance(results, list):
+        # For /tmdb_match_search endpoint (list of results)
+        if len(results) <= 2:
+            return True
+        query_lower = query_str.lower()
+        for item in results[:3]:
+            title = (item.get('title') or item.get('name', '')).lower()
+            if query_lower in title or title.startswith(query_lower):
+                return False
+        return True
+    return False
+
 # TMDB API functions
 class TMDBClient:
     """Client for interacting with TMDB API."""
@@ -710,7 +711,12 @@ class TMDBClient:
 
         try:
             response = requests.get(f"{self.BASE_URL}/search/movie", params=params, timeout=10)
+            if response.status_code == 429:
+                logger.warning("TMDB search_movies hit rate limit")
+                fast_search_index._handle_tmdb_429(response)
+                return []
             response.raise_for_status()
+            fast_search_index._reset_tmdb_backoff()
             data = response.json()
             return data.get('results', [])
         except Exception as e:
@@ -733,7 +739,12 @@ class TMDBClient:
 
         try:
             response = requests.get(f"{self.BASE_URL}/search/tv", params=params, timeout=10)
+            if response.status_code == 429:
+                logger.warning("TMDB search_tv hit rate limit")
+                fast_search_index._handle_tmdb_429(response)
+                return []
             response.raise_for_status()
+            fast_search_index._reset_tmdb_backoff()
             data = response.json()
             return data.get('results', [])
         except Exception as e:
@@ -763,7 +774,12 @@ class TMDBClient:
         }
         try:
             response = requests.get(f"{self.BASE_URL}/search/multi", params=params, timeout=10)
+            if response.status_code == 429:
+                logger.warning("TMDB search_multi hit rate limit")
+                fast_search_index._handle_tmdb_429(response)
+                return []
             response.raise_for_status()
+            fast_search_index._reset_tmdb_backoff()
             return response.json().get('results', [])
         except Exception as e:
             logger.error(f"TMDB multi search error: {e}")
@@ -4132,8 +4148,11 @@ def search():
     results['people'] = raw.get('people', [])
 
     # Spelling correction fallback: retry only when results are weak
+    # Skip correction retry if we're currently rate limited
     corrected_raw = {}
-    if len(query) > 3 and _tmdb_needs_spelling_correction(raw, query):
+    if (len(query) > 3 and 
+        not fast_search_index._is_tmdb_rate_limited() and 
+        _tmdb_needs_spelling_correction(raw, query)):
         try:
             corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
             if corrected and corrected.lower() != query.lower():
@@ -4221,6 +4240,12 @@ def search():
 
     results['movies'] = ranked_movies
     results['tv_shows'] = ranked_tv
+
+    # Remove internal _corrected markers before returning
+    for item in results['movies']:
+        item.pop('_corrected', None)
+    for item in results['tv_shows']:
+        item.pop('_corrected', None)
 
     # Log search to history
     conn = None

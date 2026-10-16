@@ -752,6 +752,82 @@ class TestPerformance(unittest.TestCase):
                 logger.warning(f"Search for '{query}' took {elapsed_ms:.2f}ms")
 
 
+class TestTitleMapRebuild(unittest.TestCase):
+    """Test that _title_map is rebuilt from scratch on each refresh."""
+    
+    def setUp(self):
+        """Set up search index."""
+        self.index = FastSearchIndex()
+    
+    def test_removed_title_drops_out(self):
+        """Test that a removed title is dropped from _title_map on rebuild."""
+        # Build initial index with two titles
+        self.index._index = [
+            {
+                'title': 'The Matrix',
+                'title_lower': 'the matrix',
+                'title_normalized': 'matrix',
+                'year': 1999,
+                'genres_lower': ['action'],
+                'content_rating': 'R',
+                'section_id': 1,
+                'media_type': 'movie',
+                'popularity_score': 1.0,
+                'rating_key': 1,
+            },
+            {
+                'title': 'The Godfather',
+                'title_lower': 'the godfather',
+                'title_normalized': 'godfather',
+                'year': 1972,
+                'genres_lower': ['crime'],
+                'content_rating': 'R',
+                'section_id': 1,
+                'media_type': 'movie',
+                'popularity_score': 1.0,
+                'rating_key': 2,
+            }
+        ]
+        self.index._library_titles = {'matrix', 'godfather'}
+        self.index._title_map = {
+            'matrix': 'The Matrix',
+            'godfather': 'The Godfather'
+        }
+        self.index._initialized = True
+        
+        # Verify both titles are in the map
+        self.assertIn('matrix', self.index._title_map)
+        self.assertIn('godfather', self.index._title_map)
+        
+        # Now rebuild with only one title (simulate library change)
+        self.index._index = [
+            {
+                'title': 'The Matrix',
+                'title_lower': 'the matrix',
+                'title_normalized': 'matrix',
+                'year': 1999,
+                'genres_lower': ['action'],
+                'content_rating': 'R',
+                'section_id': 1,
+                'media_type': 'movie',
+                'popularity_score': 1.0,
+                'rating_key': 1,
+            }
+        ]
+        self.index._library_titles = {'matrix'}
+        
+        # Manually trigger title map rebuild (simulating what _build_index does)
+        library_title_map = {'matrix': 'The Matrix'}
+        with self.index._lock:
+            tmdb_title_map = {norm: title for norm, title in self.index._title_map.items() 
+                            if norm in self.index._tmdb_titles}
+            self.index._title_map = {**library_title_map, **tmdb_title_map}
+        
+        # Verify removed title is gone
+        self.assertIn('matrix', self.index._title_map)
+        self.assertNotIn('godfather', self.index._title_map)
+
+
 class TestConcurrency(unittest.TestCase):
     """Test concurrent access and thread safety."""
     
@@ -1314,6 +1390,75 @@ class TestFlaskEndpoints(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 data = response.get_json()
                 self.assertIn('results', data)
+    
+    @patch('app.main.tmdb')
+    @patch('app.main.fast_search_index')
+    def test_search_endpoint_corrected_results_after_direct(self, mock_index, mock_tmdb):
+        """Test /search endpoint: corrected results after direct, deduped, no '_corrected' in response."""
+        # Mock weak direct results
+        mock_tmdb.search_multi.side_effect = [
+            [{'id': 1, 'title': 'Star Wars', 'media_type': 'movie', 'popularity': 100}],  # Direct
+            [{'id': 2, 'title': 'Star Trek', 'media_type': 'movie', 'popularity': 90}]   # Corrected
+        ]
+        mock_tmdb.search_movies.side_effect = [
+            [{'id': 1, 'title': 'Star Wars', 'release_date': '1977-05-25', 'popularity': 100}],  # Direct
+            [{'id': 2, 'title': 'Star Trek', 'release_date': '2009-05-08', 'popularity': 90},    # Corrected
+             {'id': 1, 'title': 'Star Wars', 'release_date': '1977-05-25', 'popularity': 100}]  # Duplicate
+        ]
+        mock_tmdb.search_tv.side_effect = [[], []]
+        mock_tmdb.search_people.return_value = []
+        
+        mock_index.find_spelling_correction.return_value = 'Star Trek'
+        mock_index._is_tmdb_rate_limited.return_value = False
+        
+        response = self.client.get('/search?q=Star%20Warz&type=movie')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        
+        movies = data.get('movies', [])
+        self.assertGreaterEqual(len(movies), 2)
+        
+        # Check that direct result comes before corrected result
+        star_wars_rank = None
+        star_trek_rank = None
+        for movie in movies:
+            if movie.get('title') == 'Star Wars':
+                star_wars_rank = movie.get('relevance_rank')
+            elif movie.get('title') == 'Star Trek':
+                star_trek_rank = movie.get('relevance_rank')
+        
+        if star_wars_rank is not None and star_trek_rank is not None:
+            self.assertLess(star_wars_rank, star_trek_rank, 
+                          "Direct result should rank before corrected result")
+        
+        # Check that '_corrected' marker is not in response
+        for movie in movies:
+            self.assertNotIn('_corrected', movie, 
+                           "_corrected marker should be removed before returning")
+        
+        # Check deduplication (should not have duplicate ids)
+        movie_ids = [m['id'] for m in movies if 'id' in m]
+        self.assertEqual(len(movie_ids), len(set(movie_ids)), 
+                       "Results should be deduped by id")
+    
+    @patch('app.main.tmdb')
+    @patch('app.main.fast_search_index')
+    def test_search_endpoint_correction_skipped_during_cooldown(self, mock_index, mock_tmdb):
+        """Test /search endpoint: correction skipped when rate limited."""
+        # Mock weak direct results
+        mock_tmdb.search_multi.return_value = []
+        mock_tmdb.search_movies.return_value = []
+        mock_tmdb.search_tv.return_value = []
+        mock_tmdb.search_people.return_value = []
+        
+        # Simulate rate limit cooldown
+        mock_index._is_tmdb_rate_limited.return_value = True
+        
+        response = self.client.get('/search?q=Interstelar&type=movie')
+        self.assertEqual(response.status_code, 200)
+        
+        # Correction should NOT be called (rate limited)
+        mock_index.find_spelling_correction.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -17,16 +17,23 @@ logger = logging.getLogger(__name__)
 
 
 class LibraryCache:
-    """Manages cached library data for lightning-fast loading"""
+    """Manages cached library data for lightning-fast loading
+    
+    Cache storage: LUMA_CACHE_DIR environment variable sets the cache root (defaults to /app).
+    Library cache uses the 'library' subdirectory within the root.
+    """
 
-    def __init__(self, cache_dir: Optional[str] = None):
-        if cache_dir is None:
-            cache_dir = os.environ.get('LUMA_CACHE_DIR', '/app/cache')
-        self.cache_dir = Path(cache_dir)
+    def __init__(self, cache_root: Optional[str] = None):
+        if cache_root is None:
+            cache_root = os.environ.get('LUMA_CACHE_DIR', '/app')
+        # Use 'library' subdirectory within cache root
+        self.cache_dir = Path(cache_root) / 'library'
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
         except (OSError, PermissionError) as e:
-            logger.warning(f"library_cache: cache directory {self.cache_dir} not writable: {e}")
+            error_msg = f"library_cache: cache root {cache_root} not writable: {e}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
         self.db_path = self.cache_dir / "library_cache.db"
         self.update_interval = 60  # 1 minute for library data
         self.last_update = {}

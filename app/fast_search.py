@@ -382,8 +382,11 @@ class FastSearchIndex:
             self._sections = [sid for sid, *_ in sections]
             self._index = all_items
             self._library_titles = library_titles
-            # Update title map with library titles (preserves existing TMDb entries)
-            self._title_map.update(library_title_map)
+            # Rebuild title map from scratch: library + current TMDb titles
+            # Get current TMDb title map before clearing
+            tmdb_title_map = {norm: title for norm, title in self._title_map.items() 
+                            if norm in self._tmdb_titles}
+            self._title_map = {**library_title_map, **tmdb_title_map}
             self._last_refresh = time.time()
             self._initialized = True
 
@@ -562,7 +565,10 @@ class FastSearchIndex:
                 new_tmdb_titles = frozenset(tmdb_titles_list)
                 with self._lock:
                     self._tmdb_titles = new_tmdb_titles
-                    self._title_map.update(tmdb_title_map)  # Add TMDb titles to map
+                    # Rebuild title map from scratch: current library + new TMDb titles
+                    library_title_map = {norm: title for norm, title in self._title_map.items() 
+                                       if norm in self._library_titles}
+                    self._title_map = {**library_title_map, **tmdb_title_map}
                     self._tmdb_titles_cached = True
                     self._tmdb_cache_time = time.time()
                 logger.info(f"fast_search: cached {len(new_tmdb_titles)} TMDb popular titles for spelling correction")
