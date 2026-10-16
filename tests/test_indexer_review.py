@@ -403,7 +403,8 @@ def test_state_files_go_to_per_test_data_dir(temp_data_dir):
 
 def test_indexer_code_has_one_data_dir_helper():
     src = (ROOT / 'app' / 'indexer_manager.py').read_text()
-    assert src.count("os.environ.get('LUMA_DATA_DIR'") == 1
+    assert "os.environ.get('LUMA_DATA_DIR'" not in src
+    assert src.count('from app.paths import data_path') == 1
 
 
 def test_indexer_tests_do_not_hardcode_app_or_workspace_paths():

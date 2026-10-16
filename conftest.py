@@ -134,6 +134,16 @@ def temp_data_dir(tmp_path, monkeypatch):
     """A private data directory for one test (LUMA_DATA_DIR). Opt-in: #4's
     indexer test modules enable it with pytestmark; everything else keeps the
     session sandbox from pytest_configure."""
+    # Keep the users DB where the session put it: since round 9 the DB path
+    # follows LUMA_DATA_DIR, and a fresh dir would have no tables.
+    if not os.environ.get('DATABASE_PATH'):
+        from app.paths import resolve_database_path
+        monkeypatch.setenv('DATABASE_PATH', str(resolve_database_path()[0]))
+    import app.user_auth
+    app.user_auth.init_db()   # these tests hit routes that read the users table
+    from app import indexer_api
+    indexer_api._guard_reset_memory()   # the tracker guard follows the new data dir
+    indexer_api._query_cache.clear()
     data_dir = tmp_path / "luma_data"
     data_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv('LUMA_DATA_DIR', str(data_dir))

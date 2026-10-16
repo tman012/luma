@@ -257,6 +257,59 @@ def _guard_decide(ix: int, interactive: bool, now: float) -> Optional[str]:
     return None
 
 
+# ---- Public guard API for other search paths (indexer_manager) ----
+# One guard for every search Luma sends, whoever sends it. Proxied Prowlarr
+# entries share the Prowlarr indexer id (same tracker, same counters as
+# ProwlarrClient); direct Torznab/Newznab entries get a stable key far above
+# any Prowlarr id. State lives in this process: run gunicorn with one worker.
+DIRECT_KEY_BASE = 1 << 40
+
+
+def guard_key(indexer_id: Any, prowlarr_id: Any = None) -> int:
+    """Guard key for an indexer-manager entry."""
+    if prowlarr_id not in (None, ''):
+        try:
+            return int(prowlarr_id)
+        except (TypeError, ValueError):
+            pass
+    import zlib
+    return DIRECT_KEY_BASE + zlib.crc32(str(indexer_id).encode('utf-8'))
+
+
+def guard_blocked_until(ix: int, now: Optional[float] = None) -> Optional[float]:
+    """Until when *ix* is in a 400/429 cooldown or the fail-closed window."""
+    now = time.time() if now is None else now
+    with _budget_state_guard:
+        _guard_load()
+        till = max(_guard_cooldown.get(ix, 0.0), _guard_cooldown.get(FAIL_CLOSED, 0.0))
+    return till if till > now else None
+
+
+def guard_acquire(ix: int, interactive: bool, now: Optional[float] = None) -> Optional[str]:
+    """None when one search to *ix* may be sent now (and records it, persisted),
+    else why not: cooldown, fail-closed, or a GUARD_LIMITS cap."""
+    now = time.time() if now is None else now
+    till = guard_blocked_until(ix, now)
+    if till:
+        return f'cooldown until {datetime.fromtimestamp(till).strftime("%H:%M:%S")}'
+    with _budget_state_guard:
+        return _guard_decide(ix, interactive, now)
+
+
+def guard_start_cooldown(ix: int, retry_after: Optional[str] = None,
+                         now: Optional[float] = None) -> float:
+    """After a 400/429 from *ix*: persist a cooldown until Retry-After, else
+    unscoped_cooldown_s. Returns the end time."""
+    now = time.time() if now is None else now
+    wait = _retry_after_seconds(retry_after, now)
+    until = now + (wait if wait is not None else GUARD_LIMITS['unscoped_cooldown_s'])
+    with _budget_state_guard:
+        _guard_load()
+        _guard_cooldown[ix] = max(until, _guard_cooldown.get(ix, 0.0))
+        _guard_save()
+    return until
+
+
 def _cache_ttl(interactive: bool) -> float:
     return GUARD_LIMITS['query_ttl_interactive' if interactive else 'query_ttl_background']
 

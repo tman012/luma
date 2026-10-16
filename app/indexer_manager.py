@@ -112,8 +112,9 @@ def add_api_key(url: str, api_key: str) -> str:
 
 
 def data_dir() -> Path:
-    """Directory for indexer state files (LUMA_DATA_DIR, default /app/data)."""
-    path = Path(os.environ.get('LUMA_DATA_DIR') or '/app/data')
+    """Directory for indexer state files (app.paths.data_path)."""
+    from app.paths import data_path
+    path = Path(data_path())
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -900,38 +901,23 @@ class IndexerManager:
                 logger.debug(f'Cache hit for {config.get("name")}: {query}')
                 return cached
 
-            # Rate limiting with separate counters for interactive and background
-            if interactive:
-                used_interactive = state.requests_last_hour_interactive(now)
-                if used_interactive >= state.max_per_hour_interactive:
-                    logger.info(f'Indexer {config.get("name")} at interactive hourly limit ({used_interactive} requests)')
-                    raise IndexerRateLimitError('Interactive hourly rate limit exceeded (40/hour)')
-                
-                # Interactive searches skip the token bucket but still respect backoff
-                state.interactive_request_log.append(time.time())
-            else:
-                used_background = state.requests_last_hour_background(now)
-                if used_background >= state.max_per_hour_background:
-                    logger.info(f'Indexer {config.get("name")} at background hourly limit ({used_background} requests)')
-                    raise IndexerRateLimitError('Background hourly rate limit exceeded (20/hour)')
-                
-                # Check bucket for background searches
-                if state.bucket:
-                    if not state.bucket.take(now):
-                        logger.debug(f'Indexer {config.get("name")} token bucket empty')
-                        raise IndexerRateLimitError('Token bucket empty')
-                
-                # Reserve request slot
-                state.background_request_log.append(time.time())
-            
-            # Calculate request slot for min interval: slot = max(now, last + interval)
-            min_interval = config.get('rate_limit_min_interval', 2.0) if state.bucket else 0
-            if min_interval > 0:
-                request_slot = max(now, state.last_request_time + min_interval)
-                state.last_request_time = request_slot
-            else:
-                request_slot = now
-        
+            # Rate limits: the one tracker guard in app.indexer_api (GUARD_LIMITS:
+            # 40/h interactive, background bucket 5 + 1/180 s, 300/day, 120/h
+            # global, 400/429 cooldowns; persisted). No second limiter here.
+            from app import indexer_api as _guard
+            gkey = _guard.guard_key(indexer_id, config.get('prowlarr_id') if config.get('prowlarr_proxy') else None)
+            reason = _guard.guard_acquire(gkey, interactive, now)
+            if reason:
+                logger.info(f'Indexer {config.get("name")} search not sent: {reason}')
+                if reason.startswith('cooldown'):
+                    raise IndexerBackoffError(f'Indexer {reason}')
+                raise IndexerRateLimitError(f'Tracker guard: {reason}')
+
+            # Spacing between requests to one indexer (GUARD_LIMITS min_interval_s)
+            min_interval = _guard.GUARD_LIMITS['min_interval_s']
+            request_slot = max(now, state.last_request_time + min_interval)
+            state.last_request_time = request_slot
+
         # Phase 2: Sleep OUTSIDE the lock until request slot
         sleep_needed = request_slot - time.time()
         if sleep_needed > 0:
@@ -994,21 +980,11 @@ class IndexerManager:
             )
 
             # Handle rate limit / errors
-            if resp.status_code == 429:
-                retry_after_header = resp.headers.get('Retry-After')
-                retry_after_seconds = parse_retry_after(retry_after_header)
-                if retry_after_seconds:
-                    with state.lock:
-                        state.set_backoff(retry_after_seconds, time.time())
-                    self._save_state()  # Persist backoff
-                    logger.warning(f'Indexer {config.get("name")} 429 - Retry-After {retry_after_seconds}s')
-                    raise IndexerBackoffError(f'Rate limited (429), retry after {retry_after_seconds}s')
-                else:
-                    with state.lock:
-                        state.set_backoff_exponential(time.time())
-                    self._save_state()  # Persist backoff
-                    logger.warning(f'Indexer {config.get("name")} 429 - exponential backoff')
-                    raise IndexerBackoffError('Rate limited (429)')
+            if resp.status_code in (400, 429):
+                until = _guard.guard_start_cooldown(gkey, resp.headers.get('Retry-After'))
+                until_str = time.strftime('%H:%M:%S', time.localtime(until))
+                logger.warning(f'Indexer {config.get("name")} {resp.status_code}: no searches until {until_str}')
+                raise IndexerBackoffError(f'Rate limited ({resp.status_code}), retry after {until_str}')
 
             if resp.status_code >= 500:
                 with state.lock:
