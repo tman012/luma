@@ -1465,9 +1465,34 @@ class TestFlaskEndpoints(unittest.TestCase):
     
     def test_hero_cache_image_served(self):
         """Test that cached image is served at URL download_image returns."""
+        import tempfile
+        import shutil
         from pathlib import Path
         from app.hero_cache import hero_cache
-        from unittest.mock import Mock
+        
+        # Create temp directory for test
+        temp_dir = Path(tempfile.mkdtemp(prefix='hero_cache_test_'))
+        
+        # Save original paths
+        original_cache_dir = hero_cache.cache_dir
+        original_static_folder = self.app.static_folder
+        
+        def cleanup():
+            """Restore original paths and clean up temp directory."""
+            hero_cache.cache_dir = original_cache_dir
+            self.app.static_folder = original_static_folder
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        
+        self.addCleanup(cleanup)
+        
+        # Point both hero_cache.cache_dir and Flask app.static_folder at temp dir
+        # hero_cache writes to cache_dir (which should be .../hero_cache)
+        # Flask serves from static_folder (which should be the parent, so /static/hero_cache/ maps correctly)
+        hero_cache_subdir = temp_dir / 'hero_cache'
+        hero_cache_subdir.mkdir(parents=True, exist_ok=True)
+        
+        hero_cache.cache_dir = hero_cache_subdir
+        self.app.static_folder = str(temp_dir)
         
         # Create test image data
         test_image_data = b'\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00test_data'
@@ -1479,56 +1504,25 @@ class TestFlaskEndpoints(unittest.TestCase):
         mock_response.raw = Mock()
         mock_response.raw.read = Mock(side_effect=[test_image_data, b''])
         
-        try:
-            # Ensure cache directory exists (use /tmp if /app not writable)
-            cache_dir = Path('/app/static/hero_cache')
-            if not cache_dir.exists():
-                # Use temp directory for testing
-                import tempfile
-                cache_dir = Path(tempfile.gettempdir()) / 'hero_cache_test'
-                cache_dir.mkdir(parents=True, exist_ok=True)
-                # Temporarily override hero_cache.cache_dir
-                original_cache_dir = hero_cache.cache_dir
-                hero_cache.cache_dir = cache_dir
-            
-            # Download image (with mocked HTTP)
-            with patch.object(hero_cache.session, 'get', return_value=mock_response):
-                image_url = hero_cache.download_image('http://example.com/test.jpg', test_filename)
-            
-            # Verify download_image returned a URL
-            self.assertIsNotNone(image_url, "download_image should return a URL")
-            self.assertTrue(image_url.startswith('/static/hero_cache/'),
-                          f"Image URL should start with /static/hero_cache/, got: {image_url}")
-            
-            # Verify file was written
-            cached_file = hero_cache.cache_dir / test_filename
-            self.assertTrue(cached_file.exists(), "Image file should be cached")
-            
-            # Read cached file content
-            with open(cached_file, 'rb') as f:
-                cached_data = f.read()
-            self.assertEqual(cached_data, test_image_data, "Cached data should match original")
-            
-            # If we had to use temp directory, update the URL for Flask test
-            if str(cache_dir) != '/app/static/hero_cache':
-                # Can't test Flask serving from temp directory, restore and skip that part
-                hero_cache.cache_dir = original_cache_dir
-                cached_file.unlink(missing_ok=True)
-                return
-            
-            # Test Flask serving: GET the exact URL returned by download_image
-            response = self.client.get(image_url)
-            self.assertEqual(response.status_code, 200,
-                           f"Image should be served at {image_url}")
-            self.assertEqual(response.data, test_image_data,
-                           "Served image data should match cached data")
-            
-            # Clean up
-            cached_file.unlink(missing_ok=True)
-            
-        except (OSError, PermissionError) as e:
-            # If we can't write to either location, skip
-            self.skipTest(f"Cannot write to cache directory: {e}")
+        # Download image (with mocked HTTP)
+        with patch.object(hero_cache.session, 'get', return_value=mock_response):
+            image_url = hero_cache.download_image('http://example.com/test.jpg', test_filename)
+        
+        # Verify download_image returned a URL
+        self.assertIsNotNone(image_url, "download_image should return a URL")
+        self.assertTrue(image_url.startswith('/static/hero_cache/'),
+                      f"Image URL should start with /static/hero_cache/, got: {image_url}")
+        
+        # Verify file was written
+        cached_file = hero_cache.cache_dir / test_filename
+        self.assertTrue(cached_file.exists(), "Image file should be cached")
+        
+        # Test Flask serving: GET the exact URL returned by download_image
+        response = self.client.get(image_url)
+        self.assertEqual(response.status_code, 200,
+                       f"Image should be served at {image_url}")
+        self.assertEqual(response.data, test_image_data,
+                       "Served image data should match cached data")
 
 
 if __name__ == '__main__':

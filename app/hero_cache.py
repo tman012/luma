@@ -25,10 +25,10 @@ logger = logging.getLogger(__name__)
 
 # Configuration defaults (will be overridden by settings when available)
 # Hero cache storage: Images are served from /static/hero_cache (Flask static files).
-# Content JSON is stored in LUMA_DATA_DIR (defaults to /app/data, the persisted volume).
+# Content JSON is stored in /app/data (the in-container persisted volume).
 # Hero cache is NOT part of LUMA_CACHE_DIR.
 CACHE_DIR = Path('/app/static/hero_cache')
-CACHE_JSON = Path(os.environ.get('LUMA_DATA_DIR', '/app/data')) / 'hero_content.json'
+CACHE_JSON = Path('/app/data/hero_content.json')
 
 
 class HeroCache:
@@ -60,8 +60,7 @@ class HeroCache:
         try:
             self.cache_json.parent.mkdir(parents=True, exist_ok=True)
         except (OSError, PermissionError) as e:
-            data_dir = os.environ.get('LUMA_DATA_DIR', '/app/data')
-            logger.warning(f"hero_cache: data directory {data_dir} not writable: {e}")
+            logger.warning(f"hero_cache: data directory {self.cache_json.parent} not writable: {e}")
 
     def init_from_settings(self, settings_manager):
         """Re-initialise API keys and config from a SettingsManager instance.
