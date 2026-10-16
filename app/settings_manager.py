@@ -116,7 +116,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
                     "name":                         {"type": "string",  "description": "Display name"},
                     "type":                         {"type": "string",  "description": "torznab or newznab"},
                     "url":                          {"type": "string",  "description": "Indexer API endpoint URL"},
-                    "api_key":                      {"type": "string",  "description": "API key"},
+                    "api_key":                      {"type": "string",  "description": "API key", "sensitive": True},
                     "categories":                   {"type": "string",  "description": "Comma-separated category IDs (e.g. 2000)"},
                     "priority":                     {"type": "integer", "description": "Search priority (lower = higher priority)"},
                     "enabled":                      {"type": "boolean", "description": "Enable this indexer"},
@@ -648,7 +648,7 @@ def _mask_secrets(data: dict, schema: dict, prefix: str = "") -> dict:
                     if isinstance(item, dict):
                         masked_item = copy.deepcopy(item)
                         for sk in sensitive_keys:
-                            if sk in masked_item and masked_item[sk] and str(masked_item[sk]).strip():
+                            if sk in masked_item and masked_item[sk] and str(masked_item[sk]).strip() and masked_item[sk] != SECRET_MASK:
                                 masked_item[sk] = SECRET_MASK
                         masked_list.append(masked_item)
                     else:
@@ -658,7 +658,7 @@ def _mask_secrets(data: dict, schema: dict, prefix: str = "") -> dict:
                 result[key] = copy.deepcopy(value)
         elif isinstance(schema_entry, dict) and schema_entry.get("sensitive"):
             # Replace with mask
-            if value and str(value).strip():
+            if value and str(value).strip() and value != SECRET_MASK:
                 result[key] = SECRET_MASK
             else:
                 result[key] = ""
