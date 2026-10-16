@@ -9134,6 +9134,27 @@ def _build_hero_movies():
     return movies, boost
 
 
+_HERO_URL_FIELDS = ('poster_url', 'backdrop_url', 'clearlogo_url', 'tmdb_backdrop_url')
+
+
+def _hero_movies_for_request(movies):
+    """Copy hero movies with root-relative image URLs prefixed by request.script_root.
+
+    _build_hero_movies() caches root-relative paths so the cache is request
+    independent; the prefix is added per response so sub-path installs work.
+    """
+    root = (request.script_root or '').rstrip('/')
+    out = []
+    for m in movies:
+        m = dict(m)
+        for key in _HERO_URL_FIELDS:
+            val = m.get(key)
+            if isinstance(val, str) and val.startswith('/') and not val.startswith('//'):
+                m[key] = f"{root}{val}"
+        out.append(m)
+    return out
+
+
 # Hero Content Endpoints
 @app.route('/api/hero/content')
 def get_hero_content():
@@ -9147,7 +9168,7 @@ def get_hero_content():
         movies, boost = _build_hero_movies()
         return jsonify({
             'success': True,
-            'movies': movies,
+            'movies': _hero_movies_for_request(movies),
             'boost_mode': boost
         })
     except Exception as e:
@@ -15403,6 +15424,7 @@ def get_screensaver_movies():
         if source == 'hero':
             # Use the same movies as the Hero section
             hero_movies, _ = _build_hero_movies()
+            hero_movies = _hero_movies_for_request(hero_movies)
             movies = []
             for m in hero_movies[:limit]:
                 movies.append({
@@ -15493,7 +15515,7 @@ def manifest():
 @app.route('/sw.js')
 def service_worker():
     """Service Worker file — short cache so updates propagate quickly."""
-    resp = send_from_directory('/app/static', 'sw.js')
+    resp = send_from_directory(app.static_folder, 'sw.js')
     resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
     resp.headers['Service-Worker-Allowed'] = '/'
     return resp
@@ -17369,6 +17391,14 @@ if __name__ == '__main__':
         logger.info("✅ Fast search index started")
     except Exception as e:
         logger.error(f"❌ Failed to start fast search index: {e}")
+
+    # Hero cache refresh/heal runs only from this background scheduler,
+    # never from a request.
+    try:
+        hero_cache.start_scheduler()
+        logger.info("✅ Hero cache scheduler started")
+    except Exception as e:
+        logger.error(f"❌ Failed to start hero cache scheduler: {e}")
 
     # Start explore cache updater thread
     try:
