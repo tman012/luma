@@ -31,15 +31,15 @@ function RequestPortalCard() {
   const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
-    fetch('/api/settings')
+    fetch('/api/request/admin/settings')
       .then(r => r.json())
       .then(data => {
-        const portal = data.request_portal || {};
-        setEnabled(portal.enabled || false);
-        setHostname(portal.hostname || '');
-        setMovieProfile(portal.movie_profile || '');
-        setTvProfile(portal.tv_profile || '');
-        setExcludeLibraries((portal.exclude_libraries || []).join(', '));
+        setEnabled(data.enabled || false);
+        setHostname(data.hostname || '');
+        setMovieProfile(data.movie_profile || '');
+        setTvProfile(data.tv_profile || '');
+        const libs = Array.isArray(data.exclude_libraries) ? data.exclude_libraries : [];
+        setExcludeLibraries(libs.join(', '));
       })
       .catch(() => {});
   }, []);
@@ -57,19 +57,17 @@ function RequestPortalCard() {
       }
     }
     setBusy(true);
-    try {
+    try:
       const body: Record<string, any> = {
-        request_portal: {
-          enabled,
-          hostname,
-          movie_profile: movieProfile,
-          tv_profile: tvProfile,
-          exclude_libraries: excludeLibraries.split(',').map(s => s.trim()).filter(Boolean),
-        },
+        enabled,
+        hostname,
+        movie_profile: movieProfile,
+        tv_profile: tvProfile,
+        exclude_libraries: excludeLibraries.split(',').map(s => s.trim()).filter(Boolean),
       };
-      if (password) body.request_portal.password = password;
+      if (password) body.password = password;
       
-      const res = await fetch('/api/settings', {
+      const res = await fetch('/api/request/admin/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

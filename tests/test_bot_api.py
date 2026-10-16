@@ -115,20 +115,18 @@ class TestBotApiAuth:
                 # Non-admin should remain non-admin
                 assert data.get("is_admin") == 0
     
-    def test_non_admin_gets_403_on_admin_endpoint(self, app):
-        """Non-admin users get 403 when accessing admin-only endpoints."""
+    def test_non_admin_gets_403_on_real_admin_endpoint(self, app):
+        """Non-admin users get 403 when accessing real admin-only endpoint (Item 8)."""
         from app.bot_api import register_bot_routes
+        from app import request_portal
         
         install_secrets = {"service_api_key": "server-key"}
         register_bot_routes(app, "luma_session", install_secrets)
         
-        @app.route("/api/admin/test")
-        def admin_endpoint():
-            from flask import jsonify
-            user = getattr(g, 'current_user', None)
-            if not user or not user.get("is_admin"):
-                return jsonify({"error": "Admin required"}), 403
-            return jsonify({"success": True})
+        # Register request_portal routes
+        mock_settings = Mock()
+        mock_settings.get.return_value = {}
+        request_portal.init_app(app, mock_settings)
         
         # Non-admin user
         with app.test_request_context('/'):
@@ -136,7 +134,32 @@ class TestBotApiAuth:
             
             from app.bot_api import _local
             with patch("flask.g.current_user", g.current_user):
-                response = _local(app, "GET", "/api/admin/test")
+                # Try to access real admin endpoint
+                response = _local(app, "GET", "/api/request/admin/settings")
                 assert response.status_code == 403
                 data = response.get_json()
-                assert "Admin" in data.get("error", "")
+                assert "error" in data
+    
+    def test_non_admin_via_bot_api_cannot_reach_admin_endpoints(self, app):
+        """Non-admin via bot API can't access admin-only endpoints (Item 8)."""
+        from app.bot_api import register_bot_routes, _local
+        from app import request_portal
+        
+        install_secrets = {"service_api_key": "server-key"}
+        register_bot_routes(app, "luma_session", install_secrets)
+        
+        # Register request_portal routes
+        mock_settings = Mock()
+        mock_settings.get.return_value = {}
+        request_portal.init_app(app, mock_settings)
+        
+        # Set g.current_user to non-admin
+        with app.test_request_context('/'):
+            g.current_user = {"id": 2, "name": "regular", "is_admin": 0}
+            
+            # Call _local (bot API's internal forwarding) with non-admin user
+            with patch("flask.g.current_user", g.current_user):
+                response = _local(app, "GET", "/api/request/admin/settings")
+                
+                # Non-admin should be blocked
+                assert response.status_code == 403
