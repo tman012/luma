@@ -54,7 +54,9 @@ class HeroCache:
                 luma_cache = os.environ.get('LUMA_CACHE_DIR', '/app/cache')
                 self.cache_dir = Path(luma_cache) / 'hero'
         
-        self.cache_json = Path('/app/data/hero_content.json')
+        # Data directory for hero_content.json
+        data_dir = os.environ.get('LUMA_DATA_DIR', '/app/data')
+        self.cache_json = Path(data_dir) / 'hero_content.json'
         self.session = requests.Session()
         
         # Background healing state
