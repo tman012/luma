@@ -111,120 +111,112 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <meta name="theme-color" content="#111318">
+    <meta name="theme-color" content="#15102a">
     <meta name="color-scheme" content="dark">
     <title>Sign in - Luma</title>
     <link rel="icon" href="{{ url_for('static', filename='images/icon-192.png') }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
+        /* Mirrors the SPA theme tokens in frontend/src/index.css (@theme);
+           tests/test_login_theme_tokens.py keeps them in sync. */
         :root {
-            --surface: #111318;
-            --surface-container: #1d2024;
-            --surface-container-high: #282a2f;
-            --on-surface: #e2e2e9;
-            --on-surface-variant: #c4c6d0;
-            --outline: #8e9099;
-            --outline-variant: #44474f;
-            --primary: #adc7ff;
-            --on-primary: #002e68;
-            --error: #ffb4ab;
-            --error-container: #93000a;
-            --on-error-container: #ffdad6;
+            --color-kiosk-black: #15102a;
+            --color-glass-5: rgb(255 255 255 / 0.05);
+            --color-glass-10: rgb(255 255 255 / 0.10);
+            --color-glass-15: rgb(255 255 255 / 0.15);
+            --color-glass-20: rgb(255 255 255 / 0.20);
+            --color-accent: #3b82f6;
+            --color-accent-hover: #60a5fa;
+            --color-text-primary: rgb(255 255 255 / 0.95);
+            --color-text-secondary: rgb(255 255 255 / 0.70);
+            --color-text-muted: rgb(255 255 255 / 0.50);
+            --font-luma: system-ui, -apple-system, sans-serif;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { background: var(--surface); }
+        html, body { background: var(--color-kiosk-black); }
         body {
-            font-family: 'Google Sans Flex', 'Google Sans', Roboto, -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: var(--font-luma);
             min-height: 100vh;
             min-height: 100dvh;
             display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 24px;
-            color: var(--on-surface);
-            -webkit-font-smoothing: antialiased;
-        }
-        .card {
-            background: var(--surface-container-high);
-            border-radius: 28px;
-            padding: 40px 32px 32px;
-            width: 100%;
-            max-width: 400px;
-        }
-        .brand {
-            display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 16px;
-            margin-bottom: 32px;
+            justify-content: center;
+            padding: 24px 16px 48px;
+            color: var(--color-text-primary);
+            -webkit-font-smoothing: antialiased;
         }
-        .brand img { width: 72px; height: 72px; border-radius: 20px; }
-        .brand h1 { font-size: 28px; font-weight: 500; letter-spacing: 0; }
-        .field { margin-bottom: 20px; }
+        .brand { display: flex; justify-content: center; margin-bottom: 32px; }
+        .brand img { width: clamp(200px, 56vw, 360px); height: auto; user-select: none; }
+        .card {
+            width: 100%;
+            max-width: 400px;
+            background: var(--color-glass-5);
+            border: 1px solid var(--color-glass-10);
+            border-radius: 20px;
+            padding: 28px 24px 24px;
+        }
+        .field { margin-bottom: 18px; }
         .field label {
             display: block;
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 500;
-            letter-spacing: 0.4px;
-            color: var(--on-surface-variant);
-            margin: 0 0 6px 4px;
+            color: var(--color-text-secondary);
+            margin: 0 0 6px 2px;
         }
         .field input {
             width: 100%;
-            height: 56px;
+            height: 50px;
             padding: 0 16px;
-            background: var(--surface-container);
-            border: 1px solid var(--outline);
+            background: var(--color-glass-10);
+            border: 1px solid var(--color-glass-15);
             border-radius: 12px;
             font: inherit;
             font-size: 16px;
-            color: var(--on-surface);
+            color: var(--color-text-primary);
             transition: border-color 0.2s;
         }
-        .field input:focus { outline: none; border: 2px solid var(--primary); padding: 0 15px; }
+        .field input:focus { outline: none; border-color: var(--color-accent); }
         .remember {
             display: flex;
             align-items: center;
-            gap: 12px;
-            margin: 4px 0 28px 4px;
+            gap: 10px;
+            margin: 4px 0 24px 2px;
             font-size: 14px;
-            color: var(--on-surface-variant);
+            color: var(--color-text-secondary);
             cursor: pointer;
         }
-        .remember input { width: 18px; height: 18px; accent-color: var(--primary); }
+        .remember input { width: 18px; height: 18px; accent-color: var(--color-accent); }
         button[type="submit"] {
             width: 100%;
-            height: 48px;
-            background: var(--primary);
-            color: var(--on-primary);
+            height: 50px;
+            background: var(--color-accent);
+            color: var(--color-text-primary);
             border: none;
-            border-radius: 24px;
+            border-radius: 999px;
             font: inherit;
             font-size: 15px;
-            font-weight: 500;
+            font-weight: 600;
             cursor: pointer;
+            transition: background 0.2s;
         }
-        button[type="submit"]:hover { filter: brightness(1.06); }
-        button[type="submit"]:active { filter: brightness(0.94); }
+        button[type="submit"]:hover { background: var(--color-accent-hover); }
         .error {
-            background: var(--error-container);
-            color: var(--on-error-container);
+            background: var(--color-glass-10);
+            border: 1px solid var(--color-glass-20);
+            color: var(--color-text-primary);
             padding: 12px 16px;
             border-radius: 12px;
-            margin-bottom: 20px;
+            margin-bottom: 18px;
             font-size: 14px;
         }
     </style>
 </head>
 <body>
+    <div class="brand">
+        <img src="{{ url_for('static', filename='images/luma_text.webp') }}" alt="" draggable="false">
+    </div>
     <main class="card">
-        <div class="brand">
-            <img src="{{ url_for('static', filename='images/icon-192.png') }}" alt="">
-            <h1>Luma</h1>
-        </div>
         {% if error %}
         <div class="error{% if rate_limited %} rate-limited{% endif %}" role="alert">{{ error }}</div>
         {% endif %}

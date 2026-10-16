@@ -147,8 +147,10 @@ def test_login_responses_are_no_store(test_app):
 
 def test_login_page_theme_and_logo(test_app):
     body = test_app.test_client().get('/login').get_data(as_text=True)
-    for token in ('#111318', '#282a2f', '#adc7ff', 'Google Sans Flex', 'images/icon-192.png'):
+    for token in ('#15102a', '#3b82f6', 'images/luma_text.webp'):
         assert token in body
+    for old in ('#111318', '#282a2f', '#adc7ff', 'Google Sans'):
+        assert old not in body
     assert 'Email or username' in body and 'Sign in' in body
 
 
