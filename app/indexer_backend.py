@@ -64,7 +64,7 @@ class LumaBackendAdapter:
         result = []
         for ix in indexers:
             result.append({
-                'id': hash(ix['id']) % 1000000,  # Fake numeric ID for compatibility
+                'id': ix['id'],  # Keep as string for consistency
                 'name': ix['name'],
                 'enabled': ix['enabled'],
             })
@@ -115,6 +115,8 @@ class LumaBackendAdapter:
         Used by Sources panel, Roulette, etc.
         """
         from app.indexer_api import MOVIE_CATEGORIES_EXPANDED, TV_SPORTS_CATEGORIES, _build_search_query
+        from email.utils import parsedate_to_datetime
+        from datetime import timezone
         
         q = _build_search_query(query, year)
         categories = list(MOVIE_CATEGORIES_EXPANDED) + list(TV_SPORTS_CATEGORIES)
@@ -128,7 +130,21 @@ class LumaBackendAdapter:
                 from app.indexer_api import _parse_title
                 parsed = _parse_title(r.get('title', ''))
                 
+                # Convert RFC-822 pubDate to ISO 8601
+                pub_date_rfc = r.get('pub_date', '')
+                pub_date_iso = ''
+                if pub_date_rfc:
+                    try:
+                        dt = parsedate_to_datetime(pub_date_rfc)
+                        # Ensure UTC timezone
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        pub_date_iso = dt.isoformat()
+                    except Exception:
+                        pub_date_iso = pub_date_rfc  # Fallback to original
+                
                 out.append({
+                    'id': r.get('id', ''),  # Stable string ID
                     'title': r.get('title', ''),
                     'clean_title': parsed['clean_title'],
                     'year': parsed['year'] or '',
@@ -139,12 +155,14 @@ class LumaBackendAdapter:
                     'size': r.get('size', 0),
                     'indexer': r.get('indexer_name', ''),
                     'tracker': r.get('tracker', ''),
-                    'indexer_id': r.get('indexer_id'),
-                    'pub_date': r.get('pub_date', ''),
+                    'indexer_id': r.get('indexer_id', ''),  # String ID
+                    'pub_date': pub_date_iso,
+                    'publishDate': pub_date_iso,  # Sonarr/Radarr compatibility
                     'download_url': r.get('download_url', ''),
+                    'magneturl': r.get('magneturl', ''),
                     'info_hash': r.get('info_hash', ''),
                     'guid': r.get('guid', ''),
-                    'protocol': 'torrent',
+                    'protocol': r.get('protocol', 'torrent'),
                     'imdb_id': r.get('imdb_id', ''),
                 })
             
@@ -166,12 +184,27 @@ class LumaBackendAdapter:
         This ensures existing consumers get the exact same data shape.
         """
         from app.indexer_api import _parse_title
+        from email.utils import parsedate_to_datetime
+        from datetime import timezone
         
         normalized = []
         for r in raw_results:
             parsed = _parse_title(r.get('title', ''))
             
+            # Convert RFC-822 pubDate to ISO 8601
+            pub_date_rfc = r.get('pub_date', '')
+            pub_date_iso = ''
+            if pub_date_rfc:
+                try:
+                    dt = parsedate_to_datetime(pub_date_rfc)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    pub_date_iso = dt.isoformat()
+                except Exception:
+                    pub_date_iso = pub_date_rfc
+            
             normalized.append({
+                'id': r.get('id', ''),  # Stable string ID
                 'title': parsed['clean_title'],
                 'year': parsed['year'] or '',
                 'seeders': r.get('seeders', 0),
@@ -179,13 +212,16 @@ class LumaBackendAdapter:
                 'resolution': parsed['resolution'] or '',
                 'source': parsed['source'] or '',
                 'tracker': r.get('tracker', ''),
-                'pub_date': r.get('pub_date', ''),
+                'pub_date': pub_date_iso,
+                'publishDate': pub_date_iso,
                 'download_url': r.get('download_url', ''),
+                'magneturl': r.get('magneturl', ''),
                 'info_hash': r.get('info_hash', ''),
                 'imdb_id': r.get('imdb_id', ''),
                 'torrent_name': r.get('title', ''),
                 'guid': r.get('guid', ''),
-                'indexer_id': r.get('indexer_id'),
+                'indexer_id': r.get('indexer_id', ''),  # String ID
+                'protocol': r.get('protocol', 'torrent'),
             })
         
         return normalized

@@ -548,14 +548,14 @@ class RadarrAPI:
             logger.error(f"Release search failed for movie_id={movie_id}: {e}")
             return []
 
-    def grab_release(self, guid: str, indexer_id: int, movie_id: int = None) -> Dict:
+    def grab_release(self, guid: str, indexer_id, movie_id: int = None) -> Dict:
         """
         Grab a specific release via Radarr. Refreshes release cache first
         to avoid stale-guid errors.
 
         Args:
             guid: Release GUID from the search results
-            indexer_id: Indexer ID from the search results
+            indexer_id: Indexer ID from the search results (string or int)
             movie_id: Radarr movie ID (used to refresh cache)
 
         Returns:

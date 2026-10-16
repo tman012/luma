@@ -249,6 +249,202 @@ def test_parse_torznab_xml_tolerant():
     assert results[1]['seeders'] == 0
 
 
+def test_parse_torznab_xml_magneturl():
+    """Parse magneturl from torznab:attr and enclosure."""
+    from app.indexer_manager import IndexerManager
+    
+    settings_mock = Mock()
+    manager = IndexerManager(settings_mock)
+    
+    xml = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>From Attr</title>
+  <link>http://dl.test/1</link>
+  <guid>g1</guid>
+  <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:attr123" xmlns:torznab="http://torznab.com/schemas/2015/feed"/>
+</item>
+<item>
+  <title>From Enclosure</title>
+  <link>http://dl.test/2</link>
+  <guid>g2</guid>
+  <enclosure url="magnet:?xt=urn:btih:enc456" type="application/x-bittorrent"/>
+</item>
+</channel></rss>"""
+    
+    results = manager._parse_torznab_xml(xml)
+    
+    assert len(results) == 2
+    assert 'magnet:?xt=urn:btih:attr123' in results[0]['magneturl']
+    assert 'magnet:?xt=urn:btih:enc456' in results[1]['magneturl']
+
+
+def test_parse_torznab_xml_protocol():
+    """Derive protocol from enclosure type or magnet."""
+    from app.indexer_manager import IndexerManager
+    
+    settings_mock = Mock()
+    manager = IndexerManager(settings_mock)
+    
+    xml = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Usenet</title>
+  <link>http://dl.test/1</link>
+  <guid>g1</guid>
+  <enclosure url="http://nzb.test/1.nzb" type="application/x-nzb"/>
+</item>
+<item>
+  <title>Torrent</title>
+  <link>http://dl.test/2</link>
+  <guid>g2</guid>
+  <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:abc" xmlns:torznab="http://torznab.com/schemas/2015/feed"/>
+</item>
+</channel></rss>"""
+    
+    results = manager._parse_torznab_xml(xml)
+    
+    assert len(results) == 2
+    assert results[0]['protocol'] == 'usenet'
+    assert results[1]['protocol'] == 'torrent'
+
+
+def test_parse_torznab_xml_leechers_calculation():
+    """Calculate leechers from peers minus seeders."""
+    from app.indexer_manager import IndexerManager
+    
+    settings_mock = Mock()
+    manager = IndexerManager(settings_mock)
+    
+    xml = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>With Peers</title>
+  <link>http://dl.test/1</link>
+  <guid>g1</guid>
+  <torznab:attr name="seeders" value="50" xmlns:torznab="http://torznab.com/schemas/2015/feed"/>
+  <torznab:attr name="peers" value="150" xmlns:torznab="http://torznab.com/schemas/2015/feed"/>
+</item>
+<item>
+  <title>Direct Leechers</title>
+  <link>http://dl.test/2</link>
+  <guid>g2</guid>
+  <torznab:attr name="seeders" value="10" xmlns:torznab="http://torznab.com/schemas/2015/feed"/>
+  <torznab:attr name="leechers" value="20" xmlns:torznab="http://torznab.com/schemas/2015/feed"/>
+</item>
+</channel></rss>"""
+    
+    results = manager._parse_torznab_xml(xml)
+    
+    assert len(results) == 2
+    # peers=150, seeders=50 => leechers=100
+    assert results[0]['leechers'] == 100
+    # No peers, use leechers directly
+    assert results[1]['leechers'] == 20
+
+
+def test_stable_string_ids():
+    """Indexer results have stable string IDs from hash(indexer_id:guid)."""
+    from app.indexer_manager import IndexerManager
+    import hashlib
+    
+    settings_mock = Mock()
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Test Indexer',
+                    'url': 'http://test.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                }
+            ]
+        return default
+    
+    settings_mock.get.side_effect = settings_get
+    
+    xml_response = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Movie</title>
+  <link>http://dl.test/1</link>
+  <guid>stable-guid-123</guid>
+</item>
+</channel></rss>"""
+    
+    with patch('app.indexer_manager.requests.get') as mock_get:
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+        mock_resp.raw = Mock()
+        mock_resp.raw.read.return_value = xml_response.encode()
+        mock_resp.raise_for_status = Mock()
+        mock_get.return_value = mock_resp
+        
+        manager = IndexerManager(settings_mock)
+        results = manager.search(query='test', categories=[2000], limit=100)
+        
+        assert len(results) == 1
+        # Check ID is a stable hash
+        expected_input = "ix1:stable-guid-123"
+        expected_id = hashlib.sha256(expected_input.encode()).hexdigest()[:16]
+        assert results[0]['id'] == expected_id
+        assert isinstance(results[0]['id'], str)
+        assert len(results[0]['id']) == 16
+
+
+def test_adapter_date_conversion():
+    """Adapter converts RFC-822 pubDate to ISO 8601."""
+    from app.indexer_backend import LumaBackendAdapter
+    from app.indexer_manager import IndexerManager
+    
+    settings_mock = Mock()
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Test',
+                    'url': 'http://test.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                }
+            ]
+        return default
+    
+    settings_mock.get.side_effect = settings_get
+    
+    xml_response = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Movie 2024</title>
+  <link>http://dl.test/1</link>
+  <guid>g1</guid>
+  <pubDate>Mon, 01 Jan 2024 12:00:00 +0000</pubDate>
+</item>
+</channel></rss>"""
+    
+    with patch('app.indexer_manager.requests.get') as mock_get:
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+        mock_resp.raw = Mock()
+        mock_resp.raw.read.return_value = xml_response.encode()
+        mock_resp.raise_for_status = Mock()
+        mock_get.return_value = mock_resp
+        
+        manager = IndexerManager(settings_mock)
+        adapter = LumaBackendAdapter(manager)
+        
+        results = adapter.search_all('movie', 'movie')
+        
+        assert len(results) == 1
+        # Should be ISO 8601 format
+        assert 'T' in results[0]['publishDate']
+        assert '2024-01-01' in results[0]['publishDate']
+
+
 # ---- IndexerManager Tests ----
 
 def test_indexer_manager_list_indexers():

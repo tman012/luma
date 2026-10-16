@@ -545,6 +545,24 @@ class IndexerManager:
                     if name:
                         attrs[name] = value
 
+                # Check enclosure for magneturl and protocol
+                enclosure = item.find('enclosure')
+                enclosure_url = enclosure.get('url', '') if enclosure is not None else ''
+                enclosure_type = enclosure.get('type', '') if enclosure is not None else ''
+                
+                # Get magneturl from attr or enclosure
+                magneturl = attrs.get('magneturl', '')
+                if not magneturl and enclosure_url and enclosure_url.startswith('magnet:'):
+                    magneturl = enclosure_url
+                
+                # Derive protocol from enclosure type or magnet
+                protocol = 'torrent'  # default
+                if enclosure_type:
+                    if 'application/x-nzb' in enclosure_type:
+                        protocol = 'usenet'
+                elif magneturl:
+                    protocol = 'torrent'
+
                 # Tolerant int parsing
                 def safe_int(value, default=0):
                     if not value:
@@ -555,21 +573,29 @@ class IndexerManager:
                         return default
 
                 seeders = safe_int(attrs.get('seeders'))
-                leechers = safe_int(attrs.get('leechers', attrs.get('peers')))
+                peers = safe_int(attrs.get('peers'))
+                leechers_attr = safe_int(attrs.get('leechers'))
                 size_bytes = safe_int(attrs.get('size', size_text))
+                
+                # Calculate leechers: max(peers - seeders, leechers_attr, 0)
+                if peers > 0:
+                    leechers = max(peers - seeders, 0)
+                else:
+                    leechers = leechers_attr
 
                 results.append({
                     'title': title,
                     'download_url': link,
+                    'magneturl': magneturl,
                     'guid': guid,
                     'pub_date': pub_date,
                     'size': size_bytes,
                     'seeders': seeders,
                     'leechers': leechers,
+                    'protocol': protocol,
                     'indexer': attrs.get('indexer', ''),
                     'info_hash': attrs.get('infohash', ''),
                     'imdb_id': attrs.get('imdb', ''),
-                    'magneturl': attrs.get('magneturl', ''),
                 })
             except Exception as e:
                 # Don't let one bad item kill the whole response
@@ -776,12 +802,23 @@ class IndexerManager:
             indexer_id = config['id']
             try:
                 results = self._search_one_indexer(indexer_id, query, categories, limit, interactive)
-                # Tag results with indexer info
+                # Tag results with indexer info and create stable string IDs
                 for r in results:
                     r['indexer_id'] = indexer_id
                     r['indexer_name'] = config.get('name', indexer_id)
                     r['tracker'] = r.get('indexer') or config.get('name', indexer_id)
                     r['priority'] = config.get('priority', 100)
+                    
+                    # Create stable string ID: hash of indexer_id + guid
+                    guid = r.get('guid', '')
+                    if guid:
+                        id_input = f"{indexer_id}:{guid}"
+                        r['id'] = hashlib.sha256(id_input.encode()).hexdigest()[:16]
+                    else:
+                        # Fallback: hash of indexer_id + title
+                        id_input = f"{indexer_id}:{r.get('title', '')}"
+                        r['id'] = hashlib.sha256(id_input.encode()).hexdigest()[:16]
+                
                 return indexer_id, results
             except (IndexerRateLimitError, IndexerBackoffError) as e:
                 logger.debug(f'Indexer {config.get("name")} skipped: {e}')
