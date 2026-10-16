@@ -1463,18 +1463,72 @@ class TestFlaskEndpoints(unittest.TestCase):
         # Correction should NOT be called (rate limited)
         mock_index.find_spelling_correction.assert_not_called()
     
-    def test_hero_cache_image_url_structure(self):
-        """Test that hero cache uses correct static path structure."""
+    def test_hero_cache_image_served(self):
+        """Test that cached image is served at URL download_image returns."""
         from pathlib import Path
-        from app.hero_cache import CACHE_DIR
+        from app.hero_cache import hero_cache
+        from unittest.mock import Mock
         
-        # Verify hero cache directory is /app/static/hero_cache (the served path)
-        expected_path = Path('/app/static/hero_cache')
-        self.assertEqual(CACHE_DIR, expected_path,
-                       "Hero cache must use /app/static/hero_cache for Flask static serving")
+        # Create test image data
+        test_image_data = b'\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00test_data'
+        test_filename = 'test_hero_12345.jpg'
         
-        # Verify URL structure: images downloaded to CACHE_DIR should be served from /static/hero_cache/
-        # This is Flask's static file serving convention
+        # Mock HTTP response for download_image
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.raw = Mock()
+        mock_response.raw.read = Mock(side_effect=[test_image_data, b''])
+        
+        try:
+            # Ensure cache directory exists (use /tmp if /app not writable)
+            cache_dir = Path('/app/static/hero_cache')
+            if not cache_dir.exists():
+                # Use temp directory for testing
+                import tempfile
+                cache_dir = Path(tempfile.gettempdir()) / 'hero_cache_test'
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                # Temporarily override hero_cache.cache_dir
+                original_cache_dir = hero_cache.cache_dir
+                hero_cache.cache_dir = cache_dir
+            
+            # Download image (with mocked HTTP)
+            with patch.object(hero_cache.session, 'get', return_value=mock_response):
+                image_url = hero_cache.download_image('http://example.com/test.jpg', test_filename)
+            
+            # Verify download_image returned a URL
+            self.assertIsNotNone(image_url, "download_image should return a URL")
+            self.assertTrue(image_url.startswith('/static/hero_cache/'),
+                          f"Image URL should start with /static/hero_cache/, got: {image_url}")
+            
+            # Verify file was written
+            cached_file = hero_cache.cache_dir / test_filename
+            self.assertTrue(cached_file.exists(), "Image file should be cached")
+            
+            # Read cached file content
+            with open(cached_file, 'rb') as f:
+                cached_data = f.read()
+            self.assertEqual(cached_data, test_image_data, "Cached data should match original")
+            
+            # If we had to use temp directory, update the URL for Flask test
+            if str(cache_dir) != '/app/static/hero_cache':
+                # Can't test Flask serving from temp directory, restore and skip that part
+                hero_cache.cache_dir = original_cache_dir
+                cached_file.unlink(missing_ok=True)
+                return
+            
+            # Test Flask serving: GET the exact URL returned by download_image
+            response = self.client.get(image_url)
+            self.assertEqual(response.status_code, 200,
+                           f"Image should be served at {image_url}")
+            self.assertEqual(response.data, test_image_data,
+                           "Served image data should match cached data")
+            
+            # Clean up
+            cached_file.unlink(missing_ok=True)
+            
+        except (OSError, PermissionError) as e:
+            # If we can't write to either location, skip
+            self.skipTest(f"Cannot write to cache directory: {e}")
 
 
 if __name__ == '__main__':
