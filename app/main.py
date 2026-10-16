@@ -15704,7 +15704,7 @@ def manifest():
     from app.server_config import get_url_base
     sm = SettingsManager()
     theme = sm.get("ui.theme_color") or "#0a0a0a"
-    url_base = get_url_base() or '/'
+    url_base = get_url_base(settings) or '/'
     data = {
         "name": "Luma",
         "short_name": "Luma",
@@ -15728,7 +15728,7 @@ def service_worker():
     from app.server_config import get_url_base
     resp = send_from_directory('/app/static', 'sw.js')
     resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
-    url_base = get_url_base() or '/'
+    url_base = get_url_base(settings) or '/'
     resp.headers['Service-Worker-Allowed'] = url_base
     return resp
 
@@ -17837,9 +17837,9 @@ if __name__ == '__main__':
     # Run the app
     from app.server_config import get_port, get_bind_address, get_https_cert
     
-    port = get_port()
-    bind = get_bind_address()
-    https_config = get_https_cert()
+    port = get_port(settings)
+    bind = get_bind_address(settings)
+    https_config = get_https_cert(settings)
 
     # Always use gunicorn gthread for production
     logger.info(f"Starting Media Search App on {'https' if https_config else 'http'}://{bind}:{port}")
