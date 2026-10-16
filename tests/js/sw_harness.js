@@ -1,5 +1,5 @@
 // Runs static/sw.js with a stub service-worker global and reports what it did.
-// Usage: node sw_harness.js <sw.js> <scope> <request-url>...
+// Usage: [SW_PUSH='{...}'] node sw_harness.js <sw.js> <scope> <request-url>...
 const fs = require('fs');
 const vm = require('vm');
 
@@ -7,6 +7,7 @@ const [swPath, scope, ...urls] = process.argv.slice(2);
 const origin = new URL(scope).origin;
 const listeners = {};
 const added = [];
+const notes = [];
 const sandbox = {
   URL, Response: class { constructor(body, init) { this.body = body; this.init = init; } },
   MessageChannel: class {}, console: { log() {}, error() {} },
@@ -22,7 +23,7 @@ const sandbox = {
   clients: { claim() {}, matchAll: () => Promise.resolve([]) },
 };
 sandbox.self = {
-  registration: { scope, showNotification: () => Promise.resolve() },
+  registration: { scope, showNotification: (title, opts) => { notes.push(opts); return Promise.resolve(); } },
   location: { origin },
   addEventListener: (type, fn) => { listeners[type] = fn; },
   skipWaiting() {}, clients: sandbox.clients,
@@ -43,5 +44,11 @@ vm.runInContext(fs.readFileSync(swPath, 'utf8'), sandbox);
     });
     handled[u] = responded;
   }
-  process.stdout.write(JSON.stringify({ shell: added, handled }));
+  if (process.env.SW_PUSH) {
+    const payload = JSON.parse(process.env.SW_PUSH);
+    let pushed;
+    listeners.push({ data: { json: () => payload }, waitUntil: (p) => { pushed = p; } });
+    await pushed;
+  }
+  process.stdout.write(JSON.stringify({ shell: added, handled, notes }));
 })();

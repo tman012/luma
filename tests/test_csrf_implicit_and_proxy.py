@@ -82,7 +82,7 @@ def _form_login(c, **kw):
 def test_forwarded_proto_trusted_only_from_trusted_proxy(test_app, client):
     import app.main
     hdrs = {'X-Forwarded-Proto': 'https', 'X-Forwarded-Host': 'luma.example.com',
-            'X-Forwarded-For': '203.0.113.9'}
+            'Host': 'luma.example.com', 'X-Forwarded-For': '203.0.113.9'}
     # Not a trusted proxy: forwarded scheme/host are ignored.
     r = _form_login(client, headers=hdrs, environ_base={'REMOTE_ADDR': '10.0.0.1'})
     (cookie,) = [c for c in r.headers.getlist('Set-Cookie') if c.startswith('luma_auth_session=')]

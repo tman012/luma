@@ -64,17 +64,50 @@ def _is_private(ip: str) -> bool:
     return bool(a and any(a.version == n.version and a in n for n in _LOCAL_NETS))
 
 
+# Narrowest prefix accepted as a trusted proxy range. Anything broader (e.g.
+# 0.0.0.0/0 or ::/0) would let the whole Internet vouch for client addresses.
+MIN_PREFIX = {4: 8, 6: 32}
+_warned: set = set()
+
+
+def proxy_range_problem(value: str) -> Optional[str]:
+    """Why *value* can't be a trusted proxy range, or None when it can."""
+    try:
+        net = ipaddress.ip_network(value.strip(), strict=False)
+    except ValueError:
+        return f'Not an IP address or range: {value.strip()}'
+    if net.prefixlen < MIN_PREFIX[net.version]:
+        return f'Range too broad: {value.strip()} (narrowest allowed /{MIN_PREFIX[net.version]})'
+    return None
+
+
+def is_public_range(value: str) -> bool:
+    try:
+        net = ipaddress.ip_network(value.strip(), strict=False)
+    except ValueError:
+        return False
+    return not any(net.version == n.version and net.subnet_of(n) for n in _LOCAL_NETS)
+
+
 def trusted_proxies(settings) -> List[ipaddress._BaseNetwork]:
+    """Parsed security.trusted_proxies. Invalid or too-broad entries are
+    ignored (logged once); public ranges are allowed but logged once."""
     raw = settings.get('security.trusted_proxies') or ''
     nets = []
     for part in str(raw).replace(';', ',').split(','):
         part = part.strip()
         if not part:
             continue
-        try:
-            nets.append(ipaddress.ip_network(part, strict=False))
-        except ValueError:
+        problem = proxy_range_problem(part)
+        if problem:
+            if part not in _warned:
+                _warned.add(part)
+                logger.warning('[access] ignoring trusted proxy %s: %s', part, problem)
             continue
+        if is_public_range(part) and part not in _warned:
+            _warned.add(part)
+            logger.warning('[access] trusted proxy %s is a public address range', part)
+        nets.append(ipaddress.ip_network(part, strict=False))
     return nets
 
 
@@ -107,7 +140,9 @@ def client_ip(request, settings=None) -> Optional[str]:
         # Walk back from the nearest hop past any further trusted proxies.
         while remaining and _in(nets, remaining[-1]):
             remaining.pop()
-        ip = remaining[-1] if remaining else hops[0]
+        if not remaining:
+            return None  # every hop is a proxy: no client address given
+        ip = remaining[-1]
         return ip if _addr(ip) else None
     if any(request.headers.get(h) for h in _FORWARD_HEADERS):
         return None
@@ -163,7 +198,15 @@ def split_host(host: str) -> str:
 
 
 # Names that only resolve inside a home network (never public DNS).
-HOME_SUFFIXES = ('.local', '.lan', '.home.arpa', '.internal')
+# Chosen for names that public DNS can never (or by ICANN policy will not)
+# delegate: .local (mDNS, RFC 6762), .home.arpa (RFC 8375), .internal (ICANN
+# reserved for private use, 2024), .localdomain (de facto, never delegated),
+# .home (ICANN name-collision block, not delegated) and .lan (common router
+# default, not a TLD). Left out on purpose: .corp is collision-blocked too but
+# used by company networks; .private, .intranet and other words are open to
+# future TLD applications, so a public site could one day use them.
+# app.lan_hosts uses this same list.
+HOME_SUFFIXES = ('.local', '.lan', '.home.arpa', '.internal', '.localdomain', '.home')
 
 
 def is_home_name(name: str) -> bool:
@@ -226,6 +269,10 @@ def should_authenticate(settings, request) -> bool:
     # Portal traffic never gets implicit owner
     if is_portal_traffic(request, settings):
         return True
+
+    # A trusted proxy sent an unknown or inconsistent X-Forwarded-Host
+    if getattr(request, 'environ', {}).get(HOST_UNTRUSTED):
+        return True
     
     # Read auth_required setting (legacy access_mode is migrated at settings load)
     auth_req = (settings.get('security.auth_required') or 'disabled_local').strip()
@@ -250,11 +297,20 @@ def owner(user_auth) -> Optional[dict]:
     return None
 
 
+HOST_UNTRUSTED = 'luma.host_untrusted'
+
+
 class TrustedProxyMiddleware:
     """WSGI middleware: honor X-Forwarded-Proto / X-Forwarded-Host only from
     trusted proxies, so request.scheme, request.is_secure and request.host
-    can't be spoofed by a direct client. X-Forwarded-Host is further limited
-    to known hosts (is_known_host). REMOTE_ADDR is not changed.
+    can't be spoofed by a direct client. REMOTE_ADDR is not changed.
+
+    From a trusted proxy:
+    - no X-Forwarded-Host: the Host header is used as is;
+    - X-Forwarded-Host present: only its first value decides. It must be a
+      known host AND name the same host as the Host header (the proxy is
+      expected to send `Host $host` and overwrite X-Forwarded-Host). Otherwise
+      the request is flagged HOST_UNTRUSTED and never gets implicit access.
     """
 
     def __init__(self, wsgi_app, get_settings):
@@ -271,7 +327,11 @@ class TrustedProxyMiddleware:
             proto = environ.get('HTTP_X_FORWARDED_PROTO', '').split(',')[-1].strip().lower()
             if proto in ('http', 'https'):
                 environ['wsgi.url_scheme'] = proto
-            host = environ.get('HTTP_X_FORWARDED_HOST', '').split(',')[-1].strip()
-            if host and is_known_host(host, settings):
-                environ['HTTP_HOST'] = host
+            xfh = environ.get('HTTP_X_FORWARDED_HOST', '').split(',')[0].strip()
+            if xfh:
+                same = split_host(xfh) == split_host(environ.get('HTTP_HOST', ''))
+                if same and is_known_host(xfh, settings):
+                    environ['HTTP_HOST'] = xfh
+                else:
+                    environ[HOST_UNTRUSTED] = True
         return self.wsgi_app(environ, start_response)

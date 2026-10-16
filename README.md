@@ -54,17 +54,38 @@ address header sent by those proxies.
 No-sign-in access needs **both** a local client address **and** a known
 name in the browser bar: an IP address, `localhost`, the server's own host
 name, a home-network name (one label such as `docker-server`, or anything
-ending in `.local`, `.lan`, `.home.arpa` or `.internal`), or a name listed
+ending in `.local`, `.lan`, `.home.arpa`, `.internal`, `.localdomain` or
+`.home`), or a name listed
 under **Host names**. The name alone never skips sign-in: a request from a
 public address, through a proxy for a public client, or through Cloudflare
-(`CF-Connecting-IP`, `CF-Ray`, ...) always signs in. A trusted proxy's `X-Forwarded-Host` is only believed for those
-names. Any other name gets the sign-in screen, which blocks DNS-rebinding
+(`CF-Connecting-IP`, `CF-Ray`, ...) always signs in. Any other name gets the sign-in screen, which blocks DNS-rebinding
 pages. Luma sends no CORS headers, and API calls made by another site with the
 no-sign-in access are refused.
 
 Account requests (**Sign up** on the sign-in screen) are accepted from the
 local network; from anywhere else only when **Allow sign-up from anywhere** is
 on (off by default).
+
+### Reverse proxy
+
+A trusted proxy must pass the browser's host name through unchanged, in both
+`Host` and `X-Forwarded-Host`. If the first `X-Forwarded-Host` value is not a
+known name, or does not match `Host`, the request signs in. For nginx:
+
+```nginx
+location / {
+    proxy_pass http://luma:5001;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Forwarded-Host  $host;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+**Trusted proxies** takes addresses or ranges no broader than `/8` (IPv4) or
+`/32` (IPv6); broader entries are refused on save and ignored if found in the
+config file. Public ranges are accepted with a warning: list only proxies you
+run.
 
 ## Deploy Notes
 

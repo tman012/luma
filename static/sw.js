@@ -21,7 +21,7 @@
 
 // BUILD_ID is replaced at build time or bumped manually per deploy.
 // When sw.js byte-content changes, the browser installs a new SW.
-const CACHE_VERSION = 'media-kiosk-v103';
+const CACHE_VERSION = 'media-kiosk-v104';
 
 // Separate cache for large immutable assets — purged when version bumps
 const IMMUTABLE_CACHE = 'media-immutable-v24';
@@ -45,6 +45,12 @@ function appPath(pathname) {
 function linkPath(url) {
   if (!url.startsWith('/') || url.startsWith('//')) return at('/');
   return appPath(url) !== null && BASE ? url : at(url);
+}
+
+// An image URL from a push message: root-relative paths get the base,
+// absolute URLs are kept.
+function assetPath(url) {
+  return typeof url === 'string' && url.startsWith('/') && !url.startsWith('//') ? linkPath(url) : url;
 }
 
 const SHELL_URLS = [
@@ -219,15 +225,15 @@ self.addEventListener('push', event => {
     const title = data.title || 'New media available';
     const options = {
       body: data.body || '',
-      icon: data.icon || at('/static/images/ic_launcher_round.png'),
-      badge: data.badge || at('/static/images/ic_launcher_round.png'),
+      icon: data.icon ? assetPath(data.icon) : at('/static/images/ic_launcher_round.png'),
+      badge: data.badge ? assetPath(data.badge) : at('/static/images/ic_launcher_round.png'),
       tag: data.tag || 'default',
       renotify: true,
       // tmdb_id rides along so an action press can be resolved by the worker
       // alone, with no window and no URL parsing.
       data: { url: data.url || '/', tmdb_id: data.tmdb_id },
     };
-    if (data.image) options.image = data.image;
+    if (data.image) options.image = assetPath(data.image);
     // Action buttons, when the sender supplies them. Chrome/Android renders up
     // to two; iOS Safari ignores the field entirely, which is why every
     // notification must still work as a plain tap-to-open deep link.

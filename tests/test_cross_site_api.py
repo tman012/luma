@@ -73,7 +73,8 @@ def test_forwarded_host_not_honored_unless_listed(client):
     assert r.status_code == 403
 
     app.main.settings.update({'security': {'hostnames': 'luma.example.com'}})
-    hdrs = {'X-Forwarded-Host': 'luma.example.com', 'X-Forwarded-For': '192.168.1.20',
+    hdrs = {'X-Forwarded-Host': 'luma.example.com', 'Host': 'luma.example.com',
+            'X-Forwarded-For': '192.168.1.20',
             'Origin': 'http://luma.example.com'}
     r = client.put('/api/security', json={'auth_required': 'disabled_local'},
                    headers=hdrs, environ_base=PROXY)

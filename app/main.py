@@ -175,10 +175,9 @@ _register_bot_api()
 
 
 def _note_lan_host():
-    """Remember the host name a LAN client used (never remote or portal traffic)."""
+    """Remember the host name of a request that just got implicit owner access
+    (so: a LAN client on a known host, never remote, proxied-public or portal)."""
     try:
-        if _access.is_portal_traffic(request, settings) or not _access.is_local_request(request, settings):
-            return
         _lan_hosts.record(request.host, _LAN_HOSTS_DIR)
     except Exception as exc:  # never let bookkeeping break a request
         logger.debug("lan host record failed: %s", exc)
@@ -191,7 +190,6 @@ def load_current_user():
     """
     # Default g.implicit_user to False for all request types
     g.implicit_user = False
-    _note_lan_host()
     
     # Check for API key first
     api_key = request.headers.get("X-API-Key")
@@ -214,6 +212,7 @@ def load_current_user():
                 "created_at": owner.get("created_at"), "token": None, "expires_at": None,
             }
             g.implicit_user = True
+            _note_lan_host()
 
 
 def _get_current_user() -> Optional[Dict]:
@@ -8014,15 +8013,6 @@ def auth_unlock():
     return resp
 
 
-def _valid_net(value: str) -> bool:
-    import ipaddress
-    try:
-        ipaddress.ip_network(value, strict=False)
-        return True
-    except ValueError:
-        return False
-
-
 @app.route('/api/security', methods=['GET'])
 def security_get():
     err = _require_admin()
@@ -8068,9 +8058,14 @@ def security_put():
     # Update trusted_proxies
     if 'trusted_proxies' in body:
         proxies = str(body.get('trusted_proxies') or '').strip()
-        bad = [p for p in proxies.replace(';', ',').split(',') if p.strip() and not _valid_net(p.strip())]
-        if bad:
-            return jsonify({'error': f'Not an IP address or range: {bad[0].strip()}'}), 400
+        parts = [p.strip() for p in proxies.replace(';', ',').split(',') if p.strip()]
+        for part in parts:
+            problem = _access.proxy_range_problem(part)
+            if problem:
+                return jsonify({'error': problem}), 400
+        for part in parts:
+            if _access.is_public_range(part):
+                logger.warning("[security] trusted proxy %s is a public address range", part)
         settings.update({'security': {'trusted_proxies': proxies}})
 
     if 'hostnames' in body:

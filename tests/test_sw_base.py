@@ -12,9 +12,11 @@ NODE = shutil.which('node')
 pytestmark = pytest.mark.skipif(NODE is None, reason='node is not installed')
 
 
-def _run(scope, *urls):
+def _run(scope, *urls, push=None):
+    import os
+    env = dict(os.environ, SW_PUSH=json.dumps(push)) if push else None
     out = subprocess.run([NODE, str(ROOT / 'tests/js/sw_harness.js'), str(ROOT / 'static/sw.js'),
-                          scope, *urls], capture_output=True, text=True, timeout=30, check=True)
+                          scope, *urls], capture_output=True, text=True, timeout=30, check=True, env=env)
     return json.loads(out.stdout)
 
 
@@ -47,3 +49,18 @@ def test_no_root_relative_literals_left():
     src = (ROOT / 'static/sw.js').read_text()
     for literal in ("fetch('/api", "c.put('/'", "caches.match('/')", "|| '/static/", "icon: '/static/"):
         assert literal not in src
+
+
+def test_push_icons_follow_base():
+    o = 'http://192.0.2.10:5001'
+    push = {'title': 't', 'icon': '/static/images/a.png', 'badge': '/luma/static/images/b.png',
+            'image': '/api/img/plex?url=/x'}
+    (note,) = _run(f'{o}/luma/', push=push)['notes']
+    assert note['icon'] == '/luma/static/images/a.png'
+    assert note['badge'] == '/luma/static/images/b.png'     # not doubled
+    assert note['image'] == '/luma/api/img/plex?url=/x'
+    (note,) = _run(f'{o}/luma/', push={'image': 'https://image.tmdb.org/t/p/x.jpg'})['notes']
+    assert note['image'] == 'https://image.tmdb.org/t/p/x.jpg'
+    assert note['icon'] == '/luma/static/images/ic_launcher_round.png'
+    (note,) = _run(f'{o}/', push={'icon': '/static/images/a.png'})['notes']
+    assert note['icon'] == '/static/images/a.png'

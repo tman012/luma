@@ -27,12 +27,6 @@ MAX_NAMES = 32
 KEEP_DAYS = 90
 _REWRITE_AFTER = timedelta(hours=6)
 
-# Suffixes that only make sense inside a home network. A name with a dot must
-# end in one of these to be seeded automatically; public domains are left for
-# a person to add.
-PRIVATE_SUFFIXES = ('.local', '.lan', '.home', '.home.arpa', '.internal',
-                    '.localdomain', '.intranet', '.private', '.corp')
-
 _LABEL = re.compile(r'^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')
 _CONTAINER_ID = re.compile(r'^[0-9a-f]{12}$')
 
@@ -62,13 +56,12 @@ def normalize(name: str) -> str:
 
 
 def is_seedable(name: str) -> bool:
-    """A private name: one label (e.g. 'docker-server') or a home-network suffix."""
+    """A home-network name (access.is_home_name: one label or a home suffix), not localhost."""
+    from app.access import is_home_name
     name = normalize(name)
     if not name or name == 'localhost' or name.endswith('.localhost'):
         return False
-    if '.' not in name:
-        return True
-    return name.endswith(PRIVATE_SUFFIXES)
+    return is_home_name(name)
 
 
 def _path(data_dir) -> Path:
@@ -84,10 +77,12 @@ def load(data_dir) -> Dict[str, str]:
 
 
 def recent(data_dir, days: int = 30) -> List[str]:
-    """Names seen from LAN clients within the last *days*, newest first."""
+    """Home-network names seen from LAN clients within the last *days*, newest first."""
     cutoff = _now() - timedelta(days=days)
     out = []
     for name, seen in load(data_dir).items():
+        if not is_seedable(name):
+            continue
         try:
             when = datetime.fromisoformat(seen)
         except ValueError:
@@ -100,10 +95,12 @@ def recent(data_dir, days: int = 30) -> List[str]:
 def record(host: str, data_dir) -> None:
     """Note that a LAN client reached Luma by *host*. Cheap; writes at most every few hours per name."""
     name = normalize(host)
-    if not name or name == 'localhost':
-        return
+    if not is_seedable(name):
+        return  # only home-network names, so junk can't fill or evict the record
     now = _now()
     with _lock:
+        if len(_last_write) > 4 * MAX_NAMES:
+            _last_write.clear()
         last = _last_write.get(name)
         if last and now - last < _REWRITE_AFTER:
             return
@@ -111,6 +108,8 @@ def record(host: str, data_dir) -> None:
         cutoff = now - timedelta(days=KEEP_DAYS)
         kept = {}
         for k, v in names.items():
+            if not is_seedable(k):
+                continue
             try:
                 if datetime.fromisoformat(v) >= cutoff:
                     kept[k] = v
