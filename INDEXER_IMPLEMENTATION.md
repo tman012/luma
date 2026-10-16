@@ -149,7 +149,7 @@ All existing tests still pass (no breaking changes).
 - ❌ Jackett (GPL-3.0)
 - ❌ Radarr (GPL-3.0)
 - ❌ Sonarr (GPL-3.0)
-- ❌ Cardigann definitions (proprietary)
+- ❌ Cardigann definitions (not used)
 
 ### Used Libraries
 - ✓ Python stdlib (`xml.etree`, `threading`, `time`)

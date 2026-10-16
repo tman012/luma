@@ -162,10 +162,7 @@ export function IndexerCard() {
   if (backend !== 'luma') {
     return (
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6">
-        <h3 className="text-lg font-medium text-white mb-2">Indexers</h3>
-        <p className="text-sm text-zinc-400 mb-4">
-          Indexer backend is set to Prowlarr. Switch to Luma backend in settings to manage indexers here.
-        </p>
+        <h3 className="text-lg font-medium text-white mb-4">Indexers</h3>
         <label className="flex items-center gap-3 text-sm text-zinc-300">
           <input
             type="checkbox"
@@ -173,7 +170,7 @@ export function IndexerCard() {
             onChange={(e) => setByPath('indexer.backend', e.target.checked ? 'luma' : 'prowlarr')}
             className="rounded bg-zinc-800 border-zinc-700"
           />
-          Use Luma indexer backend
+          Use Luma backend
         </label>
       </div>
     );
@@ -182,10 +179,7 @@ export function IndexerCard() {
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-6">
       <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-lg font-medium text-white">Indexers</h3>
-          <p className="text-xs text-zinc-500 mt-1">Torznab/Newznab endpoints</p>
-        </div>
+        <h3 className="text-lg font-medium text-white">Indexers</h3>
         <div className="flex gap-2">
           <button
             onClick={handleImport}
@@ -314,7 +308,7 @@ function IndexerForm({
       <input
         type="password"
         placeholder="API Key"
-        value={form.api_key || ''}
+        value={form.api_key === '********' ? '' : (form.api_key || '')}
         onChange={(e) => setForm({ ...form, api_key: e.target.value })}
         className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white"
       />
