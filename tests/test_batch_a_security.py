@@ -329,10 +329,11 @@ class TestCSRFProtection:
                                 environ_base={'REMOTE_ADDR': '192.168.1.100'},
                                 follow_redirects=False)
         
-        # Should redirect back to login with error
-        assert resp.status_code == 302
-        assert '/login' in resp.location
-        assert 'error=' in resp.location or 'Invalid' in resp.location
+        # Rejected: the form is shown again with a fresh token and no session
+        assert resp.status_code == 400
+        assert b'csrf_token' in resp.data
+        assert not [h for h in resp.headers.getlist('Set-Cookie')
+                    if h.startswith('luma_auth_session=')]
     
     def test_logout_get_rejected(self, test_app):
         """CSRF FIX 5b: GET /logout is rejected (POST-only)."""

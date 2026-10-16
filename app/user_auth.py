@@ -8,6 +8,7 @@ Admin account is seeded on startup only when LUMA_ADMIN_NAME / LUMA_ADMIN_PIN ar
 
 import sqlite3
 import hashlib
+import hmac
 import secrets
 import os
 import json
@@ -25,7 +26,7 @@ SESSION_TTL_DAYS = 30
 # no admin is seeded (the first-run Start flow creates it). Legacy ADMIN_* names still work.
 ADMIN_NAME = os.environ.get("LUMA_ADMIN_NAME") or os.environ.get("ADMIN_NAME", "")
 ADMIN_PIN = os.environ.get("LUMA_ADMIN_PIN") or os.environ.get("ADMIN_PIN", "")
-ADMIN_EMAIL = os.environ.get("LUMA_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL", "")
+ADMIN_EMAIL = (os.environ.get("LUMA_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL", "") or "").strip().lower()
 
 
 def _get_db_path() -> str:
@@ -107,24 +108,39 @@ def init_db() -> None:
         existing = conn.execute(
             "SELECT id FROM users WHERE name = ? COLLATE NOCASE", (ADMIN_NAME,)
         ).fetchone()
+        # The admin email is used only if no other account already has it.
+        email_owner = conn.execute(
+            "SELECT id FROM users WHERE email = ? COLLATE NOCASE AND name <> ? COLLATE NOCASE",
+            (ADMIN_EMAIL, ADMIN_NAME),
+        ).fetchone() if ADMIN_EMAIL else None
+        admin_email = None if email_owner else (ADMIN_EMAIL or None)
+        if email_owner:
+            logger.warning("LUMA_ADMIN_EMAIL belongs to another account; not assigned to the admin")
         if not existing:
             conn.execute(
                 "INSERT INTO users (name, pin_hash, is_admin, status, email) VALUES (?, ?, 1, 'active', ?)",
-                (ADMIN_NAME, _hash_pin(ADMIN_PIN), ADMIN_EMAIL or None),
+                (ADMIN_NAME, generate_password_hash(ADMIN_PIN), admin_email),
             )
             logger.info("Seeded admin user: %s", ADMIN_NAME)
         else:
-            # Ensure admin is always active with the configured email and PIN
-            if ADMIN_EMAIL:
+            # Keep the admin active and its email current. The stored password
+            # is never replaced: LUMA_ADMIN_PIN only seeds a new admin or an
+            # admin row that has no password at all.
+            if admin_email:
                 conn.execute(
-                    "UPDATE users SET status = 'active', email = ?, pin_hash = ? WHERE name = ? COLLATE NOCASE",
-                    (ADMIN_EMAIL, _hash_pin(ADMIN_PIN), ADMIN_NAME),
+                    "UPDATE users SET status = 'active', email = ? WHERE name = ? COLLATE NOCASE",
+                    (admin_email, ADMIN_NAME),
                 )
             else:
                 conn.execute(
-                    "UPDATE users SET status = 'active', pin_hash = ? WHERE name = ? COLLATE NOCASE",
-                    (_hash_pin(ADMIN_PIN), ADMIN_NAME),
+                    "UPDATE users SET status = 'active' WHERE name = ? COLLATE NOCASE",
+                    (ADMIN_NAME,),
                 )
+            conn.execute(
+                "UPDATE users SET pin_hash = ? WHERE name = ? COLLATE NOCASE"
+                " AND (pin_hash IS NULL OR pin_hash = '')",
+                (generate_password_hash(ADMIN_PIN), ADMIN_NAME),
+            )
             logger.debug("Admin user already exists: %s", ADMIN_NAME)
 
 
@@ -138,6 +154,44 @@ def get_user_by_name(name: str) -> Optional[Dict]:
             "SELECT * FROM users WHERE name = ? COLLATE NOCASE", (name,)
         ).fetchone()
         return dict(row) if row else None
+
+
+def identity_conflict(name: str, email: str = None, exclude_id: int = None) -> Optional[str]:
+    """Why this name/email can't be used, or None. Case-insensitive."""
+    name = (name or '').strip()
+    email = (email or '').strip()
+    if not name:
+        return "Name is required"
+    if '@' in name:
+        return "Name can't contain @"
+
+    def _taken(user):
+        return user is not None and user.get('id') != exclude_id
+
+    if _taken(get_user_by_name(name)) or _taken(get_user_by_email(name)):
+        return "An account with that name already exists"
+    if email and (_taken(get_user_by_email(email)) or _taken(get_user_by_name(email))):
+        return "An account with that email already exists"
+    return None
+
+
+def find_user(identifier: str, email: str = None) -> Optional[Dict]:
+    """Look up a user by email or name, case-insensitive.
+
+    An identifier containing '@' is tried as an email first; anything else is
+    tried as a name first. Either way the other lookup is the fallback.
+    """
+    identifier = (identifier or '').strip()
+    email = (email or '').strip()
+    if email:
+        user = get_user_by_email(email)
+        if user:
+            return user
+    if not identifier:
+        return None
+    if '@' in identifier:
+        return get_user_by_email(identifier) or get_user_by_name(identifier)
+    return get_user_by_name(identifier) or get_user_by_email(identifier)
 
 
 def get_user_by_email(email: str) -> Optional[Dict]:
@@ -166,14 +220,16 @@ def list_users() -> List[Dict]:
 
 def create_user(name: str, pin: str, is_admin: bool = False, status: str = 'active',
                 email: str = None) -> Dict:
-    """Create a new user. Raises ValueError on duplicate name or email."""
-    existing = get_user_by_name(name)
-    if existing:
-        raise ValueError(f"User '{name}' already exists")
-    if email:
-        existing_email = get_user_by_email(email)
-        if existing_email:
-            raise ValueError(f"An account with that email already exists")
+    """Create a new user. Raises ValueError on a bad or duplicate name or email.
+
+    Names and emails share one namespace for sign-in, so a new name may not
+    match any existing email and a new email may not match any existing name.
+    """
+    name = (name or '').strip()
+    email = (email or '').strip().lower() or None
+    problem = identity_conflict(name, email)
+    if problem:
+        raise ValueError(problem)
     
     pin_hash = generate_password_hash(pin)
     
@@ -220,7 +276,7 @@ def update_pin(user_id: int, new_pin: str) -> None:
     with _get_db() as conn:
         conn.execute(
             "UPDATE users SET pin_hash = ? WHERE id = ?",
-            (_hash_pin(new_pin), user_id),
+            (generate_password_hash(new_pin), user_id),
         )
 
 
@@ -246,42 +302,46 @@ def delete_user(user_id: int) -> bool:
 # Authentication
 # ---------------------------------------------------------------------------
 
-def authenticate(name: str, pin: str, email: str = None) -> Optional[Dict]:
-    """Verify credentials + PIN. Returns user dict on success, None on failure.
-    Tries email lookup first (if provided), then falls back to name lookup.
-    Only allows users with status='active'.
-    Automatically rehashes legacy SHA-256 passwords to werkzeug format.
+def authenticate(name: str, pin: str, email: str = None,
+                 any_status: bool = False) -> Optional[Dict]:
+    """Verify credentials. Returns the user dict on success, None on failure.
+
+    The user is found by email or name (see find_user). The password is always
+    checked before the account status, and an unknown user still costs one
+    hash, so timing does not reveal which accounts exist. Only status='active'
+    users pass unless any_status is set (the caller then reports the status).
+    A legacy SHA-256 hash is upgraded only after it matched the typed password.
     """
-    user = None
-    if email:
-        user = get_user_by_email(email)
-    if not user:
-        user = get_user_by_name(name)
-    if not user:
+    user = find_user(name, email)
+    if not user or not user.get("pin_hash"):
+        check_password_hash(_dummy_hash(), pin or "")
         return None
-    if user.get("status", "active") != "active":
-        return None
-    
+
     pin_hash = user["pin_hash"]
-    
-    # Check if it's a legacy SHA-256 hash
     if _is_legacy_hash(pin_hash):
-        # Compare with legacy hash
-        if pin_hash != _hash_pin(pin):
+        if not hmac.compare_digest(pin_hash, _hash_pin(pin)):
             return None
-        # Rehash with werkzeug and update
         new_hash = generate_password_hash(pin)
         with _get_db() as conn:
             conn.execute("UPDATE users SET pin_hash = ? WHERE id = ?", (new_hash, user["id"]))
         logger.info(f"Rehashed legacy password for user {user['name']}")
         user["pin_hash"] = new_hash
-        return user
-    
-    # Modern werkzeug hash
-    if not check_password_hash(pin_hash, pin):
+    elif not check_password_hash(pin_hash, pin):
         return None
-    
+
+    if not any_status and user.get("status", "active") != "active":
+        return None
     return user
+
+
+_DUMMY_HASH = None
+
+
+def _dummy_hash() -> str:
+    global _DUMMY_HASH
+    if _DUMMY_HASH is None:
+        _DUMMY_HASH = generate_password_hash(secrets.token_urlsafe(16))
+    return _DUMMY_HASH
 
 
 # ---------------------------------------------------------------------------

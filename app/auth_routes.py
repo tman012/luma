@@ -110,155 +110,157 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign In - Luma</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Google+Sans+Flex:wght@400;500;600&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#15102a">
+    <meta name="color-scheme" content="dark">
+    <title>Sign in - Luma</title>
+    <link rel="icon" href="{{ url_for('static', filename='images/icon-192.png') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
     <style>
+        /* Mirrors the SPA theme tokens in frontend/src/index.css (@theme);
+           tests/test_login_theme_tokens.py keeps them in sync. */
+        :root {
+            --color-kiosk-black: #15102a;
+            --color-glass-5: rgb(255 255 255 / 0.05);
+            --color-glass-10: rgb(255 255 255 / 0.10);
+            --color-glass-15: rgb(255 255 255 / 0.15);
+            --color-glass-20: rgb(255 255 255 / 0.20);
+            --color-accent: #3b82f6;
+            --color-accent-hover: #60a5fa;
+            --color-text-primary: rgb(255 255 255 / 0.95);
+            --color-text-secondary: rgb(255 255 255 / 0.70);
+            --color-text-muted: rgb(255 255 255 / 0.50);
+            --font-luma: system-ui, -apple-system, sans-serif;
+        }
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { background: var(--color-kiosk-black); }
         body {
-            font-family: 'Google Sans Flex', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #111318;
+            font-family: var(--font-luma);
             min-height: 100vh;
+            min-height: 100dvh;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 20px;
-            color: #e8eaed;
+            padding: 24px 16px 48px;
+            color: var(--color-text-primary);
+            -webkit-font-smoothing: antialiased;
         }
-        .login-container {
-            background: #282a2f;
-            border-radius: 16px;
-            padding: 40px;
+        .brand { display: flex; justify-content: center; margin-bottom: 32px; }
+        .brand img { width: clamp(200px, 56vw, 360px); height: auto; user-select: none; }
+        .card {
             width: 100%;
             max-width: 400px;
+            background: var(--color-glass-5);
+            border: 1px solid var(--color-glass-10);
+            border-radius: 20px;
+            padding: 28px 24px 24px;
         }
-        h1 {
-            font-size: 32px;
-            font-weight: 500;
-            color: #e8eaed;
-            margin-bottom: 32px;
-            text-align: center;
-            letter-spacing: -0.5px;
-        }
-        .form-group {
-            margin-bottom: 24px;
-        }
-        label {
+        .field { margin-bottom: 18px; }
+        .field label {
             display: block;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 500;
-            color: #bdc1c6;
-            margin-bottom: 8px;
+            color: var(--color-text-secondary);
+            margin: 0 0 6px 2px;
         }
-        input[type="text"],
-        input[type="password"] {
+        .field input {
             width: 100%;
-            padding: 14px 16px;
-            background: #111318;
-            border: 1px solid #3c4043;
-            border-radius: 8px;
+            height: 50px;
+            padding: 0 16px;
+            background: var(--color-glass-10);
+            border: 1px solid var(--color-glass-15);
+            border-radius: 12px;
+            font: inherit;
             font-size: 16px;
-            color: #e8eaed;
-            font-family: 'Google Sans Flex', sans-serif;
-            transition: border-color 0.2s, background 0.2s;
+            color: var(--color-text-primary);
+            transition: border-color 0.2s;
         }
-        input:focus {
-            outline: none;
-            border-color: #adc7ff;
-            background: #1a1d23;
-        }
-        input::placeholder {
-            color: #5f6368;
-        }
-        .remember-me {
+        .field input:focus { outline: none; border-color: var(--color-accent); }
+        .remember {
             display: flex;
             align-items: center;
-            margin-bottom: 32px;
-        }
-        .remember-me input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-            margin-right: 12px;
-            cursor: pointer;
-            accent-color: #adc7ff;
-        }
-        .remember-me label {
-            margin: 0;
-            font-weight: 400;
-            font-size: 15px;
-            color: #bdc1c6;
+            gap: 10px;
+            margin: 4px 0 24px 2px;
+            font-size: 14px;
+            color: var(--color-text-secondary);
             cursor: pointer;
         }
+        .remember input { width: 18px; height: 18px; accent-color: var(--color-accent); }
         button[type="submit"] {
             width: 100%;
-            padding: 14px;
-            background: #adc7ff;
-            color: #111318;
+            height: 50px;
+            background: var(--color-accent);
+            color: var(--color-text-primary);
             border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 500;
+            border-radius: 999px;
+            font: inherit;
+            font-size: 15px;
+            font-weight: 600;
             cursor: pointer;
-            font-family: 'Google Sans Flex', sans-serif;
-            transition: background 0.2s, transform 0.1s;
+            transition: background 0.2s;
         }
-        button[type="submit"]:hover {
-            background: #c4d7ff;
-        }
-        button[type="submit"]:active {
-            transform: scale(0.98);
-        }
+        button[type="submit"]:hover { background: var(--color-accent-hover); }
         .error {
-            background: #5c2626;
-            color: #f28b82;
-            padding: 14px 16px;
-            border-radius: 8px;
-            margin-bottom: 24px;
+            background: var(--color-glass-10);
+            border: 1px solid var(--color-glass-20);
+            color: var(--color-text-primary);
+            padding: 12px 16px;
+            border-radius: 12px;
+            margin-bottom: 18px;
             font-size: 14px;
-            border-left: 4px solid #f28b82;
-        }
-        .rate-limit-error {
-            background: #5c4526;
-            color: #fdd663;
-            border-left-color: #fdd663;
         }
     </style>
 </head>
 <body>
-    <div class="login-container">
-        <h1>Luma</h1>
-        
+    <div class="brand">
+        <img src="{{ url_for('static', filename='images/luma_text.webp') }}" alt="" draggable="false">
+    </div>
+    <main class="card">
         {% if error %}
-        <div class="error {% if rate_limited %}rate-limit-error{% endif %}">
-            {{ error }}
-        </div>
+        <div class="error{% if rate_limited %} rate-limited{% endif %}" role="alert">{{ error }}</div>
         {% endif %}
-        
         <form method="POST" action="{{ url_for('auth.login', next=next_url) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            
-            <div class="form-group">
-                <label for="username">Username</label>
-                <input type="text" id="username" name="username" required autofocus>
+            <div class="field">
+                <label for="username">Email or username</label>
+                <input type="text" id="username" name="username" value="{{ username }}" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required {% if not username %}autofocus{% endif %}>
             </div>
-            
-            <div class="form-group">
+            <div class="field">
                 <label for="password">Password</label>
-                <input type="password" id="password" name="password" required>
+                <input type="password" id="password" name="password" autocomplete="current-password" required {% if username %}autofocus{% endif %}>
             </div>
-            
-            <div class="remember-me">
+            <label class="remember">
                 <input type="checkbox" id="remember" name="remember" checked>
-                <label for="remember">Remember me for 30 days</label>
-            </div>
-            
-            <button type="submit">Sign In</button>
+                <span>Remember me</span>
+            </label>
+            <button type="submit">Sign in</button>
         </form>
-    </div>
+    </main>
 </body>
 </html>'''
+
+
+def _no_store(response):
+    """Auth responses must never be cached by the browser or the service worker."""
+    response.headers['Cache-Control'] = 'no-store, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    return response
+
+
+def _login_page(error='', rate_limited=False, next_url='/', username='', status=200):
+    html = render_template_string(LOGIN_PAGE_HTML,
+                                  error=error,
+                                  rate_limited=rate_limited,
+                                  next_url=next_url,
+                                  username=username,
+                                  csrf_token=_generate_csrf_token())
+    return _no_store(make_response(html, status))
+
+
+@bp.after_request
+def _auth_no_store(response):
+    return _no_store(response)
 
 
 @bp.route('/login', methods=['GET', 'POST'])
@@ -271,27 +273,26 @@ def login():
     next_param = request.args.get('next', '/')
     safe_next = _safe_redirect_url(next_param)
     
-    if request.method == 'GET':
+    if request.method in ('GET', 'HEAD'):
         # Generate CSRF token
         csrf_token = _generate_csrf_token()
         
         # Show login form
         error = request.args.get('error', '')
         rate_limited = request.args.get('rate_limited') == '1'
-        return render_template_string(LOGIN_PAGE_HTML, 
-                                     error=error, 
-                                     rate_limited=rate_limited,
-                                     next_url=safe_next,
-                                     csrf_token=csrf_token)
+        return _login_page(error=error, rate_limited=rate_limited,
+                           next_url=safe_next)
     
     # POST - process login
     # Validate CSRF token
     csrf_token = request.form.get('csrf_token', '')
     if not _validate_csrf_token(csrf_token):
         logger.warning("[auth] CSRF token validation failed")
-        return redirect(url_for('auth.login', 
-                               error='Invalid request. Please try again.',
-                               next=safe_next))
+        # Re-show the form with a fresh token; the typed name is kept.
+        return _login_page(error='Your session expired. Sign in again.',
+                           next_url=safe_next,
+                           username=request.form.get('username', '').strip(),
+                           status=400)
     
     client_ip = _get_client_ip(request, settings)
     username = request.form.get('username', '').strip()
@@ -321,11 +322,12 @@ def login():
         login_limiter.record_failure(client_ip, username)
         logger.info(f"[auth] Failed login attempt for user {username} from {client_ip}")
         return redirect(url_for('auth.login', 
-                               error='Invalid username or password',
+                               error='Wrong email, username or password.',
                                next=safe_next))
     
-    # Login successful - clear rate limit
+    # Login successful - clear rate limit; the form token is single-use
     login_limiter.record_success(client_ip, username)
+    session.pop('csrf_token', None)
     
     # Create session
     token = user_auth.create_session(user['id'])
