@@ -41,9 +41,17 @@ const SkeletonRail = memo(function SkeletonRail() {
         style={{ paddingLeft: 12 }}
       >
         {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="w-[115px] shrink-0">
+          // Mirrors MobilePosterCard: same width, poster box and text line
+          // boxes (title text-xs mt-1, subtitle text-[10px]) so the reveal
+          // does not shift the rail height.
+          <div key={i} className="w-[115px] shrink-0" aria-hidden="true">
             <div className="skeleton-shimmer aspect-[2/3] rounded-lg" />
-            <div className="skeleton-shimmer mt-1.5 h-3 w-3/4 rounded" />
+            <p className="mt-1 text-xs line-clamp-1">
+              <span className="skeleton-shimmer inline-block h-3 w-3/4 rounded align-middle" />
+            </p>
+            <p className="text-[10px] line-clamp-1">
+              <span className="skeleton-shimmer inline-block h-2 w-1/2 rounded align-middle" />
+            </p>
           </div>
         ))}
       </div>
