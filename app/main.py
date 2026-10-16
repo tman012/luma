@@ -17139,8 +17139,18 @@ def import_indexers_from_prowlarr():
         prowlarr_url = body.get('prowlarr_url') or settings.get('indexer.base_url', '')
         prowlarr_api_key = body.get('prowlarr_api_key') or settings.get('indexer.api_key', '')
         
-        if not prowlarr_url or not prowlarr_api_key:
-            return jsonify({'error': 'Prowlarr URL and API key are required'}), 400
+        if not prowlarr_url:
+            return jsonify({'error': 'Prowlarr URL is required'}), 400
+        
+        # If URL is supplied via request body, require key via request body too
+        if body.get('prowlarr_url') and not body.get('prowlarr_api_key'):
+            # Try stored key only if URL also matches stored URL
+            stored_url = settings.get('indexer.base_url', '')
+            if prowlarr_url != stored_url:
+                return jsonify({'error': 'Prowlarr API key is required when URL is supplied'}), 400
+        
+        if not prowlarr_api_key:
+            return jsonify({'error': 'Prowlarr API key is required'}), 400
         
         # SSRF protection: validate Prowlarr URL
         allow_lan = settings.get('indexer.allow_lan', False)

@@ -700,6 +700,22 @@ class IndexerManager:
         # Phase 3: Make HTTP request OUTSIDE the lock
         url = config.get('url', '').rstrip('/')
         api_key = config.get('api_key', '')
+        
+        # For proxied Prowlarr entries, resolve URL and key from settings at request time
+        if config.get('prowlarr_proxy'):
+            prowlarr_id = config.get('prowlarr_id', '')
+            prowlarr_url = self.settings_manager.get('indexer.base_url', '')
+            prowlarr_api_key = self.settings_manager.get('indexer.api_key', '')
+            
+            if not prowlarr_url or not prowlarr_api_key:
+                raise IndexerError('Prowlarr URL and API key required for proxied indexers')
+            
+            url = f"{prowlarr_url.rstrip('/')}/{prowlarr_id}/api"
+            api_key = prowlarr_api_key
+        
+        if not url or not api_key:
+            raise IndexerError('Missing URL or API key')
+        
         cat_str = ','.join(str(c) for c in categories)
         
         # SSRF validation
@@ -974,17 +990,16 @@ class IndexerManager:
                     })
                 else:
                     # Everything else: Cardigann, native C# indexers (AvistaZ, PrivateHD, etc.)
-                    # Route through Prowlarr proxy: {prowlarr_url}/{id}/api
-                    proxy_url = f"{prowlarr_url.rstrip('/')}/{indexer_id}/api"
-                    
+                    # Route through Prowlarr proxy
+                    # Store only prowlarr_id; resolve URL and key from settings at request time
                     proxied_indexers.append(name)
                     
                     imported.append({
                         'id': f'prowlarr-{indexer_id}',
                         'name': f'{name} (via Prowlarr)',
                         'type': 'torznab',  # Prowlarr proxy is Torznab-compatible
-                        'url': proxy_url,
-                        'api_key': prowlarr_api_key,  # Use Prowlarr's key for proxy
+                        'url': '',  # Don't store URL for proxied entries
+                        'api_key': '',  # Don't store key for proxied entries
                         'categories': '2000',
                         'priority': 100,
                         'enabled': bool(ix.get('enable', True)),
