@@ -141,7 +141,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
                         "enum": ["", "open", "pin_remote", "pin"]},
         "trusted_proxies": {"type": "string", "default": "", "sensitive": False,
                             "description": "Reverse proxies whose X-Forwarded-For / CF-Connecting-IP headers are believed (comma-separated IPs or CIDRs)"},
-        "remote_lock": {"type": "string", "default": "report", "enum": ["enforce", "report", "off"], "sensitive": False, "description": "Tunnel visitors from outside the home network need a session (report = log-only)"},
+# remote_lock removed - merged into access.is_local_request with home WAN tracking
     },
     "homeassistant": {
         "_type": "object",
@@ -1282,6 +1282,37 @@ def _migrate_rename_requests_to_portal(data: dict) -> bool:
     return False
 
 
+def _migrate_strip_plaintext_request_password(data: dict) -> bool:
+    """Strip any plaintext 'password' field from request_portal.
+    
+    password_hash is the only valid field; plaintext password should never be saved.
+    Also ensures exclude_libraries is a list.
+    """
+    portal = data.get('request_portal')
+    if not isinstance(portal, dict):
+        return False
+    
+    changed = False
+    
+    # Remove plaintext password if present
+    if 'password' in portal:
+        del portal['password']
+        logger.info("Stripped plaintext password from request_portal")
+        changed = True
+    
+    # Ensure exclude_libraries is a list
+    excl = portal.get('exclude_libraries')
+    if excl is not None and not isinstance(excl, list):
+        if isinstance(excl, str):
+            portal['exclude_libraries'] = [x.strip() for x in excl.split(',') if x.strip()]
+        else:
+            portal['exclude_libraries'] = []
+        logger.info("Converted exclude_libraries to list")
+        changed = True
+    
+    return changed
+
+
 def _run_all_migrations(data: dict) -> bool:
     """Run all migrations on *data* (mutated in place).
     Returns True if any migration occurred.
@@ -1304,6 +1335,7 @@ def _run_all_migrations(data: dict) -> bool:
     changed |= _migrate_remove_ai_and_alfred(data)
     changed |= _migrate_automation_features(data)
     changed |= _migrate_rename_requests_to_portal(data)
+    changed |= _migrate_strip_plaintext_request_password(data)
     return changed
 
 
