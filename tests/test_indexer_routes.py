@@ -124,3 +124,118 @@ class TestRemoteTrafficRefused:
             with patch('app.main.settings.get', return_value=[]):
                 resp = admin_session.get('/api/settings/indexers')
                 assert resp.status_code == 200
+
+
+class TestIndexerPayloadValidation:
+    """Test shared validation helper for indexer payloads."""
+    
+    def test_add_indexer_missing_required_fields(self, admin_session):
+        """POST /api/settings/indexers rejects payloads missing required fields."""
+        with patch('app.main._require_admin', return_value=None):
+            # Missing name
+            resp = admin_session.post('/api/settings/indexers', json={'url': 'http://test.com', 'type': 'torznab'})
+            assert resp.status_code == 400
+            assert b'name' in resp.data
+            
+            # Missing url
+            resp = admin_session.post('/api/settings/indexers', json={'name': 'Test', 'type': 'torznab'})
+            assert resp.status_code == 400
+            assert b'url' in resp.data
+            
+            # Missing type
+            resp = admin_session.post('/api/settings/indexers', json={'name': 'Test', 'url': 'http://test.com'})
+            assert resp.status_code == 400
+            assert b'type' in resp.data
+    
+    def test_add_indexer_invalid_types(self, admin_session):
+        """POST /api/settings/indexers rejects invalid field types."""
+        with patch('app.main._require_admin', return_value=None):
+            # Non-string name
+            resp = admin_session.post('/api/settings/indexers', json={'name': 123, 'url': 'http://test.com', 'type': 'torznab'})
+            assert resp.status_code == 400
+            assert b'name' in resp.data and b'string' in resp.data
+            
+            # Non-string URL
+            resp = admin_session.post('/api/settings/indexers', json={'name': 'Test', 'url': 123, 'type': 'torznab'})
+            assert resp.status_code == 400
+            assert b'url' in resp.data and b'string' in resp.data
+            
+            # Non-boolean enabled
+            resp = admin_session.post('/api/settings/indexers', json={'name': 'Test', 'url': 'http://test.com', 'type': 'torznab', 'enabled': 'yes'})
+            assert resp.status_code == 400
+            assert b'enabled' in resp.data and b'boolean' in resp.data
+    
+    def test_add_indexer_invalid_url_scheme(self, admin_session):
+        """POST /api/settings/indexers rejects non-http/https URLs."""
+        with patch('app.main._require_admin', return_value=None):
+            resp = admin_session.post('/api/settings/indexers', json={'name': 'Test', 'url': 'ftp://test.com', 'type': 'torznab'})
+            assert resp.status_code == 400
+            assert b'http' in resp.data.lower() or b'scheme' in resp.data.lower()
+    
+    def test_add_indexer_invalid_indexer_type(self, admin_session):
+        """POST /api/settings/indexers rejects invalid indexer types."""
+        with patch('app.main._require_admin', return_value=None):
+            resp = admin_session.post('/api/settings/indexers', json={'name': 'Test', 'url': 'http://test.com', 'type': 'invalid'})
+            assert resp.status_code == 400
+            assert b'torznab' in resp.data.lower() or b'newznab' in resp.data.lower()
+    
+    def test_add_indexer_invalid_priority_range(self, admin_session):
+        """POST /api/settings/indexers rejects out-of-range priority."""
+        with patch('app.main._require_admin', return_value=None):
+            resp = admin_session.post('/api/settings/indexers', json={'name': 'Test', 'url': 'http://test.com', 'type': 'torznab', 'priority': -1})
+            assert resp.status_code == 400
+            assert b'priority' in resp.data
+            
+            resp = admin_session.post('/api/settings/indexers', json={'name': 'Test', 'url': 'http://test.com', 'type': 'torznab', 'priority': 99999})
+            assert resp.status_code == 400
+            assert b'priority' in resp.data
+    
+    def test_add_indexer_invalid_rate_limit(self, admin_session):
+        """POST /api/settings/indexers validates rate_limit structure and ranges."""
+        with patch('app.main._require_admin', return_value=None):
+            # Invalid requests type
+            resp = admin_session.post('/api/settings/indexers', json={
+                'name': 'Test',
+                'url': 'http://test.com',
+                'type': 'torznab',
+                'rate_limit': {'requests': 'many', 'period_seconds': 60}
+            })
+            assert resp.status_code == 400
+            assert b'rate_limit.requests' in resp.data
+            
+            # Out-of-range requests
+            resp = admin_session.post('/api/settings/indexers', json={
+                'name': 'Test',
+                'url': 'http://test.com',
+                'type': 'torznab',
+                'rate_limit': {'requests': 0, 'period_seconds': 60}
+            })
+            assert resp.status_code == 400
+            assert b'rate_limit.requests' in resp.data
+            
+            # Out-of-range period
+            resp = admin_session.post('/api/settings/indexers', json={
+                'name': 'Test',
+                'url': 'http://test.com',
+                'type': 'torznab',
+                'rate_limit': {'requests': 10, 'period_seconds': 999999}
+            })
+            assert resp.status_code == 400
+            assert b'rate_limit.period_seconds' in resp.data
+    
+    def test_update_indexer_validation(self, admin_session):
+        """PUT /api/settings/indexers/<id> also validates payloads."""
+        with patch('app.main._require_admin', return_value=None):
+            with patch('app.main.settings') as mock_settings:
+                def get_side_effect(key, default=None):
+                    if key == 'indexer.indexers':
+                        return [{'id': 'test-id', 'name': 'Test', 'url': 'http://test.com', 'type': 'torznab'}]
+                    return default
+                
+                mock_settings.get.side_effect = get_side_effect
+                mock_settings.update.return_value = (True, [])
+                
+                # Invalid URL scheme
+                resp = admin_session.put('/api/settings/indexers/test-id', json={'url': 'ftp://bad.com'})
+                assert resp.status_code == 400
+                assert b'http' in resp.data.lower() or b'scheme' in resp.data.lower()

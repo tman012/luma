@@ -994,6 +994,9 @@ def get_indexer_manager(settings_manager=None) -> IndexerManager:
     """
     Get or create the global IndexerManager singleton.
     
+    DEPRECATED: Use get_indexer_client() instead for external access.
+    This function is retained for internal use only.
+    
     Args:
         settings_manager: SettingsManager instance (required for first call)
     
@@ -1009,3 +1012,21 @@ def get_indexer_manager(settings_manager=None) -> IndexerManager:
             _indexer_manager_instance = IndexerManager(settings_manager)
         
         return _indexer_manager_instance
+
+
+def get_indexer_client(settings_manager=None):
+    """
+    Public API: Get the indexer client adapter.
+    
+    This is the ONLY function external modules should call.
+    Never import private (_underscore) methods from indexer_manager.
+    
+    Args:
+        settings_manager: SettingsManager instance (required for first call)
+    
+    Returns:
+        LumaBackendAdapter instance with public API
+    """
+    from app.indexer_backend import LumaBackendAdapter
+    manager = get_indexer_manager(settings_manager)
+    return LumaBackendAdapter(manager)

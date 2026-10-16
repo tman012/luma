@@ -57,7 +57,7 @@ function RequestPortalCard() {
       }
     }
     setBusy(true);
-    try:
+    try {
       const body: Record<string, any> = {
         enabled,
         hostname,

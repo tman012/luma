@@ -1750,3 +1750,35 @@ def test_normalized_result_for_sonarr():
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+def test_no_private_indexer_manager_imports():
+    """No module should import private (_underscore) helpers from indexer_manager."""
+    import subprocess
+    result = subprocess.run(
+        ['grep', '-rE', 'from app\\.indexer_manager import.* _[a-z]', 'app/', '--include=*.py'],
+        capture_output=True,
+        text=True
+    )
+    
+    # Exclude indexer_manager.py itself and indexer_backend.py (internal adapter)
+    forbidden_imports = []
+    for line in result.stdout.splitlines():
+        if 'indexer_manager.py:' in line or 'indexer_backend.py:' in line:
+            continue
+        # Exclude imports of __all__, __version__, etc (dunder methods)
+        if '__' in line:
+            continue
+        forbidden_imports.append(line)
+    
+    assert not forbidden_imports, (
+        f"Found {len(forbidden_imports)} forbidden private imports from indexer_manager:\n" +
+        "\n".join(forbidden_imports) +
+        "\n\nUse get_indexer_client() instead. Private functions start with underscore."
+    )
+
+
+def test_get_indexer_client_exists():
+    """get_indexer_client() is the public API."""
+    from app.indexer_manager import get_indexer_client
+    assert callable(get_indexer_client)

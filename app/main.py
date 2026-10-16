@@ -16,7 +16,7 @@ import random
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, redirect, g, make_response
@@ -16921,6 +16921,76 @@ def list_indexers():
         return jsonify({'error': sanitize_api_key(str(e))}), 500
 
 
+def _validate_indexer_payload(data: Dict[str, Any], is_update: bool = False) -> Optional[Tuple[Dict, int]]:
+    """
+    Validate indexer configuration payload.
+    
+    Returns None if valid, or (error_response, status_code) tuple if invalid.
+    """
+    from urllib.parse import urlparse
+    
+    # Required fields for new indexers
+    if not is_update:
+        if not data.get('name'):
+            return jsonify({'error': 'Field "name" is required'}), 400
+        if not data.get('url'):
+            return jsonify({'error': 'Field "url" is required'}), 400
+        if not data.get('type'):
+            return jsonify({'error': 'Field "type" is required'}), 400
+    
+    # Type validation
+    if 'name' in data and not isinstance(data['name'], str):
+        return jsonify({'error': 'Field "name" must be a string'}), 400
+    
+    if 'url' in data:
+        if not isinstance(data['url'], str):
+            return jsonify({'error': 'Field "url" must be a string'}), 400
+        
+        # URL scheme validation (http/https only)
+        parsed = urlparse(data['url'])
+        if parsed.scheme not in ('http', 'https'):
+            return jsonify({'error': 'URL must use http or https scheme'}), 400
+    
+    if 'type' in data:
+        if not isinstance(data['type'], str):
+            return jsonify({'error': 'Field "type" must be a string'}), 400
+        if data['type'].lower() not in ('torznab', 'newznab'):
+            return jsonify({'error': 'Field "type" must be "torznab" or "newznab"'}), 400
+    
+    if 'api_key' in data and data['api_key'] not in (None, SECRET_MASK):
+        if not isinstance(data['api_key'], str):
+            return jsonify({'error': 'Field "api_key" must be a string'}), 400
+    
+    if 'enabled' in data and not isinstance(data['enabled'], bool):
+        return jsonify({'error': 'Field "enabled" must be a boolean'}), 400
+    
+    if 'priority' in data:
+        if not isinstance(data['priority'], int):
+            return jsonify({'error': 'Field "priority" must be an integer'}), 400
+        if not (0 <= data['priority'] <= 10000):
+            return jsonify({'error': 'Field "priority" must be between 0 and 10000'}), 400
+    
+    # Rate limit validation
+    if 'rate_limit' in data and data['rate_limit'] is not None:
+        rate_limit = data['rate_limit']
+        if not isinstance(rate_limit, dict):
+            return jsonify({'error': 'Field "rate_limit" must be an object'}), 400
+        
+        if 'requests' in rate_limit:
+            if not isinstance(rate_limit['requests'], int):
+                return jsonify({'error': 'rate_limit.requests must be an integer'}), 400
+            if not (1 <= rate_limit['requests'] <= 10000):
+                return jsonify({'error': 'rate_limit.requests must be between 1 and 10000'}), 400
+        
+        if 'period_seconds' in rate_limit:
+            if not isinstance(rate_limit['period_seconds'], int):
+                return jsonify({'error': 'rate_limit.period_seconds must be an integer'}), 400
+            if not (1 <= rate_limit['period_seconds'] <= 86400):
+                return jsonify({'error': 'rate_limit.period_seconds must be between 1 and 86400 (1 day)'}), 400
+    
+    return None
+
+
 @app.route('/api/settings/indexers', methods=['POST'])
 def add_indexer():
     """Add a new indexer (Luma backend)."""
@@ -16929,6 +16999,11 @@ def add_indexer():
         return err
     try:
         body = request.get_json() or {}
+        
+        # Validate payload
+        validation_error = _validate_indexer_payload(body, is_update=False)
+        if validation_error:
+            return validation_error
         
         # Generate ID if not provided
         if not body.get('id'):
@@ -16966,6 +17041,11 @@ def update_indexer(indexer_id: str):
         return err
     try:
         body = request.get_json() or {}
+        
+        # Validate payload
+        validation_error = _validate_indexer_payload(body, is_update=True)
+        if validation_error:
+            return validation_error
         
         # Get current indexers
         indexers = settings.get('indexer.indexers') or []

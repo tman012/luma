@@ -11,7 +11,6 @@ import { MobileCardNav, type CardItem } from './components/MobileCardNav';
 import { useSettings } from './useSettings';
 import { fetchRadarrProfiles, fetchSonarrProfiles, type QualityProfile } from '@/services/settingsApi';
 import { UsersStatusCard } from './UsersStatusCard';
-import { IndexerCard } from './IndexerCard';
 
 // -- Sonarr card (needs quality profile dropdown) -----------------
 

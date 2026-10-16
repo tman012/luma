@@ -4,7 +4,6 @@
 
 import { useState, useEffect } from 'react';
 import { useSettings } from './useSettings';
-import { settingsApi } from '@/services/settingsApi';
 
 interface Indexer {
   id: string;
@@ -15,11 +14,10 @@ interface Indexer {
   categories: string;
   priority: number;
   enabled: boolean;
-  rate_limited?: boolean;
-  rate_limit_capacity?: number;
-  rate_limit_refill_seconds?: number;
-  rate_limit_max_per_hour?: number;
-  rate_limit_min_interval?: number;
+  rate_limit?: {
+    requests: number;
+    period_seconds: number;
+  } | null;
 }
 
 export function IndexerCard() {
@@ -30,6 +28,7 @@ export function IndexerCard() {
   const [editForm, setEditForm] = useState<Partial<Indexer>>({});
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
 
   const backend = getByPath('indexer.backend') || 'prowlarr';
 
@@ -64,7 +63,7 @@ export function IndexerCard() {
       categories: '2000',
       priority: 100,
       enabled: true,
-      rate_limited: false,
+      rate_limit: null,
     });
   };
 
@@ -121,17 +120,24 @@ export function IndexerCard() {
   };
 
   const handleTest = async (id: string) => {
+    setTestResults((prev) => ({ ...prev, [id]: { success: false, message: 'Testing...' } }));
     try {
       const resp = await fetch(`/api/settings/indexers/${id}/test`, { method: 'POST' });
       const result = await resp.json();
-      alert(result.message);
+      setTestResults((prev) => ({
+        ...prev,
+        [id]: { success: result.success, message: result.message },
+      }));
     } catch (err) {
-      alert('Test failed');
+      setTestResults((prev) => ({
+        ...prev,
+        [id]: { success: false, message: 'Test failed' },
+      }));
     }
   };
 
   const handleImport = async () => {
-    const prowlarrUrl = prompt('Prowlarr URL:', getByPath('indexer.base_url') || '');
+    const prowlarrUrl = prompt('Prowlarr URL:', (getByPath('indexer.base_url') as string) || '');
     if (!prowlarrUrl) return;
 
     const prowlarrKey = prompt('Prowlarr API Key:', '');
@@ -152,8 +158,8 @@ export function IndexerCard() {
       } else {
         setImportResult(`✗ ${result.message || result.error}`);
       }
-    } catch (err) {
-      setImportResult(`✗ Import failed: ${err}`);
+    } catch (err: any) {
+      setImportResult(`✗ Import failed: ${err.message || String(err)}`);
     } finally {
       setImporting(false);
     }
@@ -213,7 +219,14 @@ export function IndexerCard() {
             editing === ix.id ? (
               <IndexerForm key={ix.id} form={editForm} setForm={setEditForm} onSave={handleSave} onCancel={handleCancel} />
             ) : (
-              <IndexerRow key={ix.id} indexer={ix} onEdit={handleEdit} onDelete={handleDelete} onTest={handleTest} />
+              <IndexerRow
+                key={ix.id}
+                indexer={ix}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+                onTest={handleTest}
+                testResult={testResults[ix.id]}
+              />
             )
           )}
           {editing === 'new' && (
@@ -230,42 +243,61 @@ function IndexerRow({
   onEdit,
   onDelete,
   onTest,
+  testResult,
 }: {
   indexer: Indexer;
   onEdit: (ix: Indexer) => void;
   onDelete: (id: string) => void;
   onTest: (id: string) => void;
+  testResult?: { success: boolean; message: string };
 }) {
   return (
-    <div className="flex items-center gap-3 p-3 bg-zinc-800/50 rounded border border-zinc-700">
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-white text-sm">{indexer.name}</span>
-          {!indexer.enabled && <span className="text-xs text-zinc-500">(disabled)</span>}
-          {indexer.rate_limited && <span className="text-xs text-yellow-500">(rate limited)</span>}
+    <div className="p-3 bg-zinc-800/50 rounded border border-zinc-700 space-y-2">
+      <div className="flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-white text-sm">{indexer.name}</span>
+            {!indexer.enabled && <span className="text-xs text-zinc-500">(disabled)</span>}
+            {indexer.rate_limit && (
+              <span className="text-xs text-yellow-500">
+                ({indexer.rate_limit.requests}/{indexer.rate_limit.period_seconds}s)
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-zinc-500 truncate">{indexer.url}</div>
         </div>
-        <div className="text-xs text-zinc-500 truncate">{indexer.url}</div>
+        <div className="flex gap-1">
+          <button
+            onClick={() => onTest(indexer.id)}
+            className="px-2 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 text-white rounded"
+          >
+            Test
+          </button>
+          <button
+            onClick={() => onEdit(indexer)}
+            className="px-2 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 text-white rounded"
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => onDelete(indexer.id)}
+            className="px-2 py-1 text-xs bg-red-900 hover:bg-red-800 text-white rounded"
+          >
+            Delete
+          </button>
+        </div>
       </div>
-      <div className="flex gap-1">
-        <button
-          onClick={() => onTest(indexer.id)}
-          className="px-2 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 text-white rounded"
+      {testResult && (
+        <div
+          className={`text-xs p-2 rounded ${
+            testResult.success
+              ? 'bg-green-900/20 text-green-400 border border-green-800'
+              : 'bg-red-900/20 text-red-400 border border-red-800'
+          }`}
         >
-          Test
-        </button>
-        <button
-          onClick={() => onEdit(indexer)}
-          className="px-2 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 text-white rounded"
-        >
-          Edit
-        </button>
-        <button
-          onClick={() => onDelete(indexer.id)}
-          className="px-2 py-1 text-xs bg-red-900 hover:bg-red-800 text-white rounded"
-        >
-          Delete
-        </button>
-      </div>
+          {testResult.message}
+        </div>
+      )}
     </div>
   );
 }
@@ -281,6 +313,17 @@ function IndexerForm({
   onSave: () => void;
   onCancel: () => void;
 }) {
+  const [hasRateLimit, setHasRateLimit] = useState(!!form.rate_limit);
+
+  const handleRateLimitToggle = (enabled: boolean) => {
+    setHasRateLimit(enabled);
+    if (enabled && !form.rate_limit) {
+      setForm({ ...form, rate_limit: { requests: 10, period_seconds: 3600 } });
+    } else if (!enabled) {
+      setForm({ ...form, rate_limit: null });
+    }
+  };
+
   return (
     <div className="p-4 bg-zinc-800 rounded border border-zinc-700 space-y-3">
       <input
@@ -288,7 +331,7 @@ function IndexerForm({
         placeholder="Name"
         value={form.name || ''}
         onChange={(e) => setForm({ ...form, name: e.target.value })}
-        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white"
+        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white placeholder:text-zinc-600"
       />
       <select
         value={form.type || 'torznab'}
@@ -300,32 +343,32 @@ function IndexerForm({
       </select>
       <input
         type="text"
-        placeholder="URL (e.g. https://indexer.example.com/api)"
+        placeholder="URL"
         value={form.url || ''}
         onChange={(e) => setForm({ ...form, url: e.target.value })}
-        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white"
+        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white placeholder:text-zinc-600"
       />
       <input
         type="password"
         placeholder="API Key"
         value={form.api_key === '********' ? '' : (form.api_key || '')}
         onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white"
+        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white placeholder:text-zinc-600"
       />
       <div className="flex gap-3">
         <input
           type="text"
-          placeholder="Categories (2000)"
+          placeholder="Categories"
           value={form.categories || ''}
           onChange={(e) => setForm({ ...form, categories: e.target.value })}
-          className="flex-1 px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white"
+          className="flex-1 px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white placeholder:text-zinc-600"
         />
         <input
           type="number"
           placeholder="Priority"
           value={form.priority ?? 100}
           onChange={(e) => setForm({ ...form, priority: parseInt(e.target.value) || 100 })}
-          className="w-24 px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white"
+          className="w-24 px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white placeholder:text-zinc-600"
         />
       </div>
       <label className="flex items-center gap-2 text-sm text-zinc-300">
@@ -333,19 +376,57 @@ function IndexerForm({
           type="checkbox"
           checked={form.enabled ?? true}
           onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-          className="rounded"
+          className="rounded bg-zinc-700 border-zinc-600"
         />
         Enabled
       </label>
       <label className="flex items-center gap-2 text-sm text-zinc-300">
         <input
           type="checkbox"
-          checked={form.rate_limited ?? false}
-          onChange={(e) => setForm({ ...form, rate_limited: e.target.checked })}
-          className="rounded"
+          checked={hasRateLimit}
+          onChange={(e) => handleRateLimitToggle(e.target.checked)}
+          className="rounded bg-zinc-700 border-zinc-600"
         />
-        Rate limited (AvistaZ family)
+        Rate limit
       </label>
+      {hasRateLimit && (
+        <div className="pl-6 space-y-2">
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs text-zinc-400 mb-1">Requests</label>
+              <input
+                type="number"
+                min="1"
+                max="10000"
+                value={form.rate_limit?.requests ?? 10}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    rate_limit: { ...form.rate_limit!, requests: parseInt(e.target.value) || 10 },
+                  })
+                }
+                className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs text-zinc-400 mb-1">Period (seconds)</label>
+              <input
+                type="number"
+                min="1"
+                max="86400"
+                value={form.rate_limit?.period_seconds ?? 3600}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    rate_limit: { ...form.rate_limit!, period_seconds: parseInt(e.target.value) || 3600 },
+                  })
+                }
+                className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded text-white"
+              />
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex gap-2 justify-end">
         <button onClick={onCancel} className="px-3 py-1 text-xs bg-zinc-700 hover:bg-zinc-600 text-white rounded">
           Cancel
