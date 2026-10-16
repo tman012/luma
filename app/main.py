@@ -87,9 +87,23 @@ app = Flask(__name__,
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or _INSTALL_SECRETS['flask_secret_key']
 CORS(app, supports_credentials=False)
 
-# Apply URL base via WSGI middleware
+# Initialize settings (needed for URL base resolution)
+from app.settings_manager import SettingsManager
+settings = SettingsManager()
+
+# Resolve URL base once at startup and store in app.config
 from app.server_config import get_url_base
-_URL_BASE = get_url_base()
+_URL_BASE = get_url_base(settings)
+app.config['URL_BASE'] = _URL_BASE
+
+# Apply ProxyFix if trusted proxies are configured
+# This makes request.is_secure, request.scheme, and request.host use X-Forwarded-* headers
+_trusted_proxies = _access.trusted_proxies(settings)
+if _trusted_proxies:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    logger.info(f"ProxyFix enabled (trusted proxies configured: {len(_trusted_proxies)} networks)")
+
 if _URL_BASE:
     from werkzeug.middleware.dispatcher import DispatcherMiddleware
     
@@ -151,6 +165,9 @@ def load_current_user():
     """Attach the current user to g.current_user (or None if not logged in).
     Also accepts X-API-Key header for service-to-service auth (companion apps).
     """
+    # Default g.implicit_user to False for all request types
+    g.implicit_user = False
+    
     # Check for API key first
     api_key = request.headers.get("X-API-Key")
     if api_key and _SERVICE_API_KEY and secrets.compare_digest(api_key, _SERVICE_API_KEY):
@@ -160,10 +177,9 @@ def load_current_user():
         }
         return
 
-    # Try both old and new session cookie names for compatibility
-    token = request.cookies.get(LUMA_SESSION_COOKIE) or request.cookies.get('luma_auth_session')
+    # Read session cookie
+    token = request.cookies.get('luma_auth_session')
     g.current_user = user_auth.validate_session(token) if token else None
-    g.implicit_user = False
     if g.current_user is None and not _access.should_authenticate(settings, request):
         # Implicit owner for local requests when auth_required=disabled_local
         owner = _access.owner(user_auth)
@@ -384,17 +400,197 @@ class Config:
 
 config = Config()
 
-# ---------------------------------------------------------------------------
-# Global Settings instance (Phase 1 -- supplements Config, does not replace)
-# ---------------------------------------------------------------------------
-settings = SettingsManager()
+# Note: Settings already initialized at startup for URL base resolution
 logger.info(f"Settings loaded from {settings.path}")
 
-# Check if background threads should be skipped (for testing)
-# Uses Flask app.config['START_BACKGROUND_THREADS'] or env var for back-compat
-skip_bg = os.getenv('LUMA_SKIP_BACKGROUND_THREADS', '').strip().lower() in ('1', 'true', 'yes')
-if not skip_bg:
-    skip_bg = not app.config.get('START_BACKGROUND_THREADS', True)
+
+def start_services(app_instance):
+    """Initialize database, caches, and background services.
+    
+    Called from:
+    - gunicorn.conf.py post_worker_init (production)
+    - __main__ (development)
+    """
+    # Check if background threads should be skipped (for testing)
+    # Read from app.config at call time, not import time
+    skip_bg = not app_instance.config.get('START_BACKGROUND_THREADS', True)
+    
+    # Initialize database
+    init_database()
+    
+    # Initialize user auth tables
+    try:
+        user_auth.init_db()
+        logger.info("✅ User auth database initialized")
+    except Exception as e:
+        logger.error(f"❌ User auth DB init failed: {e}")
+    
+    # First run: generate the Web Push (VAPID) key pair up front
+    try:
+        from app.push_service import ensure_vapid_keys
+        ensure_vapid_keys(settings)
+    except Exception as e:
+        logger.warning(f"VAPID key setup skipped: {e}")
+    
+    # Initialize library caches
+    if not skip_bg:
+        try:
+            import threading
+            threading.Thread(target=initialize_caches, daemon=True).start()
+            logger.info("✅ Library cache initialization started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start library cache initialization: {e}")
+    
+    # Start fast search index
+    if not skip_bg:
+        try:
+            fast_search_index.start()
+            logger.info("✅ Fast search index started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start fast search index: {e}")
+    
+    # Start explore cache updater
+    if not skip_bg:
+        try:
+            explore_cache_updater()
+            import threading
+            threading.Thread(target=update_explore_cache, daemon=True).start()
+            logger.info("✅ Explore cache updater started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start explore cache updater: {e}")
+    
+    # Automations and scheduled jobs
+    if _AUTOMATIONS_DISABLED:
+        logger.warning('LUMA_DISABLE_AUTOMATIONS is set: auto-rename, watchlist/auto-grab automations, schedulers, Downloads Guard and tunnel auto-start are NOT started')
+    elif not skip_bg:
+        # Auto-rename monitor
+        try:
+            from app.auto_rename import start_monitor_thread
+            start_monitor_thread()
+            logger.info("✅ Auto-rename monitor started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start auto-rename monitor: {e}")
+        
+        # Trending watchlist automation
+        try:
+            from app.trending_watchlist import start_trending_watchlist_thread
+            start_trending_watchlist_thread()
+            logger.info("✅ Trending watchlist automation started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start trending watchlist automation: {e}")
+        
+        # Trending TV watchlist automation
+        try:
+            from app.trending_tv_watchlist import start_trending_tv_watchlist_thread
+            start_trending_tv_watchlist_thread()
+            logger.info("✅ Trending TV watchlist automation started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start trending TV watchlist automation: {e}")
+        
+        # Now available watchlist automation
+        try:
+            from app.now_available_watchlist import start_now_available_watchlist_thread
+            start_now_available_watchlist_thread()
+            logger.info("✅ Now available watchlist automation started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start now available watchlist automation: {e}")
+        
+        # Anticipated watchlist automation
+        try:
+            from app.anticipated_watchlist import start_anticipated_watchlist_thread
+            start_anticipated_watchlist_thread()
+            logger.info("✅ Anticipated watchlist automation started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start anticipated watchlist automation: {e}")
+        
+        # Latest auto-grab automation
+        try:
+            from app.latest_auto_grab import start_latest_auto_grab_thread
+            start_latest_auto_grab_thread()
+            logger.info("✅ Latest auto-grab automation started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Latest auto-grab automation: {e}")
+        
+        # 4K Remux auto-grab automation
+        try:
+            from app.upgrade_4k_auto_grab import start_upgrade_4k_auto_grab_thread
+            start_upgrade_4k_auto_grab_thread()
+            logger.info("✅ 4K Remux auto-grab automation started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start 4K Remux auto-grab automation: {e}")
+        
+        # Daily upgrade scheduler
+        try:
+            from app.upgrade_scheduler import start_upgrade_scheduler_thread
+            start_upgrade_scheduler_thread()
+            logger.info("✅ Daily upgrade scheduler started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start upgrade scheduler: {e}")
+        
+        # Movie Night weekly canon scheduler
+        try:
+            from app.movie_night import start_movie_night_thread
+            start_movie_night_thread()
+            logger.info("✅ Movie Night scheduler started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Movie Night scheduler: {e}")
+        
+        # Genre Roulette nightly scheduler
+        try:
+            from app.genre_roulette import start_genre_roulette_thread
+            start_genre_roulette_thread()
+            logger.info("✅ Genre Roulette scheduler started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Genre Roulette scheduler: {e}")
+        
+        # Franchise Completer nightly scheduler
+        try:
+            from app.franchise_completer import start_franchise_completer_thread
+            start_franchise_completer_thread()
+            logger.info("✅ Franchise Completer scheduler started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Franchise Completer scheduler: {e}")
+        
+        # Watchlist digital dates scheduler
+        try:
+            from app.watchlist_digital_dates import start_watchlist_digital_dates_thread
+            start_watchlist_digital_dates_thread()
+            logger.info("✅ Watchlist Digital Dates scheduler started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Watchlist Digital Dates scheduler: {e}")
+        
+        # What You're Missing pool refresher
+        try:
+            from app.daily_missing import start_daily_missing_thread
+            start_daily_missing_thread()
+            logger.info("✅ What You're Missing pool refresher started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start What You're Missing refresher: {e}")
+        
+        # Movie Collections refresher
+        try:
+            from app.movie_collections import start_movie_collections_thread
+            start_movie_collections_thread()
+            logger.info("✅ Movie Collections refresher started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Movie Collections refresher: {e}")
+        
+        # Downloads Guard
+        try:
+            from app.downloads_guard import start_downloads_guard_thread
+            start_downloads_guard_thread()
+            logger.info("✅ Downloads Guard started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Downloads Guard: {e}")
+        
+        # Auto-start Cloudflare Tunnel if enabled
+        try:
+            tunnel_auto_start(settings)
+        except Exception as e:
+            logger.error(f"Cloudflare Tunnel auto-start failed: {e}")
+
+
+# Note: Background thread initialization moved to start_services()
 
 # Skip initialization in test mode (will be initialized on demand)
 if not skip_bg:
@@ -1006,8 +1202,9 @@ def _auth_guard():
             if request.path.startswith('/api/'):
                 return jsonify({"error": "Authentication required"}), 401
             # For HTML pages, redirect to login
-            url_base = get_url_base()
-            return redirect(f'{url_base}/login?next={request.path}')
+            url_base = app.config.get('URL_BASE', '')
+            from urllib.parse import quote
+            return redirect(f'{url_base}/login?next={quote(request.full_path)}')
 
 # CSRF protection for API state-changing requests (must run after load_current_user)
 @app.before_request
@@ -1015,7 +1212,7 @@ def _csrf_api_guard():
     """Check Origin/Referer for cookie-authenticated POST/PUT/PATCH/DELETE on /api/*.
     
     Protects against CSRF attacks by validating same-origin on state-changing requests.
-    Preserves LAN/kiosk usage and request portal operations.
+    When Origin or Referer is present, validates it even for implicit users.
     """
     # Only check state-changing methods
     if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
@@ -1037,44 +1234,36 @@ def _csrf_api_guard():
     if request.headers.get("X-API-Key"):
         return None
     
-    # Skip if this is an implicit user (LAN/kiosk mode - not session-based)
-    if getattr(g, 'implicit_user', False):
-        return None
-    
-    # Validate Origin or Referer header
+    # Get Origin or Referer header
     origin = request.headers.get('Origin')
     referer = request.headers.get('Referer')
     
+    # Get expected scheme and host (ProxyFix handles X-Forwarded-* if configured)
+    expected_scheme = request.scheme
+    expected_host = request.host
+    
+    # Import helper from auth_routes
+    from app.auth_routes import _is_same_origin
+    
+    # If Origin or Referer is present, validate it (even for implicit users)
+    if origin:
+        if not _is_same_origin(origin, expected_scheme, expected_host):
+            return jsonify({"error": "CSRF validation failed: invalid Origin"}), 403
+    
+    if referer:
+        if not _is_same_origin(referer, expected_scheme, expected_host):
+            return jsonify({"error": "CSRF validation failed: invalid Referer"}), 403
+    
+    # Skip CSRF check for implicit users when no Origin/Referer (LAN direct access)
+    if getattr(g, 'implicit_user', False):
+        if not origin and not referer:
+            return None
+    
+    # For explicit session users, require Origin or Referer
     if not origin and not referer:
-        # No Origin or Referer - reject
         return jsonify({"error": "CSRF validation failed: missing Origin/Referer"}), 403
     
-    # Get expected host and scheme
-    expected_host = request.host
-    expected_scheme = request.scheme
-    
-    # Check Origin
-    if origin:
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(origin)
-            if parsed.scheme == expected_scheme and parsed.netloc == expected_host:
-                return None  # Valid
-        except Exception:
-            pass
-    
-    # Check Referer
-    if referer:
-        try:
-            from urllib.parse import urlparse
-            parsed = urlparse(referer)
-            if parsed.scheme == expected_scheme and parsed.netloc == expected_host:
-                return None  # Valid
-        except Exception:
-            pass
-    
-    # Neither Origin nor Referer matched
-    return jsonify({"error": "CSRF validation failed: invalid Origin/Referer"}), 403
+    return None
 def _serve_spa():
     """Serve the React SPA index.html (from static/spa/) with runtime URL base injection."""
     spa_index = os.path.join(app.static_folder, 'spa', 'index.html')
@@ -1084,7 +1273,7 @@ def _serve_spa():
             html = f.read()
         
         # Inject URL base as a meta tag and inline script
-        url_base = get_url_base()
+        url_base = app.config.get('URL_BASE', '')
         injection = f'''
     <meta name="url-base" content="{url_base}">
     <script>window.__LUMA_URL_BASE__ = "{url_base}";</script>
@@ -7408,15 +7597,23 @@ def auth_login():
                 'is_admin': bool(user['is_admin']),
             }
         }))
-        # SameSite=Lax; not HttpOnly so JS can detect its presence
+        
+        # Get URL base for cookie path
+        url_base = app.config.get('URL_BASE', '') or '/'
+        
+        # Set new session cookie (httponly, secure per scheme, scoped to URL base)
         resp.set_cookie(
-            LUMA_SESSION_COOKIE, token,
+            'luma_auth_session', token,
             max_age=60 * 60 * 24 * 30,  # 30 days
-            httponly=False,
+            httponly=True,
             samesite='Lax',
-            secure=False,  # HTTP on local LAN
-            path='/',
+            secure=request.is_secure,
+            path=url_base,
         )
+        
+        # Expire legacy cookie
+        resp.delete_cookie(LUMA_SESSION_COOKIE, path='/')
+        
         return resp
 
     except Exception as e:
@@ -7658,10 +7855,16 @@ def _send_approval_email(to_email: str, display_name: str) -> None:
 def auth_logout():
     """Clear the session cookie and invalidate the session."""
     try:
-        token = request.cookies.get(LUMA_SESSION_COOKIE)
+        token = request.cookies.get('luma_auth_session')
         if token:
             user_auth.delete_session(token)
         resp = make_response(jsonify({'success': True}))
+        
+        # Get URL base for cookie path
+        url_base = app.config.get('URL_BASE', '') or '/'
+        
+        # Delete both new and legacy cookies
+        resp.delete_cookie('luma_auth_session', path=url_base)
         resp.delete_cookie(LUMA_SESSION_COOKIE, path='/')
         return resp
     except Exception as e:
@@ -7692,6 +7895,7 @@ def auth_me():
     # Needs setup if: no approved shared access AND no own server configured
     needs_setup = not is_admin and not has_shared and not has_own
     plex_access_status = user_settings_data.get('plex_access_status', None)
+    auth_required = (settings.get('security.auth_required') or 'disabled_local').strip()
     return jsonify({
         'authenticated': True,
         'user': {
@@ -7704,7 +7908,7 @@ def auth_me():
         'needs_setup': needs_setup,
         'plex_access_status': plex_access_status,
         'implicit': bool(getattr(g, 'implicit_user', False)),
-        'access_mode': _access.mode(settings),
+        'auth_required': auth_required,
         'start_in_progress': _start_flow._in_progress(user),
     })
 
@@ -7741,8 +7945,17 @@ def auth_unlock():
     login_limiter.record_success(ip, 'owner')
     token = user_auth.create_session(user['id'])
     resp = make_response(jsonify({'success': True}))
-    resp.set_cookie(LUMA_SESSION_COOKIE, token, max_age=60 * 60 * 24 * 30,
-                    httponly=False, samesite='Lax', secure=False, path='/')
+    
+    # Get URL base for cookie path
+    url_base = app.config.get('URL_BASE', '') or '/'
+    
+    # Set new session cookie (httponly, secure per scheme, scoped to URL base)
+    resp.set_cookie('luma_auth_session', token, max_age=60 * 60 * 24 * 30,
+                    httponly=True, samesite='Lax', secure=request.is_secure, path=url_base)
+    
+    # Expire legacy cookie
+    resp.delete_cookie(LUMA_SESSION_COOKIE, path='/')
+    
     return resp
 
 
@@ -7760,8 +7973,9 @@ def security_get():
     err = _require_admin()
     if err:
         return err
+    auth_required = (settings.get('security.auth_required') or 'disabled_local').strip()
     return jsonify({
-        'mode': _access.mode(settings),
+        'auth_required': auth_required,
         'pin_set': _pin_state(),
         'single_account': _start_flow.created_by_start(),
         'local_request': _access.is_local_request(request, settings),
@@ -7775,38 +7989,62 @@ def security_put():
     if err:
         return err
     body = request.get_json(silent=True) or {}
-    mode = str(body.get('mode') or '')
+    auth_required = str(body.get('auth_required') or '').strip()
     pin = str(body.get('pin') or '')
-    if mode not in _access.MODES:
-        return jsonify({'error': 'Unknown access mode'}), 400
+    
+    # Validate auth_required
+    if auth_required and auth_required not in ('enabled', 'disabled_local'):
+        return jsonify({'error': 'Invalid auth_required value'}), 400
+    
+    # Validate PIN
     if pin and (len(pin) != 4 or not pin.isdigit()):
         return jsonify({'error': 'Enter 4 digits'}), 400
     if pin and 'confirm' in body and str(body.get('confirm') or '') != pin:
         return jsonify({'error': "PINs don't match"}), 400
+    
+    # Update trusted_proxies
     if 'trusted_proxies' in body:
         proxies = str(body.get('trusted_proxies') or '').strip()
         bad = [p for p in proxies.replace(';', ',').split(',') if p.strip() and not _valid_net(p.strip())]
         if bad:
             return jsonify({'error': f'Not an IP address or range: {bad[0].strip()}'}), 400
         settings.update({'security': {'trusted_proxies': proxies}})
+    
     user = _get_current_user()
     if not user or not user.get('id'):
         return jsonify({'error': 'Sign in first'}), 400
-    if mode != 'open' and not pin and not _pin_state():
+    
+    # Require PIN to be set for enabled mode
+    if auth_required == 'enabled' and not pin and not _pin_state():
         return jsonify({'error': 'Set a PIN first'}), 400
+    
+    # Update PIN if provided
     if pin:
         user_auth.update_pin(user['id'], pin)
         if _start_flow.created_by_start():
             st = _start_flow._load_state()
             st['pin_set'] = True
             _start_flow._save_state(st)
-    settings.update({'security': {'access_mode': mode}})
-    resp = make_response(jsonify({'ok': True, 'mode': mode, 'pin_set': _pin_state()}))
-    if mode != 'open' and getattr(g, 'implicit_user', False):
-        # Keep this browser signed in after turning the PIN on.
+    
+    # Update auth_required
+    if auth_required:
+        settings.update({'security': {'auth_required': auth_required}})
+    
+    resp = make_response(jsonify({'ok': True, 'auth_required': auth_required or (settings.get('security.auth_required') or 'disabled_local'), 'pin_set': _pin_state()}))
+    
+    # Keep this browser signed in after enabling authentication
+    if auth_required == 'enabled' and getattr(g, 'implicit_user', False):
+        # Get URL base for cookie path
+        url_base = app.config.get('URL_BASE', '') or '/'
+        
         token = user_auth.create_session(user['id'])
-        resp.set_cookie(LUMA_SESSION_COOKIE, token, max_age=60 * 60 * 24 * 30,
-                        httponly=False, samesite='Lax', secure=False, path='/')
+        # Set new session cookie (httponly, secure per scheme, scoped to URL base)
+        resp.set_cookie('luma_auth_session', token, max_age=60 * 60 * 24 * 30,
+                        httponly=True, samesite='Lax', secure=request.is_secure, path=url_base)
+        
+        # Expire legacy cookie
+        resp.delete_cookie(LUMA_SESSION_COOKIE, path='/')
+    
     return resp
 
 
@@ -15707,10 +15945,9 @@ def screensaver_image_proxy():
 @app.route('/manifest.json')
 def manifest():
     """PWA manifest — app is always Luma."""
-    from app.server_config import get_url_base
     sm = SettingsManager()
     theme = sm.get("ui.theme_color") or "#0a0a0a"
-    url_base = get_url_base(settings) or '/'
+    url_base = app.config.get('URL_BASE', '') or '/'
     data = {
         "name": "Luma",
         "short_name": "Luma",
@@ -15731,10 +15968,9 @@ def manifest():
 @app.route('/sw.js')
 def service_worker():
     """Service Worker file — short cache so updates propagate quickly."""
-    from app.server_config import get_url_base
     resp = send_from_directory('/app/static', 'sw.js')
     resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
-    url_base = get_url_base(settings) or '/'
+    url_base = app.config.get('URL_BASE', '') or '/'
     resp.headers['Service-Worker-Allowed'] = url_base
     return resp
 
@@ -17653,221 +17889,21 @@ app.register_blueprint(_start_flow.bp)
 
 
 if __name__ == '__main__':
-    # Initialize database
-    init_database()
-
-    # Initialize user auth tables (multi-user support)
-    try:
-        user_auth.init_db()
-        logger.info("✅ User auth database initialized")
-    except Exception as e:
-        logger.error(f"❌ User auth DB init failed: {e}")
-
-    # Installs that already had accounts before access modes existed keep
-    # requiring sign-in (an unset mode already means "pin"; save it explicitly).
-    try:
-        if not (settings.get('security.access_mode') or '') and user_auth.list_users():
-            settings.update({'security': {'access_mode': 'pin'}})
-            logger.info("Security: existing accounts found, sign-in stays required")
-    except Exception as e:
-        logger.warning(f"Security migration skipped: {e}")
-
-    # First run: generate the Web Push (VAPID) key pair up front
-    try:
-        from app.push_service import ensure_vapid_keys
-        ensure_vapid_keys(settings)
-    except Exception as e:
-        logger.warning(f"VAPID key setup skipped: {e}")
-
-    # Database sync service disabled - using direct remote database access
-    # to avoid corruption issues during container restarts
-    logger.info("✅ Using direct Plex database access (sync disabled)")
-
-    # Initialize library caches
-    try:
-        import threading
-        threading.Thread(target=initialize_caches, daemon=True).start()
-        logger.info("✅ Library cache initialization started")
-    except Exception as e:
-        logger.error(f"❌ Failed to start library cache initialization: {e}")
-
-    # Automations / scheduled jobs (skipped when LUMA_DISABLE_AUTOMATIONS=1, e.g. a dev instance)
-    if not _AUTOMATIONS_DISABLED:
-        # Start auto-rename monitor thread
-        try:
-            from app.auto_rename import start_monitor_thread
-            start_monitor_thread()
-            logger.info("✅ Auto-rename monitor started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start auto-rename monitor: {e}")
-            logger.error("Download tracking will not be available")
-
-    # Start fast search index (preloads all Plex library metadata in memory)
-    try:
-        fast_search_index.start()
-        logger.info("✅ Fast search index started")
-    except Exception as e:
-        logger.error(f"❌ Failed to start fast search index: {e}")
-
-    # Start explore cache updater thread
-    try:
-        explore_cache_updater()
-        # Do initial update in background to not block startup
-        import threading
-        threading.Thread(target=update_explore_cache, daemon=True).start()
-        logger.info("✅ Explore cache updater started")
-    except Exception as e:
-        logger.error(f"❌ Failed to start explore cache updater: {e}")
-
-    if _AUTOMATIONS_DISABLED:
-        logger.warning('LUMA_DISABLE_AUTOMATIONS is set: auto-rename, watchlist/auto-grab automations, schedulers, Downloads Guard and tunnel auto-start are NOT started')
-    else:
-        # Start trending watchlist automation thread
-        try:
-            from app.trending_watchlist import start_trending_watchlist_thread
-            start_trending_watchlist_thread()
-            logger.info("✅ Trending watchlist automation started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start trending watchlist automation: {e}")
-
-        # Start trending TV watchlist automation thread
-        try:
-            from app.trending_tv_watchlist import start_trending_tv_watchlist_thread
-            start_trending_tv_watchlist_thread()
-            logger.info("✅ Trending TV watchlist automation started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start trending TV watchlist automation: {e}")
-
-        # Start now available watchlist automation thread
-        try:
-            from app.now_available_watchlist import start_now_available_watchlist_thread
-            start_now_available_watchlist_thread()
-            logger.info("✅ Now available watchlist automation started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start now available watchlist automation: {e}")
-
-        # Start anticipated watchlist automation thread
-        try:
-            from app.anticipated_watchlist import start_anticipated_watchlist_thread
-            start_anticipated_watchlist_thread()
-            logger.info("✅ Anticipated watchlist automation started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start anticipated watchlist automation: {e}")
-
-        # Start Latest auto-grab automation thread
-        try:
-            from app.latest_auto_grab import start_latest_auto_grab_thread
-            start_latest_auto_grab_thread()
-            logger.info("✅ Latest auto-grab automation started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Latest auto-grab automation: {e}")
-
-        # Start 4K Remux auto-grab automation thread
-        try:
-            from app.upgrade_4k_auto_grab import start_upgrade_4k_auto_grab_thread
-            start_upgrade_4k_auto_grab_thread()
-            logger.info("✅ 4K Remux auto-grab automation started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start 4K Remux auto-grab automation: {e}")
-
-        # Start daily upgrade scheduler thread
-        try:
-            from app.upgrade_scheduler import start_upgrade_scheduler_thread
-            start_upgrade_scheduler_thread()
-            logger.info("✅ Daily upgrade scheduler started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start upgrade scheduler: {e}")
-
-        # Start Movie Night weekly canon scheduler (no-ops until enabled)
-        try:
-            from app.movie_night import start_movie_night_thread
-            start_movie_night_thread()
-            logger.info("✅ Movie Night scheduler started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Movie Night scheduler: {e}")
-
-        # Start Genre Roulette nightly scheduler (no-ops until enabled)
-        try:
-            from app.genre_roulette import start_genre_roulette_thread
-            start_genre_roulette_thread()
-            logger.info("✅ Genre Roulette scheduler started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Genre Roulette scheduler: {e}")
-
-        # Start Franchise Completer nightly scheduler (no-ops until enabled)
-        try:
-            from app.franchise_completer import start_franchise_completer_thread
-            start_franchise_completer_thread()
-            logger.info("✅ Franchise Completer scheduler started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Franchise Completer scheduler: {e}")
-
-        # Morning watchlist digital-date check (default 06:00 America/New_York)
-        try:
-            from app.watchlist_digital_dates import start_watchlist_digital_dates_thread
-            start_watchlist_digital_dates_thread()
-            logger.info("✅ Watchlist Digital Dates scheduler started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Watchlist Digital Dates scheduler: {e}")
-
-        # What You're Missing — warm popular-unowned pool for the Home rail
-        try:
-            from app.daily_missing import start_daily_missing_thread
-            start_daily_missing_thread()
-            logger.info("✅ What You're Missing pool refresher started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start What You're Missing refresher: {e}")
-
-        # Incomplete movie Collections — warm TMDb franchise gap cache
-        try:
-            from app.movie_collections import start_movie_collections_thread
-            start_movie_collections_thread()
-            logger.info("✅ Movie Collections refresher started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Movie Collections refresher: {e}")
-
-        # Start Downloads Guard free-space watcher (no-ops until enabled)
-        try:
-            from app.downloads_guard import start_downloads_guard_thread
-            start_downloads_guard_thread()
-            logger.info("✅ Downloads Guard started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Downloads Guard: {e}")
-
-        # Auto-start Cloudflare Tunnel if enabled
-        try:
-            tunnel_auto_start(settings)
-        except Exception as e:
-            logger.error(f"Cloudflare Tunnel auto-start failed: {e}")
-
-    # Run the app
+    # Initialize services (database, caches, background threads)
+    start_services(app)
+    
+    # Run the app with Flask dev server (development mode)
     from app.server_config import get_port, get_bind_address, get_https_cert
     
     port = get_port(settings)
     bind = get_bind_address(settings)
     https_config = get_https_cert(settings)
-
-    # Always use gunicorn gthread for production
-    logger.info(f"Starting Media Search App on {'https' if https_config else 'http'}://{bind}:{port}")
     
-    # Build gunicorn command with gthread worker
-    import sys
-    gunicorn_cmd = [
-        sys.executable, '-m', 'gunicorn',
-        '--bind', f'{bind}:{port}',
-        '--workers', '1',
-        '--threads', '8',
-        '--worker-class', 'gthread',
-        '--timeout', '120',
-        '--access-logfile', '-',
-        '--error-logfile', '-',
-        'app.main:app'
-    ]
+    logger.info(f"Starting Luma (dev mode) on {'https' if https_config else 'http'}://{bind}:{port}")
     
-    # Add TLS config if HTTPS is enabled
+    # Use Flask development server
     if https_config:
         cert_path, key_path = https_config
-        gunicorn_cmd.extend(['--certfile', cert_path, '--keyfile', key_path])
-    
-    import subprocess
-    os.execvp(sys.executable, gunicorn_cmd)
+        app.run(host=bind, port=port, debug=False, ssl_context=(cert_path, key_path))
+    else:
+        app.run(host=bind, port=port, debug=False)

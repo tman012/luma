@@ -5,45 +5,17 @@ import time
 import secrets
 from collections import defaultdict
 from datetime import datetime, timedelta
-from flask import Blueprint, request, jsonify, make_response, redirect, url_for, render_template_string, session
+from flask import Blueprint, request, jsonify, make_response, redirect, url_for, render_template_string, session, current_app
 from werkzeug.security import check_password_hash
 import app.user_auth as user_auth
 import app.access as access
-from app.server_config import get_url_base
 
 logger = logging.getLogger(__name__)
 
 bp = Blueprint('auth', __name__)
 
-# Rate limiting: track failed attempts per IP
-_failed_attempts = defaultdict(list)  # IP -> [timestamp, ...]
-_RATE_LIMIT_WINDOW = 300  # 5 minutes
-_RATE_LIMIT_MAX = 5  # Max attempts in window
-
 # Session cookie name
 AUTH_COOKIE = 'luma_auth_session'
-
-
-def reset_rate_limiter():
-    """Reset rate limiter state (for testing)."""
-    global _failed_attempts
-    _failed_attempts.clear()
-
-
-def _is_rate_limited(ip: str) -> bool:
-    """Check if IP is rate limited."""
-    now = time.time()
-    cutoff = now - _RATE_LIMIT_WINDOW
-    
-    # Clean old attempts
-    _failed_attempts[ip] = [t for t in _failed_attempts[ip] if t > cutoff]
-    
-    return len(_failed_attempts[ip]) >= _RATE_LIMIT_MAX
-
-
-def _record_failed_attempt(ip: str):
-    """Record a failed login attempt."""
-    _failed_attempts[ip].append(time.time())
 
 
 def _get_client_ip(request, settings) -> str:
@@ -83,7 +55,7 @@ def _safe_redirect_url(next_param: str, default: str = '/') -> str:
     
     If next_param is unsafe, returns default with URL base.
     """
-    url_base = get_url_base() or ''
+    url_base = current_app.config.get('URL_BASE', '')
     
     if not _is_safe_redirect(next_param, url_base):
         return url_base + default if url_base else default
@@ -108,6 +80,35 @@ def _validate_csrf_token(token: str) -> bool:
     if not expected or not token:
         return False
     return secrets.compare_digest(expected, token)
+
+
+def _is_same_origin(request_origin: str, expected_scheme: str, expected_host: str) -> bool:
+    """Check if request_origin matches expected scheme://netloc exactly.
+    
+    Args:
+        request_origin: Origin or Referer header value (may include path)
+        expected_scheme: Expected scheme (http or https)
+        expected_host: Expected Host header value (may include port)
+    
+    Returns:
+        True if origins match exactly (scheme and netloc), False otherwise
+    """
+    from urllib.parse import urlparse
+    
+    if not request_origin:
+        return False
+    
+    # Parse the request origin/referer
+    parsed = urlparse(request_origin)
+    if not parsed.scheme or not parsed.netloc:
+        return False
+    
+    # Extract netloc from expected_host (Host header may include port)
+    expected_netloc = expected_host.lower()
+    
+    # Compare scheme and netloc exactly
+    return (parsed.scheme.lower() == expected_scheme.lower() and 
+            parsed.netloc.lower() == expected_netloc)
 
 
 # Simple HTML login page
@@ -270,6 +271,7 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
 def login():
     """Login page and authentication endpoint."""
     from app.settings_manager import SettingsManager
+    from app import login_limiter
     settings = SettingsManager()
     
     next_param = request.args.get('next', '/')
@@ -295,36 +297,41 @@ def login():
         logger.warning("[auth] CSRF token validation failed")
         return redirect(url_for('auth.login', 
                                error='Invalid request. Please try again.',
-                               next=safe_next))  # Use safe_next, not raw next_param
+                               next=safe_next))
     
     client_ip = _get_client_ip(request, settings)
-    
-    # Check rate limit
-    if _is_rate_limited(client_ip):
-        logger.warning(f"[auth] Rate limit exceeded for IP {client_ip}")
-        return redirect(url_for('auth.login', 
-                               error='Too many failed attempts. Try again in 5 minutes.',
-                               rate_limited='1',
-                               next=safe_next))  # Use safe_next
-    
     username = request.form.get('username', '').strip()
+    
+    # Check rate limit using login_limiter
+    wait_time = login_limiter.retry_after(client_ip, username)
+    if wait_time > 0:
+        mins = max(1, (wait_time + 59) // 60)
+        logger.warning(f"[auth] Rate limit exceeded for {username} from {client_ip}")
+        return redirect(url_for('auth.login', 
+                               error=f'Too many attempts. Try again in {mins} min.',
+                               rate_limited='1',
+                               next=safe_next))
+    
     password = request.form.get('password', '')
     remember = request.form.get('remember') == 'on'
     
     if not username or not password:
         return redirect(url_for('auth.login', 
                                error='Username and password required',
-                               next=safe_next))  # Use safe_next
+                               next=safe_next))
     
     # Authenticate user
     user = user_auth.authenticate(username, password)
     
     if not user:
-        _record_failed_attempt(client_ip)
+        login_limiter.record_failure(client_ip, username)
         logger.info(f"[auth] Failed login attempt for user {username} from {client_ip}")
         return redirect(url_for('auth.login', 
                                error='Invalid username or password',
-                               next=safe_next))  # Use safe_next
+                               next=safe_next))
+    
+    # Login successful - clear rate limit
+    login_limiter.record_success(client_ip, username)
     
     # Create session
     token = user_auth.create_session(user['id'])
@@ -342,7 +349,7 @@ def login():
     secure = request.is_secure
     
     # Cookie path respects URL base
-    url_base = get_url_base() or '/'
+    url_base = current_app.config.get('URL_BASE', '') or '/'
     
     response.set_cookie(
         AUTH_COOKIE,
@@ -364,17 +371,16 @@ def logout():
     # Check if request came from same origin (CSRF protection)
     origin = request.headers.get('Origin')
     referer = request.headers.get('Referer')
-    host = request.headers.get('Host')
+    host = request.headers.get('Host', '')
     
-    # Build expected origin
+    # Determine expected scheme
     scheme = 'https' if request.is_secure else 'http'
-    expected_origin = f"{scheme}://{host}"
     
-    # Validate origin or referer matches
+    # Validate origin or referer matches (exact scheme://netloc)
     valid_request = False
-    if origin and origin.startswith(expected_origin):
+    if origin and _is_same_origin(origin, scheme, host):
         valid_request = True
-    elif referer and referer.startswith(expected_origin):
+    elif referer and _is_same_origin(referer, scheme, host):
         valid_request = True
     
     if not valid_request:
@@ -386,7 +392,7 @@ def logout():
     if token:
         user_auth.delete_session(token)
     
-    url_base = get_url_base() or '/'
+    url_base = current_app.config.get('URL_BASE', '') or '/'
     login_url = (url_base.rstrip('/') + '/login') if url_base != '/' else '/login'
     
     response = make_response(redirect(login_url))

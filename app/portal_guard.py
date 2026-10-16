@@ -1,6 +1,6 @@
 """Portal traffic guard - restricts portal traffic to portal routes only.
 
-Portal traffic (from the internet via Cloudflare tunnel) can only access:
+Portal traffic (detected via request_portal.hostname) can only access:
 - /request and /request/ (portal page)
 - /static/request/* (portal static assets)
 - Specific /api/request/* endpoints (explicit allowlist, no wildcard)

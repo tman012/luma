@@ -46,6 +46,17 @@ networking so it can reach Plex and TVs on your network.
 Behind a reverse proxy or tunnel, add its address under **Trusted proxies**
 so Luma can tell local and remote visitors apart.
 
+## Deploy Notes
+
+**Security update**: Cloudflare home-WAN trust is removed. Only direct LAN connections and X-Forwarded-For from trusted proxies count as local.
+
+Before updating production:
+- Check how the kiosk and home devices reach Luma
+- Any device using the tunnel hostname instead of the LAN IP must either:
+  - Be pointed at the LAN address, or
+  - Sign in once (30-day remember-me)
+- This ensures the kiosk never shows a login screen unexpectedly
+
 ## Updating
 
 ```sh

@@ -4,7 +4,8 @@
 
 set -e
 
-BUILD_DIR="../static/spa/assets"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_DIR="$SCRIPT_DIR/../static/spa/assets"
 
 if [ ! -d "$BUILD_DIR" ]; then
     echo "❌ Build directory not found: $BUILD_DIR"
