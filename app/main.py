@@ -711,6 +711,10 @@ class TMDBClient:
         if year:
             params['primary_release_year'] = year
 
+        if fast_search_index._is_tmdb_rate_limited():
+            logger.info("TMDB search_movies skipped: rate limited (Retry-After active)")
+            return []
+
         try:
             response = requests.get(f"{self.BASE_URL}/search/movie", params=params, timeout=10)
             if response.status_code == 429:
@@ -738,6 +742,10 @@ class TMDBClient:
         }
         if year:
             params['first_air_date_year'] = year
+
+        if fast_search_index._is_tmdb_rate_limited():
+            logger.info("TMDB search_tv skipped: rate limited (Retry-After active)")
+            return []
 
         try:
             response = requests.get(f"{self.BASE_URL}/search/tv", params=params, timeout=10)
@@ -774,6 +782,10 @@ class TMDBClient:
             'query': query,
             'include_adult': False,
         }
+        if fast_search_index._is_tmdb_rate_limited():
+            logger.info("TMDB search_multi skipped: rate limited (Retry-After active)")
+            return []
+
         try:
             response = requests.get(f"{self.BASE_URL}/search/multi", params=params, timeout=10)
             if response.status_code == 429:
@@ -799,6 +811,9 @@ class TMDBClient:
             return []
 
         def fetch_page(page: int) -> List[Dict]:
+            # Every page request honors an active Retry-After window.
+            if fast_search_index._is_tmdb_rate_limited():
+                return []
             params = {
                 'api_key': self.api_key,
                 'query': query,
@@ -1577,6 +1592,8 @@ def tmdb_match_search():
         def _fetch(mtype, search_query=None):
             if search_query is None:
                 search_query = query
+            if fast_search_index._is_tmdb_rate_limited():
+                return mtype, []  # honor active Retry-After
             endpoint = '/search/movie' if mtype == 'movie' else '/search/tv'
             try:
                 resp = requests.get(
@@ -6761,8 +6778,8 @@ def library_search():
                     'rating_key': item.get('rating_key'),
                     'library_name': section_name,
                     'libraries': [section_name],
-                    'poster_url': f"{script_root}/api/img/plex?url={item['thumb']}" if item.get('thumb') else None,
-                    'backdrop_url': f"{script_root}/api/img/plex?url={item['art']}" if item.get('art') else None,
+                    'poster_url': f"{script_root}/api/img/plex?url={urllib.parse.quote(item['thumb'], safe='/')}" if item.get('thumb') else None,
+                    'backdrop_url': f"{script_root}/api/img/plex?url={urllib.parse.quote(item['art'], safe='/')}" if item.get('art') else None,
                     'clearlogo_url': None,
                 }
                 if item.get('added_at'):
@@ -17394,6 +17411,8 @@ if __name__ == '__main__':
 
     # Hero cache refresh/heal runs only from this background scheduler,
     # never from a request.
+    # NOTE: on rebase onto PR #2 this start moves into #2's
+    # START_BACKGROUND_THREADS hook so it also runs under gunicorn.
     try:
         hero_cache.start_scheduler()
         logger.info("✅ Hero cache scheduler started")

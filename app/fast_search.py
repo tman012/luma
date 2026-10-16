@@ -426,7 +426,15 @@ class FastSearchIndex:
         
         ttl = 86400 if cached else 3600  # 24h if cached successfully, 1h if not
         if not cached or cache_age > ttl:
-            threading.Thread(target=self._refresh_tmdb_titles, daemon=True, name="tmdb-titles-cache").start()
+            self._maybe_start_tmdb_refresh()
+
+    def _maybe_start_tmdb_refresh(self) -> bool:
+        """Start the background TMDb titles refresh unless TMDb has us backed off."""
+        if self._is_tmdb_rate_limited():
+            logger.info("fast_search: TMDb rate limited, not starting popular titles refresh")
+            return False
+        threading.Thread(target=self._refresh_tmdb_titles, daemon=True, name="tmdb-titles-cache").start()
+        return True
 
     def _parse_retry_after(self, response) -> float:
         """Parse Retry-After header and return Unix timestamp when we can retry.
@@ -506,6 +514,11 @@ class FastSearchIndex:
         Handles missing API key gracefully - never blocks requests.
         Thread-safe: only one refresh runs at a time.
         """
+        # Honor an active Retry-After / backoff window
+        if self._is_tmdb_rate_limited():
+            logger.info("fast_search: TMDb rate limited, skipping popular titles refresh")
+            return
+
         # Check if refresh is already running
         with self._lock:
             if self._tmdb_refreshing:

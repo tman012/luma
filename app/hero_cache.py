@@ -721,10 +721,6 @@ class HeroCache:
                 # Double the backoff, capped at max
                 self._heal_backoff = min(self._heal_backoff * 2, self._heal_backoff_max)
     
-    def get_hero_content(self) -> List[Dict]:
-        """Return cached hero content. Never refreshes, heals or starts threads."""
-        return self.load_cache()
-
     def heal_missing_images(self) -> bool:
         """Re-download missing images, honoring single-flight, cooldown and backoff.
 
@@ -776,6 +772,8 @@ class HeroCache:
 
     def start_scheduler(self, heal_interval: float = 300) -> threading.Thread:
         """Start the background refresh/heal scheduler (idempotent)."""
+        # Started from main.py's __main__ block for now; on rebase onto PR #2
+        # the start moves to #2's START_BACKGROUND_THREADS hook (gunicorn).
         if self._scheduler_thread and self._scheduler_thread.is_alive():
             return self._scheduler_thread
         self._scheduler_stop.clear()
@@ -787,33 +785,6 @@ class HeroCache:
 
     def stop_scheduler(self):
         self._scheduler_stop.set()
-
-    @staticmethod
-    def image_url(value: Optional[str], script_root: str = '') -> Optional[str]:
-        """Turn a stored image reference into a URL for the current request.
-
-        Stored values are a cache filename, ``plex:<path>``, or an absolute
-        http(s) URL. Legacy root-relative values are prefixed as-is.
-        """
-        if not value:
-            return None
-        root = (script_root or '').rstrip('/')
-        if value.startswith(('http://', 'https://')):
-            return value
-        if value.startswith('plex:'):
-            return f"{root}/api/img/plex?url={urllib.parse.quote(value[5:], safe='/')}"
-        if value.startswith('/'):
-            return f"{root}{value}"
-        return f"{root}/static/hero_cache/{urllib.parse.quote(value)}"
-
-    def response_entry(self, entry: Dict, script_root: str = '') -> Dict:
-        """Copy of a stored entry with image URLs built for this request."""
-        out = {k: v for k, v in entry.items()
-               if not k.endswith(('_upstream_url', '_cache_file'))}
-        for key in ('clearlogo_url', 'clearart_url', 'backdrop_url', 'poster_url'):
-            if key in out:
-                out[key] = self.image_url(out[key], script_root)
-        return out
 
 # Singleton instance
 hero_cache = HeroCache()

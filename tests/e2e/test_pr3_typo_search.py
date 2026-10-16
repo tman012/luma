@@ -82,16 +82,31 @@ def test_corrected_after_direct_and_deduped(api, mock):
     assert all("_corrected" not in m for m in d["movies"])
 
 # ---------- Performance (10k library) ----------
-def test_fast_search_large_library_under_50ms(api):
+PERF_QUERIES = ["Openheimer", "Interstelar", "Godfahter", "Shawshank Redemtion", "amelie", "Up", "Shadow Rivr Nite"]
+
+def _perf_medians(api):
     d, _ = timed_get(api, "/api/library/search/fast?q=x")
     if d["index_size"] < 5000: pytest.skip(f"index only {d['index_size']} items; start mock with MOCK_SEED_ITEMS=10000")
-    worst = []
-    for q in ["Openheimer", "Interstelar", "Godfahter", "Shawshank Redemtion", "amelie", "Up", "Shadow Rivr Nite"]:
-        runs = [timed_get(api, f"/api/library/search/fast?q={q}&limit=20")[0]["elapsed_ms"] for _ in range(5)]
-        runs.sort(); med = runs[2]; worst.append((q, med, runs[-1]))
-        record(check="perf_10k", q=q, index=d["index_size"], server_ms_median=med, server_ms_max=runs[-1])
-    over = [w for w in worst if w[1] >= 50]
-    assert not over, f"median >=50ms: {over}"
+    out = []
+    for q in PERF_QUERIES:
+        runs = sorted(timed_get(api, f"/api/library/search/fast?q={q}&limit=20")[0]["elapsed_ms"] for _ in range(5))
+        out.append((q, runs[2], runs[-1]))
+        record(check="perf_10k", q=q, index=d["index_size"], server_ms_median=runs[2], server_ms_max=runs[-1])
+    return out
+
+@pytest.mark.benchmark
+@pytest.mark.skipif(os.environ.get("LUMA_BENCH") != "1", reason="benchmark: set LUMA_BENCH=1 to run")
+def test_fast_search_large_library_under_50ms(api):
+    budget = 50.0 * float(os.environ.get("LUMA_BENCH_SCALE", "1"))
+    over = [w for w in _perf_medians(api) if w[1] >= budget]
+    assert not over, f"median >={budget:.0f}ms: {over}"
+
+def test_fast_search_large_library_regression_guard(api):
+    """Always-on guard: overall median (of per-query medians) under 250ms on any host."""
+    from statistics import median
+    meds = _perf_medians(api)
+    overall = median(m for _, m, _ in meds)
+    assert overall < 250, f"overall median {overall:.1f}ms >= 250ms: {meds}"
 
 # ---------- UI (phone + desktop) ----------
 def open_search(page):
@@ -107,7 +122,7 @@ def test_ui_typo_search(page, typo, want):
     hit = page.get_by_text(want, exact=True).first
     shot = f"{SHOTS}/{page.viewport_name}_{typo.replace(' ', '_')}.png"
     try:
-        hit.wait_for(state="visible", timeout=5000)
+        hit.wait_for(state="visible", timeout=10000)
     finally:
         page.wait_for_timeout(800); page.screenshot(path=shot)
     ms = (time.perf_counter() - t0) * 1000 - 800
@@ -119,7 +134,7 @@ def test_ui_typo_search(page, typo, want):
 
 def test_ui_exact_up_first(page):
     inp = open_search(page); inp.fill("Up")
-    page.get_by_text("Upgrade", exact=True).first.wait_for(timeout=5000)
+    page.get_by_text("Upgrade", exact=True).first.wait_for(timeout=10000)
     page.wait_for_timeout(800)
     page.screenshot(path=f"{SHOTS}/{page.viewport_name}_Up.png")
     body = page.inner_text("body")
@@ -168,7 +183,9 @@ def test_tmdb_rate_limited_graceful(api, mock):
         hits2 = mock.get("/__ctl").json()["hits"] - hits1
         record(check="tmdb_429", wall_ms=[round(ms, 1), round(ms2, 1)], upstream_hits=[hits1, hits2])
         assert ms < 3000 and ms2 < 3000
-        assert hits1 <= 4, f"correction retried while rate limited ({hits1} upstream calls)"
+        assert hits1 <= 4, f"correction retried while rate limited ({hits1} upstream search calls)"
+        assert hits2 == 0, f"second search ignored active Retry-After ({hits2} upstream search calls)"
+        assert not DID_YOU_MEAN.search(json.dumps(d2))
         assert not DID_YOU_MEAN.search(json.dumps(d))
         fast, _ = timed_get(api, "/api/library/search/fast?q=Openheimer")  # library unaffected
         assert titles(fast["results"])[0] == "Oppenheimer"

@@ -51,7 +51,8 @@ class H(BaseHTTPRequestHandler):
             return self.send(json.dumps(STATE), "application/json")
         if p.startswith("/tmdb"):
             p = p[5:]
-            STATE["hits"] += 1
+            if p.startswith("/search/"):  # count only searches, not background /popular pages
+                STATE["hits"] += 1
             if STATE["mode"] == "429":
                 self.send_response(429); self.send_header("Retry-After", "30")
                 self.send_header("Content-Type", "application/json"); self.end_headers()
