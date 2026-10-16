@@ -240,6 +240,9 @@ input[type="search"]::-webkit-search-cancel-button {
   .skeleton-shimmer {
     animation: none;
   }
+  .luma-rail-fade {
+    animation: none;
+  }
   .mobile-card-enter {
     animation: none !important;
     opacity: 1 !important;
@@ -402,14 +405,25 @@ input[type="search"]::-webkit-search-cancel-button {
    -------------------------------------------------------------------------- */
 
 .skeleton-shimmer {
-  background: linear-gradient(
+  /* Luma glass tokens on the kiosk background, with a subtle sweep. */
+  background-color: var(--color-glass-5);
+  background-image: linear-gradient(
     90deg,
-    rgba(255, 255, 255, 0.03) 0%,
-    rgba(255, 255, 255, 0.08) 50%,
-    rgba(255, 255, 255, 0.03) 100%
+    transparent 0%,
+    var(--color-glass-5) 50%,
+    transparent 100%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Synchronized rail reveal: every rail fades in on the same frame. */
+@keyframes lumaRailFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.luma-rail-fade {
+  animation: lumaRailFade 220ms ease-out both;
 }
 
 

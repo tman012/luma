@@ -6401,8 +6401,9 @@ def rails_what_youre_missing():
     try:
         from app import daily_missing
         limit = request.args.get('limit', daily_missing.RAIL_SIZE, type=int)
-        limit = max(1, min(limit or daily_missing.RAIL_SIZE, 40))
-        return jsonify(daily_missing.get_rail(limit=limit))
+        limit = max(1, min(limit or daily_missing.RAIL_SIZE, daily_missing.RAIL_CACHE_SIZE))
+        # One cached slate (RAIL_CACHE_SIZE titles); the limit only slices it.
+        return jsonify(daily_missing.get_rail_cached(limit=limit))
     except Exception as e:
         logger.error(f"what-youre-missing rail error: {e}")
         return jsonify({
@@ -6449,7 +6450,7 @@ def rails_what_youre_missing_dismiss():
             return jsonify({'ok': False, 'error': 'tmdb_id must be positive'}), 400
         result = daily_missing.dismiss(tmdb_id)
         # Return refreshed slate so clients can top-up immediately.
-        rail = daily_missing.get_rail(limit=daily_missing.RAIL_SIZE)
+        rail = daily_missing.replace_rail_now(limit=daily_missing.RAIL_SIZE)
         return jsonify({**result, 'rail': rail})
     except Exception as e:
         logger.error(f"what-youre-missing dismiss error: {e}")

@@ -265,8 +265,30 @@ def refresh_ownership_index():
             len(index.get('movies_by_title', {})), len(index.get('tv_by_title', {})),
             time.time() - start,
         )
+        try:
+            from app import daily_missing
+            daily_missing.note_library_signature(_library_signature(index))
+        except Exception as e:
+            logger.warning(f"What You're Missing invalidation skipped: {e}")
     except Exception as e:
         logger.error(f"Failed to refresh ownership index: {e}")
+
+
+def _library_signature(index):
+    """Cheap fingerprint of owned movies, so a library change is noticed.
+
+    Uses the built-in hash() on purpose: the value is only compared with the
+    previous one inside this process, so per-process hash randomization does
+    not matter and nothing is persisted.
+    """
+    tmdb = index.get('movies_by_tmdb') or {}
+    keys = []
+    for k in tmdb:
+        try:
+            keys.append(int(k))
+        except (TypeError, ValueError):
+            pass
+    return (len(index.get('movies') or {}), len(keys), hash(frozenset(keys)))
 
 
 class CacheUpdateScheduler:
