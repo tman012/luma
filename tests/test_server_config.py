@@ -413,6 +413,9 @@ class TestLoginRedirectURLBase:
                                 environ_base={'REMOTE_ADDR': '203.0.113.9'})
         assert resp.status_code == 302
         assert resp.headers['Location'] in ('/luma/settings', 'http://localhost/luma/settings')
+        # The form token is single-use: a new sign-in needs a fresh page.
+        page = self.client.get('/login?next=//evil.com', environ_base={'REMOTE_ADDR': '203.0.113.9'})
+        token = re.search(r'name="csrf_token" value="([^"]+)"', page.get_data(as_text=True)).group(1)
         bad = self.client.post('/login?next=//evil.com',
                                data={'username': 'testuser', 'password': 'testpass123', 'csrf_token': token},
                                environ_base={'REMOTE_ADDR': '203.0.113.9'})

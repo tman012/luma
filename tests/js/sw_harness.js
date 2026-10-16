@@ -8,16 +8,30 @@ const origin = new URL(scope).origin;
 const listeners = {};
 const added = [];
 const notes = [];
+const fetched = [];
+const puts = [];
+// SW_SHELL_RESP: the response the page fetch returns ({ok, redirected, type, url, headers}).
+const shellSpec = process.env.SW_SHELL_RESP ? JSON.parse(process.env.SW_SHELL_RESP) : null;
+function fakeResponse(spec, url) {
+  const s = spec || { ok: true };
+  const headers = s.headers || {};
+  return {
+    ok: s.ok !== false, redirected: !!s.redirected, type: s.type || 'basic', url: s.url || url,
+    headers: { get: (k) => (k in headers ? headers[k] : null) },
+    clone() { return this; },
+  };
+}
 const sandbox = {
   URL, Response: class { constructor(body, init) { this.body = body; this.init = init; } },
   MessageChannel: class {}, console: { log() {}, error() {} },
   setTimeout, Promise, JSON, Date, Array, Set,
-  fetch: () => Promise.resolve({ ok: true, clone() { return this; } }),
+  fetch: (url, opts) => { fetched.push({ url: String(url), redirect: opts && opts.redirect });
+                          return Promise.resolve(fakeResponse(shellSpec, String(url))); },
   caches: {
     keys: () => Promise.resolve([]),
     delete: () => Promise.resolve(true),
     open: () => Promise.resolve({ addAll: (u) => { added.push(...u); return Promise.resolve(); },
-                                  put: () => Promise.resolve() }),
+                                  put: (k) => { puts.push(String(k)); return Promise.resolve(); } }),
     match: () => Promise.resolve(undefined),
   },
   clients: { claim() {}, matchAll: () => Promise.resolve([]) },
@@ -35,6 +49,7 @@ vm.runInContext(fs.readFileSync(swPath, 'utf8'), sandbox);
   let installDone;
   listeners.install({ waitUntil: (p) => { installDone = p; } });
   await installDone;
+  await new Promise((r) => setTimeout(r, 0));
   const handled = {};
   for (const u of urls) {
     let responded = false;
@@ -50,5 +65,5 @@ vm.runInContext(fs.readFileSync(swPath, 'utf8'), sandbox);
     listeners.push({ data: { json: () => payload }, waitUntil: (p) => { pushed = p; } });
     await pushed;
   }
-  process.stdout.write(JSON.stringify({ shell: added, handled, notes }));
+  process.stdout.write(JSON.stringify({ shell: added, handled, notes, fetched, puts }));
 })();

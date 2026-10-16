@@ -21,7 +21,7 @@
 
 // BUILD_ID is replaced at build time or bumped manually per deploy.
 // When sw.js byte-content changes, the browser installs a new SW.
-const CACHE_VERSION = 'media-kiosk-v104';
+const CACHE_VERSION = 'media-kiosk-v109';
 
 // Separate cache for large immutable assets — purged when version bumps
 const IMMUTABLE_CACHE = 'media-immutable-v24';
@@ -54,9 +54,23 @@ function assetPath(url) {
 }
 
 const SHELL_URLS = [
-  at('/'),
   at('/manifest.json'),
 ];
+
+// Only the real app page may become the offline copy: never a redirect, an
+// error, or the sign-in page (its form token goes stale).
+function isAppShell(resp) {
+  if (!resp || !resp.ok || resp.redirected || resp.type === 'opaqueredirect') return false;
+  if (resp.headers.get('X-Luma-App-Shell') !== '1') return false;
+  const p = appPath(new URL(resp.url || self.location.href).pathname);
+  return p !== '/login' && p !== '/logout';
+}
+
+function saveShell(resp) {
+  if (!isAppShell(resp)) return Promise.resolve();
+  const copy = resp.clone();
+  return caches.open(CACHE_VERSION).then(c => c.put(at('/'), copy));
+}
 
 // ---------------------------------------------------------------------------
 // Install — purge ALL old caches, cache new shell, skip waiting immediately
@@ -75,6 +89,9 @@ self.addEventListener('install', event => {
     })
     .then(() => caches.open(CACHE_VERSION))
     .then(cache => cache.addAll(SHELL_URLS))
+    .then(() => fetch(at('/'), { redirect: 'manual', credentials: 'include', cache: 'no-store' })
+      .then(saveShell)
+      .catch(() => {}))
   );
   // Activate new SW immediately — don't wait for old tabs to close
   self.skipWaiting();
@@ -131,6 +148,11 @@ self.addEventListener('fetch', event => {
   if (path === null) return; // outside Luma's URL base
 
   // --- API data routes — network only (never cache) ---
+  // Sign-in and sign-out pages: network only, never cached.
+  if (path === '/login' || path === '/logout' || path.startsWith('/auth/')) {
+    return;
+  }
+
   if (path.startsWith('/api/') && !path.startsWith('/api/img/')) {
     return; // Let browser handle normally
   }
@@ -175,8 +197,7 @@ self.addEventListener('fetch', event => {
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).then(resp => {
-        const clone = resp.clone();
-        caches.open(CACHE_VERSION).then(c => c.put(at('/'), clone));
+        saveShell(resp);
         return resp;
       }).catch(() => caches.match(at('/')))
     );

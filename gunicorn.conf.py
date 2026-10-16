@@ -43,7 +43,9 @@ bind = _bind(_settings)
 # could overwrite each other's files. Scale with threads instead.
 workers = 1
 threads = 8
-worker_class = 'gthread'
+# gthread, plus a fast close for TLS handshakes on the plain-HTTP port
+# (see app/tls_guard.py). Never add Strict-Transport-Security.
+worker_class = 'app.tls_guard.TLSRejectingThreadWorker'
 timeout = 120
 
 # Logging
