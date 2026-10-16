@@ -47,7 +47,11 @@ def pytest_configure(config):
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
-    """Remove the temp directories when the session ends."""
+    """Create the auth tables up front (in the app, start_services does this),
+    so tests that use app.main without the test_app fixture don't depend on
+    running after one that does. Remove the temp directories at the end."""
+    import app.user_auth
+    app.user_auth.init_db()
     yield
     for d in _TEMP_DIRS:
         shutil.rmtree(d, ignore_errors=True)
