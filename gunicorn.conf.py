@@ -53,6 +53,7 @@ def on_starting(server):
     """
     from app.paths import ensure_writable_or_exit
     ensure_writable_or_exit()
+    server.log.info('[gunicorn] Startup check passed: data and cache folders are writable')
 
 
 def post_worker_init(worker):

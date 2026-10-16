@@ -824,8 +824,8 @@ class HeroCache:
 
     def start_scheduler(self, heal_interval: float = 300) -> threading.Thread:
         """Start the background refresh/heal scheduler (idempotent)."""
-        # Started from main.py's __main__ block for now; on rebase onto PR #2
-        # the start moves to #2's START_BACKGROUND_THREADS hook (gunicorn).
+        # Started from main.start_services() (gunicorn post_worker_init and
+        # the dev server) when background threads are on.
         if self._scheduler_thread and self._scheduler_thread.is_alive():
             return self._scheduler_thread
         self._scheduler_stop.clear()
