@@ -4,6 +4,12 @@ Tests for fast_search typo-tolerant fuzzy search functionality.
 Tests normalization, fuzzy matching, and ranking.
 """
 
+# Set up test cache directory before any imports
+import os
+import tempfile
+_test_cache_dir = tempfile.mkdtemp(prefix="luma_test_cache_")
+os.environ['LUMA_CACHE_DIR'] = _test_cache_dir
+
 import time
 import unittest
 from unittest.mock import Mock, patch, MagicMock, call
@@ -1197,25 +1203,12 @@ class TestFlaskEndpoints(unittest.TestCase):
     """Test Flask endpoints with mocked TMDb."""
     
     def setUp(self):
-        """Set up Flask test client with temp cache directory."""
-        import os
-        import tempfile
-        
-        # Create temp cache directory for tests
-        self.temp_dir = tempfile.mkdtemp()
-        os.environ['LUMA_CACHE_DIR'] = self.temp_dir
-        
+        """Set up Flask test client."""
         # Import here to avoid circular imports
         from app import main as app_main
         self.app = app_main.app
         self.app.config['TESTING'] = True
         self.client = self.app.test_client()
-    
-    def tearDown(self):
-        """Clean up temp directory."""
-        import shutil
-        if hasattr(self, 'temp_dir'):
-            shutil.rmtree(self.temp_dir, ignore_errors=True)
     
     @patch('app.main.fast_search_index')
     def test_library_search_fast_endpoint(self, mock_index):

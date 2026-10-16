@@ -25,21 +25,11 @@ logger = logging.getLogger(__name__)
 
 # Configuration defaults (will be overridden by settings when available)
 def _get_cache_dir():
-    cache_base = os.environ.get('LUMA_CACHE_DIR')
-    if not cache_base:
-        if os.path.exists('/app') and os.access('/app', os.W_OK):
-            cache_base = '/app'
-        else:
-            cache_base = '/tmp/luma_cache'
+    cache_base = os.environ.get('LUMA_CACHE_DIR', '/app')
     return Path(cache_base) / 'static' / 'hero_cache'
 
 def _get_cache_json():
-    cache_base = os.environ.get('LUMA_CACHE_DIR')
-    if not cache_base:
-        if os.path.exists('/app') and os.access('/app', os.W_OK):
-            cache_base = '/app'
-        else:
-            cache_base = '/tmp/luma_cache'
+    cache_base = os.environ.get('LUMA_CACHE_DIR', '/app')
     return Path(cache_base) / 'data' / 'hero_content.json'
 
 CACHE_DIR = _get_cache_dir()
@@ -67,7 +57,10 @@ class HeroCache:
         self.session = requests.Session()
 
         # Ensure cache directory exists
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            logger.warning(f"hero_cache: cache directory {self.cache_dir} not writable: {e}")
 
     def init_from_settings(self, settings_manager):
         """Re-initialise API keys and config from a SettingsManager instance.

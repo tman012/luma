@@ -21,15 +21,12 @@ class ExploreCache:
 
     def __init__(self, cache_dir: Optional[str] = None):
         if cache_dir is None:
-            # Try env var, then /app/cache if it exists, else fall back to /tmp
-            cache_dir = os.environ.get('LUMA_CACHE_DIR')
-            if not cache_dir:
-                if os.path.exists('/app') and os.access('/app', os.W_OK):
-                    cache_dir = '/app/cache'
-                else:
-                    cache_dir = '/tmp/luma_cache'
+            cache_dir = os.environ.get('LUMA_CACHE_DIR', '/app/cache')
         self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            logger.warning(f"explore_cache: cache directory {self.cache_dir} not writable: {e}")
         self.db_path = self.cache_dir / "explore_cache.db"
         self.update_interval = 900  # 15 minutes
         self.last_update = None
