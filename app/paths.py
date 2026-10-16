@@ -41,8 +41,30 @@ def hero_cache_dir() -> Path:
     return cache_dir() / 'hero'
 
 
-LEGACY_DATABASE_PATH = '/app/data/media.db'
+LEGACY_DATA_DIR = '/app/data'        # the data dir before LUMA_DATA_DIR existed
+LEGACY_DATABASE_PATH = LEGACY_DATA_DIR + '/media.db'
 _db_logged = set()
+_file_logged = set()
+TELEGRAM_BOT_FILENAME = 'telegram_bot.json'
+
+
+def data_file(name: str) -> Path:
+    """$LUMA_DATA_DIR/<name>, except when that file does not exist but one
+    already sits in the old /app/data: then the existing file is used, with a
+    warning naming both paths (logged once). Same rule as the database."""
+    derived = data_path(name)
+    legacy = Path(LEGACY_DATA_DIR) / name
+    if derived != legacy and not derived.exists() and legacy.is_file():
+        if str(legacy) not in _file_logged:
+            _file_logged.add(str(legacy))
+            _log.warning('Using the existing %s instead of %s (LUMA_DATA_DIR)', legacy, derived)
+        return legacy
+    return derived
+
+
+def telegram_bot_config_path() -> Path:
+    """Where the Telegram bot settings (bot_token, admin_chat_id) live."""
+    return data_file(TELEGRAM_BOT_FILENAME)
 _log = logging.getLogger(__name__)
 
 

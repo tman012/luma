@@ -53,7 +53,10 @@ def test_portal_host_variants_cannot_reach_full_app(test_app, host, path):
     with client.session_transaction() as s:
         s['requester'] = {'name': 'guest', 'sid': 'abc'}
     r = client.get(path, headers={'Host': host}, environ_base={'REMOTE_ADDR': '203.0.113.9'})
-    assert r.status_code == 404
+    if path == '/':     # the portal root sends visitors to the portal page
+        assert r.status_code == 302 and r.headers['Location'].endswith('/request')
+    else:
+        assert r.status_code == 404
 
 
 def test_dev_guard_ignores_trailing_dot_and_case():

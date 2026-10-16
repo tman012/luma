@@ -206,8 +206,9 @@ def _build_message(pending: dict, season: int = None, episode: int = None,
 
 
 def _get_telegram_bot_token() -> str:
-    """Read the Telegram bot token from /app/data/telegram_bot.json."""
-    config_path = '/app/data/telegram_bot.json'
+    """Read the Telegram bot token from telegram_bot.json in the data dir."""
+    from app.paths import telegram_bot_config_path
+    config_path = str(telegram_bot_config_path())
     try:
         if os.path.exists(config_path):
             with open(config_path) as f:

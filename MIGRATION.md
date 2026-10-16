@@ -123,6 +123,11 @@ wins if both are set.
   (`docker-server`, `*.local`, `*.lan`, `*.home.arpa`, `*.internal`). Other names need **Host names**. A name never
   skips sign-in for public, proxied-public or Cloudflare requests.
 - `security.allow_signup` is new (off): sign-up from outside the LAN is refused until it is turned on.
+- `security.trusted_proxies` starts empty, and this upgrade does not fill it in. Behind a reverse proxy, set it
+  (comma-separated) or LAN users get 401: for a proxy on the same host with host networking (for example Caddy),
+  `127.0.0.1/32, ::1/128`; otherwise the proxy's own IP. Only list addresses you control.
+- On the request-portal host name, `/` now redirects (302) to `/request` (URL base and query string kept). Every
+  other non-portal path on that host still returns 404.
 
 ## 4. Visible changes
 

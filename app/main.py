@@ -27,6 +27,7 @@ import requests
 # the UI exported to the environment before modules that read it are imported.
 from app import first_run
 from app import access as _access
+from app.paths import telegram_bot_config_path
 first_run.export_settings_to_env()
 _INSTALL_SECRETS = first_run.load_or_create_secrets()
 
@@ -1394,17 +1395,22 @@ def _is_auth_exempt(path: str, method: str) -> bool:
         return True  # kiosks poll it to know when to reload; it holds no data
     if path == '/api/admin/telegram-action' and method in ('GET', 'POST'):
         # Approve/deny buttons open in Telegram's browser with no Luma
-        # session. Only a correctly signed, unexpired, unused link skips
-        # sign-in; the GET only shows a confirm page.
+        # session. Only a link Luma signed skips sign-in for this one route:
+        # a valid one gets the confirm page (GET) or acts once (POST); an
+        # expired, used or revoked one gets the HTML error page. The route
+        # re-checks the link itself and grants nothing else.
         return _telegram_action_link_signed()
     return False
+
+
+_LINK_EXEMPT_REASONS = (None, 'expired', 'used', 'revoked')
 
 
 def _telegram_action_link_signed() -> bool:
     from app import action_tokens
     fields = request.form if request.method == 'POST' else request.args
-    tok, _ = action_tokens.check(app.config['SECRET_KEY'], fields, _action_token_dir())
-    return tok is not None
+    _, reason = action_tokens.check(app.config['SECRET_KEY'], fields, _action_token_dir())
+    return reason in _LINK_EXEMPT_REASONS
 
 
 def _action_token_dir():
@@ -9034,13 +9040,13 @@ def _telegram_admin_chat_id() -> str:
     """Telegram chat that receives admin approve/deny requests.
 
     TELEGRAM_ADMIN_CHAT_ID from the environment, else ``admin_chat_id`` in
-    data/telegram_bot.json. Empty means admin Telegram alerts are off.
+    $LUMA_DATA_DIR/telegram_bot.json. Empty means admin Telegram alerts are off.
     """
     chat_id = (os.environ.get('TELEGRAM_ADMIN_CHAT_ID') or '').strip()
     if chat_id:
         return chat_id
     try:
-        with open('/app/data/telegram_bot.json') as f:
+        with open(telegram_bot_config_path()) as f:
             return str(__import__('json').load(f).get('admin_chat_id') or '').strip()
     except Exception:
         return ''
@@ -9070,7 +9076,7 @@ def _send_account_request_notification(user_id: int, name: str, email: str = Non
 
     bot_token = ''
     try:
-        with open('/app/data/telegram_bot.json') as f:
+        with open(telegram_bot_config_path()) as f:
             cfg = __import__('json').load(f)
         bot_token = cfg.get('bot_token', '')
     except Exception as e:
@@ -9577,7 +9583,7 @@ def _send_plex_access_request_notification(user_id: int, name: str, email: str =
 
     bot_token = ''
     try:
-        with open('/app/data/telegram_bot.json') as f:
+        with open(telegram_bot_config_path()) as f:
             cfg = __import__('json').load(f)
         bot_token = cfg.get('bot_token', '')
     except Exception as e:
