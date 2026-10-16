@@ -24,19 +24,11 @@ from typing import List, Dict, Optional
 logger = logging.getLogger(__name__)
 
 # Configuration defaults (will be overridden by settings when available)
-# Hero cache storage: LUMA_CACHE_DIR sets the cache root (defaults to /app).
-# Hero cache uses 'hero/static' for images (served via /api/img/plex proxy)
-# and 'hero/data' for the content JSON.
-def _get_cache_dir():
-    cache_root = os.environ.get('LUMA_CACHE_DIR', '/app')
-    return Path(cache_root) / 'hero' / 'static'
-
-def _get_cache_json():
-    cache_root = os.environ.get('LUMA_CACHE_DIR', '/app')
-    return Path(cache_root) / 'hero' / 'data' / 'hero_content.json'
-
-CACHE_DIR = _get_cache_dir()
-CACHE_JSON = _get_cache_json()
+# Hero cache storage: Images are served from /static/hero_cache (Flask static files).
+# Content JSON is stored in LUMA_DATA_DIR (defaults to /app/data, the persisted volume).
+# Hero cache is NOT part of LUMA_CACHE_DIR.
+CACHE_DIR = Path('/app/static/hero_cache')
+CACHE_JSON = Path(os.environ.get('LUMA_DATA_DIR', '/app/data')) / 'hero_content.json'
 
 
 class HeroCache:
@@ -62,12 +54,14 @@ class HeroCache:
         # Ensure cache directories exist
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            logger.warning(f"hero_cache: static directory {self.cache_dir} not writable: {e}")
+        
+        try:
             self.cache_json.parent.mkdir(parents=True, exist_ok=True)
         except (OSError, PermissionError) as e:
-            cache_root = os.environ.get('LUMA_CACHE_DIR', '/app')
-            error_msg = f"hero_cache: cache root {cache_root} not writable: {e}"
-            logger.error(error_msg)
-            raise RuntimeError(error_msg) from e
+            data_dir = os.environ.get('LUMA_DATA_DIR', '/app/data')
+            logger.warning(f"hero_cache: data directory {data_dir} not writable: {e}")
 
     def init_from_settings(self, settings_manager):
         """Re-initialise API keys and config from a SettingsManager instance.

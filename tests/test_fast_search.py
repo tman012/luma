@@ -1427,9 +1427,12 @@ class TestFlaskEndpoints(unittest.TestCase):
             elif movie.get('title') == 'Star Trek':
                 star_trek_rank = movie.get('relevance_rank')
         
-        if star_wars_rank is not None and star_trek_rank is not None:
-            self.assertLess(star_wars_rank, star_trek_rank, 
-                          "Direct result should rank before corrected result")
+        # Both must be present
+        self.assertIsNotNone(star_wars_rank, "Star Wars (direct result) must be in response")
+        self.assertIsNotNone(star_trek_rank, "Star Trek (corrected result) must be in response")
+        # Direct result must rank before corrected result
+        self.assertLess(star_wars_rank, star_trek_rank, 
+                      "Direct result should rank before corrected result")
         
         # Check that '_corrected' marker is not in response
         for movie in movies:
@@ -1459,6 +1462,19 @@ class TestFlaskEndpoints(unittest.TestCase):
         
         # Correction should NOT be called (rate limited)
         mock_index.find_spelling_correction.assert_not_called()
+    
+    def test_hero_cache_image_url_structure(self):
+        """Test that hero cache uses correct static path structure."""
+        from pathlib import Path
+        from app.hero_cache import CACHE_DIR
+        
+        # Verify hero cache directory is /app/static/hero_cache (the served path)
+        expected_path = Path('/app/static/hero_cache')
+        self.assertEqual(CACHE_DIR, expected_path,
+                       "Hero cache must use /app/static/hero_cache for Flask static serving")
+        
+        # Verify URL structure: images downloaded to CACHE_DIR should be served from /static/hero_cache/
+        # This is Flask's static file serving convention
 
 
 if __name__ == '__main__':

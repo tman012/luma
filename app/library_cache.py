@@ -31,7 +31,8 @@ class LibraryCache:
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
         except (OSError, PermissionError) as e:
-            error_msg = f"library_cache: cache root {cache_root} not writable: {e}"
+            error_msg = (f"library_cache: LUMA_CACHE_DIR={cache_root} not writable "
+                        f"(tried to create {self.cache_dir}): {e}")
             logger.error(error_msg)
             raise RuntimeError(error_msg) from e
         self.db_path = self.cache_dir / "library_cache.db"

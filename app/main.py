@@ -804,7 +804,12 @@ class TMDBClient:
                 'page': page,
             }
             resp = requests.get(f"{self.BASE_URL}/search/person", params=params, timeout=8)
+            if resp.status_code == 429:
+                logger.warning(f"TMDB search_people page {page} hit rate limit")
+                fast_search_index._handle_tmdb_429(resp)
+                return []
             resp.raise_for_status()
+            fast_search_index._reset_tmdb_backoff()
             return resp.json().get('results', [])
 
         try:
