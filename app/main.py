@@ -85,7 +85,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__,
             static_folder='/app/static')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or _INSTALL_SECRETS['flask_secret_key']
-CORS(app)
+CORS(app, supports_credentials=False)
 
 # Apply URL base via WSGI middleware
 from app.server_config import get_url_base
@@ -158,8 +158,8 @@ def load_current_user():
     token = request.cookies.get(LUMA_SESSION_COOKIE) or request.cookies.get('luma_auth_session')
     g.current_user = user_auth.validate_session(token) if token else None
     g.implicit_user = False
-    if g.current_user is None and not _access.needs_pin(settings, request):
-        # Open access (Settings → Security): act as the owner without a sign-in.
+    if g.current_user is None and not _access.should_authenticate(settings, request):
+        # Implicit owner for local requests when auth_required=disabled_local
         owner = _access.owner(user_auth)
         if owner:
             g.current_user = {
@@ -977,8 +977,8 @@ def _auth_guard():
     """Redirect to login if authentication is required and user not authenticated."""
     # Skip for static files, auth routes, and request portal
     if (request.path.startswith('/static/') or 
-        request.path.startswith('/login') or
-        request.path.startswith('/logout') or
+        request.path == '/login' or
+        request.path == '/logout' or
         request.path == '/api/request/unlock' or
         request.path.startswith('/api/request/') and not request.path.startswith('/api/request/admin/')):
         return None

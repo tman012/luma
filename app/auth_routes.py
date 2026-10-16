@@ -2,11 +2,13 @@
 
 import logging
 import time
+import secrets
 from collections import defaultdict
 from datetime import datetime, timedelta
-from flask import Blueprint, request, jsonify, make_response, redirect, url_for, render_template_string
+from flask import Blueprint, request, jsonify, make_response, redirect, url_for, render_template_string, session
 from werkzeug.security import check_password_hash
 import app.user_auth as user_auth
+import app.access as access
 from app.server_config import get_url_base
 
 logger = logging.getLogger(__name__)
@@ -38,13 +40,68 @@ def _record_failed_attempt(ip: str):
     _failed_attempts[ip].append(time.time())
 
 
-def _get_client_ip() -> str:
-    """Get client IP from request."""
-    # Use X-Forwarded-For if available, otherwise remote_addr
-    forwarded = request.headers.get('X-Forwarded-For', '').split(',')
-    if forwarded and forwarded[0].strip():
-        return forwarded[0].strip()
-    return request.remote_addr or '0.0.0.0'
+def _get_client_ip(request, settings) -> str:
+    """Get client IP using trusted-proxy-aware access.client_ip()."""
+    ip = access.client_ip(request, settings)
+    return ip if ip else request.remote_addr or '0.0.0.0'
+
+
+def _is_safe_redirect(url: str, url_base: str) -> bool:
+    """Check if a redirect URL is safe (no open redirect).
+    
+    Only allows paths that:
+    - Start with exactly one '/' (not '//' or '/\')
+    - Don't contain a scheme (http:, https:, etc.)
+    - Will be prefixed with url_base
+    """
+    if not url:
+        return False
+    
+    # Reject anything with a scheme
+    if '://' in url or url.startswith('//') or url.startswith('/\\'):
+        return False
+    
+    # Must start with single /
+    if not url.startswith('/'):
+        return False
+    
+    # Check for scheme-like patterns
+    if ':' in url.split('/')[0]:
+        return False
+    
+    return True
+
+
+def _safe_redirect_url(next_param: str, default: str = '/') -> str:
+    """Return a safe redirect URL, applying URL base prefix.
+    
+    If next_param is unsafe, returns default with URL base.
+    """
+    url_base = get_url_base() or ''
+    
+    if not _is_safe_redirect(next_param, url_base):
+        return url_base + default if url_base else default
+    
+    # Apply URL base prefix if not already there
+    if url_base and not next_param.startswith(url_base):
+        return url_base + next_param
+    
+    return next_param
+
+
+def _generate_csrf_token() -> str:
+    """Generate a CSRF token and store in session."""
+    token = secrets.token_urlsafe(32)
+    session['csrf_token'] = token
+    return token
+
+
+def _validate_csrf_token(token: str) -> bool:
+    """Validate CSRF token against session."""
+    expected = session.get('csrf_token')
+    if not expected or not token:
+        return False
+    return secrets.compare_digest(expected, token)
 
 
 # Simple HTML login page
@@ -179,6 +236,8 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
         {% endif %}
         
         <form method="POST" action="{{ url_for('auth.login', next=next_url) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            
             <div class="form-group">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" required autofocus>
@@ -190,7 +249,7 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
             </div>
             
             <div class="remember-me">
-                <input type="checkbox" id="remember" name="remember" checked>
+                <input type="checkbox" id="remember" name="remember">
                 <label for="remember">Remember me for 30 days</label>
             </div>
             
@@ -204,19 +263,35 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
 @bp.route('/login', methods=['GET', 'POST'])
 def login():
     """Login page and authentication endpoint."""
-    next_url = request.args.get('next', '/')
+    from app.settings_manager import SettingsManager
+    settings = SettingsManager()
+    
+    next_param = request.args.get('next', '/')
+    safe_next = _safe_redirect_url(next_param)
     
     if request.method == 'GET':
+        # Generate CSRF token
+        csrf_token = _generate_csrf_token()
+        
         # Show login form
         error = request.args.get('error', '')
         rate_limited = request.args.get('rate_limited') == '1'
         return render_template_string(LOGIN_PAGE_HTML, 
                                      error=error, 
                                      rate_limited=rate_limited,
-                                     next_url=next_url)
+                                     next_url=safe_next,
+                                     csrf_token=csrf_token)
     
     # POST - process login
-    client_ip = _get_client_ip()
+    # Validate CSRF token
+    csrf_token = request.form.get('csrf_token', '')
+    if not _validate_csrf_token(csrf_token):
+        logger.warning("[auth] CSRF token validation failed")
+        return redirect(url_for('auth.login', 
+                               error='Invalid request. Please try again.',
+                               next=next_param))
+    
+    client_ip = _get_client_ip(request, settings)
     
     # Check rate limit
     if _is_rate_limited(client_ip):
@@ -224,7 +299,7 @@ def login():
         return redirect(url_for('auth.login', 
                                error='Too many failed attempts. Try again in 5 minutes.',
                                rate_limited='1',
-                               next=next_url))
+                               next=next_param))
     
     username = request.form.get('username', '').strip()
     password = request.form.get('password', '')
@@ -233,7 +308,7 @@ def login():
     if not username or not password:
         return redirect(url_for('auth.login', 
                                error='Username and password required',
-                               next=next_url))
+                               next=next_param))
     
     # Authenticate user
     user = user_auth.authenticate(username, password)
@@ -243,13 +318,13 @@ def login():
         logger.info(f"[auth] Failed login attempt for user {username} from {client_ip}")
         return redirect(url_for('auth.login', 
                                error='Invalid username or password',
-                               next=next_url))
+                               next=next_param))
     
     # Create session
     token = user_auth.create_session(user['id'])
     
-    # Set cookie
-    response = make_response(redirect(next_url))
+    # Set cookie and redirect to safe URL
+    response = make_response(redirect(safe_next))
     
     # Calculate expiry (30 days if remember, else session cookie)
     if remember:
@@ -277,9 +352,29 @@ def login():
     return response
 
 
-@bp.route('/logout', methods=['POST', 'GET'])
+@bp.route('/logout', methods=['POST'])
 def logout():
-    """Logout endpoint - deletes session and cookie."""
+    """Logout endpoint - POST-only, deletes session and cookie."""
+    # Check if request came from same origin (CSRF protection)
+    origin = request.headers.get('Origin')
+    referer = request.headers.get('Referer')
+    host = request.headers.get('Host')
+    
+    # Build expected origin
+    scheme = 'https' if request.is_secure else 'http'
+    expected_origin = f"{scheme}://{host}"
+    
+    # Validate origin or referer matches
+    valid_request = False
+    if origin and origin.startswith(expected_origin):
+        valid_request = True
+    elif referer and referer.startswith(expected_origin):
+        valid_request = True
+    
+    if not valid_request:
+        logger.warning(f"[auth] Logout CSRF check failed: origin={origin}, referer={referer}, host={host}")
+        return jsonify({"error": "Invalid request"}), 403
+    
     token = request.cookies.get(AUTH_COOKIE)
     
     if token:

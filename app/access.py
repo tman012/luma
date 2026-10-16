@@ -164,23 +164,30 @@ def is_portal_traffic(request, settings) -> bool:
     return False
 
 
-def needs_pin(settings, request) -> bool:
-    """True when this request must sign in.
+def should_authenticate(settings, request) -> bool:
+    """True when this request must authenticate (new auth_required logic).
     
-    Portal traffic never gets implicit owner session.
-    LAN traffic follows access_mode settings.
-    Other non-local traffic requires sign-in.
+    Uses security.auth_required instead of legacy access_mode:
+    - 'enabled': everyone must authenticate
+    - 'disabled_local': local requests get implicit owner, remote must authenticate
+    
+    Portal traffic always requires authentication (never gets implicit owner).
     """
-    # Portal traffic is handled separately (never gets implicit owner)
+    # Portal traffic never gets implicit owner
     if is_portal_traffic(request, settings):
         return True
     
-    m = mode(settings)
-    if m == 'open':
+    auth_req = (settings.get('security.auth_required') or 'disabled_local').strip()
+    
+    if auth_req == 'enabled':
+        # Everyone must authenticate
+        return True
+    elif auth_req == 'disabled_local':
+        # Local gets implicit owner, remote must authenticate
         return not is_local_request(request, settings)
-    if m == 'pin_remote':
-        return not is_local_request(request, settings)
-    return True
+    else:
+        # Unknown value, default to safe (require auth)
+        return True
 
 
 def owner(user_auth) -> Optional[Dict]:
