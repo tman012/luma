@@ -207,11 +207,12 @@ class FastSearchIndex:
         self._index: List[Dict[str, Any]] = []
         self._lock = threading.RLock()
         self._last_refresh: float = 0.0
-        self._refreshing = False
+        self._tmdb_refreshing = False
         self._initialized = False
         self._sections: List[int] = []
         self._library_titles: Set[str] = set()  # Normalized library titles
         self._tmdb_titles: Set[str] = set()  # Normalized TMDb popular titles
+        self._title_map: Dict[str, str] = {}  # Normalized -> display title map (library + TMDb)
         self._tmdb_titles_cached: bool = False
         self._tmdb_cache_time: float = 0.0
 
@@ -369,13 +370,17 @@ class FastSearchIndex:
         for sid, *_ in sections:
             all_items.extend(results.get(sid, []))
 
-        # Build library title dictionary for spelling correction
+        # Build library title dictionary and normalized->display map for spelling correction
         library_titles = {item['title_normalized'] for item in all_items if item.get('title_normalized')}
+        library_title_map = {item['title_normalized']: item['title'] 
+                            for item in all_items if item.get('title_normalized')}
 
         with self._lock:
             self._sections = [sid for sid, *_ in sections]
             self._index = all_items
             self._library_titles = library_titles
+            # Update title map with library titles (preserves existing TMDb entries)
+            self._title_map.update(library_title_map)
             self._last_refresh = time.time()
             self._initialized = True
 
@@ -402,10 +407,10 @@ class FastSearchIndex:
         """
         # Check if refresh is already running
         with self._lock:
-            if self._refreshing:
+            if self._tmdb_refreshing:
                 logger.debug("fast_search: TMDb titles refresh already in progress")
                 return
-            self._refreshing = True
+            self._tmdb_refreshing = True
         
         try:
             from app.settings_manager import SettingsManager
@@ -418,6 +423,7 @@ class FastSearchIndex:
             
             tmdb_base = settings.get('apis.tmdb.base_url', '') or 'https://api.themoviedb.org/3'
             tmdb_titles_list = []
+            tmdb_title_map = {}  # normalized -> display for TMDb titles
             failed = False
             
             # Fetch popular movies (3 pages = ~60 titles)
@@ -433,7 +439,9 @@ class FastSearchIndex:
                         for movie in results:
                             title = movie.get('title', '').strip()
                             if title:
-                                tmdb_titles_list.append(normalize_text(title))
+                                normalized = normalize_text(title)
+                                tmdb_titles_list.append(normalized)
+                                tmdb_title_map[normalized] = title
                     elif resp.status_code == 429:
                         logger.warning(f"fast_search: TMDb rate limit hit on movies page {page}")
                         failed = True
@@ -457,7 +465,9 @@ class FastSearchIndex:
                             for show in results:
                                 name = show.get('name', '').strip()
                                 if name:
-                                    tmdb_titles_list.append(normalize_text(name))
+                                    normalized = normalize_text(name)
+                                    tmdb_titles_list.append(normalized)
+                                    tmdb_title_map[normalized] = name
                         elif resp.status_code == 429:
                             logger.warning(f"fast_search: TMDb rate limit hit on TV page {page}")
                             failed = True
@@ -472,6 +482,7 @@ class FastSearchIndex:
                 new_tmdb_titles = frozenset(tmdb_titles_list)
                 with self._lock:
                     self._tmdb_titles = new_tmdb_titles
+                    self._title_map.update(tmdb_title_map)  # Add TMDb titles to map
                     self._tmdb_titles_cached = True
                     self._tmdb_cache_time = time.time()
                 logger.info(f"fast_search: cached {len(new_tmdb_titles)} TMDb popular titles for spelling correction")
@@ -484,7 +495,7 @@ class FastSearchIndex:
         
         finally:
             with self._lock:
-                self._refreshing = False
+                self._tmdb_refreshing = False
 
     def _refresh_worker(self):
         """Background thread: build index once, then refresh every 15 min."""
@@ -589,8 +600,9 @@ class FastSearchIndex:
             if use_fuzzy:
                 match_score, match_type = fuzzy_match_score(q, title, q_norm, title_norm)
                 
-                # Filter out very weak matches
-                if match_score < 0.4:
+                # Tighten threshold for 3-4 char queries to avoid false matches
+                min_threshold = 0.75 if len(q) <= 4 else 0.4
+                if match_score < min_threshold:
                     continue
             else:
                 # For short queries or when fuzzy disabled, use exact/prefix/substring only
@@ -608,17 +620,24 @@ class FastSearchIndex:
             # Calculate popularity for tiebreaking
             popularity = calculate_popularity_score(item)
             
+            # Calculate length difference for ranking (prefer shorter or exact-length)
+            title_len = len(title)
+            query_len = len(q)
+            len_diff = abs(title_len - query_len)
+            
             scored_results.append({
                 'item': item,
                 'match_score': match_score,
                 'match_type': match_type,
                 'popularity': popularity,
+                'len_diff': len_diff,
+                'title_len': title_len,
             })
 
-        # Sort by tier first, then score within tier, then popularity as tiebreaker
+        # Sort by: tier, match_score, length_difference (prefer exact or shorter), popularity
         tier_priority = {'exact': 0, 'prefix': 1, 'substring': 2, 'token': 3, 'fuzzy': 4, 'none': 5}
         scored_results.sort(
-            key=lambda x: (tier_priority.get(x['match_type'], 5), -x['match_score'], -x['popularity'])
+            key=lambda x: (tier_priority.get(x['match_type'], 5), -x['match_score'], x['len_diff'], x['title_len'], -x['popularity'])
         )
 
         # Extract top results
@@ -649,13 +668,14 @@ class FastSearchIndex:
         """
         Find the best spelling correction for a query from the combined title dictionary.
         Returns the original (pre-normalized) closest matching title if similarity >= threshold, else None.
-        Compares against the normalized query.
+        Uses the title map for O(1) lookup (no linear scan).
         """
         query_norm = normalize_text(query)
         
-        # Get combined dictionary under lock
+        # Get combined dictionary and title map under lock
         with self._lock:
             combined_titles = self._library_titles | self._tmdb_titles
+            title_map = self._title_map.copy()
 
         if not query_norm or not combined_titles:
             return None
@@ -664,19 +684,19 @@ class FastSearchIndex:
         best_score = threshold
 
         for title_norm in combined_titles:
-            # Quick trigram similarity check
-            score = trigram_similarity(query_norm, title_norm)
+            # Use rapidfuzz if available, else trigram similarity
+            if HAS_RAPIDFUZZ:
+                score = fuzz.ratio(query_norm, title_norm) / 100.0
+            else:
+                score = trigram_similarity(query_norm, title_norm)
             
             if score > best_score:
                 best_score = score
                 best_match_norm = title_norm
 
-        # Return the original title by looking it up in the index
-        if best_match_norm:
-            with self._lock:
-                for item in self._index:
-                    if item.get('title_normalized') == best_match_norm:
-                        return item['title']
+        # Return the original title from the map (O(1) lookup)
+        if best_match_norm and best_match_norm in title_map:
+            return title_map[best_match_norm]
         
         return None
 

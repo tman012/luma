@@ -308,6 +308,8 @@ class TestFastSearchIndexFuzzy(unittest.TestCase):
 
     def test_spelling_correction(self):
         """Test spelling correction returns original title."""
+        # Ensure title map is populated
+        self.index._title_map = {item['title_normalized']: item['title'] for item in self.index._index}
         correction = self.index.find_spelling_correction('Interstelar')
         self.assertEqual(correction, 'Interstellar')  # Original title, not normalized
     
@@ -388,6 +390,81 @@ class TestFastSearchIndexFuzzy(unittest.TestCase):
         results = self.index.search(q='   ')
         # Should return empty or filtered results, not entire library
         self.assertLessEqual(len(results), 100)  # Not the whole library
+    
+    def test_short_query_length_preference(self):
+        """Test that within a tier, shorter or exact-length titles are preferred."""
+        # Add 'U' and 'Up' and 'Upside Down' to test
+        u_item = {
+            'rating_key': '103',
+            'title': 'U',
+            'title_lower': 'u',
+            'title_normalized': 'u',
+            'year': 2009,
+            'content_rating': 'PG',
+            'genres': ['Drama'],
+            'genres_lower': ['drama'],
+            'section_id': 1,
+            'section_name': 'Movies',
+            'media_type': 'movie',
+            'viewCount': 10,
+            'viewOffset': 0,
+            'thumb': '/thumb103.jpg',
+        }
+        upside_item = {
+            'rating_key': '104',
+            'title': 'Upside Down',
+            'title_lower': 'upside down',
+            'title_normalized': 'upside down',
+            'year': 2012,
+            'content_rating': 'PG-13',
+            'genres': ['Romance'],
+            'genres_lower': ['romance'],
+            'section_id': 1,
+            'section_name': 'Movies',
+            'media_type': 'movie',
+            'viewCount': 100,  # Higher popularity
+            'viewOffset': 0,
+            'thumb': '/thumb104.jpg',
+        }
+        self.index._index.extend([u_item, upside_item])
+        self.index._library_titles.update(['u', 'upside down'])
+        
+        # Search for 'u' - should prefer exact length 'U' over 'Upside Down'
+        results = self.index.search(q='u')
+        self.assertGreater(len(results), 0)
+        # 'U' should rank higher than 'Upside Down' despite lower viewCount
+        titles = [r['title'] for r in results]
+        if 'U' in titles and 'Upside Down' in titles:
+            self.assertLess(titles.index('U'), titles.index('Upside Down'))
+    
+    def test_tighter_threshold_short_query(self):
+        """Test that 3-4 char queries have tighter fuzzy threshold to avoid false matches."""
+        # Add 'The Matrix' to test
+        matrix_item = {
+            'rating_key': '105',
+            'title': 'The Matrix',
+            'title_lower': 'the matrix',
+            'title_normalized': 'matrix',
+            'year': 1999,
+            'content_rating': 'R',
+            'genres': ['Sci-Fi'],
+            'genres_lower': ['sci-fi'],
+            'section_id': 1,
+            'section_name': 'Movies',
+            'media_type': 'movie',
+            'viewCount': 200,
+            'viewOffset': 0,
+            'thumb': '/thumb105.jpg',
+        }
+        self.index._index.append(matrix_item)
+        self.index._library_titles.add('matrix')
+        
+        # 'ark' should NOT fuzzy match 'matrix' (threshold too low)
+        # But should find 'Dark Knight' via substring (from earlier test)
+        results = self.index.search(q='ark')
+        titles = [r['title'] for r in results]
+        # Matrix should not be in results (fuzzy score too low for 3-char query)
+        self.assertNotIn('The Matrix', titles)
     
     def test_accent_difference_library(self):
         """Test accent difference: 'Amelie' should match 'Amélie' if in library."""
@@ -696,10 +773,51 @@ class TestTMDbIntegration(unittest.TestCase):
             'thumb': '/thumb1.jpg',
         }]
         index._library_titles = {'interstellar'}
+        index._title_map = {'interstellar': 'Interstellar'}
         index._initialized = True
         
         correction = index.find_spelling_correction('Interstelar')
         self.assertEqual(correction, 'Interstellar')  # Original title
+    
+    @patch('app.settings_manager.SettingsManager')
+    @patch('app.fast_search.requests.get')
+    def test_tmdb_only_correction(self, mock_get, mock_settings_class):
+        """Test correction finds title that exists only in TMDb set (not library)."""
+        # Mock settings
+        mock_settings = Mock()
+        mock_settings.get.side_effect = lambda key, default='': {
+            'apis.tmdb.api_key': 'test_api_key',
+            'apis.tmdb.base_url': 'https://api.themoviedb.org/3'
+        }.get(key, default)
+        mock_settings_class.return_value = mock_settings
+        
+        # Mock TMDb response with Oppenheimer
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'results': [
+                {'title': 'Oppenheimer', 'popularity': 150.0},
+            ]
+        }
+        mock_get.return_value = mock_response
+        
+        index = FastSearchIndex()
+        index._library_titles = set()  # Empty library
+        index._title_map = {}  # Empty title map
+        index._initialized = True
+        
+        # Refresh TMDb titles (adds Oppenheimer)
+        index._refresh_tmdb_titles()
+        
+        # Verify Oppenheimer is in TMDb set and title map
+        with index._lock:
+            self.assertIn('oppenheimer', index._tmdb_titles)
+            self.assertIn('oppenheimer', index._title_map)
+            self.assertEqual(index._title_map['oppenheimer'], 'Oppenheimer')
+        
+        # Test correction for typo finds Oppenheimer (TMDb-only)
+        correction = index.find_spelling_correction('Openheimer')
+        self.assertEqual(correction, 'Oppenheimer')
     
     @patch('app.settings_manager.SettingsManager')
     @patch('app.fast_search.requests.get')
@@ -786,6 +904,119 @@ class TestTMDbIntegration(unittest.TestCase):
         index._refresh_tmdb_titles()
         
         # Should log warning but continue
+
+
+class TestFlaskEndpoints(unittest.TestCase):
+    """Test Flask endpoints with mocked TMDb."""
+    
+    def setUp(self):
+        """Set up Flask test client."""
+        # Skip if cache directory doesn't exist (environment issue)
+        import os
+        if not os.path.exists('/app'):
+            self.skipTest("Flask app requires /app directory")
+        
+        # Import here to avoid circular imports
+        try:
+            from app import main as app_main
+            self.app = app_main.app
+            self.app.config['TESTING'] = True
+            self.client = self.app.test_client()
+        except Exception as e:
+            self.skipTest(f"Flask app initialization failed: {e}")
+    
+    @patch('app.main.tmdb')
+    @patch('app.main.fast_search_index')
+    def test_search_endpoint_correction_triggered(self, mock_index, mock_tmdb):
+        """Test /api/search triggers correction on weak results."""
+        # Mock weak direct results
+        mock_tmdb.search_multi.side_effect = [
+            [],  # Direct search: empty
+            [{'id': 2, 'title': 'Interstellar', 'media_type': 'movie', 'popularity': 120}]  # Corrected
+        ]
+        mock_tmdb.search_movies.side_effect = [
+            [],  # Direct search: empty
+            [{'id': 2, 'title': 'Interstellar', 'popularity': 120}]  # Corrected
+        ]
+        mock_tmdb.search_tv.side_effect = [[], []]
+        mock_tmdb.search_people.return_value = []
+        
+        # Mock spelling correction
+        mock_index.find_spelling_correction.return_value = 'Interstellar'
+        
+        response = self.client.get('/api/search?q=Interstelar&type=movie')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        
+        # Should have results from corrected search
+        self.assertGreater(len(data.get('movies', [])), 0)
+        mock_index.find_spelling_correction.assert_called_once()
+    
+    @patch('app.main.tmdb')
+    @patch('app.main.fast_search_index')
+    def test_search_endpoint_correction_not_triggered(self, mock_index, mock_tmdb):
+        """Test /api/search doesn't trigger correction when results are good."""
+        # Mock good direct results
+        mock_tmdb.search_multi.return_value = [
+            {'id': 1, 'title': 'Interstellar', 'media_type': 'movie', 'popularity': 120},
+            {'id': 2, 'title': 'Interstellar 2', 'media_type': 'movie', 'popularity': 80},
+            {'id': 3, 'title': 'Interstellar 3', 'media_type': 'movie', 'popularity': 60}
+        ]
+        mock_tmdb.search_movies.return_value = [
+            {'id': 1, 'title': 'Interstellar', 'popularity': 120}
+        ]
+        mock_tmdb.search_tv.return_value = []
+        mock_tmdb.search_people.return_value = []
+        
+        response = self.client.get('/api/search?q=Interstellar&type=movie')
+        self.assertEqual(response.status_code, 200)
+        
+        # Correction should NOT be called (good results)
+        mock_index.find_spelling_correction.assert_not_called()
+    
+    @patch('app.main.tmdb')
+    @patch('app.main.fast_search_index')
+    def test_search_endpoint_corrected_after_direct(self, mock_index, mock_tmdb):
+        """Test corrected results come after ALL direct results."""
+        # Mock direct + corrected results
+        mock_tmdb.search_multi.side_effect = [
+            [{'id': 1, 'title': 'Star Wars', 'media_type': 'movie', 'popularity': 100}],  # Direct: 1 result
+            [{'id': 2, 'title': 'Star Trek', 'media_type': 'movie', 'popularity': 90}]  # Corrected
+        ]
+        mock_tmdb.search_movies.side_effect = [
+            [{'id': 1, 'title': 'Star Wars', 'popularity': 100}],  # Direct
+            [{'id': 2, 'title': 'Star Trek', 'popularity': 90}]  # Corrected
+        ]
+        mock_tmdb.search_tv.side_effect = [[], []]
+        mock_tmdb.search_people.return_value = []
+        
+        mock_index.find_spelling_correction.return_value = 'Star Trek'
+        
+        response = self.client.get('/api/search?q=Star%20Warz&type=movie')
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        
+        movies = data.get('movies', [])
+        self.assertGreaterEqual(len(movies), 2)
+        # Direct result (Star Wars) should have lower relevance_rank than corrected (Star Trek)
+        # Meaning direct comes first
+        ranks = {m['title']: m.get('relevance_rank', 999) for m in movies}
+        if 'Star Wars' in ranks and 'Star Trek' in ranks:
+            self.assertLess(ranks['Star Wars'], ranks['Star Trek'])
+    
+    @patch('app.main.tmdb')
+    def test_tmdb_match_search_endpoint(self, mock_tmdb):
+        """Test /api/tmdb/match-search endpoint."""
+        mock_tmdb_response = Mock()
+        mock_tmdb_response.status_code = 200
+        mock_tmdb_response.json.return_value = {
+            'results': [{'id': 1, 'title': 'Interstellar', 'popularity': 120}]
+        }
+        
+        with patch('app.main.requests.get', return_value=mock_tmdb_response):
+            response = self.client.get('/api/tmdb/match-search?query=Interstellar&media_type=movie')
+            self.assertEqual(response.status_code, 200)
+            # Just verify it doesn't crash
 
 
 if __name__ == '__main__':

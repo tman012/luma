@@ -27,6 +27,37 @@ import requests
 # Import explore cache
 from app.explore_cache import explore_cache
 from app.fast_search import fast_search_index
+
+
+# Module-level helper for TMDb spelling correction logic
+def _tmdb_needs_spelling_correction(results, query_str):
+    """
+    Check if TMDb results are weak enough to warrant spelling correction.
+    Triggers on: 0-2 results OR no top-3 title contains/starts-with query.
+    """
+    if isinstance(results, dict):
+        # For /search endpoint (dict with multi/movies/tv_shows)
+        total = sum(len(results.get(k, [])) for k in ['multi', 'movies', 'tv_shows'])
+        if total <= 2:
+            return True
+        query_lower = query_str.lower()
+        for result_list in [results.get('multi', []), results.get('movies', []), results.get('tv_shows', [])]:
+            for item in result_list[:3]:
+                title = (item.get('title') or item.get('name', '')).lower()
+                if query_lower in title or title.startswith(query_lower):
+                    return False
+        return True
+    elif isinstance(results, list):
+        # For /tmdb_match_search endpoint (list of results)
+        if len(results) <= 2:
+            return True
+        query_lower = query_str.lower()
+        for item in results[:3]:
+            title = (item.get('title') or item.get('name', '')).lower()
+            if query_lower in title or title.startswith(query_lower):
+                return False
+        return True
+    return False
 from app.upgrade_finder import UpgradeFinder, BATCH_SIZE
 
 # Import library cache
@@ -1540,19 +1571,8 @@ def tmdb_match_search():
         for mtype in types:
             _, items = _fetch(mtype)
             
-            # Check if spelling correction needed: 0-2 results OR no close title match
-            def _needs_correction(items_list, query_str):
-                if len(items_list) <= 2:
-                    return True
-                query_lower = query_str.lower()
-                for item in items_list[:3]:
-                    title = (item.get('title') or item.get('name', '')).lower()
-                    if query_lower in title or title.startswith(query_lower):
-                        return False
-                return True
-            
             # If results are weak, try spelling correction (silent - no UI text)
-            if len(query) > 3 and _needs_correction(items, query):
+            if len(query) > 3 and _tmdb_needs_spelling_correction(items, query):
                 try:
                     corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
                     if corrected and corrected.lower() != query.lower():
@@ -4104,28 +4124,14 @@ def search():
 
     results['people'] = raw.get('people', [])
 
-    # Spelling correction fallback: retry only when 0-2 results OR no result title is close to query
-    def _needs_spelling_correction(results_dict, query_str):
-        """Check if results are weak enough to warrant spelling correction."""
-        total = sum(len(results_dict.get(k, [])) for k in ['multi', 'movies', 'tv_shows'])
-        if total <= 2:
-            return True
-        # Check if any top result title is close to query
-        query_lower = query_str.lower()
-        for result_list in [results_dict.get('multi', []), results_dict.get('movies', []), results_dict.get('tv_shows', [])]:
-            for item in result_list[:3]:
-                title = (item.get('title') or item.get('name', '')).lower()
-                if query_lower in title or title.startswith(query_lower):
-                    return False
-        return True
-    
-    if len(query) > 3 and _needs_spelling_correction(raw, query):
+    # Spelling correction fallback: retry only when results are weak
+    corrected_raw = {}
+    if len(query) > 3 and _tmdb_needs_spelling_correction(raw, query):
         try:
             corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
             if corrected and corrected.lower() != query.lower():
                 logger.info(f"search: trying spelling correction '{corrected}' for '{query}'")
                 # Retry TMDb searches with corrected query (silent correction - no UI text)
-                corrected_raw = {}
                 with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                     corr_futures = {}
                     if want_movies or want_tv:
@@ -4138,18 +4144,12 @@ def search():
                     for key, future in corr_futures.items():
                         try:
                             corrected_raw[key] = future.result(timeout=10)
+                            # Tag corrected items
+                            for item in corrected_raw[key]:
+                                item['_corrected'] = True
                         except Exception as e:
                             logger.warning(f"Spelling-corrected search for {key} failed: {e}")
                             corrected_raw[key] = []
-                
-                # Merge: direct matches first, then dedupe corrected results after
-                for key in ['multi', 'movies', 'tv_shows']:
-                    if key in corrected_raw and corrected_raw[key]:
-                        existing_ids = {item.get('id') for item in raw.get(key, []) if item.get('id')}
-                        for item in corrected_raw[key]:
-                            if item.get('id') and item.get('id') not in existing_ids:
-                                raw[key].append(item)
-                                existing_ids.add(item.get('id'))
         except Exception as e:
             logger.warning(f"Spelling correction failed: {e}")
 
@@ -4170,29 +4170,46 @@ def search():
     # Only keep the types the caller asked for — multi returns all of them, and
     # a type=movie query must not come back with TV shows in tv_shows.
     wanted_types = {t for t, ok in (('movie', want_movies), ('tv', want_tv)) if ok}
-    multi_items = [
-        (it['media_type'], it) for it in raw.get('multi', [])
-        if it.get('media_type') in wanted_types and it.get('id')
-    ]
+    
+    # Separate direct and corrected results
+    multi_direct = [(it['media_type'], it) for it in raw.get('multi', [])
+                    if it.get('media_type') in wanted_types and it.get('id') and not it.get('_corrected')]
+    multi_corrected = [(it['media_type'], it) for it in corrected_raw.get('multi', [])
+                       if it.get('media_type') in wanted_types and it.get('id')]
 
-    # Per-type results interleaved round-robin rather than movies-then-TV, so a
-    # show never lands behind twenty films when it's used as the lead ordering.
-    mv, tv = raw.get('movies', []), raw.get('tv_shows', [])
-    per_type = []
-    for i in range(max(len(mv), len(tv))):
-        if i < len(mv):
-            per_type.append(('movie', mv[i]))
-        if i < len(tv):
-            per_type.append(('tv', tv[i]))
+    # Per-type results interleaved round-robin rather than movies-then-TV
+    mv_direct = [it for it in raw.get('movies', []) if not it.get('_corrected')]
+    tv_direct = [it for it in raw.get('tv_shows', []) if not it.get('_corrected')]
+    mv_corrected = corrected_raw.get('movies', [])
+    tv_corrected = corrected_raw.get('tv_shows', [])
+    
+    per_type_direct = []
+    for i in range(max(len(mv_direct), len(tv_direct))):
+        if i < len(mv_direct):
+            per_type_direct.append(('movie', mv_direct[i]))
+        if i < len(tv_direct):
+            per_type_direct.append(('tv', tv_direct[i]))
+    
+    per_type_corrected = []
+    for i in range(max(len(mv_corrected), len(tv_corrected))):
+        if i < len(mv_corrected):
+            per_type_corrected.append(('movie', mv_corrected[i]))
+        if i < len(tv_corrected):
+            per_type_corrected.append(('tv', tv_corrected[i]))
 
     # /search/multi takes no year parameter, and when the user typed one TMDb's
     # year-FILTERED per-type search is far more precise than anything we can
-    # recover by re-sorting multi ("wrestlemania 2026" → the actual WrestleMania
-    # 42 cards, which multi doesn't surface at all). So a year query leads with
-    # the filtered results and lets multi backfill; without a year, multi leads
-    # because it's the only source that ranks movies and TV against each other.
-    order = (per_type + multi_items) if search_year else (multi_items + per_type)
-    for mt, item in order:
+    # recover by re-sorting multi. So a year query leads with the filtered results.
+    # Rank direct results first, then corrected results after ALL direct results.
+    direct_order = (per_type_direct + multi_direct) if search_year else (multi_direct + per_type_direct)
+    corrected_order = (per_type_corrected + multi_corrected) if search_year else (multi_corrected + per_type_corrected)
+    
+    # Process direct results first
+    for mt, item in direct_order:
+        _take(mt, item)
+    
+    # Then process corrected results (deduped by _take)
+    for mt, item in corrected_order:
         _take(mt, item)
 
     results['movies'] = ranked_movies
