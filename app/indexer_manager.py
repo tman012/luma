@@ -324,6 +324,8 @@ class IndexerManager:
         self.states_lock = threading.Lock()
         self.config_hash = None
         self._state_file = None
+        self._last_save_time = 0.0
+        self._save_throttle_seconds = 5.0  # Throttle saves to every 5 seconds
         self._load_state()
 
     def _get_state_file_path(self) -> Path:
@@ -331,8 +333,8 @@ class IndexerManager:
         if self._state_file:
             return self._state_file
         
-        # Use data/ directory or fall back to /tmp
-        data_dir = Path(os.environ.get('LUMA_DATA_DIR', './data'))
+        # Use LUMA_DATA_DIR or default to /app/data
+        data_dir = Path(os.environ.get('LUMA_DATA_DIR', '/app/data'))
         data_dir.mkdir(parents=True, exist_ok=True)
         self._state_file = data_dir / 'indexer_state.json'
         return self._state_file
@@ -378,7 +380,15 @@ class IndexerManager:
             logger.warning(f'Failed to load indexer state: {sanitize_api_key(str(e))}')
     
     def _save_state(self) -> None:
-        """Persist state to disk."""
+        """
+        Save indexer state to disk (throttled and atomic).
+        Throttled to avoid excessive I/O, atomic via temp file + rename.
+        """
+        now = time.time()
+        # Throttle: save at most once per _save_throttle_seconds
+        if now - self._last_save_time < self._save_throttle_seconds:
+            return
+        
         try:
             state_file = self._get_state_file_path()
             states_data = {}
@@ -392,11 +402,13 @@ class IndexerManager:
                 'states': states_data,
             }
             
-            # Atomic write
+            # Atomic write: write to temp file, then rename
             temp_file = state_file.with_suffix('.tmp')
             with open(temp_file, 'w') as f:
                 json.dump(data, f)
             temp_file.replace(state_file)
+            self._last_save_time = now
+            logger.debug(f'Saved indexer state to {state_file}')
             
         except Exception as e:
             logger.warning(f'Failed to save indexer state: {sanitize_api_key(str(e))}')
@@ -651,7 +663,7 @@ class IndexerManager:
                     logger.debug(f'Indexer {config.get("name")} token bucket empty')
                     raise IndexerRateLimitError('Token bucket empty')
 
-            # Reserve request slot
+            # Reserve request slot and save state
             state.request_log.append(time.time())
             
             # Calculate sleep needed for min interval
@@ -705,17 +717,20 @@ class IndexerManager:
                 if retry_after_seconds:
                     with state.lock:
                         state.set_backoff(retry_after_seconds, time.time())
+                    self._save_state()  # Persist backoff
                     logger.warning(f'Indexer {config.get("name")} 429 - Retry-After {retry_after_seconds}s')
                     raise IndexerBackoffError(f'Rate limited (429), retry after {retry_after_seconds}s')
                 else:
                     with state.lock:
                         state.set_backoff_exponential(time.time())
+                    self._save_state()  # Persist backoff
                     logger.warning(f'Indexer {config.get("name")} 429 - exponential backoff')
                     raise IndexerBackoffError('Rate limited (429)')
 
             if resp.status_code >= 500:
                 with state.lock:
                     state.set_backoff_exponential(time.time())
+                self._save_state()  # Persist backoff
                 logger.warning(f'Indexer {config.get("name")} {resp.status_code} - exponential backoff')
                 raise IndexerError(f'Server error {resp.status_code}')
 
@@ -733,6 +748,8 @@ class IndexerManager:
             with state.lock:
                 state.set_cached(cache_key, results, time.time())
                 state.clear_backoff()
+            
+            self._save_state()  # Persist successful request
 
             logger.info(f'Indexer {config.get("name")} search "{query}": {len(results)} results')
             return results
@@ -744,12 +761,14 @@ class IndexerManager:
             logger.warning(f'Indexer {config.get("name")} connection error: {error_msg}')
             with state.lock:
                 state.set_backoff_exponential(time.time())
+            self._save_state()  # Persist backoff
             raise IndexerError(f'Connection error: {error_msg[:100]}')
         except requests.exceptions.RequestException as e:
             error_msg = sanitize_api_key(str(e))
             logger.error(f'Indexer {config.get("name")} request failed: {error_msg}')
             with state.lock:
                 state.set_backoff_exponential(time.time())
+            self._save_state()  # Persist backoff
             raise IndexerError(f'Request failed: {error_msg[:100]}')
 
     def search(

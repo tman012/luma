@@ -1869,3 +1869,75 @@ def test_prowlarr_import_routing_by_implementation():
         # URL might or might not have /api appended depending on baseUrl
         assert 'https://api.nzbgeek.info' in nzbgeek['url']
         assert nzbgeek['api_key'] == 'nzbgeek-key-123'
+
+
+def test_hourly_cap_persists_across_restart():
+    """Hourly rate limit counter persists across manager restarts."""
+    import tempfile
+    import os
+    from app.indexer_manager import IndexerManager
+    
+    # Use a temp directory for state file
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.environ['LUMA_DATA_DIR'] = tmpdir
+        
+        settings_mock = Mock()
+        def settings_get(key, default=None):
+            if key == 'indexer.indexers':
+                return [
+                    {
+                        'id': 'test-ix',
+                        'name': 'Test Indexer',
+                        'url': 'http://test.example.com',
+                        'api_key': 'key',
+                        'type': 'torznab',
+                        'enabled': True,
+                        'rate_limit_max_per_hour': 20,  # 20/hour cap
+                    }
+                ]
+            return default
+        
+        settings_mock.get.side_effect = settings_get
+        
+        # Create XML response
+        xml_response = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Result</title>
+  <link>http://dl.test/1</link>
+  <guid>g1</guid>
+</item>
+</channel></rss>"""
+        
+        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
+            with patch('app.indexer_manager.requests.get') as mock_get:
+                mock_resp = Mock()
+                mock_resp.status_code = 200
+                mock_resp.raw = Mock()
+                mock_resp.raw.read.return_value = xml_response.encode()
+                mock_resp.raise_for_status = Mock()
+                mock_get.return_value = mock_resp
+                
+                # Make 20 requests with different queries to avoid cache
+                manager = IndexerManager(settings_mock)
+                for i in range(20):
+                    try:
+                        manager._search_one_indexer('test-ix', f'test{i}', [2000], 10, interactive=False)
+                    except Exception as e:
+                        pytest.fail(f'Request {i+1} should succeed: {e}')
+                
+                # Force save by setting last_save_time to 0
+                manager._last_save_time = 0
+                manager._save_state()
+                
+                # Create a new manager instance (simulating restart)
+                manager2 = IndexerManager(settings_mock)
+                
+                # Verify state was loaded
+                state2 = manager2._get_state('test-ix')
+                assert len(state2.request_log) == 20, f"Expected 20 requests in log, got {len(state2.request_log)}"
+                
+                # 21st request should be blocked (hourly cap reached)
+                from app.indexer_manager import IndexerRateLimitError
+                with pytest.raises(IndexerRateLimitError, match='Hourly rate limit'):
+                    manager2._search_one_indexer('test-ix', 'test21', [2000], 10, interactive=False)
