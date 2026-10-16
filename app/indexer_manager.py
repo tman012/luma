@@ -27,13 +27,22 @@ logger = logging.getLogger(__name__)
 
 # SSRF protection: disallowed IP ranges
 DISALLOWED_IP_RANGES = [
-    ipaddress.ip_network('127.0.0.0/8'),      # Loopback
+    ipaddress.ip_network('0.0.0.0/8'),        # "This network"
+    ipaddress.ip_network('127.0.0.0/8'),      # Loopback (never allowed, even with allow_lan)
     ipaddress.ip_network('169.254.0.0/16'),   # Link-local
     ipaddress.ip_network('10.0.0.0/8'),       # Private RFC1918
     ipaddress.ip_network('172.16.0.0/12'),    # Private RFC1918
     ipaddress.ip_network('192.168.0.0/16'),   # Private RFC1918
-    ipaddress.ip_network('::1/128'),          # IPv6 loopback
+    ipaddress.ip_network('100.64.0.0/10'),    # CGNAT (RFC6598)
+    ipaddress.ip_network('::1/128'),          # IPv6 loopback (never allowed)
     ipaddress.ip_network('fe80::/10'),        # IPv6 link-local
+    ipaddress.ip_network('fc00::/7'),         # IPv6 unique local (RFC4193)
+]
+
+# Loopback ranges (never allowed, even with allow_lan)
+LOOPBACK_RANGES = [
+    ipaddress.ip_network('127.0.0.0/8'),
+    ipaddress.ip_network('::1/128'),
 ]
 
 # 5 MB response body limit
@@ -78,54 +87,78 @@ def parse_retry_after(retry_after_value: str) -> Optional[float]:
     return None
 
 
-def validate_indexer_url(url: str, allow_lan: bool = False) -> Tuple[bool, str]:
+def validate_indexer_url(url: str, allow_lan: bool = False) -> Tuple[bool, str, Optional[str]]:
     """
     Validate indexer URL for SSRF protection.
     
-    Returns (valid, error_message).
+    Returns (valid, error_message, pinned_ip).
     Only http/https allowed. Rejects loopback, link-local, and private IPs unless allow_lan=True.
+    Loopback is NEVER allowed, even with allow_lan=True.
+    Returns the pinned IP address to prevent DNS rebinding attacks.
     """
     try:
         parsed = urlparse(url)
         
         # Only allow http/https
         if parsed.scheme not in ('http', 'https'):
-            return False, f'Only http and https schemes allowed, got {parsed.scheme}'
+            return False, f'Only http and https schemes allowed, got {parsed.scheme}', None
         
         hostname = parsed.hostname
         if not hostname:
-            return False, 'Missing hostname'
+            return False, 'Missing hostname', None
         
         # Resolve to IP
         import socket
         try:
             addr_info = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         except socket.gaierror as e:
-            return False, f'DNS resolution failed: {e}'
+            return False, f'DNS resolution failed: {e}', None
         
         if not addr_info:
-            return False, 'DNS returned no addresses'
+            return False, 'DNS returned no addresses', None
         
-        # Check all resolved addresses
+        # Check all resolved addresses and pin the first valid one
+        pinned_ip = None
         for family, socktype, proto, canonname, sockaddr in addr_info:
             ip_str = sockaddr[0]
-            ip = ipaddress.ip_address(ip_str)
+            
+            # Handle IPv4-mapped IPv6 addresses (::ffff:192.168.1.1)
+            if ip_str.startswith('::ffff:'):
+                ipv4_str = ip_str.replace('::ffff:', '')
+                try:
+                    ip = ipaddress.ip_address(ipv4_str)
+                except ValueError:
+                    ip = ipaddress.ip_address(ip_str)
+            else:
+                ip = ipaddress.ip_address(ip_str)
             
             # Cloud metadata endpoint
-            if ip_str == '169.254.169.254':
-                return False, 'Cloud metadata endpoint blocked'
+            if ip_str == '169.254.169.254' or str(ip) == '169.254.169.254':
+                return False, 'Cloud metadata endpoint blocked', None
             
-            # Check disallowed ranges
+            # Check loopback (NEVER allowed, even with allow_lan)
+            is_loopback = any(ip in network for network in LOOPBACK_RANGES)
+            if is_loopback:
+                return False, f'Loopback IP blocked: {ip_str}', None
+            
+            # Check other disallowed ranges
             for network in DISALLOWED_IP_RANGES:
                 if ip in network:
                     if not allow_lan:
-                        return False, f'Private/loopback IP blocked: {ip_str}'
+                        return False, f'Private/restricted IP blocked: {ip_str}', None
+            
+            # Pin the first valid IP
+            if pinned_ip is None:
+                pinned_ip = str(ip)
         
-        return True, ''
+        if pinned_ip is None:
+            return False, 'No valid IP addresses found', None
+        
+        return True, '', pinned_ip
         
     except Exception as e:
         logger.exception(f'URL validation error: {e}')
-        return False, f'Validation error: {sanitize_api_key(str(e))}'
+        return False, f'Validation error: {sanitize_api_key(str(e))}', None
 
 
 # Default rate limits for AvistaZ-family trackers (configurable per indexer)
@@ -494,7 +527,7 @@ class IndexerManager:
             
             # SSRF protection
             allow_lan = self.settings_manager.get('indexer.allow_lan', False)
-            valid, error = validate_indexer_url(url, allow_lan=allow_lan)
+            valid, error, pinned_ip = validate_indexer_url(url, allow_lan=allow_lan)
             if not valid:
                 return False, f'URL validation failed: {error}'
 
@@ -506,6 +539,7 @@ class IndexerManager:
                 headers=headers,
                 timeout=10,
                 stream=True,
+                allow_redirects=False,  # Prevent redirect attacks
             )
             
             # Cap response size
@@ -720,7 +754,7 @@ class IndexerManager:
         
         # SSRF validation
         allow_lan = self.settings_manager.get('indexer.allow_lan', False)
-        valid, error = validate_indexer_url(url, allow_lan=allow_lan)
+        valid, error, pinned_ip = validate_indexer_url(url, allow_lan=allow_lan)
         if not valid:
             raise IndexerError(f'URL validation failed: {error}')
 
@@ -740,6 +774,7 @@ class IndexerManager:
                 headers=headers,
                 timeout=60,
                 stream=True,
+                allow_redirects=False,  # Prevent redirect attacks
             )
             
             # Phase 4: Update last_request_time (acquire lock briefly)

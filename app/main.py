@@ -17154,7 +17154,7 @@ def import_indexers_from_prowlarr():
         
         # SSRF protection: validate Prowlarr URL
         allow_lan = settings.get('indexer.allow_lan', False)
-        valid, error = validate_indexer_url(prowlarr_url, allow_lan=allow_lan)
+        valid, error, pinned_ip = validate_indexer_url(prowlarr_url, allow_lan=allow_lan)
         if not valid:
             return jsonify({'error': f'Prowlarr URL validation failed: {error}'}), 400
         
@@ -17244,7 +17244,7 @@ def download_torrent_proxy(token: str):
         
         # Re-validate URL with SSRF check and ensure it matches indexer host
         allow_lan = settings.get('indexer.allow_lan', False)
-        valid, error = validate_indexer_url(download_url, allow_lan=allow_lan)
+        valid, error, pinned_ip = validate_indexer_url(download_url, allow_lan=allow_lan)
         if not valid:
             return jsonify({'error': f'URL validation failed: {error}'}), 403
         
@@ -17258,10 +17258,10 @@ def download_torrent_proxy(token: str):
         
         api_key = config.get('api_key', '')
         
-        # Stream the download
+        # Stream the download with allow_redirects=False to prevent redirect attacks
         import requests
         headers = {'X-Api-Key': api_key} if api_key else {}
-        resp = requests.get(download_url, headers=headers, stream=True, timeout=30)
+        resp = requests.get(download_url, headers=headers, stream=True, timeout=30, allow_redirects=False)
         resp.raise_for_status()
         
         # Stream response back to client

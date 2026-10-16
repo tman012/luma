@@ -12,10 +12,13 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def mock_ssrf_validation():
-    """Auto-patch SSRF validation for all tests."""
-    with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
-        yield
+def mock_ssrf_validation(request):
+    """Auto-patch SSRF validation for all tests except those marked with 'no_ssrf_mock'."""
+    if 'no_ssrf_mock' in request.keywords:
+        yield  # Don't patch for tests that need real SSRF validation
+    else:
+        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '1.2.3.4')):
+            yield
 
 
 # ---- Token Bucket Tests ----
@@ -507,7 +510,7 @@ def test_indexer_manager_test_success():
     settings_mock.get.side_effect = settings_get
     
     with patch('app.indexer_manager.requests.get') as mock_get:
-        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
+        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '1.2.3.4')):
             mock_resp = Mock()
             mock_resp.status_code = 200
             mock_resp.raw = Mock()
@@ -546,7 +549,7 @@ def test_indexer_manager_test_timeout():
     settings_mock.get.side_effect = settings_get
     
     with patch('app.indexer_manager.requests.get') as mock_get:
-        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
+        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '1.2.3.4')):
             mock_get.side_effect = requests.exceptions.Timeout('Connection timeout')
             
             manager = IndexerManager(settings_mock)
@@ -591,7 +594,7 @@ def test_indexer_manager_search_basic():
 </channel></rss>"""
     
     with patch('app.indexer_manager.requests.get') as mock_get:
-        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
+        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '1.2.3.4')):
             mock_resp = Mock()
             mock_resp.status_code = 200
             mock_resp.raw = Mock()
@@ -639,7 +642,7 @@ def test_indexer_manager_search_rate_limit():
     xml_response = '<rss><channel></channel></rss>'
     
     with patch('app.indexer_manager.requests.get') as mock_get:
-        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
+        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '1.2.3.4')):
             mock_resp = Mock()
             mock_resp.status_code = 200
             mock_resp.raw = Mock()
@@ -684,7 +687,7 @@ def test_indexer_manager_search_429_backoff():
     settings_mock.get.side_effect = settings_get
     
     with patch('app.indexer_manager.requests.get') as mock_get:
-        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
+        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '1.2.3.4')):
             mock_resp = Mock()
             mock_resp.status_code = 429
             mock_resp.headers = {'Retry-After': '120'}
@@ -1909,7 +1912,7 @@ def test_hourly_cap_persists_across_restart():
 </item>
 </channel></rss>"""
         
-        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
+        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '1.2.3.4')):
             with patch('app.indexer_manager.requests.get') as mock_get:
                 mock_resp = Mock()
                 mock_resp.status_code = 200
@@ -2503,3 +2506,80 @@ def test_import_requires_key_when_url_supplied():
             'stored-key'
         )
         assert imported == 0  # No indexers to import
+
+
+# ---- Item 6: SSRF Improvements ----
+
+@pytest.mark.no_ssrf_mock
+def test_ssrf_blocks_loopback_even_with_allow_lan():
+    """Loopback is blocked even with allow_lan=True."""
+    from app.indexer_manager import validate_indexer_url
+    
+    # Test IPv4 loopback
+    valid, error, pinned_ip = validate_indexer_url('http://127.0.0.1:8080', allow_lan=True)
+    assert valid is False
+    assert 'loopback' in error.lower()
+    assert pinned_ip is None
+    
+    # Test IPv6 loopback
+    valid, error, pinned_ip = validate_indexer_url('http://[::1]:8080', allow_lan=True)
+    assert valid is False
+    assert 'loopback' in error.lower()
+    assert pinned_ip is None
+
+
+@pytest.mark.no_ssrf_mock
+def test_ssrf_blocks_cgnat_range():
+    """SSRF protection blocks 100.64/10 CGNAT range."""
+    from app.indexer_manager import validate_indexer_url
+    
+    with patch('socket.getaddrinfo') as mock_getaddrinfo:
+        mock_getaddrinfo.return_value = [
+            (2, 1, 6, '', ('100.64.1.1', 0))
+        ]
+        valid, error, pinned_ip = validate_indexer_url('http://example.com', allow_lan=False)
+        assert valid is False
+        assert '100.64.1.1' in error or 'restricted' in error.lower()
+
+
+@pytest.mark.no_ssrf_mock
+def test_ssrf_blocks_ipv6_unique_local():
+    """SSRF protection blocks fc00::/7 IPv6 unique local addresses."""
+    from app.indexer_manager import validate_indexer_url
+    
+    with patch('socket.getaddrinfo') as mock_getaddrinfo:
+        mock_getaddrinfo.return_value = [
+            (10, 1, 6, '', ('fd00::1', 0, 0, 0))
+        ]
+        valid, error, pinned_ip = validate_indexer_url('http://example.com', allow_lan=False)
+        assert valid is False
+        assert 'fd00::1' in error or 'restricted' in error.lower()
+
+
+@pytest.mark.no_ssrf_mock
+def test_ssrf_blocks_ipv4_mapped_ipv6():
+    """SSRF protection blocks IPv4-mapped IPv6 addresses pointing to private ranges."""
+    from app.indexer_manager import validate_indexer_url
+    
+    with patch('socket.getaddrinfo') as mock_getaddrinfo:
+        # IPv4-mapped IPv6 for 192.168.1.1
+        mock_getaddrinfo.return_value = [
+            (10, 1, 6, '', ('::ffff:192.168.1.1', 0, 0, 0))
+        ]
+        valid, error, pinned_ip = validate_indexer_url('http://example.com', allow_lan=False)
+        assert valid is False
+        assert '192.168.1.1' in error or 'private' in error.lower()
+
+
+@pytest.mark.no_ssrf_mock
+def test_ssrf_pins_validated_ip():
+    """SSRF validation returns the pinned IP to prevent DNS rebinding."""
+    from app.indexer_manager import validate_indexer_url
+    
+    with patch('socket.getaddrinfo') as mock_getaddrinfo:
+        mock_getaddrinfo.return_value = [
+            (2, 1, 6, '', ('1.2.3.4', 0))
+        ]
+        valid, error, pinned_ip = validate_indexer_url('http://example.com', allow_lan=False)
+        assert valid is True
+        assert pinned_ip == '1.2.3.4'
