@@ -25,8 +25,17 @@ from dotenv import load_dotenv
 import requests
 
 # Import explore cache
+if __name__ == '__main__':
+    # Fail fast (exit 1) before the cache modules below touch the disk, if
+    # LUMA_DATA_DIR / LUMA_CACHE_DIR / HERO_CACHE_DIR or a database in them is
+    # not writable (e.g. a populated read-only mount).
+    # NOTE: on rebase onto PR #2, also call this from the gunicorn startup path.
+    from app.paths import ensure_writable_or_exit
+    ensure_writable_or_exit()
 from app.explore_cache import explore_cache
 from app.fast_search import fast_search_index
+
+
 from app.upgrade_finder import UpgradeFinder, BATCH_SIZE
 
 # Import library cache
@@ -75,9 +84,30 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Flask app setup
-app = Flask(__name__,
-            static_folder='/app/static')
+static_folder = os.environ.get('FLASK_STATIC_FOLDER', '/app/static')
+# static_url_path is pinned: Flask otherwise derives it from the folder's
+# basename, so FLASK_STATIC_FOLDER=/x/assets would move /static/* to /assets/*.
+app = Flask(__name__, static_folder=static_folder, static_url_path='/static')
+
+
+def _resolve_spa_dir(static_dir: str, image_spa_dir: str = '/app/spa') -> str:
+    """Directory holding the built React SPA (index.html, assets/, fonts/, weather/).
+
+    LUMA_SPA_DIR wins; else the image path /app/spa (outside ./static, so a
+    bind-mounted ./static cannot hide it); else <static>/spa for dev builds.
+    """
+    explicit = os.environ.get('LUMA_SPA_DIR')
+    if explicit:
+        return explicit
+    if os.path.isfile(os.path.join(image_spa_dir, 'index.html')):
+        return image_spa_dir
+    return os.path.join(static_dir, 'spa')
+
+
+app.config['SPA_DIR'] = _resolve_spa_dir(static_folder)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', '')
+# HERO_CACHE_DIR is resolved once in HeroCache.__init__
+app.config['HERO_CACHE_DIR'] = str(hero_cache.cache_dir)
 CORS(app)
 
 # ---------------------------------------------------------------------------
@@ -653,6 +683,36 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+# Module-level helper for TMDb spelling correction logic
+def _tmdb_needs_spelling_correction(results, query_str):
+    """
+    Check if TMDb results are weak enough to warrant spelling correction.
+    Triggers on: 0-2 results OR no top-3 title contains/starts-with query.
+    """
+    if isinstance(results, dict):
+        # For /search endpoint (dict with multi/movies/tv_shows)
+        total = sum(len(results.get(k, [])) for k in ['multi', 'movies', 'tv_shows'])
+        if total <= 2:
+            return True
+        query_lower = query_str.lower()
+        for result_list in [results.get('multi', []), results.get('movies', []), results.get('tv_shows', [])]:
+            for item in result_list[:3]:
+                title = (item.get('title') or item.get('name', '')).lower()
+                if query_lower in title or title.startswith(query_lower):
+                    return False
+        return True
+    elif isinstance(results, list):
+        # For /tmdb_match_search endpoint (list of results)
+        if len(results) <= 2:
+            return True
+        query_lower = query_str.lower()
+        for item in results[:3]:
+            title = (item.get('title') or item.get('name', '')).lower()
+            if query_lower in title or title.startswith(query_lower):
+                return False
+        return True
+    return False
+
 # TMDB API functions
 class TMDBClient:
     """Client for interacting with TMDB API."""
@@ -677,9 +737,18 @@ class TMDBClient:
         if year:
             params['primary_release_year'] = year
 
+        if fast_search_index._is_tmdb_rate_limited():
+            logger.info("TMDB search_movies skipped: rate limited (Retry-After active)")
+            return []
+
         try:
             response = requests.get(f"{self.BASE_URL}/search/movie", params=params, timeout=10)
+            if response.status_code == 429:
+                logger.warning("TMDB search_movies hit rate limit")
+                fast_search_index._handle_tmdb_429(response)
+                return []
             response.raise_for_status()
+            fast_search_index._reset_tmdb_backoff()
             data = response.json()
             return data.get('results', [])
         except Exception as e:
@@ -700,9 +769,18 @@ class TMDBClient:
         if year:
             params['first_air_date_year'] = year
 
+        if fast_search_index._is_tmdb_rate_limited():
+            logger.info("TMDB search_tv skipped: rate limited (Retry-After active)")
+            return []
+
         try:
             response = requests.get(f"{self.BASE_URL}/search/tv", params=params, timeout=10)
+            if response.status_code == 429:
+                logger.warning("TMDB search_tv hit rate limit")
+                fast_search_index._handle_tmdb_429(response)
+                return []
             response.raise_for_status()
+            fast_search_index._reset_tmdb_backoff()
             data = response.json()
             return data.get('results', [])
         except Exception as e:
@@ -730,9 +808,18 @@ class TMDBClient:
             'query': query,
             'include_adult': False,
         }
+        if fast_search_index._is_tmdb_rate_limited():
+            logger.info("TMDB search_multi skipped: rate limited (Retry-After active)")
+            return []
+
         try:
             response = requests.get(f"{self.BASE_URL}/search/multi", params=params, timeout=10)
+            if response.status_code == 429:
+                logger.warning("TMDB search_multi hit rate limit")
+                fast_search_index._handle_tmdb_429(response)
+                return []
             response.raise_for_status()
+            fast_search_index._reset_tmdb_backoff()
             return response.json().get('results', [])
         except Exception as e:
             logger.error(f"TMDB multi search error: {e}")
@@ -750,6 +837,9 @@ class TMDBClient:
             return []
 
         def fetch_page(page: int) -> List[Dict]:
+            # Every page request honors an active Retry-After window.
+            if fast_search_index._is_tmdb_rate_limited():
+                return []
             params = {
                 'api_key': self.api_key,
                 'query': query,
@@ -757,7 +847,12 @@ class TMDBClient:
                 'page': page,
             }
             resp = requests.get(f"{self.BASE_URL}/search/person", params=params, timeout=8)
+            if resp.status_code == 429:
+                logger.warning(f"TMDB search_people page {page} hit rate limit")
+                fast_search_index._handle_tmdb_429(resp)
+                return []
             resp.raise_for_status()
+            fast_search_index._reset_tmdb_backoff()
             return resp.json().get('results', [])
 
         try:
@@ -916,7 +1011,7 @@ tmdb = TMDBClient(settings.get('apis.tmdb.api_key'))
 # Routes — React SPA helper
 def _serve_spa():
     """Serve the React SPA index.html (from static/spa/)."""
-    spa_index = os.path.join(app.static_folder, 'spa', 'index.html')
+    spa_index = os.path.join(app.config['SPA_DIR'], 'index.html')
     if os.path.exists(spa_index):
         resp = send_file(spa_index)
         resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
@@ -1520,16 +1615,24 @@ def tmdb_match_search():
         tmdb_base = settings.get('apis.tmdb.base_url', '') or 'https://api.themoviedb.org/3'
         merged = []
 
-        def _fetch(mtype):
+        def _fetch(mtype, search_query=None):
+            if search_query is None:
+                search_query = query
+            if fast_search_index._is_tmdb_rate_limited():
+                return mtype, []  # honor active Retry-After
             endpoint = '/search/movie' if mtype == 'movie' else '/search/tv'
             try:
                 resp = requests.get(
                     f'{tmdb_base}{endpoint}',
-                    params={'api_key': api_key, 'query': query, 'language': 'en-US', 'page': 1},
+                    params={'api_key': api_key, 'query': search_query, 'language': 'en-US', 'page': 1},
                     timeout=10,
                 )
                 if resp.status_code == 200:
+                    fast_search_index._reset_tmdb_backoff()
                     return mtype, resp.json().get('results', [])
+                elif resp.status_code == 429:
+                    logger.warning(f"tmdb_match_search {mtype} hit rate limit")
+                    fast_search_index._handle_tmdb_429(resp)
             except Exception as e:
                 logger.warning(f"tmdb_match_search {mtype} lookup failed: {e}")
             return mtype, []
@@ -1537,6 +1640,26 @@ def tmdb_match_search():
         types = [media_type] if media_type else ['movie', 'tv']
         for mtype in types:
             _, items = _fetch(mtype)
+            
+            # If results are weak, try spelling correction (silent - no UI text)
+            # Skip correction retry if we're currently rate limited
+            if (len(query) > 3 and 
+                not fast_search_index._is_tmdb_rate_limited() and 
+                _tmdb_needs_spelling_correction(items, query)):
+                try:
+                    corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
+                    if corrected and corrected.lower() != query.lower():
+                        logger.info(f"tmdb_match_search: trying correction '{corrected}' for '{query}'")
+                        _, corrected_items = _fetch(mtype, corrected)
+                        # Merge: direct matches first, then dedupe corrected results after
+                        existing_ids = {item.get('id') for item in items if item.get('id')}
+                        for item in corrected_items:
+                            if item.get('id') and item.get('id') not in existing_ids:
+                                items.append(item)
+                                existing_ids.add(item.get('id'))
+                except Exception as e:
+                    logger.warning(f"Spelling correction in tmdb_match_search failed: {e}")
+            
             for it in items:
                 if mtype == 'movie':
                     title = it.get('title', '') or ''
@@ -4074,6 +4197,38 @@ def search():
 
     results['people'] = raw.get('people', [])
 
+    # Spelling correction fallback: retry only when results are weak
+    # Skip correction retry if we're currently rate limited
+    corrected_raw = {}
+    if (len(query) > 3 and 
+        not fast_search_index._is_tmdb_rate_limited() and 
+        _tmdb_needs_spelling_correction(raw, query)):
+        try:
+            corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
+            if corrected and corrected.lower() != query.lower():
+                logger.info(f"search: trying spelling correction '{corrected}' for '{query}'")
+                # Retry TMDb searches with corrected query (silent correction - no UI text)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                    corr_futures = {}
+                    if want_movies or want_tv:
+                        corr_futures['multi'] = executor.submit(tmdb.search_multi, corrected)
+                    if want_movies:
+                        corr_futures['movies'] = executor.submit(tmdb.search_movies, corrected, search_year)
+                    if want_tv:
+                        corr_futures['tv_shows'] = executor.submit(tmdb.search_tv, corrected, search_year)
+                    
+                    for key, future in corr_futures.items():
+                        try:
+                            corrected_raw[key] = future.result(timeout=10)
+                            # Tag corrected items
+                            for item in corrected_raw[key]:
+                                item['_corrected'] = True
+                        except Exception as e:
+                            logger.warning(f"Spelling-corrected search for {key} failed: {e}")
+                            corrected_raw[key] = []
+        except Exception as e:
+            logger.warning(f"Spelling correction failed: {e}")
+
     ranked_movies, ranked_tv = [], []
     seen = {'movie': set(), 'tv': set()}
     _pos = 0
@@ -4091,33 +4246,56 @@ def search():
     # Only keep the types the caller asked for — multi returns all of them, and
     # a type=movie query must not come back with TV shows in tv_shows.
     wanted_types = {t for t, ok in (('movie', want_movies), ('tv', want_tv)) if ok}
-    multi_items = [
-        (it['media_type'], it) for it in raw.get('multi', [])
-        if it.get('media_type') in wanted_types and it.get('id')
-    ]
+    
+    # Separate direct and corrected results
+    multi_direct = [(it['media_type'], it) for it in raw.get('multi', [])
+                    if it.get('media_type') in wanted_types and it.get('id') and not it.get('_corrected')]
+    multi_corrected = [(it['media_type'], it) for it in corrected_raw.get('multi', [])
+                       if it.get('media_type') in wanted_types and it.get('id')]
 
-    # Per-type results interleaved round-robin rather than movies-then-TV, so a
-    # show never lands behind twenty films when it's used as the lead ordering.
-    mv, tv = raw.get('movies', []), raw.get('tv_shows', [])
-    per_type = []
-    for i in range(max(len(mv), len(tv))):
-        if i < len(mv):
-            per_type.append(('movie', mv[i]))
-        if i < len(tv):
-            per_type.append(('tv', tv[i]))
+    # Per-type results interleaved round-robin rather than movies-then-TV
+    mv_direct = [it for it in raw.get('movies', []) if not it.get('_corrected')]
+    tv_direct = [it for it in raw.get('tv_shows', []) if not it.get('_corrected')]
+    mv_corrected = corrected_raw.get('movies', [])
+    tv_corrected = corrected_raw.get('tv_shows', [])
+    
+    per_type_direct = []
+    for i in range(max(len(mv_direct), len(tv_direct))):
+        if i < len(mv_direct):
+            per_type_direct.append(('movie', mv_direct[i]))
+        if i < len(tv_direct):
+            per_type_direct.append(('tv', tv_direct[i]))
+    
+    per_type_corrected = []
+    for i in range(max(len(mv_corrected), len(tv_corrected))):
+        if i < len(mv_corrected):
+            per_type_corrected.append(('movie', mv_corrected[i]))
+        if i < len(tv_corrected):
+            per_type_corrected.append(('tv', tv_corrected[i]))
 
     # /search/multi takes no year parameter, and when the user typed one TMDb's
     # year-FILTERED per-type search is far more precise than anything we can
-    # recover by re-sorting multi ("wrestlemania 2026" → the actual WrestleMania
-    # 42 cards, which multi doesn't surface at all). So a year query leads with
-    # the filtered results and lets multi backfill; without a year, multi leads
-    # because it's the only source that ranks movies and TV against each other.
-    order = (per_type + multi_items) if search_year else (multi_items + per_type)
-    for mt, item in order:
+    # recover by re-sorting multi. So a year query leads with the filtered results.
+    # Rank direct results first, then corrected results after ALL direct results.
+    direct_order = (per_type_direct + multi_direct) if search_year else (multi_direct + per_type_direct)
+    corrected_order = (per_type_corrected + multi_corrected) if search_year else (multi_corrected + per_type_corrected)
+    
+    # Process direct results first
+    for mt, item in direct_order:
+        _take(mt, item)
+    
+    # Then process corrected results (deduped by _take)
+    for mt, item in corrected_order:
         _take(mt, item)
 
     results['movies'] = ranked_movies
     results['tv_shows'] = ranked_tv
+
+    # Remove internal _corrected markers before returning
+    for item in results['movies']:
+        item.pop('_corrected', None)
+    for item in results['tv_shows']:
+        item.pop('_corrected', None)
 
     # Log search to history
     conn = None
@@ -6591,12 +6769,68 @@ def library_search_fast():
 
 @app.route('/api/library/search')
 def library_search():
-    """Search library for movies and TV shows via Plex API."""
+    """Search library for movies and TV shows with typo tolerance via fast_search index.
+    Falls back to Plex API if index isn't ready."""
     query = request.args.get('q', '').strip()
     if not query:
         return jsonify({'movies': [], 'tv_shows': []})
 
     try:
+        # Try fast_search if index is initialized (typo-tolerant)
+        status = fast_search_index.status()
+        if status.get('initialized'):
+            # Use fast search with fuzzy matching
+            results = fast_search_index.search(q=query, limit=100, fuzzy=True)
+            
+            # Separate by media type and deduplicate across library sections
+            all_movies = []
+            all_tv = []
+            seen_movies = {}  # key: (title_lower, year) -> item
+            seen_tv = {}      # key: (title_lower, year) -> item
+            
+            # Build image proxy URLs relative to script root (for URL base support)
+            script_root = request.script_root or ''
+            
+            for item in results:
+                title_lower = item.get('title', '').lower()
+                year = item.get('year')
+                section_name = item.get('section_name', 'Library')
+                key = (title_lower, year)
+                
+                # Format for frontend (matches Plex format)
+                formatted = {
+                    'title': item.get('title'),
+                    'year': year,
+                    'rating_key': item.get('rating_key'),
+                    'library_name': section_name,
+                    'libraries': [section_name],
+                    'poster_url': f"{script_root}/api/img/plex?url={urllib.parse.quote(item['thumb'], safe='/')}" if item.get('thumb') else None,
+                    'backdrop_url': f"{script_root}/api/img/plex?url={urllib.parse.quote(item['art'], safe='/')}" if item.get('art') else None,
+                    'clearlogo_url': None,
+                }
+                if item.get('added_at'):
+                    formatted['added_date'] = datetime.fromtimestamp(item['added_at']).strftime('%Y-%m-%d')
+                
+                if item.get('media_type') == 'movie':
+                    if key in seen_movies:
+                        # Add library to existing entry
+                        if section_name not in seen_movies[key]['libraries']:
+                            seen_movies[key]['libraries'].append(section_name)
+                    else:
+                        seen_movies[key] = formatted
+                        all_movies.append(formatted)
+                elif item.get('media_type') == 'show':
+                    if key in seen_tv:
+                        # Add library to existing entry
+                        if section_name not in seen_tv[key]['libraries']:
+                            seen_tv[key]['libraries'].append(section_name)
+                    else:
+                        seen_tv[key] = formatted
+                        all_tv.append(formatted)
+            
+            return jsonify({'movies': all_movies, 'tv_shows': all_tv})
+        
+        # Fallback to Plex API if index not ready
         plex = get_plex_for_request()
         sections = plex.get_library_sections()
         movie_sections = [s for s in sections if s['type'] == 'movie']
@@ -8943,20 +9177,46 @@ def _build_hero_movies():
     return movies, boost
 
 
+_HERO_URL_FIELDS = ('poster_url', 'backdrop_url', 'clearlogo_url', 'tmdb_backdrop_url')
+
+
+def _hero_movies_for_request(movies):
+    """Copy hero movies with root-relative image URLs prefixed by request.script_root.
+
+    _build_hero_movies() caches root-relative paths so the cache is request
+    independent; the prefix is added per response so sub-path installs work.
+    """
+    root = (request.script_root or '').rstrip('/')
+    out = []
+    for m in movies:
+        m = dict(m)
+        for key in _HERO_URL_FIELDS:
+            val = m.get(key)
+            if isinstance(val, str) and val.startswith('/') and not val.startswith('//'):
+                m[key] = f"{root}{val}"
+        out.append(m)
+    return out
+
+
 # Hero Content Endpoints
 @app.route('/api/hero/content')
 def get_hero_content():
-    """Get hero content for the kiosk home page."""
+    """Get hero content for the kiosk home page.
+    
+    Returns dynamic content from _build_hero_movies().
+    Background refresh runs only from the scheduler, never from a request.
+    """
     try:
+        # Return dynamic content (no refresh or healing from request)
         movies, boost = _build_hero_movies()
         return jsonify({
             'success': True,
-            'movies': movies,
-            'boost_mode': boost,
+            'movies': _hero_movies_for_request(movies),
+            'boost_mode': boost
         })
     except Exception as e:
-        logger.error(f"Error getting hero content: {e}")
-        return jsonify({'success': False, 'error': str(e), 'movies': []}), 500
+        logger.error(f"Error building hero content: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # =============================================================================
@@ -15207,6 +15467,7 @@ def get_screensaver_movies():
         if source == 'hero':
             # Use the same movies as the Hero section
             hero_movies, _ = _build_hero_movies()
+            hero_movies = _hero_movies_for_request(hero_movies)
             movies = []
             for m in hero_movies[:limit]:
                 movies.append({
@@ -15297,7 +15558,7 @@ def manifest():
 @app.route('/sw.js')
 def service_worker():
     """Service Worker file — short cache so updates propagate quickly."""
-    resp = send_from_directory('/app/static', 'sw.js')
+    resp = send_from_directory(app.static_folder, 'sw.js')
     resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
     resp.headers['Service-Worker-Allowed'] = '/'
     return resp
@@ -15321,7 +15582,7 @@ def serve_ca_cert():
 def spa_assets(filename):
     """Serve Vite-built assets (JS/CSS) for the React SPA.
     Hashed filenames → immutable cache (1 year)."""
-    resp = send_from_directory(os.path.join(app.static_folder, 'spa', 'assets'), filename)
+    resp = send_from_directory(os.path.join(app.config['SPA_DIR'], 'assets'), filename)
     resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     return resp
 
@@ -15329,7 +15590,7 @@ def spa_assets(filename):
 @app.route('/fonts/<path:filename>')
 def spa_fonts(filename):
     """Serve font files from the SPA public/fonts directory."""
-    resp = send_from_directory(os.path.join(app.static_folder, 'spa', 'fonts'), filename)
+    resp = send_from_directory(os.path.join(app.config['SPA_DIR'], 'fonts'), filename)
     resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     return resp
 
@@ -15337,9 +15598,26 @@ def spa_fonts(filename):
 @app.route('/weather/<path:filename>')
 def spa_weather(filename):
     """Serve weather icon SVGs from the SPA public/weather directory."""
-    resp = send_from_directory(os.path.join(app.static_folder, 'spa', 'weather'), filename)
+    resp = send_from_directory(os.path.join(app.config['SPA_DIR'], 'weather'), filename)
     resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
     return resp
+
+@app.route('/static/hero_cache/<path:filename>')
+def hero_cache_files(filename):
+    """Serve hero images from HERO_CACHE_DIR.
+
+    Falls back to the legacy <static>/hero_cache dir (where images lived before
+    they moved to $LUMA_CACHE_DIR/hero) so URLs stored before the move keep
+    working. safe_join rejects traversal outside either directory.
+    """
+    from werkzeug.security import safe_join
+    for base in (app.config['HERO_CACHE_DIR'], os.path.join(app.static_folder, 'hero_cache')):
+        path = safe_join(base, filename)
+        if path and os.path.isfile(path):
+            resp = send_from_directory(base, filename)
+            resp.headers['Cache-Control'] = 'public, max-age=86400'
+            return resp
+    return jsonify({'error': 'not found'}), 404
 
 # =============================================================================
 # Settings API — Phase 1
@@ -17166,6 +17444,24 @@ if __name__ == '__main__':
         logger.info("✅ Fast search index started")
     except Exception as e:
         logger.error(f"❌ Failed to start fast search index: {e}")
+
+    # Hero cache refresh/heal runs only from this background scheduler,
+    # never from a request.
+    # NOTE: on rebase onto PR #2 this start moves into #2's
+    # START_BACKGROUND_THREADS hook so it also runs under gunicorn.
+    # With FLASK_ENV=development the Werkzeug reloader runs this block in both
+    # the watcher and the serving child; start the scheduler only in the child
+    # so the startup refresh runs once.
+    _reloader_parent = (os.environ.get('FLASK_ENV') == 'development'
+                        and os.environ.get('WERKZEUG_RUN_MAIN') != 'true')
+    try:
+        if _reloader_parent:
+            logger.info("Hero cache scheduler deferred to the reloader child process")
+        else:
+            hero_cache.start_scheduler()
+            logger.info("✅ Hero cache scheduler started")
+    except Exception as e:
+        logger.error(f"❌ Failed to start hero cache scheduler: {e}")
 
     # Start explore cache updater thread
     try:

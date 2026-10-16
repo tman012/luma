@@ -5,6 +5,7 @@ Similar to the ExploreCache but for library browsing, continue watching, and rec
 
 import sqlite3
 import json
+import os
 import threading
 import logging
 from datetime import datetime, timedelta
@@ -16,11 +17,25 @@ logger = logging.getLogger(__name__)
 
 
 class LibraryCache:
-    """Manages cached library data for lightning-fast loading"""
+    """Manages cached library data for lightning-fast loading
+    
+    Cache storage: LUMA_CACHE_DIR environment variable sets the cache root (defaults to /app/cache).
+    Library cache uses the 'library' subdirectory within the root.
+    """
 
-    def __init__(self, cache_dir: str = "/app/cache"):
-        self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(exist_ok=True)
+    def __init__(self, cache_root: Optional[str] = None):
+        if cache_root is None:
+            from app.paths import cache_dir
+            cache_root = str(cache_dir())
+        # Use 'library' subdirectory within cache root
+        self.cache_dir = Path(cache_root) / 'library'
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            error_msg = (f"library_cache: LUMA_CACHE_DIR={cache_root} not writable "
+                        f"(tried to create {self.cache_dir}): {e}")
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
         self.db_path = self.cache_dir / "library_cache.db"
         self.update_interval = 60  # 1 minute for library data
         self.last_update = {}
