@@ -3,12 +3,17 @@
 Fast In-Memory Media Search Index
 Preloads all Plex library metadata (movies + TV shows) on startup for millisecond search.
 Auto-refreshes every 15 minutes in background.
+Supports typo-tolerant fuzzy search with normalization and similarity matching.
 """
 
 import logging
+import re
 import threading
 import time
-from typing import List, Dict, Optional, Any
+import unicodedata
+from collections import Counter
+from difflib import SequenceMatcher
+from typing import List, Dict, Optional, Any, Set, Tuple
 
 import requests
 
@@ -18,6 +23,158 @@ logger = logging.getLogger(__name__)
 _SECTION_TYPES = {'movie': ('movie', 1), 'show': ('show', 2)}
 
 REFRESH_INTERVAL = 900  # 15 minutes
+
+# Leading articles to strip for normalization (case-insensitive)
+_LEADING_ARTICLES = {'the', 'a', 'an', 'el', 'la', 'le', 'les', 'un', 'une', 'das', 'der', 'die'}
+
+
+# ------------------------------------------------------------------
+# Text normalization and fuzzy matching utilities
+# ------------------------------------------------------------------
+
+def normalize_text(text: str) -> str:
+    """
+    Normalize text for fuzzy matching:
+    - Lowercase
+    - Remove accents/diacritics
+    - Replace '&' with 'and'
+    - Remove leading articles (the, a, an, etc.)
+    - Remove all punctuation and extra whitespace
+    """
+    if not text:
+        return ''
+    
+    # Lowercase
+    text = text.lower()
+    
+    # Remove accents/diacritics
+    text = unicodedata.normalize('NFD', text)
+    text = ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+    
+    # Replace '&' with 'and'
+    text = text.replace('&', 'and')
+    
+    # Remove punctuation (apostrophes and asterisks removed without leaving spaces)
+    text = text.replace("'", '')
+    text = text.replace('*', '')
+    text = text.replace('-', ' ')  # Hyphens become spaces for "Spider-Man" -> "spider man"
+    text = re.sub(r'[^\w\s]', '', text)  # Remove other punctuation without replacing
+    
+    # Normalize whitespace
+    text = ' '.join(text.split())
+    
+    # Remove leading articles
+    original_text = text
+    words = text.split()
+    if words and words[0] in _LEADING_ARTICLES:
+        words = words[1:]
+    
+    result = ' '.join(words) if words else original_text
+    return result
+
+
+def extract_trigrams(text: str) -> Set[str]:
+    """Extract character trigrams from text for similarity matching."""
+    text = f"  {text} "  # Pad for edge trigrams
+    return {text[i:i+3] for i in range(len(text) - 2)}
+
+
+def trigram_similarity(text1: str, text2: str) -> float:
+    """Calculate Sørensen-Dice coefficient for trigram similarity (0.0 to 1.0)."""
+    if not text1 or not text2:
+        return 0.0
+    
+    trigrams1 = extract_trigrams(text1)
+    trigrams2 = extract_trigrams(text2)
+    
+    if not trigrams1 or not trigrams2:
+        return 0.0
+    
+    intersection = len(trigrams1 & trigrams2)
+    return 2.0 * intersection / (len(trigrams1) + len(trigrams2))
+
+
+def token_similarity(query_tokens: List[str], title_tokens: List[str]) -> float:
+    """
+    Calculate token-level similarity.
+    Returns 1.0 for exact match, high score for all tokens present, lower for partial.
+    """
+    if not query_tokens or not title_tokens:
+        return 0.0
+    
+    # Check if all query tokens are present in title tokens
+    title_set = set(title_tokens)
+    matched = sum(1 for qt in query_tokens if qt in title_set)
+    
+    if matched == len(query_tokens):
+        # All query tokens matched - bonus if title has same length
+        if len(query_tokens) == len(title_tokens):
+            return 1.0
+        return 0.9
+    
+    # Partial token match
+    return 0.6 * (matched / len(query_tokens))
+
+
+def fuzzy_match_score(query: str, title: str, query_norm: str, title_norm: str) -> Tuple[float, str]:
+    """
+    Calculate fuzzy match score for a query against a title.
+    Returns (score, match_type) where:
+    - score: 0.0 to 1.0, higher is better
+    - match_type: 'exact', 'prefix', 'fuzzy', 'none'
+    """
+    # Exact match (original case-insensitive)
+    if query.lower() == title.lower():
+        return (1.0, 'exact')
+    
+    # Prefix match
+    if title.lower().startswith(query.lower()):
+        return (0.95, 'prefix')
+    
+    # Check normalized exact match
+    if query_norm == title_norm:
+        return (0.9, 'exact')
+    
+    # Check normalized prefix
+    if title_norm.startswith(query_norm):
+        return (0.85, 'prefix')
+    
+    # Token-based matching
+    query_tokens = query_norm.split()
+    title_tokens = title_norm.split()
+    token_score = token_similarity(query_tokens, title_tokens)
+    
+    if token_score >= 0.9:
+        return (0.8, 'fuzzy')
+    elif token_score >= 0.6:
+        return (0.6 + token_score * 0.1, 'fuzzy')
+    
+    # Trigram similarity for typos
+    trigram_score = trigram_similarity(query_norm, title_norm)
+    
+    # Sequence matcher for edit distance
+    seq_score = SequenceMatcher(None, query_norm, title_norm).ratio()
+    
+    # Use the best score
+    best_score = max(trigram_score, seq_score, token_score)
+    
+    if best_score >= 0.6:
+        return (best_score * 0.8, 'fuzzy')
+    
+    return (best_score, 'none')
+
+
+def calculate_popularity_score(item: Dict[str, Any]) -> float:
+    """
+    Calculate popularity score for ranking.
+    Uses viewCount as a proxy for popularity/quality.
+    """
+    view_count = item.get('viewCount', 0)
+    # Logarithmic scale to avoid extreme differences
+    if view_count > 0:
+        import math
+        return math.log10(view_count + 1)
+    return 0.0
 
 
 class FastSearchIndex:
@@ -30,6 +187,7 @@ class FastSearchIndex:
         self._refreshing = False
         self._initialized = False
         self._sections: List[int] = []
+        self._title_dictionary: Set[str] = set()  # Normalized titles for spelling correction
 
     # ------------------------------------------------------------------
     # Config (pulled lazily from settings each refresh so token changes work)
@@ -126,11 +284,14 @@ class FastSearchIndex:
             for item in items:
                 genres = [g.get('tag', '') for g in item.get('Genre', [])]
                 thumb = item.get('thumb', '')
+                title = item.get('title', '')
+                title_normalized = normalize_text(title)
 
                 items_out.append({
                     'rating_key': str(item.get('ratingKey', '')),
-                    'title': item.get('title', ''),
-                    'title_lower': item.get('title', '').lower(),
+                    'title': title,
+                    'title_lower': title.lower(),
+                    'title_normalized': title_normalized,
                     'year': item.get('year'),
                     'content_rating': item.get('contentRating', ''),
                     'genres': genres,
@@ -182,9 +343,13 @@ class FastSearchIndex:
         for sid, *_ in sections:
             all_items.extend(results.get(sid, []))
 
+        # Build title dictionary for spelling correction
+        title_dict = {item['title_normalized'] for item in all_items if item.get('title_normalized')}
+
         with self._lock:
             self._sections = [sid for sid, *_ in sections]
             self._index = all_items
+            self._title_dictionary = title_dict
             self._last_refresh = time.time()
             self._initialized = True
 
@@ -226,47 +391,107 @@ class FastSearchIndex:
                year: Optional[int] = None,
                section: Optional[int] = None,
                media_type: Optional[str] = None,
-               limit: int = 100) -> List[Dict[str, Any]]:
+               limit: int = 100,
+               fuzzy: bool = True) -> List[Dict[str, Any]]:
         """
-        Search the in-memory index.  All filters are ANDed together.
-        Title search is case-insensitive substring match.
+        Search the in-memory index with typo-tolerant fuzzy matching.
+        All filters are ANDed together.
+        Title search supports fuzzy matching with normalization.
         media_type: 'movie' or 'show' (optional filter).
-        Returns list of result dicts (internal '_lower' keys stripped).
+        fuzzy: Enable typo-tolerant fuzzy search (default True).
+        Returns list of result dicts sorted by relevance (internal keys stripped).
         """
-        q_lower = q.lower().strip() if q else None
         genre_lower = genre.lower().strip() if genre else None
         cr_lower = content_rating.lower().strip() if content_rating else None
         mt_lower = media_type.lower().strip() if media_type else None
 
         with self._lock:
-            snapshot = self._index  # reference copy under lock
+            snapshot = list(self._index)  # copy under lock
 
-        results = []
+        # If no query, use simple filtering (browse mode)
+        if not q:
+            results = []
+            for item in snapshot:
+                if genre_lower and genre_lower not in item['genres_lower']:
+                    continue
+                if cr_lower and cr_lower != item['content_rating'].lower():
+                    continue
+                if year is not None and item['year'] != year:
+                    continue
+                if section is not None and item['section_id'] != section:
+                    continue
+                if mt_lower and item.get('media_type', 'movie') != mt_lower:
+                    continue
+                results.append(item)
+                if len(results) >= limit:
+                    break
+            return self._clean_results(results)
+
+        # Query-based search with fuzzy matching
+        q = q.strip()
+        q_lower = q.lower()
+        q_norm = normalize_text(q)
+
+        scored_results = []
+        
         for item in snapshot:
-            # Title filter
-            if q_lower and q_lower not in item['title_lower']:
-                continue
-            # Genre filter
+            # Apply non-title filters first
             if genre_lower and genre_lower not in item['genres_lower']:
                 continue
-            # Content rating filter
             if cr_lower and cr_lower != item['content_rating'].lower():
                 continue
-            # Year filter
             if year is not None and item['year'] != year:
                 continue
-            # Section filter
             if section is not None and item['section_id'] != section:
                 continue
-            # Media type filter
             if mt_lower and item.get('media_type', 'movie') != mt_lower:
                 continue
 
-            results.append(item)
-            if len(results) >= limit:
-                break
+            # Calculate fuzzy match score
+            title = item['title']
+            title_norm = item.get('title_normalized', normalize_text(title))
+            
+            if fuzzy:
+                match_score, match_type = fuzzy_match_score(q, title, q_norm, title_norm)
+                
+                # Filter out very weak matches
+                if match_score < 0.4:
+                    continue
+            else:
+                # Legacy substring matching
+                if q_lower not in item['title_lower']:
+                    continue
+                match_score = 0.8 if item['title_lower'] == q_lower else 0.7
+                match_type = 'exact' if item['title_lower'] == q_lower else 'fuzzy'
 
-        # Strip internal search helpers before returning
+            # Calculate popularity score
+            popularity = calculate_popularity_score(item)
+            
+            # Combined score: match score is primary, popularity is tiebreaker
+            # Match score weighted 80%, popularity 20%
+            combined_score = (match_score * 0.8) + (min(popularity / 10.0, 1.0) * 0.2)
+            
+            scored_results.append({
+                'item': item,
+                'score': combined_score,
+                'match_score': match_score,
+                'match_type': match_type,
+                'popularity': popularity,
+            })
+
+        # Sort by score (descending), then by match type priority, then by popularity
+        match_type_priority = {'exact': 0, 'prefix': 1, 'fuzzy': 2, 'none': 3}
+        scored_results.sort(
+            key=lambda x: (-x['score'], match_type_priority.get(x['match_type'], 3), -x['popularity'])
+        )
+
+        # Extract top results
+        results = [r['item'] for r in scored_results[:limit]]
+        
+        return self._clean_results(results)
+
+    def _clean_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Strip internal search helper fields before returning."""
         clean = []
         for m in results:
             clean.append({
@@ -282,8 +507,33 @@ class FastSearchIndex:
                 'viewOffset': m['viewOffset'],
                 'thumb': m['thumb'],
             })
-
         return clean
+
+    def find_spelling_correction(self, query: str, threshold: float = 0.6) -> Optional[str]:
+        """
+        Find the best spelling correction for a query from the title dictionary.
+        Returns the closest matching title if similarity >= threshold, else None.
+        """
+        query_norm = normalize_text(query)
+        
+        with self._lock:
+            title_dict = self._title_dictionary
+
+        if not query_norm or not title_dict:
+            return None
+
+        best_match = None
+        best_score = threshold
+
+        for title_norm in title_dict:
+            # Quick trigram similarity check
+            score = trigram_similarity(query_norm, title_norm)
+            
+            if score > best_score:
+                best_score = score
+                best_match = title_norm
+
+        return best_match
 
     def status(self) -> Dict[str, Any]:
         """Return index status info."""

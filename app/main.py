@@ -1520,12 +1520,14 @@ def tmdb_match_search():
         tmdb_base = settings.get('apis.tmdb.base_url', '') or 'https://api.themoviedb.org/3'
         merged = []
 
-        def _fetch(mtype):
+        def _fetch(mtype, search_query=None):
+            if search_query is None:
+                search_query = query
             endpoint = '/search/movie' if mtype == 'movie' else '/search/tv'
             try:
                 resp = requests.get(
                     f'{tmdb_base}{endpoint}',
-                    params={'api_key': api_key, 'query': query, 'language': 'en-US', 'page': 1},
+                    params={'api_key': api_key, 'query': search_query, 'language': 'en-US', 'page': 1},
                     timeout=10,
                 )
                 if resp.status_code == 200:
@@ -1537,6 +1539,22 @@ def tmdb_match_search():
         types = [media_type] if media_type else ['movie', 'tv']
         for mtype in types:
             _, items = _fetch(mtype)
+            
+            # If results are weak, try spelling correction
+            if len(items) < 3 and len(query) > 3:
+                try:
+                    corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
+                    if corrected and corrected != query.lower():
+                        logger.info(f"tmdb_match_search: trying correction '{corrected}' for '{query}'")
+                        _, corrected_items = _fetch(mtype, corrected)
+                        # Merge results, avoiding duplicates
+                        existing_ids = {item.get('id') for item in items if item.get('id')}
+                        for item in corrected_items:
+                            if item.get('id') and item.get('id') not in existing_ids:
+                                items.append(item)
+                except Exception as e:
+                    logger.warning(f"Spelling correction in tmdb_match_search failed: {e}")
+            
             for it in items:
                 if mtype == 'movie':
                     title = it.get('title', '') or ''
@@ -4073,6 +4091,40 @@ def search():
                 raw[key] = []
 
     results['people'] = raw.get('people', [])
+
+    # Spelling correction fallback: if TMDb results are weak or empty, try corrected query
+    total_results = len(raw.get('multi', [])) + len(raw.get('movies', [])) + len(raw.get('tv_shows', []))
+    if total_results < 3 and len(query) > 3:  # Weak results, try spelling correction
+        try:
+            corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
+            if corrected and corrected != query.lower():
+                logger.info(f"search: trying spelling correction '{corrected}' for '{query}'")
+                # Retry TMDb searches with corrected query
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                    corr_futures = {}
+                    if want_movies or want_tv:
+                        corr_futures['multi'] = executor.submit(tmdb.search_multi, corrected)
+                    if want_movies:
+                        corr_futures['movies'] = executor.submit(tmdb.search_movies, corrected, search_year)
+                    if want_tv:
+                        corr_futures['tv_shows'] = executor.submit(tmdb.search_tv, corrected, search_year)
+                    
+                    for key, future in corr_futures.items():
+                        try:
+                            corrected_results = future.result(timeout=10)
+                            # Merge with original results, avoiding duplicates
+                            if key in raw:
+                                existing_ids = {item.get('id') for item in raw[key] if item.get('id')}
+                                for item in corrected_results:
+                                    if item.get('id') and item.get('id') not in existing_ids:
+                                        raw[key].append(item)
+                                        existing_ids.add(item.get('id'))
+                            else:
+                                raw[key] = corrected_results
+                        except Exception as e:
+                            logger.warning(f"Spelling-corrected search for {key} failed: {e}")
+        except Exception as e:
+            logger.warning(f"Spelling correction failed: {e}")
 
     ranked_movies, ranked_tv = [], []
     seen = {'movie': set(), 'tv': set()}
