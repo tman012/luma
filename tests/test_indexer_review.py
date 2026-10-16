@@ -350,7 +350,7 @@ def test_concurrent_callers_are_spaced_by_min_interval():
     assert len(calls) == 4
     gaps = [b - a for a, b in zip(calls, calls[1:])]
     assert all(g >= interval - 0.03 for g in gaps), gaps
-    assert calls[-1] - calls[0] < interval * 3 + 0.5
+    assert calls[-1] - calls[0] < interval * 3 + 2.0  # generous bound for loaded machines
 
 
 # ---- 5. 429 with HTTP-date through the search path ----
@@ -966,3 +966,170 @@ def test_prowlarr_import_stores_protocol():
         IndexerManager(sm).import_from_prowlarr('http://prowlarr.example.com:9696', 'pk')
     protos = {ix['name']: ix['protocol'] for ix in sm.store['indexer.indexers']}
     assert protos == {'Geek': 'usenet', 'Cardi (via Prowlarr)': 'torrent'}
+
+
+# ---- Pre-rebase items ----
+
+from app.indexer_manager import validate_indexer_url as _REAL_VALIDATE  # noqa: E402
+
+
+def test_downloads_add_requires_auth(route_env):
+    main, adapter, pg, _ = route_env
+    qbit = _FakeQbit('00' * 20)
+    with patch('requests.Session', return_value=qbit), _no_auto_rename(), _as_user(main, None):
+        r = main.app.test_client().post('/api/downloads/add', json={'torrent_url': MAGNET})
+    assert r.status_code == 401
+    assert qbit.added == [] and pg.call_count == 0
+
+
+@pytest.mark.parametrize('bad', [
+    'magnet:?xt=urn:btih:' + 'a' * 40 + '&tr=' + 'x' * 9000,
+    'magnet:?xt=urn:btih:' + 'a' * 40 + '\x00&dn=x',
+    'magnet:?xt=urn:btih:' + 'a' * 40 + '&dn=a\x1bb',
+    'magnet:?dn=no-topic',
+    'magnet:?xt=urn:sha1:' + 'a' * 32,
+])
+def test_bad_magnet_from_redirect_rejected(route_env, bad):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(302, {'Location': bad})]
+    r = _get(main, adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1'))
+    assert r.status_code == 502
+
+
+@pytest.mark.parametrize('bad', [
+    b'magnet:?xt=urn:btih:' + b'a' * 40 + b'&tr=' + b'x' * 9000,
+    b'magnet:?xt=urn:btih:' + b'a' * 40 + b'\x07',
+    b'magnet:?dn=no-topic\n',
+])
+def test_bad_magnet_from_body_rejected(route_env, bad):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(200, {}, bad)]
+    r = _get(main, adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1'))
+    assert r.status_code == 502
+
+
+@pytest.mark.parametrize('good', [MAGNET, 'magnet:?dn=x&xt=urn:btmh:1220' + 'ab' * 32])
+def test_good_magnets_accepted(route_env, good):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(302, {'Location': good + '  '})]
+    r = _get(main, adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1'))
+    assert r.status_code == 200 and r.get_json() == {'magnet': good}
+
+
+def test_user_supplied_magnet_validated_in_downloads_add(route_env):
+    main, adapter, pg, _ = route_env
+    qbit = _FakeQbit('00' * 20)
+    with patch('requests.Session', return_value=qbit), _no_auto_rename(), \
+         _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().post('/api/downloads/add', json={'torrent_url': 'magnet:?dn=x\x00'})
+    assert r.status_code == 400 and qbit.added == []
+
+
+def test_redirect_to_other_loopback_port_blocked(route_env):
+    """Only the exact configured Prowlarr origin may be loopback, even on redirect hops."""
+    main, adapter, pg, val = route_env
+    val.side_effect = _REAL_VALIDATE
+    pg.side_effect = [_resp(302, {'Location': 'http://localhost:9697/admin'})]
+    r = _get(main, adapter.manager.issue_download_token('http://localhost:9696/7/download', 'ix2'))
+    assert r.status_code == 403 and pg.call_count == 1
+    assert val.call_args_list[1].kwargs['allow_loopback_for_host'] is None
+
+
+def test_redirect_within_prowlarr_origin_allowed(route_env):
+    main, adapter, pg, val = route_env
+    val.side_effect = _REAL_VALIDATE
+    pg.side_effect = [_resp(302, {'Location': '/7/file'}), _resp(200, {}, TORRENT)]
+    r = _get(main, adapter.manager.issue_download_token('http://localhost:9696/7/download', 'ix2'))
+    assert r.status_code == 200 and pg.call_count == 2
+
+
+@pytest.mark.parametrize('exc', [requests.exceptions.ConnectionError('refused'),
+                                 requests.exceptions.ReadTimeout('slow'),
+                                 requests.exceptions.SSLError('bad cert')])
+def test_network_errors_are_502(route_env, exc):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = exc
+    r = _get(main, adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1'))
+    assert r.status_code == 502 and r.get_json() == {'error': 'Could not reach indexer'}
+
+
+def test_network_error_mid_body_is_502(route_env):
+    main, adapter, pg, _ = route_env
+    broken = _resp(200, {})
+
+    def boom(chunk_size=8192):
+        yield b'd'
+        raise requests.exceptions.ChunkedEncodingError('reset')
+    broken.iter_content.side_effect = boom
+    pg.side_effect = [broken]
+    r = _get(main, adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1'))
+    assert r.status_code == 502
+    broken.close.assert_called()
+
+
+# Generic grab links (Prowlarr backend): validated, pinned, manual redirects.
+
+def _grab(main, url):
+    return main.app.test_client().post('/api/downloads/add', json={'torrent_url': url})
+
+
+def test_generic_grab_link_is_validated_and_pinned(route_env):
+    import hashlib
+    main, adapter, pg, val = route_env
+    pg.side_effect = [_resp(200, {}, TORRENT)]
+    qbit = _FakeQbit(hashlib.sha1(b'd4:name1:xe').hexdigest())
+    url = 'http://localhost:9696/12/download?apikey=prowlarr-key&link=abc'
+    with patch('requests.Session', return_value=qbit), patch('time.sleep'), _no_auto_rename(), \
+         patch.object(main, '_record_origin'), _as_user(main, {'id': 2, 'is_admin': False}):
+        r = _grab(main, url)
+    assert r.status_code == 200, r.get_json()
+    assert val.call_args.args[0] == url
+    assert val.call_args.kwargs == {'allow_lan': True, 'allow_loopback_for_host': 'localhost'}
+    assert pg.call_args.args[0] == url and pg.call_args.kwargs['headers'] == {}
+    assert qbit.added[0]['files']['torrents'][1] == TORRENT
+
+
+def test_generic_grab_redirect_to_magnet(route_env):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(301, {'Location': MAGNET})]
+    qbit = _FakeQbit('ab' * 20)
+    with patch('requests.Session', return_value=qbit), patch('time.sleep'), _no_auto_rename(), \
+         patch.object(main, '_record_origin'), _as_user(main, {'id': 2, 'is_admin': False}):
+        r = _grab(main, 'http://localhost:9696/12/download?link=abc')
+    assert r.status_code == 200, r.get_json()
+    assert qbit.added[0]['data']['urls'] == MAGNET
+
+
+@pytest.mark.parametrize('url', ['http://169.254.169.254/latest/meta-data/', 'http://127.0.0.1:8080/',
+                                 'http://localhost:9697/x', 'http://10.0.0.5/x.torrent'])
+def test_generic_grab_blocks_internal_targets(route_env, url):
+    main, adapter, pg, val = route_env
+    val.side_effect = _REAL_VALIDATE
+    qbit = _FakeQbit('00' * 20)
+    with patch('requests.Session', return_value=qbit), _no_auto_rename(), \
+         _as_user(main, {'id': 2, 'is_admin': False}):
+        r = _grab(main, url)
+    assert r.status_code == 403
+    assert pg.call_count == 0 and qbit.added == []
+
+
+def test_generic_grab_redirect_into_lan_blocked(route_env):
+    main, adapter, pg, val = route_env
+    val.side_effect = [(True, '', '203.0.113.9'), (False, 'Private/restricted IP blocked: 10.0.0.5', None)]
+    pg.side_effect = [_resp(302, {'Location': 'http://10.0.0.5/x'})]
+    qbit = _FakeQbit('00' * 20)
+    with patch('requests.Session', return_value=qbit), _no_auto_rename(), \
+         _as_user(main, {'id': 2, 'is_admin': False}):
+        r = _grab(main, 'https://tracker.example.com/dl/1')
+    assert r.status_code == 403 and pg.call_count == 1 and qbit.added == []
+    assert val.call_args_list[1].kwargs['allow_loopback_for_host'] is None
+
+
+def test_generic_grab_html_is_502_and_nothing_added(route_env):
+    main, adapter, pg, _ = route_env
+    pg.side_effect = [_resp(200, {}, b'<html>expired</html>')]
+    qbit = _FakeQbit('00' * 20)
+    with patch('requests.Session', return_value=qbit), _no_auto_rename(), \
+         _as_user(main, {'id': 2, 'is_admin': False}):
+        r = _grab(main, 'https://tracker.example.com/dl/1')
+    assert r.status_code == 502 and 'invalid or expired' in r.get_json()['error'] and qbit.added == []

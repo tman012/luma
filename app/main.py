@@ -13313,6 +13313,10 @@ def add_torrent_to_qbittorrent():
     BEFORE lying about success and so qBit never has to reach the indexer), then
     upload the bytes, then poll qBit until the exact hash appears.
     """
+    # NOTE: #2's _csrf_api_guard also covers this route after the rebase.
+    err = _require_auth()
+    if err:
+        return err
     try:
         from app.auto_rename import auto_renamer
         import requests as req
@@ -13365,42 +13369,35 @@ def add_torrent_to_qbittorrent():
                 torrent_bytes = fetched['body']
                 expected_hash = _torrent_info_hash(torrent_bytes)
         elif is_magnet:
+            try:
+                torrent_url = _clean_magnet(torrent_url)
+            except IndexerDownloadError as e:
+                return jsonify({'error': e.message}), 400
             expected_hash = _magnet_info_hash(torrent_url)
         else:
-            # Fetch the .torrent ourselves. This is the crux of the fix: if the
-            # indexer link is dead/expired/HTML we find out NOW and fail loudly,
-            # instead of handing qBit a URL it silently fails to fetch.
+            # Any other link (e.g. a Prowlarr download URL from the Prowlarr
+            # backend) is fetched here, never by qBittorrent, with the same SSRF
+            # validation, DNS pinning and manual redirects as the proxy. Only the
+            # configured Prowlarr origin may be on LAN or loopback.
             try:
-                dl = session.get(torrent_url, timeout=30, allow_redirects=True)
-            except Exception as e:
-                logger.error(f"Failed to fetch torrent from indexer: {e}")
-                return jsonify({'error': f'Could not fetch the torrent from the indexer: {e}'}), 502
-
-            final_url = (dl.url or '').lower()
-            body_head = dl.content[:8].lower() if dl.content else b''
-
-            if final_url.startswith('magnet:'):
+                fetched = _fetch_validated(
+                    torrent_url,
+                    allow_lan=bool(settings.get('indexer.allow_lan', False)),
+                    trusted_origin=_prowlarr_origin(),
+                    label='Grab link')
+            except IndexerDownloadError as e:
+                logger.error(f"Failed to fetch torrent from indexer: {e.message}")
+                message = e.message if e.status != 502 else (
+                    'The indexer returned an invalid or expired download link. '
+                    'Nothing was added — re-search for a fresh source and try again.')
+                return jsonify({'error': message}), e.status
+            if 'magnet' in fetched:
                 is_magnet = True
-                torrent_url = dl.url
+                torrent_url = fetched['magnet']
                 expected_hash = _magnet_info_hash(torrent_url)
-            elif body_head.startswith(b'magnet:'):
-                is_magnet = True
-                torrent_url = dl.content.decode('utf-8', 'ignore').strip().splitlines()[0]
-                expected_hash = _magnet_info_hash(torrent_url)
-            elif dl.status_code == 200 and dl.content[:1] == b'd':
-                torrent_bytes = dl.content
-                expected_hash = _torrent_info_hash(torrent_bytes)
             else:
-                ct = dl.headers.get('content-type', '')
-                logger.error(
-                    f"Indexer did not return a valid torrent "
-                    f"(status={dl.status_code}, content-type={ct}, "
-                    f"head={dl.content[:80]!r})"
-                )
-                return jsonify({
-                    'error': 'The indexer returned an invalid or expired download link. '
-                             'Nothing was added — re-search for a fresh source and try again.'
-                }), 502
+                torrent_bytes = fetched['body']
+                expected_hash = _torrent_info_hash(torrent_bytes)
 
         def _qbit_category_torrents():
             try:
@@ -17270,83 +17267,72 @@ _MAX_DOWNLOAD_REDIRECTS = 3
 _UTF8_BOM = b'\xef\xbb\xbf'
 
 
+_MAX_MAGNET_BYTES = 8 * 1024
+_MAGNET_TOPIC = re.compile(r'(?:^|[?&])xt=urn:bt(?:ih|mh):[A-Za-z0-9]+', re.IGNORECASE)
+
+
+def _clean_magnet(uri: str) -> str:
+    """Validate a magnet URI: at most 8 KB, no control characters, a BitTorrent topic.
+
+    Surrounding whitespace is stripped. Raises IndexerDownloadError(502).
+    """
+    uri = (uri or '').strip()
+    if len(uri.encode('utf-8', 'surrogatepass')) > _MAX_MAGNET_BYTES:
+        raise IndexerDownloadError(502, 'Magnet link is too long')
+    if any(ord(c) < 32 or ord(c) == 127 for c in uri):
+        raise IndexerDownloadError(502, 'Magnet link contains control characters')
+    if not uri.lower().startswith('magnet:?') or not _MAGNET_TOPIC.search(uri[len('magnet:?') - 1:]):
+        raise IndexerDownloadError(502, 'Magnet link has no BitTorrent info hash')
+    return uri
+
+
 def _magnet_from_body(body: bytes) -> Optional[str]:
-    """The magnet URI if *body* is a bare magnet link, else None."""
+    """The validated magnet URI if *body* is a bare magnet link, else None."""
     head = body.lstrip(_UTF8_BOM).lstrip()
     if not head[:8].lower().startswith(b'magnet:?'):
         return None
-    return head.decode('utf-8', 'ignore').splitlines()[0].strip()
+    line = head.split(b'\n', 1)[0].rstrip(b'\r')
+    if len(line) > _MAX_MAGNET_BYTES:
+        raise IndexerDownloadError(502, 'Magnet link is too long')
+    return _clean_magnet(line.decode('utf-8', 'replace'))
 
 
-def fetch_indexer_download(token: str) -> Dict[str, Any]:
-    """Resolve an opaque download token and fetch what it points to.
+def _fetch_validated(url: str, *, allow_lan: bool, trusted_origin=None, api_key: str = '',
+                     send_key: bool = False, is_nzb: bool = False, label: str = 'indexer') -> Dict[str, Any]:
+    """Fetch *url* with SSRF validation and DNS pinning on every hop.
 
-    Returns {'magnet': uri} for a magnet (from a redirect Location or a bare
-    magnet body; it is never fetched), or {'body', 'mimetype', 'filename'} for a
-    validated .torrent or .nzb. Redirects are followed at most
-    _MAX_DOWNLOAD_REDIRECTS times; every hop is validated and pinned again, and
-    the API key is sent only to the original scheme and host.
-    Raises IndexerDownloadError.
+    Follows at most _MAX_DOWNLOAD_REDIRECTS http(s) redirects. Only a hop whose
+    scheme, host and port equal *trusted_origin* (the configured Prowlarr URL)
+    may reach loopback or LAN addresses. The API key goes only to the first
+    hop's scheme, host and port. Returns {'magnet': uri} or
+    {'body', 'mimetype', 'filename'}; raises IndexerDownloadError.
     """
     from urllib.parse import urljoin
     from app.indexer_manager import (MAX_RESPONSE_SIZE, add_api_key, pinned_get,
                                      validate_indexer_url)
-    from app.indexer_api import get_indexer_client
-    client = get_indexer_client(settings)
-    if not hasattr(client, 'get_download_token'):
-        raise IndexerDownloadError(400, 'Download proxy only available with Luma backend')
-
-    token_data = client.get_download_token(token)
-    if not token_data:
-        raise IndexerDownloadError(403, 'Invalid or expired download token')
-    download_url, indexer_id, needs_api_key = token_data
-
-    config = next((ix for ix in (settings.get('indexer.indexers') or [])
-                   if ix.get('id') == indexer_id), None)
-    if not config:
-        raise IndexerDownloadError(404, 'Indexer not found')
-
-    # Proxied entries must point at the configured Prowlarr host,
-    # direct entries at the indexer's own host.
-    loopback_host = None
-    if config.get('prowlarr_proxy'):
-        expected_url = settings.get('indexer.base_url', '')
-        if not expected_url:
-            raise IndexerDownloadError(500, 'Prowlarr URL not configured for proxied indexer')
-        loopback_host = _url_host_port(expected_url)[1]
-        api_key = settings.get('indexer.api_key', '')
-    else:
-        expected_url = config.get('url', '')
-        if not expected_url:
-            raise IndexerDownloadError(500, 'Indexer URL not configured')
-        api_key = config.get('api_key', '')
-
-    key_origin = _url_host_port(download_url)
-    if key_origin != _url_host_port(expected_url):
-        logger.warning('Download host does not match the configured host for indexer %s', indexer_id)
-        raise IndexerDownloadError(403, 'Download URL does not match the configured host')
-
-    is_nzb = (str(config.get('type', '')).lower() == 'newznab'
-              or str(config.get('protocol', '')).lower() == 'usenet')
-    send_key = bool(needs_api_key and api_key)
-    allow_lan = settings.get('indexer.allow_lan', False)
-
-    url = download_url
+    key_origin = _url_host_port(url)
     for hop in range(_MAX_DOWNLOAD_REDIRECTS + 1):
+        origin = _url_host_port(url)
+        trusted = trusted_origin is not None and origin == trusted_origin
         valid, error, pinned_ip = validate_indexer_url(
-            url, allow_lan=allow_lan, allow_loopback_for_host=loopback_host)
+            url, allow_lan=allow_lan or trusted, allow_loopback_for_host=origin[1] if trusted else None)
         if not valid:
             raise IndexerDownloadError(403, f'URL validation failed: {error}')
-        key_here = send_key and _url_host_port(url) == key_origin
+        key_here = send_key and bool(api_key) and origin == key_origin
         fetch_url = add_api_key(url, api_key) if key_here else url
         headers = {'X-Api-Key': api_key} if key_here else {}
-        resp = pinned_get(fetch_url, pinned_ip, headers=headers, stream=True, timeout=30)
+        try:
+            resp = pinned_get(fetch_url, pinned_ip, headers=headers, stream=True, timeout=30)
+        except requests.RequestException as e:
+            from app.indexer_manager import sanitize_api_key
+            logger.warning('Could not reach %s: %s', label, sanitize_api_key(str(e)))
+            raise IndexerDownloadError(502, 'Could not reach indexer')
 
         if 300 <= resp.status_code < 400:
             location = (resp.headers.get('Location') or '').strip()
             resp.close()
             if location.lower().startswith('magnet:'):
-                return {'magnet': location}
+                return {'magnet': _clean_magnet(location)}
             if not location:
                 raise IndexerDownloadError(502, f'Indexer returned HTTP {resp.status_code} without a location')
             next_url = urljoin(url, location)
@@ -17359,7 +17345,7 @@ def fetch_indexer_download(token: str) -> Dict[str, Any]:
 
         if resp.status_code != 200:
             resp.close()
-            logger.warning('Indexer %s download returned HTTP %s', indexer_id, resp.status_code)
+            logger.warning('%s download returned HTTP %s', label, resp.status_code)
             raise IndexerDownloadError(502, f'Indexer returned HTTP {resp.status_code}')
         break
 
@@ -17377,10 +17363,12 @@ def fetch_indexer_download(token: str) -> Dict[str, Any]:
                 buf += chunk
                 if len(buf) > MAX_RESPONSE_SIZE:
                     break
+    except requests.RequestException:
+        raise IndexerDownloadError(502, 'Could not reach indexer')
     finally:
         resp.close()
     if declared > MAX_RESPONSE_SIZE or len(buf) > MAX_RESPONSE_SIZE:
-        logger.warning('Indexer %s download exceeded %d bytes', indexer_id, MAX_RESPONSE_SIZE)
+        logger.warning('%s download exceeded %d bytes', label, MAX_RESPONSE_SIZE)
         raise IndexerDownloadError(502, 'Download too large')
     body = bytes(buf)
 
@@ -17389,17 +17377,73 @@ def fetch_indexer_download(token: str) -> Dict[str, Any]:
         if magnet:
             return {'magnet': magnet}
         if not body.startswith(b'd'):
-            logger.warning('Indexer %s download is not a torrent file', indexer_id)
+            logger.warning('%s download is not a torrent file', label)
             raise IndexerDownloadError(502, 'Indexer did not return a torrent file')
         mimetype, ext = 'application/x-bittorrent', '.torrent'
     else:
         head = body.lstrip(_UTF8_BOM).lstrip()
         if not (head.startswith(b'<?xml') or head.startswith(b'<nzb')):
-            logger.warning('Indexer %s download is not an NZB file', indexer_id)
+            logger.warning('%s download is not an NZB file', label)
             raise IndexerDownloadError(502, 'Indexer did not return an NZB file')
         mimetype, ext = 'application/x-nzb', '.nzb'
     return {'body': body, 'mimetype': mimetype,
             'filename': _download_filename(content_disposition, ext)}
+
+
+def _prowlarr_origin():
+    """(scheme, host, port) of the configured Prowlarr URL, or None."""
+    base = settings.get('indexer.base_url', '') or ''
+    return _url_host_port(base) if base else None
+
+
+def fetch_indexer_download(token: str) -> Dict[str, Any]:
+    """Resolve an opaque download token and fetch what it points to.
+
+    Returns {'magnet': uri} for a magnet (from a redirect Location or a bare
+    magnet body; it is never fetched), or {'body', 'mimetype', 'filename'} for a
+    validated .torrent or .nzb. See _fetch_validated for the redirect and SSRF
+    rules. Raises IndexerDownloadError.
+    """
+    from app.indexer_api import get_indexer_client
+    client = get_indexer_client(settings)
+    if not hasattr(client, 'get_download_token'):
+        raise IndexerDownloadError(400, 'Download proxy only available with Luma backend')
+
+    token_data = client.get_download_token(token)
+    if not token_data:
+        raise IndexerDownloadError(403, 'Invalid or expired download token')
+    download_url, indexer_id, needs_api_key = token_data
+
+    config = next((ix for ix in (settings.get('indexer.indexers') or [])
+                   if ix.get('id') == indexer_id), None)
+    if not config:
+        raise IndexerDownloadError(404, 'Indexer not found')
+
+    # Proxied entries must point at the configured Prowlarr host,
+    # direct entries at the indexer's own host.
+    if config.get('prowlarr_proxy'):
+        expected_url = settings.get('indexer.base_url', '')
+        if not expected_url:
+            raise IndexerDownloadError(500, 'Prowlarr URL not configured for proxied indexer')
+        api_key = settings.get('indexer.api_key', '')
+    else:
+        expected_url = config.get('url', '')
+        if not expected_url:
+            raise IndexerDownloadError(500, 'Indexer URL not configured')
+        api_key = config.get('api_key', '')
+
+    if _url_host_port(download_url) != _url_host_port(expected_url):
+        logger.warning('Download host does not match the configured host for indexer %s', indexer_id)
+        raise IndexerDownloadError(403, 'Download URL does not match the configured host')
+
+    is_nzb = (str(config.get('type', '')).lower() == 'newznab'
+              or str(config.get('protocol', '')).lower() == 'usenet')
+    return _fetch_validated(
+        download_url,
+        allow_lan=bool(settings.get('indexer.allow_lan', False)),
+        trusted_origin=_prowlarr_origin() if config.get('prowlarr_proxy') else None,
+        api_key=api_key, send_key=bool(needs_api_key and api_key),
+        is_nzb=is_nzb, label=f'Indexer {indexer_id}')
 
 
 @app.route('/api/indexer/download/<token>', methods=['GET'])

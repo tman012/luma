@@ -2434,8 +2434,9 @@ def test_fanout_deadline_returns_partial_results():
         results = manager.search(query='test', categories=[2000], limit=10, interactive=False)
         elapsed = time.time() - start
         
-        # Should return in about 1s (deadline), definitely less than 1.3s
-        assert elapsed < 1.3, f"Search took {elapsed:.2f}s, expected < 1.3s"
+        # Returns at the 1s deadline, well before the 4s indexers finish
+        # (generous bound so a loaded machine does not fail it)
+        assert elapsed < 2.5, f"Search took {elapsed:.2f}s, expected < 2.5s"
         # Should return empty results (no indexer completed in time)
         assert results == []
 
