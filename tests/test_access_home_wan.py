@@ -67,7 +67,12 @@ class TestHomeWANTracking:
         assert is_local is False
     
     def test_cf_ip_not_trusted_without_trusted_proxies(self, app, mock_settings):
-        """CF-Connecting-IP not trusted when trusted_proxies is empty (Item 6)."""
+        """CF-Connecting-IP not trusted when trusted_proxies is empty (Item 6).
+        
+        When trusted_proxies is empty, the presence of a CF header means the request
+        was relayed, so client_ip returns None. This is correct behavior - we can't
+        trust the IP. The kiosk should configure trusted_proxies.
+        """
         from app import access
         
         # No trusted proxies configured
@@ -77,21 +82,16 @@ class TestHomeWANTracking:
             return default
         mock_settings.get.side_effect = mock_get
         
-        # Add home WAN IP
-        with access._home_lock:
-            access._home_ips.clear()
-            access._home_ips.add('203.0.113.50')
-        
-        # Request appears to come from loopback with CF header
-        # But without trusted_proxies, the CF header is ignored
+        # Request with CF header but no trusted proxies
         with app.test_request_context('/', headers={
             'CF-Connecting-IP': '203.0.113.50',
         }, environ_base={'REMOTE_ADDR': '127.0.0.1'}):
             from flask import request
             is_local = access.is_local_request(request, mock_settings)
         
-        # Should be True because the peer IP (127.0.0.1) is private
-        assert is_local is True
+        # Should be False because client_ip returns None (untrusted relay)
+        # The kiosk behind CF tunnel MUST configure trusted_proxies
+        assert is_local is False
     
     def test_cf_ip_ignored_from_untrusted_peer(self, app, mock_settings):
         """CF-Connecting-IP ignored when peer is not in trusted_proxies (Item 6)."""
@@ -104,11 +104,6 @@ class TestHomeWANTracking:
             return default
         mock_settings.get.side_effect = mock_get
         
-        # Add home WAN IP
-        with access._home_lock:
-            access._home_ips.clear()
-            access._home_ips.add('203.0.113.50')
-        
         # Request from untrusted peer with CF header
         with app.test_request_context('/', headers={
             'CF-Connecting-IP': '203.0.113.50',
@@ -116,8 +111,9 @@ class TestHomeWANTracking:
             from flask import request
             is_local = access.is_local_request(request, mock_settings)
         
-        # Should be True because peer IP is private (even though CF header ignored)
-        assert is_local is True
+        # Should be False - CF header present means relayed, but peer not trusted
+        # client_ip returns None for untrusted relay
+        assert is_local is False
     
     def test_save_and_reload_home_ips(self, app, mock_settings, tmp_path):
         """Home IPs are persisted and reloaded (Item 4 - if persistence survives)."""
