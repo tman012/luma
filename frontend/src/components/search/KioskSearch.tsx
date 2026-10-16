@@ -188,7 +188,9 @@ function relevanceScore(entry: UnifiedResult, query: string): number {
       : getTitle(entry.item);
 
   const ratio = wordMatchRatio(query, label);
-  if (ratio < MIN_MATCH_RATIO) return -1; // filtered out
+  // Skip word ratio filter for owned items - backend fuzzy search already matched them
+  const isOwned = entry.kind === 'media' && entry.owned;
+  if (!isOwned && ratio < MIN_MATCH_RATIO) return -1; // filtered out
 
   const pop = popSignal(entry);
   // text quality: ratio 0-1, with bonus for exact / starts-with
@@ -201,7 +203,7 @@ function relevanceScore(entry: UnifiedResult, query: string): number {
   else if (l.includes(q)) textBonus += 1;
 
   // Owned items get a significant boost — your library should surface first
-  const ownedBoost = (entry.kind === 'media' && entry.owned) ? 3 : 1;
+  const ownedBoost = isOwned ? 3 : 1;
 
   return textBonus * Math.log10(pop + 2) * 1000 * ownedBoost;
 }
