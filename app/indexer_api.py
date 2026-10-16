@@ -4,6 +4,8 @@ Generic Indexer API Integration
 Supports Prowlarr and Torznab endpoints for populating the Explore cache.
 """
 
+import contextlib
+import contextvars
 import re
 import threading
 import time
@@ -51,6 +53,7 @@ GUARD_LIMITS = {
     'interactive_per_hour': 40,     # user searches per indexer per hour (no bucket)
     'background_burst': 5,          # background token bucket size per indexer
     'background_refill_s': 180.0,   # one background token per 180 s = 20/h
+    'background_grab_reserve': 2,   # last N background tokens only auto-grab may use
     'per_day': 300,                 # all searches per indexer per rolling 24 h
     'global_per_hour': 120,         # all searches, all indexers, per hour
     'query_ttl_background': 3 * 3600,   # identical background query cached 3 h
@@ -276,6 +279,35 @@ def _retry_after_seconds(value: Optional[str], now: float) -> Optional[float]:
     return min(max(secs, 1.0), 86400.0)
 
 
+# Who is searching. Auto-grab jobs run with priority 'grab': they may use the
+# whole background bucket, while other background work (Explore, the Latest
+# sheet) must leave background_grab_reserve tokens. Same bucket, same totals.
+_SEARCH_PRIORITY = contextvars.ContextVar('luma_search_priority', default='background')
+# When set, a search where every indexer was skipped (budget/backoff) raises
+# IndexerSkipped instead of returning [] ("blocked" is not "nothing new").
+_STRICT_SKIPS = contextvars.ContextVar('luma_strict_skips', default=False)
+
+
+@contextlib.contextmanager
+def search_context(priority: Optional[str] = None, strict: Optional[bool] = None):
+    """Set the search priority and/or strict-skip mode for this block."""
+    tokens = []
+    if priority is not None:
+        tokens.append((_SEARCH_PRIORITY, _SEARCH_PRIORITY.set(priority)))
+    if strict is not None:
+        tokens.append((_STRICT_SKIPS, _STRICT_SKIPS.set(bool(strict))))
+    try:
+        yield
+    finally:
+        for var, tok in reversed(tokens):
+            var.reset(tok)
+
+
+def _submit(pool, fn, *args):
+    """pool.submit that carries the caller's search context into the worker."""
+    return pool.submit(contextvars.copy_context().run, fn, *args)
+
+
 def _guard_counts(ix: int, now: float) -> tuple:
     """(interactive this indexer last hour, this indexer last 24 h, all indexers
     last hour). Call under _budget_state_guard."""
@@ -297,9 +329,11 @@ def _guard_tokens(ix: int, now: float) -> List[float]:
     return b
 
 
-def _guard_decide(ix: int, interactive: bool, now: float) -> Optional[str]:
+def _guard_decide(ix: int, interactive: bool, now: float, grab: bool = False) -> Optional[str]:
     """None when a search to *ix* may be sent now (and records it), else the
-    reason it may not. Call under _budget_state_guard."""
+    reason it may not. Background work other than auto-grab (*grab*) must
+    leave GUARD_LIMITS['background_grab_reserve'] tokens in the bucket.
+    Call under _budget_state_guard."""
     _guard_load()
     if _guard_cooldown.get(FAIL_CLOSED, 0.0) > now:
         return 'guard state lost: searches paused'
@@ -315,6 +349,8 @@ def _guard_decide(ix: int, interactive: bool, now: float) -> Optional[str]:
         b = _guard_tokens(ix, now)
         if b[0] < 1.0:
             return 'background rate (token bucket empty)'
+        if not grab and b[0] < 1.0 + GUARD_LIMITS['background_grab_reserve']:
+            return 'background rate (remaining tokens reserved for auto-grab)'
         b[0] -= 1.0
     _guard_log.setdefault(ix, []).append([now, 'i' if interactive else 'b'])
     _guard_save()
@@ -668,7 +704,8 @@ class ProwlarrClient:
                 fresh = _query_cache.get(cache_key)
                 if fresh and now - fresh[0] < _cache_ttl(interactive):
                     return fresh[1]
-                reason = _guard_decide(ix, interactive, now)
+                reason = _guard_decide(ix, interactive, now,
+                                       grab=_SEARCH_PRIORITY.get() == 'grab')
                 if reason:
                     hr, day, glob = _guard_counts(ix, now)
             if reason:
@@ -804,7 +841,7 @@ class ProwlarrClient:
                 # Callers that pinned specific indexers (Movie Night, Genre
                 # Roulette) must see "couldn't search" (an exception), not
                 # "searched, nothing matched", or they burn their run slot.
-                if explicit:
+                if explicit or _STRICT_SKIPS.get():
                     raise
                 return []
 
@@ -823,12 +860,13 @@ class ProwlarrClient:
         merged: List[dict] = []
         empty: List[int] = []
         with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
-            for ix, items in pool.map(_one, targets):
+            futures = [_submit(pool, _one, t) for t in targets]
+            for ix, items in (f.result() for f in futures):
                 if items:
                     merged.extend(items)
                 else:
                     empty.append(ix)
-        if explicit and skipped and len(skipped) == len(targets):
+        if (explicit or _STRICT_SKIPS.get()) and skipped and len(skipped) == len(targets):
             raise IndexerSkipped(f'all requested indexers {skipped} backed off / over budget')
         empty = [ix for ix in empty if ix not in skipped]
         if empty:
@@ -878,6 +916,11 @@ class ProwlarrClient:
             max_s = max((m['seeders'] for m in movies), default=0)
             logger.info(f'Prowlarr browse returned {len(movies)} movies (max seeders={max_s})')
             return movies
+        except IndexerSkipped:
+            if _STRICT_SKIPS.get():
+                raise
+            logger.info('Prowlarr browse skipped: indexers over budget or backed off')
+            return []
         except Exception as e:
             logger.error(f'Prowlarr search_movies failed: {e}')
             return []
@@ -897,18 +940,23 @@ class ProwlarrClient:
 
         seen_guids: set = set()
         all_raw: list = []
+        skipped_queries: List[str] = []
 
         def _fetch(q: str) -> List[dict]:
             try:
                 items = self._search_single(q, categories, 500)
                 logger.info(f'Prowlarr sweep q={q!r}: {len(items)} results')
                 return items
+            except IndexerSkipped:
+                skipped_queries.append(q)
+                logger.info(f'Prowlarr sweep q={q!r}: skipped (over budget or backed off)')
+                return []
             except Exception as e:
                 logger.warning(f'Prowlarr sweep q={q!r} failed: {e}')
                 return []
 
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(_fetch, q): q for q in queries}
+            futures = {_submit(pool, _fetch, q): q for q in queries}
             for fut in as_completed(futures):
                 for item in fut.result():
                     key = (item.get('indexer', ''), item.get('guid', ''))
@@ -916,6 +964,8 @@ class ProwlarrClient:
                         seen_guids.add(key)
                         all_raw.append(item)
 
+        if queries and len(skipped_queries) == len(queries) and _STRICT_SKIPS.get():
+            raise IndexerSkipped('every sweep query was skipped (over budget or backed off)')
         movies = self._parse_items(all_raw)
         max_s = max((m['seeders'] for m in movies), default=0)
         logger.info(
@@ -963,7 +1013,7 @@ class ProwlarrClient:
             raw_items = []
             empty: List[int] = []
             with ThreadPoolExecutor(max_workers=min(8, len(targets))) as pool:
-                for ix, items in pool.map(_one, targets):
+                for ix, items in (f.result() for f in [_submit(pool, _one, t) for t in targets]):
                     if items:
                         raw_items.extend(items)
                     elif ix is not None:

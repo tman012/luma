@@ -2284,7 +2284,10 @@ def latest_releases(params=None) -> list:
     HTTP request, auth check, Host or loopback trust is involved. Raises
     RuntimeError when the view reports an error.
     """
-    with app.test_request_context('/api/indexer/latest', query_string=dict(params or {})):
+    from app.indexer_api import search_context
+    # Auto-grab priority: may use the background tokens Explore must leave.
+    with search_context(priority='grab'), \
+            app.test_request_context('/api/indexer/latest', query_string=dict(params or {})):
         rv = indexer_latest()
     status = 200
     if isinstance(rv, tuple):
@@ -2294,6 +2297,21 @@ def latest_releases(params=None) -> list:
         payload = resp.get_json(silent=True) or {}
         raise RuntimeError(payload.get('error') or f'status {max(status, resp.status_code)}')
     return (resp.get_json(silent=True) or {}).get('results') or []
+
+
+def _latest_fetch(client, sweep_queries):
+    """Raw items for /api/indexer/latest: a targeted sweep or one browse."""
+    if sweep_queries:
+        # Targeted Prowlarr sweep: runs the configured queries in parallel,
+        # dedups by (indexer, guid). Slower but covers low-volume verticals.
+        return client.sweep_movies(
+            categories=settings.get('indexer.movie_categories') or '2000',
+            queries=sweep_queries,
+            max_workers=3,
+        )
+    # search_movies issues a single empty browse per indexer; Prowlarr orders
+    # newest-first.
+    return client.search_movies(categories=settings.get('indexer.movie_categories') or '2000', limit=300)
 
 
 @app.route('/api/indexer/latest')
@@ -2346,19 +2364,15 @@ def indexer_latest():
         if not client:
             return jsonify({'error': 'No indexer configured. Set up Prowlarr or Torznab in settings.'}), 503
 
-        if sweep_queries:
-            # Targeted Prowlarr sweep — runs the configured queries in
-            # parallel, dedups by (indexer, guid). Slower (5–10s) but
-            # comprehensive for low-volume verticals like 2160p Remux.
-            raw = client.sweep_movies(
-                categories=settings.get('indexer.movie_categories') or '2000',
-                queries=sweep_queries,
-                max_workers=3,
-            )
-        else:
-            # search_movies issues a single empty browse per indexer — much
-            # faster than sweep_movies, and Prowlarr orders newest-first.
-            raw = client.search_movies(categories=settings.get('indexer.movie_categories') or '2000', limit=300)
+        from app.indexer_api import IndexerSkipped, search_context, GUARD_LIMITS as _GL
+        try:
+            with search_context(strict=True):
+                raw = _latest_fetch(client, sweep_queries)
+        except IndexerSkipped as e:
+            # Blocked, not empty: say so and cache nothing.
+            logger.info(f'indexer_latest: {sweep_mode} not fetched: {e}')
+            return jsonify({'error': 'indexers over budget', 'sweep': sweep_mode,
+                            'retry_after': int(_GL['background_refill_s'])}), 503
 
         def _age_days(pub_date_str):
             if not pub_date_str:
@@ -2663,8 +2677,11 @@ def indexer_latest():
                 logger.info(f"indexer_latest: dropped {skipped_lang} non-English items by TMDb original_language")
             normalized = filtered_normalized
 
-        cache_bucket['results'] = normalized
-        cache_bucket['fetched_at'] = now
+        # Never cache an empty answer: it would hide fresh releases for the
+        # whole TTL. Errors return above and are never cached either.
+        if normalized:
+            cache_bucket['results'] = normalized
+            cache_bucket['fetched_at'] = now
 
         results = normalized[:limit]
         return jsonify({

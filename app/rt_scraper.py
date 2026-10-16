@@ -6,6 +6,7 @@ Fetches critic and audience reviews from Rotten Tomatoes using the RTCF API
 
 import copy
 import re
+import threading
 import time
 import logging
 import requests
@@ -13,6 +14,29 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
+
+# RTCF review API backoff: after a 401/403 RT wants credentials we don't have,
+# so stop calling it for this process for RTCF_BACKOFF_S and log one line.
+RTCF_BACKOFF_S = 3600
+_rtcf_state = {'until': 0.0}
+_rtcf_lock = threading.Lock()
+
+
+def _rtcf_backed_off() -> bool:
+    return time.time() < _rtcf_state['until']
+
+
+def _rtcf_note_status(status: int) -> None:
+    if status not in (401, 403):
+        logger.debug(f"RTCF API returned status {status}")
+        return
+    with _rtcf_lock:
+        if time.time() < _rtcf_state['until']:
+            return
+        _rtcf_state['until'] = time.time() + RTCF_BACKOFF_S
+    logger.warning(f"RTCF review API answered {status}; review fetches paused for "
+                   f"{RTCF_BACKOFF_S // 60} min")
 
 class RTScraper:
     """Scraper for Rotten Tomatoes movie and TV show reviews using RTCF API"""
@@ -225,13 +249,15 @@ class RTScraper:
                 if cursor:
                     url += f"&after={cursor}"
 
-                logger.info(f"Fetching RT critic reviews: {url}")
+                if _rtcf_backed_off():
+                    break
+                logger.debug(f"Fetching RT critic reviews: {url}")
 
                 response = self.session.get(url, timeout=15, headers=headers)
-                logger.info(f"RT RTCF response status: {response.status_code}")
+                logger.debug(f"RT RTCF response status: {response.status_code}")
 
                 if response.status_code != 200:
-                    logger.warning(f"RTCF API returned status {response.status_code}")
+                    _rtcf_note_status(response.status_code)
                     break
 
                 try:
@@ -330,11 +356,14 @@ class RTScraper:
                 if cursor:
                     url += f"&after={cursor}"
 
-                logger.info(f"Fetching RT audience reviews: {url}")
+                if _rtcf_backed_off():
+                    break
+                logger.debug(f"Fetching RT audience reviews: {url}")
                 response = self.session.get(url, timeout=15, headers=headers)
-                logger.info(f"RT RTCF audience response status: {response.status_code}")
+                logger.debug(f"RT RTCF audience response status: {response.status_code}")
 
                 if response.status_code != 200:
+                    _rtcf_note_status(response.status_code)
                     break
 
                 try:
