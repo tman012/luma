@@ -11,10 +11,24 @@ _fail: Dict[str, List[float]] = {}
 _lock = threading.Lock()
 
 
+def _account_key(identifier: str) -> str:
+    """uid:<id> when the identifier names an account (so its name and email
+    share one bucket), else the normalized identifier."""
+    norm = (identifier or '').strip().lower()
+    try:
+        from app import user_auth
+        user = user_auth.find_user(norm)
+    except Exception:
+        user = None
+    if user and user.get('id') is not None:
+        return f"uid:{user['id']}"
+    return f'id:{norm}'
+
+
 def _keys(ip: str, identifier: str) -> Tuple[str, ...]:
     # Behind a local reverse proxy every client shares 127.0.0.1, so only the
     # account key applies there; direct clients are also limited per address.
-    ident = f'id:{(identifier or "").strip().lower()}'
+    ident = _account_key(identifier)
     if not ip or ip in ('127.0.0.1', '::1'):
         return (ident,)
     return f'ip:{ip}', ident

@@ -1,5 +1,6 @@
 """Tests for remote authentication (forms-based login)."""
 
+import re
 import pytest
 from werkzeug.security import generate_password_hash
 import app.user_auth as user_auth
@@ -113,8 +114,11 @@ class TestAuthenticationDetails:
     
     def test_wrong_password_rejected(self, test_app):
         """Wrong password is rejected."""
+        get_resp = self.client.get('/login')
+        csrf_token = re.search(r'name="csrf_token" value="([^"]+)"', get_resp.data.decode()).group(1)
         resp = self.client.post('/login',
-                                data={'username': 'testuser', 'password': 'wrongpass'},
+                                data={'username': 'testuser', 'password': 'wrongpass',
+                                      'csrf_token': csrf_token},
                                 environ_base={'REMOTE_ADDR': '203.0.113.100'},
                                 follow_redirects=False)
         

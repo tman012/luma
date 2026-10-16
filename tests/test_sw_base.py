@@ -25,7 +25,7 @@ def test_shell_and_routes_under_base():
     r = _run(f'{o}/luma/', f'{o}/luma/api/settings', f'{o}/luma/api/img/tmdb?path=/a.jpg',
              f'{o}/luma/assets/index-abc.js', f'{o}/luma/static/images/x.png', f'{o}/luma/#nav',
              f'{o}/api/img/tmdb?path=/a.jpg', f'{o}/lumafoo/static/x.js', 'https://image.tmdb.org/t/p/a.jpg')
-    assert r['shell'] == ['/luma/', '/luma/manifest.json']
+    assert r['shell'] == ['/luma/manifest.json']
     h = r['handled']
     assert h[f'{o}/luma/api/settings'] is False           # API data: network only
     assert h[f'{o}/luma/api/img/tmdb?path=/a.jpg'] is True
@@ -40,7 +40,7 @@ def test_shell_and_routes_under_base():
 def test_shell_and_routes_at_root():
     o = 'http://192.0.2.10:5001'
     r = _run(f'{o}/', f'{o}/api/settings', f'{o}/api/img/plex?url=/x', f'{o}/assets/a.js')
-    assert r['shell'] == ['/', '/manifest.json']
+    assert r['shell'] == ['/manifest.json']
     assert r['handled'] == {f'{o}/api/settings': False, f'{o}/api/img/plex?url=/x': True,
                             f'{o}/assets/a.js': True}
 
