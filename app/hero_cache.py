@@ -17,6 +17,8 @@ import json
 import logging
 import requests
 import shutil
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -50,6 +52,11 @@ class HeroCache:
         self.cache_dir = CACHE_DIR
         self.cache_json = CACHE_JSON
         self.session = requests.Session()
+        
+        # Background healing state
+        self._healing_lock = threading.Lock()
+        self._last_heal_time = 0
+        self._heal_cooldown = 600  # 10 minutes
 
         # Ensure cache directories exist
         try:
@@ -529,33 +536,71 @@ class HeroCache:
             logger.error(f"Failed to load hero cache: {e}")
         return []
 
+    def get_missing_images(self, content: List[Dict]) -> List[tuple]:
+        """Check for missing image files, return list of (item_index, field, path) tuples."""
+        missing = []
+        for idx, item in enumerate(content):
+            if item.get('backdrop_cache'):
+                backdrop_path = self.cache_dir / item['backdrop_cache']
+                if not backdrop_path.exists():
+                    missing.append((idx, 'backdrop_cache', item['backdrop_cache']))
+            if item.get('poster_cache'):
+                poster_path = self.cache_dir / item['poster_cache']
+                if not poster_path.exists():
+                    missing.append((idx, 'poster_cache', item['poster_cache']))
+        return missing
+    
+    def _heal_missing_images_background(self, content: List[Dict], missing: List[tuple]):
+        """Re-download only the missing image files (runs in background thread)."""
+        try:
+            logger.info(f"Background healing: re-downloading {len(missing)} missing images")
+            for idx, field, filename in missing:
+                item = content[idx]
+                # Re-download the image using the original URL from cache
+                if field == 'backdrop_cache' and item.get('backdrop_url'):
+                    self.download_image(item['backdrop_url'], filename)
+                elif field == 'poster_cache' and item.get('poster_url'):
+                    self.download_image(item['poster_url'], filename)
+            logger.info("Background healing complete")
+        except Exception as e:
+            logger.error(f"Background healing failed: {e}")
+    
     def get_hero_content(self) -> List[Dict]:
-        """Get cached hero content, refreshing if needed or if images are missing."""
+        """Get cached hero content, triggering background heal for missing images.
+        
+        Returns current cache immediately, never blocks the request.
+        Missing images trigger background re-download with 10min cooldown and single-flight lock.
+        """
         content = self.load_cache()
         
-        # Check if content exists and all referenced image files exist
-        if content:
-            missing_images = False
-            for item in content:
-                if item.get('backdrop_cache'):
-                    backdrop_path = self.cache_dir / item['backdrop_cache']
-                    if not backdrop_path.exists():
-                        logger.warning(f"Missing backdrop image: {backdrop_path}")
-                        missing_images = True
-                        break
-                if item.get('poster_cache'):
-                    poster_path = self.cache_dir / item['poster_cache']
-                    if not poster_path.exists():
-                        logger.warning(f"Missing poster image: {poster_path}")
-                        missing_images = True
-                        break
-            
-            if missing_images:
-                logger.info("Cached content has missing images, refreshing...")
-                content = self.refresh_hero_content()
-        else:
-            logger.info("No cached content found, refreshing...")
-            content = self.refresh_hero_content()
+        if not content:
+            logger.info("No cached content found, returning empty list")
+            return []
+        
+        # Check for missing images
+        missing = self.get_missing_images(content)
+        
+        if missing:
+            # Try to acquire healing lock (non-blocking)
+            if self._healing_lock.acquire(blocking=False):
+                try:
+                    now = time.time()
+                    # Check cooldown
+                    if now - self._last_heal_time >= self._heal_cooldown:
+                        logger.warning(f"Found {len(missing)} missing hero images, starting background heal")
+                        self._last_heal_time = now
+                        # Start healing in background thread
+                        heal_thread = threading.Thread(
+                            target=self._heal_missing_images_background,
+                            args=(content, missing),
+                            daemon=True
+                        )
+                        heal_thread.start()
+                    else:
+                        cooldown_remaining = int(self._heal_cooldown - (now - self._last_heal_time))
+                        logger.debug(f"Healing in cooldown, {cooldown_remaining}s remaining")
+                finally:
+                    self._healing_lock.release()
         
         return content
 

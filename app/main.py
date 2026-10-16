@@ -6737,29 +6737,51 @@ def library_search():
             # Use fast search with fuzzy matching
             results = fast_search_index.search(q=query, limit=100, fuzzy=True)
             
-            # Separate by media type
+            # Separate by media type and deduplicate across library sections
             all_movies = []
             all_tv = []
+            seen_movies = {}  # key: (title_lower, year) -> item
+            seen_tv = {}      # key: (title_lower, year) -> item
+            
+            # Build image proxy URLs relative to script root (for URL base support)
+            script_root = request.script_root or ''
             
             for item in results:
+                title_lower = item.get('title', '').lower()
+                year = item.get('year')
+                section_name = item.get('section_name', 'Library')
+                key = (title_lower, year)
+                
                 # Format for frontend (matches Plex format)
                 formatted = {
                     'title': item.get('title'),
-                    'year': item.get('year'),
+                    'year': year,
                     'rating_key': item.get('rating_key'),
-                    'library_name': item.get('section_name', 'Library'),
-                    'libraries': [item.get('section_name', 'Library')],
-                    'poster_url': f"/api/img/plex?url={item['thumb']}" if item.get('thumb') else None,
-                    'backdrop_url': f"/api/img/plex?url={item['art']}" if item.get('art') else None,
+                    'library_name': section_name,
+                    'libraries': [section_name],
+                    'poster_url': f"{script_root}/api/img/plex?url={item['thumb']}" if item.get('thumb') else None,
+                    'backdrop_url': f"{script_root}/api/img/plex?url={item['art']}" if item.get('art') else None,
                     'clearlogo_url': None,
                 }
                 if item.get('added_at'):
                     formatted['added_date'] = datetime.fromtimestamp(item['added_at']).strftime('%Y-%m-%d')
                 
                 if item.get('media_type') == 'movie':
-                    all_movies.append(formatted)
+                    if key in seen_movies:
+                        # Add library to existing entry
+                        if section_name not in seen_movies[key]['libraries']:
+                            seen_movies[key]['libraries'].append(section_name)
+                    else:
+                        seen_movies[key] = formatted
+                        all_movies.append(formatted)
                 elif item.get('media_type') == 'show':
-                    all_tv.append(formatted)
+                    if key in seen_tv:
+                        # Add library to existing entry
+                        if section_name not in seen_tv[key]['libraries']:
+                            seen_tv[key]['libraries'].append(section_name)
+                    else:
+                        seen_tv[key] = formatted
+                        all_tv.append(formatted)
             
             return jsonify({'movies': all_movies, 'tv_shows': all_tv})
         
@@ -9113,8 +9135,23 @@ def _build_hero_movies():
 # Hero Content Endpoints
 @app.route('/api/hero/content')
 def get_hero_content():
-    """Get hero content for the kiosk home page."""
+    """Get hero content for the kiosk home page.
+    
+    Uses cached content with background self-healing for missing images.
+    Falls back to dynamic generation if cache is empty.
+    """
     try:
+        # Try cached content first (with self-healing for missing images)
+        cached_movies = hero_cache.get_hero_content()
+        if cached_movies:
+            return jsonify({
+                'success': True,
+                'movies': cached_movies,
+                'boost_mode': False,  # Cache doesn't track boost mode
+            })
+        
+        # Fall back to dynamic generation if cache is empty
+        logger.info("Hero cache empty, falling back to dynamic generation")
         movies, boost = _build_hero_movies()
         return jsonify({
             'success': True,

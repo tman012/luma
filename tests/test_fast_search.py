@@ -7,6 +7,7 @@ Tests normalization, fuzzy matching, and ranking.
 # Set up test cache directory before any imports
 import os
 import tempfile
+from pathlib import Path
 _test_cache_dir = tempfile.mkdtemp(prefix="luma_test_cache_")
 os.environ['LUMA_CACHE_DIR'] = _test_cache_dir
 
@@ -1752,39 +1753,52 @@ class TestHeroCacheMissingImages(unittest.TestCase):
         original_cache_dir = hero.cache_dir
         original_cache_json = hero.cache_json
         
+        original_cooldown = hero._heal_cooldown
+        
         try:
             hero.cache_dir = cache_dir
             hero.cache_json = data_dir / 'hero_content.json'
+            hero._heal_cooldown = 1  # 1 second for tests
+            hero._last_heal_time = 0
             
-            # Write JSON with references to images
-            content = [
-                {
-                    'title': 'Test Movie',
-                    'backdrop_cache': 'test_backdrop.jpg',
-                    'poster_cache': 'test_poster.jpg',
-                }
-            ]
+            # Write JSON with references to images (proper format with 'movies' key)
+            content = [{
+                'title': 'Test Movie',
+                'backdrop_cache': 'test_backdrop.jpg',
+                'poster_cache': 'test_poster.jpg',
+            }]
             with open(hero.cache_json, 'w') as f:
-                json.dump(content, f)
+                json.dump({'last_updated': '2024-01-01', 'movies': content}, f)
             
-            # Mock refresh_hero_content to track if it was called
-            refresh_called = False
-            def mock_refresh():
-                nonlocal refresh_called
-                refresh_called = True
-                return []
+            # Track healing attempts
+            import time
+            healing_started = []
+            orig_heal = hero._heal_missing_images_background
+            def mock_heal(content, missing):
+                healing_started.append(True)
+            hero._heal_missing_images_background = mock_heal
             
-            hero.refresh_hero_content = mock_refresh
-            
-            # get_hero_content should detect missing images and refresh
+            # get_hero_content should return content immediately and start background healing
+            start = time.time()
             result = hero.get_hero_content()
+            elapsed = time.time() - start
             
-            self.assertTrue(refresh_called, "refresh_hero_content should be called when images missing")
+            # Should return immediately despite missing images
+            self.assertLess(elapsed, 0.1, "Should return immediately, not block")
+            self.assertEqual(len(result), 1, "Should return cached content")
+            
+            # Wait a bit for background thread
+            time.sleep(0.2)
+            
+            # Healing should have been triggered
+            self.assertEqual(len(healing_started), 1, "Background healing should be triggered once")
             
         finally:
             # Cleanup
             hero.cache_dir = original_cache_dir
             hero.cache_json = original_cache_json
+            hero._heal_cooldown = original_cooldown
+            hero._last_heal_time = 0
             import shutil
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -1826,6 +1840,245 @@ class TestFuzzyNoiseReduction(unittest.TestCase):
         
         self.assertIn('Oppenheimer', titles, "Must return 'Oppenheimer'")
         self.assertNotIn('The Godfather', titles, "Must not return 'The Godfather' (unrelated)")
+
+
+class TestSubstringWithPrefilter(unittest.TestCase):
+    """Test substring matching works even with first-letter prefilter."""
+    
+    def setUp(self):
+        """Set up index with The Matrix."""
+        self.index = FastSearchIndex()
+        self.index._index = [
+            {'title': 'The Matrix', 'title_lower': 'the matrix', 'title_normalized': 'matrix',
+             'year': 1999, 'genres_lower': ['action', 'sci-fi'], 'content_rating': 'R',
+             'section_id': 1, 'media_type': 'movie', 'popularity_score': 1.0, 'rating_key': 1},
+            {'title': 'The Godfather', 'title_lower': 'the godfather', 'title_normalized': 'godfather',
+             'year': 1972, 'genres_lower': ['crime', 'drama'], 'content_rating': 'R',
+             'section_id': 1, 'media_type': 'movie', 'popularity_score': 1.0, 'rating_key': 2},
+        ]
+        self.index._initialized = True
+    
+    def test_atrix_finds_matrix(self):
+        """Test 'atrix' finds 'The Matrix' via substring match despite prefiltering."""
+        results = self.index.search(q='atrix', fuzzy=True)
+        titles = [r['title'] for r in results]
+        
+        self.assertIn('The Matrix', titles, "'atrix' must find 'The Matrix' via substring")
+        self.assertNotIn('The Godfather', titles, "Should not return unrelated titles")
+
+
+class TestHeroCacheHealing(unittest.TestCase):
+    """Test hero cache self-healing through the real /api/hero/content endpoint."""
+    
+    def setUp(self):
+        """Set up test with mock hero cache."""
+        from app.hero_cache import hero_cache
+        import tempfile
+        import shutil
+        
+        self.hero_cache = hero_cache
+        # Save original values
+        self.orig_cache_dir = self.hero_cache.cache_dir
+        self.orig_cache_json = self.hero_cache.cache_json
+        self.orig_cooldown = self.hero_cache._heal_cooldown
+        
+        # Create temp directories
+        self.temp_dir = Path(tempfile.mkdtemp())
+        self.temp_cache_dir = self.temp_dir / 'hero_cache'
+        self.temp_cache_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_json = self.temp_dir / 'hero.json'
+        
+        # Override cache paths
+        self.hero_cache.cache_dir = self.temp_cache_dir
+        self.hero_cache.cache_json = self.temp_json
+        self.hero_cache._heal_cooldown = 1  # 1 second for tests
+        self.hero_cache._last_heal_time = 0  # Reset cooldown
+    
+    def tearDown(self):
+        """Clean up temp files."""
+        import shutil
+        self.hero_cache.cache_dir = self.orig_cache_dir
+        self.hero_cache.cache_json = self.orig_cache_json
+        self.hero_cache._heal_cooldown = self.orig_cooldown
+        self.hero_cache._last_heal_time = 0
+        if self.temp_dir.exists():
+            shutil.rmtree(self.temp_dir)
+    
+    def test_missing_images_trigger_background_heal(self):
+        """Test missing image files trigger background healing."""
+        import time
+        
+        # Create a mock cached entry
+        content = [{
+            'rating_key': 1,
+            'title': 'Test Movie',
+            'backdrop_cache': 'backdrop1.jpg',
+            'backdrop_url': 'http://example.com/backdrop1.jpg',
+            'poster_cache': 'poster1.jpg',
+            'poster_url': 'http://example.com/poster1.jpg',
+        }]
+        
+        # Save cache without creating image files
+        self.hero_cache.save_cache(content)
+        
+        # Mock download_image to track calls
+        download_calls = []
+        orig_download = self.hero_cache.download_image
+        def mock_download(url, filename):
+            download_calls.append((url, filename))
+            # Create a dummy file
+            (self.temp_cache_dir / filename).write_text('fake')
+            return f"/static/hero_cache/{filename}"
+        self.hero_cache.download_image = mock_download
+        
+        # First call should detect missing files and start healing
+        result = self.hero_cache.get_hero_content()
+        self.assertEqual(len(result), 1)
+        
+        # Wait for background thread
+        time.sleep(0.5)
+        
+        # Check that healing was triggered
+        self.assertEqual(len(download_calls), 2)
+        self.assertIn('backdrop1.jpg', [call[1] for call in download_calls])
+        self.assertIn('poster1.jpg', [call[1] for call in download_calls])
+        
+        # Restore original method
+        self.hero_cache.download_image = orig_download
+    
+    def test_concurrent_requests_dont_start_second_heal(self):
+        """Test concurrent requests don't start a second healing thread (single-flight)."""
+        import time
+        import threading
+        
+        # Create cache with missing images
+        content = [{
+            'rating_key': 1,
+            'title': 'Test Movie',
+            'backdrop_cache': 'backdrop2.jpg',
+            'backdrop_url': 'http://example.com/backdrop2.jpg',
+        }]
+        self.hero_cache.save_cache(content)
+        
+        # Track healing starts
+        heal_starts = []
+        orig_heal = self.hero_cache._heal_missing_images_background
+        def mock_heal(content, missing):
+            heal_starts.append(time.time())
+            time.sleep(0.3)  # Simulate slow healing
+            orig_heal(content, missing)
+        self.hero_cache._heal_missing_images_background = mock_heal
+        
+        # Make multiple concurrent requests
+        def make_request():
+            self.hero_cache.get_hero_content()
+        
+        threads = [threading.Thread(target=make_request) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        
+        # Should only have started healing once
+        self.assertEqual(len(heal_starts), 1, "Should only start healing once despite concurrent requests")
+        
+        # Restore
+        self.hero_cache._heal_missing_images_background = orig_heal
+    
+    def test_cooldown_prevents_rapid_heals(self):
+        """Test healing respects cooldown period."""
+        import time
+        
+        # Create cache with missing images
+        content = [{
+            'rating_key': 1,
+            'title': 'Test Movie',
+            'backdrop_cache': 'backdrop3.jpg',
+            'backdrop_url': 'http://example.com/backdrop3.jpg',
+        }]
+        self.hero_cache.save_cache(content)
+        
+        # Track healing attempts
+        heal_count = [0]
+        orig_heal = self.hero_cache._heal_missing_images_background
+        def mock_heal(content, missing):
+            heal_count[0] += 1
+        self.hero_cache._heal_missing_images_background = mock_heal
+        
+        # First request should trigger healing
+        self.hero_cache.get_hero_content()
+        time.sleep(0.1)
+        self.assertEqual(heal_count[0], 1)
+        
+        # Immediate second request should NOT trigger healing (cooldown)
+        self.hero_cache.get_hero_content()
+        time.sleep(0.1)
+        self.assertEqual(heal_count[0], 1, "Should not heal again within cooldown")
+        
+        # Wait for cooldown to expire (1 second)
+        time.sleep(1.0)
+        
+        # Third request should trigger healing again
+        self.hero_cache.get_hero_content()
+        time.sleep(0.1)
+        self.assertEqual(heal_count[0], 2, "Should heal again after cooldown expires")
+        
+        # Restore
+        self.hero_cache._heal_missing_images_background = orig_heal
+    
+    def test_response_not_blocked_by_healing(self):
+        """Test that responses are immediate even when healing is triggered."""
+        import time
+        
+        # Create cache with missing images
+        content = [{
+            'rating_key': 1,
+            'title': 'Test Movie',
+            'backdrop_cache': 'backdrop4.jpg',
+            'backdrop_url': 'http://example.com/backdrop4.jpg',
+        }]
+        self.hero_cache.save_cache(content)
+        
+        # Make healing slow
+        orig_heal = self.hero_cache._heal_missing_images_background
+        def slow_heal(content, missing):
+            time.sleep(2.0)  # Very slow healing
+            orig_heal(content, missing)
+        self.hero_cache._heal_missing_images_background = slow_heal
+        
+        # Request should return quickly despite slow healing
+        start = time.time()
+        result = self.hero_cache.get_hero_content()
+        elapsed = time.time() - start
+        
+        self.assertEqual(len(result), 1)
+        self.assertLess(elapsed, 0.5, "Response should be immediate, not blocked by healing")
+        
+        # Restore
+        self.hero_cache._heal_missing_images_background = orig_heal
+    
+    def test_get_missing_images_detection(self):
+        """Test that missing images are correctly detected."""
+        # Create cache with some images missing
+        content = [{
+            'rating_key': 1,
+            'title': 'Test Movie',
+            'backdrop_cache': 'backdrop5.jpg',
+            'poster_cache': 'poster5.jpg',
+        }]
+        
+        # Create only backdrop, not poster
+        (self.temp_cache_dir / 'backdrop5.jpg').write_text('fake image')
+        self.hero_cache.save_cache(content)
+        
+        # Check for missing images
+        loaded = self.hero_cache.load_cache()
+        missing = self.hero_cache.get_missing_images(loaded)
+        
+        # Should detect missing poster
+        self.assertEqual(len(missing), 1)
+        self.assertEqual(missing[0][1], 'poster_cache')
+        self.assertEqual(missing[0][2], 'poster5.jpg')
 
 
 if __name__ == '__main__':

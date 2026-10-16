@@ -1,4 +1,7 @@
 import os, pytest
+
+# Guard playwright import so default pytest collection doesn't fail
+playwright = pytest.importorskip("playwright")
 from playwright.sync_api import sync_playwright
 
 BASE = os.environ.get("LUMA_E2E_BASE_URL", "http://127.0.0.1:5199")

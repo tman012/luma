@@ -20,7 +20,7 @@ from typing import List, Dict, Optional, Any, Set, Tuple
 import requests
 
 try:
-    from rapidfuzz import fuzz, process
+    from rapidfuzz import fuzz
     HAS_RAPIDFUZZ = True
 except ImportError:
     HAS_RAPIDFUZZ = False
@@ -688,17 +688,18 @@ class FastSearchIndex:
         # For very short queries (1-2 chars), use only prefix/substring matching
         use_fuzzy = len(q) > 2 and fuzzy
         
-        # Prefilter by first letter for performance (only for longer queries)
-        # Skip prefiltering for queries < 5 chars to avoid missing substring matches
+        # Prefilter by first letter + substring for performance (only for longer queries)
+        # For 5+ char queries, keep items where any word starts with query's first letter
+        # OR the title contains the query as substring (for cases like 'atrix' → 'The Matrix')
         if len(q) >= 5:
             first_letter = q_norm[0] if q_norm else ''
-            # Check items that start with the same letter (normalized or with articles)
             filtered = []
             for item in snapshot:
                 title_norm = item.get('title_normalized', '')
-                # Check if any word in the title starts with query first letter
+                title_lower = item.get('title_lower', '')
+                # Check if any word starts with query first letter OR title contains query substring
                 words = title_norm.split()
-                if any(word.startswith(first_letter) for word in words):
+                if any(word.startswith(first_letter) for word in words) or q_lower in title_lower:
                     filtered.append(item)
             snapshot = filtered if filtered else snapshot  # Fallback to full snapshot if no matches
         

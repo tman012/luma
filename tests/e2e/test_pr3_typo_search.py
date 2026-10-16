@@ -6,6 +6,8 @@ Timings are appended to $LUMA_E2E_SHOTS/timings.jsonl.
 import json, re, time, pytest
 from conftest import BASE, SHOTS
 
+pytestmark = pytest.mark.e2e
+
 TYPOS = {"Openheimer": "Oppenheimer", "Interstelar": "Interstellar",
          "Godfahter": "The Godfather", "Shawshank Redemtion": "The Shawshank Redemption"}
 TOP_N = 3
