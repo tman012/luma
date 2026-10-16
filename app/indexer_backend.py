@@ -124,7 +124,7 @@ class LumaBackendAdapter:
         try:
             results = self.manager.search(query=q, categories=categories, limit=500, interactive=True)
             
-            # Convert to Prowlarr-compatible format
+            # Convert to Prowlarr-compatible format and sign download URLs
             out = []
             for r in results:
                 from app.indexer_api import _parse_title
@@ -143,6 +143,12 @@ class LumaBackendAdapter:
                     except Exception:
                         pub_date_iso = pub_date_rfc  # Fallback to original
                 
+                # Sign download URLs to avoid exposing API keys
+                download_url = r.get('download_url', '')
+                indexer_id = r.get('indexer_id', '')
+                if download_url and indexer_id:
+                    download_url = self._sign_download_url(download_url, indexer_id)
+                
                 out.append({
                     'id': r.get('id', ''),  # Stable string ID
                     'title': r.get('title', ''),
@@ -158,7 +164,7 @@ class LumaBackendAdapter:
                     'indexer_id': r.get('indexer_id', ''),  # String ID
                     'pub_date': pub_date_iso,
                     'publishDate': pub_date_iso,  # Sonarr/Radarr compatibility
-                    'download_url': r.get('download_url', ''),
+                    'download_url': download_url,  # Signed URL
                     'magneturl': r.get('magneturl', ''),
                     'info_hash': r.get('info_hash', ''),
                     'guid': r.get('guid', ''),
@@ -182,6 +188,9 @@ class LumaBackendAdapter:
         """
         Normalize IndexerManager results to match ProwlarrClient format.
         This ensures existing consumers get the exact same data shape.
+        
+        IMPORTANT: Never expose raw download_url with API keys.
+        Issue signed /api/indexer/download/<token> links instead.
         """
         from app.indexer_api import _parse_title
         from email.utils import parsedate_to_datetime
@@ -203,6 +212,12 @@ class LumaBackendAdapter:
                 except Exception:
                     pub_date_iso = pub_date_rfc
             
+            # Sign download URLs to avoid exposing API keys
+            download_url = r.get('download_url', '')
+            indexer_id = r.get('indexer_id', '')
+            if download_url and indexer_id:
+                download_url = self._sign_download_url(download_url, indexer_id)
+            
             normalized.append({
                 'id': r.get('id', ''),  # Stable string ID
                 'title': parsed['clean_title'],
@@ -214,7 +229,7 @@ class LumaBackendAdapter:
                 'tracker': r.get('tracker', ''),
                 'pub_date': pub_date_iso,
                 'publishDate': pub_date_iso,
-                'download_url': r.get('download_url', ''),
+                'download_url': download_url,  # Signed URL
                 'magneturl': r.get('magneturl', ''),
                 'info_hash': r.get('info_hash', ''),
                 'imdb_id': r.get('imdb_id', ''),
@@ -225,3 +240,34 @@ class LumaBackendAdapter:
             })
         
         return normalized
+    
+    def _sign_download_url(self, download_url: str, indexer_id: str) -> str:
+        """Sign a download URL to create a /api/indexer/download/<token> link."""
+        import base64
+        import hashlib
+        import hmac
+        import json
+        import time
+        import secrets
+        
+        # Get or generate server secret
+        secret = self.manager.settings_manager.get('indexer.download_proxy_secret')
+        if not secret:
+            secret = secrets.token_hex(32)
+            self.manager.settings_manager.update({'indexer': {'download_proxy_secret': secret}})
+        
+        # Create signed token (valid for 1 hour)
+        exp = int(time.time()) + 3600
+        payload = f"{download_url}|{indexer_id}|{exp}"
+        sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        
+        data = {
+            'url': download_url,
+            'indexer_id': indexer_id,
+            'exp': exp,
+            'sig': sig,
+        }
+        
+        # Encode as base64 URL-safe token
+        token = base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
+        return f'/api/indexer/download/{token}'

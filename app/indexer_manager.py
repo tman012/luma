@@ -533,9 +533,11 @@ class IndexerManager:
 
             # Test with caps request - send both header and query param for compatibility
             # Many Torznab/Newznab servers only accept query param
+            from urllib.parse import quote
             headers = {'X-Api-Key': api_key}
+            encoded_key = quote(api_key, safe='')
             resp = requests.get(
-                f'{url}?t=caps&apikey={api_key}',
+                f'{url}?t=caps&apikey={encoded_key}',
                 headers=headers,
                 timeout=10,
                 stream=True,

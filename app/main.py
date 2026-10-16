@@ -16896,7 +16896,8 @@ def test_indexer_connection():
     except requests.exceptions.ConnectionError:
         return jsonify({'success': False, 'message': 'Could not connect to indexer'}), 200
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        from app.indexer_manager import sanitize_api_key
+        return jsonify({'success': False, 'message': sanitize_api_key(str(e))}), 200
 
 
 # ---- Indexer Management (Luma backend) ------------------------------------

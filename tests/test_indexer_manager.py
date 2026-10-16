@@ -2577,9 +2577,126 @@ def test_ssrf_pins_validated_ip():
     from app.indexer_manager import validate_indexer_url
     
     with patch('socket.getaddrinfo') as mock_getaddrinfo:
-        mock_getaddrinfo.return_value = [
-            (2, 1, 6, '', ('1.2.3.4', 0))
-        ]
-        valid, error, pinned_ip = validate_indexer_url('http://example.com', allow_lan=False)
-        assert valid is True
-        assert pinned_ip == '1.2.3.4'
+            mock_getaddrinfo.return_value = [
+                (2, 1, 6, '', ('1.2.3.4', 0))
+            ]
+            valid, error, pinned_ip = validate_indexer_url('http://example.com', allow_lan=False)
+            assert valid is True
+            assert pinned_ip == '1.2.3.4'
+
+
+# ---- Item 7: Key Sanitization and Signed Download Links ----
+
+def test_backend_adapter_signs_download_urls():
+    """LumaBackendAdapter signs download URLs, never exposes raw URLs with keys."""
+    from app.indexer_backend import LumaBackendAdapter
+    from app.indexer_manager import IndexerManager
+    
+    settings_mock = Mock()
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Test',
+                    'url': 'http://test.example.com',
+                    'api_key': 'secret-key',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 10,
+                }
+            ]
+        return default
+    
+    settings_mock.get.side_effect = settings_get
+    
+    xml_response = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Test.Movie.2024.1080p.BluRay</title>
+  <link>http://test.example.com/download?apikey=secret-key&amp;id=123</link>
+  <guid>guid1</guid>
+  <size>5368709120</size>
+  <torznab:attr name="seeders" value="50" xmlns:torznab="http://torznab.com/schemas/2015/feed"/>
+</item>
+</channel></rss>"""
+    
+    with patch('app.indexer_manager.requests.get') as mock_get:
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+        mock_resp.raw = Mock()
+        mock_resp.raw.read.return_value = xml_response.encode()
+        mock_resp.raise_for_status = Mock()
+        mock_get.return_value = mock_resp
+        
+        manager = IndexerManager(settings_mock)
+        adapter = LumaBackendAdapter(manager)
+        
+        results = adapter.search_movies(categories='2000', limit=100)
+        
+        assert len(results) == 1
+        r = results[0]
+        
+        # Verify download_url does NOT contain the raw API key
+        assert 'apikey=' not in r['download_url']
+        assert 'secret-key' not in r['download_url']
+        
+        # Verify it's a signed token URL
+        assert r['download_url'].startswith('/api/indexer/download/')
+
+
+def test_no_apikey_in_api_responses():
+    """Test that no API response body contains 'apikey='."""
+    from app.indexer_backend import LumaBackendAdapter
+    from app.indexer_manager import IndexerManager
+    import json
+    
+    settings_mock = Mock()
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Test',
+                    'url': 'http://test.example.com',
+                    'api_key': 'secret-key-123',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 10,
+                }
+            ]
+        return default
+    
+    settings_mock.get.side_effect = settings_get
+    
+    xml_response = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Movie</title>
+  <link>http://test.example.com/dl?apikey=secret-key-123&amp;id=1</link>
+  <guid>g1</guid>
+</item>
+</channel></rss>"""
+    
+    with patch('app.indexer_manager.requests.get') as mock_get:
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+        mock_resp.raw = Mock()
+        mock_resp.raw.read.return_value = xml_response.encode()
+        mock_resp.raise_for_status = Mock()
+        mock_get.return_value = mock_resp
+        
+        manager = IndexerManager(settings_mock)
+        adapter = LumaBackendAdapter(manager)
+        
+        # Test search_movies
+        results = adapter.search_movies(categories='2000', limit=100)
+        serialized = json.dumps(results)
+        assert 'apikey=' not in serialized, "search_movies response contains 'apikey='"
+        assert 'secret-key-123' not in serialized, "search_movies response contains raw key"
+        
+        # Test search_all
+        results = adapter.search_all(query='test', media_type='movie')
+        serialized = json.dumps(results)
+        assert 'apikey=' not in serialized, "search_all response contains 'apikey='"
+        assert 'secret-key-123' not in serialized, "search_all response contains raw key"
