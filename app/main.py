@@ -17105,28 +17105,66 @@ def download_torrent_proxy(token: str):
         return err
     
     try:
-        from app.indexer_manager import get_indexer_manager, sanitize_api_key
+        from app.indexer_manager import get_indexer_manager, sanitize_api_key, validate_indexer_url
         import base64
+        import hashlib
+        import hmac
         import json
+        import time
         
-        # Decode token: base64(json({url, indexer_id}))
+        # Get or generate server secret
+        secret = settings.get('indexer.download_proxy_secret')
+        if not secret:
+            import secrets
+            secret = secrets.token_hex(32)
+            settings.update({'indexer': {'download_proxy_secret': secret}})
+            logger.info('Generated download proxy HMAC secret')
+        
+        # Decode token: base64(json({url, indexer_id, exp, sig}))
         try:
             decoded = base64.urlsafe_b64decode(token.encode()).decode()
             data = json.loads(decoded)
             download_url = data.get('url')
             indexer_id = data.get('indexer_id')
+            exp = data.get('exp', 0)
+            sig = data.get('sig', '')
         except Exception as e:
             logger.warning(f'Invalid download token: {sanitize_api_key(str(e))}')
             return jsonify({'error': 'Invalid download token'}), 400
         
+        # Check expiry (tokens valid for 1 hour)
+        if time.time() > exp:
+            return jsonify({'error': 'Download token expired'}), 403
+        
+        # Verify HMAC signature
+        payload = f"{download_url}|{indexer_id}|{exp}"
+        expected_sig = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected_sig):
+            logger.warning('Download token HMAC verification failed')
+            return jsonify({'error': 'Invalid token signature'}), 403
+        
         if not download_url or not indexer_id:
             return jsonify({'error': 'Invalid download token'}), 400
         
-        # Get indexer config to inject API key
+        # Get indexer config
         manager = get_indexer_manager(settings)
         config = manager._get_indexer_by_id(indexer_id)
         if not config:
             return jsonify({'error': 'Indexer not found'}), 404
+        
+        # Re-validate URL with SSRF check and ensure it matches indexer host
+        allow_lan = settings.get('indexer.allow_lan', False)
+        valid, error = validate_indexer_url(download_url, allow_lan=allow_lan)
+        if not valid:
+            return jsonify({'error': f'URL validation failed: {error}'}), 403
+        
+        # Ensure download URL belongs to this indexer (same host)
+        from urllib.parse import urlparse
+        download_host = urlparse(download_url).netloc
+        indexer_host = urlparse(config.get('url', '')).netloc
+        if download_host != indexer_host:
+            logger.warning(f'Download URL host {download_host} does not match indexer {indexer_host}')
+            return jsonify({'error': 'URL does not match configured indexer'}), 403
         
         api_key = config.get('api_key', '')
         

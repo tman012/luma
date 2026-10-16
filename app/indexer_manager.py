@@ -51,6 +51,33 @@ def sanitize_api_key(text: str) -> str:
     return text
 
 
+def parse_retry_after(retry_after_value: str) -> Optional[float]:
+    """
+    Parse Retry-After header as either seconds (int) or HTTP-date.
+    
+    Returns number of seconds to wait, or None if invalid.
+    """
+    if not retry_after_value:
+        return None
+    
+    # Try as integer seconds first
+    if retry_after_value.isdigit():
+        return float(retry_after_value)
+    
+    # Try parsing as HTTP-date
+    try:
+        from email.utils import parsedate_to_datetime
+        retry_time = parsedate_to_datetime(retry_after_value)
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        delta = (retry_time - now).total_seconds()
+        return max(0.0, delta)
+    except Exception:
+        return None
+    
+    return None
+
+
 def validate_indexer_url(url: str, allow_lan: bool = False) -> Tuple[bool, str]:
     """
     Validate indexer URL for SSRF protection.
@@ -109,6 +136,14 @@ DEFAULT_MAX_PER_HOUR = 20
 # Cache TTLs
 QUERY_CACHE_TTL = 3600
 INTERACTIVE_CACHE_TTL = 600
+
+# Fan-out deadlines
+INTERACTIVE_DEADLINE = 15.0  # seconds
+BACKGROUND_DEADLINE = 60.0   # seconds
+
+# Exponential backoff settings
+INITIAL_BACKOFF = 60.0       # Start at 60s
+MAX_BACKOFF = 3600.0         # Cap at 1 hour
 
 
 class IndexerError(Exception):
@@ -191,9 +226,10 @@ class IndexerState:
         self.max_per_hour = config.get('rate_limit_max_per_hour', DEFAULT_MAX_PER_HOUR)
         self.request_log: List[float] = []
 
-        # Backoff
+        # Exponential backoff
         self.disabled_until: Optional[float] = None
         self.backoff_seconds = 0
+        self.backoff_level = 0  # Exponential backoff level (0, 1, 2, ...)
 
         # Cache: {query_key: (timestamp, results)}
         self.query_cache: Dict[Tuple, Tuple[float, List[Dict]]] = {}
@@ -210,26 +246,40 @@ class IndexerState:
             return True
         return False
 
+    def set_backoff_exponential(self, now: float) -> None:
+        """Set exponential backoff: 60s * 2^level, capped at 1 hour."""
+        backoff_seconds = INITIAL_BACKOFF * (2 ** self.backoff_level)
+        backoff_seconds = min(backoff_seconds, MAX_BACKOFF)
+        self.disabled_until = now + backoff_seconds
+        self.backoff_seconds = backoff_seconds
+        self.backoff_level += 1
+        logger.info(f'Indexer {self.indexer_id} exponential backoff level {self.backoff_level}: {backoff_seconds}s')
+
     def set_backoff(self, seconds: float, now: float) -> None:
         """Put indexer into backoff for the specified duration."""
         self.disabled_until = now + seconds
         self.backoff_seconds = seconds
 
     def clear_backoff(self) -> None:
-        """Clear backoff state."""
+        """Clear backoff state and reset exponential level on success."""
         self.disabled_until = None
         self.backoff_seconds = 0
+        self.backoff_level = 0
 
     def get_cached(self, cache_key: Tuple, ttl: float, now: float) -> Optional[List[Dict]]:
         """Get cached results if fresh enough."""
         entry = self.query_cache.get(cache_key)
         if entry and (now - entry[0]) < ttl:
-            return entry[1]
+            # Deep copy to prevent mutation
+            import copy
+            return copy.deepcopy(entry[1])
         return None
 
     def set_cached(self, cache_key: Tuple, results: List[Dict], now: float) -> None:
         """Cache query results."""
-        self.query_cache[cache_key] = (now, results)
+        import copy
+        # Deep copy results before caching
+        self.query_cache[cache_key] = (now, copy.deepcopy(results))
         # Limit cache size
         if len(self.query_cache) > 500:
             oldest_keys = sorted(self.query_cache.keys(), key=lambda k: self.query_cache[k][0])[:100]
@@ -245,6 +295,7 @@ class IndexerState:
             'request_log': self.request_log,
             'disabled_until': self.disabled_until,
             'backoff_seconds': self.backoff_seconds,
+            'backoff_level': self.backoff_level,
         }
     
     @staticmethod
@@ -260,6 +311,7 @@ class IndexerState:
         state.request_log = [float(t) for t in data.get('request_log', [])]
         state.disabled_until = data.get('disabled_until')
         state.backoff_seconds = float(data.get('backoff_seconds', 0))
+        state.backoff_level = int(data.get('backoff_level', 0))
         return state
 
 
@@ -423,10 +475,11 @@ class IndexerManager:
             if not valid:
                 return False, f'URL validation failed: {error}'
 
-            # Test with caps request - prefer header auth
+            # Test with caps request - send both header and query param for compatibility
+            # Many Torznab/Newznab servers only accept query param
             headers = {'X-Api-Key': api_key}
             resp = requests.get(
-                f'{url}?t=caps',
+                f'{url}?t=caps&apikey={api_key}',
                 headers=headers,
                 timeout=10,
                 stream=True,
@@ -547,17 +600,14 @@ class IndexerManager:
             used = state.requests_last_hour(now)
             if used >= state.max_per_hour:
                 logger.info(f'Indexer {config.get("name")} at hourly limit ({used} requests)')
-                cached_stale = state.query_cache.get(cache_key)
-                if cached_stale:
-                    return cached_stale[1]
+                # Don't silently serve stale cache
                 raise IndexerRateLimitError('Hourly rate limit exceeded')
 
-            if not interactive and config.get('rate_limited', False):
+            # Check bucket for rate-limited indexers
+            if not interactive and state.bucket:
                 if not state.bucket.take(now):
                     logger.debug(f'Indexer {config.get("name")} token bucket empty')
-                    cached_stale = state.query_cache.get(cache_key)
-                    if cached_stale:
-                        return cached_stale[1]
+                    # Don't silently serve stale cache
                     raise IndexerRateLimitError('Token bucket empty')
 
             # Enforce minimum interval for rate-limited indexers
@@ -581,16 +631,19 @@ class IndexerManager:
             try:
                 state.request_log.append(time.time())
                 
-                # Prefer header auth
+                # Send both header and query param for maximum compatibility
+                # Many Torznab/Newznab servers only accept query param
                 headers = {'X-Api-Key': api_key}
+                params = {
+                    't': 'search',
+                    'q': query,
+                    'cat': cat_str,
+                    'limit': limit,
+                    'apikey': api_key,
+                }
                 resp = requests.get(
                     url,
-                    params={
-                        't': 'search',
-                        'q': query,
-                        'cat': cat_str,
-                        'limit': limit,
-                    },
+                    params=params,
                     headers=headers,
                     timeout=60,
                     stream=True,
@@ -599,15 +652,20 @@ class IndexerManager:
 
                 # Handle rate limit / errors
                 if resp.status_code == 429:
-                    retry_after = resp.headers.get('Retry-After')
-                    backoff_seconds = int(retry_after) if retry_after and retry_after.isdigit() else 60
-                    state.set_backoff(backoff_seconds, now)
-                    logger.warning(f'Indexer {config.get("name")} 429 - backing off {backoff_seconds}s')
-                    raise IndexerBackoffError(f'Rate limited (429), backoff {backoff_seconds}s')
+                    retry_after_header = resp.headers.get('Retry-After')
+                    retry_after_seconds = parse_retry_after(retry_after_header)
+                    if retry_after_seconds:
+                        state.set_backoff(retry_after_seconds, now)
+                        logger.warning(f'Indexer {config.get("name")} 429 - Retry-After {retry_after_seconds}s')
+                        raise IndexerBackoffError(f'Rate limited (429), retry after {retry_after_seconds}s')
+                    else:
+                        state.set_backoff_exponential(now)
+                        logger.warning(f'Indexer {config.get("name")} 429 - exponential backoff')
+                        raise IndexerBackoffError('Rate limited (429)')
 
                 if resp.status_code >= 500:
-                    state.set_backoff(300, now)
-                    logger.warning(f'Indexer {config.get("name")} {resp.status_code} - backing off 5min')
+                    state.set_backoff_exponential(now)
+                    logger.warning(f'Indexer {config.get("name")} {resp.status_code} - exponential backoff')
                     raise IndexerError(f'Server error {resp.status_code}')
 
                 resp.raise_for_status()
@@ -630,12 +688,12 @@ class IndexerManager:
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 error_msg = sanitize_api_key(str(e))
                 logger.warning(f'Indexer {config.get("name")} connection error: {error_msg}')
-                state.set_backoff(60, now)
+                state.set_backoff_exponential(now)
                 raise IndexerError(f'Connection error: {error_msg[:100]}')
             except requests.exceptions.RequestException as e:
                 error_msg = sanitize_api_key(str(e))
                 logger.error(f'Indexer {config.get("name")} request failed: {error_msg}')
-                state.set_backoff(60, now)
+                state.set_backoff_exponential(now)
                 raise IndexerError(f'Request failed: {error_msg[:100]}')
 
     def search(
@@ -647,7 +705,7 @@ class IndexerManager:
         interactive: bool = False,
     ) -> List[Dict[str, Any]]:
         """
-        Search across indexers with parallel fan-out.
+        Search across indexers with parallel fan-out with deadline.
 
         Args:
             query: Search query string
@@ -657,7 +715,7 @@ class IndexerManager:
             interactive: If True, bypass token bucket (but respect hourly cap)
 
         Returns:
-            Merged results from all indexers
+            Merged results from all indexers (partial results if deadline exceeded)
         """
         if categories is None:
             categories = [2000]
@@ -672,6 +730,13 @@ class IndexerManager:
         if not target_configs:
             logger.warning('No enabled indexers available for search')
             return []
+
+        # Set deadline
+        deadline = INTERACTIVE_DEADLINE if interactive else BACKGROUND_DEADLINE
+        config_deadline = self.settings_manager.get('indexer.search_deadline', None)
+        if config_deadline is not None and isinstance(config_deadline, (int, float)):
+            deadline = float(config_deadline)
+        start_time = time.time()
 
         # Fan out to indexers in parallel
         all_results = []
@@ -699,14 +764,29 @@ class IndexerManager:
 
         with ThreadPoolExecutor(max_workers=min(8, len(target_configs))) as executor:
             futures = {executor.submit(_search_one, cfg): cfg for cfg in target_configs}
-            for future in as_completed(futures):
-                indexer_id, results = future.result()
-                all_results.extend(results)
+            completed_count = 0
+            
+            for future in as_completed(futures, timeout=deadline):
+                try:
+                    indexer_id, results = future.result(timeout=0.1)
+                    all_results.extend(results)
+                    completed_count += 1
+                except Exception as e:
+                    logger.warning(f'Future failed: {sanitize_api_key(str(e))}')
+                
+                # Check if deadline exceeded
+                if time.time() - start_time >= deadline:
+                    logger.warning(f'Search deadline exceeded after {deadline}s, returning partial results')
+                    break
+            
+            # Log partial results if we didn't wait for all
+            if completed_count < len(target_configs):
+                logger.info(f'Returning partial results from {completed_count}/{len(target_configs)} indexers')
 
         # Sort by priority (lower first), then by seeders
         all_results.sort(key=lambda x: (x.get('priority', 100), -x.get('seeders', 0)))
 
-        logger.info(f'Search "{query}" returned {len(all_results)} total results from {len(target_configs)} indexers')
+        logger.info(f'Search "{query}" returned {len(all_results)} total results')
         return all_results
 
     def import_from_prowlarr(self, prowlarr_url: str, prowlarr_api_key: str) -> Tuple[int, int, List[str]]:

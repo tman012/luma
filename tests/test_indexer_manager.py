@@ -584,17 +584,22 @@ def test_backend_adapter_search_movies():
     from app.indexer_manager import IndexerManager
     
     settings_mock = Mock()
-    settings_mock.get.return_value = [
-        {
-            'id': 'ix1',
-            'name': 'Test',
-            'url': 'http://test.example.com',
-            'api_key': 'key',
-            'type': 'torznab',
-            'enabled': True,
-            'priority': 10,
-        }
-    ]
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Test',
+                    'url': 'http://test.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 10,
+                }
+            ]
+        return default
+    
+    settings_mock.get.side_effect = settings_get
     
     xml_response = """<?xml version="1.0"?>
 <rss><channel>
@@ -850,101 +855,176 @@ def test_prowlarr_import_uses_only_get():
 # ---- Retry-After and Backoff Tests ----
 
 def test_retry_after_http_date():
-    """Handle Retry-After as HTTP-date format."""
-    from app.indexer_manager import IndexerManager
+    """Handle Retry-After as HTTP-date format with mocked clock."""
+    from app.indexer_manager import IndexerManager, parse_retry_after
     import email.utils
+    from datetime import datetime, timezone, timedelta
     
+    # Test parse_retry_after directly
+    future_time = datetime.now(timezone.utc) + timedelta(seconds=300)
+    http_date = email.utils.formatdate(future_time.timestamp(), usegmt=True)
+    
+    parsed_seconds = parse_retry_after(http_date)
+    assert parsed_seconds is not None
+    assert 295 <= parsed_seconds <= 305  # Allow 5s tolerance for test execution time
+    
+    # Test integration with mocked time
     settings_mock = Mock()
-    settings_mock.get.return_value = [
-        {
-            'id': 'ix1',
-            'name': 'Test',
-            'url': 'http://test.example.com',
-            'api_key': 'key',
-            'type': 'torznab',
-            'enabled': True,
-            'priority': 10,
-        }
-    ]
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Test',
+                    'url': 'http://test.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 10,
+                }
+            ]
+        elif key.startswith('indexer.'):
+            return default
+        return default
     
-    # HTTP-date: "Fri, 16 Oct 2026 04:00:00 GMT"
-    future_time = time.time() + 300  # 5 minutes from now
-    http_date = email.utils.formatdate(future_time, usegmt=True)
+    settings_mock.get.side_effect = settings_get
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
-        mock_resp = Mock()
-        mock_resp.status_code = 429
-        mock_resp.headers = {'Retry-After': http_date}
-        mock_get.return_value = mock_resp
+    with patch('app.indexer_manager.time.time') as mock_time:
+        mock_time.return_value = 1000.0
         
-        manager = IndexerManager(settings_mock)
-        results = manager.search(query='test', categories=[2000], limit=100)
-        
-        assert results == []
-        state = manager._get_state('ix1')
-        assert state.is_backed_off(time.time()) is True
+        with patch('app.indexer_manager.requests.get') as mock_get:
+            mock_resp = Mock()
+            mock_resp.status_code = 429
+            mock_resp.headers = {'Retry-After': http_date}
+            mock_resp.raw = Mock()
+            mock_resp.raw.read.return_value = b''
+            mock_get.return_value = mock_resp
+            
+            manager = IndexerManager(settings_mock)
+            results = manager.search(query='test', categories=[2000], limit=100)
+            
+            assert results == []
+            state = manager._get_state('ix1')
+            
+            # At t=1000, should be backed off
+            assert state.is_backed_off(1000.0) is True
+            # Should store approximately the parsed seconds
+            assert 295 <= state.backoff_seconds <= 305
 
 
 def test_exponential_backoff_no_retry_after():
-    """Exponential backoff when Retry-After header is missing."""
-    from app.indexer_manager import IndexerManager
+    """Exponential backoff when Retry-After header is missing, with mocked clock."""
+    from app.indexer_manager import IndexerManager, INITIAL_BACKOFF
     
     settings_mock = Mock()
-    settings_mock.get.return_value = [
-        {
-            'id': 'ix1',
-            'name': 'Test',
-            'url': 'http://test.example.com',
-            'api_key': 'key',
-            'type': 'torznab',
-            'enabled': True,
-            'priority': 10,
-        }
-    ]
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Test',
+                    'url': 'http://test.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 10,
+                }
+            ]
+        elif key.startswith('indexer.'):
+            return default
+        return default
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
-        mock_resp = Mock()
-        mock_resp.status_code = 429
-        mock_resp.headers = {}  # No Retry-After
-        mock_get.return_value = mock_resp
+    settings_mock.get.side_effect = settings_get
+    
+    with patch('app.indexer_manager.time.time') as mock_time:
+        mock_time.return_value = 1000.0
         
-        manager = IndexerManager(settings_mock)
-        results = manager.search(query='test', categories=[2000], limit=100)
-        
-        assert results == []
-        state = manager._get_state('ix1')
-        # Should default to 60s backoff
-        assert state.backoff_seconds == 60
+        with patch('app.indexer_manager.requests.get') as mock_get:
+            mock_resp = Mock()
+            mock_resp.status_code = 429
+            mock_resp.headers = {}  # No Retry-After
+            mock_resp.raw = Mock()
+            mock_resp.raw.read.return_value = b''
+            mock_get.return_value = mock_resp
+            
+            manager = IndexerManager(settings_mock)
+            results = manager.search(query='test', categories=[2000], limit=100)
+            
+            assert results == []
+            state = manager._get_state('ix1')
+            
+            # First failure: 60s backoff (level 0: 60 * 2^0 = 60)
+            assert state.backoff_seconds == INITIAL_BACKOFF
+            assert state.backoff_level == 1
+            assert state.is_backed_off(1000.0) is True
+            assert state.is_backed_off(1000.0 + INITIAL_BACKOFF - 1) is True
+            assert state.is_backed_off(1000.0 + INITIAL_BACKOFF + 1) is False
 
 
 def test_exponential_backoff_500_error():
-    """500 errors trigger 5min backoff."""
-    from app.indexer_manager import IndexerManager
+    """500 errors trigger exponential backoff with mocked clock."""
+    from app.indexer_manager import IndexerManager, INITIAL_BACKOFF
     
     settings_mock = Mock()
-    settings_mock.get.return_value = [
-        {
-            'id': 'ix1',
-            'name': 'Test',
-            'url': 'http://test.example.com',
-            'api_key': 'key',
-            'type': 'torznab',
-            'enabled': True,
-            'priority': 10,
-        }
-    ]
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Test',
+                    'url': 'http://test.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 10,
+                }
+            ]
+        elif key.startswith('indexer.'):
+            return default
+        return default
     
-    with patch('app.indexer_manager.requests.get') as mock_get:
-        mock_resp = Mock()
-        mock_resp.status_code = 500
-        mock_get.return_value = mock_resp
+    settings_mock.get.side_effect = settings_get
+    
+    with patch('app.indexer_manager.time.time') as mock_time:
+        current_time = 1000.0
+        mock_time.return_value = current_time
         
-        manager = IndexerManager(settings_mock)
-        results = manager.search(query='test', categories=[2000], limit=100)
-        
-        assert results == []
-        state = manager._get_state('ix1')
-        assert state.backoff_seconds == 300  # 5 minutes
+        with patch('app.indexer_manager.requests.get') as mock_get:
+            mock_resp = Mock()
+            mock_resp.status_code = 500
+            mock_resp.raw = Mock()
+            mock_resp.raw.read.return_value = b''
+            mock_get.return_value = mock_resp
+            
+            manager = IndexerManager(settings_mock)
+            
+            # First failure: 60s
+            results = manager.search(query='test', categories=[2000], limit=100)
+            assert results == []
+            state = manager._get_state('ix1')
+            assert state.backoff_seconds == INITIAL_BACKOFF
+            assert state.backoff_level == 1
+            
+            # Advance time past first backoff
+            current_time += INITIAL_BACKOFF + 10
+            mock_time.return_value = current_time
+            
+            # Second failure: 120s (60 * 2^1)
+            results = manager.search(query='test2', categories=[2000], limit=100)
+            assert results == []
+            assert state.backoff_seconds == INITIAL_BACKOFF * 2
+            assert state.backoff_level == 2
+            
+            # Success clears backoff level
+            mock_resp.status_code = 200
+            mock_resp.raw.read.return_value = b'<rss><channel></channel></rss>'
+            mock_resp.raise_for_status = Mock()
+            
+            current_time += INITIAL_BACKOFF * 2 + 10
+            mock_time.return_value = current_time
+            
+            results = manager.search(query='test3', categories=[2000], limit=100)
+            assert state.backoff_level == 0  # Reset on success
 
 
 # ---- Settings API Tests ----
@@ -1159,17 +1239,22 @@ def test_normalized_result_for_sonarr():
     from app.indexer_manager import IndexerManager
     
     settings_mock = Mock()
-    settings_mock.get.return_value = [
-        {
-            'id': 'ix1',
-            'name': 'Test',
-            'url': 'http://test.example.com',
-            'api_key': 'key',
-            'type': 'torznab',
-            'enabled': True,
-            'priority': 10,
-        }
-    ]
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Test',
+                    'url': 'http://test.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 10,
+                }
+            ]
+        return default
+    
+    settings_mock.get.side_effect = settings_get
     
     xml_response = """<?xml version="1.0"?>
 <rss><channel>
