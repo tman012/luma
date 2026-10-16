@@ -49,7 +49,14 @@ class HeroCache:
         self.session = requests.Session()
 
         # Ensure cache directory exists
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        except (FileNotFoundError, PermissionError):
+            # In test environment, use temp directory
+            import tempfile
+            self.cache_dir = Path(tempfile.gettempdir()) / "luma_hero_cache"
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            self.cache_json = self.cache_dir / "hero_cache.json"
 
     def init_from_settings(self, settings_manager):
         """Re-initialise API keys and config from a SettingsManager instance.
