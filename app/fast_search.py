@@ -733,7 +733,7 @@ class FastSearchIndex:
 
             # Calculate match score
             title = item['title']
-            title_norm = item.get('title_normalized', normalize_text(title))
+            title_norm = item['title_normalized']  # always set at index build; no per-item normalize
             
             if use_fuzzy:
                 match_score, match_type = fuzzy_match_score(q, title, q_norm, title_norm)
