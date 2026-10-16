@@ -92,7 +92,7 @@ def test_gunicorn_conf():
     conf = _load_gunicorn_conf()
     assert conf.workers == 1
     assert conf.threads == 8
-    assert conf.worker_class == 'gthread'
+    assert conf.worker_class == 'app.tls_guard.TLSRejectingThreadWorker'
     with mock.patch('app.main.start_services') as start:
         conf.post_worker_init(mock.Mock(pid=123))
     import app.main
