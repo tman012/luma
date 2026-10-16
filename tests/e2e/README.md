@@ -44,3 +44,13 @@ If you need to run tests with custom mock servers:
 Env: LUMA_E2E_BASE_URL (default: http://127.0.0.1:5199), LUMA_MOCK_URL (default: http://127.0.0.1:5299), LUMA_E2E_API_KEY, LUMA_E2E_USER/PIN, LUMA_E2E_SHOTS.
 
 **Never use port 5199 or shared /app during testing** - use private directories and spare ports to avoid conflicts.
+
+### Serve this branch's SPA
+
+Build the frontend into a private static dir and point Luma at it, so e2e
+never runs against an old shared build:
+
+    STATIC=$(mktemp -d)/static && mkdir -p $STATIC && cp -r static/. $STATIC/
+    (cd frontend && npm ci && npm run build -- --outDir $STATIC/spa --emptyOutDir)
+    export FLASK_STATIC_FOLDER=$STATIC
+    export LUMA_DATA_DIR=$(mktemp -d) LUMA_CACHE_DIR=$(mktemp -d)   # hero images go to $LUMA_CACHE_DIR/hero

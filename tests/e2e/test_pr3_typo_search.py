@@ -3,7 +3,7 @@
 Start the mock upstreams + Luma first (see tests/e2e/README.md).
 Timings are appended to $LUMA_E2E_SHOTS/timings.jsonl.
 """
-import json, re, time, pytest
+import json, os, re, time, pytest
 from conftest import BASE, SHOTS
 
 pytestmark = pytest.mark.e2e
@@ -143,22 +143,18 @@ def test_pwa_manifest_and_sw(page):
 
 # ---------- Hero cache ----------
 def test_hero_static_served(api):
-    import os, pathlib
-    # Use configured HERO_CACHE_DIR from environment
-    hero_dir = os.environ.get("HERO_CACHE_DIR")
-    if not hero_dir:
-        # Default: LUMA_CACHE_DIR/hero
-        luma_cache = os.environ.get("LUMA_CACHE_DIR", "/app/cache")
-        hero_dir = f"{luma_cache}/hero"
-    
+    """A file in the configured hero cache dir is served at /static/hero_cache/."""
+    import pathlib
+    # Same resolution as the app: HERO_CACHE_DIR, else $LUMA_CACHE_DIR/hero.
+    hero_dir = os.environ.get("HERO_CACHE_DIR") or os.path.join(
+        os.environ.get("LUMA_CACHE_DIR", "/app/cache"), "hero")
     p = pathlib.Path(hero_dir) / "__qa_probe.jpg"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(b"\xff\xd8\xff\xe0qa")
     try:
-        # Hero images are now served from the cache directory via Flask static_folder config
-        # The test needs to know the URL path where they're served
-        # For now, assume standard /static/hero/ path (configured in Flask)
-        r = api.get("/static/hero/__qa_probe.jpg"); assert r.ok, r.status
+        r = api.get("/static/hero_cache/__qa_probe.jpg")
+        assert r.ok, r.status
+        assert r.body() == b"\xff\xd8\xff\xe0qa"
     finally:
         p.unlink(missing_ok=True)
 
