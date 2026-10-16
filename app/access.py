@@ -21,6 +21,7 @@ requests are treated as local (included in pin_remote exemption).
 import ipaddress
 import json
 import logging
+import os
 import threading
 import time
 from pathlib import Path
@@ -305,12 +306,13 @@ def init_home_wan_tracking(settings) -> None:
     # Load existing state
     _load_home_ips()
     
-    # Start background refresh thread
-    def _background_refresh():
-        time.sleep(2)  # Small startup delay
-        _refresh_home_wan_ip()
-        _periodic_refresh()
-    
-    threading.Thread(target=_background_refresh, name='home-wan-refresh', daemon=True).start()
+    # Start background refresh thread (skip in test mode)
+    if not os.getenv('LUMA_SKIP_BACKGROUND_THREADS'):
+        def _background_refresh():
+            time.sleep(2)  # Small startup delay
+            _refresh_home_wan_ip()
+            _periodic_refresh()
+        
+        threading.Thread(target=_background_refresh, name='home-wan-refresh', daemon=True).start()
     
     logger.info('[access] home WAN tracking initialized (%d IPs known)', len(_home_ips))

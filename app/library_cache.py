@@ -24,8 +24,8 @@ class LibraryCache:
         try:
             self.cache_dir.mkdir(exist_ok=True, parents=True)
         except (FileNotFoundError, PermissionError) as e:
-            logger.error('[library_cache] Cache directory not writable: %s', self.cache_dir)
-            raise RuntimeError(f"Library cache directory not writable: {self.cache_dir}") from e
+            logger.error('[library_cache] LUMA_CACHE_DIR not writable: %s -> %s', cache_root, self.cache_dir)
+            raise RuntimeError(f"Library cache directory not writable: LUMA_CACHE_DIR={cache_root} -> {self.cache_dir}") from e
         self.db_path = self.cache_dir / "library_cache.db"
         self.update_interval = 60  # 1 minute for library data
         self.last_update = {}
@@ -925,5 +925,24 @@ class LibraryCache:
             return {}
 
 
-# Create global instance
-library_cache = LibraryCache()
+# Global instance (lazy initialization)
+_library_cache_instance = None
+
+def _get_library_cache():
+    """Get or create the global library cache instance."""
+    global _library_cache_instance
+    if _library_cache_instance is None:
+        _library_cache_instance = LibraryCache()
+    return _library_cache_instance
+
+
+class _LibraryCacheLazy:
+    """Lazy wrapper for library cache to defer initialization until first use."""
+    def __getattr__(self, name):
+        return getattr(_get_library_cache(), name)
+    
+    def __call__(self, *args, **kwargs):
+        return _get_library_cache()(*args, **kwargs)
+
+
+library_cache = _LibraryCacheLazy()

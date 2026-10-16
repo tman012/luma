@@ -25,8 +25,8 @@ class ExploreCache:
         try:
             self.cache_dir.mkdir(exist_ok=True, parents=True)
         except (FileNotFoundError, PermissionError) as e:
-            logger.error('[explore_cache] Cache directory not writable: %s', self.cache_dir)
-            raise RuntimeError(f"Explore cache directory not writable: {self.cache_dir}") from e
+            logger.error('[explore_cache] LUMA_CACHE_DIR not writable: %s -> %s', cache_root, self.cache_dir)
+            raise RuntimeError(f"Explore cache directory not writable: LUMA_CACHE_DIR={cache_root} -> {self.cache_dir}") from e
         self.db_path = self.cache_dir / "explore_cache.db"
         self.update_interval = 900  # 15 minutes
         self.last_update = None
@@ -383,5 +383,24 @@ class ExploreCache:
             if conn:
                 conn.close()
 
-# Global instance
-explore_cache = ExploreCache()
+# Global instance (lazy initialization)
+_explore_cache_instance = None
+
+def _get_explore_cache():
+    """Get or create the global explore cache instance."""
+    global _explore_cache_instance
+    if _explore_cache_instance is None:
+        _explore_cache_instance = ExploreCache()
+    return _explore_cache_instance
+
+
+class _ExploreCacheLazy:
+    """Lazy wrapper for explore cache to defer initialization until first use."""
+    def __getattr__(self, name):
+        return getattr(_get_explore_cache(), name)
+    
+    def __call__(self, *args, **kwargs):
+        return _get_explore_cache()(*args, **kwargs)
+
+
+explore_cache = _ExploreCacheLazy()

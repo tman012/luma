@@ -372,15 +372,17 @@ config = Config()
 settings = SettingsManager()
 logger.info(f"Settings loaded from {settings.path}")
 
-# Re-initialise hero_cache with values from settings (it was created at
-# module-import time before the settings object existed).
-hero_cache.init_from_settings(settings)
+# Skip initialization in test mode (will be initialized on demand)
+if not os.getenv('LUMA_SKIP_BACKGROUND_THREADS'):
+    # Re-initialise hero_cache with values from settings (it was created at
+    # module-import time before the settings object existed).
+    hero_cache.init_from_settings(settings)
 
-# Initialize Plex service from settings
-plex_service.update_config(
-    settings.get('plex.url', ''),
-    settings.get('plex.token', ''),
-)
+    # Initialize Plex service from settings
+    plex_service.update_config(
+        settings.get('plex.url', ''),
+        settings.get('plex.token', ''),
+    )
 
 # Ownership cache - stores ownership check results to avoid slow network DB queries
 # Cache entries expire after 5 minutes

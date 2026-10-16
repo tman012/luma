@@ -532,7 +532,27 @@ class HeroCache:
 
 
 # Singleton instance
-hero_cache = HeroCache()
+# Global instance (lazy initialization)
+_hero_cache_instance = None
+
+def _get_hero_cache():
+    """Get or create the global hero cache instance."""
+    global _hero_cache_instance
+    if _hero_cache_instance is None:
+        _hero_cache_instance = HeroCache()
+    return _hero_cache_instance
+
+
+class _HeroCacheLazy:
+    """Lazy wrapper for hero cache to defer initialization until first use."""
+    def __getattr__(self, name):
+        return getattr(_get_hero_cache(), name)
+    
+    def __call__(self, *args, **kwargs):
+        return _get_hero_cache()(*args, **kwargs)
+
+
+hero_cache = _HeroCacheLazy()
 
 
 def refresh_hero_cache():
