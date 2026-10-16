@@ -222,9 +222,11 @@ def _guard_save() -> None:
         logger.warning('Tracker guard state not saved: %s', e)
 
 
+_SECRET_NAMES = r'(?:api[_-]?key|apikey|passkey|key|token|secret|password|auth|cookie|sid|uid|pid|rsskey|torrent_pass)'
 _SECRET_PATTERNS = [
-    re.compile(r'(?i)((?:api[_-]?key|apikey|passkey|token|secret|password|auth|cookie|sid|uid|pid)'
-               r'["\']?\s*[=:]\s*["\']?)[^\s&"\'<>,;]+'),
+    # name=value, name: value, "name": "value", and URL-encoded name%3Dvalue
+    # (any value length, so short passkeys and tokens are covered too)
+    re.compile(r'(?i)((?:(?<![A-Za-z0-9_])|(?<=%3[fF])|(?<=%26))' + _SECRET_NAMES + r'["\']?\s*(?:[=:]|%3[dD]|%3[aA])\s*["\']?)[^\s&"\'<>,;%]+(?:%[0-9A-Fa-f]{2}[^\s&"\'<>,;%]*)*'),
     re.compile(r'(?i)(bearer\s+)[^\s"\'<>,;]+'),
     re.compile(r'()\b[A-Za-z0-9]{24,}\b'),          # long keys and hashes
 ]
