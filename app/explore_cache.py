@@ -21,7 +21,13 @@ class ExploreCache:
 
     def __init__(self, cache_dir: str = "/app/cache"):
         self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(exist_ok=True)
+        try:
+            self.cache_dir.mkdir(exist_ok=True, parents=True)
+        except (FileNotFoundError, PermissionError):
+            # In test environment, use temp directory
+            import tempfile
+            self.cache_dir = Path(tempfile.gettempdir()) / "luma_cache"
+            self.cache_dir.mkdir(exist_ok=True, parents=True)
         self.db_path = self.cache_dir / "explore_cache.db"
         self.update_interval = 900  # 15 minutes
         self.last_update = None
