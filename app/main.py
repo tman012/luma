@@ -996,7 +996,72 @@ def _auth_guard():
             # For HTML pages, redirect to login
             return redirect(f'/login?next={request.path}')
 
-# Routes — React SPA helper
+# CSRF protection for API state-changing requests (must run after load_current_user)
+@app.before_request
+def _csrf_api_guard():
+    """Check Origin/Referer for cookie-authenticated POST/PUT/PATCH/DELETE on /api/*.
+    
+    Protects against CSRF attacks by validating same-origin on state-changing requests.
+    Preserves LAN/kiosk usage and request portal operations.
+    """
+    # Only check state-changing methods
+    if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
+        return None
+    
+    # Only check API routes
+    if not request.path.startswith('/api/'):
+        return None
+    
+    # Skip request portal endpoints (they have their own CSRF protection)
+    if request.path.startswith('/api/request/'):
+        return None
+    
+    # Skip if not authenticated via session cookie
+    if not g.current_user:
+        return None
+    
+    # Skip if authenticated via API key (not cookie-based)
+    if request.headers.get("X-API-Key"):
+        return None
+    
+    # Skip if this is an implicit user (LAN/kiosk mode - not session-based)
+    if getattr(g, 'implicit_user', False):
+        return None
+    
+    # Validate Origin or Referer header
+    origin = request.headers.get('Origin')
+    referer = request.headers.get('Referer')
+    
+    if not origin and not referer:
+        # No Origin or Referer - reject
+        return jsonify({"error": "CSRF validation failed: missing Origin/Referer"}), 403
+    
+    # Get expected host and scheme
+    expected_host = request.host
+    expected_scheme = request.scheme
+    
+    # Check Origin
+    if origin:
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(origin)
+            if parsed.scheme == expected_scheme and parsed.netloc == expected_host:
+                return None  # Valid
+        except Exception:
+            pass
+    
+    # Check Referer
+    if referer:
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(referer)
+            if parsed.scheme == expected_scheme and parsed.netloc == expected_host:
+                return None  # Valid
+        except Exception:
+            pass
+    
+    # Neither Origin nor Referer matched
+    return jsonify({"error": "CSRF validation failed: invalid Origin/Referer"}), 403
 def _serve_spa():
     """Serve the React SPA index.html (from static/spa/)."""
     spa_index = os.path.join(app.static_folder, 'spa', 'index.html')
