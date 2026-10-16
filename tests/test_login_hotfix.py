@@ -155,7 +155,7 @@ def test_login_page_theme_and_logo(test_app):
 def test_service_worker_never_caches_auth_pages():
     sw = (ROOT / 'static' / 'sw.js').read_text()
     assert "path === '/login'" in sw and "path === '/logout'" in sw
-    assert 'resp.redirected' in sw and 'no-store' in sw
+    assert 'resp.redirected' in sw and "'X-Luma-App-Shell'" in sw
 
 
 def test_auth_api_responses_are_no_store(test_app):

@@ -473,7 +473,7 @@ def _prefix_image_urls(response):
 @app.after_request
 def _auth_api_no_store(response):
     """Sign-in, sign-out and session responses are never cached."""
-    if request.path.startswith('/api/auth/'):
+    if request.path.startswith('/api/auth/') or request.path in ('/login', '/logout'):
         response.headers['Cache-Control'] = 'no-store, max-age=0'
     return response
 
@@ -1539,6 +1539,9 @@ def _serve_spa():
             html = html.replace('src="/static/', f'src="{url_base}/static/')
         
         resp = Response(html, mimetype='text/html')
+        # Marks the real app page: the only response the service worker may
+        # keep as its offline copy.
+        resp.headers['X-Luma-App-Shell'] = '1'
         resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         resp.headers['Pragma'] = 'no-cache'
         resp.headers['Expires'] = '0'
@@ -8929,13 +8932,14 @@ def auth_login():
                             'retry_after': wait}), 429
 
         # Check user status before full auth — try email first, then name
-        _pre = user_auth.find_user(identifier, email)
-        if _pre and _pre.get('status', 'active') == 'pending':
+        # Password first; the account status is only revealed to its owner.
+        user = user_auth.authenticate(identifier, pin, email=email, any_status=True)
+        if user and user.get('status', 'active') == 'pending':
             return jsonify({'success': False, 'error': 'Your account is pending admin approval. Please try again later.'}), 403
-        if _pre and _pre.get('status', 'active') == 'denied':
+        if user and user.get('status', 'active') == 'denied':
             return jsonify({'success': False, 'error': 'Your account request was denied.'}), 403
-
-        user = user_auth.authenticate(identifier, pin, email=email)
+        if user and user.get('status', 'active') != 'active':
+            user = None
         if not user:
             login_limiter.record_failure(client_ip, identifier)
             return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
@@ -9002,13 +9006,11 @@ def auth_register():
         if '@' not in email or '.' not in email.split('@')[-1]:
             return jsonify({'success': False, 'error': 'Please enter a valid email address'}), 400
 
-        # Check for existing user by name or email
-        existing = user_auth.get_user_by_name(name)
-        if existing:
-            return jsonify({'success': False, 'error': 'An account with that name already exists'}), 409
-        existing_email = user_auth.get_user_by_email(email)
-        if existing_email:
-            return jsonify({'success': False, 'error': 'An account with that email already exists'}), 409
+        # Names and emails share one sign-in namespace (case-insensitive)
+        problem = user_auth.identity_conflict(name, email)
+        if problem:
+            code = 400 if '@' in problem else 409
+            return jsonify({'success': False, 'error': problem}), code
 
         user = user_auth.create_user(name, pin, is_admin=False, status='pending', email=email)
         user_id = user['id']

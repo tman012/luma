@@ -222,7 +222,7 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
 <body>
     <main class="card">
         <div class="brand">
-            <img src="{{ url_for('static', filename='images/icon-192.png') }}" alt="Luma">
+            <img src="{{ url_for('static', filename='images/icon-192.png') }}" alt="">
             <h1>Luma</h1>
         </div>
         {% if error %}
@@ -330,11 +330,12 @@ def login():
         login_limiter.record_failure(client_ip, username)
         logger.info(f"[auth] Failed login attempt for user {username} from {client_ip}")
         return redirect(url_for('auth.login', 
-                               error='Invalid username or password',
+                               error='Wrong email, username or password.',
                                next=safe_next))
     
-    # Login successful - clear rate limit
+    # Login successful - clear rate limit; the form token is single-use
     login_limiter.record_success(client_ip, username)
+    session.pop('csrf_token', None)
     
     # Create session
     token = user_auth.create_session(user['id'])
