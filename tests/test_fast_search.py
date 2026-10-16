@@ -1809,7 +1809,6 @@ class TestHeroCacheHealing(unittest.TestCase):
         """Set up test with mock hero cache and Flask test client."""
         from app.hero_cache import hero_cache
         from app.main import app as flask_app
-        import tempfile
         
         self.app = flask_app
         
@@ -1819,27 +1818,34 @@ class TestHeroCacheHealing(unittest.TestCase):
         self.orig_cache_json = self.hero_cache.cache_json
         self.orig_cooldown = self.hero_cache._heal_cooldown
         
-        # Create temp directories
-        self.temp_dir = Path(tempfile.mkdtemp())
-        self.temp_cache_dir = self.temp_dir / 'hero_cache'
+        # Use /app/static/hero_cache directly so Flask can serve the files
+        # Tests create/delete specific test files to avoid conflicts
+        self.temp_cache_dir = Path('/app/static/hero_cache')
         self.temp_cache_dir.mkdir(parents=True, exist_ok=True)
-        self.temp_json = self.temp_dir / 'hero.json'
+        self.temp_json = Path('/tmp/test_hero_cache.json')
         
         # Override cache paths
         self.hero_cache.cache_dir = self.temp_cache_dir
         self.hero_cache.cache_json = self.temp_json
         self.hero_cache._heal_cooldown = 1  # 1 second for tests
         self.hero_cache._last_heal_time = 0  # Reset cooldown
+        
+        # Track test files for cleanup
+        self.test_files = []
     
     def tearDown(self):
-        """Clean up temp files."""
-        import shutil
+        """Clean up test files."""
         self.hero_cache.cache_dir = self.orig_cache_dir
         self.hero_cache.cache_json = self.orig_cache_json
         self.hero_cache._heal_cooldown = self.orig_cooldown
         self.hero_cache._last_heal_time = 0
-        if self.temp_dir.exists():
-            shutil.rmtree(self.temp_dir)
+        
+        # Clean up test files
+        if self.temp_json.exists():
+            self.temp_json.unlink()
+        for test_file in self.test_files:
+            if test_file.exists():
+                test_file.unlink()
     
     def test_endpoint_returns_build_hero_movies_with_all_fields(self):
         """Test /api/hero/content returns _build_hero_movies with all required fields preserved."""
@@ -1869,8 +1875,11 @@ class TestHeroCacheHealing(unittest.TestCase):
         }]
         
         # Create the cached images
-        (self.temp_cache_dir / 'movie_1_clearart.jpg').write_text('fake')
-        (self.temp_cache_dir / 'movie_1_backdrop.jpg').write_text('fake')
+        test_file1 = self.temp_cache_dir / 'movie_1_clearart.jpg'
+        test_file2 = self.temp_cache_dir / 'movie_1_backdrop.jpg'
+        test_file1.write_text('fake')
+        test_file2.write_text('fake')
+        self.test_files.extend([test_file1, test_file2])
         
         # Save cache
         with open(self.temp_json, 'w') as f:
@@ -1905,8 +1914,8 @@ class TestHeroCacheHealing(unittest.TestCase):
                 for field in optional_fields:
                     self.assertIn(field, movie, f"_build_hero_movies must include {field}")
     
-    def test_healing_covers_backdrop_and_clearart(self):
-        """Test missing files trigger heal, then files serve 200 with mocked upstream fetch."""
+    def test_healing_covers_backdrop_poster_clearart(self):
+        """Test missing backdrop, poster, and clearart files trigger heal and serve 200."""
         import json
         import time
         
@@ -1925,7 +1934,9 @@ class TestHeroCacheHealing(unittest.TestCase):
             {
                 'rating_key': 2,
                 'title': 'Test Movie 2',
-                'poster_url': '/static/hero_cache/movie_2_poster.jpg',  # Note: poster not in cache_file format
+                'poster_url': '/static/hero_cache/movie_2_poster.jpg',
+                'poster_cache_file': 'movie_2_poster.jpg',
+                'poster_upstream_url': 'http://plex.local/poster2.jpg',
                 'backdrop_url': '/static/hero_cache/movie_2_backdrop.jpg',
                 'backdrop_cache_file': 'movie_2_backdrop.jpg',
                 'backdrop_upstream_url': 'http://fanart.tv/test_backdrop2.jpg',
@@ -1942,7 +1953,9 @@ class TestHeroCacheHealing(unittest.TestCase):
         def mock_download(url, filename):
             download_calls.append((url, filename))
             # Create actual file so it can be served
-            (self.temp_cache_dir / filename).write_text(f'healed-{filename}')
+            test_file = self.temp_cache_dir / filename
+            test_file.write_text(f'healed-{filename}')
+            self.test_files.append(test_file)
             return f"/static/hero_cache/{filename}"
         self.hero_cache.download_image = mock_download
         
@@ -1954,25 +1967,74 @@ class TestHeroCacheHealing(unittest.TestCase):
         # Wait for background healing to complete
         time.sleep(0.5)
         
-        # Verify healing covered backdrop AND clearart
-        self.assertGreaterEqual(len(download_calls), 3, "Should heal backdrop1, clearart1, backdrop2")
-        urls = [call[0] for call in download_calls]
+        # Verify healing covered backdrop, poster AND clearart
+        self.assertGreaterEqual(len(download_calls), 4, "Should heal backdrop1, clearart1, poster2, backdrop2")
         filenames = [call[1] for call in download_calls]
         
         # Check specific files were healed
         self.assertIn('movie_1_backdrop.jpg', filenames, "Should heal movie_1_backdrop.jpg")
-        self.assertIn('movie_1_clearart.jpg', filenames, "Should heal movie_1_clearart.jpg (clearart coverage)")
+        self.assertIn('movie_1_clearart.jpg', filenames, "Should heal movie_1_clearart.jpg")
+        self.assertIn('movie_2_poster.jpg', filenames, "Should heal movie_2_poster.jpg (poster coverage)")
         self.assertIn('movie_2_backdrop.jpg', filenames, "Should heal movie_2_backdrop.jpg")
         
-        # Verify files now exist and can be served (simulate serving)
-        self.assertTrue((self.temp_cache_dir / 'movie_1_backdrop.jpg').exists())
-        self.assertTrue((self.temp_cache_dir / 'movie_1_clearart.jpg').exists())
-        
-        # Verify healed files have content
-        self.assertEqual((self.temp_cache_dir / 'movie_1_backdrop.jpg').read_text(), 'healed-movie_1_backdrop.jpg')
+        # Now verify files serve 200 through actual test client GET requests
+        with self.app.test_client() as client:
+            # Test each healed file serves successfully
+            resp = client.get('/static/hero_cache/movie_1_backdrop.jpg')
+            self.assertEqual(resp.status_code, 200, "movie_1_backdrop.jpg should serve 200")
+            self.assertIn(b'healed-movie_1_backdrop.jpg', resp.data)
+            
+            resp = client.get('/static/hero_cache/movie_1_clearart.jpg')
+            self.assertEqual(resp.status_code, 200, "movie_1_clearart.jpg should serve 200")
+            
+            resp = client.get('/static/hero_cache/movie_2_poster.jpg')
+            self.assertEqual(resp.status_code, 200, "movie_2_poster.jpg should serve 200")
+            
+            resp = client.get('/static/hero_cache/movie_2_backdrop.jpg')
+            self.assertEqual(resp.status_code, 200, "movie_2_backdrop.jpg should serve 200")
         
         # Restore
         self.hero_cache.download_image = orig_download
+    
+    def test_old_format_without_upstream_url_heals(self):
+        """Test old hero_content.json entries without *_upstream_url still heal via full refresh."""
+        import json
+        import time
+        
+        # Create cache entry in OLD format (no upstream URLs, only paths)
+        content = [{
+            'rating_key': 1,
+            'title': 'Old Format Movie',
+            'backdrop_url': '/static/hero_cache/movie_1_backdrop.jpg',  # Old format: just path
+            'clearart_url': '/static/hero_cache/movie_1_clearart.jpg',  # No cache_file or upstream_url
+            'poster_url': '/api/img/plex?url=/library/metadata/1/thumb',  # Proxy URL (not cached)
+        }]
+        
+        # Save old format cache WITHOUT creating image files
+        with open(self.temp_json, 'w') as f:
+            json.dump({'last_updated': '2024-01-01', 'movies': content}, f)
+        
+        # Mock refresh_hero_content to track if full refresh triggered
+        refresh_called = [False]
+        orig_refresh = self.hero_cache.refresh_hero_content
+        def mock_refresh():
+            refresh_called[0] = True
+            return []  # Return empty to avoid actual Plex calls
+        self.hero_cache.refresh_hero_content = mock_refresh
+        
+        # Call endpoint - should detect missing files and trigger full refresh
+        with self.app.test_client() as client:
+            resp = client.get('/api/hero/content')
+            self.assertEqual(resp.status_code, 200)
+        
+        # Wait for background healing
+        time.sleep(0.5)
+        
+        # Verify full refresh was triggered for old format
+        self.assertTrue(refresh_called[0], "Old format without upstream URLs should trigger full refresh")
+        
+        # Restore
+        self.hero_cache.refresh_hero_content = orig_refresh
     
     def test_failed_heal_backoff(self):
         """Test failed heal uses exponential backoff (60s, 120s, ..., capped at 600s)."""
@@ -2035,7 +2097,9 @@ class TestHeroCacheHealing(unittest.TestCase):
         
         # Now make heal succeed
         def mock_download_success(url, filename):
-            (self.temp_cache_dir / filename).write_text('healed')
+            test_file = self.temp_cache_dir / filename
+            test_file.write_text('healed')
+            self.test_files.append(test_file)
             return f"/static/hero_cache/{filename}"
         self.hero_cache.download_image = mock_download_success
         

@@ -485,10 +485,20 @@ class HeroCache:
             if not backdrop_path and movie.get('user_art_url'):
                 backdrop_path = f"/api/img/plex?url=/library/metadata/{rating_key}/art"
 
-            # Build poster URL from Plex via proxy (not cached)
+            # Cache poster from Plex if available
+            poster_cache_file = None
+            poster_upstream_url = None
             poster_url = None
             if movie.get('user_thumb_url'):
-                poster_url = f"/api/img/plex?url=/library/metadata/{rating_key}/thumb"
+                # Build upstream URL for Plex poster
+                plex_poster_url = f"{self.plex_url}/library/metadata/{rating_key}/thumb?X-Plex-Token={self.plex_token}"
+                poster_cache_file = f"movie_{rating_key}_poster.jpg"
+                poster_upstream_url = plex_poster_url
+                # Cache the poster
+                poster_url = self.download_image(plex_poster_url, poster_cache_file)
+                # Fallback to proxy if caching fails
+                if not poster_url:
+                    poster_url = f"/api/img/plex?url=/library/metadata/{rating_key}/thumb"
 
             # Build hero content entry
             hero_entry = {
@@ -516,6 +526,9 @@ class HeroCache:
             if backdrop_cache_file:
                 hero_entry['backdrop_cache_file'] = backdrop_cache_file
                 hero_entry['backdrop_upstream_url'] = backdrop_upstream_url
+            if poster_cache_file:
+                hero_entry['poster_cache_file'] = poster_cache_file
+                hero_entry['poster_upstream_url'] = poster_upstream_url
 
             hero_content.append(hero_entry)
             rt_display = movie.get('rt_score') if movie.get('rt_score') is not None else 'N/A'
@@ -574,6 +587,18 @@ class HeroCache:
                 if not (self.cache_dir / cache_file).exists():
                     # No upstream URL in old format - signal full refresh needed
                     missing.append((idx, 'backdrop', cache_file, None))
+            
+            # Check poster (new format: poster_cache_file + poster_upstream_url)
+            if item.get('poster_cache_file'):
+                cache_file = item['poster_cache_file']
+                upstream_url = item.get('poster_upstream_url')
+                if not (self.cache_dir / cache_file).exists():
+                    missing.append((idx, 'poster', cache_file, upstream_url))
+            # Old format: try to derive filename from poster_url path
+            elif item.get('poster_url') and item['poster_url'].startswith('/static/hero_cache/'):
+                cache_file = item['poster_url'].replace('/static/hero_cache/', '')
+                if not (self.cache_dir / cache_file).exists():
+                    missing.append((idx, 'poster', cache_file, None))
             
             # Check clearart (new format: clearart_cache_file + clearart_upstream_url)
             if item.get('clearart_cache_file'):
