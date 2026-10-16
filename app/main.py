@@ -17321,8 +17321,7 @@ def _fetch_validated(url: str, *, allow_lan: bool, trusted_origin=None, api_key:
     loopback or LAN addresses only if it and every earlier hop are on
     *trusted_origin* (the configured Prowlarr or Torznab URL). On the configured
     Prowlarr origin only Prowlarr's download path (/<indexer id>/download) is
-    fetched; on the Torznab origin (Torznab backend only) only its download and
-    results paths. The API key goes only to the first
+    fetched; on the configured Torznab origin only its download and results paths. The API key goes only to the first
     hop's scheme, host and port. Returns {'magnet': uri} or
     {'body', 'mimetype', 'filename'}; raises IndexerDownloadError.
     """
@@ -17457,9 +17456,23 @@ def _is_torznab_download_path(url: str) -> bool:
     download path and /api/v2.0/indexers/<id>/results[/torznab][/api], all under
     the URL base that precedes /api/v2.0/ in the configured URL.
     """
-    from urllib.parse import urlsplit
+    from urllib.parse import unquote, urlsplit
     tpath = urlsplit((settings.get('indexer.torznab_url', '') or '').strip()).path.rstrip('/')
     path = urlsplit(url).path or ''
+    # Refuse anything a server could normalize into another path: backslashes,
+    # encoded slashes or backslashes (also double-encoded), and '.'/'..' segments.
+    decoded = path
+    for _ in range(4):
+        if '\\' in decoded or re.search(r'%(?:25)*(?:2f|5c)', decoded, re.IGNORECASE):
+            return False
+        if any(seg in ('.', '..') for seg in decoded.split('/')):
+            return False
+        nxt = unquote(decoded)
+        if nxt == decoded:
+            break
+        decoded = nxt
+    else:
+        return False
     cut = tpath.find('/api/v2.0/')
     prefix = re.escape(tpath[:cut] if cut >= 0 else '')
     return (path.rstrip('/') == tpath
@@ -17478,8 +17491,12 @@ def _active_backend_origin():
 
 def _backend_path_rules():
     """{origin: (path check, refusal message)} for backend servers that only serve downloads here."""
+    # Both rules apply whenever the backend URL is configured, whichever backend
+    # is active: the path allowlist only ever narrows what may be fetched. LAN
+    # trust is separate and is granted only for the active backend's origin
+    # (see _active_backend_origin and fetch_indexer_download).
     rules = {}
-    torznab = _torznab_origin() if _torznab_backend_active() else None
+    torznab = _torznab_origin()
     if torznab is not None:
         rules[torznab] = (_is_torznab_download_path,
                           'Only Torznab download links may be fetched from the Torznab server')

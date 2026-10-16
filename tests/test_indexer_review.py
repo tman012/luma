@@ -1462,3 +1462,72 @@ def test_result_routes_refuse_when_pin_required(all_results):
     with patch.object(main._access, 'needs_pin', return_value=True):
         for route in AUTH_ROUTES:
             assert main.app.test_client().get(route).status_code == 401
+
+
+# ---- Round 8: Torznab path normalization, token state, rule gating ----
+
+@pytest.mark.parametrize('path,ok', [
+    ('/jackett/dl/idx/', True),
+    ('/jackett/dl/idx', True),
+    ('/jackett/api/v2.0/indexers/x/results/torznab/api', True),
+    ('/jackett/dl/..', False),
+    ('/jackett/dl/.', False),
+    ('/jackett/dl/%2e%2e', False),
+    ('/jackett/dl/%2E%2E/', False),
+    ('/jackett/dl/%252e%252e', False),
+    ('/jackett/dl/%25252e%25252e', False),
+    ('/jackett/dl/a%2fb', False),
+    ('/jackett/dl/a%2Fb', False),
+    ('/jackett/dl/a%252fb', False),
+    ('/jackett/dl/a%25252Fb', False),
+    ('/jackett/dl/a%5cb', False),
+    ('/jackett/dl/a%5Cb', False),
+    ('/jackett/dl/a%255cb', False),
+    ('/jackett/dl/a\\b', False),
+    ('/jackett/dl/..\\api', False),
+    ('/jackett/api/v2.0/indexers/..%2f..%2fserver/results', False),
+])
+def test_torznab_path_normalization(route_env, path, ok):
+    main = route_env[0]
+    main.settings.store['indexer.torznab_url'] = 'http://192.168.1.50:9117/jackett/api/v2.0/indexers/all/results/torznab'
+    assert main._is_torznab_download_path('http://192.168.1.50:9117' + path) is ok
+
+
+def test_torznab_dotdot_grab_refused(torznab_lan):
+    main, adapter, pg, _ = torznab_lan
+    main.settings.store['indexer.allow_lan'] = True
+    r, qbit = _grab_as_user(main, JACKETT + '/dl/%2e%2e/api/v2.0/server/config')
+    assert r.status_code == 403 and pg.call_count == 0
+
+
+def test_torznab_token_needs_torznab_backend(torznab_lan):
+    main, adapter, pg, _ = torznab_lan
+    tok = adapter.manager.issue_download_token(JACKETT + '/dl/idx/?path=a', 'backend:torznab')
+    main.settings.store['indexer.provider'] = 'prowlarr'
+    r = _get(main, tok)
+    assert r.status_code == 409 and pg.call_count == 0
+
+
+def test_torznab_token_on_luma_backend_is_409(torznab_lan):
+    main, adapter, pg, _ = torznab_lan
+    tok = adapter.manager.issue_download_token(JACKETT + '/dl/idx/?path=a', 'backend:torznab')
+    main.settings.store['indexer.backend'] = 'luma'
+    assert _get(main, tok).status_code == 409 and pg.call_count == 0
+
+
+def test_torznab_host_change_is_409(torznab_lan):
+    main, adapter, pg, _ = torznab_lan
+    tok = adapter.manager.issue_download_token(JACKETT + '/dl/idx/?path=a', 'backend:torznab')
+    main.settings.store['indexer.torznab_url'] = 'http://192.168.1.51:9117/api/v2.0/indexers/all/results/torznab'
+    r = _get(main, tok)
+    assert r.status_code == 409 and r.get_json()['error'] == 'Indexer configuration changed'
+    assert pg.call_count == 0
+
+
+def test_torznab_path_rule_applies_when_backend_inactive(torznab_lan):
+    """Like Prowlarr's, the Torznab path rule holds whenever the URL is configured."""
+    main, adapter, pg, _ = torznab_lan
+    main.settings.store.update({'indexer.backend': 'luma', 'indexer.allow_lan': True})
+    r, qbit = _grab_as_user(main, JACKETT + '/api/v2.0/server/config')
+    assert r.status_code == 403 and pg.call_count == 0
+    assert 'Torznab' in r.get_json()['error']
