@@ -11,6 +11,7 @@ import { MobileCardNav, type CardItem } from './components/MobileCardNav';
 import { useSettings } from './useSettings';
 import { fetchRadarrProfiles, fetchSonarrProfiles, type QualityProfile } from '@/services/settingsApi';
 import { UsersStatusCard } from './UsersStatusCard';
+import { IndexerCard } from './IndexerCard';
 
 // -- Sonarr card (needs quality profile dropdown) -----------------
 
@@ -272,7 +273,7 @@ export function ServicesTab() {
     },
     {
       title: 'Indexer',
-      subtitle: 'Prowlarr or Torznab for Explore page',
+      subtitle: 'Manage Torznab/Newznab endpoints',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
