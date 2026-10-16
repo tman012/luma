@@ -143,7 +143,8 @@ def load_current_user():
         }
         return
 
-    token = request.cookies.get(LUMA_SESSION_COOKIE)
+    # Try both old and new session cookie names for compatibility
+    token = request.cookies.get(LUMA_SESSION_COOKIE) or request.cookies.get('luma_auth_session')
     g.current_user = user_auth.validate_session(token) if token else None
     g.implicit_user = False
     if g.current_user is None and not _access.needs_pin(settings, request):
@@ -950,10 +951,39 @@ from app import portal_guard
 _access.init_home_wan_tracking(settings)
 _request_portal.init_app(app, settings)
 
+# Authentication routes
+from app import auth_routes
+auth_routes.init_app(app)
+
 # Portal traffic guard (must be registered before other routes)
 @app.before_request
 def _portal_traffic_guard():
     return portal_guard.guard_portal_traffic(settings)
+
+# Authentication guard (must run after portal guard and load_current_user)
+@app.before_request
+def _auth_guard():
+    """Redirect to login if authentication is required and user not authenticated."""
+    # Skip for static files, auth routes, and request portal
+    if (request.path.startswith('/static/') or 
+        request.path.startswith('/login') or
+        request.path.startswith('/logout') or
+        request.path == '/api/request/unlock' or
+        request.path.startswith('/api/request/') and not request.path.startswith('/api/request/admin/')):
+        return None
+    
+    # Check if auth is required
+    auth_required = settings.get('security.auth_required', 'disabled_local')
+    
+    # If auth is enabled for everyone, or disabled for local but this is remote
+    if auth_required == 'enabled' or (auth_required == 'disabled_local' and not _access.is_local_request(request, settings)):
+        # Check if user is authenticated (not implicit)
+        if not g.current_user or g.implicit_user:
+            # For API calls, return 401
+            if request.path.startswith('/api/'):
+                return jsonify({"error": "Authentication required"}), 401
+            # For HTML pages, redirect to login
+            return redirect(f'/login?next={request.path}')
 
 # Routes — React SPA helper
 def _serve_spa():
