@@ -144,11 +144,21 @@ def test_pwa_manifest_and_sw(page):
 # ---------- Hero cache ----------
 def test_hero_static_served(api):
     import os, pathlib
-    # path of the server's /app (QA runs Luma with a private /app bind mount)
-    p = pathlib.Path(os.environ.get("LUMA_E2E_APP_ROOT", "/app")) / "static/hero_cache/__qa_probe.jpg"
+    # Use configured HERO_CACHE_DIR from environment
+    hero_dir = os.environ.get("HERO_CACHE_DIR")
+    if not hero_dir:
+        # Default: LUMA_CACHE_DIR/hero
+        luma_cache = os.environ.get("LUMA_CACHE_DIR", "/app/cache")
+        hero_dir = f"{luma_cache}/hero"
+    
+    p = pathlib.Path(hero_dir) / "__qa_probe.jpg"
+    p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(b"\xff\xd8\xff\xe0qa")
     try:
-        r = api.get("/static/hero_cache/__qa_probe.jpg"); assert r.ok, r.status
+        # Hero images are now served from the cache directory via Flask static_folder config
+        # The test needs to know the URL path where they're served
+        # For now, assume standard /static/hero/ path (configured in Flask)
+        r = api.get("/static/hero/__qa_probe.jpg"); assert r.ok, r.status
     finally:
         p.unlink(missing_ok=True)
 

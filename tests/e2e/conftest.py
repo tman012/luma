@@ -8,8 +8,10 @@ BASE = os.environ.get("LUMA_E2E_BASE_URL", "http://127.0.0.1:5199")
 MOCK = os.environ.get("LUMA_MOCK_URL", "http://127.0.0.1:5299")
 API_KEY = os.environ.get("LUMA_E2E_API_KEY", "qa-key")
 USER, PIN = os.environ.get("LUMA_E2E_USER", "qa"), os.environ.get("LUMA_E2E_PIN", "1234")
-SHOTS = os.environ.get("LUMA_E2E_SHOTS", "/workspace/luma-qa/pr3")
-os.makedirs(SHOTS, exist_ok=True)
+# LUMA_E2E_SHOTS must be set in environment; no hard-coded default
+SHOTS = os.environ.get("LUMA_E2E_SHOTS")
+if SHOTS:
+    os.makedirs(SHOTS, exist_ok=True)
 
 @pytest.fixture(scope="session")
 def pw():

@@ -25,13 +25,6 @@ from typing import List, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-# Configuration defaults (will be overridden by settings when available)
-# Hero cache storage: Images are served from /static/hero_cache (Flask static files).
-# Content JSON is stored in /app/data (the in-container persisted volume).
-# Hero cache is NOT part of LUMA_CACHE_DIR.
-CACHE_DIR = Path('/app/static/hero_cache')
-CACHE_JSON = Path('/app/data/hero_content.json')
-
 
 class HeroCache:
     """Manages hero section content caching from user's library."""
@@ -49,8 +42,19 @@ class HeroCache:
             self.plex_url = os.environ.get('PLEX_URL', '')
             self.plex_token = os.environ.get('PLEX_TOKEN', '')
             self.excluded_genres = ['Sport', 'Sports']
-        self.cache_dir = Path(cache_dir) if cache_dir else CACHE_DIR
-        self.cache_json = CACHE_JSON
+        
+        # Resolve HERO_CACHE_DIR once: HERO_CACHE_DIR env, else $LUMA_CACHE_DIR/hero
+        if cache_dir is not None:
+            self.cache_dir = Path(cache_dir)
+        else:
+            hero_dir_env = os.environ.get('HERO_CACHE_DIR')
+            if hero_dir_env:
+                self.cache_dir = Path(hero_dir_env)
+            else:
+                luma_cache = os.environ.get('LUMA_CACHE_DIR', '/app/cache')
+                self.cache_dir = Path(luma_cache) / 'hero'
+        
+        self.cache_json = Path('/app/data/hero_content.json')
         self.session = requests.Session()
         
         # Background healing state
@@ -61,16 +65,20 @@ class HeroCache:
         self._heal_backoff = 60  # Start with 60s after failed heal
         self._heal_backoff_max = 600  # Cap at 10 minutes
 
-        # Ensure cache directories exist
+        # Ensure cache directory exists (fail-fast)
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
         except (OSError, PermissionError) as e:
-            logger.warning(f"hero_cache: static directory {self.cache_dir} not writable: {e}")
+            error_msg = f"hero_cache: HERO_CACHE_DIR={self.cache_dir} not writable: {e}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
         
         try:
             self.cache_json.parent.mkdir(parents=True, exist_ok=True)
         except (OSError, PermissionError) as e:
-            logger.warning(f"hero_cache: data directory {self.cache_json.parent} not writable: {e}")
+            error_msg = f"hero_cache: data directory {self.cache_json.parent} not writable: {e}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
 
     def init_from_settings(self, settings_manager):
         """Re-initialise API keys and config from a SettingsManager instance.
@@ -327,23 +335,46 @@ class HeroCache:
 
         return images
 
+    def _sanitize_extension(self, url: str) -> str:
+        """Extract and sanitize file extension from URL.
+        
+        Returns lowercase alphanumeric extension (1-5 chars), else 'jpg'.
+        """
+        ext = url.split('.')[-1].split('?')[0].lower()
+        # Only keep alphanumeric, max 5 chars
+        if re.match(r'^[a-z0-9]{1,5}$', ext):
+            return ext
+        return 'jpg'
+    
     def download_image(self, url: str, filename: str) -> Optional[str]:
-        """Download an image and save to cache directory."""
+        """Download an image and save to cache directory.
+        
+        Returns the filename only (no path). URLs are built at response time.
+        """
         if not url:
             return None
 
         try:
             filepath = self.cache_dir / filename
+            tmp_filepath = self.cache_dir / f"{filename}.tmp"
             response = self.session.get(url, stream=True, timeout=30)
 
             if response.status_code == 200:
-                with open(filepath, 'wb') as f:
+                with open(tmp_filepath, 'wb') as f:
                     shutil.copyfileobj(response.raw, f)
+                # Atomic rename
+                os.replace(tmp_filepath, filepath)
                 logger.debug(f"Downloaded image: {filename}")
-                return f"/static/hero_cache/{filename}"
+                return filename
 
         except Exception as e:
             logger.error(f"Failed to download image {url}: {e}")
+            # Clean up tmp file if it exists
+            try:
+                if tmp_filepath.exists():
+                    tmp_filepath.unlink()
+            except:
+                pass
 
         return None
 
@@ -460,26 +491,32 @@ class HeroCache:
             # Cache clearart from fanart.tv if available
             clearart_cache_file = None
             clearart_upstream_url = None
+            clearart_path = None
             if fanart_images['clearart']:
-                ext = fanart_images['clearart'].split('.')[-1].split('?')[0]
+                ext = self._sanitize_extension(fanart_images['clearart'])
                 clearart_cache_file = f"movie_{rating_key}_clearart.{ext}"
                 clearart_upstream_url = fanart_images['clearart']
-                clearart_path = self.download_image(
+                downloaded = self.download_image(
                     fanart_images['clearart'],
                     clearart_cache_file
                 )
+                if downloaded:
+                    clearart_path = clearart_cache_file
 
             # Cache backdrop from fanart.tv if available
             backdrop_cache_file = None
             backdrop_upstream_url = None
+            backdrop_path = None
             if fanart_images['backdrop']:
-                ext = fanart_images['backdrop'].split('.')[-1].split('?')[0]
+                ext = self._sanitize_extension(fanart_images['backdrop'])
                 backdrop_cache_file = f"movie_{rating_key}_backdrop.{ext}"
                 backdrop_upstream_url = fanart_images['backdrop']
-                backdrop_path = self.download_image(
+                downloaded = self.download_image(
                     fanart_images['backdrop'],
                     backdrop_cache_file
                 )
+                if downloaded:
+                    backdrop_path = backdrop_cache_file
 
             # Fallback to Plex backdrop if fanart.tv doesn't have it
             if not backdrop_path and movie.get('user_art_url'):
@@ -490,15 +527,19 @@ class HeroCache:
             poster_upstream_url = None
             poster_url = None
             if movie.get('user_thumb_url'):
-                # Build upstream URL for Plex poster
-                plex_poster_url = f"{self.plex_url}/library/metadata/{rating_key}/thumb?X-Plex-Token={self.plex_token}"
+                # Store only the Plex path (no token) for security
+                plex_poster_path = f"/library/metadata/{rating_key}/thumb"
                 poster_cache_file = f"movie_{rating_key}_poster.jpg"
-                poster_upstream_url = plex_poster_url
+                poster_upstream_url = plex_poster_path
+                # Build full URL with token for download
+                plex_poster_url_with_token = f"{self.plex_url}{plex_poster_path}?X-Plex-Token={self.plex_token}"
                 # Cache the poster
-                poster_url = self.download_image(plex_poster_url, poster_cache_file)
+                downloaded = self.download_image(plex_poster_url_with_token, poster_cache_file)
+                if downloaded:
+                    poster_url = poster_cache_file
                 # Fallback to proxy if caching fails
                 if not poster_url:
-                    poster_url = f"/api/img/plex?url=/library/metadata/{rating_key}/thumb"
+                    poster_url = f"/api/img/plex?url={plex_poster_path}"
 
             # Build hero content entry
             hero_entry = {
@@ -558,12 +599,24 @@ class HeroCache:
             logger.error(f"Failed to save hero cache: {e}")
 
     def load_cache(self) -> List[Dict]:
-        """Load hero content from JSON file."""
+        """Load hero content from JSON file, stripping any Plex tokens for security."""
         try:
             if self.cache_json.exists():
                 with open(self.cache_json, 'r') as f:
                     data = json.load(f)
-                    return data.get('movies', [])
+                    movies = data.get('movies', [])
+                    # Migrate: strip any X-Plex-Token from persisted URLs
+                    for movie in movies:
+                        for url_key in ['poster_upstream_url', 'backdrop_upstream_url', 'clearart_upstream_url']:
+                            if url_key in movie and movie[url_key]:
+                                url = movie[url_key]
+                                if '?X-Plex-Token=' in url or '&X-Plex-Token=' in url:
+                                    # Strip token and extract just the path
+                                    import urllib.parse
+                                    parsed = urllib.parse.urlparse(url)
+                                    movie[url_key] = parsed.path
+                                    logger.info(f"Migrated {url_key}: stripped token from persisted URL")
+                    return movies
         except Exception as e:
             logger.error(f"Failed to load hero cache: {e}")
         return []
@@ -571,7 +624,7 @@ class HeroCache:
     def get_missing_images(self, content: List[Dict]) -> List[tuple]:
         """Check for missing image files, return list of (item_index, field_type, cache_filename, upstream_url) tuples.
         
-        Handles both new format (with cache_file + upstream_url keys) and old format (paths in _url keys).
+        Works with filenames stored in _url fields (no path prefix).
         """
         missing = []
         for idx, item in enumerate(content):
@@ -581,9 +634,9 @@ class HeroCache:
                 upstream_url = item.get('backdrop_upstream_url')
                 if not (self.cache_dir / cache_file).exists():
                     missing.append((idx, 'backdrop', cache_file, upstream_url))
-            # Old format: try to derive filename from backdrop_url path
-            elif item.get('backdrop_url') and item['backdrop_url'].startswith('/static/hero_cache/'):
-                cache_file = item['backdrop_url'].replace('/static/hero_cache/', '')
+            # Check if backdrop_url is a filename (not a Plex proxy URL)
+            elif item.get('backdrop_url') and not item['backdrop_url'].startswith('/api/'):
+                cache_file = item['backdrop_url']
                 if not (self.cache_dir / cache_file).exists():
                     # No upstream URL in old format - signal full refresh needed
                     missing.append((idx, 'backdrop', cache_file, None))
@@ -594,9 +647,9 @@ class HeroCache:
                 upstream_url = item.get('poster_upstream_url')
                 if not (self.cache_dir / cache_file).exists():
                     missing.append((idx, 'poster', cache_file, upstream_url))
-            # Old format: try to derive filename from poster_url path
-            elif item.get('poster_url') and item['poster_url'].startswith('/static/hero_cache/'):
-                cache_file = item['poster_url'].replace('/static/hero_cache/', '')
+            # Check if poster_url is a filename (not a Plex proxy URL)
+            elif item.get('poster_url') and not item['poster_url'].startswith('/api/'):
+                cache_file = item['poster_url']
                 if not (self.cache_dir / cache_file).exists():
                     missing.append((idx, 'poster', cache_file, None))
             
@@ -606,11 +659,13 @@ class HeroCache:
                 upstream_url = item.get('clearart_upstream_url')
                 if not (self.cache_dir / cache_file).exists():
                     missing.append((idx, 'clearart', cache_file, upstream_url))
-            # Old format: try to derive filename from clearart_url path
-            elif item.get('clearart_url') and item['clearart_url'].startswith('/static/hero_cache/'):
-                cache_file = item['clearart_url'].replace('/static/hero_cache/', '')
+            # Check if clearart_url is a filename (not a Plex proxy URL)
+            elif item.get('clearart_url') and not item['clearart_url'].startswith('/api/'):
+                cache_file = item['clearart_url']
                 if not (self.cache_dir / cache_file).exists():
                     missing.append((idx, 'clearart', cache_file, None))
+        
+        return missing
         
         return missing
     
@@ -632,8 +687,13 @@ class HeroCache:
             # Heal by downloading from upstream URLs
             for idx, field_type, cache_filename, upstream_url in missing:
                 if upstream_url:
+                    # Add current Plex token if this is a Plex path
+                    download_url = upstream_url
+                    if upstream_url.startswith('/library/'):
+                        download_url = f"{self.plex_url}{upstream_url}?X-Plex-Token={self.plex_token}"
+                    
                     logger.info(f"Healing {field_type}: {cache_filename} from {upstream_url[:80]}...")
-                    result = self.download_image(upstream_url, cache_filename)
+                    result = self.download_image(download_url, cache_filename)
                     if not result:
                         raise Exception(f"Failed to download {cache_filename}")
             

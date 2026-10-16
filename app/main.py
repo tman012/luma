@@ -77,16 +77,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Flask app setup
-app = Flask(__name__,
-            static_folder='/app/static')
+static_folder = os.environ.get('FLASK_STATIC_FOLDER', '/app/static')
+app = Flask(__name__, static_folder=static_folder)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', '')
-app.config['HERO_CACHE_DIR'] = os.environ.get('HERO_CACHE_DIR', '/app/static/hero_cache')
+# HERO_CACHE_DIR is resolved once in HeroCache.__init__
+app.config['HERO_CACHE_DIR'] = str(hero_cache.cache_dir)
 CORS(app)
-
-# Configure hero cache directory from app config
-from pathlib import Path as _Path
-hero_cache.cache_dir = _Path(app.config['HERO_CACHE_DIR'])
-hero_cache.cache_dir.mkdir(parents=True, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # Cache-Control headers for static files
@@ -9143,31 +9139,20 @@ def _build_hero_movies():
 def get_hero_content():
     """Get hero content for the kiosk home page.
     
-    Returns dynamic content from _build_hero_movies() and triggers non-blocking
-    background heal check for cached images if present.
+    Returns dynamic content from _build_hero_movies().
+    Background refresh runs only from the scheduler, never from a request.
     """
     try:
-        # Kick off non-blocking heal check for cached images
-        def _check_and_heal():
-            try:
-                hero_cache.get_hero_content()  # Triggers healing if needed
-            except Exception as e:
-                logger.debug(f"Background heal check failed: {e}")
-        
-        import threading
-        heal_thread = threading.Thread(target=_check_and_heal, daemon=True)
-        heal_thread.start()
-        
-        # Return dynamic content (preserves exact previous behavior)
+        # Return dynamic content (no refresh or healing from request)
         movies, boost = _build_hero_movies()
         return jsonify({
             'success': True,
             'movies': movies,
-            'boost_mode': boost,
+            'boost_mode': boost
         })
     except Exception as e:
-        logger.error(f"Error getting hero content: {e}")
-        return jsonify({'success': False, 'error': str(e), 'movies': []}), 500
+        logger.error(f"Error building hero content: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # =============================================================================

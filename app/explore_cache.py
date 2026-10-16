@@ -25,7 +25,7 @@ class ExploreCache:
 
     def __init__(self, cache_root: Optional[str] = None):
         if cache_root is None:
-            cache_root = os.environ.get('LUMA_CACHE_DIR', '/app')
+            cache_root = os.environ.get('LUMA_CACHE_DIR', '/app/cache')
         # Use 'explore' subdirectory within cache root
         self.cache_dir = Path(cache_root) / 'explore'
         try:

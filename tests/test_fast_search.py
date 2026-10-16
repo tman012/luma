@@ -1894,22 +1894,23 @@ class TestHeroCacheHealing(unittest.TestCase):
             self.assertIn('boost_mode', data)
             
             # Verify it comes from _build_hero_movies (not cached content)
-            # The response should have _build_hero_movies fields, not cache-specific fields
-            # If there are movies (from Plex), they should have: rating, audience_rating, 
-            # added_at, tmdb_backdrop_url, etc.
-            # Since _build_hero_movies fetches from Plex dynamically, we verify structure only
-            if data['movies']:
-                movie = data['movies'][0]
-                # These fields must be present in _build_hero_movies format
-                required_fields = ['rating_key', 'title', 'year', 'summary', 'genres']
-                for field in required_fields:
-                    self.assertIn(field, movie, f"_build_hero_movies must include {field}")
-                
-                # These fields may be None but should exist
-                optional_fields = ['rating', 'audience_rating', 'added_at', 'tmdb_backdrop_url',
-                                 'poster_url', 'backdrop_url', 'clearlogo_url']
-                for field in optional_fields:
-                    self.assertIn(field, movie, f"_build_hero_movies must include {field}")
+            # Mock Plex to return at least one movie
+            self.assertGreater(len(data['movies']), 0, "Should have at least one movie from mocked Plex")
+            
+            # Compare structure to _build_hero_movies direct call
+            direct_movies, direct_boost = main._build_hero_movies()
+            movie = data['movies'][0]
+            
+            # These fields must be present in _build_hero_movies format
+            required_fields = ['rating_key', 'title', 'year', 'summary', 'genres']
+            for field in required_fields:
+                self.assertIn(field, movie, f"_build_hero_movies must include {field}")
+            
+            # These fields may be None but should exist
+            optional_fields = ['rating', 'audience_rating', 'added_at', 'tmdb_backdrop_url',
+                             'poster_url', 'backdrop_url', 'clearlogo_url']
+            for field in optional_fields:
+                self.assertIn(field, movie, f"_build_hero_movies must include {field}")
     
     def test_healing_covers_backdrop_poster_clearart(self):
         """Test missing backdrop, poster, and clearart files trigger heal and serve 200."""
