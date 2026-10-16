@@ -1501,7 +1501,9 @@ def sources_all_results():
                 'leechers': item.get('leechers', 0) or 0,
                 'quality': quality_label,
                 'protocol': item.get('protocol', 'torrent') or 'torrent',
-                'download_url': item.get('download_url', '') or '',
+                # Legacy-backend links carry the API key; the browser gets a token.
+                'download_url': _tokenize_legacy_download(item.get('download_url', '') or '',
+                                                          item.get('protocol', 'torrent')),
                 'info_hash': item.get('info_hash', '') or '',
                 'pub_date': item.get('pub_date', '') or '',
                 'origin': 'indexer',
@@ -1509,6 +1511,8 @@ def sources_all_results():
                 'rejection_reasons': [],
             })
 
+        if _legacy_backend_token_id():
+            _token_store().persist_download_tokens()
         payload = {
             'success': True,
             'total': len(releases),
@@ -13375,15 +13379,16 @@ def add_torrent_to_qbittorrent():
                 return jsonify({'error': e.message}), 400
             expected_hash = _magnet_info_hash(torrent_url)
         else:
-            # Any other link (e.g. a Prowlarr download URL from the Prowlarr
-            # backend) is fetched here, never by qBittorrent, with the same SSRF
-            # validation, DNS pinning and manual redirects as the proxy. Only the
-            # configured Prowlarr origin may be on LAN or loopback.
+            # Any other link is fetched here, never by qBittorrent, with the
+            # same SSRF validation, DNS pinning and manual redirects as the
+            # proxy. LAN/loopback is allowed only on the Prowlarr backend, for a
+            # link that is already on the configured Prowlarr origin.
             try:
+                prowlarr = _prowlarr_origin() if _prowlarr_backend_active() else None
                 fetched = _fetch_validated(
                     torrent_url,
                     allow_lan=bool(settings.get('indexer.allow_lan', False)),
-                    trusted_origin=_prowlarr_origin(),
+                    trusted_origin=prowlarr if prowlarr == _url_host_port(torrent_url) else None,
                     label='Grab link')
             except IndexerDownloadError as e:
                 logger.error(f"Failed to fetch torrent from indexer: {e.message}")
@@ -17268,7 +17273,9 @@ _UTF8_BOM = b'\xef\xbb\xbf'
 
 
 _MAX_MAGNET_BYTES = 8 * 1024
-_MAGNET_TOPIC = re.compile(r'(?:^|[?&])xt=urn:bt(?:ih|mh):[A-Za-z0-9]+', re.IGNORECASE)
+_MAGNET_TOPIC = re.compile(
+    r'(?:^|[?&])xt=urn:(?:btih:(?:[0-9a-f]{40}|[a-z2-7]{32})|btmh:1220[0-9a-f]{64})(?=&|$)',
+    re.IGNORECASE)
 
 
 def _clean_magnet(uri: str) -> str:
@@ -17301,9 +17308,10 @@ def _fetch_validated(url: str, *, allow_lan: bool, trusted_origin=None, api_key:
                      send_key: bool = False, is_nzb: bool = False, label: str = 'indexer') -> Dict[str, Any]:
     """Fetch *url* with SSRF validation and DNS pinning on every hop.
 
-    Follows at most _MAX_DOWNLOAD_REDIRECTS http(s) redirects. Only a hop whose
-    scheme, host and port equal *trusted_origin* (the configured Prowlarr URL)
-    may reach loopback or LAN addresses. The API key goes only to the first
+    Follows at most _MAX_DOWNLOAD_REDIRECTS http(s) redirects. A hop may reach
+    loopback or LAN addresses only if it and every earlier hop are on
+    *trusted_origin* (the configured Prowlarr URL). On the configured Prowlarr
+    origin only Prowlarr's download path (/<indexer id>/download) is fetched. The API key goes only to the first
     hop's scheme, host and port. Returns {'magnet': uri} or
     {'body', 'mimetype', 'filename'}; raises IndexerDownloadError.
     """
@@ -17311,9 +17319,16 @@ def _fetch_validated(url: str, *, allow_lan: bool, trusted_origin=None, api_key:
     from app.indexer_manager import (MAX_RESPONSE_SIZE, add_api_key, pinned_get,
                                      validate_indexer_url)
     key_origin = _url_host_port(url)
+    prowlarr = _prowlarr_origin()
+    chain_on_trusted = trusted_origin is not None
     for hop in range(_MAX_DOWNLOAD_REDIRECTS + 1):
         origin = _url_host_port(url)
-        trusted = trusted_origin is not None and origin == trusted_origin
+        if prowlarr is not None and origin == prowlarr and not _is_prowlarr_download_path(url):
+            raise IndexerDownloadError(403, 'Only Prowlarr download links may be fetched from Prowlarr')
+        # Trust (LAN/loopback) holds only while every hop so far stayed on the
+        # trusted origin; a cross-host redirect ends it for good.
+        chain_on_trusted = chain_on_trusted and origin == trusted_origin
+        trusted = chain_on_trusted
         valid, error, pinned_ip = validate_indexer_url(
             url, allow_lan=allow_lan or trusted, allow_loopback_for_host=origin[1] if trusted else None)
         if not valid:
@@ -17391,9 +17406,63 @@ def _fetch_validated(url: str, *, allow_lan: bool, trusted_origin=None, api_key:
 
 
 def _prowlarr_origin():
-    """(scheme, host, port) of the configured Prowlarr URL, or None."""
-    base = settings.get('indexer.base_url', '') or ''
+    """(scheme, host, port) of the configured Prowlarr URL, or None if none is configured."""
+    base = (settings.get('indexer.base_url', '') or '').strip()
     return _url_host_port(base) if base else None
+
+
+def _is_prowlarr_download_path(url: str) -> bool:
+    """True if *url* is Prowlarr's download endpoint: <Prowlarr URL base>/<indexer id>/download."""
+    from urllib.parse import urlsplit
+    base_path = urlsplit((settings.get('indexer.base_url', '') or '').strip()).path.rstrip('/')
+    return re.fullmatch(re.escape(base_path) + r'/\d+/download', urlsplit(url).path or '') is not None
+
+
+def _prowlarr_backend_active() -> bool:
+    """The legacy Prowlarr backend is selected and fully configured."""
+    return (str(settings.get('indexer.backend', 'prowlarr') or 'prowlarr') != 'luma'
+            and str(settings.get('indexer.provider') or 'prowlarr') == 'prowlarr'
+            and bool((settings.get('indexer.base_url') or '').strip())
+            and bool(settings.get('indexer.api_key')))
+
+
+def _token_store():
+    """The IndexerManager that owns opaque download tokens (for every backend)."""
+    from app import indexer_manager
+    return indexer_manager.get_indexer_client(settings).manager
+
+
+# Tokens for results from the legacy backends carry one of these instead of a
+# Luma indexer id; ':usenet' marks an NZB release.
+_BACKEND_TOKEN_IDS = ('backend:prowlarr', 'backend:torznab')
+
+
+def _legacy_backend_token_id() -> Optional[str]:
+    if str(settings.get('indexer.backend', 'prowlarr') or 'prowlarr') == 'luma':
+        return None
+    provider = str(settings.get('indexer.provider') or 'prowlarr')
+    return 'backend:torznab' if provider == 'torznab' else 'backend:prowlarr'
+
+
+def _legacy_backend_url() -> str:
+    key = 'indexer.torznab_url' if _legacy_backend_token_id() == 'backend:torznab' else 'indexer.base_url'
+    return (settings.get(key, '') or '').strip()
+
+
+def _tokenize_legacy_download(url: str, protocol: str) -> str:
+    """Replace a legacy-backend download URL (which carries its API key) with an opaque token link.
+
+    Magnets and links to any other host are returned unchanged; magnets carry no key.
+    """
+    backend_id = _legacy_backend_token_id()
+    base = _legacy_backend_url()
+    if not backend_id or not base or not url or url.lower().startswith('magnet:'):
+        return url
+    if _url_host_port(url) != _url_host_port(base):
+        return url
+    token_id = backend_id + (':usenet' if str(protocol or '').lower() == 'usenet' else '')
+    token = _token_store().issue_download_token(url, token_id, persist=False)
+    return f'/api/indexer/download/{token}'
 
 
 def fetch_indexer_download(token: str) -> Dict[str, Any]:
@@ -17404,15 +17473,28 @@ def fetch_indexer_download(token: str) -> Dict[str, Any]:
     validated .torrent or .nzb. See _fetch_validated for the redirect and SSRF
     rules. Raises IndexerDownloadError.
     """
-    from app.indexer_api import get_indexer_client
-    client = get_indexer_client(settings)
-    if not hasattr(client, 'get_download_token'):
-        raise IndexerDownloadError(400, 'Download proxy only available with Luma backend')
-
-    token_data = client.get_download_token(token)
+    token_data = _token_store().resolve_download_token(token)
     if not token_data:
         raise IndexerDownloadError(403, 'Invalid or expired download token')
     download_url, indexer_id, needs_api_key = token_data
+
+    is_usenet_token = indexer_id.endswith(':usenet')
+    backend_id = indexer_id[:-len(':usenet')] if is_usenet_token else indexer_id
+    if backend_id in _BACKEND_TOKEN_IDS:
+        # A result from the legacy Prowlarr/Torznab backend.
+        base_key = 'indexer.torznab_url' if backend_id == 'backend:torznab' else 'indexer.base_url'
+        expected_url = (settings.get(base_key, '') or '').strip()
+        if not expected_url:
+            raise IndexerDownloadError(409, 'The indexer for this download is no longer configured')
+        api_key = settings.get('indexer.api_key', '') or ''
+        if _url_host_port(download_url) != _url_host_port(expected_url):
+            raise IndexerDownloadError(403, 'Download URL does not match the configured host')
+        return _fetch_validated(
+            download_url,
+            allow_lan=bool(settings.get('indexer.allow_lan', False)),
+            trusted_origin=_prowlarr_origin() if backend_id == 'backend:prowlarr' else None,
+            api_key=api_key, send_key=bool(needs_api_key and api_key),
+            is_nzb=is_usenet_token, label='Indexer backend')
 
     config = next((ix for ix in (settings.get('indexer.indexers') or [])
                    if ix.get('id') == indexer_id), None)
@@ -17424,12 +17506,12 @@ def fetch_indexer_download(token: str) -> Dict[str, Any]:
     if config.get('prowlarr_proxy'):
         expected_url = settings.get('indexer.base_url', '')
         if not expected_url:
-            raise IndexerDownloadError(500, 'Prowlarr URL not configured for proxied indexer')
+            raise IndexerDownloadError(409, 'Prowlarr is not configured, so this proxied indexer is unavailable')
         api_key = settings.get('indexer.api_key', '')
     else:
         expected_url = config.get('url', '')
         if not expected_url:
-            raise IndexerDownloadError(500, 'Indexer URL not configured')
+            raise IndexerDownloadError(409, 'Indexer URL not configured')
         api_key = config.get('api_key', '')
 
     if _url_host_port(download_url) != _url_host_port(expected_url):

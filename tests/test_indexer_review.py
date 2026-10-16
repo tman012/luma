@@ -131,6 +131,7 @@ def route_env():
     stream.iter_content.side_effect = lambda chunk_size=8192: iter([b'd8:announce'])
     stream.raise_for_status = Mock()
     with patch('app.indexer_api.get_indexer_client', return_value=adapter), \
+         patch.object(main, '_token_store', return_value=adapter.manager), \
          patch.object(main, 'settings', sm), \
          patch('app.indexer_manager.pinned_get', return_value=stream) as pg, \
          patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '203.0.113.9')) as val:
@@ -1038,7 +1039,7 @@ def test_redirect_to_other_loopback_port_blocked(route_env):
 def test_redirect_within_prowlarr_origin_allowed(route_env):
     main, adapter, pg, val = route_env
     val.side_effect = _REAL_VALIDATE
-    pg.side_effect = [_resp(302, {'Location': '/7/file'}), _resp(200, {}, TORRENT)]
+    pg.side_effect = [_resp(302, {'Location': '/7/download?file=x'}), _resp(200, {}, TORRENT)]
     r = _get(main, adapter.manager.issue_download_token('http://localhost:9696/7/download', 'ix2'))
     assert r.status_code == 200 and pg.call_count == 2
 
@@ -1133,3 +1134,207 @@ def test_generic_grab_html_is_502_and_nothing_added(route_env):
          _as_user(main, {'id': 2, 'is_admin': False}):
         r = _grab(main, 'https://tracker.example.com/dl/1')
     assert r.status_code == 502 and 'invalid or expired' in r.get_json()['error'] and qbit.added == []
+
+
+# ---- Round 6, item 1: Prowlarr-origin trust ----
+
+def _admin(main):
+    return _as_user(main, {'id': 1, 'username': 'owner', 'is_admin': True})
+
+
+def _grab_as_user(main, url, qbit=None):
+    qbit = qbit or _FakeQbit('00' * 20)
+    with patch('requests.Session', return_value=qbit), patch('time.sleep'), _no_auto_rename(), \
+         patch.object(main, '_record_origin'), _as_user(main, {'id': 2, 'is_admin': False}):
+        return main.app.test_client().post('/api/downloads/add', json={'torrent_url': url}), qbit
+
+
+def test_public_redirect_to_prowlarr_api_refused(route_env):
+    main, adapter, pg, val = route_env
+    main.settings.store['indexer.allow_lan'] = True  # the path rule holds even with LAN allowed
+    pg.side_effect = [_resp(302, {'Location': 'http://localhost:9696/api/v1/indexer'})]
+    r, qbit = _grab_as_user(main, 'https://tracker.example.com/dl/1')
+    assert r.status_code == 403 and pg.call_count == 1 and qbit.added == []
+
+
+def test_user_supplied_prowlarr_api_url_refused(route_env):
+    main, adapter, pg, _ = route_env
+    r, qbit = _grab_as_user(main, 'http://localhost:9696/api/v1/system/status?apikey=pk')
+    assert r.status_code == 403 and pg.call_count == 0 and qbit.added == []
+
+
+def test_public_redirect_back_to_prowlarr_download_gets_no_trust(route_env):
+    """After a cross-host hop, the Prowlarr origin is no longer trusted (loopback blocked)."""
+    main, adapter, pg, val = route_env
+    val.side_effect = lambda url, **kw: (True, '', '203.0.113.9') if 'tracker' in url else _REAL_VALIDATE(url, **kw)
+    pg.side_effect = [_resp(302, {'Location': 'http://localhost:9696/3/download?link=x'})]
+    r, qbit = _grab_as_user(main, 'https://tracker.example.com/dl/1')
+    assert r.status_code == 403 and pg.call_count == 1
+    assert val.call_args_list[-1].kwargs == {'allow_lan': False, 'allow_loopback_for_host': None}
+
+
+def test_normal_prowlarr_download_link_still_works(route_env):
+    import hashlib
+    main, adapter, pg, val = route_env
+    val.side_effect = _REAL_VALIDATE
+    pg.side_effect = [_resp(200, {}, TORRENT)]
+    r, qbit = _grab_as_user(main, 'http://localhost:9696/3/download?apikey=pk&link=abc&file=Movie',
+                            _FakeQbit(hashlib.sha1(b'd4:name1:xe').hexdigest()))
+    assert r.status_code == 200, r.get_json()
+    assert r.get_json()['hash'] == hashlib.sha1(b'd4:name1:xe').hexdigest()
+    assert val.call_args.kwargs == {'allow_lan': True, 'allow_loopback_for_host': 'localhost'}
+
+
+def test_generic_link_gets_no_prowlarr_trust_on_luma_backend(route_env):
+    main, adapter, pg, val = route_env
+    main.settings.store['indexer.backend'] = 'luma'
+    val.side_effect = _REAL_VALIDATE
+    r, qbit = _grab_as_user(main, 'http://localhost:9696/3/download?link=abc')
+    assert r.status_code == 403 and pg.call_count == 0
+
+
+@pytest.mark.parametrize('base,path,ok', [
+    ('http://p:9696', '/3/download', True),
+    ('http://p:9696/', '/12/download', True),
+    ('http://p:9696/prowlarr', '/prowlarr/3/download', True),
+    ('http://p:9696/prowlarr', '/3/download', False),
+    ('http://p:9696', '/api/v1/indexer', False),
+    ('http://p:9696', '/3/api', False),
+    ('http://p:9696', '/3/download/extra', False),
+    ('http://p:9696', '/x/download', False),
+])
+def test_prowlarr_download_path_pattern(route_env, base, path, ok):
+    main, *_ = route_env
+    main.settings.store['indexer.base_url'] = base
+    assert main._is_prowlarr_download_path(f'http://p:9696{path}?link=a') is ok
+
+
+# ---- Round 6, item 2: magnet topics ----
+
+@pytest.mark.parametrize('xt,ok', [
+    ('urn:btih:' + 'a1' * 20, True),
+    ('urn:btih:' + 'A1' * 20, True),
+    ('urn:btih:' + 'a' * 39, False),
+    ('urn:btih:' + 'a' * 41, False),
+    ('urn:btih:' + 'g' * 40, False),
+    ('urn:btih:' + 'abcdefghijklmnopqrstuvwxyz234567', True),
+    ('urn:btih:' + 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567', True),
+    ('urn:btih:' + 'abcdefghijklmnopqrstuvwxyz234561', False),
+    ('urn:btih:' + 'a' * 31, False),
+    ('urn:btmh:1220' + 'ab' * 32, True),
+    ('urn:btmh:1220' + 'ab' * 31 + 'a', False),
+    ('urn:btmh:1221' + 'ab' * 32, False),
+    ('urn:btmh:' + 'ab' * 34, False),
+    ('urn:btmh:1220' + 'zz' * 32, False),
+])
+def test_magnet_topic_formats(xt, ok):
+    from app.main import IndexerDownloadError, _clean_magnet
+    uri = f'magnet:?dn=x&xt={xt}&tr=udp://t'
+    if ok:
+        assert _clean_magnet(uri) == uri
+    else:
+        with pytest.raises(IndexerDownloadError):
+            _clean_magnet(uri)
+
+
+# ---- Round 6, item 3: Prowlarr backend results carry tokens ----
+
+class _FakeLegacyClient:
+    def __init__(self, items):
+        self.items = items
+
+    def search_all(self, title, media_type, year=None):
+        return [dict(i) for i in self.items]
+
+
+PROWLARR_ITEMS = [
+    {'title': 'Movie.2024.1080p', 'protocol': 'torrent', 'indexer': 'A', 'indexer_id': 3,
+     'download_url': 'http://localhost:9696/3/download?apikey=pk&link=abc&file=Movie'},
+    {'title': 'Movie.2024.720p', 'protocol': 'torrent', 'indexer': 'B', 'indexer_id': 4,
+     'download_url': MAGNET},
+    {'title': 'Movie.2024.nzb', 'protocol': 'usenet', 'indexer': 'C', 'indexer_id': 5,
+     'download_url': 'http://localhost:9696/5/download?apikey=pk&link=def'},
+]
+
+
+@pytest.fixture
+def all_results(route_env, monkeypatch):
+    main, adapter, pg, val = route_env
+    monkeypatch.setattr(main, '_all_results_cache', {})
+    with patch('app.indexer_api.get_indexer_client', return_value=_FakeLegacyClient(PROWLARR_ITEMS)):
+        yield route_env
+
+
+def _search(main):
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        return main.app.test_client().get('/api/sources/all-results?title=Movie&media_type=movie&year=2024')
+
+
+def test_prowlarr_results_return_tokens_not_keys(all_results, temp_data_dir):
+    main, adapter, pg, val = all_results
+    r = _search(main)
+    assert r.status_code == 200
+    text = r.get_data(as_text=True)
+    assert 'apikey' not in text and 'localhost:9696' not in text
+    urls = [rel['download_url'] for rel in r.get_json()['releases']]
+    assert urls[0].startswith('/api/indexer/download/') and urls[2].startswith('/api/indexer/download/')
+    assert urls[1] == MAGNET
+    assert 'pk' not in (temp_data_dir / 'download_tokens.json').read_text().replace('"pk', '')
+
+
+def test_prowlarr_result_token_downloads_with_key_server_side(all_results):
+    main, adapter, pg, val = all_results
+    tok_url = _search(main).get_json()['releases'][0]['download_url']
+    pg.side_effect = [_resp(200, {}, TORRENT)]
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().get(tok_url)
+    assert r.status_code == 200 and r.data == TORRENT
+    assert pg.call_args.args[0] == 'http://localhost:9696/3/download?link=abc&file=Movie&apikey=pk'
+    assert pg.call_args.kwargs['headers'] == {'X-Api-Key': 'pk'}
+    assert val.call_args.kwargs['allow_loopback_for_host'] == 'localhost'
+
+
+def test_prowlarr_usenet_token_is_nzb(all_results):
+    main, adapter, pg, _ = all_results
+    tok_url = _search(main).get_json()['releases'][2]['download_url']
+    pg.side_effect = [_resp(200, {}, b'<?xml version="1.0"?><nzb/>')]
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().get(tok_url)
+    assert r.status_code == 200 and r.headers['Content-Type'] == 'application/x-nzb'
+
+
+def test_grab_from_prowlarr_result_token(all_results):
+    import hashlib
+    main, adapter, pg, _ = all_results
+    tok_url = _search(main).get_json()['releases'][0]['download_url']
+    pg.side_effect = [_resp(200, {}, TORRENT)]
+    r, qbit = _grab_as_user(main, tok_url, _FakeQbit(hashlib.sha1(b'd4:name1:xe').hexdigest()))
+    assert r.status_code == 200, r.get_json()
+    assert qbit.added[0]['files']['torrents'][1] == TORRENT
+
+
+def test_torznab_backend_results_return_tokens(route_env, monkeypatch):
+    main, adapter, pg, _ = route_env
+    monkeypatch.setattr(main, '_all_results_cache', {})
+    main.settings.store.update({'indexer.provider': 'torznab',
+                                'indexer.torznab_url': 'https://jackett.example.com/api/v2.0/indexers/all/results/torznab'})
+    items = [{'title': 'X', 'protocol': 'torrent',
+              'download_url': 'https://jackett.example.com/dl/x?jackett_apikey=1&apikey=pk&path=a'}]
+    with patch('app.indexer_api.get_indexer_client', return_value=_FakeLegacyClient(items)):
+        r = _search(main)
+    url = r.get_json()['releases'][0]['download_url']
+    assert url.startswith('/api/indexer/download/') and 'pk' not in r.get_data(as_text=True)
+    pg.side_effect = [_resp(200, {}, TORRENT)]
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        assert main.app.test_client().get(url).status_code == 200
+    assert pg.call_args.args[0].endswith('apikey=pk')
+
+
+def test_luma_backend_results_unchanged(route_env, monkeypatch):
+    main, adapter, pg, _ = route_env
+    monkeypatch.setattr(main, '_all_results_cache', {})
+    main.settings.store['indexer.backend'] = 'luma'
+    items = [{'title': 'X', 'protocol': 'torrent', 'download_url': '/api/indexer/download/already-a-token'}]
+    with patch('app.indexer_api.get_indexer_client', return_value=_FakeLegacyClient(items)):
+        r = _search(main)
+    assert r.get_json()['releases'][0]['download_url'] == '/api/indexer/download/already-a-token'

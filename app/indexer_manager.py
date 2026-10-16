@@ -307,6 +307,12 @@ class IndexerError(Exception):
     pass
 
 
+def _logged(exc: Exception) -> Exception:
+    """Mark an exception as already logged, so callers do not log it again."""
+    exc.logged = True
+    return exc
+
+
 class IndexerRateLimitError(IndexerError):
     """Raised when an indexer is over budget or backed off."""
     pass
@@ -496,6 +502,7 @@ class IndexerManager:
         self._download_tokens: Dict[str, Tuple[str, str, float]] = {}  # token -> (url, indexer_id, expiry)
         self._download_tokens_lock = threading.Lock()
         self._save_lock = threading.Lock()
+        self._warned_no_prowlarr = False
         self._load_state()
         self._load_download_tokens()
 
@@ -1008,7 +1015,7 @@ class IndexerManager:
                     state.set_backoff_exponential(time.time())
                 self._save_state()  # Persist backoff
                 logger.warning(f'Indexer {config.get("name")} {resp.status_code} - exponential backoff')
-                raise IndexerError(f'Server error {resp.status_code}')
+                raise _logged(IndexerError(f'Server error {resp.status_code}'))
 
             resp.raise_for_status()
 
@@ -1051,14 +1058,14 @@ class IndexerManager:
             with state.lock:
                 state.set_backoff_exponential(time.time())
             self._save_state()  # Persist backoff
-            raise IndexerError(f'Connection error: {error_msg[:100]}')
+            raise _logged(IndexerError(f'Connection error: {error_msg[:100]}'))
         except requests.exceptions.RequestException as e:
             error_msg = sanitize_api_key(str(e))
             logger.error(f'Indexer {config.get("name")} request failed: {error_msg}')
             with state.lock:
                 state.set_backoff_exponential(time.time())
             self._save_state()  # Persist backoff
-            raise IndexerError(f'Request failed: {error_msg[:100]}')
+            raise _logged(IndexerError(f'Request failed: {error_msg[:100]}'))
 
     def search(
         self,
@@ -1091,8 +1098,19 @@ class IndexerManager:
         else:
             target_configs = self.get_enabled_indexers()
 
+        # Entries routed through Prowlarr are skipped quietly while no Prowlarr
+        # is configured (Prowlarr is optional), instead of failing every search.
+        if not (self.settings_manager.get('indexer.base_url', '') and
+                self.settings_manager.get('indexer.api_key', '')):
+            proxied = [c for c in target_configs if c.get('prowlarr_proxy')]
+            if proxied:
+                if not self._warned_no_prowlarr:
+                    logger.info(f'Skipping {len(proxied)} Prowlarr-proxied indexer(s): Prowlarr is not configured')
+                    self._warned_no_prowlarr = True
+                target_configs = [c for c in target_configs if not c.get('prowlarr_proxy')]
+
         if not target_configs:
-            logger.warning('No enabled indexers available for search')
+            logger.info('No enabled indexers available for search')
             return []
 
         # Set deadline
@@ -1132,8 +1150,16 @@ class IndexerManager:
                 logger.debug(f'Indexer {config.get("name")} skipped: {e}')
                 errors[indexer_id] = str(e)
                 return indexer_id, []
+            except IndexerError as e:
+                if getattr(e, 'logged', False):
+                    # Already logged where it happened (and the indexer is backed off).
+                    logger.debug(f'Indexer {config.get("name")} failed: {e}')
+                else:
+                    logger.warning(f'Indexer {config.get("name")} failed: {sanitize_api_key(str(e))}')
+                errors[indexer_id] = str(e)
+                return indexer_id, []
             except Exception as e:
-                logger.warning(f'Indexer {config.get("name")} failed: {e}')
+                logger.warning(f'Indexer {config.get("name")} failed: {sanitize_api_key(str(e))}')
                 errors[indexer_id] = str(e)
                 return indexer_id, []
 
