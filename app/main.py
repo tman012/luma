@@ -942,10 +942,9 @@ class TMDBClient:
 # Initialize TMDB client
 tmdb = TMDBClient(settings.get('apis.tmdb.api_key'))
 
-# Remote lock (tunnel visitors need a session) + request page for friends and family
-# remote_lock merged into access.py
+# Request page for friends and family
 from app import request_portal as _request_portal
-    access.init_home_wan_tracking(settings)
+_access.init_home_wan_tracking(settings)
 _request_portal.init_app(app, settings)
 
 # Routes — React SPA helper
