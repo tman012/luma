@@ -11,17 +11,16 @@ class TestPortalIsolation:
     """Test portal traffic is isolated to portal routes only."""
     
     def test_portal_host_blocked_from_main_app(self, test_app):
-        """Portal host is blocked from main app root."""
+        """Portal host is blocked from main app pages other than the root."""
         import app.main
         app.main.settings.update({
             'request_portal': {'hostname': 'requests.example.com', 'enabled': True}
         })
-        
+
         client = test_app.test_client()
-        resp = client.get('/', headers={'Host': 'requests.example.com'})
-        
-        # Portal traffic to main app should be 404
-        assert resp.status_code == 404
+        for path in ('/library', '/explore', '/settings', '/index.html', '/requestx'):
+            assert client.get(path, headers={'Host': 'requests.example.com'}).status_code == 404, path
+        assert client.post('/', headers={'Host': 'requests.example.com'}).status_code in (404, 405)
     
     def test_portal_host_blocked_from_settings(self, test_app):
         """Portal host is blocked from /api/settings."""

@@ -32,6 +32,19 @@ read-only or wrongly owned mount fails the deploy instead of logging
   recreate with a fresh cache) -> heal immediately. Then a daily refresh at
   05:00 plus a heal check every 5 minutes.
 
+## Reverse proxy
+
+`security.trusted_proxies` starts empty, so `X-Forwarded-For` is ignored and
+every proxied request looks like it comes from the proxy. Behind a reverse
+proxy, set it (Settings, or `security.trusted_proxies` in settings.json,
+comma-separated) or LAN users get 401:
+
+- proxy on the same host with host networking (for example Caddy):
+  `127.0.0.1/32, ::1/128`
+- otherwise: the proxy's own IP as a single address (`/32` or `/128`)
+
+List only proxies you control.
+
 ## First deploy / upgrade
 
 ```bash

@@ -4,7 +4,7 @@ only the portal.
 Portal traffic is identified solely by the Host header matching
 request_portal.hostname (access.is_portal_traffic); the client address plays
 no part. Such requests can reach only:
-- /request and /request/ (portal page)
+- /request and /request/ (portal page); GET/HEAD / redirects (302) there
 - /static/request/* (portal static assets) and the two shared images it
   uses (/static/images/apple-touch-icon.png, /static/images/luma_text.png)
 - the explicitly listed /api/request/* endpoints and patterns below
@@ -14,7 +14,7 @@ Everything else returns 404, deny by default. Portal traffic never gets
 implicit owner access (see access.should_authenticate).
 """
 import logging
-from flask import request, abort
+from flask import abort, current_app, redirect, request
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +83,13 @@ def guard_portal_traffic(settings):
     # Check if path is allowed for portal traffic
     path = request.path
     method = request.method
-    
+
+    if path == '/' and method in ('GET', 'HEAD'):
+        # The portal host's root is the portal page (URL base and query kept).
+        target = (current_app.config.get('URL_BASE') or '') + '/request'
+        qs = request.query_string.decode('latin-1')
+        return redirect(target + ('?' + qs if qs else ''), 302)
+
     if not is_portal_allowed(path, method):
         # Portal traffic trying to access non-portal route
         logger.warning('[portal-guard] Portal traffic blocked from %s %s (host=%s)',
