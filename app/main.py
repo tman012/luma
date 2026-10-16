@@ -9137,21 +9137,22 @@ def _build_hero_movies():
 def get_hero_content():
     """Get hero content for the kiosk home page.
     
-    Uses cached content with background self-healing for missing images.
-    Falls back to dynamic generation if cache is empty.
+    Returns dynamic content from _build_hero_movies() and triggers non-blocking
+    background heal check for cached images if present.
     """
     try:
-        # Try cached content first (with self-healing for missing images)
-        cached_movies = hero_cache.get_hero_content()
-        if cached_movies:
-            return jsonify({
-                'success': True,
-                'movies': cached_movies,
-                'boost_mode': False,  # Cache doesn't track boost mode
-            })
+        # Kick off non-blocking heal check for cached images
+        def _check_and_heal():
+            try:
+                hero_cache.get_hero_content()  # Triggers healing if needed
+            except Exception as e:
+                logger.debug(f"Background heal check failed: {e}")
         
-        # Fall back to dynamic generation if cache is empty
-        logger.info("Hero cache empty, falling back to dynamic generation")
+        import threading
+        heal_thread = threading.Thread(target=_check_and_heal, daemon=True)
+        heal_thread.start()
+        
+        # Return dynamic content (preserves exact previous behavior)
         movies, boost = _build_hero_movies()
         return jsonify({
             'success': True,

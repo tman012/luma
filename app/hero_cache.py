@@ -455,26 +455,34 @@ class HeroCache:
                 clearlogo_path = f"/api/img/plex?url=/library/metadata/{rating_key}/clearLogo"
 
             # Cache clearart from fanart.tv if available
+            clearart_cache_file = None
+            clearart_upstream_url = None
             if fanart_images['clearart']:
                 ext = fanart_images['clearart'].split('.')[-1].split('?')[0]
+                clearart_cache_file = f"movie_{rating_key}_clearart.{ext}"
+                clearart_upstream_url = fanart_images['clearart']
                 clearart_path = self.download_image(
                     fanart_images['clearart'],
-                    f"movie_{rating_key}_clearart.{ext}"
+                    clearart_cache_file
                 )
 
             # Cache backdrop from fanart.tv if available
+            backdrop_cache_file = None
+            backdrop_upstream_url = None
             if fanart_images['backdrop']:
                 ext = fanart_images['backdrop'].split('.')[-1].split('?')[0]
+                backdrop_cache_file = f"movie_{rating_key}_backdrop.{ext}"
+                backdrop_upstream_url = fanart_images['backdrop']
                 backdrop_path = self.download_image(
                     fanart_images['backdrop'],
-                    f"movie_{rating_key}_backdrop.{ext}"
+                    backdrop_cache_file
                 )
 
             # Fallback to Plex backdrop if fanart.tv doesn't have it
             if not backdrop_path and movie.get('user_art_url'):
                 backdrop_path = f"/api/img/plex?url=/library/metadata/{rating_key}/art"
 
-            # Build poster URL from Plex via proxy
+            # Build poster URL from Plex via proxy (not cached)
             poster_url = None
             if movie.get('user_thumb_url'):
                 poster_url = f"/api/img/plex?url=/library/metadata/{rating_key}/thumb"
@@ -497,6 +505,14 @@ class HeroCache:
                 'poster_url': poster_url,
                 'is_owned': True
             }
+            
+            # Store cache filenames and upstream URLs for healing
+            if clearart_cache_file:
+                hero_entry['clearart_cache_file'] = clearart_cache_file
+                hero_entry['clearart_upstream_url'] = clearart_upstream_url
+            if backdrop_cache_file:
+                hero_entry['backdrop_cache_file'] = backdrop_cache_file
+                hero_entry['backdrop_upstream_url'] = backdrop_upstream_url
 
             hero_content.append(hero_entry)
             rt_display = movie.get('rt_score') if movie.get('rt_score') is not None else 'N/A'
@@ -537,30 +553,58 @@ class HeroCache:
         return []
 
     def get_missing_images(self, content: List[Dict]) -> List[tuple]:
-        """Check for missing image files, return list of (item_index, field, path) tuples."""
+        """Check for missing image files, return list of (item_index, field_type, cache_filename, upstream_url) tuples.
+        
+        Handles both new format (with cache_file + upstream_url keys) and old format (paths in _url keys).
+        """
         missing = []
         for idx, item in enumerate(content):
-            if item.get('backdrop_cache'):
-                backdrop_path = self.cache_dir / item['backdrop_cache']
-                if not backdrop_path.exists():
-                    missing.append((idx, 'backdrop_cache', item['backdrop_cache']))
-            if item.get('poster_cache'):
-                poster_path = self.cache_dir / item['poster_cache']
-                if not poster_path.exists():
-                    missing.append((idx, 'poster_cache', item['poster_cache']))
+            # Check backdrop (new format: backdrop_cache_file + backdrop_upstream_url)
+            if item.get('backdrop_cache_file'):
+                cache_file = item['backdrop_cache_file']
+                upstream_url = item.get('backdrop_upstream_url')
+                if not (self.cache_dir / cache_file).exists():
+                    missing.append((idx, 'backdrop', cache_file, upstream_url))
+            # Old format: try to derive filename from backdrop_url path
+            elif item.get('backdrop_url') and item['backdrop_url'].startswith('/static/hero_cache/'):
+                cache_file = item['backdrop_url'].replace('/static/hero_cache/', '')
+                if not (self.cache_dir / cache_file).exists():
+                    # No upstream URL in old format - signal full refresh needed
+                    missing.append((idx, 'backdrop', cache_file, None))
+            
+            # Check clearart (new format: clearart_cache_file + clearart_upstream_url)
+            if item.get('clearart_cache_file'):
+                cache_file = item['clearart_cache_file']
+                upstream_url = item.get('clearart_upstream_url')
+                if not (self.cache_dir / cache_file).exists():
+                    missing.append((idx, 'clearart', cache_file, upstream_url))
+            # Old format: try to derive filename from clearart_url path
+            elif item.get('clearart_url') and item['clearart_url'].startswith('/static/hero_cache/'):
+                cache_file = item['clearart_url'].replace('/static/hero_cache/', '')
+                if not (self.cache_dir / cache_file).exists():
+                    missing.append((idx, 'clearart', cache_file, None))
+        
         return missing
     
     def _heal_missing_images_background(self, content: List[Dict], missing: List[tuple]):
-        """Re-download only the missing image files (runs in background thread)."""
+        """Re-download only the missing image files from upstream URLs (runs in background thread)."""
         try:
             logger.info(f"Background healing: re-downloading {len(missing)} missing images")
-            for idx, field, filename in missing:
-                item = content[idx]
-                # Re-download the image using the original URL from cache
-                if field == 'backdrop_cache' and item.get('backdrop_url'):
-                    self.download_image(item['backdrop_url'], filename)
-                elif field == 'poster_cache' and item.get('poster_url'):
-                    self.download_image(item['poster_url'], filename)
+            
+            # Check if any missing images lack upstream URLs (old format)
+            needs_full_refresh = any(upstream_url is None for _, _, _, upstream_url in missing)
+            
+            if needs_full_refresh:
+                logger.warning("Some cached entries lack upstream URLs (old format), triggering full refresh")
+                self.refresh_hero_content()
+                return
+            
+            # Heal by downloading from upstream URLs
+            for idx, field_type, cache_filename, upstream_url in missing:
+                if upstream_url:
+                    logger.info(f"Healing {field_type}: {cache_filename} from {upstream_url[:80]}...")
+                    self.download_image(upstream_url, cache_filename)
+            
             logger.info("Background healing complete")
         except Exception as e:
             logger.error(f"Background healing failed: {e}")
