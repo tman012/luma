@@ -21,12 +21,12 @@ def get_indexer_backend(settings):
     backend = settings.get('indexer.backend', 'prowlarr')
     
     if backend == 'luma':
-        from app.indexer_manager import IndexerManager
+        from app.indexer_manager import get_indexer_manager
         from app.settings_manager import SettingsManager
         
         # Get or create settings manager instance
         sm = SettingsManager() if not hasattr(settings, 'get_all') else settings
-        manager = IndexerManager(sm)
+        manager = get_indexer_manager(sm)
         return LumaBackendAdapter(manager)
     else:
         # Legacy Prowlarr/Torznab backend

@@ -945,7 +945,7 @@ tmdb = TMDBClient(settings.get('apis.tmdb.api_key'))
 # Remote lock (tunnel visitors need a session) + request page for friends and family
 # remote_lock merged into access.py
 from app import request_portal as _request_portal
-    access.init_home_wan_tracking(settings)
+_access.init_home_wan_tracking(settings)
 _request_portal.init_app(app, settings)
 
 # Routes — React SPA helper
@@ -16908,8 +16908,8 @@ def list_indexers():
     if err:
         return err
     try:
-        from app.indexer_manager import IndexerManager
-        manager = IndexerManager(settings)
+        from app.indexer_manager import get_indexer_manager, sanitize_api_key
+        manager = get_indexer_manager(settings)
         indexers = manager.list_indexers()
         # Mask API keys
         for ix in indexers:
@@ -16918,7 +16918,7 @@ def list_indexers():
         return jsonify(indexers)
     except Exception as e:
         logger.exception('Failed to list indexers')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': sanitize_api_key(str(e))}), 500
 
 
 @app.route('/api/settings/indexers', methods=['POST'])
@@ -17034,13 +17034,15 @@ def test_single_indexer(indexer_id: str):
     if err:
         return err
     try:
-        from app.indexer_manager import IndexerManager
-        manager = IndexerManager(settings)
+        from app.indexer_manager import get_indexer_manager, sanitize_api_key
+        manager = get_indexer_manager(settings)
         success, message = manager.test_indexer(indexer_id)
-        return jsonify({'success': success, 'message': message})
+        # Sanitize any keys from the message
+        return jsonify({'success': success, 'message': sanitize_api_key(message)})
     except Exception as e:
+        from app.indexer_manager import sanitize_api_key
         logger.exception('Indexer test failed')
-        return jsonify({'success': False, 'message': str(e)}), 200
+        return jsonify({'success': False, 'message': sanitize_api_key(str(e))}), 200
 
 
 @app.route('/api/settings/indexers/import-prowlarr', methods=['POST'])
@@ -17050,6 +17052,7 @@ def import_indexers_from_prowlarr():
     if err:
         return err
     try:
+        from app.indexer_manager import get_indexer_manager, sanitize_api_key, validate_indexer_url
         body = request.get_json() or {}
         
         # Get Prowlarr credentials
@@ -17059,10 +17062,18 @@ def import_indexers_from_prowlarr():
         if not prowlarr_url or not prowlarr_api_key:
             return jsonify({'error': 'Prowlarr URL and API key are required'}), 400
         
-        from app.indexer_manager import IndexerManager
-        manager = IndexerManager(settings)
+        # SSRF protection: validate Prowlarr URL
+        allow_lan = settings.get('indexer.allow_lan', False)
+        valid, error = validate_indexer_url(prowlarr_url, allow_lan=allow_lan)
+        if not valid:
+            return jsonify({'error': f'Prowlarr URL validation failed: {error}'}), 400
+        
+        manager = get_indexer_manager(settings)
         
         imported, cardigann, errors = manager.import_from_prowlarr(prowlarr_url, prowlarr_api_key)
+        
+        # Sanitize errors
+        errors = [sanitize_api_key(e) for e in errors]
         
         result = {
             'success': True,
@@ -17081,9 +17092,64 @@ def import_indexers_from_prowlarr():
         
         return jsonify(result)
     except Exception as e:
+        from app.indexer_manager import sanitize_api_key
         logger.exception('Prowlarr import failed')
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': sanitize_api_key(str(e))}), 500
 
+
+@app.route('/api/indexer/download/<token>', methods=['GET'])
+def download_torrent_proxy(token: str):
+    """Admin-gated proxy for downloading torrents without exposing API keys in URLs."""
+    err = _require_admin()
+    if err:
+        return err
+    
+    try:
+        from app.indexer_manager import get_indexer_manager, sanitize_api_key
+        import base64
+        import json
+        
+        # Decode token: base64(json({url, indexer_id}))
+        try:
+            decoded = base64.urlsafe_b64decode(token.encode()).decode()
+            data = json.loads(decoded)
+            download_url = data.get('url')
+            indexer_id = data.get('indexer_id')
+        except Exception as e:
+            logger.warning(f'Invalid download token: {sanitize_api_key(str(e))}')
+            return jsonify({'error': 'Invalid download token'}), 400
+        
+        if not download_url or not indexer_id:
+            return jsonify({'error': 'Invalid download token'}), 400
+        
+        # Get indexer config to inject API key
+        manager = get_indexer_manager(settings)
+        config = manager._get_indexer_by_id(indexer_id)
+        if not config:
+            return jsonify({'error': 'Indexer not found'}), 404
+        
+        api_key = config.get('api_key', '')
+        
+        # Stream the download
+        import requests
+        headers = {'X-Api-Key': api_key} if api_key else {}
+        resp = requests.get(download_url, headers=headers, stream=True, timeout=30)
+        resp.raise_for_status()
+        
+        # Stream response back to client
+        from flask import Response
+        return Response(
+            resp.iter_content(chunk_size=8192),
+            content_type=resp.headers.get('Content-Type', 'application/x-bittorrent'),
+            headers={
+                'Content-Disposition': resp.headers.get('Content-Disposition', 'attachment; filename="download.torrent"')
+            }
+        )
+        
+    except Exception as e:
+        from app.indexer_manager import sanitize_api_key
+        logger.exception('Download proxy failed')
+        return jsonify({'error': sanitize_api_key(str(e))}), 500
 
 
 @app.route('/api/settings/test/shield-adb', methods=['POST'])

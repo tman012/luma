@@ -11,6 +11,13 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def mock_ssrf_validation():
+    """Auto-patch SSRF validation for all tests."""
+    with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
+        yield
+
+
 # ---- Token Bucket Tests ----
 
 def test_token_bucket_basic():
@@ -245,28 +252,37 @@ def test_indexer_manager_test_success():
     from app.indexer_manager import IndexerManager
     
     settings_mock = Mock()
-    settings_mock.get.return_value = [
-        {
-            'id': 'test-ix',
-            'name': 'Test Indexer',
-            'url': 'http://test.example.com',
-            'api_key': 'test-key',
-            'type': 'torznab',
-        }
-    ]
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'test-ix',
+                    'name': 'Test Indexer',
+                    'url': 'http://test.example.com',
+                    'api_key': 'test-key',
+                    'type': 'torznab',
+                }
+            ]
+        elif key == 'indexer.allow_lan':
+            return False
+        return default
+    
+    settings_mock.get.side_effect = settings_get
     
     with patch('app.indexer_manager.requests.get') as mock_get:
-        mock_resp = Mock()
-        mock_resp.status_code = 200
-        mock_resp.text = '<caps></caps>'
-        mock_resp.raise_for_status = Mock()
-        mock_get.return_value = mock_resp
-        
-        manager = IndexerManager(settings_mock)
-        success, message = manager.test_indexer('test-ix')
-        
-        assert success is True
-        assert 'successful' in message.lower()
+        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
+            mock_resp = Mock()
+            mock_resp.status_code = 200
+            mock_resp.raw = Mock()
+            mock_resp.raw.read.return_value = b'<caps></caps>'
+            mock_resp.raise_for_status = Mock()
+            mock_get.return_value = mock_resp
+            
+            manager = IndexerManager(settings_mock)
+            success, message = manager.test_indexer('test-ix')
+            
+            assert success is True
+            assert 'successful' in message.lower()
 
 
 def test_indexer_manager_test_timeout():
@@ -275,24 +291,32 @@ def test_indexer_manager_test_timeout():
     import requests
     
     settings_mock = Mock()
-    settings_mock.get.return_value = [
-        {
-            'id': 'test-ix',
-            'name': 'Test Indexer',
-            'url': 'http://test.example.com',
-            'api_key': 'test-key',
-            'type': 'torznab',
-        }
-    ]
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'test-ix',
+                    'name': 'Test Indexer',
+                    'url': 'http://test.example.com',
+                    'api_key': 'test-key',
+                    'type': 'torznab',
+                }
+            ]
+        elif key == 'indexer.allow_lan':
+            return False
+        return default
+    
+    settings_mock.get.side_effect = settings_get
     
     with patch('app.indexer_manager.requests.get') as mock_get:
-        mock_get.side_effect = requests.exceptions.Timeout('Connection timeout')
-        
-        manager = IndexerManager(settings_mock)
-        success, message = manager.test_indexer('test-ix')
-        
-        assert success is False
-        assert 'timeout' in message.lower()
+        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
+            mock_get.side_effect = requests.exceptions.Timeout('Connection timeout')
+            
+            manager = IndexerManager(settings_mock)
+            success, message = manager.test_indexer('test-ix')
+            
+            assert success is False
+            assert 'timeout' in message.lower()
 
 
 def test_indexer_manager_search_basic():
@@ -300,17 +324,24 @@ def test_indexer_manager_search_basic():
     from app.indexer_manager import IndexerManager
     
     settings_mock = Mock()
-    settings_mock.get.return_value = [
-        {
-            'id': 'ix1',
-            'name': 'Indexer 1',
-            'url': 'http://test1.example.com',
-            'api_key': 'key1',
-            'type': 'torznab',
-            'enabled': True,
-            'priority': 10,
-        }
-    ]
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Indexer 1',
+                    'url': 'http://test1.example.com',
+                    'api_key': 'key1',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 10,
+                }
+            ]
+        elif key == 'indexer.allow_lan':
+            return False
+        return default
+    
+    settings_mock.get.side_effect = settings_get
     
     xml_response = """<?xml version="1.0"?>
 <rss><channel>
@@ -323,19 +354,21 @@ def test_indexer_manager_search_basic():
 </channel></rss>"""
     
     with patch('app.indexer_manager.requests.get') as mock_get:
-        mock_resp = Mock()
-        mock_resp.status_code = 200
-        mock_resp.text = xml_response
-        mock_resp.raise_for_status = Mock()
-        mock_get.return_value = mock_resp
-        
-        manager = IndexerManager(settings_mock)
-        results = manager.search(query='test', categories=[2000], limit=100)
-        
-        assert len(results) == 1
-        assert results[0]['title'] == 'Test Movie 1080p'
-        assert results[0]['seeders'] == 100
-        assert results[0]['indexer_name'] == 'Indexer 1'
+        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
+            mock_resp = Mock()
+            mock_resp.status_code = 200
+            mock_resp.raw = Mock()
+            mock_resp.raw.read.return_value = xml_response.encode()
+            mock_resp.raise_for_status = Mock()
+            mock_get.return_value = mock_resp
+            
+            manager = IndexerManager(settings_mock)
+            results = manager.search(query='test', categories=[2000], limit=100)
+            
+            assert len(results) == 1
+            assert results[0]['title'] == 'Test Movie 1080p'
+            assert results[0]['seeders'] == 100
+            assert results[0]['indexer_name'] == 'Indexer 1'
 
 
 def test_indexer_manager_search_rate_limit():
@@ -343,41 +376,50 @@ def test_indexer_manager_search_rate_limit():
     from app.indexer_manager import IndexerManager, IndexerRateLimitError
     
     settings_mock = Mock()
-    settings_mock.get.return_value = [
-        {
-            'id': 'ix1',
-            'name': 'Rate Limited',
-            'url': 'http://test.example.com',
-            'api_key': 'key',
-            'type': 'torznab',
-            'enabled': True,
-            'priority': 10,
-            'rate_limited': True,
-            'rate_limit_capacity': 2,
-            'rate_limit_refill_seconds': 100,
-            'rate_limit_max_per_hour': 5,
-        }
-    ]
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Rate Limited',
+                    'url': 'http://test.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 10,
+                    'rate_limited': True,
+                    'rate_limit_capacity': 2,
+                    'rate_limit_refill_seconds': 100,
+                    'rate_limit_max_per_hour': 5,
+                }
+            ]
+        elif key == 'indexer.allow_lan':
+            return False
+        return default
+    
+    settings_mock.get.side_effect = settings_get
     
     xml_response = '<rss><channel></channel></rss>'
     
     with patch('app.indexer_manager.requests.get') as mock_get:
-        mock_resp = Mock()
-        mock_resp.status_code = 200
-        mock_resp.text = xml_response
-        mock_resp.raise_for_status = Mock()
-        mock_get.return_value = mock_resp
-        
-        manager = IndexerManager(settings_mock)
-        
-        # First 2 requests should succeed (token bucket capacity)
-        manager.search(query='test1', categories=[2000], limit=100)
-        manager.search(query='test2', categories=[2000], limit=100)
-        
-        # 3rd request should be rate limited (no tokens left, not interactive)
-        results = manager.search(query='test3', categories=[2000], limit=100)
-        # Should return empty (rate limited, no cache)
-        assert results == []
+        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
+            mock_resp = Mock()
+            mock_resp.status_code = 200
+            mock_resp.raw = Mock()
+            mock_resp.raw.read.return_value = xml_response.encode()
+            mock_resp.raise_for_status = Mock()
+            mock_get.return_value = mock_resp
+            
+            manager = IndexerManager(settings_mock)
+            
+            # First 2 requests should succeed (token bucket capacity)
+            manager.search(query='test1', categories=[2000], limit=100)
+            manager.search(query='test2', categories=[2000], limit=100)
+            
+            # 3rd request should be rate limited (no tokens left, not interactive)
+            results = manager.search(query='test3', categories=[2000], limit=100)
+            # Should return empty (rate limited, no cache)
+            assert results == []
 
 
 def test_indexer_manager_search_429_backoff():
@@ -385,26 +427,34 @@ def test_indexer_manager_search_429_backoff():
     from app.indexer_manager import IndexerManager
     
     settings_mock = Mock()
-    settings_mock.get.return_value = [
-        {
-            'id': 'ix1',
-            'name': 'Test',
-            'url': 'http://test.example.com',
-            'api_key': 'key',
-            'type': 'torznab',
-            'enabled': True,
-            'priority': 10,
-        }
-    ]
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Test',
+                    'url': 'http://test.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 10,
+                }
+            ]
+        elif key == 'indexer.allow_lan':
+            return False
+        return default
+    
+    settings_mock.get.side_effect = settings_get
     
     with patch('app.indexer_manager.requests.get') as mock_get:
-        mock_resp = Mock()
-        mock_resp.status_code = 429
-        mock_resp.headers = {'Retry-After': '120'}
-        mock_get.return_value = mock_resp
-        
-        manager = IndexerManager(settings_mock)
-        results = manager.search(query='test', categories=[2000], limit=100)
+        with patch('app.indexer_manager.validate_indexer_url', return_value=(True, '')):
+            mock_resp = Mock()
+            mock_resp.status_code = 429
+            mock_resp.headers = {'Retry-After': '120'}
+            mock_get.return_value = mock_resp
+            
+            manager = IndexerManager(settings_mock)
+            results = manager.search(query='test', categories=[2000], limit=100)
         
         # Should return empty due to 429
         assert results == []
@@ -560,7 +610,8 @@ def test_backend_adapter_search_movies():
     with patch('app.indexer_manager.requests.get') as mock_get:
         mock_resp = Mock()
         mock_resp.status_code = 200
-        mock_resp.text = xml_response
+        mock_resp.raw = Mock()
+        mock_resp.raw.read.return_value = xml_response.encode()
         mock_resp.raise_for_status = Mock()
         mock_get.return_value = mock_resp
         
@@ -898,7 +949,7 @@ def test_exponential_backoff_500_error():
 
 # ---- Settings API Tests ----
 
-def test_list_indexers_endpoint(mocker):
+def test_list_indexers_endpoint():
     """GET /api/settings/indexers returns masked keys."""
     # This would need Flask app context - simplified mock test
     from app.indexer_manager import IndexerManager
@@ -1135,7 +1186,8 @@ def test_normalized_result_for_sonarr():
     with patch('app.indexer_manager.requests.get') as mock_get:
         mock_resp = Mock()
         mock_resp.status_code = 200
-        mock_resp.text = xml_response
+        mock_resp.raw = Mock()
+        mock_resp.raw.read.return_value = xml_response.encode()
         mock_resp.raise_for_status = Mock()
         mock_get.return_value = mock_resp
         

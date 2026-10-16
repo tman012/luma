@@ -3,20 +3,103 @@
 Luma Indexer Manager
 Clean-room Torznab/Newznab indexer manager to replace Prowlarr.
 
-Licensing: MIT/BSD compatible libraries only (stdlib, requests, xml.etree).
+Licensing: MIT/BSD compatible libraries only (stdlib, requests, defusedxml).
 No GPL code from Prowlarr, Jackett, Radarr, or Sonarr.
 """
 
+import hashlib
+import ipaddress
+import json
 import logging
+import os
+import re
 import threading
 import time
-import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 import requests
+from defusedxml import ElementTree as ET
 
 logger = logging.getLogger(__name__)
+
+# SSRF protection: disallowed IP ranges
+DISALLOWED_IP_RANGES = [
+    ipaddress.ip_network('127.0.0.0/8'),      # Loopback
+    ipaddress.ip_network('169.254.0.0/16'),   # Link-local
+    ipaddress.ip_network('10.0.0.0/8'),       # Private RFC1918
+    ipaddress.ip_network('172.16.0.0/12'),    # Private RFC1918
+    ipaddress.ip_network('192.168.0.0/16'),   # Private RFC1918
+    ipaddress.ip_network('::1/128'),          # IPv6 loopback
+    ipaddress.ip_network('fe80::/10'),        # IPv6 link-local
+]
+
+# 5 MB response body limit
+MAX_RESPONSE_SIZE = 5 * 1024 * 1024
+
+
+def sanitize_api_key(text: str) -> str:
+    """Strip API keys from logs/exceptions."""
+    if not text:
+        return text
+    # Remove apikey=xxx and api_key=xxx patterns
+    text = re.sub(r'(apikey|api_key)=[^&\s]+', r'\1=***', text, flags=re.IGNORECASE)
+    # Remove X-Api-Key: xxx patterns
+    text = re.sub(r'(X-Api-Key|apikey):\s*[^\s]+', r'\1: ***', text, flags=re.IGNORECASE)
+    return text
+
+
+def validate_indexer_url(url: str, allow_lan: bool = False) -> Tuple[bool, str]:
+    """
+    Validate indexer URL for SSRF protection.
+    
+    Returns (valid, error_message).
+    Only http/https allowed. Rejects loopback, link-local, and private IPs unless allow_lan=True.
+    """
+    try:
+        parsed = urlparse(url)
+        
+        # Only allow http/https
+        if parsed.scheme not in ('http', 'https'):
+            return False, f'Only http and https schemes allowed, got {parsed.scheme}'
+        
+        hostname = parsed.hostname
+        if not hostname:
+            return False, 'Missing hostname'
+        
+        # Resolve to IP
+        import socket
+        try:
+            addr_info = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        except socket.gaierror as e:
+            return False, f'DNS resolution failed: {e}'
+        
+        if not addr_info:
+            return False, 'DNS returned no addresses'
+        
+        # Check all resolved addresses
+        for family, socktype, proto, canonname, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            ip = ipaddress.ip_address(ip_str)
+            
+            # Cloud metadata endpoint
+            if ip_str == '169.254.169.254':
+                return False, 'Cloud metadata endpoint blocked'
+            
+            # Check disallowed ranges
+            for network in DISALLOWED_IP_RANGES:
+                if ip in network:
+                    if not allow_lan:
+                        return False, f'Private/loopback IP blocked: {ip_str}'
+        
+        return True, ''
+        
+    except Exception as e:
+        logger.exception(f'URL validation error: {e}')
+        return False, f'Validation error: {sanitize_api_key(str(e))}'
+
 
 # Default rate limits for AvistaZ-family trackers (configurable per indexer)
 DEFAULT_CAPACITY = 5
@@ -62,6 +145,26 @@ class TokenBucket:
             self.tokens -= 1.0
             return True
         return False
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dict for persistence."""
+        return {
+            'capacity': self.capacity,
+            'refill_seconds': self.refill_seconds,
+            'tokens': self.tokens,
+            'last_refill': self.last_refill,
+        }
+    
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> 'TokenBucket':
+        """Deserialize from dict."""
+        bucket = TokenBucket(
+            capacity=int(data.get('capacity', DEFAULT_CAPACITY)),
+            refill_seconds=float(data.get('refill_seconds', DEFAULT_REFILL_SECONDS)),
+        )
+        bucket.tokens = float(data.get('tokens', bucket.capacity))
+        bucket.last_refill = float(data.get('last_refill', time.time()))
+        return bucket
 
 
 class IndexerState:
@@ -73,10 +176,18 @@ class IndexerState:
         self.lock = threading.Lock()
         self.last_request_time = 0.0
 
-        # Rate limiting
-        capacity = config.get('rate_limit_capacity', DEFAULT_CAPACITY)
-        refill = config.get('rate_limit_refill_seconds', DEFAULT_REFILL_SECONDS)
-        self.bucket = TokenBucket(capacity, refill)
+        # Rate limiting - default on for AvistaZ family
+        is_avistaz = any(tracker in config.get('url', '').lower() 
+                        for tracker in ['avistaz', 'cinemaz', 'privatehd', 'exoticaz', 'animez'])
+        rate_limited_default = is_avistaz
+        
+        if config.get('rate_limited', rate_limited_default):
+            capacity = config.get('rate_limit_capacity', DEFAULT_CAPACITY)
+            refill = config.get('rate_limit_refill_seconds', DEFAULT_REFILL_SECONDS)
+            self.bucket = TokenBucket(capacity, refill)
+        else:
+            self.bucket = None
+            
         self.max_per_hour = config.get('rate_limit_max_per_hour', DEFAULT_MAX_PER_HOUR)
         self.request_log: List[float] = []
 
@@ -124,6 +235,32 @@ class IndexerState:
             oldest_keys = sorted(self.query_cache.keys(), key=lambda k: self.query_cache[k][0])[:100]
             for k in oldest_keys:
                 self.query_cache.pop(k, None)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to dict for persistence (excluding cache)."""
+        return {
+            'indexer_id': self.indexer_id,
+            'last_request_time': self.last_request_time,
+            'bucket': self.bucket.to_dict() if self.bucket else None,
+            'request_log': self.request_log,
+            'disabled_until': self.disabled_until,
+            'backoff_seconds': self.backoff_seconds,
+        }
+    
+    @staticmethod
+    def from_dict(data: Dict[str, Any], config: Dict[str, Any]) -> 'IndexerState':
+        """Deserialize from dict."""
+        state = IndexerState(data.get('indexer_id', ''), config)
+        state.last_request_time = float(data.get('last_request_time', 0.0))
+        
+        bucket_data = data.get('bucket')
+        if bucket_data:
+            state.bucket = TokenBucket.from_dict(bucket_data)
+        
+        state.request_log = [float(t) for t in data.get('request_log', [])]
+        state.disabled_until = data.get('disabled_until')
+        state.backoff_seconds = float(data.get('backoff_seconds', 0))
+        return state
 
 
 class IndexerManager:
@@ -133,6 +270,84 @@ class IndexerManager:
         self.settings_manager = settings_manager
         self.states: Dict[str, IndexerState] = {}
         self.states_lock = threading.Lock()
+        self.config_hash = None
+        self._state_file = None
+        self._load_state()
+
+    def _get_state_file_path(self) -> Path:
+        """Get path for state persistence."""
+        if self._state_file:
+            return self._state_file
+        
+        # Use data/ directory or fall back to /tmp
+        data_dir = Path(os.environ.get('LUMA_DATA_DIR', './data'))
+        data_dir.mkdir(parents=True, exist_ok=True)
+        self._state_file = data_dir / 'indexer_state.json'
+        return self._state_file
+    
+    def _compute_config_hash(self) -> str:
+        """Compute hash of current indexer config."""
+        indexers = self._get_indexers()
+        config_str = json.dumps(indexers, sort_keys=True)
+        return hashlib.sha256(config_str.encode()).hexdigest()[:16]
+    
+    def _load_state(self) -> None:
+        """Load persisted state from disk."""
+        try:
+            state_file = self._get_state_file_path()
+            if not state_file.exists():
+                return
+            
+            with open(state_file, 'r') as f:
+                data = json.load(f)
+            
+            saved_hash = data.get('config_hash')
+            states_data = data.get('states', {})
+            
+            current_hash = self._compute_config_hash()
+            
+            if saved_hash != current_hash:
+                logger.info('Indexer config changed, discarding saved state')
+                return
+            
+            # Restore states
+            indexers = self._get_indexers()
+            indexer_map = {ix['id']: ix for ix in indexers if 'id' in ix}
+            
+            for indexer_id, state_dict in states_data.items():
+                config = indexer_map.get(indexer_id, {})
+                if config:
+                    self.states[indexer_id] = IndexerState.from_dict(state_dict, config)
+            
+            self.config_hash = current_hash
+            logger.info(f'Loaded state for {len(self.states)} indexers')
+            
+        except Exception as e:
+            logger.warning(f'Failed to load indexer state: {sanitize_api_key(str(e))}')
+    
+    def _save_state(self) -> None:
+        """Persist state to disk."""
+        try:
+            state_file = self._get_state_file_path()
+            states_data = {}
+            
+            with self.states_lock:
+                for indexer_id, state in self.states.items():
+                    states_data[indexer_id] = state.to_dict()
+            
+            data = {
+                'config_hash': self.config_hash,
+                'states': states_data,
+            }
+            
+            # Atomic write
+            temp_file = state_file.with_suffix('.tmp')
+            with open(temp_file, 'w') as f:
+                json.dump(data, f)
+            temp_file.replace(state_file)
+            
+        except Exception as e:
+            logger.warning(f'Failed to save indexer state: {sanitize_api_key(str(e))}')
 
     def _get_indexers(self) -> List[Dict[str, Any]]:
         """Get indexer configurations from settings."""
@@ -147,8 +362,20 @@ class IndexerManager:
                 return ix
         return None
 
+    def _rebuild_if_config_changed(self) -> None:
+        """Rebuild state if config hash changed."""
+        current_hash = self._compute_config_hash()
+        if self.config_hash != current_hash:
+            logger.info('Indexer config changed, rebuilding state')
+            with self.states_lock:
+                self.states.clear()
+            self.config_hash = current_hash
+            self._load_state()
+
     def _get_state(self, indexer_id: str) -> IndexerState:
         """Get or create state for an indexer."""
+        self._rebuild_if_config_changed()
+        
         with self.states_lock:
             if indexer_id not in self.states:
                 config = self._get_indexer_by_id(indexer_id) or {}
@@ -189,17 +416,31 @@ class IndexerManager:
 
             if not url or not api_key:
                 return False, 'Missing URL or API key'
+            
+            # SSRF protection
+            allow_lan = self.settings_manager.get('indexer.allow_lan', False)
+            valid, error = validate_indexer_url(url, allow_lan=allow_lan)
+            if not valid:
+                return False, f'URL validation failed: {error}'
 
-            # Test with caps request
+            # Test with caps request - prefer header auth
+            headers = {'X-Api-Key': api_key}
             resp = requests.get(
-                url,
-                params={'t': 'caps', 'apikey': api_key},
+                f'{url}?t=caps',
+                headers=headers,
                 timeout=10,
+                stream=True,
             )
+            
+            # Cap response size
+            content = resp.raw.read(MAX_RESPONSE_SIZE)
+            if len(content) >= MAX_RESPONSE_SIZE:
+                return False, 'Response too large (>5MB)'
+            
             resp.raise_for_status()
 
             # Check for valid XML response
-            root = ET.fromstring(resp.text)
+            root = ET.fromstring(content)
             if root.tag != 'caps':
                 return False, 'Invalid response (missing <caps> element)'
 
@@ -208,12 +449,13 @@ class IndexerManager:
         except requests.exceptions.Timeout:
             return False, 'Connection timeout'
         except requests.exceptions.RequestException as e:
-            return False, f'Request error: {str(e)[:100]}'
+            error_msg = sanitize_api_key(str(e))
+            return False, f'Request error: {error_msg[:100]}'
         except ET.ParseError:
             return False, 'Invalid XML response'
         except Exception as e:
-            logger.exception(f'Indexer test failed: {e}')
-            return False, f'Error: {str(e)[:100]}'
+            logger.exception(f'Indexer test failed: {sanitize_api_key(str(e))}')
+            return False, f'Error: {sanitize_api_key(str(e))[:100]}'
 
     def _parse_torznab_xml(self, xml_text: str) -> List[Dict[str, Any]]:
         """Parse Torznab/Newznab XML response into normalized results."""
@@ -319,7 +561,7 @@ class IndexerManager:
                     raise IndexerRateLimitError('Token bucket empty')
 
             # Enforce minimum interval for rate-limited indexers
-            min_interval = config.get('rate_limit_min_interval', 2.0) if config.get('rate_limited') else 0
+            min_interval = config.get('rate_limit_min_interval', 2.0) if state.bucket else 0
             if min_interval > 0:
                 elapsed = now - state.last_request_time
                 if elapsed < min_interval:
@@ -329,19 +571,29 @@ class IndexerManager:
             url = config.get('url', '').rstrip('/')
             api_key = config.get('api_key', '')
             cat_str = ','.join(str(c) for c in categories)
+            
+            # SSRF validation
+            allow_lan = self.settings_manager.get('indexer.allow_lan', False)
+            valid, error = validate_indexer_url(url, allow_lan=allow_lan)
+            if not valid:
+                raise IndexerError(f'URL validation failed: {error}')
 
             try:
                 state.request_log.append(time.time())
+                
+                # Prefer header auth
+                headers = {'X-Api-Key': api_key}
                 resp = requests.get(
                     url,
                     params={
                         't': 'search',
                         'q': query,
                         'cat': cat_str,
-                        'apikey': api_key,
                         'limit': limit,
                     },
+                    headers=headers,
                     timeout=60,
+                    stream=True,
                 )
                 state.last_request_time = time.time()
 
@@ -360,22 +612,31 @@ class IndexerManager:
 
                 resp.raise_for_status()
 
+                # Cap response size at 5MB
+                content = resp.raw.read(MAX_RESPONSE_SIZE)
+                if len(content) >= MAX_RESPONSE_SIZE:
+                    logger.warning(f'Indexer {config.get("name")} response truncated at 5MB')
+
                 # Parse results
-                results = self._parse_torznab_xml(resp.text)
+                results = self._parse_torznab_xml(content.decode('utf-8', errors='replace'))
                 state.set_cached(cache_key, results, now)
                 state.clear_backoff()
 
                 logger.info(f'Indexer {config.get("name")} search "{query}": {len(results)} results')
                 return results
 
+            except (IndexerError, IndexerBackoffError, IndexerRateLimitError):
+                raise
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                logger.warning(f'Indexer {config.get("name")} connection error: {e}')
+                error_msg = sanitize_api_key(str(e))
+                logger.warning(f'Indexer {config.get("name")} connection error: {error_msg}')
                 state.set_backoff(60, now)
-                raise IndexerError(f'Connection error: {e}')
+                raise IndexerError(f'Connection error: {error_msg[:100]}')
             except requests.exceptions.RequestException as e:
-                logger.error(f'Indexer {config.get("name")} request failed: {e}')
+                error_msg = sanitize_api_key(str(e))
+                logger.error(f'Indexer {config.get("name")} request failed: {error_msg}')
                 state.set_backoff(60, now)
-                raise IndexerError(f'Request failed: {e}')
+                raise IndexerError(f'Request failed: {error_msg[:100]}')
 
     def search(
         self,
@@ -544,3 +805,29 @@ class IndexerManager:
             f'flagged {len(cardigann_indexers)} Cardigann-only'
         )
         return len(imported), len(cardigann_indexers), errors
+
+
+# Global singleton instance
+_indexer_manager_instance: Optional[IndexerManager] = None
+_indexer_manager_lock = threading.Lock()
+
+
+def get_indexer_manager(settings_manager=None) -> IndexerManager:
+    """
+    Get or create the global IndexerManager singleton.
+    
+    Args:
+        settings_manager: SettingsManager instance (required for first call)
+    
+    Returns:
+        The global IndexerManager instance
+    """
+    global _indexer_manager_instance
+    
+    with _indexer_manager_lock:
+        if _indexer_manager_instance is None:
+            if settings_manager is None:
+                raise ValueError('settings_manager required for first call to get_indexer_manager()')
+            _indexer_manager_instance = IndexerManager(settings_manager)
+        
+        return _indexer_manager_instance
