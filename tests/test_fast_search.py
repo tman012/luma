@@ -31,6 +31,21 @@ from app.fast_search import (
 )
 
 
+
+_ORIG_THREAD_START = threading.Thread.start
+
+
+def _start_unless_from(ident, started):
+    """Thread.start stand-in: records starts made from thread `ident` (the
+    request under test) and lets threads started elsewhere (left over from
+    other tests) run normally, so the assertion is not timing dependent."""
+    def _start(self_thread):
+        if threading.get_ident() == ident:
+            started.append(self_thread)
+            return None
+        return _ORIG_THREAD_START(self_thread)
+    return _start
+
 class TestNormalization(unittest.TestCase):
     """Test text normalization functions."""
 
@@ -2071,6 +2086,7 @@ class TestHeroCacheHealing(unittest.TestCase):
     def test_get_endpoint_no_refresh_or_thread(self):
         """GET /api/hero/content never refreshes, heals or starts a thread."""
         import threading
+        started = []
         self._mock_plex()
         self._write_cache([{'rating_key': 1, 'title': 'Missing images',
                             'backdrop_cache_file': 'movie_1_backdrop.jpg',
@@ -2078,14 +2094,15 @@ class TestHeroCacheHealing(unittest.TestCase):
         with patch.object(self.hero_cache, 'refresh_hero_content') as refresh, \
                 patch.object(self.hero_cache, 'heal_missing_images') as heal, \
                 patch.object(self.hero_cache, '_heal_missing_images_background') as heal_bg, \
-                patch.object(threading.Thread, 'start', autospec=True) as thread_start:
+                patch.object(threading.Thread, 'start', autospec=True,
+                             side_effect=_start_unless_from(threading.get_ident(), started)):
             with local_client(self.app) as client:
                 resp = client.get('/api/hero/content')
                 self.assertEqual(resp.status_code, 200)
         refresh.assert_not_called()
         heal.assert_not_called()
         heal_bg.assert_not_called()
-        thread_start.assert_not_called()
+        self.assertEqual(started, [])
 
     def test_sanitize_extension(self):
         s = self.hero_cache._sanitize_extension
