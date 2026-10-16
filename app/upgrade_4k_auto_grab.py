@@ -46,7 +46,7 @@ _lock = threading.Lock()
 _DEFAULT_INTERVAL_MINUTES = 15
 _DEFAULT_MIN_SEEDERS = 100
 _DEFAULT_MAX_AGE_HOURS = 24
-_INITIAL_DELAY = 50      # offset slightly from latest_auto_grab's 45s start
+_INITIAL_DELAY = 300     # after Latest's first cycle, so its remux sweep is served from the query cache
 _MAX_LOG_ENTRIES = 200
 
 

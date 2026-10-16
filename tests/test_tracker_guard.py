@@ -96,9 +96,13 @@ def _q():
 
 
 def _send(c, ix, interactive, clock=None, step=0.0):
+    # Background sends run with auto-grab priority so these tests measure the
+    # whole bucket (the PM totals); the Explore reserve is covered in
+    # tests/test_latest_budget.py.
     if clock and step:
         clock.advance(step)
-    return c._get_search(_q(), [ix], interactive=interactive)
+    with ia.search_context(priority='grab'):
+        return c._get_search(_q(), [ix], interactive=interactive)
 
 
 def _restart():
