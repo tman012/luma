@@ -148,15 +148,11 @@ def is_local_request(request, settings=None) -> bool:
 
 
 def is_portal_traffic(request, settings) -> bool:
-    """Detect if request is portal traffic (requests from the internet via tunnel).
+    """Detect if request is portal traffic (via dedicated hostname only).
     
-    Portal traffic is identified by:
-    1. Host header matches request_portal.hostname setting, OR
-    2. Has Cloudflare tunnel headers (CF-Ray or CF-Connecting-IP)
-    
-    Portal traffic can ONLY access the request portal routes.
+    Portal traffic is detected ONLY by Host header matching request_portal.hostname.
+    Owner can use the full app remotely via tunnel on the main hostname.
     """
-    # Check if Host matches portal hostname
     portal_hostname = (settings.get('request_portal.hostname') or '').strip().lower()
     if portal_hostname:
         request_host = (request.headers.get('Host') or '').strip().lower()
@@ -164,10 +160,6 @@ def is_portal_traffic(request, settings) -> bool:
         request_host = request_host.split(':')[0]
         if request_host == portal_hostname:
             return True
-    
-    # Check for Cloudflare tunnel headers
-    if request.headers.get('CF-Ray') or request.headers.get('CF-Connecting-IP'):
-        return True
     
     return False
 
