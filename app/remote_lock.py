@@ -200,5 +200,29 @@ def init_app(app, settings) -> None:
     
     # Register guard
     app.before_request(guard)
+
+
+def _save() -> None:
+    """Persist home IPs to state file."""
+    if not _state_path:
+        return
+    try:
+        data = {'home': list(_home.keys())}
+        _state_path.write_text(json.dumps(data, indent=2))
+    except Exception:
+        logger.warning('[remote-lock] state save failed', exc_info=True)
+
+
+def _load() -> None:
+    """Load persisted home IPs from state file."""
+    if not _state_path or not _state_path.exists():
+        return
+    try:
+        data = json.loads(_state_path.read_text())
+        for ip in data.get('home', []):
+            _home[ip] = time.time()
+        logger.info('[remote-lock] loaded %d home IPs', len(_home))
+    except Exception:
+        logger.warning('[remote-lock] state load failed', exc_info=True)
     
     logger.info('[remote-lock] mode=%s, home IPs known=%d', mode(), len(_home))
