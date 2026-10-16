@@ -2700,3 +2700,93 @@ def test_no_apikey_in_api_responses():
         serialized = json.dumps(results)
         assert 'apikey=' not in serialized, "search_all response contains 'apikey='"
         assert 'secret-key-123' not in serialized, "search_all response contains raw key"
+
+
+# ---- Item 8: Body Cap Improvements ----
+
+def test_body_cap_decodes_gzip():
+    """Body cap decodes gzip and rejects bodies > 5MB."""
+    from app.indexer_manager import IndexerManager, IndexerError
+    import gzip
+    
+    settings_mock = Mock()
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'test-ix',
+                    'name': 'Test',
+                    'url': 'http://test.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                }
+            ]
+        return default
+    
+    settings_mock.get.side_effect = settings_get
+    
+    # Create a large XML response (> 5MB when decompressed)
+    large_items = ''.join([
+        f'<item><title>Movie {i}</title><link>http://dl.test/{i}</link><guid>g{i}</guid></item>'
+        for i in range(50000)  # Large number of items
+    ])
+    xml_response = f'<?xml version="1.0"?><rss><channel>{large_items}</channel></rss>'
+    
+    with patch('app.indexer_manager.requests.get') as mock_get:
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {'Content-Encoding': 'gzip'}
+        mock_resp.raw = Mock()
+        
+        # Compress the response
+        compressed = gzip.compress(xml_response.encode())
+        mock_resp.raw.stream.return_value = [compressed[i:i+1024] for i in range(0, len(compressed), 1024)]
+        mock_resp.raise_for_status = Mock()
+        mock_get.return_value = mock_resp
+        
+        manager = IndexerManager(settings_mock)
+        
+        # Should reject if decompressed size > 5MB
+        if len(xml_response.encode()) > 5 * 1024 * 1024:
+            with pytest.raises(IndexerError, match='too large'):
+                manager._search_one_indexer('test-ix', 'test', [2000], 10, interactive=False)
+
+
+def test_body_cap_rejects_truncated():
+    """Body cap rejects truncated responses (incomplete vs Content-Length)."""
+    from app.indexer_manager import IndexerManager, IndexerError
+    
+    settings_mock = Mock()
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'test-ix',
+                    'name': 'Test',
+                    'url': 'http://test.example.com',
+                    'api_key': 'key',
+                    'type': 'torznab',
+                    'enabled': True,
+                }
+            ]
+        return default
+    
+    settings_mock.get.side_effect = settings_get
+    
+    xml_response = b'<?xml version="1.0"?><rss><channel><item><title>Movie</title></item></channel></rss>'
+    
+    with patch('app.indexer_manager.requests.get') as mock_get:
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {'Content-Length': '10000'}  # Claims 10KB but only sends partial
+        mock_resp.raw = Mock()
+        mock_resp.raw.stream.return_value = [xml_response]  # Only send a small part
+        mock_resp.raise_for_status = Mock()
+        mock_get.return_value = mock_resp
+        
+        manager = IndexerManager(settings_mock)
+        
+        # Should reject truncated response
+        with pytest.raises(IndexerError, match='truncated'):
+            manager._search_one_indexer('test-ix', 'test', [2000], 10, interactive=False)

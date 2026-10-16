@@ -544,15 +544,28 @@ class IndexerManager:
                 allow_redirects=False,  # Prevent redirect attacks
             )
             
-            # Cap response size
-            content = resp.raw.read(MAX_RESPONSE_SIZE)
-            if len(content) >= MAX_RESPONSE_SIZE:
-                return False, 'Response too large (>5MB)'
+            # Cap response size at 5 MB (decode gzip automatically)
+            content_bytes = b''
+            for chunk in resp.raw.stream(decode_content=True):
+                content_bytes += chunk
+                if len(content_bytes) > MAX_RESPONSE_SIZE:
+                    logger.warning(f'Indexer {config.get("name")} response exceeded 5MB limit')
+                    raise IndexerError('Response too large (>5MB)')
+            
+            # Reject truncated bodies - if stream ended before Content-Length, that's truncation
+            content_length = resp.headers.get('Content-Length')
+            if content_length:
+                try:
+                    expected_length = int(content_length)
+                    if len(content_bytes) < expected_length:
+                        raise IndexerError(f'Response truncated: got {len(content_bytes)} bytes, expected {expected_length}')
+                except ValueError:
+                    pass  # Invalid Content-Length header, ignore
             
             resp.raise_for_status()
 
             # Check for valid XML response
-            root = ET.fromstring(content)
+            root = ET.fromstring(content_bytes)
             if root.tag != 'caps':
                 return False, 'Invalid response (missing <caps> element)'
 
@@ -809,13 +822,26 @@ class IndexerManager:
 
             resp.raise_for_status()
 
-            # Cap response size at 5MB
-            content = resp.raw.read(MAX_RESPONSE_SIZE)
-            if len(content) >= MAX_RESPONSE_SIZE:
-                logger.warning(f'Indexer {config.get("name")} response truncated at 5MB')
+            # Cap response size at 5 MB (decode gzip automatically)
+            content_bytes = b''
+            for chunk in resp.raw.stream(decode_content=True):
+                content_bytes += chunk
+                if len(content_bytes) > MAX_RESPONSE_SIZE:
+                    logger.warning(f'Indexer {config.get("name")} response exceeded 5MB limit')
+                    raise IndexerError('Response too large (>5MB)')
+            
+            # Reject truncated bodies - if stream ended before Content-Length, that's truncation
+            content_length = resp.headers.get('Content-Length')
+            if content_length:
+                try:
+                    expected_length = int(content_length)
+                    if len(content_bytes) < expected_length:
+                        raise IndexerError(f'Response truncated: got {len(content_bytes)} bytes, expected {expected_length}')
+                except ValueError:
+                    pass  # Invalid Content-Length header, ignore
 
             # Parse results
-            results = self._parse_torznab_xml(content.decode('utf-8', errors='replace'))
+            results = self._parse_torznab_xml(content_bytes.decode('utf-8', errors='replace'))
             
             # Phase 5: Cache and clear backoff (acquire lock briefly)
             with state.lock:
