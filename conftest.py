@@ -34,6 +34,46 @@ def setup_test_environment():
         os.environ.pop(key, None)
 
 
+@pytest.fixture(autouse=True)
+def reset_shared_state(request):
+    """Reset shared state between tests to ensure test isolation.
+    
+    Only applies to pytest-based tests (not unittest.TestCase tests).
+    """
+    # Skip for unittest.TestCase tests
+    if hasattr(request, 'instance') and hasattr(request.instance, '__class__'):
+        if 'unittest' in str(type(request.instance)):
+            yield
+            return
+    
+    # Reset rate limiter
+    try:
+        from app import auth_routes
+        auth_routes.reset_rate_limiter()
+    except Exception:
+        pass
+    
+    # Clear user database between tests
+    try:
+        import app.user_auth as user_auth
+        conn = user_auth._get_db()
+        conn.execute('DELETE FROM users')
+        conn.execute('DELETE FROM user_sessions')
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+    
+    yield
+    
+    # Cleanup after test
+    try:
+        from app import auth_routes
+        auth_routes.reset_rate_limiter()
+    except Exception:
+        pass
+
+
 @pytest.fixture
 def test_app():
     """Create a real Flask app from app.main for integration tests."""
@@ -46,5 +86,13 @@ def test_app():
     
     # Initialize database schema
     app.user_auth.init_db()
+    
+    # Reset settings to defaults for each test
+    app.main.settings.update({
+        'security': {
+            'auth_required': 'disabled_local',
+            'session_secret': '',  # Will be auto-generated
+        }
+    })
     
     return flask_app

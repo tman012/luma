@@ -24,6 +24,12 @@ _RATE_LIMIT_MAX = 5  # Max attempts in window
 AUTH_COOKIE = 'luma_auth_session'
 
 
+def reset_rate_limiter():
+    """Reset rate limiter state (for testing)."""
+    global _failed_attempts
+    _failed_attempts.clear()
+
+
 def _is_rate_limited(ip: str) -> bool:
     """Check if IP is rate limited."""
     now = time.time()

@@ -171,13 +171,33 @@ def should_authenticate(settings, request) -> bool:
     - 'enabled': everyone must authenticate
     - 'disabled_local': local requests get implicit owner, remote must authenticate
     
+    Falls back to legacy access_mode for backwards compatibility:
+    - 'pin': everyone must authenticate (maps to 'enabled')
+    - 'pin_remote': local gets implicit owner, remote must authenticate (maps to 'disabled_local')
+    - 'open': local gets implicit owner, remote must authenticate (maps to 'disabled_local')
+    
+    Default (when neither setting is present): 'enabled' (secure default, everyone must authenticate)
+    
     Portal traffic always requires authentication (never gets implicit owner).
     """
     # Portal traffic never gets implicit owner
     if is_portal_traffic(request, settings):
         return True
     
-    auth_req = (settings.get('security.auth_required') or 'disabled_local').strip()
+    # Try new auth_required setting first
+    auth_req = settings.get('security.auth_required', '').strip()
+    
+    # Fall back to legacy access_mode for backwards compatibility
+    if not auth_req:
+        legacy_mode = settings.get('security.access_mode', '').strip()
+        if legacy_mode == 'pin':
+            auth_req = 'enabled'
+        elif legacy_mode in ('pin_remote', 'open'):
+            auth_req = 'disabled_local'
+        else:
+            # Default to 'enabled' (secure default - everyone must authenticate)
+            # This matches the old default behavior of 'pin' mode
+            auth_req = 'enabled'
     
     if auth_req == 'enabled':
         # Everyone must authenticate
