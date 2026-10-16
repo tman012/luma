@@ -45,6 +45,25 @@ comma-separated) or LAN users get 401:
 
 List only proxies you control.
 
+The proxy must also pass the original `Host` (or `X-Forwarded-Host`): Luma
+uses it to tell the main site from the request-portal host name and LAN names
+from public ones. Caddy's `reverse_proxy` keeps the client's `Host` and sets
+`X-Forwarded-For` / `X-Forwarded-Host` by default; don't override them with
+`header_up Host {upstream_hostport}`. Example (replace the placeholders; with
+host networking Luma listens on the host's port):
+
+```caddyfile
+luma.example.com, requests.example.com {
+    reverse_proxy 127.0.0.1:<luma port> {
+        header_up Host {host}
+        header_up X-Forwarded-Host {host}
+    }
+}
+```
+
+Then set `security.trusted_proxies` to `127.0.0.1/32, ::1/128` and
+`request_portal.hostname` to the portal name.
+
 ## First deploy / upgrade
 
 ```bash

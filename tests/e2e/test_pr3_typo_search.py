@@ -109,8 +109,20 @@ def test_fast_search_large_library_regression_guard(api):
     assert overall < 250, f"overall median {overall:.1f}ms >= 250ms: {meds}"
 
 # ---------- UI (phone + desktop) ----------
+def dismiss_connect_sheets(page):
+    """Close any fresh-install "Connect <service>" sheet (e.g. Connect Radarr on
+    the phone home screen) so it can't cover the controls under test."""
+    for _ in range(3):
+        sheet = page.locator('[role=dialog][aria-label^="Connect "]:visible')
+        if not sheet.count():
+            return
+        sheet.first.get_by_role("button", name="Not Now", exact=True).click()
+        sheet.first.wait_for(state="hidden", timeout=5000)
+
+
 def open_search(page):
     page.goto(BASE + "/"); page.wait_for_load_state("networkidle")
+    dismiss_connect_sheets(page)
     name = "Search" if page.viewport_name == "phone" else "Open search"
     page.get_by_role("button", name=name, exact=True).first.click()
     return page.locator("input[type=search]:visible").first

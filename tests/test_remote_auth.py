@@ -193,7 +193,7 @@ class TestAuthenticationDetails:
                   for c in cookies)
     
     def test_portal_host_404_on_login_and_main(self, test_app):
-        """Portal hostname gets 404 on /login and main app."""
+        """Portal hostname gets 404 on /login and app pages; / redirects to /request."""
         import app.main
         app.main.settings.update({
             'request_portal': {
@@ -206,6 +206,9 @@ class TestAuthenticationDetails:
         resp = self.client.get('/login', headers={'Host': 'requests.example.com'})
         assert resp.status_code == 404
         
-        # Portal host trying to access main app
+        # Portal host trying to reach the main app: / goes to the portal page,
+        # app pages are 404
         resp = self.client.get('/', headers={'Host': 'requests.example.com'})
+        assert resp.status_code == 302 and resp.headers['Location'].endswith('/request')
+        resp = self.client.get('/library', headers={'Host': 'requests.example.com'})
         assert resp.status_code == 404

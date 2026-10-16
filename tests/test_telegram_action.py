@@ -96,8 +96,8 @@ def test_expired_link_refused(env, monkeypatch):
     client, uid, state = env
     f = action_tokens.sign('k' * 40, 'deny_plex', uid, now=time.time() - 24 * 3600 - 1)
     assert action_tokens.check('k' * 40, f, state) == (None, 'expired')
-    assert client.post(PATH, data=f, environ_base=REMOTE).status_code == 401
-    assert client.get(PATH, query_string=f, environ_base=REMOTE).status_code == 401
+    for r in (client.post(PATH, data=f, environ_base=REMOTE), client.get(PATH, query_string=f, environ_base=REMOTE)):
+        assert r.status_code == 410 and r.mimetype == 'text/html' and b'Link Expired' in r.data
 
 
 @pytest.mark.parametrize('field,value', [
@@ -176,7 +176,7 @@ def test_corrupt_nonce_store_revokes_earlier_links(env, monkeypatch, caplog):
     (state / action_tokens.NONCE_FILENAME).write_text('{broken')
     with caplog.at_level('ERROR'):
         # replay of the used link after corruption: refused
-        assert client.post(PATH, data=used, environ_base=REMOTE).status_code == 401
+        assert client.post(PATH, data=used, environ_base=REMOTE).status_code == 410
     assert any('moved it to' in r.message for r in caplog.records)
     assert [p for p in state.iterdir() if p.name.startswith(action_tokens.NONCE_FILENAME + '.bad-')]
     # every link issued before the corruption is refused, even an unused one
@@ -301,3 +301,45 @@ def test_quarantine_names_are_unique(tmp_path):
         names.add(quarantine(p, 'test').name)
     assert len(names) == 3
     assert all(re.fullmatch(r'state\.json\.bad-\d+-\d+-\d+', n) for n in names)
+
+
+def test_remote_used_link_gets_html_page_not_json(env, monkeypatch):
+    client, uid, _ = env
+    monkeypatch.setattr(user_auth, 'save_user_settings', lambda *a: None)
+    _, f = _fields('deny_plex', uid)
+    assert client.post(PATH, data=f, environ_base=REMOTE).status_code == 200
+    for r in (client.post(PATH, data=f, environ_base=REMOTE), client.get(PATH, query_string=f, environ_base=REMOTE)):
+        assert r.status_code == 410 and r.mimetype == 'text/html'
+        assert b'Link Already Used' in r.data and b'<form' not in r.data
+        assert r.headers['Content-Security-Policy'].startswith("default-src 'none'")
+
+
+def test_remote_lan_same_page_for_expired_link(env):
+    client, uid, _ = env
+    f = action_tokens.sign('k' * 40, 'deny_plex', uid, now=time.time() - 24 * 3600 - 1)
+    lan = client.get(PATH, query_string=f, environ_base={'REMOTE_ADDR': '192.168.1.20'})
+    remote = client.get(PATH, query_string=f, environ_base=REMOTE)
+    assert (lan.status_code, lan.data) == (remote.status_code, remote.data) == (410, remote.data)
+
+
+def test_unusable_link_grants_nothing_else(env, monkeypatch):
+    """An expired or used link's fields on any other route still need sign-in,
+    and on the link route it never acts."""
+    client, uid, _ = env
+    calls = []
+    monkeypatch.setattr(user_auth, 'save_user_settings', lambda *a: calls.append(a))
+    f = action_tokens.sign('k' * 40, 'approve_plex', uid, now=time.time() - 24 * 3600 - 1)
+    for path in ('/api/settings', '/api/admin/users', '/api/request/admin/settings', '/'):
+        r = client.get(path, query_string=f, environ_base=REMOTE)
+        assert r.status_code in (302, 401, 403, 404), (path, r.status_code)
+        assert r.status_code != 200
+    assert client.post(PATH, data=f, environ_base=REMOTE).status_code == 410
+    assert calls == []
+
+
+@pytest.mark.parametrize('field,value', [('sig', '0' * 64), ('nonce', 'other'), ('action', 'nope')])
+def test_forged_link_still_needs_sign_in(env, field, value):
+    client, uid, _ = env
+    _, f = _fields('deny_plex', uid)
+    f[field] = value
+    assert client.get(PATH, query_string=f, environ_base=REMOTE).status_code == 401
