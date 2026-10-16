@@ -1338,3 +1338,127 @@ def test_luma_backend_results_unchanged(route_env, monkeypatch):
     with patch('app.indexer_api.get_indexer_client', return_value=_FakeLegacyClient(items)):
         r = _search(main)
     assert r.get_json()['releases'][0]['download_url'] == '/api/indexer/download/already-a-token'
+
+
+# ---- Round 7, item 1: Torznab/Jackett on LAN gets the same scoped trust ----
+
+JACKETT = 'http://192.168.1.50:9117'
+
+
+@pytest.fixture
+def torznab_lan(route_env):
+    main, adapter, pg, val = route_env
+    main.settings.store.update({'indexer.provider': 'torznab', 'indexer.allow_lan': False,
+                                'indexer.torznab_url': JACKETT + '/api/v2.0/indexers/all/results/torznab'})
+    val.side_effect = _REAL_VALIDATE
+    return route_env
+
+
+def _torrent_hash():
+    import hashlib
+    return hashlib.sha1(b'd4:name1:xe').hexdigest()
+
+
+def test_torznab_lan_token_download_allowed(torznab_lan):
+    main, adapter, pg, val = torznab_lan
+    tok = adapter.manager.issue_download_token(JACKETT + '/dl/idx/?path=a&file=M', 'backend:torznab')
+    pg.side_effect = [_resp(200, {}, TORRENT)]
+    r = _get(main, tok)
+    assert r.status_code == 200 and r.data == TORRENT
+    assert val.call_args.kwargs['allow_lan'] is True
+
+
+def test_torznab_lan_generic_grab_allowed(torznab_lan):
+    main, adapter, pg, val = torznab_lan
+    pg.side_effect = [_resp(200, {}, TORRENT)]
+    r, qbit = _grab_as_user(main, JACKETT + '/dl/idx/?jackett_apikey=k&path=a', _FakeQbit(_torrent_hash()))
+    assert r.status_code == 200, r.get_json()
+    assert val.call_args.kwargs['allow_lan'] is True
+
+
+@pytest.mark.parametrize('path', ['/api/v2.0/server/config', '/api/v2.0/indexers/all/config', '/UI/Dashboard'])
+def test_torznab_api_paths_blocked(torznab_lan, path):
+    main, adapter, pg, _ = torznab_lan
+    main.settings.store['indexer.allow_lan'] = True  # the path rule holds even with LAN allowed
+    r, qbit = _grab_as_user(main, JACKETT + path)
+    assert r.status_code == 403 and pg.call_count == 0 and qbit.added == []
+
+
+def test_torznab_redirect_to_jackett_api_blocked(torznab_lan):
+    main, adapter, pg, _ = torznab_lan
+    tok = adapter.manager.issue_download_token(JACKETT + '/dl/idx/?path=a', 'backend:torznab')
+    pg.side_effect = [_resp(302, {'Location': '/api/v2.0/server/config'})]
+    assert _get(main, tok).status_code == 403 and pg.call_count == 1
+
+
+def test_torznab_cross_origin_redirect_loses_trust(torznab_lan):
+    main, adapter, pg, val = torznab_lan
+    tok = adapter.manager.issue_download_token(JACKETT + '/dl/idx/?path=a', 'backend:torznab')
+    pg.side_effect = [_resp(302, {'Location': 'http://192.168.1.60:8080/file.torrent'})]
+    r = _get(main, tok)
+    assert r.status_code == 403 and pg.call_count == 1
+    assert val.call_args.kwargs == {'allow_lan': False, 'allow_loopback_for_host': None}
+
+
+def test_torznab_results_path_allowed(torznab_lan):
+    assert torznab_lan[0]._is_torznab_download_path(JACKETT + '/api/v2.0/indexers/x/results/torznab/api?t=search')
+
+
+def test_torznab_lan_needs_torznab_backend(torznab_lan):
+    main, adapter, pg, _ = torznab_lan
+    main.settings.store['indexer.provider'] = 'prowlarr'
+    r, qbit = _grab_as_user(main, JACKETT + '/dl/idx/?path=a')
+    assert r.status_code == 403 and pg.call_count == 0
+
+
+# ---- Round 7, items 3 and 4: backend token state ----
+
+def test_prowlarr_token_needs_prowlarr_backend(route_env):
+    main, adapter, pg, _ = route_env
+    tok = adapter.manager.issue_download_token('http://localhost:9696/3/download?link=a', 'backend:prowlarr')
+    main.settings.store['indexer.backend'] = 'luma'
+    r = _get(main, tok)
+    assert r.status_code == 409 and pg.call_count == 0
+
+
+def test_prowlarr_host_change_is_409(route_env):
+    main, adapter, pg, _ = route_env
+    tok = adapter.manager.issue_download_token('http://localhost:9696/3/download?link=a', 'backend:prowlarr')
+    main.settings.store['indexer.base_url'] = 'http://prowlarr.example.com:9696'
+    r = _get(main, tok)
+    assert r.status_code == 409 and r.get_json()['error'] == 'Indexer configuration changed'
+    assert pg.call_count == 0
+
+
+# ---- Round 7, item 2: auth on result listings ----
+
+AUTH_ROUTES = ['/api/sources/all-results?title=Movie&media_type=movie&year=2024',
+               '/api/indexer/latest', '/api/radarr/movie/releases?movieId=1']
+
+
+@pytest.mark.parametrize('route', AUTH_ROUTES)
+def test_result_routes_refuse_anonymous(all_results, route):
+    main = all_results[0]
+    with _as_user(main, None):
+        r = main.app.test_client().get(route)
+    assert r.status_code == 401
+
+
+@pytest.mark.parametrize('route', AUTH_ROUTES)
+def test_result_routes_open_to_owner_on_open_access(all_results, route):
+    main = all_results[0]
+    owner = {'id': 1, 'name': 'owner', 'is_admin': 1}
+    with patch.object(main._access, 'needs_pin', return_value=False), \
+         patch.object(main._access, 'owner', return_value=owner), \
+         patch.object(main, 'get_radarr_for_request', return_value=None):
+        r = main.app.test_client().get(route)
+    assert r.status_code != 401
+    if 'all-results' in route:
+        assert r.status_code == 200 and r.get_json()['releases']
+
+
+def test_result_routes_refuse_when_pin_required(all_results):
+    main = all_results[0]
+    with patch.object(main._access, 'needs_pin', return_value=True):
+        for route in AUTH_ROUTES:
+            assert main.app.test_client().get(route).status_code == 401

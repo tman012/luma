@@ -1139,6 +1139,9 @@ def get_sources_config():
 @app.route('/api/radarr/movie/releases')
 def radarr_movie_releases():
     """Search for available releases for a movie via Radarr interactive search."""
+    err = _require_auth()
+    if err:
+        return err
     try:
         radarr = get_radarr_for_request()
         if not radarr:
@@ -1448,6 +1451,9 @@ def sources_all_results():
         year        – optional int, appended to the search query.
         tmdb_id     – optional int (accepted; not required for the search).
     """
+    err = _require_auth()
+    if err:
+        return err
     try:
         from app.indexer_api import get_indexer_client
 
@@ -1680,6 +1686,9 @@ def indexer_latest():
 
     Each result is enriched with a TMDb poster + tmdb_id when available.
     """
+    err = _require_auth()
+    if err:
+        return err
     try:
         import time as _time
 
@@ -13381,14 +13390,14 @@ def add_torrent_to_qbittorrent():
         else:
             # Any other link is fetched here, never by qBittorrent, with the
             # same SSRF validation, DNS pinning and manual redirects as the
-            # proxy. LAN/loopback is allowed only on the Prowlarr backend, for a
-            # link that is already on the configured Prowlarr origin.
+            # proxy. LAN/loopback is allowed only on the Prowlarr or Torznab
+            # backend, for a link already on that backend's configured origin.
             try:
-                prowlarr = _prowlarr_origin() if _prowlarr_backend_active() else None
+                backend_origin = _active_backend_origin()
                 fetched = _fetch_validated(
                     torrent_url,
                     allow_lan=bool(settings.get('indexer.allow_lan', False)),
-                    trusted_origin=prowlarr if prowlarr == _url_host_port(torrent_url) else None,
+                    trusted_origin=backend_origin if backend_origin == _url_host_port(torrent_url) else None,
                     label='Grab link')
             except IndexerDownloadError as e:
                 logger.error(f"Failed to fetch torrent from indexer: {e.message}")
@@ -17310,8 +17319,10 @@ def _fetch_validated(url: str, *, allow_lan: bool, trusted_origin=None, api_key:
 
     Follows at most _MAX_DOWNLOAD_REDIRECTS http(s) redirects. A hop may reach
     loopback or LAN addresses only if it and every earlier hop are on
-    *trusted_origin* (the configured Prowlarr URL). On the configured Prowlarr
-    origin only Prowlarr's download path (/<indexer id>/download) is fetched. The API key goes only to the first
+    *trusted_origin* (the configured Prowlarr or Torznab URL). On the configured
+    Prowlarr origin only Prowlarr's download path (/<indexer id>/download) is
+    fetched; on the Torznab origin (Torznab backend only) only its download and
+    results paths. The API key goes only to the first
     hop's scheme, host and port. Returns {'magnet': uri} or
     {'body', 'mimetype', 'filename'}; raises IndexerDownloadError.
     """
@@ -17319,12 +17330,13 @@ def _fetch_validated(url: str, *, allow_lan: bool, trusted_origin=None, api_key:
     from app.indexer_manager import (MAX_RESPONSE_SIZE, add_api_key, pinned_get,
                                      validate_indexer_url)
     key_origin = _url_host_port(url)
-    prowlarr = _prowlarr_origin()
+    path_rules = _backend_path_rules()
     chain_on_trusted = trusted_origin is not None
     for hop in range(_MAX_DOWNLOAD_REDIRECTS + 1):
         origin = _url_host_port(url)
-        if prowlarr is not None and origin == prowlarr and not _is_prowlarr_download_path(url):
-            raise IndexerDownloadError(403, 'Only Prowlarr download links may be fetched from Prowlarr')
+        rule = path_rules.get(origin)
+        if rule is not None and not rule[0](url):
+            raise IndexerDownloadError(403, rule[1])
         # Trust (LAN/loopback) holds only while every hop so far stayed on the
         # trusted origin; a cross-host redirect ends it for good.
         chain_on_trusted = chain_on_trusted and origin == trusted_origin
@@ -17426,6 +17438,62 @@ def _prowlarr_backend_active() -> bool:
             and bool(settings.get('indexer.api_key')))
 
 
+def _torznab_backend_active() -> bool:
+    """The legacy Torznab backend is selected and has a Torznab URL."""
+    return (str(settings.get('indexer.backend', 'prowlarr') or 'prowlarr') != 'luma'
+            and str(settings.get('indexer.provider') or 'prowlarr') == 'torznab'
+            and bool((settings.get('indexer.torznab_url') or '').strip()))
+
+
+def _torznab_origin():
+    url = (settings.get('indexer.torznab_url', '') or '').strip()
+    return _url_host_port(url) if url else None
+
+
+def _is_torznab_download_path(url: str) -> bool:
+    """True if *url* is a download or results path of the configured Torznab server.
+
+    Allowed: the configured Torznab endpoint itself, Jackett's /dl/<indexer>/
+    download path and /api/v2.0/indexers/<id>/results[/torznab][/api], all under
+    the URL base that precedes /api/v2.0/ in the configured URL.
+    """
+    from urllib.parse import urlsplit
+    tpath = urlsplit((settings.get('indexer.torznab_url', '') or '').strip()).path.rstrip('/')
+    path = urlsplit(url).path or ''
+    cut = tpath.find('/api/v2.0/')
+    prefix = re.escape(tpath[:cut] if cut >= 0 else '')
+    return (path.rstrip('/') == tpath
+            or re.fullmatch(prefix + r'/dl/[^/]+/?', path) is not None
+            or re.fullmatch(prefix + r'/api/v2\.0/indexers/[^/]+/results(?:/torznab)?(?:/api)?/?', path) is not None)
+
+
+def _active_backend_origin():
+    """Origin of the active legacy backend (Prowlarr or Torznab), or None."""
+    if _prowlarr_backend_active():
+        return _prowlarr_origin()
+    if _torznab_backend_active():
+        return _torznab_origin()
+    return None
+
+
+def _backend_path_rules():
+    """{origin: (path check, refusal message)} for backend servers that only serve downloads here."""
+    rules = {}
+    torznab = _torznab_origin() if _torznab_backend_active() else None
+    if torznab is not None:
+        rules[torznab] = (_is_torznab_download_path,
+                          'Only Torznab download links may be fetched from the Torznab server')
+    prowlarr = _prowlarr_origin()
+    if prowlarr is not None:
+        if prowlarr in rules:
+            rules[prowlarr] = (lambda u: _is_prowlarr_download_path(u) or _is_torznab_download_path(u),
+                               'Only indexer download links may be fetched from the indexer backend')
+        else:
+            rules[prowlarr] = (_is_prowlarr_download_path,
+                               'Only Prowlarr download links may be fetched from Prowlarr')
+    return rules
+
+
 def _token_store():
     """The IndexerManager that owns opaque download tokens (for every backend)."""
     from app import indexer_manager
@@ -17484,15 +17552,18 @@ def fetch_indexer_download(token: str) -> Dict[str, Any]:
         # A result from the legacy Prowlarr/Torznab backend.
         base_key = 'indexer.torznab_url' if backend_id == 'backend:torznab' else 'indexer.base_url'
         expected_url = (settings.get(base_key, '') or '').strip()
-        if not expected_url:
+        active = (_prowlarr_backend_active() if backend_id == 'backend:prowlarr'
+                  else _torznab_backend_active())
+        if not expected_url or not active:
             raise IndexerDownloadError(409, 'The indexer for this download is no longer configured')
         api_key = settings.get('indexer.api_key', '') or ''
         if _url_host_port(download_url) != _url_host_port(expected_url):
-            raise IndexerDownloadError(403, 'Download URL does not match the configured host')
+            # The backend URL changed after this token was issued.
+            raise IndexerDownloadError(409, 'Indexer configuration changed')
         return _fetch_validated(
             download_url,
             allow_lan=bool(settings.get('indexer.allow_lan', False)),
-            trusted_origin=_prowlarr_origin() if backend_id == 'backend:prowlarr' else None,
+            trusted_origin=_url_host_port(expected_url),
             api_key=api_key, send_key=bool(needs_api_key and api_key),
             is_nzb=is_usenet_token, label='Indexer backend')
 
