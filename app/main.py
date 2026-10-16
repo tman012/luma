@@ -9054,7 +9054,8 @@ def _make_admin_action_url(action: str, user_id: int) -> str:
     """
     from urllib.parse import urlencode
     from app import action_tokens
-    fields = action_tokens.sign(app.config['SECRET_KEY'], action, user_id)
+    fields = action_tokens.sign(app.config['SECRET_KEY'], action, user_id,
+                                ver=_admin_action_version(action, user_id))
     return f"{_public_app_url()}/api/admin/telegram-action?{urlencode(fields)}"
 
 
@@ -9552,7 +9553,9 @@ def request_shared_plex():
         return jsonify({'success': True, 'message': 'Request already pending'})
 
     # Save pending status
-    user_auth.save_user_settings(user_id, {'plex_access_status': 'pending'})
+    # requested_at versions this request: Telegram links for an earlier one stop working
+    user_auth.save_user_settings(user_id, {'plex_access_status': 'pending',
+                                           'plex_access_requested_at': f'{time.time():.6f}'})
 
     # Send Telegram notification to admin
     full_user = user_auth.get_user_by_id(user_id)
@@ -9924,8 +9927,10 @@ def admin_telegram_action():
             return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
         if not _admin_action_pending(tok['action'], u):
             return _admin_already_handled(u)
+        if tok['ver'] != _admin_action_version(tok['action'], u['id']):
+            return _admin_link_superseded(u)
         title, question, button = _ADMIN_ACTION_LABELS[tok['action']]
-        fields = {k: request.args.get(k, '') for k in ('action', 'uid', 'exp', 'nonce', 'sig')}
+        fields = {k: request.args.get(k, '') for k in ('action', 'uid', 'exp', 'nonce', 'ver', 'sig')}
         return _admin_action_page(title, question.format(name=u['name']), tok['action'].startswith('approve'),
                                   form=fields, button=button)
 
@@ -9952,6 +9957,8 @@ def admin_telegram_action():
             return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
         if not _admin_action_pending(action, u):
             return _admin_already_handled(u)
+        if tok['ver'] != _admin_action_version(action, uid):
+            return _admin_link_superseded(u)
         name = u['name']
         before = _admin_action_state(uid)
         attempted = True
@@ -10016,7 +10023,24 @@ def _admin_action_pending(action: str, user: dict) -> bool:
     plex = user_auth.get_user_settings(user['id']).get('plex_access_status')
     if action == 'approve_plex':
         return plex == 'pending'
-    return plex != 'denied'
+    return plex in ('pending', 'approved')
+
+
+def _admin_action_version(action: str, uid: int) -> str:
+    """Which request a Telegram link is for: the account's creation time for
+    account actions, the Plex request time for Plex actions. Signed into the
+    link and compared on use, so a link for an earlier request can't act on a
+    newer one."""
+    if action in ('approve_user', 'deny_user'):
+        u = user_auth.get_user_by_id(uid) or {}
+        return 'u:' + str(u.get('created_at') or '')
+    return 'p:' + str(user_auth.get_user_settings(uid).get('plex_access_requested_at') or '')
+
+
+def _admin_link_superseded(user: dict):
+    return _admin_action_page('Link Out of Date',
+                              f"This link was for an earlier request from {user['name']}. "
+                              'Use the link from the newest notification.', False, 410)
 
 
 def _admin_already_handled(user: dict):
