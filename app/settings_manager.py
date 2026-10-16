@@ -145,6 +145,8 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
         "auth_required": {"type": "string", "default": "disabled_local", "sensitive": False,
                           "description": "Authentication requirement: disabled_local (LAN no sign-in, remote must) or enabled (everyone must)",
                           "enum": ["disabled_local", "enabled"]},
+        "session_secret": {"type": "string", "default": "", "sensitive": True,
+                          "description": "Secret key for session signing (auto-generated on first run)"},
         "trusted_proxies": {"type": "string", "default": "", "sensitive": False,
                             "description": "Reverse proxies whose X-Forwarded-For / CF-Connecting-IP headers are believed (comma-separated IPs or CIDRs)"},
     },
