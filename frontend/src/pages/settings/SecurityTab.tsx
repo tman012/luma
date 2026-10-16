@@ -18,6 +18,181 @@ interface SecurityState {
 
 const digits = (v: string) => v.replace(/\D/g, '').slice(0, 4);
 
+function RequestPortalCard() {
+  const [enabled, setEnabled] = useState(false);
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [hostname, setHostname] = useState('');
+  const [movieProfile, setMovieProfile] = useState('');
+  const [tvProfile, setTvProfile] = useState('');
+  const [excludeLibraries, setExcludeLibraries] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/settings')
+      .then(r => r.json())
+      .then(data => {
+        const portal = data.request_portal || {};
+        setEnabled(portal.enabled || false);
+        setHostname(portal.hostname || '');
+        setMovieProfile(portal.movie_profile || '');
+        setTvProfile(portal.tv_profile || '');
+        setExcludeLibraries((portal.exclude_libraries || []).join(', '));
+      })
+      .catch(() => {});
+  }, []);
+
+  const save = async () => {
+    setMsg(null);
+    if (enabled && password) {
+      if (password.length < 8) {
+        setMsg({ ok: false, text: 'Password must be at least 8 characters' });
+        return;
+      }
+      if (password !== confirmPassword) {
+        setMsg({ ok: false, text: "Passwords don't match" });
+        return;
+      }
+    }
+    setBusy(true);
+    try {
+      const body: Record<string, any> = {
+        request_portal: {
+          enabled,
+          hostname,
+          movie_profile: movieProfile,
+          tv_profile: tvProfile,
+          exclude_libraries: excludeLibraries.split(',').map(s => s.trim()).filter(Boolean),
+        },
+      };
+      if (password) body.request_portal.password = password;
+      
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setMsg({ ok: false, text: data.error || 'Save failed' });
+        return;
+      }
+      setPassword('');
+      setConfirmPassword('');
+      setDirty(false);
+      setMsg({ ok: true, text: 'Saved' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    setDirty(password !== '' || confirmPassword !== '');
+  }, [enabled, password, confirmPassword, hostname, movieProfile, tvProfile, excludeLibraries]);
+
+  return (
+    <section className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 space-y-5">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-[15px] font-semibold text-white/90">Request Portal</h3>
+        <label className="relative inline-flex cursor-pointer items-center">
+          <input
+            type="checkbox"
+            checked={enabled}
+            onChange={e => { setEnabled(e.target.checked); setDirty(true); }}
+            className="peer sr-only"
+          />
+          <div className="peer h-6 w-11 rounded-full bg-white/10 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-emerald-500 peer-checked:after:translate-x-5" />
+        </label>
+      </div>
+
+      {enabled && (
+        <>
+          <div className="grid gap-3 max-w-md">
+            <label className="space-y-1.5">
+              <span className="block text-[12px] font-medium text-white/50">Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={e => { setPassword(e.target.value); setDirty(true); }}
+                placeholder="Leave blank to keep current"
+                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className="block text-[12px] font-medium text-white/50">Confirm password</span>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={e => { setConfirmPassword(e.target.value); setDirty(true); }}
+                placeholder="Confirm new password"
+                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className="block text-[12px] font-medium text-white/50">Hostname</span>
+              <input
+                type="text"
+                value={hostname}
+                onChange={e => { setHostname(e.target.value); setDirty(true); }}
+                placeholder="requests.example.com"
+                spellCheck={false}
+                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className="block text-[12px] font-medium text-white/50">Movie profile</span>
+              <input
+                type="text"
+                value={movieProfile}
+                onChange={e => { setMovieProfile(e.target.value); setDirty(true); }}
+                placeholder="Radarr quality profile name"
+                spellCheck={false}
+                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className="block text-[12px] font-medium text-white/50">TV profile</span>
+              <input
+                type="text"
+                value={tvProfile}
+                onChange={e => { setTvProfile(e.target.value); setDirty(true); }}
+                placeholder="Sonarr quality profile name"
+                spellCheck={false}
+                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+              />
+            </label>
+            <label className="space-y-1.5">
+              <span className="block text-[12px] font-medium text-white/50">Exclude libraries</span>
+              <input
+                type="text"
+                value={excludeLibraries}
+                onChange={e => { setExcludeLibraries(e.target.value); setDirty(true); }}
+                placeholder="Library names, comma separated"
+                spellCheck={false}
+                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+              />
+            </label>
+          </div>
+        </>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={save}
+          disabled={busy || !dirty}
+          className="rounded-full bg-white px-5 py-2 text-[14px] font-semibold text-[#15102a] disabled:opacity-40"
+        >
+          Save
+        </button>
+        {msg && <span className={cn('text-[13px]', msg.ok ? 'text-emerald-300' : 'text-red-300')}>{msg.text}</span>}
+      </div>
+    </section>
+  );
+}
+
 export function SecurityTab() {
   const [state, setState] = useState<SecurityState | null>(null);
   const [mode, setMode] = useState<Mode>('pin_remote');
@@ -67,6 +242,8 @@ export function SecurityTab() {
 
   return (
     <div className="space-y-5 p-4 md:p-6">
+      <RequestPortalCard />
+      
       <section className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 space-y-5">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-[15px] font-semibold text-white/90">Require PIN</h3>

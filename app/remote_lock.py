@@ -11,6 +11,15 @@ Classification (cloudflared and Caddy both connect from loopback):
 
 Mode (settings security.remote_lock): enforce | report | off.
 Defaults to 'report' for new installs (log-only, non-blocking).
+
+INTEGRATION WITH ACCESS_MODE (start-flow):
+- remote_lock applies AFTER access_mode's authentication check
+- If access_mode='open', remote_lock still runs (remote_lock can lock down
+  an otherwise-open install when accessed via tunnel from outside)
+- If access_mode='pin_remote', it already requires auth for remote IPs,
+  so remote_lock's 'enforce' mode provides redundant protection
+- remote_lock classification is independent: it focuses on tunnel/CF headers,
+  while access_mode uses IP privacy checks
 """
 from __future__ import annotations
 
@@ -91,6 +100,13 @@ def _allowed(path: str, method: str) -> bool:
 
 
 def guard():
+    """Remote lock guard runs AFTER access_mode authentication.
+    
+    This provides an additional layer: even if access_mode='open' (no PIN required),
+    remote_lock can still require authentication for traffic via tunnel from outside.
+    If a user is already authenticated (by access_mode or otherwise), remote_lock
+    allows them through.
+    """
     m = mode()
     if m == 'off' or getattr(g, 'current_user', None):
         return None

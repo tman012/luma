@@ -114,3 +114,29 @@ class TestBotApiAuth:
                 data = response.get_json()
                 # Non-admin should remain non-admin
                 assert data.get("is_admin") == 0
+    
+    def test_non_admin_gets_403_on_admin_endpoint(self, app):
+        """Non-admin users get 403 when accessing admin-only endpoints."""
+        from app.bot_api import register_bot_routes
+        
+        install_secrets = {"service_api_key": "server-key"}
+        register_bot_routes(app, "luma_session", install_secrets)
+        
+        @app.route("/api/admin/test")
+        def admin_endpoint():
+            from flask import jsonify
+            user = getattr(g, 'current_user', None)
+            if not user or not user.get("is_admin"):
+                return jsonify({"error": "Admin required"}), 403
+            return jsonify({"success": True})
+        
+        # Non-admin user
+        with app.test_request_context('/'):
+            g.current_user = {"id": 2, "name": "regular", "is_admin": 0}
+            
+            from app.bot_api import _local
+            with patch("flask.g.current_user", g.current_user):
+                response = _local(app, "GET", "/api/admin/test")
+                assert response.status_code == 403
+                data = response.get_json()
+                assert "Admin" in data.get("error", "")

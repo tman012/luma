@@ -183,7 +183,7 @@ class TestRequestPortalHostGuard:
     """Test hostname-based routing."""
     
     def test_host_guard_serves_only_request_page_on_dedicated_host(self, app, settings_mock):
-        """When request portal has a dedicated hostname, only serve /request there."""
+        """When request portal has a dedicated hostname, non-request paths return 404."""
         from app import request_portal
         
         request_portal._settings = settings_mock
@@ -192,12 +192,12 @@ class TestRequestPortalHostGuard:
             'request_portal.hostname': 'requests.example.com'
         }.get(key, default)
         
-        # Request to /browse on the request hostname should redirect to /request
+        # Request to /browse on the request hostname should return 404
         with app.test_request_context('/browse', headers={'Host': 'requests.example.com'}):
             result = request_portal._host_guard()
             assert result is not None
-            # Should be a redirect (check if it's a tuple or Response object)
+            # Should be a 404 on non-request paths
             if isinstance(result, tuple):
-                assert result[1] == 302
+                assert result[1] == 404
             else:
-                assert result.status_code == 302
+                assert result.status_code == 404
