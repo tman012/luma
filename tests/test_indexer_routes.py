@@ -67,7 +67,15 @@ class TestIndexerRoutesAdminOnly:
     def test_admin_can_access_list(self, admin_session):
         """Admin can access GET /api/settings/indexers."""
         with patch('app.main._require_admin', return_value=None):
-            with patch('app.main.settings.get', return_value=[]):
+            with patch('app.main.settings.get') as mock_get:
+                def settings_get(key, default=None):
+                    if key == 'indexer.indexers':
+                        return []
+                    elif key == 'indexer.backend':
+                        return 'luma'  # Enable Luma backend
+                    return default
+                mock_get.side_effect = settings_get
+                
                 resp = admin_session.get('/api/settings/indexers')
                 assert resp.status_code == 200
 
@@ -119,9 +127,16 @@ class TestRemoteTrafficRefused:
     
     def test_local_ip_allowed(self, admin_session):
         """Local IP (home network) is allowed."""
-        # This test would need proper access control setup
         with patch('app.main._require_admin', return_value=None):
-            with patch('app.main.settings.get', return_value=[]):
+            with patch('app.main.settings.get') as mock_get:
+                def settings_get(key, default=None):
+                    if key == 'indexer.backend':
+                        return 'luma'
+                    elif key == 'indexer.indexers':
+                        return []
+                    return default
+                mock_get.side_effect = settings_get
+                
                 resp = admin_session.get('/api/settings/indexers')
                 assert resp.status_code == 200
 
