@@ -15,7 +15,7 @@ import os
 import re
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -868,26 +868,28 @@ class IndexerManager:
                 errors[indexer_id] = str(e)
                 return indexer_id, []
 
-        with ThreadPoolExecutor(max_workers=min(8, len(target_configs))) as executor:
+        executor = ThreadPoolExecutor(max_workers=min(8, len(target_configs)))
+        try:
             futures = {executor.submit(_search_one, cfg): cfg for cfg in target_configs}
             completed_count = 0
             
-            for future in as_completed(futures, timeout=deadline):
-                try:
-                    indexer_id, results = future.result(timeout=0.1)
-                    all_results.extend(results)
-                    completed_count += 1
-                except Exception as e:
-                    logger.warning(f'Future failed: {sanitize_api_key(str(e))}')
-                
-                # Check if deadline exceeded
-                if time.time() - start_time >= deadline:
-                    logger.warning(f'Search deadline exceeded after {deadline}s, returning partial results')
-                    break
+            try:
+                for future in as_completed(futures, timeout=deadline):
+                    try:
+                        indexer_id, results = future.result(timeout=0.1)
+                        all_results.extend(results)
+                        completed_count += 1
+                    except Exception as e:
+                        logger.warning(f'Future failed: {sanitize_api_key(str(e))}')
+            except TimeoutError:
+                logger.warning(f'Search deadline exceeded after {deadline}s, returning partial results')
             
             # Log partial results if we didn't wait for all
             if completed_count < len(target_configs):
                 logger.info(f'Returning partial results from {completed_count}/{len(target_configs)} indexers')
+        finally:
+            # Cancel remaining futures and shutdown immediately
+            executor.shutdown(wait=False, cancel_futures=True)
 
         # Sort by priority (lower first), then by seeders
         all_results.sort(key=lambda x: (x.get('priority', 100), -x.get('seeders', 0)))

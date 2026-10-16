@@ -2294,3 +2294,73 @@ def test_concurrent_requests_respect_min_interval():
             # (allowing some tolerance for thread scheduling)
             assert len(results) == 2
             assert max(results) >= 0.4  # At least 0.4s total (0.5s with tolerance)
+
+
+# ---- Item 4: Fan-out TimeoutError Handling ----
+
+def test_fanout_deadline_returns_partial_results():
+    """Fan-out with 1s deadline and two 4s indexers returns in about 1.3s or less."""
+    import time
+    from app.indexer_manager import IndexerManager
+    
+    settings_mock = Mock()
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Slow Indexer 1',
+                    'url': 'http://slow1.example.com',
+                    'api_key': 'key1',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 10,
+                },
+                {
+                    'id': 'ix2',
+                    'name': 'Slow Indexer 2',
+                    'url': 'http://slow2.example.com',
+                    'api_key': 'key2',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 20,
+                },
+            ]
+        elif key == 'indexer.search_deadline':
+            return 1.0  # 1 second deadline
+        return default
+    
+    settings_mock.get.side_effect = settings_get
+    
+    xml_response = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Result</title>
+  <link>http://dl.test/1</link>
+  <guid>g1</guid>
+</item>
+</channel></rss>"""
+    
+    with patch('app.indexer_manager.requests.get') as mock_get:
+        def slow_response(*args, **kwargs):
+            # Simulate 4-second delay
+            time.sleep(4.0)
+            mock_resp = Mock()
+            mock_resp.status_code = 200
+            mock_resp.raw = Mock()
+            mock_resp.raw.read.return_value = xml_response.encode()
+            mock_resp.raise_for_status = Mock()
+            return mock_resp
+        
+        mock_get.side_effect = slow_response
+        
+        manager = IndexerManager(settings_mock)
+        
+        start = time.time()
+        results = manager.search(query='test', categories=[2000], limit=10, interactive=False)
+        elapsed = time.time() - start
+        
+        # Should return in about 1s (deadline), definitely less than 1.3s
+        assert elapsed < 1.3, f"Search took {elapsed:.2f}s, expected < 1.3s"
+        # Should return empty results (no indexer completed in time)
+        assert results == []
