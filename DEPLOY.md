@@ -46,3 +46,12 @@ docker compose stop luma && rm -rf cache/hero && docker compose start luma
 ```
 
 Backup: `tar czf luma-data.tgz data` (the cache folder can be rebuilt).
+
+## Single gunicorn worker (required)
+
+gunicorn.conf.py runs `workers = 1` with threads. The tracker guard
+(GUARD_LIMITS in app/indexer_api.py, used by Prowlarr, Torznab and the
+built-in indexer manager alike), the /api/indexer/download token store and
+the Telegram used-link store hold live state in the one process and persist
+it to the data dir. Do not raise `workers`: each worker would apply its own
+limits and they would overwrite each other's state files.

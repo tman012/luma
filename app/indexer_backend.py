@@ -258,4 +258,16 @@ class LumaBackendAdapter:
     def _sign_download_url(self, download_url: str, indexer_id: str) -> str:
         """Replace a raw download URL with an opaque, server-side-mapped token link."""
         token = self.manager.issue_download_token(download_url, indexer_id, persist=False)
-        return f'/api/indexer/download/{token}'
+        return indexer_download_path(token)
+
+
+def indexer_download_path(token: str) -> str:
+    """Our /api/indexer/download/<token> link, under the configured URL base
+    (app.config['URL_BASE'], e.g. /luma). The download-path matcher in main.py
+    accepts the link with or without the base."""
+    try:
+        from flask import current_app
+        base = (current_app.config.get('URL_BASE', '') or '').rstrip('/')
+    except RuntimeError:          # outside a request/app context
+        base = ''
+    return f'{base}/api/indexer/download/{token}'

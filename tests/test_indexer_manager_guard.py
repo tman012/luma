@@ -125,3 +125,14 @@ def test_manager_has_no_second_limiter():
     src = inspect.getsource(indexer_manager.IndexerManager._search_one_indexer)
     assert 'guard_acquire' in src
     assert 'bucket.take' not in src and 'requests_last_hour' not in src
+
+
+def test_download_links_use_url_base():
+    from flask import Flask
+    from app.indexer_backend import indexer_download_path
+    assert indexer_download_path('t1') == '/api/indexer/download/t1'
+    a = Flask('x'); a.config['URL_BASE'] = '/luma'
+    with a.app_context():
+        assert indexer_download_path('t1') == '/luma/api/indexer/download/t1'
+    from app import main
+    assert main._INDEXER_DOWNLOAD_PATH.match('/luma/api/indexer/download/t1')

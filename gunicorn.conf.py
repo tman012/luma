@@ -36,6 +36,11 @@ _settings = SettingsManager()
 
 # Worker configuration
 bind = _bind(_settings)
+# Keep ONE worker. The tracker guard (app/indexer_api.py: counters, buckets,
+# cooldowns, streaks), the indexer download-token store and the Telegram
+# used-link store keep their live state in this process and only persist it
+# to the data dir; several workers would each enforce their own limits and
+# could overwrite each other's files. Scale with threads instead.
 workers = 1
 threads = 8
 worker_class = 'gthread'

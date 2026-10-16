@@ -20338,7 +20338,8 @@ def _tokenize_legacy_download(url: str, protocol: str) -> str:
         return url
     token_id = backend_id + (':usenet' if str(protocol or '').lower() == 'usenet' else '')
     token = _token_store().issue_download_token(url, token_id, persist=False)
-    return f'/api/indexer/download/{token}'
+    from app.indexer_backend import indexer_download_path
+    return indexer_download_path(token)
 
 
 def fetch_indexer_download(token: str) -> Dict[str, Any]:
