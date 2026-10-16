@@ -75,6 +75,8 @@ services:
     volumes:
       # Persistent data (settings, databases, caches)
       - ${LUMA_DATA_DIR:-./data}:/app/data
+      # Hero cache images (persisted across rebuilds, served from /static/hero_cache)
+      - hero_cache:/app/static/hero_cache
       # ADB keys (only used when an Android TV / Shield device is added)
       - ${LUMA_ADB_KEYS_DIR:-./.android}:/app/home/.android
       # Completed downloads (auto-rename moves files from here)
@@ -96,3 +98,7 @@ services:
       interval: 30s
       timeout: 3s
       retries: 3
+
+volumes:
+  # Named volume for hero cache images (persists across container/image rebuilds)
+  hero_cache:
