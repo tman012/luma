@@ -592,17 +592,15 @@ def start_services(app_instance):
 
 # Note: Background thread initialization moved to start_services()
 
-# Skip initialization in test mode (will be initialized on demand)
-if not skip_bg:
-    # Re-initialise hero_cache with values from settings (it was created at
-    # module-import time before the settings object existed).
-    hero_cache.init_from_settings(settings)
+# Re-initialise hero_cache with values from settings (it was created at
+# module-import time before the settings object existed).
+hero_cache.init_from_settings(settings)
 
-    # Initialize Plex service from settings
-    plex_service.update_config(
-        settings.get('plex.url', ''),
-        settings.get('plex.token', ''),
-    )
+# Initialize Plex service from settings
+plex_service.update_config(
+    settings.get('plex.url', ''),
+    settings.get('plex.token', ''),
+)
 
 # Ownership cache - stores ownership check results to avoid slow network DB queries
 # Cache entries expire after 5 minutes
