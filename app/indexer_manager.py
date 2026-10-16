@@ -511,13 +511,13 @@ class IndexerManager:
             return False, f'Error: {sanitize_api_key(str(e))[:100]}'
 
     def _parse_torznab_xml(self, xml_text: str) -> List[Dict[str, Any]]:
-        """Parse Torznab/Newznab XML response into normalized results."""
+        """Parse Torznab/Newznab XML response into normalized results. Tolerant of bad data."""
         results = []
 
         try:
             root = ET.fromstring(xml_text)
         except ET.ParseError as e:
-            logger.error(f'XML parse error: {e}')
+            logger.error(f'XML parse error: {sanitize_api_key(str(e))}')
             return results
 
         ns = {
@@ -530,36 +530,51 @@ class IndexerManager:
             return results
 
         for item in channel.findall('item'):
-            title = item.findtext('title', '') or ''
-            link = item.findtext('link', '') or ''
-            guid = item.findtext('guid', '') or ''
-            pub_date = item.findtext('pubDate', '') or ''
-            size = item.findtext('size', '0') or '0'
+            try:
+                title = item.findtext('title', '') or ''
+                link = item.findtext('link', '') or ''
+                guid = item.findtext('guid', '') or ''
+                pub_date = item.findtext('pubDate', '') or ''
+                size_text = item.findtext('size', '0') or '0'
 
-            # Extract torznab/newznab attributes
-            attrs = {}
-            for attr_el in item.findall('torznab:attr', ns) + item.findall('newznab:attr', ns):
-                name = attr_el.get('name', '')
-                value = attr_el.get('value', '')
-                if name:
-                    attrs[name] = value
+                # Extract torznab/newznab attributes
+                attrs = {}
+                for attr_el in item.findall('torznab:attr', ns) + item.findall('newznab:attr', ns):
+                    name = attr_el.get('name', '')
+                    value = attr_el.get('value', '')
+                    if name:
+                        attrs[name] = value
 
-            seeders = int(attrs.get('seeders', 0) or 0)
-            leechers = int(attrs.get('leechers', 0) or attrs.get('peers', 0) or 0)
-            size_bytes = int(attrs.get('size', size) or 0)
+                # Tolerant int parsing
+                def safe_int(value, default=0):
+                    if not value:
+                        return default
+                    try:
+                        return int(value)
+                    except (ValueError, TypeError):
+                        return default
 
-            results.append({
-                'title': title,
-                'download_url': link,
-                'guid': guid,
-                'pub_date': pub_date,
-                'size': size_bytes,
-                'seeders': seeders,
-                'leechers': leechers,
-                'indexer': attrs.get('indexer', ''),
-                'info_hash': attrs.get('infohash', ''),
-                'imdb_id': attrs.get('imdb', ''),
-            })
+                seeders = safe_int(attrs.get('seeders'))
+                leechers = safe_int(attrs.get('leechers', attrs.get('peers')))
+                size_bytes = safe_int(attrs.get('size', size_text))
+
+                results.append({
+                    'title': title,
+                    'download_url': link,
+                    'guid': guid,
+                    'pub_date': pub_date,
+                    'size': size_bytes,
+                    'seeders': seeders,
+                    'leechers': leechers,
+                    'indexer': attrs.get('indexer', ''),
+                    'info_hash': attrs.get('infohash', ''),
+                    'imdb_id': attrs.get('imdb', ''),
+                    'magneturl': attrs.get('magneturl', ''),
+                })
+            except Exception as e:
+                # Don't let one bad item kill the whole response
+                logger.warning(f'Failed to parse item: {sanitize_api_key(str(e))}')
+                continue
 
         return results
 
@@ -571,7 +586,7 @@ class IndexerManager:
         limit: int,
         interactive: bool = False,
     ) -> List[Dict[str, Any]]:
-        """Search a single indexer with rate limiting and caching."""
+        """Search a single indexer with rate limiting and caching. Lock NOT held during HTTP or sleeps."""
         config = self._get_indexer_by_id(indexer_id)
         if not config or not config.get('enabled', True):
             raise IndexerError(f'Indexer {indexer_id} not found or disabled')
@@ -582,6 +597,8 @@ class IndexerManager:
         # Build cache key
         cache_key = (query, tuple(sorted(categories)), limit)
 
+        # Phase 1: Check state and reserve request slot (acquire lock briefly)
+        sleep_needed = 0.0
         with state.lock:
             # Check backoff
             if state.is_backed_off(now):
@@ -600,101 +617,114 @@ class IndexerManager:
             used = state.requests_last_hour(now)
             if used >= state.max_per_hour:
                 logger.info(f'Indexer {config.get("name")} at hourly limit ({used} requests)')
-                # Don't silently serve stale cache
                 raise IndexerRateLimitError('Hourly rate limit exceeded')
 
             # Check bucket for rate-limited indexers
             if not interactive and state.bucket:
                 if not state.bucket.take(now):
                     logger.debug(f'Indexer {config.get("name")} token bucket empty')
-                    # Don't silently serve stale cache
                     raise IndexerRateLimitError('Token bucket empty')
 
-            # Enforce minimum interval for rate-limited indexers
+            # Reserve request slot
+            state.request_log.append(time.time())
+            
+            # Calculate sleep needed for min interval
             min_interval = config.get('rate_limit_min_interval', 2.0) if state.bucket else 0
             if min_interval > 0:
                 elapsed = now - state.last_request_time
                 if elapsed < min_interval:
-                    time.sleep(min_interval - elapsed)
+                    sleep_needed = min_interval - elapsed
+        
+        # Phase 2: Sleep OUTSIDE the lock if needed
+        if sleep_needed > 0:
+            time.sleep(sleep_needed)
+        
+        # Phase 3: Make HTTP request OUTSIDE the lock
+        url = config.get('url', '').rstrip('/')
+        api_key = config.get('api_key', '')
+        cat_str = ','.join(str(c) for c in categories)
+        
+        # SSRF validation
+        allow_lan = self.settings_manager.get('indexer.allow_lan', False)
+        valid, error = validate_indexer_url(url, allow_lan=allow_lan)
+        if not valid:
+            raise IndexerError(f'URL validation failed: {error}')
 
-            # Make request
-            url = config.get('url', '').rstrip('/')
-            api_key = config.get('api_key', '')
-            cat_str = ','.join(str(c) for c in categories)
+        try:
+            # Send both header and query param for maximum compatibility
+            headers = {'X-Api-Key': api_key}
+            params = {
+                't': 'search',
+                'q': query,
+                'cat': cat_str,
+                'limit': limit,
+                'apikey': api_key,
+            }
+            resp = requests.get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=60,
+                stream=True,
+            )
             
-            # SSRF validation
-            allow_lan = self.settings_manager.get('indexer.allow_lan', False)
-            valid, error = validate_indexer_url(url, allow_lan=allow_lan)
-            if not valid:
-                raise IndexerError(f'URL validation failed: {error}')
-
-            try:
-                state.request_log.append(time.time())
-                
-                # Send both header and query param for maximum compatibility
-                # Many Torznab/Newznab servers only accept query param
-                headers = {'X-Api-Key': api_key}
-                params = {
-                    't': 'search',
-                    'q': query,
-                    'cat': cat_str,
-                    'limit': limit,
-                    'apikey': api_key,
-                }
-                resp = requests.get(
-                    url,
-                    params=params,
-                    headers=headers,
-                    timeout=60,
-                    stream=True,
-                )
+            # Phase 4: Update last_request_time (acquire lock briefly)
+            with state.lock:
                 state.last_request_time = time.time()
 
-                # Handle rate limit / errors
-                if resp.status_code == 429:
-                    retry_after_header = resp.headers.get('Retry-After')
-                    retry_after_seconds = parse_retry_after(retry_after_header)
-                    if retry_after_seconds:
-                        state.set_backoff(retry_after_seconds, now)
-                        logger.warning(f'Indexer {config.get("name")} 429 - Retry-After {retry_after_seconds}s')
-                        raise IndexerBackoffError(f'Rate limited (429), retry after {retry_after_seconds}s')
-                    else:
-                        state.set_backoff_exponential(now)
-                        logger.warning(f'Indexer {config.get("name")} 429 - exponential backoff')
-                        raise IndexerBackoffError('Rate limited (429)')
+            # Handle rate limit / errors
+            if resp.status_code == 429:
+                retry_after_header = resp.headers.get('Retry-After')
+                retry_after_seconds = parse_retry_after(retry_after_header)
+                if retry_after_seconds:
+                    with state.lock:
+                        state.set_backoff(retry_after_seconds, time.time())
+                    logger.warning(f'Indexer {config.get("name")} 429 - Retry-After {retry_after_seconds}s')
+                    raise IndexerBackoffError(f'Rate limited (429), retry after {retry_after_seconds}s')
+                else:
+                    with state.lock:
+                        state.set_backoff_exponential(time.time())
+                    logger.warning(f'Indexer {config.get("name")} 429 - exponential backoff')
+                    raise IndexerBackoffError('Rate limited (429)')
 
-                if resp.status_code >= 500:
-                    state.set_backoff_exponential(now)
-                    logger.warning(f'Indexer {config.get("name")} {resp.status_code} - exponential backoff')
-                    raise IndexerError(f'Server error {resp.status_code}')
+            if resp.status_code >= 500:
+                with state.lock:
+                    state.set_backoff_exponential(time.time())
+                logger.warning(f'Indexer {config.get("name")} {resp.status_code} - exponential backoff')
+                raise IndexerError(f'Server error {resp.status_code}')
 
-                resp.raise_for_status()
+            resp.raise_for_status()
 
-                # Cap response size at 5MB
-                content = resp.raw.read(MAX_RESPONSE_SIZE)
-                if len(content) >= MAX_RESPONSE_SIZE:
-                    logger.warning(f'Indexer {config.get("name")} response truncated at 5MB')
+            # Cap response size at 5MB
+            content = resp.raw.read(MAX_RESPONSE_SIZE)
+            if len(content) >= MAX_RESPONSE_SIZE:
+                logger.warning(f'Indexer {config.get("name")} response truncated at 5MB')
 
-                # Parse results
-                results = self._parse_torznab_xml(content.decode('utf-8', errors='replace'))
-                state.set_cached(cache_key, results, now)
+            # Parse results
+            results = self._parse_torznab_xml(content.decode('utf-8', errors='replace'))
+            
+            # Phase 5: Cache and clear backoff (acquire lock briefly)
+            with state.lock:
+                state.set_cached(cache_key, results, time.time())
                 state.clear_backoff()
 
-                logger.info(f'Indexer {config.get("name")} search "{query}": {len(results)} results')
-                return results
+            logger.info(f'Indexer {config.get("name")} search "{query}": {len(results)} results')
+            return results
 
-            except (IndexerError, IndexerBackoffError, IndexerRateLimitError):
-                raise
-            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                error_msg = sanitize_api_key(str(e))
-                logger.warning(f'Indexer {config.get("name")} connection error: {error_msg}')
-                state.set_backoff_exponential(now)
-                raise IndexerError(f'Connection error: {error_msg[:100]}')
-            except requests.exceptions.RequestException as e:
-                error_msg = sanitize_api_key(str(e))
-                logger.error(f'Indexer {config.get("name")} request failed: {error_msg}')
-                state.set_backoff_exponential(now)
-                raise IndexerError(f'Request failed: {error_msg[:100]}')
+        except (IndexerError, IndexerBackoffError, IndexerRateLimitError):
+            raise
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            error_msg = sanitize_api_key(str(e))
+            logger.warning(f'Indexer {config.get("name")} connection error: {error_msg}')
+            with state.lock:
+                state.set_backoff_exponential(time.time())
+            raise IndexerError(f'Connection error: {error_msg[:100]}')
+        except requests.exceptions.RequestException as e:
+            error_msg = sanitize_api_key(str(e))
+            logger.error(f'Indexer {config.get("name")} request failed: {error_msg}')
+            with state.lock:
+                state.set_backoff_exponential(time.time())
+            raise IndexerError(f'Request failed: {error_msg[:100]}')
 
     def search(
         self,
@@ -792,12 +822,16 @@ class IndexerManager:
     def import_from_prowlarr(self, prowlarr_url: str, prowlarr_api_key: str) -> Tuple[int, int, List[str]]:
         """
         Import indexer configurations from Prowlarr (read-only).
-
+        
+        Routing logic:
+        - Torznab/Newznab implementation: search directly with own baseUrl + apiKey
+        - Everything else (Cardigann, native C# like AvistaZ/PrivateHD): proxy via {prowlarr_url}/{id}/api
+        
         Returns:
-            (imported_count, cardigann_count, error_messages)
+            (imported_count, proxied_count, error_messages)
         """
         imported = []
-        cardigann_indexers = []
+        proxied_indexers = []
         errors = []
 
         try:
@@ -807,7 +841,7 @@ class IndexerManager:
                 'Accept': 'application/json',
             })
 
-            # Get indexers
+            # Get indexers from Prowlarr API
             resp = session.get(f'{prowlarr_url.rstrip("/")}/api/v1/indexer', timeout=20)
             resp.raise_for_status()
             indexers = resp.json() or []
@@ -816,59 +850,85 @@ class IndexerManager:
                 indexer_id = str(ix.get('id', ''))
                 name = ix.get('name', f'Indexer {indexer_id}')
                 protocol = ix.get('protocol', 'torznab').lower()
-
-                # Skip if not torznab/newznab
-                if protocol not in ('torznab', 'newznab'):
-                    continue
-
-                # Detect Cardigann (custom scrapers, not native Torznab)
                 implementation = ix.get('implementation', '').lower()
-                is_cardigann = implementation == 'cardigann' or ix.get('configContract') == 'CardigannSettings'
-
-                if is_cardigann:
-                    cardigann_indexers.append(name)
+                
+                # Skip unsupported protocols
+                if protocol not in ('torznab', 'newznab', 'usenet'):
                     continue
 
-                # Extract config
+                # Detect if this is a direct Torznab/Newznab indexer
+                # Implementation "torznab" or "newznab" means we can query it directly
+                is_direct_torznab = implementation in ('torznab', 'newznab')
+                
+                # Extract Prowlarr fields
                 fields = {f.get('name'): f.get('value') for f in ix.get('fields', []) if f.get('name')}
-                base_url = fields.get('baseUrl', '')
-                api_key = fields.get('apiKey', '')
-
-                if not base_url:
-                    errors.append(f'{name}: no baseUrl')
-                    continue
-
-                # Build Torznab URL
-                if '/api' not in base_url:
-                    url = f"{base_url.rstrip('/')}/api"
-                else:
-                    url = base_url.rstrip('/')
-
+                
                 # Detect rate-limited trackers (AvistaZ family)
-                rate_limited_names = ('avistaz', 'privatehd', 'cinemaz', 'exoticaz')
-                rate_limited = any(n in name.lower() for n in rate_limited_names)
-
-                imported.append({
-                    'id': f'prowlarr-{indexer_id}',
-                    'name': name,
-                    'type': protocol,
-                    'url': url,
-                    'api_key': api_key,
-                    'categories': '2000',
-                    'priority': 100,
-                    'enabled': bool(ix.get('enable', True)),
-                    'rate_limited': rate_limited,
-                    'rate_limit_capacity': DEFAULT_CAPACITY if rate_limited else 10,
-                    'rate_limit_refill_seconds': DEFAULT_REFILL_SECONDS if rate_limited else 60,
-                    'rate_limit_max_per_hour': DEFAULT_MAX_PER_HOUR if rate_limited else 200,
-                    'rate_limit_min_interval': 2.0 if rate_limited else 0,
-                })
+                rate_limited_names = ('avistaz', 'privatehd', 'cinemaz', 'exoticaz', 'animez')
+                is_avistaz_family = any(n in name.lower() for n in rate_limited_names)
+                
+                if is_direct_torznab:
+                    # Direct Torznab/Newznab: use its own URL and key
+                    base_url = fields.get('baseUrl', '')
+                    api_key = fields.get('apiKey', '')
+                    
+                    if not base_url or not api_key:
+                        errors.append(f'{name}: missing baseUrl or apiKey for direct Torznab')
+                        continue
+                    
+                    # Build direct URL
+                    if '/api' not in base_url:
+                        url = f"{base_url.rstrip('/')}/api"
+                    else:
+                        url = base_url.rstrip('/')
+                    
+                    imported.append({
+                        'id': f'direct-{indexer_id}',
+                        'name': name,
+                        'type': protocol,
+                        'url': url,
+                        'api_key': api_key,
+                        'categories': '2000',
+                        'priority': 100,
+                        'enabled': bool(ix.get('enable', True)),
+                        'prowlarr_proxy': False,
+                        'rate_limited': is_avistaz_family,
+                        'rate_limit_capacity': DEFAULT_CAPACITY if is_avistaz_family else 10,
+                        'rate_limit_refill_seconds': DEFAULT_REFILL_SECONDS if is_avistaz_family else 60,
+                        'rate_limit_max_per_hour': DEFAULT_MAX_PER_HOUR if is_avistaz_family else 200,
+                        'rate_limit_min_interval': 2.0 if is_avistaz_family else 0,
+                    })
+                else:
+                    # Everything else: Cardigann, native C# indexers (AvistaZ, PrivateHD, etc.)
+                    # Route through Prowlarr proxy: {prowlarr_url}/{id}/api
+                    proxy_url = f"{prowlarr_url.rstrip('/')}/{indexer_id}/api"
+                    
+                    proxied_indexers.append(name)
+                    
+                    imported.append({
+                        'id': f'prowlarr-{indexer_id}',
+                        'name': f'{name} (via Prowlarr)',
+                        'type': protocol,
+                        'url': proxy_url,
+                        'api_key': prowlarr_api_key,  # Use Prowlarr's key for proxy
+                        'categories': '2000',
+                        'priority': 100,
+                        'enabled': bool(ix.get('enable', True)),
+                        'prowlarr_proxy': True,
+                        'prowlarr_url': prowlarr_url,
+                        'implementation': implementation,
+                        'rate_limited': is_avistaz_family,
+                        'rate_limit_capacity': DEFAULT_CAPACITY if is_avistaz_family else 10,
+                        'rate_limit_refill_seconds': DEFAULT_REFILL_SECONDS if is_avistaz_family else 60,
+                        'rate_limit_max_per_hour': DEFAULT_MAX_PER_HOUR if is_avistaz_family else 200,
+                        'rate_limit_min_interval': 2.0 if is_avistaz_family else 0,
+                    })
 
         except requests.exceptions.RequestException as e:
-            errors.append(f'Prowlarr API error: {e}')
+            errors.append(f'Prowlarr API error: {sanitize_api_key(str(e))}')
             return 0, 0, errors
         except Exception as e:
-            errors.append(f'Import error: {e}')
+            errors.append(f'Import error: {sanitize_api_key(str(e))}')
             return 0, 0, errors
 
         # Merge with existing indexers (don't overwrite user edits)
@@ -881,10 +941,11 @@ class IndexerManager:
         self.settings_manager.update({'indexer': {'indexers': list(existing.values())}})
 
         logger.info(
-            f'Imported {len(imported)} indexers from Prowlarr, '
-            f'flagged {len(cardigann_indexers)} Cardigann-only'
+            f'Imported {len(imported)} indexers from Prowlarr: '
+            f'{len(proxied_indexers)} proxied (Cardigann/native), '
+            f'{len(imported) - len(proxied_indexers)} direct (Torznab/Newznab)'
         )
-        return len(imported), len(cardigann_indexers), errors
+        return len(imported), len(proxied_indexers), errors
 
 
 # Global singleton instance

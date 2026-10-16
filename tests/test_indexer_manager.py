@@ -208,6 +208,47 @@ def test_parse_torznab_xml_malformed():
     assert results == []
 
 
+def test_parse_torznab_xml_tolerant():
+    """Tolerant parsing: bad int doesn't drop the response."""
+    from app.indexer_manager import IndexerManager
+    
+    settings_mock = Mock()
+    manager = IndexerManager(settings_mock)
+    
+    xml = """<?xml version="1.0"?>
+<rss><channel>
+<item>
+  <title>Good Item</title>
+  <link>http://dl.test/1</link>
+  <guid>g1</guid>
+  <size>1000</size>
+  <torznab:attr name="seeders" value="50" xmlns:torznab="http://torznab.com/schemas/2015/feed"/>
+</item>
+<item>
+  <title>Bad Size Item</title>
+  <link>http://dl.test/2</link>
+  <guid>g2</guid>
+  <size>not-a-number</size>
+  <torznab:attr name="seeders" value="also-bad" xmlns:torznab="http://torznab.com/schemas/2015/feed"/>
+</item>
+</channel></rss>"""
+    
+    results = manager._parse_torznab_xml(xml)
+    
+    # Both items should be parsed
+    assert len(results) == 2
+    
+    # Good item
+    assert results[0]['title'] == 'Good Item'
+    assert results[0]['size'] == 1000
+    assert results[0]['seeders'] == 50
+    
+    # Bad size item defaults to 0
+    assert results[1]['title'] == 'Bad Size Item'
+    assert results[1]['size'] == 0
+    assert results[1]['seeders'] == 0
+
+
 # ---- IndexerManager Tests ----
 
 def test_indexer_manager_list_indexers():
@@ -509,18 +550,18 @@ def test_prowlarr_import_success():
         mock_session_cls.return_value = mock_session
         
         manager = IndexerManager(settings_mock)
-        imported, cardigann, errors = manager.import_from_prowlarr(
+        imported, proxied, errors = manager.import_from_prowlarr(
             'http://prowlarr:9696',
             'prowlarr-key'
         )
         
-        assert imported == 1  # Only non-Cardigann indexer
-        assert cardigann == 1  # Cardigann indexer flagged
+        assert imported == 2  # Both Torznab (direct) and Cardigann (proxied)
+        assert proxied == 1  # Cardigann is proxied
         assert len(errors) == 0
 
 
 def test_prowlarr_import_no_baseurl():
-    """Skip indexers without baseUrl."""
+    """Skip direct Torznab indexers without baseUrl or apiKey."""
     from app.indexer_manager import IndexerManager
     
     settings_mock = Mock()
@@ -530,11 +571,11 @@ def test_prowlarr_import_no_baseurl():
     prowlarr_response = [
         {
             'id': 1,
-            'name': 'Broken Indexer',
+            'name': 'Broken Torznab',
             'protocol': 'torznab',
-            'implementation': 'Torznab',
+            'implementation': 'Torznab',  # Direct, needs baseUrl/apiKey
             'enable': True,
-            'fields': [],  # No baseUrl
+            'fields': [],  # No baseUrl or apiKey
         },
     ]
     
@@ -547,14 +588,155 @@ def test_prowlarr_import_no_baseurl():
         mock_session_cls.return_value = mock_session
         
         manager = IndexerManager(settings_mock)
-        imported, cardigann, errors = manager.import_from_prowlarr(
+        imported, proxied, errors = manager.import_from_prowlarr(
             'http://prowlarr:9696',
             'prowlarr-key'
         )
         
         assert imported == 0
         assert len(errors) == 1
-        assert 'no baseUrl' in errors[0]
+        assert 'baseUrl or apiKey' in errors[0]
+
+
+def test_prowlarr_import_direct_torznab():
+    """Import direct Torznab indexer with its own URL and key."""
+    from app.indexer_manager import IndexerManager
+    
+    settings_mock = Mock()
+    settings_mock.get.return_value = []
+    settings_mock.update.return_value = (True, [])
+    
+    prowlarr_response = [
+        {
+            'id': 1,
+            'name': 'BeyondHD',
+            'protocol': 'torznab',
+            'implementation': 'Torznab',
+            'enable': True,
+            'fields': [
+                {'name': 'baseUrl', 'value': 'https://beyond-hd.me'},
+                {'name': 'apiKey', 'value': 'beyond-key-123'},
+            ],
+        },
+    ]
+    
+    with patch('app.indexer_manager.requests.Session') as mock_session_cls:
+        mock_session = Mock()
+        mock_resp = Mock()
+        mock_resp.json.return_value = prowlarr_response
+        mock_resp.raise_for_status = Mock()
+        mock_session.get.return_value = mock_resp
+        mock_session_cls.return_value = mock_session
+        
+        manager = IndexerManager(settings_mock)
+        imported, proxied, errors = manager.import_from_prowlarr(
+            'http://prowlarr:9696',
+            'prowlarr-key'
+        )
+        
+        assert imported == 1
+        assert proxied == 0
+        
+        # Check URL in saved indexer
+        update_call = settings_mock.update.call_args[0][0]
+        indexers = update_call['indexer']['indexers']
+        ix = indexers[0]
+        assert ix['id'] == 'direct-1'
+        assert ix['url'] == 'https://beyond-hd.me/api'
+        assert ix['api_key'] == 'beyond-key-123'
+        assert ix['prowlarr_proxy'] is False
+
+
+def test_prowlarr_import_native_avistaz_proxied():
+    """Import native AvistaZ indexer proxied through Prowlarr with rate limiting."""
+    from app.indexer_manager import IndexerManager
+    
+    settings_mock = Mock()
+    settings_mock.get.return_value = []
+    settings_mock.update.return_value = (True, [])
+    
+    prowlarr_response = [
+        {
+            'id': 5,
+            'name': 'AvistaZ',
+            'protocol': 'torznab',
+            'implementation': 'AvistaZ',
+            'enable': True,
+            'fields': [],
+        },
+    ]
+    
+    with patch('app.indexer_manager.requests.Session') as mock_session_cls:
+        mock_session = Mock()
+        mock_resp = Mock()
+        mock_resp.json.return_value = prowlarr_response
+        mock_resp.raise_for_status = Mock()
+        mock_session.get.return_value = mock_resp
+        mock_session_cls.return_value = mock_session
+        
+        manager = IndexerManager(settings_mock)
+        imported, proxied, errors = manager.import_from_prowlarr(
+            'http://prowlarr:9696',
+            'prowlarr-key'
+        )
+        
+        assert imported == 1
+        assert proxied == 1
+        
+        update_call = settings_mock.update.call_args[0][0]
+        indexers = update_call['indexer']['indexers']
+        ix = indexers[0]
+        
+        assert ix['id'] == 'prowlarr-5'
+        assert ix['url'] == 'http://prowlarr:9696/5/api'
+        assert ix['api_key'] == 'prowlarr-key'
+        assert ix['prowlarr_proxy'] is True
+        assert ix['rate_limited'] is True
+
+
+def test_prowlarr_import_cardigann_proxied():
+    """Import Cardigann indexer proxied through Prowlarr."""
+    from app.indexer_manager import IndexerManager
+    
+    settings_mock = Mock()
+    settings_mock.get.return_value = []
+    settings_mock.update.return_value = (True, [])
+    
+    prowlarr_response = [
+        {
+            'id': 10,
+            'name': 'Custom Scraper',
+            'protocol': 'torznab',
+            'implementation': 'Cardigann',
+            'enable': True,
+            'fields': [],
+        },
+    ]
+    
+    with patch('app.indexer_manager.requests.Session') as mock_session_cls:
+        mock_session = Mock()
+        mock_resp = Mock()
+        mock_resp.json.return_value = prowlarr_response
+        mock_resp.raise_for_status = Mock()
+        mock_session.get.return_value = mock_resp
+        mock_session_cls.return_value = mock_session
+        
+        manager = IndexerManager(settings_mock)
+        imported, proxied, errors = manager.import_from_prowlarr(
+            'http://prowlarr:9696',
+            'prowlarr-key'
+        )
+        
+        assert imported == 1
+        assert proxied == 1
+        
+        update_call = settings_mock.update.call_args[0][0]
+        indexers = update_call['indexer']['indexers']
+        ix = indexers[0]
+        
+        assert ix['id'] == 'prowlarr-10'
+        assert ix['url'] == 'http://prowlarr:9696/10/api'
+        assert ix['prowlarr_proxy'] is True
 
 
 # ---- Backend Compatibility Tests ----
@@ -1025,6 +1207,83 @@ def test_exponential_backoff_500_error():
             
             results = manager.search(query='test3', categories=[2000], limit=100)
             assert state.backoff_level == 0  # Reset on success
+
+
+def test_concurrent_indexer_requests_overlap():
+    """Two indexers' HTTP requests can overlap (locks not held during HTTP)."""
+    from app.indexer_manager import IndexerManager
+    import threading
+    
+    settings_mock = Mock()
+    def settings_get(key, default=None):
+        if key == 'indexer.indexers':
+            return [
+                {
+                    'id': 'ix1',
+                    'name': 'Indexer 1',
+                    'url': 'http://test1.example.com',
+                    'api_key': 'key1',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 10,
+                },
+                {
+                    'id': 'ix2',
+                    'name': 'Indexer 2',
+                    'url': 'http://test2.example.com',
+                    'api_key': 'key2',
+                    'type': 'torznab',
+                    'enabled': True,
+                    'priority': 20,
+                }
+            ]
+        return default
+    
+    settings_mock.get.side_effect = settings_get
+    
+    xml_response = '<rss><channel><item><title>Test</title><link>http://dl.test/1</link><guid>g1</guid></item></channel></rss>'
+    
+    # Track when HTTP calls are active
+    http_active = {'ix1': None, 'ix2': None}
+    http_lock = threading.Lock()
+    overlap_detected = [False]
+    
+    def mock_get_with_delay(url, **kwargs):
+        # Determine which indexer from URL
+        indexer = 'ix1' if 'test1' in url else 'ix2'
+        
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+        mock_resp.raw = Mock()
+        mock_resp.raw.read.return_value = xml_response.encode()
+        mock_resp.raise_for_status = Mock()
+        
+        # Mark this indexer as active
+        with http_lock:
+            http_active[indexer] = time.time()
+            # Check if the other indexer is also active (overlap)
+            other = 'ix2' if indexer == 'ix1' else 'ix1'
+            if http_active[other] is not None:
+                overlap_detected[0] = True
+        
+        # Simulate slow HTTP request
+        time.sleep(0.1)
+        
+        # Mark as done
+        with http_lock:
+            http_active[indexer] = None
+        
+        return mock_resp
+    
+    with patch('app.indexer_manager.requests.get', side_effect=mock_get_with_delay):
+        manager = IndexerManager(settings_mock)
+        results = manager.search(query='test', categories=[2000], limit=100)
+        
+        # Should get results from both indexers
+        assert len(results) == 2
+        
+        # Should have detected overlap (concurrent HTTP requests)
+        assert overlap_detected[0], "HTTP requests did not overlap - locks may be held during HTTP"
 
 
 # ---- Settings API Tests ----
