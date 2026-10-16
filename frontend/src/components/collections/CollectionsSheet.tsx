@@ -4,6 +4,7 @@ import { useModalHost, type ModalSource } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { posterUrl } from '@/utils/image';
 import { cn } from '@/utils/cn';
+import { apiFetch } from '../../apiClient';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -99,7 +100,7 @@ function orbForStatus(status: CollectionPart['status']): { color: string; glow: 
 // ---------------------------------------------------------------------------
 
 async function fetchList(): Promise<{ collections: CollectionSummary[]; building: boolean; built_at_iso: string | null }> {
-  const resp = await fetch('/api/collections/incomplete');
+  const resp = await apiFetch('/api/collections/incomplete');
   if (!resp.ok) return { collections: [], building: false, built_at_iso: null };
   const data = await resp.json();
   return {
@@ -110,14 +111,14 @@ async function fetchList(): Promise<{ collections: CollectionSummary[]; building
 }
 
 async function fetchDetail(id: number): Promise<CollectionDetail | null> {
-  const resp = await fetch(`/api/collections/${id}`);
+  const resp = await apiFetch(`/api/collections/${id}`);
   if (!resp.ok) return null;
   return (await resp.json()) as CollectionDetail;
 }
 
 async function triggerRefresh(): Promise<void> {
   try {
-    await fetch('/api/collections/refresh', { method: 'POST' });
+    await apiFetch('/api/collections/refresh', { method: 'POST' });
   } catch {
     /* ignore — background will catch up */
   }

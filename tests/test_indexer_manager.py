@@ -10,6 +10,10 @@ import xml.etree.ElementTree as ET
 from unittest.mock import MagicMock, Mock, patch
 import pytest
 
+# Each test gets a private LUMA_DATA_DIR (see conftest.temp_data_dir).
+pytestmark = pytest.mark.usefixtures('temp_data_dir')
+
+
 
 @pytest.fixture(autouse=True)
 def mock_ssrf_validation(request):

@@ -19,8 +19,7 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from flask import Flask, request, jsonify, send_from_directory, send_file, redirect, g, make_response
-from flask_cors import CORS
+from flask import Flask, request, jsonify, send_from_directory, send_file, redirect, g, make_response, Response
 from dotenv import load_dotenv
 import requests
 
@@ -32,13 +31,22 @@ first_run.export_settings_to_env()
 _INSTALL_SECRETS = first_run.load_or_create_secrets()
 
 # Import explore cache
+if __name__ == '__main__':
+    # Fail fast (exit 1) before the cache modules below touch the disk, if
+    # LUMA_DATA_DIR / LUMA_CACHE_DIR / HERO_CACHE_DIR or a database in them is
+    # not writable (e.g. a populated read-only mount).
+    # Under gunicorn the same check runs from gunicorn.conf.py on_starting.
+    from app.paths import ensure_writable_or_exit
+    ensure_writable_or_exit()
 from app.explore_cache import explore_cache
 from app.fast_search import fast_search_index
+
+
 from app.upgrade_finder import UpgradeFinder, BATCH_SIZE
 
 # Import library cache
 from app.library_cache import library_cache
-from app.cache_updater import initialize_caches, update_continue_watching_cache, update_library_browse_cache, update_recent_items_cache, update_recent_tv_episodes_cache
+from app.cache_updater import initialize_caches, update_continue_watching_cache, update_library_browse_cache, update_recent_items_cache, update_recent_tv_episodes_cache, update_library_stats_cache
 
 # Import RT scraper
 from app.rt_scraper import rt_scraper
@@ -82,17 +90,73 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Flask app setup
-app = Flask(__name__,
-            static_folder='/app/static')
+static_folder = os.environ.get('FLASK_STATIC_FOLDER') or '/app/static'
+# static_url_path is pinned: Flask otherwise derives it from the folder's
+# basename, so FLASK_STATIC_FOLDER=/x/assets would move /static/* to /assets/*.
+app = Flask(__name__, static_folder=static_folder, static_url_path='/static')
+
+
+def _resolve_spa_dir(static_dir: str, image_spa_dir: str = '/app/spa') -> str:
+    """Directory holding the built React SPA (index.html, assets/, fonts/, weather/).
+
+    LUMA_SPA_DIR wins; else the image path /app/spa (outside ./static, so a
+    bind-mounted ./static cannot hide it); else <static>/spa for dev builds.
+    """
+    explicit = os.environ.get('LUMA_SPA_DIR')
+    if explicit:
+        return explicit
+    if os.path.isfile(os.path.join(image_spa_dir, 'index.html')):
+        return image_spa_dir
+    return os.path.join(static_dir, 'spa')
+
+
+app.config['SPA_DIR'] = _resolve_spa_dir(static_folder)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or _INSTALL_SECRETS['flask_secret_key']
-CORS(app)
+# HERO_CACHE_DIR is resolved once in HeroCache.__init__
+app.config['HERO_CACHE_DIR'] = str(hero_cache.cache_dir)
+
+# Initialize settings (needed for URL base resolution)
+from app.settings_manager import SettingsManager
+settings = SettingsManager()
+
+# Resolve URL base once at startup and store in app.config
+from app.server_config import get_url_base
+_URL_BASE = get_url_base(settings)
+app.config['URL_BASE'] = _URL_BASE
+
+# Scheme and host come from X-Forwarded-Proto / X-Forwarded-Host only when the
+# direct peer is a trusted proxy (read per request, so settings changes apply).
+# REMOTE_ADDR is left alone; access.client_ip() resolves the client address.
+app.wsgi_app = _access.TrustedProxyMiddleware(app.wsgi_app, lambda: settings)
+
+# Background threads (caches, search index, automations) start from
+# start_services(); tests and tools can turn them off with
+# START_BACKGROUND_THREADS=False (read when start_services runs).
+app.config['START_BACKGROUND_THREADS'] = not (
+    os.environ.get('LUMA_SKIP_BACKGROUND_THREADS', '').strip().lower() in ('1', 'true', 'yes', 'on')
+    or bool(settings.get('general.skip_background_threads'))
+)
+
+if _URL_BASE:
+    from werkzeug.middleware.dispatcher import DispatcherMiddleware
+    
+    # Proper WSGI 404 app (not a lambda)
+    def _404_app(environ, start_response):
+        """WSGI app that returns 404 for requests outside the URL base."""
+        status = '404 Not Found'
+        headers = [('Content-Type', 'text/plain; charset=utf-8')]
+        start_response(status, headers)
+        return [b'Not Found']
+    
+    # Wrap the app so all routes are prefixed with URL base
+    app.wsgi_app = DispatcherMiddleware(_404_app, {_URL_BASE: app.wsgi_app})
 
 # Lazy import after constants are defined
 def _register_bot_api():
-    """Register bot API routes after LUMA_SESSION_COOKIE and _INSTALL_SECRETS are available."""
+    """Register bot API routes after AUTH_COOKIE and _INSTALL_SECRETS are available."""
     try:
         from app.bot_api import register_bot_routes
-        register_bot_routes(app, LUMA_SESSION_COOKIE, _INSTALL_SECRETS)
+        register_bot_routes(app, AUTH_COOKIE, _INSTALL_SECRETS)
     except Exception as _bot_api_err:
         logger.error("Failed to register bot API routes: %s", _bot_api_err)
 
@@ -110,13 +174,25 @@ def _register_bot_api():
 # Auth middleware — read session cookie on every request
 # ---------------------------------------------------------------------------
 
-LUMA_SESSION_COOKIE = "luma_session"
-# These paths don't need auth
+# The only session cookie Luma issues or accepts. The pre-2026 "luma_session"
+# cookie is no longer read; any copy a browser still sends is expired by
+# _expire_legacy_session_cookie (the one place that deletes it).
+from app.auth_routes import AUTH_COOKIE, LEGACY_SESSION_COOKIE
+from app import lan_hosts as _lan_hosts
+# lan_hosts.json lives next to settings.json
+from app.settings_manager import _infer_data_dir  # resolves via app.paths
+_LAN_HOSTS_DIR = _infer_data_dir()
+# Exact paths reachable without signing in. Request-portal API paths come from
+# portal_guard's explicit allowlist (see _is_auth_exempt).
 _AUTH_EXEMPT = {
-    "/health", "/api/auth/login", "/api/auth/me", "/api/auth/check-user",
-    "/api/auth/register", "/api/auth/unlock",
+    "/health", "/login", "/logout", "/request", "/request/",
+    "/api/auth/login", "/api/auth/me", "/api/auth/register", "/api/auth/unlock",
     "/manifest.json", "/sw.js", "/ca.crt",
 }
+# Static files a signed-out browser needs: the sign-in page, PWA shell and
+# request portal. Everything else under /static/ requires access.
+_AUTH_EXEMPT_STATIC_PREFIXES = ("/static/request/", "/static/images/")
+_AUTH_EXEMPT_STATIC = {"/static/manifest.json", "/static/sw.js"}
 
 # Dev/test switch: when set, no automations, auto-grabs or scheduled jobs are
 # started (read-only caches still run). See docker-compose.dev.yml.
@@ -129,11 +205,23 @@ _SERVICE_API_KEY = os.environ.get("SERVICE_API_KEY") or _INSTALL_SECRETS["servic
 _register_bot_api()
 
 
+def _note_lan_host():
+    """Remember the host name of a request that just got implicit owner access
+    (so: a LAN client on a known host, never remote, proxied-public or portal)."""
+    try:
+        _lan_hosts.record(request.host, _LAN_HOSTS_DIR)
+    except Exception as exc:  # never let bookkeeping break a request
+        logger.debug("lan host record failed: %s", exc)
+
+
 @app.before_request
 def load_current_user():
     """Attach the current user to g.current_user (or None if not logged in).
     Also accepts X-API-Key header for service-to-service auth (companion apps).
     """
+    # Default g.implicit_user to False for all request types
+    g.implicit_user = False
+    
     # Check for API key first
     api_key = request.headers.get("X-API-Key")
     if api_key and _SERVICE_API_KEY and secrets.compare_digest(api_key, _SERVICE_API_KEY):
@@ -143,11 +231,11 @@ def load_current_user():
         }
         return
 
-    token = request.cookies.get(LUMA_SESSION_COOKIE)
+    # Read session cookie
+    token = request.cookies.get(AUTH_COOKIE)
     g.current_user = user_auth.validate_session(token) if token else None
-    g.implicit_user = False
-    if g.current_user is None and not _access.needs_pin(settings, request):
-        # Open access (Settings → Security): act as the owner without a sign-in.
+    if g.current_user is None and not _access.should_authenticate(settings, request):
+        # Implicit owner for local requests when auth_required=disabled_local
         owner = _access.owner(user_auth)
         if owner:
             g.current_user = {
@@ -155,6 +243,7 @@ def load_current_user():
                 "created_at": owner.get("created_at"), "token": None, "expires_at": None,
             }
             g.implicit_user = True
+            _note_lan_host()
 
 
 def _get_current_user() -> Optional[Dict]:
@@ -323,6 +412,63 @@ def _resolve_users_for_arr_url(arr_url: str) -> list[int]:
     return matching_users if matching_users else _shared_targets()
 
 
+def set_auth_cookie(resp, token, max_age=60 * 60 * 24 * 30):
+    """Issue the session cookie: httponly, secure per scheme, scoped to the URL base."""
+    resp.set_cookie(AUTH_COOKIE, token, max_age=max_age, httponly=True, samesite='Lax',
+                    secure=request.is_secure, path=app.config.get('URL_BASE') or '/')
+    return resp
+
+
+def clear_auth_cookie(resp):
+    resp.delete_cookie(AUTH_COOKIE, path=app.config.get('URL_BASE') or '/')
+    return resp
+
+
+@app.after_request
+def _expire_legacy_session_cookie(response):
+    """Expire the retired luma_session cookie whenever a browser still sends it."""
+    if LEGACY_SESSION_COOKIE in request.cookies:
+        response.delete_cookie(LEGACY_SESSION_COOKIE, path='/')
+        base = app.config.get('URL_BASE') or ''
+        if base:
+            response.delete_cookie(LEGACY_SESSION_COOKIE, path=base)
+    return response
+
+
+_IMG_PREFIX = '/api/img/'
+
+
+def _with_base_img(value, base):
+    """Prefix root-relative /api/img/ strings in a JSON value with the URL base."""
+    if isinstance(value, str):
+        return base + value if value.startswith(_IMG_PREFIX) else value
+    if isinstance(value, list):
+        return [_with_base_img(v, base) for v in value]
+    if isinstance(value, dict):
+        return {k: _with_base_img(v, base) for k, v in value.items()}
+    return value
+
+
+@app.after_request
+def _prefix_image_urls(response):
+    """Image proxy URLs are built and cached root-relative ('/api/img/...').
+    Under a URL base, prefix them in /api JSON responses at send time, so
+    cached data stays base-independent. Already-prefixed URLs don't match."""
+    base = request.script_root or app.config.get('URL_BASE') or ''
+    if (not base or response.direct_passthrough or response.is_streamed
+            or response.mimetype != 'application/json' or not request.path.startswith('/api/')):
+        return response
+    raw = response.get_data(as_text=True)
+    if '"' + _IMG_PREFIX not in raw:
+        return response
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return response
+    response.set_data(json.dumps(_with_base_img(payload, base), separators=(',', ':')))
+    return response
+
+
 @app.after_request
 def set_static_cache_headers(response):
     path = request.path
@@ -366,11 +512,217 @@ class Config:
 
 config = Config()
 
-# ---------------------------------------------------------------------------
-# Global Settings instance (Phase 1 -- supplements Config, does not replace)
-# ---------------------------------------------------------------------------
-settings = SettingsManager()
+# Note: Settings already initialized at startup for URL base resolution
 logger.info(f"Settings loaded from {settings.path}")
+
+
+def _is_reloader_parent() -> bool:
+    """True in the Werkzeug reloader's watcher process (FLASK_ENV=development)."""
+    return (os.environ.get('FLASK_ENV') == 'development'
+            and os.environ.get('WERKZEUG_RUN_MAIN') != 'true')
+
+
+def start_services(app_instance):
+    """Initialize database, caches, and background services.
+    
+    Called from:
+    - gunicorn.conf.py post_worker_init (production)
+    - __main__ (development)
+    """
+    # Check if background threads should be skipped (for testing)
+    # Read from app.config at call time, not import time
+    skip_bg = not app_instance.config.get('START_BACKGROUND_THREADS', True)
+    
+    # Initialize database
+    init_database()
+    
+    # Initialize user auth tables
+    try:
+        user_auth.init_db()
+        logger.info("✅ User auth database initialized")
+    except Exception as e:
+        logger.error(f"❌ User auth DB init failed: {e}")
+    
+    # First run: generate the Web Push (VAPID) key pair up front
+    try:
+        from app.push_service import ensure_vapid_keys
+        ensure_vapid_keys(settings)
+    except Exception as e:
+        logger.warning(f"VAPID key setup skipped: {e}")
+    
+    # Initialize library caches
+    if not skip_bg:
+        try:
+            import threading
+            threading.Thread(target=initialize_caches, daemon=True).start()
+            logger.info("✅ Library cache initialization started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start library cache initialization: {e}")
+    
+    # Start fast search index
+    if not skip_bg:
+        try:
+            fast_search_index.start()
+            logger.info("✅ Fast search index started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start fast search index: {e}")
+    
+    # Start explore cache updater
+    if not skip_bg:
+        try:
+            explore_cache_updater()
+            import threading
+            threading.Thread(target=update_explore_cache, daemon=True).start()
+            logger.info("✅ Explore cache updater started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start explore cache updater: {e}")
+    
+    # Hero cache refresh/heal runs only from this background scheduler, never
+    # from a request. With FLASK_ENV=development the Werkzeug reloader runs
+    # __main__ in both the watcher and the serving child; start it only in the
+    # child so the startup refresh runs once.
+    if not skip_bg:
+        try:
+            if _is_reloader_parent():
+                logger.info("Hero cache scheduler deferred to the reloader child process")
+            else:
+                hero_cache.start_scheduler()
+                logger.info("✅ Hero cache scheduler started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start hero cache scheduler: {e}")
+    
+    # Automations and scheduled jobs
+    if _AUTOMATIONS_DISABLED:
+        logger.warning('LUMA_DISABLE_AUTOMATIONS is set: auto-rename, watchlist/auto-grab automations, schedulers, Downloads Guard and tunnel auto-start are NOT started')
+    elif not skip_bg:
+        # Auto-rename monitor
+        try:
+            from app.auto_rename import start_monitor_thread
+            start_monitor_thread()
+            logger.info("✅ Auto-rename monitor started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start auto-rename monitor: {e}")
+        
+        # Trending watchlist automation
+        try:
+            from app.trending_watchlist import start_trending_watchlist_thread
+            start_trending_watchlist_thread()
+            logger.info("✅ Trending watchlist automation started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start trending watchlist automation: {e}")
+        
+        # Trending TV watchlist automation
+        try:
+            from app.trending_tv_watchlist import start_trending_tv_watchlist_thread
+            start_trending_tv_watchlist_thread()
+            logger.info("✅ Trending TV watchlist automation started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start trending TV watchlist automation: {e}")
+        
+        # Now available watchlist automation
+        try:
+            from app.now_available_watchlist import start_now_available_watchlist_thread
+            start_now_available_watchlist_thread()
+            logger.info("✅ Now available watchlist automation started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start now available watchlist automation: {e}")
+        
+        # Anticipated watchlist automation
+        try:
+            from app.anticipated_watchlist import start_anticipated_watchlist_thread
+            start_anticipated_watchlist_thread()
+            logger.info("✅ Anticipated watchlist automation started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start anticipated watchlist automation: {e}")
+        
+        # Latest auto-grab automation
+        try:
+            from app.latest_auto_grab import start_latest_auto_grab_thread
+            start_latest_auto_grab_thread()
+            logger.info("✅ Latest auto-grab automation started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Latest auto-grab automation: {e}")
+        
+        # 4K Remux auto-grab automation
+        try:
+            from app.upgrade_4k_auto_grab import start_upgrade_4k_auto_grab_thread
+            start_upgrade_4k_auto_grab_thread()
+            logger.info("✅ 4K Remux auto-grab automation started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start 4K Remux auto-grab automation: {e}")
+        
+        # Daily upgrade scheduler
+        try:
+            from app.upgrade_scheduler import start_upgrade_scheduler_thread
+            start_upgrade_scheduler_thread()
+            logger.info("✅ Daily upgrade scheduler started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start upgrade scheduler: {e}")
+        
+        # Movie Night weekly canon scheduler
+        try:
+            from app.movie_night import start_movie_night_thread
+            start_movie_night_thread()
+            logger.info("✅ Movie Night scheduler started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Movie Night scheduler: {e}")
+        
+        # Genre Roulette nightly scheduler
+        try:
+            from app.genre_roulette import start_genre_roulette_thread
+            start_genre_roulette_thread()
+            logger.info("✅ Genre Roulette scheduler started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Genre Roulette scheduler: {e}")
+        
+        # Franchise Completer nightly scheduler
+        try:
+            from app.franchise_completer import start_franchise_completer_thread
+            start_franchise_completer_thread()
+            logger.info("✅ Franchise Completer scheduler started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Franchise Completer scheduler: {e}")
+        
+        # Watchlist digital dates scheduler
+        try:
+            from app.watchlist_digital_dates import start_watchlist_digital_dates_thread
+            start_watchlist_digital_dates_thread()
+            logger.info("✅ Watchlist Digital Dates scheduler started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Watchlist Digital Dates scheduler: {e}")
+        
+        # What You're Missing pool refresher
+        try:
+            from app.daily_missing import start_daily_missing_thread
+            start_daily_missing_thread()
+            logger.info("✅ What You're Missing pool refresher started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start What You're Missing refresher: {e}")
+        
+        # Movie Collections refresher
+        try:
+            from app.movie_collections import start_movie_collections_thread
+            start_movie_collections_thread()
+            logger.info("✅ Movie Collections refresher started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Movie Collections refresher: {e}")
+        
+        # Downloads Guard
+        try:
+            from app.downloads_guard import start_downloads_guard_thread
+            start_downloads_guard_thread()
+            logger.info("✅ Downloads Guard started")
+        except Exception as e:
+            logger.error(f"❌ Failed to start Downloads Guard: {e}")
+        
+        # Auto-start Cloudflare Tunnel if enabled
+        try:
+            tunnel_auto_start(settings)
+        except Exception as e:
+            logger.error(f"Cloudflare Tunnel auto-start failed: {e}")
+
+
+# Note: Background thread initialization moved to start_services()
 
 # Re-initialise hero_cache with values from settings (it was created at
 # module-import time before the settings object existed).
@@ -682,6 +1034,36 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+# Module-level helper for TMDb spelling correction logic
+def _tmdb_needs_spelling_correction(results, query_str):
+    """
+    Check if TMDb results are weak enough to warrant spelling correction.
+    Triggers on: 0-2 results OR no top-3 title contains/starts-with query.
+    """
+    if isinstance(results, dict):
+        # For /search endpoint (dict with multi/movies/tv_shows)
+        total = sum(len(results.get(k, [])) for k in ['multi', 'movies', 'tv_shows'])
+        if total <= 2:
+            return True
+        query_lower = query_str.lower()
+        for result_list in [results.get('multi', []), results.get('movies', []), results.get('tv_shows', [])]:
+            for item in result_list[:3]:
+                title = (item.get('title') or item.get('name', '')).lower()
+                if query_lower in title or title.startswith(query_lower):
+                    return False
+        return True
+    elif isinstance(results, list):
+        # For /tmdb_match_search endpoint (list of results)
+        if len(results) <= 2:
+            return True
+        query_lower = query_str.lower()
+        for item in results[:3]:
+            title = (item.get('title') or item.get('name', '')).lower()
+            if query_lower in title or title.startswith(query_lower):
+                return False
+        return True
+    return False
+
 # TMDB API functions
 class TMDBClient:
     """Client for interacting with TMDB API."""
@@ -706,9 +1088,18 @@ class TMDBClient:
         if year:
             params['primary_release_year'] = year
 
+        if fast_search_index._is_tmdb_rate_limited():
+            logger.info("TMDB search_movies skipped: rate limited (Retry-After active)")
+            return []
+
         try:
             response = requests.get(f"{self.BASE_URL}/search/movie", params=params, timeout=10)
+            if response.status_code == 429:
+                logger.warning("TMDB search_movies hit rate limit")
+                fast_search_index._handle_tmdb_429(response)
+                return []
             response.raise_for_status()
+            fast_search_index._reset_tmdb_backoff()
             data = response.json()
             return data.get('results', [])
         except Exception as e:
@@ -729,9 +1120,18 @@ class TMDBClient:
         if year:
             params['first_air_date_year'] = year
 
+        if fast_search_index._is_tmdb_rate_limited():
+            logger.info("TMDB search_tv skipped: rate limited (Retry-After active)")
+            return []
+
         try:
             response = requests.get(f"{self.BASE_URL}/search/tv", params=params, timeout=10)
+            if response.status_code == 429:
+                logger.warning("TMDB search_tv hit rate limit")
+                fast_search_index._handle_tmdb_429(response)
+                return []
             response.raise_for_status()
+            fast_search_index._reset_tmdb_backoff()
             data = response.json()
             return data.get('results', [])
         except Exception as e:
@@ -759,9 +1159,18 @@ class TMDBClient:
             'query': query,
             'include_adult': False,
         }
+        if fast_search_index._is_tmdb_rate_limited():
+            logger.info("TMDB search_multi skipped: rate limited (Retry-After active)")
+            return []
+
         try:
             response = requests.get(f"{self.BASE_URL}/search/multi", params=params, timeout=10)
+            if response.status_code == 429:
+                logger.warning("TMDB search_multi hit rate limit")
+                fast_search_index._handle_tmdb_429(response)
+                return []
             response.raise_for_status()
+            fast_search_index._reset_tmdb_backoff()
             return response.json().get('results', [])
         except Exception as e:
             logger.error(f"TMDB multi search error: {e}")
@@ -779,6 +1188,9 @@ class TMDBClient:
             return []
 
         def fetch_page(page: int) -> List[Dict]:
+            # Every page request honors an active Retry-After window.
+            if fast_search_index._is_tmdb_rate_limited():
+                return []
             params = {
                 'api_key': self.api_key,
                 'query': query,
@@ -786,7 +1198,12 @@ class TMDBClient:
                 'page': page,
             }
             resp = requests.get(f"{self.BASE_URL}/search/person", params=params, timeout=8)
+            if resp.status_code == 429:
+                logger.warning(f"TMDB search_people page {page} hit rate limit")
+                fast_search_index._handle_tmdb_429(resp)
+                return []
             resp.raise_for_status()
+            fast_search_index._reset_tmdb_backoff()
             return resp.json().get('results', [])
 
         try:
@@ -942,18 +1359,166 @@ class TMDBClient:
 # Initialize TMDB client
 tmdb = TMDBClient(settings.get('apis.tmdb.api_key'))
 
-# Remote lock (tunnel visitors need a session) + request page for friends and family
-# remote_lock merged into access.py
+# Request page for friends and family
 from app import request_portal as _request_portal
-_access.init_home_wan_tracking(settings)
+from app import portal_guard
 _request_portal.init_app(app, settings)
 
-# Routes — React SPA helper
+# Authentication routes
+from app import auth_routes
+auth_routes.init_app(app)
+
+# Portal traffic guard (must be registered before other routes)
+@app.before_request
+def _portal_traffic_guard():
+    return portal_guard.guard_portal_traffic(settings)
+
+def _is_auth_exempt(path: str, method: str) -> bool:
+    """True for the paths a signed-out visitor may reach (see _AUTH_EXEMPT)."""
+    if path in _AUTH_EXEMPT or path in _AUTH_EXEMPT_STATIC:
+        return True
+    if path.startswith(_AUTH_EXEMPT_STATIC_PREFIXES):
+        return True
+    if path.startswith('/static/spa/'):
+        return True  # SPA bundle (hashed assets, no data)
+    if path.startswith('/api/request/'):
+        # Requester endpoints check the request-page cookie themselves.
+        return portal_guard.is_portal_allowed(path, method)
+    if path == '/api/version' and method in ('GET', 'HEAD'):
+        return True  # kiosks poll it to know when to reload; it holds no data
+    if path == '/api/admin/telegram-action' and method in ('GET', 'POST'):
+        # Approve/deny buttons open in Telegram's browser with no Luma
+        # session. Only a correctly signed, unexpired, unused link skips
+        # sign-in; the GET only shows a confirm page.
+        return _telegram_action_link_signed()
+    return False
+
+
+def _telegram_action_link_signed() -> bool:
+    from app import action_tokens
+    fields = request.form if request.method == 'POST' else request.args
+    tok, _ = action_tokens.check(app.config['SECRET_KEY'], fields, _action_token_dir())
+    return tok is not None
+
+
+def _action_token_dir():
+    from app.first_run import data_dir
+    return data_dir()
+
+
+# Authentication guard (must run after portal guard and load_current_user)
+@app.before_request
+def _auth_guard():
+    """Redirect to login if authentication is required and user not authenticated."""
+    if _is_auth_exempt(request.path, request.method):
+        return None
+
+    if _access.should_authenticate(settings, request):
+        # Check if user is authenticated (not implicit)
+        if not getattr(g, 'current_user', None) or getattr(g, 'implicit_user', False):
+            # For API calls, return 401
+            if request.path.startswith('/api/'):
+                return jsonify({"error": "Authentication required"}), 401
+            # For HTML pages, redirect to login
+            url_base = app.config.get('URL_BASE', '')
+            from urllib.parse import quote
+            target = request.path + (f'?{request.query_string.decode("latin-1")}' if request.query_string else '')
+            return redirect(f'{url_base}/login?next={quote(target)}')
+
+# CSRF protection for API state-changing requests (must run after load_current_user)
+@app.before_request
+def _csrf_api_guard():
+    """Check Origin/Referer for cookie-authenticated POST/PUT/PATCH/DELETE on /api/*.
+    
+    Protects against CSRF attacks by validating same-origin on state-changing requests.
+    When Origin or Referer is present, validates it even for implicit users.
+    """
+    # Only check API routes
+    if not request.path.startswith('/api/'):
+        return None
+
+    # Implicit (no-cookie) LAN access must never be usable from another site,
+    # reads included: a cross-site fetch or a foreign Origin is refused.
+    if getattr(g, 'implicit_user', False):
+        from app.auth_routes import is_same_origin as _same_origin
+        if request.headers.get('Sec-Fetch-Site', '').lower() in ('cross-site', 'same-site'):
+            return jsonify({"error": "Cross-site request refused"}), 403
+        _origin = request.headers.get('Origin')
+        if _origin and not _same_origin(_origin):
+            return jsonify({"error": "CSRF validation failed: invalid Origin"}), 403
+
+    # Only check state-changing methods
+    if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE'):
+        return None
+    
+    # Skip request portal endpoints (they have their own CSRF protection)
+    if request.path.startswith('/api/request/'):
+        return None
+    
+    # Skip if not authenticated (the route itself will refuse)
+    if not getattr(g, 'current_user', None):
+        return None
+    
+    # Skip if authenticated via a valid API key (not cookie-based)
+    if g.current_user.get('id') == 0 and request.headers.get("X-API-Key"):
+        return None
+    
+    origin = request.headers.get('Origin')
+    referer = request.headers.get('Referer')
+    
+    # Scheme/host already reflect X-Forwarded-* only for trusted proxies.
+    from app.auth_routes import is_same_origin
+    
+    # A cross-origin Origin or Referer is refused for everyone, including
+    # implicit LAN-owner users.
+    if origin and not is_same_origin(origin):
+        return jsonify({"error": "CSRF validation failed: invalid Origin"}), 403
+    if referer and not is_same_origin(referer):
+        return jsonify({"error": "CSRF validation failed: invalid Referer"}), 403
+    
+    # Skip CSRF check for implicit users when no Origin/Referer (LAN direct access)
+    if getattr(g, 'implicit_user', False):
+        if not origin and not referer:
+            return None
+    
+    # For explicit session users, require Origin or Referer
+    if not origin and not referer:
+        return jsonify({"error": "CSRF validation failed: missing Origin/Referer"}), 403
+    
+    return None
 def _serve_spa():
-    """Serve the React SPA index.html (from static/spa/)."""
-    spa_index = os.path.join(app.static_folder, 'spa', 'index.html')
+    """Serve the React SPA index.html (from SPA_DIR) with runtime URL base injection."""
+    spa_index = os.path.join(app.config['SPA_DIR'], 'index.html')
     if os.path.exists(spa_index):
-        resp = send_file(spa_index)
+        # Read the index.html
+        with open(spa_index, 'r', encoding='utf-8') as f:
+            html = f.read()
+        
+        # Inject URL base as a meta tag and inline script
+        url_base = app.config.get('URL_BASE', '')
+        injection = f'''
+    <meta name="url-base" content="{url_base}">
+    <script>window.__LUMA_URL_BASE__ = "{url_base}";</script>
+'''
+        # Insert after <head> tag
+        html = html.replace('<head>', f'<head>{injection}', 1)
+        
+        # The bundle is built with a relative base (./assets/...). Anchor it
+        # to the URL base so deep links like /luma/library/1 still load it.
+        for attr in ('src', 'href'):
+            html = html.replace(f'{attr}="./assets/', f'{attr}="{url_base}/assets/')
+            html = html.replace(f'{attr}="./manifest.json"', f'{attr}="{url_base}/manifest.json"')
+            html = html.replace(f'{attr}="./static/', f'{attr}="{url_base}/static/')
+        
+        # Prefix root-relative paths with the URL base
+        if url_base:
+            # Fix manifest.json reference
+            html = html.replace('href="/manifest.json"', f'href="{url_base}/manifest.json"')
+            # Fix apple-touch-icon reference
+            html = html.replace('href="/static/', f'href="{url_base}/static/')
+            html = html.replace('src="/static/', f'src="{url_base}/static/')
+        
+        resp = Response(html, mimetype='text/html')
         resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         resp.headers['Pragma'] = 'no-cache'
         resp.headers['Expires'] = '0'
@@ -970,7 +1535,6 @@ def _serve_spa():
 @app.route('/browse')
 @app.route('/settings')
 @app.route('/upgrades')
-@app.route('/login')
 @app.route('/start')
 @app.route('/unlock')
 @app.route('/admin')
@@ -1567,16 +2131,24 @@ def tmdb_match_search():
         tmdb_base = settings.get('apis.tmdb.base_url', '') or 'https://api.themoviedb.org/3'
         merged = []
 
-        def _fetch(mtype):
+        def _fetch(mtype, search_query=None):
+            if search_query is None:
+                search_query = query
+            if fast_search_index._is_tmdb_rate_limited():
+                return mtype, []  # honor active Retry-After
             endpoint = '/search/movie' if mtype == 'movie' else '/search/tv'
             try:
                 resp = requests.get(
                     f'{tmdb_base}{endpoint}',
-                    params={'api_key': api_key, 'query': query, 'language': 'en-US', 'page': 1},
+                    params={'api_key': api_key, 'query': search_query, 'language': 'en-US', 'page': 1},
                     timeout=10,
                 )
                 if resp.status_code == 200:
+                    fast_search_index._reset_tmdb_backoff()
                     return mtype, resp.json().get('results', [])
+                elif resp.status_code == 429:
+                    logger.warning(f"tmdb_match_search {mtype} hit rate limit")
+                    fast_search_index._handle_tmdb_429(resp)
             except Exception as e:
                 logger.warning(f"tmdb_match_search {mtype} lookup failed: {e}")
             return mtype, []
@@ -1584,6 +2156,26 @@ def tmdb_match_search():
         types = [media_type] if media_type else ['movie', 'tv']
         for mtype in types:
             _, items = _fetch(mtype)
+            
+            # If results are weak, try spelling correction (silent - no UI text)
+            # Skip correction retry if we're currently rate limited
+            if (len(query) > 3 and 
+                not fast_search_index._is_tmdb_rate_limited() and 
+                _tmdb_needs_spelling_correction(items, query)):
+                try:
+                    corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
+                    if corrected and corrected.lower() != query.lower():
+                        logger.info(f"tmdb_match_search: trying correction '{corrected}' for '{query}'")
+                        _, corrected_items = _fetch(mtype, corrected)
+                        # Merge: direct matches first, then dedupe corrected results after
+                        existing_ids = {item.get('id') for item in items if item.get('id')}
+                        for item in corrected_items:
+                            if item.get('id') and item.get('id') not in existing_ids:
+                                items.append(item)
+                                existing_ids.add(item.get('id'))
+                except Exception as e:
+                    logger.warning(f"Spelling correction in tmdb_match_search failed: {e}")
+            
             for it in items:
                 if mtype == 'movie':
                     title = it.get('title', '') or ''
@@ -4124,6 +4716,38 @@ def search():
 
     results['people'] = raw.get('people', [])
 
+    # Spelling correction fallback: retry only when results are weak
+    # Skip correction retry if we're currently rate limited
+    corrected_raw = {}
+    if (len(query) > 3 and 
+        not fast_search_index._is_tmdb_rate_limited() and 
+        _tmdb_needs_spelling_correction(raw, query)):
+        try:
+            corrected = fast_search_index.find_spelling_correction(query, threshold=0.65)
+            if corrected and corrected.lower() != query.lower():
+                logger.info(f"search: trying spelling correction '{corrected}' for '{query}'")
+                # Retry TMDb searches with corrected query (silent correction - no UI text)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                    corr_futures = {}
+                    if want_movies or want_tv:
+                        corr_futures['multi'] = executor.submit(tmdb.search_multi, corrected)
+                    if want_movies:
+                        corr_futures['movies'] = executor.submit(tmdb.search_movies, corrected, search_year)
+                    if want_tv:
+                        corr_futures['tv_shows'] = executor.submit(tmdb.search_tv, corrected, search_year)
+                    
+                    for key, future in corr_futures.items():
+                        try:
+                            corrected_raw[key] = future.result(timeout=10)
+                            # Tag corrected items
+                            for item in corrected_raw[key]:
+                                item['_corrected'] = True
+                        except Exception as e:
+                            logger.warning(f"Spelling-corrected search for {key} failed: {e}")
+                            corrected_raw[key] = []
+        except Exception as e:
+            logger.warning(f"Spelling correction failed: {e}")
+
     ranked_movies, ranked_tv = [], []
     seen = {'movie': set(), 'tv': set()}
     _pos = 0
@@ -4141,33 +4765,56 @@ def search():
     # Only keep the types the caller asked for — multi returns all of them, and
     # a type=movie query must not come back with TV shows in tv_shows.
     wanted_types = {t for t, ok in (('movie', want_movies), ('tv', want_tv)) if ok}
-    multi_items = [
-        (it['media_type'], it) for it in raw.get('multi', [])
-        if it.get('media_type') in wanted_types and it.get('id')
-    ]
+    
+    # Separate direct and corrected results
+    multi_direct = [(it['media_type'], it) for it in raw.get('multi', [])
+                    if it.get('media_type') in wanted_types and it.get('id') and not it.get('_corrected')]
+    multi_corrected = [(it['media_type'], it) for it in corrected_raw.get('multi', [])
+                       if it.get('media_type') in wanted_types and it.get('id')]
 
-    # Per-type results interleaved round-robin rather than movies-then-TV, so a
-    # show never lands behind twenty films when it's used as the lead ordering.
-    mv, tv = raw.get('movies', []), raw.get('tv_shows', [])
-    per_type = []
-    for i in range(max(len(mv), len(tv))):
-        if i < len(mv):
-            per_type.append(('movie', mv[i]))
-        if i < len(tv):
-            per_type.append(('tv', tv[i]))
+    # Per-type results interleaved round-robin rather than movies-then-TV
+    mv_direct = [it for it in raw.get('movies', []) if not it.get('_corrected')]
+    tv_direct = [it for it in raw.get('tv_shows', []) if not it.get('_corrected')]
+    mv_corrected = corrected_raw.get('movies', [])
+    tv_corrected = corrected_raw.get('tv_shows', [])
+    
+    per_type_direct = []
+    for i in range(max(len(mv_direct), len(tv_direct))):
+        if i < len(mv_direct):
+            per_type_direct.append(('movie', mv_direct[i]))
+        if i < len(tv_direct):
+            per_type_direct.append(('tv', tv_direct[i]))
+    
+    per_type_corrected = []
+    for i in range(max(len(mv_corrected), len(tv_corrected))):
+        if i < len(mv_corrected):
+            per_type_corrected.append(('movie', mv_corrected[i]))
+        if i < len(tv_corrected):
+            per_type_corrected.append(('tv', tv_corrected[i]))
 
     # /search/multi takes no year parameter, and when the user typed one TMDb's
     # year-FILTERED per-type search is far more precise than anything we can
-    # recover by re-sorting multi ("wrestlemania 2026" → the actual WrestleMania
-    # 42 cards, which multi doesn't surface at all). So a year query leads with
-    # the filtered results and lets multi backfill; without a year, multi leads
-    # because it's the only source that ranks movies and TV against each other.
-    order = (per_type + multi_items) if search_year else (multi_items + per_type)
-    for mt, item in order:
+    # recover by re-sorting multi. So a year query leads with the filtered results.
+    # Rank direct results first, then corrected results after ALL direct results.
+    direct_order = (per_type_direct + multi_direct) if search_year else (multi_direct + per_type_direct)
+    corrected_order = (per_type_corrected + multi_corrected) if search_year else (multi_corrected + per_type_corrected)
+    
+    # Process direct results first
+    for mt, item in direct_order:
+        _take(mt, item)
+    
+    # Then process corrected results (deduped by _take)
+    for mt, item in corrected_order:
         _take(mt, item)
 
     results['movies'] = ranked_movies
     results['tv_shows'] = ranked_tv
+
+    # Remove internal _corrected markers before returning
+    for item in results['movies']:
+        item.pop('_corrected', None)
+    for item in results['tv_shows']:
+        item.pop('_corrected', None)
 
     # Log search to history
     conn = None
@@ -4189,6 +4836,622 @@ def search():
                 pass
 
     return jsonify(results)
+
+# ---------------------------------------------------------------------------
+# AI Natural Language Search
+# ---------------------------------------------------------------------------
+
+_natural_search_cache: Dict[str, tuple] = {}  # md5 → (timestamp, response_data)
+_NATURAL_SEARCH_TTL = 5 * 60  # 5 minutes
+_NATURAL_SEARCH_CACHE_MAX = 200
+
+
+@app.route('/api/search/natural', methods=['POST'])
+def natural_search():
+    """AI-powered natural language search.
+
+    Strategy: Ask the AI to recommend specific titles (like ChatGPT would),
+    then look each title up in Plex (owned) and TMDb (unowned).
+    """
+    body = request.get_json(silent=True) or {}
+    description = (body.get('description', '') or '').strip()
+    media_type = body.get('media_type', 'any') or 'any'
+    if media_type not in ('movie', 'tv', 'any'):
+        media_type = 'any'
+
+    if not description:
+        return jsonify({'error': 'Description is required'}), 400
+    if len(description) > 500:
+        description = description[:500]
+
+    # Check OpenAI configuration
+    openai_enabled = settings.get('apis.openai.enabled', False)
+    openai_key = settings.get('apis.openai.api_key', '')
+    if not openai_enabled or not openai_key:
+        return jsonify({'error': 'OpenAI is not configured. Enable it in Settings > AI.'}), 503
+
+    # Read configurable AI parameters
+    custom_instructions = settings.get('apis.openai.custom_instructions', '')
+    temperature = float(settings.get('apis.openai.temperature', 0.7))
+    max_tokens = int(settings.get('apis.openai.max_tokens', 1500))
+
+    # Cache check (include media_type + custom_instructions so results update when preferences change)
+    import hashlib
+    cache_raw = f"{description.lower()}|{media_type}|{custom_instructions}"
+    cache_key = hashlib.md5(cache_raw.encode()).hexdigest()
+    cached = _natural_search_cache.get(cache_key)
+    if cached:
+        ts, data = cached
+        if time.time() - ts < _NATURAL_SEARCH_TTL:
+            return jsonify(data)
+
+    # --- Step 1: Ask AI for specific title recommendations ---
+    model = settings.get('apis.openai.model', 'gpt-4o-mini')
+    try:
+        from app import openai_client as openai_lib
+        client = openai_lib.OpenAI(api_key=openai_key, max_retries=0)
+
+        system_prompt = """You are a movie and TV show identification and recommendation engine. The user will describe what they want to watch.
+
+CRITICAL FIRST STEP — Read the user's description and decide:
+A) Are they describing a SPECIFIC movie/show they're trying to identify? (plot details, character descriptions, specific scenes, "that movie where...")
+B) Are they asking for general recommendations matching a vibe/mood/theme?
+
+If (A) — IDENTIFICATION MODE:
+- Your #1 job is to figure out EXACTLY which title they mean
+- Put the most likely exact match as recommendation #1 with category "The One"
+- Then include 7-11 similar titles they'd also enjoy
+- Think hard about plot clues, character details, settings, and time periods
+
+If (B) — RECOMMENDATION MODE:
+- Provide 8-12 titles that best match the described vibe/mood
+- Include a mix of well-known and hidden gems
+
+Output ONLY valid JSON with these fields:
+- "recommendations": array of 8-12 objects, each with:
+  - "title": exact title as it appears on TMDb/IMDb
+  - "year": release year (integer)
+  - "type": "movie" or "tv"
+  - "category": a short 2-4 word VIBE label describing the feeling or mood of this pick. NEVER just name the genre. Good examples: "The One", "Cozy classic", "Chill dramedy", "Warm & feel-good", "Easy comedy pick", "Pure sarcastic energy", "Effortlessly cool", "Dark slow-burn", "Nonstop laughs", "Hidden gem", "Sleeper hit", "Cult favorite", "Peak 80s fun". Bad examples: "Comedy", "Thriller", "Action", "Drama", "Sci-Fi".
+  - "reason": 1-2 sentences explaining the vibe and why it matches. Be specific about tone and feel.
+- "genres": array of up to 3 genre labels that describe the request (e.g. "Dark Comedy", "Thriller")
+- "moods": array of up to 3 mood keywords (e.g. "dark", "quirky", "intense")
+- "media_type": "movie", "tv", or "any" based on what the user asked for
+
+Be specific and accurate with titles and years. Quality over quantity — every pick should be a strong match. Include a mix of well-known and hidden gems. Every category MUST be unique — never repeat the same category label across recommendations. If the user mentions an actor, director, or creator, every recommendation MUST feature that person."""
+
+        # Append user's custom content preferences (if any)
+        if custom_instructions.strip():
+            system_prompt += f"\n\nADDITIONAL INSTRUCTIONS FROM USER:\n{custom_instructions.strip()}"
+
+        # Append media type instruction so the AI only recommends the requested type
+        user_message = description
+        if media_type == 'movie':
+            user_message += '\n\n(Looking for movies only, no TV shows)'
+        elif media_type == 'tv':
+            user_message += '\n\n(Looking for TV shows only, no movies)'
+
+        # gpt-5+ and o-series: max_completion_tokens, no temperature control
+        is_new_model = model.startswith('gpt-5') or model.startswith('o')
+        api_kwargs = {
+            'model': model,
+            'messages': [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            'response_format': {"type": "json_object"},
+            'timeout': 120 if is_new_model else 45,
+        }
+        if is_new_model:
+            api_kwargs['max_completion_tokens'] = max(max_tokens, 4000)
+            api_kwargs['extra_body'] = {'reasoning_effort': 'low'}
+        else:
+            api_kwargs['max_tokens'] = max_tokens
+            api_kwargs['temperature'] = temperature
+        completion = client.chat.completions.create(**api_kwargs)
+
+        usage = completion.usage
+        if usage:
+            logger.info(f"Natural search: model={model}, tokens: prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}")
+        else:
+            logger.info(f"Natural search: model={model}, tokens: usage data not available")
+
+        import json as json_lib
+        raw_content = completion.choices[0].message.content or ''
+        finish_reason = completion.choices[0].finish_reason
+        logger.info(f"Natural search: finish_reason={finish_reason}, content_length={len(raw_content)}")
+        if finish_reason == 'length':
+            logger.warning(f"Natural search: response truncated! Last 200 chars: ...{raw_content[-200:]}")
+        parsed = json_lib.loads(raw_content)
+    except Exception as e:
+        logger.error(f"OpenAI natural search error: {e}")
+        err_msg = str(e)
+        if 'insufficient_quota' in err_msg:
+            return jsonify({'error': 'OpenAI quota exceeded. Add credits at platform.openai.com/settings/organization/billing.'}), 502
+        if 'rate_limit' in err_msg.lower() or 'RateLimitError' in type(e).__name__:
+            return jsonify({'error': 'OpenAI rate limit reached. Please try again shortly.'}), 502
+        if 'timeout' in err_msg.lower():
+            return jsonify({'error': 'OpenAI request timed out. Please try again.'}), 502
+        return jsonify({'error': f'AI processing failed: {err_msg}'}), 502
+
+    recommendations = parsed.get('recommendations', [])
+    genres = parsed.get('genres', [])[:3]
+    moods = parsed.get('moods', [])[:3]
+    ai_media_type = parsed.get('media_type', 'any')
+
+    logger.info(f"Natural search: AI returned {len(recommendations)} recommendations for '{description}'")
+    for rec in recommendations[:5]:
+        logger.info(f"  - {rec.get('title')} ({rec.get('year')}) [{rec.get('type')}]: {rec.get('reason', '')}")
+
+    # --- Step 2: Resolve recommendations via TMDb (parallel) ---
+    tmdb_api_key = settings.get('apis.tmdb.api_key', '') or Config.TMDB_API_KEY
+    tmdb_base = settings.get('apis.tmdb.base_url', '') or 'https://api.themoviedb.org/3'
+    image_base = settings.get('apis.tmdb.image_base_url', '') or 'https://image.tmdb.org/t/p'
+
+    seen_tmdb_ids = set()
+
+    def _lookup_tmdb(rec):
+        """Search TMDb for a recommended title. Returns (tmdb_item, media_type) or None."""
+        title = rec.get('title', '')
+        year = rec.get('year')
+        mtype = rec.get('type', 'movie')
+        if not title:
+            return None
+
+        endpoint = '/search/movie' if mtype == 'movie' else '/search/tv'
+        params = {'api_key': tmdb_api_key, 'query': title, 'language': 'en-US', 'page': 1}
+        if year:
+            params['year' if mtype == 'movie' else 'first_air_date_year'] = year
+
+        try:
+            resp = requests.get(f'{tmdb_base}{endpoint}', params=params, timeout=8)
+            if resp.status_code == 200:
+                results = resp.json().get('results', [])
+                if results:
+                    return (results[0], mtype)
+                # Retry without year constraint
+                if year:
+                    params.pop('year', None)
+                    params.pop('first_air_date_year', None)
+                    resp2 = requests.get(f'{tmdb_base}{endpoint}', params=params, timeout=8)
+                    if resp2.status_code == 200:
+                        results2 = resp2.json().get('results', [])
+                        if results2:
+                            return (results2[0], mtype)
+        except Exception as e:
+            logger.warning(f"Natural search TMDb lookup for '{title}': {e}")
+        return None
+
+    # Parallel TMDb lookups (8 workers to resolve all titles quickly)
+    results_list = []  # (index, item)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_lookup_tmdb, rec): (i, rec) for i, rec in enumerate(recommendations)}
+        for future in as_completed(futures):
+            idx, rec = futures[future]
+            reason = rec.get('reason', '')
+            category = rec.get('category', '')
+            try:
+                result = future.result(timeout=15)
+            except Exception:
+                result = None
+
+            if result:
+                tmdb_item, mtype = result
+                tmdb_id = tmdb_item.get('id')
+                if tmdb_id and tmdb_id not in seen_tmdb_ids:
+                    seen_tmdb_ids.add(tmdb_id)
+                    title = tmdb_item.get('title') or tmdb_item.get('name') or ''
+                    year_str = (tmdb_item.get('release_date') or tmdb_item.get('first_air_date') or '')[:4]
+                    year_val = int(year_str) if year_str.isdigit() else None
+                    poster_path = tmdb_item.get('poster_path')
+                    backdrop_path = tmdb_item.get('backdrop_path')
+
+                    results_list.append((idx, {
+                        'title': title,
+                        'year': year_val,
+                        'type': 'tv' if mtype == 'tv' else 'movie',
+                        'tmdb_id': tmdb_id,
+                        'rating': tmdb_item.get('vote_average'),
+                        'vote_count': tmdb_item.get('vote_count', 0),
+                        'overview': tmdb_item.get('overview', ''),
+                        'poster_url': f'{image_base}/w500{poster_path}' if poster_path else None,
+                        'backdrop_url': f'{image_base}/w1280{backdrop_path}' if backdrop_path else None,
+                        'genres': [],
+                        'runtime_minutes': 0,
+                        'content_rating': '',
+                        'ai_reason': reason,
+                        'ai_category': category,
+                        'ai_rank': idx,
+                    }))
+
+    # Preserve AI recommendation order
+    results_list.sort(key=lambda x: x[0])
+    all_results = [item for _, item in results_list]
+    enrich_imdb_ratings(all_results, settings=settings, max_items=40, replace_rating=True)
+
+    # Post-filter by media_type as safety net
+    if media_type == 'movie':
+        all_results = [r for r in all_results if r.get('type') != 'tv']
+    elif media_type == 'tv':
+        all_results = [r for r in all_results if r.get('type') == 'tv']
+
+    logger.info(f"Natural search results: {len(all_results)} results")
+
+    # Build response — ownership determined client-side when modal opens
+    response_data = {
+        'owned': [],
+        'unowned': all_results[:20],
+        'parsed': {
+            'genres': genres,
+            'moods': moods,
+            'media_type': ai_media_type,
+        },
+        'description': description,
+    }
+
+    # Cache — evict expired entries and enforce max size
+    now_ts = time.time()
+    expired = [k for k, (ts, _) in list(_natural_search_cache.items())
+               if now_ts - ts >= _NATURAL_SEARCH_TTL]
+    for k in expired:
+        del _natural_search_cache[k]
+    if len(_natural_search_cache) >= _NATURAL_SEARCH_CACHE_MAX:
+        sorted_keys = sorted(_natural_search_cache, key=lambda k: _natural_search_cache[k][0])
+        for k in sorted_keys[:len(_natural_search_cache) - _NATURAL_SEARCH_CACHE_MAX + 1]:
+            del _natural_search_cache[k]
+    _natural_search_cache[cache_key] = (now_ts, response_data)
+
+    return jsonify(response_data)
+
+# ---------------------------------------------------------------------------
+# Voice Assistant
+# ---------------------------------------------------------------------------
+
+def _resolve_playback_target(rating_key: int, room_id: str,
+                              resume: bool = False) -> Dict[str, Any]:
+    """Resolve room → device → service and trigger playback.
+
+    Shared helper used by both the player_play endpoint and voice assistant.
+    Returns a dict with success/error info.
+    """
+    room = settings.get_room_by_id(room_id)
+    if not room:
+        return {'success': False, 'error': f'Room not found: {room_id}'}
+
+    device = None
+    service = None
+    client_ip = ''
+    adb_port = settings.get_default_adb_port()
+
+    if room and isinstance(room.get('devices'), list):
+        # Prefer a device with a Plex service
+        for dev in room['devices']:
+            if not isinstance(dev, dict):
+                continue
+            for svc in (dev.get('services') or []):
+                if isinstance(svc, dict) and svc.get('type') == 'plex':
+                    device = dev
+                    break
+            if device:
+                break
+        if not device and room['devices']:
+            device = room['devices'][0] if isinstance(room['devices'][0], dict) else None
+
+        if device:
+            client_ip = device.get('host', '')
+            adb_port = device.get('connectPort', adb_port)
+            # Prefer Plex service
+            for svc in (device.get('services') or []):
+                if isinstance(svc, dict) and svc.get('type') == 'plex':
+                    service = svc
+                    break
+            if not service and device.get('services'):
+                service = device['services'][0] if isinstance(device['services'][0], dict) else None
+    elif room:
+        client_ip = room.get('host') or room.get('ip', '')
+        adb_port = room.get('connectPort') or room.get('adb_port', adb_port)
+
+    if not client_ip:
+        return {'success': False, 'error': 'Could not resolve device IP for room'}
+
+    resume_offset = 0
+    if resume:
+        metadata = plex_service.get_metadata(rating_key)
+        if metadata:
+            resume_offset = metadata.get('viewOffset', 0)
+
+    # Wake device
+    try:
+        from app.device_wake import ensure_device_ready
+        wake = ensure_device_ready(device or {}, room or {})
+        logger.info("Voice playback wake: ok=%s", wake.get('ok'))
+    except Exception as we:
+        logger.warning("Device wake failed: %s", we)
+
+    # Route to playback
+    platform = device.get('platform', '') if device else ''
+    room_name = room.get('name', room_id)
+    svc_type = (service or {}).get('type', 'kodi')
+
+    try:
+        if svc_type == 'plex':
+            result = _play_via_plex(service or {}, rating_key, resume_offset, room_name, client_ip, adb_port, platform)
+        else:
+            result = _play_via_kodi(service or {}, rating_key, resume_offset, room_name, client_ip, adb_port, platform)
+        # Extract JSON response
+        if hasattr(result, 'get_json'):
+            return result.get_json()
+        if isinstance(result, tuple):
+            resp, code = result
+            if hasattr(resp, 'get_json'):
+                return resp.get_json()
+        return {'success': True, 'message': f'Playing in {room_name}'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+@app.route('/api/voice/command', methods=['POST'])
+def voice_command():
+    """Process a voice command via GPT function calling."""
+    body = request.get_json(silent=True) or {}
+    transcript = (body.get('transcript', '') or '').strip()
+    history = body.get('history', [])
+
+    if not transcript:
+        return jsonify({'error': 'Transcript is required'}), 400
+    if len(transcript) > 500:
+        transcript = transcript[:500]
+
+    # Check voice is enabled
+    voice_enabled = settings.get('apis.openai.voice_enabled', False)
+    openai_enabled = settings.get('apis.openai.enabled', False)
+    openai_key = settings.get('apis.openai.api_key', '')
+
+    if not voice_enabled or not openai_enabled or not openai_key:
+        return jsonify({'error': 'Voice assistant is not enabled. Enable it in Settings > AI.'}), 503
+
+    from app.voice_service import process_voice_command
+    result = process_voice_command(
+        transcript=transcript,
+        history=history,
+        settings=settings,
+        plex_service=plex_service,
+        resolve_playback_fn=_resolve_playback_target,
+    )
+    return jsonify(result)
+
+
+@app.route('/api/voice/tts', methods=['POST'])
+def voice_tts():
+    """Convert text to speech. Supports OpenAI and ElevenLabs providers."""
+    body = request.get_json(silent=True) or {}
+    text = (body.get('text', '') or '').strip()
+    speed = body.get('speed', 1.0)
+
+    if not text:
+        return jsonify({'error': 'Text is required'}), 400
+    if len(text) > 4096:
+        text = text[:4096]
+
+    provider = settings.get('apis.openai.tts_provider', 'openai')
+
+    from flask import Response as FlaskResponse
+
+    # ----- ElevenLabs -----
+    if provider == 'elevenlabs':
+        el_key = settings.get('apis.elevenlabs.api_key', '')
+        # Allow voice_id override from request body (for preview before saving)
+        el_voice = body.get('elevenlabs_voice_id') or settings.get('apis.elevenlabs.voice_id', '')
+        logger.info('ElevenLabs TTS — voice_id=%s', el_voice)
+        if not el_key or not el_voice:
+            return jsonify({'error': 'ElevenLabs API key and voice ID are required'}), 503
+
+        el_model = settings.get('apis.elevenlabs.model_id', 'eleven_multilingual_v2')
+        stability = settings.get('apis.elevenlabs.stability', 0.5)
+        similarity = settings.get('apis.elevenlabs.similarity', 0.75)
+
+        try:
+            import requests as req
+            resp = req.post(
+                f'https://api.elevenlabs.io/v1/text-to-speech/{el_voice}',
+                headers={
+                    'xi-api-key': el_key,
+                    'Content-Type': 'application/json',
+                    'Accept': 'audio/mpeg',
+                },
+                json={
+                    'text': text,
+                    'model_id': el_model,
+                    'voice_settings': {
+                        'stability': stability,
+                        'similarity_boost': similarity,
+                    },
+                },
+                timeout=20,
+                stream=True,
+            )
+            resp.raise_for_status()
+
+            return FlaskResponse(
+                resp.iter_content(chunk_size=4096),
+                content_type='audio/mpeg',
+                headers={'Cache-Control': 'no-cache'},
+            )
+        except Exception as e:
+            logger.error('ElevenLabs TTS failed: %s', e)
+            return jsonify({'error': 'ElevenLabs TTS generation failed'}), 500
+
+    # ----- OpenAI (default) -----
+    openai_key = settings.get('apis.openai.api_key', '')
+    if not openai_key:
+        return jsonify({'error': 'OpenAI is not configured'}), 503
+
+    default_voice = settings.get('apis.openai.tts_voice', 'nova')
+    voice = body.get('voice', default_voice)
+
+    try:
+        import requests as req
+        resp = req.post(
+            'https://api.openai.com/v1/audio/speech',
+            headers={
+                'Authorization': f'Bearer {openai_key}',
+                'Content-Type': 'application/json',
+            },
+            json={
+                'model': 'tts-1',
+                'input': text,
+                'voice': voice,
+                'speed': speed,
+                'response_format': 'mp3',
+            },
+            timeout=15,
+            stream=True,
+        )
+        resp.raise_for_status()
+
+        return FlaskResponse(
+            resp.iter_content(chunk_size=4096),
+            content_type='audio/mpeg',
+            headers={'Cache-Control': 'no-cache'},
+        )
+    except Exception as e:
+        logger.error('TTS failed: %s', e)
+        return jsonify({'error': 'TTS generation failed'}), 500
+
+
+@app.route('/api/voice/transcribe', methods=['POST'])
+def voice_transcribe():
+    """Transcribe audio using OpenAI Whisper API."""
+    openai_key = settings.get('apis.openai.api_key', '')
+    if not openai_key:
+        return jsonify({'error': 'OpenAI is not configured'}), 503
+
+    if 'audio' not in request.files:
+        return jsonify({'error': 'No audio file provided'}), 400
+
+    audio_file = request.files['audio']
+    if not audio_file.filename:
+        return jsonify({'error': 'No audio file provided'}), 400
+
+    # Whisper API limit is 25 MB
+    audio_file.seek(0, 2)
+    size = audio_file.tell()
+    audio_file.seek(0)
+    if size > 25 * 1024 * 1024:
+        return jsonify({'error': 'Audio file exceeds 25 MB limit'}), 400
+
+    language = request.form.get('language', 'en')
+
+    try:
+        import requests as req
+        resp = req.post(
+            'https://api.openai.com/v1/audio/transcriptions',
+            headers={'Authorization': f'Bearer {openai_key}'},
+            files={'file': (audio_file.filename, audio_file.stream, audio_file.content_type or 'audio/webm')},
+            data={
+                'model': 'whisper-1',
+                'language': language,
+                'response_format': 'json',
+                'prompt': 'This is a voice command to a media assistant called Luma. The user may ask about movies, TV shows, playback, downloads, or navigation.',
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        result = resp.json()
+        return jsonify({'text': result.get('text', '')})
+    except Exception as e:
+        logger.error('Whisper transcription failed: %s', e)
+        return jsonify({'error': 'Transcription failed'}), 500
+
+
+@app.route('/api/elevenlabs/voices', methods=['GET'])
+def elevenlabs_voices():
+    """List available ElevenLabs voices."""
+    el_key = settings.get('apis.elevenlabs.api_key', '')
+    if not el_key:
+        return jsonify({'voices': [], 'error': 'ElevenLabs API key not configured'}), 200
+    try:
+        import requests as req
+        resp = req.get(
+            'https://api.elevenlabs.io/v1/voices',
+            headers={'xi-api-key': el_key},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        voices = [
+            {'voice_id': v['voice_id'], 'name': v.get('name', ''), 'category': v.get('category', '')}
+            for v in data.get('voices', [])
+        ]
+        return jsonify({'voices': voices})
+    except Exception as e:
+        logger.error('ElevenLabs voices fetch failed: %s', e)
+        return jsonify({'voices': [], 'error': str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Alfred agent bridge
+# ---------------------------------------------------------------------------
+
+_alfred_bridge = None  # lazy singleton
+
+def _get_alfred_bridge():
+    """Lazy-init the Alfred bridge from settings."""
+    global _alfred_bridge
+    enabled = settings.get('apis.alfred.enabled', False)
+    base_url = settings.get('apis.alfred.base_url', '')
+    if not enabled or not base_url:
+        return None
+    # Re-create if base_url changed
+    if _alfred_bridge is None or _alfred_bridge.base_url != base_url.rstrip('/'):
+        from app.alfred_bridge import AlfredBridge
+        api_key = settings.get('apis.alfred.api_key', '') or None
+        timeout = settings.get('apis.alfred.timeout', 25)
+        _alfred_bridge = AlfredBridge(base_url, api_key=api_key, timeout=timeout)
+    return _alfred_bridge
+
+
+@app.route('/api/alfred/command', methods=['POST'])
+def alfred_command():
+    """Forward a voice command to the Alfred agent."""
+    body = request.get_json(silent=True) or {}
+    transcript = (body.get('transcript', '') or '').strip()
+    context = body.get('context')
+    history = body.get('history')
+
+    if not transcript:
+        return jsonify({'error': 'Transcript is required'}), 400
+    if len(transcript) > 1000:
+        transcript = transcript[:1000]
+
+    bridge = _get_alfred_bridge()
+    if bridge is None:
+        return jsonify({
+            'error': 'Alfred is not configured. Enable it in Settings > APIs.',
+        }), 503
+
+    result = bridge.send_command(transcript, context=context, history=history)
+    return jsonify(result)
+
+
+@app.route('/api/alfred/health', methods=['GET'])
+def alfred_health():
+    """Check if Alfred agent is reachable."""
+    bridge = _get_alfred_bridge()
+    if bridge is None:
+        return jsonify({'available': False, 'reason': 'not_configured'})
+    return jsonify(bridge.health_check())
+
+
+@app.route('/api/alfred/reset', methods=['POST'])
+def alfred_reset():
+    """Reset the Alfred bridge — forces re-init on next request."""
+    global _alfred_bridge
+    _alfred_bridge = None
+    logger.info('Alfred bridge reset')
+    return jsonify({'ok': True, 'message': 'Alfred bridge reset. Will reconnect on next command.'})
+
 
 _tmdb_detail_cache: Dict[str, tuple] = {}  # key → (timestamp, data)
 _tmdb_detail_cache_lock = threading.Lock()
@@ -4453,7 +5716,7 @@ def movie_similar(tmdb_id):
         # Prefer Plex proxy poster so tiles render without a TMDb round-trip;
         # posterUrl() on the frontend passes /api/ paths through unchanged.
         poster_path = f'/api/img/plex?url={thumb}' if thumb else (
-            f'/api/img/plex?url=/library/metadata/{rk}/thumb' if rk else None
+            f'/api/img/plex?url=/library/metadata/{rk}/thumb&r=2' if rk else None
         )
         art = item.get('artPath')
         backdrop_path = f'/api/img/plex?url={art}' if art else None
@@ -5947,6 +7210,106 @@ def top_rated_upgrades():
         return jsonify({'error': str(e), 'upgrades': []}), 500
 
 
+@app.route('/api/upgrades/auto-grab', methods=['POST'])
+def auto_grab_upgrades():
+    """Alfred endpoint: grab top-rated upgrades and send them to Radarr.
+
+    Payload:
+        quality: upgrade_type (default: 4k_remux)
+        min_score: minimum RT score (default: 75)
+        max_grabs: max movies to grab per run (default: 3)
+        profile: Radarr quality profile name (default: 4K)
+
+    Returns list of movies grabbed with RT scores and reasons.
+    """
+    try:
+        data = request.get_json(silent=True) or {}
+        quality = data.get('quality', '4k_remux')
+        min_score = data.get('min_score', 75)
+        max_grabs = data.get('max_grabs', 3)
+        profile_name = data.get('profile', '4K')
+
+        finder = _get_upgrade_finder()
+        top = finder.get_top_rated_upgrades(
+            quality=quality, min_rt_score=min_score, limit=max_grabs)
+
+        if not top['upgrades']:
+            return jsonify({
+                'status': 'ok',
+                'grabbed': [],
+                'message': 'No upgrades meet the rating threshold',
+            })
+
+        radarr = get_radarr_for_request()
+        if not radarr:
+            return jsonify({'error': 'Radarr not configured'}), 503
+
+        # Resolve quality profile
+        profiles = radarr.get_quality_profiles()
+        qp = next(
+            (p for p in profiles if p.get('name', '').lower() == profile_name.lower()),
+            profiles[0] if profiles else None,
+        )
+        if not qp:
+            return jsonify({'error': 'No quality profiles in Radarr'}), 500
+
+        grabbed = []
+        for movie in top['upgrades']:
+            tmdb_id = movie['tmdb_id']
+            title = movie['title']
+            year = movie.get('year', '')
+            rt_c = movie.get('rt_critic')
+            rt_a = movie.get('rt_audience')
+            avg_score = ((rt_c or 0) + (rt_a or 0)) // 2
+
+            try:
+                result = radarr.ensure_movie_monitored(
+                    tmdb_id=int(tmdb_id),
+                    quality_profile_id=qp['id'],
+                    title=title,
+                    year=int(year) if year and str(year).isdigit() else 0,
+                )
+                if result['success']:
+                    finder.mark_grabbed(tmdb_id)
+                    grabbed.append({
+                        'tmdb_id': tmdb_id,
+                        'title': title,
+                        'year': year,
+                        'rt_critic': rt_c,
+                        'rt_audience': rt_a,
+                        'avg_score': avg_score,
+                        'current_quality': movie.get('current_quality', ''),
+                        'upgrade_quality': movie.get('best_quality', ''),
+                        'seeders': movie.get('best_seeders', 0),
+                        'size_gb': movie.get('best_size_gb', 0),
+                        'action': result['action'],
+                        'reason': (
+                            f"RT {rt_c}% critic / {rt_a}% audience "
+                            f"({avg_score}% avg). "
+                            f"Upgrading from {movie.get('current_quality', '?')} "
+                            f"to {movie.get('best_quality', '?')}. "
+                            f"{movie.get('best_seeders', 0)} seeders, "
+                            f"{movie.get('best_size_gb', 0):.1f} GB."
+                        ),
+                    })
+                    logger.info(
+                        f"[auto-grab] Grabbed '{title}' ({year}) — "
+                        f"RT {rt_c}/{rt_a}, profile={profile_name}")
+            except Exception as e:
+                logger.error(f"[auto-grab] Failed to grab '{title}': {e}")
+
+        return jsonify({
+            'status': 'ok',
+            'grabbed': grabbed,
+            'total_grabbed': len(grabbed),
+            'profile': profile_name,
+        })
+
+    except Exception as e:
+        logger.error(f"Error in /api/upgrades/auto-grab: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/upgrades/scheduler/status')
 def upgrade_scheduler_status():
     """Get daily upgrade scheduler status and run log."""
@@ -6038,6 +7401,49 @@ def get_in_theaters():
         logger.error(f"Error getting in-theaters movies: {e}")
         return jsonify({'error': str(e), 'movies': []}), 500
 
+@app.route('/api/library/stats')
+def library_stats():
+    """Get library statistics from Plex API."""
+    try:
+        stats = get_plex_for_request().get_library_stats()
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Error getting library stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/library/stats/cached')
+def library_stats_cached():
+    """Get cached library statistics for ultra-fast loading."""
+    try:
+        # Check if cache needs updating (but don't block)
+        if library_cache.needs_update('library_stats'):
+            # Start update in background
+            import threading
+            threading.Thread(target=update_library_stats_cache, daemon=True).start()
+
+        # Return cached stats immediately
+        stats = library_cache.get_library_stats()
+
+        if stats:
+            stats['from_cache'] = True
+            stats['cache_info'] = library_cache.get_cache_info().get('library_stats', {})
+            return jsonify(stats)
+        else:
+            # No cache yet, return empty
+            return jsonify({
+                'movies': {},
+                'tv_shows': {},
+                'total_movies': 0,
+                'total_shows': 0,
+                'total_episodes': 0,
+                'from_cache': True,
+                'cache_info': {'status': 'initializing'}
+            })
+
+    except Exception as e:
+        logger.error(f"Error getting cached library stats: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/library/browse/cached')
@@ -6192,6 +7598,228 @@ def library_browse():
         return jsonify({'error': str(e)}), 500
 
 
+# ---------------------------------------------------------------------------
+# Vibe Engine — full library index for mood-based browsing
+# ---------------------------------------------------------------------------
+
+_vibe_cache: dict = {}  # keyed by plex_url → {'data': ..., 'ts': float}
+_VIBE_CACHE_TTL = 600  # 10 minutes
+
+
+_VIBE_STALE_MAX = 24 * 3600  # serve a stale index (and refresh in background) for up to 24h
+_vibe_refreshing: set = set()
+_vibe_refresh_lock = threading.Lock()
+
+
+def _vibe_build(plex, _vibe_key, now):
+    """Walk every Plex section and (re)build the Vibe Engine index.
+
+    Returns (payload, None) on success or (None, (error_body, status)).
+    No Flask request/app context needed, so it can run in a background thread.
+    """
+    if not plex.is_configured:
+        logger.warning('Vibe Engine: plex_service not configured')
+        return None, ({'error': 'Plex not configured', 'items': [], 'total': 0}, 503)
+
+    sections = plex.get_sections_lean()
+    if not sections:
+        logger.warning('Vibe Engine: no library sections returned from Plex')
+        return None, ({'error': 'No Plex libraries found', 'items': [], 'total': 0}, 503)
+
+    excluded_libraries = settings.get('ui.vibe_engine.excluded_libraries', []) or []
+
+    # ----- helper: fetch all items for one section -----
+    def _fetch_section(section):
+        sec_id = section['id']
+        sec_type = section['type']
+        sec_title = section['title']
+        section_items = []
+        page_size = 500
+        timeout = 30
+
+        try:
+            if sec_type == 'movie':
+                offset = 0
+                while True:
+                    result = plex.get_all_movies(
+                        section_id=sec_id, sort='titleSort:asc',
+                        limit=page_size, offset=offset, timeout=timeout,
+                    )
+                    for m in result['movies']:
+                        section_items.append({
+                            'rating_key': m['ratingKey'],
+                            'title': m['title'],
+                            'year': m.get('year'),
+                            'type': 'movie',
+                            'runtime_minutes': round(m.get('duration', 0) / 60000),
+                            'genres': m.get('genres', []),
+                            'summary': m.get('summary', ''),
+                            'content_rating': m.get('contentRating', ''),
+                            'rating': m.get('rating'),
+                            'audience_rating': m.get('audienceRating'),
+                            'poster_url': f"/api/img/plex?url={m['thumbPath']}" if m.get('thumbPath') else None,
+                            'backdrop_url': f"/api/img/plex?url={m['artPath']}" if m.get('artPath') else None,
+                            'tmdb_id': m.get('tmdb_id'),
+                            'imdb_id': m.get('imdb_id'),
+                            'view_count': m.get('viewCount', 0),
+                            'last_viewed_at': m.get('lastViewedAt', 0),
+                            'added_at': m.get('addedAt', 0),
+                            'library_name': sec_title,
+                        })
+                    if not result['has_more']:
+                        break
+                    offset += page_size
+
+            elif sec_type == 'show':
+                offset = 0
+                while True:
+                    result = plex.get_all_shows(
+                        section_id=sec_id, sort='titleSort:asc',
+                        limit=page_size, offset=offset, timeout=timeout,
+                    )
+                    for s in result['shows']:
+                        section_items.append({
+                            'rating_key': s['ratingKey'],
+                            'title': s['title'],
+                            'year': s.get('year'),
+                            'type': 'tv',
+                            'runtime_minutes': round(s.get('duration', 0) / 60000),
+                            'genres': s.get('genres', []),
+                            'summary': s.get('summary', ''),
+                            'content_rating': s.get('contentRating', ''),
+                            'rating': s.get('rating'),
+                            'audience_rating': s.get('audienceRating'),
+                            'poster_url': f"/api/img/plex?url={s['thumbPath']}" if s.get('thumbPath') else None,
+                            'backdrop_url': f"/api/img/plex?url={s['artPath']}" if s.get('artPath') else None,
+                            'tmdb_id': s.get('tmdb_id'),
+                            'imdb_id': s.get('imdb_id'),
+                            'view_count': s.get('viewCount', 0),
+                            'last_viewed_at': s.get('lastViewedAt', 0),
+                            'added_at': s.get('addedAt', 0),
+                            'library_name': sec_title,
+                        })
+                    if not result['has_more']:
+                        break
+                    offset += page_size
+
+        except Exception as exc:
+            logger.error('Vibe Engine: failed to fetch section "%s" (id=%s): %s',
+                         sec_title, sec_id, exc)
+
+        if not section_items and sec_type in ('movie', 'show'):
+            logger.warning('Vibe Engine: section "%s" (%s, id=%s) returned 0 items '
+                           '— possible timeout or error', sec_title, sec_type, sec_id)
+        else:
+            logger.info('Vibe Engine: section "%s" (%s, id=%s) → %d items',
+                        sec_title, sec_type, sec_id, len(section_items))
+
+        return section_items
+
+    # ----- filter sections and fetch in parallel -----
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    active_sections = [
+        s for s in sections
+        if s['title'] not in excluded_libraries and s['type'] in ('movie', 'show')
+    ]
+    for s in sections:
+        if s['title'] in excluded_libraries:
+            logger.debug('Vibe Engine: skipping excluded library "%s"', s['title'])
+
+    items = []
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(_fetch_section, s): s for s in active_sections}
+        for future in as_completed(futures):
+            items.extend(future.result())
+
+    payload = {
+        'items': items,
+        'total': len(items),
+        'cached_at': int(now),
+    }
+
+    # Only cache non-empty results so retries work when Plex was temporarily down.
+    # An older (stale) entry is kept otherwise, so it can still be served.
+    if items:
+        _vibe_cache[_vibe_key] = {'data': payload, 'ts': now}
+
+    logger.info('Vibe Engine: indexed %d items across %d sections',
+                 len(items), len(active_sections))
+    return payload, None
+
+
+def _vibe_refresh_async(plex, _vibe_key):
+    """Rebuild the index in the background (one refresh per key at a time)."""
+    with _vibe_refresh_lock:
+        if _vibe_key in _vibe_refreshing:
+            return
+        _vibe_refreshing.add(_vibe_key)
+
+    def _run():
+        try:
+            _vibe_build(plex, _vibe_key, time.time())
+        except Exception as exc:  # keep serving the stale copy
+            logger.error(f"Vibe Engine background refresh error: {exc}")
+        finally:
+            with _vibe_refresh_lock:
+                _vibe_refreshing.discard(_vibe_key)
+
+    threading.Thread(target=_run, name='vibe-refresh', daemon=True).start()
+
+
+def _vibe_warm_on_startup(delay: float = 45.0):
+    """Build the shared (global Plex) Vibe index shortly after boot so the first
+    Pick For Me → "In Your Library" after a restart doesn't wait on a cold
+    ~15-20s Plex walk. Runs once, in the background."""
+    def _run():
+        time.sleep(delay)
+        try:
+            if getattr(plex_service, 'is_configured', False):
+                key = getattr(plex_service, 'plex_url', '') or 'global'
+                if not _vibe_cache.get(key):
+                    _vibe_refresh_async(plex_service, key)
+        except Exception as exc:
+            logger.error(f"Vibe Engine warm-up error: {exc}")
+    threading.Thread(target=_run, name='vibe-warm', daemon=True).start()
+
+
+
+@app.route('/api/library/vibe-engine')
+def library_vibe_engine():
+    """Return all movies + shows from Plex for the Vibe Engine UI.
+
+    Response includes watch state, genres, ratings, runtime — everything
+    the frontend needs to compute mood-based shelves client-side.
+    Cached in-memory for 10 minutes; after that the stale copy is served
+    instantly while a background refresh rebuilds it (a cold Plex walk takes
+    ~10s, which used to stall Pick For Me → "In Your Library").
+    """
+    import time as _time
+
+    now = _time.time()
+
+    try:
+        plex = get_plex_for_request()
+        _vibe_key = getattr(plex, 'plex_url', '') or 'global'
+        _vibe_entry = _vibe_cache.get(_vibe_key)
+        if _vibe_entry and _vibe_entry.get('data'):
+            _age = now - _vibe_entry.get('ts', 0)
+            if _age < _VIBE_CACHE_TTL:
+                return jsonify(_vibe_entry['data'])
+            if _age < _VIBE_STALE_MAX:
+                _vibe_refresh_async(plex, _vibe_key)
+                return jsonify(_vibe_entry['data'])
+
+        payload, err = _vibe_build(plex, _vibe_key, now)
+        if err:
+            return jsonify(err[0]), err[1]
+        return jsonify(payload)
+
+    except Exception as e:
+        logger.error(f"Vibe Engine error: {e}")
+        return jsonify({'error': str(e), 'items': [], 'total': 0}), 500
+
+
 @app.route('/api/library/recent/cached')
 def library_recent_cached():
     """Get cached recently added items for ultra-fast loading."""
@@ -6321,7 +7949,7 @@ def library_recent_episodes():
 
             poster_url = None
             if show_rk:
-                poster_url = f"/api/img/plex?url=/library/metadata/{show_rk}/thumb"
+                poster_url = f"/api/img/plex?url=/library/metadata/{show_rk}/thumb&r=2"
             elif ep.get('showThumbPath'):
                 poster_url = f"/api/img/plex?url={ep['showThumbPath']}"
 
@@ -6714,12 +8342,68 @@ def library_search_fast():
 
 @app.route('/api/library/search')
 def library_search():
-    """Search library for movies and TV shows via Plex API."""
+    """Search library for movies and TV shows with typo tolerance via fast_search index.
+    Falls back to Plex API if index isn't ready."""
     query = request.args.get('q', '').strip()
     if not query:
         return jsonify({'movies': [], 'tv_shows': []})
 
     try:
+        # Try fast_search if index is initialized (typo-tolerant)
+        status = fast_search_index.status()
+        if status.get('initialized'):
+            # Use fast search with fuzzy matching
+            results = fast_search_index.search(q=query, limit=100, fuzzy=True)
+            
+            # Separate by media type and deduplicate across library sections
+            all_movies = []
+            all_tv = []
+            seen_movies = {}  # key: (title_lower, year) -> item
+            seen_tv = {}      # key: (title_lower, year) -> item
+            
+            # Build image proxy URLs relative to script root (for URL base support)
+            script_root = request.script_root or ''
+            
+            for item in results:
+                title_lower = item.get('title', '').lower()
+                year = item.get('year')
+                section_name = item.get('section_name', 'Library')
+                key = (title_lower, year)
+                
+                # Format for frontend (matches Plex format)
+                formatted = {
+                    'title': item.get('title'),
+                    'year': year,
+                    'rating_key': item.get('rating_key'),
+                    'library_name': section_name,
+                    'libraries': [section_name],
+                    'poster_url': f"{script_root}/api/img/plex?url={urllib.parse.quote(item['thumb'], safe='/')}" if item.get('thumb') else None,
+                    'backdrop_url': f"{script_root}/api/img/plex?url={urllib.parse.quote(item['art'], safe='/')}" if item.get('art') else None,
+                    'clearlogo_url': None,
+                }
+                if item.get('added_at'):
+                    formatted['added_date'] = datetime.fromtimestamp(item['added_at']).strftime('%Y-%m-%d')
+                
+                if item.get('media_type') == 'movie':
+                    if key in seen_movies:
+                        # Add library to existing entry
+                        if section_name not in seen_movies[key]['libraries']:
+                            seen_movies[key]['libraries'].append(section_name)
+                    else:
+                        seen_movies[key] = formatted
+                        all_movies.append(formatted)
+                elif item.get('media_type') == 'show':
+                    if key in seen_tv:
+                        # Add library to existing entry
+                        if section_name not in seen_tv[key]['libraries']:
+                            seen_tv[key]['libraries'].append(section_name)
+                    else:
+                        seen_tv[key] = formatted
+                        all_tv.append(formatted)
+            
+            return jsonify({'movies': all_movies, 'tv_shows': all_tv})
+        
+        # Fallback to Plex API if index not ready
         plex = get_plex_for_request()
         sections = plex.get_library_sections()
         movie_sections = [s for s in sections if s['type'] == 'movie']
@@ -6968,7 +8652,7 @@ def check_ownership():
                     logger.warning(f"Failed to enrich cast/directors with TMDB photos: {e}")
 
             # Proxy image URLs
-            movie['poster_url'] = f"/api/img/plex?url=/library/metadata/{rk}/thumb"
+            movie['poster_url'] = f"/api/img/plex?url=/library/metadata/{rk}/thumb&r=2"
             movie['clearlogo_url'] = f"/api/img/plex?url=/library/metadata/{rk}/clearLogo"
             movie['backdrop_url'] = f"/api/img/plex?url=/library/metadata/{rk}/art"
 
@@ -7197,34 +8881,6 @@ def health():
 # Auth API routes
 # =============================================================================
 
-@app.route('/api/auth/check-user', methods=['POST'])
-def auth_check_user():
-    """Check if a user exists by email (preferred) or name (backwards compat).
-    Returns whether the user needs to set a PIN (new user created by admin with no settings).
-    """
-    try:
-        data = request.get_json(force=True) or {}
-        email = (data.get('email') or '').strip()
-        name = (data.get('name') or '').strip()
-        if not email and not name:
-            return jsonify({'error': 'Email or name is required'}), 400
-        # Try email first, then fall back to name
-        user = None
-        if email:
-            user = user_auth.get_user_by_email(email)
-        if not user and name:
-            user = user_auth.get_user_by_name(name)
-        if not user and email:
-            # Also try email as a name (backwards compat)
-            user = user_auth.get_user_by_name(email)
-        if not user:
-            return jsonify({'exists': False})
-        return jsonify({'exists': True, 'name': user['name']})
-    except Exception as e:
-        logger.error(f"auth_check_user error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
 @app.route('/api/auth/login', methods=['POST'])
 def auth_login():
     """Authenticate with email/name + PIN. Sets a session cookie on success."""
@@ -7239,7 +8895,7 @@ def auth_login():
             return jsonify({'success': False, 'error': 'Email and password are required'}), 400
 
         from app import login_limiter
-        client_ip = request.remote_addr or ''
+        client_ip = _access.client_ip(request, settings) or (request.remote_addr or '')
         wait = login_limiter.retry_after(client_ip, identifier)
         if wait:
             mins = max(1, (wait + 59) // 60)
@@ -7273,20 +8929,24 @@ def auth_login():
                 'is_admin': bool(user['is_admin']),
             }
         }))
-        # SameSite=Lax; not HttpOnly so JS can detect its presence
-        resp.set_cookie(
-            LUMA_SESSION_COOKIE, token,
-            max_age=60 * 60 * 24 * 30,  # 30 days
-            httponly=False,
-            samesite='Lax',
-            secure=False,  # HTTP on local LAN
-            path='/',
-        )
+        
+        
+        set_auth_cookie(resp, token)
+        
+        
         return resp
 
     except Exception as e:
         logger.error(f"auth_login error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _signup_open() -> bool:
+    """Account requests: always from the local network, from elsewhere only
+    when security.allow_signup is on. Never on the request-portal host."""
+    if _access.is_portal_traffic(request, settings):
+        return False
+    return bool(settings.get('security.allow_signup')) or _access.is_local_request(request, settings)
 
 
 @app.route('/api/auth/register', methods=['POST'])
@@ -7307,6 +8967,8 @@ def auth_register():
 
         if not user_auth.list_users():
             return jsonify({'success': False, 'error': 'Luma is not set up yet', 'needs_start': True}), 409
+        if not _signup_open():
+            return jsonify({'success': False, 'error': 'Sign-up is off'}), 403
         if not name:
             return jsonify({'success': False, 'error': 'Name is required'}), 400
         if not email:
@@ -7379,24 +9041,15 @@ def _telegram_admin_chat_id() -> str:
 
 
 def _make_admin_action_url(action: str, user_id: int) -> str:
-    """Generate an HMAC-signed URL for admin actions (approve/deny) via Telegram buttons."""
-    import hashlib, hmac
-    app_url = _public_app_url()
-    secret = _TELEGRAM_ACTION_SECRET
-    msg = f"{action}:{user_id}"
-    sig = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()[:16]
-    return f"{app_url}/api/admin/telegram-action?action={action}&uid={user_id}&sig={sig}"
+    """Signed, single-use link (24 h) for an admin action button in Telegram.
 
-
-def _verify_admin_action_sig(action: str, user_id: int, sig: str) -> bool:
-    """Verify the HMAC signature on a Telegram admin action URL."""
-    import hashlib, hmac
-    secret = _TELEGRAM_ACTION_SECRET
-    if not secret:
-        return False
-    msg = f"{action}:{user_id}"
-    expected = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()[:16]
-    return hmac.compare_digest(sig, expected)
+    Opening it shows a confirm page; only the button on that page (a POST)
+    changes anything. See app.action_tokens.
+    """
+    from urllib.parse import urlencode
+    from app import action_tokens
+    fields = action_tokens.sign(app.config['SECRET_KEY'], action, user_id)
+    return f"{_public_app_url()}/api/admin/telegram-action?{urlencode(fields)}"
 
 
 def _send_account_request_notification(user_id: int, name: str, email: str = None) -> None:
@@ -7523,11 +9176,13 @@ def _send_approval_email(to_email: str, display_name: str) -> None:
 def auth_logout():
     """Clear the session cookie and invalidate the session."""
     try:
-        token = request.cookies.get(LUMA_SESSION_COOKIE)
+        token = request.cookies.get(AUTH_COOKIE)
         if token:
             user_auth.delete_session(token)
         resp = make_response(jsonify({'success': True}))
-        resp.delete_cookie(LUMA_SESSION_COOKIE, path='/')
+        
+        
+        clear_auth_cookie(resp)
         return resp
     except Exception as e:
         logger.error(f"auth_logout error: {e}")
@@ -7543,6 +9198,7 @@ def auth_me():
             'authenticated': False,
             'needs_start': _start_flow.needs_start(),
             'pin_unlock': _start_flow.created_by_start(),
+            'signup': _signup_open(),
         }), 401
     # Include user settings
     user_settings_data = user_auth.get_user_settings(user['id'])
@@ -7557,6 +9213,7 @@ def auth_me():
     # Needs setup if: no approved shared access AND no own server configured
     needs_setup = not is_admin and not has_shared and not has_own
     plex_access_status = user_settings_data.get('plex_access_status', None)
+    auth_required = (settings.get('security.auth_required') or 'disabled_local').strip()
     return jsonify({
         'authenticated': True,
         'user': {
@@ -7569,7 +9226,7 @@ def auth_me():
         'needs_setup': needs_setup,
         'plex_access_status': plex_access_status,
         'implicit': bool(getattr(g, 'implicit_user', False)),
-        'access_mode': _access.mode(settings),
+        'auth_required': auth_required,
         'start_in_progress': _start_flow._in_progress(user),
     })
 
@@ -7606,18 +9263,12 @@ def auth_unlock():
     login_limiter.record_success(ip, 'owner')
     token = user_auth.create_session(user['id'])
     resp = make_response(jsonify({'success': True}))
-    resp.set_cookie(LUMA_SESSION_COOKIE, token, max_age=60 * 60 * 24 * 30,
-                    httponly=False, samesite='Lax', secure=False, path='/')
+    
+    
+    set_auth_cookie(resp, token)
+    
+    
     return resp
-
-
-def _valid_net(value: str) -> bool:
-    import ipaddress
-    try:
-        ipaddress.ip_network(value, strict=False)
-        return True
-    except ValueError:
-        return False
 
 
 @app.route('/api/security', methods=['GET'])
@@ -7625,13 +9276,22 @@ def security_get():
     err = _require_admin()
     if err:
         return err
+    auth_required = (settings.get('security.auth_required') or 'disabled_local').strip()
     return jsonify({
-        'mode': _access.mode(settings),
+        'auth_required': auth_required,
         'pin_set': _pin_state(),
         'single_account': _start_flow.created_by_start(),
-        'local_request': _access.is_local_request(request, settings),
+        'local_request': not _access.should_authenticate(settings, request),
         'trusted_proxies': settings.get('security.trusted_proxies') or '',
+        'hostnames': settings.get('security.hostnames') or '',
+        # Names LAN clients used in the last 30 days that aren't listed yet
+        'seen_hostnames': [n for n in _lan_hosts.recent(_LAN_HOSTS_DIR, 30)
+                           if n not in _access.configured_hostnames(settings)],
+        'allow_signup': bool(settings.get('security.allow_signup')),
     })
+
+
+_HOSTNAME_RE = re.compile(r'^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\.?$', re.I)
 
 
 @app.route('/api/security', methods=['PUT'])
@@ -7640,38 +9300,71 @@ def security_put():
     if err:
         return err
     body = request.get_json(silent=True) or {}
-    mode = str(body.get('mode') or '')
+    auth_required = str(body.get('auth_required') or '').strip()
     pin = str(body.get('pin') or '')
-    if mode not in _access.MODES:
-        return jsonify({'error': 'Unknown access mode'}), 400
+    
+    # Validate auth_required
+    if auth_required and auth_required not in ('enabled', 'disabled_local'):
+        return jsonify({'error': 'Invalid auth_required value'}), 400
+    
+    # Validate PIN
     if pin and (len(pin) != 4 or not pin.isdigit()):
         return jsonify({'error': 'Enter 4 digits'}), 400
     if pin and 'confirm' in body and str(body.get('confirm') or '') != pin:
         return jsonify({'error': "PINs don't match"}), 400
+    
+    # Update trusted_proxies
     if 'trusted_proxies' in body:
         proxies = str(body.get('trusted_proxies') or '').strip()
-        bad = [p for p in proxies.replace(';', ',').split(',') if p.strip() and not _valid_net(p.strip())]
-        if bad:
-            return jsonify({'error': f'Not an IP address or range: {bad[0].strip()}'}), 400
+        parts = [p.strip() for p in proxies.replace(';', ',').split(',') if p.strip()]
+        for part in parts:
+            problem = _access.proxy_range_problem(part)
+            if problem:
+                return jsonify({'error': problem}), 400
+        for part in parts:
+            if _access.is_public_range(part):
+                logger.warning("[security] trusted proxy %s is a public address range", part)
         settings.update({'security': {'trusted_proxies': proxies}})
+
+    if 'hostnames' in body:
+        names = [n for n in re.split(r'[,;\s]+', str(body.get('hostnames') or '')) if n]
+        bad = [n for n in names if not _HOSTNAME_RE.match(n)]
+        if bad:
+            return jsonify({'error': f'Not a host name: {bad[0]}'}), 400
+        settings.update({'security': {'hostnames': ', '.join(n.lower() for n in names)}})
+
+    if 'allow_signup' in body:
+        settings.update({'security': {'allow_signup': body.get('allow_signup') is True}})
+    
     user = _get_current_user()
     if not user or not user.get('id'):
         return jsonify({'error': 'Sign in first'}), 400
-    if mode != 'open' and not pin and not _pin_state():
+    
+    # Require PIN to be set for enabled mode
+    if auth_required == 'enabled' and not pin and not _pin_state():
         return jsonify({'error': 'Set a PIN first'}), 400
+    
+    # Update PIN if provided
     if pin:
         user_auth.update_pin(user['id'], pin)
         if _start_flow.created_by_start():
             st = _start_flow._load_state()
             st['pin_set'] = True
             _start_flow._save_state(st)
-    settings.update({'security': {'access_mode': mode}})
-    resp = make_response(jsonify({'ok': True, 'mode': mode, 'pin_set': _pin_state()}))
-    if mode != 'open' and getattr(g, 'implicit_user', False):
-        # Keep this browser signed in after turning the PIN on.
+    
+    # Update auth_required
+    if auth_required:
+        settings.update({'security': {'auth_required': auth_required}})
+    
+    resp = make_response(jsonify({'ok': True, 'auth_required': auth_required or (settings.get('security.auth_required') or 'disabled_local'), 'pin_set': _pin_state()}))
+    
+    # Keep this browser signed in after enabling authentication
+    if auth_required == 'enabled' and getattr(g, 'implicit_user', False):
+        
         token = user_auth.create_session(user['id'])
-        resp.set_cookie(LUMA_SESSION_COOKIE, token, max_age=60 * 60 * 24 * 30,
-                        httponly=False, samesite='Lax', secure=False, path='/')
+        set_auth_cookie(resp, token)
+        
+    
     return resp
 
 
@@ -8146,50 +9839,101 @@ def _send_plex_access_email(to_email: str, display_name: str) -> None:
 # Clicking Approve/Deny in Telegram opens the URL in a browser, which hits this
 # endpoint directly — no webhook needed.
 
-_TELEGRAM_ACTION_SECRET = os.environ.get('TELEGRAM_ACTION_SECRET', '')
+_ADMIN_ACTION_CSP = ("default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
+                     "frame-ancestors 'none'; base-uri 'none'")
+_ADMIN_ACTION_LABELS = {
+    'approve_user': ('Approve account', 'Approve {name} so they can sign in?', 'Approve'),
+    'deny_user': ('Deny account', 'Deny {name} and remove the account?', 'Deny'),
+    'approve_plex': ('Grant Plex access', 'Give {name} access to the shared Plex server?', 'Grant access'),
+    'deny_plex': ('Deny Plex access', 'Deny {name} shared Plex access?', 'Deny'),
+}
 
 
-def _admin_action_page(title: str, message: str, success: bool = True) -> str:
-    """Return a minimal HTML page shown after an admin action from Telegram."""
+def _admin_action_page(title: str, message: str, success: bool = True, status: int = 200,
+                       form: dict = None, button: str = '') -> Response:
+    """Minimal HTML page for a Telegram admin action. Every interpolated value
+    is HTML-escaped; the response forbids scripts (CSP) and MIME sniffing."""
+    import html as _html
+    esc = lambda v: _html.escape(str(v), quote=True)
     color = '#22c55e' if success else '#ef4444'
-    icon = '✅' if success else '❌'
-    return f"""\
+    form_html = ''
+    if form:
+        hidden = ''.join(f'<input type="hidden" name="{esc(k)}" value="{esc(v)}">' for k, v in form.items())
+        action_url = esc(request.script_root + request.path)
+        form_html = (f'<form method="post" action="{action_url}" style="margin-top:24px;">{hidden}'
+                     f'<button type="submit" style="font-size:16px;font-weight:600;padding:12px 28px;'
+                     f'border:0;border-radius:10px;background:{color};color:#fff;">{esc(button)}</button></form>')
+    page = f"""\
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{title} — Luma</title></head>
+<meta name="referrer" content="no-referrer">
+<title>{esc(title)} - Luma</title></head>
 <body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
 background:radial-gradient(ellipse at 50% 40%,#1a1a1c 0%,#111113 40%,#050507 100%);
 font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#fff;">
 <div style="text-align:center;padding:40px;max-width:400px;">
-<div style="font-size:48px;margin-bottom:16px;">{icon}</div>
-<h1 style="font-size:20px;font-weight:700;margin:0 0 8px;">{title}</h1>
-<p style="font-size:14px;color:rgba(255,255,255,0.5);line-height:1.6;margin:0;">{message}</p>
+<h1 style="font-size:20px;font-weight:700;margin:0 0 8px;color:{color};">{esc(title)}</h1>
+<p style="font-size:14px;color:rgba(255,255,255,0.7);line-height:1.6;margin:0;">{esc(message)}</p>
+{form_html}
 </div></body></html>"""
+    resp = Response(page, status=status, mimetype='text/html')
+    resp.headers['Content-Security-Policy'] = _ADMIN_ACTION_CSP
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Cache-Control'] = 'no-store'
+    resp.headers['Referrer-Policy'] = 'no-referrer'
+    return resp
 
 
-@app.route('/api/admin/telegram-action', methods=['GET'])
+_ADMIN_LINK_ERRORS = {
+    'malformed': ('Invalid Link', 'This link is missing required parameters.', 400),
+    'not configured': ('Invalid Link', 'Admin links are not configured on this server.', 403),
+    'bad signature': ('Invalid Link', 'This link has an invalid signature.', 403),
+    'expired': ('Link Expired', 'This link has expired. Open the request in Luma instead.', 410),
+    'used': ('Link Already Used', 'This link has already been used.', 410),
+}
+
+
+def _admin_link_error(reason: str) -> Response:
+    title, message, status = _ADMIN_LINK_ERRORS.get(reason, _ADMIN_LINK_ERRORS['malformed'])
+    return _admin_action_page(title, message, False, status)
+
+
+@app.route('/api/admin/telegram-action', methods=['GET', 'POST'])
 def admin_telegram_action():
-    """Handle admin approve/deny actions from Telegram URL buttons."""
-    action = (request.args.get('action') or '').strip()
-    uid_str = request.args.get('uid', '')
-    sig = request.args.get('sig', '')
+    """Admin approve/deny from Telegram URL buttons.
 
-    if not action or not uid_str or not sig:
-        return _admin_action_page('Invalid Link', 'This link is missing required parameters.', False), 400
+    GET (opening the link) never changes state: it checks the link and shows a
+    confirm page whose button POSTs the same signed fields. The POST consumes
+    the single-use link and performs the action.
+    """
+    from app import action_tokens
+    secret = app.config['SECRET_KEY']
+    if request.method == 'GET':
+        tok, reason = action_tokens.check(secret, request.args, _action_token_dir())
+        if tok is None:
+            return _admin_link_error(reason)
+        u = user_auth.get_user_by_id(tok['uid'])
+        if not u:
+            return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
+        title, question, button = _ADMIN_ACTION_LABELS[tok['action']]
+        fields = {k: request.args.get(k, '') for k in ('action', 'uid', 'exp', 'nonce', 'sig')}
+        return _admin_action_page(title, question.format(name=u['name']), tok['action'].startswith('approve'),
+                                  form=fields, button=button)
 
-    try:
-        uid = int(uid_str)
-    except ValueError:
-        return _admin_action_page('Invalid Link', 'Invalid user ID.', False), 400
-
-    if not _verify_admin_action_sig(action, uid, sig):
-        return _admin_action_page('Invalid Link', 'This link has an invalid signature.', False), 403
-
+    from app.auth_routes import is_same_origin
+    origin = request.headers.get('Origin')
+    if (origin and origin != 'null' and not is_same_origin(origin)) or \
+            request.headers.get('Sec-Fetch-Site', '').lower() == 'cross-site':
+        return _admin_action_page('Invalid Request', 'This request came from another site.', False, 403)
+    tok, reason = action_tokens.consume(secret, request.form, _action_token_dir())
+    if tok is None:
+        return _admin_link_error(reason)
+    action, uid = tok['action'], tok['uid']
     try:
         if action == 'approve_user':
             ok = user_auth.approve_user(uid)
             if not ok:
-                return _admin_action_page('User Not Found', 'This user no longer exists.', False), 404
+                return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
             u = user_auth.get_user_by_id(uid)
             name = u['name'] if u else '?'
             if u and u.get('email'):
@@ -8197,53 +9941,36 @@ def admin_telegram_action():
                     _send_approval_email(u['email'], name)
                 except Exception:
                     pass
-            logger.info(f"User {uid} ({name}) approved via Telegram URL action")
+            logger.info(f"User {uid} approved via Telegram link")
             return _admin_action_page('Account Approved', f'{name} has been approved and can now sign in.')
 
-        elif action == 'deny_user':
+        if action == 'deny_user':
             u = user_auth.get_user_by_id(uid)
             name = u['name'] if u else '?'
-            ok = user_auth.deny_user(uid)
-            if not ok:
-                return _admin_action_page('User Not Found', 'This user no longer exists.', False), 404
-            logger.info(f"User {uid} ({name}) denied via Telegram URL action")
+            if not user_auth.deny_user(uid):
+                return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
+            logger.info(f"User {uid} denied via Telegram link")
             return _admin_action_page('Account Denied', f'{name} has been denied and removed.', False)
 
-        elif action == 'approve_plex':
-            u = user_auth.get_user_by_id(uid)
-            if not u:
-                return _admin_action_page('User Not Found', 'This user no longer exists.', False), 404
-            name = u['name']
-            user_auth.save_user_settings(uid, {
-                'use_shared_server': True,
-                'plex_access_status': 'approved',
-            })
+        u = user_auth.get_user_by_id(uid)
+        if not u:
+            return _admin_action_page('User Not Found', 'This user no longer exists.', False, 404)
+        name = u['name']
+        if action == 'approve_plex':
+            user_auth.save_user_settings(uid, {'use_shared_server': True, 'plex_access_status': 'approved'})
             if u.get('email'):
                 try:
                     _send_plex_access_email(u['email'], name)
                 except Exception:
                     pass
-            logger.info(f"User {uid} ({name}) granted Plex access via Telegram URL action")
+            logger.info(f"User {uid} granted Plex access via Telegram link")
             return _admin_action_page('Access Granted', f'{name} now has access to the shared Plex server.')
-
-        elif action == 'deny_plex':
-            u = user_auth.get_user_by_id(uid)
-            if not u:
-                return _admin_action_page('User Not Found', 'This user no longer exists.', False), 404
-            name = u['name']
-            user_auth.save_user_settings(uid, {
-                'use_shared_server': False,
-                'plex_access_status': 'denied',
-            })
-            logger.info(f"User {uid} ({name}) denied Plex access via Telegram URL action")
-            return _admin_action_page('Access Denied', f'{name} was denied shared Plex access.', False)
-
-        else:
-            return _admin_action_page('Unknown Action', f'Action "{action}" is not recognized.', False), 400
-
+        user_auth.save_user_settings(uid, {'use_shared_server': False, 'plex_access_status': 'denied'})
+        logger.info(f"User {uid} denied Plex access via Telegram link")
+        return _admin_action_page('Access Denied', f'{name} was denied shared Plex access.', False)
     except Exception as e:
         logger.error(f"admin_telegram_action error: {e}")
-        return _admin_action_page('Error', 'Something went wrong processing this action.', False), 500
+        return _admin_action_page('Error', 'Something went wrong processing this action.', False, 500)
 
 
 # ── App version endpoint (used by KioskHub wrapper for auto-reload) ──────────
@@ -8473,7 +10200,35 @@ def get_plex_ratings(rating_key):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/plex/ratings/resolve')
+def resolve_plex_ratings():
+    """Resolve tmdb_id to a Plex ratingKey, then return ratings."""
+    null_result = {
+        'imdb': None,
+        'rotten_tomatoes_critic': None,
+        'rotten_tomatoes_audience': None,
+        'metacritic': None,
+        'tmdb': None
+    }
+    try:
+        tmdb_id = request.args.get('tmdb_id')
+        if not tmdb_id:
+            return jsonify(null_result)
 
+        rating_key = _resolve_rating_key_by_guid('tmdb', tmdb_id)
+        if not rating_key:
+            return jsonify(null_result)
+
+        ratings_data = _parse_plex_ratings(rating_key)
+        if ratings_data is None:
+            return jsonify(null_result)
+
+        logger.info(f"Plex ratings resolved for tmdb={tmdb_id} (rk={rating_key}): {ratings_data}")
+        return jsonify(ratings_data)
+
+    except Exception as e:
+        logger.error(f"Error resolving Plex ratings: {e}")
+        return jsonify(null_result)
 
 @app.route('/api/rt/reviews')
 def get_rt_reviews():
@@ -8669,7 +10424,30 @@ def get_plex_ultrablur(rating_key):
         return jsonify(_make_null_palette_result())
 
 
+@app.route('/api/plex/ultrablur/resolve')
+def resolve_plex_ultrablur():
+    """Resolve tmdb_id or imdb_id to ratingKey, then return UltraBlurColors.
 
+    Returns palette format with blobs array plus legacy corner fields.
+    """
+    try:
+        tmdb_id = request.args.get('tmdb_id')
+        imdb_id = request.args.get('imdb_id')
+
+        rating_key = None
+        if tmdb_id:
+            rating_key = _resolve_rating_key_by_guid('tmdb', tmdb_id)
+        elif imdb_id:
+            rating_key = _resolve_rating_key_by_guid('imdb', imdb_id)
+
+        if not rating_key:
+            return jsonify(_make_null_palette_result())
+
+        colors = _fetch_ultrablur_colors(rating_key)
+        return jsonify(colors)
+    except Exception as e:
+        logger.error(f"Error resolving UltraBlurColors: {e}")
+        return jsonify(_make_null_palette_result())
 
 _tmdb_colors_cache: dict = {}   # tmdb_id → {colors, ts}
 _TMDB_COLORS_TTL = 24 * 3600   # 24 hours
@@ -9024,6 +10802,142 @@ def get_logos_batch():
         return jsonify({'logos': {}}), 500
 
 
+# ---------------------------------------------------------------------------
+# TMDb Discover — paginated discover proxy for Vibe Engine "Something New"
+# ---------------------------------------------------------------------------
+_tmdb_discover_cache: Dict[str, tuple] = {}   # cache_key → (timestamp, data)
+_TMDB_DISCOVER_CACHE_TTL = 15 * 60            # 15 minutes
+
+@app.route('/api/tmdb/discover')
+def tmdb_discover():
+    """Proxy TMDb /discover/movie and /discover/tv with pagination + caching.
+
+    Query params:
+        type          – "movie", "tv", or "both" (default "movie")
+        pages         – number of pages to fetch (capped at 20)
+        with_genres   – comma-separated genre IDs
+        primary_release_date.gte / .lte – movie date filters
+        first_air_date.gte / .lte       – TV date filters
+
+    Returns: { "results": [ { ...tmdb item, media_type: "movie"|"tv" }, ... ] }
+    """
+    tmdb_api_key = settings.get('apis.tmdb.api_key', '') or Config.TMDB_API_KEY
+    if not tmdb_api_key:
+        return jsonify({'results': [], 'error': 'TMDb API key not configured'}), 500
+
+    # Parse query params
+    media_type = request.args.get('type', 'movie')
+    if media_type not in ('movie', 'tv', 'both'):
+        media_type = 'movie'
+
+    raw_pages = request.args.get('pages', '5')
+    try:
+        total_pages = min(int(raw_pages), 500)  # TMDb has up to 500 pages
+    except (ValueError, TypeError):
+        total_pages = 5
+    total_pages = max(total_pages, 1)
+
+    with_genres = request.args.get('with_genres', '')
+    release_gte = request.args.get('primary_release_date.gte', '')
+    release_lte = request.args.get('primary_release_date.lte', '')
+    air_gte = request.args.get('first_air_date.gte', '')
+    air_lte = request.args.get('first_air_date.lte', '')
+
+    # Build cache key from all relevant params
+    cache_key = f"tmdb_discover:{media_type}:{total_pages}:{with_genres}:{release_gte}:{release_lte}:{air_gte}:{air_lte}"
+
+    # Check cache
+    cached = _tmdb_discover_cache.get(cache_key)
+    if cached:
+        ts, data = cached
+        if time.time() - ts < _TMDB_DISCOVER_CACHE_TTL:
+            return jsonify(data)
+        del _tmdb_discover_cache[cache_key]
+
+    base_url = "https://api.themoviedb.org/3"
+
+    def _fetch_page(endpoint, page_num, extra_params):
+        """Fetch a single discover page from TMDb. Returns list of results."""
+        params = {
+            'api_key': tmdb_api_key,
+            'sort_by': 'vote_count.desc',
+            'page': page_num,
+        }
+        if with_genres:
+            params['with_genres'] = with_genres
+        params.update(extra_params)
+        try:
+            resp = requests.get(
+                f"{base_url}{endpoint}",
+                params=params,
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return resp.json().get('results', [])
+            logger.warning(f"TMDb discover {endpoint} page {page_num}: HTTP {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"TMDb discover {endpoint} page {page_num} failed: {e}")
+        return []
+
+    all_results = []
+
+    try:
+        if media_type == 'both':
+            # Split pages evenly between movie and TV
+            movie_pages = total_pages // 2
+            tv_pages = total_pages - movie_pages
+            # Ensure at least 1 page each
+            movie_pages = max(movie_pages, 1)
+            tv_pages = max(tv_pages, 1)
+        else:
+            movie_pages = total_pages if media_type == 'movie' else 0
+            tv_pages = total_pages if media_type == 'tv' else 0
+
+        # Build work items for thread pool
+        work_items = []
+
+        movie_extra = {}
+        if release_gte:
+            movie_extra['primary_release_date.gte'] = release_gte
+        if release_lte:
+            movie_extra['primary_release_date.lte'] = release_lte
+
+        tv_extra = {}
+        if air_gte:
+            tv_extra['first_air_date.gte'] = air_gte
+        if air_lte:
+            tv_extra['first_air_date.lte'] = air_lte
+
+        for p in range(1, movie_pages + 1):
+            work_items.append(('/discover/movie', p, movie_extra, 'movie'))
+        for p in range(1, tv_pages + 1):
+            work_items.append(('/discover/tv', p, tv_extra, 'tv'))
+
+        # Fetch pages in parallel
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {
+                pool.submit(_fetch_page, endpoint, page_num, extra): mtype
+                for endpoint, page_num, extra, mtype in work_items
+            }
+            for future in as_completed(futures):
+                mtype = futures[future]
+                try:
+                    page_results = future.result()
+                    for item in page_results:
+                        item['media_type'] = mtype
+                    all_results.extend(page_results)
+                except Exception as e:
+                    logger.warning(f"TMDb discover future error: {e}")
+
+        payload = {'results': all_results}
+        _tmdb_discover_cache[cache_key] = (time.time(), payload)
+        return jsonify(payload)
+
+    except Exception as e:
+        logger.error(f"TMDb discover error: {e}")
+        return jsonify({'results': []}), 500
+
+
 # Hero Content — shared logic
 _hero_result_cache: dict = {}   # keyed by plex_url → {'movies': [...], 'boost': bool, 'ts': float}
 _HERO_RESULT_TTL = 120          # 2-minute cache — Plex data doesn't change rapidly
@@ -9186,20 +11100,46 @@ def _build_hero_movies():
     return movies, boost
 
 
+_HERO_URL_FIELDS = ('poster_url', 'backdrop_url', 'clearlogo_url', 'tmdb_backdrop_url')
+
+
+def _hero_movies_for_request(movies):
+    """Copy hero movies with root-relative image URLs prefixed by request.script_root.
+
+    _build_hero_movies() caches root-relative paths so the cache is request
+    independent; the prefix is added per response so sub-path installs work.
+    """
+    root = (request.script_root or '').rstrip('/')
+    out = []
+    for m in movies:
+        m = dict(m)
+        for key in _HERO_URL_FIELDS:
+            val = m.get(key)
+            if isinstance(val, str) and val.startswith('/') and not val.startswith('//'):
+                m[key] = f"{root}{val}"
+        out.append(m)
+    return out
+
+
 # Hero Content Endpoints
 @app.route('/api/hero/content')
 def get_hero_content():
-    """Get hero content for the kiosk home page."""
+    """Get hero content for the kiosk home page.
+    
+    Returns dynamic content from _build_hero_movies().
+    Background refresh runs only from the scheduler, never from a request.
+    """
     try:
+        # Return dynamic content (no refresh or healing from request)
         movies, boost = _build_hero_movies()
         return jsonify({
             'success': True,
-            'movies': movies,
-            'boost_mode': boost,
+            'movies': _hero_movies_for_request(movies),
+            'boost_mode': boost
         })
     except Exception as e:
-        logger.error(f"Error getting hero content: {e}")
-        return jsonify({'success': False, 'error': str(e), 'movies': []}), 500
+        logger.error(f"Error building hero content: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # =============================================================================
@@ -9226,6 +11166,19 @@ def get_kiosk_settings():
             'screensaver_orb_count': settings.get('ui.screensaver.orb_count', 9),
             'screensaver_tablet_orb_count': settings.get('ui.screensaver.tablet_orb_count', 4),
             'screensaver_source': settings.get('ui.screensaver.source', 'plex_library'),
+            'vibe_newer_than_years': settings.get('ui.vibe_engine.newer_than_years', 1),
+            'vibe_excluded_libraries': settings.get('ui.vibe_engine.excluded_libraries', []),
+            'vibe_genres': settings.get('ui.vibe_engine.genres', ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Drama', 'Fantasy', 'Horror', 'Romance', 'Sci-Fi', 'Thriller']),
+            'vibe_tonight_max_runtime': settings.get('ui.vibe_engine.tonight_max_runtime', 100),
+            'vibe_premium_rating_threshold': settings.get('ui.vibe_engine.premium_rating_threshold', 7.0),
+            'vibe_unwatched_boost_weight': settings.get('ui.vibe_engine.unwatched_boost_weight', 3),
+            'ai_search_available': bool(settings.get('apis.openai.enabled', False)
+                                        and settings.get('apis.openai.api_key', '')),
+            'voice_enabled': bool(
+                (settings.get('apis.openai.enabled', False) and settings.get('apis.openai.voice_enabled', False))
+                or settings.get('apis.alfred.enabled', False)
+            ),
+            'wake_word': settings.get('apis.openai.wake_word', 'alfred'),
             'home_area_id': settings.get('ui.kiosk.home_area_id', ''),
             'daily_kiosk_widget_seconds': settings.get('ui.daily_kiosk.widget_seconds', 8),
         })
@@ -9256,7 +11209,7 @@ def update_kiosk_settings():
         if not data:
             return jsonify({'error': 'No data provided'}), 400
 
-        update = {'ui': {'hero': {}, 'screensaver': {}, 'kiosk': {}, 'daily_kiosk': {}}}
+        update = {'ui': {'hero': {}, 'screensaver': {}, 'vibe_engine': {}, 'kiosk': {}, 'daily_kiosk': {}}}
         if 'home_area_id' in data:
             val = data['home_area_id']
             if isinstance(val, str):
@@ -9286,18 +11239,41 @@ def update_kiosk_settings():
             val = data['screensaver_source']
             if val in ('hero', 'plex_library'):
                 update['ui']['screensaver']['source'] = val
+        if 'vibe_newer_than_years' in data and data['vibe_newer_than_years'] != '':
+            update['ui']['vibe_engine']['newer_than_years'] = _safe_int(data['vibe_newer_than_years'])
+        if 'vibe_excluded_libraries' in data:
+            val = data['vibe_excluded_libraries']
+            if isinstance(val, list):
+                update['ui']['vibe_engine']['excluded_libraries'] = val
+        if 'vibe_genres' in data:
+            val = data['vibe_genres']
+            if isinstance(val, list):
+                update['ui']['vibe_engine']['genres'] = val
+        if 'vibe_tonight_max_runtime' in data and data['vibe_tonight_max_runtime'] != '':
+            update['ui']['vibe_engine']['tonight_max_runtime'] = _safe_int(data['vibe_tonight_max_runtime'])
+        if 'vibe_premium_rating_threshold' in data and data['vibe_premium_rating_threshold'] != '':
+            update['ui']['vibe_engine']['premium_rating_threshold'] = _safe_float(data['vibe_premium_rating_threshold'])
+        if 'vibe_unwatched_boost_weight' in data and data['vibe_unwatched_boost_weight'] != '':
+            update['ui']['vibe_engine']['unwatched_boost_weight'] = _safe_int(data['vibe_unwatched_boost_weight'])
 
         # Clean empty sub-dicts to avoid unnecessary writes
         if not update['ui']['hero']:
             del update['ui']['hero']
         if not update['ui']['screensaver']:
             del update['ui']['screensaver']
+        if not update['ui']['vibe_engine']:
+            del update['ui']['vibe_engine']
         if not update['ui']['kiosk']:
             del update['ui']['kiosk']
 
         success, errors = settings.update(update)
         if not success:
             return jsonify({'error': 'Validation failed', 'details': errors}), 400
+
+        # Invalidate vibe cache if vibe_engine settings changed
+        if 'vibe_engine' in update.get('ui', {}):
+            _vibe_cache.clear()
+            logger.info('Vibe cache invalidated due to kiosk settings change')
 
         # Hero settings (section/limit/boost/source) are saved here too, but the
         # hero cache is keyed only by plex_url — so clear it on any hero change,
@@ -10132,12 +12108,20 @@ def img_plex_proxy():
                             headers={'Cache-Control': 'public, max-age=60'})
 
         from flask import Response
+        import re as _re, hashlib as _hl
+        body = resp.content
+        # Versioned Plex paths (/thumb/<updatedAt>) change URL when the art changes -> cache a day.
+        # Unversioned ones (/library/metadata/<rk>/thumb) keep the same URL after a Fix Match or
+        # poster change, so make the browser revalidate (cheap 304 via ETag) instead of showing old art.
+        versioned = bool(_re.search(r'/(thumb|art|clearLogo|banner|theme)/\d+', plex_path))
+        etag = '"' + _hl.md5(body).hexdigest() + '"'
+        if not versioned and request.headers.get('If-None-Match') == etag:
+            return Response(status=304, headers={'ETag': etag, 'Cache-Control': 'no-cache'})
         return Response(
-            resp.content,
+            body,
             content_type=resp.headers.get('Content-Type', 'image/jpeg'),
-            headers={
-                'Cache-Control': 'public, max-age=86400',  # 24-hour cache
-            },
+            headers={'Cache-Control': 'public, max-age=86400'} if versioned
+            else {'Cache-Control': 'no-cache', 'ETag': etag},
         )
     except requests.RequestException as e:
         logger.error(f"Plex image proxy error: {e}")
@@ -10878,6 +12862,235 @@ def _plex_play_shield(run_adb, _t, target, device_ip, machine_id, rating_key, of
         'message': f'Plex playback failed in {room_name}',
         'rating_key': report_rk,
     }), 500
+
+def _plex_status(rating_key, device_ip=None):
+    """Check if content is currently playing via Plex sessions API.
+
+    Fetches /status/sessions from Plex, finds a Video element with matching
+    ratingKey, optionally filtered by device IP (Player address).
+    """
+    import xml.etree.ElementTree as ET
+
+    plex_url = settings.get('plex.url')
+    plex_token = settings.get('plex.token')
+
+    stopped = {
+        'playing': False,
+        'state': 'stopped',
+        'rating_key': str(rating_key),
+        'viewOffset': 0,
+        'duration': 0
+    }
+
+    if not plex_url or not plex_token:
+        return stopped
+
+    try:
+        resp = requests.get(
+            f"{plex_url}/status/sessions",
+            params={'X-Plex-Token': plex_token},
+            timeout=5
+        )
+        if resp.status_code != 200:
+            return stopped
+
+        root = ET.fromstring(resp.content)
+        for video in root.findall('./Video'):
+            if video.get('ratingKey') != str(rating_key):
+                continue
+
+            # Optionally match by device IP
+            player = video.find('.//Player')
+            if device_ip and player is not None:
+                player_addr = player.get('address', '')
+                if player_addr and player_addr != device_ip:
+                    continue
+
+            state = player.get('state', 'stopped') if player is not None else 'stopped'
+            view_offset = int(video.get('viewOffset', 0))
+            duration = int(video.get('duration', 0))
+
+            return {
+                'playing': state == 'playing',
+                'state': state,
+                'rating_key': str(rating_key),
+                'viewOffset': view_offset,
+                'duration': duration
+            }
+
+        return stopped
+
+    except Exception as e:
+        logger.error(f"Error checking Plex session status: {e}")
+        return stopped
+
+
+@app.route('/api/player/status/<rating_key>')
+def player_status(rating_key):
+    """Check if content is currently playing via Kodi or Plex.
+
+    Accepts optional query params room_id, device_id, and service_id to
+    resolve which service to poll. Falls back to first room/device.
+    """
+    from app.kodi_service import KodiService
+
+    try:
+        room_id = request.args.get('room_id', '')
+        device_id = request.args.get('device_id', '')
+        service_id = request.args.get('service_id', '')
+
+        # Resolve the service to poll
+        service = None
+        device = None
+        if room_id:
+            room = settings.get_room_by_id(room_id)
+            if room and isinstance(room.get('devices'), list):
+                for dev in room['devices']:
+                    if not isinstance(dev, dict):
+                        continue
+                    if device_id and dev.get('id') == device_id:
+                        device = dev
+                        break
+                if not device and room['devices']:
+                    # Prefer device with Plex service (rating_key is Plex content)
+                    for dev in room['devices']:
+                        if not isinstance(dev, dict):
+                            continue
+                        for svc in (dev.get('services') or []):
+                            if isinstance(svc, dict) and svc.get('type') == 'plex':
+                                device = dev
+                                break
+                        if device:
+                            break
+                    if not device:
+                        device = room['devices'][0] if isinstance(room['devices'][0], dict) else None
+
+        # Fall back to first room's first device (prefer Plex service)
+        if not device:
+            rooms = settings.get('devices.rooms') or []
+            for r in rooms:
+                if isinstance(r, dict) and isinstance(r.get('devices'), list):
+                    for dev in r['devices']:
+                        if isinstance(dev, dict) and dev.get('host'):
+                            for svc in (dev.get('services') or []):
+                                if isinstance(svc, dict) and svc.get('type') == 'plex':
+                                    device = dev
+                                    break
+                            if device:
+                                break
+                    if device:
+                        break
+            # Final fallback: any device with a host
+            if not device:
+                for r in rooms:
+                    if isinstance(r, dict) and isinstance(r.get('devices'), list):
+                        for dev in r['devices']:
+                            if isinstance(dev, dict) and dev.get('host'):
+                                device = dev
+                                break
+                        if device:
+                            break
+
+        if device:
+            # If service_id provided, find that specific service
+            if service_id:
+                for svc in (device.get('services') or []):
+                    if isinstance(svc, dict) and svc.get('id') == service_id:
+                        service = svc
+                        break
+            # Prefer Plex service since we're checking Plex content status
+            if not service:
+                for svc in (device.get('services') or []):
+                    if isinstance(svc, dict) and svc.get('type') == 'plex':
+                        service = svc
+                        break
+            # Fall back to any kodi/plex service
+            if not service:
+                for svc in (device.get('services') or []):
+                    if isinstance(svc, dict) and svc.get('type') in ('kodi', 'plex'):
+                        service = svc
+                        break
+
+        if not service or not device:
+            return jsonify({
+                'playing': False,
+                'state': 'stopped',
+                'rating_key': rating_key,
+                'viewOffset': 0,
+                'duration': 0
+            })
+
+        # Route to Plex session polling if service type is plex
+        if service.get('type') == 'plex':
+            device_ip = device.get('host', '')
+            return jsonify(_plex_status(rating_key, device_ip))
+
+        kodi_host = service.get('kodi_host', '') or device.get('host', '')
+        kodi_port = int(service.get('kodi_port') or 8080)
+        kodi_user = service.get('kodi_username', '')
+        kodi_pass = service.get('kodi_password', '')
+
+        if not kodi_host:
+            return jsonify({
+                'playing': False,
+                'state': 'stopped',
+                'rating_key': rating_key,
+                'viewOffset': 0,
+                'duration': 0
+            })
+
+        kodi = KodiService(host=kodi_host, port=kodi_port, username=kodi_user, password=kodi_pass)
+        player = kodi.get_active_player()
+
+        if not player:
+            return jsonify({
+                'playing': False,
+                'state': 'stopped',
+                'rating_key': rating_key,
+                'viewOffset': 0,
+                'duration': 0
+            })
+
+        player_id = player.get('playerid', 1)
+        props = kodi.get_player_properties(player_id)
+
+        # Convert Kodi time format to milliseconds
+        time_obj = props.get('time', {})
+        total_obj = props.get('totaltime', {})
+        view_offset = (
+            time_obj.get('hours', 0) * 3600000
+            + time_obj.get('minutes', 0) * 60000
+            + time_obj.get('seconds', 0) * 1000
+            + time_obj.get('milliseconds', 0)
+        )
+        duration = (
+            total_obj.get('hours', 0) * 3600000
+            + total_obj.get('minutes', 0) * 60000
+            + total_obj.get('seconds', 0) * 1000
+            + total_obj.get('milliseconds', 0)
+        )
+
+        speed = props.get('speed', 0)
+        state = 'playing' if speed > 0 else 'paused'
+
+        return jsonify({
+            'playing': speed > 0,
+            'state': state,
+            'rating_key': rating_key,
+            'viewOffset': view_offset,
+            'duration': duration
+        })
+
+    except Exception as e:
+        logger.error(f"Error checking Kodi playback status: {e}")
+        return jsonify({
+            'playing': False,
+            'state': 'stopped',
+            'rating_key': rating_key,
+            'viewOffset': 0,
+            'duration': 0
+        })
+
 
 # ---------------------------------------------------------------------------
 # Kodi now-playing helpers (for sessions endpoint)
@@ -11899,6 +14112,27 @@ def _fix_match_invalidate(plex, rating_key, items):
         except Exception as exc:
             logger.warning(f"Fix Match: ownership rebuild failed: {exc}")
     threading.Thread(target=_rebuild, name='fixmatch-ownership', daemon=True).start()
+    try:
+        _vibe_refresh_async(plex, getattr(plex, 'plex_url', '') or 'global')
+    except Exception as exc:
+        logger.warning(f"Fix Match: vibe refresh failed: {exc}")
+
+
+def _fix_match_followup(plex, rating_key, out):
+    """Plex finishes the external-id/artwork refresh a few seconds after the match call.
+    Re-check then, and invalidate + rebuild again so ownership/detail never keep the old tmdb id."""
+    def _later():
+        from app import plex_match as _pm
+        for delay in (10, 45):
+            time.sleep(delay)
+            try:
+                cur = _pm.get_item(plex, rating_key)
+            except Exception as exc:
+                logger.warning(f"Fix Match: follow-up read failed: {exc}")
+                continue
+            _fix_match_invalidate(plex, rating_key, [out['before'], out['after'], cur])
+            logger.info(f"Fix Match: follow-up {rating_key} now {cur['title']!r} ({cur['year']}) tmdb {cur.get('tmdb_id')}")
+    threading.Thread(target=_later, name='fixmatch-followup', daemon=True).start()
 
 
 def _fix_match_error(exc):
@@ -11947,6 +14181,7 @@ def plex_match_apply(rating_key):
     except Exception as exc:
         return _fix_match_error(exc)
     _fix_match_invalidate(plex, rating_key, [out['before'], out['after']])
+    _fix_match_followup(plex, rating_key, out)
     a = out['after']
     return jsonify({'ok': True, 'rating_key': rating_key, 'type': a['type'], 'title': a['title'],
                     'year': a['year'], 'guid': a['guid'], 'tmdb_id': a['tmdb_id'],
@@ -11965,6 +14200,7 @@ def plex_match_unmatch(rating_key):
     except Exception as exc:
         return _fix_match_error(exc)
     _fix_match_invalidate(plex, rating_key, [out['before'], out['after']])
+    _fix_match_followup(plex, rating_key, out)
     a = out['after']
     return jsonify({'ok': True, 'rating_key': rating_key, 'type': a['type'], 'title': a['title'],
                     'year': a['year'], 'guid': a['guid'], 'tmdb_id': a['tmdb_id']})
@@ -12069,7 +14305,46 @@ def plex_show_metadata(rating_key):
         logger.error(f"Error getting show metadata for rating_key {rating_key}: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/plex/episode_libraries/<int:rating_key>')
+def plex_episode_libraries(rating_key):
+    """Get all libraries where a specific episode exists via HTTP API."""
+    try:
+        meta = plex_service.get_metadata(rating_key)
+        if not meta:
+            return jsonify({'owned': False, 'libraries': [], 'library_keys': {}})
 
+        # For episodes, get show title and search across TV libraries
+        show_title = meta.get('show_title', meta.get('title', ''))
+        show_rk = meta.get('show_rating_key')
+
+        if show_rk:
+            # Use show metadata to find copies
+            show_meta = plex_service.get_metadata(show_rk)
+            if show_meta:
+                show_title = show_meta.get('title', show_title)
+                copies = plex_service.find_show_copies(
+                    show_title,
+                    tmdb_id=show_meta.get('tmdb_id'),
+                    tvdb_id=show_meta.get('tvdb_id'),
+                )
+                library_keys = {}
+                for copy in copies:
+                    lib_name = copy.get('library_name', '')
+                    rk = copy.get('ratingKey') or copy.get('rating_key')
+                    if lib_name and rk and lib_name not in library_keys:
+                        library_keys[lib_name] = rating_key  # Use episode rating key
+                if library_keys:
+                    return jsonify({
+                        'owned': True,
+                        'libraries': list(library_keys.keys()),
+                        'library_keys': library_keys
+                    })
+
+        return jsonify({'owned': True, 'libraries': ['Library'], 'library_keys': {'Library': rating_key}})
+
+    except Exception as e:
+        logger.error(f"Error getting episode libraries for rating_key {rating_key}: {e}")
+        return jsonify({'error': str(e), 'owned': False}), 500
 
 @app.route('/api/plex/continue_watching/cached')
 def plex_continue_watching_cached():
@@ -12201,7 +14476,7 @@ def plex_recently_watched():
                     'season_number': season,
                     'episode_number': episode,
                     'year': None,
-                    'poster_url': f"/api/img/plex?url=/library/metadata/{poster_rk}/thumb",
+                    'poster_url': f"/api/img/plex?url=/library/metadata/{poster_rk}/thumb&r=2",
                     'subtitle': ' · '.join(subtitle_parts) or None,
                     'viewed_at': row.get('viewed_at'),
                 })
@@ -12211,7 +14486,7 @@ def plex_recently_watched():
                     'metadata_type': 1,
                     'title': row.get('title') or '',
                     'year': row.get('year'),
-                    'poster_url': f"/api/img/plex?url=/library/metadata/{row['rating_key']}/thumb",
+                    'poster_url': f"/api/img/plex?url=/library/metadata/{row['rating_key']}/thumb&r=2",
                     'subtitle': f"({row['year']})" if row.get('year') else None,
                     'viewed_at': row.get('viewed_at'),
                 })
@@ -12733,6 +15008,9 @@ def _record_origin(origin: str, **kw):
     """Record who started a grab for the Activity badge. Never raises."""
     try:
         from app import grab_origin
+        from flask import has_app_context
+        if 'evidence' not in kw and has_app_context() and getattr(g, 'origin_evidence', ''):
+            kw['evidence'] = g.origin_evidence  # e.g. 'request page: <name>'
         grab_origin.record(origin, **kw)
         _history_cache.clear()
     except Exception as exc:  # noqa: BLE001
@@ -15436,13 +17714,106 @@ def get_tv_ownership(tvdb_id):
         logger.error(f"Error checking TV ownership: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/tv/show')
+def get_tv_show():
+    """Get TV show info from Plex by title via ownership index."""
+    try:
+        title = request.args.get('title')
+        year = request.args.get('year')
+
+        if not title:
+            return jsonify({'error': 'Missing title parameter'}), 400
+
+        index = plex_service.build_ownership_index()
+        key = f"{title.lower()}|{year}" if year else title.lower()
+        show_entry = index['tv'].get(key)
+        if not show_entry:
+            candidates = index['tv_by_title'].get(title.lower(), [])
+            show_entry = candidates[0] if candidates else None
+
+        if show_entry:
+            return jsonify({
+                'success': True,
+                'show': {
+                    'rating_key': show_entry['rating_key'],
+                    'title': show_entry['title'],
+                    'year': show_entry['year'],
+                }
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Show not found in Plex library'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Error getting TV show: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/tv/episodes')
+def get_tv_episode():
+    """Get specific episode from Plex via HTTP API."""
+    try:
+        show_rating_key = request.args.get('show_rating_key', type=int)
+        season = request.args.get('season', type=int)
+        episode = request.args.get('episode', type=int)
+
+        if not all([show_rating_key, season is not None, episode is not None]):
+            return jsonify({'error': 'Missing required parameters'}), 400
+
+        # Fetch all episodes for show, find the matching one
+        episodes = plex_service.get_show_episodes(show_rating_key)
+        matched = None
+        for ep in episodes:
+            if ep.get('season_number') == season and ep.get('episode_number') == episode:
+                matched = ep
+                break
+
+        if matched:
+            show_meta = plex_service.get_metadata(show_rating_key)
+            episode_data = {
+                'rating_key': matched['rating_key'],
+                'episode_title': matched['title'],
+                'episode_number': matched['episode_number'],
+                'season_number': matched['season_number'],
+                'show_rating_key': show_rating_key,
+                'show_title': show_meta.get('title', '') if show_meta else '',
+                'show_year': show_meta.get('year') if show_meta else None,
+            }
+
+            # Find copies across libraries
+            copies = plex_service.find_show_copies(
+                episode_data['show_title'],
+                tmdb_id=show_meta.get('tmdb_id') if show_meta else None,
+                tvdb_id=show_meta.get('tvdb_id') if show_meta else None,
+            )
+            library_keys = {}
+            for copy in copies:
+                lib_name = copy.get('library_name', '')
+                rk = copy.get('ratingKey') or copy.get('rating_key')
+                if lib_name and rk and lib_name not in library_keys:
+                    library_keys[lib_name] = matched['rating_key']
+            if not library_keys:
+                library_keys = {'Library': matched['rating_key']}
+
+            episode_data['libraries'] = list(library_keys.keys())
+            episode_data['library_keys'] = library_keys
+
+            return jsonify({'success': True, 'episode': episode_data})
+        else:
+            return jsonify({
+                'success': False,
+                'message': f'Episode S{season:02d}E{episode:02d} not found'
+            }), 404
+
+    except Exception as e:
+        logger.error(f"Error getting TV episode: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 # ============================================================================
 # ACTIVITY / PLAYBACK MONITORING ENDPOINTS
 # ============================================================================
-
-
 
 @app.route('/api/plex/clients')
 def plex_clients():
@@ -15503,6 +17874,336 @@ def plex_client_control():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/activity')  # alfred asks here first, then falls back to the ADB path
+@app.route('/api/adb/shield_activity')
+def adb_shield_activity():
+    """Get current activity/media playing on a room device via ADB."""
+    try:
+        room_id = request.args.get('room_id')
+        device_ip = request.args.get('device_ip')
+        adb_port = settings.get_default_adb_port()
+
+        if room_id:
+            room = settings.get_room_by_id(room_id)
+            if room:
+                device_ip = device_ip or room.get('host', '')
+                adb_port = room.get('connectPort', adb_port)
+        if not device_ip:
+            device_ip = settings.get_default_device_ip()
+
+        # Get current foreground app
+        app_cmd = f'adb -s {device_ip}:{adb_port} shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp"'
+        app_result = subprocess.run(
+            app_cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        # Get media session info (works for YouTube, Netflix, Plex, Spotify, etc.)
+        media_cmd = f'adb -s {device_ip}:{adb_port} shell dumpsys media_session'
+        media_result = subprocess.run(
+            media_cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        # Parse current app
+        current_app = 'Unknown'
+        current_package = ''
+        if app_result.returncode == 0:
+            output = app_result.stdout
+            # Extract package name from mCurrentFocus or mFocusedApp
+            import re
+            match = re.search(r'([a-z0-9\.]+)/([a-z0-9\.]+)', output)
+            if match:
+                current_package = match.group(1)
+                # Map package names to friendly names
+                app_names = {
+                    'com.plexapp.android': 'Plex',
+                    'com.google.android.youtube.tv': 'YouTube',
+                    'com.netflix.ninja': 'Netflix',
+                    'com.amazon.avod.thirdpartyclient': 'Prime Video',
+                    'com.hulu.plus': 'Hulu',
+                    'com.disney.disneyplus': 'Disney+',
+                    'com.hbo.hbonow': 'HBO Max',
+                    'tv.twitch.android.app': 'Twitch',
+                    'com.spotify.tv.android': 'Spotify',
+                    'ar.tvplayer.tv': 'TiViMate',
+                    'com.google.android.tvlauncher': 'Home Screen',
+                    'com.nvidia.shield.apps': 'Shield',
+                }
+                current_app = app_names.get(current_package, current_package)
+
+        # Parse media session
+        media_info = {
+            'is_active': False,
+            'state': 'stopped',
+            'title': None,
+            'artist': None,
+            'album': None,
+            'duration': 0,
+            'position': 0,
+            'package': current_package,
+            'app_name': current_app
+        }
+
+        if media_result.returncode == 0:
+            lines = media_result.stdout.split('\n')
+
+            # Find active sessions
+            current_session = None
+            for i, line in enumerate(lines):
+                # Look for session header with package name
+                if 'package=' in line and i > 0:
+                    # Check if this session is active
+                    is_active = False
+                    session_pkg = None
+
+                    pkg_match = re.search(r'package=([a-z0-9\.]+)', line)
+                    if pkg_match:
+                        session_pkg = pkg_match.group(1)
+
+                    # Look ahead for active=true
+                    for j in range(i, min(len(lines), i+15)):
+                        if 'active=true' in lines[j]:
+                            is_active = True
+                            break
+
+                    if is_active and session_pkg and session_pkg != 'com.google.android.tvlauncher':
+                        current_session = session_pkg
+                        media_info['package'] = session_pkg
+                        media_info['app_name'] = {
+                            'com.plexapp.android': 'Plex',
+                            'com.google.android.youtube.tv': 'YouTube',
+                            'com.netflix.ninja': 'Netflix',
+                            'com.amazon.avod.thirdpartyclient': 'Prime Video',
+                            'com.hulu.plus': 'Hulu',
+                            'com.disney.disneyplus': 'Disney+',
+                            'com.spotify.tv.android': 'Spotify',
+                        }.get(session_pkg, session_pkg)
+
+                        # Now look for state and metadata in the lines after this
+                        for k in range(i, min(len(lines), i+30)):
+                            # Parse playback state
+                            if 'state=PlaybackState' in lines[k]:
+                                state_match = re.search(r'state=(\d+)', lines[k])
+                                if state_match:
+                                    state_code = int(state_match.group(1))
+                                    if state_code == 3:
+                                        media_info['state'] = 'playing'
+                                        media_info['is_active'] = True
+                                    elif state_code == 2:
+                                        media_info['state'] = 'paused'
+                                        media_info['is_active'] = True
+
+                                # Parse position
+                                pos_match = re.search(r'position=(\d+)', lines[k])
+                                if pos_match:
+                                    media_info['position'] = int(pos_match.group(1))
+
+                                # Parse duration (buffered position in YouTube)
+                                buf_match = re.search(r'buffered position=(\d+)', lines[k])
+                                if buf_match and int(buf_match.group(1)) > 0:
+                                    media_info['duration'] = int(buf_match.group(1))
+
+                            # Parse metadata description (YouTube uses this for title)
+                            if 'metadata:' in lines[k] and 'description=' in lines[k]:
+                                desc_match = re.search(r'description=([^,]+)', lines[k])
+                                if desc_match:
+                                    title = desc_match.group(1).strip()
+                                    if title and title != 'null':
+                                        media_info['title'] = title
+
+                        break  # Found active session, stop looking
+
+            # If no active session found, check Audio playback section for apps like TiViMate
+            if not media_info['is_active'] and current_package:
+                audio_playback_section = False
+                for line in lines:
+                    if 'Audio playback' in line:
+                        audio_playback_section = True
+                    if audio_playback_section and f'packages={current_package}' in line:
+                        # This app is actively playing audio
+                        media_info['is_active'] = True
+                        media_info['state'] = 'playing'
+                        # Set a generic title for apps without media sessions
+                        if current_package == 'ar.tvplayer.tv':
+                            media_info['title'] = 'Watching Live TV'
+                        else:
+                            media_info['title'] = f'Playing in {current_app}'
+                        break
+
+        # Calculate progress percentage
+        if media_info['duration'] > 0:
+            media_info['progress_percent'] = (media_info['position'] / media_info['duration']) * 100
+        else:
+            media_info['progress_percent'] = 0
+
+        # Try to get metadata from Plex sessions API if Plex is playing
+        media_info['artwork_url'] = None
+        media_info['backdrop_url'] = None
+        if media_info['package'] == 'com.plexapp.android' and media_info['is_active']:
+            try:
+                plex_url = settings.get('plex.url')
+                plex_token = settings.get('plex.token')
+                if plex_token:
+                    # Get active Plex sessions
+                    sessions_url = f"{plex_url}/status/sessions?X-Plex-Token={plex_token}"
+                    headers = {'Accept': 'application/json'}
+                    plex_response = requests.get(sessions_url, headers=headers, timeout=3)
+                    if plex_response.status_code == 200:
+                        sessions_data = plex_response.json()
+                        metadata_list = sessions_data.get('MediaContainer', {}).get('Metadata', [])
+
+                        # Find the active session (there should usually be one for this device)
+                        for session in metadata_list:
+                            player = session.get('Player', {})
+                            state = player.get('state', '')
+
+                            # Check if this session is playing/paused
+                            if state in ['playing', 'paused']:
+                                # Update state from Plex (more accurate)
+                                media_info['state'] = state
+                                media_info['is_active'] = True
+
+                                # Get title based on media type
+                                media_type = session.get('type', '')
+                                if media_type == 'episode':
+                                    show_title = session.get('grandparentTitle', '')
+                                    episode_title = session.get('title', '')
+                                    season = session.get('parentIndex', '')
+                                    episode = session.get('index', '')
+                                    media_info['title'] = f"{show_title} - S{season}E{episode}"
+                                    media_info['subtitle'] = episode_title
+                                elif media_type == 'movie':
+                                    title = session.get('title', '')
+                                    year = session.get('year', '')
+                                    media_info['title'] = f"{title} ({year})" if year else title
+                                else:
+                                    media_info['title'] = session.get('title', 'Unknown')
+
+                                # Get duration and position
+                                media_info['duration'] = session.get('duration', 0) // 1000  # Convert ms to seconds
+                                view_offset = session.get('viewOffset', 0)
+                                media_info['position'] = view_offset // 1000  # Convert ms to seconds
+
+                                # Calculate progress
+                                if media_info['duration'] > 0:
+                                    media_info['progress_percent'] = (media_info['position'] / media_info['duration']) * 100
+
+                                # Get artwork URLs
+                                thumb = session.get('thumb', '')
+                                art = session.get('art', '') or session.get('grandparentArt', '')
+                                if thumb:
+                                    media_info['artwork_url'] = f"{plex_url}{thumb}?X-Plex-Token={plex_token}"
+                                if art:
+                                    media_info['backdrop_url'] = f"{plex_url}{art}?X-Plex-Token={plex_token}"
+
+                                # Get player info
+                                media_info['player_name'] = player.get('title', 'Unknown')
+
+                                break  # Found active session
+            except Exception as e:
+                logger.debug(f"Could not fetch Plex metadata from sessions API: {e}")
+
+        return jsonify({
+            'device_ip': device_ip,
+            'current_app': current_app,
+            'current_package': current_package,
+            'media': media_info
+        })
+
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'ADB command timed out'}), 500
+    except Exception as e:
+        logger.error(f"Error getting Shield activity: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/adb/control', methods=['POST'])
+def adb_control():
+    """Send ADB commands to control playback on a room device."""
+    try:
+        data = request.get_json() or {}
+        room_id = data.get('room_id')
+        device_ip = data.get('device_ip')
+        command = data.get('command')  # play_pause, stop, rewind, forward, home
+
+        # Resolve device from room_id
+        adb_port = settings.get_default_adb_port()
+        if room_id:
+            room = settings.get_room_by_id(room_id)
+            if room:
+                device_ip = device_ip or room.get('host', '')
+                adb_port = room.get('connectPort', adb_port)
+        if not device_ip:
+            device_ip = settings.get_default_device_ip()
+
+        if not command:
+            return jsonify({'error': 'Command required'}), 400
+
+        # ADB keycode mappings
+        keycodes = {
+            'play_pause': 'KEYCODE_MEDIA_PLAY_PAUSE',
+            'play': 'KEYCODE_MEDIA_PLAY',
+            'pause': 'KEYCODE_MEDIA_PAUSE',
+            'stop': 'KEYCODE_MEDIA_STOP',
+            'rewind': 'KEYCODE_MEDIA_REWIND',
+            'forward': 'KEYCODE_MEDIA_FAST_FORWARD',
+            'skip_back': 'KEYCODE_MEDIA_SKIP_BACKWARD',
+            'skip_forward': 'KEYCODE_MEDIA_SKIP_FORWARD',
+            'previous': 'KEYCODE_MEDIA_PREVIOUS',
+            'next': 'KEYCODE_MEDIA_NEXT',
+            'home': 'KEYCODE_HOME',
+            'back': 'KEYCODE_BACK',
+            'up': 'KEYCODE_DPAD_UP',
+            'down': 'KEYCODE_DPAD_DOWN',
+            'left': 'KEYCODE_DPAD_LEFT',
+            'right': 'KEYCODE_DPAD_RIGHT',
+            'select': 'KEYCODE_DPAD_CENTER'
+        }
+
+        if command not in keycodes:
+            return jsonify({'error': f'Unknown command: {command}'}), 400
+
+        keycode = keycodes[command]
+
+        # Send ADB command
+        target = f'{device_ip}:{adb_port}'
+        env = {**os.environ, 'HOME': '/app/home'}
+        logger.info(f"Sending ADB keyevent {keycode} to {target}")
+
+        result = subprocess.run(
+            ['adb', '-s', target, 'shell', 'input', 'keyevent', keycode],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env=env,
+        )
+
+        if result.returncode == 0:
+            return jsonify({
+                'success': True,
+                'command': command,
+                'device': device_ip,
+                'message': f'Command {command} sent successfully'
+            })
+        else:
+            logger.error(f"ADB command failed: {result.stderr}")
+            return jsonify({
+                'success': False,
+                'error': result.stderr or 'Command failed'
+            }), 500
+
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Command timed out'}), 500
+    except Exception as e:
+        logger.error(f"Error sending ADB command: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
 
 
 # =============================================================================
@@ -15531,6 +18232,7 @@ def get_screensaver_movies():
         if source == 'hero':
             # Use the same movies as the Hero section
             hero_movies, _ = _build_hero_movies()
+            hero_movies = _hero_movies_for_request(hero_movies)
             movies = []
             for m in hero_movies[:limit]:
                 movies.append({
@@ -15601,19 +18303,20 @@ def manifest():
     """PWA manifest — app is always Luma."""
     sm = SettingsManager()
     theme = sm.get("ui.theme_color") or "#0a0a0a"
+    prefix = app.config.get('URL_BASE', '') or ''
     data = {
         "name": "Luma",
         "short_name": "Luma",
         "description": "Your personal media library and search",
-        "start_url": "/",
-        "scope": "/",
+        "start_url": f"{prefix}/",
+        "scope": f"{prefix}/",
         "display": "standalone",
         "background_color": "#1a1a1a",
         "theme_color": theme,
         "orientation": "portrait",
         "icons": [
-            {"src": "/static/images/ic_launcher_round.png", "sizes": "72x72", "type": "image/png"},
-            {"src": "/static/images/ic_launcher.png", "sizes": "72x72", "type": "image/png", "purpose": "any"},
+            {"src": f"{prefix}/static/images/ic_launcher_round.png", "sizes": "72x72", "type": "image/png"},
+            {"src": f"{prefix}/static/images/ic_launcher.png", "sizes": "72x72", "type": "image/png", "purpose": "any"},
         ],
     }
     return jsonify(data)
@@ -15621,9 +18324,9 @@ def manifest():
 @app.route('/sw.js')
 def service_worker():
     """Service Worker file — short cache so updates propagate quickly."""
-    resp = send_from_directory('/app/static', 'sw.js')
+    resp = send_from_directory(app.static_folder, 'sw.js')
     resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
-    resp.headers['Service-Worker-Allowed'] = '/'
+    resp.headers['Service-Worker-Allowed'] = (app.config.get('URL_BASE', '') or '') + '/'
     return resp
 
 @app.route('/ca.crt')
@@ -15645,7 +18348,7 @@ def serve_ca_cert():
 def spa_assets(filename):
     """Serve Vite-built assets (JS/CSS) for the React SPA.
     Hashed filenames → immutable cache (1 year)."""
-    resp = send_from_directory(os.path.join(app.static_folder, 'spa', 'assets'), filename)
+    resp = send_from_directory(os.path.join(app.config['SPA_DIR'], 'assets'), filename)
     resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     return resp
 
@@ -15653,7 +18356,7 @@ def spa_assets(filename):
 @app.route('/fonts/<path:filename>')
 def spa_fonts(filename):
     """Serve font files from the SPA public/fonts directory."""
-    resp = send_from_directory(os.path.join(app.static_folder, 'spa', 'fonts'), filename)
+    resp = send_from_directory(os.path.join(app.config['SPA_DIR'], 'fonts'), filename)
     resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     return resp
 
@@ -15661,9 +18364,43 @@ def spa_fonts(filename):
 @app.route('/weather/<path:filename>')
 def spa_weather(filename):
     """Serve weather icon SVGs from the SPA public/weather directory."""
-    resp = send_from_directory(os.path.join(app.static_folder, 'spa', 'weather'), filename)
+    resp = send_from_directory(os.path.join(app.config['SPA_DIR'], 'weather'), filename)
     resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
     return resp
+
+@app.route('/static/hero_cache/<path:filename>')
+def hero_cache_files(filename):
+    """Serve hero images from HERO_CACHE_DIR.
+
+    Falls back to the legacy <static>/hero_cache dir (where images lived before
+    they moved to $LUMA_CACHE_DIR/hero) so URLs stored before the move keep
+    working. _contained_file rejects traversal and symlinks that leave either
+    directory.
+    """
+    for base in (app.config['HERO_CACHE_DIR'], os.path.join(app.static_folder, 'hero_cache')):
+        path = _contained_file(base, filename)
+        if path:
+            resp = send_file(path)
+            resp.headers['Cache-Control'] = 'public, max-age=86400'
+            return resp
+    return jsonify({'error': 'not found'}), 404
+
+
+def _contained_file(base: str, filename: str):
+    """Real path of base/filename when it is a regular file inside base, else None.
+
+    safe_join rejects '..' and absolute names; the realpath check also rejects
+    symlinks (or symlinked folders) that point outside base.
+    """
+    from werkzeug.security import safe_join
+    path = safe_join(base, filename)
+    if not path:
+        return None
+    root = os.path.realpath(base)
+    real = os.path.realpath(path)
+    if os.path.commonpath([root, real]) != root or real == root or not os.path.isfile(real):
+        return None
+    return real
 
 # =============================================================================
 # Settings API — Phase 1
@@ -15704,6 +18441,9 @@ def update_settings():
 
         # Invalidate caches when relevant settings change
         ui_data = data.get('ui') if isinstance(data.get('ui'), dict) else {}
+        if 'vibe_engine' in ui_data:
+            _vibe_cache.clear()
+            logger.info('Vibe cache invalidated due to settings change')
         if 'hero' in ui_data:
             _hero_result_cache.clear()
             logger.info('Hero cache invalidated due to settings change')
@@ -17731,6 +20471,35 @@ def test_homeassistant_connection():
         return jsonify({'success': False, 'message': str(e)}), 200
 
 
+@app.route('/api/settings/test/openai', methods=['POST'])
+def test_openai_connection():
+    """Test OpenAI API key and model validity."""
+    err = _require_admin()
+    if err:
+        return err
+    try:
+        body = request.get_json(silent=True) or {}
+        api_key = body.get('api_key', '')
+        if not api_key or api_key == SECRET_MASK:
+            api_key = settings.get('apis.openai.api_key', '')
+        if not api_key:
+            return jsonify({'success': False, 'message': 'OpenAI API key is required'}), 400
+
+        model = body.get('model', '') or settings.get('apis.openai.model', 'gpt-4o-mini')
+
+        from app import openai_client as openai_lib
+        client = openai_lib.OpenAI(api_key=api_key)
+        model_info = client.models.retrieve(model)
+        return jsonify({'success': True, 'message': f'Connected successfully. Model: {model_info.id}'})
+    except Exception as e:
+        err = str(e)
+        if 'AuthenticationError' in type(e).__name__ or 'Incorrect API key' in err:
+            return jsonify({'success': False, 'message': 'Invalid OpenAI API key'}), 200
+        if 'NotFoundError' in type(e).__name__:
+            return jsonify({'success': False, 'message': f'Model "{model}" not found or not accessible'}), 200
+        return jsonify({'success': False, 'message': err}), 200
+
+
 @app.route('/api/settings/test/kodi', methods=['POST'])
 def test_kodi_connection():
     """Test Kodi JSON-RPC connectivity."""
@@ -18238,7 +21007,7 @@ def integrations_tmdb():
 
 from app import start_flow as _start_flow
 _start_flow.init(
-    settings=settings, user_auth=user_auth, session_cookie=LUMA_SESSION_COOKIE,
+    settings=settings, user_auth=user_auth, session_cookie=AUTH_COOKIE,
     client_id=_INSTALL_SECRETS['plex_client_id'], on_plex_saved=_start_plex_saved,
     get_current_user=_get_current_user,
 )
@@ -18246,196 +21015,21 @@ app.register_blueprint(_start_flow.bp)
 
 
 if __name__ == '__main__':
-    # Initialize database
-    init_database()
-
-    # Initialize user auth tables (multi-user support)
-    try:
-        user_auth.init_db()
-        logger.info("✅ User auth database initialized")
-    except Exception as e:
-        logger.error(f"❌ User auth DB init failed: {e}")
-
-    # Installs that already had accounts before access modes existed keep
-    # requiring sign-in (an unset mode already means "pin"; save it explicitly).
-    try:
-        if not (settings.get('security.access_mode') or '') and user_auth.list_users():
-            settings.update({'security': {'access_mode': 'pin'}})
-            logger.info("Security: existing accounts found, sign-in stays required")
-    except Exception as e:
-        logger.warning(f"Security migration skipped: {e}")
-
-    # First run: generate the Web Push (VAPID) key pair up front
-    try:
-        from app.push_service import ensure_vapid_keys
-        ensure_vapid_keys(settings)
-    except Exception as e:
-        logger.warning(f"VAPID key setup skipped: {e}")
-
-    # Database sync service disabled - using direct remote database access
-    # to avoid corruption issues during container restarts
-    logger.info("✅ Using direct Plex database access (sync disabled)")
-
-    # Initialize library caches
-    try:
-        import threading
-        threading.Thread(target=initialize_caches, daemon=True).start()
-        logger.info("✅ Library cache initialization started")
-    except Exception as e:
-        logger.error(f"❌ Failed to start library cache initialization: {e}")
-
-    # Automations / scheduled jobs (skipped when LUMA_DISABLE_AUTOMATIONS=1, e.g. a dev instance)
-    if not _AUTOMATIONS_DISABLED:
-        # Start auto-rename monitor thread
-        try:
-            from app.auto_rename import start_monitor_thread
-            start_monitor_thread()
-            logger.info("✅ Auto-rename monitor started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start auto-rename monitor: {e}")
-            logger.error("Download tracking will not be available")
-
-    # Start fast search index (preloads all Plex library metadata in memory)
-    try:
-        fast_search_index.start()
-        logger.info("✅ Fast search index started")
-    except Exception as e:
-        logger.error(f"❌ Failed to start fast search index: {e}")
-
-    # Start explore cache updater thread
-    try:
-        explore_cache_updater()
-        # Do initial update in background to not block startup
-        import threading
-        threading.Thread(target=update_explore_cache, daemon=True).start()
-        logger.info("✅ Explore cache updater started")
-    except Exception as e:
-        logger.error(f"❌ Failed to start explore cache updater: {e}")
-
-    if _AUTOMATIONS_DISABLED:
-        logger.warning('LUMA_DISABLE_AUTOMATIONS is set: auto-rename, watchlist/auto-grab automations, schedulers, Downloads Guard and tunnel auto-start are NOT started')
+    # Initialize services (database, caches, background threads)
+    start_services(app)
+    
+    # Run the app with Flask dev server (development mode)
+    from app.server_config import get_port, get_bind_address, get_https_cert
+    
+    port = get_port(settings)
+    bind = get_bind_address(settings)
+    https_config = get_https_cert(settings)
+    
+    logger.info(f"Starting Luma (dev mode) on {'https' if https_config else 'http'}://{bind}:{port}")
+    
+    # Use Flask development server
+    if https_config:
+        cert_path, key_path = https_config
+        app.run(host=bind, port=port, debug=False, ssl_context=(cert_path, key_path))
     else:
-        # Start trending watchlist automation thread
-        try:
-            from app.trending_watchlist import start_trending_watchlist_thread
-            start_trending_watchlist_thread()
-            logger.info("✅ Trending watchlist automation started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start trending watchlist automation: {e}")
-
-        # Start trending TV watchlist automation thread
-        try:
-            from app.trending_tv_watchlist import start_trending_tv_watchlist_thread
-            start_trending_tv_watchlist_thread()
-            logger.info("✅ Trending TV watchlist automation started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start trending TV watchlist automation: {e}")
-
-        # Start now available watchlist automation thread
-        try:
-            from app.now_available_watchlist import start_now_available_watchlist_thread
-            start_now_available_watchlist_thread()
-            logger.info("✅ Now available watchlist automation started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start now available watchlist automation: {e}")
-
-        # Start anticipated watchlist automation thread
-        try:
-            from app.anticipated_watchlist import start_anticipated_watchlist_thread
-            start_anticipated_watchlist_thread()
-            logger.info("✅ Anticipated watchlist automation started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start anticipated watchlist automation: {e}")
-
-        # Start Latest auto-grab automation thread
-        try:
-            from app.latest_auto_grab import start_latest_auto_grab_thread
-            start_latest_auto_grab_thread()
-            logger.info("✅ Latest auto-grab automation started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Latest auto-grab automation: {e}")
-
-        # Start 4K Remux auto-grab automation thread
-        try:
-            from app.upgrade_4k_auto_grab import start_upgrade_4k_auto_grab_thread
-            start_upgrade_4k_auto_grab_thread()
-            logger.info("✅ 4K Remux auto-grab automation started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start 4K Remux auto-grab automation: {e}")
-
-        # Start daily upgrade scheduler thread
-        try:
-            from app.upgrade_scheduler import start_upgrade_scheduler_thread
-            start_upgrade_scheduler_thread()
-            logger.info("✅ Daily upgrade scheduler started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start upgrade scheduler: {e}")
-
-        # Start Movie Night weekly canon scheduler (no-ops until enabled)
-        try:
-            from app.movie_night import start_movie_night_thread
-            start_movie_night_thread()
-            logger.info("✅ Movie Night scheduler started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Movie Night scheduler: {e}")
-
-        # Start Genre Roulette nightly scheduler (no-ops until enabled)
-        try:
-            from app.genre_roulette import start_genre_roulette_thread
-            start_genre_roulette_thread()
-            logger.info("✅ Genre Roulette scheduler started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Genre Roulette scheduler: {e}")
-
-        # Start Franchise Completer nightly scheduler (no-ops until enabled)
-        try:
-            from app.franchise_completer import start_franchise_completer_thread
-            start_franchise_completer_thread()
-            logger.info("✅ Franchise Completer scheduler started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Franchise Completer scheduler: {e}")
-
-        # Morning watchlist digital-date check (default 06:00 America/New_York)
-        try:
-            from app.watchlist_digital_dates import start_watchlist_digital_dates_thread
-            start_watchlist_digital_dates_thread()
-            logger.info("✅ Watchlist Digital Dates scheduler started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Watchlist Digital Dates scheduler: {e}")
-
-        # What You're Missing — warm popular-unowned pool for the Home rail
-        try:
-            from app.daily_missing import start_daily_missing_thread
-            start_daily_missing_thread()
-            logger.info("✅ What You're Missing pool refresher started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start What You're Missing refresher: {e}")
-
-        # Incomplete movie Collections — warm TMDb franchise gap cache
-        try:
-            from app.movie_collections import start_movie_collections_thread
-            start_movie_collections_thread()
-            logger.info("✅ Movie Collections refresher started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Movie Collections refresher: {e}")
-
-        # Start Downloads Guard free-space watcher (no-ops until enabled)
-        try:
-            from app.downloads_guard import start_downloads_guard_thread
-            start_downloads_guard_thread()
-            logger.info("✅ Downloads Guard started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Downloads Guard: {e}")
-
-        # Auto-start Cloudflare Tunnel if enabled
-        try:
-            tunnel_auto_start(settings)
-        except Exception as e:
-            logger.error(f"Cloudflare Tunnel auto-start failed: {e}")
-
-    # Run the app
-    port = settings.get('network.flask_port', 5001)
-    debug = os.environ.get('FLASK_ENV', 'production') == 'development'
-
-    logger.info(f"Starting Media Search App on port {port}")
-    app.run(host='0.0.0.0', port=port, debug=debug)
+        app.run(host=bind, port=port, debug=False)

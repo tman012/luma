@@ -13,6 +13,10 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
+# Each test gets a private LUMA_DATA_DIR (see conftest.temp_data_dir).
+pytestmark = pytest.mark.usefixtures('temp_data_dir')
+
+
 ROOT = Path(__file__).resolve().parent.parent
 TORRENT = b'd8:announce3:url4:infod4:name1:xee'
 DIRECT = {'id': 'direct-1', 'name': 'Direct', 'url': 'https://tracker.example.com/api',

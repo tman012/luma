@@ -10,6 +10,7 @@ import { MobileRail } from '@/components/mobile/MobileRail';
 import { MobilePosterCard } from '@/components/mobile/MobilePosterCard';
 import { DismissMissingSheet } from '@/features/home/DismissMissingSheet';
 import { dismissWhatYoureMissing } from '@/features/home/wymDismissApi';
+import { apiFetch } from '../apiClient';
 
 // ---------------------------------------------------------------------------
 // Modal source mapping per rail
@@ -98,7 +99,7 @@ export function MobileHomePage() {
         setWlOverride(base.filter((it) => it.tmdbId !== detail.tmdbId));
         return;
       }
-      void fetch('/api/watchlist')
+      void apiFetch('/api/watchlist')
         .then((r) => (r.ok ? r.json() : []))
         .then((data: unknown) => {
           const raw = (Array.isArray(data) ? data : []) as Record<string, unknown>[];

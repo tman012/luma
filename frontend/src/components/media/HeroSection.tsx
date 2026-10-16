@@ -3,6 +3,7 @@ import { cn } from '@/utils/cn';
 import { formatRuntime } from '@/utils/image';
 import { KenBurnsBackdrop } from './KenBurnsBackdrop';
 import { useModalHost } from '@/contexts/ModalHostContext';
+import { HeroOrb } from '@/components/voice/HeroOrb';
 import { useFocusable } from '@/hooks/useFocusable';
 import { FocusZone } from '@/components/tv/FocusZone';
 import { useTabletPerf } from '@/hooks/useTabletPerf';
@@ -164,6 +165,9 @@ export function HeroSection({ movies, backdropSource = 'plex', className }: Hero
 
       {/* Bottom gradient overlay */}
       <div className="absolute inset-0 bg-gradient-to-t from-kiosk-black via-kiosk-black/50 to-kiosk-black/20" />
+
+      {/* Alfred orb — replaces search bar in expanded mode */}
+      <HeroOrb />
 
       {/* Content overlay — bottom left, entire area clickable */}
       <FocusZone zoneId="home-hero" orientation="vertical">

@@ -17,24 +17,27 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 class ExploreCache:
-    """Manages cached explore movies for fast loading"""
+    """Manages cached explore movies for fast loading
+    
+    Cache storage: LUMA_CACHE_DIR environment variable sets the cache root (defaults to /app/cache).
+    Explore cache uses the 'explore' subdirectory within the root.
+    """
 
-    def __init__(self, cache_dir: str = "/app/cache"):
-        self.cache_dir = Path(cache_dir)
+    def __init__(self, cache_root: Optional[str] = None):
+        if cache_root is None:
+            from app.paths import cache_dir
+            cache_root = str(cache_dir())
+        # Use 'explore' subdirectory within cache root
+        self.cache_dir = Path(cache_root) / 'explore'
         try:
-            self.cache_dir.mkdir(exist_ok=True, parents=True)
-        except (FileNotFoundError, PermissionError) as e:
-            # Fall back to temp directory only in test environment
-            if os.getenv('PYTEST_CURRENT_TEST') or os.getenv('LUMA_TEST_MODE'):
-                import tempfile
-                self.cache_dir = Path(tempfile.gettempdir()) / "luma_cache"
-                self.cache_dir.mkdir(exist_ok=True, parents=True)
-                logger.warning('[explore_cache] Production cache dir unavailable, using temp: %s', self.cache_dir)
-            else:
-                logger.error('[explore_cache] Cache directory unavailable and not in test mode: %s', e)
-                raise
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            error_msg = (f"explore_cache: LUMA_CACHE_DIR={cache_root} not writable "
+                        f"(tried to create {self.cache_dir}): {e}")
+            logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
         self.db_path = self.cache_dir / "explore_cache.db"
-        self.update_interval = 900  # 15 minutes
+        self.update_interval = 6 * 3600  # was 15 min (21-query tracker sweep ~100x/day)
         self.last_update = None
         self.updating = False
         self.lock = threading.Lock()
@@ -389,5 +392,24 @@ class ExploreCache:
             if conn:
                 conn.close()
 
-# Global instance
-explore_cache = ExploreCache()
+# Global instance (lazy initialization)
+_explore_cache_instance = None
+
+def _get_explore_cache():
+    """Get or create the global explore cache instance."""
+    global _explore_cache_instance
+    if _explore_cache_instance is None:
+        _explore_cache_instance = ExploreCache()
+    return _explore_cache_instance
+
+
+class _ExploreCacheLazy:
+    """Lazy wrapper for explore cache to defer initialization until first use."""
+    def __getattr__(self, name):
+        return getattr(_get_explore_cache(), name)
+    
+    def __call__(self, *args, **kwargs):
+        return _get_explore_cache()(*args, **kwargs)
+
+
+explore_cache = _ExploreCacheLazy()

@@ -7,6 +7,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { ShowMonitorSheet } from './ShowMonitorSheet';
+import { apiFetch } from '../../../apiClient';
 
 export type SonarrEpState =
   | 'downloaded' | 'downloading' | 'queued' | 'importing' | 'blocked'
@@ -136,7 +137,7 @@ export function useSonarrSeriesStatus(
         const p = new URLSearchParams();
         if (tvdbId) p.set('tvdb_id', String(tvdbId));
         if (tmdbId) p.set('tmdb_id', String(tmdbId));
-        const resp = await fetch(`/api/sonarr/series-status?${p.toString()}`);
+        const resp = await apiFetch(`/api/sonarr/series-status?${p.toString()}`);
         if (!resp.ok) throw new Error(String(resp.status));
         const d = (await resp.json()) as SonarrSeriesStatusData;
         if (cancelled) return;
@@ -172,7 +173,7 @@ export function useSonarrSeriesStatus(
 
   /** POST a monitor change; on ON, Sonarr searches — poll fast and say so. */
   const postMonitor = useCallback(async (url: string, body: Record<string, unknown>, monitored: boolean) => {
-    const resp = await fetch(url, {
+    const resp = await apiFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

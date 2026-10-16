@@ -23,7 +23,14 @@ services:
       - TZ=${TZ:-UTC}
       - FLASK_ENV=production
       - PORT=${LUMA_PORT:-5001}
+      # Empty: the port saved in Settings (default 5001) is used
+      - LUMA_PORT=${LUMA_PORT:-}
       - DATABASE_PATH=/app/data/media.db
+      # Container-side paths the app reads (app/paths.py). The host side of
+      # these mounts is LUMA_DATA_HOST_DIR / LUMA_CACHE_HOST_DIR below, so a
+      # host path in .env can never leak in as the container path.
+      - LUMA_DATA_DIR=/app/data
+      - LUMA_CACHE_DIR=/app/cache
       # API keys
       - TMDB_API_KEY=${TMDB_API_KEY:-}
       - OMDB_API_KEY=${OMDB_API_KEY:-}
@@ -51,7 +58,6 @@ services:
       - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD:-}
       # Telegram admin alerts (bot token lives in data/telegram_bot.json)
       - TELEGRAM_ADMIN_CHAT_ID=${TELEGRAM_ADMIN_CHAT_ID:-}
-      - TELEGRAM_ACTION_SECRET=${TELEGRAM_ACTION_SECRET:-}
       # Service-to-service API key (X-API-Key; companion apps read rooms with it)
       - SERVICE_API_KEY=${SERVICE_API_KEY:-}
       # Flask session key
@@ -73,8 +79,11 @@ services:
       - TV_4K_ROOT=/media/tv-4k
       - TV_REMUX_ROOT=/media/tv-remux
     volumes:
-      # Persistent data (settings, databases, caches)
-      - ${LUMA_DATA_DIR:-./data}:/app/data
+      # Persistent data (settings, databases, hero_content.json)
+      # Older .env files named the host folder LUMA_DATA_DIR; still honored.
+      - ${LUMA_DATA_HOST_DIR:-${LUMA_DATA_DIR:-./data}}:/app/data
+      # Rebuildable caches (explore, library, hero images in /app/cache/hero)
+      - ${LUMA_CACHE_HOST_DIR:-${LUMA_CACHE_DIR:-./cache}}:/app/cache
       # ADB keys (only used when an Android TV / Shield device is added)
       - ${LUMA_ADB_KEYS_DIR:-./.android}:/app/home/.android
       # Completed downloads (auto-rename moves files from here)
@@ -92,7 +101,8 @@ services:
       - ${LUMA_PLEX_DB_DIR:-./plexdb}:/mnt/plexdb:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:$${PORT:-5001}/health"]
+      test: ["CMD", "python3", "/app/scripts/healthcheck.py"]
       interval: 30s
-      timeout: 3s
+      timeout: 5s
+      start_period: 20s
       retries: 3

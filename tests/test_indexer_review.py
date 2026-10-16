@@ -973,6 +973,10 @@ def test_prowlarr_import_stores_protocol():
 
 from app.indexer_manager import validate_indexer_url as _REAL_VALIDATE  # noqa: E402
 
+# Each test gets a private LUMA_DATA_DIR (see conftest.temp_data_dir).
+pytestmark = pytest.mark.usefixtures('temp_data_dir')
+
+
 
 def test_downloads_add_requires_auth(route_env):
     main, adapter, pg, _ = route_env
@@ -1279,7 +1283,7 @@ def test_prowlarr_results_return_tokens_not_keys(all_results, temp_data_dir):
     urls = [rel['download_url'] for rel in r.get_json()['releases']]
     assert urls[0].startswith('/api/indexer/download/') and urls[2].startswith('/api/indexer/download/')
     assert urls[1] == MAGNET
-    assert 'pk' not in (temp_data_dir / 'download_tokens.json').read_text().replace('"pk', '')
+    assert '=pk' not in (temp_data_dir / 'download_tokens.json').read_text()
 
 
 def test_prowlarr_result_token_downloads_with_key_server_side(all_results):
@@ -1323,7 +1327,7 @@ def test_torznab_backend_results_return_tokens(route_env, monkeypatch):
     with patch('app.indexer_api.get_indexer_client', return_value=_FakeLegacyClient(items)):
         r = _search(main)
     url = r.get_json()['releases'][0]['download_url']
-    assert url.startswith('/api/indexer/download/') and 'pk' not in r.get_data(as_text=True)
+    assert url.startswith('/api/indexer/download/') and 'apikey=pk' not in r.get_data(as_text=True)
     pg.side_effect = [_resp(200, {}, TORRENT)]
     with _as_user(main, {'id': 2, 'is_admin': False}):
         assert main.app.test_client().get(url).status_code == 200
@@ -1448,7 +1452,7 @@ def test_result_routes_refuse_anonymous(all_results, route):
 def test_result_routes_open_to_owner_on_open_access(all_results, route):
     main = all_results[0]
     owner = {'id': 1, 'name': 'owner', 'is_admin': 1}
-    with patch.object(main._access, 'needs_pin', return_value=False), \
+    with patch.object(main._access, 'should_authenticate', return_value=False), \
          patch.object(main._access, 'owner', return_value=owner), \
          patch.object(main, 'get_radarr_for_request', return_value=None):
         r = main.app.test_client().get(route)
@@ -1459,7 +1463,7 @@ def test_result_routes_open_to_owner_on_open_access(all_results, route):
 
 def test_result_routes_refuse_when_pin_required(all_results):
     main = all_results[0]
-    with patch.object(main._access, 'needs_pin', return_value=True):
+    with patch.object(main._access, 'should_authenticate', return_value=True):
         for route in AUTH_ROUTES:
             assert main.app.test_client().get(route).status_code == 401
 

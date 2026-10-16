@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { ReviewsData } from '@/types/reviews';
+import { apiFetch } from '../apiClient';
 
 interface UseReviewsReturn {
   data: ReviewsData | null;
@@ -38,7 +39,7 @@ export function useReviews(title: string, year: number | null, mediaType: 'movie
         params.set('limit', '100');
         if (mediaType === 'tv') params.set('media_type', 'tv');
 
-        const resp = await fetch(`/api/rt/reviews?${params.toString()}`, {
+        const resp = await apiFetch(`/api/rt/reviews?${params.toString()}`, {
           signal: controller.signal,
         });
 

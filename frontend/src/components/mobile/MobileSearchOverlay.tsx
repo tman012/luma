@@ -13,6 +13,7 @@ import {
   type PersonCredit,
 } from '@/services/searchApi';
 import { mediaKey } from '@/services/ownership';
+import { withBase } from '@/urlHelpers';
 const MAX_SUGGESTIONS = 5;
 
 /** Normalize title for dedup: lowercase, & → and, strip non-alphanum except spaces */
@@ -540,7 +541,7 @@ function CreditRow({ credit, onClick }: { credit: PersonCredit; onClick: () => v
       <div className="h-[100px] w-[67px] flex-shrink-0 overflow-hidden rounded-lg bg-white/5">
         {credit.poster_url ? (
           <img
-            src={credit.poster_url}
+            src={credit.poster_url ? withBase(credit.poster_url) : undefined}
             alt={credit.title}
             className="h-full w-full object-cover"
             loading="lazy"

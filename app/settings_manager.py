@@ -149,6 +149,34 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "client_id":     {"type": "string",  "default": "",    "sensitive": True,  "description": "Trakt API client ID"},
             "client_secret": {"type": "string",  "default": "",    "sensitive": True,  "description": "Trakt API client secret (optional)"},
         },
+        "openai": {
+            "_type": "object",
+            "enabled":  {"type": "boolean", "default": False, "sensitive": False, "description": "Enable AI-powered natural language search"},
+            "api_key":  {"type": "string",  "default": "",    "sensitive": True,  "description": "OpenAI API key"},
+            "model":    {"type": "string",  "default": "gpt-4o-mini", "sensitive": False, "description": "OpenAI model for structured extraction"},
+            "custom_instructions": {"type": "string", "default": "", "sensitive": False, "description": "Custom instructions appended to AI prompt (e.g. content preferences)"},
+            "temperature": {"type": "number", "default": 0.7, "sensitive": False, "description": "AI creativity (0.0 = focused, 1.0 = creative)"},
+            "max_tokens": {"type": "integer", "default": 1500, "sensitive": False, "description": "Maximum response length in tokens"},
+            "voice_enabled": {"type": "boolean", "default": False, "sensitive": False, "description": "Enable voice assistant for playback control"},
+            "wake_word": {"type": "string", "default": "alfred", "sensitive": False, "description": "Wake word to activate voice assistant (e.g. alfred, jarvis, luma)"},
+            "tts_provider": {"type": "string", "default": "openai", "sensitive": False, "description": "TTS provider (openai or elevenlabs)"},
+            "tts_voice": {"type": "string", "default": "nova", "sensitive": False, "description": "OpenAI TTS voice (nova, alloy, echo, fable, onyx, shimmer)"},
+        },
+        "elevenlabs": {
+            "_type": "object",
+            "api_key":  {"type": "string",  "default": "",    "sensitive": True,  "description": "ElevenLabs API key"},
+            "voice_id": {"type": "string",  "default": "",    "sensitive": False, "description": "ElevenLabs voice ID"},
+            "model_id": {"type": "string",  "default": "eleven_multilingual_v2", "sensitive": False, "description": "ElevenLabs model ID"},
+            "stability":    {"type": "number", "default": 0.5, "sensitive": False, "description": "Voice stability (0.0-1.0)"},
+            "similarity":   {"type": "number", "default": 0.75, "sensitive": False, "description": "Similarity boost (0.0-1.0)"},
+        },
+        "alfred": {
+            "_type": "object",
+            "enabled":  {"type": "boolean", "default": False,  "sensitive": False, "description": "Enable Alfred agent for complex voice commands"},
+            "base_url": {"type": "string",  "default": "", "sensitive": False, "description": "Alfred API base URL"},
+            "api_key":  {"type": "string",  "default": "",     "sensitive": True,  "description": "Alfred API key (optional)"},
+            "timeout":  {"type": "integer", "default": 90,     "sensitive": False, "description": "Request timeout in seconds"},
+        },
     },
     "request_portal": {
         "_type": "object",
@@ -162,12 +190,20 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
     },
     "security": {
         "_type": "object",
-        "access_mode": {"type": "string", "default": "", "sensitive": False,
-                        "description": "Who must sign in: open (no sign-in), pin_remote (PIN outside the local network) or pin (everyone). Empty: pin when users already exist.",
-                        "enum": ["", "open", "pin_remote", "pin"]},
+        "auth_method": {"type": "string", "default": "forms", "sensitive": False,
+                        "description": "Authentication method",
+                        "enum": ["forms"]},
+        "auth_required": {"type": "string", "default": "disabled_local", "sensitive": False,
+                          "description": "Authentication requirement: disabled_local (LAN no sign-in, remote must) or enabled (everyone must)",
+                          "enum": ["disabled_local", "enabled"]},
+        "session_secret": {"type": "string", "default": "", "sensitive": True,
+                          "description": "Secret key for session signing (auto-generated on first run)"},
         "trusted_proxies": {"type": "string", "default": "", "sensitive": False,
-                            "description": "Reverse proxies whose X-Forwarded-For / CF-Connecting-IP headers are believed (comma-separated IPs or CIDRs)"},
-# remote_lock removed - merged into access.is_local_request with home WAN tracking
+                            "description": "Reverse proxies whose X-Forwarded-For and X-Forwarded-Proto headers are believed (comma-separated IPs or CIDRs)"},
+        "hostnames": {"type": "string", "default": "", "sensitive": False,
+                      "description": "Host names Luma is reached by besides IP addresses and localhost (comma-separated). Needed for no-sign-in LAN access by name and for a trusted proxy's X-Forwarded-Host"},
+        "allow_signup": {"type": "boolean", "default": False, "sensitive": False,
+                         "description": "Let visitors outside the local network request an account from the sign-in page"},
     },
     "homeassistant": {
         "_type": "object",
@@ -448,6 +484,7 @@ ENV_VAR_MAP: Dict[str, str] = {
     # APIs
     "TMDB_API_KEY":       "apis.tmdb.api_key",
     "OMDB_API_KEY":       "apis.omdb.api_key",
+    "OPENAI_API_KEY":     "apis.openai.api_key",
     # Indexer
     "INDEXER_PROVIDER": "indexer.provider",
     "INDEXER_BASE_URL": "indexer.base_url",
@@ -480,11 +517,13 @@ _ENV_VAR_MIGRATION_MAP: Dict[str, str] = {
 def _infer_data_dir() -> Path:
     """Determine the data directory for settings.json.
 
-    In Docker the canonical path is /app/data/.  Outside Docker we fall back
-    to the ``data/`` directory relative to the project root.
+    In Docker the canonical path is LUMA_DATA_DIR (default /app/data).
+    Outside Docker we fall back to the ``data/`` directory relative to the
+    project root.
     """
-    # Try the Docker path first
-    docker_data = Path("/app/data")
+    from app.paths import data_dir
+    # Try the configured (Docker) path first
+    docker_data = data_dir()
     if docker_data.is_dir():
         return docker_data
 
@@ -1227,26 +1266,6 @@ def _migrate_remove_dead_plex_fields(data: dict) -> bool:
     return False
 
 
-def _migrate_remove_ai_and_alfred(data: dict) -> bool:
-    """Remove retired AI/voice/Alfred settings (apis.openai, apis.elevenlabs,
-    apis.alfred) and the retired Vibe Engine UI block (ui.vibe_engine)."""
-    removed = []
-    apis = data.get("apis")
-    if isinstance(apis, dict):
-        for k in ("openai", "elevenlabs", "alfred"):
-            if k in apis:
-                del apis[k]
-                removed.append(f"apis.{k}")
-    ui = data.get("ui")
-    if isinstance(ui, dict) and "vibe_engine" in ui:
-        del ui["vibe_engine"]
-        removed.append("ui.vibe_engine")
-    if removed:
-        logger.info(f"Removed retired AI/Alfred settings: {', '.join(removed)}")
-        return True
-    return False
-
-
 def _migrate_automation_features(data: dict) -> bool:
     """Introduce the Auto-grab / 4K & upgrades feature switches.
 
@@ -1308,6 +1327,42 @@ def _migrate_rename_requests_to_portal(data: dict) -> bool:
     return False
 
 
+def _migrate_remove_remote_lock(data: dict) -> bool:
+    """Remove security.remote_lock setting (merged into access.py)."""
+    security = data.get('security')
+    if isinstance(security, dict) and 'remote_lock' in security:
+        del security['remote_lock']
+        logger.info("Removed security.remote_lock (merged into access.py)")
+        return True
+    return False
+
+
+def _migrate_access_mode_to_auth_required(data: dict) -> bool:
+    """Replace the retired security.access_mode with security.auth_required.
+
+    Mapping (only when auth_required isn't already saved):
+    - pin -> enabled (everyone must authenticate)
+    - pin_remote, open -> disabled_local (remote never gets implicit access)
+    - empty -> nothing saved (the auth_required default applies)
+    - anything else -> enabled
+
+    The access_mode key is always deleted. Idempotent.
+    """
+    security = data.get('security')
+    if not isinstance(security, dict) or 'access_mode' not in security:
+        return False
+
+    old_mode = str(security.pop('access_mode') or '').strip()
+    if old_mode and 'auth_required' not in security:
+        new_mode = {'pin': 'enabled', 'pin_remote': 'disabled_local',
+                    'open': 'disabled_local'}.get(old_mode, 'enabled')
+        security['auth_required'] = new_mode
+        logger.info("Migrated access_mode '%s' -> auth_required '%s'", old_mode, new_mode)
+    else:
+        logger.info("Removed security.access_mode")
+    return True
+
+
 def _migrate_strip_plaintext_request_password(data: dict) -> bool:
     """Strip any plaintext 'password' field from request_portal.
     
@@ -1339,8 +1394,94 @@ def _migrate_strip_plaintext_request_password(data: dict) -> bool:
     return changed
 
 
-def _run_all_migrations(data: dict) -> bool:
+def _migrate_seed_hostnames(data: dict, data_dir=None) -> bool:
+    """Introduce security.hostnames, seeded once so LAN devices that open Luma
+    by name keep working without sign-in after the upgrade.
+
+    Runs only while the key is absent. Sources (see app.lan_hosts): names LAN
+    clients used in the last 30 days when that record has any; otherwise
+    private names from APP_URL plus this machine's host name and its .local /
+    .lan forms. The request-portal host name is never seeded.
+    """
+    security = data.setdefault('security', {})
+    if not isinstance(security, dict) or 'hostnames' in security:
+        return False
+    from app import lan_hosts
+
+    portal_cfg = data.get('request_portal')
+    portal = portal_cfg.get('hostname') if isinstance(portal_cfg, dict) else ''
+    sources = lan_hosts.seed_candidates(
+        data_dir if data_dir is not None else _infer_data_dir(),
+        configured_urls=[os.environ.get('APP_URL', '')],
+        exclude=[portal or ''],
+    )
+    names = []
+    for group in sources.values():
+        names.extend(n for n in group if n not in names)
+    security['hostnames'] = ', '.join(names)
+    logger.info("Seeded security.hostnames: %s (sources: %s)", security['hostnames'] or '(none)',
+                ', '.join(f"{k}={v}" for k, v in sources.items()))
+    return True
+
+
+# Defaults the live install used before these settings had their current
+# defaults. Upgraded installs keep them (see the migrations below).
+LEGACY_REQUEST_EXCLUDES = ['Full Rips', '4K Movies', '4K TV', '3D', 'Remux TV']
+LEGACY_QBIT_APP_CATEGORY = 'media-search-app'
+
+
+def _migrate_legacy_request_excludes(data: dict, existing: bool) -> bool:
+    """Keep the old hidden-libraries default on an upgraded install.
+
+    Before the rename to request_portal, an unset or empty
+    requests.exclude_libraries meant LEGACY_REQUEST_EXCLUDES. A settings file
+    from that era (it has a 'requests' section, or no request-page section at
+    all) gets that list written out when its own is absent or empty, so 4K,
+    Remux and Full Rips copies still don't count as available. Must run
+    before the rename. Fresh installs keep the new empty default.
+    """
+    if not existing or ('requests' not in data and 'request_portal' in data):
+        return False
+    section = data.setdefault('requests' if 'requests' in data else 'request_portal', {})
+    if not isinstance(section, dict):
+        return False
+    current = section.get('exclude_libraries')
+    if current not in (None, [], ''):
+        return False
+    section['exclude_libraries'] = list(LEGACY_REQUEST_EXCLUDES)
+    logger.info("Kept the previous hidden-libraries default for the request page: %s",
+                ', '.join(LEGACY_REQUEST_EXCLUDES))
+    return True
+
+
+QBIT_CATEGORY_MARKER = 'legacy_qbit_category'
+
+
+def _migrate_legacy_qbit_category(data: dict, existing: bool) -> bool:
+    """Keep qBittorrent's old app category on an upgraded install, once.
+
+    The category default changed to 'luma'. An existing settings file with no
+    qbittorrent.app_category key used LEGACY_QBIT_APP_CATEGORY, and its
+    torrents carry that category, so it is written out explicitly. Otherwise
+    those torrents would drop out of Activity, origin badges and auto-rename.
+    Runs once (a marker under _migrations persists), and a category the user
+    cleared on purpose (key present, empty) is left alone.
+    """
+    done = data.setdefault('_migrations', {})
+    if not isinstance(done, dict) or done.get(QBIT_CATEGORY_MARKER):
+        return False
+    done[QBIT_CATEGORY_MARKER] = True
+    qbit = data.setdefault('qbittorrent', {})
+    if existing and isinstance(qbit, dict) and 'app_category' not in qbit:
+        qbit['app_category'] = LEGACY_QBIT_APP_CATEGORY
+        logger.info("Kept the previous qBittorrent app category: %s", LEGACY_QBIT_APP_CATEGORY)
+    return True
+
+
+def _run_all_migrations(data: dict, data_dir=None, existing: bool = False) -> bool:
     """Run all migrations on *data* (mutated in place).
+    *existing* is True when *data* came from a settings file on disk (an
+    upgrade), False for a first-run bootstrap.
     Returns True if any migration occurred.
     """
     changed = False
@@ -1358,10 +1499,14 @@ def _run_all_migrations(data: dict) -> bool:
     changed |= _migrate_remove_fanart(data)
     changed |= _migrate_hero_schema(data)
     changed |= _migrate_remove_dead_plex_fields(data)
-    changed |= _migrate_remove_ai_and_alfred(data)
     changed |= _migrate_automation_features(data)
+    changed |= _migrate_legacy_request_excludes(data, existing)
+    changed |= _migrate_legacy_qbit_category(data, existing)
     changed |= _migrate_rename_requests_to_portal(data)
     changed |= _migrate_strip_plaintext_request_password(data)
+    changed |= _migrate_remove_remote_lock(data)
+    changed |= _migrate_access_mode_to_auth_required(data)
+    changed |= _migrate_seed_hostnames(data, data_dir)
     return changed
 
 
@@ -1790,7 +1935,7 @@ class SettingsManager:
 
         # Run migrations BEFORE merging with defaults so old fields are
         # converted into new list fields that will survive the merge.
-        migrated = _run_all_migrations(on_disk)
+        migrated = _run_all_migrations(on_disk, self._path.parent, existing=bool(on_disk))
 
         defaults = _build_defaults(SETTINGS_SCHEMA)
         with self._lock:

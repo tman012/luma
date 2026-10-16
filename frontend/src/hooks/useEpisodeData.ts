@@ -20,6 +20,7 @@ import type { EpisodeData } from '@/components/media/TvDetailModal/types';
 import type { CastMember } from '@/utils/modalParsers';
 import { fetchPlexEpisode, fetchTmdbEpisode } from '@/services/sonarrApi';
 import { posterUrl } from '@/utils/image';
+import { apiUrl } from '@/urlHelpers';
 
 interface UseEpisodeDataResult {
   episodeData: EpisodeData | null;
@@ -123,7 +124,7 @@ export function useEpisodeData(
             viewOffset: plex.view_offset || undefined,
             duration: plex.duration || undefined,
             thumbPath: plex.thumb_path
-              ? `/api/img/plex?url=${plex.thumb_path}`
+              ? apiUrl(`/api/img/plex?url=${plex.thumb_path}`)
               : undefined,
             cast: [],
           };

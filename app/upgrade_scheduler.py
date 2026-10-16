@@ -202,7 +202,7 @@ def _run_pipeline(force: bool = False) -> None:
         logger.info('[upgrade-scheduler] Step 2: Running batch searches...')
         total_searched = 0
         total_upgrades = 0
-        max_batches = 20  # safety cap (~2000 movies)
+        max_batches = 2  # 200 titles a night keeps per-title tracker searches low
 
         for i in range(max_batches):
             batch_result = finder.run_batch(batch_size=_BATCH_SIZE)

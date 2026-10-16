@@ -9,6 +9,7 @@ import { CompactLayout } from './CompactLayout';
 import { FocusZone } from '@/components/tv/FocusZone';
 import { useTVMode } from '@/contexts/TVModeContext';
 import { notifyWatchlistChanged } from '@/services/watchlistApi';
+import { apiFetch } from '../../../apiClient';
 
 export function MovieDetailModal({
   ratingKey,
@@ -68,7 +69,7 @@ export function MovieDetailModal({
     const id = resolvedTmdbId;
     if (!id) return;
     let cancelled = false;
-    fetch('/api/radarr/watchlist/tmdb-ids')
+    apiFetch('/api/radarr/watchlist/tmdb-ids')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data?.tmdb_ids) return;

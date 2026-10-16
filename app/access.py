@@ -1,54 +1,45 @@
-"""Access mode: who may use Luma without signing in.
+"""Access control: who may use Luma without signing in.
 
-Modes (setting ``security.access_mode``):
+security.auth_required decides:
+- 'disabled_local' (default, also when nothing is saved): requests from a LAN
+  address get implicit owner access; everyone else must sign in.
+- 'enabled': everyone must sign in.
 
-* ``pin_remote``  "Disabled for local addresses" (default for a new install):
-                  private/LAN addresses are open, anyone else needs the PIN.
-* ``pin``         "Always": everyone signs in.
-* ``open``        "Never": no sign-in at all.
+"Local" means the client address is private (RFC 1918, loopback, link-local,
+IPv6 ULA). The client address is the TCP peer, or, only when that peer is in
+security.trusted_proxies, the nearest untrusted X-Forwarded-For hop (or the
+header named by the optional security.trusted_proxy_header, off by default).
+No other header (CF-Connecting-IP, X-Real-IP from untrusted peers, ...) and no
+"home WAN" address is ever treated as local.
 
-Forwarded-for headers are believed only from ``security.trusted_proxies``.
-
-An install that already has users but no saved mode (every install created
-before the Start flow) is treated as ``pin`` so its sign-in behavior doesn't
-change. An install with no users has no owner, so nothing is open until the
-Start flow creates one.
-
-Home WAN IP tracking: when accessed via Cloudflare tunnel from the home WAN IP,
-requests are treated as local (included in pin_remote exemption).
+Implicit owner access needs BOTH a local client address (above) AND a known
+Host: an IP literal, localhost, this machine's own host name, a home-network
+name (one label such as "docker-server", or *.local, *.lan, *.home.arpa,
+*.internal) or a name listed in security.hostnames. The Host header is chosen
+by the client, so it never grants access on its own; it only narrows it. A
+page on a public name (for example a DNS-rebinding domain that resolves to a
+LAN address) gets no implicit access. Requests that came through Cloudflare
+(CF-Connecting-IP, CF-Ray, ... present) are never local, even from a trusted
+proxy.
+X-Forwarded-Host is only honored from a trusted proxy and only when it names
+such a known host.
 """
 
 import ipaddress
-import json
 import logging
-import threading
-import time
-from pathlib import Path
-from typing import Dict, List, Optional, Set
-
-import requests
+import socket
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-MODES = ('open', 'pin_remote', 'pin')
-
-# Home WAN IP tracking
-_home_ips: Set[str] = set()
-_home_lock = threading.Lock()
-_HOME_MAX_SIZE = 10
-_settings = None
-_state_path: Optional[Path] = None
-
-# Headers a proxy or tunnel adds. Their values are trusted only from a
-# configured trusted proxy; from anyone else their mere presence means the
-# request was relayed, so it is treated as remote (spoofing one can only make
+# Headers a proxy or tunnel adds. Their presence from an untrusted source means
+# the request was relayed, so it is treated as remote (spoofing one can only make
 # a request *less* trusted).
-_FORWARD_HEADERS = ('X-Forwarded-For', 'X-Real-IP', 'Forwarded', 'CF-Connecting-IP', 'CF-Ray', 'True-Client-IP')
-
-
-def mode(settings) -> str:
-    value = (settings.get('security.access_mode') or '').strip()
-    return value if value in MODES else 'pin'
+# CF-Connecting-IP / True-Client-IP are listed so a tunnel connector on the LAN
+# (e.g. cloudflared in Docker) is never mistaken for a local client; their
+# values are never used as the client address.
+_FORWARD_HEADERS = ('X-Forwarded-For', 'X-Real-IP', 'Forwarded',
+                    'CF-Connecting-IP', 'True-Client-IP')
 
 
 def _addr(ip: str):
@@ -73,17 +64,50 @@ def _is_private(ip: str) -> bool:
     return bool(a and any(a.version == n.version and a in n for n in _LOCAL_NETS))
 
 
+# Narrowest prefix accepted as a trusted proxy range. Anything broader (e.g.
+# 0.0.0.0/0 or ::/0) would let the whole Internet vouch for client addresses.
+MIN_PREFIX = {4: 8, 6: 32}
+_warned: set = set()
+
+
+def proxy_range_problem(value: str) -> Optional[str]:
+    """Why *value* can't be a trusted proxy range, or None when it can."""
+    try:
+        net = ipaddress.ip_network(value.strip(), strict=False)
+    except ValueError:
+        return f'Not an IP address or range: {value.strip()}'
+    if net.prefixlen < MIN_PREFIX[net.version]:
+        return f'Range too broad: {value.strip()} (broadest allowed is /{MIN_PREFIX[net.version]})'
+    return None
+
+
+def is_public_range(value: str) -> bool:
+    try:
+        net = ipaddress.ip_network(value.strip(), strict=False)
+    except ValueError:
+        return False
+    return not any(net.version == n.version and net.subnet_of(n) for n in _LOCAL_NETS)
+
+
 def trusted_proxies(settings) -> List[ipaddress._BaseNetwork]:
+    """Parsed security.trusted_proxies. Invalid or too-broad entries are
+    ignored (logged once); public ranges are allowed but logged once."""
     raw = settings.get('security.trusted_proxies') or ''
     nets = []
     for part in str(raw).replace(';', ',').split(','):
         part = part.strip()
         if not part:
             continue
-        try:
-            nets.append(ipaddress.ip_network(part, strict=False))
-        except ValueError:
+        problem = proxy_range_problem(part)
+        if problem:
+            if part not in _warned:
+                _warned.add(part)
+                logger.warning('[access] ignoring trusted proxy %s: %s', part, problem)
             continue
+        if is_public_range(part) and part not in _warned:
+            _warned.add(part)
+            logger.warning('[access] trusted proxy %s is a public address range', part)
+        nets.append(ipaddress.ip_network(part, strict=False))
     return nets
 
 
@@ -93,69 +117,174 @@ def _in(nets, ip: str) -> bool:
 
 
 def client_ip(request, settings=None) -> Optional[str]:
-    """The real client address, or None when a request was relayed by a proxy
-    that isn't trusted (its forwarded headers can't be believed).
+    """The real client address, or None when it can't be trusted.
+
+    - Peer not in security.trusted_proxies: the peer itself, unless the request
+      carries any forwarding header (then None: relayed, treated as remote).
+    - Peer is a trusted proxy: the header named by security.trusted_proxy_header
+      when that setting is on (off by default), else the nearest
+      X-Forwarded-For hop that isn't itself a trusted proxy. With neither,
+      None (the proxy didn't say who the client is).
     """
     peer = request.remote_addr or ''
     nets = trusted_proxies(settings) if settings is not None else []
     if nets and _in(nets, peer):
-        cf = request.headers.get('CF-Connecting-IP', '').strip()
-        if cf:
-            return cf
+        custom_header = (settings.get('security.trusted_proxy_header') or '').strip()
+        if custom_header:
+            value = request.headers.get(custom_header, '').split(',')[-1].strip()
+            return value if _addr(value) else None
         hops = [h.strip() for h in request.headers.get('X-Forwarded-For', '').split(',') if h.strip()]
+        if not hops:
+            return None
+        remaining = list(hops)
         # Walk back from the nearest hop past any further trusted proxies.
-        while hops and _in(nets, hops[-1]):
-            hops.pop()
-        if hops:
-            return hops[-1]
-        real = request.headers.get('X-Real-IP', '').strip()
-        return real or peer
+        while remaining and _in(nets, remaining[-1]):
+            remaining.pop()
+        if not remaining:
+            return None  # every hop is a proxy: no client address given
+        ip = remaining[-1]
+        return ip if _addr(ip) else None
     if any(request.headers.get(h) for h in _FORWARD_HEADERS):
         return None
     return peer
 
 
-def _get_cf_ip(request, settings) -> Optional[str]:
-    """Get CF-Connecting-IP, but only trust it from configured trusted proxies."""
-    peer = request.remote_addr or ''
-    nets = trusted_proxies(settings) if settings else []
-    if not (nets and _in(nets, peer)):
-        return None
-    return request.headers.get('CF-Connecting-IP', '').strip() or None
+# Headers Cloudflare adds to every proxied request. A request carrying any of
+# them came through the tunnel/CDN, so it is never a LAN request.
+_CLOUDFLARE_HEADERS = ('CF-Connecting-IP', 'CF-Ray', 'CF-Visitor', 'CF-IPCountry', 'True-Client-IP')
+
+
+def via_cloudflare(request) -> bool:
+    if any(request.headers.get(h) for h in _CLOUDFLARE_HEADERS):
+        return True
+    return 'cloudflare' in (request.headers.get('CDN-Loop') or '').lower()
 
 
 def is_local_request(request, settings=None) -> bool:
-    """True when the request originates from a local/private IP or home WAN via tunnel.
+    """True when the request originates from a local/private IP.
     
     Checks:
     1. Direct connection from private IP (LAN, loopback)
-    2. Cloudflare tunnel from home WAN IP (tracked dynamically)
+    2. Connection via trusted proxy from private IP (using X-Forwarded-For)
     """
+    if via_cloudflare(request):
+        return False
     ip = client_ip(request, settings)
-    if ip and _is_private(ip):
+    return bool(ip and _is_private(ip))
+
+
+def configured_hostnames(settings) -> set:
+    """Lower-cased names from security.hostnames (comma or space separated)."""
+    raw = (settings.get('security.hostnames') or '') if settings is not None else ''
+    names = set()
+    for part in str(raw).replace(';', ',').replace(' ', ',').split(','):
+        name = split_host(part.strip())
+        if name:
+            names.add(name)
+    return names
+
+
+def split_host(host: str) -> str:
+    """The lower-cased host name of a Host header value, without port or brackets."""
+    host = (host or '').strip().lower()
+    if not host:
+        return ''
+    if host.startswith('['):
+        end = host.find(']')
+        return host[1:end] if end > 0 else ''
+    if host.count(':') == 1:
+        host = host.split(':', 1)[0]
+    return host.rstrip('.')
+
+
+# Names that only resolve inside a home network (never public DNS).
+# Chosen for names that public DNS can never (or by ICANN policy will not)
+# delegate: .local (mDNS, RFC 6762), .home.arpa (RFC 8375), .internal (ICANN
+# reserved for private use, 2024), .localdomain (de facto, never delegated),
+# .home (ICANN name-collision block, not delegated) and .lan (common router
+# default, not a TLD). Left out on purpose: .corp is collision-blocked too but
+# used by company networks; .private, .intranet and other words are open to
+# future TLD applications, so a public site could one day use them.
+# app.lan_hosts uses this same list.
+HOME_SUFFIXES = ('.local', '.lan', '.home.arpa', '.internal', '.localdomain', '.home')
+
+
+def is_home_name(name: str) -> bool:
+    """One label (e.g. 'docker-server') or a home-network suffix; not an IP."""
+    name = split_host(name)
+    if not name or _addr(name) is not None:
+        return False
+    return '.' not in name or name.endswith(HOME_SUFFIXES)
+
+
+def own_hostnames() -> set:
+    """This machine's host name, with and without its domain."""
+    try:
+        raw = split_host(socket.gethostname())
+    except OSError:
+        return set()
+    return {raw, raw.split('.', 1)[0]} if raw else set()
+
+
+def is_known_host(host: str, settings=None) -> bool:
+    """True for an IP literal, localhost, a home-network name, this machine's
+    host name, or a name in security.hostnames. Never enough on its own: see
+    should_authenticate."""
+    name = split_host(host)
+    if not name:
+        return False
+    if _addr(name) is not None or name == 'localhost' or is_home_name(name):
+        return True
+    return name in own_hostnames() or name in configured_hostnames(settings)
+
+
+def is_portal_traffic(request, settings) -> bool:
+    """Detect if request is portal traffic (via dedicated hostname only).
+    
+    Portal traffic is detected ONLY by Host header matching request_portal.hostname.
+    Owner can use the full app remotely via tunnel on the main hostname.
+    """
+    portal = split_host(str(settings.get('request_portal.hostname') or ''))
+    if not portal:
+        return False
+    return split_host(request.headers.get('Host') or '') == portal
+
+
+def should_authenticate(settings, request) -> bool:
+    """True when this request must authenticate (new auth_required logic).
+    
+    Uses security.auth_required (migrated from legacy access_mode):
+    - 'enabled': everyone must authenticate
+    - 'disabled_local': local requests get implicit owner, remote must authenticate
+    
+    Default: 'disabled_local' (LAN and kiosk don't need sign-in)
+    
+    Portal traffic always requires authentication (never gets implicit owner).
+    """
+    # Portal traffic never gets implicit owner
+    if is_portal_traffic(request, settings):
+        return True
+
+    # A trusted proxy sent an unknown or inconsistent X-Forwarded-Host
+    if getattr(request, 'environ', {}).get(HOST_UNTRUSTED):
         return True
     
-    # Check if via Cloudflare tunnel from home WAN IP
-    cf_ip = _get_cf_ip(request, settings)
-    if cf_ip:
-        with _home_lock:
-            if cf_ip in _home_ips:
-                return True
+    # Read auth_required setting (legacy access_mode is migrated at settings load)
+    auth_req = (settings.get('security.auth_required') or 'disabled_local').strip()
     
-    return False
+    if auth_req == 'enabled':
+        # Everyone must authenticate
+        return True
+    elif auth_req == 'disabled_local':
+        # Local gets implicit owner on a known Host; everyone else signs in
+        return not (is_local_request(request, settings)
+                    and is_known_host(request.host, settings))
+    else:
+        # Unknown value, default to safe (require auth)
+        return True
 
 
-def needs_pin(settings, request) -> bool:
-    """True when this request must sign in."""
-    m = mode(settings)
-    if m == 'open':
-        return False
-    if m == 'pin_remote':
-        return not is_local_request(request, settings)
-    return True
-
-
-def owner(user_auth) -> Optional[Dict]:
+def owner(user_auth) -> Optional[dict]:
     """The install owner: the first active admin account."""
     for u in user_auth.list_users():
         if u.get('is_admin') and (u.get('status') or 'active') == 'active':
@@ -163,97 +292,42 @@ def owner(user_auth) -> Optional[Dict]:
     return None
 
 
-# ---------------------------------------------------------------------------
-# Home WAN IP tracking
-# ---------------------------------------------------------------------------
-
-def _lookup_wan_ip() -> Optional[str]:
-    """Look up the current WAN IP via Cloudflare's 1.1.1.1 trace."""
-    try:
-        resp = requests.get('https://1.1.1.1/cdn-cgi/trace', timeout=5)
-        for line in resp.text.splitlines():
-            if line.startswith('ip='):
-                return line.split('=', 1)[1].strip()
-    except Exception:
-        pass
-    return None
+HOST_UNTRUSTED = 'luma.host_untrusted'
 
 
-def _refresh_home_wan_ip() -> None:
-    """Refresh the home WAN IP in background thread."""
-    ip = _lookup_wan_ip()
-    if not ip:
-        return
-    
-    with _home_lock:
-        # Add or update timestamp
-        _home_ips.discard(ip)  # Remove if exists
-        _home_ips.add(ip)
-        
-        # LRU eviction: keep only the most recent IPs
-        if len(_home_ips) > _HOME_MAX_SIZE:
-            _home_ips.pop()  # Set.pop() removes arbitrary element, effectively FIFO
-        
-        logger.info('[access] home WAN IP updated: %s (tracking %d)', ip, len(_home_ips))
-    
-    _save_home_ips()
+class TrustedProxyMiddleware:
+    """WSGI middleware: honor X-Forwarded-Proto / X-Forwarded-Host only from
+    trusted proxies, so request.scheme, request.is_secure and request.host
+    can't be spoofed by a direct client. REMOTE_ADDR is not changed.
 
+    From a trusted proxy:
+    - no X-Forwarded-Host: the Host header is used as is;
+    - X-Forwarded-Host present: it must be a single value, a
+      known host AND name the same host as the Host header (the proxy is
+      expected to send `Host $host` and overwrite X-Forwarded-Host). Otherwise
+      the request is flagged HOST_UNTRUSTED and never gets implicit access.
+    """
 
-def _periodic_refresh() -> None:
-    """Background thread that refreshes home WAN IP every 10 minutes."""
-    while True:
-        time.sleep(600)  # 10 minutes
-        _refresh_home_wan_ip()
+    def __init__(self, wsgi_app, get_settings):
+        self.wsgi_app = wsgi_app
+        self._get_settings = get_settings
 
-
-def _load_home_ips() -> None:
-    """Load persisted home IPs from state file."""
-    if not _state_path or not _state_path.exists():
-        return
-    try:
-        data = json.loads(_state_path.read_text())
-        with _home_lock:
-            _home_ips.clear()
-            _home_ips.update(data.get('home_ips', []))
-        logger.info('[access] loaded %d home IPs', len(_home_ips))
-    except Exception:
-        logger.warning('[access] failed to load home IPs', exc_info=True)
-
-
-def _save_home_ips() -> None:
-    """Persist home IPs to state file."""
-    if not _state_path:
-        return
-    try:
-        with _home_lock:
-            data = {'home_ips': list(_home_ips)}
-        _state_path.write_text(json.dumps(data, indent=2))
-    except Exception:
-        logger.warning('[access] failed to save home IPs', exc_info=True)
-
-
-def init_home_wan_tracking(settings) -> None:
-    """Initialize home WAN IP tracking with background refresh."""
-    global _settings, _state_path
-    _settings = settings
-    
-    # Determine state file path
-    try:
-        data_dir = Path(settings.path).parent
-        _state_path = data_dir / 'home_wan_ips.json'
-    except Exception:
-        logger.warning('[access] could not determine state path for home IPs')
-        _state_path = None
-    
-    # Load existing state
-    _load_home_ips()
-    
-    # Start background refresh thread
-    def _background_refresh():
-        time.sleep(2)  # Small startup delay
-        _refresh_home_wan_ip()
-        _periodic_refresh()
-    
-    threading.Thread(target=_background_refresh, name='home-wan-refresh', daemon=True).start()
-    
-    logger.info('[access] home WAN tracking initialized (%d IPs known)', len(_home_ips))
+    def __call__(self, environ, start_response):
+        try:
+            settings = self._get_settings()
+            nets = trusted_proxies(settings)
+        except Exception:
+            settings, nets = None, []
+        if nets and _in(nets, environ.get('REMOTE_ADDR', '')):
+            proto = environ.get('HTTP_X_FORWARDED_PROTO', '').split(',')[-1].strip().lower()
+            if proto in ('http', 'https'):
+                environ['wsgi.url_scheme'] = proto
+            xfh = environ.get('HTTP_X_FORWARDED_HOST', '').strip()
+            if xfh:
+                single = ',' not in xfh
+                same = split_host(xfh) == split_host(environ.get('HTTP_HOST', ''))
+                if single and same and is_known_host(xfh, settings):
+                    environ['HTTP_HOST'] = xfh
+                else:
+                    environ[HOST_UNTRUSTED] = True
+        return self.wsgi_app(environ, start_response)

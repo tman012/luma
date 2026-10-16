@@ -1,19 +1,26 @@
 /**
  * SecurityTab — when Luma asks for a PIN (Sonarr/Radarr v4 style
- * "Authentication Required" choice), the PIN itself, and trusted proxies.
+ * "Authentication Required" choice), the PIN itself, trusted proxies, host
+ * names and account requests.
  */
 import { useEffect, useState } from 'react';
-import { ACCESS_CHOICES } from '@/pages/StartPage';
+import { ACCESS_CHOICES, type AuthRequired } from '@/pages/StartPage';
 import { cn } from '@/utils/cn';
+import { apiFetch } from '../../apiClient';
+import {
+  describeRequest, recentRequests, requestLink, requestTime, type RequestLogEntry,
+} from './requestPortalLog';
 
-type Mode = 'pin_remote' | 'pin' | 'open';
+type Mode = AuthRequired;
 
 interface SecurityState {
-  mode: Mode;
+  auth_required: Mode;
   pin_set: boolean;
   single_account: boolean;
   local_request: boolean;
   trusted_proxies: string;
+  hostnames: string;
+  allow_signup: boolean;
 }
 
 const digits = (v: string) => v.replace(/\D/g, '').slice(0, 4);
@@ -29,11 +36,15 @@ function RequestPortalCard() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [publicUrl, setPublicUrl] = useState('');
+  const [log, setLog] = useState<RequestLogEntry[]>([]);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    fetch('/api/request/admin/settings')
+    apiFetch('/api/request/admin/settings')
       .then(r => r.json())
       .then(data => {
+        setPublicUrl(data.public_url || '');
         setEnabled(data.enabled || false);
         setHostname(data.hostname || '');
         setMovieProfile(data.movie_profile || '');
@@ -42,7 +53,20 @@ function RequestPortalCard() {
         setExcludeLibraries(libs.join(', '));
       })
       .catch(() => {});
+    apiFetch('/api/request/admin/log')
+      .then(r => (r.ok ? r.json() : []))
+      .then(data => setLog(recentRequests(data)))
+      .catch(() => {});
   }, []);
+
+  const link = requestLink(publicUrl, window.location.origin);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard unavailable */ }
+  };
 
   const save = async () => {
     setMsg(null);
@@ -67,7 +91,7 @@ function RequestPortalCard() {
       };
       if (password) body.password = password;
       
-      const res = await fetch('/api/request/admin/settings', {
+      const res = await apiFetch('/api/request/admin/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -86,9 +110,6 @@ function RequestPortalCard() {
     }
   };
 
-  useEffect(() => {
-    setDirty(password !== '' || confirmPassword !== '');
-  }, [enabled, password, confirmPassword, hostname, movieProfile, tvProfile, excludeLibraries]);
 
   return (
     <section className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 space-y-5">
@@ -108,6 +129,25 @@ function RequestPortalCard() {
       {enabled && (
         <>
           <div className="grid gap-3 max-w-md">
+            <div className="space-y-1.5">
+              <span className="block text-[12px] font-medium text-white/50">Link</span>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={link}
+                  onFocus={e => e.currentTarget.select()}
+                  className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 font-mono text-[13px] text-white/70 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={copy}
+                  className="shrink-0 rounded-lg border border-white/10 bg-white/[0.06] px-4 text-[13px] font-semibold text-white/70 hover:bg-white/10"
+                >
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            </div>
             <label className="space-y-1.5">
               <span className="block text-[12px] font-medium text-white/50">Password</span>
               <input
@@ -187,33 +227,55 @@ function RequestPortalCard() {
         </button>
         {msg && <span className={cn('text-[13px]', msg.ok ? 'text-emerald-300' : 'text-red-300')}>{msg.text}</span>}
       </div>
+
+      {log.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-[13px] font-semibold text-white/70">Recent Requests</h4>
+          <div className="divide-y divide-white/[0.06]">
+            {log.map(e => (
+              <div key={e.id} className="flex items-center justify-between gap-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="truncate text-[14px] text-white/85">{describeRequest(e)}</div>
+                  <div className="text-[12px] text-white/40">{e.who}</div>
+                </div>
+                <div className="shrink-0 text-[12px] text-white/40">{requestTime(e.ts)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
 export function SecurityTab() {
   const [state, setState] = useState<SecurityState | null>(null);
-  const [mode, setMode] = useState<Mode>('pin_remote');
+  const [mode, setMode] = useState<Mode>('disabled_local');
   const [pin, setPin] = useState('');
   const [confirm, setConfirm] = useState('');
   const [proxies, setProxies] = useState('');
+  const [hostnames, setHostnames] = useState('');
+  const [signup, setSignup] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
-    const res = await fetch('/api/security');
+    const res = await apiFetch('/api/security');
     if (!res.ok) return;
     const data: SecurityState = await res.json();
     setState(data);
-    setMode(data.mode);
+    setMode(data.auth_required);
     setProxies(data.trusted_proxies || '');
+    setHostnames(data.hostnames || '');
+    setSignup(!!data.allow_signup);
   };
   useEffect(() => { load(); }, []);
 
   if (!state) return null;
 
-  const pinNeeded = mode !== 'open' && !state.pin_set;
-  const dirty = mode !== state.mode || pin !== '' || proxies !== (state.trusted_proxies || '');
+  const pinNeeded = !state.pin_set;
+  const dirty = mode !== state.auth_required || pin !== '' || proxies !== (state.trusted_proxies || '')
+    || hostnames !== (state.hostnames || '') || signup !== !!state.allow_signup;
 
   const save = async () => {
     setMsg(null);
@@ -223,9 +285,11 @@ export function SecurityTab() {
     }
     setBusy(true);
     try {
-      const body: Record<string, string> = { mode, trusted_proxies: proxies };
+      const body: Record<string, string | boolean> = {
+        auth_required: mode, trusted_proxies: proxies, hostnames, allow_signup: signup,
+      };
       if (pin) { body.pin = pin; body.confirm = confirm; }
-      const res = await fetch('/api/security', {
+      const res = await apiFetch('/api/security', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
@@ -263,7 +327,7 @@ export function SecurityTab() {
               onClick={() => { setMode(c.value); setMsg(null); }}
               className={cn(
                 'min-h-[34px] rounded-lg px-2 py-1.5 text-[13px] font-medium leading-tight transition-colors',
-                c.value === 'pin_remote' ? 'flex-[2.2]' : 'flex-1',
+                c.value === 'disabled_local' ? 'flex-[2.2]' : 'flex-1',
                 mode === c.value ? 'bg-white text-[#15102a] font-semibold shadow' : 'text-white/80 hover:text-white',
               )}
             >
@@ -272,7 +336,7 @@ export function SecurityTab() {
           ))}
         </div>
 
-        {mode !== 'open' && (
+        {(
           <div className="grid grid-cols-2 gap-3 max-w-sm">
             <label className="space-y-1.5">
               <span className="block text-[12px] font-medium text-white/50">{state.pin_set ? 'New PIN' : 'PIN'}</span>
@@ -301,6 +365,32 @@ export function SecurityTab() {
             className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
           />
         </label>
+
+        <label className="block space-y-1.5">
+          <span className="block text-[12px] font-medium text-white/50">Host names</span>
+          <input
+            type="text" value={hostnames} onChange={e => setHostnames(e.target.value)} placeholder="Names"
+            spellCheck={false} autoCapitalize="off"
+            className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+          />
+        </label>
+
+        <div className="flex items-center justify-between gap-3 max-w-md">
+          <span className="text-[14px] font-medium text-white/70">Allow sign-up from anywhere</span>
+          <button
+            type="button" role="switch" aria-checked={signup} aria-label="Allow sign-up from anywhere"
+            onClick={() => { setSignup(v => !v); setMsg(null); }}
+            className={cn(
+              'relative h-[28px] w-[50px] shrink-0 rounded-full transition-colors duration-200',
+              signup ? 'bg-emerald-500' : 'bg-white/15',
+            )}
+          >
+            <span className={cn(
+              'absolute top-[4px] left-[4px] h-[20px] w-[20px] rounded-full bg-white shadow-sm transition-transform duration-200',
+              signup && 'translate-x-[22px]',
+            )} />
+          </button>
+        </div>
 
         <div className="flex items-center gap-3">
           <button

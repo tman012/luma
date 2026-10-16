@@ -12,8 +12,9 @@ import secrets
 import os
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
+from werkzeug.security import generate_password_hash, check_password_hash
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +41,13 @@ def _get_db() -> sqlite3.Connection:
 
 
 def _hash_pin(pin: str) -> str:
-    """Hash a PIN with SHA-256 + app-specific salt."""
+    """Hash a PIN with SHA-256 + app-specific salt (legacy, for backward compat detection)."""
     return hashlib.sha256(f"luma_auth_v1_{pin}".encode()).hexdigest()
+
+
+def _is_legacy_hash(pin_hash: str) -> bool:
+    """Check if a hash is legacy SHA-256 format (64 hex chars)."""
+    return len(pin_hash) == 64 and all(c in '0123456789abcdef' for c in pin_hash)
 
 
 # ---------------------------------------------------------------------------
@@ -167,10 +173,13 @@ def create_user(name: str, pin: str, is_admin: bool = False, status: str = 'acti
         existing_email = get_user_by_email(email)
         if existing_email:
             raise ValueError(f"An account with that email already exists")
+    
+    pin_hash = generate_password_hash(pin)
+    
     with _get_db() as conn:
         cursor = conn.execute(
             "INSERT INTO users (name, pin_hash, is_admin, status, email) VALUES (?, ?, ?, ?, ?)",
-            (name.strip(), _hash_pin(pin), 1 if is_admin else 0, status, email.strip().lower() if email else None),
+            (name.strip(), pin_hash, 1 if is_admin else 0, status, email.strip().lower() if email else None),
         )
         user_id = cursor.lastrowid
     return {"id": user_id, "name": name.strip(), "email": email.strip().lower() if email else None,
@@ -240,6 +249,7 @@ def authenticate(name: str, pin: str, email: str = None) -> Optional[Dict]:
     """Verify credentials + PIN. Returns user dict on success, None on failure.
     Tries email lookup first (if provided), then falls back to name lookup.
     Only allows users with status='active'.
+    Automatically rehashes legacy SHA-256 passwords to werkzeug format.
     """
     user = None
     if email:
@@ -248,10 +258,28 @@ def authenticate(name: str, pin: str, email: str = None) -> Optional[Dict]:
         user = get_user_by_name(name)
     if not user:
         return None
-    if user["pin_hash"] != _hash_pin(pin):
-        return None
     if user.get("status", "active") != "active":
         return None
+    
+    pin_hash = user["pin_hash"]
+    
+    # Check if it's a legacy SHA-256 hash
+    if _is_legacy_hash(pin_hash):
+        # Compare with legacy hash
+        if pin_hash != _hash_pin(pin):
+            return None
+        # Rehash with werkzeug and update
+        new_hash = generate_password_hash(pin)
+        with _get_db() as conn:
+            conn.execute("UPDATE users SET pin_hash = ? WHERE id = ?", (new_hash, user["id"]))
+        logger.info(f"Rehashed legacy password for user {user['name']}")
+        user["pin_hash"] = new_hash
+        return user
+    
+    # Modern werkzeug hash
+    if not check_password_hash(pin_hash, pin):
+        return None
+    
     return user
 
 
@@ -262,7 +290,7 @@ def authenticate(name: str, pin: str, email: str = None) -> Optional[Dict]:
 def create_session(user_id: int) -> str:
     """Create a 30-day session token. Returns the token string."""
     token = secrets.token_urlsafe(32)
-    expires_at = (datetime.utcnow() + timedelta(days=SESSION_TTL_DAYS)).isoformat()
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)).isoformat()
     with _get_db() as conn:
         conn.execute(
             "INSERT INTO user_sessions (user_id, token, expires_at) VALUES (?, ?, ?)",

@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { apiFetch } from '../../apiClient';
 
 // ────────────────────────────────────────────────────────────────────
 // Types
@@ -47,7 +48,7 @@ interface SmartHomeModalProps {
 
 async function callService(domain: string, service: string, data: Record<string, unknown>): Promise<boolean> {
   try {
-    const resp = await fetch('/api/ha/service', {
+    const resp = await apiFetch('/api/ha/service', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ domain, service, data }),
@@ -718,7 +719,7 @@ export function SmartHomeModal({ open, onClose, defaultAreaId }: SmartHomeModalP
   // Fetch areas once
   useEffect(() => {
     if (!open) return;
-    fetch('/api/ha/areas')
+    apiFetch('/api/ha/areas')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!data) return;
@@ -806,7 +807,7 @@ export function SmartHomeModal({ open, onClose, defaultAreaId }: SmartHomeModalP
     const ctrl = new AbortController();
     inFlightRef.current = ctrl;
     setLoading(true);
-    fetch(`/api/ha/area/${encodeURIComponent(areaId)}/entities`, { signal: ctrl.signal })
+    apiFetch(`/api/ha/area/${encodeURIComponent(areaId)}/entities`, { signal: ctrl.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (ctrl.signal.aborted) return;

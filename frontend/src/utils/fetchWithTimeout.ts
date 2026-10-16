@@ -1,3 +1,4 @@
+import { apiFetch } from '../apiClient';
 /**
  * fetchWithTimeout — wraps native fetch with an AbortController timeout.
  *
@@ -13,5 +14,5 @@ export function fetchWithTimeout(
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+  return apiFetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
 }

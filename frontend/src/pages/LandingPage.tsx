@@ -3,9 +3,12 @@
  */
 
 import { useNavigate } from 'react-router';
+import { assetUrl } from '@/urlHelpers';
+import { useAuth } from '@/contexts/AuthContext';
 
 export function LandingPage() {
   const navigate = useNavigate();
+  const { signupOpen } = useAuth();
 
   return (
     <div
@@ -31,7 +34,7 @@ export function LandingPage() {
         }}
       >
         <img
-          src="/static/images/luma_text.webp"
+          src={assetUrl('/static/images/luma_text.webp')}
           alt="Luma"
           style={{
             width: 'clamp(380px, 90vw, 780px)',
@@ -61,12 +64,14 @@ export function LandingPage() {
           Sign in
         </button>
 
-        <button
-          onClick={() => navigate('/login', { state: { flow: 'signup' } })}
-          style={btnStyle}
-        >
-          Sign up
-        </button>
+        {signupOpen && (
+          <button
+            onClick={() => navigate('/login', { state: { flow: 'signup' } })}
+            style={btnStyle}
+          >
+            Sign up
+          </button>
+        )}
 
         <p
           style={{

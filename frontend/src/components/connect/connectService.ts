@@ -7,6 +7,7 @@
  *   for Discover, Radarr for requests, …) open the sheet the first time.
  */
 import { useEffect, useState } from 'react';
+import { apiFetch } from '../../apiClient';
 
 export type ServiceId = 'tmdb' | 'radarr' | 'sonarr' | 'qbittorrent';
 export const CONNECT_EVENT = 'luma:connect-service';
@@ -49,7 +50,7 @@ let statusPromise: Promise<Status> | null = null;
 
 export function integrationsStatus(refresh = false): Promise<Status> {
   if (!statusPromise || refresh) {
-    statusPromise = fetch('/api/integrations/status')
+    statusPromise = apiFetch('/api/integrations/status')
       .then(r => (r.ok ? r.json() : {}))
       .catch(() => ({}));
   }

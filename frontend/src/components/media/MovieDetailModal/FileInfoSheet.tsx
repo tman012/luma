@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
+import { apiFetch } from '../../../apiClient';
 
 interface FileInfoStream {
   id: number | null;
@@ -338,7 +339,7 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
     setLoading(true);
     setError(null);
     setVersionIdx(0);
-    fetch(`/api/plex/file-info/${activeKey}`, { signal: controller.signal, credentials: 'same-origin' })
+    apiFetch(`/api/plex/file-info/${activeKey}`, { signal: controller.signal, credentials: 'same-origin' })
       .then(async (r) => {
         if (r.status === 401) throw new Error('Sign in to see file info');
         if (!r.ok) throw new Error('Could not load file info');

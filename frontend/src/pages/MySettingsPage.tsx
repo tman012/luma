@@ -1,3 +1,4 @@
+import { apiFetch } from '../apiClient';
 /**
  * MySettingsPage — Personal settings for non-admin users.
  *
@@ -64,7 +65,7 @@ export function MySettingsPage() {
   ) => {
     setResult({ status: 'testing', message: '' });
     try {
-      const res = await fetch(endpoint, {
+      const res = await apiFetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

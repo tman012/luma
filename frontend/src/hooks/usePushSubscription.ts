@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
+import { apiFetch } from '../apiClient';
 
 type PushState = 'unsupported' | 'prompt' | 'subscribed' | 'denied' | 'loading';
 
@@ -79,7 +80,7 @@ export function usePushSubscription() {
         }
 
         // Fetch current VAPID key from server
-        const res = await fetch('/api/push/vapid-key');
+        const res = await apiFetch('/api/push/vapid-key');
         const { publicKey } = await res.json();
         if (cancelled || !publicKey) return;
 
@@ -115,7 +116,7 @@ export function usePushSubscription() {
     setState('loading');
     try {
       // Get VAPID key from server
-      const res = await fetch('/api/push/vapid-key');
+      const res = await apiFetch('/api/push/vapid-key');
       const { publicKey } = await res.json();
 
       if (!publicKey) {
@@ -135,7 +136,7 @@ export function usePushSubscription() {
       });
 
       // Send subscription to server
-      await fetch('/api/push/subscribe', {
+      await apiFetch('/api/push/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sub.toJSON()),

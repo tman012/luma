@@ -1,3 +1,4 @@
+import { apiFetch } from '../apiClient';
 /**
  * Sonarr TV API — shared service for kiosk TV modal.
  *
@@ -126,7 +127,7 @@ export async function checkSonarrStatus(
   const params = tmdbId ? `?tmdb_id=${tmdbId}` : '';
   const promise = (async (): Promise<SonarrStatus> => {
     try {
-      const resp = await fetch(`/api/sonarr/status/${tvdbId}${params}`);
+      const resp = await apiFetch(`/api/sonarr/status/${tvdbId}${params}`);
       if (!resp.ok) return { exists: false, enabled: false };
       const data: SonarrStatus = await resp.json();
       _statusCache.set(key, { data, ts: Date.now() });
@@ -150,7 +151,7 @@ export async function addToSonarr(
   seasons?: number[],
   qualityProfileId?: number,
 ): Promise<{ success: boolean; message: string; series?: Record<string, unknown> }> {
-  const resp = await fetch('/api/sonarr/add', {
+  const resp = await apiFetch('/api/sonarr/add', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -168,7 +169,7 @@ export async function addToSonarr(
 
 export async function fetchQualityProfiles(): Promise<QualityProfile[]> {
   try {
-    const resp = await fetch('/api/sonarr/quality-profiles');
+    const resp = await apiFetch('/api/sonarr/quality-profiles');
     if (!resp.ok) return [];
     return resp.json();
   } catch {
@@ -186,7 +187,7 @@ export async function autoSearchSeason(
   tmdbId?: number,
 ): Promise<{ success: boolean; message: string }> {
   try {
-    const resp = await fetch('/api/sonarr/search/season', {
+    const resp = await apiFetch('/api/sonarr/search/season', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -210,7 +211,7 @@ export async function autoSearchEpisode(
   title?: string,
 ): Promise<{ success: boolean; message: string }> {
   try {
-    const resp = await fetch('/api/sonarr/search/episode', {
+    const resp = await apiFetch('/api/sonarr/search/episode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -243,7 +244,7 @@ export async function searchSeasonReleases(
   });
   if (tmdbId) params.set('tmdb_id', String(tmdbId));
   try {
-    const resp = await fetch(`/api/sonarr/season/search?${params}`);
+    const resp = await apiFetch(`/api/sonarr/season/search?${params}`);
     return resp.json();
   } catch {
     return { success: false, releases: [] };
@@ -263,7 +264,7 @@ export async function searchEpisodeReleases(
   });
   if (tmdbId) params.set('tmdb_id', String(tmdbId));
   try {
-    const resp = await fetch(`/api/sonarr/episode/search?${params}`);
+    const resp = await apiFetch(`/api/sonarr/episode/search?${params}`);
     return resp.json();
   } catch {
     return { success: false, releases: [] };
@@ -280,7 +281,7 @@ export async function downloadRelease(
   opts?: { seriesId?: number; season?: number; episodeId?: number; tmdbId?: number; title?: string },
 ): Promise<{ success: boolean; message: string }> {
   try {
-    const resp = await fetch('/api/sonarr/episode/download', {
+    const resp = await apiFetch('/api/sonarr/episode/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -323,7 +324,7 @@ export async function fetchTvSeasons(
   const promise = (async (): Promise<SeasonsResult> => {
     try {
       const qs = light ? '?light=1' : '';
-      const resp = await fetch(`/api/tv/seasons/${tmdbId}${qs}`);
+      const resp = await apiFetch(`/api/tv/seasons/${tmdbId}${qs}`);
       if (!resp.ok) return { success: false, tmdb_id: tmdbId, tvdb_id: null, seasons: [] };
       const data: SeasonsResult = await resp.json();
       _seasonsCache.set(key, { data, ts: Date.now() });
@@ -358,7 +359,7 @@ export async function fetchTvOwnership(
 
   const promise = (async (): Promise<TvOwnershipResult> => {
     try {
-      const resp = await fetch(`/api/tv/ownership/${tvdbId}/cached${qs}`);
+      const resp = await apiFetch(`/api/tv/ownership/${tvdbId}/cached${qs}`);
       if (!resp.ok) return { success: false, tvdb_id: tvdbId, episodes: {}, total_owned: 0, is_owned: false };
       const data: TvOwnershipResult = await resp.json();
       _tvOwnCache.set(key, { data, ts: Date.now() });
@@ -468,7 +469,7 @@ export async function fetchPlexEpisode(ratingKey: number): Promise<PlexEpisodeRe
   // New request
   const promise = (async (): Promise<PlexEpisodeResponse | null> => {
     try {
-      const resp = await fetch(`/api/plex/episode/${ratingKey}`);
+      const resp = await apiFetch(`/api/plex/episode/${ratingKey}`);
       if (!resp.ok) return null;
       const data: PlexEpisodeResponse = await resp.json();
       _plexEpCache.set(key, { data, ts: Date.now() });
@@ -509,7 +510,7 @@ export async function fetchTmdbEpisode(
   // New request
   const promise = (async (): Promise<TmdbEpisodeResponse | null> => {
     try {
-      const resp = await fetch(`/api/tv/${tmdbShowId}/season/${season}/episode/${episode}`);
+      const resp = await apiFetch(`/api/tv/${tmdbShowId}/season/${season}/episode/${episode}`);
       if (!resp.ok) return null;
       const data: TmdbEpisodeResponse = await resp.json();
       _tmdbEpCache.set(key, { data, ts: Date.now() });

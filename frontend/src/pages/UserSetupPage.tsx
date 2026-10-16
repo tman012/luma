@@ -11,6 +11,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { apiFetch } from '../apiClient';
 
 type PlexMode = 'shared' | 'own' | 'both';
 
@@ -61,7 +62,7 @@ export function UserSetupPage() {
 
       // Request shared server access if applicable
       if (mode === 'shared' || mode === 'both') {
-        const res = await fetch('/api/user/request-shared-plex', { method: 'POST' });
+        const res = await apiFetch('/api/user/request-shared-plex', { method: 'POST' });
         const data = await res.json();
         if (!res.ok || !data.success) {
           setError(data.error || 'Failed to request access');

@@ -77,9 +77,9 @@ class StartFlowTest(unittest.TestCase):
 
         @app.before_request
         def load():
-            tok = request.cookies.get('luma_session')
+            tok = request.cookies.get('luma_auth_session')
             g.current_user = user_auth.validate_session(tok) if tok else None
-            if g.current_user is None and not access.needs_pin(self.settings, request):
+            if g.current_user is None and not access.should_authenticate(self.settings, request):
                 o = access.owner(user_auth)
                 if o:
                     g.current_user = dict(o)
@@ -95,7 +95,7 @@ class StartFlowTest(unittest.TestCase):
             return 3
 
         start_flow._pending.clear()
-        start_flow.init(settings=self.settings, user_auth=user_auth, session_cookie='luma_session',
+        start_flow.init(settings=self.settings, user_auth=user_auth, session_cookie='luma_auth_session',
                         client_id='luma-test', on_plex_saved=saved,
                         get_current_user=lambda: getattr(g, 'current_user', None))
         app.register_blueprint(start_flow.bp)
@@ -173,7 +173,13 @@ class StartFlowTest(unittest.TestCase):
         self.assertEqual(len(users), 1)
         self.assertTrue(users[0]['is_admin'])
         self.assertEqual(users[0]['email'], 'owner@example.com')
-        self.assertEqual(self.settings.get('security.access_mode'), 'pin_remote')
+        self.assertEqual(self.settings.get('security.auth_required'), 'disabled_local')
+        self.assertIsNone(self.settings.get('security.access_mode'))
+        cookie = [h for h in r.headers.getlist('Set-Cookie') if h.startswith('luma_auth_session=')]
+        self.assertEqual(len(cookie), 1)
+        self.assertIn('HttpOnly', cookie[0])
+        self.assertNotIn('Secure', cookie[0])
+        self.assertIn('Path=/', cookie[0])
 
         st = c.get('/api/start/status').json
         self.assertEqual((st['needs_start'], st['in_progress'], st['step']), (False, True, 'done'))
@@ -203,34 +209,43 @@ class StartFlowTest(unittest.TestCase):
 
     # -- access modes -------------------------------------------------------
 
-    def _who(self, mode, remote_addr, headers=None, proxies=''):
-        self.settings.update({'security': {'access_mode': mode, 'trusted_proxies': proxies}})
+    def _who(self, auth_required, remote_addr, headers=None, proxies=''):
+        self.settings.update({'security': {'auth_required': auth_required, 'trusted_proxies': proxies}})
         r = self.client.get('/whoami', headers=headers or {}, environ_base={'REMOTE_ADDR': remote_addr})
         return r.json['user']
 
     def test_access_modes(self):
         self.ua.create_user('owner', '1234', is_admin=True)
-        self.assertEqual(self._who('open', '203.0.113.9'), 'owner')
-        self.assertIsNone(self._who('pin', '10.20.0.5'))
-        self.assertEqual(self._who('pin_remote', '10.20.0.5'), 'owner')
-        self.assertEqual(self._who('pin_remote', '10.20.0.6'), 'owner')
-        self.assertIsNone(self._who('pin_remote', '203.0.113.9'))
+        # disabled_local mode: remote visitors need sign-in (no implicit owner)
+        self.assertIsNone(self._who('disabled_local', '203.0.113.9'))
+        # disabled_local mode: local visitors get implicit owner
+        self.assertEqual(self._who('disabled_local', '10.20.0.5'), 'owner')
+        # enabled mode: everyone needs sign-in
+        self.assertIsNone(self._who('enabled', '10.20.0.5'))
+        # disabled_local mode: local gets owner, remote needs sign-in
+        self.assertEqual(self._who('disabled_local', '10.20.0.5'), 'owner')
+        self.assertEqual(self._who('disabled_local', '10.20.0.6'), 'owner')
+        self.assertIsNone(self._who('disabled_local', '203.0.113.9'))
         # Relayed by a proxy that isn't trusted: treated as remote, whatever the headers claim.
-        self.assertIsNone(self._who('pin_remote', '127.0.0.1', {'X-Forwarded-For': '10.20.0.5'}))
-        self.assertIsNone(self._who('pin_remote', '172.21.0.1', {'CF-Connecting-IP': '10.20.0.5'}))
+        self.assertIsNone(self._who('disabled_local', '127.0.0.1', {'X-Forwarded-For': '10.20.0.5'}))
+        self.assertIsNone(self._who('disabled_local', '172.21.0.1', {'CF-Connecting-IP': '10.20.0.5'}))
         # Trusted proxy: the forwarded client address decides.
-        self.assertEqual(self._who('pin_remote', '172.20.0.2', {'X-Forwarded-For': '10.20.0.5'}, '172.20.0.0/16'), 'owner')
-        self.assertIsNone(self._who('pin_remote', '172.20.0.2', {'X-Forwarded-For': '10.20.0.5, 198.51.100.7'}, '172.20.0.0/16'))
-        self.assertIsNone(self._who('pin_remote', '172.20.0.2', {'CF-Connecting-IP': '198.51.100.7'}, '172.20.0.0/16'))
+        self.assertEqual(self._who('disabled_local', '172.20.0.2', {'X-Forwarded-For': '10.20.0.5'}, '172.20.0.0/16'), 'owner')
+        self.assertIsNone(self._who('disabled_local', '172.20.0.2', {'X-Forwarded-For': '10.20.0.5, 198.51.100.7'}, '172.20.0.0/16'))
+        self.assertIsNone(self._who('disabled_local', '172.20.0.2', {'CF-Connecting-IP': '198.51.100.7'}, '172.20.0.0/16'))
 
-    def test_unset_mode_requires_pin(self):
+    def test_unset_mode_defaults_to_disabled_local(self):
         self.ua.create_user('owner', '1234', is_admin=True)
         s = _Settings()
-        self.assertEqual(self.access.mode(s), 'pin')
-        req = SimpleNamespace(remote_addr='10.20.0.5', headers={})
-        self.assertTrue(self.access.needs_pin(s, req))
+        # With no auth_required set, defaults to disabled_local
+        lan = SimpleNamespace(remote_addr='10.20.0.5', headers={}, host='10.20.0.5:5001')
+        wan = SimpleNamespace(remote_addr='203.0.113.9', headers={}, host='luma.example.com')
+        self.assertFalse(self.access.should_authenticate(s, lan))  # LAN doesn't sign in
+        self.assertTrue(self.access.should_authenticate(s, wan))
 
     def test_no_users_no_open_access(self):
+        # No account yet: LAN gets no implicit owner, and 'open' is not a mode.
+        self.assertIsNone(self._who('disabled_local', '10.20.0.5'))
         self.assertIsNone(self._who('open', '10.20.0.5'))
 
 

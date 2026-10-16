@@ -22,7 +22,8 @@ def data_dir() -> Path:
     override = os.environ.get('LUMA_STATE_DIR', '')
     if override:
         return Path(override)
-    d = Path('/app/data')
+    from app.paths import data_dir as configured_data_dir
+    d = configured_data_dir()
     if d.is_dir():
         return d
     db = os.environ.get('DATABASE_PATH', '')

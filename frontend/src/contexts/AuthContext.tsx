@@ -12,6 +12,7 @@ import {
   useCallback,
   ReactNode,
 } from 'react';
+import { apiFetch } from '../apiClient';
 
 export interface UserInfo {
   id: number;
@@ -53,7 +54,9 @@ interface AuthState {
   pinUnlock: boolean;
   /** Signed in implicitly because access is open (no sign-in needed). */
   implicit: boolean;
-  accessMode: 'open' | 'pin_remote' | 'pin' | null;
+  authRequired: 'disabled_local' | 'enabled' | null;
+  /** Account requests are accepted from this device. */
+  signupOpen: boolean;
 }
 
 interface AuthContextValue extends AuthState {
@@ -65,7 +68,7 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const NO_START = { needsStart: false, startInProgress: false, pinUnlock: false, implicit: false, accessMode: null } as const;
+const NO_START = { needsStart: false, startInProgress: false, pinUnlock: false, implicit: false, authRequired: null, signupOpen: false } as const;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
@@ -80,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      const res = await fetch('/api/auth/me');
+      const res = await apiFetch('/api/auth/me');
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.authenticated) {
         setState({
@@ -94,13 +97,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           startInProgress: !!data.start_in_progress,
           pinUnlock: false,
           implicit: !!data.implicit,
-          accessMode: data.access_mode || null,
+          authRequired: data.auth_required || null,
+          signupOpen: false,
         });
         return;
       }
       setState({
         user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null,
-        ...NO_START, needsStart: !!data.needs_start, pinUnlock: !!data.pin_unlock,
+        ...NO_START, needsStart: !!data.needs_start, pinUnlock: !!data.pin_unlock, signupOpen: !!data.signup,
       });
       return;
     } catch {
@@ -116,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (identifier: string, pin: string) => {
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: identifier, name: identifier, pin }),
@@ -144,14 +148,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch {}
     setState({ user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null, ...NO_START });
   }, []);
 
   const saveUserSettings = useCallback(async (updates: Partial<UserSettings>) => {
     try {
-      const res = await fetch('/api/user/settings', {
+      const res = await apiFetch('/api/user/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),

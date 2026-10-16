@@ -5,7 +5,7 @@
  *   - Top bar: Luma text logo (left), search icon + user icon (right)
  *   - Content rails: horizontal scroll poster rows
  *   - Navigation pills after Continue Watching: Storage, Latest, Activity,
- *     Library, Watchlist, TV Calendar, Rooms, Upgrades
+ *     Luma AI, Library, Watchlist, TV Calendar, Rooms, Upgrades
  *   - "See More" at end of Now Available rail → Explore page
  *   - Clickable items open MediaDetailModal or TvDetailModal
  */
@@ -20,6 +20,7 @@ import { LatestSheet } from '@/components/latest/LatestSheet';
 import { ActivitySheet } from '@/components/activity/ActivitySheet';
 import { WatchlistSheet } from '@/components/watchlist/WatchlistSheet';
 import { CollectionsSheet } from '@/components/collections/CollectionsSheet';
+import { LumaAISheet } from '@/components/luma/LumaAISheet';
 import { TvCalendarSheet } from '@/components/calendar/TvCalendarSheet';
 import { LibrariesSheet } from '@/components/libraries/LibrariesSheet';
 import { useBodyScroll } from '@/hooks/useBodyScroll';
@@ -40,6 +41,8 @@ import {
   type SearchPerson,
   type SearchResults,
 } from '@/services/searchApi';
+import { apiFetch } from '../apiClient';
+import { assetUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
 // Rail ID -> ModalSource mapping
@@ -311,6 +314,11 @@ const NAV_PILLS: NavPillDef[] = [
       <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
     </svg>
   )},
+  { label: 'Luma AI', id: 'luma-ai', icon: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2l2 4 4 1-3 3 1 4-4-2-4 2 1-4-3-3 4-1z" /><path d="M5 18l1.5 3 3 .5-2 2.5-.5-3z" /><path d="M19 18l-1.5 3-3 .5 2 2.5.5-3z" />
+    </svg>
+  )},
   { label: 'Library', id: 'library', icon: (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="3" width="8" height="8" rx="1" /><rect x="14" y="3" width="8" height="8" rx="1" /><rect x="2" y="13" width="8" height="8" rx="1" /><rect x="14" y="13" width="8" height="8" rx="1" />
@@ -343,7 +351,7 @@ const NAV_PILLS: NavPillDef[] = [
   )},
 ];
 
-function NavPills({ onRoomsOpen, onUpgradesOpen, onWatchlistOpen, onCollectionsOpen, onTvCalendarOpen, onLibrariesOpen, onLatestOpen, onActivityOpen }: { onRoomsOpen: () => void; onUpgradesOpen: () => void; onWatchlistOpen: () => void; onCollectionsOpen: () => void; onTvCalendarOpen: () => void; onLibrariesOpen: () => void; onLatestOpen: () => void; onActivityOpen: () => void }) {
+function NavPills({ onRoomsOpen, onUpgradesOpen, onWatchlistOpen, onCollectionsOpen, onLumaOpen, onTvCalendarOpen, onLibrariesOpen, onLatestOpen, onActivityOpen }: { onRoomsOpen: () => void; onUpgradesOpen: () => void; onWatchlistOpen: () => void; onCollectionsOpen: () => void; onLumaOpen: () => void; onTvCalendarOpen: () => void; onLibrariesOpen: () => void; onLatestOpen: () => void; onActivityOpen: () => void }) {
   const navigate = useNavigate();
   const [pressed, setPressed] = React.useState<string | null>(null);
 
@@ -355,7 +363,7 @@ function NavPills({ onRoomsOpen, onUpgradesOpen, onWatchlistOpen, onCollectionsO
         <button
           key={pill.id}
           type="button"
-          onClick={() => pill.path ? navigate(pill.path) : pill.id === 'tv-calendar' ? onTvCalendarOpen() : pill.id === 'rooms' ? onRoomsOpen() : pill.id === 'upgrades' ? onUpgradesOpen() : pill.id === 'latest' ? onLatestOpen() : pill.id === 'activity' ? onActivityOpen() : pill.id === 'watchlist' ? onWatchlistOpen() : pill.id === 'collections' ? onCollectionsOpen() : pill.id === 'library' ? onLibrariesOpen() : undefined}
+          onClick={() => pill.path ? navigate(pill.path) : pill.id === 'luma-ai' ? onLumaOpen() : pill.id === 'tv-calendar' ? onTvCalendarOpen() : pill.id === 'rooms' ? onRoomsOpen() : pill.id === 'upgrades' ? onUpgradesOpen() : pill.id === 'latest' ? onLatestOpen() : pill.id === 'activity' ? onActivityOpen() : pill.id === 'watchlist' ? onWatchlistOpen() : pill.id === 'collections' ? onCollectionsOpen() : pill.id === 'library' ? onLibrariesOpen() : undefined}
           onTouchStart={() => setPressed(pill.id)}
           onTouchEnd={() => setPressed(null)}
           onTouchCancel={() => setPressed(null)}
@@ -394,7 +402,7 @@ function TopBar({ onSearchOpen }: { onSearchOpen: () => void }) {
     >
       <div style={{ height: 56, display: 'flex', alignItems: 'center', paddingLeft: 6, paddingRight: 12 }}>
         {/* Luma text logo */}
-        <img src="/static/images/luma_text.webp" alt="Luma" style={{ height: 100, objectFit: 'contain', marginTop: -2 }} />
+        <img src={assetUrl('/static/images/luma_text.webp')} alt="Luma" style={{ height: 100, objectFit: 'contain', marginTop: -2 }} />
 
         {/* Spacer */}
         <div style={{ flex: 1 }} />
@@ -816,6 +824,7 @@ export function AuthenticatedHomePage() {
   const [activityOpen, setActivityOpen] = useState(false);
   const [watchlistOpen, setWatchlistOpen] = useState(false);
   const [collectionsOpen, setCollectionsOpen] = useState(false);
+  const [lumaOpen, setLumaOpen] = useState(false);
   const [tvCalendarOpen, setTvCalendarOpen] = useState(false);
   const [librariesOpen, setLibrariesOpen] = useState(false);
   const [wymOverride, setWymOverride] = useState<NormalizedMediaItem[] | null>(null);
@@ -891,7 +900,7 @@ export function AuthenticatedHomePage() {
         return;
       }
       // Added — refetch rail so digital date + poster land correctly
-      void fetch('/api/watchlist')
+      void apiFetch('/api/watchlist')
         .then((r) => (r.ok ? r.json() : []))
         .then((data: unknown) => {
           const raw = (Array.isArray(data) ? data : []) as Record<string, unknown>[];
@@ -929,6 +938,7 @@ export function AuthenticatedHomePage() {
   const handleActivityOpen = useCallback(() => setActivityOpen(true), []);
   const handleWatchlistOpen = useCallback(() => setWatchlistOpen(true), []);
   const handleCollectionsOpen = useCallback(() => setCollectionsOpen(true), []);
+  const handleLumaOpen = useCallback(() => setLumaOpen(true), []);
   const handleTvCalendarOpen = useCallback(() => setTvCalendarOpen(true), []);
   const handleLibrariesOpen = useCallback(() => setLibrariesOpen(true), []);
 
@@ -953,14 +963,14 @@ export function AuthenticatedHomePage() {
 
       // Insert nav pills after continue_watching (or after first rail if CW is empty)
       if (!addedPills && (railId === 'continue_watching' || elements.length === 1)) {
-        elements.push(<NavPills key="nav-pills" onRoomsOpen={handleRoomsOpen} onUpgradesOpen={handleUpgradesOpen} onWatchlistOpen={handleWatchlistOpen} onCollectionsOpen={handleCollectionsOpen} onTvCalendarOpen={handleTvCalendarOpen} onLibrariesOpen={handleLibrariesOpen} onLatestOpen={handleLatestOpen} onActivityOpen={handleActivityOpen} />);
+        elements.push(<NavPills key="nav-pills" onRoomsOpen={handleRoomsOpen} onUpgradesOpen={handleUpgradesOpen} onWatchlistOpen={handleWatchlistOpen} onCollectionsOpen={handleCollectionsOpen} onLumaOpen={handleLumaOpen} onTvCalendarOpen={handleTvCalendarOpen} onLibrariesOpen={handleLibrariesOpen} onLatestOpen={handleLatestOpen} onActivityOpen={handleActivityOpen} />);
         addedPills = true;
       }
     }
 
     // If no rails rendered yet, still show pills
     if (!addedPills) {
-      elements.unshift(<NavPills key="nav-pills" onRoomsOpen={handleRoomsOpen} onUpgradesOpen={handleUpgradesOpen} onWatchlistOpen={handleWatchlistOpen} onCollectionsOpen={handleCollectionsOpen} onTvCalendarOpen={handleTvCalendarOpen} onLibrariesOpen={handleLibrariesOpen} onLatestOpen={handleLatestOpen} onActivityOpen={handleActivityOpen} />);
+      elements.unshift(<NavPills key="nav-pills" onRoomsOpen={handleRoomsOpen} onUpgradesOpen={handleUpgradesOpen} onWatchlistOpen={handleWatchlistOpen} onCollectionsOpen={handleCollectionsOpen} onLumaOpen={handleLumaOpen} onTvCalendarOpen={handleTvCalendarOpen} onLibrariesOpen={handleLibrariesOpen} onLatestOpen={handleLatestOpen} onActivityOpen={handleActivityOpen} />);
     }
 
     return elements;
@@ -1047,6 +1057,8 @@ export function AuthenticatedHomePage() {
       {/* Incomplete franchise collections */}
       <CollectionsSheet open={collectionsOpen} onClose={() => setCollectionsOpen(false)} />
 
+      {/* Luma AI sheet */}
+      <LumaAISheet open={lumaOpen} onClose={() => setLumaOpen(false)} />
 
       {/* Downloads sheet */}
       <TvCalendarSheet open={tvCalendarOpen} onClose={() => setTvCalendarOpen(false)} />

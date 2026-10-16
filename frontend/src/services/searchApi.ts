@@ -1,3 +1,4 @@
+import { apiFetch } from '../apiClient';
 /**
  * Search API layer — mirrors /web search behavior exactly.
  *
@@ -122,10 +123,10 @@ export async function performSearch(
 ): Promise<SearchResults> {
   // Parallel fetch: library (owned) + TMDb (external)
   const [libraryData, tmdbData] = await Promise.all([
-    fetch(`/api/library/search?q=${encodeURIComponent(query)}`, { signal })
+    apiFetch(`/api/library/search?q=${encodeURIComponent(query)}`, { signal })
       .then((r) => r.json())
       .catch(() => ({ movies: [], tv_shows: [], people: [] })),
-    fetch(`/search?q=${encodeURIComponent(query)}&type=all`, { signal })
+    apiFetch(`/search?q=${encodeURIComponent(query)}&type=all`, { signal })
       .then((r) => r.json())
       .catch(() => ({ movies: [], tv_shows: [], people: [] })),
   ]);
@@ -189,7 +190,7 @@ export async function checkOwnership(
   if (year) params.set('year', String(year));
   if (tmdbId) params.set('tmdb_id', String(tmdbId));
   if (imdbId) params.set('imdb_id', imdbId);
-  const resp = await fetch(`/api/check-ownership?${params}`);
+  const resp = await apiFetch(`/api/check-ownership?${params}`);
   return resp.json();
 }
 
@@ -200,7 +201,7 @@ export async function checkOwnership(
 export async function fetchPersonCredits(
   tmdbPersonId: number,
 ): Promise<{ credits: PersonCredit[]; person: { name: string; profile_url: string | null } }> {
-  const resp = await fetch(`/api/tmdb/person_by_id/${tmdbPersonId}/credits`);
+  const resp = await apiFetch(`/api/tmdb/person_by_id/${tmdbPersonId}/credits`);
   return resp.json();
 }
 
@@ -215,7 +216,7 @@ export async function batchCheckOwnership(
     use_media_paths?: boolean;
   },
 ): Promise<Record<string, { owned: boolean; rating_key?: number }>> {
-  const resp = await fetch('/api/check-ownership-batch', {
+  const resp = await apiFetch('/api/check-ownership-batch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

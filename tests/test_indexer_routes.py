@@ -3,6 +3,10 @@
 import pytest
 from unittest.mock import Mock, patch
 
+# Each test gets a private LUMA_DATA_DIR (see conftest.temp_data_dir).
+pytestmark = pytest.mark.usefixtures('temp_data_dir')
+
+
 
 @pytest.fixture
 def app():
@@ -91,6 +95,10 @@ def portal_host(monkeypatch):
     stub = Mock()
     stub.get.side_effect = lambda k, d=None: values.get(k, d)
     monkeypatch.setattr(request_portal, '_settings', stub)
+    # #2's portal guard reads app.main.settings, so overlay the same keys there.
+    from app import main
+    real_get = main.settings.get
+    monkeypatch.setattr(main.settings, 'get', lambda k, d=None: values[k] if k in values else real_get(k, d))
     return 'requests.example.com'
 
 
@@ -109,10 +117,12 @@ class TestRequestPortalHostIndexerBlocking:
             resp = client.get('/api/indexer/download/x', headers={'Host': portal_host})
         assert resp.status_code == 404
     
-    def test_host_guard_runs_before_every_other_hook(self, app):
-        """The portal-host 404 runs before any auth hook."""
-        from app import request_portal
-        assert app.before_request_funcs[None][0] is request_portal._host_guard
+    def test_host_guard_runs_before_auth_hooks(self, app):
+        """The portal-host guard runs before the auth and CSRF hooks (#2's model:
+        it follows load_current_user so it can see a requester session)."""
+        names = [f.__name__ for f in app.before_request_funcs[None]]
+        guard = next(i for i, n in enumerate(names) if 'portal' in n)
+        assert guard < names.index('_auth_guard') < names.index('_csrf_api_guard')
 
 
 class TestTunnelTrafficIndexerBlocking:

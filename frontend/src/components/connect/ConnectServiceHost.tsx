@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { CONNECT_EVENT, integrationsStatus, type ServiceId } from './connectService';
+import { apiFetch } from '../../apiClient';
 
 const NAMES: Record<ServiceId, string> = {
   tmdb: 'TMDB', radarr: 'Radarr', sonarr: 'Sonarr', qbittorrent: 'qBittorrent',
@@ -40,7 +41,7 @@ export function ConnectServiceHost() {
     setBusy(save ? 'save' : 'test');
     setResult(null);
     try {
-      const res = await fetch('/api/integrations/tmdb', {
+      const res = await apiFetch('/api/integrations/tmdb', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ api_key: key.trim(), save }),
       });
@@ -51,7 +52,7 @@ export function ConnectServiceHost() {
       if (data.restarting) {
         await new Promise(r => setTimeout(r, 1500));
         for (let i = 0; i < 40; i++) {
-          try { if ((await fetch('/health')).ok) break; } catch { /* restarting */ }
+          try { if ((await apiFetch('/health')).ok) break; } catch { /* restarting */ }
           await new Promise(r => setTimeout(r, 750));
         }
         window.location.reload();
