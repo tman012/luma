@@ -41,9 +41,9 @@ def app():
 class TestRequestPortalPasswordHashing:
     """Test that passwords are hashed, not stored plaintext."""
     
-    def test_admin_settings_hashes_password(self):
-        """PUT /api/request/admin/settings hashes the password (unit test)."""
-        from werkzeug.security import generate_password_hash
+    def test_password_hashing_works_correctly(self):
+        """Password hashing and verification works correctly (unit test)."""
+        from werkzeug.security import generate_password_hash, check_password_hash
         
         # Test the hash generation directly
         password = 'test1234'
