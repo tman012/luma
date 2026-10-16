@@ -981,7 +981,10 @@ class IndexerManager:
 
             # Handle rate limit / errors
             if resp.status_code in (400, 429):
-                until = _guard.guard_start_cooldown(gkey, resp.headers.get('Retry-After'))
+                strict = (resp.status_code == 400 and (_guard.is_strict_host(url) or
+                          str(config.get('definition') or '').strip().lower()
+                          in _guard.GUARD_LIMITS['strict_400_definitions']))
+                until = _guard.guard_start_cooldown(gkey, resp.status_code, resp.headers.get('Retry-After'), strict)
                 until_str = time.strftime('%H:%M:%S', time.localtime(until))
                 logger.warning(f'Indexer {config.get("name")} {resp.status_code}: no searches until {until_str}')
                 raise IndexerBackoffError(f'Rate limited ({resp.status_code}), retry after {until_str}')
@@ -994,6 +997,7 @@ class IndexerManager:
                 raise _logged(IndexerError(f'Server error {resp.status_code}'))
 
             resp.raise_for_status()
+            _guard.guard_note_success(gkey)   # ends a 400/429 streak
 
             # Cap response size at 5 MB (decode gzip automatically)
             content_bytes = b''

@@ -360,18 +360,52 @@ def guard_acquire(ix: int, interactive: bool, now: Optional[float] = None) -> Op
         return _guard_decide(ix, interactive, now)
 
 
-def guard_start_cooldown(ix: int, retry_after: Optional[str] = None,
-                         now: Optional[float] = None) -> float:
-    """After a 400/429 from *ix*: persist a cooldown until Retry-After, else
-    unscoped_cooldown_s. Returns the end time."""
-    now = time.time() if now is None else now
-    wait = _retry_after_seconds(retry_after, now)
-    until = now + (wait if wait is not None else GUARD_LIMITS['unscoped_cooldown_s'])
+def _apply_cooldown(ix: int, status: int, wait: Optional[float], tills: List[float],
+                    strict: bool, now: float) -> float:
+    """Shared 400/429 cooldown rule (ProwlarrClient and indexer_manager):
+    Retry-After, else a known backoff time, else the GUARD_LIMITS tier
+    doubled per consecutive 400/429 and capped. Bumps and persists the streak."""
     with _budget_state_guard:
         _guard_load()
+        streak = _guard_streak.get(ix, 0)
+        _guard_streak[ix] = streak + 1
+        if wait is not None:
+            until = now + wait
+        elif tills:
+            until = max(tills)
+        else:
+            base = GUARD_LIMITS['cooldown_429_s' if status == 429 else
+                                'cooldown_400_strict_s' if strict else 'cooldown_400_s']
+            until = now + min(base * 2 ** min(streak, 16), GUARD_LIMITS['cooldown_max_s'])
         _guard_cooldown[ix] = max(until, _guard_cooldown.get(ix, 0.0))
         _guard_save()
     return until
+
+
+def is_strict_host(url: str) -> bool:
+    """Whether *url*'s host is in GUARD_LIMITS['strict_400_hosts']."""
+    from urllib.parse import urlsplit
+    try:
+        h = (urlsplit(str(url)).hostname or '').lower().rstrip('.')
+    except ValueError:
+        return False
+    return any(h == x or h.endswith('.' + x) for x in GUARD_LIMITS['strict_400_hosts'])
+
+
+def guard_start_cooldown(ix: int, status: int, retry_after: Optional[str] = None,
+                         strict: bool = False, now: Optional[float] = None) -> float:
+    """After a 400/429 from an indexer-manager entry: same tiered, streak-
+    doubled, persisted cooldown as ProwlarrClient. Returns the end time."""
+    now = time.time() if now is None else now
+    return _apply_cooldown(ix, status, _retry_after_seconds(retry_after, now), [], strict, now)
+
+
+def guard_note_success(ix: int) -> None:
+    """A good answer from *ix* ends its 400/429 streak."""
+    with _budget_state_guard:
+        _guard_load()
+        if _guard_streak.pop(ix, 0):
+            _guard_save()
 
 
 def _cache_ttl(interactive: bool) -> float:
@@ -781,20 +815,7 @@ class ProwlarrClient:
             backoffs = self._indexer_backoffs()
             tills = [t for t in (backoffs.values() if ix == UNSCOPED else [backoffs.get(ix) or 0.0]) if t > now]
         strict = status == 400 and (ix == UNSCOPED or self._is_strict_tracker(ix))
-        with _budget_state_guard:
-            _guard_load()
-            streak = _guard_streak.get(ix, 0)
-            _guard_streak[ix] = streak + 1
-            if wait is not None:
-                until = now + wait
-            elif tills:
-                until = max(tills)
-            else:
-                base = GUARD_LIMITS['cooldown_429_s' if status == 429 else
-                                    'cooldown_400_strict_s' if strict else 'cooldown_400_s']
-                until = now + min(base * 2 ** min(streak, 16), GUARD_LIMITS['cooldown_max_s'])
-            _guard_cooldown[ix] = max(until, _guard_cooldown.get(ix, 0.0))
-            _guard_save()
+        until = _apply_cooldown(ix, status, wait, tills, strict, now)
         self._log_skip_once(ix, 'cooldown', round(until),
                             f'{self._indexer_name(ix)} (id {ix}) answered {resp.status_code}: no searches until '
                             f'{datetime.fromtimestamp(until).strftime("%H:%M:%S")}')

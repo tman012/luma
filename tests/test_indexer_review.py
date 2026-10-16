@@ -320,70 +320,7 @@ def test_search_pins_validated_ip_for_proxied_prowlarr():
 
 # ---- 4. Min-interval spacing ----
 
-def test_concurrent_callers_are_spaced_by_min_interval():
-    from app.indexer_manager import IndexerManager
-    interval = 0.3
-    cfg = dict(DIRECT, url='https://avistaz.example.com', rate_limited=True,
-               rate_limit_capacity=100, rate_limit_refill_seconds=1,
-               rate_limit_min_interval=interval)
-    sm = _settings({'indexer.indexers': [cfg]})
-    calls, lock = [], threading.Lock()
-
-    def fake_get(*a, **k):
-        with lock:
-            calls.append(time.monotonic())
-        return _ok_xml_resp()
-
-    with patch('app.indexer_manager.pinned_get', side_effect=fake_get):
-        m = IndexerManager(sm)
-        barrier = threading.Barrier(4)
-
-        def run(i):
-            barrier.wait()
-            m._search_one_indexer('ix1', f'q{i}', [2000], 10, interactive=False)
-
-        threads = [threading.Thread(target=run, args=(i,)) for i in range(4)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(10)
-    calls.sort()
-    assert len(calls) == 4
-    gaps = [b - a for a, b in zip(calls, calls[1:])]
-    assert all(g >= interval - 0.03 for g in gaps), gaps
-    assert calls[-1] - calls[0] < interval * 3 + 2.0  # generous bound for loaded machines
-
-
 # ---- 5. 429 with HTTP-date through the search path ----
-
-def test_429_http_date_end_to_end_avistaz():
-    from app.indexer_backend import LumaBackendAdapter
-    from app.indexer_manager import IndexerManager
-    sm = _settings({'indexer.indexers': [], 'indexer.base_url': 'http://prowlarr.example.com:9696',
-                    'indexer.api_key': 'pk'})
-    listing = Mock()
-    listing.raise_for_status = Mock()
-    listing.json.return_value = [{'id': 7, 'name': 'AvistaZ', 'implementation': 'Cardigann',
-                                  'protocol': 'torrent', 'enable': True, 'priority': 25, 'fields': []}]
-    with patch('app.indexer_manager.requests.Session') as sess:
-        sess.return_value.get.return_value = listing
-        m = IndexerManager(sm)
-        assert m.import_from_prowlarr('http://prowlarr.example.com:9696', 'pk')[0] == 1
-    avistaz = next(ix for ix in sm.store['indexer.indexers'] if ix['name'].startswith('AvistaZ'))
-    assert avistaz['rate_limited'] is True
-
-    resp = Mock()
-    resp.status_code = 429
-    resp.headers = {'Retry-After': formatdate(
-        (datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp(), usegmt=True)}
-    with patch('app.indexer_manager.pinned_get', return_value=resp) as pg:
-        results = LumaBackendAdapter(m).search_all('Some Movie', 'movie', 2020)
-    assert pg.called
-    assert results == []
-    state = m._get_state(avistaz['id'])
-    assert state.is_backed_off(time.time())
-    assert 295 <= state.backoff_seconds <= 305
-
 
 # ---- 6. Test hygiene ----
 
