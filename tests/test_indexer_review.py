@@ -73,7 +73,7 @@ def test_tokens_are_opaque_and_resolve(temp_data_dir):
     tok = m.issue_download_token(url, 'ix1')
     assert len(tok) >= 40 and 'secret' not in tok and 'tracker' not in tok
     assert all(c.isalnum() or c in '-_' for c in tok)
-    assert m.resolve_download_token(tok) == (url, 'ix1')
+    assert m.resolve_download_token(tok) == ('https://tracker.example.com/dl?id=5', 'ix1', True)
     assert m.resolve_download_token('not-a-token') is None
     assert m.issue_download_token(url, 'ix1') != tok
 
@@ -106,7 +106,7 @@ def test_tokens_persist_in_data_dir(temp_data_dir):
     sm = _settings({'indexer.indexers': [DIRECT]})
     tok = IndexerManager(sm).issue_download_token('https://tracker.example.com/a', 'ix1')
     assert (temp_data_dir / 'download_tokens.json').exists()
-    assert IndexerManager(sm).resolve_download_token(tok) == ('https://tracker.example.com/a', 'ix1')
+    assert IndexerManager(sm).resolve_download_token(tok) == ('https://tracker.example.com/a', 'ix1', False)
 
 
 # ---- 2. Download route ----
@@ -124,13 +124,14 @@ def route_env():
     stream = Mock()
     stream.status_code = 200
     stream.headers = {'Content-Type': 'application/x-bittorrent'}
-    stream.iter_content.return_value = [b'd8:announce']
+    stream.iter_content.side_effect = lambda chunk_size=8192: iter([b'd8:announce'])
     stream.raise_for_status = Mock()
     with patch('app.indexer_api.get_indexer_client', return_value=adapter), \
          patch.object(main, 'settings', sm), \
          patch('app.indexer_manager.pinned_get', return_value=stream) as pg, \
          patch('app.indexer_manager.validate_indexer_url', return_value=(True, '', '203.0.113.9')) as val:
         yield main, adapter, pg, val
+        stream.status_code = 200
 
 
 def _as_user(main, user):
@@ -275,7 +276,7 @@ def test_pinned_https_uses_sni_and_verifies_hostname(tls_server):
 @pytest.mark.no_ssrf_mock
 def test_rebinding_to_private_ip_rejected():
     from app.indexer_manager import validate_indexer_url
-    answers = [(2, 1, 6, '', ('203.0.113.5', 0)), (2, 1, 6, '', ('10.0.0.5', 0))]
+    answers = [(2, 1, 6, '', ('8.8.8.8', 0)), (2, 1, 6, '', ('10.0.0.5', 0))]
     with patch('socket.getaddrinfo', return_value=answers):
         ok, err, ip = validate_indexer_url('https://tracker.example.com', allow_lan=False)
     assert not ok and ip is None and '10.0.0.5' in err
@@ -413,3 +414,237 @@ def test_no_zinc_classes_in_indexer_ui():
     hits = [str(p) for p in (ROOT / 'frontend' / 'src' / 'pages' / 'settings').rglob('*.tsx')
             if 'zinc-' in p.read_text()]
     assert hits == []
+
+
+# ---- Round 2, item 1: SSRF address policy ----
+
+SSRF_CASES = [
+    # (address, allow_lan, allowed)
+    ('::', False, False), ('::', True, False),
+    ('0.0.0.0', False, False), ('0.0.0.0', True, False), ('0.1.2.3', True, False),
+    ('127.0.0.1', True, False), ('::1', True, False), ('::ffff:127.0.0.1', True, False),
+    ('64:ff9b::7f00:1', False, False), ('64:ff9b::7f00:1', True, False),
+    ('64:ff9b::a00:1', False, False), ('64:ff9b::a00:1', True, True),
+    ('64:ff9b::808:808', False, True),
+    ('2002:7f00:1::', True, False), ('2002:c0a8:101::', False, False), ('2002:808:808::', False, True),
+    ('::ffff:192.168.1.1', False, False), ('::ffff:192.168.1.1', True, True), ('::ffff:8.8.8.8', False, True),
+    ('198.18.0.1', False, False), ('198.18.0.1', True, False), ('198.19.255.1', True, False),
+    ('224.0.0.1', True, False), ('239.255.255.250', True, False), ('ff02::1', True, False),
+    ('240.0.0.1', True, False), ('255.255.255.255', True, False),
+    ('169.254.169.254', True, False), ('169.254.170.2', True, False), ('169.254.1.1', True, False),
+    ('fe80::1', True, False), ('fd00:ec2::254', True, False),
+    ('192.0.2.1', True, False), ('203.0.113.5', False, False), ('192.0.0.8', True, False),
+    ('10.1.2.3', False, False), ('10.1.2.3', True, True),
+    ('172.16.0.1', True, True), ('192.168.1.10', True, True),
+    ('100.64.0.1', False, False), ('100.64.0.1', True, True),
+    ('fd12:3456::1', False, False), ('fd12:3456::1', True, True),
+    ('8.8.8.8', False, True), ('2606:4700:4700::1111', False, True),
+]
+
+
+@pytest.mark.no_ssrf_mock
+@pytest.mark.parametrize('addr,allow_lan,allowed', SSRF_CASES)
+def test_ssrf_address_policy(addr, allow_lan, allowed):
+    from app.indexer_manager import validate_indexer_url
+    fam = socket.AF_INET6 if ':' in addr else socket.AF_INET
+    sockaddr = (addr, 0, 0, 0) if fam == socket.AF_INET6 else (addr, 0)
+    with patch('socket.getaddrinfo', return_value=[(fam, 1, 6, '', sockaddr)]):
+        ok, err, ip = validate_indexer_url('http://indexer.example.com:9696/', allow_lan=allow_lan)
+    assert ok is allowed, (addr, allow_lan, err)
+    assert (ip is not None) is allowed
+
+
+@pytest.mark.no_ssrf_mock
+@pytest.mark.parametrize('url,allow_lan', [('http://[::]:9696/', False), ('http://[::]:9696/', True),
+                                           ('http://0.0.0.0:9696/', True), ('http://[::1]:9696/', True),
+                                           ('http://[64:ff9b::7f00:1]/', True)])
+def test_ssrf_literal_addresses_rejected_without_mocks(url, allow_lan):
+    from app.indexer_manager import validate_indexer_url
+    ok, _, ip = validate_indexer_url(url, allow_lan=allow_lan)
+    assert not ok and ip is None
+
+
+@pytest.mark.no_ssrf_mock
+def test_prowlarr_loopback_exception_is_narrow():
+    from app.indexer_manager import validate_indexer_url
+    v = validate_indexer_url
+    assert v('http://localhost:9696/', allow_loopback_for_host='localhost')[0] is True
+    assert v('http://127.0.0.1:9696/', allow_loopback_for_host='127.0.0.1')[0] is True
+    assert v('http://[::]:9696/', allow_loopback_for_host='::')[0] is False
+    assert v('http://0.0.0.0:9696/', allow_lan=True, allow_loopback_for_host='0.0.0.0')[0] is False
+    assert v('http://127.0.0.1:9696/', allow_lan=True, allow_loopback_for_host='localhost')[0] is False
+
+
+# ---- Round 2, item 3: no API keys on disk ----
+
+def test_token_file_has_no_api_keys_and_is_private(temp_data_dir):
+    from app.indexer_manager import IndexerManager
+    m = IndexerManager(_settings({'indexer.indexers': [DIRECT]}))
+    m.issue_download_token('https://tracker.example.com/dl?id=1&apikey=SECRETKEY&x=2', 'ix1')
+    m.issue_download_token('https://tracker.example.com/dl?API_KEY=SECRETKEY', 'ix1')
+    f = temp_data_dir / 'download_tokens.json'
+    assert 'SECRETKEY' not in f.read_text()
+    assert (f.stat().st_mode & 0o777) == 0o600
+
+
+def test_legacy_token_file_is_scrubbed_on_load(temp_data_dir):
+    from app.indexer_manager import IndexerManager
+    f = temp_data_dir / 'download_tokens.json'
+    f.write_text(json.dumps({'tok': ['https://tracker.example.com/dl?id=1&apikey=OLDKEY', 'ix1', time.time() + 600]}))
+    m = IndexerManager(_settings({'indexer.indexers': [DIRECT]}))
+    assert m.resolve_download_token('tok') == ('https://tracker.example.com/dl?id=1', 'ix1', True)
+    assert 'OLDKEY' not in f.read_text()
+
+
+def test_download_readds_current_key_from_settings(route_env):
+    main, adapter, pg, _ = route_env
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/dl?id=1&apikey=STALE', 'ix1')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        assert main.app.test_client().get(f'/api/indexer/download/{tok}').status_code == 200
+    url = pg.call_args.args[0]
+    assert 'STALE' not in url and url.endswith('apikey=k')
+    assert pg.call_args.kwargs['headers'] == {'X-Api-Key': 'k'}
+    plain = adapter.manager.issue_download_token('https://tracker.example.com/dl?id=2', 'ix1')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        main.app.test_client().get(f'/api/indexer/download/{plain}')
+    assert pg.call_args.args[0] == 'https://tracker.example.com/dl?id=2'
+
+
+# ---- Round 2, item 4: concurrent saves ----
+
+def test_concurrent_state_saves_no_warnings_no_lost_counters(temp_data_dir, caplog):
+    import logging
+    from app.indexer_manager import IndexerManager
+    cfgs = [dict(DIRECT, id=f'ix{i}', name=f'I{i}') for i in range(4)]
+    m = IndexerManager(_settings({'indexer.indexers': cfgs}))
+    m._save_throttle_seconds = 0
+    per_thread = 50
+    caplog.set_level(logging.WARNING, logger='app.indexer_manager')
+
+    def work(i):
+        st = m._get_state(f'ix{i}')
+        for _ in range(per_thread):
+            with st.lock:
+                st.background_request_log.append(time.time())
+            m._save_state()
+
+    threads = [threading.Thread(target=work, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    m._last_save_time = 0
+    m._save_state()
+    assert not [r for r in caplog.records if 'Failed to save' in r.getMessage()]
+    assert not list(temp_data_dir.glob('*.tmp'))
+    f = temp_data_dir / 'indexer_state.json'
+    assert (f.stat().st_mode & 0o777) == 0o600
+    saved = json.loads(f.read_text())['states']
+    assert all(len(saved[f'ix{i}']['background_request_log']) == per_thread for i in range(4))
+
+
+# ---- Round 2, item 5: download response hardening ----
+
+@pytest.mark.parametrize('status', [301, 302, 204, 404, 500])
+def test_download_requires_200(route_env, status):
+    main, adapter, pg, _ = route_env
+    pg.return_value.status_code = status
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().get(f'/api/indexer/download/{tok}')
+    assert r.status_code == 502
+    pg.return_value.close.assert_called()
+
+
+def test_download_headers_forced_and_sanitized(route_env):
+    main, adapter, pg, _ = route_env
+    pg.return_value.headers = {'Content-Type': 'text/html',
+                               'Content-Disposition': 'attachment; filename="../../evil\r\n<script>.html"'}
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().get(f'/api/indexer/download/{tok}')
+    assert r.status_code == 200
+    assert r.headers['Content-Type'] == 'application/x-bittorrent'
+    assert r.headers['X-Content-Type-Options'] == 'nosniff'
+    cd = r.headers['Content-Disposition']
+    name = cd.split('filename="', 1)[1].rstrip('"')
+    assert name.endswith('.torrent')
+    assert '/' not in name and '\\' not in name and '<' not in name and '..' not in name
+
+
+def test_download_nzb_type(route_env):
+    main, adapter, pg, _ = route_env
+    pg.return_value.headers = {'Content-Type': 'application/x-nzb'}
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/get/1', 'ix1')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().get(f'/api/indexer/download/{tok}')
+    assert r.headers['Content-Type'] == 'application/x-nzb'
+    assert r.headers['Content-Disposition'] == 'attachment; filename="download.nzb"'
+
+
+def test_download_size_cap_while_streaming(route_env, monkeypatch):
+    from app import indexer_manager as im
+    main, adapter, pg, _ = route_env
+    monkeypatch.setattr(im, 'MAX_RESPONSE_SIZE', 20000)
+    pg.return_value.iter_content.side_effect = lambda chunk_size=8192: iter([b'x' * 8192] * 10)
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().get(f'/api/indexer/download/{tok}')
+        body = r.get_data()
+        r.close()
+    assert len(body) <= 20000
+    pg.return_value.close.assert_called()
+
+
+def test_download_declared_oversize_rejected(route_env, monkeypatch):
+    from app import indexer_manager as im
+    main, adapter, pg, _ = route_env
+    monkeypatch.setattr(im, 'MAX_RESPONSE_SIZE', 1000)
+    pg.return_value.headers = {'Content-Length': '5000'}
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        assert main.app.test_client().get(f'/api/indexer/download/{tok}').status_code == 502
+
+
+def test_download_closes_upstream_on_close(route_env):
+    main, adapter, pg, _ = route_env
+    tok = adapter.manager.issue_download_token('https://tracker.example.com/dl/1', 'ix1')
+    with _as_user(main, {'id': 2, 'is_admin': False}):
+        r = main.app.test_client().get(f'/api/indexer/download/{tok}')
+        r.get_data()
+        r.close()
+    pg.return_value.close.assert_called()
+
+
+# ---- Round 2, item 6: pinned_get closes its session ----
+
+def _count_session_closes(monkeypatch):
+    closes = []
+    real = requests.Session.close
+    monkeypatch.setattr(requests.Session, 'close', lambda self: (closes.append(1), real(self))[1])
+    return closes
+
+
+def test_pinned_get_closes_session_without_stream(local_server, monkeypatch):
+    from app.indexer_manager import pinned_get
+    closes = _count_session_closes(monkeypatch)
+    r = pinned_get(f'http://indexer.invalid:{local_server.server_address[1]}/', '127.0.0.1', timeout=5)
+    assert r.status_code == 200 and closes == [1]
+
+
+def test_pinned_get_closes_session_with_response(local_server, monkeypatch):
+    from app.indexer_manager import pinned_get
+    closes = _count_session_closes(monkeypatch)
+    r = pinned_get(f'http://indexer.invalid:{local_server.server_address[1]}/', '127.0.0.1',
+                   timeout=5, stream=True)
+    assert closes == []
+    r.close()
+    assert closes == [1]
+
+
+def test_pinned_get_closes_session_on_error(monkeypatch):
+    from app.indexer_manager import pinned_get
+    closes = _count_session_closes(monkeypatch)
+    with pytest.raises(requests.exceptions.ConnectionError):
+        pinned_get('http://indexer.invalid:1/', '127.0.0.1', timeout=2)
+    assert closes == [1]

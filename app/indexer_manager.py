@@ -15,6 +15,7 @@ import os
 import re
 import secrets
 import socket
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
@@ -28,25 +29,29 @@ from defusedxml import ElementTree as ET
 
 logger = logging.getLogger(__name__)
 
-# SSRF protection: disallowed IP ranges
-DISALLOWED_IP_RANGES = [
-    ipaddress.ip_network('0.0.0.0/8'),        # "This network"
-    ipaddress.ip_network('127.0.0.0/8'),      # Loopback (never allowed, even with allow_lan)
-    ipaddress.ip_network('169.254.0.0/16'),   # Link-local
-    ipaddress.ip_network('10.0.0.0/8'),       # Private RFC1918
-    ipaddress.ip_network('172.16.0.0/12'),    # Private RFC1918
-    ipaddress.ip_network('192.168.0.0/16'),   # Private RFC1918
-    ipaddress.ip_network('100.64.0.0/10'),    # CGNAT (RFC6598)
-    ipaddress.ip_network('::1/128'),          # IPv6 loopback (never allowed)
-    ipaddress.ip_network('fe80::/10'),        # IPv6 link-local
-    ipaddress.ip_network('fc00::/7'),         # IPv6 unique local (RFC4193)
+# SSRF policy (see _ip_block_reason):
+#  * always blocked: unspecified, loopback, link-local, multicast, reserved, 0.0.0.0/8
+#    and cloud metadata addresses (loopback has one exception: the configured
+#    Prowlarr host);
+#  * IPv4-mapped, NAT64 (64:ff9b::/96) and 6to4 addresses are unwrapped first;
+#  * without allow_lan the address must be globally routable;
+#  * allow_lan opens only RFC1918, IPv6 unique local and CGNAT.
+ALWAYS_BLOCKED_NETWORKS = [
+    ipaddress.ip_network('0.0.0.0/8'),
 ]
-
-# Loopback ranges (never allowed, even with allow_lan)
-LOOPBACK_RANGES = [
-    ipaddress.ip_network('127.0.0.0/8'),
-    ipaddress.ip_network('::1/128'),
+LAN_NETWORKS = [
+    ipaddress.ip_network('10.0.0.0/8'),
+    ipaddress.ip_network('172.16.0.0/12'),
+    ipaddress.ip_network('192.168.0.0/16'),
+    ipaddress.ip_network('100.64.0.0/10'),
+    ipaddress.ip_network('fc00::/7'),
 ]
+METADATA_IPS = {
+    ipaddress.ip_address('169.254.169.254'),
+    ipaddress.ip_address('169.254.170.2'),
+    ipaddress.ip_address('fd00:ec2::254'),
+}
+NAT64_NETWORK = ipaddress.ip_network('64:ff9b::/96')
 
 # Download tokens: lifetime and cap on how many are kept
 DOWNLOAD_TOKEN_TTL = 3600
@@ -65,6 +70,41 @@ def sanitize_api_key(text: str) -> str:
     # Remove X-Api-Key: xxx patterns
     text = re.sub(r'(X-Api-Key|apikey):\s*[^\s]+', r'\1: ***', text, flags=re.IGNORECASE)
     return text
+
+
+def write_private_json(path: Path, data: Any) -> None:
+    """Atomically write JSON readable only by the owner (unique temp file + os.replace)."""
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f'.{path.name}.', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(data, f)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def strip_api_key(url: str) -> Tuple[str, bool]:
+    """Remove apikey/api_key query parameters; return (url, whether one was removed)."""
+    from urllib.parse import parse_qsl, urlencode
+    parts = urlsplit(url)
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    kept = [(k, v) for k, v in pairs if k.lower() not in ('apikey', 'api_key')]
+    if len(kept) == len(pairs):
+        return url, False
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment)), True
+
+
+def add_api_key(url: str, api_key: str) -> str:
+    """Append apikey=<api_key> to url's query string."""
+    from urllib.parse import urlencode
+    parts = urlsplit(url)
+    query = '&'.join(q for q in (parts.query, urlencode({'apikey': api_key})) if q)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
 
 
 def data_dir() -> Path:
@@ -113,12 +153,29 @@ def pinned_get(url: str, pinned_ip: str, **kwargs) -> requests.Response:
     """GET *url* over a connection pinned to *pinned_ip* (from validate_indexer_url).
 
     Redirects are never followed, because a redirect target was not validated.
+    The session is closed with the response (immediately unless stream=True).
     """
     parts = urlsplit(url)
     session = requests.Session()
     session.mount(f'{parts.scheme}://', PinnedIPHTTPAdapter(pinned_ip, parts.hostname, parts.scheme))
     kwargs['allow_redirects'] = False
-    return session.get(url, **kwargs)
+    try:
+        resp = session.get(url, **kwargs)
+    except Exception:
+        session.close()
+        raise
+    if not kwargs.get('stream'):
+        session.close()
+        return resp
+    close_response = resp.close
+
+    def close():
+        try:
+            close_response()
+        finally:
+            session.close()
+    resp.close = close
+    return resp
 
 
 def parse_retry_after(retry_after_value: str) -> Optional[float]:
@@ -148,82 +205,83 @@ def parse_retry_after(retry_after_value: str) -> Optional[float]:
     return None
 
 
+def _unwrap_ip(ip):
+    """Return the IPv4 address embedded in an IPv4-mapped, NAT64 or 6to4 address, else ip."""
+    if ip.version == 6:
+        if ip.ipv4_mapped is not None:
+            return ip.ipv4_mapped
+        if ip in NAT64_NETWORK:
+            return ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+        if ip.sixtofour is not None:
+            return ip.sixtofour
+    return ip
+
+
+def _ip_block_reason(ip, allow_lan: bool, loopback_ok: bool) -> Optional[str]:
+    """Why *ip* may not be contacted, or None if it may."""
+    inner = _unwrap_ip(ip)
+    # Judge wrapped IPv6 forms by the IPv4 address they carry.
+    for addr in (inner,):
+        if addr in METADATA_IPS:
+            return 'Cloud metadata endpoint blocked'
+        if addr.is_loopback:
+            if loopback_ok:
+                continue
+            return f'Loopback IP blocked: {ip}'
+        if (addr.is_unspecified or addr.is_link_local or addr.is_multicast or addr.is_reserved
+                or any(addr in net for net in ALWAYS_BLOCKED_NETWORKS)):
+            return f'Private/restricted IP blocked: {ip}'
+    if inner.is_loopback and loopback_ok:
+        return None
+    if allow_lan and any(inner in net for net in LAN_NETWORKS):
+        return None
+    if not inner.is_global:
+        return f'Private/restricted IP blocked: {ip}'
+    return None
+
+
 def validate_indexer_url(url: str, allow_lan: bool = False, allow_loopback_for_host: Optional[str] = None) -> Tuple[bool, str, Optional[str]]:
     """
-    Validate indexer URL for SSRF protection.
-    
-    Returns (valid, error_message, pinned_ip).
-    Only http/https allowed. Rejects loopback, link-local, and private IPs unless allow_lan=True.
-    Loopback is NEVER allowed, even with allow_lan=True, EXCEPT for the specific host in allow_loopback_for_host.
-    Returns the pinned IP address to prevent DNS rebinding attacks.
+    Validate an indexer URL for SSRF protection.
+
+    Returns (valid, error_message, pinned_ip). Only http/https are allowed, and
+    every resolved address must pass _ip_block_reason; the first one is pinned
+    so the connection cannot be redirected by a second DNS answer. Loopback is
+    allowed only when the hostname is allow_loopback_for_host (the configured
+    Prowlarr host).
     """
     try:
         parsed = urlparse(url)
-        
-        # Only allow http/https
         if parsed.scheme not in ('http', 'https'):
             return False, f'Only http and https schemes allowed, got {parsed.scheme}', None
-        
+
         hostname = parsed.hostname
         if not hostname:
             return False, 'Missing hostname', None
-        
-        # Resolve to IP
-        import socket
+        loopback_ok = bool(allow_loopback_for_host) and hostname.lower() == allow_loopback_for_host.lower()
+
         try:
             addr_info = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         except socket.gaierror as e:
             return False, f'DNS resolution failed: {e}', None
-        
         if not addr_info:
             return False, 'DNS returned no addresses', None
-        
-        # Check all resolved addresses and pin the first valid one
+
         pinned_ip = None
-        for family, socktype, proto, canonname, sockaddr in addr_info:
-            ip_str = sockaddr[0]
-            
-            # Handle IPv4-mapped IPv6 addresses (::ffff:192.168.1.1)
-            if ip_str.startswith('::ffff:'):
-                ipv4_str = ip_str.replace('::ffff:', '')
-                try:
-                    ip = ipaddress.ip_address(ipv4_str)
-                except ValueError:
-                    ip = ipaddress.ip_address(ip_str)
-            else:
-                ip = ipaddress.ip_address(ip_str)
-            
-            # Cloud metadata endpoint
-            if ip_str == '169.254.169.254' or str(ip) == '169.254.169.254':
-                return False, 'Cloud metadata endpoint blocked', None
-            
-            # Check loopback (NEVER allowed, even with allow_lan, EXCEPT for configured Prowlarr host)
-            is_loopback = any(ip in network for network in LOOPBACK_RANGES)
-            if is_loopback:
-                if allow_loopback_for_host and hostname.lower() == allow_loopback_for_host.lower():
-                    # Loopback is allowed ONLY for the configured Prowlarr host
-                    if pinned_ip is None:
-                        pinned_ip = str(ip)
-                    continue
-                return False, f'Loopback IP blocked: {ip_str}', None
-            
-            # Check other disallowed ranges
-            for network in DISALLOWED_IP_RANGES:
-                if ip in network:
-                    if not allow_lan:
-                        return False, f'Private/restricted IP blocked: {ip_str}', None
-            
-            # Pin the first valid IP
+        for _family, _socktype, _proto, _canonname, sockaddr in addr_info:
+            ip = ipaddress.ip_address(str(sockaddr[0]).split('%', 1)[0])
+            reason = _ip_block_reason(ip, allow_lan, loopback_ok)
+            if reason:
+                return False, reason, None
             if pinned_ip is None:
                 pinned_ip = str(ip)
-        
+
         if pinned_ip is None:
             return False, 'No valid IP addresses found', None
-        
         return True, '', pinned_ip
-        
+
     except Exception as e:
-        logger.exception(f'URL validation error: {e}')
+        logger.exception(f'URL validation error: {sanitize_api_key(str(e))}')
         return False, f'Validation error: {sanitize_api_key(str(e))}', None
 
 
@@ -438,6 +496,7 @@ class IndexerManager:
         self._save_throttle_seconds = 5.0  # Throttle saves to every 5 seconds
         self._download_tokens: Dict[str, Tuple[str, str, float]] = {}  # token -> (url, indexer_id, expiry)
         self._download_tokens_lock = threading.Lock()
+        self._save_lock = threading.Lock()
         self._load_state()
         self._load_download_tokens()
 
@@ -490,45 +549,36 @@ class IndexerManager:
             logger.warning(f'Failed to load indexer state: {sanitize_api_key(str(e))}')
     
     def _save_state(self) -> None:
-        """
-        Save indexer state to disk (throttled and atomic).
-        Throttled to avoid excessive I/O, atomic via temp file + rename.
-        """
-        now = time.time()
-        # Throttle: save at most once per _save_throttle_seconds
-        if now - self._last_save_time < self._save_throttle_seconds:
-            return
-        
-        try:
-            state_file = self._get_state_file_path()
-            states_data = {}
-            
-            with self.states_lock:
-                for indexer_id, state in self.states.items():
-                    states_data[indexer_id] = state.to_dict()
-            
-            data = {
-                'config_hash': self.config_hash,
-                'states': states_data,
-            }
-            
-            # Atomic write: write to temp file, then rename
-            temp_file = state_file.with_suffix('.tmp')
-            with open(temp_file, 'w') as f:
-                json.dump(data, f)
-            temp_file.replace(state_file)
-            self._last_save_time = now
-            logger.debug(f'Saved indexer state to {state_file}')
-            
-        except Exception as e:
-            logger.warning(f'Failed to save indexer state: {sanitize_api_key(str(e))}')
+        """Save indexer state to disk, throttled, atomically, one writer at a time."""
+        with self._save_lock:
+            now = time.time()
+            if now - self._last_save_time < self._save_throttle_seconds:
+                return
+            try:
+                state_file = self._get_state_file_path()
+                with self.states_lock:
+                    states = list(self.states.items())
+                states_data = {}
+                for indexer_id, state in states:
+                    with state.lock:
+                        states_data[indexer_id] = state.to_dict()
+                write_private_json(state_file, {'config_hash': self.config_hash, 'states': states_data})
+                self._last_save_time = now
+                logger.debug(f'Saved indexer state to {state_file}')
+            except Exception as e:
+                logger.warning(f'Failed to save indexer state: {sanitize_api_key(str(e))}')
 
     def issue_download_token(self, url: str, indexer_id: str, ttl: int = DOWNLOAD_TOKEN_TTL,
                              persist: bool = True) -> str:
-        """Return an opaque token mapped server-side to (url, indexer_id) until it expires."""
+        """Return an opaque token mapped server-side to the download until it expires.
+
+        Any apikey in the URL is stripped before it is stored; the download
+        route adds the current key from settings back.
+        """
+        stored_url, had_key = strip_api_key(url)
         token = secrets.token_urlsafe(32)
         with self._download_tokens_lock:
-            self._download_tokens[token] = (url, indexer_id, time.time() + ttl)
+            self._download_tokens[token] = (stored_url, indexer_id, time.time() + ttl, had_key)
             self._prune_download_tokens()
             if persist:
                 self._persist_download_tokens()
@@ -539,19 +589,19 @@ class IndexerManager:
         with self._download_tokens_lock:
             self._persist_download_tokens()
 
-    def resolve_download_token(self, token: str) -> Optional[Tuple[str, str]]:
-        """Return (url, indexer_id) for a live token, or None if unknown or expired."""
+    def resolve_download_token(self, token: str) -> Optional[Tuple[str, str, bool]]:
+        """Return (url without apikey, indexer_id, needs_api_key) for a live token, else None."""
         with self._download_tokens_lock:
             self._prune_download_tokens()
             entry = self._download_tokens.get(token)
             if entry and time.time() < entry[2]:
-                return entry[0], entry[1]
+                return entry[0], entry[1], entry[3]
             return None
 
     def _prune_download_tokens(self) -> None:
         """Drop expired tokens, then the oldest beyond MAX_DOWNLOAD_TOKENS (lock held)."""
         now = time.time()
-        for tok in [t for t, (_, _, exp) in self._download_tokens.items() if exp <= now]:
+        for tok in [t for t, entry in self._download_tokens.items() if entry[2] <= now]:
             del self._download_tokens[tok]
         overflow = len(self._download_tokens) - MAX_DOWNLOAD_TOKENS
         if overflow > 0:
@@ -560,17 +610,12 @@ class IndexerManager:
                 del self._download_tokens[tok]
 
     def _persist_download_tokens(self) -> None:
-        """Persist download tokens to disk (call with lock held)."""
+        """Persist download tokens to disk, owner-only (call with lock held)."""
         try:
-            tokens_file = data_dir() / 'download_tokens.json'
-            temp_file = tokens_file.with_suffix('.tmp')
-            
-            with open(temp_file, 'w') as f:
-                json.dump(self._download_tokens, f)
-            temp_file.replace(tokens_file)
+            write_private_json(data_dir() / 'download_tokens.json', self._download_tokens)
         except Exception as e:
             logger.warning(f'Failed to persist download tokens: {sanitize_api_key(str(e))}')
-    
+
     def _load_download_tokens(self) -> None:
         """Load download tokens from disk."""
         try:
@@ -582,11 +627,14 @@ class IndexerManager:
                 data = json.load(f)
             
             with self._download_tokens_lock:
-                self._download_tokens = {
-                    str(tok): (str(v[0]), str(v[1]), float(v[2]))
-                    for tok, v in data.items()
-                    if isinstance(v, (list, tuple)) and len(v) == 3
-                }
+                tokens = {}
+                for tok, v in data.items():
+                    if not isinstance(v, (list, tuple)) or len(v) not in (3, 4):
+                        continue
+                    url, had_key = strip_api_key(str(v[0]))
+                    tokens[str(tok)] = (url, str(v[1]), float(v[2]), bool(v[3]) if len(v) == 4 else had_key)
+                self._download_tokens = tokens
+                self._persist_download_tokens()
                 self._prune_download_tokens()
         except Exception as e:
             logger.warning(f'Failed to load download tokens: {sanitize_api_key(str(e))}')

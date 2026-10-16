@@ -17213,9 +17213,23 @@ def _url_host_port(url: str):
     return (parts.hostname or '').lower(), port
 
 
+def _download_filename(content_disposition: str, ext: str) -> str:
+    """A safe attachment filename from an upstream Content-Disposition header."""
+    import re
+    from email.message import Message
+    msg = Message()
+    msg['content-disposition'] = content_disposition or ''
+    raw = msg.get_filename() or ''
+    name = re.sub(r'[^A-Za-z0-9._()\[\] -]+', '_', raw.replace('\\', '/').rsplit('/', 1)[-1])
+    name = name.strip(' ._')[:150] or 'download'
+    if not name.lower().endswith(ext):
+        name += ext
+    return name
+
+
 @app.route('/api/indexer/download/<token>', methods=['GET'])
 def download_torrent_proxy(token: str):
-    """Stream a torrent for an opaque download token without exposing indexer API keys.
+    """Stream a torrent or NZB for an opaque download token without exposing indexer API keys.
 
     Open to any signed-in user; anonymous requests are refused.
     """
@@ -17224,7 +17238,8 @@ def download_torrent_proxy(token: str):
         return err
     
     try:
-        from app.indexer_manager import sanitize_api_key, validate_indexer_url, pinned_get
+        from app.indexer_manager import (MAX_RESPONSE_SIZE, add_api_key, pinned_get,
+                                         sanitize_api_key, validate_indexer_url)
         from flask import Response
         
         from app.indexer_api import get_indexer_client
@@ -17237,7 +17252,7 @@ def download_torrent_proxy(token: str):
         if not token_data:
             return jsonify({'error': 'Invalid or expired download token'}), 403
         
-        download_url, indexer_id = token_data
+        download_url, indexer_id, needs_api_key = token_data
         
         config = next((ix for ix in (settings.get('indexer.indexers') or [])
                        if ix.get('id') == indexer_id), None)
@@ -17269,17 +17284,42 @@ def download_torrent_proxy(token: str):
         if not valid:
             return jsonify({'error': f'URL validation failed: {error}'}), 403
         
+        fetch_url = add_api_key(download_url, api_key) if (needs_api_key and api_key) else download_url
         headers = {'X-Api-Key': api_key} if api_key else {}
-        resp = pinned_get(download_url, pinned_ip, headers=headers, stream=True, timeout=30)
-        resp.raise_for_status()
+        resp = pinned_get(fetch_url, pinned_ip, headers=headers, stream=True, timeout=30)
         
-        return Response(
-            resp.iter_content(chunk_size=8192),
-            content_type=resp.headers.get('Content-Type', 'application/x-bittorrent'),
-            headers={
-                'Content-Disposition': resp.headers.get('Content-Disposition', 'attachment; filename="download.torrent"')
-            }
-        )
+        if resp.status_code != 200:
+            resp.close()
+            logger.warning('Indexer %s download returned HTTP %s', indexer_id, resp.status_code)
+            return jsonify({'error': f'Indexer returned HTTP {resp.status_code}'}), 502
+        try:
+            declared = int(resp.headers.get('Content-Length') or 0)
+        except ValueError:
+            declared = 0
+        if declared > MAX_RESPONSE_SIZE:
+            resp.close()
+            return jsonify({'error': 'Download too large'}), 502
+        
+        upstream_type = (resp.headers.get('Content-Type') or '').lower()
+        is_nzb = (config.get('type') == 'newznab' or 'nzb' in upstream_type
+                  or download_url.lower().split('?', 1)[0].endswith('.nzb'))
+        mimetype, ext = ('application/x-nzb', '.nzb') if is_nzb else ('application/x-bittorrent', '.torrent')
+        filename = _download_filename(resp.headers.get('Content-Disposition', ''), ext)
+        
+        def body():
+            sent = 0
+            for chunk in resp.iter_content(chunk_size=8192):
+                sent += len(chunk)
+                if sent > MAX_RESPONSE_SIZE:
+                    logger.warning('Indexer %s download exceeded %d bytes; stopped', indexer_id, MAX_RESPONSE_SIZE)
+                    return
+                yield chunk
+        
+        out = Response(body(), mimetype=mimetype)
+        out.headers['X-Content-Type-Options'] = 'nosniff'
+        out.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        out.call_on_close(resp.close)
+        return out
         
     except Exception as e:
         from app.indexer_manager import sanitize_api_key

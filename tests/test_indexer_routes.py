@@ -80,23 +80,39 @@ class TestIndexerRoutesAdminOnly:
                 assert resp.status_code == 200
 
 
+@pytest.fixture
+def portal_host(monkeypatch):
+    """Point the request portal at its own settings so other tests cannot leak theirs in."""
+    from app import request_portal
+    values = {
+        'request_portal.hostname': 'requests.example.com',
+        'request_portal.enabled': True,
+    }
+    stub = Mock()
+    stub.get.side_effect = lambda k, d=None: values.get(k, d)
+    monkeypatch.setattr(request_portal, '_settings', stub)
+    return 'requests.example.com'
+
+
 class TestRequestPortalHostIndexerBlocking:
     """Test that request portal host gets 404 on indexer routes."""
     
-    def test_portal_host_blocks_indexer_list(self, client):
-        """Request portal hostname blocks indexer list."""
-        with patch('app.main.settings.get') as mock_get:
-            mock_get.side_effect = lambda k, d=None: {
-                'request_portal.hostname': 'requests.example.com',
-                'request_portal.enabled': True,
-            }.get(k, d)
-            
-            resp = client.get(
-                '/api/settings/indexers',
-                headers={'Host': 'requests.example.com'}
-            )
-            # Portal host should get 404 or be blocked
-            assert resp.status_code in (404, 403)
+    def test_portal_host_blocks_indexer_list(self, client, portal_host):
+        """Request portal hostname gets 404, even with no signed-in user."""
+        with patch('app.main._get_current_user', return_value=None):
+            resp = client.get('/api/settings/indexers', headers={'Host': portal_host})
+        assert resp.status_code == 404
+    
+    def test_portal_host_blocks_indexer_download(self, client, portal_host):
+        """The download proxy is also 404 on the portal hostname."""
+        with patch('app.main._get_current_user', return_value=None):
+            resp = client.get('/api/indexer/download/x', headers={'Host': portal_host})
+        assert resp.status_code == 404
+    
+    def test_host_guard_runs_before_every_other_hook(self, app):
+        """The portal-host 404 runs before any auth hook."""
+        from app import request_portal
+        assert app.before_request_funcs[None][0] is request_portal._host_guard
 
 
 class TestTunnelTrafficIndexerBlocking:

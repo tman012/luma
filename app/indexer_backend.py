@@ -65,8 +65,8 @@ class LumaBackendAdapter:
         """Import indexers from Prowlarr."""
         return self.manager.import_from_prowlarr(prowlarr_url, prowlarr_api_key)
     
-    def get_download_token(self, token: str) -> Optional[Tuple[str, str]]:
-        """Resolve an opaque download token to (url, indexer_id), or None."""
+    def get_download_token(self, token: str) -> Optional[Tuple[str, str, bool]]:
+        """Resolve an opaque download token to (url without apikey, indexer_id, needs_api_key)."""
         return self.manager.resolve_download_token(token)
     
     def get_indexers(self) -> List[Dict]:
