@@ -15,14 +15,14 @@ import {
 } from '@/components/start/StartUI';
 
 type Step = 'loading' | 'welcome' | 'plex' | 'servers' | 'connecting' | 'access' | 'done';
-type Mode = 'pin_remote' | 'pin' | 'open';
+export type AuthRequired = 'disabled_local' | 'enabled';
+type Mode = AuthRequired;
 
 interface Server { machine_id: string; name: string }
 
 export const ACCESS_CHOICES: Array<{ value: Mode; label: string }> = [
-  { value: 'pin_remote', label: 'Disabled for local addresses' },
-  { value: 'pin', label: 'Always' },
-  { value: 'open', label: 'Never' },
+  { value: 'disabled_local', label: 'Disabled for local addresses' },
+  { value: 'enabled', label: 'Enabled' },
 ];
 
 async function api<T = Record<string, unknown>>(url: string, init?: RequestInit): Promise<{ ok: boolean; status: number; data: T }> {
@@ -214,7 +214,7 @@ export function StartPage() {
 }
 
 /** "Require PIN" segmented choice with an inline keypad (entered twice). */
-export function AccessChooser({ onSaved, initial = 'pin_remote', pinSet = false, compactTitle }: {
+export function AccessChooser({ onSaved, initial = 'disabled_local', pinSet = false, compactTitle }: {
   onSaved: (mode: Mode) => void;
   initial?: Mode;
   pinSet?: boolean;
@@ -229,7 +229,7 @@ export function AccessChooser({ onSaved, initial = 'pin_remote', pinSet = false,
 
   const save = async (p?: string, c?: string) => {
     setBusy(true);
-    const { ok, data } = await sendJson('/api/security', p ? { mode, pin: p, confirm: c } : { mode }, 'PUT');
+    const { ok, data } = await sendJson('/api/security', p ? { auth_required: mode, pin: p, confirm: c } : { auth_required: mode }, 'PUT');
     setBusy(false);
     if (ok) { onSaved(mode); return; }
     setPin(''); setFirst('');
@@ -246,7 +246,8 @@ export function AccessChooser({ onSaved, initial = 'pin_remote', pinSet = false,
     save(first, value);
   };
 
-  const needsPin = mode !== 'open';
+  // Remote visitors always sign in, so a PIN is needed in both modes.
+  const needsPin = true;
   return (
     <>
       <h1 style={{ margin: 0, marginTop: compactTitle ? 0 : 'min(10vh, 90px)', fontSize: 28, fontWeight: 600, textAlign: 'center' }}>
@@ -260,7 +261,7 @@ export function AccessChooser({ onSaved, initial = 'pin_remote', pinSet = false,
             role="radio"
             aria-checked={mode === c.value}
             onClick={() => { setMode(c.value); setPin(''); setFirst(''); setError(''); }}
-            style={{ ...segItem, ...(mode === c.value ? segOn : null), flex: c.value === 'pin_remote' ? 2.2 : 1 }}
+            style={{ ...segItem, ...(mode === c.value ? segOn : null), flex: c.value === 'disabled_local' ? 2.2 : 1 }}
           >
             {c.label}
           </button>

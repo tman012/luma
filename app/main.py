@@ -83,7 +83,7 @@ logger = logging.getLogger(__name__)
 
 # Flask app setup
 app = Flask(__name__,
-            static_folder='/app/static')
+            static_folder=os.environ.get('FLASK_STATIC_FOLDER') or '/app/static')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or _INSTALL_SECRETS['flask_secret_key']
 CORS(app, supports_credentials=False)
 
@@ -96,13 +96,18 @@ from app.server_config import get_url_base
 _URL_BASE = get_url_base(settings)
 app.config['URL_BASE'] = _URL_BASE
 
-# Apply ProxyFix if trusted proxies are configured
-# This makes request.is_secure, request.scheme, and request.host use X-Forwarded-* headers
-_trusted_proxies = _access.trusted_proxies(settings)
-if _trusted_proxies:
-    from werkzeug.middleware.proxy_fix import ProxyFix
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
-    logger.info(f"ProxyFix enabled (trusted proxies configured: {len(_trusted_proxies)} networks)")
+# Scheme and host come from X-Forwarded-Proto / X-Forwarded-Host only when the
+# direct peer is a trusted proxy (read per request, so settings changes apply).
+# REMOTE_ADDR is left alone; access.client_ip() resolves the client address.
+app.wsgi_app = _access.TrustedProxyMiddleware(app.wsgi_app, lambda: settings)
+
+# Background threads (caches, search index, automations) start from
+# start_services(); tests and tools can turn them off with
+# START_BACKGROUND_THREADS=False (read when start_services runs).
+app.config['START_BACKGROUND_THREADS'] = not (
+    os.environ.get('LUMA_SKIP_BACKGROUND_THREADS', '').strip().lower() in ('1', 'true', 'yes', 'on')
+    or bool(settings.get('general.skip_background_threads'))
+)
 
 if _URL_BASE:
     from werkzeug.middleware.dispatcher import DispatcherMiddleware
@@ -120,10 +125,10 @@ if _URL_BASE:
 
 # Lazy import after constants are defined
 def _register_bot_api():
-    """Register bot API routes after LUMA_SESSION_COOKIE and _INSTALL_SECRETS are available."""
+    """Register bot API routes after AUTH_COOKIE and _INSTALL_SECRETS are available."""
     try:
         from app.bot_api import register_bot_routes
-        register_bot_routes(app, LUMA_SESSION_COOKIE, _INSTALL_SECRETS)
+        register_bot_routes(app, AUTH_COOKIE, _INSTALL_SECRETS)
     except Exception as _bot_api_err:
         logger.error("Failed to register bot API routes: %s", _bot_api_err)
 
@@ -141,7 +146,10 @@ def _register_bot_api():
 # Auth middleware — read session cookie on every request
 # ---------------------------------------------------------------------------
 
-LUMA_SESSION_COOKIE = "luma_session"
+# The only session cookie Luma issues or accepts. The pre-2026 "luma_session"
+# cookie is no longer read; any copy a browser still sends is expired.
+AUTH_COOKIE = "luma_auth_session"
+LEGACY_SESSION_COOKIE = "luma_session"
 # These paths don't need auth
 _AUTH_EXEMPT = {
     "/health", "/api/auth/login", "/api/auth/me", "/api/auth/check-user",
@@ -178,7 +186,7 @@ def load_current_user():
         return
 
     # Read session cookie
-    token = request.cookies.get('luma_auth_session')
+    token = request.cookies.get(AUTH_COOKIE)
     g.current_user = user_auth.validate_session(token) if token else None
     if g.current_user is None and not _access.should_authenticate(settings, request):
         # Implicit owner for local requests when auth_required=disabled_local
@@ -355,6 +363,29 @@ def _resolve_users_for_arr_url(arr_url: str) -> list[int]:
                 matching_users.append(u['id'])
                 break
     return matching_users if matching_users else _shared_targets()
+
+
+def set_auth_cookie(resp, token, max_age=60 * 60 * 24 * 30):
+    """Issue the session cookie: httponly, secure per scheme, scoped to the URL base."""
+    resp.set_cookie(AUTH_COOKIE, token, max_age=max_age, httponly=True, samesite='Lax',
+                    secure=request.is_secure, path=app.config.get('URL_BASE') or '/')
+    return resp
+
+
+def clear_auth_cookie(resp):
+    resp.delete_cookie(AUTH_COOKIE, path=app.config.get('URL_BASE') or '/')
+    return resp
+
+
+@app.after_request
+def _expire_legacy_session_cookie(response):
+    """Expire the retired luma_session cookie whenever a browser still sends it."""
+    if LEGACY_SESSION_COOKIE in request.cookies:
+        response.delete_cookie(LEGACY_SESSION_COOKIE, path='/')
+        base = app.config.get('URL_BASE') or ''
+        if base:
+            response.delete_cookie(LEGACY_SESSION_COOKIE, path=base)
+    return response
 
 
 @app.after_request
@@ -1182,6 +1213,7 @@ def _auth_guard():
     """Redirect to login if authentication is required and user not authenticated."""
     # Skip for static files, auth routes, and request portal
     if (request.path.startswith('/static/') or 
+        request.path in _AUTH_EXEMPT or
         request.path == '/login' or
         request.path == '/logout' or
         request.path == '/api/request/unlock' or
@@ -1194,7 +1226,7 @@ def _auth_guard():
     # If auth is enabled for everyone, or disabled for local but this is remote
     if auth_required == 'enabled' or (auth_required == 'disabled_local' and not _access.is_local_request(request, settings)):
         # Check if user is authenticated (not implicit)
-        if not g.current_user or g.implicit_user:
+        if not getattr(g, 'current_user', None) or getattr(g, 'implicit_user', False):
             # For API calls, return 401
             if request.path.startswith('/api/'):
                 return jsonify({"error": "Authentication required"}), 401
@@ -1223,33 +1255,26 @@ def _csrf_api_guard():
     if request.path.startswith('/api/request/'):
         return None
     
-    # Skip if not authenticated via session cookie
-    if not g.current_user:
+    # Skip if not authenticated (the route itself will refuse)
+    if not getattr(g, 'current_user', None):
         return None
     
-    # Skip if authenticated via API key (not cookie-based)
-    if request.headers.get("X-API-Key"):
+    # Skip if authenticated via a valid API key (not cookie-based)
+    if g.current_user.get('id') == 0 and request.headers.get("X-API-Key"):
         return None
     
-    # Get Origin or Referer header
     origin = request.headers.get('Origin')
     referer = request.headers.get('Referer')
     
-    # Get expected scheme and host (ProxyFix handles X-Forwarded-* if configured)
-    expected_scheme = request.scheme
-    expected_host = request.host
+    # Scheme/host already reflect X-Forwarded-* only for trusted proxies.
+    from app.auth_routes import is_same_origin
     
-    # Import helper from auth_routes
-    from app.auth_routes import _is_same_origin
-    
-    # If Origin or Referer is present, validate it (even for implicit users)
-    if origin:
-        if not _is_same_origin(origin, expected_scheme, expected_host):
-            return jsonify({"error": "CSRF validation failed: invalid Origin"}), 403
-    
-    if referer:
-        if not _is_same_origin(referer, expected_scheme, expected_host):
-            return jsonify({"error": "CSRF validation failed: invalid Referer"}), 403
+    # A cross-origin Origin or Referer is refused for everyone, including
+    # implicit LAN-owner users.
+    if origin and not is_same_origin(origin):
+        return jsonify({"error": "CSRF validation failed: invalid Origin"}), 403
+    if referer and not is_same_origin(referer):
+        return jsonify({"error": "CSRF validation failed: invalid Referer"}), 403
     
     # Skip CSRF check for implicit users when no Origin/Referer (LAN direct access)
     if getattr(g, 'implicit_user', False):
@@ -1278,8 +1303,14 @@ def _serve_spa():
         # Insert after <head> tag
         html = html.replace('<head>', f'<head>{injection}', 1)
         
-        # Update hardcoded paths in index.html
-        # Replace absolute paths with base-relative
+        # The bundle is built with a relative base (./assets/...). Anchor it
+        # to the URL base so deep links like /luma/library/1 still load it.
+        for attr in ('src', 'href'):
+            html = html.replace(f'{attr}="./assets/', f'{attr}="{url_base}/assets/')
+            html = html.replace(f'{attr}="./manifest.json"', f'{attr}="{url_base}/manifest.json"')
+            html = html.replace(f'{attr}="./static/', f'{attr}="{url_base}/static/')
+        
+        # Prefix root-relative paths with the URL base
         if url_base:
             # Fix manifest.json reference
             html = html.replace('href="/manifest.json"', f'href="{url_base}/manifest.json"')
@@ -7560,7 +7591,7 @@ def auth_login():
             return jsonify({'success': False, 'error': 'Email and password are required'}), 400
 
         from app import login_limiter
-        client_ip = request.remote_addr or ''
+        client_ip = _access.client_ip(request, settings) or (request.remote_addr or '')
         wait = login_limiter.retry_after(client_ip, identifier)
         if wait:
             mins = max(1, (wait + 59) // 60)
@@ -7595,21 +7626,11 @@ def auth_login():
             }
         }))
         
-        # Get URL base for cookie path
-        url_base = app.config.get('URL_BASE', '') or '/'
         
-        # Set new session cookie (httponly, secure per scheme, scoped to URL base)
-        resp.set_cookie(
-            'luma_auth_session', token,
-            max_age=60 * 60 * 24 * 30,  # 30 days
-            httponly=True,
-            samesite='Lax',
-            secure=request.is_secure,
-            path=url_base,
-        )
+        set_auth_cookie(resp, token)
         
         # Expire legacy cookie
-        resp.delete_cookie(LUMA_SESSION_COOKIE, path='/')
+        resp.delete_cookie(LEGACY_SESSION_COOKIE, path='/')
         
         return resp
 
@@ -7852,17 +7873,15 @@ def _send_approval_email(to_email: str, display_name: str) -> None:
 def auth_logout():
     """Clear the session cookie and invalidate the session."""
     try:
-        token = request.cookies.get('luma_auth_session')
+        token = request.cookies.get(AUTH_COOKIE)
         if token:
             user_auth.delete_session(token)
         resp = make_response(jsonify({'success': True}))
         
-        # Get URL base for cookie path
-        url_base = app.config.get('URL_BASE', '') or '/'
         
         # Delete both new and legacy cookies
-        resp.delete_cookie('luma_auth_session', path=url_base)
-        resp.delete_cookie(LUMA_SESSION_COOKIE, path='/')
+        clear_auth_cookie(resp)
+        resp.delete_cookie(LEGACY_SESSION_COOKIE, path='/')
         return resp
     except Exception as e:
         logger.error(f"auth_logout error: {e}")
@@ -7943,15 +7962,11 @@ def auth_unlock():
     token = user_auth.create_session(user['id'])
     resp = make_response(jsonify({'success': True}))
     
-    # Get URL base for cookie path
-    url_base = app.config.get('URL_BASE', '') or '/'
     
-    # Set new session cookie (httponly, secure per scheme, scoped to URL base)
-    resp.set_cookie('luma_auth_session', token, max_age=60 * 60 * 24 * 30,
-                    httponly=True, samesite='Lax', secure=request.is_secure, path=url_base)
+    set_auth_cookie(resp, token)
     
     # Expire legacy cookie
-    resp.delete_cookie(LUMA_SESSION_COOKIE, path='/')
+    resp.delete_cookie(LEGACY_SESSION_COOKIE, path='/')
     
     return resp
 
@@ -8031,16 +8046,12 @@ def security_put():
     
     # Keep this browser signed in after enabling authentication
     if auth_required == 'enabled' and getattr(g, 'implicit_user', False):
-        # Get URL base for cookie path
-        url_base = app.config.get('URL_BASE', '') or '/'
         
         token = user_auth.create_session(user['id'])
-        # Set new session cookie (httponly, secure per scheme, scoped to URL base)
-        resp.set_cookie('luma_auth_session', token, max_age=60 * 60 * 24 * 30,
-                        httponly=True, samesite='Lax', secure=request.is_secure, path=url_base)
+        set_auth_cookie(resp, token)
         
         # Expire legacy cookie
-        resp.delete_cookie(LUMA_SESSION_COOKIE, path='/')
+        resp.delete_cookie(LEGACY_SESSION_COOKIE, path='/')
     
     return resp
 
@@ -15944,7 +15955,8 @@ def manifest():
     """PWA manifest — app is always Luma."""
     sm = SettingsManager()
     theme = sm.get("ui.theme_color") or "#0a0a0a"
-    url_base = app.config.get('URL_BASE', '') or '/'
+    prefix = app.config.get('URL_BASE', '') or ''
+    url_base = prefix or '/'
     data = {
         "name": "Luma",
         "short_name": "Luma",
@@ -15956,8 +15968,8 @@ def manifest():
         "theme_color": theme,
         "orientation": "portrait",
         "icons": [
-            {"src": "/static/images/ic_launcher_round.png", "sizes": "72x72", "type": "image/png"},
-            {"src": "/static/images/ic_launcher.png", "sizes": "72x72", "type": "image/png", "purpose": "any"},
+            {"src": f"{prefix}/static/images/ic_launcher_round.png", "sizes": "72x72", "type": "image/png"},
+            {"src": f"{prefix}/static/images/ic_launcher.png", "sizes": "72x72", "type": "image/png", "purpose": "any"},
         ],
     }
     return jsonify(data)
@@ -15965,7 +15977,7 @@ def manifest():
 @app.route('/sw.js')
 def service_worker():
     """Service Worker file — short cache so updates propagate quickly."""
-    resp = send_from_directory('/app/static', 'sw.js')
+    resp = send_from_directory(app.static_folder, 'sw.js')
     resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
     url_base = app.config.get('URL_BASE', '') or '/'
     resp.headers['Service-Worker-Allowed'] = url_base
@@ -17878,7 +17890,7 @@ def integrations_tmdb():
 
 from app import start_flow as _start_flow
 _start_flow.init(
-    settings=settings, user_auth=user_auth, session_cookie=LUMA_SESSION_COOKIE,
+    settings=settings, user_auth=user_auth, session_cookie=AUTH_COOKIE,
     client_id=_INSTALL_SECRETS['plex_client_id'], on_plex_saved=_start_plex_saved,
     get_current_user=_get_current_user,
 )

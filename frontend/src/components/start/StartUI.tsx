@@ -3,6 +3,7 @@
  * centered column, pill buttons and the 4-digit keypad.
  */
 import { useEffect } from 'react';
+import { assetUrl } from '@/urlHelpers';
 
 export const FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 
@@ -54,7 +55,7 @@ export function Status({ text }: { text: string }) {
 export function Logo({ top = '14vh' }: { top?: string }) {
   return (
     <img
-      src="/static/images/luma_text.webp"
+      src={assetUrl('/static/images/luma_text.webp')}
       alt="Luma"
       style={{ width: 'clamp(240px, 64vw, 520px)', height: 'auto', userSelect: 'none', marginTop: top }}
       draggable={false}

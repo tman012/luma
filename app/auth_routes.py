@@ -3,7 +3,6 @@
 import logging
 import time
 import secrets
-from collections import defaultdict
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, make_response, redirect, url_for, render_template_string, session, current_app
 from werkzeug.security import check_password_hash
@@ -82,33 +81,26 @@ def _validate_csrf_token(token: str) -> bool:
     return secrets.compare_digest(expected, token)
 
 
-def _is_same_origin(request_origin: str, expected_scheme: str, expected_host: str) -> bool:
-    """Check if request_origin matches expected scheme://netloc exactly.
-    
-    Args:
-        request_origin: Origin or Referer header value (may include path)
-        expected_scheme: Expected scheme (http or https)
-        expected_host: Expected Host header value (may include port)
-    
-    Returns:
-        True if origins match exactly (scheme and netloc), False otherwise
+def is_same_origin(value: str) -> bool:
+    """True when an Origin or Referer value has exactly this request's scheme://netloc.
+
+    The single origin check used by logout and the API CSRF guard. Scheme and
+    host reflect X-Forwarded-Proto/Host only for trusted proxies (see
+    access.TrustedProxyMiddleware). Prefix tricks such as
+    http://127.0.0.1:5302.evil.com never match http://127.0.0.1:5302.
     """
-    from urllib.parse import urlparse
-    
-    if not request_origin:
+    from urllib.parse import urlsplit
+
+    if not value:
         return False
-    
-    # Parse the request origin/referer
-    parsed = urlparse(request_origin)
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
     if not parsed.scheme or not parsed.netloc:
         return False
-    
-    # Extract netloc from expected_host (Host header may include port)
-    expected_netloc = expected_host.lower()
-    
-    # Compare scheme and netloc exactly
-    return (parsed.scheme.lower() == expected_scheme.lower() and 
-            parsed.netloc.lower() == expected_netloc)
+    return (parsed.scheme.lower() == request.scheme.lower()
+            and parsed.netloc.lower() == request.host.lower())
 
 
 # Simple HTML login page
@@ -345,7 +337,7 @@ def login():
     else:
         max_age = None  # Session cookie
     
-    # Secure flag if HTTPS
+    # Secure flag per scheme (X-Forwarded-Proto only from trusted proxies)
     secure = request.is_secure
     
     # Cookie path respects URL base
@@ -368,23 +360,16 @@ def login():
 @bp.route('/logout', methods=['POST'])
 def logout():
     """Logout endpoint - POST-only, deletes session and cookie."""
-    # Check if request came from same origin (CSRF protection)
+    # CSRF protection: exact same-origin Origin (or Referer) required
     origin = request.headers.get('Origin')
     referer = request.headers.get('Referer')
-    host = request.headers.get('Host', '')
-    
-    # Determine expected scheme
-    scheme = 'https' if request.is_secure else 'http'
-    
-    # Validate origin or referer matches (exact scheme://netloc)
-    valid_request = False
-    if origin and _is_same_origin(origin, scheme, host):
-        valid_request = True
-    elif referer and _is_same_origin(referer, scheme, host):
-        valid_request = True
+    if origin:
+        valid_request = is_same_origin(origin)
+    else:
+        valid_request = is_same_origin(referer)
     
     if not valid_request:
-        logger.warning(f"[auth] Logout CSRF check failed: origin={origin}, referer={referer}, host={host}")
+        logger.warning(f"[auth] Logout CSRF check failed: origin={origin}, referer={referer}, host={request.host}")
         return jsonify({"error": "Invalid request"}), 403
     
     token = request.cookies.get(AUTH_COOKIE)
@@ -397,6 +382,7 @@ def logout():
     
     response = make_response(redirect(login_url))
     response.delete_cookie(AUTH_COOKIE, path=url_base)
+    response.delete_cookie('luma_session', path='/')
     
     return response
 

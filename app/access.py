@@ -1,12 +1,16 @@
 """Access control: who may use Luma without signing in.
 
-Authentication is controlled by security.auth_required:
-- 'disabled_local': local requests (private IP or via trusted proxy) get implicit owner access
-- 'enabled': everyone must authenticate
+security.auth_required decides:
+- 'disabled_local' (default, also when nothing is saved): requests from a LAN
+  address get implicit owner access; everyone else must sign in.
+- 'enabled': everyone must sign in.
 
-X-Forwarded-For headers are trusted only from security.trusted_proxies.
-An optional security.trusted_proxy_header setting specifies a custom header to read
-(e.g., 'X-Real-IP'); defaults to standard XFF behavior.
+"Local" means the client address is private (RFC 1918, loopback, link-local,
+IPv6 ULA). The client address is the TCP peer, or, only when that peer is in
+security.trusted_proxies, the nearest untrusted X-Forwarded-For hop (or the
+header named by the optional security.trusted_proxy_header, off by default).
+No other header (CF-Connecting-IP, X-Real-IP from untrusted peers, ...) and no
+"home WAN" address is ever treated as local.
 """
 
 import ipaddress
@@ -18,7 +22,11 @@ logger = logging.getLogger(__name__)
 # Headers a proxy or tunnel adds. Their presence from an untrusted source means
 # the request was relayed, so it is treated as remote (spoofing one can only make
 # a request *less* trusted).
-_FORWARD_HEADERS = ('X-Forwarded-For', 'X-Real-IP', 'Forwarded')
+# CF-Connecting-IP / True-Client-IP are listed so a tunnel connector on the LAN
+# (e.g. cloudflared in Docker) is never mistaken for a local client; their
+# values are never used as the client address.
+_FORWARD_HEADERS = ('X-Forwarded-For', 'X-Real-IP', 'Forwarded',
+                    'CF-Connecting-IP', 'True-Client-IP')
 
 
 def _addr(ip: str):
@@ -63,29 +71,31 @@ def _in(nets, ip: str) -> bool:
 
 
 def client_ip(request, settings=None) -> Optional[str]:
-    """The real client address, or None when a request was relayed by a proxy
-    that isn't trusted (its forwarded headers can't be believed).
+    """The real client address, or None when it can't be trusted.
+
+    - Peer not in security.trusted_proxies: the peer itself, unless the request
+      carries any forwarding header (then None: relayed, treated as remote).
+    - Peer is a trusted proxy: the header named by security.trusted_proxy_header
+      when that setting is on (off by default), else the nearest
+      X-Forwarded-For hop that isn't itself a trusted proxy. With neither,
+      None (the proxy didn't say who the client is).
     """
     peer = request.remote_addr or ''
     nets = trusted_proxies(settings) if settings is not None else []
     if nets and _in(nets, peer):
-        # Check for custom trusted_proxy_header setting
-        custom_header = (settings.get('security.trusted_proxy_header') or '').strip() if settings else ''
+        custom_header = (settings.get('security.trusted_proxy_header') or '').strip()
         if custom_header:
-            # Use custom header if configured
-            custom_value = request.headers.get(custom_header, '').strip()
-            if custom_value:
-                return custom_value
-        
-        # Standard XFF behavior
+            value = request.headers.get(custom_header, '').split(',')[-1].strip()
+            return value if _addr(value) else None
         hops = [h.strip() for h in request.headers.get('X-Forwarded-For', '').split(',') if h.strip()]
+        if not hops:
+            return None
+        remaining = list(hops)
         # Walk back from the nearest hop past any further trusted proxies.
-        while hops and _in(nets, hops[-1]):
-            hops.pop()
-        if hops:
-            return hops[-1]
-        real = request.headers.get('X-Real-IP', '').strip()
-        return real or peer
+        while remaining and _in(nets, remaining[-1]):
+            remaining.pop()
+        ip = remaining[-1] if remaining else hops[0]
+        return ip if _addr(ip) else None
     if any(request.headers.get(h) for h in _FORWARD_HEADERS):
         return None
     return peer
@@ -154,3 +164,28 @@ def owner(user_auth) -> Optional[dict]:
         if u.get('is_admin') and (u.get('status') or 'active') == 'active':
             return u
     return None
+
+
+class TrustedProxyMiddleware:
+    """WSGI middleware: honor X-Forwarded-Proto / X-Forwarded-Host only from
+    trusted proxies, so request.scheme, request.is_secure and request.host
+    can't be spoofed by a direct client. REMOTE_ADDR is not changed.
+    """
+
+    def __init__(self, wsgi_app, get_settings):
+        self.wsgi_app = wsgi_app
+        self._get_settings = get_settings
+
+    def __call__(self, environ, start_response):
+        try:
+            nets = trusted_proxies(self._get_settings())
+        except Exception:
+            nets = []
+        if nets and _in(nets, environ.get('REMOTE_ADDR', '')):
+            proto = environ.get('HTTP_X_FORWARDED_PROTO', '').split(',')[-1].strip().lower()
+            if proto in ('http', 'https'):
+                environ['wsgi.url_scheme'] = proto
+            host = environ.get('HTTP_X_FORWARDED_HOST', '').split(',')[-1].strip()
+            if host:
+                environ['HTTP_HOST'] = host
+        return self.wsgi_app(environ, start_response)

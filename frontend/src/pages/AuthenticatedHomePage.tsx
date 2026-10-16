@@ -41,6 +41,7 @@ import {
   type SearchResults,
 } from '@/services/searchApi';
 import { apiFetch } from '../apiClient';
+import { assetUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
 // Rail ID -> ModalSource mapping
@@ -395,7 +396,7 @@ function TopBar({ onSearchOpen }: { onSearchOpen: () => void }) {
     >
       <div style={{ height: 56, display: 'flex', alignItems: 'center', paddingLeft: 6, paddingRight: 12 }}>
         {/* Luma text logo */}
-        <img src="/static/images/luma_text.webp" alt="Luma" style={{ height: 100, objectFit: 'contain', marginTop: -2 }} />
+        <img src={assetUrl('/static/images/luma_text.webp')} alt="Luma" style={{ height: 100, objectFit: 'contain', marginTop: -2 }} />
 
         {/* Spacer */}
         <div style={{ flex: 1 }} />

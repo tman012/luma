@@ -312,7 +312,7 @@ def start_plex_server():
                               status='active', email=account.get('email') or None)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409
-    _cfg['settings'].update({'security': {'access_mode': 'pin_remote'}})
+    _cfg['settings'].update({'security': {'auth_required': 'disabled_local'}})
     st.update(server_name=server['name'], admin_via_start=True, completed=False, pin_set=False)
     st.pop('nonce', None)
     _save_state(st)
@@ -321,8 +321,10 @@ def start_plex_server():
     session = ua.create_session(user['id'])
     resp = make_response(jsonify({'ok': True, 'server': server['name'], 'connection': conn['kind'],
                                   'libraries': libraries}))
+    from flask import current_app
     resp.set_cookie(_cfg['session_cookie'], session, max_age=60 * 60 * 24 * 30,
-                    httponly=False, samesite='Lax', secure=False, path='/')
+                    httponly=True, samesite='Lax', secure=request.is_secure,
+                    path=current_app.config.get('URL_BASE') or '/')
     resp.delete_cookie(START_COOKIE, path='/')
     logger.info('Start: owner account created')
     return resp

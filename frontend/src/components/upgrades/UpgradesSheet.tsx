@@ -5,6 +5,7 @@ import { openModalForItem } from '@/utils/modalNavigation';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
 import { cn } from '@/utils/cn';
 import { apiFetch } from '../../apiClient';
+import { assetUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -278,8 +279,8 @@ function UpgradeRow({
               <span className="inline-flex items-center gap-0.5">
                 <img
                   src={item.rt_critic != null && item.rt_critic > 0
-                    ? (item.rt_critic >= 60 ? '/static/images/rotten-tomatoes-logo.png' : '/static/images/rotten-tomatoes-splat.png')
-                    : '/static/images/rotten-tomatoes-logo.png'}
+                    ? (item.rt_critic >= 60 ? assetUrl('/static/images/rotten-tomatoes-logo.png') : assetUrl('/static/images/rotten-tomatoes-splat.png'))
+                    : assetUrl('/static/images/rotten-tomatoes-logo.png')}
                   alt="" width="16" height="16" className="shrink-0"
                   style={!(item.rt_critic != null && item.rt_critic > 0) ? { opacity: 0.4 } : undefined}
                 />
@@ -290,8 +291,8 @@ function UpgradeRow({
               <span className="inline-flex items-center gap-0.5">
                 <img
                   src={item.rt_audience != null && item.rt_audience > 0
-                    ? (item.rt_audience >= 60 ? '/static/images/rotten-tomatoes-popcorn-good.png' : '/static/images/rotten-tomatoes-popcorn-bad.png')
-                    : '/static/images/rotten-tomatoes-popcorn-good.png'}
+                    ? (item.rt_audience >= 60 ? assetUrl('/static/images/rotten-tomatoes-popcorn-good.png') : assetUrl('/static/images/rotten-tomatoes-popcorn-bad.png'))
+                    : assetUrl('/static/images/rotten-tomatoes-popcorn-good.png')}
                   alt="" width="16" height="16" className="shrink-0"
                   style={!(item.rt_audience != null && item.rt_audience > 0) ? { opacity: 0.4 } : undefined}
                 />

@@ -1,71 +1,51 @@
-"""Test X-API-Key requests work without g.implicit_user error (Item 2)."""
+"""Remote X-API-Key requests must not 500 (round 3, item 2)."""
 
 import pytest
-import os
-import secrets
+from flask import g, jsonify
 
 
-@pytest.fixture(autouse=True)
-def setup_test_env(test_app, monkeypatch):
-    """Set up test environment with API key."""
-    api_key = secrets.token_urlsafe(32)
-    monkeypatch.setenv('SERVICE_API_KEY', api_key)
-    
-    # Reload main module to pick up new API key
-    import importlib
+@pytest.fixture
+def api_key(test_app, monkeypatch):
     import app.main
-    importlib.reload(app.main)
-    
-    return api_key
+    monkeypatch.setattr(app.main, '_SERVICE_API_KEY', 'test-service-key')
+    return 'test-service-key'
 
 
-class TestAPIKeyAuth:
-    """Test X-API-Key authentication works correctly."""
-    
-    def test_api_key_request_no_error(self, test_app, setup_test_env):
-        """X-API-Key request returns 200, not 500 from unset g.implicit_user."""
-        api_key = setup_test_env
-        client = test_app.test_client()
-        
-        # Make a request with X-API-Key header
-        response = client.get('/api/settings', headers={
-            'X-API-Key': api_key
-        }, environ_base={'REMOTE_ADDR': '203.0.113.100'})
-        
-        # Should return 200, not 500
-        assert response.status_code == 200
-    
-    def test_api_key_sets_service_user(self, test_app, setup_test_env):
-        """X-API-Key request sets g.current_user to Service user."""
-        api_key = setup_test_env
-        client = test_app.test_client()
-        
-        # Create a test route that returns g.current_user
-        @test_app.route('/test/current_user')
-        def test_current_user():
-            from flask import g, jsonify
-            return jsonify({
-                'user': g.current_user,
-                'implicit': getattr(g, 'implicit_user', None)
-            })
-        
-        response = client.get('/test/current_user', headers={
-            'X-API-Key': api_key
-        })
-        
-        data = response.get_json()
-        assert response.status_code == 200
-        assert data['user']['name'] == 'Service'
-        assert data['user']['is_admin'] == 1
-        assert data['implicit'] is False  # Should be set, not missing
-    
-    def test_invalid_api_key_rejected(self, test_app):
-        """Invalid X-API-Key is rejected."""
-        client = test_app.test_client()
-        
-        response = client.get('/api/settings', headers={
-            'X-API-Key': 'invalid_key_12345'
-        }, environ_base={'REMOTE_ADDR': '203.0.113.100'})
-        
-        # Should return 401 (no auth)
-        assert response.status_code == 401
+def test_remote_api_key_request_ok(test_app, api_key):
+    r = test_app.test_client().get('/api/auth/me', headers={'X-API-Key': api_key},
+                                   environ_base={'REMOTE_ADDR': '203.0.113.100'})
+    assert r.status_code == 200
+    assert r.get_json()['implicit'] is False
+
+
+def test_remote_api_key_html_route_ok(test_app, api_key):
+    """_auth_guard runs on non-API pages too; it must read g safely."""
+    r = test_app.test_client().get('/settings', headers={'X-API-Key': api_key},
+                                   environ_base={'REMOTE_ADDR': '203.0.113.100'})
+    assert r.status_code != 500
+    assert '/login' not in r.headers.get('Location', '')
+
+
+def test_api_key_sets_service_user_and_implicit_false(test_app, api_key):
+    import app.main
+    with test_app.test_request_context('/api/auth/me', headers={'X-API-Key': api_key},
+                                       environ_base={'REMOTE_ADDR': '203.0.113.100'}):
+        app.main.load_current_user()
+        assert g.current_user['name'] == 'Service'
+        assert g.implicit_user is False
+        assert app.main._auth_guard() is None
+
+
+def test_auth_guard_without_load_current_user(test_app):
+    """Even if g was never populated, _auth_guard must not raise."""
+    import app.main
+    app.main.settings.update({'security': {'auth_required': 'enabled'}})
+    with test_app.test_request_context('/api/settings', environ_base={'REMOTE_ADDR': '203.0.113.100'}):
+        resp = app.main._auth_guard()
+        assert resp[1] == 401
+
+
+def test_invalid_api_key_rejected(test_app, api_key):
+    r = test_app.test_client().get('/api/settings', headers={'X-API-Key': 'wrong'},
+                                   environ_base={'REMOTE_ADDR': '203.0.113.100'})
+    assert r.status_code == 401

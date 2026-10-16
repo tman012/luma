@@ -46,12 +46,9 @@ def reset_shared_state(request):
             yield
             return
     
-    # Reset rate limiter
-    try:
-        from app import auth_routes
-        auth_routes.reset_rate_limiter()
-    except Exception:
-        pass
+    # Reset the sign-in rate limiter
+    from app import login_limiter
+    login_limiter._fail.clear()
     
     # Clear user database between tests
     try:
@@ -67,11 +64,7 @@ def reset_shared_state(request):
     yield
     
     # Cleanup after test
-    try:
-        from app import auth_routes
-        auth_routes.reset_rate_limiter()
-    except Exception:
-        pass
+    login_limiter._fail.clear()
 
 
 @pytest.fixture
@@ -99,7 +92,11 @@ def test_app():
         'security': {
             'auth_required': 'disabled_local',  # Default: LAN no sign-in
             'session_secret': '',  # Will be auto-generated
+            'trusted_proxies': '',
+            'trusted_proxy_header': '',
         }
     })
+    flask_app.config['URL_BASE'] = ''
+    flask_app.config['START_BACKGROUND_THREADS'] = False
     
     return flask_app

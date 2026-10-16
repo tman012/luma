@@ -11,7 +11,7 @@ class TestLogoutOriginValidation:
     def setup(self, test_app):
         """Set up test user and client."""
         user_auth.init_db()
-        user_auth.set_credentials('testuser', 'testpass123', is_admin=True)
+        user_auth.create_user('testuser', 'testpass123', is_admin=True)
         self.app = test_app
         self.client = test_app.test_client()
     
@@ -22,7 +22,7 @@ class TestLogoutOriginValidation:
         token = user_auth.create_session(user['id'])
         
         # Make logout request with valid Origin
-        response = self.client.post('/auth/logout',
+        response = self.client.post('/logout',
                                     headers={
                                         'Origin': 'http://localhost',
                                         'Cookie': f'luma_auth_session={token}'
@@ -38,7 +38,7 @@ class TestLogoutOriginValidation:
         token = user_auth.create_session(user['id'])
         
         # Make logout request with spoofed Origin
-        response = self.client.post('/auth/logout',
+        response = self.client.post('/logout',
                                     headers={
                                         'Origin': 'http://127.0.0.1:5302.evil.com',
                                         'Cookie': f'luma_auth_session={token}'
@@ -57,7 +57,7 @@ class TestLogoutOriginValidation:
         token = user_auth.create_session(user['id'])
         
         # Make logout request with valid Referer
-        response = self.client.post('/auth/logout',
+        response = self.client.post('/logout',
                                     headers={
                                         'Referer': 'http://localhost/settings',
                                         'Cookie': f'luma_auth_session={token}'
@@ -73,7 +73,7 @@ class TestLogoutOriginValidation:
         token = user_auth.create_session(user['id'])
         
         # Make logout request from different origin
-        response = self.client.post('/auth/logout',
+        response = self.client.post('/logout',
                                     headers={
                                         'Origin': 'http://evil.com',
                                         'Cookie': f'luma_auth_session={token}'

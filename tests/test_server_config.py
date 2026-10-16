@@ -403,9 +403,17 @@ class TestLoginRedirectURLBase:
         self.client = test_app.test_client()
     
     def test_login_redirect_uses_url_base(self, test_app):
-        """Login redirect goes to root of URL base."""
-        # This test verifies that auth_routes imports and uses get_url_base
-        import app.auth_routes
-        
-        # Check that get_url_base is imported
-        assert hasattr(app.auth_routes, 'get_url_base')
+        """After sign-in the redirect stays under the URL base from app.config."""
+        import re
+        test_app.config['URL_BASE'] = '/luma'
+        page = self.client.get('/login?next=/settings', environ_base={'REMOTE_ADDR': '203.0.113.9'})
+        token = re.search(r'name="csrf_token" value="([^"]+)"', page.get_data(as_text=True)).group(1)
+        resp = self.client.post('/login?next=/settings',
+                                data={'username': 'testuser', 'password': 'testpass123', 'csrf_token': token},
+                                environ_base={'REMOTE_ADDR': '203.0.113.9'})
+        assert resp.status_code == 302
+        assert resp.headers['Location'] in ('/luma/settings', 'http://localhost/luma/settings')
+        bad = self.client.post('/login?next=//evil.com',
+                               data={'username': 'testuser', 'password': 'testpass123', 'csrf_token': token},
+                               environ_base={'REMOTE_ADDR': '203.0.113.9'})
+        assert bad.headers['Location'].endswith('/luma/')

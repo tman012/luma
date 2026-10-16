@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useModalHost } from '@/contexts/ModalHostContext';
+import { assetUrl } from '@/urlHelpers';
 
 interface OrbScreensaverWrapperProps {
   enabled?: boolean;
@@ -35,7 +36,7 @@ export function OrbScreensaverWrapper({
 
     // Load the screensaver script
     const script = document.createElement('script');
-    script.src = '/static/js/movie-orb-screensaver.js';
+    script.src = assetUrl('/static/js/movie-orb-screensaver.js');
     script.async = true;
     script.onload = () => {
       scriptLoadedRef.current = true;

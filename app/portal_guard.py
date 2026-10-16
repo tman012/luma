@@ -1,11 +1,16 @@
-"""Portal traffic guard - restricts portal traffic to portal routes only.
+"""Portal traffic guard: requests on the request-portal hostname may reach
+only the portal.
 
-Portal traffic (detected via request_portal.hostname) can only access:
+Portal traffic is identified solely by the Host header matching
+request_portal.hostname (access.is_portal_traffic); the client address plays
+no part. Such requests can reach only:
 - /request and /request/ (portal page)
 - /static/request/* (portal static assets)
-- Specific /api/request/* endpoints (explicit allowlist, no wildcard)
+- the explicitly listed /api/request/* endpoints and patterns below
+  (never /api/request/admin*)
 
-All other routes return 404 for portal traffic.
+Everything else returns 404, deny by default. Portal traffic never gets
+implicit owner access (see access.should_authenticate).
 """
 import logging
 from flask import request, abort

@@ -54,7 +54,7 @@ interface AuthState {
   pinUnlock: boolean;
   /** Signed in implicitly because access is open (no sign-in needed). */
   implicit: boolean;
-  accessMode: 'open' | 'pin_remote' | 'pin' | null;
+  authRequired: 'disabled_local' | 'enabled' | null;
 }
 
 interface AuthContextValue extends AuthState {
@@ -66,7 +66,7 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const NO_START = { needsStart: false, startInProgress: false, pinUnlock: false, implicit: false, accessMode: null } as const;
+const NO_START = { needsStart: false, startInProgress: false, pinUnlock: false, implicit: false, authRequired: null } as const;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
@@ -95,7 +95,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           startInProgress: !!data.start_in_progress,
           pinUnlock: false,
           implicit: !!data.implicit,
-          accessMode: data.access_mode || null,
+          authRequired: data.auth_required || null,
         });
         return;
       }

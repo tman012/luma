@@ -26,6 +26,7 @@ import {
   type ResumeInfo,
 } from '@/services/playbackApi';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
+import { assetUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -950,7 +951,7 @@ export function PlaybackModal({
                     }}
                   >
                     <img
-                      src={svc.type === 'plex' ? '/static/images/plex_white.png' : '/static/images/kodi_white.png'}
+                      src={svc.type === 'plex' ? assetUrl('/static/images/plex_white.png') : assetUrl('/static/images/kodi_white.png')}
                       alt={svc.type === 'plex' ? 'Plex' : 'Kodi'}
                       style={{ height: svc.type === 'kodi' ? '80px' : '32px', objectFit: 'contain' }}
                     />
@@ -986,7 +987,7 @@ export function PlaybackModal({
                     }}
                   >
                     <img
-                      src={svc.type === 'plex' ? '/static/images/plex_white.png' : '/static/images/kodi_white.png'}
+                      src={svc.type === 'plex' ? assetUrl('/static/images/plex_white.png') : assetUrl('/static/images/kodi_white.png')}
                       alt={svc.type === 'plex' ? 'Plex' : 'Kodi'}
                       style={{ height: svc.type === 'kodi' ? '100px' : '48px', objectFit: 'contain' }}
                     />

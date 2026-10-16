@@ -3,14 +3,14 @@
  * "Authentication Required" choice), the PIN itself, and trusted proxies.
  */
 import { useEffect, useState } from 'react';
-import { ACCESS_CHOICES } from '@/pages/StartPage';
+import { ACCESS_CHOICES, type AuthRequired } from '@/pages/StartPage';
 import { cn } from '@/utils/cn';
 import { apiFetch } from '../../apiClient';
 
-type Mode = 'pin_remote' | 'pin' | 'open';
+type Mode = AuthRequired;
 
 interface SecurityState {
-  mode: Mode;
+  auth_required: Mode;
   pin_set: boolean;
   single_account: boolean;
   local_request: boolean;
@@ -194,7 +194,7 @@ function RequestPortalCard() {
 
 export function SecurityTab() {
   const [state, setState] = useState<SecurityState | null>(null);
-  const [mode, setMode] = useState<Mode>('pin_remote');
+  const [mode, setMode] = useState<Mode>('disabled_local');
   const [pin, setPin] = useState('');
   const [confirm, setConfirm] = useState('');
   const [proxies, setProxies] = useState('');
@@ -206,15 +206,15 @@ export function SecurityTab() {
     if (!res.ok) return;
     const data: SecurityState = await res.json();
     setState(data);
-    setMode(data.mode);
+    setMode(data.auth_required);
     setProxies(data.trusted_proxies || '');
   };
   useEffect(() => { load(); }, []);
 
   if (!state) return null;
 
-  const pinNeeded = mode !== 'open' && !state.pin_set;
-  const dirty = mode !== state.mode || pin !== '' || proxies !== (state.trusted_proxies || '');
+  const pinNeeded = !state.pin_set;
+  const dirty = mode !== state.auth_required || pin !== '' || proxies !== (state.trusted_proxies || '');
 
   const save = async () => {
     setMsg(null);
@@ -224,7 +224,7 @@ export function SecurityTab() {
     }
     setBusy(true);
     try {
-      const body: Record<string, string> = { mode, trusted_proxies: proxies };
+      const body: Record<string, string> = { auth_required: mode, trusted_proxies: proxies };
       if (pin) { body.pin = pin; body.confirm = confirm; }
       const res = await apiFetch('/api/security', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -264,7 +264,7 @@ export function SecurityTab() {
               onClick={() => { setMode(c.value); setMsg(null); }}
               className={cn(
                 'min-h-[34px] rounded-lg px-2 py-1.5 text-[13px] font-medium leading-tight transition-colors',
-                c.value === 'pin_remote' ? 'flex-[2.2]' : 'flex-1',
+                c.value === 'disabled_local' ? 'flex-[2.2]' : 'flex-1',
                 mode === c.value ? 'bg-white text-[#15102a] font-semibold shadow' : 'text-white/80 hover:text-white',
               )}
             >
@@ -273,7 +273,7 @@ export function SecurityTab() {
           ))}
         </div>
 
-        {mode !== 'open' && (
+        {(
           <div className="grid grid-cols-2 gap-3 max-w-sm">
             <label className="space-y-1.5">
               <span className="block text-[12px] font-medium text-white/50">{state.pin_set ? 'New PIN' : 'PIN'}</span>

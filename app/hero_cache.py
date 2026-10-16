@@ -24,7 +24,7 @@ from typing import List, Dict, Optional
 logger = logging.getLogger(__name__)
 
 # Configuration defaults (will be overridden by settings when available)
-CACHE_DIR = Path('/app/static/hero_cache')
+CACHE_DIR = Path(os.environ.get('HERO_CACHE_DIR') or '/app/static/hero_cache')
 CACHE_JSON = Path('/app/data/hero_content.json')
 
 

@@ -3,6 +3,7 @@
  */
 
 import { useNavigate } from 'react-router';
+import { assetUrl } from '@/urlHelpers';
 
 export function LandingPage() {
   const navigate = useNavigate();
@@ -31,7 +32,7 @@ export function LandingPage() {
         }}
       >
         <img
-          src="/static/images/luma_text.webp"
+          src={assetUrl('/static/images/luma_text.webp')}
           alt="Luma"
           style={{
             width: 'clamp(380px, 90vw, 780px)',

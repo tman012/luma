@@ -77,9 +77,9 @@ class StartFlowTest(unittest.TestCase):
 
         @app.before_request
         def load():
-            tok = request.cookies.get('luma_session')
+            tok = request.cookies.get('luma_auth_session')
             g.current_user = user_auth.validate_session(tok) if tok else None
-            if g.current_user is None and not access.needs_pin(self.settings, request):
+            if g.current_user is None and not access.should_authenticate(self.settings, request):
                 o = access.owner(user_auth)
                 if o:
                     g.current_user = dict(o)
@@ -95,7 +95,7 @@ class StartFlowTest(unittest.TestCase):
             return 3
 
         start_flow._pending.clear()
-        start_flow.init(settings=self.settings, user_auth=user_auth, session_cookie='luma_session',
+        start_flow.init(settings=self.settings, user_auth=user_auth, session_cookie='luma_auth_session',
                         client_id='luma-test', on_plex_saved=saved,
                         get_current_user=lambda: getattr(g, 'current_user', None))
         app.register_blueprint(start_flow.bp)
@@ -173,7 +173,13 @@ class StartFlowTest(unittest.TestCase):
         self.assertEqual(len(users), 1)
         self.assertTrue(users[0]['is_admin'])
         self.assertEqual(users[0]['email'], 'owner@example.com')
-        self.assertEqual(self.settings.get('security.access_mode'), 'pin_remote')
+        self.assertEqual(self.settings.get('security.auth_required'), 'disabled_local')
+        self.assertIsNone(self.settings.get('security.access_mode'))
+        cookie = [h for h in r.headers.getlist('Set-Cookie') if h.startswith('luma_auth_session=')]
+        self.assertEqual(len(cookie), 1)
+        self.assertIn('HttpOnly', cookie[0])
+        self.assertNotIn('Secure', cookie[0])
+        self.assertIn('Path=/', cookie[0])
 
         st = c.get('/api/start/status').json
         self.assertEqual((st['needs_start'], st['in_progress'], st['step']), (False, True, 'done'))
@@ -232,10 +238,14 @@ class StartFlowTest(unittest.TestCase):
         self.ua.create_user('owner', '1234', is_admin=True)
         s = _Settings()
         # With no auth_required set, defaults to disabled_local
-        req = SimpleNamespace(remote_addr='10.20.0.5', headers={})
-        self.assertFalse(self.access.needs_pin(s, req))  # LAN doesn't need PIN
+        lan = SimpleNamespace(remote_addr='10.20.0.5', headers={})
+        wan = SimpleNamespace(remote_addr='203.0.113.9', headers={})
+        self.assertFalse(self.access.should_authenticate(s, lan))  # LAN doesn't sign in
+        self.assertTrue(self.access.should_authenticate(s, wan))
 
     def test_no_users_no_open_access(self):
+        # No account yet: LAN gets no implicit owner, and 'open' is not a mode.
+        self.assertIsNone(self._who('disabled_local', '10.20.0.5'))
         self.assertIsNone(self._who('open', '10.20.0.5'))
 
 

@@ -10,22 +10,10 @@ class TestURLBaseEndToEnd:
     
     @pytest.fixture
     def test_app_with_url_base(self, test_app):
-        """Create a test app with URL base configured."""
-        import app.main
-        
-        # Set URL base environment variable
-        os.environ['LUMA_URL_BASE'] = '/luma'
-        
-        # Reload server_config to pick up the new URL base
-        import importlib
-        import app.server_config
-        importlib.reload(app.server_config)
-        
+        """App with URL base /luma (as resolved at startup into app.config)."""
+        test_app.config['URL_BASE'] = '/luma'
         yield test_app
-        
-        # Cleanup
-        del os.environ['LUMA_URL_BASE']
-        importlib.reload(app.server_config)
+        test_app.config['URL_BASE'] = ''
     
     @pytest.fixture
     def create_spa_files(self, test_app):

@@ -38,24 +38,32 @@ networking so it can reach Plex and TVs on your network.
 
 **Settings → Security → Require PIN**
 
-- **Disabled for local addresses** (default): devices on your home network
-  open Luma directly; anyone else needs the PIN.
-- **Always**: everyone enters the PIN.
-- **Never**: no PIN.
+- **Disabled for local addresses** (default, and what an install with no
+  saved choice uses): devices on your home network open Luma directly;
+  anyone else signs in.
+- **Enabled**: everyone signs in.
 
-Behind a reverse proxy or tunnel, add its address under **Trusted proxies**
-so Luma can tell local and remote visitors apart.
+"Local" means a private (LAN) client address. Behind a reverse proxy, add its
+address under **Trusted proxies**; only then is its `X-Forwarded-For` (and
+`X-Forwarded-Proto` / `X-Forwarded-Host`) believed. An optional
+`security.trusted_proxy_header` (off by default) names a different client
+address header sent by those proxies.
 
 ## Deploy Notes
 
-**Security update**: Cloudflare home-WAN trust is removed. Only direct LAN connections and X-Forwarded-For from trusted proxies count as local.
-
-Before updating production:
-- Check how the kiosk and home devices reach Luma
-- Any device using the tunnel hostname instead of the LAN IP must either:
-  - Be pointed at the LAN address, or
-  - Sign in once (30-day remember-me)
-- This ensures the kiosk never shows a login screen unexpectedly
+- **Cloudflare / home-WAN trust is removed.** `CF-Connecting-IP` is ignored
+  and the home WAN address no longer counts as local. Only direct LAN
+  connections and `X-Forwarded-For` from trusted proxies count as local.
+- **Before cutover, Ops checks how the kiosk and every home device reach
+  Luma.** Any device that uses the tunnel hostname instead of the LAN IP is
+  either pointed at the LAN IP or signed in once (30-day remember-me), so the
+  kiosk never lands on a sign-in screen.
+- Existing installs keep LAN access without sign-in: with no saved
+  `security.auth_required`, Luma uses `disabled_local`.
+- The old `luma_session` cookie is no longer accepted; browsers that send it
+  get it expired and sign in again with `luma_auth_session` when remote.
+- The container runs `gunicorn -c gunicorn.conf.py app.main:app` (1 worker,
+  8 threads); startup work runs in `start_services()` from `post_worker_init`.
 
 ## Updating
 
