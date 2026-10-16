@@ -18,20 +18,14 @@ logger = logging.getLogger(__name__)
 class LibraryCache:
     """Manages cached library data for lightning-fast loading"""
 
-    def __init__(self, cache_dir: str = "/app/cache"):
-        self.cache_dir = Path(cache_dir)
+    def __init__(self):
+        cache_root = Path(os.getenv("LUMA_CACHE_DIR", "/app/cache"))
+        self.cache_dir = cache_root / "library"
         try:
             self.cache_dir.mkdir(exist_ok=True, parents=True)
         except (FileNotFoundError, PermissionError) as e:
-            # Fall back to temp directory only in test environment
-            if os.getenv('PYTEST_CURRENT_TEST') or os.getenv('LUMA_TEST_MODE'):
-                import tempfile
-                self.cache_dir = Path(tempfile.gettempdir()) / "luma_cache"
-                self.cache_dir.mkdir(exist_ok=True, parents=True)
-                logger.warning('[library_cache] Production cache dir unavailable, using temp: %s', self.cache_dir)
-            else:
-                logger.error('[library_cache] Cache directory unavailable and not in test mode: %s', e)
-                raise
+            logger.error('[library_cache] Cache directory not writable: %s', self.cache_dir)
+            raise RuntimeError(f"Library cache directory not writable: {self.cache_dir}") from e
         self.db_path = self.cache_dir / "library_cache.db"
         self.update_interval = 60  # 1 minute for library data
         self.last_update = {}
