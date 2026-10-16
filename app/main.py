@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from flask import Flask, request, jsonify, send_from_directory, send_file, redirect, g, make_response
+from flask import Flask, request, jsonify, send_from_directory, send_file, redirect, g, make_response, Response
 from flask_cors import CORS
 from dotenv import load_dotenv
 import requests
@@ -92,11 +92,17 @@ from app.server_config import get_url_base
 _URL_BASE = get_url_base()
 if _URL_BASE:
     from werkzeug.middleware.dispatcher import DispatcherMiddleware
+    
+    # Proper WSGI 404 app (not a lambda)
+    def _404_app(environ, start_response):
+        """WSGI app that returns 404 for requests outside the URL base."""
+        status = '404 Not Found'
+        headers = [('Content-Type', 'text/plain; charset=utf-8')]
+        start_response(status, headers)
+        return [b'Not Found']
+    
     # Wrap the app so all routes are prefixed with URL base
-    app.wsgi_app = DispatcherMiddleware(
-        lambda environ, start_response: [b'Not Found'],
-        {_URL_BASE: app.wsgi_app}
-    )
+    app.wsgi_app = DispatcherMiddleware(_404_app, {_URL_BASE: app.wsgi_app})
 
 # Lazy import after constants are defined
 def _register_bot_api():
@@ -994,7 +1000,8 @@ def _auth_guard():
             if request.path.startswith('/api/'):
                 return jsonify({"error": "Authentication required"}), 401
             # For HTML pages, redirect to login
-            return redirect(f'/login?next={request.path}')
+            url_base = get_url_base()
+            return redirect(f'{url_base}/login?next={request.path}')
 
 # CSRF protection for API state-changing requests (must run after load_current_user)
 @app.before_request
@@ -1063,10 +1070,32 @@ def _csrf_api_guard():
     # Neither Origin nor Referer matched
     return jsonify({"error": "CSRF validation failed: invalid Origin/Referer"}), 403
 def _serve_spa():
-    """Serve the React SPA index.html (from static/spa/)."""
+    """Serve the React SPA index.html (from static/spa/) with runtime URL base injection."""
     spa_index = os.path.join(app.static_folder, 'spa', 'index.html')
     if os.path.exists(spa_index):
-        resp = send_file(spa_index)
+        # Read the index.html
+        with open(spa_index, 'r', encoding='utf-8') as f:
+            html = f.read()
+        
+        # Inject URL base as a meta tag and inline script
+        url_base = get_url_base()
+        injection = f'''
+    <meta name="url-base" content="{url_base}">
+    <script>window.__LUMA_URL_BASE__ = "{url_base}";</script>
+'''
+        # Insert after <head> tag
+        html = html.replace('<head>', f'<head>{injection}', 1)
+        
+        # Update hardcoded paths in index.html
+        # Replace absolute paths with base-relative
+        if url_base:
+            # Fix manifest.json reference
+            html = html.replace('href="/manifest.json"', f'href="{url_base}/manifest.json"')
+            # Fix apple-touch-icon reference
+            html = html.replace('href="/static/', f'href="{url_base}/static/')
+            html = html.replace('src="/static/', f'src="{url_base}/static/')
+        
+        resp = Response(html, mimetype='text/html')
         resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
         resp.headers['Pragma'] = 'no-cache'
         resp.headers['Expires'] = '0'
