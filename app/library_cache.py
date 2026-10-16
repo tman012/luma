@@ -19,13 +19,14 @@ logger = logging.getLogger(__name__)
 class LibraryCache:
     """Manages cached library data for lightning-fast loading
     
-    Cache storage: LUMA_CACHE_DIR environment variable sets the cache root (defaults to /app).
+    Cache storage: LUMA_CACHE_DIR environment variable sets the cache root (defaults to /app/cache).
     Library cache uses the 'library' subdirectory within the root.
     """
 
     def __init__(self, cache_root: Optional[str] = None):
         if cache_root is None:
-            cache_root = os.environ.get('LUMA_CACHE_DIR', '/app/cache')
+            from app.paths import cache_dir
+            cache_root = str(cache_dir())
         # Use 'library' subdirectory within cache root
         self.cache_dir = Path(cache_root) / 'library'
         try:
