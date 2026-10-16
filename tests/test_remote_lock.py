@@ -60,9 +60,10 @@ class TestRemoteLockClassification:
             # Add home IP to the set
             remote_lock._home.add(('1.2.3.4', 1234567890.0))
             
-            with patch('app.access._trusted_peer', return_value=True):
-                classification = remote_lock.classify()
-                assert classification == 'home'
+            with patch('app.access.trusted_proxies', return_value=[Mock(version=4, __contains__=lambda s,x: True)]):
+                with patch('app.access._in', return_value=True):
+                    classification = remote_lock.classify()
+                    assert classification == 'home'
     
     def test_classify_remote_via_tunnel(self, app, settings_mock):
         """Traffic via tunnel from unknown IP is classified as 'remote'."""
@@ -74,9 +75,10 @@ class TestRemoteLockClassification:
         with app.test_request_context('/',
                                       environ_base={'REMOTE_ADDR': '127.0.0.1'},
                                       headers={'Cf-Ray': 'test', 'CF-Connecting-IP': '5.6.7.8'}):
-            with patch('app.access._trusted_peer', return_value=True):
-                classification = remote_lock.classify()
-                assert classification == 'remote'
+            with patch('app.access.trusted_proxies', return_value=[Mock(version=4, __contains__=lambda s,x: True)]):
+                with patch('app.access._in', return_value=True):
+                    classification = remote_lock.classify()
+                    assert classification == 'remote'
     
     def test_classify_remote_from_public_ip(self, app, settings_mock):
         """Traffic from a public IP is classified as 'remote'."""

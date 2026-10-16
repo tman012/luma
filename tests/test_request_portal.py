@@ -196,5 +196,8 @@ class TestRequestPortalHostGuard:
         with app.test_request_context('/browse', headers={'Host': 'requests.example.com'}):
             result = request_portal._host_guard()
             assert result is not None
-            # Should be a redirect
-            assert result[1] == 302
+            # Should be a redirect (check if it's a tuple or Response object)
+            if isinstance(result, tuple):
+                assert result[1] == 302
+            else:
+                assert result.status_code == 302

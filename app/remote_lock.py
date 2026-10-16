@@ -58,8 +58,10 @@ def _private(ip: str) -> bool:
 def _cf_ip() -> str:
     """Get CF-Connecting-IP header, but only trust it from configured trusted proxies."""
     from app import access
-    # Only trust CF headers if they come through a trusted proxy
-    if not access._trusted_peer(request, _settings):
+    # Only trust CF headers if the peer is a configured trusted proxy
+    peer = request.remote_addr or ''
+    nets = access.trusted_proxies(_settings) if _settings else []
+    if not (nets and access._in(nets, peer)):
         return ''
     return (request.headers.get('CF-Connecting-IP') or '').strip()
 
