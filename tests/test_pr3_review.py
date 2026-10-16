@@ -28,31 +28,41 @@ def _server():
     return types.SimpleNamespace(log=logging.getLogger('gunicorn-test'))
 
 
-def test_on_starting_runs_probe():
-    ns = _load_gunicorn_conf()
-    with patch('app.paths.ensure_writable_or_exit') as probe:
-        ns['on_starting'](_server())
-    probe.assert_called_once_with()
+class _NoSettings:
+    def get(self, key, default=None):
+        return default
 
 
-def test_on_starting_exits_for_read_only_dir(tmp_path, monkeypatch):
+def test_config_load_runs_probe_before_settings():
+    order = []
+    with patch('app.paths.ensure_writable_or_exit', lambda: order.append('probe')), \
+            patch('app.settings_manager.SettingsManager', lambda *a, **k: order.append('settings') or _NoSettings()):
+        ns = _load_gunicorn_conf()
+    assert order[:2] == ['probe', 'settings']
+    ns['on_starting'](_server())
+
+
+def test_config_load_exits_for_read_only_dir(tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip('root can write read-only folders')
     ro = tmp_path / 'ro'
     ro.mkdir()
-    (ro / 'x.db').write_bytes(b'')
-    os.chmod(ro / 'x.db', 0o444)
-    monkeypatch.setenv('LUMA_DATA_DIR', str(ro))
-    ns = _load_gunicorn_conf()
-    if os.geteuid() == 0:
-        pytest.skip('root can write read-only files')
-    with pytest.raises(SystemExit) as e:
-        ns['on_starting'](_server())
-    assert e.value.code == 1
+    os.chmod(ro, 0o555)
+    env = dict(os.environ, LUMA_DATA_DIR=str(ro), LUMA_STATE_DIR=str(ro))
+    env.pop('SETTINGS_PATH', None)
+    code = "import runpy; runpy.run_path('gunicorn.conf.py')"
+    out = subprocess.run([sys.executable, '-c', code], cwd=ROOT, capture_output=True, text=True,
+                         env=env, timeout=60)
+    os.chmod(ro, 0o755)
+    assert out.returncode == 1
+    assert 'not writable' in out.stderr
+    assert not (ro / 'settings.json').exists()
 
 
-def test_on_starting_does_not_import_app_main():
-    """Workers import app.main later; the probe in the master must not."""
-    code = ("import sys, types, runpy; ns = runpy.run_path('gunicorn.conf.py'); "
-            "import logging; ns['on_starting'](types.SimpleNamespace(log=logging.getLogger('g'))); "
+def test_config_load_does_not_import_app_main():
+    """Workers import app.main later; the master must not."""
+    code = ("import sys, types, runpy, logging; ns = runpy.run_path('gunicorn.conf.py'); "
+            "ns['on_starting'](types.SimpleNamespace(log=logging.getLogger('g'))); "
             "print('app.main' in sys.modules)")
     out = subprocess.run([sys.executable, '-c', code], cwd=ROOT, capture_output=True,
                          text=True, env=dict(os.environ), timeout=60)

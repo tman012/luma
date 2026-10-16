@@ -56,7 +56,7 @@ GUARD_LIMITS = {
     'query_ttl_background': 3 * 3600,   # identical background query cached 3 h
     'query_ttl_interactive': 900,       # identical user query cached 15 min
     'min_interval_s': 2.0,          # spacing between requests to one indexer
-    'unscoped_cooldown_s': 3600,    # unscoped search after a 400/429, if Prowlarr gives no time
+    'unscoped_cooldown_s': 3600,    # pause after a 400/429 without Retry-After or Prowlarr disabledTill
 }
 _INDEXER_STATUS_TTL = 60             # seconds to cache /api/v1/indexerstatus
 UNSCOPED = -1                        # pseudo-indexer for a search across all indexers
@@ -83,65 +83,133 @@ def _guard_reset_memory() -> None:
     _guard_loaded[0] = False
 
 
+FAIL_CLOSED = -2                     # pseudo-indexer: guard state lost, refuse searches until then
+FAIL_CLOSED_S = 3600
+
+
+def _valid_ts(v) -> Optional[float]:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    v = float(v)
+    return v if v == v and 0 < v < 1e11 else None   # not NaN, plausible epoch
+
+
+def _guard_fail_closed(reason: str) -> None:
+    """The saved counters are lost: refuse searches for FAIL_CLOSED_S instead
+    of starting over with empty counters (that could blow through the tracker
+    caps). Recorded in the new state file, so a restart keeps it."""
+    until = time.time() + FAIL_CLOSED_S
+    _guard_cooldown[FAIL_CLOSED] = max(until, _guard_cooldown.get(FAIL_CLOSED, 0.0))
+    logger.error('Tracker guard state lost (%s): no indexer searches until %s',
+                 reason, datetime.fromtimestamp(until).strftime('%H:%M:%S'))
+    try:
+        _guard_save()
+    except Exception:  # never let a save problem escape the load path
+        pass
+
+
 def _guard_load() -> None:
-    """Load persisted guard state once per process (call under _budget_state_guard)."""
+    """Load persisted guard state once per process (call under _budget_state_guard).
+
+    Bad entries are dropped one by one. An unreadable or wrongly shaped file
+    is moved aside (<name>.bad-<ts>) and searches are refused for an hour
+    (fail closed). Never raises."""
     if _guard_loaded[0]:
         return
     _guard_loaded[0] = True
     import json
+    from app.paths import quarantine
+    path = _guard_path()
     try:
-        with open(_guard_path()) as fh:
+        with open(path) as fh:
             raw = json.load(fh)
     except FileNotFoundError:
         return
-    except (OSError, ValueError) as e:
-        logger.warning('Tracker guard state unreadable (%s); starting with full limits in force', e)
-        raw = {}
-    cutoff = time.time() - 86400
-    try:
-        for k, entries in (raw.get('log') or {}).items():
-            kept = []
-            for e in entries:
-                ts, kind = (e[0], e[1]) if isinstance(e, list) else (e, 'b')
-                if float(ts) > cutoff:
-                    kept.append([float(ts), 'i' if kind == 'i' else 'b'])
-            _guard_log[int(k)] = kept
-        for k, v in (raw.get('buckets') or {}).items():
-            _guard_buckets[int(k)] = [float(v[0]), float(v[1])]
-        for k, v in (raw.get('cooldown') or {}).items():
-            _guard_cooldown[int(k)] = float(v)
-    except (TypeError, ValueError, IndexError) as e:
-        logger.warning('Tracker guard state malformed (%s); ignoring part of it', e)
+    except (OSError, ValueError, UnicodeDecodeError) as e:
+        quarantine(path, f'unreadable: {e}', logger)
+        _guard_fail_closed('state file unreadable')
+        return
+    sections = ('log', 'buckets', 'cooldown')
+    if not isinstance(raw, dict) or any(not isinstance(raw.get(k, {}), dict) for k in sections):
+        quarantine(path, 'wrong shape', logger)
+        _guard_fail_closed('state file has the wrong shape')
+        return
+    cutoff, dropped = time.time() - 86400, 0
+    burst = float(GUARD_LIMITS['background_burst'])
+
+    def _key(k):
+        try:
+            return int(k)
+        except (TypeError, ValueError):
+            return None
+
+    for k, entries in raw.get('log', {}).items():
+        ix = _key(k)
+        if ix is None or not isinstance(entries, list):
+            dropped += 1
+            continue
+        kept = []
+        for e in entries:
+            if isinstance(e, list) and len(e) == 2 and e[1] in ('i', 'b'):
+                ts, kind = _valid_ts(e[0]), e[1]
+            else:
+                ts, kind = _valid_ts(e), 'b'      # older format: bare timestamps
+            if ts is None:
+                dropped += 1
+            elif ts > cutoff:
+                kept.append([ts, kind])
+        _guard_log[ix] = kept
+    for k, v in raw.get('buckets', {}).items():
+        ix = _key(k)
+        ok = ix is not None and isinstance(v, list) and len(v) == 2
+        tokens = v[0] if ok else None
+        ts = _valid_ts(v[1]) if ok else None
+        if not ok or isinstance(tokens, bool) or not isinstance(tokens, (int, float)) \
+                or not 0 <= tokens <= burst or ts is None:
+            dropped += 1
+            if ix is not None:
+                _guard_buckets[ix] = [0.0, time.time()]   # unknown: treat as empty, not full
+            continue
+        _guard_buckets[ix] = [float(tokens), ts]
+    for k, v in raw.get('cooldown', {}).items():
+        ix, ts = _key(k), _valid_ts(v)
+        if ix is None or ts is None:
+            dropped += 1
+            continue
+        _guard_cooldown[ix] = ts
+    if dropped:
+        logger.warning('Tracker guard state: dropped %d invalid entr%s', dropped, 'y' if dropped == 1 else 'ies')
 
 
 def _guard_save() -> None:
-    """Write all guard state atomically: temp file in the same dir, fsync, os.replace."""
-    import json
-    import os
-    import tempfile
-    path = _guard_path()
+    """Write all guard state atomically (app.paths.atomic_write_json)."""
+    from app.paths import atomic_write_json
     state = {
         'log': {str(k): v for k, v in _guard_log.items()},
         'buckets': {str(k): v for k, v in _guard_buckets.items()},
         'cooldown': {str(k): v for k, v in _guard_cooldown.items()},
     }
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix='.indexer_guard.', dir=os.path.dirname(path))
-        try:
-            with os.fdopen(fd, 'w') as fh:
-                json.dump(state, fh)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(tmp, path)
-        except BaseException:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
+        atomic_write_json(_guard_path(), state)
     except OSError as e:
         logger.warning('Tracker guard state not saved: %s', e)
+
+
+def _retry_after_seconds(value: Optional[str], now: float) -> Optional[float]:
+    """Seconds to wait from a Retry-After header (delta-seconds or HTTP-date),
+    capped at 24 h; None when absent or unparsable."""
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        secs = float(value)
+    else:
+        from email.utils import parsedate_to_datetime
+        try:
+            secs = parsedate_to_datetime(value).timestamp() - now
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return None
+    return min(max(secs, 1.0), 86400.0)
 
 
 def _guard_counts(ix: int, now: float) -> tuple:
@@ -169,6 +237,8 @@ def _guard_decide(ix: int, interactive: bool, now: float) -> Optional[str]:
     """None when a search to *ix* may be sent now (and records it), else the
     reason it may not. Call under _budget_state_guard."""
     _guard_load()
+    if _guard_cooldown.get(FAIL_CLOSED, 0.0) > now:
+        return 'guard state lost: searches paused'
     hr, day, glob = _guard_counts(ix, now)
     if day >= GUARD_LIMITS['per_day']:
         return f"daily cap {GUARD_LIMITS['per_day']}"
@@ -444,10 +514,14 @@ class ProwlarrClient:
             _status_cache[self.base_url] = (0.0, ent[1])
 
     def _backed_off_until(self, ix: int) -> Optional[float]:
-        till = self._indexer_backoffs().get(int(ix))
-        if till and till > time.time():
-            return till
-        return None
+        """Until when *ix* must not be searched: Prowlarr's backoff, Luma's
+        own cooldown after a 400/429, or the fail-closed window."""
+        now = time.time()
+        with _budget_state_guard:
+            _guard_load()
+            own = max(_guard_cooldown.get(int(ix), 0.0), _guard_cooldown.get(FAIL_CLOSED, 0.0))
+        till = max(self._indexer_backoffs().get(int(ix)) or 0.0, own)
+        return till if till > now else None
 
     def _indexer_name(self, ix: int) -> str:
         names = getattr(self, '_ix_names', None) or {}
@@ -537,8 +611,7 @@ class ProwlarrClient:
             # Prowlarr parked the indexer (tracker 429): pick that up now so
             # every following call skips it instead of collecting more 400s.
             self._invalidate_backoffs()
-            if single is None:
-                self._start_unscoped_cooldown()
+            self._start_cooldown(ix, resp)
         resp.raise_for_status()
         items = resp.json()
         with _budget_state_guard:
@@ -549,23 +622,32 @@ class ProwlarrClient:
         return items
 
     def _unscoped_blocked_until(self, now: float) -> Optional[float]:
-        """Until when an unscoped search must not be sent: its own cooldown
-        after a 400/429, or the latest backoff of any indexer."""
-        with _budget_state_guard:
-            _guard_load()
-            cool = _guard_cooldown.get(UNSCOPED, 0.0)
+        """Until when an unscoped search must not be sent: its own cooldown,
+        the fail-closed window, or the latest backoff of any indexer."""
         tills = [t for t in self._indexer_backoffs().values() if t > now]
-        till = max([cool] + tills)
+        till = max([self._backed_off_until(UNSCOPED) or 0.0] + tills)
         return till if till > now else None
 
-    def _start_unscoped_cooldown(self) -> None:
+    def _start_cooldown(self, ix: int, resp) -> None:
+        """After a 400/429: no searches to *ix* until Retry-After (seconds or
+        HTTP-date), else Prowlarr's disabledTill, else unscoped_cooldown_s.
+        Persisted, so a restart keeps it."""
         now = time.time()
-        tills = [t for t in self._indexer_backoffs().values() if t > now]
-        until = max(tills) if tills else now + GUARD_LIMITS['unscoped_cooldown_s']
+        headers = getattr(resp, 'headers', None) or {}
+        wait = _retry_after_seconds(headers.get('Retry-After'), now)
+        if wait is not None:
+            until = now + wait
+        else:
+            backoffs = self._indexer_backoffs()
+            tills = [t for t in (backoffs.values() if ix == UNSCOPED else [backoffs.get(ix) or 0.0]) if t > now]
+            until = max(tills) if tills else now + GUARD_LIMITS['unscoped_cooldown_s']
         with _budget_state_guard:
             _guard_load()
-            _guard_cooldown[UNSCOPED] = until
+            _guard_cooldown[ix] = max(until, _guard_cooldown.get(ix, 0.0))
             _guard_save()
+        self._log_skip_once(ix, 'cooldown', round(until),
+                            f'{self._indexer_name(ix)} (id {ix}) answered {resp.status_code}: no searches until '
+                            f'{datetime.fromtimestamp(until).strftime("%H:%M:%S")}')
 
     def _search_request(self, query: str, categories: str, limit: int,
                         indexer_ids: Optional[List[int]] = None) -> List[dict]:

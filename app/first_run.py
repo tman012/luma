@@ -79,7 +79,7 @@ def export_settings_to_env() -> None:
     try:
         data = json.loads((data_dir() / 'settings.json').read_text())
     except (FileNotFoundError, ValueError):
-        return
+        data = {}
     for env, path in _SETTINGS_ENV.items():
         if os.environ.get(env):
             continue
@@ -88,3 +88,14 @@ def export_settings_to_env() -> None:
             cur = cur.get(k) if isinstance(cur, dict) else None
         if isinstance(cur, str) and cur.strip():
             os.environ[env] = cur.strip()
+    _export_database_path(data)
+
+
+def _export_database_path(data: dict) -> None:
+    """Resolve the database once and export DATABASE_PATH, so every module
+    that reads the env var opens the same file (see app.paths)."""
+    if os.environ.get('DATABASE_PATH'):
+        return
+    from app.paths import database_path
+    saved = ((data.get('media') or {}).get('database_path') if isinstance(data, dict) else None)
+    os.environ['DATABASE_PATH'] = str(database_path(saved))

@@ -15,8 +15,8 @@ HOUR, DAY = 3600, 86400
 
 
 class _Resp:
-    def __init__(self, items, status=200):
-        self._items, self.status_code = items, status
+    def __init__(self, items, status=200, headers=None):
+        self._items, self.status_code, self.headers = items, status, headers or {}
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -34,9 +34,10 @@ class _Session:
         if url.endswith('/indexerstatus'):
             return _Resp(self.backoffs)
         self.calls.append(params)
-        return _Resp([{'title': f'r{len(self.calls)}'}], self.status)
+        return _Resp([{'title': f'r{len(self.calls)}'}], self.status, self.headers)
 
     backoffs = []
+    headers = {}
 
 
 class Clock:
@@ -304,11 +305,108 @@ def test_old_entries_dropped_on_load(clock, state_dir):
     assert ia._guard_log[5] == [[clock.now - 10, 'b']]
 
 
-def test_corrupt_state_file_keeps_limits(clock, state_dir):
+def _skips(fn):
+    try:
+        fn()
+    except ia.IndexerSkipped:
+        return True
+    return False
+
+
+@pytest.mark.parametrize('headers', [{}, {'Retry-After': '120'}, {'Retry-After': 'HTTPDATE'}])
+def test_per_indexer_429_cools_down_four_calls_one_hit(client, clock, headers):
+    if headers.get('Retry-After') == 'HTTPDATE':
+        from email.utils import formatdate
+        headers = {'Retry-After': formatdate(clock.now + 120, usegmt=True)}
+    client.session.status, client.session.headers = 429, headers
+    with pytest.raises(RuntimeError):
+        _send(client, 5, True)
+    client.session.status, client.session.headers = 200, {}
+    for _ in range(3):
+        assert _skips(lambda: _send(client, 5, True))
+    assert len(client.session.calls) == 1
+    wait = 120 if headers else ia.GUARD_LIMITS['unscoped_cooldown_s']
+    assert ia._guard_cooldown[5] == pytest.approx(clock.now + wait, abs=5)
+    clock.advance(wait + 5)
+    _send(client, 5, True)
+    assert len(client.session.calls) == 2
+
+
+def test_per_indexer_400_cooldown_survives_restart(client, clock, state_dir):
+    client.session.status = 400
+    with pytest.raises(RuntimeError):
+        _send(client, 5, False)
+    _restart()
+    c2 = _client()
+    for _ in range(3):
+        assert _skips(lambda: _send(c2, 5, True))
+    assert c2.session.calls == []
+    raw = json.loads((state_dir / ia.GUARD_FILENAME).read_text())
+    assert float(raw['cooldown']['5']) > clock.now
+
+
+def test_retry_after_parsing(clock):
+    from email.utils import formatdate
+    assert ia._retry_after_seconds('30', clock.now) == 30
+    assert ia._retry_after_seconds(formatdate(clock.now + 90, usegmt=True), clock.now) == pytest.approx(90, abs=1)
+    assert ia._retry_after_seconds('soon', clock.now) is None
+    assert ia._retry_after_seconds('', clock.now) is None
+    assert ia._retry_after_seconds('999999', clock.now) == 86400
+
+
+def _assert_fail_closed(state_dir, clock, client):
+    assert _skips(lambda: _send(client, 1, True))
+    backups = [p.name for p in state_dir.iterdir() if '.bad-' in p.name]
+    assert len(backups) == 1 and backups[0].startswith(ia.GUARD_FILENAME + '.bad-')
+    assert _skips(lambda: client._get_search(_q(), None, interactive=True))
+    assert client.session.calls == []
+    _restart()                                   # still closed after a restart
+    c2 = _client()
+    assert _skips(lambda: _send(c2, 1, True))
+    clock.advance(ia.FAIL_CLOSED_S + 1)
+    _send(c2, 1, True)
+    assert len(c2.session.calls) == 1
+
+
+def test_corrupt_json_moved_aside_and_fails_closed(clock, state_dir, caplog):
     (state_dir / ia.GUARD_FILENAME).write_text('{not json')
+    with caplog.at_level('ERROR'):
+        _assert_fail_closed(state_dir, clock, _client())
+    assert any('moved it to' in r.message for r in caplog.records)
+
+
+@pytest.mark.parametrize('raw', ['[]', '"x"', '{"log": [], "buckets": {}}', '{"buckets": "5,0"}'])
+def test_wrong_shape_moved_aside_and_fails_closed(clock, state_dir, raw):
+    (state_dir / ia.GUARD_FILENAME).write_text(raw)
+    _assert_fail_closed(state_dir, clock, _client())
+
+
+def test_one_bad_entry_dropped_rest_kept(clock, state_dir, caplog):
+    now = clock.now
+    good = [[now - 10, 'i']] * 40
+    (state_dir / ia.GUARD_FILENAME).write_text(json.dumps({
+        'log': {'8': good + [['x', 'i'], [now - 5, 'zz'], None], 'bad-key': [[now, 'i']]},
+        'buckets': {'3': [0.0, now], '4': 'full', '6': [99, now]},
+        'cooldown': {'9': now + 600, '10': 'later'},
+    }))
     c = _client()
-    _send(c, 1, True)
+    with caplog.at_level('WARNING'):
+        assert _skips(lambda: _send(c, 8, True))   # 40 kept entries: interactive cap hit
+    assert any('dropped' in r.message for r in caplog.records)
+    assert not [p for p in state_dir.iterdir() if '.bad-' in p.name]
+    assert len(ia._guard_log[8]) == 40
+    assert ia._guard_buckets[4][0] == 0.0 and ia._guard_buckets[6][0] == 0.0   # bad buckets read as empty
+    assert _skips(lambda: _send(c, 4, False))
+    assert _skips(lambda: _send(c, 9, True))     # cooldown kept
+    _send(c, 10, True)                           # bad cooldown dropped
     assert len(c.session.calls) == 1
+
+
+def test_bad_state_never_raises(clock, state_dir):
+    for raw in ('\x00\xff', '{"log": {"1": "abc"}}', '{"cooldown": {"1": [1, 2]}}', 'null'):
+        (state_dir / ia.GUARD_FILENAME).write_text(raw)
+        _restart()
+        ia._guard_load()
 
 
 def test_upgrade_batch_pauses_on_guard(tmp_path, monkeypatch):

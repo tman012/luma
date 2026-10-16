@@ -83,6 +83,34 @@ Activity tags did not change. `GET /api/automation/features` shows the effective
 - `push.vapid_email` defaults to empty and falls back to `LUMA_ADMIN_EMAIL`. Existing values are untouched.
 - The AI/voice keys (OpenAI, ElevenLabs, Anthropic) are dropped from settings by an earlier migration. Remove them from `.env` too.
 
+### Database location
+
+Luma keeps using the database file it used before. The path is chosen in this
+order:
+
+1. `DATABASE_PATH` in the environment. The shipped `docker-compose.yml` sets
+   `DATABASE_PATH=/app/data/media.db`, so a compose install keeps that exact
+   file.
+2. A saved `media.database_path` setting.
+3. `media.db` in the data folder (`LUMA_DATA_DIR`, default `/app/data`).
+   If that file does not exist yet but a database already sits at the old
+   default `/app/data/media.db`, Luma uses the existing file and logs a
+   warning that names both paths. It never creates a new, empty database next
+   to an existing one.
+
+To check, look for one `Database:` line in the container log after start:
+
+    docker compose logs luma | grep "Database:"
+
+It reads `Database: /app/data/media.db (from env)` (or `from setting` /
+`from data dir`). A `Database: using the existing ... instead of ...` warning
+means the old file was picked up; pin it so the choice is explicit.
+
+To pin the path, keep `DATABASE_PATH` in the compose environment, or save
+`media.database_path` (Settings, or `data/settings.json` under `media`) with the
+full container path of the file. Both point at the same file; the environment
+wins if both are set.
+
 ### Access and host names
 
 - `security.access_mode` is deleted (an old `pin` becomes `auth_required: enabled`; `pin_remote`/`open` become

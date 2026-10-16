@@ -29,7 +29,8 @@ ADMIN_EMAIL = os.environ.get("LUMA_ADMIN_EMAIL") or os.environ.get("ADMIN_EMAIL"
 
 
 def _get_db_path() -> str:
-    return os.environ.get("DATABASE_PATH", "/app/data/media.db")
+    from app.paths import database_path
+    return str(database_path())
 
 
 def _get_db() -> sqlite3.Connection:

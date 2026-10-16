@@ -58,7 +58,8 @@ class Config:
     PLEX_ACCOUNT_ID = int(os.environ.get('PLEX_ACCOUNT_ID', '1'))  # Default to account 1 (server owner)
 
     # Database path
-    DATABASE_PATH = os.environ.get('DATABASE_PATH', '/app/data/media.db')
+    # Database path (blank: resolved by app.paths.database_path)
+    DATABASE_PATH = os.environ.get('DATABASE_PATH', '')
 
     @classmethod
     def validate(cls):
