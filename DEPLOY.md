@@ -1,71 +1,48 @@
 # Luma Deployment Notes
 
-## Docker Volumes
+## Folders and mounts
 
-### Hero Cache Images (`hero_cache` volume)
+| Container path | Host side (compose variable, default) | Contents |
+|---|---|---|
+| `/app/data` (`LUMA_DATA_DIR`) | `LUMA_DATA_HOST_DIR`, `./data` | `media.db`, `settings.json`, `hero_content.json`, other state. Back this up. |
+| `/app/cache` (`LUMA_CACHE_DIR`) | `LUMA_CACHE_HOST_DIR`, `./cache` | Rebuildable caches: `explore/`, `library/`, `hero/` (hero images). |
+| `/app/spa` | none (built into the image) | The React SPA. Kept outside `/app/static` so a bind-mounted `./static` cannot hide it. Override with `LUMA_SPA_DIR`. |
 
-**What**: Cached hero section backdrop and poster images  
-**Path**: `/app/static/hero_cache` (inside container)  
-**Volume**: Named volume `hero_cache` in `docker-compose.yml`
+`LUMA_DATA_DIR` and `LUMA_CACHE_DIR` are container paths and are set in
+`docker-compose.yml`. Put host folders in `.env` only as `LUMA_DATA_HOST_DIR` /
+`LUMA_CACHE_HOST_DIR`. Older `.env` files that set `LUMA_DATA_DIR=./data`
+should rename it to `LUMA_DATA_HOST_DIR`. `HERO_CACHE_DIR` (container path)
+defaults to `$LUMA_CACHE_DIR/hero` and normally stays unset.
 
-**Why persistent**: Hero images are downloaded from Plex/Fanart/TMDb and take time to fetch. The named volume ensures these images survive:
-- Container restarts
-- Image rebuilds
-- Stack redeployments
+Both mounts must be writable by the container user. On start Luma creates and
+deletes a temp file in each directory and opens every SQLite database there for
+write; if any check fails it logs the reason and exits with status 1 (so a
+read-only or wrongly owned mount fails the deploy instead of logging
+"readonly database" errors later).
 
-**Self-healing**: If image files are missing (e.g., after manual volume deletion), the app automatically re-downloads them on next request.
+## Hero cache
 
-**Served path**: Images are served via Flask at `/static/hero_cache/{filename}`.
+- Images live in `$LUMA_CACHE_DIR/hero` and are served at `/static/hero_cache/<file>`.
+- URLs from before the move still work: if a file is not in the hero cache dir,
+  it is served from the legacy `<static>/hero_cache` folder.
+- Refresh/heal runs only in a background scheduler, never from a request, and
+  at most one refresh runs at a time (also across processes sharing the cache).
+- On start: no `hero_content.json` -> one refresh. A `hero_content.json` that
+  references images missing from the hero cache dir (e.g. after a container
+  recreate with a fresh cache) -> heal immediately. Then a daily refresh at
+  05:00 plus a heal check every 5 minutes.
 
-### First Deploy
-
-When deploying for the first time:
+## First deploy / upgrade
 
 ```bash
+mkdir -p data cache
 docker compose up -d --build
 ```
 
-The `hero_cache` volume will be automatically created and persist across future deployments.
+Clear the hero image cache (it is rebuilt on the next start):
 
-### Volume Management
-
-**List volumes**:
 ```bash
-docker volume ls | grep hero_cache
+docker compose stop luma && rm -rf cache/hero && docker compose start luma
 ```
 
-**Inspect volume**:
-```bash
-docker volume inspect luma_hero_cache
-```
-
-**Clear cache (if needed)**:
-```bash
-docker compose down
-docker volume rm luma_hero_cache
-docker compose up -d
-```
-
-The app will re-download images on demand.
-
-### Backup
-
-To backup hero cache images:
-```bash
-docker run --rm -v luma_hero_cache:/data -v $(pwd):/backup alpine tar czf /backup/hero_cache_backup.tar.gz -C /data .
-```
-
-To restore:
-```bash
-docker run --rm -v luma_hero_cache:/data -v $(pwd):/backup alpine sh -c "cd /data && tar xzf /backup/hero_cache_backup.tar.gz"
-```
-
-## Data Directory
-
-The main data directory (`${LUMA_DATA_DIR}`) contains:
-- `media.db` - Main SQLite database
-- `settings.json` - Application settings
-- `hero_content.json` - Hero section content metadata
-- Cache databases (explore, library)
-
-This should be backed up regularly as it contains all app state except the hero images.
+Backup: `tar czf luma-data.tgz data` (the cache folder can be rebuilt).

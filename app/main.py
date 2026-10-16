@@ -25,6 +25,13 @@ from dotenv import load_dotenv
 import requests
 
 # Import explore cache
+if __name__ == '__main__':
+    # Fail fast (exit 1) before the cache modules below touch the disk, if
+    # LUMA_DATA_DIR / LUMA_CACHE_DIR / HERO_CACHE_DIR or a database in them is
+    # not writable (e.g. a populated read-only mount).
+    # NOTE: on rebase onto PR #2, also call this from the gunicorn startup path.
+    from app.paths import ensure_writable_or_exit
+    ensure_writable_or_exit()
 from app.explore_cache import explore_cache
 from app.fast_search import fast_search_index
 
@@ -78,7 +85,26 @@ logger = logging.getLogger(__name__)
 
 # Flask app setup
 static_folder = os.environ.get('FLASK_STATIC_FOLDER', '/app/static')
-app = Flask(__name__, static_folder=static_folder)
+# static_url_path is pinned: Flask otherwise derives it from the folder's
+# basename, so FLASK_STATIC_FOLDER=/x/assets would move /static/* to /assets/*.
+app = Flask(__name__, static_folder=static_folder, static_url_path='/static')
+
+
+def _resolve_spa_dir(static_dir: str, image_spa_dir: str = '/app/spa') -> str:
+    """Directory holding the built React SPA (index.html, assets/, fonts/, weather/).
+
+    LUMA_SPA_DIR wins; else the image path /app/spa (outside ./static, so a
+    bind-mounted ./static cannot hide it); else <static>/spa for dev builds.
+    """
+    explicit = os.environ.get('LUMA_SPA_DIR')
+    if explicit:
+        return explicit
+    if os.path.isfile(os.path.join(image_spa_dir, 'index.html')):
+        return image_spa_dir
+    return os.path.join(static_dir, 'spa')
+
+
+app.config['SPA_DIR'] = _resolve_spa_dir(static_folder)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', '')
 # HERO_CACHE_DIR is resolved once in HeroCache.__init__
 app.config['HERO_CACHE_DIR'] = str(hero_cache.cache_dir)
@@ -985,7 +1011,7 @@ tmdb = TMDBClient(settings.get('apis.tmdb.api_key'))
 # Routes — React SPA helper
 def _serve_spa():
     """Serve the React SPA index.html (from static/spa/)."""
-    spa_index = os.path.join(app.static_folder, 'spa', 'index.html')
+    spa_index = os.path.join(app.config['SPA_DIR'], 'index.html')
     if os.path.exists(spa_index):
         resp = send_file(spa_index)
         resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
@@ -15556,7 +15582,7 @@ def serve_ca_cert():
 def spa_assets(filename):
     """Serve Vite-built assets (JS/CSS) for the React SPA.
     Hashed filenames → immutable cache (1 year)."""
-    resp = send_from_directory(os.path.join(app.static_folder, 'spa', 'assets'), filename)
+    resp = send_from_directory(os.path.join(app.config['SPA_DIR'], 'assets'), filename)
     resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     return resp
 
@@ -15564,7 +15590,7 @@ def spa_assets(filename):
 @app.route('/fonts/<path:filename>')
 def spa_fonts(filename):
     """Serve font files from the SPA public/fonts directory."""
-    resp = send_from_directory(os.path.join(app.static_folder, 'spa', 'fonts'), filename)
+    resp = send_from_directory(os.path.join(app.config['SPA_DIR'], 'fonts'), filename)
     resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
     return resp
 
@@ -15572,16 +15598,26 @@ def spa_fonts(filename):
 @app.route('/weather/<path:filename>')
 def spa_weather(filename):
     """Serve weather icon SVGs from the SPA public/weather directory."""
-    resp = send_from_directory(os.path.join(app.static_folder, 'spa', 'weather'), filename)
+    resp = send_from_directory(os.path.join(app.config['SPA_DIR'], 'weather'), filename)
     resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
     return resp
 
 @app.route('/static/hero_cache/<path:filename>')
 def hero_cache_files(filename):
-    """Serve hero cache images from the configurable hero cache directory."""
-    resp = send_from_directory(app.config['HERO_CACHE_DIR'], filename)
-    resp.headers['Cache-Control'] = 'public, max-age=86400'
-    return resp
+    """Serve hero images from HERO_CACHE_DIR.
+
+    Falls back to the legacy <static>/hero_cache dir (where images lived before
+    they moved to $LUMA_CACHE_DIR/hero) so URLs stored before the move keep
+    working. safe_join rejects traversal outside either directory.
+    """
+    from werkzeug.security import safe_join
+    for base in (app.config['HERO_CACHE_DIR'], os.path.join(app.static_folder, 'hero_cache')):
+        path = safe_join(base, filename)
+        if path and os.path.isfile(path):
+            resp = send_from_directory(base, filename)
+            resp.headers['Cache-Control'] = 'public, max-age=86400'
+            return resp
+    return jsonify({'error': 'not found'}), 404
 
 # =============================================================================
 # Settings API — Phase 1
@@ -17413,9 +17449,17 @@ if __name__ == '__main__':
     # never from a request.
     # NOTE: on rebase onto PR #2 this start moves into #2's
     # START_BACKGROUND_THREADS hook so it also runs under gunicorn.
+    # With FLASK_ENV=development the Werkzeug reloader runs this block in both
+    # the watcher and the serving child; start the scheduler only in the child
+    # so the startup refresh runs once.
+    _reloader_parent = (os.environ.get('FLASK_ENV') == 'development'
+                        and os.environ.get('WERKZEUG_RUN_MAIN') != 'true')
     try:
-        hero_cache.start_scheduler()
-        logger.info("✅ Hero cache scheduler started")
+        if _reloader_parent:
+            logger.info("Hero cache scheduler deferred to the reloader child process")
+        else:
+            hero_cache.start_scheduler()
+            logger.info("✅ Hero cache scheduler started")
     except Exception as e:
         logger.error(f"❌ Failed to start hero cache scheduler: {e}")
 

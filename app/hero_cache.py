@@ -13,6 +13,7 @@ Selection criteria:
 
 import os
 import re
+import fcntl
 import json
 import logging
 import requests
@@ -57,6 +58,7 @@ class HeroCache:
         self._scheduler_thread = None
         self._scheduler_stop = threading.Event()
         self._healing_lock = threading.Lock()
+        self._refresh_lock = threading.Lock()  # single-flight refresh in this process
         self._last_heal_time = 0
         self._heal_cooldown = 600  # 10 minutes after successful heal
         self._heal_failed = False
@@ -415,6 +417,28 @@ class HeroCache:
             logger.error(f"Error clearing old cache: {e}")
 
     def refresh_hero_content(self) -> List[Dict]:
+        """Single-flight refresh: at most one runs at a time, across threads and
+        processes sharing the cache dir. A caller that finds one already
+        running skips (it would only repeat the same work) and gets the cache.
+        """
+        if not self._refresh_lock.acquire(blocking=False):
+            logger.info("Hero refresh already running in this process; skipping")
+            return self.load_cache()
+        lock_file = None
+        try:
+            try:
+                lock_file = open(self.cache_dir / '.refresh.lock', 'w')
+                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                logger.info("Hero refresh already running in another process; skipping")
+                return self.load_cache()
+            return self._refresh_hero_content_unlocked()
+        finally:
+            if lock_file is not None:
+                lock_file.close()  # releases the flock
+            self._refresh_lock.release()
+
+    def _refresh_hero_content_unlocked(self) -> List[Dict]:
         """
         Main method to refresh hero content cache from Recently Released library.
 
@@ -750,9 +774,32 @@ class HeroCache:
             target += timedelta(days=1)
         return (target - now).total_seconds()
 
-    def _scheduler_loop(self, heal_interval: float):
-        if not self.load_cache():
+    def startup_sync(self) -> Optional[str]:
+        """One-time startup step, run by the scheduler before its first wait.
+
+        No cached content -> one refresh. Cached content that references image
+        files missing from the hero cache dir (e.g. a stale data/hero_content.json
+        surviving a container recreate) -> heal now instead of after the first
+        heal interval; entries without upstream URLs make that heal a single
+        full refresh. Returns 'refresh', 'heal' or None.
+        """
+        content = self.load_cache()
+        if not content:
             self._safe_refresh()
+            return 'refresh'
+        missing = self.get_missing_images(content)
+        if not missing:
+            return None
+        with self._healing_lock:
+            self._last_heal_time = self._clock()
+            self._heal_missing_images_background(content, missing)
+        return 'heal'
+
+    def _scheduler_loop(self, heal_interval: float):
+        try:
+            self.startup_sync()
+        except Exception as e:
+            logger.error(f"Hero startup refresh/heal failed: {e}")
         next_refresh = time.monotonic() + self._seconds_until_daily_refresh()
         while not self._scheduler_stop.wait(heal_interval):
             if time.monotonic() >= next_refresh:
