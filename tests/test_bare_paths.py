@@ -17,3 +17,9 @@ def test_app_uses_them():
     import app.main
     assert not str(app.hero_cache.CACHE_DIR).startswith('/app')
     assert not app.main.app.static_folder.startswith('/app')
+
+
+def test_library_cache_constructs(tmp_path, monkeypatch):
+    monkeypatch.setenv('LUMA_CACHE_DIR', str(tmp_path))
+    from app.library_cache import LibraryCache
+    LibraryCache()   # regression: module was missing `import os`

@@ -120,9 +120,9 @@ def test_split_host(value, name):
 
 
 def test_configured_hostnames_parsing():
-    s = SimpleNamespace(get=lambda k, d=None: ' a.lan, B.lan;c.lan  d.lan:5001 ' if k == 'security.hostnames' else d)
-    assert access.configured_hostnames(s) == {'a.lan', 'b.lan', 'c.lan', 'd.lan'}
-    assert access.is_known_host('b.lan:443', s)
-    assert not access.is_known_host('e.lan', s)
+    s = SimpleNamespace(get=lambda k, d=None: ' a.example.com, B.example.com;c.lan  d.lan:5001 ' if k == 'security.hostnames' else d)
+    assert access.configured_hostnames(s) == {'a.example.com', 'b.example.com', 'c.lan', 'd.lan'}
+    assert access.is_known_host('b.example.com:443', s)
+    assert not access.is_known_host('e.example.com', s)
     assert access.is_known_host('127.0.0.1', None)
     assert not access.is_known_host('', None)

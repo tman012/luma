@@ -63,8 +63,8 @@ def _run(tmp_path, settings, env_base=None):
 def test_url_base_set_only_in_settings(tmp_path):
     r = _run(tmp_path, {'general': {'url_base': 'luma-test/'}})
     assert r['base'] == '/luma-test'
-    assert r['manifest']['start_url'] == '/luma-test'
-    assert r['manifest']['scope'] == '/luma-test'
+    assert r['manifest']['start_url'] == '/luma-test/'
+    assert r['manifest']['scope'] == '/luma-test/'
     assert all(i['src'].startswith('/luma-test/static/') for i in r['manifest']['icons'])
     assert r['login_location'].startswith('/luma-test/login?next=')
     assert r['outside_status'] == 404
@@ -73,7 +73,7 @@ def test_url_base_set_only_in_settings(tmp_path):
 def test_env_overrides_settings(tmp_path):
     r = _run(tmp_path, {'general': {'url_base': '/from-settings'}}, env_base='/from-env')
     assert r['base'] == '/from-env'
-    assert r['manifest']['start_url'] == '/from-env'
+    assert r['manifest']['start_url'] == '/from-env/'
 
 
 def test_no_base(tmp_path):
@@ -91,7 +91,7 @@ def test_readers_use_app_config(test_app):
     test_app.config['URL_BASE'] = '/mybase'
     c = test_app.test_client()
     man = c.get('/manifest.json').get_json()
-    assert man['start_url'] == '/mybase'
+    assert man['start_url'] == '/mybase/'
     assert man['icons'][0]['src'].startswith('/mybase/static/')
     r = c.get('/settings?tab=x', environ_base={'REMOTE_ADDR': '203.0.113.9'})
     assert r.status_code == 302

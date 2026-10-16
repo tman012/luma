@@ -82,6 +82,19 @@ Activity tags did not change. `GET /api/automation/features` shows the effective
 - `push.vapid_email` defaults to empty and falls back to `LUMA_ADMIN_EMAIL`. Existing values are untouched.
 - The AI/voice keys (OpenAI, ElevenLabs, Anthropic) are dropped from settings by an earlier migration. Remove them from `.env` too.
 
+### Access and host names
+
+- `security.access_mode` is deleted (an old `pin` becomes `auth_required: enabled`; `pin_remote`/`open` become
+  `disabled_local`).
+- `security.hostnames` is new and seeded **once**, only when the key doesn't exist yet: from names LAN clients
+  used in the last 30 days (`data/lan_hosts.json`, which this release starts writing, so it is empty on the first
+  upgrade); otherwise from private names in `APP_URL` plus the server's host name and its `.local` / `.lan`
+  forms. The log line `Seeded security.hostnames: ...` shows the result. Clearing the field later never re-seeds.
+- Without any setup, a LAN device can use an IP, `localhost`, the server's host name or a home-network name
+  (`docker-server`, `*.local`, `*.lan`, `*.home.arpa`, `*.internal`). Other names need **Host names**. A name never
+  skips sign-in for public, proxied-public or Cloudflare requests.
+- `security.allow_signup` is new (off): sign-up from outside the LAN is refused until it is turned on.
+
 ## 4. Visible changes
 
 - The legacy pages `/activity`, `/browse_libraries`, `/browse_media` and `/legacy/explore` redirect to the React

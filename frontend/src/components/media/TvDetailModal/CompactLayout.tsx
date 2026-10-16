@@ -30,7 +30,7 @@ import {
   SonarrShowStatus, SonarrSeasonNote, SonarrSeasonLine, SonarrEpisodeNote, SonarrEpisodeBadges, SonarrSeasonBadges,
   useSonarrStatusData, sonarrEpisode, sonarrSeason, seasonInFlight, isInFlight, orbWithSonarr,
 } from './SonarrStatus';
-import { apiUrl } from '@/urlHelpers';
+import { apiUrl, withBase } from '@/urlHelpers';
 
 function resolveEpisodeThumbnail(ep: TvEpisode): string | null {
   if (ep.still_path) {
@@ -598,7 +598,7 @@ export function CompactLayout(props: TvModalViewProps) {
                 >
                   {show.clearLogoUrl ? (
                     <img
-                      src={show.clearLogoUrl}
+                      src={show.clearLogoUrl ? withBase(show.clearLogoUrl) : undefined}
                       alt={show.title}
                       style={{
                         maxWidth: 'calc(100% - 32px)',

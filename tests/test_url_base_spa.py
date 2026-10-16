@@ -63,7 +63,8 @@ def test_js_chunks_have_no_root_relative_asset_urls(client):
 
 def test_manifest_icons_prefixed(client):
     man = _lan(client, '/luma/manifest.json').get_json()
-    assert man['start_url'] == '/luma'
+    assert man['start_url'] == '/luma/'
+    assert man['scope'] == '/luma/'
     for icon in man['icons']:
         assert icon['src'].startswith('/luma/static/')
         assert _lan(client, icon['src']).status_code == 200

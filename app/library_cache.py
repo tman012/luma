@@ -3,6 +3,7 @@ Library Cache Module - Caches frequently accessed library data for fast loading
 Similar to the ExploreCache but for library browsing, continue watching, and recent items.
 """
 
+import os
 import sqlite3
 import json
 import threading

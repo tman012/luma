@@ -12,15 +12,22 @@ header named by the optional security.trusted_proxy_header, off by default).
 No other header (CF-Connecting-IP, X-Real-IP from untrusted peers, ...) and no
 "home WAN" address is ever treated as local.
 
-Implicit owner access also needs a known Host: an IP literal, localhost, or a
-name listed in security.hostnames. A page on any other name (for example a
-DNS-rebinding domain that resolves to a LAN address) gets no implicit access.
+Implicit owner access needs BOTH a local client address (above) AND a known
+Host: an IP literal, localhost, this machine's own host name, a home-network
+name (one label such as "docker-server", or *.local, *.lan, *.home.arpa,
+*.internal) or a name listed in security.hostnames. The Host header is chosen
+by the client, so it never grants access on its own; it only narrows it. A
+page on a public name (for example a DNS-rebinding domain that resolves to a
+LAN address) gets no implicit access. Requests that came through Cloudflare
+(CF-Connecting-IP, CF-Ray, ... present) are never local, even from a trusted
+proxy.
 X-Forwarded-Host is only honored from a trusted proxy and only when it names
 such a known host.
 """
 
 import ipaddress
 import logging
+import socket
 from typing import List, Optional
 
 logger = logging.getLogger(__name__)
@@ -107,6 +114,17 @@ def client_ip(request, settings=None) -> Optional[str]:
     return peer
 
 
+# Headers Cloudflare adds to every proxied request. A request carrying any of
+# them came through the tunnel/CDN, so it is never a LAN request.
+_CLOUDFLARE_HEADERS = ('CF-Connecting-IP', 'CF-Ray', 'CF-Visitor', 'CF-IPCountry', 'True-Client-IP')
+
+
+def via_cloudflare(request) -> bool:
+    if any(request.headers.get(h) for h in _CLOUDFLARE_HEADERS):
+        return True
+    return 'cloudflare' in (request.headers.get('CDN-Loop') or '').lower()
+
+
 def is_local_request(request, settings=None) -> bool:
     """True when the request originates from a local/private IP.
     
@@ -114,6 +132,8 @@ def is_local_request(request, settings=None) -> bool:
     1. Direct connection from private IP (LAN, loopback)
     2. Connection via trusted proxy from private IP (using X-Forwarded-For)
     """
+    if via_cloudflare(request):
+        return False
     ip = client_ip(request, settings)
     return bool(ip and _is_private(ip))
 
@@ -142,14 +162,37 @@ def split_host(host: str) -> str:
     return host.rstrip('.')
 
 
+# Names that only resolve inside a home network (never public DNS).
+HOME_SUFFIXES = ('.local', '.lan', '.home.arpa', '.internal')
+
+
+def is_home_name(name: str) -> bool:
+    """One label (e.g. 'docker-server') or a home-network suffix; not an IP."""
+    name = split_host(name)
+    if not name or _addr(name) is not None:
+        return False
+    return '.' not in name or name.endswith(HOME_SUFFIXES)
+
+
+def own_hostnames() -> set:
+    """This machine's host name, with and without its domain."""
+    try:
+        raw = split_host(socket.gethostname())
+    except OSError:
+        return set()
+    return {raw, raw.split('.', 1)[0]} if raw else set()
+
+
 def is_known_host(host: str, settings=None) -> bool:
-    """True for an IP literal, localhost, or a name in security.hostnames."""
+    """True for an IP literal, localhost, a home-network name, this machine's
+    host name, or a name in security.hostnames. Never enough on its own: see
+    should_authenticate."""
     name = split_host(host)
     if not name:
         return False
-    if _addr(name) is not None or name == 'localhost':
+    if _addr(name) is not None or name == 'localhost' or is_home_name(name):
         return True
-    return name in configured_hostnames(settings)
+    return name in own_hostnames() or name in configured_hostnames(settings)
 
 
 def is_portal_traffic(request, settings) -> bool:

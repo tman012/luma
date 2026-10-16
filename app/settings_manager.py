@@ -1357,7 +1357,37 @@ def _migrate_strip_plaintext_request_password(data: dict) -> bool:
     return changed
 
 
-def _run_all_migrations(data: dict) -> bool:
+def _migrate_seed_hostnames(data: dict, data_dir=None) -> bool:
+    """Introduce security.hostnames, seeded once so LAN devices that open Luma
+    by name keep working without sign-in after the upgrade.
+
+    Runs only while the key is absent. Sources (see app.lan_hosts): names LAN
+    clients used in the last 30 days when that record has any; otherwise
+    private names from APP_URL plus this machine's host name and its .local /
+    .lan forms. The request-portal host name is never seeded.
+    """
+    security = data.setdefault('security', {})
+    if not isinstance(security, dict) or 'hostnames' in security:
+        return False
+    from app import lan_hosts
+
+    portal_cfg = data.get('request_portal')
+    portal = portal_cfg.get('hostname') if isinstance(portal_cfg, dict) else ''
+    sources = lan_hosts.seed_candidates(
+        data_dir if data_dir is not None else _infer_data_dir(),
+        configured_urls=[os.environ.get('APP_URL', '')],
+        exclude=[portal or ''],
+    )
+    names = []
+    for group in sources.values():
+        names.extend(n for n in group if n not in names)
+    security['hostnames'] = ', '.join(names)
+    logger.info("Seeded security.hostnames: %s (sources: %s)", security['hostnames'] or '(none)',
+                ', '.join(f"{k}={v}" for k, v in sources.items()))
+    return True
+
+
+def _run_all_migrations(data: dict, data_dir=None) -> bool:
     """Run all migrations on *data* (mutated in place).
     Returns True if any migration occurred.
     """
@@ -1382,6 +1412,7 @@ def _run_all_migrations(data: dict) -> bool:
     changed |= _migrate_strip_plaintext_request_password(data)
     changed |= _migrate_remove_remote_lock(data)
     changed |= _migrate_access_mode_to_auth_required(data)
+    changed |= _migrate_seed_hostnames(data, data_dir)
     return changed
 
 
@@ -1790,7 +1821,7 @@ class SettingsManager:
 
         # Run migrations BEFORE merging with defaults so old fields are
         # converted into new list fields that will survive the merge.
-        migrated = _run_all_migrations(on_disk)
+        migrated = _run_all_migrations(on_disk, self._path.parent)
 
         defaults = _build_defaults(SETTINGS_SCHEMA)
         with self._lock:

@@ -148,6 +148,9 @@ def _register_bot_api():
 # cookie is no longer read; any copy a browser still sends is expired by
 # _expire_legacy_session_cookie (the one place that deletes it).
 from app.auth_routes import AUTH_COOKIE, LEGACY_SESSION_COOKIE
+from app import lan_hosts as _lan_hosts
+# lan_hosts.json lives next to settings.json
+_LAN_HOSTS_DIR = Path(settings.path).parent
 # Exact paths reachable without signing in. Request-portal API paths come from
 # portal_guard's explicit allowlist (see _is_auth_exempt).
 _AUTH_EXEMPT = {
@@ -171,6 +174,16 @@ _SERVICE_API_KEY = os.environ.get("SERVICE_API_KEY") or _INSTALL_SECRETS["servic
 _register_bot_api()
 
 
+def _note_lan_host():
+    """Remember the host name a LAN client used (never remote or portal traffic)."""
+    try:
+        if _access.is_portal_traffic(request, settings) or not _access.is_local_request(request, settings):
+            return
+        _lan_hosts.record(request.host, _LAN_HOSTS_DIR)
+    except Exception as exc:  # never let bookkeeping break a request
+        logger.debug("lan host record failed: %s", exc)
+
+
 @app.before_request
 def load_current_user():
     """Attach the current user to g.current_user (or None if not logged in).
@@ -178,6 +191,7 @@ def load_current_user():
     """
     # Default g.implicit_user to False for all request types
     g.implicit_user = False
+    _note_lan_host()
     
     # Check for API key first
     api_key = request.headers.get("X-API-Key")
@@ -388,6 +402,40 @@ def _expire_legacy_session_cookie(response):
         base = app.config.get('URL_BASE') or ''
         if base:
             response.delete_cookie(LEGACY_SESSION_COOKIE, path=base)
+    return response
+
+
+_IMG_PREFIX = '/api/img/'
+
+
+def _with_base_img(value, base):
+    """Prefix root-relative /api/img/ strings in a JSON value with the URL base."""
+    if isinstance(value, str):
+        return base + value if value.startswith(_IMG_PREFIX) else value
+    if isinstance(value, list):
+        return [_with_base_img(v, base) for v in value]
+    if isinstance(value, dict):
+        return {k: _with_base_img(v, base) for k, v in value.items()}
+    return value
+
+
+@app.after_request
+def _prefix_image_urls(response):
+    """Image proxy URLs are built and cached root-relative ('/api/img/...').
+    Under a URL base, prefix them in /api JSON responses at send time, so
+    cached data stays base-independent. Already-prefixed URLs don't match."""
+    base = request.script_root or app.config.get('URL_BASE') or ''
+    if (not base or response.direct_passthrough or response.is_streamed
+            or response.mimetype != 'application/json' or not request.path.startswith('/api/')):
+        return response
+    raw = response.get_data(as_text=True)
+    if '"' + _IMG_PREFIX not in raw:
+        return response
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return response
+    response.set_data(json.dumps(_with_base_img(payload, base), separators=(',', ':')))
     return response
 
 
@@ -7988,6 +8036,9 @@ def security_get():
         'local_request': not _access.should_authenticate(settings, request),
         'trusted_proxies': settings.get('security.trusted_proxies') or '',
         'hostnames': settings.get('security.hostnames') or '',
+        # Names LAN clients used in the last 30 days that aren't listed yet
+        'seen_hostnames': [n for n in _lan_hosts.recent(_LAN_HOSTS_DIR, 30)
+                           if n not in _access.configured_hostnames(settings)],
         'allow_signup': bool(settings.get('security.allow_signup')),
     })
 
@@ -15964,13 +16015,12 @@ def manifest():
     sm = SettingsManager()
     theme = sm.get("ui.theme_color") or "#0a0a0a"
     prefix = app.config.get('URL_BASE', '') or ''
-    url_base = prefix or '/'
     data = {
         "name": "Luma",
         "short_name": "Luma",
         "description": "Your personal media library and search",
-        "start_url": url_base if url_base != '/' else "/",
-        "scope": url_base if url_base != '/' else "/",
+        "start_url": f"{prefix}/",
+        "scope": f"{prefix}/",
         "display": "standalone",
         "background_color": "#1a1a1a",
         "theme_color": theme,
@@ -15987,8 +16037,7 @@ def service_worker():
     """Service Worker file — short cache so updates propagate quickly."""
     resp = send_from_directory(app.static_folder, 'sw.js')
     resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
-    url_base = app.config.get('URL_BASE', '') or '/'
-    resp.headers['Service-Worker-Allowed'] = url_base
+    resp.headers['Service-Worker-Allowed'] = (app.config.get('URL_BASE', '') or '') + '/'
     return resp
 
 @app.route('/ca.crt')

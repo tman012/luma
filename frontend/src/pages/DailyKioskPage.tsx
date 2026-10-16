@@ -12,6 +12,7 @@ import { useModalHost } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { SmartHomeModal } from '@/components/smarthome/SmartHomeModal';
 import { apiFetch } from '../apiClient';
+import { withBase } from '@/urlHelpers';
 
 // ── Amazon Ember font injection ────────────────────────────────────
 
@@ -1231,7 +1232,7 @@ function TvCalendarWidget({ data, textShadow: ts }: { data: TvCalendarData; text
             {/* Poster */}
             {ep.poster_url ? (
               <img
-                src={ep.poster_url}
+                src={ep.poster_url ? withBase(ep.poster_url) : undefined}
                 alt={ep.series_title}
                 loading="lazy"
                 style={{
@@ -1351,7 +1352,7 @@ function NowAvailableOverlay({
       }}>
         <img
           key={data.backdrop_url}
-          src={data.backdrop_url}
+          src={data.backdrop_url ? withBase(data.backdrop_url) : undefined}
           alt=""
           style={{
             width: '100%',
