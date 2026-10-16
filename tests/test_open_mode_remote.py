@@ -83,8 +83,8 @@ class TestOpenModeRemoteAccess:
             assert access.needs_pin(mock_settings, request) is False
     
     def test_remote_visitor_no_implicit_owner_session(self, app, mock_settings):
-        """Remote visitor in open mode doesn't get implicit owner session (Item 7)."""
-        from app import access, user_auth
+        """Remote visitor in open mode needs PIN (doesn't get implicit owner) (Item 7)."""
+        from app import access
         
         # Configure open mode
         def mock_get(key, default=None):
@@ -95,31 +95,21 @@ class TestOpenModeRemoteAccess:
             return default
         mock_settings.get.side_effect = mock_get
         
-        # Mock owner user
-        mock_user_auth = Mock()
-        owner_user = {'id': 1, 'name': 'admin', 'is_admin': 1, 'status': 'active'}
-        mock_user_auth.list_users.return_value = [owner_user]
-        
-        # Remote request
+        # Remote request via CF tunnel
         with app.test_request_context('/', headers={
             'CF-Connecting-IP': '198.51.100.25',
         }, environ_base={'REMOTE_ADDR': '127.0.0.1'}):
             from flask import request
             
-            # Mock UserAuth
-            with patch.object(user_auth, 'UserAuth') as MockUserAuth:
-                instance = MockUserAuth.return_value
-                instance.list_users.return_value = [owner_user]
-                
-                auth = user_auth.UserAuth(mock_settings, None)
-                session = auth.implicit_owner_session(mock_settings, request)
-                
-                # Remote visitor should NOT get implicit owner session
-                assert session is None
+            # Remote visitor is not treated as local
+            assert access.is_local_request(request, mock_settings) is False
+            
+            # Remote visitor needs PIN even in open mode (no implicit owner)
+            assert access.needs_pin(mock_settings, request) is True
     
     def test_local_visitor_gets_implicit_owner_session(self, app, mock_settings):
-        """Local visitor in open mode gets implicit owner session (Item 7)."""
-        from app import access, user_auth
+        """Local visitor in open mode doesn't need PIN (gets implicit owner) (Item 7)."""
+        from app import access
         
         # Configure open mode
         def mock_get(key, default=None):
@@ -128,23 +118,12 @@ class TestOpenModeRemoteAccess:
             return default
         mock_settings.get.side_effect = mock_get
         
-        # Mock owner user
-        owner_user = {'id': 1, 'name': 'admin', 'is_admin': 1, 'status': 'active'}
-        
         # Local request
         with app.test_request_context('/', environ_base={'REMOTE_ADDR': '192.168.1.100'}):
             from flask import request
             
-            # Mock UserAuth
-            with patch.object(user_auth, 'UserAuth') as MockUserAuth:
-                instance = MockUserAuth.return_value
-                instance.list_users.return_value = [owner_user]
-                
-                auth = user_auth.UserAuth(mock_settings, None)
-                with patch.object(access, 'owner', return_value=owner_user):
-                    session = auth.implicit_owner_session(mock_settings, request)
-                
-                # Local visitor should get implicit owner session
-                assert session is not None
-                assert session['user_id'] == 1
-                assert session['implicit'] is True
+            # Local visitor is treated as local
+            assert access.is_local_request(request, mock_settings) is True
+            
+            # Local visitor doesn't need PIN in open mode (implicit owner granted)
+            assert access.needs_pin(mock_settings, request) is False

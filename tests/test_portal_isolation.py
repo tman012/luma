@@ -4,46 +4,41 @@ Portal traffic can only access portal routes. All tests use real app.main test c
 """
 import pytest
 from unittest.mock import patch, Mock
-import os
-
-
-@pytest.fixture
-def test_app():
-    """Create real Flask app from app.main."""
-    # Set test mode
-    os.environ['LUMA_TEST_MODE'] = '1'
-    
-    # Mock settings to avoid DB dependencies
-    mock_settings = Mock()
-    mock_settings.get.return_value = None
-    mock_settings.path = '/tmp/test_settings.json'
-    
-    def mock_get(key, default=None):
-        if key == 'request_portal.hostname':
-            return 'requests.example.com'
-        if key == 'request_portal.password_hash':
-            from werkzeug.security import generate_password_hash
-            return generate_password_hash('testpass')
-        if key == 'request_portal.enabled':
-            return True
-        if key == 'security.access_mode':
-            return 'open'
-        if key == 'security.trusted_proxies':
-            return ''
-        return default
-    
-    mock_settings.get.side_effect = mock_get
-    
-    with patch('app.settings_manager.SettingsManager') as MockSettings:
-        MockSettings.return_value = mock_settings
-        
-        # Import main to create app
-        import app.main
-        return app.main.app
+from werkzeug.security import generate_password_hash
 
 
 class TestPortalIsolation:
     """Test portal traffic is isolated to portal routes only."""
+    
+    @pytest.fixture(autouse=True)
+    def setup_portal(self, test_app):
+        """Set up portal configuration for each test."""
+        import app.user_auth
+        import app.main
+        
+        # Initialize database
+        app.user_auth.init_db()
+        app.user_auth.create_user('owner', 'password123', is_admin=True)
+        
+        # Mock settings for portal
+        settings = app.main.settings
+        original_get = settings.get
+        
+        def mock_get(key, default=None):
+            if key == 'request_portal.hostname':
+                return 'requests.example.com'
+            if key == 'request_portal.password_hash':
+                return generate_password_hash('testpass')
+            if key == 'request_portal.enabled':
+                return True
+            if key == 'security.access_mode':
+                return 'open'
+            if key == 'security.trusted_proxies':
+                return ''
+            return original_get(key, default)
+        
+        with patch.object(settings, 'get', side_effect=mock_get):
+            yield
     
     def test_portal_host_can_access_request_page(self, test_app):
         """Portal host can GET /request."""

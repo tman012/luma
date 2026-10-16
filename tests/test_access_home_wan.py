@@ -184,11 +184,6 @@ class TestOpenModeRemoteAccess:
             is_local = access.is_local_request(request, mock_settings)
             assert is_local is False
             
-            # In open mode, needs_pin should be False
-            # But the visitor shouldn't be treated as local
+            # In open mode, remote visitors need sign-in (no implicit owner)
             needs_pin = access.needs_pin(mock_settings, request)
-            assert needs_pin is False
-            
-            # The important part: remote visitor shouldn't get owner privileges
-            # (that's checked at the auth layer, not here, but we verify they're not "local")
-            assert is_local is False
+            assert needs_pin is True, "Remote visitors must sign in even in open mode"

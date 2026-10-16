@@ -39,6 +39,12 @@ def test_app():
     """Create a real Flask app from app.main for integration tests."""
     # Ensure test environment is set up
     import app.main
+    import app.user_auth
+    
     app = app.main.app
     app.config['TESTING'] = True
+    
+    # Initialize database schema
+    app.user_auth.init_db()
+    
     return app

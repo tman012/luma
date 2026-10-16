@@ -210,8 +210,13 @@ class StartFlowTest(unittest.TestCase):
 
     def test_access_modes(self):
         self.ua.create_user('owner', '1234', is_admin=True)
-        self.assertEqual(self._who('open', '203.0.113.9'), 'owner')
+        # Open mode: remote visitors need sign-in (no implicit owner)
+        self.assertIsNone(self._who('open', '203.0.113.9'))
+        # Open mode: local visitors get implicit owner
+        self.assertEqual(self._who('open', '10.20.0.5'), 'owner')
+        # Pin mode: everyone needs sign-in
         self.assertIsNone(self._who('pin', '10.20.0.5'))
+        # Pin-remote mode: local gets owner, remote needs sign-in
         self.assertEqual(self._who('pin_remote', '10.20.0.5'), 'owner')
         self.assertEqual(self._who('pin_remote', '10.20.0.6'), 'owner')
         self.assertIsNone(self._who('pin_remote', '203.0.113.9'))
