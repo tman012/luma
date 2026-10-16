@@ -3,7 +3,7 @@
  *
  * Full-bleed rotating wallpaper, top-left clock, top-right current weather,
  * large centered 5-day forecast with animated colorful icons,
- * bottom-right date.
+ * bottom-right date, bottom-center voice suggestion text.
  * Uses Amazon Ember font family.
  */
 
@@ -13,6 +13,7 @@ import { openModalForItem } from '@/utils/modalNavigation';
 import { SmartHomeModal } from '@/components/smarthome/SmartHomeModal';
 import { apiFetch } from '../apiClient';
 import { withBase } from '@/urlHelpers';
+import { useVoice } from '@/contexts/VoiceContext';
 
 // ── Amazon Ember font injection ────────────────────────────────────
 
@@ -49,6 +50,12 @@ function ensureEmberFont() {
       font-weight: 500;
       font-style: normal;
       font-display: swap;
+    }
+    @keyframes dk-suggestion-fade {
+      0% { opacity: 0; transform: translateY(6px); }
+      4% { opacity: 1; transform: translateY(0); }
+      96% { opacity: 1; transform: translateY(0); }
+      100% { opacity: 0; transform: translateY(-6px); }
     }
   `;
   document.head.appendChild(style);
@@ -110,6 +117,29 @@ function getSeason(): string {
 }
 
 const WALLPAPERS = SEASONAL_WALLPAPERS[getSeason()]!;
+
+// ── voice suggestion phrases ───────────────────────────────────────
+
+// Phrases shown with the configured wake word ("<Wake word>, ...").
+const VOICE_SUGGESTIONS = [
+  'what movies came out this week?',
+  'play something funny',
+  "what's trending on Plex?",
+  'find me a thriller',
+  'what should I watch tonight?',
+  'search for sci-fi movies',
+  "what's new in my library?",
+  'recommend something like Inception',
+  'show me action movies',
+  'what are the top rated movies?',
+];
+
+export function voiceSuggestion(wakeWord: string, index: number): string {
+  const w = wakeWord.trim();
+  const name = w ? w.charAt(0).toUpperCase() + w.slice(1) : '';
+  const phrase = VOICE_SUGGESTIONS[((index % VOICE_SUGGESTIONS.length) + VOICE_SUGGESTIONS.length) % VOICE_SUGGESTIONS.length] ?? '';
+  return name ? `"${name}, ${phrase}"` : `"${phrase.charAt(0).toUpperCase()}${phrase.slice(1)}"`;
+}
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -246,6 +276,44 @@ function formatVoteCount(n: number): string {
   return String(n);
 }
 
+
+// ── voice suggestion rotator ────────────────────────────────────────
+
+function VoiceSuggestion() {
+  const { voiceEnabled, wakeWord } = useVoice();
+  const [index, setIndex] = useState(() => Math.floor(Math.random() * VOICE_SUGGESTIONS.length));
+  const [key, setKey] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setIndex((prev) => (prev + 1) % VOICE_SUGGESTIONS.length);
+      setKey((k) => k + 1);
+    }, 18000);
+    return () => clearInterval(interval);
+  }, []);
+
+  if (!voiceEnabled) return null;
+
+  return (
+    <div
+      key={key}
+      style={{
+        fontFamily: EMBER,
+        fontWeight: 400,
+        fontStyle: 'italic',
+        fontSize: 'clamp(20px, 2.2vw, 32px)',
+        color: 'rgba(255,255,255,0.98)',
+        textShadow: '0 1px 3px rgba(0,0,0,0.55), 0 2px 6px rgba(0,0,0,0.35)',
+        textAlign: 'center',
+        animation: 'dk-suggestion-fade 18s ease-in-out forwards',
+        letterSpacing: '0.3px',
+      }}
+    >
+      <span style={{ color: 'rgba(255,255,255,0.85)', fontStyle: 'italic', fontWeight: 400 }}>Try </span>
+      {voiceSuggestion(wakeWord, index)}
+    </div>
+  );
+}
 
 // ── Wallpaper background with crossfade ────────────────────────────
 
@@ -1982,6 +2050,23 @@ export function DailyKioskPage() {
           {activeKey !== 'news' && activeKey !== 'now-available' ? activeNode : null}
         </div>
       </div>
+
+      {/* ── Bottom-center: voice suggestion (hidden when the live sports
+             widget is the active page so the scoreboard owns the screen) ── */}
+      {!(isGameLive && activeKey === 'sports') && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: pad,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 10,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <VoiceSuggestion />
+        </div>
+      )}
 
       {/* ── Bottom-right: Date ── */}
       <div

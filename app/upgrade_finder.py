@@ -486,7 +486,7 @@ class UpgradeFinder:
 
         try:
             # Get indexer client
-            from app.indexer_api import get_indexer_client
+            from app.indexer_api import IndexerSkipped, get_indexer_client
             client = get_indexer_client(self.settings)
             if not client:
                 return {'status': 'error', 'message': 'No indexer configured'}
@@ -531,6 +531,11 @@ class UpgradeFinder:
                     results = client._search_single(query, '2000', 100)
                     parsed = client._parse_items(results)
                 except Exception as e:
+                    if isinstance(e, IndexerSkipped):
+                        # Tracker guard or backoff: stop here and leave the
+                        # rest unsearched so the next run picks them up.
+                        logger.info(f"Upgrade batch paused at '{title}': {e}")
+                        break
                     logger.warning(f"Indexer search failed for '{title}': {e}")
                     conn.execute("""
                         INSERT OR REPLACE INTO upgrade_results

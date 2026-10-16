@@ -95,12 +95,55 @@ def set_episodes_monitored(sonarr, series_id: int, episode_ids: List[int], monit
     if not ids:
         raise MonitorError('No episodes')
     series_flipped = _ensure_series_monitored(sonarr, series_id) if monitored else False
+    if monitored:
+        _ensure_seasons_monitored_only(sonarr, series_id, ids)
     if not _put(sonarr, 'episode/monitor', {'episodeIds': ids, 'monitored': bool(monitored)}):
         raise MonitorError('Sonarr rejected the episode update')
     invalidate(series_id, include_series=True)
-    command_id = _search(sonarr, {'name': 'EpisodeSearch', 'episodeIds': ids}) if monitored else None
+    command_id = None
+    if monitored:
+        # Read back: series, season and every requested episode must be monitored before we search.
+        series = sonarr._request('GET', f'series/{series_id}', timeout=15) or {}
+        eps = {e['id']: e for e in (sonarr._request('GET', 'episode', {'seriesId': series_id}, timeout=20) or [])}
+        seasons_on = {x.get('seasonNumber') for x in series.get('seasons') or [] if x.get('monitored')}
+        bad = [i for i in ids if not (eps.get(i) or {}).get('monitored') or (eps.get(i) or {}).get('seasonNumber') not in seasons_on]
+        if not series.get('monitored') or bad:
+            logger.error(f"Sonarr episode monitor read-back failed for series {series_id}: {bad}")
+            raise MonitorError('Sonarr did not keep the episode monitored')
+        for _ in range(2):
+            command_id = _search(sonarr, {'name': 'EpisodeSearch', 'episodeIds': ids})
+            if command_id is not None:
+                break
+            time.sleep(1.5)
+        logger.info(f"Sonarr EpisodeSearch for series {series_id} episodes {ids}: command {command_id}")
     return {'episodeIds': ids, 'monitored': bool(monitored), 'seriesMonitored': True if series_flipped else None,
             'searching': command_id is not None, 'commandId': command_id}
+
+
+def _ensure_seasons_monitored_only(sonarr, series_id: int, episode_ids: List[int]) -> None:
+    """Sonarr skips episodes whose SEASON is unmonitored (RSS + automatic search), so turn the season
+    on for each requested episode - but Sonarr cascades a season toggle to all its episodes, so put
+    every other episode of that season back the way it was (nothing unrequested gets monitored)."""
+    eps = sonarr._request('GET', 'episode', {'seriesId': series_id}, timeout=20) or []
+    by_id = {e['id']: e for e in eps}
+    want = {by_id[i]['seasonNumber'] for i in episode_ids if i in by_id}
+    series = sonarr._request('GET', f'series/{series_id}', timeout=15)
+    if not isinstance(series, dict):
+        raise MonitorError('Series not found in Sonarr')
+    off = [x for x in series.get('seasons') or [] if x.get('seasonNumber') in want and not x.get('monitored')]
+    if not off:
+        return
+    before = {e['id']: bool(e.get('monitored')) for e in eps if e.get('seasonNumber') in want}
+    for x in off:
+        x['monitored'] = True
+    if not _put(sonarr, f'series/{series_id}', series):
+        raise MonitorError('Sonarr rejected the season update')
+    after = sonarr._request('GET', 'episode', {'seriesId': series_id}, timeout=20) or []
+    revert = [e['id'] for e in after if e['id'] in before and e['id'] not in episode_ids
+              and bool(e.get('monitored')) and not before[e['id']]]
+    if revert and not _put(sonarr, 'episode/monitor', {'episodeIds': revert, 'monitored': False}):
+        raise MonitorError('Sonarr rejected the episode update')
+    logger.info(f"Sonarr series {series_id}: monitored season(s) {sorted(want)}, kept {len(revert)} other episode(s) unmonitored")
 
 
 def set_season_monitored(sonarr, series_id: int, season: int, monitored: bool) -> Dict:

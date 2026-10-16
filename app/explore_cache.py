@@ -28,7 +28,7 @@ class ExploreCache:
             logger.error('[explore_cache] LUMA_CACHE_DIR not writable: %s -> %s', cache_root, self.cache_dir)
             raise RuntimeError(f"Explore cache directory not writable: LUMA_CACHE_DIR={cache_root} -> {self.cache_dir}") from e
         self.db_path = self.cache_dir / "explore_cache.db"
-        self.update_interval = 900  # 15 minutes
+        self.update_interval = 6 * 3600  # was 15 min (21-query tracker sweep ~100x/day)
         self.last_update = None
         self.updating = False
         self.lock = threading.Lock()

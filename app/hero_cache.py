@@ -463,7 +463,7 @@ class HeroCache:
             # Build poster URL from Plex via proxy
             poster_url = None
             if movie.get('user_thumb_url'):
-                poster_url = f"/api/img/plex?url=/library/metadata/{rating_key}/thumb"
+                poster_url = f"/api/img/plex?url=/library/metadata/{rating_key}/thumb&r=2"
 
             # Build hero content entry
             hero_entry = {

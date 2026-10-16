@@ -62,7 +62,7 @@ def update_library_browse_cache(library_name: str, section_id: int):
                     'summary': item.get('summary', ''),
                     'genre': genres[0] if genres else None,
                     'all_genres': genres,
-                    'poster_url': f"/api/img/plex?url=/library/metadata/{rk}/thumb",
+                    'poster_url': f"/api/img/plex?url=/library/metadata/{rk}/thumb&r=2",
                     'backdrop_url': f"/api/img/plex?url=/library/metadata/{rk}/art",
                     'clearlogo_url': f"/api/img/plex?url=/library/metadata/{rk}/clearLogo",
                 }
@@ -107,7 +107,7 @@ def update_recent_items_cache():
                     'library_name': section['title'],
                     'metadata_type': 1,
                     'tmdb_id': item.get('tmdb_id'),
-                    'poster_url': f"/api/img/plex?url=/library/metadata/{rk}/thumb",
+                    'poster_url': f"/api/img/plex?url=/library/metadata/{rk}/thumb&r=2",
                     'backdrop_url': f"/api/img/plex?url=/library/metadata/{rk}/art",
                     'clearlogo_url': f"/api/img/plex?url=/library/metadata/{rk}/clearLogo",
                 }
@@ -134,7 +134,7 @@ def update_recent_items_cache():
                     'rating': item.get('rating'),
                     'library_name': section['title'],
                     'metadata_type': 2,
-                    'poster_url': f"/api/img/plex?url=/library/metadata/{rk}/thumb",
+                    'poster_url': f"/api/img/plex?url=/library/metadata/{rk}/thumb&r=2",
                     'backdrop_url': f"/api/img/plex?url=/library/metadata/{rk}/art",
                     'clearlogo_url': f"/api/img/plex?url=/library/metadata/{rk}/clearLogo",
                 }
@@ -170,6 +170,22 @@ def update_all_library_caches():
 
     except Exception as e:
         logger.error(f"Failed to update library caches: {e}")
+
+
+def update_library_stats_cache():
+    """Update the library stats cache via Plex HTTP API"""
+    try:
+        logger.info("Updating library stats cache...")
+        from app.plex_service import plex_service
+
+        stats = plex_service.get_library_stats()
+
+        # Update cache
+        library_cache.update_library_stats(stats)
+        logger.info("Updated library stats cache")
+
+    except Exception as e:
+        logger.error(f"Failed to update library stats cache: {e}")
 
 
 def update_recent_tv_episodes_cache():
@@ -210,7 +226,7 @@ def update_recent_tv_episodes_cache():
                 'show_title': item.get('show_title') or item.get('title', ''),
                 'show_year': item.get('show_year') or item.get('year'),
                 'latest_added_at': added_at,
-                'poster_url': f"/api/img/plex?url=/library/metadata/{show_rk}/thumb",
+                'poster_url': f"/api/img/plex?url=/library/metadata/{show_rk}/thumb&r=2",
             }
             if added_at:
                 try:
@@ -272,6 +288,7 @@ class CacheUpdateScheduler:
             threading.Thread(target=self._update_loop, args=('continue_watching', 60, update_continue_watching_cache), daemon=True),
             threading.Thread(target=self._update_loop, args=('recent_items', 120, update_recent_items_cache), daemon=True),
             threading.Thread(target=self._update_loop, args=('recent_tv_episodes', 120, update_recent_tv_episodes_cache), daemon=True),
+            threading.Thread(target=self._update_loop, args=('library_stats', 300, update_library_stats_cache), daemon=True),
             threading.Thread(target=self._update_loop, args=('libraries', 300, update_all_library_caches), daemon=True),
             # 240s, deliberately under the index's own 300s TTL — the point is
             # that it never expires while nobody is looking.
@@ -319,6 +336,7 @@ def initialize_caches():
         update_continue_watching_cache()
         update_recent_items_cache()
         update_recent_tv_episodes_cache()
+        update_library_stats_cache()
         update_all_library_caches()
 
         # Start background updates

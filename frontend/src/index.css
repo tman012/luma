@@ -1336,3 +1336,8 @@ input[type="search"]::-webkit-search-cancel-button {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* iOS PWA resume bug: fixed inset:0 layers come back short. Size detail sheets to the large viewport. */
+@supports (height: 100lvh) {
+  [data-modal="MovieDetailModal"], [data-modal="TvDetailModal"] { bottom: auto !important; height: 100lvh !important; }
+}

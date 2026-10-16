@@ -123,6 +123,34 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "client_id":     {"type": "string",  "default": "",    "sensitive": True,  "description": "Trakt API client ID"},
             "client_secret": {"type": "string",  "default": "",    "sensitive": True,  "description": "Trakt API client secret (optional)"},
         },
+        "openai": {
+            "_type": "object",
+            "enabled":  {"type": "boolean", "default": False, "sensitive": False, "description": "Enable AI-powered natural language search"},
+            "api_key":  {"type": "string",  "default": "",    "sensitive": True,  "description": "OpenAI API key"},
+            "model":    {"type": "string",  "default": "gpt-4o-mini", "sensitive": False, "description": "OpenAI model for structured extraction"},
+            "custom_instructions": {"type": "string", "default": "", "sensitive": False, "description": "Custom instructions appended to AI prompt (e.g. content preferences)"},
+            "temperature": {"type": "number", "default": 0.7, "sensitive": False, "description": "AI creativity (0.0 = focused, 1.0 = creative)"},
+            "max_tokens": {"type": "integer", "default": 1500, "sensitive": False, "description": "Maximum response length in tokens"},
+            "voice_enabled": {"type": "boolean", "default": False, "sensitive": False, "description": "Enable voice assistant for playback control"},
+            "wake_word": {"type": "string", "default": "alfred", "sensitive": False, "description": "Wake word to activate voice assistant (e.g. alfred, jarvis, luma)"},
+            "tts_provider": {"type": "string", "default": "openai", "sensitive": False, "description": "TTS provider (openai or elevenlabs)"},
+            "tts_voice": {"type": "string", "default": "nova", "sensitive": False, "description": "OpenAI TTS voice (nova, alloy, echo, fable, onyx, shimmer)"},
+        },
+        "elevenlabs": {
+            "_type": "object",
+            "api_key":  {"type": "string",  "default": "",    "sensitive": True,  "description": "ElevenLabs API key"},
+            "voice_id": {"type": "string",  "default": "",    "sensitive": False, "description": "ElevenLabs voice ID"},
+            "model_id": {"type": "string",  "default": "eleven_multilingual_v2", "sensitive": False, "description": "ElevenLabs model ID"},
+            "stability":    {"type": "number", "default": 0.5, "sensitive": False, "description": "Voice stability (0.0-1.0)"},
+            "similarity":   {"type": "number", "default": 0.75, "sensitive": False, "description": "Similarity boost (0.0-1.0)"},
+        },
+        "alfred": {
+            "_type": "object",
+            "enabled":  {"type": "boolean", "default": False,  "sensitive": False, "description": "Enable Alfred agent for complex voice commands"},
+            "base_url": {"type": "string",  "default": "", "sensitive": False, "description": "Alfred API base URL"},
+            "api_key":  {"type": "string",  "default": "",     "sensitive": True,  "description": "Alfred API key (optional)"},
+            "timeout":  {"type": "integer", "default": 90,     "sensitive": False, "description": "Request timeout in seconds"},
+        },
     },
     "request_portal": {
         "_type": "object",
@@ -430,6 +458,7 @@ ENV_VAR_MAP: Dict[str, str] = {
     # APIs
     "TMDB_API_KEY":       "apis.tmdb.api_key",
     "OMDB_API_KEY":       "apis.omdb.api_key",
+    "OPENAI_API_KEY":     "apis.openai.api_key",
     # Indexer
     "INDEXER_PROVIDER": "indexer.provider",
     "INDEXER_BASE_URL": "indexer.base_url",
@@ -1209,26 +1238,6 @@ def _migrate_remove_dead_plex_fields(data: dict) -> bool:
     return False
 
 
-def _migrate_remove_ai_and_alfred(data: dict) -> bool:
-    """Remove retired AI/voice/Alfred settings (apis.openai, apis.elevenlabs,
-    apis.alfred) and the retired Vibe Engine UI block (ui.vibe_engine)."""
-    removed = []
-    apis = data.get("apis")
-    if isinstance(apis, dict):
-        for k in ("openai", "elevenlabs", "alfred"):
-            if k in apis:
-                del apis[k]
-                removed.append(f"apis.{k}")
-    ui = data.get("ui")
-    if isinstance(ui, dict) and "vibe_engine" in ui:
-        del ui["vibe_engine"]
-        removed.append("ui.vibe_engine")
-    if removed:
-        logger.info(f"Removed retired AI/Alfred settings: {', '.join(removed)}")
-        return True
-    return False
-
-
 def _migrate_automation_features(data: dict) -> bool:
     """Introduce the Auto-grab / 4K & upgrades feature switches.
 
@@ -1387,8 +1396,58 @@ def _migrate_seed_hostnames(data: dict, data_dir=None) -> bool:
     return True
 
 
-def _run_all_migrations(data: dict, data_dir=None) -> bool:
+# Defaults the live install used before these settings had their current
+# defaults. Upgraded installs keep them (see the migrations below).
+LEGACY_REQUEST_EXCLUDES = ['Full Rips', '4K Movies', '4K TV', '3D', 'Remux TV']
+LEGACY_QBIT_APP_CATEGORY = 'media-search-app'
+
+
+def _migrate_legacy_request_excludes(data: dict, existing: bool) -> bool:
+    """Keep the old hidden-libraries default on an upgraded install.
+
+    Before the rename to request_portal, an unset or empty
+    requests.exclude_libraries meant LEGACY_REQUEST_EXCLUDES. A settings file
+    from that era (it has a 'requests' section, or no request-page section at
+    all) gets that list written out when its own is absent or empty, so 4K,
+    Remux and Full Rips copies still don't count as available. Must run
+    before the rename. Fresh installs keep the new empty default.
+    """
+    if not existing or ('requests' not in data and 'request_portal' in data):
+        return False
+    section = data.setdefault('requests' if 'requests' in data else 'request_portal', {})
+    if not isinstance(section, dict):
+        return False
+    current = section.get('exclude_libraries')
+    if current not in (None, [], ''):
+        return False
+    section['exclude_libraries'] = list(LEGACY_REQUEST_EXCLUDES)
+    logger.info("Kept the previous hidden-libraries default for the request page: %s",
+                ', '.join(LEGACY_REQUEST_EXCLUDES))
+    return True
+
+
+def _migrate_legacy_qbit_category(data: dict, existing: bool) -> bool:
+    """Keep qBittorrent's old app category on an upgraded install.
+
+    The category default changed to 'luma'. An existing settings file with no
+    saved qbittorrent.app_category used LEGACY_QBIT_APP_CATEGORY, and its
+    torrents carry that category, so it is written out explicitly. Otherwise
+    those torrents would drop out of Activity, origin badges and auto-rename.
+    """
+    if not existing:
+        return False
+    qbit = data.setdefault('qbittorrent', {})
+    if not isinstance(qbit, dict) or qbit.get('app_category'):
+        return False
+    qbit['app_category'] = LEGACY_QBIT_APP_CATEGORY
+    logger.info("Kept the previous qBittorrent app category: %s", LEGACY_QBIT_APP_CATEGORY)
+    return True
+
+
+def _run_all_migrations(data: dict, data_dir=None, existing: bool = False) -> bool:
     """Run all migrations on *data* (mutated in place).
+    *existing* is True when *data* came from a settings file on disk (an
+    upgrade), False for a first-run bootstrap.
     Returns True if any migration occurred.
     """
     changed = False
@@ -1406,8 +1465,9 @@ def _run_all_migrations(data: dict, data_dir=None) -> bool:
     changed |= _migrate_remove_fanart(data)
     changed |= _migrate_hero_schema(data)
     changed |= _migrate_remove_dead_plex_fields(data)
-    changed |= _migrate_remove_ai_and_alfred(data)
     changed |= _migrate_automation_features(data)
+    changed |= _migrate_legacy_request_excludes(data, existing)
+    changed |= _migrate_legacy_qbit_category(data, existing)
     changed |= _migrate_rename_requests_to_portal(data)
     changed |= _migrate_strip_plaintext_request_password(data)
     changed |= _migrate_remove_remote_lock(data)
@@ -1821,7 +1881,7 @@ class SettingsManager:
 
         # Run migrations BEFORE merging with defaults so old fields are
         # converted into new list fields that will survive the merge.
-        migrated = _run_all_migrations(on_disk, self._path.parent)
+        migrated = _run_all_migrations(on_disk, self._path.parent, existing=bool(on_disk))
 
         defaults = _build_defaults(SETTINGS_SCHEMA)
         with self._lock:

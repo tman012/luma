@@ -681,6 +681,55 @@ class PlexService:
 
         return self._parse_video(video)
 
+    def get_library_stats(self) -> Dict[str, Any]:
+        """Get library statistics via API (replaces DB count queries)."""
+        stats: Dict[str, Any] = {
+            'movies': {},
+            'tv_shows': {},
+            'total_movies': 0,
+            'total_shows': 0,
+            'total_episodes': 0,
+        }
+
+        sections_root = self._get('/library/sections')
+        if sections_root is None:
+            return stats
+
+        for directory in sections_root.findall('.//Directory'):
+            sec_type = directory.get('type', '')
+            sec_id = directory.get('key', '')
+            title = directory.get('title', '')
+
+            if sec_type == 'movie':
+                # Get count by fetching with container size 0
+                count_root = self._get(f'/library/sections/{sec_id}/all', params={
+                    'type': 1,
+                    'X-Plex-Container-Size': 0,
+                })
+                count = int(count_root.get('totalSize', 0)) if count_root is not None else 0
+                stats['movies'][title] = count
+                stats['total_movies'] += count
+
+            elif sec_type == 'show':
+                # Get show count
+                show_root = self._get(f'/library/sections/{sec_id}/all', params={
+                    'type': 2,
+                    'X-Plex-Container-Size': 0,
+                })
+                show_count = int(show_root.get('totalSize', 0)) if show_root is not None else 0
+                stats['tv_shows'][title] = {'shows': show_count}
+                stats['total_shows'] += show_count
+
+                # Get episode count
+                ep_root = self._get(f'/library/sections/{sec_id}/all', params={
+                    'type': 4,
+                    'X-Plex-Container-Size': 0,
+                })
+                ep_count = int(ep_root.get('totalSize', 0)) if ep_root is not None else 0
+                stats['total_episodes'] += ep_count
+
+        return stats
+
     def get_on_deck(self, limit: int = 25) -> List[Dict[str, Any]]:
         """Fetch on-deck (continue watching) items via API."""
         root = self._get('/library/onDeck', params={

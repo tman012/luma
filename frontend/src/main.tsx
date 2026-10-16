@@ -172,3 +172,8 @@ function showUpdateToast(waitingSW: ServiceWorker) {
     }
   }, 10_000);
 }
+
+// iOS PWA: nudge layout after returning from background so fixed layers re-measure.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) requestAnimationFrame(() => window.scrollTo(window.scrollX, window.scrollY));
+});

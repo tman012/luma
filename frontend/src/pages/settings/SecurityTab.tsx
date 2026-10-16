@@ -7,6 +7,9 @@ import { useEffect, useState } from 'react';
 import { ACCESS_CHOICES, type AuthRequired } from '@/pages/StartPage';
 import { cn } from '@/utils/cn';
 import { apiFetch } from '../../apiClient';
+import {
+  describeRequest, recentRequests, requestLink, requestTime, type RequestLogEntry,
+} from './requestPortalLog';
 
 type Mode = AuthRequired;
 
@@ -33,11 +36,15 @@ function RequestPortalCard() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [publicUrl, setPublicUrl] = useState('');
+  const [log, setLog] = useState<RequestLogEntry[]>([]);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     apiFetch('/api/request/admin/settings')
       .then(r => r.json())
       .then(data => {
+        setPublicUrl(data.public_url || '');
         setEnabled(data.enabled || false);
         setHostname(data.hostname || '');
         setMovieProfile(data.movie_profile || '');
@@ -46,7 +53,20 @@ function RequestPortalCard() {
         setExcludeLibraries(libs.join(', '));
       })
       .catch(() => {});
+    apiFetch('/api/request/admin/log')
+      .then(r => (r.ok ? r.json() : []))
+      .then(data => setLog(recentRequests(data)))
+      .catch(() => {});
   }, []);
+
+  const link = requestLink(publicUrl, window.location.origin);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard unavailable */ }
+  };
 
   const save = async () => {
     setMsg(null);
@@ -90,9 +110,6 @@ function RequestPortalCard() {
     }
   };
 
-  useEffect(() => {
-    setDirty(password !== '' || confirmPassword !== '');
-  }, [enabled, password, confirmPassword, hostname, movieProfile, tvProfile, excludeLibraries]);
 
   return (
     <section className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 space-y-5">
@@ -112,6 +129,25 @@ function RequestPortalCard() {
       {enabled && (
         <>
           <div className="grid gap-3 max-w-md">
+            <div className="space-y-1.5">
+              <span className="block text-[12px] font-medium text-white/50">Link</span>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={link}
+                  onFocus={e => e.currentTarget.select()}
+                  className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 font-mono text-[13px] text-white/70 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={copy}
+                  className="shrink-0 rounded-lg border border-white/10 bg-white/[0.06] px-4 text-[13px] font-semibold text-white/70 hover:bg-white/10"
+                >
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            </div>
             <label className="space-y-1.5">
               <span className="block text-[12px] font-medium text-white/50">Password</span>
               <input
@@ -191,6 +227,23 @@ function RequestPortalCard() {
         </button>
         {msg && <span className={cn('text-[13px]', msg.ok ? 'text-emerald-300' : 'text-red-300')}>{msg.text}</span>}
       </div>
+
+      {log.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-[13px] font-semibold text-white/70">Recent Requests</h4>
+          <div className="divide-y divide-white/[0.06]">
+            {log.map(e => (
+              <div key={e.id} className="flex items-center justify-between gap-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="truncate text-[14px] text-white/85">{describeRequest(e)}</div>
+                  <div className="text-[12px] text-white/40">{e.who}</div>
+                </div>
+                <div className="shrink-0 text-[12px] text-white/40">{requestTime(e.ts)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
