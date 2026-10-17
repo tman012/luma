@@ -12118,6 +12118,8 @@ _PLEX_IMG_PATH = re.compile(
     r'|/library/sections/[0-9]+/composite/[0-9]+',
     re.ASCII)
 _PLEX_NO_STORE = {'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'}
+_PLEX_IMG_TYPES = frozenset({'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'})
+_PLEX_IMG_MAX_BYTES = 20 * 1024 * 1024
 
 
 def _plex_image_path(raw: str):
@@ -12175,7 +12177,7 @@ def img_plex_proxy():
     plex_token = _user_plex.plex_token if _user_plex else settings.get('plex.token')
 
     if not plex_url or not plex_token:
-        return 'Plex not configured', 503
+        return Response('Plex not configured', status=503, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
     try:
         if req_w or req_h:
@@ -12193,17 +12195,36 @@ def img_plex_proxy():
             headers={'X-Plex-Token': plex_token},
             timeout=15,
             stream=True,
+            # Never follow a redirect: it would carry the Plex token to another host.
+            allow_redirects=False,
         )
+        try:
+            if 300 <= resp.status_code < 400:
+                return Response('Redirect refused', status=502, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
-        if resp.status_code != 200:
-            # Never cached: the reply can depend on who is signed in.
-            return Response('Image not found', status=404, mimetype='text/plain', headers=_PLEX_NO_STORE)
+            if resp.status_code != 200:
+                # Never cached: the reply can depend on who is signed in.
+                return Response('Image not found', status=404, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
-        # Only ever answer with an image; anything else from upstream is refused.
-        ctype = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
-        if not re.fullmatch(r'image/[a-z0-9.+-]+', ctype, re.ASCII) or ctype == 'image/svg+xml':
-            return Response('Not an image', status=502, mimetype='text/plain', headers=_PLEX_NO_STORE)
-        return Response(resp.content, content_type=ctype, headers=_PLEX_NO_STORE)
+            # Only ever answer with an image; anything else from upstream is refused.
+            ctype = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+            if ctype not in _PLEX_IMG_TYPES:
+                return Response('Not an image', status=502, mimetype='text/plain', headers=_PLEX_NO_STORE)
+
+            too_big = Response('Image too large', status=502, mimetype='text/plain', headers=_PLEX_NO_STORE)
+            try:
+                if int(resp.headers.get('Content-Length') or 0) > _PLEX_IMG_MAX_BYTES:
+                    return too_big
+            except ValueError:
+                pass
+            body = bytearray()
+            for chunk in resp.iter_content(chunk_size=65536):
+                body += chunk
+                if len(body) > _PLEX_IMG_MAX_BYTES:
+                    return too_big
+            return Response(bytes(body), content_type=ctype, headers=_PLEX_NO_STORE)
+        finally:
+            resp.close()
     except requests.RequestException as e:
         logger.error(f"Plex image proxy error: {e}")
         return Response('Error fetching image', status=502, mimetype='text/plain', headers=_PLEX_NO_STORE)

@@ -11,10 +11,18 @@ LAN = {'REMOTE_ADDR': '192.168.1.20'}
 
 
 class _Resp:
-    def __init__(self, status=200, ctype='image/jpeg'):
+    def __init__(self, status=200, ctype='image/jpeg', chunks=(b'img',), headers=None):
         self.status_code = status
-        self.content = b'img'
+        self.chunks = list(chunks)
         self.headers = {'Content-Type': ctype} if ctype is not None else {}
+        self.headers.update(headers or {})
+        self.closed = False
+
+    def iter_content(self, chunk_size=1):
+        yield from self.chunks
+
+    def close(self):
+        self.closed = True
 
 
 @pytest.fixture
@@ -26,6 +34,7 @@ def plex(test_app, monkeypatch):
 
     def fake_get(url, **k):
         calls.append(url)
+        state['kwargs'] = k
         return state['resp']
     monkeypatch.setattr(app.main.requests, 'get', fake_get)
     return test_app.test_client(), calls, state
@@ -102,6 +111,7 @@ def test_resize_still_goes_through_transcoder(plex):
 @pytest.mark.parametrize('ctype', [
     'text/html', 'text/html; charset=utf-8', 'application/json', 'application/xml',
     'image/svg+xml', 'image/svg+xml; charset=utf-8', '', None, 'image/', 'imagex/png',
+    'image/x-icon', 'image/bmp', 'image/tiff', 'image/jpeg2',
 ])
 def test_non_image_upstream_refused(plex, ctype):
     client, _, state = plex
@@ -115,6 +125,7 @@ def test_non_image_upstream_refused(plex, ctype):
 
 @pytest.mark.parametrize('ctype, out', [
     ('image/png', 'image/png'), ('IMAGE/WEBP', 'image/webp'), ('image/jpeg; charset=binary', 'image/jpeg'),
+    ('image/gif', 'image/gif'), ('image/avif', 'image/avif'),
 ])
 def test_image_type_forced_and_normalized(plex, ctype, out):
     client, _, state = plex
@@ -141,4 +152,96 @@ def test_upstream_exception_never_publicly_cached(plex, monkeypatch):
     monkeypatch.setattr(app.main.requests, 'get', boom)
     r = _get(client, 'url=/library/metadata/1/thumb')
     assert r.status_code == 502
+    assert r.headers['Cache-Control'] == 'private, no-store'
+
+@pytest.mark.parametrize('status', [301, 302, 303, 307, 308])
+def test_redirect_never_followed(plex, status):
+    """A Plex that redirects elsewhere must not get the token sent on."""
+    client, calls, state = plex
+    state['resp'] = _Resp(status, 'text/html', headers={'Location': 'http://evil.test/steal'})
+    r = _get(client, 'url=/library/metadata/1/thumb')
+    assert r.status_code == 502
+    assert state['kwargs']['allow_redirects'] is False
+    assert calls == ['http://plex.test/library/metadata/1/thumb']
+    assert 'Location' not in r.headers
+    assert r.headers['Cache-Control'] == 'private, no-store'
+
+
+def test_redirect_with_real_requests_not_followed(test_app, monkeypatch):
+    """Same, through the real requests library against a fake Plex that redirects."""
+    import requests
+    from requests.adapters import BaseAdapter
+    from requests.models import Response as RResponse
+
+    seen = []
+
+    class FakePlex(BaseAdapter):
+        def send(self, request, **kwargs):
+            seen.append((request.url, request.headers.get('X-Plex-Token')))
+            r = RResponse()
+            r.request, r.url, r.raw = request, request.url, None
+            r._content, r._content_consumed = b'', True
+            if request.url.startswith('http://plex.test/'):
+                r.status_code = 302
+                r.headers['Location'] = 'http://evil.test/steal'
+            else:
+                r.status_code = 200
+                r.headers['Content-Type'] = 'image/jpeg'
+                r._content = b'stolen'
+            return r
+
+        def close(self):
+            pass
+
+    def get_via_fake(url, **k):
+        with requests.Session() as s:
+            s.mount('http://', FakePlex())
+            return s.get(url, **k)
+    monkeypatch.setattr(app.main.requests, 'get', get_via_fake)
+    monkeypatch.setattr(app.main, 'get_plex_for_request',
+                        lambda: SimpleNamespace(plex_url='http://plex.test', plex_token='tok'))
+    r = test_app.test_client().get('/api/img/plex?url=/library/metadata/1/thumb', environ_base=LAN)
+    assert r.status_code == 502
+    assert [u for u, _ in seen] == ['http://plex.test/library/metadata/1/thumb']
+
+
+def test_oversized_declared_length_refused(plex):
+    client, _, state = plex
+    state['resp'] = _Resp(200, headers={'Content-Length': str(20 * 1024 * 1024 + 1)})
+    r = _get(client, 'url=/library/metadata/1/thumb')
+    assert r.status_code == 502
+    assert state['resp'].closed
+    assert r.headers['Cache-Control'] == 'private, no-store'
+
+
+def test_oversized_stream_aborted(plex):
+    client, _, state = plex
+    mb = b'x' * (1024 * 1024)
+    pulled = []
+
+    def chunks():
+        for _ in range(40):
+            pulled.append(1)
+            yield mb
+    state['resp'] = _Resp(200)
+    state['resp'].iter_content = lambda chunk_size=1: chunks()
+    r = _get(client, 'url=/library/metadata/1/thumb')
+    assert r.status_code == 502
+    assert len(pulled) == 21
+    assert state['resp'].closed
+
+
+def test_image_at_cap_served(plex):
+    client, _, state = plex
+    state['resp'] = _Resp(200, chunks=[b'x' * (20 * 1024 * 1024)])
+    r = _get(client, 'url=/library/metadata/1/thumb')
+    assert r.status_code == 200
+    assert len(r.data) == 20 * 1024 * 1024
+
+
+def test_plex_not_configured_never_stored(test_app, monkeypatch):
+    monkeypatch.setattr(app.main, 'get_plex_for_request', lambda: None)
+    monkeypatch.setattr(app.main.settings, 'get', lambda *a, **k: None)
+    r = test_app.test_client().get('/api/img/plex?url=/library/metadata/1/thumb', environ_base=LAN)
+    assert r.status_code == 503
     assert r.headers['Cache-Control'] == 'private, no-store'

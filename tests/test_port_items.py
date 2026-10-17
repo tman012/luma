@@ -142,6 +142,12 @@ class _ImgResp:
     content = b'poster-bytes'
     headers = {'Content-Type': 'image/jpeg'}
 
+    def iter_content(self, chunk_size=1):
+        yield self.content
+
+    def close(self):
+        pass
+
 
 @pytest.fixture
 def img(test_app, monkeypatch):
