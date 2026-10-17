@@ -21452,7 +21452,13 @@ app.register_blueprint(_qbit_connector.bp)
 # Settings > Library paths and the library mover (LUMA_MINIMAL builds only).
 from app import file_management as _file_management
 from app import library_mover as _library_mover
-_file_management.init(settings=settings, owner_or_error=_start_flow._owner_or_error)
+def _tv_library_paths():
+    from app import tv_settings
+    return tv_settings.tv_paths()
+
+
+_file_management.init(settings=settings, owner_or_error=_start_flow._owner_or_error,
+                      other_paths=_tv_library_paths)   # Movies and TV paths never overlap
 from app import qbit_owner as _qbit_owner  # noqa: E402
 _qbit_owner.init(settings=settings)
 _library_mover.init(settings=settings)

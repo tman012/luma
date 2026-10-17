@@ -239,8 +239,20 @@ def writable(real: str) -> bool:
         return False
 
 
+def other_store_paths() -> List[Dict[str, Any]]:
+    """Library paths kept by another store (TV), so the two never overlap."""
+    fn = _cfg.get('other_paths')
+    try:
+        return list(fn()) if fn else []
+    except Exception as e:
+        logger.warning('Other library paths unreadable: %s', type(e).__name__)
+        return []
+
+
 def check_library_path(raw: Any, others: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[str]]:
-    """(path to store, None) or (None, error) for a library folder."""
+    """(path to store, None) or (None, error) for a library folder. *others*
+    are this store's other paths; the TV store's are added here."""
+    others = list(others) + other_store_paths()
     p, err = clean_abs_path(raw)
     if err:
         return None, err
@@ -530,8 +542,11 @@ def map_path(path: str, path_map: List[Dict[str, str]]) -> str:
 
 # ------------------------------------------------------------------ routes
 
-def init(*, settings, owner_or_error: Callable, store_path: Optional[str] = None) -> None:
+def init(*, settings, owner_or_error: Callable, store_path: Optional[str] = None,
+         other_paths: Optional[Callable[[], List[Dict[str, Any]]]] = None) -> None:
     _cfg.update(settings=settings, owner_or_error=owner_or_error)
+    if other_paths is not None:
+        _cfg['other_paths'] = other_paths
     if store_path:
         _cfg['store_path'] = store_path
 
