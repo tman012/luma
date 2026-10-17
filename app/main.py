@@ -306,6 +306,17 @@ def _require_admin():
     return None
 
 
+def _signed_in_owner_only(fn):
+    """Destructive file actions: start_flow.signed_in_owner_required, looked
+    up per request (start_flow is set up further down this module)."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return _start_flow.signed_in_owner_required(fn)(*args, **kwargs)
+    return wrapper
+
+
 def get_plex_for_request():
     """Resolve the correct PlexService for the current request.
 
@@ -4679,9 +4690,24 @@ def downloads_guard_run():
 
     Defaults to dry_run — pass {"dry_run": false} to actually delete. The daily
     ceiling and every guard in storage_cleanup still apply either way.
+
+    A real run deletes files, so it is a destructive file action (PM ruling):
+    only the owner signed in with a session (start_flow.require_signed_in_owner).
+    The implicit LAN owner, the service key (kiosk, companion apps) and no
+    session get 401 {"error": "Sign in first", "sign_in": true}; other admins
+    and plain, guest or Plex-approved users get 403. A dry run deletes nothing
+    and keeps today's access.
     """
     from app import downloads_guard
-    dry = (request.get_json(silent=True) or {}).get('dry_run', True)
+    body = request.get_json(silent=True)
+    dry = (body if isinstance(body, dict) else {}).get('dry_run', True)
+    if not bool(dry):
+        # A real run (the same test trigger_manual_run gets) deletes: check first.
+        _user, err = _start_flow.require_signed_in_owner()
+        if err is not None:
+            resp, status = err
+            resp.headers['Cache-Control'] = 'no-store'
+            return resp, status
     downloads_guard.trigger_manual_run(dry_run=bool(dry))
     return jsonify({'ok': True, 'dry_run': bool(dry)})
 

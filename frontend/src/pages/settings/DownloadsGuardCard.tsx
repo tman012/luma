@@ -12,6 +12,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { SettingsCard } from './components/SettingsCard';
 import { FormField } from './components/FormField';
 import { ToggleSwitch } from './components/ToggleSwitch';
@@ -285,6 +286,10 @@ export function DownloadsGuardCard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // A real run answered 401: the owner must sign in with a session first.
+  const [signIn, setSignIn] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const running = Boolean(status?.running);
 
@@ -344,8 +349,12 @@ export function DownloadsGuardCard() {
   const handleRunNow = () => withBusy('run', async () => {
     const baselineCheck = status?.last_check ?? null;
     const baselineRun = status?.last_run ?? null;
-    await triggerDownloadsGuardRun(false);
+    const res = await triggerDownloadsGuardRun(false);
     setConfirming(false);
+    if (res.signIn) {
+      setSignIn(true);
+      return '';
+    }
     pollUntilIdle(baselineCheck, baselineRun);
     return 'Cleanup started — the result appears below.';
   });
@@ -458,7 +467,13 @@ export function DownloadsGuardCard() {
       )}
 
       <div className="col-span-full flex flex-wrap items-center gap-2">
-        {confirming ? (
+        {signIn ? (
+          <button type="button" data-sign-in-to-delete=""
+            onClick={() => navigate('/login', { state: { signIn: true, from: location.pathname } })}
+            className="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-[12px] font-semibold text-white/80">
+            Sign in to clean up
+          </button>
+        ) : confirming ? (
           <>
             <button type="button" onClick={handleRunNow} disabled={busy !== null || running}
               className="rounded-lg border border-rose-500/30 bg-rose-500/15 px-3 py-2 text-[12px] font-semibold text-rose-200 disabled:opacity-40">

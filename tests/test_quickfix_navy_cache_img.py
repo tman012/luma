@@ -10,8 +10,8 @@ import pytest
 
 import app.main
 
-# Highest service-worker version that has shipped (:5002 runs v138).
-LAST_SHIPPED_SW_VERSION = 138
+# Highest service-worker version shipped or taken (v140 and v141 are taken).
+LAST_SHIPPED_SW_VERSION = 141
 from app import theme
 
 ROOT = Path(__file__).resolve().parent.parent
