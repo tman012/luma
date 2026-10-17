@@ -27,7 +27,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 from app import tracker_types as tt
 
@@ -70,6 +70,30 @@ def _url_allowed(type_id: str, url: str) -> bool:
     if type_id in GENERIC_TYPES and is_proxy_url(url):
         return False
     return not host_literal_blocked(url)
+
+
+ADDRESS_NOT_ALLOWED = 'Address not allowed'
+
+
+def _blocked_names(payload: Any) -> FrozenSet[str]:
+    """The payload's URL (normalized) when its host name resolves to an
+    address that is not allowed (private, loopback, this host...). Literals
+    are refused by _url_allowed; a name that doesn't resolve now is left to
+    Test and to the check on every request."""
+    from app.tracker_http import ip_literal, name_blocked
+    if not isinstance(payload, dict) or not str(payload.get('url') or '').strip():
+        return frozenset()
+    url = tt.normalize_url(payload.get('url'))
+    if url is None:
+        return frozenset()
+    from urllib.parse import urlsplit
+    try:
+        host = urlsplit(url).hostname or ''
+    except ValueError:
+        return frozenset()
+    if not host or ip_literal(host) is not None:
+        return frozenset()
+    return frozenset({url}) if name_blocked(url) else frozenset()
 
 
 def _has_control(s: str) -> bool:
@@ -268,7 +292,8 @@ class TrackerStore:
     # ------------------------------------------------------------ validation
 
     def _build(self, payload: Dict[str, Any], existing: Optional[Dict[str, Any]],
-               others: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Optional[str]]]:
+               others: List[Dict[str, Any]], blocked_urls: FrozenSet[str] = frozenset()
+               ) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Optional[str]]]:
         """Validate *payload* against the type schema.
 
         Returns (record without secrets, field errors, secret changes) where a
@@ -310,6 +335,8 @@ class TrackerStore:
             url = tt.normalize_url(raw_url)
             if url is None or not _url_allowed(type_id, url):
                 errors['url'] = tt.INVALID_URL
+            elif url in blocked_urls:
+                errors['url'] = ADDRESS_NOT_ALLOWED
             rec['url'] = url or ''
         # Stored secrets are bound to the saved URL: a new URL drops them.
         url_changed = existing is not None and rec['url'] != existing.get('url')
@@ -396,12 +423,13 @@ class TrackerStore:
     # ------------------------------------------------------------ CRUD
 
     def create(self, payload: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Dict[str, str]]:
+        blocked = _blocked_names(payload)          # DNS before the file lock
         with self._file_lock():
             self._reload()
             others = self._data['trackers']
             if len(others) >= MAX_TRACKERS:
                 return None, {'_': 'Too many trackers'}
-            rec, errors, changes = self._build(payload, None, others)
+            rec, errors, changes = self._build(payload, None, others, blocked)
             if errors:
                 return None, errors
             secrets: Dict[str, str] = {}
@@ -418,12 +446,13 @@ class TrackerStore:
         return copy.deepcopy(rec), {}
 
     def update(self, tracker_id: int, payload: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Dict[str, str]]:
+        blocked = _blocked_names(payload)          # DNS before the file lock
         with self._file_lock():
             self._reload()
             cur = next((t for t in self._data['trackers'] if t['id'] == tracker_id), None)
             if cur is None:
                 return None, {'_': 'Not found'}
-            rec, errors, changes = self._build(payload, cur, self._data['trackers'])
+            rec, errors, changes = self._build(payload, cur, self._data['trackers'], blocked)
             if errors:
                 return None, errors
             secrets = {k: v for k, v in (cur.get('secrets') or {}).items() if k in tt.secret_keys(rec['type'])}

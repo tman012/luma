@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from app import tracker_clients, tracker_types as tt
-from app.tracker_guard import TrackerGuard, get_guard, guard_key, guarded_test
+from app.tracker_guard import TrackerGuard, address_scope, get_guard, guard_key, guarded_test, record_failure
 from app.tracker_http import TrackerError
 from app.tracker_store import STATUS_ERROR, STATUS_OK, TrackerStore, get_store
 
@@ -255,8 +255,8 @@ class TrackerSearch:
             self._skip_logged[key] = window
         logger.info(msg, *args)
 
-    def _record_failure(self, cfg: Dict[str, Any], gk: int, err: TrackerError) -> None:
-        until = self.guard.failure(gk, err.kind, err.retry_after)
+    def _record_failure(self, cfg: Dict[str, Any], gk: str, err: TrackerError, scope=None) -> None:
+        until = record_failure(self.guard, gk, err, scope)
         self.store.set_status(cfg['id'], STATUS_ERROR, err.message)
         self._log_once((gk, 'fail'), round(until),
                        'Tracker %s (id %s) %s: no requests until %s', cfg['name'], cfg['id'], err.kind,
@@ -288,10 +288,12 @@ class TrackerSearch:
                     return hit[1]
                 raise TrackerSkipped(reason)
             self.guard.wait_spacing(gk)
+            scope = address_scope(cfg, self.guard)
             try:
-                items = tracker_clients.search(cfg, query, categories, limit, self.request, imdb_id=imdb_id)
+                with scope:
+                    items = tracker_clients.search(cfg, query, categories, limit, self.request, imdb_id=imdb_id)
             except TrackerError as e:
-                self._record_failure(cfg, gk, e)
+                self._record_failure(cfg, gk, e, scope)
                 raise
             except Exception as e:       # parser bug: treat as a bad answer, never leak details
                 logger.warning('Tracker %s (id %s) answer not understood (%s)', cfg['name'], cfg['id'],

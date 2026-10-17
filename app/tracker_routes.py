@@ -124,11 +124,14 @@ def _not_found():
 
 
 def _throttle_keys(cfg: Dict[str, Any]) -> List[str]:
-    """The guard key (site type, or normalized host for Torznab/Newznab) and
-    the normalized host: never the record id, so re-adding, editing, an
-    unsaved form or another path on the same host shares one budget."""
+    """Click-debounce keys, per type: the guard key (site type, or normalized
+    host for Torznab/Newznab) and the normalized host, both under the type.
+    Never the record id, so re-adding, editing, an unsaved form or another
+    path on the same host shares one debounce; another type on the same
+    host has its own (the persisted budgets in tracker_guard stay shared)."""
+    type_id = str(cfg.get('type') or '').strip().lower() or '-'
     keys = [guard_key(cfg), f"host:{normalize_host(cfg.get('url')) or '-'}"]
-    return list(dict.fromkeys(keys))
+    return [f'{type_id}|{k}' for k in dict.fromkeys(keys)]
 
 
 def _test_allowed(cfg: Dict[str, Any]) -> bool:
