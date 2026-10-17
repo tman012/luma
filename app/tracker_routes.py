@@ -60,12 +60,13 @@ def init(*, get_current_user: Callable[[], Optional[dict]], get_owner: Callable[
     owner (no session). *tester* runs one connection test (raises
     TrackerError); defaults to tracker_clients.test. It always runs inside
     tracker_guard.guarded_test. *on_change*/*on_delete* get the stored record
-    after an edit or a delete (the search manager resets backoffs there).
+    after an edit or a delete (the search manager resets backoffs and drops
+    release links there); *on_change* also gets url_changed=bool.
     *on_list_change* runs after any add, edit, enable/disable or delete (cached
     search answers no longer match the tracker list)."""
     _cfg.update(get_current_user=get_current_user, get_owner=get_owner, is_implicit=is_implicit,
                 tester=tester or (lambda cfg: tracker_clients.test(cfg)),
-                on_change=on_change or (lambda rec: None), on_delete=on_delete or (lambda rec: None),
+                on_change=on_change or (lambda rec, **kw: None), on_delete=on_delete or (lambda rec: None),
                 on_list_change=on_list_change or (lambda: None))
 
 
@@ -209,13 +210,14 @@ def edit_tracker(tracker_id: int):
     data = _body()
     if data is None:
         return _invalid({'_': 'Invalid'})
+    before = get_store().get(tracker_id)
     try:
         rec, errors = get_store().update(tracker_id, data)
     except CredentialsUnreadable:
         return _unreadable()
     if errors:
         return _invalid(errors)
-    _cfg['on_change'](rec)
+    _cfg['on_change'](rec, url_changed=bool(before) and before.get('url') != rec.get('url'))
     _list_changed()
     return _no_store(jsonify({'tracker': get_store().public(rec)}))
 

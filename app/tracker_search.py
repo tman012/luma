@@ -21,17 +21,19 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import secrets
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import urljoin, urlsplit
 
 from app import tracker_clients, tracker_types as tt
 from app.tracker_guard import TrackerGuard, get_guard, guard_key, guarded_test
-from app.tracker_http import TrackerError
-from app.tracker_store import STATUS_ERROR, STATUS_OK, TrackerStore, get_store
+from app.tracker_http import TrackerError, looks_banned, raise_for_status
+from app.tracker_store import STATUS_ERROR, STATUS_OK, CredentialsUnreadable, TrackerStore, get_store
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,64 @@ RELEASE_PATH = '/api/trackers/release/'
 
 class TrackerSkipped(Exception):
     """A request to a tracker was deliberately not sent (rate limit or backoff)."""
+
+
+class ReleaseUnavailable(Exception):
+    """A release link could not be turned into a torrent or magnet.
+
+    kind: 'expired' (unknown or old link, tracker deleted or disabled),
+    'skipped' (the tracker is in backoff or over its limits; nothing was sent),
+    'tracker' (the tracker refused or failed; see .tracker_error) or 'invalid'
+    (the tracker answered with something that is not a torrent)."""
+
+    MESSAGES = {'expired': 'Release link expired', 'skipped': 'Tracker is paused',
+                'tracker': 'Tracker download failed', 'invalid': 'Not a torrent file'}
+
+    def __init__(self, kind: str, tracker_error: Optional[TrackerError] = None):
+        super().__init__(kind)
+        self.kind = kind
+        self.tracker_error = tracker_error
+
+    @property
+    def message(self) -> str:
+        if self.kind == 'tracker' and self.tracker_error is not None:
+            return self.tracker_error.message
+        return self.MESSAGES.get(self.kind, 'Tracker download failed')
+
+
+_TOKEN_RE = re.compile(r'[A-Za-z0-9_-]{16,64}')
+
+
+def release_token(url: Any) -> Optional[str]:
+    """The token of one of our release links (relative or absolute, any URL
+    base), else None."""
+    path = urlsplit(str(url or '').strip()).path
+    i = path.rfind(RELEASE_PATH)
+    if i < 0:
+        return None
+    tok = path[i + len(RELEASE_PATH):]
+    return tok if _TOKEN_RE.fullmatch(tok) else None
+
+
+def is_release_link(url: Any) -> bool:
+    return release_token(url) is not None
+
+
+def _host(url: str) -> str:
+    h = (urlsplit(str(url or '')).hostname or '').lower()
+    return h[4:] if h.startswith('www.') else h
+
+
+def _looks_like_torrent(body: bytes) -> bool:
+    return body[:1] == b'd' and body[-1:] == b'e' and b'4:info' in body[:1024 * 1024]
+
+
+def _magnet_in(body: bytes) -> Optional[str]:
+    head = body[:8192].lstrip()
+    if head[:7].lower() != b'magnet:':
+        return None
+    line = head.split(b'\n', 1)[0].strip().decode('utf-8', 'ignore')
+    return line or None
 
 
 # ------------------------------------------------------------------ release tokens
@@ -124,6 +184,17 @@ class ReleaseTokens:
             if not hit or hit[2] <= time.time():
                 return None
             return hit[0], hit[1]
+
+    def forget_tracker(self, tracker_id: int) -> None:
+        """Drop every link of a tracker (deleted, or its URL changed)."""
+        with self._lock:
+            self._load()
+            for tok, (tid, url, _) in list(self._map.items()):
+                if tid == tracker_id:
+                    self._map.pop(tok, None)
+                    self._by_url.pop((tid, url), None)
+                    self._dirty = True
+        self.flush()
 
     def flush(self) -> None:
         with self._lock:
@@ -303,6 +374,90 @@ class TrackerSearch:
         tracker_guard.guarded_test)."""
         guarded_test(cfg, lambda c: tracker_clients.test(c, self.request), self.guard)
 
+    # -- release downloads -------------------------------------------------
+
+    def fetch_release(self, url: str, interactive: bool = True) -> Dict[str, Any]:
+        """Resolve one of our release links server-side.
+
+        Returns {'magnet': str} or {'torrent': bytes}, plus 'tracker',
+        'tracker_id' and 'tracker_type'. The download goes through the same
+        guard as searches (limits, backoff, bans) and tracker_http's network
+        checks. Tracker credentials (the IPTorrents cookie) are sent only to
+        the host of the tracker's saved URL; a redirect to another host is
+        followed once, without them. Raises ReleaseUnavailable."""
+        tok = release_token(url)
+        hit = self.tokens.resolve(tok) if tok else None
+        if not hit:
+            raise ReleaseUnavailable('expired')
+        tid, target = hit
+        rec = self.store.get(tid)
+        if rec is None or not rec.get('enabled', True):
+            raise ReleaseUnavailable('expired')
+        try:
+            cfg = self.store.config(rec)
+        except CredentialsUnreadable:
+            raise ReleaseUnavailable('tracker', TrackerError('auth')) from None
+        info = {'tracker': cfg['name'], 'tracker_id': tid, 'tracker_type': cfg['type']}
+        if target.lower().startswith('magnet:'):
+            return dict(info, magnet=target)
+        own_host = _host(cfg.get('url', ''))
+        headers = tracker_clients.download_headers(cfg) if own_host and _host(target) == own_host else {}
+        gk = guard_key(cfg)
+        strict = tt.is_rate_strict(cfg['type'])
+        with self.guard.tracker_lock(gk):
+            reason = self.guard.take(gk, interactive, strict)
+            if reason:
+                logger.info('Tracker %s (id %s) download not sent: %s', cfg['name'], tid, reason)
+                raise ReleaseUnavailable('skipped')
+            self.guard.wait_spacing(gk)
+            try:
+                resp = self.request('GET', target, headers=headers, follow_redirects=True)
+                loc = resp.headers.get('Location') or resp.headers.get('location') or ''
+                if 300 <= resp.status < 400 and loc:
+                    nxt = urljoin(resp.url or target, loc)
+                    if nxt.lower().startswith('magnet:'):
+                        return dict(info, magnet=nxt)
+                    if urlsplit(nxt).scheme not in ('http', 'https'):
+                        raise ReleaseUnavailable('invalid')
+                    # Another host (a CDN): one hop, no tracker credentials.
+                    resp = self.request('GET', nxt, headers={}, follow_redirects=False)
+                    if 300 <= resp.status < 400:
+                        loc2 = urljoin(nxt, resp.headers.get('Location') or resp.headers.get('location') or '')
+                        if loc2.lower().startswith('magnet:'):
+                            return dict(info, magnet=loc2)
+                        raise TrackerError('redirect', resp.status)
+                raise_for_status(resp)
+            except TrackerError as e:
+                self._download_failure(cfg, gk, e)
+                raise ReleaseUnavailable('tracker', e) from None
+        body = resp.body or b''
+        magnet = _magnet_in(body)
+        if magnet:
+            self.guard.success(gk)
+            return dict(info, magnet=magnet)
+        if resp.status == 200 and _looks_like_torrent(body):
+            self.guard.success(gk)
+            return dict(info, torrent=body)
+        text = body[:4000].decode('utf-8', 'ignore')
+        if looks_banned(text):
+            err = TrackerError('banned', resp.status)
+        elif 'name="password"' in text or 'login.php' in text or 'name="username"' in text:
+            err = TrackerError('auth', resp.status)
+        else:
+            logger.info('Tracker %s (id %s) download was not a torrent', cfg['name'], tid)
+            raise ReleaseUnavailable('invalid')
+        self._download_failure(cfg, gk, err)
+        raise ReleaseUnavailable('tracker', err)
+
+    def _download_failure(self, cfg: Dict[str, Any], gk: int, err: TrackerError) -> None:
+        """A failed download backs the tracker off only for what says
+        something about the tracker (rate limit, ban, rejected credentials);
+        one dead link must not pause searches."""
+        if err.kind in ('rate', 'banned', 'auth'):
+            self._record_failure(cfg, gk, err)
+        else:
+            logger.info('Tracker %s (id %s) download failed: %s', cfg['name'], cfg['id'], err.kind)
+
     # -- results -----------------------------------------------------------
 
     def to_item(self, cfg: Dict[str, Any], r: Dict[str, Any], secret_values: List[str]) -> Optional[Dict[str, Any]]:
@@ -462,11 +617,14 @@ def reset_search_for_tests(s: Optional[TrackerSearch] = None) -> None:
         _search = s
 
 
-def on_tracker_changed(rec: Dict[str, Any]) -> None:
+def on_tracker_changed(rec: Dict[str, Any], url_changed: bool = False) -> None:
     """After an edit: forget credential/failure backoffs (never rate limits
-    or bans) and cached answers of that tracker."""
+    or bans) and cached answers of that tracker. Links issued under an older
+    URL are dropped (credentials stay with the URL they were saved with)."""
     s = get_search()
     s.guard.clear(guard_key(rec))
+    if url_changed:
+        s.tokens.forget_tracker(int(rec['id']))
     with s._cache_lock:
         for k in [k for k in s._cache if k[0] == rec['id']]:
             s._cache.pop(k, None)
@@ -474,11 +632,17 @@ def on_tracker_changed(rec: Dict[str, Any]) -> None:
 
 def on_tracker_deleted(rec: Dict[str, Any]) -> None:
     s = get_search()
+    s.tokens.forget_tracker(int(rec['id']))
     if not tt.is_rate_strict(rec['type']):
         s.guard.forget(int(rec['id']))
     with s._cache_lock:
         for k in [k for k in s._cache if k[0] == rec['id']]:
             s._cache.pop(k, None)
+
+
+def fetch_release(url: str, interactive: bool = True) -> Dict[str, Any]:
+    """Module-level shortcut for TrackerSearch.fetch_release."""
+    return get_search().fetch_release(url, interactive)
 
 
 def has_enabled_trackers() -> bool:
