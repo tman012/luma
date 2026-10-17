@@ -14,6 +14,11 @@ import { useModalHost } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { posterUrl } from '@/utils/image';
 import { apiFetch } from '../../apiClient';
+import { useLocation, useNavigate } from 'react-router';
+import { useAuth } from '@/contexts/AuthContext';
+
+/** Shown instead of the delete when the owner must sign in first (sentence case, no helper text). */
+export const SIGN_IN_TO_DELETE = 'Sign in to delete files';
 
 /** A single completed download, badged by its origin. */
 interface ActivityEntry {
@@ -66,12 +71,14 @@ const THUMB_H = 117;
  */
 
 /** DELETE /api/downloads/remove/<hash>?deleteFiles=… — qBit remove / delete+files. */
-async function removeDownload(hash: string, deleteFiles: boolean): Promise<{ ok: boolean; error?: string }> {
+export async function removeDownload(hash: string, deleteFiles: boolean): Promise<{ ok: boolean; error?: string; signIn?: boolean }> {
   if (!hash) return { ok: false, error: 'Missing torrent hash' };
   try {
     const q = deleteFiles ? '?deleteFiles=true' : '?deleteFiles=false';
     const resp = await apiFetch(`/api/downloads/remove/${encodeURIComponent(hash)}${q}`, { method: 'DELETE' });
-    const data = await resp.json().catch(() => ({})) as { success?: boolean; error?: string; message?: string };
+    const data = await resp.json().catch(() => ({})) as { success?: boolean; error?: string; message?: string; sign_in?: boolean };
+    // Deleting files needs the owner signed in with a session, even on the LAN.
+    if (resp.status === 401 && deleteFiles) return { ok: false, signIn: true };
     if (!resp.ok || data.success === false) {
       return { ok: false, error: data.error || `Remove failed (${resp.status})` };
     }
@@ -239,6 +246,15 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
   const [confirmHash, setConfirmHash] = useState<string | null>(null);
   const [busyHash, setBusyHash] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  // Rows whose delete came back 401 (sign in first); the implicit LAN owner gets
+  // the sign-in prompt on every row up front.
+  const [signInHash, setSignInHash] = useState<string | null>(null);
+  const { implicit } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const signIn = useCallback(() => {
+    navigate('/login', { state: { from: location.pathname + location.search, signIn: true } });
+  }, [navigate, location.pathname, location.search]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
@@ -269,7 +285,8 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
     const res = await removeDownload(dl.hash, deleteFiles);
     setBusyHash(null);
     if (!res.ok) {
-      setActionError(res.error || 'Remove failed');
+      if (res.signIn) setSignInHash(dl.hash);
+      else setActionError(res.error || 'Remove failed');
       // Force a refresh so a failed optimistic remove comes back.
       setReloadTick((t) => t + 1);
       // Also re-trigger active poll by bumping — loadActive is interval-bound;
@@ -517,7 +534,17 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
               {/* Remove actions — only inside the expanded filename panel (tap name to open). */}
               {dl.hash && nameOpen ? (
                 <div className="mt-2.5" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                  {confirmHash === dl.hash ? (
+                  {implicit || signInHash === dl.hash ? (
+                    <button
+                      type="button"
+                      data-testid="activity-sign-in"
+                      onClick={signIn}
+                      className="w-full rounded-lg px-3 py-2 text-left text-[12px] font-medium text-white/85 active:bg-white/10"
+                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                    >
+                      {SIGN_IN_TO_DELETE}
+                    </button>
+                  ) : confirmHash === dl.hash ? (
                     <div
                       className="rounded-xl px-3 py-2.5"
                       style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)' }}

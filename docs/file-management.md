@@ -24,13 +24,15 @@ store (`file_management.json` in the data dir, mode 0600). The seeded
   torrent's own entry. A folder that holds one (a category folder) is never
   deleted whole; its other entries are offered one by one. Both delete nothing
   while qBittorrent can't be read, and the manual cleanup is owner only.
-- Destructive file actions (the manual cleanup now; any TV or movie delete
-  later) need the owner signed in with a session, even when LAN sign-in is
-  off (PM ruling). Routes use `start_flow.require_signed_in_owner` (or the
+- Destructive file actions (the manual cleanup, removing a download with
+  `deleteFiles=true`, and any TV or movie delete later) need the owner signed
+  in with a session, even when LAN sign-in is off (PM ruling). Removing a
+  download without its files keeps today's access. Routes use `start_flow.require_signed_in_owner` (or the
   `signed_in_owner_required` decorator): the implicit LAN owner, the service
   key (kiosk, companion apps) and no session get 401 with `"sign_in": true`;
   other admins and plain, guest and Plex-approved users get 403. The storage
-  sheet shows "Sign in to free up space" instead of the delete, and /login
+  sheet shows "Sign in to free up space" and Activity "Sign in to delete
+  files" instead of the delete (also after a 401), and /login
   shows the form to an implicit LAN owner sent there for that action.
   Everything else keeps today's LAN behavior.
 - `LUMA_TEST_QBIT_TAG` is refused (falls back to `luma-test`) when it equals an
