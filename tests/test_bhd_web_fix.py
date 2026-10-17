@@ -62,22 +62,6 @@ def test_pages_stop_at_the_cap_and_at_the_last_page():
     assert len(m.calls) == tc.BHD_MAX_PAGES
 
 
-def test_movie_with_tmdb_id_searches_by_id_not_text():
-    m = Mock(R(dict(bhd_pages.page2(), page=1, total_pages=1)))
-    tc.search(cfg(), 'Dune: Part Two 2024', [2000, 5000], 500, m, tmdb_id='693134', media_type='movie')
-    body = m.calls[0]['json']
-    assert body['tmdb_id'] == '693134' and body['categories'] == 'Movies' and 'search' not in body
-    assert body['action'] == 'search' and body['rsskey'] == bhd_pages.RK
-
-
-def test_tv_with_tmdb_id_keeps_only_the_episode_text():
-    m = Mock(R({'status_code': 1, 'page': 1, 'results': [], 'total_pages': 1, 'total_results': 0,
-                'success': True}))
-    tc.search(cfg(), 'Breaking Bad S01E05', [5000], 500, m, tmdb_id='1396', media_type='tv')
-    body = m.calls[0]['json']
-    assert body['tmdb_id'] == '1396' and body['categories'] == 'TV' and body['search'] == 'S01E05'
-
-
 @pytest.mark.parametrize('title,sent', [
     ("Dune: Part Two 2024", 'Dune Part Two 2024'),
     ("Ocean's Eleven 2001", 'Oceans Eleven 2001'),
@@ -88,7 +72,8 @@ def test_text_query_drops_punctuation_bhd_names_leave_out(title, sent):
     m = Mock(R({'status_code': 1, 'page': 1, 'results': [], 'total_pages': 1, 'total_results': 0,
                 'success': True}))
     tc.search(cfg(), title, [2000, 5000], 500, m)
-    assert m.calls[0]['json']['search'] == sent
+    assert m.calls[0]['json']['search'] == title          # first exactly as typed (as ee3bee4)
+    assert any(c['json'].get('search') == sent for c in m.calls)
 
 
 @pytest.fixture
@@ -112,9 +97,9 @@ def test_sources_gets_web_rows_and_logs_types(engine, caplog):
     out = LumaTrackersClient(eng).search_all('Dune: Part Two', 'movie', 2024, tmdb_id=693134)
     assert len(out) == 104
     assert {o['source'] for o in out} >= {'WEB-DL', 'WEBRip', 'REMUX', 'BluRay'}
-    assert mock.calls[0]['json']['tmdb_id'] == '693134'
+    assert mock.calls[0]['json'] == {'action': 'search', 'rsskey': bhd_pages.RK, 'search': 'Dune: Part Two 2024'}
     line = next(r.getMessage() for r in caplog.records if 'rows parsed' in r.getMessage())
-    assert '104 rows parsed, 104 results, 0 dropped, pages 2, by id yes' in line
+    assert '104 rows parsed, 104 results, 0 dropped, pages 2, by id no' in line
     assert 'WEB-DL 3' in line and 'WEBRip 1' in line and 'Remux 50' in line
     assert KEY not in caplog.text and bhd_pages.RK not in caplog.text
 
@@ -130,61 +115,103 @@ def test_rows_without_download_link_count_as_dropped(engine, caplog):
     assert '4 rows parsed, 3 results, 1 dropped' in caplog.text
 
 
+
 EMPTY = {'status_code': 1, 'page': 1, 'results': [], 'total_pages': 1, 'total_results': 0, 'success': True}
 WEB_ONLY = dict(bhd_pages.page2(), page=1, total_pages=1)
+FAIL = {'status_code': 0, 'success': False, 'status_message': 'Something went wrong'}
 
 
-def test_id_with_rows_sends_no_text_search():
+def movie(m, title='Dune: Part Two 2024'):
+    return tc.search(cfg(), title, [2000, 5000], 500, m, tmdb_id='693134', media_type='movie')
+
+
+def test_text_first_exactly_like_ee3bee4_and_no_more_when_it_has_rows():
     m = Mock(R(WEB_ONLY))
-    out = tc.search(cfg(), 'Dune: Part Two 2024', [2000, 5000], 500, m, tmdb_id='693134', media_type='movie')
-    assert len(out) == 4 and len(m.calls) == 1 and 'search' not in m.calls[0]['json']
-    assert tc.last_stats()['fallback'] == ''
+    assert len(movie(m)) == 4 and len(m.calls) == 1
+    assert m.calls[0]['json'] == {'action': 'search', 'rsskey': bhd_pages.RK, 'search': 'Dune: Part Two 2024'}
+    assert tc.last_stats()['fallback'] == '' and not tc.last_stats()['by_id']
 
 
-def test_id_with_no_rows_falls_back_to_text_with_the_year():
-    m = Mock(R(EMPTY), R(WEB_ONLY))
-    out = tc.search(cfg(), 'Dune: Part Two 2024', [2000, 5000], 500, m, tmdb_id='693134', media_type='movie')
-    assert len(out) == 4 and len(m.calls) == 2
-    assert m.calls[0]['json']['tmdb_id'] == '693134'
-    fb = m.calls[1]['json']
-    assert 'tmdb_id' not in fb and fb['search'] == 'Dune Part Two 2024' and fb['categories'] == 'Movies'
-    assert tc.last_stats()['fallback'] == 'text'
+def test_tmdb_id_is_sent_as_movie_slash_id():
+    m = Mock(R(EMPTY), R(EMPTY), R(EMPTY), R(WEB_ONLY))
+    assert len(movie(m)) == 4
+    assert [c['json'].get('search') for c in m.calls] == ['Dune: Part Two 2024', 'Dune Part Two 2024',
+                                                         'Dune Part Two', None]
+    idb = m.calls[3]['json']
+    assert idb['tmdb_id'] == 'movie/693134' and 'categories' not in idb
+    assert tc.last_stats()['by_id'] and tc.last_stats()['fallback'] == 'id'
 
 
-def test_id_and_year_text_empty_then_title_only():
-    m = Mock(R(EMPTY), R(EMPTY), R(WEB_ONLY))
-    out = tc.search(cfg(), 'Dune: Part Two 2024', [2000, 5000], 500, m, tmdb_id='693134', media_type='movie')
-    assert len(out) == 4 and [c['json'].get('search') for c in m.calls] == [None, 'Dune Part Two 2024',
-                                                                            'Dune Part Two']
-    assert tc.last_stats()['fallback'] == 'text, no year'
-
-
-def test_tv_id_with_no_rows_falls_back_to_title_and_episode():
-    m = Mock(R(EMPTY), R(EMPTY))
+def test_tv_id_is_tv_slash_id_with_the_episode_text():
+    m = Mock(R(EMPTY))
     tc.search(cfg(), "Grey's Anatomy S01E05", [5000], 500, m, tmdb_id='1416', media_type='tv')
-    assert len(m.calls) == 2
-    assert m.calls[0]['json']['search'] == 'S01E05' and m.calls[0]['json']['tmdb_id'] == '1416'
-    assert m.calls[1]['json']['search'] == 'Greys Anatomy S01E05' and m.calls[1]['json']['categories'] == 'TV'
-    assert 'tmdb_id' not in m.calls[1]['json']
+    assert [c['json'].get('search') for c in m.calls] == ["Grey's Anatomy S01E05", 'Greys Anatomy S01E05', 'S01E05']
+    assert m.calls[2]['json']['tmdb_id'] == 'tv/1416'
 
 
-def test_fallback_is_one_budget_unit_and_not_asked_again(engine, caplog):
+@pytest.mark.parametrize('bad', [R(FAIL), R({'x': 1}, 500), Response(200, {}, b'<html>oops'), 'timeout'])
+def test_an_attempt_that_errors_falls_back(bad):
+    from app.tracker_http import TrackerError
+
+    class M(Mock):
+        def __call__(self, method, url, **kw):
+            self.calls.append({'method': method, 'url': url, **kw})
+            r = self.resps.pop(0)
+            if r == 'timeout':
+                raise TrackerError('timeout')
+            return r
+    m = M(bad, R(WEB_ONLY))
+    assert len(movie(m)) == 4 and len(m.calls) == 2
+    st = tc.last_stats()
+    assert st['steps'][0]['error'] in ('response', 'http', 'timeout') and st['steps'][1]['rows'] == 4
+
+
+def test_every_attempt_erroring_is_a_tracker_error_not_zero():
+    from app.tracker_http import TrackerError
+    m = Mock(R(FAIL))
+    with pytest.raises(TrackerError) as e:
+        movie(m)
+    assert e.value.kind == 'response' and len(m.calls) == 4
+
+
+def test_rate_limit_or_key_rejection_stops_the_chain():
+    from app.tracker_http import TrackerError
+    for resp, kind in ((R({}, 429), 'rate'), (R({'status_code': 0, 'success': False,
+                                                 'status_message': 'Invalid API key'}), 'auth')):
+        m = Mock(resp)
+        with pytest.raises(TrackerError) as e:
+            movie(m)
+        assert e.value.kind == kind and len(m.calls) == 1
+
+
+def test_chain_is_one_budget_unit_and_logs_each_step(engine, caplog):
     eng, mock = engine
-    mock.resps = [R(EMPTY), R(EMPTY), R(EMPTY), R(EMPTY)]
+    mock.resps = [R(FAIL), R(EMPTY), R(EMPTY), R(WEB_ONLY)]
     caplog.set_level(logging.INFO)
     out = LumaTrackersClient(eng).search_all('Dune: Part Two', 'movie', 2024, tmdb_id=693134)
-    assert out == []
-    # id, text + year, text alone; the search_all year retry does not ask BHD again
-    assert [c['json'].get('search') for c in mock.calls] == [None, 'Dune Part Two 2024', 'Dune Part Two']
+    assert len(out) == 4 and len(mock.calls) == 4
     assert len(eng.guard.log.get('site:beyondhd', [])) == 1
-    assert 'by id yes, fallback text, no year' in caplog.text
+    msgs = [r.getMessage() for r in caplog.records]
+    assert 'Tracker BHD (id 1) search step 1 text: HTTP 200, success False, status_code 0, error response' in msgs
+    assert 'Tracker BHD (id 1) search step 2 text stripped: HTTP 200, success True, status_code 1, 0 rows' in msgs
+    assert 'Tracker BHD (id 1) search step 4 id: HTTP 200, success True, status_code 1, 4 rows' in msgs
+    assert any('by id yes, fallback id' in x for x in msgs)
     assert KEY not in caplog.text and bhd_pages.RK not in caplog.text and 'Dune' not in caplog.text
+    assert '693134' not in caplog.text
 
 
-def test_fallback_hit_logged(engine, caplog):
+def test_all_errors_logged_and_counted_as_failure(engine, caplog):
     eng, mock = engine
-    mock.resps = [R(EMPTY), R(WEB_ONLY)]
+    mock.resps = [R(FAIL)]
     caplog.set_level(logging.INFO)
-    out = LumaTrackersClient(eng).search_all('Dune: Part Two', 'movie', 2024, tmdb_id=693134)
-    assert len(out) == 4 and len(eng.guard.log.get('site:beyondhd', [])) == 1
-    assert '4 rows parsed, 4 results, 0 dropped, pages 2, by id yes, fallback text,' in caplog.text
+    assert LumaTrackersClient(eng).search_all('Dune: Part Two', 'movie', 2024, tmdb_id=693134) == []
+    assert any(r.levelno == logging.WARNING and 'search failed: response (HTTP 200' in r.getMessage()
+               for r in caplog.records)
+    assert eng.store.get(1)['status']['state'] == 'error'
+
+
+def test_chain_stops_starting_attempts_after_its_time_budget(monkeypatch):
+    t = iter([0.0, 10.0, 50.0, 60.0, 70.0])
+    monkeypatch.setattr(tc, '_monotonic', lambda: next(t))
+    m = Mock(R(EMPTY))
+    assert movie(m) == [] and len(m.calls) == 2

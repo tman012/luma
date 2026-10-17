@@ -255,6 +255,19 @@ class TrackerSearch:
             self._skip_logged[key] = window
         logger.log(level, msg, *args)
 
+    @staticmethod
+    def _log_steps(cfg: Dict[str, Any], st: Dict[str, Any]) -> None:
+        """One line per attempt of a multi-step search (BHD): step name, HTTP
+        status, the API's success/status_code, rows or the error kind. Never
+        the query, a URL or a key."""
+        for i, s in enumerate(st.get('steps') or []):
+            logger.info('Tracker %s (id %s) search step %d %s: HTTP %s, success %s, status_code %s, %s',
+                        cfg['name'], cfg['id'], i + 1, s.get('step'),
+                        s.get('http') if s.get('http') is not None else '-',
+                        s.get('success') if s.get('success') is not None else '-',
+                        s.get('status_code') if s.get('status_code') is not None else '-',
+                        f"error {s['error']}" if s.get('error') else f"{s.get('rows', 0)} rows")
+
     def _record_failure(self, cfg: Dict[str, Any], gk: str, err: TrackerError, scope=None) -> None:
         until = record_failure(self.guard, gk, err, scope)
         self.store.set_status(cfg['id'], STATUS_ERROR, err.message)
@@ -301,9 +314,11 @@ class TrackerSearch:
                                                    tmdb_id=str(tmdb_id or ''), media_type=media_type or '')
             except TrackerError as e:
                 st = tracker_clients.last_stats()
+                self._log_steps(cfg, st)
                 # One redacted line per failure: name, stage, reason, HTTP status. Never a URL or header.
                 logger.warning('Tracker %s (id %s) search failed: %s (HTTP %s, %s bytes, %s rows parsed)',
-                               cfg['name'], cfg['id'], e.kind, e.status if e.status is not None else '-',
+                               cfg['name'], cfg['id'], e.kind,
+                               e.status if e.status is not None else st.get('status') or '-',
                                st.get('bytes', '-'), st.get('rows', '-'))
                 self._record_failure(cfg, gk, e, scope)
                 raise
@@ -316,6 +331,7 @@ class TrackerSearch:
         self.guard.success(gk)
         self.store.set_status(cfg['id'], STATUS_OK, '')
         st = tracker_clients.last_stats()
+        self._log_steps(cfg, st)
         kinds = st.get('kinds') or {}
         if not kinds:
             for it in items:
@@ -326,8 +342,7 @@ class TrackerSearch:
                     cfg['name'], cfg['id'], st.get('status', '-'), st.get('bytes', '-'), st.get('rows', '-'),
                     len(items), (st['rows'] - len(items)) if isinstance(st.get('rows'), int) else '-',
                     st.get('pages', '-'),
-                    ('yes, fallback ' + st['fallback']) if st.get('by_id') and st.get('fallback')
-                    else 'yes' if st.get('by_id') else 'no',
+                    ('yes' if st.get('by_id') else 'no') + (f", fallback {st['fallback']}" if st.get('fallback') else ''),
                     ', '.join(f'{k} {v}' for k, v in sorted(kinds.items())) or '-')
         if items:          # an empty answer is never cached
             with self._cache_lock:
@@ -482,11 +497,11 @@ class LumaTrackersClient:
         items, _, _ = self.engine.search(q, cats, 500, interactive=True, tmdb_id=tmdb, media_type=media_type)
         bare = (query or '').strip()
         if not items and bare and q != bare:
-            # Release names often leave the year out: one retry without it. Trackers that
-            # searched by TMDB id already fell back to text themselves (same budget unit),
-            # so they are not asked again.
+            # Release names often leave the year out: one retry without it. BHD already
+            # tried the title without the year (and the TMDB id) in the same budget unit,
+            # so it is not asked again.
             again = [c['id'] for c in self.engine.store.enabled_configs()
-                     if not (tmdb and tt.searches_by_id(c.get('type')))]
+                     if not tt.searches_by_id(c.get('type'))]
             if again:
                 logger.info('Tracker search_all media_type=%s: no results with the year, retrying without it',
                             media_type)

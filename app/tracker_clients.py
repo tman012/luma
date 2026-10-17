@@ -22,7 +22,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlencode, urljoin, urlsplit
 
 from app import tracker_types as tt
@@ -244,7 +244,7 @@ def _bhd_error(data: Dict[str, Any]) -> None:
     msg = str(data.get('status_message') or '').lower()
     if looks_banned(msg):
         raise TrackerError('banned')
-    if 'key' in msg or 'auth' in msg or 'invalid' in msg:
+    if 'key' in msg or 'auth' in msg or 'unauthori' in msg:
         raise TrackerError('auth')
     if 'limit' in msg or 'too many' in msg:
         raise TrackerError('rate')
@@ -252,38 +252,47 @@ def _bhd_error(data: Dict[str, Any]) -> None:
 
 
 _TRAILING_YEAR_RE = re.compile(r'\s+(?:19|20)\d{2}$')
+BHD_CHAIN_BUDGET_S = 45.0         # no new attempt after this; Sources waits 75 s
+# Failures after which another attempt may still work. Rate limits, bans and
+# rejected keys end the search at once (and start the guard's backoff).
+_BHD_RETRYABLE = ('response', 'http', 'timeout', 'network', 'redirect', 'too_large')
+_monotonic = time.monotonic
+
+
+def bhd_tmdb_param(tmdb_id: str, media_type: str) -> str:
+    """BHD's tmdb_id filter takes '<movie|tv>/<id>' (the same shape its
+    results carry, e.g. 'movie/693134'); a bare number matches nothing."""
+    return f"{'movie' if media_type == 'movie' else 'tv'}/{int(tmdb_id)}"
 
 
 def beyondhd_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id='',
                     media_type=''):
-    """BHD's own API. With a TMDB id (and a known media type) the search is by
-    id first: exact, and immune to punctuation or a year the release names
-    don't carry; for TV only the SxxEyy/Sxx part of the query is kept as
-    text. When the id search finds no rows (an upload without a TMDB id),
-    the punctuation-stripped text is searched instead: movies title + year,
-    then the title alone; TV title + SxxEyy/Sxx. All of it is one search to
-    the guard. Pages are followed up to BHD_MAX_PAGES so a title with many
-    Remux and Encode uploads still gets its older WEB rows."""
+    """BHD's own API, text first exactly as before (the query as given),
+    then, only while nothing was found: the punctuation-stripped text, for
+    movies the title without the year, and last the TMDB id
+    ('movie/<id>' / 'tv/<id>', TV with its SxxEyy/Sxx text). An attempt that
+    fails with a bad answer, an HTTP error or a timeout moves on to the next;
+    a rate limit, ban or rejected key stops at once. When every attempt
+    failed the error is raised, never an empty list. The whole chain is one
+    search to the guard. Pages are followed up to BHD_MAX_PAGES."""
     q, imdb = _split_imdb(query, imdb_id)
     tmdb = str(tmdb_id or '').strip()
-    by_id = bool(tmdb.isdigit() and int(tmdb) > 0 and media_type in ('movie', 'tv'))
+    has_id = bool(tmdb.isdigit() and int(tmdb) > 0 and media_type in ('movie', 'tv'))
     acc: Dict[str, Any] = {'status': None, 'bytes': 0, 'rows': 0, 'pages': 0, 'kinds': {}, 'total': None,
-                           'by_id': by_id, 'fallback': ''}
+                           'by_id': False, 'fallback': '', 'steps': []}
     out: List[Dict[str, Any]] = []
 
     def stats():
         _set_stats(status=acc['status'], bytes=acc['bytes'], rows=acc['rows'], kept=len(out),
-                   pages=acc['pages'], kinds=dict(acc['kinds']), by_id=by_id, total=acc['total'],
-                   fallback=acc['fallback'])
+                   pages=acc['pages'], kinds=dict(acc['kinds']), by_id=acc['by_id'], total=acc['total'],
+                   fallback=acc['fallback'], steps=list(acc['steps']))
 
-    def run(body: Dict[str, Any]) -> int:
+    def run(body: Dict[str, Any], step: Dict[str, Any]) -> int:
         """All pages of one query; returns the raw rows it found."""
         found = 0
-        sent = acc['pages']
         for page in range(1, BHD_MAX_PAGES + 1):
-            if sent or page > 1:
+            if acc['pages']:
                 _sleep(BHD_PAGE_GAP_S)
-            sent += 1
             b = dict(body)
             if page > 1:
                 b['page'] = page
@@ -292,11 +301,14 @@ def beyondhd_search(cfg, query, categories, limit, request: Request = http_reque
                            headers={'Accept': 'application/json'})
             acc['status'], acc['pages'] = resp.status, acc['pages'] + 1
             acc['bytes'] += len(resp.body or b'')
+            step['http'] = resp.status
             stats()
             raise_for_status(resp)
             data = _json(resp)
             if not isinstance(data, dict):
                 raise TrackerError('response', resp.status)
+            step['success'] = data.get('success')
+            step['status_code'] = data.get('status_code')
             if data.get('success') is False or _int(data.get('status_code', 1)) == 0:
                 _bhd_error(data)
             rows = data.get('results') or []
@@ -325,37 +337,68 @@ def beyondhd_search(cfg, query, categories, limit, request: Request = http_reque
 
     base: Dict[str, Any] = {'action': 'search', 'rsskey': cfg.get('rss_key', '')}
 
-    def text_body(text: str, fallback: bool = False) -> Dict[str, Any]:
+    def text_body(text: str) -> Dict[str, Any]:
         b = dict(base)
         if text:
             b['search'] = text
         if imdb:
             b['imdb_id'] = imdb
-        kind = media_type if fallback else media_kind(categories)
+        kind = media_kind(categories)
         if kind != 'any':
             b['categories'] = 'Movies' if kind == 'movie' else 'TV'
         return b
 
-    text = bhd_query_text(q)
-    if by_id:
-        b = dict(base, tmdb_id=tmdb, categories='Movies' if media_type == 'movie' else 'TV')
-        ep = _BHD_ID_RE.search(q or '') if media_type == 'tv' else None
+    attempts: List[Tuple[str, Dict[str, Any]]] = []
+    seen = set()
+
+    def add(name: str, body: Dict[str, Any]) -> None:
+        key = json.dumps(body, sort_keys=True)
+        if key not in seen:
+            seen.add(key)
+            attempts.append((name, body))
+
+    raw_text = (q or '').strip()
+    clean = bhd_query_text(raw_text)
+    add('text', text_body(raw_text))                      # exactly what ee3bee4 sent
+    if clean and clean != raw_text:
+        add('text stripped', text_body(clean))
+    if media_type == 'movie' and clean:
+        bare = _TRAILING_YEAR_RE.sub('', clean)
+        if bare and bare != clean:
+            add('text no year', text_body(bare))
+    if has_id:
+        b = dict(base, tmdb_id=bhd_tmdb_param(tmdb, media_type))
+        ep = _BHD_ID_RE.search(raw_text) if media_type == 'tv' else None
         if ep:
             b['search'] = ep.group(0).upper()
-        if run(b) or not text:
+        add('id', b)
+
+    started = _monotonic()
+    errors: List[TrackerError] = []
+    answered = False
+    for i, (name, body) in enumerate(attempts):
+        if i and _monotonic() - started > BHD_CHAIN_BUDGET_S:
+            break
+        step: Dict[str, Any] = {'step': name, 'http': None, 'success': None, 'status_code': None, 'rows': 0}
+        acc['steps'].append(step)
+        if i:
+            acc['fallback'] = name
+        acc['by_id'] = name == 'id'
+        try:
+            step['rows'] = run(body, step)
+            answered = True
+        except TrackerError as e:
+            step['error'] = e.kind
+            errors.append(e)
             stats()
-            return out
-        # No rows by id: the uploads may lack a TMDB id. Same search, by text.
-        acc['fallback'] = 'text'
-        found = run(text_body(text, True))
-        bare = _TRAILING_YEAR_RE.sub('', text) if media_type == 'movie' else text
-        if not found and bare and bare != text:
-            acc['fallback'] = 'text, no year'
-            run(text_body(bare, True))
-        stats()
-        return out
-    run(text_body(text))
+            if e.kind not in _BHD_RETRYABLE:
+                raise
+            continue
+        if step['rows']:
+            break
     stats()
+    if not answered and errors:
+        raise errors[-1]
     return out
 
 
