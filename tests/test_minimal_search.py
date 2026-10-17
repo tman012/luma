@@ -57,7 +57,13 @@ def no_tmdb_network(monkeypatch):
     def fake_get(url, **kw):
         calls.append(url)
         return R()
-    monkeypatch.setattr('app.connectors.requests.get', fake_get)
+    # Replace only app.connectors' own requests reference. Patching
+    # requests.get itself is process-wide, so background threads left by
+    # earlier tests (TMDB popular prefetch) were recorded here too.
+    import types
+    import requests as _requests
+    fake = types.SimpleNamespace(get=fake_get, exceptions=_requests.exceptions)
+    monkeypatch.setattr('app.connectors.requests', fake)
     return calls
 
 
@@ -403,3 +409,15 @@ def test_tmdb_base_url_ignores_bad_values(monkeypatch, value):
     from app import connectors
     monkeypatch.setenv('LUMA_TMDB_BASE_URL', value)
     assert connectors.tmdb_base_url() == 'https://api.themoviedb.org/3'
+
+
+def test_no_tmdb_network_ignores_other_threads(minimal, no_tmdb_network, monkeypatch):
+    """The fixture records only app.connectors' own calls: a stray
+    requests.get from a background thread left by another test is not ours."""
+    import threading
+    import requests
+    monkeypatch.setattr(requests.Session, 'request', lambda *a, **k: None)
+    t = threading.Thread(target=lambda: requests.get('https://api.themoviedb.org/3/movie/popular'))
+    t.start()
+    t.join()
+    assert no_tmdb_network == []
