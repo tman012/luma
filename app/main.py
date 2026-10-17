@@ -8553,12 +8553,13 @@ def library_search():
                     'backdrop_url': f"{script_root}/api/img/plex?url={urllib.parse.quote(item['art'], safe='/')}" if item.get('art') else None,
                     'clearlogo_url': None,
                 }
-                # Movies carry their tmdb_id so the modal can start /api/movie
-                # alongside /api/plex/movie (which still validates the id).
+                # Results carry their tmdb_id so the modal can start /api/movie
+                # or /api/tv alongside /api/plex/* (which still validates it).
                 # An id already known to be the wrong type is left out.
                 tmdb_hint = item.get('tmdb_id')
-                if (item.get('media_type') == 'movie' and tmdb_hint
-                        and _cached_tmdb_type(tmdb_hint, 'movie') is not False):
+                hint_type = {'movie': 'movie', 'show': 'tv'}.get(item.get('media_type'))
+                if (hint_type and tmdb_hint
+                        and _cached_tmdb_type(tmdb_hint, hint_type) is not False):
                     formatted['tmdb_id'] = tmdb_hint
                 if item.get('added_at'):
                     formatted['added_date'] = datetime.fromtimestamp(item['added_at']).strftime('%Y-%m-%d')
@@ -8628,6 +8629,8 @@ def library_search():
                     s['library_name'] = section['title']
                     s['libraries'] = [section['title']]
                     s['poster_url'] = f"/api/img/plex?url={s['thumbPath']}" if s.get('thumbPath') else None
+                    if s.get('tmdb_id') and _cached_tmdb_type(s['tmdb_id'], 'tv') is False:
+                        s['tmdb_id'] = None
                     all_tv.append(s)
                 else:
                     for existing in all_tv:
