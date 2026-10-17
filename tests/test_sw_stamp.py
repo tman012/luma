@@ -19,6 +19,12 @@ def test_the_sw_version_is_above_the_last_shipped_one():
     assert sw_stamp.version_number() not in sw_stamp.TAKEN
 
 
+def test_v145_is_taken_by_the_build_ops_is_shipping():
+    """01abfd9 (v145) is going out: this branch's next frontend needs a newer one."""
+    assert 145 in sw_stamp.TAKEN and 144 in sw_stamp.TAKEN
+    assert sw_stamp.version_number() >= 146
+
+
 def _fake(tmp_path, monkeypatch, version, last):
     for rel in ('static', 'frontend/src'):
         (tmp_path / rel).mkdir(parents=True)
