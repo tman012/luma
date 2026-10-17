@@ -1,0 +1,146 @@
+/** Settings > TV: library paths, Scan, shows with "Wrong show?", unmatched
+ * folders with "Match", and Upgrades (Replace / Keep both). */
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TvLibrarySettings, UPGRADE_OPTIONS } from '@/components/library/TvLibrarySettings';
+import { fileCounts, lastScanText, showLabel } from '@/components/library/tvLibraryApi';
+
+const res = (body: unknown, status = 200) => ({ ok: status < 300, status, json: async () => body }) as Response;
+const PATH = { id: 't_0000aaaa', name: 'TV', path: '/media/TV', status: 'ok' };
+const SEV = { id: 1, tmdb_id: 95396, title: 'Severance', year: 2022, path_id: PATH.id, path_name: 'TV', folder: 'Severance (2022)',
+  poster_path: null, monitored: false, files: 6, linked: 3, mismatch: 2, unrecognized: 1 };
+const MYS = { id: 7, path_id: PATH.id, path_name: 'TV', folder: 'Mystery Show', guess_title: 'Mystery Show', guess_year: null,
+  candidates: [{ tmdb_id: 1001, title: 'Mystery Show', year: 2015 }, { tmdb_id: 1002, title: 'Mystery Show', year: 2019 }],
+  reason: 'not_exact' };
+let settings: Record<string, unknown>;
+let library: Record<string, unknown>;
+const calls: { url: string; method: string; body: unknown }[] = [];
+
+beforeEach(() => {
+  calls.length = 0;
+  settings = { paths: [PATH], upgrades: { mode: 'keep_both' }, rescan_interval_h: 6, naming: {}, automation: {} };
+  library = { shows: [SEV], unmatched: [MYS], scan: { running: false, error: null, last_scan: null } };
+  vi.stubGlobal('fetch', vi.fn(async (u: string, init?: RequestInit) => {
+    const url = String(u);
+    const method = init?.method || 'GET';
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    calls.push({ url, method, body });
+    if (url === '/api/settings/tv' && method === 'GET') return res(settings);
+    if (url === '/api/settings/tv' && method === 'PUT') { settings = { ...settings, ...body }; return res(settings); }
+    if (url === '/api/settings/tv/paths' && method === 'POST') {
+      if (body.path === '/etc') return res({ errors: { path: 'Not allowed' } }, 400);
+      settings = { ...settings, paths: [PATH, { id: 't_0000bbbb', ...body, status: 'ok' }] };
+      return res(settings);
+    }
+    if (url === '/api/settings/tv/library') return res(library);
+    if (url === '/api/settings/tv/scan') {
+      library = { ...library, scan: { running: false, error: null, last_scan: 1_760_000_000 } };
+      return res({ scan: { running: true, error: null, last_scan: null } }, 202);
+    }
+    if (url.startsWith('/api/settings/tv/search')) return res({ results: [{ tmdb_id: 2316, title: 'The Office', year: 2005 }, { tmdb_id: 95396, title: 'Severance', year: 2022 }] });
+    if (url === '/api/settings/tv/unmatched/7/match') {
+      library = { ...library, unmatched: [], shows: [SEV, { ...SEV, id: 2, tmdb_id: body.tmdb_id, title: 'Mystery Show', year: 2019, folder: 'Mystery Show' }] };
+      return res({ ok: true, series_id: 2, ...library });
+    }
+    if (url === '/api/settings/tv/shows/1/match') {
+      if (body.tmdb_id === 95396) return res({ error: 'That show is already matched to another folder' }, 409);
+      library = { ...library, shows: [{ ...SEV, tmdb_id: body.tmdb_id, title: 'The Office', year: 2005 }] };
+      return res({ ok: true, series_id: 1, ...library });
+    }
+    return res({ error: 'Not found' }, 404);
+  }));
+});
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+describe('Settings > TV', () => {
+  it('lists the paths, the shows with their files, the unmatched folders and Upgrades', async () => {
+    render(<TvLibrarySettings wide />);
+    await screen.findByText('Severance (2022)');
+    expect(within(screen.getByTestId('tv-paths')).getByText('/media/TV')).toBeTruthy();
+    expect(screen.getByText('3 linked · 2 mismatch · 1 unrecognized')).toBeTruthy();
+    expect(within(screen.getByTestId('tv-unmatched')).getByText('Mystery Show')).toBeTruthy();
+    expect(screen.getByTestId('tv-scan-status').textContent).toBe('Not scanned yet');
+    expect(screen.getByTestId('tv-upgrades-keep_both').getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByTestId('tv-upgrades-replace_verified').getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('adds a TV path and shows field errors', async () => {
+    render(<TvLibrarySettings wide={false} />);
+    fireEvent.click(await screen.findByTestId('tv-add-path'));
+    fireEvent.change(screen.getByTestId('lp-name'), { target: { value: 'Anime' } });
+    fireEvent.change(screen.getByTestId('lp-dir'), { target: { value: '/etc' } });
+    fireEvent.click(screen.getByTestId('lp-save'));
+    await screen.findByText('Not allowed');
+    fireEvent.change(screen.getByTestId('lp-dir'), { target: { value: '/media/Anime' } });
+    fireEvent.click(screen.getByTestId('lp-save'));
+    await screen.findByText('/media/Anime');
+    expect(calls.filter(c => c.url === '/api/settings/tv/paths').map(c => c.body)).toEqual([
+      { name: 'Anime', path: '/etc' }, { name: 'Anime', path: '/media/Anime' }]);
+  });
+
+  it('Scan starts a scan and shows the last scan', async () => {
+    render(<TvLibrarySettings wide />);
+    fireEvent.click(await screen.findByTestId('tv-scan'));
+    await waitFor(() => expect(screen.getByTestId('tv-scan-status').textContent).toMatch(/^Last scan /));
+    expect(calls.some(c => c.url === '/api/settings/tv/scan' && c.method === 'POST')).toBe(true);
+  });
+
+  it('a scan error shows instead of the time', async () => {
+    library = { ...library, scan: { running: false, error: 'Add a TMDB key in Connectors', last_scan: null } };
+    render(<TvLibrarySettings wide />);
+    await waitFor(() => expect(screen.getByTestId('tv-scan-status').textContent).toBe('Add a TMDB key in Connectors'));
+  });
+
+  it('Match offers the candidates and matches the folder', async () => {
+    render(<TvLibrarySettings wide />);
+    fireEvent.click(await screen.findByTestId('tv-match'));
+    const picker = screen.getByTestId('tv-picker');
+    expect(within(picker).getAllByTestId('tv-candidate').map(b => b.textContent)).toEqual(['Mystery Show (2015)', 'Mystery Show (2019)']);
+    expect(calls.some(c => c.url.startsWith('/api/settings/tv/search'))).toBe(false);   // candidates first
+    await act(async () => fireEvent.click(within(picker).getByText('Mystery Show (2019)')));
+    await waitFor(() => expect(screen.queryByTestId('tv-unmatched')).toBeNull());
+    expect(calls.find(c => c.url === '/api/settings/tv/unmatched/7/match')?.body).toEqual({ tmdb_id: 1002 });
+    expect(screen.getAllByTestId('tv-show')).toHaveLength(2);
+  });
+
+  it('Wrong show? searches and rematches, without offering the current show', async () => {
+    render(<TvLibrarySettings wide />);
+    fireEvent.click(await screen.findByTestId('tv-wrong-show'));
+    await waitFor(() => expect(screen.getAllByTestId('tv-candidate').map(b => b.textContent)).toEqual(['The Office (2005)']));
+    expect(calls.find(c => c.url.startsWith('/api/settings/tv/search'))?.url).toBe('/api/settings/tv/search?q=Severance');
+    fireEvent.change(screen.getByTestId('tv-search'), { target: { value: 'office' } });
+    fireEvent.click(screen.getByTestId('tv-search-go'));
+    await waitFor(() => expect(calls.some(c => c.url === '/api/settings/tv/search?q=office')).toBe(true));
+    await act(async () => fireEvent.click(screen.getByText('The Office (2005)')));
+    await screen.findByText('The Office (2005)', { selector: 'span' });
+    expect(calls.find(c => c.url === '/api/settings/tv/shows/1/match')?.body).toEqual({ tmdb_id: 2316 });
+  });
+
+  it('Upgrades saves Replace and Keep both', async () => {
+    render(<TvLibrarySettings wide />);
+    fireEvent.click(await screen.findByTestId('tv-upgrades-replace_verified'));
+    await waitFor(() => expect(screen.getByTestId('tv-upgrades-replace_verified').getAttribute('aria-checked')).toBe('true'));
+    expect(calls.find(c => c.url === '/api/settings/tv' && c.method === 'PUT')?.body).toEqual({ upgrades: { mode: 'replace_verified' } });
+    expect(UPGRADE_OPTIONS.map(o => o.label)).toEqual(['Replace', 'Keep both']);
+  });
+
+  it('no helper text, sentence case', () => {
+    const src = readFileSync(resolve(__dirname, '../src/components/library/TvLibrarySettings.tsx'), 'utf8');
+    expect(src).not.toMatch(/hint=|note=|helper/i);
+    for (const label of ['Library paths', 'Unmatched', 'Shows', 'Upgrades', 'Wrong show?', 'Match', 'Scan', 'Add path', 'Keep both'])
+      expect(src).toContain(label);
+  });
+});
+
+describe('labels', () => {
+  it('formats shows, counts and the last scan', () => {
+    expect(showLabel({ title: 'Dark', year: null })).toBe('Dark');
+    expect(fileCounts({ ...SEV, files: 0 })).toBe('No files');
+    expect(fileCounts({ ...SEV, mismatch: 0, unrecognized: 0 })).toBe('3 linked');
+    const now = new Date(2026, 9, 17, 17, 0).getTime();
+    expect(lastScanText(new Date(2026, 9, 17, 15, 5).getTime() / 1000, now)).toBe('Last scan 3:05 PM');
+    expect(lastScanText(new Date(2026, 9, 16, 9, 0).getTime() / 1000, now)).toBe('Last scan Oct 16');
+  });
+});

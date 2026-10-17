@@ -27,6 +27,7 @@ import { ConnectorsSettings } from '@/components/home/ConnectorsSettings';
 import { TrackersSettings, useTrackersAccess } from '@/components/trackers/TrackersSettings';
 import { LibraryPathsSettings } from '@/components/library/LibraryPathsSettings';
 import { SectionTrackersList } from '@/components/settings/SectionTrackersList';
+import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
 import { isMinimal } from '@/minimal';
 import { SAVE_FAILED } from '@/utils/messages';
 
@@ -77,7 +78,12 @@ export function SettingsPage() {
         : slug === 'library-paths'
           ? (owner ? <LibraryPathsSettings wide={wide} /> : null)
           : slug === 'tv'
-            ? (owner ? <div style={{ padding: wide ? 0 : '8px 20px 0' }}><SectionTrackersList section="tv" label="Trackers" wide={wide} /></div> : null)
+            ? (owner ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+                  <TvLibrarySettings wide={wide} />
+                  <div style={{ padding: wide ? 0 : '0 20px' }}><SectionTrackersList section="tv" label="Trackers" wide={wide} /></div>
+                </div>
+              ) : null)
             : <HomeScreenSection admin={admin} wide={wide} />;
   // Trackers draws its own title row (desktop) and header (phone: Plus, pushed pages).
   const ownChrome = known?.slug === 'trackers';

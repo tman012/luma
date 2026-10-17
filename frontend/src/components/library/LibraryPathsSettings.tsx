@@ -17,7 +17,7 @@ import {
 
 const ROW_H = 64;
 /** Desktop (>=1024px) or phone, for type sizes and chip heights. */
-const WideCtx = createContext(true);
+export const WideCtx = createContext(true);
 type Editing = { kind: 'path'; id: string | null } | { kind: 'rule'; index: number | null } | { kind: 'map' } | null;
 
 export function LibraryPathsSettings({ wide }: { wide: boolean }) {
@@ -554,7 +554,7 @@ function MapForm({ index, first, onSave, onCancel }: {
 
 // ---------------------------------------------------------------- shared bits
 
-function Field({ id, label, value, error, onChange, autoFocus, placeholder, maxLength, mono }: {
+export function Field({ id, label, value, error, onChange, autoFocus, placeholder, maxLength, mono }: {
   id: string; label: string; value: string; error?: string; onChange: (v: string) => void;
   autoFocus?: boolean; placeholder?: string; maxLength?: number; mono?: boolean;
 }) {
@@ -571,7 +571,7 @@ function Field({ id, label, value, error, onChange, autoFocus, placeholder, maxL
   );
 }
 
-function FormButtons({ busy, canSave, onCancel, onDelete }: {
+export function FormButtons({ busy, canSave, onCancel, onDelete }: {
   busy: boolean; canSave: boolean; onCancel: () => void; onDelete?: () => void;
 }) {
   return (
@@ -587,7 +587,7 @@ function FormButtons({ busy, canSave, onCancel, onDelete }: {
   );
 }
 
-function AddRow({ label, first, onClick, testId }: { label: string; first: boolean; onClick: () => void; testId: string }) {
+export function AddRow({ label, first, onClick, testId }: { label: string; first: boolean; onClick: () => void; testId: string }) {
   return (
     <button type="button" className="lp-row" data-testid={testId} onClick={onClick}
       style={{ ...rowBtn, height: 52, color: T.accent, ...(first ? null : topBorder) }}>
@@ -603,24 +603,24 @@ export const libraryPathsCss = `
 `;
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-const pad = (wide: boolean): React.CSSProperties => ({ padding: wide ? 0 : '8px 20px 0' });
-const muted: React.CSSProperties = { color: T.text3, fontSize: 17, fontFamily: FONT };
-const sectionLabel: React.CSSProperties = {
+export const pad = (wide: boolean): React.CSSProperties => ({ padding: wide ? 0 : '8px 20px 0' });
+export const muted: React.CSSProperties = { color: T.text3, fontSize: 17, fontFamily: FONT };
+export const sectionLabel: React.CSSProperties = {
   margin: '0 4px 8px', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.5)', fontFamily: FONT,
 };
-const card: React.CSSProperties = {
+export const card: React.CSSProperties = {
   borderRadius: 16, background: T.glass, border: `1px solid ${T.glass8}`, overflow: 'hidden',
 };
-const topBorder: React.CSSProperties = { borderTop: '1px solid rgba(255,255,255,0.06)' };
-const rowBtn: React.CSSProperties = {
+export const topBorder: React.CSSProperties = { borderTop: '1px solid rgba(255,255,255,0.06)' };
+export const rowBtn: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 12, width: '100%', minHeight: ROW_H, padding: '10px 16px', border: 'none',
   background: 'none', cursor: 'pointer', fontFamily: FONT, boxSizing: 'border-box', color: T.text, textAlign: 'left',
 };
 const rowBtnBare: React.CSSProperties = { ...rowBtn, flex: 1, minWidth: 0, width: 'auto', padding: '10px 4px', borderTop: 'none' };
-const titleText = (wide: boolean): React.CSSProperties => ({
+export const titleText = (wide: boolean): React.CSSProperties => ({
   ...primaryText, fontSize: wide ? 15 : 16, fontWeight: 500,
 });
-const subText = (wide: boolean): React.CSSProperties => ({
+export const subText = (wide: boolean): React.CSSProperties => ({
   ...secondaryText, fontSize: wide ? 13 : 14, color: wide ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.55)',
 });
 const selectBox: React.CSSProperties = {
@@ -647,7 +647,7 @@ const handle: React.CSSProperties = {
   width: 44, height: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none',
   border: 'none', background: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'grab', padding: 0, touchAction: 'none', borderRadius: 10,
 };
-const formBox: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 16, padding: 16, background: 'rgba(255,255,255,0.03)' };
+export const formBox: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 16, padding: 16, background: 'rgba(255,255,255,0.03)' };
 const labelStyle: React.CSSProperties = {
   display: 'block', margin: '0 0 6px', fontSize: 13, fontWeight: 500, color: T.text2, fontFamily: FONT,
 };
@@ -658,23 +658,23 @@ const inputStyle: React.CSSProperties = {
 };
 const invalid: React.CSSProperties = { border: `1px solid ${T.danger}` };
 const fieldError: React.CSSProperties = { display: 'block', marginTop: 6, fontSize: 13, color: T.dangerText, fontFamily: FONT };
-const segment: React.CSSProperties = {
+export const segment: React.CSSProperties = {
   display: 'flex', padding: 3, borderRadius: 12, background: T.glass, border: `1px solid ${T.glass8}`, maxWidth: 320,
 };
-const segBtn: React.CSSProperties = {
+export const segBtn: React.CSSProperties = {
   flex: 1, height: 38, border: 'none', borderRadius: 9, background: 'none', color: T.text2,
   fontSize: 15, fontWeight: 500, fontFamily: FONT, cursor: 'pointer',
 };
-const segOn: React.CSSProperties = { background: T.accent, color: T.white, fontWeight: 600 };
+export const segOn: React.CSSProperties = { background: T.accent, color: T.white, fontWeight: 600 };
 const iconBtn: React.CSSProperties = {
   width: 44, height: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none',
   border: 'none', background: 'none', color: T.text3, cursor: 'pointer', borderRadius: 10,
 };
-const primary: React.CSSProperties = {
+export const primary: React.CSSProperties = {
   minHeight: 44, padding: '0 22px', borderRadius: 10, border: 'none', background: T.accent, color: T.white,
   fontSize: 15, fontWeight: 600, fontFamily: FONT,
 };
-const ghostBtn: React.CSSProperties = {
+export const ghostBtn: React.CSSProperties = {
   minHeight: 44, padding: '0 18px', borderRadius: 10, border: `1px solid ${T.glass12}`,
   background: T.glass, color: T.text, fontSize: 15, fontFamily: FONT, cursor: 'pointer',
 };
