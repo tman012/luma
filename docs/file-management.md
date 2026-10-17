@@ -39,6 +39,12 @@ store (`file_management.json` in the data dir, mode 0600). The seeded
   (also after a 401), and /login
   shows the form to an implicit LAN owner sent there for that action.
   Everything else keeps today's LAN behavior.
+- The cleanup and Downloads Guard run routes take an optional JSON object;
+  any other non-empty body (a list, string, number, `null`, or text that isn't
+  JSON) gets 400 `{"error": "Invalid request"}` (`main._json_object_body`). The
+  run route checks the body first; cleanup checks the session first.
+- Tracker routes (`/api/trackers*`) answer the service key with 401
+  `"sign_in": true` too, like the routes above.
 - `LUMA_TEST_QBIT_TAG` is refused (falls back to `luma-test`) when it equals an
   app's category: Radarr/Sonarr/..., `LUMA_QBIT_APP_CATEGORY`, or the
   `qbittorrent.app_category` setting.

@@ -317,6 +317,18 @@ def _signed_in_owner_only(fn):
     return wrapper
 
 
+def _json_object_body():
+    """The request's JSON body as a dict: ({}, None) with no body, (body, None)
+    for a JSON object, and (None, 400 {"error": "Invalid request"}) for any
+    other body (a list, string, number, null, or text that isn't JSON)."""
+    if not request.get_data(cache=True).strip():
+        return {}, None
+    body = request.get_json(silent=True, force=True)
+    if isinstance(body, dict):
+        return body, None
+    return None, (jsonify({'error': 'Invalid request'}), 400)
+
+
 def get_plex_for_request():
     """Resolve the correct PlexService for the current request.
 
@@ -4639,7 +4651,9 @@ def cleanup_downloads_storage():
     """
     try:
         from app.storage_cleanup import run_cleanup, DEFAULT_TARGET_BYTES
-        body = request.get_json(silent=True) or {}
+        body, bad = _json_object_body()
+        if bad is not None:
+            return bad
         target = body.get('target_bytes') or DEFAULT_TARGET_BYTES
         try:
             target = int(target)
@@ -4699,10 +4713,14 @@ def downloads_guard_run():
 
     Defaults to dry_run — pass {"dry_run": false} to actually delete. The daily
     ceiling and every guard in storage_cleanup still apply either way. A real
-    run needs the signed-in owner (start_flow.require_signed_in_owner).
+    run needs the signed-in owner (start_flow.require_signed_in_owner). A body
+    that isn't a JSON object gets 400 {"error": "Invalid request"}.
     """
     from app import downloads_guard
-    dry = bool((request.get_json(silent=True) or {}).get('dry_run', True))
+    body, bad = _json_object_body()
+    if bad is not None:
+        return bad
+    dry = bool(body.get('dry_run', True))
     if not dry:
         # A real run deletes files (PM ruling): only the owner signed in with a
         # session. Implicit LAN owner, service key and no session get 401 with

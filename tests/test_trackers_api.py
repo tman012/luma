@@ -175,7 +175,9 @@ def test_service_api_key_is_not_the_owner(test_app, store):
     c = test_app.test_client()
     c.environ_base.update(REMOTE)
     r = c.get('/api/trackers', headers={'X-API-Key': app.main._SERVICE_API_KEY})
-    assert r.status_code == 403
+    # Still not the owner; since the Reviewer follow-up it gets the same 401
+    # sign-in answer as the guard (start_flow.require_signed_in_owner).
+    assert r.status_code == 401 and r.get_json()['sign_in'] is True
 
 
 # ------------------------------------------------------------------ CRUD + masking

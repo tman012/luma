@@ -268,12 +268,58 @@ def test_guard_dry_run_remote_no_session_is_unchanged(guard):
     assert guard.runs == []
 
 
+@pytest.mark.parametrize('raw', ['[]', '[{"dry_run": false}]', '"x"', '0', 'false', '7', '1.5', 'true', 'null',
+                                 'not json'])
+def test_guard_run_non_object_body_is_400(guard, raw):
+    owner = _client(guard)
+    r = owner.post(GUARD_RUN, data=raw, content_type='application/json', environ_base=LAN, headers=HDR)
+    assert r.status_code == 400 and r.get_json() == {'error': 'Invalid request'}
+    assert guard.runs == []
+
+
+@pytest.mark.parametrize('raw', ['[]', '"x"', '0', 'null', 'not json'])
+def test_cleanup_non_object_body_is_400_after_the_owner_check(full, raw):
+    owner = _client(full)
+    r = owner.post(CLEANUP, data=raw, content_type='application/json', environ_base=LAN, headers=HDR)
+    assert r.status_code == 400 and r.get_json() == {'error': 'Invalid request'}
+    r = full.test_client().post(CLEANUP, data=raw, content_type='application/json', environ_base=LAN, headers=HDR)
+    assert r.status_code == 401                               # the implicit LAN owner is refused first
+    assert full.calls == []
+
+
+def test_cleanup_empty_body_uses_the_default(full):
+    owner = _client(full)
+    r = owner.post(CLEANUP, data='', environ_base=LAN, headers=HDR)
+    assert r.status_code == 200 and len(full.calls) == 1
+
+
+@pytest.mark.parametrize('raw', ['', '  '])
+def test_guard_run_empty_body_is_a_dry_run(guard, raw):
+    owner = _client(guard)
+    r = owner.post(GUARD_RUN, data=raw, content_type='application/json', environ_base=LAN, headers=HDR)
+    assert r.status_code == 200 and r.get_json() == {'ok': True, 'dry_run': True}
+
+
 # ------------------------------------------------- tracker routes' 401
 
 def test_tracker_routes_401_says_sign_in(full):
     _client(full)
     r = full.test_client().get('/api/trackers', environ_base=LAN, headers=HDR)
     assert r.status_code == 401 and r.get_json()['sign_in'] is True
+
+
+@pytest.mark.parametrize('env', [LAN, REMOTE])
+def test_tracker_routes_service_key_gets_401_sign_in(full, env):
+    _client(full)
+    r = full.test_client().get('/api/trackers', environ_base=env, headers=dict(HDR, **{'X-API-Key': KEY}))
+    assert r.status_code == 401 and r.get_json() == {'error': 'Authentication required', 'sign_in': True}
+    assert r.headers['Cache-Control'] == 'no-store'
+
+
+def test_tracker_routes_other_admin_still_403(full):
+    _client(full)
+    r = _client(full, name='admin2').get('/api/trackers', environ_base=LAN, headers=HDR)
+    assert r.status_code == 403
 
 
 # ------------------------------------------------- full boot smoke
