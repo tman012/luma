@@ -175,3 +175,22 @@ def test_partial_failure_is_not_route_cached(test_app, monkeypatch):
     j = test_app.test_client().get('/api/sources/all-results?title=Dune&media_type=movie').get_json()
     assert len(j['releases']) == 1 and j['trackers'] == [{'name': 'BHD', 'status': 'unavailable'}]
     assert not app.main._all_results_cache
+
+
+def test_retry_skips_the_answer_cache_and_shows_the_new_error(engine):
+    """Tester bhd gate: after a good answer, BHD fails; Retry must reach BHD and
+    show its status (not the cached rows), then a later Retry brings rows back."""
+    eng, mock = engine
+    mock.resps = [R(WEB_ONLY)]
+    assert len(LumaTrackersClient(eng).search_all('Dune', 'movie', None)) == 4
+    n = len(mock.calls)
+    assert len(LumaTrackersClient(eng).search_all('Dune', 'movie', None)) == 4 and len(mock.calls) == n  # cached
+    mock.resps = [R({'status_code': 0, 'success': False, 'status_message': 'Invalid API key'})]
+    st = []
+    out = LumaTrackersClient(eng).search_all('Dune', 'movie', None, refresh=True, statuses=st)
+    assert len(mock.calls) > n and [x['status'] for x in st] == ['auth']
+    assert out == []                     # the failure is shown, not the cached rows
+    mock.resps = [R(WEB_ONLY)]
+    st = []
+    out = LumaTrackersClient(eng).search_all('Dune', 'movie', None, refresh=True, statuses=st)
+    assert len(out) == 4 and not st

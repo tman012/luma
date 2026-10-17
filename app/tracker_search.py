@@ -313,7 +313,8 @@ class TrackerSearch:
         Negative cache: a signed-in answer with zero raw rows is remembered
         for NEG_TTL per tracker and exact query. Never after an error (auth,
         parse, timeout, 429) or when rows were parsed and then dropped;
-        refresh=True (an explicit user retry) bypasses and clears it."""
+        refresh=True (an explicit user retry) bypasses and clears it, and also
+        skips the answer cache, so Retry always asks the tracker again."""
         gk = guard_key(cfg)
         if not tt.searches_by_id(cfg.get('type')):
             tmdb_id, media_type = '', ''
@@ -339,14 +340,14 @@ class TrackerSearch:
                 if ts is not None:
                     neg.pop(nkey, None)
             hit = self._cache.get(ckey)
-        if hit and now - hit[0] < ttl:
+        if hit and not refresh and now - hit[0] < ttl:
             logger.info('Tracker %s (id %s) search: cached answer, %d results', cfg['name'], cfg['id'], len(hit[1]))
             return hit[1]
         strict = tt.is_rate_strict(cfg['type'])
         with self.guard.tracker_lock(gk):
             with self._cache_lock:
                 fresh = self._cache.get(ckey)
-            if fresh and time.time() - fresh[0] < ttl:
+            if fresh and not refresh and time.time() - fresh[0] < ttl:
                 return fresh[1]
             reason = self.guard.take(gk, interactive, strict)
             if reason:
