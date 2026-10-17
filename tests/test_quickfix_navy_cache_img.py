@@ -48,7 +48,7 @@ def test_sw_and_index_are_never_cached(test_app):
         r = c.get(path, environ_base=LAN)
         assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-cache', path
     sw = (ROOT / 'static/sw.js').read_text()
-    assert "CACHE_VERSION = 'media-kiosk-v130'" in sw
+    assert "CACHE_VERSION = 'media-kiosk-v131'" in sw
     assert "fetch(event.request, { cache: 'no-store' })" in sw
     assert 'self.skipWaiting()' in sw and 'self.clients.claim()' in sw
 
@@ -130,11 +130,12 @@ def test_proxy_refuses_non_images(proxy, ctype):
 
 @pytest.mark.parametrize('url', ['/library/metadata/5/art/1700000000', '/library/metadata/5/clearLogo/1700000000',
                                  '/library/metadata/5/thumb/1700000000'])
-def test_proxy_never_stores_versioned_backdrops_and_logos(proxy, url):
-    # Prod hotfix #12: replies can depend on who is signed in, so nothing is stored.
+def test_proxy_caches_backdrops_and_logos_privately(proxy, url):
+    # Replies can depend on who is signed in: this browser only, a day, keyed by the cookie.
     c, _, _ = proxy
     r = c.get('/api/img/plex', query_string={'url': url, 'w': 1280, 'h': 720}, environ_base=LAN)
-    assert r.status_code == 200 and r.headers['Cache-Control'] == 'private, no-store'
+    assert r.status_code == 200 and r.headers['Cache-Control'] == 'private, max-age=86400'
+    assert r.headers['Vary'] == 'Cookie'
 
 
 def test_proxy_errors_are_never_cached(proxy, monkeypatch):
@@ -178,7 +179,7 @@ PEOPLE = 'https://metadata-static.plex.tv/b/people/b604d520903d1d1f445458008ab9d
 def test_people_photo_is_a_small_transcode_via_the_users_plex(proxy):
     c, calls, _ = proxy
     r = c.get('/api/img/plex', query_string={'url': PEOPLE, 'w': 120}, environ_base=LAN)
-    assert r.status_code == 200 and r.headers['Cache-Control'] == 'private, no-store'
+    assert r.status_code == 200 and r.headers['Cache-Control'] == 'private, max-age=86400'
     assert len(calls) == 1
     assert calls[0].startswith('http://plex.test/photo/:/transcode?') and 'width=120' in calls[0]
     assert 'metadata-static.plex.tv' in calls[0]  # quoted inner url, fetched by Plex, not by us

@@ -13,6 +13,8 @@ import {
   ReactNode,
 } from 'react';
 import { apiFetch } from '../apiClient';
+import { _resetModalPrefetch } from '@/services/modalPrefetch';
+import { _resetModalColors } from '@/services/modalColors';
 
 export interface UserInfo {
   id: number;
@@ -194,9 +196,13 @@ export function useAuth() {
  *  to another account clears what the previous one left behind. */
 export const LAST_USER_KEY = 'luma:last-user';
 
-/** Sign-out or account switch: the service worker and the page drop every
- *  Cache Storage entry (the browser's own HTTP cache is left alone). */
+/** Sign-out or account switch: forget what was kept for the previous
+ *  account, in memory (prefetched popup details, images, colors) and in every
+ *  Cache Storage entry. The browser's HTTP cache is cleared by the server's
+ *  Clear-Site-Data on sign-out and is keyed by the session cookie otherwise. */
 export function clearAllCaches(): void {
+  _resetModalPrefetch();
+  _resetModalColors();
   try {
     navigator.serviceWorker?.controller?.postMessage('CLEAR_ALL_CACHES');
     if (typeof caches === 'undefined') return;

@@ -1534,7 +1534,7 @@ def _auth_guard():
         if not getattr(g, 'current_user', None) or getattr(g, 'implicit_user', False):
             # For API calls, return 401
             if request.path.startswith('/api/'):
-                return jsonify({"error": "Authentication required"}), 401
+                return jsonify({"error": "Authentication required"}), 401, {'Cache-Control': 'private, no-store'}
             # For HTML pages, redirect to login
             url_base = app.config.get('URL_BASE', '')
             from urllib.parse import quote
@@ -12407,6 +12407,11 @@ _PLEX_IMG_PATH = re.compile(
     r'|/library/sections/[0-9]+/composite/[0-9]+',
     re.ASCII)
 _PLEX_NO_STORE = {'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'}
+# A served image may be kept by this browser for a day (never by a shared
+# cache), so the kiosk and the detail popup don't re-download every poster,
+# backdrop and logo. Vary: Cookie so a browser never hands one account's copy
+# to another. Errors and refusals stay no-store.
+_PLEX_IMG_CACHE = {'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Vary': 'Cookie'}
 _PLEX_IMG_TYPES = frozenset({'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'})
 _PLEX_IMG_MAX_BYTES = 20 * 1024 * 1024
 
@@ -12536,7 +12541,7 @@ def img_plex_proxy():
                 body += chunk
                 if len(body) > _PLEX_IMG_MAX_BYTES:
                     return too_big
-            return Response(bytes(body), content_type=ctype, headers=_PLEX_NO_STORE)
+            return Response(bytes(body), content_type=ctype, headers=_PLEX_IMG_CACHE)
         finally:
             resp.close()
     except requests.RequestException as e:
