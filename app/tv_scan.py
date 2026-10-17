@@ -364,6 +364,78 @@ def status() -> Dict[str, Any]:
             'last_scan': last_scan(), 'summary': _state['summary']}
 
 
+# --------------------------------------------------------------------------- fix-match
+
+NOT_FOUND = 'Not found'
+SHOW_NOT_FOUND = 'Show not found on TMDB'
+TAKEN = 'That show is already matched to another folder'
+BUSY = 'A scan is already running'
+LOCK_WAIT_S = 30
+
+
+def _root_for(path_id: str) -> Optional[str]:
+    from app import file_management as fm, tv_settings
+    for rec in tv_settings.load()['paths']:
+        if rec['id'] == path_id:
+            root = os.path.realpath(rec['path'])
+            return root if not fm.blocked(root) and os.path.isdir(root) else None
+    return None
+
+
+def _apply(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str, event: str,
+           series_id: Optional[int]) -> Dict[str, Any]:
+    with tv_store.connect() as conn:
+        other = conn.execute('SELECT id FROM series WHERE tmdb_id = ?', (tmdb_id,)).fetchone()
+    if other and other['id'] != series_id:
+        return {'ok': False, 'error': TAKEN, 'status': 409}
+    if not tv_tmdb.show(tmdb_id):
+        return {'ok': False, 'error': SHOW_NOT_FOUND, 'status': 404}
+    sid = store_show(path_id, folder, tmdb_id, now, via=via, event=event, series_id=series_id)
+    if sid is None:
+        return {'ok': False, 'error': TAKEN, 'status': 409}
+    root = _root_for(path_id)
+    if root is not None:
+        scan_files(sid, path_id, folder, root, now)
+    return {'ok': True, 'series_id': sid}
+
+
+def _locked(fn):
+    def wrapped(*a, **k):
+        if not _scan_lock.acquire(timeout=LOCK_WAIT_S):
+            return {'ok': False, 'error': BUSY, 'status': 409}
+        try:
+            return fn(*a, **k)
+        finally:
+            _scan_lock.release()
+    wrapped.__name__ = fn.__name__
+    wrapped.__doc__ = fn.__doc__
+    return wrapped
+
+
+@_locked
+def rematch(series_id: int, tmdb_id: int, now: Optional[float] = None) -> Dict[str, Any]:
+    """"Wrong show?": point a matched folder at another show (history: rematched)."""
+    now = time.time() if now is None else now
+    with tv_store.connect() as conn:
+        row = conn.execute('SELECT path_id, folder, tmdb_id FROM series WHERE id = ? AND path_id IS NOT NULL',
+                           (series_id,)).fetchone()
+    if not row:
+        return {'ok': False, 'error': NOT_FOUND, 'status': 404}
+    return _apply(row['path_id'], row['folder'], tmdb_id, now, via='manual', event='rematched',
+                  series_id=series_id)
+
+
+@_locked
+def match_unmatched(unmatched_id: int, tmdb_id: int, now: Optional[float] = None) -> Dict[str, Any]:
+    """"Match": give an unmatched folder its show (history: matched, via manual)."""
+    now = time.time() if now is None else now
+    with tv_store.connect() as conn:
+        row = conn.execute('SELECT path_id, folder FROM unmatched WHERE id = ?', (unmatched_id,)).fetchone()
+    if not row:
+        return {'ok': False, 'error': NOT_FOUND, 'status': 404}
+    return _apply(row['path_id'], row['folder'], tmdb_id, now, via='manual', event='matched', series_id=None)
+
+
 # --------------------------------------------------------------------------- view
 
 def library_view() -> Dict[str, Any]:

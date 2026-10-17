@@ -101,6 +101,18 @@ def test_no_write_calls_reach_the_library(lib, no_writes):
     assert no_writes == []
 
 
+def test_fix_match_touches_no_files(lib, no_writes):
+    tv_scan.scan_all(now=1000.0)
+    before = snapshot(lib)
+    from app import tv_store
+    with tv_store.connect() as conn:
+        sid = conn.execute("SELECT id FROM series WHERE folder = 'Severance (2022)'").fetchone()['id']
+        un = conn.execute("SELECT id FROM unmatched WHERE folder = 'Mystery Show'").fetchone()['id']
+    assert tv_scan.rematch(sid, 5000, now=2000.0)['ok']
+    assert tv_scan.match_unmatched(un, 1001, now=2000.0)['ok']
+    assert snapshot(lib) == before and no_writes == []
+
+
 @pytest.mark.skipif(hasattr(os, 'geteuid') and os.geteuid() == 0, reason='root ignores file modes')
 def test_scan_works_over_a_read_only_tree(lib, tmp_path):
     for dirpath, dirnames, filenames in os.walk(lib):
