@@ -38,7 +38,14 @@ def minimal(test_app, monkeypatch, tmp_path):
     monkeypatch.setenv('LUMA_MINIMAL', '1')
     (tmp_path / 'index.html').write_text('<!doctype html><head></head><div id="root"></div>')
     monkeypatch.setitem(test_app.config, 'SPA_DIR', str(tmp_path))
-    monkeypatch.setattr(app.main, 'fast_search_index', _index())
+    idx = _index()
+    # A TMDB key save starts idx._refresh_tmdb_titles in a daemon thread
+    # (main._on_tmdb_key). It pages through TMDB popular lists through
+    # requests.get long after this test ends, and later tests that patch
+    # requests.get see its calls. Record it instead of starting it.
+    idx.tmdb_refreshes = []
+    monkeypatch.setattr(idx, '_refresh_tmdb_titles', lambda: idx.tmdb_refreshes.append(1))
+    monkeypatch.setattr(app.main, 'fast_search_index', idx)
     saved = app.main.settings.get_section('apis')
     yield test_app
     app.main.settings.update({'apis': saved})
@@ -421,3 +428,17 @@ def test_no_tmdb_network_ignores_other_threads(minimal, no_tmdb_network, monkeyp
     t.start()
     t.join()
     assert no_tmdb_network == []
+
+
+def test_a_tmdb_key_save_starts_no_real_title_refresh(minimal, no_tmdb_network):
+    """The key save still asks for the title refresh; the minimal fixture
+    keeps it from running in a thread that outlives the test."""
+    c = _client(minimal)
+    hdr = {'Origin': 'http://localhost', 'Host': 'localhost'}
+    c.put('/api/settings/connectors/tmdb', json={'api_key': KEY}, environ_base=REMOTE, headers=hdr)
+    import time
+    for _ in range(50):
+        if app.main.fast_search_index.tmdb_refreshes:
+            break
+        time.sleep(0.01)
+    assert app.main.fast_search_index.tmdb_refreshes == [1]
