@@ -46,8 +46,8 @@ PROTECTED_NAMES = {'incomplete', 'complete', 'temp', '.recycle'}
 # Partial-download suffixes written by qBittorrent / other clients.
 PARTIAL_SUFFIXES = ('.!qb', '.part', '.parts', '.tmp', '.downloading')
 
-QBIT_UNREADABLE = ('qBittorrent unreachable — cannot tell which downloads belong to '
-                   'the test install, so nothing was deleted this cycle')
+# Shown on prod and test builds alike, so it names neither install.
+QBIT_UNREADABLE = "Can't reach qBittorrent, so nothing was deleted"
 
 # Hard ceiling on a single run so a bad target can't empty the folder.
 MAX_TARGET_BYTES = 2 * 1024 ** 4  # 2 TiB

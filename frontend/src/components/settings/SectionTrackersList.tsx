@@ -9,7 +9,7 @@ import { GripIcon } from '@/components/nav/AppNav';
 import { move } from '@/components/home/homeApi';
 import { Switch, trackersCss } from '@/components/trackers/trackersUi';
 import {
-  blockedReason, loadSectionTrackers, saveSectionTrackers, type Section, type SectionTracker,
+  blockedReason, loadSectionTrackers, saveSectionTrackers, shownOn, type Section, type SectionTracker,
 } from './sectionTrackersApi';
 
 const ROW_H = 64;
@@ -75,9 +75,10 @@ export function SectionTrackersList({ section, label, wide = false }: { section:
             const lifted = drag?.id === t.id;
             const y = lifted ? drag!.dy : shiftFor(i, list.length);
             const why = blockedReason(t, section);
-            const dim = !t.enabled || !!why;
+            const on = shownOn(t);
+            const dim = !on;
             const sub = [t.type_name !== t.name ? t.type_name : '', why,
-              t.enabled && !why && t.budget ? `${t.budget.used} of ${t.budget.cap} today` : '']
+              on && t.budget ? `${t.budget.used} of ${t.budget.cap} today` : '']
               .filter(Boolean).join(' · ');
             return (
               <li key={t.id} data-testid="section-tracker-row" data-lifted={lifted ? 'true' : undefined}
@@ -113,10 +114,15 @@ export function SectionTrackersList({ section, label, wide = false }: { section:
                 </button>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
                   <span data-testid="section-tracker-name" style={{ ...name, ...(wide ? nameWide : null), color: dim ? T.text3 : T.text }}>{t.name}</span>
-                  {sub && <span style={meta} data-testid="section-tracker-meta">{sub}</span>}
+                  {sub && <span id={`st-${section}-${t.id}-meta`} style={meta} data-testid="section-tracker-meta">{sub}</span>}
                 </div>
-                <Switch on={t.enabled} label={t.name} disabled={!!why}
-                  onChange={on => { if (!why) commit(list.map(x => (x.id === t.id ? { ...x, enabled: on } : x))); }} />
+                {/* Unusable: shown off and locked; its saved switch is kept and sent back as is. */}
+                <Switch on={on} label={t.name} lockOn={!!why}
+                  describedBy={why ? `st-${section}-${t.id}-meta` : undefined}
+                  onChange={next => {
+                    if (why && next) return;
+                    commit(list.map(x => (x.id === t.id ? { ...x, enabled: next, active: next && !why } : x)));
+                  }} />
               </li>
             );
           })}

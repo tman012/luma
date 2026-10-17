@@ -16,8 +16,11 @@ export interface Rule {
 }
 export interface PathMapRow { remote: string; local: string }
 export type Transfer = 'copy' | 'hardlink';
+export interface NotFound { title: string; since: number }
 export interface LibraryView {
   paths: LibPath[]; rules: Rule[]; fallback_path_id: string | null; path_map: PathMapRow[]; transfer: Transfer;
+  downloads?: { path: string; status: 'ok' | 'missing' };
+  not_found?: NotFound[];
 }
 export type Errors = Record<string, string>;
 export type Result = { ok: true; view: LibraryView } | { ok: false; errors: Errors; error: string };
@@ -63,4 +66,14 @@ export function ruleSummary(r: Rule): string {
   if (r.resolution.length) parts.push(lbl(RESOLUTIONS, r.resolution));
   if (r.source.length) parts.push(lbl(SOURCES, r.source));
   return parts.length ? parts.join(' · ') : 'All movies';
+}
+
+/** "Since 3:05 PM" today, else "Since Oct 16". */
+export function sinceText(ts: number, now = Date.now()): string {
+  const d = new Date(ts * 1000);
+  const today = new Date(now);
+  const same = d.toDateString() === today.toDateString();
+  return 'Since ' + (same
+    ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
 }

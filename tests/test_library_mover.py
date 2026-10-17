@@ -573,8 +573,7 @@ def test_size_mismatch_is_a_failure_not_a_file(env, monkeypatch):
     movie_file(env, 'Heat.1995.mkv')
 
     def short(src, dst, exclusive=False, on_progress=None):
-        with open(dst, 'wb') as f:
-            f.write(b'x')
+        os.write(dst, b'x')                # the mover hands over its partial's descriptor
         return 1
     monkeypatch.setattr(lm, '_paced_copy', short)
     lm.track(H1, TMDB, 'Heat.1995')

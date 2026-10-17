@@ -4,14 +4,21 @@ luma-test (minimal) builds.
 SQLite in the data dir (never on a media share), WAL, foreign keys on, one
 writer at a time (a process lock plus SQLite's busy timeout), short
 transactions. The schema is versioned with PRAGMA user_version; MIGRATIONS[n]
-takes the file from version n to n + 1. A file that can't be opened or isn't a
-database is quarantined (moved aside) and a new one starts empty, like the
-JSON stores. Luma's rows only: nothing here ever deletes a library file.
+takes the file from version n to n + 1. A file that is corrupt or isn't a
+database (SQLITE_CORRUPT, SQLITE_NOTADB, a failed quick_check) is quarantined
+with its -wal/-shm (moved aside, never deleted) and a new one starts empty,
+like the JSON stores. Anything else (a lock or busy timeout, a read-only or
+full disk, a missing folder) is raised as is and the file is left alone.
+tv.db, tv.db-wal and tv.db-shm are 0600: the file is created 0600 before
+SQLite opens it (SQLite gives -wal/-shm the database file's mode) and all
+three are chmodded after opening as well.
+Luma's rows only: nothing here ever deletes a library file.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import logging
 import sqlite3
 import threading
@@ -146,6 +153,49 @@ def init(path: Optional[str] = None) -> None:
         _ready.clear()
 
 
+_CORRUPT_CODES = {11, 26}            # SQLITE_CORRUPT, SQLITE_NOTADB
+_CORRUPT_TEXT = ('malformed', 'not a database', 'quick_check failed', 'corrupt')
+
+
+class Corrupt(sqlite3.DatabaseError):
+    """The file is not a usable database (as opposed to busy or locked)."""
+
+
+def is_corrupt(e: BaseException) -> bool:
+    """True only for real corruption. A lock or busy timeout, a read-only or
+    full disk, or a missing folder is an OperationalError and never counts."""
+    if isinstance(e, Corrupt):
+        return True
+    if not isinstance(e, sqlite3.DatabaseError):
+        return False
+    code = getattr(e, 'sqlite_errorcode', None)
+    if isinstance(code, int):
+        return (code & 0xff) in _CORRUPT_CODES
+    if isinstance(e, sqlite3.OperationalError):
+        return False
+    return any(t in str(e).lower() for t in _CORRUPT_TEXT)
+
+
+def _private(p: Path) -> None:
+    """Create the file 0600 if it doesn't exist, and chmod it and its
+    -wal/-shm to 0600."""
+    try:
+        os.close(os.open(str(p), os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | getattr(os, 'O_CLOEXEC', 0), 0o600))
+    except FileExistsError:
+        pass
+    for f in (str(p), str(p) + '-wal', str(p) + '-shm'):
+        try:
+            fd = os.open(f, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, 'O_CLOEXEC', 0))
+        except OSError:
+            continue
+        try:
+            os.fchmod(fd, 0o600)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
+
+
 def _open(p: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(p), timeout=10, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -193,32 +243,34 @@ def _prepare(p: Path) -> None:
     for attempt in (1, 2):
         conn = None
         try:
+            _private(p)
             conn = _open(p)
             if conn.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
-                raise sqlite3.DatabaseError('quick_check failed')
+                raise Corrupt('quick_check failed')
             conn.execute('PRAGMA journal_mode = WAL')
             _migrate(conn)
+            _private(p)
             break
         except sqlite3.DatabaseError as e:
             if conn is not None:
                 conn.close()
                 conn = None
-            if attempt == 2:
+            if attempt == 2 or not is_corrupt(e):
+                raise                     # busy, locked, read-only...: leave the file alone
+            logger.error('tv.db is corrupt (%s); starting empty', type(e).__name__)
+            backup = _paths.quarantine(p, 'corrupt', logger)
+            if backup is None:
                 raise
-            logger.error('tv.db unreadable (%s); starting empty', type(e).__name__)
-            for suffix in ('-wal', '-shm'):
-                try:
-                    Path(str(p) + suffix).unlink()
-                except OSError:
-                    pass
-            _paths.quarantine(p, 'unreadable', logger)
+            for suffix in ('-wal', '-shm'):   # they belong to the bad file: keep them with it
+                side = Path(str(p) + suffix)
+                if side.exists():
+                    try:
+                        os.replace(side, str(backup) + suffix)
+                    except OSError:
+                        pass
         finally:
             if conn is not None:
                 conn.close()
-    try:
-        p.chmod(0o600)
-    except OSError:
-        pass
     _ready[str(p)] = True
 
 

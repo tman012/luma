@@ -106,8 +106,10 @@ def test_fresh_install_starts_empty(minimal, store):
     c = _client(minimal)
     r = _get(c)
     assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-store'
-    assert r.get_json() == {'paths': [], 'rules': [], 'fallback_path_id': None, 'path_map': [],
-                            'transfer': 'copy', 'not_found': []}
+    j = r.get_json()
+    assert j.pop('downloads')['status'] in ('ok', 'missing')
+    assert j == {'paths': [], 'rules': [], 'fallback_path_id': None, 'path_map': [],
+                 'transfer': 'copy', 'not_found': []}
     assert not store.exists()   # a read writes nothing
 
 

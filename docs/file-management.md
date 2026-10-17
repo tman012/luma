@@ -23,7 +23,16 @@ store (`file_management.json` in the data dir, mode 0600). The seeded
 - Prod's Downloads Guard and the storage pill's manual cleanup skip each tagged
   torrent's own entry. A folder that holds one (a category folder) is never
   deleted whole; its other entries are offered one by one. Both delete nothing
-  while qBittorrent can't be read, and the manual cleanup is owner only.
+  while qBittorrent can't be read, and the manual cleanup is owner only:
+  the signed-in owner, or on a full build with LAN sign-in off, the implicit
+  LAN owner (as for the full build's other admin actions). Other admins,
+  plain, guest and Plex-approved users, and the service key (kiosk and
+  companion apps) never delete. Minimal builds don't offer it. Caveat: a LAN
+  kiosk browser with LAN sign-in off is the implicit owner and can't be told
+  apart from the owner's own browser.
+- `LUMA_TEST_QBIT_TAG` is refused (falls back to `luma-test`) when it equals an
+  app's category: Radarr/Sonarr/..., `LUMA_QBIT_APP_CATEGORY`, or the
+  `qbittorrent.app_category` setting.
 - qBittorrent bans an IP after 5 failed sign-ins. The mover stops after 3
   rejected sign-ins and keeps that count on disk (`qbit_login.json`, 0600,
   keyed by a hash of the credentials), so a restart or a Save with the same
@@ -61,13 +70,17 @@ read-only and as a separate mount from `/media`, that is always the case on
 - Files 0664, folders 0775. Running as root (euid 0), each new file and folder
   is chowned to the uid:gid of the configured library path (for example
   1000:1000); otherwise ownership is left alone. No chmod 777, no Telegram.
-- Copies go to a hidden `.name.luma-partial` file (O_EXCL, no symlink follow),
-  then are linked into place, or renamed with `RENAME_NOREPLACE` where links
-  aren't supported. Symlinks in downloads are never followed.
+- Copies go to a hidden `.name.<random>.luma-partial` file (O_EXCL, 0600, no
+  symlink follow), then are linked into place, or renamed with
+  `RENAME_NOREPLACE` where links aren't supported. A partial that is already
+  there is someone else's and is never touched; a failed copy removes its own
+  partial only while it is still the same inode. Symlinks in downloads are
+  never followed.
 - Sources: only files inside `LUMA_DOWNLOADS_ROOT`, whatever save path qBit
   reports. Each file is opened `O_NOFOLLOW` and must be the same inode that
-  was checked; a hardlink links that open inode. A save path outside the root
-  waits for a path map (Settings) and is listed as `files not found` after an
+  was checked (device, inode and size from the scan, rechecked on the open
+  file; a change waits for the next pass); a hardlink links that open inode.
+  A save path outside the root waits for a path map (Settings) and is listed as `files not found` after an
   hour; changing the path map puts grabs skipped for a path error back in the
   queue.
 - Destination: the library folder and the title folder are opened as directory
@@ -76,6 +89,10 @@ read-only and as a separate mount from `/media`, that is always the case on
 - qBit's "don't create subfolder" layout (content path equal to the save
   path) files only the torrent's own files, listed by `torrents/files`.
 - A library path inside, equal to, or holding the downloads folder is refused.
+- A missing or unreadable downloads folder: the mover doesn't sign in to
+  qBittorrent at all; waiting grabs are listed as `files not found` after an
+  hour. Settings > Library paths shows the downloads folder (Missing) and the
+  grabs whose files are not found.
 
 # TV scoping note (later pass)
 

@@ -11,8 +11,20 @@ Settings > Trackers since) is listed last, switched off. A deleted tracker's
 id is dropped (forget()). A section searches a tracker only when it is on
 here, on in Settings > Trackers, and set up for the section's category.
 
+Usable vs. saved (QA-TV1/TV2): a tracker that is off in Settings > Trackers
+or has no category for the section is "unusable" here. Its saved switch for
+the section (`enabled`) is kept, but it is not `active` and the UI shows its
+switch off and locked. Turning it back on in Settings > Trackers makes it
+active again with the switch it had, and the list shows it on: the visible
+state always equals `active`, so nothing turns on out of sight. The PUT
+refuses switching on a tracker that is unusable; an unusable tracker that was
+already on keeps that saved state when the list is saved, and switching one
+off is always allowed.
+
 GET /api/settings/sections/<section>/trackers   the list, in order
 PUT /api/settings/sections/<section>/trackers   {"trackers": [{"id", "enabled"}, ...]} in order
+    Each row: id, name, type_name, enabled (saved), active (enabled and usable),
+    global_enabled, has_category, budget.
 
 Owner only, luma-test (minimal) builds only.
 """
@@ -41,6 +53,8 @@ CATEGORY = {'tv': 5000, 'movies': 2000}
 MAX_IDS = 200
 INVALID = 'Invalid'
 UNKNOWN = 'Unknown tracker'
+NOT_USABLE = {'global': '{name} is off in Trackers', 'category': {
+    'tv': '{name} has no TV category', 'movies': '{name} has no Movies category'}}
 
 
 # --------------------------------------------------------------------------- store
@@ -144,6 +158,7 @@ def arrange(section: str, records: Optional[List[Dict[str, Any]]] = None,
         row = {'id': i, 'name': r.get('name', ''), 'type_name': t.get('name', r.get('type', '')),
                'enabled': i in sec['enabled'], 'global_enabled': bool(r.get('enabled', True)),
                'has_category': has_category(r, section)}
+        row['active'] = row['enabled'] and row['global_enabled'] and row['has_category']
         if budget:
             row['budget'] = budget(r)
         out.append(row)
@@ -153,8 +168,7 @@ def arrange(section: str, records: Optional[List[Dict[str, Any]]] = None,
 def ordered_ids(section: str, records: Optional[List[Dict[str, Any]]] = None) -> List[int]:
     """Tracker ids the section searches, in order: on here, on globally and
     set up for the section's category."""
-    return [r['id'] for r in arrange(section, records)
-            if r['enabled'] and r['global_enabled'] and r['has_category']]
+    return [r['id'] for r in arrange(section, records) if r['active']]
 
 
 def _budget_for(section: str) -> Optional[Callable]:
@@ -170,12 +184,17 @@ def _budget_for(section: str) -> Optional[Callable]:
     return budget
 
 
-def check_put(section: str, body: Any, records: List[Dict[str, Any]]):
-    """(new section record, None) or (None, error) for a PUT body."""
+def check_put(section: str, body: Any, records: List[Dict[str, Any]],
+              saved: Optional[Dict[str, Any]] = None):
+    """(new section record, None) or (None, error) for a PUT body. *saved* is
+    the section's stored record: an unusable tracker may stay on only when it
+    already was (its saved state), never be switched on."""
     items = body.get('trackers') if isinstance(body, dict) else None
     if not isinstance(items, list) or len(items) > MAX_IDS:
         return None, INVALID
-    valid = {r['id'] for r in records if isinstance(r.get('id'), int)}
+    by_id = {r['id']: r for r in records if isinstance(r.get('id'), int)}
+    valid = set(by_id)
+    was_on = set((saved or {}).get('enabled') or [])
     order: List[int] = []
     enabled: List[int] = []
     for it in items:
@@ -189,6 +208,13 @@ def check_put(section: str, body: Any, records: List[Dict[str, Any]]):
         if i in order:
             continue                      # a duplicate: the first one counts
         order.append(i)
+        if on and i not in was_on:
+            rec = by_id[i]
+            name = str(rec.get('name') or 'Tracker')
+            if not rec.get('enabled', True):
+                return None, NOT_USABLE['global'].format(name=name)
+            if not has_category(rec, section):
+                return None, NOT_USABLE['category'][section].format(name=name)
         if on:
             enabled.append(i)
     return {'order': order, 'enabled': enabled}, None
@@ -237,11 +263,11 @@ def section_trackers_put(section):
     if err:
         return err
     records = _records()
-    new, error = check_put(section, request.get_json(silent=True), records)
-    if error:
-        return _no_store(jsonify({'error': error}), 400)
     with _lock:
         data = load()
+        new, error = check_put(section, request.get_json(silent=True), records, data['sections'][section])
+        if error:
+            return _no_store(jsonify({'error': error}), 400)
         # Trackers the client didn't list (added meanwhile) keep their place, off.
         old = data['sections'][section]
         tail = [i for i in old['order'] if i not in new['order']]

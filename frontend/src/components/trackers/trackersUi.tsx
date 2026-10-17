@@ -98,19 +98,25 @@ export function Spinner() {
 // ---------------------------------------------------------------- switch
 
 /** iOS-style switch: 51x31 on phone, 44x26 on desktop; on = Luma blue. */
-export function Switch({ on, label, onChange, small, disabled }: {
+/** `lockOn`: it can't be switched on (switching off still works). It stays
+ * focusable, so keyboard and screen-reader users reach it and its
+ * description (`describedBy`), and shows at 40%. */
+export function Switch({ on, label, onChange, small, disabled, lockOn, describedBy }: {
   on: boolean; label: string; onChange: (on: boolean) => void; small?: boolean; disabled?: boolean;
+  lockOn?: boolean; describedBy?: string;
 }) {
   const w = small ? 44 : 51;
   const h = small ? 26 : 31;
   const k = h - 4;
+  const locked = !!lockOn && !on;
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={disabled}
+      aria-disabled={locked || undefined} aria-describedby={describedBy}
       className="lt-focus" data-testid="tracker-switch"
-      onClick={e => { e.stopPropagation(); onChange(!on); }}
+      onClick={e => { e.stopPropagation(); if (!locked) onChange(!on); }}
       style={{ width: w + 8, height: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end',
-        border: 'none', background: 'none', cursor: disabled ? 'default' : 'pointer', padding: 0, flex: 'none', borderRadius: 10,
-        opacity: disabled ? 0.4 : 1 }}>
+        border: 'none', background: 'none', cursor: disabled || locked ? 'default' : 'pointer', padding: 0, flex: 'none', borderRadius: 10,
+        opacity: disabled || lockOn ? 0.4 : 1 }}>
       <span data-track style={{ position: 'relative', display: 'block', width: w, height: h, borderRadius: h / 2,
         background: on ? BLUE : 'rgba(255,255,255,0.18)', transition: 'background .2s' }}>
         <span style={{ position: 'absolute', top: 2, left: 2, width: k, height: k, borderRadius: k / 2, background: T.white,

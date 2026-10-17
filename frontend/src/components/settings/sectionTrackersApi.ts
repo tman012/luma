@@ -5,7 +5,8 @@ import { SAVE_FAILED } from '@/utils/messages';
 export type Section = 'tv' | 'movies';
 export interface SectionTracker {
   id: number; name: string; type_name: string;
-  enabled: boolean; global_enabled: boolean; has_category: boolean;
+  /** enabled: the saved switch; active: saved on and usable (what the list shows). */
+  enabled: boolean; active?: boolean; global_enabled: boolean; has_category: boolean;
   budget?: { used: number; cap: number } | null;
 }
 export type TrackersResult = { ok: true; trackers: SectionTracker[] } | { ok: false; error: string };
@@ -37,3 +38,7 @@ export function blockedReason(t: SectionTracker, section: Section): string {
   if (!t.has_category) return section === 'tv' ? 'No TV category' : 'No Movies category';
   return '';
 }
+
+/** What the switch shows: on only when saved on and usable. */
+export const shownOn = (t: SectionTracker) =>
+  t.active ?? (t.enabled && t.global_enabled && t.has_category);

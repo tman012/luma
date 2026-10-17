@@ -61,6 +61,9 @@ NAMING_FIELDS = {
     'daily': {'series', 'air_date', 'episode_title', 'year', 'resolution', 'source'},
     'specials_folder': set(),
 }
+# Number fields; the rest are text, and a format spec ('{title:02}') on text
+# would raise at naming time, so it is refused when the template is saved.
+INT_FIELDS = {'season', 'episode', 'year', 'tmdb_id'}
 REQUIRED_FIELDS = {'series_folder': {'title'}, 'season_folder': set(),
                    'episode': {'season', 'episode'}, 'daily': {'air_date'}, 'specials_folder': set()}
 AUTOMATION_FLAGS = ('enabled', 'feed_enabled', 'backlog_enabled', 'upgrades_enabled')
@@ -85,7 +88,8 @@ def store_path() -> Path:
 def check_template(key: str, value: Any) -> Tuple[Optional[str], Optional[str]]:
     """(template, None) or (None, error). Placeholders must be known for the
     template; required ones must be there; no path separators or control
-    characters; '{season:02}'-style zero padding only."""
+    characters; '{season:02}'-style zero padding only, and only on number
+    fields."""
     if not isinstance(value, str):
         return None, INVALID
     v = value.strip()
@@ -100,6 +104,8 @@ def check_template(key: str, value: Any) -> Tuple[Optional[str], Optional[str]]:
         if field is None:
             continue
         if field not in NAMING_FIELDS[key] or conv or not _FMT_RE.match(spec or ''):
+            return None, INVALID
+        if spec and field not in INT_FIELDS:
             return None, INVALID
         used.add(field)
     if not REQUIRED_FIELDS[key] <= used:
@@ -205,11 +211,18 @@ def series_folder(title: Any, year: Any, data: Optional[Dict[str, Any]] = None, 
     by default). An empty year drops its parentheses. Safe as one path part."""
     from app.file_management import safe_component
     tpl = (data or load())['naming']['series_folder']
-    y = str(year) if isinstance(year, (str, int)) and re.fullmatch(r'\d{4}', str(year)) else ''
-    if not y:
-        tpl = re.sub(r'\s*[(\[]\{year\}[)\]]', '', tpl).replace('{year}', '')
+    y = int(year) if isinstance(year, (str, int)) and not isinstance(year, bool) \
+        and re.fullmatch(r'\d{4}', str(year)) else None
+    tid = tmdb_id if isinstance(tmdb_id, int) and not isinstance(tmdb_id, bool) and tmdb_id > 0 else None
+    for name, val in (('year', y), ('tmdb_id', tid)):
+        if val is None:                   # drop the field, with its brackets
+            tpl = re.sub(r'\s*(?:\{\{|[(\[])[A-Za-z_-]*\{%s(?::[^}]*)?\}(?:\}\}|[)\]])' % name, '', tpl)
+            tpl = re.sub(r'\{%s(?::[^}]*)?\}' % name, '', tpl)
     t = title.replace('{', '{{').replace('}', '}}') if isinstance(title, str) else ''
-    out = tpl.replace('{title}', t).format(year=y, tmdb_id=tmdb_id if isinstance(tmdb_id, int) else '')
+    try:
+        out = tpl.replace('{title}', t).format(year=y, tmdb_id=tid)
+    except (ValueError, KeyError, IndexError):
+        out = t
     return safe_component(out, fallback='Series')
 
 

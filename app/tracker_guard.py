@@ -68,6 +68,13 @@ def _purpose_limits() -> Dict[str, Dict[str, float]]:
 
 _PURPOSE_RE = __import__('re').compile(r'^[a-z]{1,16}$')
 _KIND_RE = __import__('re').compile(r'^[ib](:[a-z]{1,16})?$')
+# Rollback safety: `log` keeps only [ts, 'i'|'b'] pairs, the shape every
+# earlier guard reads, so a rolled-back build still counts TV's requests
+# against its per-tracker and global caps. Which purpose a background request
+# was for is kept beside it in `purposes` ({key: [[ts, purpose], ...]}), which
+# an earlier guard ignores (and drops on its next save; only the TV caps forget
+# that day's count, and those caps are a subset of the shared ones). Files
+# written by 78d7f1e with [ts, 'b:tv'] in `log` are read as both.
 FAIL_CLOSED_S = 3600
 MAX_COOLDOWN_S = 24 * 3600
 FILENAME = 'tracker_guard.json'
@@ -88,6 +95,7 @@ class TrackerGuard:
         self._loaded = False
         # Keys are guard_key() strings ('site:<type>' or 'host:<host>').
         self.log: Dict[str, List[list]] = {}          # key -> [[ts, 'i'|'b'], ...]
+        self.purposes: Dict[str, List[list]] = {}     # key -> [[ts, purpose], ...] (background only)
         self.buckets: Dict[str, List[float]] = {}     # key -> [tokens, ts]
         self.cooldown: Dict[str, Tuple[float, str]] = {}   # key -> (until, kind)
         self.streak: Dict[str, int] = {}
@@ -133,10 +141,23 @@ class TrackerGuard:
             i = key(k)
             if i is None or not isinstance(entries, list):
                 continue
-            self.log[i] = [[_num(e[0]), e[1]] for e in entries
-                           if isinstance(e, list) and len(e) == 2 and isinstance(e[1], str)
-                           and _KIND_RE.match(e[1])
-                           and _num(e[0]) and _num(e[0]) > now - 86400]
+            kept = [[_num(e[0]), e[1]] for e in entries
+                    if isinstance(e, list) and len(e) == 2 and isinstance(e[1], str)
+                    and _KIND_RE.match(e[1])
+                    and _num(e[0]) and _num(e[0]) > now - 86400]
+            self.log[i] = [[t, k[:1]] for t, k in kept]
+            legacy = [[t, k[2:]] for t, k in kept if k.startswith('b:')]
+            if legacy:
+                self.purposes.setdefault(i, []).extend(legacy)
+        purposes = raw.get('purposes')
+        for k, entries in (purposes.items() if isinstance(purposes, dict) else ()):
+            i = key(k)
+            if i is None or not isinstance(entries, list):
+                continue
+            self.purposes.setdefault(i, []).extend(
+                [_num(e[0]), e[1]] for e in entries
+                if isinstance(e, list) and len(e) == 2 and isinstance(e[1], str) and _PURPOSE_RE.match(e[1])
+                and _num(e[0]) and _num(e[0]) > now - 86400)
         for k, v in raw.get('buckets', {}).items():
             i = key(k)
             if i is None:
@@ -160,6 +181,7 @@ class TrackerGuard:
         from app.paths import atomic_write_json
         state = {
             'log': {str(k): v for k, v in self.log.items() if v},
+            'purposes': {str(k): v for k, v in self.purposes.items() if v},
             'buckets': {str(k): v for k, v in self.buckets.items()},
             'cooldown': {str(k): [u, kind] for k, (u, kind) in self.cooldown.items()},
             'streak': {str(k): v for k, v in self.streak.items() if v},
@@ -203,6 +225,8 @@ class TrackerGuard:
         day, hr = now - 86400, now - 3600
         for k in list(self.log):
             self.log[k] = [e for e in self.log[k] if e[0] > day]
+        for k in list(self.purposes):
+            self.purposes[k] = [e for e in self.purposes[k] if e[0] > day]
         mine = self.log.get(tid, [])
         return (sum(1 for t, kind in mine if t > hr and kind[:1] == 'i'), len(mine),
                 sum(1 for v in self.log.values() for t, _ in v if t > hr))
@@ -212,13 +236,12 @@ class TrackerGuard:
         requests in the last hour and 24 h, every tracker's in 24 h, and the
         time of this tracker's latest (0 when none)."""
         now = time.time() if now is None else now
-        kind = f'b:{purpose}'
         with self._lock:
             self._load()
             day, hr = now - 86400, now - 3600
-            mine = [t for t, k in self.log.get(tid, []) if k == kind and t > day]
+            mine = [t for t, k in self.purposes.get(tid, []) if k == purpose and t > day]
             return {'hour': sum(1 for t in mine if t > hr), 'day': len(mine),
-                    'all_day': sum(1 for v in self.log.values() for t, k in v if k == kind and t > day),
+                    'all_day': sum(1 for v in self.purposes.values() for t, k in v if k == purpose and t > day),
                     'last': max(mine, default=0.0)}
 
     def _purpose_refusal(self, tid: str, purpose: str, now: float) -> Optional[str]:
@@ -271,8 +294,9 @@ class TrackerGuard:
                 if b[0] < 1.0:
                     return 'rate limit (bucket empty)'
                 b[0] -= 1.0
-            kind = 'i' if interactive else ('b:' + purpose if purpose else 'b')
-            self.log.setdefault(tid, []).append([now, kind])
+            self.log.setdefault(tid, []).append([now, 'i' if interactive else 'b'])
+            if purpose:
+                self.purposes.setdefault(tid, []).append([now, purpose])
             self._save()
             return None
 

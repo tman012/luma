@@ -44,7 +44,7 @@ import stat as _stat
 import threading
 import time
 from datetime import date
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import requests
 
@@ -409,7 +409,21 @@ def _real_under(path: str, root: str) -> bool:
     return fm._under(os.path.realpath(path), root)
 
 
-def _scan_file(full: str, videos: List[Tuple[str, int]]) -> Tuple[bool, bool]:
+class Found(NamedTuple):
+    """A video picked by a scan, with the identity it had then: the copy must
+    read this very file (same device, inode and size), not one swapped in
+    under the same name since."""
+    path: str
+    size: int
+    dev: int = -1
+    ino: int = -1
+
+
+def _found(path: str, st: os.stat_result) -> Found:
+    return Found(path, st.st_size, st.st_dev, st.st_ino)
+
+
+def _scan_file(full: str, videos: List[Found]) -> Tuple[bool, bool]:
     """Look at one candidate file: (is_rar, is_video). Adds stable videos to
     *videos*; raises Pending for files still being written."""
     f = os.path.basename(full)
@@ -426,7 +440,7 @@ def _scan_file(full: str, videos: List[Tuple[str, int]]) -> Tuple[bool, bool]:
         return is_rar, False
     if not is_file_stable(full):
         raise Pending('still being written')
-    videos.append((full, st.st_size))
+    videos.append(_found(full, st))
     return is_rar, True
 
 
@@ -437,8 +451,8 @@ def _not_in_temp(real: str, root: str, temp_dirs: Tuple[str, ...]) -> None:
 
 
 def find_video_files(content: str, root: str, added: float, now: float,
-                     temp_dirs: Tuple[str, ...] = ()) -> List[Tuple[str, int]]:
-    """[(path, size)] of the movie's video files inside *content* (a file or
+                     temp_dirs: Tuple[str, ...] = ()) -> List[Found]:
+    """[Found(path, size, dev, ino)] of the movie's video files inside *content* (a file or
     folder under the real downloads *root*). Raises Pending / Refused.
     Port of prod's find_video_files; symlinks and anything in <root>/incomplete,
     qBittorrent's temp folder (*temp_dirs*) or named *.!qB are never touched."""
@@ -456,10 +470,16 @@ def find_video_files(content: str, root: str, added: float, now: float,
             raise Refused('not a video')
         if not is_file_stable(real):
             raise Pending('still being written')
-        return [(real, os.path.getsize(real))]
+        try:
+            st = os.lstat(real)
+        except FileNotFoundError:
+            raise Pending('not there yet')
+        if not _stat.S_ISREG(st.st_mode):
+            raise Refused('not a regular file')
+        return [_found(real, st)]
     if not os.path.isdir(real):
         raise Pending('not there yet')
-    videos: List[Tuple[str, int]] = []
+    videos: List[Found] = []
     rar_only = False
     for dirpath, dirnames, files in os.walk(real, followlinks=False):
         if '.extraction_in_progress' in files:
@@ -474,7 +494,7 @@ def find_video_files(content: str, root: str, added: float, now: float,
     return _finish_scan(videos, rar_only, added, now)
 
 
-def _finish_scan(videos, rar_only, added, now) -> List[Tuple[str, int]]:
+def _finish_scan(videos, rar_only, added, now) -> List[Found]:
     if not videos and rar_only and now - added < EXTRACT_WAIT_S:
         raise Pending('unpacking')
     if not videos:
@@ -494,14 +514,14 @@ def _clean_rel(name: Any) -> Optional[str]:
 
 
 def find_listed_files(save_real: str, listed: List[Dict[str, Any]], root: str, added: float, now: float,
-                      temp_dirs: Tuple[str, ...] = ()) -> List[Tuple[str, int]]:
+                      temp_dirs: Tuple[str, ...] = ()) -> List[Found]:
     """The "no subfolder" layout: the torrent's files sit straight in the save
     folder next to other downloads. Only the files qBittorrent lists for this
     torrent (torrents/files) are considered."""
     _not_in_temp(save_real, root, temp_dirs)
     if not fm._under(save_real, root):
         raise Refused('outside the downloads folder')
-    videos: List[Tuple[str, int]] = []
+    videos: List[Found] = []
     rar_only = False
     names = set()
     for f in listed:
@@ -536,6 +556,7 @@ def find_listed_files(save_real: str, listed: List[Dict[str, Any]], root: str, a
 def select_main(videos: List[Tuple[str, int]]) -> List[str]:
     """Prod's select_main_video_files for movies: the largest when it is 5x the
     next, else every file (multi-part), largest first, minus likely duplicates."""
+    videos = [(v[0], v[1]) for v in videos]
     v = sorted(videos, key=lambda x: x[1], reverse=True)
     if len(v) > 1 and v[0][1] > v[1][1] * 5:
         return [v[0][0]]
@@ -657,10 +678,15 @@ def _rename_noreplace(dfd: int, old: str, new: str) -> bool:
     return True
 
 
-def _open_source(src: str, root: str) -> Tuple[int, os.stat_result]:
+SOURCE_CHANGED = 'the file changed since it was checked'
+
+
+def _open_source(src: str, root: str, expect: Optional[Found] = None) -> Tuple[int, os.stat_result]:
     """Open a download file for reading: never through a symlink, and only
     when the open file is the one inspected (same device and inode) and it
-    really sits inside the downloads *root*."""
+    really sits inside the downloads *root*. With *expect* (what the scan
+    saw), the open file must also be that one: same device, inode and size;
+    else Pending (the next pass scans again)."""
     try:
         st0 = os.lstat(src)
     except FileNotFoundError:
@@ -683,6 +709,8 @@ def _open_source(src: str, root: str) -> Tuple[int, os.stat_result]:
             raise Refused('the file changed while being checked')
         if not fm._under(os.path.realpath(_fd_path(fd)), root):
             raise Refused('outside the downloads folder')
+        if expect is not None and (st.st_dev, st.st_ino, st.st_size) != (expect.dev, expect.ino, expect.size):
+            raise Pending(SOURCE_CHANGED)
     except BaseException:
         os.close(fd)
         raise
@@ -723,13 +751,47 @@ def _ensure_folder(rfd: int, lib_root: str, folder: str, owner) -> Tuple[int, bo
     return dfd, created, os.path.join(lib_root, folder)
 
 
-def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root: str) -> str:
+PARTIAL_SUFFIX = '.luma-partial'
+
+
+def _new_partial(dfd: int, name: str) -> Tuple[str, int, Tuple[int, int]]:
+    """(name, write fd, (dev, ino)) of a new, uniquely named partial file,
+    created here (O_EXCL, never through a symlink). A partial that is already
+    there belongs to someone else and is never touched."""
+    import secrets
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW | _O_CLOEXEC
+    for _ in range(8):
+        tmp = f'.{name}.{secrets.token_hex(4)}{PARTIAL_SUFFIX}'
+        try:
+            fd = os.open(tmp, flags, 0o600, dir_fd=dfd)
+        except FileExistsError:
+            continue
+        st = os.fstat(fd)
+        return tmp, fd, (st.st_dev, st.st_ino)
+    raise OSError(errno.EEXIST, 'no free partial name')
+
+
+def _unlink_ours(dfd: int, tmp: str, ident: Tuple[int, int]) -> None:
+    """Remove *tmp* only while it is still the file this pass created."""
+    try:
+        st = os.stat(tmp, dir_fd=dfd, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
+    if (st.st_dev, st.st_ino) == ident:
+        _unlink_at(dfd, tmp)
+
+
+def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root: str,
+             expect: Optional[Found] = None) -> str:
     """'linked', 'copied' or 'exists' for one download file *src* into the open
     library folder *dfd* (path *folder*) as *name*. Never overwrites, never
-    moves, never follows a symlink on either side."""
+    moves, never follows a symlink on either side, and reads only the file
+    the scan saw (*expect*)."""
     if _lexists_at(dfd, name):
         return 'exists'
-    sfd, st = _open_source(src, root)
+    sfd, st = _open_source(src, root, expect)
     try:
         if mode == 'hardlink':
             try:
@@ -740,20 +802,22 @@ def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root:
                 return 'exists'
             except OSError as e:
                 logger.info('Library mover: hardlink failed (%s), copying', errno.errorcode.get(e.errno, e.errno))
-        tmp = f'.{name}.luma-partial'
         _check_space(folder, st.st_size)
+        tmp, tfd, ident = _new_partial(dfd, name)
         try:
-            _unlink_at(dfd, tmp)
             try:
-                _paced_copy(sfd, _fd_path(dfd, tmp), exclusive=True)
-            except OSError as e:
-                if e.errno in (errno.ENOSPC, getattr(errno, 'EDQUOT', -1)):
-                    raise InsufficientSpace(INSUFFICIENT_SPACE) from e
-                raise
-            tst = os.stat(tmp, dir_fd=dfd, follow_symlinks=False)
-            if not _stat.S_ISREG(tst.st_mode) or tst.st_size != st.st_size:
-                raise OSError(errno.EIO, 'size mismatch after copy')
-            _finish(tmp, 0o664, owner, dir_fd=dfd)
+                try:
+                    _paced_copy(sfd, tfd)
+                except OSError as e:
+                    if e.errno in (errno.ENOSPC, getattr(errno, 'EDQUOT', -1)):
+                        raise InsufficientSpace(INSUFFICIENT_SPACE) from e
+                    raise
+                tst = os.fstat(tfd)
+                if not _stat.S_ISREG(tst.st_mode) or tst.st_size != st.st_size:
+                    raise OSError(errno.EIO, 'size mismatch after copy')
+                _finish_fd(tfd, 0o664, owner)
+            finally:
+                os.close(tfd)
             try:
                 os.link(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd, follow_symlinks=False)   # refuses an existing name
             except FileExistsError:
@@ -764,7 +828,7 @@ def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root:
                 return 'copied' if _rename_noreplace(dfd, tmp, name) else 'exists'
             return 'copied'
         finally:
-            _unlink_at(dfd, tmp)
+            _unlink_ours(dfd, tmp, ident)
     finally:
         os.close(sfd)
 
@@ -827,6 +891,7 @@ def process(job: Dict[str, Any], torrent: Dict[str, Any], data: Dict[str, Any], 
     else:
         found = find_video_files(content, root, added, now, temp_dirs)
     files = select_main(found)
+    seen = {f[0]: f for f in found}
 
     info = fm.classify(job.get('name') or str(torrent.get('name') or ''), os.path.basename(files[0]))
     if fm.needs_release_date(data):
@@ -869,7 +934,8 @@ def process(job: Dict[str, Any], torrent: Dict[str, Any], data: Dict[str, Any], 
         try:
             results = []
             for src, name in zip(files, names):
-                result = transfer(src, dfd, folder, name, data['transfer'], owner, root)
+                result = transfer(src, dfd, folder, name, data['transfer'], owner, root,
+                                  seen.get(src) if isinstance(seen.get(src), Found) else None)
                 if result != 'exists':
                     made.append(name)
                 results.append({'file': name, 'result': result})
@@ -973,8 +1039,8 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
 
 def tick(now: Optional[float] = None, session_factory: Callable = requests.Session) -> Dict[str, int]:
     """One pass over the waiting jobs. Never contacts qBittorrent when no
-    library path is configured or nothing is waiting. One job's failure never
-    stops the others."""
+    library path is configured, nothing is waiting or the downloads folder is
+    missing. One job's failure never stops the others."""
     now = time.time() if now is None else now
     summary = {'checked': 0, 'filed': 0, 'dropped': 0}
     data = fm.load()
@@ -982,6 +1048,16 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
         return summary
     waiting = {h: j for h, j in data['jobs'].items() if j.get('state') == 'waiting'}
     if not waiting:
+        return summary
+    try:
+        _downloads_root()
+    except Pending as e:
+        # No downloads folder (not mounted, not set up): nothing could be read,
+        # so don't sign in to qBittorrent at all. The jobs wait and are
+        # flagged 'files not found' after NOT_FOUND_AFTER_S.
+        for h, job in waiting.items():
+            summary['checked'] += 1
+            _note_pending(h, job, str(e), now)
         return summary
     sess, url = _qbit_session(session_factory, now)
     if not sess:

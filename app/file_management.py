@@ -560,12 +560,24 @@ def view(data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         'fallback_path_id': data['fallback_path_id'],
         'path_map': copy.deepcopy(data['path_map']),
         'transfer': data['transfer'],
+        'downloads': downloads_status(),
         'not_found': sorted(
             ({'title': j.get('title') or '', 'since': j.get('pending_since') or 0}
              for j in data['jobs'].values()
              if j.get('state') == 'waiting' and j.get('status') == 'files not found'),
             key=lambda x: x['since'])[:50],
     }
+
+
+def downloads_status() -> Dict[str, str]:
+    """{'path', 'status'}: the downloads folder the mover reads, 'ok' when it
+    is a readable folder, else 'missing'."""
+    root = downloads_root()
+    try:
+        ok = not blocked(root) and os.path.isdir(root) and os.access(root, os.R_OK | os.X_OK)
+    except OSError:
+        ok = False
+    return {'path': root, 'status': 'ok' if ok else 'missing'}
 
 
 def requeue_path_errors(data: Dict[str, Any]) -> int:

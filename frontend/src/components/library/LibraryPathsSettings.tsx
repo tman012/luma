@@ -10,7 +10,7 @@ import { CheckIcon, ChevronIcon, GripIcon, XIcon } from '@/components/nav/AppNav
 import { move } from '@/components/home/homeApi';
 import { CategoryChip, PlusIcon, Switch, trackersCss } from '@/components/trackers/trackersUi';
 import {
-  RESOLUTIONS, SAVE_FAILED, SOURCES, addPath, deletePath, editPath, loadLibrary, ruleSummary, saveMapping, saveRules,
+  RESOLUTIONS, SAVE_FAILED, SOURCES, addPath, deletePath, editPath, loadLibrary, ruleSummary, saveMapping, saveRules, sinceText,
   type Errors, type LibPath, type LibraryView, type PathMapRow, type Result, type Rule, type Transfer, type Unit,
 } from './libraryPathsApi';
 
@@ -66,6 +66,8 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
       <style>{libraryPathsCss}</style>
       <style>{trackersCss}</style>
       {toast && <NoticeToast key={toast + seq.current} text={toast} onDone={() => setToast('')} />}
+
+      <DownloadsStatus view={view} />
 
       <div data-testid="lp-paths">
         <h3 style={sectionLabel}>Paths</h3>
@@ -137,6 +139,46 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
       </div>
     </section>
     </WideCtx.Provider>
+  );
+}
+
+// ---------------------------------------------------------------- downloads
+
+/** The downloads folder the mover reads, and grabs whose files it can't find. */
+function DownloadsStatus({ view }: { view: LibraryView }) {
+  const wide = useContext(WideCtx);
+  const dl = view.downloads;
+  const lost = view.not_found || [];
+  if (!dl && !lost.length) return null;
+  const s = STATUS[dl?.status === 'missing' ? 'missing' : 'ok'];
+  return (
+    <div data-testid="lp-downloads">
+      <h3 style={sectionLabel}>Downloads</h3>
+      <div style={card}>
+        {dl && (
+          <div data-testid="lp-downloads-folder" data-status={dl.status} style={{ ...rowBtn, cursor: 'default' }}>
+            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: s.color, flex: 'none' }} />
+            <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={titleText(wide)}>Downloads folder</span>
+              <span style={subText(wide)} title={dl.path}>{dl.path}</span>
+            </span>
+            {s.text && (
+              <span data-testid="lp-downloads-status" style={{ fontSize: 13, fontWeight: 500, color: s.color, flex: 'none' }}>{s.text}</span>
+            )}
+          </div>
+        )}
+        {lost.map((j, i) => (
+          <div key={`${j.title}\u0000${j.since}`} data-testid="lp-not-found" style={{ ...rowBtn, cursor: 'default', ...(dl || i > 0 ? topBorder : null) }}>
+            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: T.danger, flex: 'none' }} />
+            <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={titleText(wide)}>{j.title || 'Untitled'}</span>
+              <span style={subText(wide)}>{sinceText(j.since)}</span>
+            </span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: T.danger, flex: 'none' }}>Files not found</span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

@@ -2,6 +2,7 @@
 budgets in the tracker guard, tv_settings.json and tv.db."""
 
 import json
+from pathlib import Path
 import os
 import sqlite3
 import stat
@@ -51,11 +52,15 @@ def test_flags_global_switch_and_category(sec):
 
 
 def test_order_and_allow_list(sec):
+    # 4 and 3 were saved on earlier (when they were usable): they keep that saved state.
+    saved = {'order': [1, 2, 3, 4], 'enabled': [3, 4]}
     new, err = st.check_put('tv', {'trackers': [{'id': 4, 'enabled': True}, {'id': 3, 'enabled': True},
-                                                {'id': 1, 'enabled': True}, {'id': 2, 'enabled': False}]}, RECS)
+                                                {'id': 1, 'enabled': True}, {'id': 2, 'enabled': False}]}, RECS, saved)
     assert err is None
     st.save({'sections': {'tv': new}})
-    assert [r['id'] for r in st.arrange('tv')] == [4, 3, 1, 2]
+    rows = st.arrange('tv')
+    assert [r['id'] for r in rows] == [4, 3, 1, 2]
+    assert [(r['enabled'], r['active']) for r in rows] == [(True, False), (True, False), (True, True), (False, False)]
     assert st.ordered_ids('tv') == [1]                           # 4 off globally, 3 has no TV category
     assert stat.S_IMODE(os.stat(sec).st_mode) == 0o600
     assert st.load()['sections']['movies'] == {'order': [], 'enabled': []}
@@ -217,19 +222,56 @@ def test_other_traffic_does_not_use_tvs_budget_and_manual_is_interactive(guard):
 
 
 def test_purpose_log_persists_and_reloads(guard, tmp_path):
-    assert guard.take('site:x', False, False, now=T0, purpose='tv') is None
-    raw = json.loads((tmp_path / 'tracker_guard.json').read_text())
-    assert raw['log']['site:x'][0][1] == 'b:tv'
-    fresh = TrackerGuard(tmp_path / 'tracker_guard.json')
     import time
     now = time.time()
-    fresh.log = {}
-    fresh._loaded = False
-    # entries older than a day are dropped on load; a recent one survives
-    raw['log']['site:x'] = [[now - 10, 'b:tv'], [now - 20, 'b:junk!'], [now - 30, 'x']]
-    (tmp_path / 'tracker_guard.json').write_text(json.dumps(raw))
-    assert fresh.purpose_counts('site:x', 'tv', now)['day'] == 1
-    assert fresh.log['site:x'] == [[now - 10, 'b:tv']]
+    assert guard.take('site:x', False, False, now=now, purpose='tv') is None
+    raw = json.loads((tmp_path / 'tracker_guard.json').read_text())
+    # `log` keeps the [ts, 'b'] shape every earlier guard reads; the purpose is beside it.
+    assert raw['log']['site:x'] == [[now, 'b']] and raw['purposes']['site:x'] == [[now, 'tv']]
+    fresh = TrackerGuard(tmp_path / 'tracker_guard.json')
+    assert fresh.purpose_counts('site:x', 'tv', now + 1)['day'] == 1
+    assert fresh.counts('site:x', now + 1)[1] == 1
+
+
+def test_78d7f1e_files_with_b_colon_tv_are_read_as_both(tmp_path):
+    import time
+    now = time.time()
+    raw = {'log': {'site:x': [[now - 10, 'b:tv'], [now - 20, 'b:junk!'], [now - 30, 'x'], [now - 40, 'i']]}}
+    (tmp_path / 'g.json').write_text(json.dumps(raw))
+    g = TrackerGuard(tmp_path / 'g.json')
+    assert g.purpose_counts('site:x', 'tv', now)['day'] == 1
+    g._load()
+    assert g.log['site:x'] == [[now - 10, 'b'], [now - 40, 'i']]
+    assert g.take('site:x', True, False, now=now) is None
+    saved = json.loads((tmp_path / 'g.json').read_text())
+    assert all(k in ('i', 'b') for _t, k in saved['log']['site:x'])
+    assert saved['purposes']['site:x'] == [[now - 10, 'tv']]
+
+
+def test_a_rolled_back_guard_still_counts_tv_requests(tmp_path, monkeypatch):
+    """The 1a4ff5e guard keeps only [ts, 'i'|'b'] log entries; TV's requests
+    must survive a rollback so its shared caps still count them."""
+    import subprocess
+    import sys
+    import time
+    now = time.time()
+    g = TrackerGuard(tmp_path / 'tracker_guard.json')
+    for i in range(3):
+        assert g.take('site:x', False, False, now=now - 8000 + i * 3700, purpose='tv') is None
+    old = subprocess.run(['git', 'show', '1a4ff5e:app/tracker_guard.py'], capture_output=True, text=True,
+                         cwd=str(Path(__file__).resolve().parent.parent))
+    if old.returncode != 0:
+        pytest.skip('1a4ff5e not in this clone')
+    mod = tmp_path / 'old_guard.py'
+    mod.write_text(old.stdout)
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('old_guard', mod)
+    og = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, 'old_guard', og)
+    spec.loader.exec_module(og)
+    rolled = og.TrackerGuard(tmp_path / 'tracker_guard.json')
+    rolled._load()
+    assert rolled.counts('site:x', now)[1] == 3
 
 
 @pytest.mark.parametrize('purpose', ['TV', 'tv!', '', 'x' * 17, 7])
@@ -245,7 +287,7 @@ def test_tv_budget_take_and_usage(guard):
     cfg = {'type': 'iptorrents', 'url': 'https://iptorrents.com'}
     assert tv_budget.take(cfg, now=T0, guard=guard) is None
     assert tv_budget.usage(cfg, now=T0 + 1, guard=guard) == {'used': 1, 'cap': 8}
-    assert guard.log == {'site:iptorrents': [[T0, 'b:tv']]}
+    assert guard.log == {'site:iptorrents': [[T0, 'b']]} and guard.purposes == {'site:iptorrents': [[T0, 'tv']]}
 
 
 def test_search_one_charges_the_purpose(guard, monkeypatch):
@@ -255,7 +297,8 @@ def test_search_one_charges_the_purpose(guard, monkeypatch):
     monkeypatch.setattr(guard, 'wait_spacing', lambda tid: None)
     cfg = {'id': 1, 'type': 'torznab', 'name': 'A', 'url': 'https://a.example/api', 'categories': [5000]}
     s.search_one(cfg, 'Show S01E01', [5000], 50, False, purpose='tv')
-    assert [k for _t, k in guard.log['host:a.example']] == ['b:tv']
+    assert [k for _t, k in guard.log['host:a.example']] == ['b']
+    assert [k for _t, k in guard.purposes['host:a.example']] == ['tv']
 
 
 # ---------------------------------------------------------------- tv_settings.json

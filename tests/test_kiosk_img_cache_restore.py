@@ -137,7 +137,9 @@ def _sw(urls, spec):
 
 
 def test_sw_version_bumped():
-    assert "const CACHE_VERSION = 'media-kiosk-v138';" in (ROOT / 'static/sw.js').read_text()
+    import re
+    m = re.search(r"const CACHE_VERSION = 'media-kiosk-v(\d+)';", (ROOT / 'static/sw.js').read_text())
+    assert m and int(m.group(1)) >= 138          # each frontend change bumps it (tests/test_sw_stamp.py)
 
 
 @pytest.mark.skipif(NODE is None, reason='node is not installed')

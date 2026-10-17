@@ -394,3 +394,30 @@ describe('Settings wiring for Library paths', () => {
     expect(calls.some(c => c.url.includes('library-'))).toBe(false);
   });
 });
+
+describe('Settings > Library paths > Downloads (QA-UI1)', () => {
+  it('a missing downloads folder and grabs whose files are not found show at the top', async () => {
+    const since = Math.floor(new Date(2026, 9, 16, 9, 5).getTime() / 1000);
+    state = { ...base(), downloads: { path: '/downloads', status: 'missing' },
+      not_found: [{ title: 'Heat', since }, { title: 'Ronin', since: since + 60 }] };
+    render(<LibraryPathsSettings wide />);
+    const box = await screen.findByTestId('lp-downloads');
+    const sections = Array.from(screen.getByTestId('library-paths-section').querySelectorAll('h3')).map(h => h.textContent);
+    expect(sections[0]).toBe('Downloads');
+    const folder = within(box).getByTestId('lp-downloads-folder');
+    expect(folder.textContent).toContain('Downloads folder');
+    expect(folder.textContent).toContain('/downloads');
+    expect(within(box).getByTestId('lp-downloads-status').textContent).toBe('Missing');
+    expect(within(box).getByTestId('lp-downloads-status').style.color).toBe('var(--color-danger)');
+    const lost = within(box).getAllByTestId('lp-not-found');
+    expect(lost.map(r => r.textContent)).toEqual(['HeatSince Oct 16Files not found', 'RoninSince Oct 16Files not found']);
+  });
+
+  it('a readable downloads folder shows no status and no list when nothing is lost', async () => {
+    state = { ...base(), downloads: { path: '/downloads', status: 'ok' }, not_found: [] };
+    render(<LibraryPathsSettings wide />);
+    const box = await screen.findByTestId('lp-downloads');
+    expect(within(box).queryByTestId('lp-downloads-status')).toBeNull();
+    expect(within(box).queryAllByTestId('lp-not-found')).toHaveLength(0);
+  });
+});

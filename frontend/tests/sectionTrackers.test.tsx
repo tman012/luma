@@ -37,7 +37,8 @@ function server() {
         const byId = new Map(state.map(t => [t.id, t]));
         state = body.trackers.map((t: { id: number; enabled: boolean }) => ({ ...byId.get(t.id)!, enabled: t.enabled }));
       }
-      return res({ section: 'tv', trackers: state });
+      // Like the server: active = saved on and usable.
+      return res({ section: 'tv', trackers: state.map(t => ({ ...t, active: t.enabled && t.global_enabled && t.has_category })) });
     }
     return res({}, 404);
   });
@@ -65,26 +66,56 @@ describe('SectionTrackersList', () => {
     const meta = rows().map(r => r.querySelector('[data-testid="section-tracker-meta"]')?.textContent ?? '');
     // The type is left out when it is the name; an empty line isn't drawn.
     expect(meta).toEqual(['3 of 8 today', '', 'Torznab · No TV category', 'Torznab · Off in Trackers']);
-    expect(screen.getAllByRole('switch').map(s => s.getAttribute('aria-checked'))).toEqual(['true', 'false', 'true', 'false']);
+    // Movies Only is saved on but has no TV category: it shows off (QA-TV2).
+    expect(screen.getAllByRole('switch').map(s => s.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false', 'false']);
   });
 
-  it('rows that cannot be searched show their saved switch disabled at 40%', async () => {
+  it('unusable rows show off and locked at 40%, still focusable, and only switching on is blocked', async () => {
     render(<SectionTrackersList section="tv" label="Trackers" />);
     await waitFor(() => expect(rows()).toHaveLength(4));
     const sw = (n: string) => screen.getByRole('switch', { name: n }) as HTMLButtonElement;
     for (const n of ['Movies Only', 'Paused']) {
-      expect(sw(n).disabled).toBe(true);
+      expect(sw(n).disabled).toBe(false);                       // reachable by keyboard
+      expect(sw(n).getAttribute('aria-disabled')).toBe('true');
+      expect(sw(n).getAttribute('aria-checked')).toBe('false');
       expect(sw(n).style.opacity).toBe('0.4');
+      expect(document.getElementById(sw(n).getAttribute('aria-describedby')!)!.textContent)
+        .toMatch(/No TV category|Off in Trackers/);
+      sw(n).focus();
+      expect(document.activeElement).toBe(sw(n));
       fireEvent.click(sw(n));
+      fireEvent.keyDown(sw(n), { key: ' ' });
     }
-    expect(sw('Movies Only').getAttribute('aria-checked')).toBe('true');    // saved state still shown
-    expect(sw('Paused').getAttribute('aria-checked')).toBe('false');
     for (const n of ['IPTorrents', 'BeyondHD']) {
-      expect(sw(n).disabled).toBe(false);
+      expect(sw(n).getAttribute('aria-disabled')).toBeNull();
       expect(sw(n).style.opacity).toBe('1');
     }
     await new Promise(r => setTimeout(r, 20));
     expect(calls.filter(c => c.method === 'PUT')).toHaveLength(0);
+  });
+
+  it('saving the list keeps an unusable row\'s saved switch underneath', async () => {
+    render(<SectionTrackersList section="tv" label="Trackers" />);
+    await waitFor(() => expect(rows()).toHaveLength(4));
+    fireEvent.click(screen.getByRole('switch', { name: 'BeyondHD' }));
+    await waitFor(() => expect(calls.filter(c => c.method === 'PUT')).toHaveLength(1));
+    expect(calls.find(c => c.method === 'PUT')!.body!.trackers.find(t => t.id === 3)).toEqual({ id: 3, enabled: true });
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'BeyondHD' }).getAttribute('aria-checked')).toBe('true'));
+    expect(screen.getByRole('switch', { name: 'Movies Only' }).getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('turned back on in Trackers, a saved-on row shows on again (the list matches what is searched)', async () => {
+    state = state.map(t => (t.id === 4 ? { ...t, enabled: true } : t));     // saved on while off in Trackers
+    render(<SectionTrackersList section="tv" label="Trackers" />);
+    await waitFor(() => expect(rows()).toHaveLength(4));
+    expect(screen.getByRole('switch', { name: 'Paused' }).getAttribute('aria-checked')).toBe('false');
+    cleanup();
+    state = state.map(t => (t.id === 4 ? { ...t, global_enabled: true } : t));
+    render(<SectionTrackersList section="tv" label="Trackers" />);
+    await waitFor(() => expect(rows()).toHaveLength(4));
+    const sw = screen.getByRole('switch', { name: 'Paused' });
+    expect(sw.getAttribute('aria-checked')).toBe('true');
+    expect(sw.getAttribute('aria-disabled')).toBeNull();
   });
 
   it('desktop rows: titles 15/500, subtitles 13px muted; phone titles 16', async () => {

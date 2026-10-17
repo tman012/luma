@@ -760,13 +760,20 @@ SETTINGS_PLEX_PATH = '/settings/plex'
 _owner_pending: Dict[int, Dict[str, Any]] = {}   # owner uid -> {pin_id, created, token, servers}
 
 
-def _owner_or_error():
+def _owner_or_error(allow_implicit: bool = False):
     """(user, None) for the signed-in owner; else (None, error response).
     The owner is the account setup created; installs set up before the
-    Start flow fall back to the first admin."""
+    Start flow fall back to the first admin.
+
+    allow_implicit: also accept the implicit LAN owner (auth_required
+    'disabled_local' on a full build), the way the full build's other admin
+    actions do. It is still the owner's account, never another admin, a
+    plain or Plex-approved user, or the service key. Minimal builds never
+    have an implicit user."""
     from flask import g
     user = _cfg['get_current_user']()
-    if not user or getattr(g, 'implicit_user', False) or not user.get('id'):
+    implicit = bool(getattr(g, 'implicit_user', False))
+    if not user or (implicit and not allow_implicit) or not user.get('id'):
         return None, (jsonify({'error': 'Sign in first'}), 401)
     if not user.get('is_admin'):
         return None, (jsonify({'error': 'Owner only'}), 403)

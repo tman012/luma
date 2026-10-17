@@ -5,8 +5,9 @@ qBittorrent. The test install tags every torrent it adds with its test tag
 (LUMA_TEST_QBIT_TAG, default 'luma-test'), and only ever moves torrents it
 tracked by hash *and* that carry the tag. Only the tag counts: a category of
 the same name does not, and a tag equal to an app's category ('luma',
-'radarr', 'sonarr', ...) is refused and the default used instead, so the test
-install can never claim production's downloads.
+'radarr', 'sonarr', ..., or the configured qbittorrent.app_category) is
+refused and the default used instead, so the test install can never claim
+production's downloads.
 Production's auto-rename monitor skips torrents that carry it. The tag lives in
 the environment, not in settings.json, so production's config is never seeded
 with it.
@@ -32,9 +33,29 @@ logger = logging.getLogger(__name__)
 _warned: Set[str] = set()
 
 
+_cfg: dict = {}
+
+
+def init(settings=None) -> None:
+    """Give tag_name() the settings, so the configured app category
+    (Settings > qBittorrent, qbittorrent.app_category) is reserved too."""
+    _cfg['settings'] = settings
+
+
+def _app_category() -> str:
+    s = _cfg.get('settings')
+    if s is None:
+        return ''
+    try:
+        v = s.get('qbittorrent.app_category')
+    except Exception:
+        return ''
+    return v.strip().casefold() if isinstance(v, str) else ''
+
+
 def _reserved() -> Set[str]:
-    extra = (os.environ.get('LUMA_QBIT_APP_CATEGORY') or '').strip().casefold()
-    return set(RESERVED) | ({extra} if extra else set())
+    extra = {(os.environ.get('LUMA_QBIT_APP_CATEGORY') or '').strip().casefold(), _app_category()}
+    return set(RESERVED) | {x for x in extra if x}
 
 
 def tag_name() -> str:

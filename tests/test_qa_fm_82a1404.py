@@ -252,8 +252,7 @@ def test_real_enospc_on_a_full_folder_leaves_no_partial(env, monkeypatch):
     monkeypatch.setattr(lm, 'free_bytes', lambda p: 10 ** 15)
 
     def full(src, dst, exclusive=False):
-        fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o664)
-        os.write(fd, b'half'); os.close(fd)
+        os.write(dst, b'half')             # the mover hands over its partial's descriptor
         raise OSError(errno.ENOSPC, 'No space left on device')
     monkeypatch.setattr(lm, '_paced_copy', full)
     lm.track(H1, TMDB, 'Heat.1995')

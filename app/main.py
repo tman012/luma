@@ -4619,8 +4619,13 @@ def cleanup_downloads_storage():
     undoable; the UI gates it behind an explicit confirm. Owner only, and
     nothing is deleted while qBittorrent can't be read (the test install's
     downloads in a shared client can't be told apart without it).
+
+    Owner only, by the full build's own owner rule: the implicit LAN owner
+    (auth_required 'disabled_local') counts, as it does for the other admin
+    actions; other admins, plain and Plex-approved users and the service key
+    (companion and kiosk apps) never delete.
     """
-    _user, err = _start_flow._owner_or_error()
+    _user, err = _start_flow._owner_or_error(allow_implicit=True)
     if err:
         return err
     try:
@@ -21369,6 +21374,8 @@ app.register_blueprint(_qbit_connector.bp)
 from app import file_management as _file_management
 from app import library_mover as _library_mover
 _file_management.init(settings=settings, owner_or_error=_start_flow._owner_or_error)
+from app import qbit_owner as _qbit_owner  # noqa: E402
+_qbit_owner.init(settings=settings)
 _library_mover.init(settings=settings)
 app.register_blueprint(_file_management.bp)
 
