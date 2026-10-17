@@ -10,12 +10,16 @@ import { useModalHost } from '@/contexts/ModalHostContext';
 import type { Card } from '@/components/home/homeApi';
 import { LUMA_BLUE } from '@/ui/lumaButton';
 import { fetchHome, type HomeData } from '@/components/home/homeApi';
+import { KioskHome, useKioskWidth } from '@/components/home/KioskHome';
 
 export function MinimalHomePage() {
   const { authenticated, loading, needsStart, startInProgress, pinUnlock, user, implicit, logout } = useAuth();
   const navigate = useNavigate();
-  // index.css locks html/body scrolling for the kiosk; Home scrolls the page.
-  useBodyScroll();
+  // >=1024px: the web kiosk (one full-screen slideshow, no scroll). Phones
+  // and small tablets keep the rails, which scroll the page: index.css locks
+  // html/body scrolling, so unlock it there.
+  const kiosk = useKioskWidth();
+  useBodyScroll(!kiosk);
   const [busy, setBusy] = useState(false);
   const [data, setData] = useState<HomeData | null>(null);
   const [failed, setFailed] = useState(false);
@@ -26,7 +30,7 @@ export function MinimalHomePage() {
 
   const ready = !loading && authenticated && !startInProgress;
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || kiosk) return;
     let alive = true;
     setFailed(false);
     setSlow(false);
@@ -36,7 +40,7 @@ export function MinimalHomePage() {
     // One request returns every rail, so all of them appear together.
     fetchHome().then(d => { if (alive) setData(d); }).catch(() => { if (alive) setFailed(true); });
     return () => { alive = false; window.clearTimeout(timer); };
-  }, [ready, attempt]);
+  }, [ready, attempt, kiosk]);
 
   if (loading) return null;
   if (!authenticated) return <Navigate to={needsStart ? '/start' : pinUnlock ? '/unlock' : '/login'} replace />;
@@ -48,14 +52,28 @@ export function MinimalHomePage() {
     navigate('/login', { replace: true });
   };
 
+  const menu = (user?.is_admin || !implicit) && (
+    <AccountMenu name={user?.name || ''} admin={!!user?.is_admin} canSignOut={!implicit} busy={busy} onSignOut={signOut} />
+  );
+
+  if (kiosk) {
+    return (
+      <div data-step="home" data-layout="kiosk">
+        <KioskHome />
+        <header style={kioskBar} data-testid="kiosk-header">
+          <img src={assetUrl(LOGO_SRC)} alt="Luma" style={{ height: 28, width: 'auto' }} draggable={false} />
+          {menu}
+        </header>
+      </div>
+    );
+  }
+
   return (
     <div style={page} data-step="home">
       <style>{railCss}</style>
       <header style={bar}>
         <img src={assetUrl(LOGO_SRC)} alt="Luma" style={{ height: 30, width: 'auto' }} draggable={false} />
-        {(user?.is_admin || !implicit) && (
-          <AccountMenu name={user?.name || ''} admin={!!user?.is_admin} canSignOut={!implicit} busy={busy} onSignOut={signOut} />
-        )}
+        {menu}
       </header>
       <main style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
         {homeView(data, failed || slow, () => setAttempt(a => a + 1), openCard)}
@@ -187,6 +205,12 @@ export const homeBar: React.CSSProperties = {
   borderBottom: '1px solid rgba(255,255,255,0.06)',
 };
 const bar = homeBar;
+/** Web kiosk header: overlays the slideshow, top gradient, no glass. */
+export const kioskBar: React.CSSProperties = {
+  position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50, display: 'flex', alignItems: 'center',
+  justifyContent: 'space-between', padding: '24px 60px',
+  background: 'linear-gradient(to bottom, rgba(0,0,0,0.8), transparent)',
+};
 export const iconBtn: React.CSSProperties = {
   width: 40, height: 40, borderRadius: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
   background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', cursor: 'pointer',

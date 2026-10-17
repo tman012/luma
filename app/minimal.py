@@ -18,6 +18,8 @@ ALLOWED_PATHS = frozenset({
     '/manifest.json', '/sw.js', '/api/security', '/api/version',
     # Home (#11): rails, the Libraries choice and proxied posters. Sign-in required.
     '/api/home', '/api/home/libraries', '/api/img/plex', '/settings/libraries',
+    # Web kiosk home (#12, >=1024px): prod's hero slideshow data. Sign-in required.
+    '/api/hero/content',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).

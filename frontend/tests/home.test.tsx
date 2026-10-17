@@ -2,6 +2,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// The voice module primes an AudioContext on the first click; jsdom has none.
+class FakeAudioContext { state = 'running'; resume() { return Promise.resolve(); } createBuffer() { return {}; } createBufferSource() { return { connect() {}, start() {}, buffer: null }; } destination = {}; }
+(globalThis as unknown as { AudioContext: unknown }).AudioContext ??= FakeAudioContext;
+
 const auth = { authenticated: true, loading: false, needsStart: false, startInProgress: false, pinUnlock: false,
   user: { id: 1, name: 'taylor', is_admin: true }, implicit: false, logout: vi.fn() };
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));

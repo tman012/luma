@@ -9,6 +9,8 @@ interface KenBurnsBackdropProps {
   className?: string;
   /** When true, disable ken-burns animation (static backdrop with crossfade only). Tablet perf. */
   disableAnimation?: boolean;
+  /** Swap images with no fade (reduced motion). */
+  instant?: boolean;
 }
 
 /**
@@ -25,6 +27,7 @@ export function KenBurnsBackdrop({
   prevImage,
   className,
   disableAnimation,
+  instant,
 }: KenBurnsBackdropProps) {
   // Which layer (0 or 1) is currently "on top" (opacity-100).
   const activeLayerRef = useRef(0);
@@ -73,13 +76,13 @@ export function KenBurnsBackdrop({
       <div
         ref={layerARe}
         className={cn(shared, !disableAnimation && 'animate-ken-burns')}
-        style={{ opacity: 1 }}
+        style={{ opacity: 1, ...(instant ? { transition: 'none' } : null) }}
       />
       {/* Layer B — starts hidden */}
       <div
         ref={layerBRef}
         className={cn(shared, !disableAnimation && 'animate-ken-burns-alt')}
-        style={{ opacity: 0 }}
+        style={{ opacity: 0, ...(instant ? { transition: 'none' } : null) }}
       />
     </div>
   );

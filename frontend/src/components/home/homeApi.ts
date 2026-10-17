@@ -1,4 +1,6 @@
 import { apiFetch } from '@/apiClient';
+import { mapHeroMovie } from '@/services/api';
+import type { HeroMovie, HeroContentResponse } from '@/services/types';
 
 export interface Card {
   key: string; type: string; title: string; subtitle: string;
@@ -39,4 +41,12 @@ export function move<T>(list: T[], from: number, to: number): T[] {
   const [it] = next.splice(from, 1);
   next.splice(to, 0, it as T);
   return next;
+}
+
+/** Prod kiosk's hero data: the selected library's most recent movies. */
+export async function fetchHeroMovies(): Promise<HeroMovie[]> {
+  const res = await apiFetch('/api/hero/content');
+  if (!res.ok) throw new Error(String(res.status));
+  const data = (await res.json()) as HeroContentResponse;
+  return data.success ? (data.movies || []).map(mapHeroMovie) : [];
 }

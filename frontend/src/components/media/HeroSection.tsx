@@ -14,6 +14,43 @@ interface HeroSectionProps {
   movies: HeroMovie[];
   backdropSource?: 'plex' | 'tmdb';
   className?: string;
+  /**
+   * Web kiosk home (LUMA_MINIMAL, >=1024px): the same slideshow with nothing
+   * to interact with. No click-to-open, swipe/drag, focus ring or voice orb;
+   * rotation pauses while the tab is hidden and fades are instant under
+   * reduced motion. Desktop sizing, text at white/90.
+   */
+  displayOnly?: boolean;
+}
+
+/** True while the page is hidden (another tab, minimized). */
+function useDocumentHidden(enabled: boolean): boolean {
+  const [hidden, setHidden] = useState(() => enabled && typeof document !== 'undefined' && document.hidden);
+  useEffect(() => {
+    if (!enabled) return;
+    const sync = () => setHidden(document.hidden);
+    sync();
+    document.addEventListener('visibilitychange', sync);
+    return () => document.removeEventListener('visibilitychange', sync);
+  }, [enabled]);
+  return enabled && hidden;
+}
+
+/** prefers-reduced-motion: reduce, kept live. */
+function useReducedMotion(enabled: boolean): boolean {
+  const query = '(prefers-reduced-motion: reduce)';
+  const [reduced, setReduced] = useState(
+    () => enabled && typeof window !== 'undefined' && !!window.matchMedia?.(query).matches,
+  );
+  useEffect(() => {
+    if (!enabled || !window.matchMedia) return;
+    const mq = window.matchMedia(query);
+    const sync = () => setReduced(mq.matches);
+    sync();
+    mq.addEventListener?.('change', sync);
+    return () => mq.removeEventListener?.('change', sync);
+  }, [enabled]);
+  return enabled && reduced;
 }
 
 /** Resolve the backdrop URL for a given movie based on source preference. */
@@ -40,7 +77,7 @@ function preloadImage(url: string | null, timeoutMs = 1500): Promise<void> {
   });
 }
 
-export function HeroSection({ movies, backdropSource = 'plex', className }: HeroSectionProps) {
+export function HeroSection({ movies, backdropSource = 'plex', className, displayOnly = false }: HeroSectionProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const prevIndexRef = useRef(0);
   const transitioningRef = useRef(false);
@@ -49,7 +86,10 @@ export function HeroSection({ movies, backdropSource = 'plex', className }: Hero
 
   const { openMovie } = useModalHost();
   const perf = useTabletPerf();
-  const d = useUiDensity();
+  const density = useUiDensity();
+  const d = displayOnly ? { ...density, isTablet: false } : density;
+  const pageHidden = useDocumentHidden(displayOnly);
+  const reducedMotion = useReducedMotion(displayOnly);
 
   // Search is now hosted globally (GlobalSearchHost) and driven by the
   // `open-search` / `search-query` window events — no local overlay here.
@@ -89,7 +129,7 @@ export function HeroSection({ movies, backdropSource = 'plex', className }: Hero
 
   // Auto-rotate every 8 seconds. Paused when modal is open on tablet.
   useEffect(() => {
-    if (movies.length <= 1 || modalOpen) return;
+    if (movies.length <= 1 || modalOpen || pageHidden) return;
     const timer = setInterval(() => {
       setActiveIndex((current) => {
         const next = (current + 1) % movies.length;
@@ -99,7 +139,7 @@ export function HeroSection({ movies, backdropSource = 'plex', className }: Hero
       });
     }, 8000);
     return () => clearInterval(timer);
-  }, [movies.length, advanceTo, modalOpen]);
+  }, [movies.length, advanceTo, modalOpen, pageHidden]);
 
   if (movies.length === 0) return null;
 
@@ -128,6 +168,7 @@ export function HeroSection({ movies, backdropSource = 'plex', className }: Hero
     focusKey: 'hero-content',
     zoneId: 'home-hero',
     onEnter: handleHeroClick,
+    disabled: displayOnly,
   });
 
   const handleDragStart = (x: number) => {
@@ -147,6 +188,92 @@ export function HeroSection({ movies, backdropSource = 'plex', className }: Hero
     }
   };
 
+  const text = displayOnly ? 'text-white/90' : 'text-text-secondary';
+
+  const backdrop = (
+    <>
+      {/* Static crossfade backdrop — Ken Burns pan/zoom disabled per kiosk pref */}
+      <KenBurnsBackdrop
+        currentImage={currentBackdropUrl}
+        prevImage={prevBackdropUrl}
+        disableAnimation
+        instant={reducedMotion}
+      />
+
+      {/* Bottom gradient overlay */}
+      <div className="absolute inset-0 bg-gradient-to-t from-kiosk-black via-kiosk-black/50 to-kiosk-black/20" />
+    </>
+  );
+
+  const details = (
+    <>
+          {/* Title */}
+          <h1 className={cn(
+            'mb-4 font-bold leading-tight drop-shadow-2xl', text,
+            d.isTablet ? 'text-[44px]' : 'text-[clamp(36px,3.2vw,60px)]',
+          )}>
+            {movie.title}
+          </h1>
+
+          {/* Meta row: Year · Duration · MPAA */}
+          {(() => {
+            const parts: string[] = [];
+            if (movie.year) parts.push(String(movie.year));
+            if (movie.duration > 0) parts.push(formatRuntime(movie.duration));
+            if (movie.contentRating) parts.push(movie.contentRating);
+            return parts.length > 0 ? (
+              <p className={cn(
+                'mb-4 font-medium', text,
+                d.isTablet ? 'text-[22px]' : 'text-[clamp(18px,1.6vw,24px)]',
+              )}>
+                {parts.join(' \u00B7 ')}
+              </p>
+            ) : null;
+          })()}
+
+          {/* Plot */}
+          {movie.summary && (
+            <p className={cn(
+              'max-w-[65%] leading-relaxed', text,
+              d.isTablet
+                ? (hasMeta ? 'text-[18px]' : 'text-[22px]')
+                : 'text-[clamp(16px,1.3vw,20px)]',
+            )}>
+              {movie.summary}
+            </p>
+          )}
+
+          {/* Genres */}
+          {movie.genres && movie.genres.length > 0 && (
+            <div className="mt-5 flex gap-3">
+              {movie.genres.map((genre) => (
+                <span
+                  key={genre}
+                  className={cn('rounded-full bg-glass-10 px-4 py-1.5 text-[16px]', displayOnly ? 'text-white/70' : 'text-text-muted')}
+                >
+                  {genre}
+                </span>
+              ))}
+            </div>
+          )}
+    </>
+  );
+
+  if (displayOnly) {
+    return (
+      <section
+        className={cn('relative h-dvh w-full select-none overflow-hidden', className)}
+        data-hero-display-only
+        aria-roledescription="slideshow"
+      >
+        {backdrop}
+        <div data-hero-content className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-[60px] pb-[60px]">
+          {details}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section
       className={cn('relative h-dvh w-full overflow-hidden', className)}
@@ -156,15 +283,7 @@ export function HeroSection({ movies, backdropSource = 'plex', className }: Hero
       onMouseUp={(e) => { if (isDraggingRef.current) handleDragEnd(e.clientX); }}
       onMouseLeave={() => { dragStartXRef.current = null; isDraggingRef.current = false; }}
     >
-      {/* Static crossfade backdrop — Ken Burns pan/zoom disabled per kiosk pref */}
-      <KenBurnsBackdrop
-        currentImage={currentBackdropUrl}
-        prevImage={prevBackdropUrl}
-        disableAnimation
-      />
-
-      {/* Bottom gradient overlay */}
-      <div className="absolute inset-0 bg-gradient-to-t from-kiosk-black via-kiosk-black/50 to-kiosk-black/20" />
+      {backdrop}
 
       {/* Alfred orb — replaces search bar in expanded mode */}
       <HeroOrb />
@@ -194,55 +313,7 @@ export function HeroSection({ movies, backdropSource = 'plex', className }: Hero
             />
           )}
 
-          {/* Title */}
-          <h1 className={cn(
-            'mb-4 font-bold leading-tight text-text-secondary drop-shadow-2xl',
-            d.isTablet ? 'text-[44px]' : 'text-[clamp(36px,3.2vw,60px)]',
-          )}>
-            {movie.title}
-          </h1>
-
-          {/* Meta row: Year · Duration · MPAA */}
-          {(() => {
-            const parts: string[] = [];
-            if (movie.year) parts.push(String(movie.year));
-            if (movie.duration > 0) parts.push(formatRuntime(movie.duration));
-            if (movie.contentRating) parts.push(movie.contentRating);
-            return parts.length > 0 ? (
-              <p className={cn(
-                'mb-4 font-medium text-text-secondary',
-                d.isTablet ? 'text-[22px]' : 'text-[clamp(18px,1.6vw,24px)]',
-              )}>
-                {parts.join(' \u00B7 ')}
-              </p>
-            ) : null;
-          })()}
-
-          {/* Plot */}
-          {movie.summary && (
-            <p className={cn(
-              'max-w-[65%] leading-relaxed text-text-secondary',
-              d.isTablet
-                ? (hasMeta ? 'text-[18px]' : 'text-[22px]')
-                : 'text-[clamp(16px,1.3vw,20px)]',
-            )}>
-              {movie.summary}
-            </p>
-          )}
-
-          {/* Genres */}
-          {movie.genres && movie.genres.length > 0 && (
-            <div className="mt-5 flex gap-3">
-              {movie.genres.map((genre) => (
-                <span
-                  key={genre}
-                  className="rounded-full bg-glass-10 px-4 py-1.5 text-[16px] text-text-muted"
-                >
-                  {genre}
-                </span>
-              ))}
-            </div>
-          )}
+          {details}
 
         </div>
       </FocusZone>

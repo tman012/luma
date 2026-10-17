@@ -12,8 +12,9 @@ import { useEffect } from 'react';
  * (set in index.css) so the page content scrolls via the document
  * flow instead of a fixed container.
  */
-export function useBodyScroll() {
+export function useBodyScroll(enabled = true) {
   useEffect(() => {
+    if (!enabled) return;
     const html = document.documentElement;
     const body = document.body;
     const prevHtml = html.style.overflow;
@@ -24,5 +25,5 @@ export function useBodyScroll() {
       html.style.overflow = prevHtml;
       body.style.overflow = prevBody;
     };
-  }, []);
+  }, [enabled]);
 }
