@@ -8,6 +8,13 @@ import threading
 import time
 
 import pytest
+# Imported at collection: tests that mock.patch.dict(sys.modules) drop any
+# cryptography submodule first imported inside them, and a re-import then
+# mismatches the Rust bindings ("curve must be an EllipticCurve instance").
+from cryptography import x509  # noqa: F401
+from cryptography.hazmat.primitives import hashes, serialization  # noqa: F401
+from cryptography.hazmat.primitives.asymmetric import ec  # noqa: F401
+from cryptography.x509.oid import NameOID  # noqa: F401
 
 import app.main
 import app.user_auth as user_auth
