@@ -7,11 +7,12 @@ import type React from 'react';
 import { apiFetch } from '@/apiClient';
 import { FONT } from '@/components/start/StartUI';
 import { T } from '@/theme/tokens';
+import { Switch } from '@/components/trackers/trackersUi';
 
 export const QBIT_API = '/api/settings/connectors/qbittorrent';
 export const QBIT_UNREACHABLE = "Couldn't reach Luma";
 
-export interface QbitView { url: string; username: string; category: string; password: { set: boolean } }
+export interface QbitView { url: string; username: string; category: string; password: { set: boolean }; add_paused?: boolean }
 type Fields = Partial<Record<'url' | 'username' | 'password' | 'category', string>>;
 interface Answer { ok?: boolean; message?: string; version?: string; error?: string; fields?: Fields }
 
@@ -45,6 +46,7 @@ function QbitForm({ view, onSaved }: { view: QbitView; onSaved: (v: QbitView) =>
   const [username, setUsername] = useState(view.username);
   const [category, setCategory] = useState(view.category);
   const [password, setPassword] = useState('');
+  const [paused, setPaused] = useState(!!view.add_paused);
   const [show, setShow] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -63,7 +65,8 @@ function QbitForm({ view, onSaved }: { view: QbitView; onSaved: (v: QbitView) =>
   const urlChanged = normUrl(url) !== normUrl(view.url);
   // A saved password belongs to the saved URL only.
   const keepsPassword = view.password.set && !urlChanged;
-  const dirty = urlChanged || username.trim() !== view.username || category.trim() !== view.category || password !== '';
+  const dirty = urlChanged || username.trim() !== view.username || category.trim() !== view.category || password !== ''
+    || paused !== !!view.add_paused;
   const canSave = !!url.trim() && dirty && !saving;
 
   const edit = (key: keyof Fields, set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -76,6 +79,7 @@ function QbitForm({ view, onSaved }: { view: QbitView; onSaved: (v: QbitView) =>
     url: url.trim(), username: username.trim(), category: category.trim(),
     ...(password !== '' ? { password } : null),
   });
+  const saveBody = () => ({ ...body(), add_paused: paused });
 
   const test = async () => {
     if (testing) return;
@@ -96,7 +100,7 @@ function QbitForm({ view, onSaved }: { view: QbitView; onSaved: (v: QbitView) =>
   const save = async () => {
     if (!canSave) { if (!url.trim()) setErrors(e => ({ ...e, url: 'Required' })); return; }
     setSaving(true);
-    const r = await send<QbitView & Answer>(QBIT_API, 'PUT', body());
+    const r = await send<QbitView & Answer>(QBIT_API, 'PUT', saveBody());
     if (!alive.current) return;
     setSaving(false);
     if (r.ok && typeof r.data.url === 'string') { onSaved(r.data); return; }
@@ -138,6 +142,10 @@ function QbitForm({ view, onSaved }: { view: QbitView; onSaved: (v: QbitView) =>
           {errors.password && <span id="qbit-password-error" data-testid="qbit-password-error" style={fieldError}>{errors.password}</span>}
         </div>
         {input('category', 'Category', category, edit('category', setCategory))}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 }} data-testid="qbit-paused-row">
+          <span id="qbit-paused-label" style={{ ...labelStyle, margin: 0 }}>Add paused</span>
+          <Switch small on={paused} label="Add paused" onChange={setPaused} />
+        </div>
         <div style={actions}>
           <button type="button" style={ghostBtn} disabled={testing} aria-busy={testing} onClick={test} data-testid="qbit-test">
             {testing ? 'Testing…' : 'Test'}

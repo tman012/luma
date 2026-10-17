@@ -64,7 +64,7 @@ describe('Settings > Connectors > qBittorrent', () => {
     expect(field('password').placeholder).toBe('••••••••');
     expect((screen.getByTestId('qbit-save') as HTMLButtonElement).disabled).toBe(true);
     // Labels and buttons only: no helper or explanatory text.
-    expect(card.textContent).toBe('qBittorrentURLUsernamePasswordShowCategoryTestSave');
+    expect(card.textContent).toBe('qBittorrentURLUsernamePasswordShowCategoryAdd pausedTestSave');
   });
 
   it('a fresh install starts empty', async () => {
@@ -106,7 +106,7 @@ describe('Settings > Connectors > qBittorrent', () => {
     expect((screen.getByTestId('qbit-save') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('qbit-save'));
     await screen.findByText('Saved');
-    expect(last(c => c.method === 'PUT')!.body).toEqual({ url: 'http://qbit.local:8080', username: 'admin', category: 'movies', password: PW });
+    expect(last(c => c.method === 'PUT')!.body).toEqual({ url: 'http://qbit.local:8080', username: 'admin', category: 'movies', password: PW, add_paused: false });
     expect(field('password').value).toBe('');
     expect(field('category').value).toBe('movies');
   });
@@ -117,7 +117,7 @@ describe('Settings > Connectors > qBittorrent', () => {
     type('username', 'taylor');
     fireEvent.click(screen.getByTestId('qbit-save'));
     await screen.findByText('Saved');
-    expect(last(c => c.method === 'PUT')!.body).toEqual({ url: 'http://qbit.local:8080', username: 'taylor', category: 'luma-test' });
+    expect(last(c => c.method === 'PUT')!.body).toEqual({ url: 'http://qbit.local:8080', username: 'taylor', category: 'luma-test', add_paused: false });
   });
 
   it('a new URL drops the dots and shows the server field error', async () => {
@@ -152,5 +152,19 @@ describe('Settings > Connectors > qBittorrent', () => {
     expect(screen.getByTestId('qbit-save').style.minHeight).toBe('44px');
     expect(screen.getByTestId('qbit-test').style.minHeight).toBe('44px');
     expect(screen.getByTestId('qbit-save').style.background).toBe('var(--color-accent)');
+  });
+
+  it('Add paused: a switch with no helper text, off by default; toggling it enables Save and is sent', async () => {
+    render(<ConnectorsSettings />);
+    await screen.findByTestId('connector-qbittorrent');
+    const sw = screen.getByRole('switch', { name: 'Add paused' });
+    expect(sw.getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByTestId('qbit-paused-row').textContent).toBe('Add paused');
+    expect((screen.getByTestId('qbit-save') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(sw);
+    expect(sw.getAttribute('aria-checked')).toBe('true');
+    expect((screen.getByTestId('qbit-save') as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByTestId('qbit-save'));
+    await waitFor(() => expect(last(c => c.method === 'PUT')!.body).toMatchObject({ add_paused: true }));
   });
 });

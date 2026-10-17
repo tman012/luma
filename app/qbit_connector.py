@@ -103,10 +103,11 @@ def _same_url(a: str, b: str) -> bool:
 def view() -> Dict[str, Any]:
     """What the card shows. All empty until a URL is saved."""
     url = _s('url')
+    paused = _cfg['settings'].get('qbittorrent.add_paused') is True
     if not url:
-        return {'url': '', 'username': '', 'category': '', 'password': {'set': False}}
+        return {'url': '', 'username': '', 'category': '', 'password': {'set': False}, 'add_paused': paused}
     return {'url': url, 'username': _s('username'), 'category': _s('app_category'),
-            'password': {'set': bool(_s('password'))}}
+            'password': {'set': bool(_s('password'))}, 'add_paused': paused}
 
 
 def _text(raw: Any, limit: int) -> Optional[str]:
@@ -253,6 +254,10 @@ def qbit_save():
     if errors:
         return _no_store(jsonify({'error': INVALID, 'fields': errors}), 400)
     section = {'url': cfg['url'], 'username': cfg['username'], 'app_category': cfg['category']}
+    if 'add_paused' in body:
+        if not isinstance(body['add_paused'], bool):
+            return _no_store(jsonify({'error': INVALID, 'fields': {'add_paused': INVALID}}), 400)
+        section['add_paused'] = body['add_paused']
     given, password = _password_in(body)
     if given:
         section['password'] = password

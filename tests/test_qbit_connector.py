@@ -115,7 +115,7 @@ def test_fresh_install_starts_empty(minimal):
     c = _client(minimal)
     r = _get(c)
     assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-store'
-    assert r.get_json() == {'url': '', 'username': '', 'category': '', 'password': {'set': False}}
+    assert r.get_json() == {'url': '', 'username': '', 'category': '', 'password': {'set': False}, 'add_paused': False}
 
 
 def test_prefills_from_settings_section_and_never_returns_password(minimal):
@@ -124,7 +124,7 @@ def test_prefills_from_settings_section_and_never_returns_password(minimal):
     c = _client(minimal)
     r = _get(c)
     assert r.get_json() == {'url': 'http://qbit.local:8080', 'username': 'admin', 'category': 'luma-test',
-                            'password': {'set': True}}
+                            'password': {'set': True}, 'add_paused': False}
     assert PW not in r.get_data(as_text=True)
 
 
@@ -286,3 +286,15 @@ def test_charsetless_ascii_body_is_read_as_utf8():
     r2 = requests.models.Response()
     r2.status_code, r2._content = 200, b'Ok.'
     assert qbit_connector._text_of(r2) == 'Ok.'
+
+
+def test_add_paused_is_saved_and_shown_and_defaults_off(minimal):
+    c = _client(minimal)
+    assert c.get('/api/settings/connectors/qbittorrent').get_json()['add_paused'] is False
+    r = _put(c, {'url': 'http://qbit.local:8080', 'username': 'admin', 'password': PW, 'category': 'a', 'add_paused': True})
+    assert r.status_code == 200 and r.get_json()['add_paused'] is True
+    assert app.main.settings.get('qbittorrent.add_paused') is True
+    assert app.main._qbit_add_fields()['paused'] == 'true'
+    r = _put(c, {'url': 'http://qbit.local:8080', 'username': 'admin', 'category': 'a', 'add_paused': 'yes'})
+    assert r.status_code == 400
+    assert _put(c, {'url': 'http://qbit.local:8080', 'username': 'admin', 'category': 'a'}).get_json()['add_paused'] is True
