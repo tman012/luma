@@ -1,7 +1,9 @@
+> Phone layout superseded by settings-page-spec.md (Plex iOS pattern). Library row behavior (drag, switch, saving, empty) still applies.
+
 # Phone Settings > Home screen (navy, <1024px)
 
 Navigation
-- Reached from the drawer: Home, Settings > Home screen (sidebar spec). No back arrow; header is the 56px app header: hamburger, page title "Home screen" (17px/600, white 95%, left after hamburger), avatar right.
+- Reached from user menu > Settings > Home screen (settings-page-spec.md). Header: back chevron to Settings, title "Home screen" (17px/600), no avatar.
 - Remove "Libraries" from the avatar menu; it keeps only Sign out.
 
 Layout
