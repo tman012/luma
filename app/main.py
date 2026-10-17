@@ -9132,9 +9132,11 @@ def check_ownership_batch():
     if not movies_to_check and not tv_to_check:
         return jsonify({'results': {}})
 
-    # Build allowed library names from configured media.paths
+    # Build allowed library names from configured media.paths. The minimal
+    # build ignores legacy media.paths (its libraries are the Library paths
+    # store); the settings themselves are left as they are.
     allowed_libraries = None
-    if use_media_paths:
+    if use_media_paths and not _minimal.enabled():
         media_paths = settings.get('media.paths') or []
         names = {p['name'].lower() for p in media_paths if isinstance(p, dict) and p.get('name')}
         if names:
