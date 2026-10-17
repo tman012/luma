@@ -289,7 +289,10 @@ def _qbit_session(session_factory, now: Optional[float] = None) -> Tuple[Optiona
                 _save_login_locked()
         return sess, url
     _close(sess)
-    rejected = r.status_code in (401, 403) or (r.status_code == 200 and body == 'Fails.')
+    # A redirect counts as a rejected sign-in too: the session never follows it,
+    # so retrying it forever would only resend the password to the same 3xx.
+    rejected = (r.status_code in (401, 403) or 300 <= r.status_code < 400
+                or (r.status_code == 200 and body == 'Fails.'))
     with _login_lock:
         _login['unreachable'] = 0
         if rejected:

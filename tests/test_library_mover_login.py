@@ -68,6 +68,26 @@ def test_wrong_password_ticking_every_30s_signs_in_at_most_3_times(waiting):
     assert lm.login_state()['held'] is True
 
 
+@pytest.mark.parametrize('status', [300, 301, 302, 303, 307, 308, 399])
+def test_a_redirected_sign_in_is_rejected_and_holds_after_3(waiting, status):
+    c = Client(lambda: Resp(status, ''))
+    seen = []
+    for t in range(0, 3600, 30):
+        n = len(c.logins)
+        lm.tick(now=T0 + t, session_factory=c.factory)
+        if len(c.logins) > n:
+            seen.append(t)
+    assert seen == [0, 60, 180]                # the same backoff as a wrong password
+    assert lm.login_state()['held'] is True
+    assert all(kw.get('allow_redirects') is False for kw in c.logins)
+
+
+def test_other_odd_answers_back_off_without_counting(waiting):
+    c = Client(lambda: Resp(500, ''))
+    run(c, range(0, 3600, 30))
+    assert lm.login_state()['held'] is False and lm.login_state()['failures'] == 0
+
+
 def test_backoff_is_exponential(waiting):
     c = Client()
     seen = []

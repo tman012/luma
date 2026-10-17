@@ -16,8 +16,9 @@ PASSWORD = 'hunter2-qbit-secret'
 
 
 class _Server:
-    def __init__(self, login_status=307, info_status=200):
+    def __init__(self, login_status=307, info_status=200, login_body='Ok.'):
         self.caught, self.login_status, self.info_status = [], login_status, info_status
+        self.login_body = login_body
         srv = self
 
         class H(BaseHTTPRequestHandler):
@@ -44,6 +45,8 @@ class _Server:
                 if self.path == '/api/v2/auth/login':
                     if srv.login_status in (301, 302, 303, 307, 308):
                         return self._send(srv.login_status, headers={'Location': '/catch/login'})
+                    if srv.login_body != 'Ok.':
+                        return self._send(200, srv.login_body.encode())
                     return self._send(200, b'Ok.', {'Set-Cookie': 'SID=sid-secret-cookie; path=/'})
                 if self.path.startswith('/api/v2/torrents/info'):
                     if srv.info_status != 200:
@@ -95,8 +98,8 @@ def test_session_never_follows_even_when_asked(server, status):
 def test_connector_test_treats_a_redirect_as_failed_sign_in(server, status):
     s = server(login_status=status)
     err, version = qbit_connector.check(s.url, 'u', PASSWORD)
-    assert err == qbit_connector.SIGN_IN_FAILED and version == ''
-    assert 'HTTP' not in err and not s.caught
+    assert err == 'qBittorrent redirected. Use its final address.' == qbit_connector.REDIRECTED
+    assert version == '' and 'HTTP' not in err and str(status) not in err and not s.caught
 
 
 def test_sid_cookie_is_never_sent_on_to_a_redirect(server):
@@ -144,8 +147,17 @@ def test_grab_path_never_reposts_the_password(server, grab, status):
                   environ_base={'REMOTE_ADDR': '192.168.1.20'},
                   json={'torrent_url': 'magnet:?xt=urn:btih:' + 'a' * 40 + '&dn=x'})
     assert r.status_code == 502
-    assert r.get_json() == {'error': 'Download client sign-in failed'}
+    assert r.get_json() == {'error': 'qBittorrent redirected. Use its final address.'}
     assert not s.caught
+
+
+def test_grab_wrong_password_still_says_sign_in_failed(server, grab):
+    s = server(login_status=200, login_body='Fails.')
+    app.main.settings.update({'qbittorrent': {'url': s.url, 'username': 'u', 'password': PASSWORD}})
+    r = grab.post('/api/downloads/add', headers={'Origin': 'http://localhost'},
+                  environ_base={'REMOTE_ADDR': '192.168.1.20'},
+                  json={'torrent_url': 'magnet:?xt=urn:btih:' + 'b' * 40 + '&dn=x'})
+    assert r.status_code == 502 and r.get_json() == {'error': 'Download client sign-in failed'}
 
 
 @pytest.mark.parametrize('status', [307, 308])

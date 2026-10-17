@@ -16596,6 +16596,10 @@ def add_torrent_to_qbittorrent():
         except req.exceptions.RequestException as e:
             logger.error(f"qBittorrent unreachable: {type(e).__name__}")
             return _download_client_unavailable()
+        if 300 <= login_response.status_code < 400:
+            from app.qbit_connector import REDIRECTED
+            logger.error(f"qBittorrent login redirected: {login_response.status_code}")
+            return jsonify({'error': REDIRECTED}), 502
         if login_response.status_code != 200 or _qbit_body(login_response) != 'Ok.':
             logger.error(f"qBittorrent login failed: {login_response.status_code}")
             return jsonify({'error': 'Download client sign-in failed'}), 502

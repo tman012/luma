@@ -47,7 +47,7 @@ TIMED_OUT = 'Timed out'
 UNREACHABLE = "Can't reach qBittorrent"
 CERT = 'Certificate error'
 BAD_LOGIN = 'Wrong username or password'
-SIGN_IN_FAILED = 'qBittorrent sign-in failed'
+REDIRECTED = 'qBittorrent redirected. Use its final address.'
 BANNED = 'qBittorrent blocked this address after failed logins'
 NOT_QBIT = 'Not a qBittorrent Web UI'
 UNEXPECTED = 'Unexpected response'
@@ -269,7 +269,7 @@ def check(url: str, username: str, password: str) -> Tuple[Optional[str], str]:
             return UNREACHABLE, ''
         body = _text_of(r)
         if 300 <= r.status_code < 400:
-            return SIGN_IN_FAILED, ''           # a redirect is never a sign-in
+            return REDIRECTED, ''               # a redirect is never a sign-in
         if r.status_code == 403:
             return BANNED, ''
         if r.status_code == 401:
