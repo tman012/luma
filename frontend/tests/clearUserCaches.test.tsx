@@ -23,7 +23,7 @@ describe('sign-out and account switch clear the caches', () => {
       return json({ success: true });
     }));
   });
-  afterEach(() => { cleanup(); vi.unstubAllGlobals(); Object.defineProperty(navigator, 'serviceWorker', { value: undefined, configurable: true }); });
+  afterEach(() => { sessionStorage.clear(); cleanup(); vi.unstubAllGlobals(); Object.defineProperty(navigator, 'serviceWorker', { value: undefined, configurable: true }); });
 
   async function mount() {
     render(<AuthProvider><Probe /></AuthProvider>);
@@ -46,5 +46,21 @@ describe('sign-out and account switch clear the caches', () => {
     me = { id: 2, name: 'b' };
     await act(async () => { await api!.login('b', '1234'); });
     expect(post).toHaveBeenCalledWith('CLEAR_ALL_CACHES');
+  });
+
+  it('an account switch after a reload still clears (last account kept in sessionStorage)', async () => {
+    sessionStorage.setItem('luma:cachesFor', '1');
+    me = { id: 2, name: 'b' };
+    await mount();
+    expect(post).toHaveBeenCalledWith('CLEAR_ALL_CACHES');
+    expect(sessionStorage.getItem('luma:cachesFor')).toBe('2');
+  });
+
+  it('a reload as the same account does not clear; sign-out forgets the account', async () => {
+    sessionStorage.setItem('luma:cachesFor', '1');
+    await mount();
+    expect(post).not.toHaveBeenCalled();
+    await act(async () => { await api!.logout(); });
+    expect(sessionStorage.getItem('luma:cachesFor')).toBeNull();
   });
 });
