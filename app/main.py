@@ -19451,16 +19451,21 @@ def _unbind_qbit_password_on_new_url(data: dict) -> None:
         q['password'] = ''
 
 
-def _auto_delete_widened_by(partial: dict) -> list:
-    """The automatic-deletion settings *partial* would widen if saved
-    (auto_delete_guard._widens_auto_delete on the settings before and after
-    the same merge settings.update does)."""
-    from app import settings_manager as _sm
+from app.settings_manager import SettingsVeto as _SettingsVeto  # noqa: E402
+
+
+def _auto_delete_veto(owner_err):
+    """settings.update veto for PUT /api/settings: refuse with *owner_err*
+    (the caller isn't the signed-in owner) when the write would widen
+    automatic deletion (auto_delete_guard._widens_auto_delete on the stored
+    and the merged settings, under the settings lock)."""
+    if owner_err is None:
+        return None
     from app.auto_delete_guard import _widens_auto_delete
-    old = settings.get_all()
-    cleaned = _sm._strip_mask_values(partial, _sm.SETTINGS_SCHEMA)
-    new = _sm._coerce_types(_sm._deep_merge(old, cleaned), _sm.SETTINGS_SCHEMA)
-    return _widens_auto_delete(old, new)
+
+    def veto(current, candidate):
+        return owner_err if _widens_auto_delete(current, candidate) else None
+    return veto
 
 
 @app.route('/api/settings', methods=['PUT'])
@@ -19487,16 +19492,19 @@ def update_settings():
 
         _unbind_qbit_password_on_new_url(data)
         # PM ruling: turning on or widening automatic deletion (Downloads
-        # Guard) needs the owner signed in with a session; turning it off or
-        # tightening it stays open to any admin.
-        widened = _auto_delete_widened_by(data)
-        if widened:
-            _user, owner_err = _start_flow.require_signed_in_owner()
-            if owner_err is not None:
-                resp, status = owner_err
-                resp.headers['Cache-Control'] = 'no-store'
-                return resp, status
-        success, errors = settings.update(data)
+        # Guard, or any folder it or the cleanup deletes from) needs the owner
+        # signed in with a session; turning it off or tightening it stays
+        # open to any admin. Whether the caller is that owner is settled
+        # first; whether the change widens is decided under the settings lock,
+        # against the merged result the write would store, so a concurrent
+        # save can't make a stale check pass.
+        _user, owner_err = _start_flow.require_signed_in_owner()
+        try:
+            success, errors = settings.update(data, veto=_auto_delete_veto(owner_err))
+        except _SettingsVeto as v:
+            resp, status = v.answer
+            resp.headers['Cache-Control'] = 'no-store'
+            return resp, status
         if not success:
             return jsonify({'success': False, 'errors': errors}), 400
 

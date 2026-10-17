@@ -111,13 +111,22 @@ def test_the_helper_reads_values_like_the_guard_does():
     assert adg._widens_auto_delete(_settings(), _settings(reclaim_gb='lots')) == []
 
 
-def test_the_helper_a_new_downloads_root_widens_while_on():
+def test_the_helper_a_new_downloads_root_widens_on_or_off():
     moved = _settings()
     moved['media']['downloads_root'] = '/'
     assert adg._widens_auto_delete(_settings(), moved) == [adg.ROOT]
     off_old, off_new = _settings(enabled=False), _settings(enabled=False)
     off_new['media']['downloads_root'] = '/'
-    assert adg._widens_auto_delete(off_old, off_new) == []
+    assert adg._widens_auto_delete(off_old, off_new) == [adg.ROOT]
+    # turning it off in the same save doesn't excuse the move
+    off_moved = _settings(enabled=False)
+    off_moved['media']['downloads_root'] = '/'
+    assert adg._widens_auto_delete(_settings(), off_moved) == [adg.ROOT]
+    # the same folder spelled differently is not a move
+    same = _settings(enabled=False)
+    same['media']['downloads_root'] = '/downloads/'
+    assert adg._widens_auto_delete(off_old, same) == []
+    assert adg.ROOT in adg.DELETE_ROOTS and adg.ROOT in adg.WIDENING_PATHS
 
 
 # ── the route ─────────────────────────────────────────────────────────────
@@ -217,3 +226,103 @@ def test_a_mixed_save_is_refused_whole(full):
     r = _put(c, _guard(reclaim_gb=999, check_interval_minutes=30))
     assert r.status_code == 401
     assert _now('reclaim_gb') == 100 and _now('check_interval_minutes') == 15
+
+
+# ── the folder deletions come from, guard off ─────────────────────────────
+
+@pytest.mark.parametrize('who', ['implicit', 'key', 'admin'])
+def test_moving_the_downloads_root_while_off_is_refused(full, who):
+    app.main.settings.update(_guard(enabled=False))
+    before = app.main.settings.get('media.downloads_root')
+    c, extra = _as(full, who)
+    r = _put(c, {'media': {'downloads_root': str(full.tmp / 'elsewhere')}}, LAN, dict(HDR, **extra))
+    assert r.status_code == (403 if who == 'admin' else 401)
+    assert r.get_json() == ({'error': 'Owner only'} if who == 'admin' else SIGN_IN)
+    assert r.headers['Cache-Control'] == 'no-store'
+    assert app.main.settings.get('media.downloads_root') == before
+
+
+def test_the_owner_may_move_the_downloads_root_while_off(full):
+    app.main.settings.update(_guard(enabled=False))
+    elsewhere = str(full.tmp / 'elsewhere')
+    _as(full, 'owner')
+    assert _put(full.owner, {'media': {'downloads_root': elsewhere}}).status_code == 200
+    assert app.main.settings.get('media.downloads_root') == elsewhere
+
+
+def test_turning_off_and_moving_in_one_save_is_refused(full):
+    c, _ = _as(full, 'admin')
+    r = _put(c, {'automation': {'downloads_guard': {'enabled': False}},
+                 'media': {'downloads_root': str(full.tmp / 'elsewhere')}})
+    assert r.status_code == 403 and _now('enabled') is True
+
+
+# ── decided under the settings lock, against the merged result ─────────────
+
+def test_a_save_landing_between_check_and_write_cannot_widen(full, monkeypatch):
+    """The guard is on. The implicit LAN owner sends enabled=true (no change
+    against what it read). Before its write, an admin turns the guard off.
+    Judged against the settings it is about to replace, the implicit save
+    would turn the guard back on: refused."""
+    c, _ = _as(full, 'implicit')
+    admin = _client(full, admin=True, name='second')
+    real = app.main._start_flow.require_signed_in_owner
+
+    fired = []
+
+    def interleave():
+        out = real()
+        if not fired:                          # once: the admin's own save runs this too
+            fired.append(1)
+            assert _put(admin, _guard(enabled=False)).status_code == 200   # lands first
+        return out
+    monkeypatch.setattr(app.main._start_flow, 'require_signed_in_owner', interleave)
+    r = _put(c, _guard(enabled=True))
+    assert r.status_code == 401 and r.get_json() == SIGN_IN
+    assert _now('enabled') is False
+
+
+def test_concurrent_saves_never_leave_the_guard_on(full):
+    """Threads race an admin turning the guard off against the implicit LAN
+    owner re-sending enabled=true. Either order must end with it off: the
+    implicit save only succeeds while it is already on."""
+    import threading
+    implicit = full.test_client()
+    _as(full, 'owner')
+    admin = _client(full, admin=True, name='racer')
+    for _ in range(25):
+        app.main.settings.update(_guard(enabled=True))
+        go = threading.Barrier(2)
+        out = {}
+
+        def turn_off():
+            go.wait()
+            out['off'] = _put(admin, _guard(enabled=False)).status_code
+
+        def turn_on():
+            go.wait()
+            out['on'] = _put(implicit, _guard(enabled=True)).status_code
+        ts = [threading.Thread(target=turn_off), threading.Thread(target=turn_on)]
+        [t.start() for t in ts]
+        [t.join(10) for t in ts]
+        assert out['off'] == 200 and out['on'] in (200, 401)
+        assert _now('enabled') is False, out
+
+
+def test_the_veto_runs_under_the_settings_lock(full, monkeypatch):
+    seen = []
+    real = app.main._auto_delete_veto
+
+    def spy(owner_err):
+        v = real(owner_err)
+        if v is None:
+            return None
+
+        def checked(current, candidate):
+            seen.append(app.main.settings._lock.locked())
+            return v(current, candidate)
+        return checked
+    monkeypatch.setattr(app.main, '_auto_delete_veto', spy)
+    c, _ = _as(full, 'implicit')
+    assert _put(c, _guard(reclaim_gb=999)).status_code == 401
+    assert seen == [True]

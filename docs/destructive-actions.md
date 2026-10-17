@@ -41,12 +41,18 @@ with `state.signIn`.
   - raises `reclaim_gb` (each run deletes more);
   - raises `daily_cap_gb`, or sets it to 0 (no cap);
   - lowers `check_interval_minutes` (runs more often);
-  - changes `media.downloads_root` while the guard is on (it would delete in
-    another folder).
-  Turning the guard off (even with other edits in the same save) or
+  - changes `media.downloads_root`, **guard on or off**. It is the folder
+    the guard and the manual cleanup delete from (`auto_delete_guard.DELETE_ROOTS`
+    lists every such setting), so moving it always needs the owner, even in
+    the same save that turns the guard off.
+  Turning the guard off (even with other number edits in the same save) or
   tightening any of these stays open to any admin, as does the tracker
   preference, which only sets what is spent first. A refused save changes
-  nothing. Non-admins get 403 as before. In Settings, Save becomes "Sign in
+  nothing. The check is atomic: the route settles whether the caller is the
+  signed-in owner first, then `SettingsManager.update(veto=...)` decides
+  whether the change widens under the same lock as the write, against the
+  stored settings and the merged result. A save that lands in between can't
+  make a stale check pass. Non-admins get 403 as before. In Settings, Save becomes "Sign in
   to save" after a 401 and opens /login. A new edit to that card brings Save
   back.
 

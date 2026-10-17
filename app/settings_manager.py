@@ -1517,6 +1517,15 @@ def _minimal_gated(data: dict, dotted_path: str):
     return False, None
 
 
+class SettingsVeto(Exception):
+    """SettingsManager.update(veto=...) refused the write; ``answer`` is what
+    the veto returned (for a route, its error response)."""
+
+    def __init__(self, answer):
+        super().__init__('settings update vetoed')
+        self.answer = answer
+
+
 class SettingsManager:
     """Thread-safe, file-backed settings store with schema validation.
 
@@ -1566,7 +1575,7 @@ class SettingsManager:
         with self._lock:
             return copy.deepcopy(self._settings.get(section, {}))
 
-    def update(self, partial: Dict[str, Any]) -> Tuple[bool, List[str]]:
+    def update(self, partial: Dict[str, Any], veto=None) -> Tuple[bool, List[str]]:
         """Deep-merge *partial* into the current settings.
 
         Masked sentinel values (``"********"``) are silently stripped so they
@@ -1578,6 +1587,14 @@ class SettingsManager:
 
         Returns ``(success, errors)`` where *errors* is a list of validation
         error strings (empty on success).
+
+        *veto*, when given, is called as ``veto(current, candidate)`` under the
+        same lock as the write, with the settings as they are and as they
+        would be. A non-None answer aborts the write with
+        ``SettingsVeto(answer)``. Two concurrent saves can't slip a change past
+        a check made against settings the other one is about to replace.
+        The veto must not call back into this SettingsManager (the lock isn't
+        reentrant).
         """
         cleaned = _strip_mask_values(partial, SETTINGS_SCHEMA)
         if not cleaned:
@@ -1593,6 +1610,10 @@ class SettingsManager:
             errors = _validate_settings(candidate, SETTINGS_SCHEMA)
             if errors:
                 return False, errors
+            if veto is not None:
+                answer = veto(self._settings, candidate)
+                if answer is not None:
+                    raise SettingsVeto(answer)
             self._settings = candidate
             self._save()
         return True, []
