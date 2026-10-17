@@ -1827,6 +1827,9 @@ def get_sources_config():
             'radarr_configured': radarr_configured,
             # Trackers (Settings > Trackers) or a Prowlarr/Torznab connection.
             'indexer_configured': _tsrc.indexer_available(settings),
+            # Raw tracker rows are added through qBittorrent: without it the
+            # UI disables their Download up front.
+            'download_client_configured': bool(settings.get('qbittorrent.url')),
         })
     except Exception as e:
         logger.error(f"Error getting sources config: {e}")

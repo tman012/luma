@@ -21,7 +21,8 @@ import {
   getBadgeColor,
 } from './sourcesUtils';
 import { useMovieSourcesData } from './useMovieSourcesData';
-import { SegmentRow, sortTrackerTopsFirst, needsLibraryGrab, IndexerQueryOverride } from '@/components/media/sourcesShared';
+import { SegmentRow, sortTrackerTopsFirst, needsLibraryGrab, grabDisabledReason, IndexerQueryOverride } from '@/components/media/sourcesShared';
+import { fetchIndexerConfigured, useDownloadClientReady } from '@/services/sourcesAvailability';
 import { grabToLibrary } from '@/services/allSourcesApi';
 import { ManualMatchPicker } from '@/components/media/ManualMatchPicker';
 import { srcPanel, srcAbove, srcConfirmCard, srcPrimaryBtn, srcCancelBtn, SRC_ROW_BG, SRC_HEADING_COLOR, SRC_HOVER_CSS, NO_SOURCES } from '@/components/media/sourcesTheme';
@@ -339,6 +340,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
   const [upgradeErrorMsg, setUpgradeErrorMsg] = useState<string | null>(null);
   const [showSourcesShelf, setShowSourcesShelf] = useState(false);
+  useDownloadClientReady();
+  // Each opening re-reads /api/sources/config (qBit set up or not).
+  useEffect(() => { if (showSourcesShelf) fetchIndexerConfigured(); }, [showSourcesShelf]);
   const collectionId = detail?.collectionId ?? null;
   // File Info sheet (ⓘ above the meta line)
   const [showFileInfo, setShowFileInfo] = useState(false);
@@ -1443,6 +1447,11 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                             {srcConfirmTarget.seeders} seeders
                           </span>
                         </div>
+                        {!srcGrabError && grabDisabledReason(srcConfirmTarget) && (
+                          <div data-sources-disabled-reason="" style={{ margin: '0 0 20px', fontSize: '20px', color: SRC_HEADING_COLOR, textAlign: 'center' }}>
+                            {grabDisabledReason(srcConfirmTarget)}
+                          </div>
+                        )}
                         {srcGrabError && (
                           <div style={{
                             background: 'rgba(239, 68, 68, 0.15)',
@@ -1464,9 +1473,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                             style={{ padding: '18px 40px', borderRadius: '50px', ...srcCancelBtn, fontSize: '22px', fontWeight: 600, cursor: srcConfirmLoading ? 'default' : 'pointer' }}>
                             Cancel
                           </button>
-                          <button type="button" onClick={handleSrcDownload} disabled={srcConfirmLoading}
+                          <button type="button" onClick={handleSrcDownload} disabled={srcConfirmLoading || !!grabDisabledReason(srcConfirmTarget)}
                             data-sources-download=""
-                            style={{ padding: '18px 44px', borderRadius: '50px', ...srcPrimaryBtn, fontSize: '22px', fontWeight: 600, cursor: srcConfirmLoading ? 'default' : 'pointer', opacity: srcConfirmLoading ? 0.7 : 1 }}>
+                            style={{ padding: '18px 44px', borderRadius: '50px', ...srcPrimaryBtn, fontSize: '22px', fontWeight: 600, cursor: (srcConfirmLoading || grabDisabledReason(srcConfirmTarget)) ? 'default' : 'pointer', opacity: grabDisabledReason(srcConfirmTarget) ? 0.4 : srcConfirmLoading ? 0.7 : 1 }}>
                             {srcConfirmLoading ? 'Sending…' : 'Download'}
                           </button>
                         </div>

@@ -6,7 +6,7 @@ import { FocusZone } from '@/components/tv/FocusZone';
 import { useFocusable } from '@/hooks/useFocusable';
 import { ManualMatchPicker } from '@/components/media/ManualMatchPicker';
 import { grabToLibrary } from '@/services/allSourcesApi';
-import { useIndexerConfigured } from '@/services/sourcesAvailability';
+import { useIndexerConfigured, useDownloadClientReady } from '@/services/sourcesAvailability';
 import { START_GLOW } from '@/components/start/StartUI';
 import {
   TrackerSeedPills,
@@ -1293,6 +1293,7 @@ function CompactSourcesView({
 
   const noSources = !loading && !error && visibleReleases.length === 0;
   const indexerConfigured = useIndexerConfigured();
+  useDownloadClientReady();   // re-render when qBit turns out to be missing
   const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
 
   return (

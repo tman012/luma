@@ -34,6 +34,9 @@ export const SAVE_FAILED = "Couldn't save";
 export const LOAD_FAILED = "Couldn't load trackers";
 export const SEARCH_FROM = 8;          // the picker gets a search field above this many types
 export const TEST_STATUS_MS = 4000;
+/** The server allows one Test per tracker every 3 s: a quicker second press waits its turn. */
+export const TEST_SPACING_MS = 3200;
+export const TEST_RATE_LIMITED = 'Too many tests. Try again in a few minutes.';
 export const CHIP_PHONE_H = 44;       // phone: every tap target is at least 44px
 
 type Access = 'unknown' | 'owner' | 'denied';
@@ -41,31 +44,23 @@ type Access = 'unknown' | 'owner' | 'denied';
 /** Whether the signed-in user may use Settings > Trackers: null until known,
  * then true only for the owner with a session (the API answers 401/403
  * otherwise). Pass enabled=false to skip the check (not an admin, no session). */
-/** Retry delays (ms) for a transient answer (429, 5xx, unreachable). */
-export const ACCESS_RETRY_MS = [1000, 3000, 8000];
-
-export function useTrackersAccess(enabled: boolean, retryMs: number[] = ACCESS_RETRY_MS): boolean | null {
+export function useTrackersAccess(enabled: boolean): boolean | null {
   const [ok, setOk] = useState<boolean | null>(null);
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     setOk(null);
-    const attempt = (n: number) => {
-      fetchTypes().then(r => {
-        if (!alive) return;
-        if (r.ok) { setOk(Array.isArray(r.data.types)); return; }
-        const transient = r.status === 0 || r.status === 429 || r.status >= 500;
-        if (!transient) { setOk(false); return; }       // 401/403/404: not the owner
-        // A busy or restarting server must not hide Trackers: retry, then show
-        // the section anyway (its own list load shows the error and Retry).
-        if (n < retryMs.length) timer = setTimeout(() => attempt(n + 1), retryMs[n]);
-        else setOk(true);
-      });
-    };
-    attempt(0);
-    return () => { alive = false; if (timer) clearTimeout(timer); };
-  }, [enabled, retryMs]);
+    fetchTypes().then(r => {
+      if (!alive) return;
+      if (r.ok) { setOk(Array.isArray(r.data.types)); return; }
+      // Only 401/403/404 mean "not the owner". A busy or failing server
+      // (429, 5xx, unreachable) keeps Trackers visible: the section shows
+      // "Couldn't load trackers" with Retry instead of vanishing.
+      const transient = r.status === 0 || r.status === 429 || r.status >= 500;
+      setOk(transient);
+    });
+    return () => { alive = false; };
+  }, [enabled]);
   return enabled ? ok : false;
 }
 
@@ -385,6 +380,7 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
   const [deleting, setDeleting] = useState(false);
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
+  const lastTestAt = useRef(0);
 
   const errors = useMemo(() => validate(type, form, tracker), [type, form, tracker]);
   const dirty = isDirty(type, form, start, tracker);
@@ -453,6 +449,10 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
     if (!valid) { touchAll(); return; }
     setTesting(true);
     setResult(null);
+    const wait = lastTestAt.current + TEST_SPACING_MS - Date.now();
+    if (wait > 0) await new Promise(res => window.setTimeout(res, wait));
+    if (!alive.current) return;
+    lastTestAt.current = Date.now();
     const r = tracker && !dirty
       ? await testSavedTracker(tracker.id)
       : await testTrackerForm({ ...toPayload(type, form, tracker), ...(tracker ? { id: tracker.id } : null) });
@@ -466,6 +466,7 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
       return;
     }
     if (r.ok && r.data.ok) setResult({ ok: true, text: r.data.message || 'Connected' });
+    else if (r.data.error === 'Rate limited') setResult({ ok: false, text: TEST_RATE_LIMITED });
     else setResult({ ok: false, text: r.data.error || (r.status === 0 ? UNREACHABLE : 'Unexpected response') });
     if (tracker && !dirty && r.ok) onTested();
   };

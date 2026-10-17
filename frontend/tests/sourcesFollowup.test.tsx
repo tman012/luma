@@ -120,3 +120,25 @@ describe('Designer pass 2', () => {
     }
   });
 });
+
+describe('no qBittorrent: Download is disabled up front', () => {
+  it('raw tracker rows get the reason; Arr rows do not', async () => {
+    const { grabDisabledReason, NO_DOWNLOAD_CLIENT } = await import('@/components/media/sourcesShared');
+    const { setDownloadClientReady, fetchIndexerConfigured } = await import('@/services/sourcesAvailability');
+    const raw = { origin: 'indexer', protocol: 'torrent' } as never;
+    const arr = { origin: 'arr', protocol: 'torrent', rejected: false } as never;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ indexer_configured: true, download_client_configured: false }), { status: 200 })));
+    await fetchIndexerConfigured();
+    expect(grabDisabledReason(raw)).toBe(NO_DOWNLOAD_CLIENT);
+    expect(NO_DOWNLOAD_CLIENT).toBe('qBittorrent isn’t set up');
+    expect(grabDisabledReason(arr)).toBeNull();
+    setDownloadClientReady(true);
+    expect(grabDisabledReason(raw)).toBeNull();
+    vi.unstubAllGlobals();
+  });
+  it('desktop confirm disables Download with the reason', () => {
+    const src = read('components/media/MovieDetailModal/ExpandedLayout.tsx');
+    expect(src).toContain('disabled={srcConfirmLoading || !!grabDisabledReason(srcConfirmTarget)}');
+    expect(src).toContain('fetchIndexerConfigured()');
+  });
+});

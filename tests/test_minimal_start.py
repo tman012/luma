@@ -98,7 +98,11 @@ def test_disabled_routes_404_in_minimal_mode(test_app, minimal):
     assert c.post('/api/automation/latest-auto-grab/run', headers=ORIGIN).status_code == 404
 
 
-def test_core_routes_stay_on_in_minimal_mode(test_app, minimal):
+def test_core_routes_stay_on_in_minimal_mode(test_app, minimal, monkeypatch, tmp_path):
+    # Its own SPA index: with no built SPA in SPA_DIR, _serve_spa's dev fallback
+    # answers /login with a 302 to Vite, so the result depended on the machine's build.
+    (tmp_path / 'index.html').write_text('<!doctype html><html><head></head><div id="root"></div></html>')
+    monkeypatch.setitem(test_app.config, 'SPA_DIR', str(tmp_path))
     c = test_app.test_client()
     assert c.get('/health').status_code == 200
     assert c.get('/api/start/status').json['needs_start'] is True

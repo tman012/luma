@@ -7,7 +7,7 @@ import { sourcesTargetLabel } from './seasonLabels';
 import { getBadgeColor, buildQualityGroups, buildScopeOptions, filterByScope } from './tvSourcesUtils';
 import { ManualMatchPicker } from '@/components/media/ManualMatchPicker';
 import { grabToLibrary } from '@/services/allSourcesApi';
-import { useIndexerConfigured } from '@/services/sourcesAvailability';
+import { useIndexerConfigured, useDownloadClientReady } from '@/services/sourcesAvailability';
 import { START_GLOW } from '@/components/start/StartUI';
 import {
   SegmentRow,
@@ -1126,6 +1126,7 @@ function CompactTvSourcesView({
 
   const noSources = !loading && !error && visibleReleases.length === 0;
   const indexerConfigured = useIndexerConfigured();
+  useDownloadClientReady();   // re-render when qBit turns out to be missing
   const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
 
   const targetLabel = sourcesTargetLabel(target, targetName);

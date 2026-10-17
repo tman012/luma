@@ -320,24 +320,22 @@ describe('Tracker form: add', () => {
       expect((await screen.findByTestId('tracker-form-error')).textContent).toBe(msg);
     });
 
-  it('useTrackersAccess retries 429/5xx instead of hiding Trackers', async () => {
-    function Probe({ retry }: { retry: number[] }) { const a = useTrackersAccess(true, retry); return <p data-testid="a">{String(a)}</p>; }
-    const fast = [1, 1, 1];
-    let n = 0;
-    override = url => (url.endsWith('/api/trackers/types') && n++ < 2 ? res({ error: 'Busy' }, n === 1 ? 429 : 503) : null);
-    const r1 = render(<Probe retry={fast} />);
+  it.each([429, 500, 503])('useTrackersAccess: a %i keeps Trackers visible; the section shows the error and Retry', async (st) => {
+    function Probe() { const a = useTrackersAccess(true); return <p data-testid="a">{String(a)}</p>; }
+    override = url => (url.endsWith('/api/trackers/types') ? res({ error: 'Busy' }, st) : null);
+    const r1 = render(<Probe />);
     await waitFor(() => expect(screen.getByTestId('a').textContent).toBe('true'));
-    expect(n).toBe(3);
     r1.unmount();
-    // Still failing after every retry: the section shows anyway (its list has Retry).
-    override = url => (url.endsWith('/api/trackers/types') ? res({ error: 'Busy' }, 502) : null);
-    const r2 = render(<Probe retry={fast} />);
-    await waitFor(() => expect(screen.getByTestId('a').textContent).toBe('true'));
-    r2.unmount();
-    // 403 is final: no retry.
+    render(<MemoryRouter initialEntries={['/settings/trackers']}><TrackersSettings wide /></MemoryRouter>);
+    expect(await screen.findByText("Couldn't load trackers")).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+  });
+
+  it('useTrackersAccess: 403 is final (one call, hidden)', async () => {
+    function Probe() { const a = useTrackersAccess(true); return <p data-testid="a">{String(a)}</p>; }
     override = null; denied = 403;
     const before = calls.length;
-    render(<Probe retry={fast} />);
+    render(<Probe />);
     await waitFor(() => expect(screen.getByTestId('a').textContent).toBe('false'));
     expect(calls.length - before).toBe(1);
   });
@@ -363,8 +361,9 @@ describe('Tracker form: add', () => {
     expect(screen.getByTestId('tracker-test-result').textContent).toBe('');
   });
 
-  it.each(['Address not allowed', 'Unauthorized', 'Timed out', 'Rate limited'])('Test shows the server error "%s" in red', async msg => {
-    override = url => (url.endsWith('/api/trackers/test') ? res({ ok: false, error: msg }) : null);
+  it.each([['Address not allowed', 'Address not allowed'], ['Unauthorized', 'Unauthorized'], ['Timed out', 'Timed out'],
+    ['Rate limited', 'Too many tests. Try again in a few minutes.']])('Test shows the server error "%s" in red', async (err, msg) => {
+    override = url => (url.endsWith('/api/trackers/test') ? res({ ok: false, error: err }) : null);
     renderAt('/settings/trackers/new?type=torznab');
     await screen.findByTestId('tracker-form');
     fill('Name', 'X');
@@ -504,13 +503,17 @@ describe('Tracker form: edit and secrets', () => {
     expect(lastCall(c => c.url.includes('/test'))!.url).toMatch(/\/api\/trackers\/6\/test$/);
     fill('Priority', '7');
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    const n = calls.filter(c => c.url.includes('/test')).length;
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
-    await waitFor(() => expect(lastCall(c => c.url.includes('/test'))!.url).toMatch(/\/api\/trackers\/test$/));
+    // A second Test within 3 s waits its turn instead of drawing "Rate limited".
+    await new Promise(r => setTimeout(r, 300));
+    expect(calls.filter(c => c.url.includes('/test')).length).toBe(n);
+    await waitFor(() => expect(lastCall(c => c.url.includes('/test'))!.url).toMatch(/\/api\/trackers\/test$/), { timeout: 5000 });
     const body = lastCall(c => c.url.endsWith('/api/trackers/test'))!.body!;
     expect(body.id).toBe(6);
     expect(body.priority).toBe(7);
     expect('api_key' in body).toBe(false);
-  });
+  }, 10000);
 
   it('Delete asks "Delete <name>?" and returns to the list', async () => {
     renderAt('/settings/trackers/6');

@@ -11,6 +11,7 @@
  */
 
 import { SRC_ROW_BG, sourcesCount } from './sourcesTheme';
+import { isDownloadClientReady } from '@/services/sourcesAvailability';
 import { useState, useEffect, useRef } from 'react';
 
 // ---------------------------------------------------------------------------
@@ -267,8 +268,12 @@ export function grabDisabledReason(release: ReleaseLike): string | null {
   if (release.protocol && release.protocol !== 'torrent') {
     return 'Usenet release — not supported by the download pipeline';
   }
+  if (needsLibraryGrab(release) && !isDownloadClientReady()) return NO_DOWNLOAD_CLIENT;
   return null;
 }
+
+/** Raw tracker rows need qBittorrent (same wording as the server). */
+export const NO_DOWNLOAD_CLIENT = 'qBittorrent isn’t set up';
 
 // ---------------------------------------------------------------------------
 // Plain-text indexer query override (Sources escape hatch)

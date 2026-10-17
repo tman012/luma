@@ -334,3 +334,33 @@ def test_movie_releases_without_radarr(test_app, monkeypatch, trackers):
         assert body['releases'] == [] and body['radarr_configured'] is False
     else:
         assert r.status_code == 503 and body['needs_setup'] == 'radarr'
+
+
+# ── downloads/add 502s never name the host (QA ceed5e5 item 4) ──────────
+
+@pytest.mark.parametrize('exc', [
+    requests.exceptions.ConnectionError("HTTPConnectionPool(host='169.254.169.254', port=80): Max retries"),
+    og.FetchError("connect to 10.0.0.7:8080 failed"),
+    OSError("[Errno 111] Connection refused: tracker.internal.lan"),
+])
+def test_torrent_fetch_failure_is_generic_502(client, net, qbit, monkeypatch, exc):
+    _owner_client(client)
+
+    def boom(url):
+        raise exc
+    monkeypatch.setattr(app.main, '_fetch_pasted_torrent', boom)
+    r = _post(client, 'https://tracker.example/dl/1')
+    body = r.get_data(as_text=True)
+    assert r.status_code == 502 and r.get_json() == {'error': 'Couldn’t get the torrent from that link'}
+    for leak in ('169.254', '10.0.0.7', 'tracker.internal', 'HTTPConnectionPool', 'Errno'):
+        assert leak not in body
+    assert qbit.logins == 0
+
+
+@pytest.mark.parametrize('url', ['', 'http://qbit.test:8080'])
+def test_sources_config_says_whether_qbit_is_set_up(test_app, url):
+    app.main.settings.update({'qbittorrent': {'url': url}})
+    c = _member(test_app, approved=False, admin=True)
+    j = c.get('/api/sources/config').get_json()
+    assert j['download_client_configured'] is bool(url)
+    assert 'qbit.test' not in json.dumps(j)
