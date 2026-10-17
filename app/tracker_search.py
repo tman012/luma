@@ -50,6 +50,27 @@ class TrackerSkipped(Exception):
     """A request to a tracker was deliberately not sent (rate limit or backoff)."""
 
 
+def search_status(err: Exception) -> str:
+    """Short per-tracker status for the Sources UI: 'auth' (sign-in failed,
+    banned, or in an auth/ban backoff), 'rate' (rate limit, caps, rate backoff)
+    or 'unavailable' (anything else)."""
+    if isinstance(err, TrackerSkipped):
+        reason = str(err)
+        if reason.startswith('backoff ('):
+            kind = reason[len('backoff ('):].rstrip(')')
+        elif 'cap' in reason or 'rate limit' in reason:
+            kind = 'rate'
+        else:
+            kind = 'unavailable'
+    else:
+        kind = getattr(err, 'kind', '')
+    if kind in ('auth', 'banned'):
+        return 'auth'
+    if kind == 'rate':
+        return 'rate'
+    return 'unavailable'
+
+
 # ------------------------------------------------------------------ release tokens
 
 class ReleaseTokens:
@@ -257,6 +278,19 @@ class TrackerSearch:
             self._skip_logged[key] = window
         logger.log(level, msg, *args)
 
+    @staticmethod
+    def _log_steps(cfg: Dict[str, Any], st: Dict[str, Any]) -> None:
+        """One line per attempt of a multi-step search (BHD): step name, HTTP
+        status, the API's success/status_code, rows or the error kind. Never
+        the query, a URL or a key."""
+        for i, s in enumerate(st.get('steps') or []):
+            logger.info('Tracker %s (id %s) search step %d %s: HTTP %s, success %s, status_code %s, %s',
+                        cfg['name'], cfg['id'], i + 1, s.get('step'),
+                        s.get('http') if s.get('http') is not None else '-',
+                        s.get('success') if s.get('success') is not None else '-',
+                        s.get('status_code') if s.get('status_code') is not None else '-',
+                        f"error {s['error']}" if s.get('error') else f"{s.get('rows', 0)} rows")
+
     def _record_failure(self, cfg: Dict[str, Any], gk: str, err: TrackerError, scope=None) -> None:
         until = record_failure(self.guard, gk, err, scope)
         self.store.set_status(cfg['id'], STATUS_ERROR, err.message)
@@ -271,7 +305,8 @@ class TrackerSearch:
         return neg
 
     def search_one(self, cfg: Dict[str, Any], query: str, categories: List[int], limit: int,
-                   interactive: bool, imdb_id: str = '', refresh: bool = False) -> List[Dict[str, Any]]:
+                   interactive: bool, imdb_id: str = '', tmdb_id: str = '', media_type: str = '',
+                   refresh: bool = False) -> List[Dict[str, Any]]:
         """Guarded, cached search of one tracker; raw client results.
         Raises TrackerSkipped (guard) or TrackerError (the tracker failed).
 
@@ -280,8 +315,12 @@ class TrackerSearch:
         parse, timeout, 429) or when rows were parsed and then dropped;
         refresh=True (an explicit user retry) bypasses and clears it."""
         gk = guard_key(cfg)
-        ckey = (cfg['id'], (query or '').strip().lower(), tuple(categories), imdb_id or '', int(limit))
-        nkey = (cfg['id'], query or '', tuple(categories), imdb_id or '', int(limit))
+        if not tt.searches_by_id(cfg.get('type')):
+            tmdb_id, media_type = '', ''
+        ckey = (cfg['id'], (query or '').strip().lower(), tuple(categories), imdb_id or '', int(limit),
+                str(tmdb_id or ''), media_type or '')
+        nkey = (cfg['id'], query or '', tuple(categories), imdb_id or '', int(limit),
+                str(tmdb_id or ''), media_type or '')
         ttl = TTL_INTERACTIVE if interactive else TTL_BACKGROUND
         now = time.time()
         with self._cache_lock:
@@ -315,14 +354,39 @@ class TrackerSearch:
                 raise TrackerSkipped(reason)
             self.guard.wait_spacing(gk)
             scope = address_scope(cfg, self.guard)
+            sent = [0]
+
+            def charged(*a, **kw):
+                # Caps count HTTP requests: the first was taken above, every page and
+                # fallback after it is taken here, and none is sent once refused.
+                if sent[0]:
+                    why = self.guard.take(gk, interactive, strict)
+                    if why:
+                        raise tracker_clients.OutOfBudget(why)
+                sent[0] += 1
+                return self.request(*a, **kw)
+            # Stats are per thread: clear the last tracker's, so a client that sets
+            # none (Torznab) is never judged or logged by another's numbers.
+            tracker_clients._set_stats()
             try:
                 with scope:
-                    items = tracker_clients.search(cfg, query, categories, limit, self.request, imdb_id=imdb_id)
+                    items = tracker_clients.search(cfg, query, categories, limit, charged, imdb_id=imdb_id,
+                                                   tmdb_id=str(tmdb_id or ''), media_type=media_type or '')
+            except tracker_clients.OutOfBudget as e:
+                self._log_steps(cfg, tracker_clients.last_stats())
+                self._log_once((gk, 'skip'), int(time.time() // 900),
+                               'Tracker %s (id %s) search not sent: %s', cfg['name'], cfg['id'], e.reason,
+                               level=logging.WARNING)
+                if hit:
+                    return hit[1]
+                raise TrackerSkipped(e.reason) from None
             except TrackerError as e:
-                st = tracker_clients.last_stats() if cfg.get('type') == 'iptorrents' else {}
+                st = tracker_clients.last_stats()
+                self._log_steps(cfg, st)
                 # One redacted line per failure: name, stage, reason, HTTP status. Never a URL or header.
                 logger.warning('Tracker %s (id %s) search failed: %s (HTTP %s, %s bytes, %s rows parsed)',
-                               cfg['name'], cfg['id'], e.kind, e.status if e.status is not None else '-',
+                               cfg['name'], cfg['id'], e.kind,
+                               e.status if e.status is not None else st.get('status') or '-',
                                st.get('bytes', '-'), st.get('rows', '-'))
                 self._record_failure(cfg, gk, e, scope)
                 with self._cache_lock:
@@ -336,11 +400,25 @@ class TrackerSearch:
                 raise err from None
         self.guard.success(gk)
         self.store.set_status(cfg['id'], STATUS_OK, '')
-        st = tracker_clients.last_stats() if cfg.get('type') == 'iptorrents' else {}
-        logger.info('Tracker %s (id %s) search: HTTP %s, %s bytes, %s rows parsed, %d results',
+        st = tracker_clients.last_stats()
+        self._log_steps(cfg, st)
+        kinds = st.get('kinds') or {}
+        if not kinds:
+            for it in items:
+                k = tracker_clients.release_kind(it.get('title'))
+                kinds[k] = kinds.get(k, 0) + 1
+        logger.info('Tracker %s (id %s) search: HTTP %s, %s bytes, %s rows parsed, %d results, %s dropped, '
+                    'pages %s, by id %s, types %s',
                     cfg['name'], cfg['id'], st.get('status', '-'), st.get('bytes', '-'), st.get('rows', '-'),
-                    len(items))
-        if not items and not st.get('rows'):
+                    len(items), (st['rows'] - len(items)) if isinstance(st.get('rows'), int) else '-',
+                    st.get('pages', '-'),
+                    ('yes' if st.get('by_id') else 'no') + (f", fallback {st['fallback']}" if st.get('fallback') else ''),
+                    ', '.join(f'{k} {v}' for k, v in sorted(kinds.items())) or '-')
+        # A multi-step chain (BHD) that hit an error on any step, or that the
+        # time budget cut short, is not a clean "nothing here": never cached.
+        chain_clean = (not any(x.get('error') for x in (st.get('steps') or []))
+                       and not st.get('stopped'))
+        if not items and not st.get('rows') and chain_clean:
             # Signed in (no auth error) and zero raw rows: remember it briefly.
             with self._cache_lock:
                 neg = self._neg_store()
@@ -387,10 +465,14 @@ class TrackerSearch:
         }
 
     def search(self, query: str, categories: List[int], limit: int, interactive: bool,
-               tracker_ids: Optional[List[int]] = None, imdb_id: str = '',
-               refresh: bool = False) -> Tuple[List[Dict[str, Any]], List[int], List[int]]:
+               tracker_ids: Optional[List[int]] = None, imdb_id: str = '', tmdb_id: str = '',
+               media_type: str = '', refresh: bool = False,
+               statuses: Optional[List[Dict[str, Any]]] = None,
+               ) -> Tuple[List[Dict[str, Any]], List[int], List[int]]:
         """Fan out to enabled trackers (or *tracker_ids*). Returns
-        (items in raw Prowlarr shape, ids searched, ids skipped)."""
+        (items in raw Prowlarr shape, ids searched, ids skipped). When
+        *statuses* is a list, each tracker that was skipped or failed adds
+        {'id', 'name', 'status'} (see search_status)."""
         cfgs = self.store.enabled_configs()
         if tracker_ids:
             want = {int(i) for i in tracker_ids}
@@ -406,11 +488,16 @@ class TrackerSearch:
         def one(job):
             c, cats = job
             try:
-                return c, self.search_one(c, query, cats, limit, interactive, imdb_id, refresh=refresh)
-            except TrackerSkipped:
+                return c, self.search_one(c, query, cats, limit, interactive, imdb_id, tmdb_id, media_type,
+                                          refresh=refresh)
+            except TrackerSkipped as e:
                 skipped.append(c['id'])
-            except TrackerError:
+                if statuses is not None:
+                    statuses.append({'id': c['id'], 'name': c['name'], 'status': search_status(e)})
+            except TrackerError as e:
                 failed.append(c['id'])
+                if statuses is not None:
+                    statuses.append({'id': c['id'], 'name': c['name'], 'status': search_status(e)})
             return c, []
 
         items: List[Dict[str, Any]] = []
@@ -488,20 +575,38 @@ class LumaTrackersClient:
                     raw.append(it)
         return self._parse_items(raw)
 
+    supports_ids = True
+
     def search_all(self, query: str, media_type: str, year: Optional[int] = None,
-                   refresh: bool = False) -> List[Dict]:
+                   tmdb_id: Optional[int] = None, refresh: bool = False,
+                   statuses: Optional[List[Dict[str, Any]]] = None) -> List[Dict]:
         from app.indexer_api import (MOVIE_CATEGORIES_EXPANDED, TV_SPORTS_CATEGORIES,
                                      _build_search_query, _parse_title)
         # TV release names carry SxxEyy, not the first-air year: never add it for TV.
         q = (query or '').strip() if media_type == 'tv' else _build_search_query(query, year)
         cats = list(MOVIE_CATEGORIES_EXPANDED) + list(TV_SPORTS_CATEGORIES)
-        items, _, _ = self.engine.search(q, cats, 500, interactive=True, refresh=refresh)
+        tmdb = str(tmdb_id) if tmdb_id else ''
+        st: List[Dict[str, Any]] = []
+        items, _, _ = self.engine.search(q, cats, 500, interactive=True, tmdb_id=tmdb, media_type=media_type,
+                                         refresh=refresh, statuses=st)
         bare = (query or '').strip()
         if not items and bare and q != bare:
-            # Release names often leave the year out (TV above all): one retry without it.
-            logger.info('Tracker search_all media_type=%s: no results with the year, retrying without it',
-                        media_type)
-            items, _, _ = self.engine.search(bare, cats, 500, interactive=True, refresh=refresh)
+            # Release names often leave the year out: one retry without it. BHD already
+            # tried the title without the year (and the TMDB id) in the same budget unit,
+            # so it is not asked again.
+            again = [c['id'] for c in self.engine.store.enabled_configs()
+                     if not tt.searches_by_id(c.get('type'))]
+            if again:
+                logger.info('Tracker search_all media_type=%s: no results with the year, retrying without it',
+                            media_type)
+                st2: List[Dict[str, Any]] = []
+                items, _, _ = self.engine.search(bare, cats, 500, interactive=True, tracker_ids=again,
+                                                 tmdb_id=tmdb, media_type=media_type,
+                                                 refresh=refresh, statuses=st2)
+                # Retried trackers report their second answer; BHD keeps its first.
+                st = [x for x in st if x['id'] not in set(again)] + st2
+        if statuses is not None:
+            statuses.extend(sorted(st, key=lambda x: x['name'].lower()))
         out = []
         for it in items:
             parsed = _parse_title(it['title'])
@@ -567,3 +672,56 @@ def has_enabled_trackers() -> bool:
         return any(r.get('enabled', True) for r in get_store().list())
     except Exception:
         return False
+
+
+# ------------------------------------------------------------------ one-time migrations
+
+BHD_ID_RESET_MARKER = '.migrated-bhd-id-backoff-v1'
+# BHD's answer to a TMDB id it can't use, as a stored status message would
+# carry it. Generic 'Unauthorized' (bad key, 401/403) never matches.
+_ID_REJECTION_RE = __import__('re').compile(
+    r'\b(tmdb|imdb)(_id)?\b.{0,40}\b(invalid|not valid|not found|rejected|unknown|malformed)\b'
+    r'|\b(invalid|not valid|rejected|unknown|malformed)\b.{0,40}\b(tmdb|imdb)(_id)?\b', __import__('re').I)
+
+
+def is_id_rejection(message: str) -> bool:
+    return bool(_ID_REJECTION_RE.search(str(message or '')))
+
+
+def reset_bhd_id_backoffs_once(store: Optional[TrackerStore] = None, guard: Optional[TrackerGuard] = None,
+                               marker: Optional[Path] = None) -> int:
+    """Once per install (marker file, created exclusively so one worker runs
+    it): clear a BeyondHD 'auth' backoff that came from BHD rejecting a TMDB
+    id (builds d02df0a/a534e21 sent ids BHD could refuse), identified only by
+    a stored status message matching the id-rejection pattern. A real auth
+    failure (bad key, 401/403: stored as 'Unauthorized') is never cleared.
+    Returns how many trackers were reset."""
+    import os
+    from app.tracker_types import searches_by_id
+    store = store or get_store()
+    guard = guard or get_guard()
+    if marker is None:
+        from app.first_run import data_dir
+        marker = Path(data_dir()) / BHD_ID_RESET_MARKER
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(marker), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return 0
+    os.close(fd)
+    reset = 0
+    for rec in store.list():
+        if not searches_by_id(rec.get('type')):
+            continue
+        st = rec.get('status') or {}
+        if st.get('state') != STATUS_ERROR or not is_id_rejection(st.get('message', '')):
+            continue
+        gk = guard_key(rec)
+        cd = guard.blocked(gk)
+        if cd and cd[1] == 'auth':
+            guard.clear(gk, kinds=('auth',))
+        store.set_status(rec['id'], 'untested', '')
+        reset += 1
+        logger.warning('Tracker %s (id %s): cleared a backoff from a rejected TMDB id (one-time reset)',
+                       rec['name'], rec['id'])
+    return reset

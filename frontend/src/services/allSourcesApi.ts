@@ -41,6 +41,19 @@ export interface AllResultsRelease {
   trackerType: string;
 }
 
+/** A tracker that was not searched or failed, as all-results reports it. */
+export interface TrackerStatus {
+  name: string;
+  status: 'auth' | 'rate' | 'unavailable';
+}
+
+/** Short status line for one tracker, e.g. "IPTorrents sign-in failed". */
+export function trackerStatusText(t: TrackerStatus): string {
+  if (t.status === 'auth') return `${t.name} sign-in failed`;
+  if (t.status === 'rate') return `${t.name} search limit reached`;
+  return `${t.name} unavailable`;
+}
+
 export interface TmdbMatchResult {
   tmdb_id: number;
   media_type: MediaType;
@@ -67,6 +80,8 @@ export async function fetchAllResults(
   signal?: AbortSignal,
   /** An explicit user retry: the server skips its caches (empty answers too). */
   refresh = false,
+  /** Receives the trackers that were not searched or failed. */
+  onTrackers?: (trackers: TrackerStatus[]) => void,
 ): Promise<AllResultsRelease[]> {
   if (!title) throw new Error('fetchAllResults: title is required');
   const params = new URLSearchParams();
@@ -82,7 +97,16 @@ export async function fetchAllResults(
     // blowing up the Arr results the modal already has.
     return [];
   }
-  const data = (await resp.json()) as { releases?: Record<string, unknown>[] };
+  const data = (await resp.json()) as { releases?: Record<string, unknown>[]; trackers?: unknown };
+  if (onTrackers) {
+    const list = Array.isArray(data.trackers) ? data.trackers : [];
+    onTrackers(list
+      .filter((t): t is { name: string; status: string } => !!t && typeof (t as { name?: unknown }).name === 'string')
+      .map((t) => ({
+        name: t.name,
+        status: t.status === 'auth' || t.status === 'rate' ? t.status : 'unavailable',
+      })));
+  }
   return (data.releases ?? []).map(normalizeIndexerRelease);
 }
 
@@ -186,15 +210,16 @@ export async function grabToLibrary(
 // Merge / dedup — the ONE implementation used by both modals
 // ---------------------------------------------------------------------------
 
+function alnum(s: string | undefined | null): string {
+  return (s ?? '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+}
+
 /** Minimal shape a release must expose to participate in merge/dedup. */
 export interface MergeableRelease {
   guid?: string;
   title?: string;
   infoHash?: string;
-}
-
-function alnum(s: string | undefined | null): string {
-  return (s ?? '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  rejected?: boolean;
 }
 
 /**
@@ -204,37 +229,44 @@ function alnum(s: string | undefined | null): string {
  *   2. guid (exact)
  *   3. alnum(title) — non-alphanumerics stripped, lowercased
  *
- * On any collision the Arr release is KEPT (it carries quality-profile scoring,
- * proper grab routing, etc.) and the indexer duplicate is dropped. Indexer rows
- * that don't collide with any Arr row are appended.
- *
- * Generic over both release shapes so the movie modal (ProcessedRelease) and TV
- * modal (TvProcessedRelease) can share this single implementation.
+ * On a collision the Arr release is kept (quality scoring, grab routing),
+ * unless the Arr copy is rejected and the tracker copy isn't: a release the
+ * Arr profile rejects must not hide the same release from the owner's own
+ * trackers. Indexer rows that don't collide are appended.
  */
 export function mergeReleases<
   A extends MergeableRelease,
   I extends MergeableRelease,
 >(arrReleases: A[], indexerReleases: I[]): (A | I)[] {
-  const hashKeys = new Set<string>();
-  const guidKeys = new Set<string>();
-  const titleKeys = new Set<string>();
-
-  for (const a of arrReleases) {
-    const h = alnum(a.infoHash);
-    if (h) hashKeys.add(h);
-    if (a.guid) guidKeys.add(a.guid);
-    const t = alnum(a.title);
-    if (t) titleKeys.add(t);
-  }
-
   const merged: (A | I)[] = [...arrReleases];
-  for (const i of indexerReleases) {
-    const h = alnum(i.infoHash);
-    if (h && hashKeys.has(h)) continue;
-    if (i.guid && guidKeys.has(i.guid)) continue;
-    const t = alnum(i.title);
-    if (t && titleKeys.has(t)) continue;
-    merged.push(i);
+  const byHash = new Map<string, number>();
+  const byGuid = new Map<string, number>();
+  const byTitle = new Map<string, number>();
+  const index = (r: MergeableRelease, i: number) => {
+    const h = alnum(r.infoHash);
+    if (h && !byHash.has(h)) byHash.set(h, i);
+    if (r.guid && !byGuid.has(r.guid)) byGuid.set(r.guid, i);
+    const t = alnum(r.title);
+    if (t && !byTitle.has(t)) byTitle.set(t, i);
+  };
+  arrReleases.forEach((a, i) => index(a, i));
+  const arrCount = arrReleases.length;
+
+  for (const r of indexerReleases) {
+    const h = alnum(r.infoHash);
+    const t = alnum(r.title);
+    const hit =
+      (h ? byHash.get(h) : undefined) ??
+      (r.guid ? byGuid.get(r.guid) : undefined) ??
+      (t ? byTitle.get(t) : undefined);
+    if (hit === undefined) {
+      merged.push(r);
+      continue;
+    }
+    if (hit < arrCount && merged[hit]?.rejected && !r.rejected) {
+      // Replaced once: later tracker copies of this release are duplicates.
+      merged[hit] = r;
+    }
   }
   return merged;
 }

@@ -617,6 +617,11 @@ def start_services(app_instance):
     
     # Initialize database
     init_database()
+    try:
+        from app import tracker_search as _ts_migrate
+        _ts_migrate.reset_bhd_id_backoffs_once()
+    except Exception as e:      # a migration must never stop the app
+        logger.warning('Tracker id-backoff reset skipped: %s', type(e).__name__)
     
     # Initialize user auth tables
     try:
@@ -2159,13 +2164,8 @@ def indexer_browse():
 
 
 # In-memory cache for raw "View all results" indexer searches.
-_all_results_cache: Dict[tuple, tuple] = {}   # (media_type, title_lower, year) → (timestamp, data)
-_ALL_RESULTS_CACHE_TTL = 300                   # 5 minutes
-# An empty result is almost always a transient tracker problem (Prowlarr
-# rate-limit ban, indexer down) rather than "this title has no sources", so it
-# gets a much shorter life — caching a zero for 5 minutes turns a 30-second
-# tracker blip into five minutes of an empty modal.
-_ALL_RESULTS_EMPTY_TTL = 20
+_all_results_cache: Dict[tuple, tuple] = {}   # (media_type, title_lower, year, tmdb_id) → (timestamp, data)
+_ALL_RESULTS_CACHE_TTL = 300                   # 5 minutes; only answers with releases are cached
 
 # In-memory cache for TMDb manual-match searches.
 _tmdb_match_cache: Dict[tuple, tuple] = {}     # (query, media_type) → (timestamp, data)
@@ -2358,19 +2358,24 @@ def sources_all_results():
         # An explicit user retry (Retry, Override search, clear override) skips
         # every cache, the trackers' empty-answer cache included.
         refresh = (request.args.get('refresh') or '').lower() in ('1', 'true')
-        cache_key = (media_type, title.lower(), year)
+        tmdb_id = request.args.get('tmdb_id', type=int)
+        tmdb_id = tmdb_id if tmdb_id and tmdb_id > 0 else None
+        cache_key = (media_type, title.lower(), year, tmdb_id)
         cached = None if refresh else _all_results_cache.get(cache_key)
         if cached:
             ts, data = cached
-            ttl = (_ALL_RESULTS_CACHE_TTL if data.get('releases')
-                   else _ALL_RESULTS_EMPTY_TTL)
-            if time.time() - ts < ttl:
+            if time.time() - ts < _ALL_RESULTS_CACHE_TTL:
                 return jsonify(_all_results_public(data))
             _all_results_cache.pop(cache_key, None)
 
         from app.tracker_search import LumaTrackersClient as _LTC
-        raw = (client.search_all(title, media_type, year, refresh=refresh) if isinstance(client, _LTC)
-               else client.search_all(title, media_type, year))
+        statuses: list = []
+        if isinstance(client, _LTC):
+            raw = client.search_all(title, media_type, year, tmdb_id=tmdb_id, refresh=refresh, statuses=statuses)
+        elif getattr(client, 'supports_ids', False):
+            raw = client.search_all(title, media_type, year, tmdb_id=tmdb_id)
+        else:
+            raw = client.search_all(title, media_type, year)
 
         releases = []
         for item in raw:
@@ -2412,16 +2417,18 @@ def sources_all_results():
             'success': True,
             'total': len(releases),
             'releases': releases,
+            # Trackers that were not searched or failed: name + short status only.
+            'trackers': [{'name': x['name'], 'status': x['status']} for x in statuses],
         }
         if releases:       # an empty answer is never cached: the next search asks again
             _all_results_cache[cache_key] = (time.time(), payload)
         return jsonify(_all_results_public(payload))
 
     except Exception as e:
-        logger.error(f"Error in sources_all_results: {e}")
+        logger.error(f"Error in sources_all_results: {type(e).__name__}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Search failed'}), 500
 
 
 @app.route('/api/tmdb/match-search')

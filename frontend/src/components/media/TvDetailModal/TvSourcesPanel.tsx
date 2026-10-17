@@ -1,5 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { srcAbove, srcCancelBtn, srcPrimaryBtn, SRC_BLUE, SRC_HEADING_COLOR, NO_SOURCES, sourcesCount } from '../sourcesTheme';
+import { TrackerStatusNotice } from '../sourcesTrackerStatus';
 import { createPortal } from 'react-dom';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useTvSourcesData, type TvProcessedRelease } from './useTvSourcesData';
@@ -152,7 +153,7 @@ function ExpandedTvSourcesView({
   // All results are fetched up front (rejected + indexer rows included). We show
   // everything, segmented by resolution → type and sorted by seeders within each
   // segment — no filtering, no toggle.
-  const { loading, error, releases, handleGrab } = useTvSourcesData({
+  const { loading, error, releases, handleGrab, trackers, retry } = useTvSourcesData({
     target, tvdbId, tmdbId, title, year, indexerQuery,
   });
 
@@ -315,8 +316,9 @@ function ExpandedTvSourcesView({
             ))}
           </div>
         )}
-        {!loading && !error && !showScopeStep && scopedReleases.length === 0 && (
-          <div data-sources-state="empty" style={{ color: SRC_HEADING_COLOR, fontSize: '22px', ...srcAbove }}>{NO_SOURCES}</div>
+        {!loading && !error && !showScopeStep && scopedReleases.length === 0 && (trackers.length > 0
+          ? <TrackerStatusNotice trackers={trackers} onRetry={retry} fontSize={22} />
+          : <div data-sources-state="empty" style={{ color: SRC_HEADING_COLOR, fontSize: '22px', ...srcAbove }}>{NO_SOURCES}</div>
         )}
         {!loading && !error && !showScopeStep && qualityGroups.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '560px' }}>
@@ -779,7 +781,7 @@ function CompactTvSourcesView({
   onIndexerQueryClear,
   targetName = null,
 }: TvSourcesPanelProps) {
-  const { loading, error, releases, handleGrab } = useTvSourcesData({
+  const { loading, error, releases, handleGrab, trackers, retry } = useTvSourcesData({
     target, tvdbId, tmdbId, title, year, indexerQuery,
   });
 
@@ -1286,9 +1288,10 @@ function CompactTvSourcesView({
         {/* No sources */}
         {noSources && indexerConfigured === true && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 24px 60px', gap: '20px' }}>
+            {trackers.length > 0 ? <TrackerStatusNotice trackers={trackers} onRetry={retry} /> : (
             <span style={{ fontSize: '17px', fontWeight: 600, color: 'rgba(255,255,255,0.7)', textAlign: 'center' }}>
               {NO_SOURCES}
-            </span>
+            </span>)}
             {indexerQuery && (
               <button
                 type="button"

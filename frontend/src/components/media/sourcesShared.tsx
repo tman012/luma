@@ -413,10 +413,7 @@ export function IndexerQueryOverride({
             Search
           </button>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.35)', lineHeight: 1.3 }}>
-            Indexers only — library title stays “{mediaTitle || 'this title'}”
-          </span>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px' }}>
           <button
             type="button"
             onClick={() => setOpen(false)}
