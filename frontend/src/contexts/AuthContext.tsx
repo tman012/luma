@@ -150,6 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch {}
+    purgeCachedImages();
     setState({ user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null, ...NO_START });
   }, []);
 
@@ -185,4 +186,15 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
   return ctx;
+}
+
+/** Sign-out: drop any poster an older service worker cached (v111+ never caches them). */
+function purgeCachedImages() {
+  try {
+    navigator.serviceWorker?.controller?.postMessage('PURGE_IMAGES');
+    if (typeof caches === 'undefined') return;
+    void caches.keys().then(names => Promise.all(names.map(n => caches.open(n).then(c => c.keys().then(reqs =>
+      Promise.all(reqs.filter(r => new URL(r.url).pathname.includes('/api/img/')).map(r => c.delete(r))))))))
+      .catch(() => {});
+  } catch { /* no cache access: nothing to purge */ }
 }

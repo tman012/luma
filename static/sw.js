@@ -3,7 +3,7 @@
 // Cache strategy summary:
 //   Navigation (HTML)       → NetworkFirst (fallback to cached shell)
 //   /assets/* (hashed)      → CacheFirst (immutable, hash-busted by Vite)
-//   /api/img/* (Plex proxy) → CacheFirst (URL includes full path as key)
+//   /api/img/* (Plex proxy) → Network only (posters are per-account, never cached)
 //   /static/images/*        → NetworkFirst (icons change without hash)
 //   /static/* (other)       → NetworkFirst (JS/CSS may change without hash)
 //   /api/* (data)           → Network only (never cached)
@@ -21,7 +21,7 @@
 
 // BUILD_ID is replaced at build time or bumped manually per deploy.
 // When sw.js byte-content changes, the browser installs a new SW.
-const CACHE_VERSION = 'media-kiosk-v110';
+const CACHE_VERSION = 'media-kiosk-v111';
 
 // Separate cache for large immutable assets — purged when version bumps
 const IMMUTABLE_CACHE = 'media-immutable-v24';
@@ -118,12 +118,24 @@ self.addEventListener('activate', event => {
   event.waitUntil(self.clients.claim());
 });
 
+// Drop any proxied image an older worker cached (sign-out, account switch).
+function purgeImages() {
+  return caches.keys().then(names => Promise.all(names.map(n =>
+    caches.open(n).then(c => c.keys().then(reqs => Promise.all(
+      reqs.filter(r => appPath(new URL(r.url).pathname)?.startsWith('/api/img/')).map(r => c.delete(r))
+    )))
+  )));
+}
+
 // ---------------------------------------------------------------------------
 // Message handler — supports cache clearing from client
 // ---------------------------------------------------------------------------
 self.addEventListener('message', event => {
   if (event.data === 'SKIP_WAITING') {
     self.skipWaiting();
+  }
+  if (event.data === 'PURGE_IMAGES') {
+    event.waitUntil(purgeImages());
   }
   if (event.data === 'CLEAR_ALL_CACHES') {
     event.waitUntil(
@@ -153,8 +165,8 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  if (path.startsWith('/api/') && !path.startsWith('/api/img/')) {
-    return; // Let browser handle normally
+  if (path.startsWith('/api/')) {
+    return; // Data and proxied images: network only, never cached
   }
 
   // --- Hashed assets (/assets/index-ABC123.js) — CacheFirst (immutable) ---
@@ -167,24 +179,6 @@ self.addEventListener('fetch', event => {
           if (resp.ok) {
             const clone = resp.clone();
             caches.open(IMMUTABLE_CACHE).then(c => c.put(event.request, clone));
-          }
-          return resp;
-        });
-      })
-    );
-    return;
-  }
-
-  // --- Image proxy routes (/api/img/*) — CacheFirst ---
-  // URL includes the full Plex/TMDb path, so same URL = same image.
-  if (path.startsWith('/api/img/')) {
-    event.respondWith(
-      caches.match(event.request).then(cached => {
-        if (cached) return cached;
-        return fetch(event.request).then(resp => {
-          if (resp.ok) {
-            const clone = resp.clone();
-            caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
           }
           return resp;
         });

@@ -49,7 +49,7 @@ describe('Home', () => {
     await waitFor(() => expect(screen.getByTestId('home-rails')).toBeTruthy());
     expect(screen.queryByTestId('home-skeleton')).toBeNull();
     const titles = screen.getAllByRole('heading', { level: 2 }).map(h => h.textContent);
-    expect(titles).toEqual(['Continue watching', 'Recently added in Movies', 'Recently added in TV Shows']);
+    expect(titles).toEqual(['Continue watching', 'Movies', 'TV Shows']);
     expect((screen.getByTestId('progress') as HTMLElement).style.width).toBe('25%');
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Account' }));

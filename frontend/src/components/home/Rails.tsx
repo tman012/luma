@@ -86,7 +86,7 @@ export function HomeRails({ cw, rails, onOpen }: { cw: Card[]; rails: Rail[]; on
         </RailRow>
       )}
       {rails.filter(r => r.items.length > 0).map(r => (
-        <RailRow key={r.id} title={`Recently added in ${r.title}`} testId={`rail-${r.id}`}>
+        <RailRow key={r.id} title={r.title} testId={`rail-${r.id}`}>
           {r.items.map(c => <PosterCard key={c.key} card={c} onOpen={onOpen} />)}
         </RailRow>
       ))}

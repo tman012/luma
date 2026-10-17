@@ -19,7 +19,7 @@ AUTOMATION_MODULES = [
 DISABLED = [
     '/api/rails/what-youre-missing', '/api/automation/features', '/api/automation/latest-auto-grab/status',
     '/api/genre-roulette/status', '/api/request/home', '/api/bot/rooms', '/api/alfred/health',
-    '/api/ha/areas', '/api/kiosk/settings', '/api/explore/cached', '/api/hero/content',
+    '/api/ha/areas', '/api/kiosk/settings', '/api/explore/cached', '/api/hero/refresh',
     '/api/sonarr/calendar', '/api/radarr/queue', '/api/settings', '/api/indexer/latest',
     '/api/library/recent', '/api/weather', '/explore', '/settings', '/request', '/watchlist',
 ]
