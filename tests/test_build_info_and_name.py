@@ -112,6 +112,9 @@ def test_api_version_reports_sha_without_subprocess(test_app, monkeypatch):
         c = test_app.test_client()
         for _ in range(3):
             body = c.get('/api/version').get_json()
+            assert body == {'version': SHA[:7]}  # signed out: short id only
+        with mock.patch.object(app.main, '_get_current_user', return_value={'id': 1, 'is_admin': True}):
+            body = c.get('/api/version').get_json()
             assert body['git'] == SHA and body['version'] == SHA[:7]
     monkeypatch.setattr(build_info, '_cached', None)
     monkeypatch.setattr(app.main, '_app_version', None)

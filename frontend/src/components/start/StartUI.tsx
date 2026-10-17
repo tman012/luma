@@ -163,6 +163,9 @@ export const primaryBtn: React.CSSProperties = {
   width: '100%', height: 50, borderRadius: 25, border: 'none', background: '#fff', color: '#15102a',
   fontSize: 17, fontWeight: 600, fontFamily: FONT, cursor: 'pointer',
 };
+/** Luma blue: the one primary-action color. */
+export const LUMA_BLUE = '#3b82f6';
+export const accentBtn: React.CSSProperties = { ...primaryBtn, background: LUMA_BLUE, color: '#fff' };
 export const plexBtn: React.CSSProperties = {
   ...primaryBtn, background: '#e5a00d', color: '#1f1f1f', display: 'flex', alignItems: 'center', justifyContent: 'center',
 };

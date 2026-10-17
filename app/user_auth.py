@@ -12,6 +12,7 @@ import hmac
 import secrets
 import os
 import json
+import unicodedata
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
@@ -156,19 +157,62 @@ def get_user_by_name(name: str) -> Optional[Dict]:
         return dict(row) if row else None
 
 
+def _script(ch: str) -> str:
+    """Rough Unicode script of a letter: the first word of its name."""
+    try:
+        return unicodedata.name(ch).split(' ')[0]
+    except ValueError:
+        return 'UNKNOWN'
+
+
+def normalize_name(name: str) -> str:
+    """NFKC-normalized, trimmed form of a username (fullwidth -> ASCII etc.)."""
+    return unicodedata.normalize('NFKC', name or '').strip()
+
+
+def name_key(name: str) -> str:
+    """Comparison key for uniqueness: NFKC then casefold."""
+    return normalize_name(name).casefold()
+
+
+def name_problem(name: str) -> Optional[str]:
+    """Why a (normalized) username is unusable, or None."""
+    for ch in name:
+        if unicodedata.category(ch) in ('Cc', 'Cf', 'Co', 'Cs', 'Cn', 'Zl', 'Zp'):
+            return "Name can't contain hidden or control characters"
+    scripts = {_script(ch) for ch in name if ch.isalpha()}
+    if len(scripts) > 1:
+        return "Use letters from one alphabet"
+    return None
+
+
+def _name_taken(name: str, exclude_id: int = None) -> bool:
+    key = name_key(name)
+    for u in list_users():
+        if u.get('id') == exclude_id:
+            continue
+        if name_key(u.get('name') or '') == key or name_key(u.get('email') or '') == key:
+            return True
+    return False
+
+
 def identity_conflict(name: str, email: str = None, exclude_id: int = None) -> Optional[str]:
-    """Why this name/email can't be used, or None. Case-insensitive."""
-    name = (name or '').strip()
+    """Why this name/email can't be used, or None. Names compare after NFKC
+    normalization and casefolding."""
+    name = normalize_name(name)
     email = (email or '').strip()
     if not name:
         return "Name is required"
     if '@' in name:
         return "Name can't contain @"
+    problem = name_problem(name)
+    if problem:
+        return problem
 
     def _taken(user):
         return user is not None and user.get('id') != exclude_id
 
-    if _taken(get_user_by_name(name)) or _taken(get_user_by_email(name)):
+    if _name_taken(name, exclude_id) or _taken(get_user_by_name(name)) or _taken(get_user_by_email(name)):
         return "An account with that name already exists"
     if email and (_taken(get_user_by_email(email)) or _taken(get_user_by_name(email))):
         return "An account with that email already exists"
@@ -225,7 +269,7 @@ def create_user(name: str, pin: str, is_admin: bool = False, status: str = 'acti
     Names and emails share one namespace for sign-in, so a new name may not
     match any existing email and a new email may not match any existing name.
     """
-    name = (name or '').strip()
+    name = normalize_name(name)
     email = (email or '').strip().lower() or None
     problem = identity_conflict(name, email)
     if problem:
@@ -274,7 +318,7 @@ def deny_user(user_id: int) -> bool:
 def set_name_and_password(user_id: int, name: str, password: str) -> None:
     """Rename a user and set their password in one transaction.
     Raises ValueError when the name is unusable or taken."""
-    name = (name or '').strip()
+    name = normalize_name(name)
     problem = identity_conflict(name, exclude_id=user_id)
     if problem:
         raise ValueError(problem)

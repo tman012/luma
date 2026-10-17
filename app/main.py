@@ -10086,6 +10086,10 @@ def _get_app_version():
             _app_version = datetime.now().strftime('%Y%m%d%H%M%S')
     return _app_version
 
+def _short_sha(value) -> str:
+    return str(value or '')[:7]
+
+
 def _build_info_sha():
     from app import build_info
     return build_info.git_sha()
@@ -10096,11 +10100,15 @@ def api_version():
     """Lightweight version endpoint for KioskHub auto-reload.
     Returns a version that changes on each deploy/restart."""
     version = _get_app_version()
-    resp = jsonify({
-        'version': version,
-        'git': _build_info_sha(),
-        'built_at': datetime.now().isoformat()
-    })
+    if _get_current_user():
+        resp = jsonify({
+            'version': version,
+            'git': _build_info_sha(),
+            'built_at': datetime.now().isoformat()
+        })
+    else:
+        # Signed out: only the short build id kiosks need to notice a deploy.
+        resp = jsonify({'version': _short_sha(version)})
     resp.headers['Cache-Control'] = 'no-store'
     return resp
 

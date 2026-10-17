@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import secrets
 import sys
 import threading
@@ -51,6 +52,7 @@ def init(*, settings, user_auth, session_cookie: str, client_id: str,
     _cfg.update(settings=settings, user_auth=user_auth, session_cookie=session_cookie,
                 client_id=client_id, on_plex_saved=on_plex_saved, get_current_user=get_current_user,
                 secret=secret)
+    clear_stale_claim()
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +76,32 @@ def _save_state(state: Dict[str, Any]) -> None:
     tmp.write_text(json.dumps(state, indent=2))
     os.chmod(tmp, 0o600)
     tmp.replace(p)
+
+
+CLAIM_TTL = 60  # seconds a password claim blocks a second attempt
+
+
+def _claim_active(st: Dict[str, Any]) -> bool:
+    """A password write is in flight. Claims older than CLAIM_TTL (a crash
+    mid-write) or from an older format (True) no longer block."""
+    claimed = st.get('password_claimed')
+    if isinstance(claimed, bool) or not isinstance(claimed, (int, float)):
+        return False
+    return 0 <= time.time() - claimed < CLAIM_TTL
+
+
+def clear_stale_claim() -> None:
+    """At startup no password write can be in flight: drop any claim."""
+    try:
+        st = _load_state()
+    except Exception:
+        return
+    if 'password_claimed' in st:
+        st.pop('password_claimed', None)
+        try:
+            _save_state(st)
+        except OSError as e:
+            logger.warning(f'Start: could not clear password claim: {e}')
 
 
 def needs_start() -> bool:
@@ -129,14 +157,42 @@ PLEX_DONE_PATH = '/start/plex-done'   # pop-up: closes itself
 START_PATH = '/start'                  # same tab: resumes the flow
 
 
+PLEX_AUTH_MODES = ('popup', 'redirect')
+_HOST_RE = re.compile(
+    r'^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*'
+    r'|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$')
+
+
+def _allowed_hosts() -> List[str]:
+    raw = os.environ.get('LUMA_ALLOWED_HOSTS', '')
+    return [h.strip().lower() for h in raw.split(',') if h.strip()]
+
+
+def valid_host(host: str) -> Optional[str]:
+    """The request host when it is a well-formed host[:port] (and listed in
+    LUMA_ALLOWED_HOSTS when that is set), else None."""
+    host = (host or '').strip()
+    if not host or len(host) > 255 or not _HOST_RE.match(host):
+        return None
+    allowed = _allowed_hosts()
+    if allowed and host.lower() not in allowed:
+        return None
+    return host
+
+
 def forward_url(mode: str = 'popup') -> str:
-    """Where Plex sends the browser after sign-in: this request's own origin
-    (scheme and host as seen through trusted proxies) plus the URL base, then
-    the self-closing done page (pop-up) or /start (same-tab redirect)."""
+    """Where Plex sends the browser after sign-in: this request's validated
+    origin plus the URL base, then the self-closing done page (pop-up) or
+    /start (same-tab redirect). Empty when the host isn't valid, so Plex
+    gets no forward URL rather than a reflected one."""
     from flask import current_app
+    host = valid_host(request.host)
+    if not host:
+        return ''
+    scheme = 'https' if request.scheme == 'https' else 'http'
     base = (current_app.config.get('URL_BASE') or '').rstrip('/')
     path = START_PATH if mode == 'redirect' else PLEX_DONE_PATH
-    return f"{request.host_url.rstrip('/')}{base}{path}"
+    return f"{scheme}://{host}{base}{path}"
 
 
 def auth_url(code: str, forward: str = '') -> str:
@@ -339,7 +395,10 @@ def start_account():
     password = body.get('password')
     if not isinstance(username, str) or not username.strip():
         return bad('Enter a username')
-    username = username.strip()
+    username = _cfg['user_auth'].normalize_name(username) if hasattr(_cfg['user_auth'], 'normalize_name') \
+        else username.strip()
+    if not username:
+        return bad('Enter a username')
     if len(username) > USERNAME_MAX:
         return bad(f'Use at most {USERNAME_MAX} characters for the username')
     if '@' in username:
@@ -353,9 +412,9 @@ def start_account():
 
     with _lock:
         st = _load_state()
-        if st.get('password_set') or st.get('password_claimed'):
+        if st.get('password_set') or _claim_active(st):
             return jsonify({'error': 'Password already set'}), 409
-        st['password_claimed'] = True
+        st['password_claimed'] = time.time()
         _save_state(st)
         try:
             _cfg['user_auth'].set_name_and_password(user['id'], username, password)
@@ -395,7 +454,11 @@ def start_plex_pin():
         _save_state(st)
     with _lock:
         _pending[nonce] = {'pin_id': pin['id'], 'created': time.time()}
-    resp = make_response(jsonify({'id': pin['id'], 'auth_url': auth_url(pin['code'], forward_url(str((request.get_json(silent=True) or {}).get('mode') or 'popup')))}))
+    mode = (request.get_json(silent=True) or {}).get('mode')
+    if mode not in PLEX_AUTH_MODES:
+        mode = 'popup'
+    forward = forward_url(mode)
+    resp = make_response(jsonify({'id': pin['id'], 'auth_url': auth_url(pin['code'], forward)}))
     resp.set_cookie(START_COOKIE, nonce, max_age=3600, httponly=True, samesite='Lax', path='/')
     return resp
 
@@ -439,6 +502,15 @@ def start_plex_poll():
     })
 
 
+def _owner_name(ua, name) -> str:
+    """The Plex account name when it is a usable username, else 'Owner'."""
+    norm = getattr(ua, 'normalize_name', lambda n: (n or '').strip())(name if isinstance(name, str) else '')
+    check = getattr(ua, 'name_problem', lambda n: None)
+    if not norm or '@' in norm or check(norm):
+        return 'Owner'
+    return norm
+
+
 @bp.route('/api/start/plex/server', methods=['POST'])
 def start_plex_server():
     err = _require_fresh()
@@ -463,7 +535,7 @@ def start_plex_server():
     account = st.get('account') or {}
     ua = _cfg['user_auth']
     try:
-        user = ua.create_user(account.get('name') or 'Owner', secrets.token_urlsafe(24), is_admin=True,
+        user = ua.create_user(_owner_name(ua, account.get('name')), secrets.token_urlsafe(24), is_admin=True,
                               status='active', email=account.get('email') or None)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409
@@ -472,7 +544,7 @@ def start_plex_server():
     _cfg['settings'].update({'security': {'auth_required': 'enabled' if minimal.enabled() else 'disabled_local'}})
     plex_id = str(account.get('id') or '')
     st.update(server_name=server['name'], admin_via_start=True, completed=False, pin_set=False,
-              password_set=False, password_claimed=False, owner_uid=user['id'], owner_plex_id=plex_id)
+              password_set=False, owner_uid=user['id'], owner_plex_id=plex_id)
     st.pop('nonce', None)
     _save_state(st)
     with _lock:

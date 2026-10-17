@@ -2,21 +2,24 @@ import { apiFetch } from '../apiClient';
 /**
  * StartPage — first-run setup for a fresh install.
  *
- * Welcome → Sign in with Plex → (pick a server) → Create Account → Access → Done.
+ * Welcome (Continue with Plex) → (pick a server when there are several) →
+ * Create account → (Access, full build only) → Home, with a one-time toast.
  * Only reachable while the install has no users (the backend refuses every
- * Plex step once an account exists) and never shown again after Done.
+ * Plex step once an account exists) and never shown again once finished.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
+import { assetUrl } from '@/urlHelpers';
+import { markSetupJustFinished } from '@/components/start/SetupToast';
 import { useAuth } from '@/contexts/AuthContext';
 import { isMinimal } from '@/minimal';
 import { openPlexPopup, plexAuthMode } from '@/utils/plexAuth';
 import {
-  StartShell, Center, Bottom, Title, Sub, ErrorLine, Status, Logo, PlexMark, Check, PinPad,
-  primaryBtn, plexBtn, linkBtn, list, row, FONT,
+  StartShell, Center, Bottom, Title, ErrorLine, Status, Logo, PlexMark, PinPad,
+  primaryBtn, accentBtn, plexBtn, linkBtn, list, row, FONT,
 } from '@/components/start/StartUI';
 
-type Step = 'loading' | 'welcome' | 'plex' | 'servers' | 'connecting' | 'password' | 'access' | 'done';
+type Step = 'loading' | 'welcome' | 'servers' | 'connecting' | 'password' | 'access';
 export type AuthRequired = 'disabled_local' | 'enabled';
 type Mode = AuthRequired;
 
@@ -50,6 +53,7 @@ export function StartPage() {
   const [authUrl, setAuthUrl] = useState('');
   const [servers, setServers] = useState<Server[]>([]);
   const [serverName, setServerName] = useState('');
+  const finishRef = useRef<() => void>(() => {});
   const [busy, setBusy] = useState(false);
   const [passwordSet, setPasswordSet] = useState(false);
   const pollRef = useRef<number | null>(null);
@@ -67,7 +71,7 @@ export function StartPage() {
       if (!alive) return;
       if (data.needs_start && data.step === 'plex') {
         // Back from Plex (same window): keep polling the PIN this browser started.
-        setStep('plex');
+        setStep('welcome');
         setAuthUrl('pending');
         pollFnRef.current();
         return;
@@ -75,7 +79,9 @@ export function StartPage() {
       if (data.in_progress) {
         setServerName(data.server || '');
         setPasswordSet(!!data.password_set);
-        setStep(!data.password_set ? 'password' : isMinimal() ? 'done' : 'access');
+        if (!data.password_set) setStep('password');
+        else if (isMinimal()) finishRef.current();
+        else setStep('access');
       }
       else if (!data.needs_start) navigate('/', { replace: true });
       else setStep('welcome');
@@ -89,7 +95,7 @@ export function StartPage() {
     setStep('connecting');
     const { ok, data } = await sendJson('/api/start/plex/server', { machine_id: s.machine_id });
     if (ok) { setStep('password'); return; }
-    setStep(data.restart ? 'welcome' : count > 1 ? 'servers' : 'plex');
+    setStep(count > 1 && !data.restart ? 'servers' : 'welcome');
     if (!data.restart) setAuthUrl('');
     setError(data.error || `Couldn't connect to ${s.name}`);
   }, []);
@@ -152,8 +158,10 @@ export function StartPage() {
       }
     }
     await refreshUser();
-    window.location.replace('/');
+    markSetupJustFinished();
+    window.location.replace(assetUrl('/'));
   };
+  finishRef.current = finish;
 
   if (!loading && authenticated && !startInProgress && step === 'welcome') {
     return <Navigate to="/" replace />;
@@ -166,29 +174,17 @@ export function StartPage() {
           <Logo />
           <Bottom>
             {error && <ErrorLine text={error} />}
-            <button className="luma-start-btn" style={primaryBtn} onClick={() => { setError(''); setStep('plex'); }}>
-              Get Started
-            </button>
-          </Bottom>
-        </Center>
-      )}
-
-      {step === 'plex' && (
-        <Center key="plex">
-          <Title>Sign in with Plex</Title>
-          <Bottom>
-            {error && <ErrorLine text={error} />}
             {authUrl && !error ? (
               <>
                 <Status text="Waiting for Plex…" />
                 {authUrl !== 'pending' && <a href={authUrl} target="_blank" rel="noreferrer" style={linkBtn}>Open Plex again</a>}
+                <button style={linkBtn} onClick={() => { stopPolling(); setAuthUrl(''); setError(''); }}>Cancel</button>
               </>
             ) : (
               <button className="luma-start-btn" style={plexBtn} onClick={signInWithPlex} disabled={busy}>
                 <PlexMark /> Continue with Plex
               </button>
             )}
-            <button style={linkBtn} onClick={() => { stopPolling(); setAuthUrl(''); setError(''); setStep('welcome'); }}>Back</button>
           </Bottom>
         </Center>
       )}
@@ -217,45 +213,40 @@ export function StartPage() {
 
       {step === 'password' && (
         <Center key="password">
-          <AccountStep onSaved={() => { setPasswordSet(true); setStep(isMinimal() ? 'done' : 'access'); }} onRestart={() => setStep('welcome')} />
+          <AccountStep
+            onSaved={() => { setPasswordSet(true); if (isMinimal()) finish(); else setStep('access'); }}
+            onRestart={() => setStep('welcome')}
+            locked={busy}
+          />
         </Center>
       )}
 
       {step === 'access' && (
         <Center key="access">
-          <AccessChooser onSaved={() => setStep('done')} passwordSet={passwordSet} />
+          <AccessChooser onSaved={() => finish()} passwordSet={passwordSet} />
         </Center>
       )}
 
-      {step === 'done' && (
-        <Center key="done">
-          <Check />
-          <Title>You're all set</Title>
-          {serverName && <Sub>{serverName}</Sub>}
-          <Bottom>
-            <button className="luma-start-btn" style={primaryBtn} onClick={finish} disabled={busy}>
-              {busy ? 'Starting Luma…' : 'Go to Home'}
-            </button>
-          </Bottom>
-        </Center>
-      )}
     </StartShell>
   );
 }
 
-/** Create Account: the owner's username and password for /login. */
-export function AccountStep({ onSaved, onRestart }: { onSaved: () => void; onRestart: () => void }) {
+/** Create account: the owner's username and password for /login. */
+export function AccountStep({ onSaved, onRestart, locked = false }: {
+  onSaved: () => void; onRestart: () => void; locked?: boolean;
+}) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const busy = saving || locked;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy) return;
-    setBusy(true);
+    setSaving(true);
     const { ok, data } = await sendJson('/api/start/account', { username, password });
-    setBusy(false);
+    setSaving(false);
     if (ok) { onSaved(); return; }
     if (data.restart) { onRestart(); return; }
     setError(data.error || 'Something went wrong');
@@ -263,7 +254,9 @@ export function AccountStep({ onSaved, onRestart }: { onSaved: () => void; onRes
 
   return (
     <form id="start-account" method="post" action="#" onSubmit={submit} style={pwForm}>
-      <Title>Create Account</Title>
+      <Logo />
+      <div style={{ height: 32 }} />
+      <Title>Create account</Title>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', marginTop: 28 }}>
         <label style={pwLabel}>
           Username
@@ -284,8 +277,8 @@ export function AccountStep({ onSaved, onRestart }: { onSaved: () => void; onRes
       </div>
       <Bottom>
         {error && <ErrorLine text={error} />}
-        <button type="submit" className="luma-start-btn" style={primaryBtn} disabled={busy || !username.trim() || !password}>
-          Create Account
+        <button type="submit" className="luma-start-btn" style={accentBtn} disabled={busy || !username.trim() || !password}>
+          Create account
         </button>
       </Bottom>
     </form>

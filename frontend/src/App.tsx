@@ -29,6 +29,8 @@ import { apiFetch } from './apiClient';
 import { isMinimal } from './minimal';
 import { MinimalHomePage } from '@/pages/MinimalHomePage';
 import { PlexDonePage } from '@/pages/PlexDonePage';
+import { SetupToast } from '@/components/start/SetupToast';
+import { getUrlBase } from '@/urlHelpers';
 
 // Lazy-load non-home routes — keeps initial bundle small
 const ExploreKioskPage = lazy(() => import('@/pages/ExploreKioskPage').then(m => ({ default: m.ExploreKioskPage })));
@@ -217,10 +219,16 @@ function Home() {
   return <LandingPage />;
 }
 
+/** Router basename from the runtime URL base, so navigation keeps it. */
+export function routerBasename(): string | undefined {
+  const base = getUrlBase().replace(/\/+$/, '');
+  return base || undefined;
+}
+
 /** LUMA_MINIMAL=1: Get Started, sign-in and the main screen only. */
 function MinimalApp() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={routerBasename()}>
       <AuthProvider>
         <Routes>
           <Route path="/" element={<MinimalHomePage />} />
@@ -230,6 +238,7 @@ function MinimalApp() {
           <Route path="/unlock" element={<UnlockPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        <SetupToast />
       </AuthProvider>
     </BrowserRouter>
   );
@@ -241,7 +250,7 @@ export default function App() {
   if (isMinimal()) return <MinimalApp />;
 
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={routerBasename()}>
       <AuthProvider>
         <TVModeProvider>
           <LayoutModeProvider>
@@ -298,6 +307,7 @@ export default function App() {
                     />
                   </Routes>
                 </Suspense>
+                <SetupToast />
                 </NotificationsProvider>
                 </VoiceProvider>
                 {/* ScreensaverManager outside auth gate — harmless when not logged in */}
