@@ -51,6 +51,19 @@ describe('Home', () => {
     expect(items).toEqual(['Libraries', 'Sign out']);
   });
 
+  it('scrolls: the page unlocks html/body, rails scroll sideways', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json(HOME)));
+    const view = render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
+    await waitFor(() => screen.getByTestId('home-rails'));
+    expect(document.documentElement.style.overflow).toBe('auto');
+    expect(document.body.style.overflow).toBe('auto');
+    const row = screen.getByTestId('rail-continue').querySelector('.luma-rail') as HTMLElement;
+    expect(row.style.overflowX).toBe('auto');
+    expect(row.style.touchAction).toBe('pan-x pan-y');
+    view.unmount();
+    expect(document.documentElement.style.overflow).toBe('');
+  });
+
   it('shows Retry when Home fails, then loads', async () => {
     const fetchMock = vi.fn(async () => { throw new Error('offline'); });
     vi.stubGlobal('fetch', fetchMock);

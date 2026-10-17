@@ -96,8 +96,10 @@ const railTitle: React.CSSProperties = {
   margin: '0 20px 12px', fontSize: 19, fontWeight: 600, letterSpacing: '-0.01em', fontFamily: FONT, color: '#fff',
 };
 const scroller: React.CSSProperties = {
-  display: 'flex', gap: 12, overflowX: 'auto', padding: '0 20px', scrollSnapType: 'x mandatory',
+  display: 'flex', gap: 12, overflowX: 'auto', overflowY: 'hidden', padding: '0 20px', scrollSnapType: 'x mandatory',
   scrollPaddingLeft: 20, marginTop: 12,
+  // Sideways swipes scroll the rail, up/down swipes still scroll the page.
+  touchAction: 'pan-x pan-y', overscrollBehaviorX: 'contain', WebkitOverflowScrolling: 'touch',
 };
 const posterCard: React.CSSProperties = { flex: 'none', width: 'clamp(112px, 30vw, 160px)', scrollSnapAlign: 'start' };
 const posterImg: React.CSSProperties = { position: 'relative', width: '100%', aspectRatio: '2 / 3', borderRadius: 12, overflow: 'hidden' };

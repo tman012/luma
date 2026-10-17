@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { FONT, LOGO_SRC, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
 import { HomeRails, SkeletonRails, railCss } from '@/components/home/Rails';
@@ -10,6 +11,8 @@ import { fetchHome, type HomeData } from '@/components/home/homeApi';
 export function MinimalHomePage() {
   const { authenticated, loading, needsStart, startInProgress, pinUnlock, user, implicit, logout } = useAuth();
   const navigate = useNavigate();
+  // index.css locks html/body scrolling for the kiosk; Home scrolls the page.
+  useBodyScroll();
   const [busy, setBusy] = useState(false);
   const [data, setData] = useState<HomeData | null>(null);
   const [failed, setFailed] = useState(false);

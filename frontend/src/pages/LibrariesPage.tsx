@@ -7,9 +7,11 @@ import { LUMA_BLUE } from '@/ui/lumaButton';
 import { railCss } from '@/components/home/Rails';
 import { fetchLibraries, move, saveLibraries, type Library } from '@/components/home/homeApi';
 import { homeBar, homePage, iconBtn } from '@/pages/MinimalHomePage';
+import { useBodyScroll } from '@/hooks/useBodyScroll';
 
 export function LibrariesPage() {
   const { authenticated, loading } = useAuth();
+  useBodyScroll();
   if (loading) return null;
   if (!authenticated) return <Navigate to="/login" replace />;
   return <LibrariesEditor />;
