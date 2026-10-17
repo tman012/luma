@@ -189,8 +189,17 @@ def _certs(tmp_path):
 
 
 def _torrent(c, seen):
+    # Under TLS 1.3 the server finishes its handshake before the client
+    # checks the certificate, so a client that rejects the name closes the
+    # connection with nothing sent: recv returns b'' (or raises). Only a read
+    # with data is a request.
     try:
-        c.recv(4096)
+        try:
+            data = c.recv(4096)
+        except (ssl.SSLError, OSError):
+            return
+        if not data:
+            return
         seen.append('request')
         c.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n' % len(TORRENT) + TORRENT)
     finally:
