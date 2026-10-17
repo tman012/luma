@@ -15,7 +15,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { isMinimal } from '@/minimal';
 import { openPlexPopup, plexAuthMode } from '@/utils/plexAuth';
 import {
-  StartShell, Center, Bottom, Title, ErrorLine, Status, Logo, PlexMark, PinPad,
+  StartShell, Center, Bottom, Title, ErrorLine, Status, Logo, LogoGap, PlexMark, PinPad,
   primaryBtn, accentBtn, plexBtn, linkBtn, list, row, FONT,
 } from '@/components/start/StartUI';
 
@@ -57,7 +57,14 @@ export function StartPage() {
   const [busy, setBusy] = useState(false);
   const [passwordSet, setPasswordSet] = useState(false);
   const pollRef = useRef<number | null>(null);
+  const popupRef = useRef<Window | null>(null);
   const pollFnRef = useRef<() => void>(() => {});
+
+  // Best effort: the Plex pop-up has no return page, so the opener closes it.
+  const closePopup = () => {
+    try { popupRef.current?.close(); } catch { /* cross-origin or gone */ }
+    popupRef.current = null;
+  };
 
   const stopPolling = () => {
     if (pollRef.current !== null) window.clearTimeout(pollRef.current);
@@ -110,7 +117,8 @@ export function StartPage() {
         return;
       }
       if (data.status === 'waiting') { pollRef.current = window.setTimeout(tick, 2000); return; }
-      if (data.status === 'expired') { setError('Sign-in timed out. Try again.'); setAuthUrl(''); return; }
+      if (data.status === 'expired') { closePopup(); setError('Sign-in timed out. Try again.'); setAuthUrl(''); return; }
+      closePopup();
       const found = data.servers || [];
       setServers(found);
       if (found.length === 0) { setError('No Plex servers found on this account.'); setAuthUrl(''); }
@@ -137,6 +145,7 @@ export function StartPage() {
     }
     setAuthUrl(data.auth_url);
     if (popup) {
+      popupRef.current = popup;
       popup.location.href = data.auth_url;
       poll();
     } else {
@@ -178,7 +187,7 @@ export function StartPage() {
               <>
                 <Status text="Waiting for Plex…" />
                 {authUrl !== 'pending' && <a href={authUrl} target="_blank" rel="noreferrer" style={linkBtn}>Open Plex again</a>}
-                <button style={linkBtn} onClick={() => { stopPolling(); setAuthUrl(''); setError(''); }}>Cancel</button>
+                <button style={linkBtn} onClick={() => { stopPolling(); closePopup(); setAuthUrl(''); setError(''); }}>Cancel</button>
               </>
             ) : (
               <button className="luma-start-btn" style={plexBtn} onClick={signInWithPlex} disabled={busy}>
@@ -255,7 +264,7 @@ export function AccountStep({ onSaved, onRestart, locked = false }: {
   return (
     <form id="start-account" method="post" action="#" onSubmit={submit} style={pwForm}>
       <Logo />
-      <div style={{ height: 32 }} />
+      <LogoGap />
       <Title>Create account</Title>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', marginTop: 28 }}>
         <label style={pwLabel}>

@@ -485,14 +485,14 @@ def test_auth_url_has_encoded_forward_url(test_app, minimal, base):
     test_app.config['URL_BASE'] = base
     try:
         with mock.patch('app.start_flow.requests.post', return_value=_PinResp()):
-            r = test_app.test_client().post('/api/start/plex/pin', headers=ORIGIN,
+            r = test_app.test_client().post('/api/start/plex/pin', json={'mode': 'redirect'}, headers=ORIGIN,
                                             base_url='http://192.168.1.62:5002', environ_base=REMOTE)
         assert r.status_code == 200, r.get_data(as_text=True)
         url = r.json['auth_url']
         frag = urlsplit(url).fragment
         assert frag.startswith('?')
         q = parse_qs(frag[1:])
-        assert q['forwardUrl'] == ['http://192.168.1.62:5002' + base.rstrip('/') + '/start/plex-done']
+        assert q['forwardUrl'] == ['http://192.168.1.62:5002' + base.rstrip('/') + '/start']
         assert 'forwardUrl=http%3A%2F%2F192.168.1.62%3A5002' in url
     finally:
         test_app.config['URL_BASE'] = old
@@ -502,18 +502,23 @@ def test_forward_url_ignores_untrusted_forwarded_host(test_app, minimal):
     import app.main
     app.main.settings.update({'security': {'trusted_proxies': ''}})
     with mock.patch('app.start_flow.requests.post', return_value=_PinResp()):
-        r = test_app.test_client().post('/api/start/plex/pin', base_url='http://192.168.1.62:5002',
+        r = test_app.test_client().post('/api/start/plex/pin', json={'mode': 'redirect'},
+                                        base_url='http://192.168.1.62:5002',
                                         headers={**ORIGIN, 'X-Forwarded-Host': 'evil.example',
                                                  'X-Forwarded-Proto': 'https'}, environ_base=REMOTE)
     assert 'evil.example' not in r.json['auth_url']
     assert 'forwardUrl=http%3A%2F%2F192.168.1.62%3A5002' in r.json['auth_url']
 
 
-def test_plex_done_page_signed_out_and_never_creates_pin(test_app, minimal):
+@pytest.mark.parametrize('flag', [True, False])
+def test_plex_done_route_is_gone(test_app, monkeypatch, flag):
+    if flag:
+        monkeypatch.setenv('LUMA_MINIMAL', '1')
     with mock.patch('app.start_flow.create_pin') as create:
-        r = test_app.test_client().get('/start/plex-done', environ_base=REMOTE)
-    assert r.status_code != 404
-    assert '/login' not in (r.headers.get('Location') or '')
+        # Full build: a LAN visitor passes the sign-in gate, so the route itself answers.
+        env = REMOTE if flag else {'REMOTE_ADDR': '127.0.0.1'}
+        r = test_app.test_client().get('/start/plex-done', environ_base=env)
+    assert r.status_code == 404
     create.assert_not_called()
 
 
@@ -590,8 +595,8 @@ def test_account_without_email(test_app, start_owner):
     assert _login(test_app, 'noemail', 'pass-word-1').status_code == 200
 
 
-@pytest.mark.parametrize('mode,path', [('popup', '/start/plex-done'), ('redirect', '/start'),
-                                       (None, '/start/plex-done'), ('bogus', '/start/plex-done')])
+@pytest.mark.parametrize('mode,path', [('popup', None), ('redirect', '/start'),
+                                       (None, None), ('bogus', None)])
 def test_forward_url_per_mode(test_app, minimal, mode, path):
     from urllib.parse import parse_qs, urlsplit
     old = test_app.config.get('URL_BASE')
@@ -602,7 +607,10 @@ def test_forward_url_per_mode(test_app, minimal, mode, path):
             r = test_app.test_client().post('/api/start/plex/pin', json=body, headers=ORIGIN,
                                             base_url='http://192.168.1.62:5002', environ_base=REMOTE)
         q = parse_qs(urlsplit(r.json['auth_url']).fragment[1:])
-        assert q['forwardUrl'] == ['http://192.168.1.62:5002/luma' + path]
+        if path is None:
+            assert 'forwardUrl' not in q  # pop-up: the opener polls and closes it
+        else:
+            assert q['forwardUrl'] == ['http://192.168.1.62:5002/luma' + path]
     finally:
         test_app.config['URL_BASE'] = old
 

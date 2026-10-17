@@ -14,14 +14,14 @@ _TRUE = ('1', 'true', 'yes', 'on')
 
 # Pages and API paths that stay on in minimal mode.
 ALLOWED_PATHS = frozenset({
-    '/', '/start', '/start/plex-done', '/login', '/logout', '/unlock', '/health',
+    '/', '/start', '/login', '/logout', '/unlock', '/health',
     '/manifest.json', '/sw.js', '/api/security', '/api/version',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/')
 # Inside /static/, these belong to disabled features.
 BLOCKED_PREFIXES = ('/static/request/', '/static/hero_cache/')
 # Reachable signed out (minimal mode signs in every address, LAN included).
-SIGNED_OUT_PATHS = frozenset({'/', '/start', '/start/plex-done', '/unlock'})
+SIGNED_OUT_PATHS = frozenset({'/', '/start', '/unlock'})
 SIGNED_OUT_PREFIXES = ('/api/start/', '/assets/', '/fonts/')
 
 

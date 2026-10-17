@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { StartShell, Center, Bottom, Sub, Logo, primaryBtn } from '@/components/start/StartUI';
+import { StartShell, Center, Bottom, Logo, LogoGap, TRIM, primaryBtn } from '@/components/start/StartUI';
 
 export function MinimalHomePage() {
   const { authenticated, loading, needsStart, startInProgress, pinUnlock, user, implicit, logout } = useAuth();
@@ -23,7 +23,12 @@ export function MinimalHomePage() {
     <StartShell step="home">
       <Center key="home">
         <Logo />
-        {user?.name && <Sub>{user.name}</Sub>}
+        {user?.name ? (
+          <>
+            <LogoGap />
+            <p style={homeName}>{user.name}</p>
+          </>
+        ) : null}
         <Bottom>
           {!implicit && (
             <button className="luma-start-btn" style={primaryBtn} onClick={signOut} disabled={busy}>Sign out</button>
@@ -33,3 +38,5 @@ export function MinimalHomePage() {
     </StartShell>
   );
 }
+
+const homeName: React.CSSProperties = { margin: 0, fontSize: 15, lineHeight: 1, color: 'rgba(255,255,255,0.55)', textAlign: 'center', ...TRIM };

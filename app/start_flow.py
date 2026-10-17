@@ -153,14 +153,12 @@ def create_pin() -> Dict[str, Any]:
     return {'id': d['id'], 'code': d['code']}
 
 
-PLEX_DONE_PATH = '/start/plex-done'   # pop-up: closes itself
-START_PATH = '/start'                  # same tab: resumes the flow
-
+START_PATH = '/start'   # same-tab sign-in returns here; the page resumes the PIN
 
 PLEX_AUTH_MODES = ('popup', 'redirect')
 _HOST_RE = re.compile(
-    r'^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*'
-    r'|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$')
+    r'^(?P<name>[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*'
+    r'|\[[0-9A-Fa-f:.]+\])(?::(?P<port>\d{1,5}))?$')
 
 
 def _allowed_hosts() -> List[str]:
@@ -169,30 +167,40 @@ def _allowed_hosts() -> List[str]:
 
 
 def valid_host(host: str) -> Optional[str]:
-    """The request host when it is a well-formed host[:port] (and listed in
-    LUMA_ALLOWED_HOSTS when that is set), else None."""
+    """The request host when it is a well-formed host[:port] with a port in
+    1-65535 that names this server: listed in LUMA_ALLOWED_HOSTS, or one of
+    its own known addresses (access.is_known_host). Otherwise None."""
     host = (host or '').strip()
-    if not host or len(host) > 255 or not _HOST_RE.match(host):
+    m = _HOST_RE.match(host) if host and len(host) <= 255 else None
+    if not m:
         return None
-    allowed = _allowed_hosts()
-    if allowed and host.lower() not in allowed:
+    port = m.group('port')
+    if port is not None and not 1 <= int(port) <= 65535:
         return None
-    return host
+    if host.lower() in _allowed_hosts():
+        return host
+    from app import access
+    try:
+        known = access.is_known_host(host, _cfg.get('settings'))
+    except Exception:
+        known = False
+    return host if known else None
 
 
 def forward_url(mode: str = 'popup') -> str:
-    """Where Plex sends the browser after sign-in: this request's validated
-    origin plus the URL base, then the self-closing done page (pop-up) or
-    /start (same-tab redirect). Empty when the host isn't valid, so Plex
-    gets no forward URL rather than a reflected one."""
+    """Where Plex sends the browser after sign-in. Pop-up mode: nowhere (the
+    opener polls the PIN and closes the pop-up). Same-tab mode: this server's
+    validated origin plus the URL base and /start. Empty when the host can't
+    be validated: an arbitrary Host header is never reflected."""
+    if mode != 'redirect':
+        return ''
     from flask import current_app
     host = valid_host(request.host)
     if not host:
         return ''
     scheme = 'https' if request.scheme == 'https' else 'http'
     base = (current_app.config.get('URL_BASE') or '').rstrip('/')
-    path = START_PATH if mode == 'redirect' else PLEX_DONE_PATH
-    return f"{scheme}://{host}{base}{path}"
+    return f"{scheme}://{host}{base}{START_PATH}"
 
 
 def auth_url(code: str, forward: str = '') -> str:

@@ -1583,7 +1583,6 @@ def _serve_spa():
 @app.route('/upgrades')
 @app.route('/start')
 @app.route('/unlock')
-@app.route('/start/plex-done')
 @app.route('/admin')
 @app.route('/setup')
 def spa_route():

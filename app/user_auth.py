@@ -57,6 +57,22 @@ def _is_legacy_hash(pin_hash: str) -> bool:
 # DB initialisation
 # ---------------------------------------------------------------------------
 
+def _migrate_name_key(conn) -> None:
+    """Add users.name_key (NFKC + casefold of the name), index it and fill
+    it for existing rows. Not UNIQUE: older installs may hold names that only
+    collide after normalization, and a failed migration must not lock anyone
+    out; new names are checked against it before every write."""
+    try:
+        conn.execute("ALTER TABLE users ADD COLUMN name_key TEXT")
+        logger.info("Migrated users table: added name_key column")
+    except Exception:
+        pass  # Column already exists
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_users_name_key ON users(name_key)")
+    rows = conn.execute("SELECT id, name FROM users WHERE name_key IS NULL").fetchall()
+    for row in rows:
+        conn.execute("UPDATE users SET name_key = ? WHERE id = ?", (name_key(row[1] or ''), row[0]))
+
+
 def init_db() -> None:
     """Create auth tables and seed the admin user."""
     with _get_db() as conn:
@@ -102,6 +118,8 @@ def init_db() -> None:
         except Exception:
             pass  # Column already exists
 
+        _migrate_name_key(conn)
+
         # Seed admin account (only when configured via env; never with built-in defaults)
         if not (ADMIN_NAME and ADMIN_PIN):
             logger.info("LUMA_ADMIN_NAME/LUMA_ADMIN_PIN not set; skipping admin seed")
@@ -119,8 +137,8 @@ def init_db() -> None:
             logger.warning("LUMA_ADMIN_EMAIL belongs to another account; not assigned to the admin")
         if not existing:
             conn.execute(
-                "INSERT INTO users (name, pin_hash, is_admin, status, email) VALUES (?, ?, 1, 'active', ?)",
-                (ADMIN_NAME, generate_password_hash(ADMIN_PIN), admin_email),
+                "INSERT INTO users (name, pin_hash, is_admin, status, email, name_key) VALUES (?, ?, 1, 'active', ?, ?)",
+                (ADMIN_NAME, generate_password_hash(ADMIN_PIN), admin_email, name_key(ADMIN_NAME)),
             )
             logger.info("Seeded admin user: %s", ADMIN_NAME)
         else:
@@ -158,11 +176,26 @@ def get_user_by_name(name: str) -> Optional[Dict]:
 
 
 def _script(ch: str) -> str:
-    """Rough Unicode script of a letter: the first word of its name."""
+    """Script group of a letter, from its Unicode name. Han, kana and Hangul
+    are grouped so the usual CJK combinations resolve (UTS #39 style)."""
     try:
-        return unicodedata.name(ch).split(' ')[0]
+        word = unicodedata.name(ch).split(' ')[0]
     except ValueError:
         return 'UNKNOWN'
+    if word in ('CJK', 'IDEOGRAPHIC'):
+        return 'HAN'
+    if word in ('HIRAGANA', 'KATAKANA', 'KATAKANA-HIRAGANA', 'HALFWIDTH'):
+        return 'KANA'
+    return word
+
+
+# Script sets a single name may mix (UTS #39 "highly restrictive"): Latin
+# with Japanese (Han + kana), Korean (Han + Hangul) or Chinese (Han + Bopomofo).
+_ALLOWED_MIXES = (
+    frozenset({'LATIN', 'HAN', 'KANA'}),
+    frozenset({'LATIN', 'HAN', 'HANGUL'}),
+    frozenset({'LATIN', 'HAN', 'BOPOMOFO'}),
+)
 
 
 def normalize_name(name: str) -> str:
@@ -178,22 +211,31 @@ def name_key(name: str) -> str:
 def name_problem(name: str) -> Optional[str]:
     """Why a (normalized) username is unusable, or None."""
     for ch in name:
-        if unicodedata.category(ch) in ('Cc', 'Cf', 'Co', 'Cs', 'Cn', 'Zl', 'Zp'):
+        cat = unicodedata.category(ch)
+        if cat in ('Cc', 'Cf', 'Co', 'Cs', 'Cn', 'Zl', 'Zp'):
             return "Name can't contain hidden or control characters"
+        if cat == 'Me' or (cat == 'Mn' and unicodedata.combining(ch) == 1):
+            return "Name can't contain overlay marks"
     scripts = {_script(ch) for ch in name if ch.isalpha()}
-    if len(scripts) > 1:
+    if len(scripts) > 1 and not any(scripts <= mix for mix in _ALLOWED_MIXES):
         return "Use letters from one alphabet"
     return None
 
 
 def _name_taken(name: str, exclude_id: int = None) -> bool:
+    """True when another account's name or email matches *name* after NFKC
+    normalization and casefolding (indexed users.name_key lookup)."""
     key = name_key(name)
-    for u in list_users():
-        if u.get('id') == exclude_id:
-            continue
-        if name_key(u.get('name') or '') == key or name_key(u.get('email') or '') == key:
+    with _get_db() as conn:
+        rows = conn.execute(
+            "SELECT id FROM users WHERE name_key = ? OR lower(email) = ?", (key, key)
+        ).fetchall()
+        if any(r[0] != exclude_id for r in rows):
             return True
-    return False
+        # Rows written outside this module (e.g. set_credentials) before the
+        # next start-up backfill have no key yet.
+        legacy = conn.execute("SELECT id, name FROM users WHERE name_key IS NULL").fetchall()
+    return any(r[0] != exclude_id and name_key(r[1] or '') == key for r in legacy)
 
 
 def identity_conflict(name: str, email: str = None, exclude_id: int = None) -> Optional[str]:
@@ -279,8 +321,9 @@ def create_user(name: str, pin: str, is_admin: bool = False, status: str = 'acti
     
     with _get_db() as conn:
         cursor = conn.execute(
-            "INSERT INTO users (name, pin_hash, is_admin, status, email) VALUES (?, ?, ?, ?, ?)",
-            (name.strip(), pin_hash, 1 if is_admin else 0, status, email.strip().lower() if email else None),
+            "INSERT INTO users (name, pin_hash, is_admin, status, email, name_key) VALUES (?, ?, ?, ?, ?, ?)",
+            (name.strip(), pin_hash, 1 if is_admin else 0, status, email.strip().lower() if email else None,
+             name_key(name)),
         )
         user_id = cursor.lastrowid
     return {"id": user_id, "name": name.strip(), "email": email.strip().lower() if email else None,
@@ -324,7 +367,8 @@ def set_name_and_password(user_id: int, name: str, password: str) -> None:
         raise ValueError(problem)
     pin_hash = generate_password_hash(password)
     with _get_db() as conn:
-        conn.execute("UPDATE users SET name = ?, pin_hash = ? WHERE id = ?", (name, pin_hash, user_id))
+        conn.execute("UPDATE users SET name = ?, name_key = ?, pin_hash = ? WHERE id = ?",
+                     (name, name_key(name), pin_hash, user_id))
 
 
 def update_pin(user_id: int, new_pin: str) -> None:

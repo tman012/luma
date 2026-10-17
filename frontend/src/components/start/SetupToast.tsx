@@ -1,8 +1,9 @@
 /**
- * One-time "You're all set" toast shown over Home right after the owner
+ * One-time "You're all set" toast shown at the top of Home right after the owner
  * finishes Get Started. It never blocks taps and dismisses itself.
  */
 import { useEffect, useState } from 'react';
+import { FONT } from '@/components/start/StartUI';
 
 export const SETUP_TOAST_KEY = 'luma-setup-finished';
 export const FADE_IN_MS = 200;
@@ -35,10 +36,10 @@ export function prefersReducedMotion(): boolean {
 
 const css = `
 @keyframes lumaToast{
-  0%{opacity:0;transform:translate(-50%,-50%) scale(.96)}
-  ${(FADE_IN_MS / TOTAL_MS * 100).toFixed(2)}%{opacity:1;transform:translate(-50%,-50%) scale(1)}
-  ${((FADE_IN_MS + HOLD_MS) / TOTAL_MS * 100).toFixed(2)}%{opacity:1;transform:translate(-50%,-50%) scale(1)}
-  100%{opacity:0;transform:translate(-50%,-50%) scale(1)}
+  0%{opacity:0;transform:translate(-50%,-8px)}
+  ${(FADE_IN_MS / TOTAL_MS * 100).toFixed(2)}%{opacity:1;transform:translate(-50%,0)}
+  ${((FADE_IN_MS + HOLD_MS) / TOTAL_MS * 100).toFixed(2)}%{opacity:1;transform:translate(-50%,0)}
+  100%{opacity:0;transform:translate(-50%,0)}
 }
 .luma-setup-toast{animation:lumaToast ${TOTAL_MS}ms ease both}
 @media (prefers-reduced-motion: reduce){.luma-setup-toast{animation:none}}
@@ -64,7 +65,7 @@ export function SetupToast() {
       style={toast}
     >
       <style>{css}</style>
-      <svg width="40" height="40" viewBox="0 0 40 40" aria-hidden="true">
+      <svg width="26" height="26" viewBox="0 0 40 40" aria-hidden="true">
         <circle cx="20" cy="20" r="19" fill="rgba(59,130,246,0.18)" stroke="rgba(255,255,255,0.3)" strokeWidth="1.2" />
         <path d="M12.5 20.5l5 5 10-11" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
@@ -73,12 +74,13 @@ export function SetupToast() {
   );
 }
 
+export const TOAST_TOP = 'calc(env(safe-area-inset-top, 0px) + 24px)';
 const toast: React.CSSProperties = {
-  position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', zIndex: 1000,
-  pointerEvents: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
-  padding: '22px 28px', borderRadius: 20, minWidth: 180, boxSizing: 'border-box',
+  position: 'fixed', left: '50%', top: TOAST_TOP, transform: 'translate(-50%,0)', zIndex: 1000,
+  pointerEvents: 'none', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 10,
+  padding: '10px 18px 10px 12px', borderRadius: 999, boxSizing: 'border-box', fontFamily: FONT,
   background: 'rgba(21,16,42,0.62)', border: '1px solid rgba(255,255,255,0.14)',
   backdropFilter: 'blur(24px) saturate(160%)', WebkitBackdropFilter: 'blur(24px) saturate(160%)',
   boxShadow: '0 12px 40px rgba(0,0,0,0.45)', color: '#fff',
 };
-const label: React.CSSProperties = { fontSize: 17, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap' };
+const label: React.CSSProperties = { fontFamily: FONT, fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em', whiteSpace: 'nowrap' };

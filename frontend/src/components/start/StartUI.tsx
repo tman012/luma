@@ -52,15 +52,26 @@ export function Status({ text }: { text: string }) {
     </p>
   );
 }
+/** The wordmark is cropped to its visible bounds on the navy backdrop (no transparent padding),
+ * so spacing set next to it is the visible gap. Rendered at the visible size
+ * the uncropped 1520px-wide art had at clamp(240px, 64vw, 520px). */
+export const LOGO_SRC = '/static/images/luma_wordmark.webp';
+export const LOGO_GAP = 32;
+const LOGO_RATIO = 916 / 1520;
+export const LOGO_WIDTH = `clamp(${240 * LOGO_RATIO}px, ${64 * LOGO_RATIO}vw, ${520 * LOGO_RATIO}px)`;
 export function Logo({ top = '0' }: { top?: string }) {
   return (
     <img
-      src={assetUrl('/static/images/luma_text.webp')}
+      src={assetUrl(LOGO_SRC)}
       alt="Luma"
-      style={{ width: 'clamp(240px, 64vw, 520px)', height: 'auto', userSelect: 'none', marginTop: top }}
+      style={{ display: 'block', width: LOGO_WIDTH, height: 'auto', aspectRatio: '916 / 416', userSelect: 'none', marginTop: top }}
       draggable={false}
     />
   );
+}
+/** Exactly LOGO_GAP of space below the wordmark. */
+export function LogoGap() {
+  return <div aria-hidden="true" style={{ height: LOGO_GAP, flex: 'none' }} />;
 }
 export function PlexMark() {
   return (
@@ -157,7 +168,10 @@ const bottom: React.CSSProperties = {
   marginTop: 32, width: '100%', maxWidth: 360,
   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16,
 };
-const title: React.CSSProperties = { margin: 0, fontSize: 28, fontWeight: 600, letterSpacing: '-0.01em', textAlign: 'center' };
+/** Trims the line box to cap height and baseline so the space set above a
+ * heading is the visible space. */
+export const TRIM: React.CSSProperties = { textBoxTrim: 'trim-both', textBoxEdge: 'cap alphabetic' } as React.CSSProperties;
+const title: React.CSSProperties = { margin: 0, fontSize: 28, fontWeight: 600, letterSpacing: '-0.01em', textAlign: 'center', ...TRIM };
 const sub: React.CSSProperties = { margin: '8px 0 0', fontSize: 15, color: 'rgba(255,255,255,0.55)', textAlign: 'center' };
 export const primaryBtn: React.CSSProperties = {
   width: '100%', height: 50, borderRadius: 25, border: 'none', background: '#fff', color: '#15102a',

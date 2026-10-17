@@ -1,8 +1,9 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  SETUP_TOAST_KEY, SetupToast, TOTAL_MS, FADE_IN_MS, HOLD_MS, FADE_OUT_MS, markSetupJustFinished,
+  SETUP_TOAST_KEY, SetupToast, TOTAL_MS, FADE_IN_MS, HOLD_MS, FADE_OUT_MS, markSetupJustFinished, TOAST_TOP,
 } from '@/components/start/SetupToast';
+import { FONT } from '@/components/start/StartUI';
 
 function mockMotion(reduce: boolean) {
   window.matchMedia = vi.fn().mockImplementation((q: string) => ({
@@ -34,6 +35,11 @@ describe('SetupToast', () => {
     expect(el.querySelector('button')).toBeNull();
     expect(el.style.pointerEvents).toBe('none');
     expect(el.className).toContain('luma-setup-toast');
+    expect(el.style.position).toBe('fixed');
+    expect(el.style.left).toBe('50%');
+    expect(TOAST_TOP).toBe('calc(env(safe-area-inset-top, 0px) + 24px)');
+    expect(el.style.fontFamily).toBe(FONT.replace(/"/g, '"'));
+    expect(el.querySelector('span')!.style.fontFamily).toBe(el.style.fontFamily);
     expect(window.sessionStorage.getItem(SETUP_TOAST_KEY)).toBeNull();
     act(() => { vi.advanceTimersByTime(TOTAL_MS - 10); });
     expect(screen.queryByRole('status')).not.toBeNull();
