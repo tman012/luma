@@ -1,5 +1,6 @@
 """Tests for app/request_portal.py"""
 
+from tests.portal_threads import init_portal
 import pytest
 import time
 from unittest.mock import Mock, patch, MagicMock
@@ -151,7 +152,7 @@ class TestRequestPortalRequesterGuard:
         }.get(key, default)
         
         with app.app_context():
-            request_portal.init_app(app, settings_mock)
+            init_portal(app, settings_mock)
         
         with app.test_request_context('/api/admin/something'):
             g.current_user = None
