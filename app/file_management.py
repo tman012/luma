@@ -10,6 +10,7 @@ PUT    /api/settings/library-paths/<id>       rename or repoint a path
 DELETE /api/settings/library-paths/<id>       409 while a rule or the fallback uses it
 PUT    /api/settings/library-rules            {rules: [...], fallback_path_id}
 PUT    /api/settings/library-paths/mapping    {path_map: [...], transfer}
+GET    /api/settings/library-paths/browse?path=  folders for the picker (allowed roots only)
 
 Its own store (data dir, file_management.json, 0600), empty on a fresh
 install. It never reads or shows settings.json media.paths / media.types or
@@ -237,6 +238,72 @@ def writable(real: str) -> bool:
         return True
     except OSError:
         return False
+
+
+# --------------------------------------------------------------------------- folder picker
+
+BROWSE_ROOTS_ENV = 'LUMA_BROWSE_ROOTS'
+DEFAULT_BROWSE_ROOTS = ('/media',)
+BROWSE_MAX = 500
+
+
+def browse_roots() -> List[str]:
+    """Real paths the folder picker may show: LUMA_BROWSE_ROOTS (':' or ','
+    separated absolute paths, else /media), the downloads folder, and every
+    configured Movies and TV library path. Missing or blocked ones are
+    dropped, and a root inside another is folded into it."""
+    raw = (os.environ.get(BROWSE_ROOTS_ENV) or '').strip()
+    base = [r.strip() for r in re.split(r'[:,]', raw) if r.strip()] if raw else list(DEFAULT_BROWSE_ROOTS)
+    cands = base + [downloads_root()] + [p['path'] for p in load()['paths']] + \
+        [p['path'] for p in other_store_paths()]
+    reals: List[str] = []
+    for c in cands:
+        p, err = clean_abs_path(c)
+        if err:
+            continue
+        real = os.path.realpath(p)
+        if blocked(real) or not os.path.isdir(real) or real in reals:
+            continue
+        reals.append(real)
+    return sorted(r for r in reals if not any(o != r and _under(r, o) for o in reals))
+
+
+def browse(raw: Optional[str]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    """({path, parent, dirs: [{name, path}]}, None) or (None, error). No path:
+    the roots. Only folders whose real path stays inside a root are shown or
+    opened (a symlink pointing out is neither). Reads only: scandir."""
+    roots = browse_roots()
+    if not raw:
+        return {'path': None, 'parent': None, 'dirs': [{'name': r, 'path': r} for r in roots]}, None
+    p, err = clean_abs_path(raw)
+    if err:
+        return None, err
+    real = os.path.realpath(p)
+    root = next((r for r in roots if _under(real, r)), None)
+    if root is None or blocked(real):
+        return None, NOT_ALLOWED
+    if not os.path.isdir(real):
+        return None, NOT_FOUND
+    dirs = []
+    try:
+        with os.scandir(real) as it:
+            for e in it:
+                if e.name.startswith('.') or _CTRL_RE.search(e.name):
+                    continue
+                try:
+                    if not e.is_dir(follow_symlinks=True):
+                        continue
+                    child_real = os.path.realpath(os.path.join(real, e.name))
+                except OSError:
+                    continue
+                if not any(_under(child_real, r) for r in roots) or blocked(child_real):
+                    continue
+                dirs.append({'name': e.name, 'path': os.path.join(p, e.name)})
+    except OSError:
+        return None, NOT_FOUND
+    dirs.sort(key=lambda d: d['name'].casefold())
+    parent = None if real in roots else os.path.dirname(p)
+    return {'path': p, 'parent': parent, 'dirs': dirs[:BROWSE_MAX]}, None
 
 
 def other_store_paths() -> List[Dict[str, Any]]:
@@ -648,6 +715,17 @@ def library_paths_add():
         save(data)
         logger.info('Library path added: %s', rec['name'])
         return _no_store(jsonify(view(data)), 201)
+
+
+@bp.route('/api/settings/library-paths/browse', methods=['GET'])
+def library_paths_browse():
+    err = _guard()
+    if err:
+        return err
+    out, e = browse(request.args.get('path'))
+    if e:
+        return _no_store(jsonify({'error': e}), 400)
+    return _no_store(jsonify(out))
 
 
 @bp.route('/api/settings/library-paths/<pid>', methods=['PUT'])

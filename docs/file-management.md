@@ -57,6 +57,7 @@ store (`file_management.json` in the data dir, mode 0600). The seeded
 | `LUMA_TEST_DOWNLOADS_DIR` | `/downloads` (read-only) | Same path qBit saves to; `/downloads/incomplete` is skipped |
 | `LUMA_TEST_MEDIA_DIR` | `/media` | Parent of the library folders; any subfolder can be added, spaces included |
 | `LUMA_TEST_QBIT_TAG` | env | Default `luma-test`; set the same value on prod |
+| `LUMA_BROWSE_ROOTS` | env | Folders the library-path picker may browse, `:` or `,` separated (default `/media`); the downloads folder and every configured Movies and TV library path are always added. Nothing outside them is listed or opened, symlinks pointing out included |
 | `LUMA_DOWNLOADS_ROOT` | env | Any absolute path (default `/downloads`); the only folder the mover reads from, and the folder storage cleanup measures. When qBittorrent reports another path (e.g. `/downloads` while this container sees `/storage/downloads`), the Library paths path map is required; a grab whose save path doesn't map under it shows "Path not mapped" in Settings > Library paths and Activity right away |
 
 Unset, both fall back to empty named volumes so the app still starts with zero

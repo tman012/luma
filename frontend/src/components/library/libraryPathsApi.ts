@@ -77,3 +77,19 @@ export function sinceText(ts: number, now = Date.now()): string {
     ? d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
     : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
 }
+
+export const BROWSE_URL = '/api/settings/library-paths/browse';
+export interface Folder { name: string; path: string }
+export type Browse = { ok: true; path: string | null; parent: string | null; dirs: Folder[] } | { ok: false; error: string };
+
+/** Folders for the picker: no path lists the allowed roots. */
+export async function browseFolders(path: string | null): Promise<Browse> {
+  try {
+    const res = await apiFetch(path ? `${BROWSE_URL}?path=${encodeURIComponent(path)}` : BROWSE_URL);
+    const data = await res.json().catch(() => ({})) as { path?: string | null; parent?: string | null; dirs?: Folder[]; error?: string };
+    if (res.ok && Array.isArray(data.dirs)) return { ok: true, path: data.path ?? null, parent: data.parent ?? null, dirs: data.dirs };
+    return { ok: false, error: data.error || SAVE_FAILED };
+  } catch {
+    return { ok: false, error: UNREACHABLE };
+  }
+}

@@ -9,6 +9,7 @@ import { NoticeToast } from '@/components/start/SetupToast';
 import { CheckIcon, ChevronIcon, GripIcon, XIcon } from '@/components/nav/AppNav';
 import { move } from '@/components/home/homeApi';
 import { CategoryChip, PlusIcon, Switch, trackersCss } from '@/components/trackers/trackersUi';
+import { FolderBrowser } from './FolderBrowser';
 import {
   RESOLUTIONS, SAVE_FAILED, SOURCES, addPath, deletePath, editPath, loadLibrary, ruleSummary, saveMapping, saveRules, sinceText,
   type Errors, type LibPath, type LibraryView, type PathMapRow, type Result, type Rule, type Transfer, type Unit,
@@ -192,7 +193,7 @@ const STATUS: Record<LibPath['status'], { color: string; text: string }> = {
   read_only: { color: T.warning, text: 'Read-only' },
 };
 
-function PathRow({ path, first, onOpen }: { path: LibPath; first: boolean; onOpen: () => void }) {
+export function PathRow({ path, first, onOpen }: { path: LibPath; first: boolean; onOpen: () => void }) {
   const s = STATUS[path.status] || STATUS.missing;
   const wide = useContext(WideCtx);
   return (
@@ -211,26 +212,37 @@ function PathRow({ path, first, onOpen }: { path: LibPath; first: boolean; onOpe
   );
 }
 
-function PathForm({ path, first, onSave, onCancel, onDelete }: {
+export function PathForm({ path, first, onSave, onCancel, onDelete }: {
   path?: LibPath; first: boolean; onCancel: () => void;
-  onSave: (name: string, path: string) => Promise<Result>; onDelete?: () => Promise<Result>;
+  onSave: (name: string, path: string) => Promise<{ ok: boolean; errors?: Errors }>;
+  onDelete?: () => Promise<{ ok: boolean; errors?: Errors }>;
 }) {
   const [name, setName] = useState(path?.name || '');
   const [dir, setDir] = useState(path?.path || '');
   const [errors, setErrors] = useState<Errors>({});
   const [busy, setBusy] = useState(false);
-  const run = async (fn: () => Promise<Result>) => {
+  const [browsing, setBrowsing] = useState(false);
+  const run = async (fn: () => Promise<{ ok: boolean; errors?: Errors }>) => {
     setBusy(true);
     const r = await fn();
     setBusy(false);
-    if (!r.ok) setErrors(r.errors);
+    if (!r.ok) setErrors(r.errors || {});
   };
   const dirty = name.trim() !== (path?.name || '') || dir.trim() !== (path?.path || '');
   return (
     <form data-testid="lp-path-form" style={{ ...formBox, ...(first ? null : topBorder) }}
       onSubmit={e => { e.preventDefault(); if (dirty && !busy) run(() => onSave(name.trim(), dir.trim())); }}>
       <Field id="lp-name" label="Name" value={name} error={errors.name} onChange={setName} autoFocus maxLength={40} />
-      <Field id="lp-dir" label="Folder" value={dir} error={errors.path} onChange={setDir} mono />
+      <div>
+        <Field id="lp-dir" label="Folder" value={dir} error={errors.path} onChange={setDir} mono />
+        {browsing
+          ? <div style={{ marginTop: 10 }}>
+              <FolderBrowser start={dir.trim() || null} onClose={() => setBrowsing(false)}
+                onPick={p => { setDir(p); setBrowsing(false); }} />
+            </div>
+          : <button type="button" className="lp-focus" data-testid="lp-browse" onClick={() => setBrowsing(true)}
+              style={{ ...ghostBtn, marginTop: 10 }}>Browse</button>}
+      </div>
       <FormButtons busy={busy} canSave={dirty && !!name.trim() && !!dir.trim()} onCancel={onCancel}
         onDelete={onDelete && (() => run(onDelete))} />
     </form>
