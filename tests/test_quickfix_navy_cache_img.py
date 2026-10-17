@@ -48,7 +48,7 @@ def test_sw_and_index_are_never_cached(test_app):
         r = c.get(path, environ_base=LAN)
         assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-cache', path
     sw = (ROOT / 'static/sw.js').read_text()
-    assert "CACHE_VERSION = 'media-kiosk-v135'" in sw
+    assert "CACHE_VERSION = 'media-kiosk-v136'" in sw
     assert "fetch(event.request, { cache: 'no-store' })" in sw
     assert 'self.skipWaiting()' in sw and 'self.clients.claim()' in sw
 
