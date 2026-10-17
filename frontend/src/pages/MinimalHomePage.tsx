@@ -61,7 +61,7 @@ export function MinimalHomePage() {
       <div data-step="home" data-layout="kiosk">
         <KioskHome />
         <header style={kioskBar} data-testid="kiosk-header">
-          <img src={assetUrl(LOGO_SRC)} alt="Luma" style={{ height: 28, width: 'auto' }} draggable={false} />
+          <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="kiosk-logo" style={{ height: 42, width: 'auto' }} draggable={false} />
           {menu}
         </header>
       </div>

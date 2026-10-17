@@ -11,6 +11,7 @@
  * with snap (inner scroll only — the page never pans sideways) and are
  * DPAD-focusable in TV mode.
  */
+import { isMinimal } from '@/minimal';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useFocusable } from '@/hooks/useFocusable';
@@ -45,7 +46,7 @@ export function useTopReviews(title?: string | null, year?: number | null, media
   const [reviews, setReviews] = useState<TopReview[]>([]);
   useEffect(() => {
     setReviews([]);
-    if (!title) return;
+    if (!title || isMinimal()) return;
     const controller = new AbortController();
     const params = new URLSearchParams({ title });
     if (year) params.set('year', String(year));

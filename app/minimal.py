@@ -17,9 +17,9 @@ ALLOWED_PATHS = frozenset({
     '/', '/start', '/login', '/logout', '/unlock', '/health',
     '/manifest.json', '/sw.js', '/api/security', '/api/version',
     # Home (#11): rails, the Libraries choice and proxied posters. Sign-in required.
-    '/api/home', '/api/home/libraries', '/api/img/plex', '/settings', '/settings/libraries',
+    '/api/home', '/api/home/libraries', '/api/img/plex', '/settings', '/settings/libraries', '/settings/home-screen',
     # Web kiosk home (#12, >=1024px): prod's hero slideshow data. Sign-in required.
-    '/api/hero/content',
+    '/api/hero/content', '/api/home/kiosk',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).
@@ -27,7 +27,7 @@ ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts
 DETAIL_READ_PREFIXES = (
     '/api/plex/movie/', '/api/plex/tv/', '/api/movie/', '/api/tv/',
     '/api/plex/ratings/', '/api/plex/ultrablur/', '/api/tmdb/colors/',
-    '/api/clearlogo/', '/api/ratings/', '/api/rt/reviews', '/api/plex/lookup',
+    '/api/clearlogo/', '/api/plex/lookup', '/api/plex/episode/',
 )
 # Inside /static/, these belong to disabled features.
 BLOCKED_PREFIXES = ('/static/request/', '/static/hero_cache/')

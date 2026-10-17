@@ -1,3 +1,4 @@
+import { isMinimal } from '@/minimal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -50,7 +51,7 @@ function useImdbRatings(title: string | null | undefined, year: number | null | 
   const [ratings, setRatings] = useState<Ratings | null>(null);
 
   useEffect(() => {
-    if (!title) {
+    if (!title || isMinimal()) {
       setRatings(null);
       return;
     }

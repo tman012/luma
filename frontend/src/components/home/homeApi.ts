@@ -35,6 +35,25 @@ export async function saveLibraries(libs: Library[]): Promise<Library[]> {
   return (await res.json()).libraries || [];
 }
 
+export interface KioskLibraries { id: string; libraries: { id: string; title: string }[] }
+
+/** Which movie library the web kiosk slideshow uses (owner/admin only). */
+export async function fetchKioskLibrary(): Promise<KioskLibraries> {
+  const res = await apiFetch('/api/home/kiosk');
+  if (!res.ok) throw new Error(String(res.status));
+  const d = await res.json();
+  return { id: String(d.id || ''), libraries: Array.isArray(d.libraries) ? d.libraries : [] };
+}
+
+export async function saveKioskLibrary(id: string): Promise<KioskLibraries> {
+  const res = await apiFetch('/api/home/kiosk', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+  });
+  if (!res.ok) throw new Error(String(res.status));
+  const d = await res.json();
+  return { id: String(d.id || ''), libraries: Array.isArray(d.libraries) ? d.libraries : [] };
+}
+
 export function move<T>(list: T[], from: number, to: number): T[] {
   if (to < 0 || to >= list.length || from === to) return list;
   const next = list.slice();

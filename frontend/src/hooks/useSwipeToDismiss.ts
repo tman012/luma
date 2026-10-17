@@ -151,8 +151,8 @@ export function useSwipeToDismiss({
     const progress = Math.min(dampened / (containerH * 0.3), 1);
     s.backdropOpacity = 1 - progress * 0.7;
 
-    // Only lock the gesture after we are committed to dismiss-drag.
-    e.preventDefault();
+    // React's touchmove listener is passive, so preventDefault() here was a
+    // no-op that only logged a warning; touch-action on the sheet handles it.
 
     cancelAnimationFrame(frameRef.current);
     frameRef.current = requestAnimationFrame(() => {

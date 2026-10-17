@@ -84,19 +84,30 @@ describe('web kiosk home (>=1024px)', () => {
     expect(header.style.position).toBe('fixed');
     expect(header.style.background).toContain('rgba(0, 0, 0, 0.8)');
     expect(header.style.padding).toBe('24px 60px');
-    expect((header.querySelector('img') as HTMLImageElement).style.height).toBe('28px');
+    expect((header.querySelector('img') as HTMLImageElement).style.height).toBe('42px');   // 1.5x the phone-era 28px
   });
 
-  it('is display-only: the avatar is the only focusable control, clicks open nothing', async () => {
+  it('only the title (or logo art) and the avatar are interactive; the title opens the popup', async () => {
+    modals.openMovie.mockClear();
     vi.stubGlobal('fetch', vi.fn(async () => json({ success: true, movies: TEN })));
     const { container } = renderHome();
     await waitFor(() => screen.getByText('Movie 0'));
     const focusable = container.querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"]), [role="button"], input, select, textarea');
-    expect([...focusable].map(e => e.getAttribute('aria-label'))).toEqual(['Account']);
+    expect([...focusable].map(e => e.getAttribute('aria-label') || e.textContent)).toEqual(['Movie 0', 'Account']);
     const hero = container.querySelector('[data-hero-display-only]') as HTMLElement;
-    fireEvent.click(screen.getByText('Movie 0'));
+    // The backdrop, plot and genres open nothing; a drag doesn't swipe.
+    fireEvent.click(hero);
+    fireEvent.click(screen.getByText('Plot 0.'));
     fireEvent.mouseDown(hero, { clientX: 600 }); fireEvent.mouseUp(hero, { clientX: 100 });
     expect(modals.openMovie).not.toHaveBeenCalled();
+    // The title is a real button: click, Enter and Space all open it.
+    const title = screen.getByRole('button', { name: 'Movie 0' });
+    expect(title.tagName).toBe('BUTTON');
+    expect(title.className).toContain('pointer-events-auto');
+    fireEvent.click(title);
+    expect(modals.openMovie).toHaveBeenCalledTimes(1);
+    expect(modals.openMovie.mock.calls[0][0]).toMatchObject({ ratingKey: 100 });
+    modals.openMovie.mockClear();
     expect(screen.getByText('Movie 0')).toBeTruthy();   // no swipe to the next one
     expect(container.querySelector('[data-hero-content]')!.className).toContain('pointer-events-none');
   });
@@ -109,15 +120,42 @@ describe('web kiosk home (>=1024px)', () => {
     expect(screen.getByText('Movie 0')).toBeTruthy();
     await act(async () => { await vi.advanceTimersByTimeAsync(7999); });
     expect(screen.getByText('Movie 0')).toBeTruthy();
-    await act(async () => { await vi.advanceTimersByTimeAsync(1 + 1500); });   // + preload timeout
+    await act(async () => { await vi.advanceTimersByTimeAsync(1 + 6000); });   // + kiosk preload timeout (image never loads in jsdom)
     expect(screen.getByText('Movie 1')).toBeTruthy();
     act(() => setHidden(true));
     await act(async () => { await vi.advanceTimersByTimeAsync(30000); });
     expect(screen.getByText('Movie 1')).toBeTruthy();
     act(() => setHidden(false));
     await act(async () => { await vi.advanceTimersByTimeAsync(8001); });   // interval restarts
-    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });   // preload, then swap
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });   // preload (6 s cap), then swap
     expect(screen.getByText('Movie 2')).toBeTruthy();
+  });
+
+  it('keeps rotating through several full cycles, wrapping, even across re-renders', async () => {
+    // Backdrops load (as real proxied images do): each slide lasts exactly 8 s.
+    class LoadingImage { onload: (() => void) | null = null; onerror: (() => void) | null = null;
+      set src(_v: string) { setTimeout(() => this.onload?.(), 50); } }
+    vi.stubGlobal('Image', LoadingImage);
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    vi.stubGlobal('fetch', vi.fn(async () => json({ success: true, movies: TEN })));
+    renderHome();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText('Movie 0')).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });   // offset past each 50 ms preload
+    for (let step = 1; step <= 23; step++) {   // 2.3 full cycles of 10
+      if (step % 3 === 0) {
+        // A parent re-render mid-slide (avatar menu open/close) must not reset the timer.
+        await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+        fireEvent.click(screen.getByRole('button', { name: 'Account' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Account' }));
+        await act(async () => { await vi.advanceTimersByTimeAsync(4000); });
+      } else {
+        await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+      }
+      expect(screen.getByText(`Movie ${step % 10}`)).toBeTruthy();
+    }
+    // Only one hero fetch: the kiosk never remounted.
+    expect((globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
   });
 
   it('crossfades over 1.2 s, instantly under reduced motion', async () => {

@@ -1,3 +1,4 @@
+import { isMinimal } from '@/minimal';
 import { useState, useEffect, useRef } from 'react';
 import { pickBestTrailer } from '@/utils/pickBestTrailer';
 import { backdropUrl as tmdbBackdrop } from '@/utils/image';
@@ -220,7 +221,8 @@ export function useMovieDetail(
 
       const params = new URLSearchParams();
       if (movieYear) params.set('year', String(movieYear));
-      const omdbPromise: Promise<Record<string, unknown> | null> = apiFetch(
+      // Minimal mode shows Plex's own ratings only (no OMDb, no RT scrape).
+      const omdbPromise: Promise<Record<string, unknown> | null> = isMinimal() ? Promise.resolve(null) : apiFetch(
         `/api/ratings/${encodeURIComponent(movieTitle!)}?${params}`,
         { signal: controller.signal },
       )
@@ -261,7 +263,7 @@ export function useMovieDetail(
       // Background fill: if RT critic or audience is missing, try RT scraper
       const missingRtCritic = merged.rotten_tomatoes_critic?.score == null;
       const missingRtAudience = merged.rotten_tomatoes_audience?.score == null;
-      if (missingRtCritic || missingRtAudience) {
+      if (!isMinimal() && (missingRtCritic || missingRtAudience)) {
         const rtParams = new URLSearchParams({ title: movieTitle! });
         if (movieYear) rtParams.set('year', String(movieYear));
         apiFetch(`/api/rt/reviews?${rtParams}`, { signal: controller.signal })

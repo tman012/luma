@@ -143,23 +143,22 @@ describe('Libraries', () => {
     expect((await screen.findByTestId('libraries-empty')).textContent).toBe('Nothing here yet');
   });
 
-  it('is the Settings page with a Home screen section and 44px controls', async () => {
+  it('the Home screen libraries list has 44px controls', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ libraries: [
       { id: '1', title: 'Movies', type: 'movie', enabled: true }, { id: '2', title: 'TV Shows', type: 'show', enabled: false }] })));
     render(<MemoryRouter><LibrariesEditor /></MemoryRouter>);
     await waitFor(() => screen.getByTestId('libraries'));
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Settings');
-    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Home screen');
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Libraries');
     for (const b of [screen.getByLabelText('Move Movies down'), screen.getByLabelText('Move TV Shows up'), ...screen.getAllByRole('switch')]) {
       expect(parseInt(b.style.width, 10)).toBeGreaterThanOrEqual(44);
       expect(parseInt(b.style.height, 10)).toBeGreaterThanOrEqual(44);
     }
   });
 
-  it('/settings/libraries redirects to /settings', () => {
+  it('/settings/libraries redirects to /settings/home-screen', () => {
     render(<MemoryRouter initialEntries={['/settings/libraries']}><Routes>
       <Route path="/settings/libraries" element={<LibrariesRedirect />} />
-      <Route path="/settings" element={<p>settings page</p>} />
+      <Route path="/settings/home-screen" element={<p>settings page</p>} />
     </Routes></MemoryRouter>);
     expect(screen.getByText('settings page')).toBeTruthy();
   });

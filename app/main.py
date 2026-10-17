@@ -11108,7 +11108,20 @@ def _build_hero_movies():
     else:
         fetch_limit = limit * 3 if (excluded_genres or max_age_days) else limit
 
-    items = plex.get_recently_added(section_id=section_id, limit=fetch_limit)
+    if minimal_kiosk:
+        # Web kiosk (#12): the library's newest movies by date added. Plex's
+        # /recentlyAdded applies its own recency window (it returned 2 items on
+        # :5002, so the slideshow had almost nothing to rotate through). Only
+        # items with backdrop art can be shown.
+        fetch_limit = max(limit * 3, 30)
+        try:
+            items = (plex.get_all_movies(int(section_id), sort='addedAt:desc', limit=fetch_limit) or {}).get('movies') or []
+        except Exception as e:
+            logger.warning(f"Hero: newest movies lookup failed: {e}")
+            items = []
+        items = [it for it in items if it.get('artPath')]
+    else:
+        items = plex.get_recently_added(section_id=section_id, limit=fetch_limit)
     logger.debug(f"Hero fetched {len(items)} items from Plex (boost={boost})")
 
     # Date filter: only keep movies added within max_age_days
@@ -11211,7 +11224,8 @@ def _build_hero_movies():
             'genres': item.get('genres', []),
             'added_at': item.get('added_at', 0),
             'poster_url': f"/api/img/plex?url={item['thumbPath']}" if item.get('thumbPath') else None,
-            'backdrop_url': f"/api/img/plex?url={item['artPath']}" if item.get('artPath') else None,
+            'backdrop_url': (f"/api/img/plex?url={item['artPath']}" + ('&w=1920' if minimal_kiosk else ''))
+                            if item.get('artPath') else None,
             'clearlogo_url': f"/api/img/plex?url={item['clearLogoPath']}" if item.get('clearLogoPath') else None,
             'tmdb_backdrop_url': f"/api/img/tmdb?path={tmdb_backdrops[item.get('tmdb_id')]}&size=original" if item.get('tmdb_id') and item.get('tmdb_id') in tmdb_backdrops else None,
         }
@@ -11242,6 +11256,38 @@ def _hero_movies_for_request(movies):
                 m[key] = f"{root}{val}"
         out.append(m)
     return out
+
+
+# Web kiosk library (Settings > Kiosk): which movie library the slideshow
+# uses. Stored in prod's own setting (ui.hero.library_section_id).
+@app.route('/api/home/kiosk', methods=['GET', 'PUT'])
+def home_kiosk_library():
+    err = _require_auth()
+    if err:
+        return err
+    user = _get_current_user()
+    if not user or not user.get('is_admin'):
+        return jsonify({'error': 'Admin access required'}), 403
+    from app import home_rails as _hr
+    plex = get_plex_for_request()
+    libs = []
+    if plex is not None and getattr(plex, 'is_configured', False):
+        libs = [{'id': str(s['id']), 'title': s.get('title', '')}
+                for s in (_hr._sections(plex) or []) if s.get('type') == 'movie']
+    if request.method == 'PUT':
+        body = request.get_json(silent=True) or {}
+        sid = str(body.get('id') or '').strip()[:32]
+        if not sid or sid not in {l['id'] for l in libs}:
+            return jsonify({'error': 'Choose a movie library'}), 400
+        settings.update({'ui': {'hero': {'library_section_id': int(sid)}}})
+        _hero_result_cache.clear()
+    current = settings.get('ui.hero.library_section_id', 0) or 0
+    if not current and libs:
+        try:
+            current = (plex.health_check() or {}).get('default_movie_section_id') or 0
+        except Exception:
+            current = 0
+    return jsonify({'id': str(current) if current else '', 'libraries': libs})
 
 
 # Hero Content Endpoints

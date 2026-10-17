@@ -77,8 +77,20 @@ function preloadImage(url: string | null, timeoutMs = 1500): Promise<void> {
   });
 }
 
+/** Logo art when the title has one, else the title text. */
+function LogoOrTitle({ logo, title }: { logo: string | null | undefined; title: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!logo || failed) return <>{title}</>;
+  return (
+    <img src={logo} alt={title} draggable={false} onError={() => setFailed(true)}
+      style={{ maxHeight: 'clamp(80px,12vh,160px)', maxWidth: '40vw', objectFit: 'contain', display: 'block' }} />
+  );
+}
+
 export function HeroSection({ movies, backdropSource = 'plex', className, displayOnly = false }: HeroSectionProps) {
   const [activeIndex, setActiveIndex] = useState(0);
+  const activeIndexRef = useRef(0);
+  activeIndexRef.current = activeIndex;
   const prevIndexRef = useRef(0);
   const transitioningRef = useRef(false);
   const dragStartXRef = useRef<number | null>(null);
@@ -116,7 +128,9 @@ export function HeroSection({ movies, backdropSource = 'plex', className, displa
       transitioningRef.current = true;
 
       const nextUrl = resolveBackdrop(movies[nextIndex], backdropSource);
-      preloadImage(nextUrl).then(() => {
+      // The kiosk waits longer for the next backdrop so the crossfade never
+      // lands on a layer whose image hasn't arrived yet.
+      preloadImage(nextUrl, displayOnly ? 6000 : 1500).then(() => {
         setActiveIndex((prev) => {
           prevIndexRef.current = prev;
           return nextIndex;
@@ -124,19 +138,15 @@ export function HeroSection({ movies, backdropSource = 'plex', className, displa
         transitioningRef.current = false;
       });
     },
-    [movies, backdropSource],
+    [movies, backdropSource, displayOnly],
   );
 
   // Auto-rotate every 8 seconds. Paused when modal is open on tablet.
   useEffect(() => {
     if (movies.length <= 1 || modalOpen || pageHidden) return;
+    // Read the index from a ref; no side effects inside a state updater.
     const timer = setInterval(() => {
-      setActiveIndex((current) => {
-        const next = (current + 1) % movies.length;
-        // Kick off preload-then-advance; return current unchanged for now.
-        advanceTo(next);
-        return current;
-      });
+      advanceTo((activeIndexRef.current + 1) % movies.length);
     }, 8000);
     return () => clearInterval(timer);
   }, [movies.length, advanceTo, modalOpen, pageHidden]);
@@ -207,12 +217,22 @@ export function HeroSection({ movies, backdropSource = 'plex', className, displa
 
   const details = (
     <>
-          {/* Title */}
+          {/* Title (the kiosk's only clickable spot: opens the details popup) */}
           <h1 className={cn(
             'mb-4 font-bold leading-tight drop-shadow-2xl', text,
             d.isTablet ? 'text-[44px]' : 'text-[clamp(36px,3.2vw,60px)]',
           )}>
-            {movie.title}
+            {displayOnly ? (
+              <button
+                type="button"
+                data-hero-title
+                onClick={handleHeroClick}
+                className="pointer-events-auto cursor-pointer rounded-lg text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+                style={{ background: 'none', border: 0, padding: 0, font: 'inherit', color: 'inherit' }}
+              >
+                <LogoOrTitle key={movie.ratingKey ?? movie.title} logo={movie.clearlogoUrl} title={movie.title} />
+              </button>
+            ) : movie.title}
           </h1>
 
           {/* Meta row: Year · Duration · MPAA */}

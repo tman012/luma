@@ -10,7 +10,7 @@ from tests.test_home_rails import REMOTE, FakePlex, _client, plex  # noqa: F401
 
 DETAIL = ['/api/plex/movie/11', '/api/plex/tv/9', '/api/movie/603', '/api/tv/1399',
           '/api/plex/ratings/11', '/api/plex/ultrablur/11', '/api/tmdb/colors/603',
-          '/api/clearlogo/603', '/api/ratings/Dune', '/api/rt/reviews', '/api/plex/lookup']
+          '/api/clearlogo/603', '/api/plex/lookup', '/api/plex/episode/77']
 
 
 @pytest.fixture

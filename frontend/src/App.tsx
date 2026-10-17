@@ -242,6 +242,7 @@ function MinimalApp() {
           <Route path="/unlock" element={<UnlockPage />} />
           <Route path="/settings" element={<MinimalSettingsPage />} />
           <Route path="/settings/libraries" element={<LibrariesRedirect />} />
+          <Route path="/settings/:section" element={<MinimalSettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         </AppModalHost>
