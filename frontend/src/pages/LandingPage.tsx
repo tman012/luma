@@ -5,6 +5,7 @@
 import { useNavigate } from 'react-router';
 import { assetUrl } from '@/urlHelpers';
 import { useAuth } from '@/contexts/AuthContext';
+import { NAVY_BG } from '@/components/start/StartUI';
 
 export function LandingPage() {
   const navigate = useNavigate();
@@ -19,7 +20,7 @@ export function LandingPage() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'radial-gradient(ellipse at 50% 40%, #3a1a3a 0%, #1a0a1e 40%, #0a0410 100%)',
+        background: NAVY_BG,
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
         overflow: 'hidden',
       }}

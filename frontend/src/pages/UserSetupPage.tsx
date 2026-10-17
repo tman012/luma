@@ -12,6 +12,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiFetch } from '../apiClient';
+import { NAVY_BG } from '@/components/start/StartUI';
+import { LUMA_BLUE, primaryButtonColors } from '@/ui/lumaButton';
 
 type PlexMode = 'shared' | 'own' | 'both';
 
@@ -213,7 +215,7 @@ export function UserSetupPage() {
               href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/"
               target="_blank"
               rel="noreferrer"
-              style={{ display: 'inline-block', fontSize: 12, color: 'rgba(168,85,247,0.8)', textDecoration: 'none' }}
+              style={{ display: 'inline-block', fontSize: 12, color: LUMA_BLUE, textDecoration: 'none' }}
             >
               How to find your Plex token
             </a>
@@ -274,7 +276,7 @@ function OptionButton({ selected, onClick, label, desc }: {
         padding: '14px 16px',
         background: selected ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.03)',
         border: selected
-          ? '1.5px solid rgba(168,85,247,0.6)'
+          ? '1.5px solid rgba(59,130,246,0.6)'
           : '1px solid rgba(255,255,255,0.08)',
         borderRadius: 12,
         cursor: 'pointer',
@@ -289,7 +291,7 @@ function OptionButton({ selected, onClick, label, desc }: {
           height: 18,
           borderRadius: '50%',
           border: selected
-            ? '5px solid rgb(168,85,247)'
+            ? `5px solid ${LUMA_BLUE}`
             : '2px solid rgba(255,255,255,0.25)',
           flexShrink: 0,
           marginTop: 2,
@@ -312,7 +314,7 @@ function OptionButton({ selected, onClick, label, desc }: {
 const pageStyle: React.CSSProperties = {
   position: 'fixed',
   inset: 0,
-  background: 'radial-gradient(ellipse at 50% 40%, #3a1a3a 0%, #1a0a1e 40%, #0a0410 100%)',
+  background: NAVY_BG,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -366,8 +368,7 @@ const primaryBtnStyle: React.CSSProperties = {
   padding: '11px 0',
   fontSize: 15,
   fontWeight: 600,
-  color: '#ffffff',
-  background: 'rgba(168,85,247,0.5)',
+  ...primaryButtonColors,
   border: 'none',
   borderRadius: 50,
   cursor: 'pointer',

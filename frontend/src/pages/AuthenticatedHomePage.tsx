@@ -676,7 +676,7 @@ function SearchShelf({ onClose, initialQuery }: { onClose: () => void; initialQu
                   touchAction: 'manipulation',
                   background: active ? 'transparent' : 'rgba(255,255,255,0.06)',
                   border: active ? 'none' : '1px solid rgba(255,255,255,0.15)',
-                  color: active ? 'rgba(147,112,219,1)' : 'rgba(255,255,255,0.6)',
+                  color: active ? '#3b82f6' : 'rgba(255,255,255,0.6)',
                 }}
               >
                 {pill.label}

@@ -633,3 +633,13 @@ def test_plex_server_without_start_cookie_is_401(test_app, minimal):
     r = test_app.test_client().post('/api/start/plex/server', json={'machine_id': 'm1'}, headers=ORIGIN,
                                     environ_base=REMOTE)
     assert r.status_code == 401 and r.json['restart'] is True
+
+
+@pytest.mark.parametrize('pw', [' pass-word-1', 'pass-word-1 '])
+def test_create_account_rejects_password_spaces(test_app, start_owner, pw):
+    from app import login_limiter
+    c, user = start_owner
+    r = c.post('/api/start/account', json={'username': 'plexowner', 'password': pw}, headers=ORIGIN)
+    assert r.status_code == 400 and r.json['error'] == "Password can't start or end with a space"
+    assert not login_limiter._fail
+    assert c.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 200

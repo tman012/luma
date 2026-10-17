@@ -1,4 +1,4 @@
-import { apiFetch, apiUrl } from '@/apiClient';
+import { apiFetch } from '@/apiClient';
 
 export interface Card {
   key: string; type: string; title: string; subtitle: string;
@@ -8,8 +8,8 @@ export interface Rail { id: string; title: string; type: string; items: Card[] }
 export interface HomeData { continue_watching: Card[]; rails: Rail[]; plex: boolean }
 export interface Library { id: string; title: string; type: string; enabled: boolean }
 
-/** Image paths come from the server without the URL base. */
-export const img = (p: string | null | undefined) => (p ? apiUrl(p) : null);
+/** Image URLs come from the server complete (URL base included): use as is. */
+export const img = (p: string | null | undefined) => p || null;
 
 export async function fetchHome(): Promise<HomeData> {
   const res = await apiFetch('/api/home');

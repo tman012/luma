@@ -45,6 +45,24 @@ def test_login_background_is_luma_purple():
     assert 'background: var(--color-kiosk-black)' in LOGIN_PAGE_HTML
 
 
+def test_login_uses_the_spa_navy_and_fields():
+    ui = (ROOT / 'frontend/src/components/start/StartUI.tsx').read_text()
+    navy = re.search(r"export const NAVY_BG = '([^']+)'", ui).group(1)
+    root = _login_root()
+    assert root['--navy-bg'] == navy
+    from app import theme
+    assert theme.NAVY_BG == navy and theme.NAVY == '#15102a'
+    ui_btn = (ROOT / 'frontend/src/ui/lumaButton.ts').read_text()
+    assert f"LUMA_BLUE = '{theme.LUMA_BLUE}'" in ui_btn
+    assert 'background: var(--navy-bg) fixed var(--color-kiosk-black);' in LOGIN_PAGE_HTML
+    field = re.search(r"export const fieldInput[^{]*\{(.*?)\};", ui, re.S).group(1)
+    assert "rgba(255,255,255,0.08)" in field.replace(' ', '') and root['--field-bg'] == 'rgb(255 255 255 / 0.08)'
+    assert root['--field-border'] == 'rgb(255 255 255 / 0.14)'
+    assert '--color-glass-5' not in LOGIN_PAGE_HTML.split('</style>')[0].split('.card')[1].split('}')[0]
+    for plum in ('#3a1a3a', '#1a0a1e', '#0a0410'):
+        assert plum not in LOGIN_PAGE_HTML
+
+
 def test_no_hard_coded_colors_outside_tokens():
     style = re.search(r"<style>(.*?)</style>", LOGIN_PAGE_HTML, re.S).group(1)
     rules = re.sub(r":root\s*\{.*?\}", "", style, count=1, flags=re.S)

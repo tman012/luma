@@ -491,7 +491,9 @@ def _auth_api_no_store(response):
 @app.after_request
 def set_static_cache_headers(response):
     path = request.path
-    if path.startswith('/static/'):
+    if path == '/static/sw.js':
+        response.headers['Cache-Control'] = 'no-cache'
+    elif path.startswith('/static/'):
         # Don't override if a specific route already set Cache-Control
         # (e.g. sw.js sets max-age=0)
         if 'Cache-Control' not in response.headers or response.headers.get('Cache-Control') == 'no-cache':
@@ -8993,7 +8995,9 @@ def auth_login():
 
 def _signup_open() -> bool:
     """Account requests: always from the local network, from elsewhere only
-    when security.allow_signup is on. Never on the request-portal host."""
+    when security.allow_signup is on. Never on the request-portal host. Never in minimal mode."""
+    if _minimal.enabled():
+        return False
     if _access.is_portal_traffic(request, settings):
         return False
     return bool(settings.get('security.allow_signup')) or _access.is_local_request(request, settings)
@@ -9908,6 +9912,7 @@ def _admin_action_page(title: str, message: str, success: bool = True, status: i
     is HTML-escaped; the response forbids scripts (CSP) and MIME sniffing."""
     import html as _html
     esc = lambda v: _html.escape(str(v), quote=True)
+    from app.theme import LUMA_BLUE, NAVY, NAVY_BG
     color = '#22c55e' if success else '#ef4444'
     form_html = ''
     if form:
@@ -9915,14 +9920,14 @@ def _admin_action_page(title: str, message: str, success: bool = True, status: i
         action_url = esc(request.script_root + request.path)
         form_html = (f'<form method="post" action="{action_url}" style="margin-top:24px;">{hidden}'
                      f'<button type="submit" style="font-size:16px;font-weight:600;padding:12px 28px;'
-                     f'border:0;border-radius:10px;background:{color};color:#fff;">{esc(button)}</button></form>')
+                     f'border:0;border-radius:999px;background:{LUMA_BLUE};color:#fff;">{esc(button)}</button></form>')
     page = f"""\
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>{esc(title)} - Luma</title></head>
 <body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
-background:radial-gradient(ellipse at 50% 40%,#1a1a1c 0%,#111113 40%,#050507 100%);
+background:{NAVY_BG} fixed {NAVY};
 font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#fff;">
 <div style="text-align:center;padding:40px;max-width:400px;">
 <h1 style="font-size:20px;font-weight:700;margin:0 0 8px;color:{color};">{esc(title)}</h1>
@@ -12149,6 +12154,22 @@ def plex_health():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+_PLEX_IMG_PATH = re.compile(
+    r'/library/(?:metadata|collections)/\d+/(?:thumb|art|clearLogo|banner|composite|poster)(?:/\d+)?'
+    r'|/library/sections/\d+/composite/\d+')
+
+
+def _plex_image_path(raw: str):
+    """The Plex library image path to fetch, or None. A photo-transcode URL is
+    accepted only when its inner url is itself a library image path."""
+    raw = (raw or '').strip()
+    if raw.startswith('/photo/:/transcode?'):
+        from urllib.parse import parse_qs, urlsplit
+        inner = parse_qs(urlsplit(raw).query).get('url', [''])[0]
+        return inner if _PLEX_IMG_PATH.fullmatch(inner) else None
+    return raw if _PLEX_IMG_PATH.fullmatch(raw) else None
+
+
 @app.route('/api/img/plex')
 def img_plex_proxy():
     """Secure proxy for Plex images. Never exposes PLEX_TOKEN to the browser.
@@ -12164,9 +12185,10 @@ def img_plex_proxy():
     if not plex_path:
         return 'Missing url parameter', 400
 
-    # Security: only allow paths starting with /library/ or /photo/
-    if not plex_path.startswith(('/library/', '/photo/')):
-        return 'Invalid path — must start with /library/ or /photo/', 400
+    # Security: only Plex's own image paths, never an outside URL.
+    plex_path = _plex_image_path(plex_path)
+    if not plex_path:
+        return 'Not a Plex image path', 400
 
     # Optional resize via Plex photo transcoder (clamped to sane bounds)
     def _clamp_dim(raw):
@@ -12210,10 +12232,13 @@ def img_plex_proxy():
             # the proxy (each opening a 15s upstream request) on every re-render.
             from flask import Response
             return Response('Image not found', status=404,
-                            headers={'Cache-Control': 'public, max-age=60'})
+                            headers={'Cache-Control': 'private, max-age=60'})
 
         from flask import Response
         import re as _re, hashlib as _hl
+        ctype = (resp.headers.get('Content-Type') or 'image/jpeg').split(';')[0].strip().lower()
+        if not ctype.startswith('image/') or ctype == 'image/svg+xml':
+            return Response('Not an image', status=502, headers={'Cache-Control': 'private, max-age=30'})
         body = resp.content
         # Versioned Plex paths (/thumb/<updatedAt>) change URL when the art changes -> cache a day.
         # Unversioned ones (/library/metadata/<rk>/thumb) keep the same URL after a Fix Match or
@@ -12221,18 +12246,18 @@ def img_plex_proxy():
         versioned = bool(_re.search(r'/(thumb|art|clearLogo|banner|theme)/\d+', plex_path))
         etag = '"' + _hl.md5(body).hexdigest() + '"'
         if not versioned and request.headers.get('If-None-Match') == etag:
-            return Response(status=304, headers={'ETag': etag, 'Cache-Control': 'no-cache'})
+            return Response(status=304, headers={'ETag': etag, 'Cache-Control': 'private, no-cache'})
         return Response(
             body,
-            content_type=resp.headers.get('Content-Type', 'image/jpeg'),
-            headers={'Cache-Control': 'public, max-age=86400'} if versioned
-            else {'Cache-Control': 'no-cache', 'ETag': etag},
+            content_type=ctype,
+            headers={'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff'} if versioned
+            else {'Cache-Control': 'private, no-cache', 'ETag': etag, 'X-Content-Type-Options': 'nosniff'},
         )
     except requests.RequestException as e:
         logger.error(f"Plex image proxy error: {e}")
         from flask import Response
         return Response('Error fetching image', status=502,
-                        headers={'Cache-Control': 'public, max-age=30'})
+                        headers={'Cache-Control': 'private, max-age=30'})
 
 @app.route('/api/img/tmdb')
 def img_tmdb_proxy():
@@ -18380,7 +18405,7 @@ def screensaver_image_proxy():
 def manifest():
     """PWA manifest — app is always Luma."""
     sm = SettingsManager()
-    theme = sm.get("ui.theme_color") or "#0a0a0a"
+    theme = sm.get("ui.theme_color") or "#15102a"
     prefix = app.config.get('URL_BASE', '') or ''
     data = {
         "name": "Luma",
@@ -18389,7 +18414,7 @@ def manifest():
         "start_url": f"{prefix}/",
         "scope": f"{prefix}/",
         "display": "standalone",
-        "background_color": "#1a1a1a",
+        "background_color": "#15102a",
         "theme_color": theme,
         "orientation": "portrait",
         "icons": [
@@ -18403,7 +18428,7 @@ def manifest():
 def service_worker():
     """Service Worker file — short cache so updates propagate quickly."""
     resp = send_from_directory(app.static_folder, 'sw.js')
-    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate'
+    resp.headers['Cache-Control'] = 'no-cache'
     resp.headers['Service-Worker-Allowed'] = (app.config.get('URL_BASE', '') or '') + '/'
     return resp
 

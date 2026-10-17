@@ -87,8 +87,9 @@ if (new URLSearchParams(window.location.search).has('sw_reset')) {
     });
   }).catch(() => {});
 
-  // Auto-reload when the new SW takes control (after skipWaiting)
-  let refreshing = false;
+  // Reload once when a new SW takes over a page an older one was serving
+  // (a first install has no old copy to replace).
+  let refreshing = !navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (refreshing) return;
     refreshing = true;

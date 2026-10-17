@@ -154,11 +154,14 @@ export function PinPad({ value, onChange, onComplete, shake, disabled, compact }
   );
 }
 
+/** Luma's navy backdrop, shared by Home and every sign-in surface. */
+export const NAVY_BG = 'radial-gradient(ellipse at 50% 30%, #262a66 0%, #15102a 55%, #0a0818 100%)';
+
 /* ── Styles ─────────────────────────────────────────────────────────────── */
 
 const page: React.CSSProperties = {
   position: 'fixed', inset: 0, overflow: 'auto', zIndex: 100,
-  background: 'radial-gradient(ellipse at 50% 30%, #262a66 0%, #15102a 55%, #0a0818 100%)',
+  background: NAVY_BG,
   color: '#fff', fontFamily: FONT, WebkitFontSmoothing: 'antialiased',
 };
 const center: React.CSSProperties = {

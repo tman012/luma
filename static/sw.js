@@ -21,7 +21,7 @@
 
 // BUILD_ID is replaced at build time or bumped manually per deploy.
 // When sw.js byte-content changes, the browser installs a new SW.
-const CACHE_VERSION = 'media-kiosk-v107';
+const CACHE_VERSION = 'media-kiosk-v108';
 
 // Separate cache for large immutable assets — purged when version bumps
 const IMMUTABLE_CACHE = 'media-immutable-v24';
@@ -115,7 +115,7 @@ self.addEventListener('activate', event => {
     )
   );
   // Take control of all open tabs immediately
-  self.clients.claim();
+  event.waitUntil(self.clients.claim());
 });
 
 // ---------------------------------------------------------------------------
@@ -195,8 +195,10 @@ self.addEventListener('fetch', event => {
 
   // --- Navigation requests — NetworkFirst (offline fallback to shell) ---
   if (event.request.mode === 'navigate') {
+    // Always ask the network (bypassing the HTTP cache) so a deploy shows
+    // up on the next load; the saved shell is only for offline.
     event.respondWith(
-      fetch(event.request).then(resp => {
+      fetch(event.request, { cache: 'no-store' }).then(resp => {
         saveShell(resp);
         return resp;
       }).catch(() => caches.match(at('/')))

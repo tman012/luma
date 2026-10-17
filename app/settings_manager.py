@@ -259,7 +259,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
     },
     "ui": {
         "_type": "object",
-        "theme_color":    {"type": "string", "default": "#0a0a0a", "sensitive": False, "description": "App theme color (PWA)"},
+        "theme_color":    {"type": "string", "default": "#15102a", "sensitive": False, "description": "App theme color (PWA)"},
         "placeholder_poster_url": {"type": "string", "default": "https://via.placeholder.com/342x513/1a1a1a/808080?text=No+Poster", "sensitive": False, "description": "Fallback poster image URL"},
         "kiosk_mode":     {"type": "string", "default": "movie", "sensitive": False, "description": "Kiosk home page mode (movie or daily)"},
         "daily_kiosk": {

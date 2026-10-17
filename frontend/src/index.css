@@ -1269,7 +1269,7 @@ input[type="search"]::-webkit-search-cancel-button {
 }
 
 .admin-modal {
-  background: #111115;
+  background: var(--color-kiosk-black);
   border: 1px solid rgba(255,255,255,0.12);
   border-radius: 20px;
   padding: 28px 24px;

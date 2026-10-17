@@ -1,5 +1,5 @@
 import { apiFetch } from '../apiClient';
-import { primaryButtonColors } from '@/ui/lumaButton';
+import { primaryButtonColors, LUMA_BLUE } from '@/ui/lumaButton';
 /**
  * MySettingsPage — Personal settings for non-admin users.
  *
@@ -10,6 +10,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBodyScroll } from '@/hooks/useBodyScroll';
+import { NAVY_BG } from '@/components/start/StartUI';
 
 type TestStatus = 'idle' | 'testing' | 'success' | 'error';
 
@@ -140,7 +141,7 @@ export function MySettingsPage() {
               onClick={() => setUseShared(!useShared)}
               style={{
                 ...toggleTrackStyle,
-                background: useShared ? 'rgba(168,85,247,0.6)' : 'rgba(255,255,255,0.15)',
+                background: useShared ? LUMA_BLUE : 'rgba(255,255,255,0.15)',
               }}
             >
               <div style={{
@@ -400,7 +401,7 @@ function ArrIcon({ color }: { color: string }) {
 
 const pageStyle: React.CSSProperties = {
   minHeight: '100dvh',
-  background: 'radial-gradient(ellipse at 50% 0%, #1a1a1c 0%, var(--color-kiosk-black) 40%, #050507 100%)',
+  background: NAVY_BG,
   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
 };
 
@@ -413,7 +414,7 @@ const headerStyle: React.CSSProperties = {
   justifyContent: 'space-between',
   padding: '12px 16px',
   paddingTop: 'max(12px, env(safe-area-inset-top))',
-  background: 'rgba(26,10,30,0.85)',
+  background: 'rgba(21,16,42,0.85)',
   backdropFilter: 'blur(20px)',
   WebkitBackdropFilter: 'blur(20px)',
   borderBottom: '1px solid rgba(255,255,255,0.06)',

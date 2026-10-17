@@ -22,6 +22,8 @@ ALLOWED_PATHS = frozenset({
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/')
 # Inside /static/, these belong to disabled features.
 BLOCKED_PREFIXES = ('/static/request/', '/static/hero_cache/')
+# Under /api/auth/, these belong to disabled features (no self sign-up).
+BLOCKED_PATHS = frozenset({'/api/auth/register'})
 # Reachable signed out (minimal mode signs in every address, LAN included).
 SIGNED_OUT_PATHS = frozenset({'/', '/start', '/unlock'})
 SIGNED_OUT_PREFIXES = ('/api/start/', '/assets/', '/fonts/')
@@ -37,6 +39,6 @@ def path_allowed(path: str) -> bool:
         path = path.rstrip('/')
     if path in ALLOWED_PATHS:
         return True
-    if path.startswith(BLOCKED_PREFIXES):
+    if path.rstrip('/') in BLOCKED_PATHS or path.startswith(BLOCKED_PREFIXES):
         return False
     return path.startswith(ALLOWED_PREFIXES)

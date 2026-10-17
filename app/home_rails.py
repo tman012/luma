@@ -84,7 +84,10 @@ def arrange(sections: List[Dict[str, Any]], prefs: Dict[str, List[str]]) -> List
 def _img(path: Optional[str], width: int) -> Optional[str]:
     if not path or not str(path).startswith(('/library/', '/photo/')):
         return None
-    return f"/api/img/plex?url={quote(path, safe='')}&w={width}"
+    # Full path under the URL base, so the browser can use it as is.
+    from flask import current_app
+    base = (current_app.config.get('URL_BASE') or '').rstrip('/')
+    return f"{base}/api/img/plex?url={quote(path, safe='')}&w={width}"
 
 
 def _sections(plex) -> List[Dict[str, Any]]:
@@ -176,9 +179,17 @@ def home():
     if plex is None:
         return jsonify({'continue_watching': [], 'rails': [], 'plex': False})
     libs = [l for l in arrange(_sections(plex), load_prefs()) if l['enabled']]
+    from flask import current_app
+    flask_app = current_app._get_current_object()
+
+    def in_app(fn, *args):
+        # Worker threads need the app context (image URLs read URL_BASE).
+        with flask_app.app_context():
+            return fn(*args)
+
     with ThreadPoolExecutor(max_workers=min(6, len(libs) + 1)) as pool:
-        cw = pool.submit(continue_watching, plex)
-        rails = [(l, pool.submit(recently_added, plex, l['id'])) for l in libs]
+        cw = pool.submit(in_app, continue_watching, plex)
+        rails = [(l, pool.submit(in_app, recently_added, plex, l['id'])) for l in libs]
         out_rails = [{'id': l['id'], 'title': l['title'], 'type': l['type'], 'items': f.result()}
                      for l, f in rails]
         cw_items = cw.result()

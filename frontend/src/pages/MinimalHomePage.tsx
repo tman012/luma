@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { FONT, LOGO_SRC } from '@/components/start/StartUI';
+import { FONT, LOGO_SRC, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
 import { HomeRails, SkeletonRails, railCss } from '@/components/home/Rails';
 import { fetchHome, type HomeData } from '@/components/home/homeApi';
@@ -103,7 +103,7 @@ function PersonIcon() {
 
 const menu: React.CSSProperties = {
   position: 'absolute', right: 0, top: 48, minWidth: 180, padding: 6, borderRadius: 14,
-  background: 'rgba(28,22,56,0.96)', border: '1px solid rgba(255,255,255,0.1)',
+  background: 'rgba(21,16,42,0.96)', border: '1px solid rgba(255,255,255,0.1)',
   boxShadow: '0 12px 32px rgba(0,0,0,0.45)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
 };
 const menuItem: React.CSSProperties = {
@@ -137,7 +137,7 @@ function SignOutIcon() {
 
 export const homePage: React.CSSProperties = {
   minHeight: '100dvh', color: '#fff', fontFamily: FONT, WebkitFontSmoothing: 'antialiased',
-  background: 'radial-gradient(ellipse at 50% 0%, #262a66 0%, #15102a 55%, #0a0818 100%)', backgroundAttachment: 'fixed',
+  background: NAVY_BG, backgroundAttachment: 'fixed',
 };
 const page = homePage;
 export const homeBar: React.CSSProperties = {

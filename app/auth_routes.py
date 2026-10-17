@@ -132,10 +132,15 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
             --color-text-secondary: rgb(255 255 255 / 0.70);
             --color-text-muted: rgb(255 255 255 / 0.50);
             --font-luma: system-ui, -apple-system, sans-serif;
+            /* Shared with the SPA: StartUI NAVY_BG and fieldInput. */
+            --navy-bg: __NAVY_BG__;
+            --field-bg: rgb(255 255 255 / 0.08);
+            --field-border: rgb(255 255 255 / 0.14);
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { background: var(--color-kiosk-black); }
         body {
+            background: var(--navy-bg) fixed var(--color-kiosk-black);
             font-family: var(--font-luma);
             min-height: 100vh;
             min-height: 100dvh;
@@ -151,11 +156,7 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
         .brand img { width: clamp(200px, 56vw, 360px); height: auto; user-select: none; }
         .card {
             width: 100%;
-            max-width: 400px;
-            background: var(--color-glass-5);
-            border: 1px solid var(--color-glass-10);
-            border-radius: 20px;
-            padding: 28px 24px 24px;
+            max-width: 360px;
         }
         .field { margin-bottom: 18px; }
         .field label {
@@ -169,8 +170,8 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
             width: 100%;
             height: 50px;
             padding: 0 16px;
-            background: var(--color-glass-10);
-            border: 1px solid var(--color-glass-15);
+            background: var(--field-bg);
+            border: 1px solid var(--field-border);
             border-radius: 12px;
             font: inherit;
             font-size: 16px;
@@ -240,6 +241,9 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
     </main>
 </body>
 </html>'''
+
+from app.theme import NAVY_BG as _NAVY_BG  # noqa: E402
+LOGIN_PAGE_HTML = LOGIN_PAGE_HTML.replace('__NAVY_BG__', _NAVY_BG)
 
 
 def _no_store(response):
