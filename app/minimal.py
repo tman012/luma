@@ -31,8 +31,11 @@ ALLOWED_PATHS = frozenset({
     # Search and the detail popup: TMDB images through prod's proxy (works when
     # the browser can't reach image.tmdb.org) and the read-only ownership check.
     '/api/img/tmdb', '/api/check-ownership-batch',
+    # Trackers (#16): owner-only, signed-in CRUD and Test; the routes check that themselves.
+    '/api/trackers',
 })
-ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/', '/settings/')
+ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/', '/settings/',
+                    '/api/trackers/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).
 # GET only, sign-in required like everything else in minimal mode.
 DETAIL_READ_PREFIXES = (

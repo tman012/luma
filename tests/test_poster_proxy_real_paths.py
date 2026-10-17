@@ -18,6 +18,12 @@ class _Resp:
         self.content = b'img'
         self.headers = {'Content-Type': ctype}
 
+    def iter_content(self, chunk_size=1):
+        yield self.content
+
+    def close(self):
+        pass
+
 
 @pytest.fixture
 def plex(test_app, monkeypatch):

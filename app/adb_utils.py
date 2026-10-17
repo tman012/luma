@@ -18,12 +18,49 @@ Hint codes:
 
 import logging
 import os
+import re
+import shlex
 import shutil
 import socket
 import subprocess
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+_HOSTNAME = re.compile(
+    r'(?=.{1,253}\Z)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*',
+    re.ASCII)
+
+
+def adb_target(host, port, allowed_hosts) -> Optional[str]:
+    """'host:port' for ``adb -s``, or None. The host must be a plain IP address
+    (no zone id) or an RFC hostname that is in *allowed_hosts* (lowercase), and
+    the port 1-65535. IPv6 targets are bracketed."""
+    import ipaddress
+    if not isinstance(host, str) or not host or '%' in host or isinstance(port, bool):
+        return None
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return None
+    if not 1 <= port <= 65535:
+        return None
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+        if not _HOSTNAME.fullmatch(host):
+            return None
+    if host.lower() not in allowed_hosts:
+        return None
+    return f'[{ip.compressed}]:{port}' if ip is not None and ip.version == 6 else f'{host.lower()}:{port}'
+
+
+def shell_command(*args: str) -> str:
+    """One quoted string for ``adb shell``. adb joins everything after
+    'shell' into a single line the device's sh runs, so each argument must be
+    quoted or a filename with ; $() or spaces would run or split on the device."""
+    return shlex.join([str(a) for a in args])
 
 ADB_TIMEOUT = 10  # seconds for connect/pair
 TCP_TIMEOUT = 1.5  # seconds for TCP probe
