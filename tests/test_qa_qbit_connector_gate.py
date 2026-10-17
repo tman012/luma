@@ -90,7 +90,8 @@ def test_login_redirect_is_an_error_and_not_followed(minimal, monkeypatch):
     r = c.post(API + '/test', json={'url': SAVED, 'username': 'admin', 'password': PW},
                environ_base=REMOTE, headers=HDR)
     j = r.get_json()
-    assert j['ok'] is False and '302' in j['error'], j
+    # Hotfix: a redirect on login is a failed sign-in (no raw HTTP status in the UI).
+    assert j['ok'] is False and j['error'] == 'qBittorrent sign-in failed', j
     assert len(calls) == 1 and calls[0][1].get('allow_redirects') is False
 
 
