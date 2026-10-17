@@ -70,3 +70,24 @@ describe('folder picker', () => {
     expect(onSave).toHaveBeenCalledWith('Movies', '/media/Video/Movies');
   });
 });
+
+describe('folder picker shows the server path (Tester tv1-8646479 M6)', () => {
+  it('a typed path is shown and picked as the server cleaned it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => res({ path: '/media/TV', parent: '/media', dirs: [{ name: 'Anime', path: '/media/TV/Anime' }] })));
+    const onPick = vi.fn();
+    render(<FolderBrowser start="/media//TV/" onPick={onPick} onClose={() => {}} />);
+    await screen.findByText('Anime');
+    expect(screen.getByTestId('lp-browser-path').textContent).toBe('/media/TV');
+    fireEvent.click(screen.getByTestId('lp-browser-use'));
+    expect(onPick).toHaveBeenCalledWith('/media/TV');
+  });
+
+  it('Use this folder waits for the server answer', async () => {
+    let answer: (r: Response) => void = () => {};
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(r => { answer = r; })));
+    render(<FolderBrowser start="/media/TV" onPick={() => {}} onClose={() => {}} />);
+    expect((screen.getByTestId('lp-browser-use') as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { answer(res({ path: '/media/TV', parent: '/media', dirs: [] })); });
+    await waitFor(() => expect((screen.getByTestId('lp-browser-use') as HTMLButtonElement).disabled).toBe(false));
+  });
+});

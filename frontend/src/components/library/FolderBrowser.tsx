@@ -11,6 +11,8 @@ export function FolderBrowser({ start, onPick, onClose }: {
 }) {
   const [path, setPath] = useState<string | null>(start);
   const [parent, setParent] = useState<string | null>(null);
+  // The folder as the server returned it (cleaned: no trailing or doubled slashes).
+  const [shown, setShown] = useState<string | null>(null);
   const [dirs, setDirs] = useState<Folder[] | null>(null);
   const [error, setError] = useState('');
 
@@ -19,12 +21,14 @@ export function FolderBrowser({ start, onPick, onClose }: {
     setDirs(null);
     browseFolders(path).then(r => {
       if (!live) return;
-      if (r.ok) { setDirs(r.dirs); setParent(r.parent); setError(''); return; }
+      if (r.ok) { setDirs(r.dirs); setParent(r.parent); setShown(r.path); setError(''); return; }
       if (path && path === start) { setPath(null); return; }     // a typed path outside the roots: start at the roots
-      setError(r.error); setDirs([]);
+      setError(r.error); setDirs([]); setShown(null);
     });
     return () => { live = false; };
   }, [path, start]);
+
+  const ready = dirs !== null && !error && !!path && !!shown;
 
   return (
     <div data-testid="lp-browser" style={box}>
@@ -35,7 +39,7 @@ export function FolderBrowser({ start, onPick, onClose }: {
             <span style={{ display: 'inline-flex', transform: 'rotate(180deg)' }}><ChevronIcon size={16} /></span>
           </button>
         )}
-        <span data-testid="lp-browser-path" style={pathText} title={path || ''}>{path || 'Folders'}</span>
+        <span data-testid="lp-browser-path" style={pathText} title={shown || ''}>{shown || 'Folders'}</span>
       </div>
       <div style={{ maxHeight: 260, overflowY: 'auto' }}>
         {error && <div role="alert" style={{ ...rowStyle, color: T.dangerText, cursor: 'default' }}>{error}</div>}
@@ -48,8 +52,8 @@ export function FolderBrowser({ start, onPick, onClose }: {
       </div>
       <div style={{ display: 'flex', gap: 12, padding: 12, justifyContent: 'flex-end' }}>
         <button type="button" className="lp-focus" data-testid="lp-browser-cancel" onClick={onClose} style={ghost}>Cancel</button>
-        <button type="button" className="lp-focus" data-testid="lp-browser-use" disabled={!path}
-          onClick={() => { if (path) onPick(path); }} style={{ ...primary, opacity: path ? 1 : 0.5 }}>Use this folder</button>
+        <button type="button" className="lp-focus" data-testid="lp-browser-use" disabled={!ready}
+          onClick={() => { if (ready) onPick(shown); }} style={{ ...primary, opacity: ready ? 1 : 0.5 }}>Use this folder</button>
       </div>
     </div>
   );
