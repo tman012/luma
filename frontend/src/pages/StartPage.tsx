@@ -9,6 +9,7 @@ import { apiFetch } from '../apiClient';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
+import { isMinimal } from '@/minimal';
 import {
   StartShell, Center, Bottom, Title, Sub, ErrorLine, Status, Logo, PlexMark, Check, PinPad,
   primaryBtn, plexBtn, linkBtn, list, row, FONT,
@@ -65,7 +66,7 @@ export function StartPage() {
       if (data.in_progress) {
         setServerName(data.server || '');
         setPasswordSet(!!data.password_set);
-        setStep(data.password_set ? 'access' : 'password');
+        setStep(!data.password_set ? 'password' : isMinimal() ? 'done' : 'access');
       }
       else if (!data.needs_start) navigate('/', { replace: true });
       else setStep('welcome');
@@ -198,7 +199,7 @@ export function StartPage() {
 
       {step === 'password' && (
         <Center key="password">
-          <PasswordStep onSaved={() => { setPasswordSet(true); setStep('access'); }} onRestart={() => setStep('welcome')} />
+          <PasswordStep onSaved={() => { setPasswordSet(true); setStep(isMinimal() ? 'done' : 'access'); }} onRestart={() => setStep('welcome')} />
         </Center>
       )}
 

@@ -13,16 +13,19 @@ services:
       context: .
       dockerfile: Dockerfile
     init: true
-    # Host networking, like production, so sign-in sees real LAN addresses.
-    network_mode: host
+    # Bridge network (not the host network production uses). Reachable from
+    # the LAN at <server>:5002; the app listens on its usual 5001 inside.
+    # Behind Docker's NAT every client appears as the bridge gateway, which
+    # is fine here: LUMA_MINIMAL never treats any address as the owner, so
+    # every request after setup needs a real session.
+    ports:
+      - "5002:5001"
     environment:
       - TZ=${TZ:-UTC}
       - FLASK_ENV=production
       - LUMA_MINIMAL=1
       - LUMA_DISABLE_ADB=1
       - LUMA_NO_RESTART=1
-      - PORT=5002
-      - LUMA_PORT=5002
       - DATABASE_PATH=/app/data/media.db
       - LUMA_DATA_DIR=/app/data
       - LUMA_CACHE_DIR=/app/cache

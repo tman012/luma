@@ -1411,6 +1411,12 @@ def _is_auth_exempt(path: str, method: str) -> bool:
         return True
     if path.startswith('/static/spa/'):
         return True  # SPA bundle (hashed assets, no data)
+    if _minimal.enabled() and (path in _minimal.SIGNED_OUT_PATHS
+                               or path.startswith(_minimal.SIGNED_OUT_PREFIXES)):
+        # Minimal builds sign in everyone, LAN included, so the app shell,
+        # its bundle and Get Started (whose endpoints check the setup state,
+        # session and cookies themselves) must load signed out.
+        return True
     if path.startswith('/api/request/'):
         # Requester endpoints check the request-page cookie themselves.
         return portal_guard.is_portal_allowed(path, method)
@@ -9320,7 +9326,8 @@ def security_get():
     auth_required = (settings.get('security.auth_required') or 'disabled_local').strip()
     return jsonify({
         'auth_required': auth_required,
-        'pin_set': _pin_state(),
+        'pin_set': _pin_state() or _start_flow.password_set(),
+        'password_set': _start_flow.password_set(),
         'single_account': _start_flow.created_by_start(),
         'local_request': not _access.should_authenticate(settings, request),
         'trusted_proxies': settings.get('security.trusted_proxies') or '',
@@ -9340,6 +9347,8 @@ def security_put():
     err = _require_admin()
     if err:
         return err
+    if _minimal.enabled() and (getattr(g, 'implicit_user', False) or not (g.current_user or {}).get('token')):
+        return jsonify({'error': 'Sign in first'}), 401
     body = request.get_json(silent=True) or {}
     auth_required = str(body.get('auth_required') or '').strip()
     pin = str(body.get('pin') or '')
@@ -9397,7 +9406,7 @@ def security_put():
     if auth_required:
         settings.update({'security': {'auth_required': auth_required}})
     
-    resp = make_response(jsonify({'ok': True, 'auth_required': auth_required or (settings.get('security.auth_required') or 'disabled_local'), 'pin_set': _pin_state()}))
+    resp = make_response(jsonify({'ok': True, 'auth_required': auth_required or (settings.get('security.auth_required') or 'disabled_local'), 'pin_set': _pin_state() or _start_flow.password_set()}))
     
     # Keep this browser signed in after enabling authentication
     if auth_required == 'enabled' and getattr(g, 'implicit_user', False):
@@ -20363,7 +20372,7 @@ from app import start_flow as _start_flow
 _start_flow.init(
     settings=settings, user_auth=user_auth, session_cookie=AUTH_COOKIE,
     client_id=_INSTALL_SECRETS['plex_client_id'], on_plex_saved=_start_plex_saved,
-    get_current_user=_get_current_user,
+    get_current_user=_get_current_user, secret=app.config['SECRET_KEY'],
 )
 app.register_blueprint(_start_flow.bp)
 

@@ -180,6 +180,13 @@ class StartFlowTest(unittest.TestCase):
         self.assertIn('HttpOnly', cookie[0])
         self.assertNotIn('Secure', cookie[0])
         self.assertIn('Path=/', cookie[0])
+        setup = [h for h in r.headers.getlist('Set-Cookie') if h.startswith('luma_setup=')]
+        self.assertEqual(len(setup), 1)
+        self.assertIn('HttpOnly', setup[0])
+        self.assertIn('SameSite=Strict', setup[0])
+        st_file = self.sf._load_state()
+        self.assertEqual(st_file['owner_uid'], users[0]['id'])
+        self.assertFalse(st_file['password_set'])
 
         st = c.get('/api/start/status').json
         self.assertEqual((st['needs_start'], st['in_progress'], st['step']), (False, True, 'done'))
@@ -192,6 +199,16 @@ class StartFlowTest(unittest.TestCase):
         self.assertEqual(r.json, {'ok': True, 'restarting': False})
         st = c.get('/api/start/status').json
         self.assertEqual((st['needs_start'], st['in_progress']), (False, False))
+
+    def test_minimal_build_requires_sign_in_after_plex_step(self):
+        with mock.patch.dict(os.environ, {'LUMA_MINIMAL': '1'}):
+            with self._fake_plex():
+                self.client.post('/api/start/plex/pin')
+                self.client.get('/api/start/plex/pin')
+            with mock.patch.object(self.sf, 'probe', return_value=True):
+                r = self.client.post('/api/start/plex/server', json={'machine_id': 'm1'})
+            self.assertEqual(r.status_code, 200, r.json)
+            self.assertEqual(self.settings.get('security.auth_required'), 'enabled')
 
     def test_other_browser_cannot_hijack(self):
         with self._fake_plex():

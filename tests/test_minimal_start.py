@@ -30,19 +30,29 @@ def minimal(monkeypatch):
     monkeypatch.setenv('LUMA_MINIMAL', '1')
 
 
+def _setup_cookie(test_app, client, uid, plex_id='plex-1'):
+    from app import start_flow
+    with test_app.test_request_context():
+        tok = start_flow.setup_token(uid, plex_id)
+    client.set_cookie(start_flow.SETUP_COOKIE, tok, path='/api/start/')
+
+
 @pytest.fixture
 def start_owner(test_app, monkeypatch):
-    """An owner just created by the Start flow (Plex step done, Done not tapped yet)."""
+    """An owner just created by the Start flow (Plex step done, Done not tapped yet),
+    in the browser that holds the signed setup cookie."""
     import secrets
     from app import start_flow, user_auth
     monkeypatch.setenv('LUMA_NO_RESTART', '1')
     user = user_auth.create_user('plexowner', secrets.token_urlsafe(24), is_admin=True,
                                  status='active', email='owner@example.com')
     start_flow._save_state({'admin_via_start': True, 'completed': False, 'pin_set': False,
-                            'server_name': 'Basement'})
+                            'password_set': False, 'server_name': 'Basement',
+                            'owner_uid': user['id'], 'owner_plex_id': 'plex-1'})
     test_app.config['START_BACKGROUND_THREADS'] = False
     c = test_app.test_client()
     c.set_cookie('luma_auth_session', user_auth.create_session(user['id']))
+    _setup_cookie(test_app, c, user['id'])
     yield c, user
     start_flow._save_state({})
     import app.main
@@ -231,13 +241,129 @@ def test_set_password_validation(start_owner, body, msg):
     assert r.status_code == 400 and msg in r.json['error']
 
 
+GOOD = {'password': 'abcdefgh-1', 'confirm': 'abcdefgh-1'}
+
+
 def test_set_password_refused_outside_start(test_app, start_owner):
     from app import start_flow
     c, _ = start_owner
+    start_flow._save_state({**start_flow._load_state(), 'completed': True})
+    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 409
+
+
+@pytest.mark.parametrize('peer', ['127.0.0.1', '192.168.1.20', '10.0.0.7'])
+def test_implicit_local_owner_cannot_set_password(test_app, start_owner, peer):
+    """disabled_local gives LAN/loopback an implicit owner; it must never set the password."""
+    import app.main
+    app.main.settings.update({'security': {'auth_required': 'disabled_local'}})
     anon = test_app.test_client()
-    r = anon.post('/api/start/password', json={'password': 'abcdefgh', 'confirm': 'abcdefgh'},
-                  headers=ORIGIN, environ_base=REMOTE)
-    assert r.status_code in (401, 403, 409)
-    start_flow._save_state({'admin_via_start': True, 'completed': True})
-    r = c.post('/api/start/password', json={'password': 'abcdefgh', 'confirm': 'abcdefgh'}, headers=ORIGIN)
-    assert r.status_code == 409
+    r = anon.post('/api/start/password', json=GOOD, headers={**ORIGIN, 'Host': 'localhost'},
+                  environ_base={'REMOTE_ADDR': peer})
+    assert r.status_code == 401
+    # Even with a stolen setup cookie but no real session.
+    _setup_cookie(test_app, anon, start_owner[1]['id'])
+    r = anon.post('/api/start/password', json=GOOD, headers=ORIGIN, environ_base={'REMOTE_ADDR': peer})
+    assert r.status_code == 401
+
+
+def test_session_without_setup_cookie_rejected(test_app, start_owner):
+    from app import start_flow, user_auth
+    _, user = start_owner
+    other = test_app.test_client()
+    other.set_cookie('luma_auth_session', user_auth.create_session(user['id']))
+    assert other.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 403
+    other.set_cookie(start_flow.SETUP_COOKIE, 'forged.value', path='/api/start/')
+    assert other.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 403
+
+
+def test_setup_cookie_for_another_uid_or_plex_account_rejected(test_app, start_owner):
+    c, user = start_owner
+    _setup_cookie(test_app, c, user['id'] + 1)
+    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 403
+    _setup_cookie(test_app, c, user['id'], plex_id='someone-else')
+    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 403
+    _setup_cookie(test_app, c, user['id'])
+    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 200
+
+
+def test_set_password_is_one_shot(test_app, start_owner):
+    from app import start_flow, user_auth
+    c, user = start_owner
+    r = c.post('/api/start/password', json=GOOD, headers=ORIGIN)
+    assert r.status_code == 200
+    assert any(h.startswith(start_flow.SETUP_COOKIE + '=;') for h in r.headers.getlist('Set-Cookie'))
+    before = user_auth.get_user_by_id(user['id'])['pin_hash']
+    _setup_cookie(test_app, c, user['id'])
+    again = {'password': 'another-pass-2', 'confirm': 'another-pass-2'}
+    assert c.post('/api/start/password', json=again, headers=ORIGIN).status_code == 409
+    assert user_auth.get_user_by_id(user['id'])['pin_hash'] == before
+
+
+def test_set_password_attempt_limit(test_app, start_owner):
+    from app import login_limiter
+    c, user = start_owner
+    other = test_app.test_client()
+    for _ in range(login_limiter.MAX_FAILURES):
+        assert other.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 401
+    r = c.post('/api/start/password', json=GOOD, headers=ORIGIN)
+    assert r.status_code == 429 and int(r.headers['Retry-After']) > 0
+
+
+def test_security_reports_password(start_owner):
+    c, _ = start_owner
+    assert c.get('/api/security').json['pin_set'] is False
+    c.post('/api/start/password', json=GOOD, headers=ORIGIN)
+    body = c.get('/api/security').json
+    assert body['pin_set'] is True and body['password_set'] is True
+
+
+# -- minimal mode: no implicit owner, Docker bridge NAT -----------------------
+
+@pytest.mark.parametrize('peer,headers', [
+    ('192.168.1.20', {}),
+    ('127.0.0.1', {}),
+    ('172.17.0.1', {}),                                   # Docker bridge gateway
+    ('172.17.0.1', {'X-Forwarded-For': '192.168.1.20'}),  # spoofed hop through NAT
+])
+def test_minimal_mode_never_implicit_owner(test_app, minimal, peer, headers):
+    import secrets
+    import app.main
+    from app import user_auth
+    user_auth.create_user('owner', secrets.token_urlsafe(16), is_admin=True)
+    app.main.settings.update({'security': {'auth_required': 'disabled_local', 'trusted_proxies': ''}})
+    c = test_app.test_client()
+    r = c.get('/api/auth/me', headers={**headers, 'Host': 'localhost'}, environ_base={'REMOTE_ADDR': peer})
+    assert r.status_code == 401
+    assert c.put('/api/security', json={'auth_required': 'disabled_local'}, headers=ORIGIN,
+                 environ_base={'REMOTE_ADDR': peer}).status_code == 401
+
+
+def test_bridge_gateway_client_ip(test_app):
+    """Behind Docker NAT the peer is the gateway; forwarded headers from an
+    untrusted peer are never believed, and a trusted gateway is honored."""
+    from app import access
+
+    class S(dict):
+        def get(self, k, d=None):
+            return dict.get(self, k, d)
+    with test_app.test_request_context('/', environ_base={'REMOTE_ADDR': '172.17.0.1'}):
+        from flask import request
+        assert access.client_ip(request, S()) == '172.17.0.1'
+    with test_app.test_request_context('/', environ_base={'REMOTE_ADDR': '172.17.0.1'},
+                                       headers={'X-Forwarded-For': '203.0.113.9'}):
+        from flask import request
+        assert access.client_ip(request, S()) is None
+        assert access.client_ip(request, S({'security.trusted_proxies': '172.16.0.0/12'})) == '203.0.113.9'
+        assert not access.is_local_request(request, S({'security.trusted_proxies': '172.16.0.0/12'}))
+
+
+def test_flag_unset_lan_keeps_implicit_owner(test_app, monkeypatch):
+    import secrets
+    import app.main
+    from app import user_auth
+    monkeypatch.delenv('LUMA_MINIMAL', raising=False)
+    user_auth.create_user('owner', secrets.token_urlsafe(16), is_admin=True)
+    app.main.settings.update({'security': {'auth_required': 'disabled_local'}})
+    r = test_app.test_client().get('/api/auth/me', headers={'Host': 'localhost'},
+                                   environ_base={'REMOTE_ADDR': '127.0.0.1'})
+    assert r.status_code == 200 and r.json['implicit'] is True

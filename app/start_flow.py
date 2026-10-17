@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 
 PLEX_TV = 'https://plex.tv'
 START_COOKIE = 'luma_start'
+SETUP_COOKIE = 'luma_setup'          # Plex-verified browser may set the owner password
+SETUP_SALT = 'luma-start-password'
+SETUP_TTL = 3600
 PRODUCT = 'Luma'
 
 bp = Blueprint('start_flow', __name__)
@@ -43,9 +46,11 @@ _lock = threading.Lock()
 
 
 def init(*, settings, user_auth, session_cookie: str, client_id: str,
-         on_plex_saved: Callable[[str, str, str], int], get_current_user: Callable[[], Optional[dict]]):
+         on_plex_saved: Callable[[str, str, str], int], get_current_user: Callable[[], Optional[dict]],
+         secret: Optional[str] = None):
     _cfg.update(settings=settings, user_auth=user_auth, session_cookie=session_cookie,
-                client_id=client_id, on_plex_saved=on_plex_saved, get_current_user=get_current_user)
+                client_id=client_id, on_plex_saved=on_plex_saved, get_current_user=get_current_user,
+                secret=secret)
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +144,7 @@ def get_account(token: str) -> Dict[str, str]:
     r.raise_for_status()
     d = r.json()
     return {
+        'id': str(d.get('id') or d.get('uuid') or ''),
         'name': (d.get('username') or d.get('title') or d.get('friendlyName') or '').strip(),
         'email': (d.get('email') or '').strip(),
     }
@@ -228,13 +234,67 @@ PASSWORD_MIN = 8
 PASSWORD_MAX = 256
 
 
+_fallback_secret = secrets.token_bytes(32)
+
+
+def _serializer():
+    from flask import current_app
+    from itsdangerous import URLSafeTimedSerializer
+    secret = _cfg.get('secret') or current_app.secret_key or _fallback_secret
+    return URLSafeTimedSerializer(secret, salt=SETUP_SALT)
+
+
+def setup_token(uid: int, plex_id: str) -> str:
+    """Signed proof that this browser completed the Plex step for owner *uid*."""
+    return _serializer().dumps({'uid': int(uid), 'plex': str(plex_id or '')})
+
+
+def _setup_cookie_ok(st: Dict[str, Any], uid: int) -> bool:
+    raw = request.cookies.get(SETUP_COOKIE, '')
+    if not raw:
+        return False
+    try:
+        data = _serializer().loads(raw, max_age=SETUP_TTL)
+    except Exception:
+        return False
+    return (data.get('uid') == uid == st.get('owner_uid')
+            and str(data.get('plex') or '') == str(st.get('owner_plex_id') or ''))
+
+
+PASSWORD_LIMIT_ID = 'start-password'
+
+
 @bp.route('/api/start/password', methods=['POST'])
 def start_password():
     """The owner replaces the random password from the Plex step with one
-    of their own (hashed the same way /login verifies it)."""
+    of their own (hashed the same way /login verifies it).
+
+    Only the browser that completed the Plex step (signed SameSite=Strict
+    setup cookie plus its real session, never an implicit local owner) may
+    call it, once; afterwards changes go through normal sign-in."""
+    from flask import g
+    from app import access, login_limiter
+    ip = access.client_ip(request, _cfg['settings']) or request.remote_addr or ''
+    wait = login_limiter.retry_after(ip, PASSWORD_LIMIT_ID)
+    if wait:
+        resp = jsonify({'error': 'Too many attempts. Try again later.', 'retry_after': wait})
+        resp.headers['Retry-After'] = str(wait)
+        return resp, 429
+
+    def refuse(status, message, **extra):
+        login_limiter.record_failure(ip, PASSWORD_LIMIT_ID)
+        return jsonify({'error': message, **extra}), status
+
     user = _cfg['get_current_user']()
+    if not user or getattr(g, 'implicit_user', False) or not user.get('token'):
+        return refuse(401, 'Sign in first')
+    st = _load_state()
     if not _in_progress(user) or not user.get('id'):
-        return jsonify({'error': 'Start again', 'restart': True}), 409
+        return refuse(409, 'Start again', restart=True)
+    if st.get('password_set'):
+        return refuse(409, 'Password already set')
+    if user['id'] != st.get('owner_uid') or not _setup_cookie_ok(st, user['id']):
+        return refuse(403, 'Start again', restart=True)
     body = request.get_json(silent=True) or {}
     password = body.get('password')
     confirm = body.get('confirm')
@@ -250,8 +310,11 @@ def start_password():
     st = _load_state()
     st['password_set'] = True
     _save_state(st)
+    login_limiter.record_success(ip, PASSWORD_LIMIT_ID)
     logger.info('Start: owner password set')
-    return jsonify({'ok': True})
+    resp = make_response(jsonify({'ok': True}))
+    resp.delete_cookie(SETUP_COOKIE, path='/api/start/')
+    return resp
 
 
 @bp.route('/api/start/plex/pin', methods=['POST'])
@@ -343,8 +406,12 @@ def start_plex_server():
                               status='active', email=account.get('email') or None)
     except ValueError as e:
         return jsonify({'error': str(e)}), 409
-    _cfg['settings'].update({'security': {'auth_required': 'disabled_local'}})
-    st.update(server_name=server['name'], admin_via_start=True, completed=False, pin_set=False)
+    from app import minimal
+    # A minimal (test) build never opens local addresses: every request signs in.
+    _cfg['settings'].update({'security': {'auth_required': 'enabled' if minimal.enabled() else 'disabled_local'}})
+    plex_id = str(account.get('id') or '')
+    st.update(server_name=server['name'], admin_via_start=True, completed=False, pin_set=False,
+              password_set=False, owner_uid=user['id'], owner_plex_id=plex_id)
     st.pop('nonce', None)
     _save_state(st)
     with _lock:
@@ -357,6 +424,8 @@ def start_plex_server():
                     httponly=True, samesite='Lax', secure=request.is_secure,
                     path=current_app.config.get('URL_BASE') or '/')
     resp.delete_cookie(START_COOKIE, path='/')
+    resp.set_cookie(SETUP_COOKIE, setup_token(user['id'], plex_id), max_age=SETUP_TTL, httponly=True,
+                    samesite='Strict', secure=request.is_secure, path='/api/start/')
     logger.info('Start: owner account created')
     return resp
 

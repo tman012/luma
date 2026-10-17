@@ -261,6 +261,11 @@ def should_authenticate(settings, request) -> bool:
     
     Portal traffic always requires authentication (never gets implicit owner).
     """
+    # A minimal (test) build never treats any address as the implicit owner.
+    from app import minimal
+    if minimal.enabled():
+        return True
+
     # Portal traffic never gets implicit owner
     if is_portal_traffic(request, settings):
         return True

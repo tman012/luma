@@ -100,8 +100,14 @@ main screen. No background threads start, and every other route returns 404.
 docker compose -p luma-test -f docker-compose.test.yml up -d --build
 ```
 
-- Container `luma-test`, image tag `luma:minimal-test` (never `luma:latest`),
-  port 5002 (host networking, like production).
+- Container `luma-test`, image tag `luma:minimal-test` (never `luma:latest`).
+- Bridge network, published as `5002:5001`: open `http://<server LAN IP>:5002`
+  from any device on the LAN (LAN access is intended). It does not use the
+  host network, so it cannot collide with production on 5001.
+- Every request needs sign-in, LAN and loopback included: minimal mode never
+  treats any address as the implicit owner, and Get Started sets sign-in to
+  required. Behind Docker's NAT clients appear as the bridge gateway
+  (172.x); leave trusted proxies empty unless a reverse proxy sits in front.
 - Its own named volumes `luma-test_luma-test-data` and
   `luma-test_luma-test-cache`. No `.env`, host data folder, media folders,
   ADB keys or Plex database are mounted.
