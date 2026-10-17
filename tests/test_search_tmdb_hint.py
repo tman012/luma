@@ -1,5 +1,5 @@
-"""Library search results carry tmdb_id (movies) so the modal can start
-/api/movie alongside /api/plex/movie, and the TMDb type check cache is bounded."""
+"""Library search results carry tmdb_id (movies and shows) so the modal can start
+/api/movie or /api/tv alongside /api/plex/*, and the TMDb type check cache is bounded."""
 
 import os
 import tempfile
@@ -70,9 +70,21 @@ def test_library_search_includes_movie_tmdb_id(client):
         data = client.get('/api/library/search?q=inter').get_json()
     assert data['movies'][0]['tmdb_id'] == 157336
     assert data['movies'][0]['rating_key'] == '7'
-    # TV keeps its current shape; the search never calls TMDb.
-    assert 'tmdb_id' not in data['tv_shows'][0]
+    assert data['tv_shows'][0]['tmdb_id'] == 1396
+    # The search itself never calls TMDb.
     net.get.assert_not_called()
+
+
+def test_library_search_drops_tv_id_known_to_be_wrong_type(client):
+    # The id is a movie, not a show: leave it out, but keep it for the movie.
+    app_main._tmdb_type_validation_cache['tv:157336'] = (app_main.time.time(), False)
+    items = [_movie(tmdb_id=157336),
+             {'title': 'Interstellar', 'year': 2014, 'rating_key': '9', 'media_type': 'show',
+              'section_name': 'TV', 'tmdb_id': 157336}]
+    with patch.object(app_main, 'fast_search_index', _index(items)):
+        data = client.get('/api/library/search?q=inter').get_json()
+    assert data['movies'][0]['tmdb_id'] == 157336
+    assert 'tmdb_id' not in data['tv_shows'][0]
 
 
 def test_library_search_drops_id_known_to_be_wrong_type(client):

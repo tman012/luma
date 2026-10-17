@@ -98,8 +98,10 @@ export async function warmDetail(
       tid = (parsed.tmdbId as number | undefined) || (plex.tmdb_id as number | undefined) || undefined;
       plexBackdrop = parsed.backdropUrl || parsed.posterUrl || null;
     }
-  } else if (ratingKey && kind === 'movie') {
-    void json(`/api/plex/movie/${ratingKey}`);
+  } else if (ratingKey) {
+    // Both ids (owned search results): warm Plex too, which runs the
+    // server-side tmdb_id type check the popup waits on.
+    void json(kind === 'movie' ? `/api/plex/movie/${ratingKey}` : `/api/plex/tv/${ratingKey}`);
   }
   const [tm, logo] = await Promise.all([
     tid ? json(kind === 'movie' ? `/api/movie/${tid}` : `/api/tv/${tid}`) : Promise.resolve(null),
