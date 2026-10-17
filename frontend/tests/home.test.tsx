@@ -53,9 +53,19 @@ describe('Home', () => {
     expect(titles).toEqual(['Continue watching', 'Movies', 'TV Shows']);
     expect((screen.getByTestId('progress') as HTMLElement).style.width).toBe('25%');
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Menu' })).toBeNull();   // logo and avatar only
     fireEvent.click(screen.getByRole('button', { name: 'Account' }));
-    const items = screen.getAllByRole('menuitem').map(i => i.textContent?.trim());
-    expect(items).toEqual(['Sign out']);   // Settings lives in the drawer/sidebar
+    // Phone: a right-side account panel with the username, Settings and Sign out.
+    const panel = screen.getByTestId('account-panel');
+    expect(panel.getAttribute('role')).toBe('dialog');
+    expect(panel.style.width).toBe('82vw');
+    expect(panel.style.maxWidth).toBe('340px');
+    expect(screen.getByTestId('account-name').textContent).toBe('taylor');
+    const rows = [...panel.querySelectorAll('button')];
+    expect(rows.map(b => b.textContent?.trim())).toEqual(['Settings', 'Sign out']);
+    expect(rows[0]!.style.height).toBe('52px');
+    fireEvent.click(screen.getByTestId('account-scrim'));
+    await waitFor(() => expect(screen.queryByTestId('account-panel')).toBeNull());
   });
 
   it('scrolls: the page unlocks html/body, rails scroll sideways', async () => {
@@ -122,13 +132,13 @@ describe('Home', () => {
     vi.useRealTimers();
   });
 
-  it('hides Libraries for non-admins', async () => {
+  it('hides Settings for non-admins', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json(HOME)));
     auth.user = { id: 2, name: 'guest', is_admin: false };
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
     await waitFor(() => screen.getByTestId('home-rails'));
     fireEvent.click(screen.getByRole('button', { name: 'Account' }));
-    expect(screen.getAllByRole('menuitem').map(i => i.textContent?.trim())).toEqual(['Sign out']);
+    expect([...screen.getByTestId('account-panel').querySelectorAll('button')].map(i => i.textContent?.trim())).toEqual(['Sign out']);
     auth.user = { id: 1, name: 'taylor', is_admin: true };
   });
 });

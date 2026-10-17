@@ -1,22 +1,26 @@
-/** Settings (/settings/<section>), docs/design/sidebar-nav-spec.md and
- * docs/design/mobile-settings-spec.md. Desktop: the persistent sidebar and
- * the section in the main pane. Phone: the 56px app header (hamburger,
- * title, avatar) and the drawer. Home screen: Libraries (drag to reorder,
- * switch on/off, instant save) and, on desktop for owner/admin, Kiosk >
- * Backdrop library. */
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Navigate, useNavigate, useParams } from 'react-router';
+/** Settings (/settings/<section>), docs/design/settings-page-spec.md and
+ * docs/design/mobile-settings-spec.md (row behavior).
+ * Desktop (>=1024px): a full page under the app header (logo back to Home,
+ * avatar): a left section list and the section on the right. Home screen
+ * shows only Kiosk > Backdrop library (owner/admin).
+ * Phone: a full-screen sheet (X close, section list); a section pushes in
+ * with a back chevron. Home screen shows only Libraries (drag to reorder,
+ * switch on/off, instant save). */
+import { useEffect, useRef, useState } from 'react';
+import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { FONT } from '@/components/start/StartUI';
+import { FONT, LOGO_SRC } from '@/components/start/StartUI';
+import { assetUrl } from '@/urlHelpers';
 import { LUMA_BLUE } from '@/ui/lumaButton';
 import {
   fetchKioskLibrary, fetchLibraries, move, saveKioskLibrary, saveLibraries,
   type KioskLibraries, type Library,
 } from '@/components/home/homeApi';
-import { AccountMenu, homePage, phoneBar } from '@/pages/MinimalHomePage';
+import { homePage } from '@/pages/MinimalHomePage';
 import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { useKioskWidth } from '@/components/home/KioskHome';
-import { CheckIcon, ChevronIcon, GripIcon, MenuButton, NavDrawer, SIDEBAR_W, Sidebar } from '@/components/nav/AppNav';
+import { CheckIcon, ChevronIcon, ChevronLeftIcon, GripIcon, XIcon } from '@/components/nav/AppNav';
+import { UserMenu } from '@/components/nav/UserMenu';
 import { NoticeToast } from '@/components/start/SetupToast';
 import { PlexSettings, usePlexOwner } from '@/components/home/PlexSettings';
 
@@ -37,51 +41,105 @@ export function SettingsPage() {
   const { section } = useParams();
   const wide = useKioskWidth();
   const navigate = useNavigate();
-  const [drawer, setDrawer] = useState(false);
   const [busy, setBusy] = useState(false);
-  const closeDrawer = useCallback(() => setDrawer(false), []);
   const owner = usePlexOwner(!!user?.is_admin);
   useBodyScroll();
   if (loading) return null;
   if (!authenticated) return <Navigate to="/login" replace />;
   const known = SETTINGS_SECTIONS.find(s => s.slug === section);
-  if (!known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
+  if (section && !known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
+  if (known?.slug === 'plex' && owner === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   const admin = !!user?.is_admin;
-  const signOut = async () => { setBusy(true); await logout(); navigate('/login', { replace: true }); };
-  const avatar = (size: number) => !implicit
-    ? <AccountMenu name={user?.name || ''} busy={busy} onSignOut={signOut} size={size} />
-    : <span style={{ width: size }} />;
-  if (known.slug === 'plex' && owner === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
-  const content = known.slug === 'plex'
+  const sections = SETTINGS_SECTIONS.filter(s => s.slug !== 'plex' || owner);
+  const content = (slug: string) => slug === 'plex'
     ? (owner ? <PlexSettings /> : null)
     : <HomeScreenSection admin={admin} wide={wide} />;
 
   if (wide) {
+    if (!known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
+    const signOut = async () => { setBusy(true); await logout(); navigate('/login', { replace: true }); };
     return (
-      <div style={homePage} data-step="settings" data-layout="sidebar">
-        <Sidebar />
-        <div style={{ marginLeft: SIDEBAR_W, minHeight: '100dvh' }}>
-          <header style={deskBar}>
-            <h1 style={pageTitle}>{known.label}</h1>
-            {avatar(48)}
-          </header>
-          <main style={{ padding: '8px 40px 48px', maxWidth: 720 }}>{content}</main>
+      <div style={homePage} data-step="settings" data-layout="desktop">
+        <style>{css}</style>
+        <header style={deskHeader}>
+          <Link to="/" aria-label="Home" style={{ display: 'inline-flex', borderRadius: 12 }} className="luma-focus">
+            <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="settings-logo" style={{ height: 64, width: 'auto' }} draggable={false} />
+          </Link>
+          {!implicit
+            ? <UserMenu name={user?.name || ''} admin={admin} busy={busy} onSignOut={signOut} size={48} />
+            : <span style={{ width: 48 }} />}
+        </header>
+        <div style={deskPage}>
+          <nav aria-label="Settings" data-testid="settings-nav" style={{ width: 220, flex: 'none' }}>
+            <h1 style={navHeading}>Settings</h1>
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {sections.map(s => {
+                const on = s.slug === known.slug;
+                return (
+                  <li key={s.slug}>
+                    <Link to={`/settings/${s.slug}`} className="luma-section-item" aria-current={on ? 'page' : undefined}
+                      style={{ ...navItem, ...(on ? navItemOn : null) }}>
+                      {on && <span style={bar} aria-hidden="true" />}
+                      {s.label}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+          <main style={{ flex: 1, minWidth: 0, maxWidth: 720 }}>
+            <h2 style={deskTitle}>{known.label}</h2>
+            {content(known.slug)}
+          </main>
         </div>
       </div>
     );
   }
+
+  // Phone: the Settings sheet; /settings lists the sections, a section pushes in.
   return (
-    <div style={homePage} data-step="settings" data-layout="phone">
-      <header style={phoneBar}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-          <MenuButton onClick={() => setDrawer(true)} />
-          <h1 style={pageTitle}>{known.label}</h1>
-        </div>
-        {avatar(40)}
-      </header>
-      <NavDrawer open={drawer} onClose={closeDrawer} />
-      <main style={{ padding: '0 16px calc(env(safe-area-inset-bottom) + 24px)' }}>{content}</main>
+    <div style={sheetBackdrop} data-step="settings" data-layout="phone">
+      <style>{css}</style>
+      <div role="dialog" aria-modal="true" aria-label="Settings" data-testid="settings-sheet" className="luma-sheet" style={sheet}>
+        {!known ? (
+          <div key="list">
+            <SheetHeader title="Settings" onClose={() => navigate('/')} />
+            <ul style={{ listStyle: 'none', margin: '16px 0 0', padding: 0 }} data-testid="settings-list">
+              {sections.map((s, i) => (
+                <li key={s.slug}>
+                  <Link to={`/settings/${s.slug}`} className="luma-sheet-row" style={sheetRow}>
+                    <span style={{ flex: 1 }}>{s.label}</span>
+                    <span style={{ display: 'inline-flex', color: 'rgba(255,255,255,0.3)' }}><ChevronIcon size={18} /></span>
+                    {i < sections.length - 1 && <span style={divider} aria-hidden="true" />}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <div key={known.slug} className="luma-push" data-testid="settings-section">
+            <SheetHeader title={known.label} onBack={() => navigate('/settings')} onClose={() => navigate('/')} />
+            <div style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 24px)' }}>{content(known.slug)}</div>
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+/** 56px sheet header: a circular X (or back chevron) left, centered title.
+ * Swipe down on the header closes the sheet. */
+function SheetHeader({ title, onBack, onClose }: { title: string; onBack?: () => void; onClose: () => void }) {
+  const startY = useRef<number | null>(null);
+  return (
+    <header style={sheetHeader}
+      onPointerDown={e => { startY.current = e.clientY; }}
+      onPointerUp={e => { if (startY.current !== null && e.clientY - startY.current > 80) onClose(); startY.current = null; }}>
+      <button type="button" aria-label={onBack ? 'Back' : 'Close'} onClick={onBack || onClose} style={circleHit} className="luma-focus">
+        <span style={circle}>{onBack ? <ChevronLeftIcon size={18} /> : <XIcon size={18} />}</span>
+      </button>
+      <h1 style={sheetTitle}>{title}</h1>
+    </header>
   );
 }
 
@@ -183,19 +241,19 @@ export function LibrariesEditor() {
   return (
     <section data-testid="home-screen-section">
       {toast > 0 && <NoticeToast key={toast} text={SAVE_FAILED} onDone={() => setToast(0)} />}
-      <h2 style={sectionTitle}>Libraries</h2>
+      <h2 style={groupHeader}>Libraries</h2>
       {libs === null ? (
         loadFailed ? (
-          <div style={{ ...card, ...emptyRow }} role="alert"><span style={muted}>{"Couldn't load libraries"}</span></div>
+          <div style={emptyRow} role="alert"><span style={muted}>{"Couldn't load libraries"}</span></div>
         ) : (
-          <div data-testid="libraries-skeleton" style={card}>
-            {[0, 1, 2].map(i => <div key={i} className="luma-shimmer" style={{ height: ROW_H }} />)}
+          <div data-testid="libraries-skeleton">
+            {[0, 1, 2].map(i => <div key={i} className="luma-shimmer" style={{ height: ROW_H, margin: '0 20px 1px', borderRadius: 8 }} />)}
           </div>
         )
       ) : libs.length === 0 ? (
-        <div data-testid="libraries-empty" style={{ ...card, ...emptyRow }}><span style={muted}>No libraries</span></div>
+        <div data-testid="libraries-empty" style={emptyRow}><span style={muted}>No libraries</span></div>
       ) : (
-        <ul style={{ ...card, listStyle: 'none', margin: 0, padding: 0, position: 'relative' }} data-testid="libraries">
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, position: 'relative' }} data-testid="libraries">
           {libs.map((l, i) => {
             const lifted = drag?.id === l.id;
             const y = lifted ? drag!.dy : shiftFor(i, libs.length);
@@ -234,14 +292,15 @@ export function LibrariesEditor() {
                 >
                   <GripIcon />
                 </button>
-                <div style={{ ...rowBody, borderBottom: i < libs.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none' }}>
-                  <span style={{ ...nameStyle, color: l.enabled ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.5)' }}>{l.title}</span>
+                {i < libs.length - 1 && !lifted && <span style={divider} aria-hidden="true" />}
+                <div style={rowBody}>
+                  <span style={{ ...libName, color: l.enabled ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.5)' }}>{l.title}</span>
                   <button
                     type="button" role="switch" aria-checked={l.enabled} aria-label={l.title}
                     onClick={() => commit(libs.map(x => (x.id === l.id ? { ...x, enabled: !x.enabled } : x)))}
                     style={switchHit}
                   >
-                    <span data-track style={{ ...track, background: l.enabled ? LUMA_BLUE : 'rgba(255,255,255,0.2)' }}>
+                    <span data-track style={{ ...track, background: l.enabled ? LUMA_BLUE : 'rgba(255,255,255,0.18)' }}>
                       <span style={{ ...knob, transform: l.enabled ? 'translateX(20px)' : 'none' }} />
                     </span>
                   </button>
@@ -255,12 +314,74 @@ export function LibrariesEditor() {
   );
 }
 
-const deskBar: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 72, padding: '0 40px',
+const css = `
+.luma-section-item:hover{background:rgba(255,255,255,.06)}
+.luma-section-item[aria-current="page"]:hover{background:rgba(59,130,246,.14)}
+.luma-sheet-row:active{background:rgba(255,255,255,.06)}
+.luma-section-item:focus-visible,.luma-sheet-row:focus-visible,.luma-focus:focus-visible{outline:2px solid #60a5fa;outline-offset:-2px}
+.luma-sheet{animation:luma-sheet-up 300ms cubic-bezier(.2,.8,.2,1)}
+.luma-push{animation:luma-push-in 260ms cubic-bezier(.2,.8,.2,1)}
+@keyframes luma-sheet-up{from{transform:translateY(100%)}to{transform:none}}
+@keyframes luma-push-in{from{transform:translateX(100%)}to{transform:none}}
+@keyframes luma-fade-in{from{opacity:0}to{opacity:1}}
+@media (prefers-reduced-motion: reduce){.luma-sheet,.luma-push{animation:luma-fade-in 200ms}}
+`;
+const deskHeader: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 60px 20px 44px',
 };
-const pageTitle: React.CSSProperties = {
-  margin: 0, fontSize: 17, fontWeight: 600, fontFamily: FONT, color: 'rgba(255,255,255,0.95)',
-  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+const deskPage: React.CSSProperties = {
+  display: 'flex', gap: 40, maxWidth: 1100, margin: '0 auto', padding: '32px 60px', boxSizing: 'border-box',
+};
+const navHeading: React.CSSProperties = {
+  margin: '0 0 20px', fontSize: 24, fontWeight: 600, fontFamily: FONT, color: 'rgba(255,255,255,0.95)',
+};
+const navItem: React.CSSProperties = {
+  position: 'relative', display: 'flex', alignItems: 'center', height: 40, padding: '0 12px', borderRadius: 10,
+  fontSize: 15, fontWeight: 500, fontFamily: FONT, color: 'rgba(255,255,255,0.7)', textDecoration: 'none',
+};
+const navItemOn: React.CSSProperties = { background: 'rgba(59,130,246,0.14)', color: 'rgba(255,255,255,0.95)' };
+const bar: React.CSSProperties = {
+  position: 'absolute', left: 0, top: 8, bottom: 8, width: 3, borderRadius: 2, background: LUMA_BLUE,
+};
+const deskTitle: React.CSSProperties = {
+  margin: '0 0 8px', fontSize: 20, fontWeight: 600, fontFamily: FONT, color: 'rgba(255,255,255,0.95)', lineHeight: '40px',
+};
+const sheetBackdrop: React.CSSProperties = {
+  ...homePage, position: 'fixed', inset: 0, backgroundImage: 'linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55))',
+};
+const sheet: React.CSSProperties = {
+  position: 'absolute', top: 'calc(env(safe-area-inset-top) + 8px)', left: 0, right: 0, bottom: 0,
+  background: 'var(--color-kiosk-black)', borderRadius: '20px 20px 0 0', overflowX: 'hidden', overflowY: 'auto',
+  fontFamily: FONT, color: '#fff', overscrollBehavior: 'contain',
+};
+const sheetHeader: React.CSSProperties = {
+  position: 'relative', height: 56, display: 'flex', alignItems: 'center', padding: '0 12px', touchAction: 'pan-x',
+};
+const circleHit: React.CSSProperties = {
+  width: 44, height: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+  border: 'none', background: 'none', cursor: 'pointer', borderRadius: 22, position: 'relative', zIndex: 1, color: 'rgba(255,255,255,0.9)',
+};
+const circle: React.CSSProperties = {
+  width: 36, height: 36, borderRadius: 18, background: 'rgba(255,255,255,0.10)',
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+};
+const sheetTitle: React.CSSProperties = {
+  position: 'absolute', left: 64, right: 64, margin: 0, textAlign: 'center', fontSize: 17, fontWeight: 600,
+  fontFamily: FONT, color: 'rgba(255,255,255,0.95)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+};
+const sheetRow: React.CSSProperties = {
+  position: 'relative', display: 'flex', alignItems: 'center', height: 56, padding: '0 20px', boxSizing: 'border-box',
+  fontSize: 17, fontWeight: 400, fontFamily: FONT, color: 'rgba(255,255,255,0.95)', textDecoration: 'none',
+};
+const divider: React.CSSProperties = {
+  position: 'absolute', left: 20, right: 20, bottom: 0, height: 1, background: 'rgba(255,255,255,0.08)',
+};
+const groupHeader: React.CSSProperties = {
+  margin: 0, padding: '24px 20px 8px', fontSize: 20, fontWeight: 700, fontFamily: FONT, color: 'rgba(255,255,255,0.95)',
+};
+const libName: React.CSSProperties = {
+  flex: 1, minWidth: 0, fontSize: 17, fontWeight: 400, fontFamily: FONT,
+  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'left',
 };
 const sectionTitle: React.CSSProperties = {
   margin: '24px 4px 8px', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.5)', fontFamily: FONT,
@@ -269,10 +390,10 @@ const card: React.CSSProperties = {
   borderRadius: 16, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
   overflow: 'hidden',
 };
-const emptyRow: React.CSSProperties = { height: ROW_H, display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const muted: React.CSSProperties = { color: 'rgba(255,255,255,0.5)', fontSize: 15, fontFamily: FONT };
+const emptyRow: React.CSSProperties = { height: ROW_H, display: 'flex', alignItems: 'center', padding: '0 20px' };
+const muted: React.CSSProperties = { color: 'rgba(255,255,255,0.5)', fontSize: 17, fontFamily: FONT };
 const row: React.CSSProperties = {
-  position: 'relative', display: 'flex', alignItems: 'center', height: ROW_H, padding: '0 12px 0 4px',
+  position: 'relative', display: 'flex', alignItems: 'center', height: ROW_H, padding: '0 20px 0 8px',
   boxSizing: 'border-box', background: 'transparent', touchAction: 'pan-y',
 };
 const liftedRow: React.CSSProperties = {
@@ -287,7 +408,7 @@ const nameStyle: React.CSSProperties = {
 };
 const handle: React.CSSProperties = {
   width: 44, height: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none',
-  border: 'none', background: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'grab', padding: 0,
+  border: 'none', background: 'none', color: 'rgba(255,255,255,0.4)', cursor: 'grab', padding: 0,
   touchAction: 'none', borderRadius: 10,
 };
 const switchHit: React.CSSProperties = {

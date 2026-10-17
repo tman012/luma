@@ -94,7 +94,7 @@ describe('web kiosk home (>=1024px)', () => {
     const { container } = renderHome();
     await waitFor(() => screen.getByText('Movie 0'));
     const focusable = container.querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"]), [role="button"], input, select, textarea');
-    expect([...focusable].map(e => e.getAttribute('aria-label') || e.textContent)).toEqual(['Movie 0', 'Menu', 'Account']);
+    expect([...focusable].map(e => e.getAttribute('aria-label') || e.textContent)).toEqual(['Movie 0', 'Account']);
     const hero = container.querySelector('[data-hero-display-only]') as HTMLElement;
     // The backdrop, plot and genres open nothing; a drag doesn't swipe.
     fireEvent.click(hero);
@@ -159,20 +159,23 @@ describe('web kiosk home (>=1024px)', () => {
     expect((globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
   });
 
-  it('the menu icon opens the sidebar as an overlay drawer over the full-bleed slideshow', async () => {
+  it('logo and avatar only; the avatar dropdown holds Settings (admins) and Sign out', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ success: true, movies: TEN })));
     renderHome();
     await waitFor(() => screen.getByText('Movie 0'));
-    expect(screen.queryByTestId('app-sidebar')).toBeNull();            // collapsed: no persistent sidebar
+    expect(screen.queryByRole('button', { name: 'Menu' })).toBeNull();
+    expect(screen.queryByTestId('app-sidebar')).toBeNull();
     expect(screen.getByTestId('kiosk-home').style.inset).toBe('0px');   // full-bleed
-    fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
-    const drawer = screen.getByTestId('nav-drawer');
-    expect(screen.getByTestId('nav-scrim')).toBeTruthy();
-    expect(screen.getByRole('link', { name: 'Home' }).getAttribute('aria-current')).toBe('page');
-    expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy();
-    expect(drawer.contains(document.activeElement)).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Account' }));
+    const menu = screen.getByTestId('user-menu');
+    expect(menu.style.minWidth).toBe('200px');
+    expect(menu.style.top).toBe('56px');
+    const items = screen.getAllByRole('menuitem');
+    expect(items.map(i => i.textContent?.trim())).toEqual(['Settings', 'Sign out']);
+    expect(items[0]!.style.height).toBe('44px');
+    expect(screen.getByRole('separator')).toBeTruthy();
     fireEvent.keyDown(document, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByTestId('nav-drawer')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('user-menu')).toBeNull());
   });
 
   it('crossfades over 1.2 s, instantly under reduced motion', async () => {

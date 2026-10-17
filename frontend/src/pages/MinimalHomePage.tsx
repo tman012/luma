@@ -1,5 +1,5 @@
 /** Main screen of a LUMA_MINIMAL build: the phone-first Home (#11). */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBodyScroll } from '@/hooks/useBodyScroll';
@@ -11,7 +11,7 @@ import type { Card } from '@/components/home/homeApi';
 import { LUMA_BLUE } from '@/ui/lumaButton';
 import { fetchHome, type HomeData } from '@/components/home/homeApi';
 import { KioskHome, useKioskWidth } from '@/components/home/KioskHome';
-import { MenuButton, NavDrawer } from '@/components/nav/AppNav';
+import { UserMenu } from '@/components/nav/UserMenu';
 
 export function MinimalHomePage() {
   const { authenticated, loading, needsStart, startInProgress, pinUnlock, user, implicit, logout } = useAuth();
@@ -26,8 +26,6 @@ export function MinimalHomePage() {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [slow, setSlow] = useState(false);
-  const [drawer, setDrawer] = useState(false);
-  const closeDrawer = useCallback(() => setDrawer(false), []);
   const modals = useModalHost();
   const openCard = (c: Card) => openDetail(modals, c);
 
@@ -55,9 +53,9 @@ export function MinimalHomePage() {
     navigate('/login', { replace: true });
   };
 
-  // The avatar menu holds Sign out only (Settings lives in the sidebar/drawer).
+  // Home has only the logo and the avatar; the avatar menu holds Settings (admins) and Sign out.
   const menu = (size: number) => !implicit ? (
-    <AccountMenu name={user?.name || ''} busy={busy} onSignOut={signOut} size={size} />
+    <UserMenu name={user?.name || ''} admin={!!user?.is_admin} busy={busy} onSignOut={signOut} size={size} />
   ) : <span style={{ width: size }} />;
 
   if (kiosk) {
@@ -65,13 +63,9 @@ export function MinimalHomePage() {
       <div data-step="home" data-layout="kiosk">
         <KioskHome />
         <header style={kioskBar} data-testid="kiosk-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <MenuButton onClick={() => setDrawer(true)} />
-            <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="kiosk-logo" style={{ height: 64, width: 'auto' }} draggable={false} />
-          </div>
+          <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="kiosk-logo" style={{ height: 64, width: 'auto' }} draggable={false} />
           {menu(48)}
         </header>
-        <NavDrawer open={drawer} onClose={closeDrawer} />
       </div>
     );
   }
@@ -79,17 +73,15 @@ export function MinimalHomePage() {
   return (
     <div style={page} data-step="home">
       <style>{railCss}</style>
-      <header style={phoneBar}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <MenuButton onClick={() => setDrawer(true)} />
+      <div data-shift-root>
+        <header style={phoneBar}>
           <img src={assetUrl(LOGO_SRC)} alt="Luma" style={{ height: 30, width: 'auto' }} draggable={false} />
-        </div>
-        {menu(40)}
-      </header>
-      <NavDrawer open={drawer} onClose={closeDrawer} />
-      <main style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
-        {homeView(data, failed || slow, () => setAttempt(a => a + 1), openCard)}
-      </main>
+          {menu(40)}
+        </header>
+        <main style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
+          {homeView(data, failed || slow, () => setAttempt(a => a + 1), openCard)}
+        </main>
+      </div>
     </div>
   );
 }
@@ -125,55 +117,6 @@ function homeView(data: HomeData | null, down: boolean, retry: () => void, onOpe
   return <SkeletonRails />;
 }
 
-/** Avatar button with a small menu: Sign out. */
-export function AccountMenu({ name, busy, onSignOut, size = 40 }: {
-  name: string; busy: boolean; onSignOut: () => void; size?: number;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: Event) => {
-      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !ref.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('pointerdown', close);
-    document.addEventListener('keydown', close);
-    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', close); };
-  }, [open]);
-  const initial = (name.trim()[0] || '').toUpperCase();
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button type="button" aria-label="Account" aria-haspopup="menu" aria-expanded={open}
-        onClick={() => setOpen(o => !o)} style={{ ...iconBtn, width: size, height: size, borderRadius: size / 2 }}>
-        {initial ? <span style={{ fontSize: size >= 48 ? 19 : 16, fontWeight: 600 }}>{initial}</span> : <PersonIcon />}
-      </button>
-      {open && (
-        <div role="menu" style={{ ...menu, top: size + 8 }}>
-          <button role="menuitem" type="button" onClick={onSignOut} disabled={busy} style={menuItem}><SignOutIcon /> Sign out</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PersonIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-      <circle cx="12" cy="8" r="4" /><path d="M4 20c1.5-4 4.5-6 8-6s6.5 2 8 6" />
-    </svg>
-  );
-}
-
-const menu: React.CSSProperties = {
-  position: 'absolute', right: 0, top: 48, minWidth: 180, padding: 6, borderRadius: 14,
-  background: 'rgba(21,16,42,0.96)', border: '1px solid rgba(255,255,255,0.1)',
-  boxShadow: '0 12px 32px rgba(0,0,0,0.45)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-};
-const menuItem: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '12px 12px', borderRadius: 10,
-  background: 'transparent', border: 'none', color: '#fff', font: 'inherit', fontSize: 15,
-  textDecoration: 'none', cursor: 'pointer', textAlign: 'left',
-};
 // Centered in the space under the header: one muted line, optional Retry pill.
 const emptyBox: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16,
@@ -184,14 +127,6 @@ const retryBtn: React.CSSProperties = {
   padding: '10px 22px', borderRadius: 999, border: 0, background: LUMA_BLUE,
   color: '#fff', font: 'inherit', fontWeight: 600, cursor: 'pointer',
 };
-
-function SignOutIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4" />
-    </svg>
-  );
-}
 
 export const homePage: React.CSSProperties = {
   minHeight: '100dvh', color: '#fff', fontFamily: FONT, WebkitFontSmoothing: 'antialiased',
@@ -204,10 +139,10 @@ export const homeBar: React.CSSProperties = {
   background: 'rgba(21,16,42,0.55)', backdropFilter: 'blur(20px) saturate(160%)', WebkitBackdropFilter: 'blur(20px) saturate(160%)',
   borderBottom: '1px solid rgba(255,255,255,0.06)',
 };
-/** Phone header: 56px + safe area; hamburger and logo left, avatar right. */
+/** Phone header: 56px + safe area; logo left, avatar right. */
 export const phoneBar: React.CSSProperties = {
   ...homeBar, height: 'calc(env(safe-area-inset-top) + 56px)', boxSizing: 'border-box',
-  padding: 'env(safe-area-inset-top) 12px 0 6px',
+  padding: 'env(safe-area-inset-top) 12px 0 16px',
 };
 /** Web kiosk header: overlays the slideshow, top gradient, no glass. */
 export const kioskBar: React.CSSProperties = {

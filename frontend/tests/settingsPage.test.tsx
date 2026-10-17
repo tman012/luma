@@ -45,31 +45,29 @@ describe('Settings', () => {
   beforeEach(() => { auth.user.is_admin = true; plexOwner = true; plexConnected = false; });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-  it('web: persistent sidebar (Home, Settings > Home screen active) beside the section', async () => {
+  it('web: full page: logo back to Home, avatar, left list with Home screen active, Backdrop library only', async () => {
     wide = true; stubMatchMedia();
-    vi.stubGlobal('fetch', api());
+    const fetchMock = api(); vi.stubGlobal('fetch', fetchMock);
     renderAt('/settings');
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/settings/home-screen'));
-    const side = screen.getByTestId('app-sidebar');
-    expect(side.style.width).toBe('220px');
-    expect(side.style.position).toBe('fixed');
-    expect((screen.getByTestId('nav-logo') as HTMLImageElement).style.height).toBe('40px');
-    const home = screen.getByRole('link', { name: 'Home' });
-    const settings = screen.getByRole('button', { name: 'Settings' });
-    const sub = screen.getByRole('link', { name: 'Home screen' });
-    for (const el of [home, settings, sub]) expect(side.contains(el)).toBe(true);
-    expect(parseInt(home.style.height, 10)).toBe(44);
-    expect(parseInt(sub.style.height, 10)).toBe(36);
-    expect(settings.getAttribute('aria-expanded')).toBe('true');   // auto-expanded on /settings routes
-    expect(sub.getAttribute('aria-current')).toBe('page');
-    expect(home.getAttribute('aria-current')).toBeNull();
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Home screen');
+    expect(screen.queryByTestId('app-sidebar')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Menu' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Home' }).getAttribute('href')).toBe('/');
+    expect(screen.getByTestId('settings-logo')).toBeTruthy();
+    const nav = screen.getByTestId('settings-nav');
+    expect(nav.querySelector('h1')!.textContent).toBe('Settings');
+    expect(nav.style.width).toBe('220px');
+    const item = screen.getByRole('link', { name: 'Home screen' });
+    expect(item.getAttribute('aria-current')).toBe('page');
+    expect(item.style.height).toBe('40px');
+    expect(item.style.background).toBe('rgba(59, 130, 246, 0.14)');
+    expect(screen.getByRole('heading', { level: 2, name: 'Home screen' })).toBeTruthy();
+    await screen.findByRole('button', { name: /Backdrop library/ });
+    expect(screen.queryByTestId('libraries')).toBeNull();
+    expect(screen.queryByTestId('settings-sheet')).toBeNull();
     expect(screen.getByRole('button', { name: 'Account' }).style.width).toBe('48px');
-    expect(screen.queryByText('Back')).toBeNull();
-    fireEvent.click(settings);   // click toggles
-    expect(screen.queryByRole('link', { name: 'Home screen' })).toBeNull();
-    fireEvent.click(settings);
-    expect(screen.getByRole('link', { name: 'Home screen' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('link', { name: 'Home' }));
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/'));
   });
 
   it('web: Kiosk > Backdrop library opens a list with a check on the selected one', async () => {
@@ -77,61 +75,61 @@ describe('Settings', () => {
     const fetchMock = api(); vi.stubGlobal('fetch', fetchMock);
     renderAt('/settings/home-screen');
     const row = await screen.findByRole('button', { name: /Backdrop library/ });
-    // Desktop shows only the Backdrop library picker: no Libraries list, never fetched.
     expect(screen.queryByTestId('libraries')).toBeNull();
     expect(screen.getByTestId('backdrop-value').textContent).toBe('Movies');
     fireEvent.click(row);
     const radios = screen.getAllByRole('radio');
-    expect(radios.map(r => [r.textContent, r.getAttribute('aria-checked')])).toEqual([['Movies', 'true'], ['4K Movies', 'false']]);
+    expect(radios.map(r => r.getAttribute('aria-checked'))).toEqual(['true', 'false']);
     fireEvent.click(radios[1]!);
     await waitFor(() => expect(screen.getByTestId('backdrop-value').textContent).toBe('4K Movies'));
     const put = fetchMock.mock.calls.find(c => c[1]?.method === 'PUT' && String(c[0]).includes('/api/home/kiosk'))!;
     expect(JSON.parse(String(put[1]!.body))).toEqual({ id: '9' });
   });
 
-  it('phone: header hamburger + title + avatar; drawer has the same structure; no kiosk picker', async () => {
-    wide = false; stubMatchMedia();
+  it('phone: /settings is a sheet with a circular X and the section list; rows push in with a back chevron', async () => {
+    wide = false; stubMatchMedia(); plexOwner = false;
     vi.stubGlobal('fetch', api());
-    renderAt('/settings/home-screen');
+    renderAt('/settings');
+    const sheet = screen.getByTestId('settings-sheet');
+    expect(sheet.getAttribute('role')).toBe('dialog');
+    expect(sheet.style.background).toBe('var(--color-kiosk-black)');   // app navy token, no new hex
+    expect(sheet.style.borderRadius).toBe('20px 20px 0 0');
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Settings');
+    expect(screen.queryByRole('button', { name: 'Account' })).toBeNull();
+    const close = screen.getByRole('button', { name: 'Close' });
+    expect(close.style.width).toBe('44px');
+    expect((close.firstChild as HTMLElement).style.width).toBe('36px');
+    const list = screen.getByTestId('settings-list');
+    expect([...list.querySelectorAll('a')].map(a => a.textContent)).toEqual(['Home screen']);
+    const row = screen.getByRole('link', { name: 'Home screen' });
+    expect(row.style.height).toBe('56px');
+    fireEvent.click(row);
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/settings/home-screen'));
     await screen.findByTestId('libraries');
-    expect(screen.queryByTestId('app-sidebar')).toBeNull();
-    expect(screen.queryByTestId('kiosk-library')).toBeNull();
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Home screen');
-    expect(screen.queryByTestId('nav-drawer')).toBeNull();
-    const menu = screen.getByRole('button', { name: 'Menu' });
-    expect(menu.style.width).toBe('44px');
-    await act(async () => { fireEvent.click(menu); await new Promise(r => requestAnimationFrame(() => r(null))); });
-    const drawer = screen.getByTestId('nav-drawer');
-    expect(drawer.getAttribute('role')).toBe('dialog');
-    expect(drawer.getAttribute('aria-modal')).toBe('true');
-    expect(drawer.style.width).toBe('280px');
-    expect(parseInt(screen.getByRole('link', { name: 'Home' }).style.height, 10)).toBe(48);
-    expect(parseInt(screen.getByRole('link', { name: 'Home screen' }).style.height, 10)).toBe(44);
-    expect(document.documentElement.style.overflow).toBe('hidden');   // body scroll locked
-    expect(drawer.contains(document.activeElement)).toBe(true);        // focus moved in
-    fireEvent.keyDown(document, { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByTestId('nav-drawer')).toBeNull());
-  });
-
-  it('drawer closes on scrim tap and on selecting an item', async () => {
-    wide = false; stubMatchMedia(); vi.stubGlobal('fetch', api());
-    renderAt('/settings/home-screen');
-    await screen.findByTestId('libraries');
-    fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
-    fireEvent.click(screen.getByTestId('nav-scrim'));
-    await waitFor(() => expect(screen.queryByTestId('nav-drawer')).toBeNull());
-    fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
-    fireEvent.click(screen.getByRole('link', { name: 'Home' }));
+    const libsHead = screen.getByRole('heading', { level: 2, name: 'Libraries' });
+    expect(libsHead.style.fontSize).toBe('20px');
+    expect(libsHead.style.fontWeight).toBe('700');
+    expect(screen.queryByTestId('kiosk-library')).toBeNull();          // no Kiosk group on phone
+    expect(screen.getAllByTestId('library-row')[0]!.style.height).toBe('56px');
+    expect(screen.getAllByRole('switch')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/settings'));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/'));
   });
 
-  it('non-admins get no Settings entry and no kiosk picker', async () => {
+  it('phone: owners also get a Plex row', async () => {
+    wide = false; stubMatchMedia(); vi.stubGlobal('fetch', api());
+    renderAt('/settings');
+    expect(await screen.findByRole('link', { name: 'Plex' })).toBeTruthy();
+  });
+
+  it('non-admins get no kiosk picker on web', async () => {
     wide = true; stubMatchMedia(); auth.user.is_admin = false;
     const fetchMock = api(); vi.stubGlobal('fetch', fetchMock);
     renderAt('/settings/home-screen');
-    await screen.findByTestId('app-sidebar');
-    expect(screen.getByRole('link', { name: 'Home' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
+    await screen.findByTestId('settings-nav');
     expect(screen.queryByTestId('kiosk-library')).toBeNull();
     expect(fetchMock.mock.calls.some(c => String(c[0]).includes('/api/home/kiosk'))).toBe(false);
   });
@@ -147,7 +145,7 @@ describe('Settings', () => {
     renderAt('/settings/plex');
     const item = await screen.findByRole('link', { name: 'Plex' });
     expect(item.getAttribute('aria-current')).toBe('page');
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Plex');
+    expect(screen.getByRole('heading', { level: 2, name: 'Plex' })).toBeTruthy();
     expect((await screen.findByTestId('plex-server-name')).textContent).toBe('Not connected');
     const btn = await screen.findByRole('button', { name: 'Connect Plex' });
     expect(parseInt(btn.style.minHeight, 10)).toBeGreaterThanOrEqual(44);
