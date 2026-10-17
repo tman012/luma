@@ -159,5 +159,7 @@ def test_sources_panels_use_the_kiosk_theme():
         assert "border: '1px solid rgba(255,255,255,0.08)'" in src
         assert "expanded ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)'" in src
         assert "background: '#3b82f6'" in src
-        for old in ("background: '#000'", "background: '#222'", "'#111112'", "'#1a1a1c'"):
+        assert ".rejected ? '#2a2520' : 'rgba(255,255,255,0.04)'" in src
+        assert ']:hover { background: rgba(255,255,255,0.08) !important' in src
+        for old in ("background: '#000'", "background: '#222'", "'#111112'", "'#1a1a1c'", "'#333'", '#444 !important'):
             assert old not in src, (rel, old)

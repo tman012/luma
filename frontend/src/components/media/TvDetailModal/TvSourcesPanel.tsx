@@ -335,8 +335,8 @@ function ExpandedTvSourcesView({
         <style>{`
           @keyframes tvSourcesSpin { to { transform: rotate(360deg); } }
           @media (hover: hover) {
-            [data-source-tile]:hover { background: #444 !important; border-color: rgba(255,255,255,0.25) !important; }
-            [data-source-row]:hover { background: #444 !important; border-color: rgba(255,255,255,0.25) !important; }
+            [data-source-tile]:hover { background: rgba(255,255,255,0.08) !important; border-color: rgba(255,255,255,0.25) !important; }
+            [data-source-row]:hover { background: rgba(255,255,255,0.08) !important; border-color: rgba(255,255,255,0.25) !important; }
           }
         `}</style>
       </SourcesScreen>
@@ -366,7 +366,7 @@ function ExpandedTvSourcesView({
                         style={{
                           display: 'flex', flexDirection: 'column', gap: '10px',
                           padding: '18px 22px',
-                          background: recommended.rejected ? '#2a2520' : '#333',
+                          background: recommended.rejected ? '#2a2520' : 'rgba(255,255,255,0.04)',
                           border: '2px solid rgba(74, 222, 128, 0.45)',
                           borderLeft: '3px solid #4ade80',
                           borderRadius: '16px',
@@ -442,7 +442,7 @@ function ExpandedTvSourcesView({
                       style={{
                         display: 'flex', flexDirection: 'column', gap: '10px',
                         padding: '18px 22px',
-                        background: release.rejected ? '#2a2520' : '#333',
+                        background: release.rejected ? '#2a2520' : 'rgba(255,255,255,0.04)',
                         border: `2px solid ${isRec ? 'rgba(74, 222, 128, 0.45)' : (release.rejected ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255, 255, 255, 0.15)')}`,
                         borderLeft: `3px solid ${isRec ? '#4ade80' : (release.rejected ? 'rgba(245, 158, 11, 0.5)' : 'rgba(255,255,255,0.15)')}`,
                         borderRadius: '16px',

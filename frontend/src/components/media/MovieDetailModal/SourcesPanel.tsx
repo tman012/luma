@@ -248,7 +248,7 @@ function FocusableReleaseRow({ release, onClick, index, zoneId, isWeb, recommend
       style={{
         display: 'flex', flexDirection: 'column', gap: '10px',
         padding: isWeb ? '22px 28px' : '18px 22px',
-        background: release.rejected ? '#2a2520' : '#333',
+        background: release.rejected ? '#2a2520' : 'rgba(255,255,255,0.04)',
         border: `2px solid ${recommended ? 'rgba(74, 222, 128, 0.45)' : (release.rejected ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255, 255, 255, 0.15)')}`,
         borderLeft: `3px solid ${recommended ? '#4ade80' : (release.rejected ? 'rgba(245, 158, 11, 0.5)' : 'rgba(255,255,255,0.15)')}`,
         borderRadius: '16px',
@@ -557,7 +557,7 @@ function ExpandedSourcesView({
     padding: '16px 22px',
     borderRadius: '16px',
     border: '2px solid rgba(255, 255, 255, 0.15)',
-    background: '#333',
+    background: 'rgba(255,255,255,0.04)',
     color: '#fff', cursor: 'pointer',
     display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center',
     gap: '12px', transition: 'background 0.2s ease, border-color 0.2s ease',
@@ -624,8 +624,8 @@ function ExpandedSourcesView({
           <style>{`
             @keyframes spin { to { transform: rotate(360deg); } }
             @media (hover: hover) {
-              [data-source-tile]:hover { background: #444 !important; border-color: rgba(255,255,255,0.25) !important; }
-              [data-source-row]:hover { background: #444 !important; border-color: rgba(255,255,255,0.25) !important; }
+              [data-source-tile]:hover { background: rgba(255,255,255,0.08) !important; border-color: rgba(255,255,255,0.25) !important; }
+              [data-source-row]:hover { background: rgba(255,255,255,0.08) !important; border-color: rgba(255,255,255,0.25) !important; }
             }
           `}</style>
         </SourcesScreen>
