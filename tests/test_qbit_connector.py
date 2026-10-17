@@ -201,7 +201,7 @@ def test_test_wrong_password_is_specific_and_secret_free(minimal, qbit):
 @pytest.mark.parametrize('setup,msg', [
     (lambda q: setattr(q, 'login_code', 403), 'qBittorrent blocked this address after failed logins'),
     (lambda q: setattr(q, 'login_code', 404), 'Not a qBittorrent Web UI'),
-    (lambda q: setattr(q, 'login_code', 502), 'qBittorrent answered HTTP 502'),
+    (lambda q: setattr(q, 'login_code', 502), 'Unexpected response'),
     (lambda q: setattr(q, 'exc', qbit_connector.requests.exceptions.ConnectTimeout()), 'Timed out'),
     (lambda q: setattr(q, 'exc', qbit_connector.requests.exceptions.ConnectionError()), "Can't reach qBittorrent"),
     (lambda q: setattr(q, 'exc', qbit_connector.requests.exceptions.SSLError()), 'Certificate error'),

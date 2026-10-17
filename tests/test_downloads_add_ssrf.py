@@ -65,7 +65,7 @@ class FakeQbit:
     def __init__(self):
         self.torrents, self.added, self.logins = [], [], 0
 
-    def post(self, url, data=None, files=None, timeout=None):
+    def post(self, url, data=None, files=None, timeout=None, **k):
         if url.endswith('/auth/login'):
             self.logins += 1
             return _QResp()

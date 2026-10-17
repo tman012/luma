@@ -47,6 +47,7 @@ TIMED_OUT = 'Timed out'
 UNREACHABLE = "Can't reach qBittorrent"
 CERT = 'Certificate error'
 BAD_LOGIN = 'Wrong username or password'
+SIGN_IN_FAILED = 'qBittorrent sign-in failed'
 BANNED = 'qBittorrent blocked this address after failed logins'
 NOT_QBIT = 'Not a qBittorrent Web UI'
 UNEXPECTED = 'Unexpected response'
@@ -189,12 +190,32 @@ def _text_of(r) -> str:
 text_of = _text_of
 
 
+def new_session(factory: Optional[Callable] = None):
+    """A session for qBittorrent: never via an environment proxy and never
+    following a redirect, whatever the caller passes. Every request on it
+    carries the password (login) or the SID cookie, so a 3xx must never send
+    them on to another URL. Callers pass allow_redirects=False as well."""
+    session = (factory or requests.Session)()
+    try:
+        session.trust_env = False
+    except AttributeError:
+        pass
+    orig = getattr(session, 'request', None)
+    if callable(orig):
+        def request(method, url, *args, **kwargs):
+            kwargs['allow_redirects'] = False
+            return orig(method, url, *args, **kwargs)
+        try:
+            session.request = request
+        except AttributeError:
+            pass
+    return session
+
+
 def check(url: str, username: str, password: str) -> Tuple[Optional[str], str]:
     """(None, version) when qBittorrent accepts the login, else (error, '').
     The error is short and never carries the URL, username or password."""
-    session = requests.Session()
-    # Never via an environment proxy: the password goes to this URL only.
-    session.trust_env = False
+    session = new_session()          # no environment proxy, never follows a redirect
     try:
         try:
             r = session.post(f'{url}/api/v2/auth/login', data={'username': username, 'password': password},
@@ -206,6 +227,8 @@ def check(url: str, username: str, password: str) -> Tuple[Optional[str], str]:
         except requests.exceptions.RequestException:
             return UNREACHABLE, ''
         body = _text_of(r)
+        if 300 <= r.status_code < 400:
+            return SIGN_IN_FAILED, ''           # a redirect is never a sign-in
         if r.status_code == 403:
             return BANNED, ''
         if r.status_code == 401:
@@ -213,7 +236,7 @@ def check(url: str, username: str, password: str) -> Tuple[Optional[str], str]:
         if r.status_code == 404:
             return NOT_QBIT, ''
         if r.status_code != 200:
-            return f'qBittorrent answered HTTP {int(r.status_code)}', ''
+            return UNEXPECTED, ''               # never a raw HTTP status in the UI
         if body == 'Fails.':
             return BAD_LOGIN, ''
         if body != 'Ok.':
