@@ -20382,7 +20382,11 @@ _start_flow.init(
 app.register_blueprint(_start_flow.bp)
 
 from app import tracker_routes as _tracker_routes
-_tracker_routes.init(get_current_user=_get_current_user, get_owner=lambda: _access.owner(user_auth))
+from app import tracker_search as _tracker_search
+_tracker_routes.init(get_current_user=_get_current_user, get_owner=lambda: _access.owner(user_auth),
+                     tester=lambda cfg: _tracker_search.get_search().test(cfg),
+                     on_change=_tracker_search.on_tracker_changed,
+                     on_delete=_tracker_search.on_tracker_deleted)
 app.register_blueprint(_tracker_routes.bp)
 
 

@@ -44,11 +44,15 @@ _test_lock = threading.Lock()
 
 
 def init(*, get_current_user: Callable[[], Optional[dict]], get_owner: Callable[[], Optional[dict]],
-         tester: Optional[Callable[[Dict[str, Any]], None]] = None) -> None:
+         tester: Optional[Callable[[Dict[str, Any]], None]] = None,
+         on_change: Optional[Callable[[Dict[str, Any]], None]] = None,
+         on_delete: Optional[Callable[[Dict[str, Any]], None]] = None) -> None:
     """*tester* runs one connection test (raises TrackerError); defaults to
-    tracker_clients.test. The search manager swaps in its guarded version."""
+    tracker_clients.test. *on_change*/*on_delete* get the stored record after
+    an edit or a delete (the search manager resets backoffs there)."""
     _cfg.update(get_current_user=get_current_user, get_owner=get_owner,
-                tester=tester or (lambda cfg: tracker_clients.test(cfg)))
+                tester=tester or (lambda cfg: tracker_clients.test(cfg)),
+                on_change=on_change or (lambda rec: None), on_delete=on_delete or (lambda rec: None))
 
 
 def _no_store(resp, status=200):
@@ -165,6 +169,7 @@ def edit_tracker(tracker_id: int):
     rec, errors = get_store().update(tracker_id, data)
     if errors:
         return _invalid(errors)
+    _cfg['on_change'](rec)
     return _no_store(jsonify({'tracker': get_store().public(rec)}))
 
 
@@ -181,8 +186,10 @@ def set_tracker_enabled(tracker_id: int):
 
 @bp.route('/api/trackers/<int:tracker_id>', methods=['DELETE'])
 def delete_tracker(tracker_id: int):
-    if not get_store().delete(tracker_id):
+    rec = get_store().get(tracker_id)
+    if rec is None or not get_store().delete(tracker_id):
         return _not_found()
+    _cfg['on_delete'](rec)
     return _no_store(jsonify({'ok': True}))
 
 
