@@ -84,12 +84,12 @@ def test_no_base(tmp_path):
     assert r['manifest']['icons'][0]['src'].startswith('/static/')
 
 
-def test_readers_use_app_config(test_app):
+def test_readers_use_app_config(test_app, monkeypatch):
     """Manifest, auth guard and login read app.config['URL_BASE'] at request time."""
     import app.main
     import app.user_auth as user_auth
     user_auth.create_user('owner', '1234', is_admin=True)
-    test_app.config['URL_BASE'] = '/mybase'
+    monkeypatch.setitem(test_app.config, 'URL_BASE', '/mybase')  # restored after the test
     c = test_app.test_client()
     man = c.get('/manifest.json').get_json()
     assert man['start_url'] == '/mybase/'
