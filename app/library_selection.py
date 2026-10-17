@@ -16,7 +16,10 @@ When a Library path is removed, every section's selection drops it
 (file_management.on_path_removed); the section keeps whatever it learned
 about that folder (TV keeps its tv.db rows) so selecting it again restores it.
 
-register() wires the two routes for a section; it holds no state itself.
+register() wires the two routes for a section. claim() records which ids a
+section holds; Movies filing (file_management.pick_destination, the implicit
+fallback) and the Movies rule and fallback choices leave those out, so Movies
+behave as if TV's folders weren't Library paths at all.
 """
 
 from __future__ import annotations
@@ -29,6 +32,31 @@ from flask import Blueprint, jsonify, request
 logger = logging.getLogger(__name__)
 
 MAX_SELECTED = 20
+_claims: Dict[str, Callable[[], List[str]]] = {}
+
+
+def claim(section: str, get_ids: Callable[[], List[str]]) -> None:
+    """*section* holds the Library path ids *get_ids()* returns (never writes)."""
+    _claims[section] = get_ids
+
+
+def claimed() -> Dict[str, List[str]]:
+    """{Library path id: [sections that selected it]}. A section whose store
+    can't be read claims nothing (its store reads as empty anyway)."""
+    out: Dict[str, List[str]] = {}
+    for section, fn in sorted(_claims.items()):
+        try:
+            ids = list(fn())
+        except Exception as e:
+            logger.warning('Library selection for %s unreadable: %s', section, type(e).__name__)
+            continue
+        for i in ids:
+            out.setdefault(i, []).append(section)
+    return out
+
+
+def claimed_ids() -> set:
+    return set(claimed())
 INVALID = 'Invalid'
 NOT_A_LIBRARY = 'Not a library path'
 TOO_MANY = 'Too many'

@@ -340,9 +340,10 @@ def _path_removed(pid: str) -> None:
             logger.warning('A section did not drop a removed library path: %s', type(e).__name__)
 
 
-def check_library_path(raw: Any, others: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[str]]:
+def check_library_path(raw: Any, others: List[Dict[str, Any]], probe: bool = True) -> Tuple[Optional[str], Optional[str]]:
     """(path to store, None) or (None, error) for a library folder. *others*
-    are this store's other paths (TV selects from these, it has none of its own)."""
+    are this store's other paths (TV selects from these, it has none of its own).
+    probe=False never writes: os.access stands in for the create/delete probe."""
     p, err = clean_abs_path(raw)
     if err:
         return None, err
@@ -359,7 +360,7 @@ def check_library_path(raw: Any, others: List[Dict[str, Any]]) -> Tuple[Optional
             return None, DUPLICATE
         if _under(real, other) or _under(other, real):
             return None, OVERLAPS
-    if not writable(real):
+    if not (writable(real) if probe else os.access(real, os.W_OK | os.X_OK)):
         return None, NOT_WRITABLE
     return p, None
 
@@ -453,8 +454,31 @@ def check_rules(body: Dict[str, Any], data: Dict[str, Any]) -> Tuple[Optional[Di
     return {'rules': out, 'fallback_path_id': fb}, {}
 
 
-def effective_fallback(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """The fallback path; with exactly one path and none chosen, that one."""
+def section_ids() -> set:
+    """Library path ids another section (TV) selected: never Movie destinations."""
+    from app import library_selection
+    return library_selection.claimed_ids()
+
+
+def movies_only(data: Dict[str, Any], taken: Optional[set] = None) -> Dict[str, Any]:
+    """*data* as Movies see it: without the paths a section selected, rules
+    pointing at them, or a fallback that is one of them. Movies then file
+    exactly as they did before TV selected Library paths."""
+    taken = section_ids() if taken is None else taken
+    if not taken:
+        return data
+    out = dict(data)
+    out['paths'] = [p for p in data['paths'] if p['id'] not in taken]
+    out['rules'] = [r for r in data['rules'] if r.get('path_id') not in taken]
+    if data.get('fallback_path_id') in taken:
+        out['fallback_path_id'] = None
+    return out
+
+
+def effective_fallback(data: Dict[str, Any], taken: Optional[set] = None) -> Optional[Dict[str, Any]]:
+    """The fallback path; with exactly one Movies path and none chosen, that
+    one. Paths a section (TV) selected are never it."""
+    data = movies_only(data, taken)
     by_id = {p['id']: p for p in data['paths']}
     if data.get('fallback_path_id') in by_id:
         return by_id[data['fallback_path_id']]
@@ -485,18 +509,21 @@ def rule_matches(rule: Dict[str, Any], info: Dict[str, Any], today: date) -> boo
 
 
 def pick_destination(data: Dict[str, Any], info: Dict[str, Any],
-                     today: Optional[date] = None) -> Optional[Dict[str, Any]]:
-    """First enabled rule that matches, else the fallback; None when neither."""
+                     today: Optional[date] = None, taken: Optional[set] = None) -> Optional[Dict[str, Any]]:
+    """First enabled rule that matches, else the fallback; None when neither.
+    Paths a section (TV) selected are left out (movies_only)."""
     today = today or date.today()
+    taken = section_ids() if taken is None else taken
+    data = movies_only(data, taken)
     by_id = {p['id']: p for p in data['paths']}
     for r in data['rules']:
         if r.get('enabled') and r.get('path_id') in by_id and rule_matches(r, info, today):
             return by_id[r['path_id']]
-    return effective_fallback(data)
+    return effective_fallback(data, taken)
 
 
 def needs_release_date(data: Dict[str, Any]) -> bool:
-    return any(r.get('enabled') and r.get('released_within') for r in data['rules'])
+    return any(r.get('enabled') and r.get('released_within') for r in movies_only(data)['rules'])
 
 
 # ------------------------------------------------------------------ release names
@@ -655,9 +682,13 @@ def _guard():
 
 
 def view(data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """'used_by' lists the sections (TV) that selected a path: the Movies rule
+    and fallback choices leave those out."""
+    from app import library_selection
     data = data if data is not None else load()
+    used = library_selection.claimed()
     return {
-        'paths': [{**p, 'status': path_status(p)} for p in data['paths']],
+        'paths': [{**p, 'status': path_status(p), 'used_by': used.get(p['id'], [])} for p in data['paths']],
         'rules': copy.deepcopy(data['rules']),
         'fallback_path_id': data['fallback_path_id'],
         'path_map': copy.deepcopy(data['path_map']),

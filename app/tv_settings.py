@@ -325,16 +325,25 @@ def migrate() -> Dict[str, str]:
         if not data['paths']:
             return {}
         lib = fm.load()
+        movies_before = list(fm.movies_only(lib)['paths'])
         added, mapping = 0, {}
         for rec in data['paths']:
             hit = next((p for p in lib['paths'] if _same_folder(p['path'], rec['path'])), None)
             if hit is None:
+                # Library paths' checks, without the write probe; never blocks.
+                _p, err = fm.check_library_path(rec['path'], lib['paths'], probe=False)
+                logger.info('TV path %r added to Library paths (%s)', rec['name'], err or 'checks passed')
                 hit = {'id': fm._new_id('p', {p['id'] for p in lib['paths']}),
                        'name': _free_name(rec['name'], [p['name'] for p in lib['paths']]), 'path': rec['path']}
                 lib['paths'].append(hit)
                 added += 1
             mapping[rec['id']] = hit['id']
-        if added:
+        pinned = False
+        if (lib['fallback_path_id'] is None and len(movies_before) == 1
+                and movies_before[0]['id'] not in mapping.values()):
+            lib['fallback_path_id'] = movies_before[0]['id']   # the implicit fallback stays the fallback
+            pinned = True
+        if added or pinned:
             fm.save(lib)                  # first: a rerun after a crash then matches these
         for old, new in mapping.items():
             if old != new:
@@ -383,6 +392,7 @@ def _guard():
 
 
 _fm.on_path_removed(lambda pid: _drop_library(pid))
+library_selection.claim('tv', lambda: selected_ids(migrate_first=False))   # never Movie destinations
 
 
 @bp.route('/api/settings/tv', methods=['GET'])
