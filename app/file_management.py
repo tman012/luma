@@ -398,10 +398,14 @@ _SRC = (
     ('web', re.compile(r'\bweb\b'), True),
 )
 _TAIL_START = re.compile(r'\b((19|20)\d{2}|2160p|1080[pi]|720p|480[pi]|576[pi]|s\d{1,2}e\d{1,3})\b')
+# Separators in release and file names. A module constant, not inline: a
+# backslash inside an f-string expression is a SyntaxError before 3.12, and
+# the image runs 3.11.
+_NAME_SEPARATORS = re.compile(r'[._()\[\]]+')
 
 
 def _norm_name(name: str) -> str:
-    return f" {re.sub(r'[._()\[\]]+', ' ', (name or '').lower())} "
+    return ' ' + _NAME_SEPARATORS.sub(' ', (name or '').lower()) + ' '
 
 
 def classify(*names: str) -> Dict[str, Optional[str]]:
