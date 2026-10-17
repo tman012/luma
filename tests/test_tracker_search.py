@@ -272,13 +272,15 @@ def test_rate_limit_honors_retry_after(env):
     assert len(env['mock'].calls) == 1
 
 
-def test_answers_are_cached_but_empty_answers_are_not(env):
+def test_answers_are_cached_and_empty_answers_only_briefly(env):
     rec = torznab(env['store'])
     cfg = env['store'].config(rec)
     eng = env['engine']
     env['mock'].set('t.example', R(body=EMPTY_RSS))
     assert eng.search_one(cfg, 'x', [2000], 10, True) == []
-    assert eng.search_one(cfg, 'x', [2000], 10, True) == []
+    assert eng.search_one(cfg, 'x', [2000], 10, True) == []          # 2-minute empty-answer cache
+    assert len(env['mock'].calls) == 1
+    assert eng.search_one(cfg, 'x', [2000], 10, True, refresh=True) == []   # explicit retry asks again
     assert len(env['mock'].calls) == 2
     env['mock'].set('t.example', R(body=rss(('X 2020 1080p WEB-DL', 1, 1))))
     eng.search_one(cfg, 'y', [2000], 10, True)

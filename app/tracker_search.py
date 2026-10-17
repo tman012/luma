@@ -36,6 +36,8 @@ from app.tracker_store import STATUS_ERROR, STATUS_OK, TrackerStore, get_store
 logger = logging.getLogger(__name__)
 
 TTL_INTERACTIVE = 900
+# Negative cache (PM): a signed-in tracker that answered with zero raw rows.
+NEG_TTL = 120
 TTL_BACKGROUND = 3 * 3600
 CACHE_MAX = 500
 RELEASE_TTL = 14 * 86400
@@ -262,15 +264,37 @@ class TrackerSearch:
                        'Tracker %s (id %s) %s: no requests until %s', cfg['name'], cfg['id'], err.kind,
                        time.strftime('%H:%M:%S', time.localtime(until)))
 
+    def _neg_store(self) -> Dict[tuple, float]:
+        neg = getattr(self, '_neg', None)
+        if neg is None:
+            neg = self._neg = {}
+        return neg
+
     def search_one(self, cfg: Dict[str, Any], query: str, categories: List[int], limit: int,
-                   interactive: bool, imdb_id: str = '') -> List[Dict[str, Any]]:
+                   interactive: bool, imdb_id: str = '', refresh: bool = False) -> List[Dict[str, Any]]:
         """Guarded, cached search of one tracker; raw client results.
-        Raises TrackerSkipped (guard) or TrackerError (the tracker failed)."""
+        Raises TrackerSkipped (guard) or TrackerError (the tracker failed).
+
+        Negative cache: a signed-in answer with zero raw rows is remembered
+        for NEG_TTL per tracker and exact query. Never after an error (auth,
+        parse, timeout, 429) or when rows were parsed and then dropped;
+        refresh=True (an explicit user retry) bypasses and clears it."""
         gk = guard_key(cfg)
         ckey = (cfg['id'], (query or '').strip().lower(), tuple(categories), imdb_id or '', int(limit))
+        nkey = (cfg['id'], query or '', tuple(categories), imdb_id or '', int(limit))
         ttl = TTL_INTERACTIVE if interactive else TTL_BACKGROUND
         now = time.time()
         with self._cache_lock:
+            neg = self._neg_store()
+            if refresh:
+                neg.pop(nkey, None)
+            else:
+                ts = neg.get(nkey)
+                if ts is not None and now - ts < NEG_TTL:
+                    logger.info('Tracker %s (id %s) search: cached empty answer', cfg['name'], cfg['id'])
+                    return []
+                if ts is not None:
+                    neg.pop(nkey, None)
             hit = self._cache.get(ckey)
         if hit and now - hit[0] < ttl:
             logger.info('Tracker %s (id %s) search: cached answer, %d results', cfg['name'], cfg['id'], len(hit[1]))
@@ -301,6 +325,8 @@ class TrackerSearch:
                                cfg['name'], cfg['id'], e.kind, e.status if e.status is not None else '-',
                                st.get('bytes', '-'), st.get('rows', '-'))
                 self._record_failure(cfg, gk, e, scope)
+                with self._cache_lock:
+                    self._neg_store().pop(nkey, None)
                 raise
             except Exception as e:       # parser bug: treat as a bad answer, never leak details
                 logger.warning('Tracker %s (id %s) search failed: parse (%s)', cfg['name'], cfg['id'],
@@ -314,7 +340,15 @@ class TrackerSearch:
         logger.info('Tracker %s (id %s) search: HTTP %s, %s bytes, %s rows parsed, %d results',
                     cfg['name'], cfg['id'], st.get('status', '-'), st.get('bytes', '-'), st.get('rows', '-'),
                     len(items))
-        if items:          # an empty answer is never cached
+        if not items and not st.get('rows'):
+            # Signed in (no auth error) and zero raw rows: remember it briefly.
+            with self._cache_lock:
+                neg = self._neg_store()
+                neg[nkey] = time.time()
+                if len(neg) > CACHE_MAX:
+                    for k, _ in sorted(neg.items(), key=lambda kv: kv[1])[:100]:
+                        neg.pop(k, None)
+        if items:          # an empty answer is never cached as a positive one
             with self._cache_lock:
                 self._cache[ckey] = (time.time(), items)
                 if len(self._cache) > CACHE_MAX:
@@ -353,7 +387,8 @@ class TrackerSearch:
         }
 
     def search(self, query: str, categories: List[int], limit: int, interactive: bool,
-               tracker_ids: Optional[List[int]] = None, imdb_id: str = '') -> Tuple[List[Dict[str, Any]], List[int], List[int]]:
+               tracker_ids: Optional[List[int]] = None, imdb_id: str = '',
+               refresh: bool = False) -> Tuple[List[Dict[str, Any]], List[int], List[int]]:
         """Fan out to enabled trackers (or *tracker_ids*). Returns
         (items in raw Prowlarr shape, ids searched, ids skipped)."""
         cfgs = self.store.enabled_configs()
@@ -371,7 +406,7 @@ class TrackerSearch:
         def one(job):
             c, cats = job
             try:
-                return c, self.search_one(c, query, cats, limit, interactive, imdb_id)
+                return c, self.search_one(c, query, cats, limit, interactive, imdb_id, refresh=refresh)
             except TrackerSkipped:
                 skipped.append(c['id'])
             except TrackerError:
@@ -453,19 +488,20 @@ class LumaTrackersClient:
                     raw.append(it)
         return self._parse_items(raw)
 
-    def search_all(self, query: str, media_type: str, year: Optional[int] = None) -> List[Dict]:
+    def search_all(self, query: str, media_type: str, year: Optional[int] = None,
+                   refresh: bool = False) -> List[Dict]:
         from app.indexer_api import (MOVIE_CATEGORIES_EXPANDED, TV_SPORTS_CATEGORIES,
                                      _build_search_query, _parse_title)
         # TV release names carry SxxEyy, not the first-air year: never add it for TV.
         q = (query or '').strip() if media_type == 'tv' else _build_search_query(query, year)
         cats = list(MOVIE_CATEGORIES_EXPANDED) + list(TV_SPORTS_CATEGORIES)
-        items, _, _ = self.engine.search(q, cats, 500, interactive=True)
+        items, _, _ = self.engine.search(q, cats, 500, interactive=True, refresh=refresh)
         bare = (query or '').strip()
         if not items and bare and q != bare:
             # Release names often leave the year out (TV above all): one retry without it.
             logger.info('Tracker search_all media_type=%s: no results with the year, retrying without it',
                         media_type)
-            items, _, _ = self.engine.search(bare, cats, 500, interactive=True)
+            items, _, _ = self.engine.search(bare, cats, 500, interactive=True, refresh=refresh)
         out = []
         for it in items:
             parsed = _parse_title(it['title'])

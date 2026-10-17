@@ -22,7 +22,7 @@ import { apiFetch } from '../../../apiClient';
  * server-side budget, which reads as "broken" rather than "slow".
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { processRawReleases, extractResolution, type ProcessedRelease } from './sourcesUtils';
 import { classifySourceType } from '@/components/media/sourcesShared';
 import { fetchAllResults, mergeReleases, type AllResultsRelease } from '@/services/allSourcesApi';
@@ -122,6 +122,7 @@ async function loadSources(
   title: string,
   year: number | null,
   indexerQuery?: string | null,
+  refresh = false,
 ): Promise<SourcesResult> {
   const arrClock = deadline(ARR_TIMEOUT_MS);
   const indexerClock = deadline(INDEXER_TIMEOUT_MS);
@@ -157,7 +158,7 @@ async function loadSources(
   // there's no reason to make Radarr wait behind it.
   const [arrOutcome, indexerOutcome] = await Promise.allSettled([
     fetchArr(),
-    fetchAllResults(indexerTitle, 'movie', indexerYear, tmdbId, indexerClock.signal)
+    fetchAllResults(indexerTitle, 'movie', indexerYear, tmdbId, indexerClock.signal, refresh)
       .finally(() => indexerClock.clear()),
   ]);
 
@@ -213,12 +214,13 @@ function requestSources(
   title: string,
   year: number | null,
   indexerQuery?: string | null,
+  refresh = false,
 ): Promise<SourcesResult> {
   const key = searchKey(tmdbId, title, year, indexerQuery);
   const running = inFlight.get(key);
   if (running) return running;
 
-  const request = loadSources(tmdbId, title, year, indexerQuery).finally(() => {
+  const request = loadSources(tmdbId, title, year, indexerQuery, refresh).finally(() => {
     inFlight.delete(key);
   });
   inFlight.set(key, request);
@@ -246,6 +248,8 @@ export function useMovieSourcesData({
   // has no rows, and is not "loading" — long enough to flash "No sources
   // found" every time the shelf opens.
   const loading = key !== null && settledKey !== key;
+  // Override search / clear override is an explicit retry: skip server caches.
+  const lastQuery = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     if (key === null) return;
@@ -264,7 +268,9 @@ export function useMovieSourcesData({
       if (!cancelled) setSlow(true);
     }, SLOW_AFTER_MS);
 
-    requestSources(tmdbId, title, year, indexerQuery)
+    const refresh = lastQuery.current !== undefined && lastQuery.current !== (indexerQuery ?? null);
+    lastQuery.current = indexerQuery ?? null;
+    requestSources(tmdbId, title, year, indexerQuery, refresh)
       .then((result) => {
         if (cancelled) return;
         setReleases(result.releases);

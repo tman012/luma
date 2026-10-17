@@ -142,3 +142,27 @@ describe('no qBittorrent: Download is disabled up front', () => {
     expect(src).toContain('fetchIndexerConfigured()');
   });
 });
+
+describe('explicit retry skips the server caches', () => {
+  it('fetchAllResults adds refresh=1 only when asked', async () => {
+    const { fetchAllResults } = await import('@/services/allSourcesApi');
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => { urls.push(String(u)); return new Response('{"releases":[]}', { status: 200 }); }));
+    await fetchAllResults('Dune', 'movie', 2021);
+    await fetchAllResults('Dune', 'movie', 2021, undefined, undefined, true);
+    expect(urls[0]).not.toContain('refresh=');
+    expect(urls[1]).toContain('refresh=1');
+    vi.unstubAllGlobals();
+  });
+  it.each(['components/media/MovieDetailModal/useMovieSourcesData.ts', 'components/media/TvDetailModal/useTvSourcesData.ts'])(
+    '%s: a changed override (Override search / clear) is a refresh', (p) => {
+      const src = read(p);
+      expect(src).toContain('lastQuery.current !== undefined && lastQuery.current !== (indexerQuery ?? null)');
+    });
+});
+
+describe('tracker UI uses theme tokens', () => {
+  it('trackersUi.tsx has no hex white left', () => {
+    expect(read('components/trackers/trackersUi.tsx')).not.toMatch(/#fff\b/i);
+  });
+});

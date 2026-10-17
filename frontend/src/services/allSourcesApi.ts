@@ -65,6 +65,8 @@ export async function fetchAllResults(
   year?: number | null,
   tmdbId?: number,
   signal?: AbortSignal,
+  /** An explicit user retry: the server skips its caches (empty answers too). */
+  refresh = false,
 ): Promise<AllResultsRelease[]> {
   if (!title) throw new Error('fetchAllResults: title is required');
   const params = new URLSearchParams();
@@ -72,6 +74,7 @@ export async function fetchAllResults(
   params.set('media_type', mediaType);
   if (year) params.set('year', String(year));
   if (tmdbId) params.set('tmdb_id', String(tmdbId));
+  if (refresh) params.set('refresh', '1');
 
   const resp = await apiFetch(`/api/sources/all-results?${params.toString()}`, { signal });
   if (!resp.ok) {

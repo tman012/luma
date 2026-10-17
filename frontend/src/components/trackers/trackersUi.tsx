@@ -55,7 +55,7 @@ export const trackersCss = `
 .lt-input[aria-invalid="true"]:focus{box-shadow:0 0 0 3px rgba(239,68,68,.25)}
 .lt-input::-webkit-outer-spin-button,.lt-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .lt-search{height:40px;padding-left:40px}
-.lt-spin{width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;animation:lt-spin .8s linear infinite}
+.lt-spin{width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,.25);border-top-color:${T.white};animation:lt-spin .8s linear infinite}
 .lt-fade{animation:lt-fade 160ms ease both}
 .lt-pop{animation:lt-pop 160ms cubic-bezier(.2,.8,.2,1) both}
 .lt-up{animation:lt-up 260ms cubic-bezier(.2,.8,.2,1) both}
@@ -112,7 +112,7 @@ export function Switch({ on, label, onChange, small, disabled }: {
         border: 'none', background: 'none', cursor: disabled ? 'default' : 'pointer', padding: 0, flex: 'none', borderRadius: 10 }}>
       <span data-track style={{ position: 'relative', display: 'block', width: w, height: h, borderRadius: h / 2,
         background: on ? BLUE : 'rgba(255,255,255,0.18)', transition: 'background .2s' }}>
-        <span style={{ position: 'absolute', top: 2, left: 2, width: k, height: k, borderRadius: k / 2, background: '#fff',
+        <span style={{ position: 'absolute', top: 2, left: 2, width: k, height: k, borderRadius: k / 2, background: T.white,
           transition: 'transform .2s', transform: on ? `translateX(${w - h}px)` : 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
       </span>
     </button>
@@ -213,7 +213,7 @@ export function TopToast({ text, onDone }: { text: string; onDone: () => void })
         zIndex: 1000, pointerEvents: 'none', padding: '10px 18px', borderRadius: 999, fontFamily: FONT,
         background: 'rgba(21,16,42,0.62)', border: '1px solid rgba(255,255,255,0.14)',
         backdropFilter: 'blur(24px) saturate(160%)', WebkitBackdropFilter: 'blur(24px) saturate(160%)',
-        boxShadow: '0 12px 40px rgba(0,0,0,0.45)', color: '#fff', fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap' }}>
+        boxShadow: '0 12px 40px rgba(0,0,0,0.45)', color: T.white, fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap' }}>
       {text}
     </div>
   );

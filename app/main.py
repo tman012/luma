@@ -2348,8 +2348,11 @@ def sources_all_results():
         if denied:
             return denied
 
+        # An explicit user retry (Retry, Override search, clear override) skips
+        # every cache, the trackers' empty-answer cache included.
+        refresh = (request.args.get('refresh') or '').lower() in ('1', 'true')
         cache_key = (media_type, title.lower(), year)
-        cached = _all_results_cache.get(cache_key)
+        cached = None if refresh else _all_results_cache.get(cache_key)
         if cached:
             ts, data = cached
             ttl = (_ALL_RESULTS_CACHE_TTL if data.get('releases')
@@ -2358,7 +2361,9 @@ def sources_all_results():
                 return jsonify(_all_results_public(data))
             _all_results_cache.pop(cache_key, None)
 
-        raw = client.search_all(title, media_type, year)
+        from app.tracker_search import LumaTrackersClient as _LTC
+        raw = (client.search_all(title, media_type, year, refresh=refresh) if isinstance(client, _LTC)
+               else client.search_all(title, media_type, year))
 
         releases = []
         for item in raw:

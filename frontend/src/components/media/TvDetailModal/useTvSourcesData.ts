@@ -5,7 +5,7 @@
  * and TvMobileSourcesPanel (compact). Both modes now use this single hook.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   searchSeasonReleases,
   searchEpisodeReleases,
@@ -196,10 +196,14 @@ export function useTvSourcesData({
     seriesId?: number;
     episodeId?: number;
   }>({});
+  // Override search / clear override is an explicit retry: skip server caches.
+  const lastQuery = useRef<string | null | undefined>(undefined);
 
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
+    const refresh = lastQuery.current !== undefined && lastQuery.current !== (indexerQuery ?? null);
+    lastQuery.current = indexerQuery ?? null;
 
     async function fetchReleases() {
       setLoading(true);
@@ -250,7 +254,7 @@ export function useTvSourcesData({
         // answer: only a sweep that failed outright counts toward an error.
         let indexerOk = !!indexerTitle;
         const indexerRaw = indexerTitle
-          ? await fetchAllResults(indexerTitle, 'tv', indexerYear, tmdbId, controller.signal)
+          ? await fetchAllResults(indexerTitle, 'tv', indexerYear, tmdbId, controller.signal, refresh)
               .catch((err: unknown) => {
                 if ((err as { name?: string })?.name === 'AbortError') throw err;
                 indexerOk = false;

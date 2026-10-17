@@ -125,7 +125,8 @@ def test_empty_answer_does_not_skip_the_next_search(engine):
     mock.resps = [empty, R(body=FIXTURE)]
     c = LumaTrackersClient(eng)
     assert c.search_all('Dune Part Two', 'movie', None) == []
-    assert len(c.search_all('Dune Part Two', 'movie', None)) == 2
+    # PM: an empty answer is cached for 2 minutes; an explicit retry asks again.
+    assert len(c.search_all('Dune Part Two', 'movie', None, refresh=True)) == 2
     assert len(mock.calls) == 2
 
 
