@@ -11,8 +11,9 @@ echo "================================================"
 export HOME=/app/home
 mkdir -p $HOME/.android
 
-# LUMA_DISABLE_ADB=1 (e.g. a dev instance): never start ADB or connect to devices.
-if [ "${LUMA_DISABLE_ADB}" = "1" ] || [ "${LUMA_DISABLE_ADB}" = "true" ]; then
+# LUMA_DISABLE_ADB=1 (e.g. a dev instance) or LUMA_MINIMAL=1: never start ADB or connect to devices.
+if [ "${LUMA_DISABLE_ADB}" = "1" ] || [ "${LUMA_DISABLE_ADB}" = "true" ] \
+   || [ "${LUMA_MINIMAL}" = "1" ] || [ "${LUMA_MINIMAL}" = "true" ]; then
     echo "LUMA_DISABLE_ADB is set: skipping ADB server and device connections."
     echo "================================================"
     exec gunicorn -c gunicorn.conf.py app.main:app

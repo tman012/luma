@@ -1,0 +1,42 @@
+# Luma fresh-install test build (LUMA_MINIMAL=1), separate from production.
+#
+#   docker compose -p luma-test -f docker-compose.test.yml up -d --build
+#
+# Its own project, container, image tag and named volumes. No .env file, no
+# host data folder, no media folders and no Plex database are mounted, so
+# it starts empty and can never touch the production container or its data.
+services:
+  luma-test:
+    container_name: luma-test
+    image: luma:minimal-test
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    # Host networking, like production, so sign-in sees real LAN addresses.
+    network_mode: host
+    environment:
+      - TZ=${TZ:-UTC}
+      - FLASK_ENV=production
+      - LUMA_MINIMAL=1
+      - LUMA_DISABLE_ADB=1
+      - LUMA_NO_RESTART=1
+      - PORT=5002
+      - LUMA_PORT=5002
+      - DATABASE_PATH=/app/data/media.db
+      - LUMA_DATA_DIR=/app/data
+      - LUMA_CACHE_DIR=/app/cache
+    volumes:
+      - luma-test-data:/app/data
+      - luma-test-cache:/app/cache
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "/app/scripts/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  luma-test-data:
+  luma-test-cache:

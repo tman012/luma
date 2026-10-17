@@ -26,6 +26,8 @@ import { StartPage } from '@/pages/StartPage';
 import { UnlockPage } from '@/pages/UnlockPage';
 import { ConnectServiceHost } from '@/components/connect/ConnectServiceHost';
 import { apiFetch } from './apiClient';
+import { isMinimal } from './minimal';
+import { MinimalHomePage } from '@/pages/MinimalHomePage';
 
 // Lazy-load non-home routes — keeps initial bundle small
 const ExploreKioskPage = lazy(() => import('@/pages/ExploreKioskPage').then(m => ({ default: m.ExploreKioskPage })));
@@ -214,8 +216,27 @@ function Home() {
   return <LandingPage />;
 }
 
+/** LUMA_MINIMAL=1: Get Started, sign-in and the main screen only. */
+function MinimalApp() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/" element={<MinimalHomePage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/start" element={<StartPage />} />
+          <Route path="/unlock" element={<UnlockPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
+
 export default function App() {
   useVisualViewport();
+
+  if (isMinimal()) return <MinimalApp />;
 
   return (
     <BrowserRouter>

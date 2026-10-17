@@ -89,3 +89,26 @@ docker compose stop luma && rm -rf cache/hero && docker compose start luma
 ```
 
 Backup: `tar czf luma-data.tgz data` (the cache folder can be rebuilt).
+
+## Fresh-install test build (luma-test, port 5002)
+
+`docker-compose.test.yml` runs a second, empty Luma with `LUMA_MINIMAL=1`:
+Get Started (Plex sign-in, server pick, Set password, access), sign-in and the
+main screen. No background threads start, and every other route returns 404.
+
+```bash
+docker compose -p luma-test -f docker-compose.test.yml up -d --build
+```
+
+- Container `luma-test`, image tag `luma:minimal-test` (never `luma:latest`),
+  port 5002 (host networking, like production).
+- Its own named volumes `luma-test_luma-test-data` and
+  `luma-test_luma-test-cache`. No `.env`, host data folder, media folders,
+  ADB keys or Plex database are mounted.
+- Start over from an empty install:
+  `docker compose -p luma-test -f docker-compose.test.yml down -v`.
+- Production (`docker compose up` in the production folder, port 5001) is not
+  affected; always pass `-p luma-test -f docker-compose.test.yml` for the test
+  build.
+
+With `LUMA_MINIMAL` unset, Luma runs exactly as before.

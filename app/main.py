@@ -205,6 +205,8 @@ _SERVICE_API_KEY = os.environ.get("SERVICE_API_KEY") or _INSTALL_SECRETS["servic
 # Register bot API now that constants are available
 _register_bot_api()
 
+from app import minimal as _minimal  # noqa: E402
+
 
 def _note_lan_host():
     """Remember the host name of a request that just got implicit owner access
@@ -213,6 +215,14 @@ def _note_lan_host():
         _lan_hosts.record(request.host, _LAN_HOSTS_DIR)
     except Exception as exc:  # never let bookkeeping break a request
         logger.debug("lan host record failed: %s", exc)
+
+
+@app.before_request
+def minimal_mode_gate():
+    """LUMA_MINIMAL=1: every route outside the core answers 404."""
+    if _minimal.enabled() and not _minimal.path_allowed(request.path):
+        from flask import abort
+        abort(404)
 
 
 @app.before_request
@@ -558,6 +568,11 @@ def start_services(app_instance):
     except Exception as e:
         logger.warning(f"VAPID key setup skipped: {e}")
     
+    # LUMA_MINIMAL=1: no caches, automations, schedulers or tunnel.
+    if _minimal.enabled():
+        logger.warning('LUMA_MINIMAL is set: background threads are NOT started')
+        return
+
     # Initialize library caches
     if not skip_bg:
         try:
@@ -1520,6 +1535,8 @@ def _serve_spa():
     <meta name="url-base" content="{url_base}">
     <script>window.__LUMA_URL_BASE__ = "{url_base}";</script>
 '''
+        if _minimal.enabled():
+            injection += '    <script>window.__LUMA_MINIMAL__ = true;</script>\n'
         # Insert after <head> tag
         html = html.replace('<head>', f'<head>{injection}', 1)
         
@@ -9221,7 +9238,7 @@ def auth_me():
         return jsonify({
             'authenticated': False,
             'needs_start': _start_flow.needs_start(),
-            'pin_unlock': _start_flow.created_by_start(),
+            'pin_unlock': _start_flow.created_by_start() and not _start_flow.password_set(),
             'signup': _signup_open(),
         }), 401
     # Include user settings
@@ -9365,7 +9382,7 @@ def security_put():
         return jsonify({'error': 'Sign in first'}), 400
     
     # Require PIN to be set for enabled mode
-    if auth_required == 'enabled' and not pin and not _pin_state():
+    if auth_required == 'enabled' and not pin and not _pin_state() and not _start_flow.password_set():
         return jsonify({'error': 'Set a PIN first'}), 400
     
     # Update PIN if provided

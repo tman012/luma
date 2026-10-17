@@ -1,4 +1,4 @@
-"""Start flow for a brand-new install: Welcome, Sign in with Plex, Access, Done.
+"""Start flow for a brand-new install: Welcome, Sign in with Plex, Password, Access, Done.
 
 The Plex account that signs in becomes the owner (admin). The Access step
 (PUT /api/security) picks when a PIN is required, like Sonarr/Radarr v4's
@@ -220,7 +220,38 @@ def start_status():
     elif out['in_progress']:
         out['step'] = 'done'
         out['server'] = _load_state().get('server_name', '')
+        out['password_set'] = password_set()
     return jsonify(out)
+
+
+PASSWORD_MIN = 8
+PASSWORD_MAX = 256
+
+
+@bp.route('/api/start/password', methods=['POST'])
+def start_password():
+    """The owner replaces the random password from the Plex step with one
+    of their own (hashed the same way /login verifies it)."""
+    user = _cfg['get_current_user']()
+    if not _in_progress(user) or not user.get('id'):
+        return jsonify({'error': 'Start again', 'restart': True}), 409
+    body = request.get_json(silent=True) or {}
+    password = body.get('password')
+    confirm = body.get('confirm')
+    if not isinstance(password, str) or not isinstance(confirm, str):
+        return jsonify({'error': 'Enter a password'}), 400
+    if len(password) < PASSWORD_MIN:
+        return jsonify({'error': f'Use at least {PASSWORD_MIN} characters'}), 400
+    if len(password) > PASSWORD_MAX:
+        return jsonify({'error': f'Use at most {PASSWORD_MAX} characters'}), 400
+    if password != confirm:
+        return jsonify({'error': "Passwords don't match"}), 400
+    _cfg['user_auth'].update_pin(user['id'], password)
+    st = _load_state()
+    st['password_set'] = True
+    _save_state(st)
+    logger.info('Start: owner password set')
+    return jsonify({'ok': True})
 
 
 @bp.route('/api/start/plex/pin', methods=['POST'])
@@ -354,6 +385,11 @@ def _restart_soon():
     except Exception:
         pass
     os.execv(sys.executable, [sys.executable, '-m', 'app.main'])
+
+
+def password_set() -> bool:
+    """True when the owner chose a password in the Start flow."""
+    return bool(_load_state().get('password_set'))
 
 
 def created_by_start() -> bool:

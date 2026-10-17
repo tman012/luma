@@ -2,7 +2,7 @@ import { apiFetch } from '../apiClient';
 /**
  * StartPage — first-run setup for a fresh install.
  *
- * Welcome → Sign in with Plex → (pick a server) → Access → Done.
+ * Welcome → Sign in with Plex → (pick a server) → Set password → Access → Done.
  * Only reachable while the install has no users (the backend refuses every
  * Plex step once an account exists) and never shown again after Done.
  */
@@ -14,7 +14,7 @@ import {
   primaryBtn, plexBtn, linkBtn, list, row, FONT,
 } from '@/components/start/StartUI';
 
-type Step = 'loading' | 'welcome' | 'plex' | 'servers' | 'connecting' | 'access' | 'done';
+type Step = 'loading' | 'welcome' | 'plex' | 'servers' | 'connecting' | 'password' | 'access' | 'done';
 export type AuthRequired = 'disabled_local' | 'enabled';
 type Mode = AuthRequired;
 
@@ -49,6 +49,7 @@ export function StartPage() {
   const [servers, setServers] = useState<Server[]>([]);
   const [serverName, setServerName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [passwordSet, setPasswordSet] = useState(false);
   const pollRef = useRef<number | null>(null);
 
   const stopPolling = () => {
@@ -59,9 +60,13 @@ export function StartPage() {
   // Resume where this browser left off (e.g. a reload mid-setup).
   useEffect(() => {
     let alive = true;
-    api<{ needs_start: boolean; in_progress: boolean; server?: string }>('/api/start/status').then(({ data }) => {
+    api<{ needs_start: boolean; in_progress: boolean; server?: string; password_set?: boolean }>('/api/start/status').then(({ data }) => {
       if (!alive) return;
-      if (data.in_progress) { setServerName(data.server || ''); setStep('access'); }
+      if (data.in_progress) {
+        setServerName(data.server || '');
+        setPasswordSet(!!data.password_set);
+        setStep(data.password_set ? 'access' : 'password');
+      }
       else if (!data.needs_start) navigate('/', { replace: true });
       else setStep('welcome');
     });
@@ -73,7 +78,7 @@ export function StartPage() {
     setServerName(s.name);
     setStep('connecting');
     const { ok, data } = await sendJson('/api/start/plex/server', { machine_id: s.machine_id });
-    if (ok) { setStep('access'); return; }
+    if (ok) { setStep('password'); return; }
     setStep(data.restart ? 'welcome' : count > 1 ? 'servers' : 'plex');
     if (!data.restart) setAuthUrl('');
     setError(data.error || `Couldn't connect to ${s.name}`);
@@ -191,9 +196,15 @@ export function StartPage() {
         </Center>
       )}
 
+      {step === 'password' && (
+        <Center key="password">
+          <PasswordStep onSaved={() => { setPasswordSet(true); setStep('access'); }} onRestart={() => setStep('welcome')} />
+        </Center>
+      )}
+
       {step === 'access' && (
         <Center key="access">
-          <AccessChooser onSaved={() => setStep('done')} />
+          <AccessChooser onSaved={() => setStep('done')} passwordSet={passwordSet} />
         </Center>
       )}
 
@@ -213,12 +224,66 @@ export function StartPage() {
   );
 }
 
+/** The owner's own password, used at /login from then on. */
+export function PasswordStep({ onSaved, onRestart }: { onSaved: () => void; onRestart: () => void }) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    if (password !== confirm) { setError("Passwords don't match"); return; }
+    setBusy(true);
+    const { ok, data } = await sendJson('/api/start/password', { password, confirm });
+    setBusy(false);
+    if (ok) { onSaved(); return; }
+    if (data.restart) { onRestart(); return; }
+    setError(data.error || 'Something went wrong');
+  };
+
+  return (
+    <form id="start-password" method="post" action="#" onSubmit={submit} style={pwForm}>
+      <Title>Set password</Title>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%', marginTop: 28 }}>
+        <input
+          id="new-password" name="new-password" type="password" autoComplete="new-password" aria-label="Password"
+          placeholder="Password" value={password} onChange={e => { setError(''); setPassword(e.target.value); }}
+          style={pwInput} autoFocus disabled={busy} maxLength={256}
+        />
+        <input
+          id="confirm-password" name="confirm-password" type="password" autoComplete="new-password" aria-label="Confirm password"
+          placeholder="Confirm password" value={confirm} onChange={e => { setError(''); setConfirm(e.target.value); }}
+          style={pwInput} disabled={busy} maxLength={256}
+        />
+      </div>
+      <Bottom>
+        {error && <ErrorLine text={error} />}
+        <button type="submit" className="luma-start-btn" style={primaryBtn} disabled={busy || !password || !confirm}>
+          Continue
+        </button>
+      </Bottom>
+    </form>
+  );
+}
+
+const pwForm: React.CSSProperties = {
+  display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', maxWidth: 360, flex: 1,
+};
+const pwInput: React.CSSProperties = {
+  width: '100%', boxSizing: 'border-box', padding: '14px 16px', borderRadius: 12, fontSize: 16, fontFamily: FONT,
+  color: '#fff', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.14)', outline: 'none',
+};
+
 /** "Require PIN" segmented choice with an inline keypad (entered twice). */
-export function AccessChooser({ onSaved, initial = 'disabled_local', pinSet = false, compactTitle }: {
+export function AccessChooser({ onSaved, initial = 'disabled_local', pinSet = false, compactTitle, passwordSet = false }: {
   onSaved: (mode: Mode) => void;
   initial?: Mode;
   pinSet?: boolean;
   compactTitle?: boolean;
+  /** The owner set a password: choose the mode only, no PIN keypad. */
+  passwordSet?: boolean;
 }) {
   const [mode, setMode] = useState<Mode>(initial);
   const [pin, setPin] = useState('');
@@ -246,14 +311,16 @@ export function AccessChooser({ onSaved, initial = 'disabled_local', pinSet = fa
     save(first, value);
   };
 
-  // Remote visitors always sign in, so a PIN is needed in both modes.
-  const needsPin = true;
+  // Remote visitors always sign in, so a PIN is needed in both modes,
+  // unless the owner already set a password.
+  const needsPin = !passwordSet;
+  const heading = passwordSet ? 'Require sign-in' : 'Require PIN';
   return (
     <>
       <h1 style={{ margin: 0, marginTop: compactTitle ? 0 : 'min(10vh, 90px)', fontSize: 28, fontWeight: 600, textAlign: 'center' }}>
-        Require PIN
+        {heading}
       </h1>
-      <div role="radiogroup" aria-label="Require PIN" style={seg}>
+      <div role="radiogroup" aria-label={heading} style={seg}>
         {ACCESS_CHOICES.map(c => (
           <button
             key={c.value}
