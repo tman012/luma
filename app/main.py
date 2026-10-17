@@ -12113,6 +12113,30 @@ def plex_health():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+_PLEX_IMG_PATH = re.compile(
+    r'/library/(?:metadata|collections)/[0-9]+/(?:thumb|art|clearLogo|banner|composite|poster)(?:/[0-9]+)?'
+    r'|/library/sections/[0-9]+/composite/[0-9]+',
+    re.ASCII)
+_PLEX_NO_STORE = {'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'}
+
+
+def _plex_image_path(raw: str):
+    """The Plex library image path to fetch, or None. Anything with '..', a
+    backslash or a leftover percent sign (encoded or double-encoded) is refused.
+    A photo-transcode URL is accepted only when its inner url is itself a
+    library image path."""
+    from urllib.parse import parse_qs, urlsplit
+    raw = raw or ''
+    if raw.startswith('/photo/:/transcode?'):
+        inner = parse_qs(urlsplit(raw).query).get('url', [''])
+        if len(inner) != 1:
+            return None
+        raw = inner[0]
+    if '..' in raw or '\\' in raw or '%' in raw:
+        return None
+    return raw if _PLEX_IMG_PATH.fullmatch(raw) else None
+
+
 @app.route('/api/img/plex')
 def img_plex_proxy():
     """Secure proxy for Plex images. Never exposes PLEX_TOKEN to the browser.
@@ -12123,14 +12147,16 @@ def img_plex_proxy():
     Plex serves full-resolution originals (~1MB per poster) otherwise, which
     is wasteful for small thumbnails/grid cards — transcoded copies are ~15KB.
     """
+    from flask import Response
     plex_path = request.args.get('url', '')
 
     if not plex_path:
-        return 'Missing url parameter', 400
+        return Response('Missing url parameter', status=400, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
-    # Security: only allow paths starting with /library/ or /photo/
-    if not plex_path.startswith(('/library/', '/photo/')):
-        return 'Invalid path — must start with /library/ or /photo/', 400
+    # Security: only Plex's own library image paths, never an outside URL.
+    plex_path = _plex_image_path(plex_path)
+    if not plex_path:
+        return Response('Not a Plex image path', status=400, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
     # Optional resize via Plex photo transcoder (clamped to sane bounds)
     def _clamp_dim(raw):
@@ -12170,33 +12196,17 @@ def img_plex_proxy():
         )
 
         if resp.status_code != 200:
-            # Negative-cache briefly so a grid of broken images doesn't hammer
-            # the proxy (each opening a 15s upstream request) on every re-render.
-            from flask import Response
-            return Response('Image not found', status=404,
-                            headers={'Cache-Control': 'public, max-age=60'})
+            # Never cached: the reply can depend on who is signed in.
+            return Response('Image not found', status=404, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
-        from flask import Response
-        import re as _re, hashlib as _hl
-        body = resp.content
-        # Versioned Plex paths (/thumb/<updatedAt>) change URL when the art changes -> cache a day.
-        # Unversioned ones (/library/metadata/<rk>/thumb) keep the same URL after a Fix Match or
-        # poster change, so make the browser revalidate (cheap 304 via ETag) instead of showing old art.
-        versioned = bool(_re.search(r'/(thumb|art|clearLogo|banner|theme)/\d+', plex_path))
-        etag = '"' + _hl.md5(body).hexdigest() + '"'
-        if not versioned and request.headers.get('If-None-Match') == etag:
-            return Response(status=304, headers={'ETag': etag, 'Cache-Control': 'no-cache'})
-        return Response(
-            body,
-            content_type=resp.headers.get('Content-Type', 'image/jpeg'),
-            headers={'Cache-Control': 'public, max-age=86400'} if versioned
-            else {'Cache-Control': 'no-cache', 'ETag': etag},
-        )
+        # Only ever answer with an image; anything else from upstream is refused.
+        ctype = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+        if not re.fullmatch(r'image/[a-z0-9.+-]+', ctype, re.ASCII) or ctype == 'image/svg+xml':
+            return Response('Not an image', status=502, mimetype='text/plain', headers=_PLEX_NO_STORE)
+        return Response(resp.content, content_type=ctype, headers=_PLEX_NO_STORE)
     except requests.RequestException as e:
         logger.error(f"Plex image proxy error: {e}")
-        from flask import Response
-        return Response('Error fetching image', status=502,
-                        headers={'Cache-Control': 'public, max-age=30'})
+        return Response('Error fetching image', status=502, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
 @app.route('/api/img/tmdb')
 def img_tmdb_proxy():

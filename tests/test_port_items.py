@@ -150,18 +150,11 @@ def img(test_app, monkeypatch):
     return test_app.test_client()
 
 
-def test_unversioned_poster_revalidates(img):
-    r = img.get('/api/img/plex?url=/library/metadata/5/thumb&r=2', environ_base=LAN)
-    assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-cache'
-    etag = r.headers['ETag']
-    r2 = img.get('/api/img/plex?url=/library/metadata/5/thumb&r=2', headers={'If-None-Match': etag}, environ_base=LAN)
-    assert r2.status_code == 304
-
-
-def test_versioned_poster_cached_a_day(img):
-    r = img.get('/api/img/plex?url=/library/metadata/5/thumb/1700000000', environ_base=LAN)
-    assert r.headers['Cache-Control'] == 'public, max-age=86400'
-    assert 'ETag' not in r.headers
+def test_poster_replies_never_stored(img):
+    for url in ('/library/metadata/5/thumb', '/library/metadata/5/thumb/1700000000'):
+        r = img.get('/api/img/plex?url=' + url + '&r=2', environ_base=LAN)
+        assert r.status_code == 200 and r.headers['Cache-Control'] == 'private, no-store'
+        assert 'ETag' not in r.headers
 
 
 def test_unversioned_poster_urls_carry_cache_buster():
