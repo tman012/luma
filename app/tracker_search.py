@@ -631,10 +631,11 @@ def on_tracker_changed(rec: Dict[str, Any], url_changed: bool = False) -> None:
 
 
 def on_tracker_deleted(rec: Dict[str, Any]) -> None:
+    """After a delete: drop the tracker's release links and cached answers.
+    Guard state belongs to the site, not the record, so it stays (re-adding
+    the tracker can't reset a budget or a backoff)."""
     s = get_search()
     s.tokens.forget_tracker(int(rec['id']))
-    if not tt.is_rate_strict(rec['type']):
-        s.guard.forget(int(rec['id']))
     with s._cache_lock:
         for k in [k for k in s._cache if k[0] == rec['id']]:
             s._cache.pop(k, None)

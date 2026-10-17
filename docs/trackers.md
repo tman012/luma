@@ -43,3 +43,11 @@ Secrets are never logged, never sent to the browser and never put in a URL Luma 
 ## Network safety
 
 Luma only contacts public addresses. Before every request and every redirect it resolves the tracker's host, refuses it if any answer is loopback, private (RFC 1918 or unique-local), CGNAT (100.64/10), link-local (cloud metadata included), 0.0.0.0, multicast, reserved, or one of this host's own addresses. This applies to every type, with no opt-in. Ports are not restricted on public hosts; Luma's own ports (5001, 5002, `LUMA_PORT`, `PORT`) are refused on its own addresses. The connection then goes to the checked address only, so a DNS change in between can't redirect it. Redirects must keep the scheme (http to https is fine), host and port. Site types (everything but Torznab and Newznab) need an https URL. A whole request, redirects and body included, ends after 60 s. Test answers "Address not allowed" for a refused target.
+
+## Search
+
+As soon as at least one tracker is enabled, every search (Sources, Explore, Latest, Movie Night, Genre Roulette) goes to the enabled trackers directly and the old indexer settings are not used. With zero trackers and no indexer, `GET /api/sources/all-results` answers `{"success": true, "total": 0, "releases": []}`.
+
+Searches go through the same guard as Test (budgets, backoffs, bans; keyed by site). A tracker is searched only for the categories it is set up for. Answers are cached 15 min for user searches and 3 h for background ones; empty answers are never cached. One failing tracker never hides the others' results. Each release carries `tracker_type` next to `indexer` (the tracker's name).
+
+Download links never leave the server. Each result's `download_url` is `/api/trackers/release/<token>`, a random token that maps to the real link (stored encrypted in `$LUMA_DATA_DIR/tracker_releases.json`, kept 14 days). `app.tracker_search.fetch_release(url)` resolves it server-side to a magnet or the validated .torrent bytes: through the guard, with tracker credentials (the IPTorrents cookie) sent only to the tracker's own host, and one redirect to another host followed without them. A 429, ban or rejected-credentials answer backs the site off; a dead link does not. Deleting a tracker or changing its URL drops its links.

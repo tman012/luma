@@ -11,7 +11,7 @@ import pytest
 import app.main
 import app.user_auth
 from app import indexer_api, tracker_clients, tracker_guard, tracker_routes, tracker_search, tracker_store
-from app.tracker_guard import TrackerGuard
+from app.tracker_guard import TrackerGuard, guard_key
 from app.tracker_http import Response, TrackerError
 from app.tracker_search import LumaTrackersClient, ReleaseTokens, TrackerSearch, TrackerSkipped
 from app.tracker_store import TrackerStore
@@ -265,7 +265,7 @@ def test_rate_limit_honors_retry_after(env):
     cfg = env['store'].config(rec)
     with pytest.raises(TrackerError):
         eng.search_one(cfg, 'x', [2000], 10, True)
-    until, kind = env['guard'].blocked(rec['id'])
+    until, kind = env['guard'].blocked(guard_key(rec))
     assert kind == 'rate' and until - time.time() > 590
     with pytest.raises(TrackerSkipped):
         eng.search_one(cfg, 'y', [2000], 10, True)
@@ -316,7 +316,7 @@ def test_tracker_only_gets_categories_it_is_set_up_for(env):
 
 def test_pinned_search_on_backed_off_tracker_says_skipped(env):
     rec = torznab(env['store'])
-    env['guard'].failure(rec['id'], 'network')
+    env['guard'].failure(guard_key(rec), 'network')
     with pytest.raises(indexer_api.IndexerSkipped):
         LumaTrackersClient(env['engine'])._search_single('x', '2000', 10, indexer_ids=[rec['id']])
 
@@ -374,7 +374,7 @@ def test_ban_is_persisted_and_search_skips_the_tracker_after_restart(env):
     env['mock'].set('up.example', R(body=rss(('The Nut Job 2014 1080p WEB-DL', 4, 1))))
     out = LumaTrackersClient(env['engine']).search_all('The Nut Job', 'movie')
     assert [o['indexer'] for o in out] == ['Up']
-    until, kind = env['guard'].blocked(rec['id'])
+    until, kind = env['guard'].blocked(guard_key(rec))
     assert kind == 'banned' and until - time.time() > 23 * 3600
     # Restart: a fresh guard reads the ban back; the banned tracker is not contacted.
     fresh = TrackerGuard(env['tmp'] / 'tracker_guard.json')
@@ -388,7 +388,7 @@ def test_ban_is_persisted_and_search_skips_the_tracker_after_restart(env):
 
 def test_search_test_goes_through_the_guard(env):
     rec = torznab(env['store'])
-    env['guard'].failure(rec['id'], 'rate', 600)
+    env['guard'].failure(guard_key(rec), 'rate', 600)
     with pytest.raises(TrackerError) as e:
         env['engine'].test(env['store'].config(rec))
     assert e.value.kind == 'rate' and env['mock'].calls == []
@@ -489,7 +489,7 @@ def test_fetch_release_login_page_is_an_auth_backoff(env):
     with pytest.raises(tracker_search.ReleaseUnavailable) as e:
         env['engine'].fetch_release(link)
     assert e.value.kind == 'tracker' and e.value.tracker_error.kind == 'auth'
-    assert env['guard'].blocked(rec['id'])[1] == 'auth'
+    assert env['guard'].blocked(guard_key(rec))[1] == 'auth'
     assert env['store'].get(rec['id'])['status']['state'] == 'error'
     assert COOKIE not in e.value.message
 
@@ -500,7 +500,7 @@ def test_fetch_release_429_backs_off_downloads_and_searches(env):
     with pytest.raises(tracker_search.ReleaseUnavailable) as e:
         env['engine'].fetch_release(link)
     assert e.value.tracker_error.kind == 'rate'
-    until, kind = env['guard'].blocked(rec['id'])
+    until, kind = env['guard'].blocked(guard_key(rec))
     assert kind == 'rate' and until - time.time() > 890
     n = len(env['mock'].calls)
     with pytest.raises(tracker_search.ReleaseUnavailable) as e:
@@ -517,11 +517,11 @@ def test_fetch_release_dead_link_does_not_pause_searches(env):
     with pytest.raises(tracker_search.ReleaseUnavailable) as e:
         env['engine'].fetch_release(link)
     assert e.value.kind == 'tracker' and e.value.tracker_error.kind == 'http'
-    assert env['guard'].blocked(rec['id']) is None
+    assert env['guard'].blocked(guard_key(rec)) is None
     env['mock'].set('t.example', R(body='<html>Not found</html>'))
     with pytest.raises(tracker_search.ReleaseUnavailable) as e:
         env['engine'].fetch_release(link)
-    assert e.value.kind == 'invalid' and env['guard'].blocked(rec['id']) is None
+    assert e.value.kind == 'invalid' and env['guard'].blocked(guard_key(rec)) is None
 
 
 def test_fetch_release_cross_host_redirect_is_network_checked(env):
@@ -549,3 +549,26 @@ def test_fetch_release_to_a_blocked_address_is_refused(env, monkeypatch):
     with pytest.raises(tracker_search.ReleaseUnavailable) as e:
         eng.fetch_release(tracker_search.release_path(tok))
     assert e.value.tracker_error.kind == 'blocked' and sent == []
+
+
+def test_readded_tracker_search_keeps_the_site_backoff(client, env):
+    """Guard state belongs to the site: delete + re-add can't reset a 429."""
+    rec = torznab(env['store'])
+    env['mock'].set('t.example', R(429, headers={'Retry-After': '1200'}))
+    LumaTrackersClient(env['engine']).search_all('The Nut Job', 'movie')
+    assert client.delete(f"/api/trackers/{rec['id']}").status_code == 200
+    again = torznab(env['store'], url='https://www.t.example/other/api')
+    assert again['id'] != rec['id']
+    n = len(env['mock'].calls)
+    out, searched, skipped = env['engine'].search('Another', [2000], 10, True)
+    assert out == [] and skipped == [again['id']] and len(env['mock'].calls) == n
+    assert env['guard'].blocked('host:t.example')[1] == 'rate'
+
+
+def test_two_records_on_one_host_share_one_budget(env):
+    a = torznab(env['store'], name='A')
+    b = torznab(env['store'], name='B', url='https://t.example/second/api')
+    now = time.time()
+    env['guard'].log['host:t.example'] = [[now - 60, 'i'] for _ in range(tracker_guard.LIMITS['interactive_per_hour'])]
+    out, searched, skipped = env['engine'].search('x', [2000], 10, True)
+    assert sorted(skipped) == sorted([a['id'], b['id']]) and env['mock'].calls == []
