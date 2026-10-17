@@ -386,7 +386,9 @@ def start_account():
     if user['id'] != st.get('owner_uid') or not _setup_cookie_ok(st, user['id']):
         return jsonify({'error': 'Start again', 'restart': True}), 403
 
-    # Only the owner's own Plex-verified browser gets here: limit its attempts.
+    # Only the owner's own Plex-verified browser gets here. Typing mistakes
+    # (blank, too short, too long) never count; only probes of existing names
+    # do, so the owner can't lock themselves out by fixing a form.
     limit_id = f"{PASSWORD_LIMIT_ID}:uid:{user['id']}"
     wait = login_limiter.retry_after('', limit_id)
     if wait:
@@ -395,7 +397,6 @@ def start_account():
         return resp, 429
 
     def bad(message):
-        login_limiter.record_failure('', limit_id)
         return jsonify({'error': message}), 400
 
     body = request.get_json(silent=True) or {}

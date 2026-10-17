@@ -43,3 +43,40 @@ def test_no_duplicate_limiter_in_auth_routes():
     assert 'login_limiter.retry_after' in src and 'login_limiter.record_failure' in src
     for name in ('_login_attempts', 'reset_rate_limiter', '_check_rate_limit', 'RATE_LIMIT'):
         assert name not in src, name
+
+
+# -- only wrong credentials count --------------------------------------------
+
+def test_form_blank_password_not_counted(test_app):
+    from app import login_limiter
+    user_auth.create_user('owner', '1234', is_admin=True)
+    c = test_app.test_client()
+    for _ in range(login_limiter.MAX_FAILURES * 2):
+        _post(c, '')
+    assert login_limiter._fail == {}
+
+
+def test_api_blank_pin_not_counted(test_app):
+    from app import login_limiter
+    user_auth.create_user('owner', '1234', is_admin=True)
+    c = test_app.test_client()
+    for _ in range(login_limiter.MAX_FAILURES * 2):
+        r = c.post('/api/auth/login', json={'name': 'owner', 'pin': ''},
+                   environ_base={'REMOTE_ADDR': '203.0.113.9'})
+        assert r.status_code == 400
+    assert login_limiter._fail == {}
+    r = c.post('/api/auth/login', json={'name': 'owner', 'pin': 'nope'},
+               environ_base={'REMOTE_ADDR': '203.0.113.9'})
+    assert r.status_code == 401 and login_limiter._fail
+
+
+def test_unlock_blank_pin_not_counted(test_app, monkeypatch):
+    import app.main as main
+    from app import login_limiter
+    monkeypatch.setattr(main._start_flow, 'created_by_start', lambda: True)
+    monkeypatch.setattr(main, '_pin_state', lambda: True)
+    c = test_app.test_client()
+    for _ in range(login_limiter.MAX_FAILURES * 2):
+        r = c.post('/api/auth/unlock', json={'pin': ''}, environ_base={'REMOTE_ADDR': '203.0.113.9'})
+        assert r.status_code == 400 and r.json['error'] == 'Enter your PIN'
+    assert login_limiter._fail == {}

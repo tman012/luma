@@ -317,11 +317,25 @@ def test_signed_out_spam_never_locks_out_owner(test_app, start_owner):
     assert c.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 200
 
 
-def test_owner_bad_attempts_hit_limit(test_app, start_owner):
+def test_owner_typing_mistakes_never_lock(test_app, start_owner):
     from app import login_limiter
     c, _ = start_owner
+    bad = [{'username': 'plexowner', 'password': 'short'}, {'username': '', 'password': 'pass-word-1'},
+           {'username': 'a@b', 'password': 'pass-word-1'}, {'username': 'plexowner', 'password': 'x' * 2000}]
     for _ in range(login_limiter.MAX_FAILURES):
-        assert c.post('/api/start/account', json={'username': 'plexowner', 'password': 'short'},
+        for body in bad:
+            assert c.post('/api/start/account', json=body, headers=ORIGIN).status_code == 400
+    assert login_limiter._fail == {}
+    assert c.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 200
+
+
+def test_owner_name_probes_hit_limit(test_app, start_owner):
+    import secrets
+    from app import login_limiter, user_auth
+    c, _ = start_owner
+    user_auth.create_user('Existing', secrets.token_urlsafe(12), email='else@example.com')
+    for _ in range(login_limiter.MAX_FAILURES):
+        assert c.post('/api/start/account', json={'username': 'existing', 'password': 'pass-word-1'},
                       headers=ORIGIN).status_code == 400
     r = c.post('/api/start/account', json=GOOD, headers=ORIGIN)
     assert r.status_code == 429 and int(r.headers['Retry-After']) > 0
@@ -459,12 +473,12 @@ def test_flag_unset_lan_keeps_implicit_owner(test_app, monkeypatch):
 
 # -- blank password, Plex forwardUrl ------------------------------------------
 
-def test_blank_password_rejected_and_counted(test_app, start_owner):
+def test_blank_password_rejected_not_counted(test_app, start_owner):
     from app import login_limiter
     c, user = start_owner
     r = c.post('/api/start/account', json={'username': 'plexowner', 'password': ' ' * 10}, headers=ORIGIN)
     assert r.status_code == 400 and 'Enter a password' in r.json['error']
-    assert login_limiter._fail.get(f"id:start-password:uid:{user['id']}")
+    assert not login_limiter._fail.get(f"id:start-password:uid:{user['id']}")
 
 
 class _PinResp:

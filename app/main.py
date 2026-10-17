@@ -9297,6 +9297,8 @@ def auth_unlock():
     if not _start_flow.created_by_start() or not _pin_state():
         return jsonify({'success': False, 'error': 'PIN sign-in is not available'}), 400
     pin = str((request.get_json(silent=True) or {}).get('pin') or '')
+    if not pin:
+        return jsonify({'success': False, 'error': 'Enter your PIN'}), 400
     ip = _access.client_ip(request, settings) or (request.remote_addr or "")
     wait = login_limiter.retry_after(ip, 'owner')
     if wait:

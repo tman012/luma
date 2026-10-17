@@ -227,13 +227,13 @@ def own_hostnames() -> set:
 
 
 def is_known_host(host: str, settings=None) -> bool:
-    """True for an IP literal, localhost, a home-network name, this machine's
-    host name, or a name in security.hostnames. Never enough on its own: see
-    should_authenticate."""
+    """True for a private or loopback IP literal, localhost, a home-network
+    name, this machine's host name, or a name (or public IP) listed in
+    security.hostnames. Never enough on its own: see should_authenticate."""
     name = split_host(host)
     if not name:
         return False
-    if _addr(name) is not None or name == 'localhost' or is_home_name(name):
+    if _is_private(name) or name == 'localhost' or is_home_name(name):
         return True
     return name in own_hostnames() or name in configured_hostnames(settings)
 

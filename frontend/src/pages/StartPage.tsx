@@ -93,7 +93,7 @@ export function StartPage() {
       else if (!data.needs_start) navigate('/', { replace: true });
       else setStep('welcome');
     });
-    return () => { alive = false; stopPolling(); };
+    return () => { alive = false; stopPolling(); closePopup(); };
   }, [navigate]);
 
   const chooseServer = useCallback(async (s: Server, count: number) => {
@@ -112,7 +112,7 @@ export function StartPage() {
     const tick = async () => {
       const { ok, data } = await api<{ status?: string; servers?: Server[]; restart?: boolean }>('/api/start/plex/pin');
       if (!ok) {
-        if (data.restart) { setStep('welcome'); setAuthUrl(''); return; }
+        if (data.restart) { closePopup(); setStep('welcome'); setAuthUrl(''); return; }
         pollRef.current = window.setTimeout(tick, 3000);
         return;
       }
@@ -132,6 +132,7 @@ export function StartPage() {
 
   const signInWithPlex = async () => {
     setError('');
+    stopPolling();
     setBusy(true);
     // Open the pop-up inside the click so blockers allow it, then point it at Plex.
     const popup = openPlexPopup();
@@ -140,6 +141,7 @@ export function StartPage() {
     setBusy(false);
     if (!ok || !data.auth_url) {
       popup?.close();
+      popupRef.current = null;
       setError(data.error || "Couldn't reach Plex. Try again.");
       return;
     }
