@@ -671,6 +671,22 @@ def _cell_int(row, cls: str) -> Optional[int]:
     return None
 
 
+def _host_port(u) -> Tuple[str, Optional[int]]:
+    port = u.port
+    if port == {'http': 80, 'https': 443}.get(u.scheme):
+        port = None
+    return (u.hostname or '').lower().rstrip('.'), port
+
+
+def on_host(url: str, base: str) -> bool:
+    """True when *url* (already absolute) is http(s) on *base*'s host and port."""
+    try:
+        u, b = urlsplit(url), urlsplit(base)
+        return u.scheme in ('http', 'https') and bool(u.hostname) and _host_port(u) == _host_port(b)
+    except ValueError:
+        return False
+
+
 def parse_iptorrents(html: str, base: str, limit: int, counts: Optional[Dict[str, int]] = None
                      ) -> List[Dict[str, Any]]:
     p = _IPTParser()
@@ -679,6 +695,7 @@ def parse_iptorrents(html: str, base: str, limit: int, counts: Optional[Dict[str
     p._end_row()
     out = []
     rows = 0
+    offhost = 0
     for row in p.rows:
         dl = next((h for h in row['links'] if '/download.php' in h), '')
         if not dl:
@@ -701,14 +718,21 @@ def parse_iptorrents(html: str, base: str, limit: int, counts: Optional[Dict[str
             leechers = _int(nums[-1].replace(',', '')) if nums else 0
         size_cell = next((c for c in cells if _SIZE_RE.fullmatch(c.strip())), '')
         info = urljoin(base + '/', det) if det else ''
-        out.append(_result(title, urljoin(base + '/', dl), _parse_size(size_cell), seeders, leechers,
+        dl_abs = urljoin(base + '/', dl)
+        if not on_host(dl_abs, base) or (info and not on_host(info, base)):
+            # A download or details link on another host: never IPT's own row.
+            offhost += 1
+            continue
+        out.append(_result(title, dl_abs, _parse_size(size_cell), seeders, leechers,
                            freeleech=row['free'], category=cat,
-                           guid=info or urljoin(base + '/', dl), info_url=info))
+                           guid=info or dl_abs, info_url=info))
         if len(out) >= limit:
             break
     if counts is not None:
         counts['rows'] = rows
         counts['kept'] = len(out)
+        if offhost:
+            counts['offhost'] = offhost
     return out
 
 
@@ -717,12 +741,21 @@ def iptorrents_headers(cfg) -> Dict[str, str]:
             'User-Agent': str(cfg.get('user_agent') or '').strip() or DEFAULT_UA}
 
 
+# A sign-in form field: an <input> named exactly username or password, or
+# any password input. Page text such as 'name=usernames' never matches.
+_IPT_LOGIN_INPUT_RE = re.compile(
+    r'<input\b[^>]*?(?:\bname\s*=\s*["\']?(?:username|password)(?=["\'\s/>])'
+    r'|\btype\s*=\s*["\']?password(?=["\'\s/>]))', re.I)
+
+
+def _ipt_login_form(text: str) -> bool:
+    return bool(_IPT_LOGIN_INPUT_RE.search(text or ''))
+
+
 def _ipt_signed_out(text: str) -> bool:
+    if _ipt_login_form(text):
+        return True
     low = text.lower()
-    if 'name="username"' in low or "name='username'" in low or 'name=username' in low:
-        return True
-    if 'name="password"' in low or "name='password'" in low or 'name=password' in low:
-        return True
     return not any(m in low for m in _IPT_SIGNED_IN)
 
 
@@ -740,6 +773,10 @@ def iptorrents_search(cfg, query, categories, limit, request: Request = http_req
     if resp.status in (301, 302, 303, 307, 308):
         raise TrackerError('auth', resp.status)          # IPT sends a signed-out visitor to its login page
     raise_for_status(resp)
+    if _ipt_login_form(text):
+        # A sign-in form means the cookie was not accepted, even when the page
+        # also carries a torrents table: never results, never "0 results".
+        raise TrackerError('auth', resp.status)
     if not _IPT_TABLE_RE.search(text):
         if looks_banned(text) and _ipt_signed_out(text):
             raise TrackerError('banned', resp.status)
