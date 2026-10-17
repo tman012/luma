@@ -1,4 +1,4 @@
-/** Settings > TV API (owner only, luma-test builds): TV library paths, the
+/** Settings > TV API (owner only, luma-test builds): the selected TV libraries, the
  * scanned shows, unmatched folders, fix-match and Upgrades. */
 import { apiFetch } from '@/apiClient';
 import { SAVE_FAILED, UNREACHABLE, type Errors, type LibPath } from './libraryPathsApi';
@@ -38,10 +38,8 @@ const isView = (d: Record<string, unknown>) => Array.isArray(d.paths);
 const isLib = (d: Record<string, unknown>) => Array.isArray(d.shows) && Array.isArray(d.unmatched);
 
 export const loadTv = () => call<TvSettingsView>(TV_URL, undefined, isView);
-export const addTvPath = (name: string, path: string) => call<TvSettingsView>(`${TV_URL}/paths`, json('POST', { name, path }), isView);
-export const editTvPath = (id: string, name: string, path: string) =>
-  call<TvSettingsView>(`${TV_URL}/paths/${encodeURIComponent(id)}`, json('PUT', { name, path }), isView);
-export const deleteTvPath = (id: string) => call<TvSettingsView>(`${TV_URL}/paths/${encodeURIComponent(id)}`, json('DELETE'), isView);
+/** The TV libraries selector (LibrarySelector / librarySelectionApi). */
+export const TV_LIBRARIES_URL = `${TV_URL}/libraries`;
 export const saveUpgrades = (mode: UpgradeMode) => call<TvSettingsView>(TV_URL, json('PUT', { upgrades: { mode } }), isView);
 
 export const loadTvLibrary = () => call<TvLibrary>(`${TV_URL}/library`, undefined, isLib);

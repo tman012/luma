@@ -1,6 +1,7 @@
-/** Settings > TV (owner only, luma-test builds): TV library paths, Scan, the
- * matched shows ("Wrong show?"), unmatched folders ("Match"), and Upgrades.
- * Scanning only reads the library folders; everything goes to tv.db. */
+/** Settings > TV (owner only, luma-test builds): which Library paths are TV
+ * libraries (LibrarySelector; folders are added in Library paths only), Scan,
+ * the matched shows ("Wrong show?"), unmatched folders ("Match"), and
+ * Upgrades. Scanning only reads the library folders; everything goes to tv.db. */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { T } from '@/theme/tokens';
 import { FONT } from '@/components/start/StartUI';
@@ -8,20 +9,22 @@ import { NoticeToast } from '@/components/start/SetupToast';
 import { ChevronIcon } from '@/components/nav/AppNav';
 import { trackersCss } from '@/components/trackers/trackersUi';
 import {
-  AddRow, Field, PathForm, PathRow, WideCtx, card, formBox, ghostBtn, libraryPathsCss, muted, pad, primary, rowBtn,
+  Field, WideCtx, card, formBox, ghostBtn, libraryPathsCss, muted, pad, primary, rowBtn,
   sectionLabel, segBtn, segOn, segment, subText, titleText, topBorder,
 } from './LibraryPathsSettings';
+import { LibrarySelector } from './LibrarySelector';
+import type { SelectableLibrary } from './librarySelectionApi';
 import { SAVE_FAILED } from './libraryPathsApi';
 import {
-  addTvPath, deleteTvPath, editTvPath, showSubtitle, lastScanText, loadTv, loadTvLibrary, matchFolder, needsReview, rematchShow,
+  TV_LIBRARIES_URL, showSubtitle, lastScanText, loadTv, loadTvLibrary, matchFolder, needsReview, rematchShow,
   saveUpgrades, searchShows, showLabel, startScan,
   type Candidate, type Show, type TvLibrary, type TvSettingsView, type Unmatched, type UpgradeMode,
 } from './tvLibraryApi';
 
 export const POLL_MS = 2000;
-/** Space between sections (Library paths, Scan, Unmatched, Shows, Upgrades), as on Library paths. */
+/** Space between sections (Libraries, Scan, Unmatched, Shows, Upgrades), as on Library paths. */
 export const SECTION_GAP = 28;
-type Editing = { kind: 'path'; id: string | null } | { kind: 'show'; id: number } | { kind: 'folder'; id: number } | null;
+type Editing = { kind: 'show'; id: number } | { kind: 'folder'; id: number } | null;
 
 export function TvLibrarySettings({ wide }: { wide: boolean }) {
   const [view, setView] = useState<TvSettingsView | null>(null);
@@ -32,6 +35,13 @@ export function TvLibrarySettings({ wide }: { wide: boolean }) {
   const seq = useRef(0);
 
   const refreshLib = useCallback(() => loadTvLibrary().then(r => { if (r.ok) setLib(r.data); return r; }), []);
+  const picked = useRef<string | null>(null);
+  const onLibraries = useCallback((sel: SelectableLibrary[]) => {
+    const key = sel.map(l => l.id).join(',');
+    setView(v => (v ? { ...v, paths: sel.map(({ selected: _s, ...p }) => p) } : v));
+    if (picked.current !== null && picked.current !== key) void refreshLib();   // shows follow the selection
+    picked.current = key;
+  }, [refreshLib]);
   useEffect(() => {
     loadTv().then(r => (r.ok ? setView(r.data) : setLoadFailed(true)));
     refreshLib();
@@ -48,10 +58,6 @@ export function TvLibrarySettings({ wide }: { wide: boolean }) {
     return loadFailed ? <div role="alert" style={{ ...pad(wide), ...muted }}>{"Couldn't load TV settings"}</div> : null;
   }
   const say = (msg: string) => { seq.current += 1; setToast(msg); };
-  const donePath = (r: { ok: true; data: TvSettingsView } | { ok: false; errors: Record<string, string>; error: string }, msg: string) => {
-    if (r.ok) { setView(r.data); setEditing(null); say(msg); refreshLib(); return { ok: true }; }
-    return { ok: false, errors: r.errors };
-  };
   const doneMatch = (r: { ok: true; data: TvLibrary } | { ok: false; error: string }) => {
     if (r.ok) { setLib(r.data); setEditing(null); say('Matched'); } else say(r.error || SAVE_FAILED);
   };
@@ -63,24 +69,7 @@ export function TvLibrarySettings({ wide }: { wide: boolean }) {
       <style>{trackersCss}</style>
       {toast && <NoticeToast key={toast + seq.current} text={toast} onDone={() => setToast('')} />}
 
-      <div data-testid="tv-paths">
-        <h3 style={sectionLabel}>Library paths</h3>
-        <div style={card}>
-          {view.paths.map((p, i) => (editing?.kind === 'path' && editing.id === p.id
-            ? <PathForm key={p.id} path={p} first={i === 0} onCancel={() => setEditing(null)}
-                onSave={(name, path) => editTvPath(p.id, name, path).then(r => donePath(r, 'Saved'))}
-                onDelete={() => deleteTvPath(p.id).then(r => {
-                  if (!r.ok && !Object.keys(r.errors).length) say(r.error);
-                  return donePath(r, 'Removed');
-                })} />
-            : <PathRow key={p.id} path={p} first={i === 0} onOpen={() => setEditing({ kind: 'path', id: p.id })} />))}
-          {editing?.kind === 'path' && editing.id === null
-            ? <PathForm first={view.paths.length === 0} onCancel={() => setEditing(null)}
-                onSave={(name, path) => addTvPath(name, path).then(r => donePath(r, 'Added'))} />
-            : <AddRow label="Add path" first={view.paths.length === 0} testId="tv-add-path"
-                onClick={() => setEditing({ kind: 'path', id: null })} />}
-        </div>
-      </div>
+      <LibrarySelector url={TV_LIBRARIES_URL} label="Libraries" testId="tv-paths" onChange={onLibraries} />
 
       {view.paths.length > 0 && (
         <div data-testid="tv-scan-row" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>

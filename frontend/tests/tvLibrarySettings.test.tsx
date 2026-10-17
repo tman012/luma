@@ -1,14 +1,19 @@
-/** Settings > TV: library paths, Scan, shows with "Wrong show?", unmatched
+/** Settings > TV: the Libraries selector (Library paths picked as TV libraries), Scan, shows with "Wrong show?", unmatched
  * folders with "Match", and Upgrades (Replace / Keep both). */
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+import type { ReactElement } from 'react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SECTION_GAP, TvLibrarySettings, UPGRADE_OPTIONS } from '@/components/library/TvLibrarySettings';
+import { SECTION_GAP, TvLibrarySettings as TvSettingsBare, UPGRADE_OPTIONS } from '@/components/library/TvLibrarySettings';
 import { episodeCount, lastScanText, needsReview, reviewCount, showLabel, showSubtitle } from '@/components/library/tvLibraryApi';
 
+const TvLibrarySettings = (p: { wide: boolean }): ReactElement => <MemoryRouter><TvSettingsBare {...p} /></MemoryRouter>;
 const res = (body: unknown, status = 200) => ({ ok: status < 300, status, json: async () => body }) as Response;
-const PATH = { id: 't_0000aaaa', name: 'TV', path: '/media/TV', status: 'ok' };
+const PATH = { id: 'p_0000aaaa', name: 'TV', path: '/media/TV', status: 'ok' };
+const ANIME = { id: 'p_0000bbbb', name: 'Anime', path: '/media/Anime', status: 'ok' };
+let selected: string[];
 const SEV = { id: 1, tmdb_id: 95396, title: 'Severance', year: 2022, path_id: PATH.id, path_name: 'TV', folder: 'Severance (2022)',
   poster_path: null, monitored: false, files: 6, episodes: 4, linked: 3, mismatch: 2, unrecognized: 1,
   review: ['S03E01 is in Season 2', "S02E40 isn't an episode of this show", '1 file not recognized'] };
@@ -22,6 +27,7 @@ const calls: { url: string; method: string; body: unknown }[] = [];
 
 beforeEach(() => {
   calls.length = 0;
+  selected = [PATH.id];
   settings = { paths: [PATH], upgrades: { mode: 'keep_both' }, rescan_interval_h: 6, naming: {}, automation: {} };
   library = { shows: [SEV, DARK], unmatched: [MYS], scan: { running: false, error: null, last_scan: null } };
   vi.stubGlobal('fetch', vi.fn(async (u: string, init?: RequestInit) => {
@@ -31,10 +37,9 @@ beforeEach(() => {
     calls.push({ url, method, body });
     if (url === '/api/settings/tv' && method === 'GET') return res(settings);
     if (url === '/api/settings/tv' && method === 'PUT') { settings = { ...settings, ...body }; return res(settings); }
-    if (url === '/api/settings/tv/paths' && method === 'POST') {
-      if (body.path === '/etc') return res({ errors: { path: 'Not allowed' } }, 400);
-      settings = { ...settings, paths: [PATH, { id: 't_0000bbbb', ...body, status: 'ok' }] };
-      return res(settings);
+    if (url === '/api/settings/tv/libraries') {
+      if (method === 'PUT') selected = body.selected;
+      return res({ selected, libraries: [PATH, ANIME].map(l => ({ ...l, selected: selected.includes(l.id) })) });
     }
     if (url === '/api/settings/tv/library') return res(library);
     if (url === '/api/settings/tv/scan') {
@@ -60,7 +65,9 @@ describe('Settings > TV', () => {
   it('lists the paths, the shows with their files, the unmatched folders and Upgrades', async () => {
     render(<TvLibrarySettings wide />);
     await screen.findByText('Severance (2022)');
-    expect(within(screen.getByTestId('tv-paths')).getByText('/media/TV')).toBeTruthy();
+    await screen.findAllByTestId('lib-select-row');
+    const libs = within(screen.getByTestId('tv-paths')).getAllByTestId('lib-select-row');
+    expect(libs.map(r => [r.textContent, r.getAttribute('aria-checked')])).toEqual([['TV/media/TV', 'true'], ['Anime/media/Anime', 'false']]);
     const rows = screen.getAllByTestId('tv-show');
     expect(within(rows[0]!).getByTestId('tv-show-subtitle').textContent).toBe('4 episodes \u00b7 3 need review');
     expect(within(rows[0]!).getByTestId('tv-review-dot').getAttribute('aria-label')).toBe('Needs review');
@@ -73,18 +80,28 @@ describe('Settings > TV', () => {
     expect(screen.getByTestId('tv-upgrades-replace_verified').getAttribute('aria-checked')).toBe('false');
   });
 
-  it('adds a TV path and shows field errors', async () => {
+  it('selects Library paths as TV libraries; no add-path or folder picker', async () => {
     render(<TvLibrarySettings wide={false} />);
-    fireEvent.click(await screen.findByTestId('tv-add-path'));
-    fireEvent.change(screen.getByTestId('lp-name'), { target: { value: 'Anime' } });
-    fireEvent.change(screen.getByTestId('lp-dir'), { target: { value: '/etc' } });
-    fireEvent.click(screen.getByTestId('lp-save'));
-    await screen.findByText('Not allowed');
-    fireEvent.change(screen.getByTestId('lp-dir'), { target: { value: '/media/Anime' } });
-    fireEvent.click(screen.getByTestId('lp-save'));
-    await screen.findByText('/media/Anime');
-    expect(calls.filter(c => c.url === '/api/settings/tv/paths').map(c => c.body)).toEqual([
-      { name: 'Anime', path: '/etc' }, { name: 'Anime', path: '/media/Anime' }]);
+    const rows = await screen.findAllByTestId('lib-select-row');
+    expect(screen.queryByTestId('tv-add-path')).toBeNull();
+    expect(screen.queryByText('Add path')).toBeNull();
+    expect(screen.queryByTestId('lp-browse')).toBeNull();
+    const n = calls.filter(c => c.url === '/api/settings/tv/library').length;
+    fireEvent.click(rows[1]!);
+    await waitFor(() => expect(screen.getAllByTestId('lib-select-row')[1]!.getAttribute('aria-checked')).toBe('true'));
+    expect(calls.filter(c => c.method === 'PUT' && c.url === '/api/settings/tv/libraries').map(c => c.body))
+      .toEqual([{ selected: ['p_0000aaaa', 'p_0000bbbb'] }]);
+    await waitFor(() => expect(calls.filter(c => c.url === '/api/settings/tv/library').length).toBe(n + 1));
+  });
+
+  it('Scan hides when no library is selected and shows once one is', async () => {
+    selected = [];
+    settings = { ...settings, paths: [] };
+    render(<TvLibrarySettings wide />);
+    const rows = await screen.findAllByTestId('lib-select-row');
+    expect(screen.queryByTestId('tv-scan')).toBeNull();
+    fireEvent.click(rows[0]!);
+    await screen.findByTestId('tv-scan');
   });
 
   it('Scan starts a scan and shows the last scan', async () => {
@@ -136,6 +153,7 @@ describe('Settings > TV', () => {
   it('the review dot is 8px amber, and Scan is its own section with the section gap', async () => {
     render(<TvLibrarySettings wide />);
     const dot = await screen.findByTestId('tv-review-dot');
+    await screen.findAllByTestId('lib-select-row');
     expect([dot.style.width, dot.style.height, dot.style.background]).toEqual(['8px', '8px', 'var(--color-warning)']);
     const section = screen.getByTestId('tv-section');
     expect(section.style.gap).toBe(`${SECTION_GAP}px`);
@@ -147,8 +165,9 @@ describe('Settings > TV', () => {
   it('no helper text, sentence case', () => {
     const src = readFileSync(resolve(__dirname, '../src/components/library/TvLibrarySettings.tsx'), 'utf8');
     expect(src).not.toMatch(/hint=|note=|helper/i);
-    for (const label of ['Library paths', 'Unmatched', 'Shows', 'Upgrades', 'Wrong show?', 'Match', 'Scan', 'Add path', 'Keep both'])
+    for (const label of ['Libraries', 'Unmatched', 'Shows', 'Upgrades', 'Wrong show?', 'Match', 'Scan', 'Keep both'])
       expect(src).toContain(label);
+    expect(src).not.toMatch(/Add path|PathForm|FolderBrowser|addTvPath/);
   });
 });
 
