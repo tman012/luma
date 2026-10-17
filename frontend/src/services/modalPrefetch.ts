@@ -127,6 +127,8 @@ const started = new Set<string>();
  *  forgotten past this (Set keeps insertion order). */
 export const STARTED_MAX = 500;
 let active = 0;
+/** Bumped by a reset: jobs from before it finish without touching `active`. */
+let gen = 0;
 
 function pump(): void {
   while (active < WARM_CONCURRENCY && queue.length) {
@@ -134,7 +136,12 @@ function pump(): void {
     started.add(job.key);
     if (started.size > STARTED_MAX) started.delete(started.values().next().value!);
     active += 1;
-    job.run().catch(() => {}).finally(() => { active -= 1; pump(); });
+    const g = gen;
+    job.run().catch(() => {}).finally(() => {
+      if (g !== gen) return; // reset meanwhile: its slot was already freed
+      active -= 1;
+      pump();
+    });
   }
 }
 
@@ -221,6 +228,7 @@ export function _resetModalPrefetch(): void {
   loading.clear();
   queue.length = 0;
   started.clear();
+  gen += 1;
   active = 0;
   pending = false;
   tapAt = 0;

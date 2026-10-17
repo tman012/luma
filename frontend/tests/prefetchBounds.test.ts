@@ -30,4 +30,22 @@ describe('prefetch bookkeeping stays bounded', () => {
     expect(clear.mock.calls.length).toBeGreaterThan(before);
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('a reset while jobs run frees all slots; the old jobs finishing later do not skew the count', async () => {
+    _resetModalPrefetch();
+    const release: (() => void)[] = [];
+    const slow = () => new Promise<void>((r) => release.push(r));
+    for (let i = 0; i < 4; i++) scheduleWarm(`old${i}`, slow);
+    expect(release.length).toBe(4);
+    _resetModalPrefetch();
+    const fresh = vi.fn(() => new Promise<void>(() => {}));
+    for (let i = 0; i < 4; i++) scheduleWarm(`new${i}`, fresh);
+    expect(fresh).toHaveBeenCalledTimes(4);
+    // The old jobs end now; they must not free slots the new ones hold.
+    release.forEach((r) => r());
+    await new Promise((r) => setTimeout(r, 0));
+    const fifth = vi.fn(() => Promise.resolve());
+    scheduleWarm('new4', fifth);
+    expect(fifth).not.toHaveBeenCalled();
+  });
 });

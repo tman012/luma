@@ -334,3 +334,11 @@ def test_people_photo_match_is_case_sensitive(plex, url):
     r = client.get('/api/img/plex', query_string={'url': url, 'w': 120}, environ_base=LAN)
     assert r.status_code == 400
     assert calls == []
+
+
+def test_image_replies_vary_on_cookie(plex):
+    client, _, _ = plex
+    r = _get(client, 'url=/library/metadata/5/thumb/1700000000')
+    assert r.status_code == 200
+    assert r.headers['Vary'] == 'Cookie'
+    assert r.headers['Cache-Control'] == 'private, max-age=86400'

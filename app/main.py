@@ -9204,8 +9204,8 @@ def auth_logout():
         if token:
             user_auth.delete_session(token)
         resp = make_response(jsonify({'success': True}))
-        
-        
+        # The browser drops its HTTP cache for this site (signed-in images).
+        resp.headers['Clear-Site-Data'] = '"cache"'
         clear_auth_cookie(resp)
         return resp
     except Exception as e:
@@ -12121,7 +12121,8 @@ _PLEX_NO_STORE = {'Cache-Control': 'private, no-store', 'X-Content-Type-Options'
 # A served image may be kept by this browser for a day (never by a shared
 # cache); without it every detail modal re-downloads its backdrop and logo.
 # Errors and refusals above stay no-store.
-_PLEX_IMG_CACHE = {'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff'}
+# Vary: Cookie so a browser cache never hands one account's image to another.
+_PLEX_IMG_CACHE = {'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Vary': 'Cookie'}
 _PLEX_IMG_TYPES = frozenset({'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'})
 _PLEX_IMG_MAX_BYTES = 20 * 1024 * 1024
 # Plex's own people photos (cast and crew): full-size originals on plex.tv.
