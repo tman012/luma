@@ -158,7 +158,7 @@ def test_sources_panels_use_the_kiosk_theme():
         assert "linear-gradient(rgba(255,255,255,0.06), rgba(255,255,255,0.06)), #15102a" in src
         assert "border: '1px solid rgba(255,255,255,0.08)'" in src
         assert "expanded ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)'" in src
-        assert "background: '#3b82f6'" in src
+        assert '...srcPrimaryBtn' in src and "'#1d4ed8'" not in src   # primary = theme accent #3b82f6
         assert ".rejected ? '#2a2520' : 'rgba(255,255,255,0.04)'" in src
         assert ']:hover { background: rgba(255,255,255,0.08) !important' in src
         if 'MovieDetailModal' in rel:

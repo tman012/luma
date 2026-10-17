@@ -1401,7 +1401,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 {sourcesLoading && (
                   <div data-sources-state="loading" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', ...srcAbove }}>
                     <div style={{ width: '72px', height: '72px', border: '4px solid rgba(255,255,255,0.15)', borderTopColor: 'rgba(255,255,255,0.7)', borderRadius: '50%', animation: 'webModalSpin 0.8s linear infinite' }} />
-                    <span style={{ fontSize: '36px', color: SRC_HEADING_COLOR, fontWeight: 500 }}>Searching for sources...</span>
+                    <span style={{ fontSize: '36px', color: SRC_HEADING_COLOR, fontWeight: 500 }}>Searching for sources…</span>
                   </div>
                 )}
                 {/* Error */}
@@ -1467,7 +1467,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                           <button type="button" onClick={handleSrcDownload} disabled={srcConfirmLoading}
                             data-sources-download=""
                             style={{ padding: '18px 44px', borderRadius: '50px', ...srcPrimaryBtn, fontSize: '22px', fontWeight: 600, cursor: srcConfirmLoading ? 'default' : 'pointer', opacity: srcConfirmLoading ? 0.7 : 1 }}>
-                            {srcConfirmLoading ? 'Sending...' : 'Download'}
+                            {srcConfirmLoading ? 'Sending…' : 'Download'}
                           </button>
                         </div>
                       </div>

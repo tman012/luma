@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
-import { srcAbove, srcCancelBtn, SRC_HEADING_COLOR, NO_SOURCES, sourcesCount } from '../sourcesTheme';
+import { srcAbove, srcCancelBtn, srcPrimaryBtn, SRC_BLUE, SRC_HEADING_COLOR, NO_SOURCES, sourcesCount } from '../sourcesTheme';
 import { createPortal } from 'react-dom';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useTvSourcesData, type TvProcessedRelease } from './useTvSourcesData';
@@ -291,7 +291,7 @@ function ExpandedTvSourcesView({
         {loading && (
           <div data-sources-state="loading" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px', color: SRC_HEADING_COLOR, fontSize: '22px', ...srcAbove }}>
             <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,255,255,0.15)', borderTopColor: 'rgba(255,255,255,0.7)', borderRadius: '50%', animation: 'tvSourcesSpin 0.8s linear infinite' }} />
-            Searching for sources...
+            Searching for sources…
           </div>
         )}
         {!loading && error && (
@@ -299,7 +299,7 @@ function ExpandedTvSourcesView({
             Failed to load sources
           </div>
         )}
-        {/* Scope rows — pick Full Season vs an individual episode first. */}
+        {/* Scope rows — pick Full season vs an individual episode first. */}
         {!loading && !error && showScopeStep && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '560px' }}>
             {availableScopes.map((s) => (
@@ -551,13 +551,13 @@ function ExpandedTvSourcesView({
                 type="button" onClick={handleConfirmDownload} disabled={confirmLoading || !!disabledReason}
                 style={{
                   padding: '16px 40px', borderRadius: '50px',
-                  border: '1px solid #3b82f6', background: '#3b82f6',
+                  ...srcPrimaryBtn,
                   color: '#fff', fontSize: '18px', fontWeight: 600, minHeight: '56px',
                   cursor: (confirmLoading || disabledReason) ? 'default' : 'pointer', transition: 'background 0.2s ease, border-color 0.2s ease',
                   opacity: (confirmLoading || disabledReason) ? 0.5 : 1,
                 }}
               >
-                {confirmLoading ? 'Sending...' : 'Download'}
+                {confirmLoading ? 'Sending…' : 'Download'}
               </button>
             </div>
           </div>
@@ -712,8 +712,8 @@ function ReleaseCard({
               background: grabbed
                 ? '#166534'
                 : grabbing
-                  ? '#1e3a5f'
-                  : '#1d4ed8',
+                  ? SRC_BLUE
+                  : SRC_BLUE,
               color: '#fff',
               opacity: grabbing ? 0.8 : disabledReason ? 0.4 : 1,
             }}
@@ -732,7 +732,7 @@ function ReleaseCard({
                   border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff',
                   borderRadius: '50%', animation: 'tvSrcSpin 0.8s linear infinite',
                 }} />
-                Sending...
+                Sending…
               </>
             ) : (
               <>
@@ -1258,17 +1258,10 @@ function CompactTvSourcesView({
               borderRadius: '50%', animation: 'tvSrcSpin 0.8s linear infinite',
             }} />
             <span style={{ fontSize: '16px', fontWeight: 500, color: 'rgba(255,255,255,0.5)' }}>
-              Searching<span style={{ display: 'inline-block', width: '24px', textAlign: 'left' }}>
-                <span style={{ animation: 'tvSrcDot1 1.4s infinite' }}>.</span>
-                <span style={{ animation: 'tvSrcDot2 1.4s infinite' }}>.</span>
-                <span style={{ animation: 'tvSrcDot3 1.4s infinite' }}>.</span>
-              </span>
+              Searching…
             </span>
             <style>{`
               @keyframes tvSrcSpin { to { transform: rotate(360deg) } }
-              @keyframes tvSrcDot1 { 0%, 20% { opacity: 0 } 40%, 100% { opacity: 1 } }
-              @keyframes tvSrcDot2 { 0%, 40% { opacity: 0 } 60%, 100% { opacity: 1 } }
-              @keyframes tvSrcDot3 { 0%, 60% { opacity: 0 } 80%, 100% { opacity: 1 } }
             `}</style>
           </div>
         )}
@@ -1325,7 +1318,7 @@ function CompactTvSourcesView({
             }}
           >
             <p style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 16px' }}>
-              Full Season or Episode
+              Full season or episode
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {availableScopes.map(s => (
@@ -1408,7 +1401,7 @@ function CompactTvSourcesView({
             }}
           >
             <p style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 20px' }}>
-              Select Type
+              Select type
             </p>
             {grabErrorMsg && (
               <div style={{

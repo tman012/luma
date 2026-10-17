@@ -177,7 +177,7 @@ export interface ScopeOption {
 /**
  * Split a season search's releases into scopes: the full-season pack and each
  * individual episode present. Season pack first, then episodes ascending. Used
- * so a season browse can be narrowed to "Full Season" or one episode before
+ * so a season browse can be narrowed to "Full season" or one episode before
  * drilling into resolution/type.
  */
 export function buildScopeOptions(releases: TvProcessedRelease[]): ScopeOption[] {
@@ -189,7 +189,7 @@ export function buildScopeOptions(releases: TvProcessedRelease[]): ScopeOption[]
     }
   }
   const opts: ScopeOption[] = [];
-  if (seasonCount > 0) opts.push({ key: 'season', label: 'Full Season', count: seasonCount, episode: null });
+  if (seasonCount > 0) opts.push({ key: 'season', label: 'Full season', count: seasonCount, episode: null });
   for (const ep of [...epCounts.keys()].sort((a, b) => a - b)) {
     opts.push({ key: `e${ep}`, label: `Episode ${ep}`, count: epCounts.get(ep)!, episode: ep });
   }

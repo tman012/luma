@@ -4,7 +4,8 @@ import type React from 'react';
 import { START_GLOW } from '@/components/start/StartUI';
 
 export const SRC_NAVY = '#15102a';
-export const SRC_BLUE = '#3b82f6';
+/** Primary blue (#3b82f6) via the theme token. */
+export const SRC_BLUE = 'var(--color-accent)';
 
 /** Panel / full-screen backdrop: navy with the Start page glow. */
 export const srcPanel: React.CSSProperties = {

@@ -54,7 +54,8 @@ describe('desktop Sources (Expanded) is navy', () => {
     expect(src).toContain('...srcCancelBtn');
     expect(srcConfirmCard.borderRadius).toBe('20px');
     expect(srcConfirmCard.background).toContain('#15102a');
-    expect(srcPrimaryBtn.background).toBe('#3b82f6');
+    expect(srcPrimaryBtn.background).toBe('var(--color-accent)');
+    expect(read('index.css')).toContain('--color-accent: #3b82f6;');
     expect(srcCancelBtn.background).toBe('rgba(255,255,255,0.08)');
     expect(srcCancelBtn.border).toBe('1px solid rgba(255,255,255,0.12)');
   });
@@ -98,5 +99,24 @@ describe('ManualMatchPicker z-order', () => {
     expect(MATCH_PICKER_Z).toBeGreaterThanOrEqual(10100);
     vi.unstubAllGlobals();
     host.remove();
+  });
+});
+
+describe('Designer pass 2', () => {
+  it.each(SOURCES_FILES)('%s: primary buttons use the accent token, sentence case, real ellipsis', (p) => {
+    const src = read(p);
+    for (const bad of ['#1d4ed8', '#1e3a5f', 'Full Season', 'Season or Episode', 'Add to Watchlist', 'Select Type',
+      'Searching for sources...', "'Sending...'", 'srcDot1', 'tvSrcDot1']) {
+      expect(src, bad).not.toContain(bad);
+    }
+  });
+  it('TV scope label and heading are sentence case', () => {
+    expect(read('components/media/TvDetailModal/tvSourcesUtils.ts')).toContain("label: 'Full season'");
+    expect(read('components/media/TvDetailModal/TvSourcesPanel.tsx')).toContain('Full season or episode');
+  });
+  it('phone Searching uses the ellipsis character', () => {
+    for (const p of ['components/media/MovieDetailModal/SourcesPanel.tsx', 'components/media/TvDetailModal/TvSourcesPanel.tsx']) {
+      expect(read(p)).toContain('Searching\u2026');
+    }
   });
 });

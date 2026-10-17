@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
-import { srcAbove, srcCancelBtn, SRC_HEADING_COLOR, NO_SOURCES, sourcesCount } from '../sourcesTheme';
+import { srcAbove, srcCancelBtn, srcPrimaryBtn, SRC_BLUE, SRC_HEADING_COLOR, NO_SOURCES, sourcesCount } from '../sourcesTheme';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useMovieSourcesData } from './useMovieSourcesData';
 import { FocusZone } from '@/components/tv/FocusZone';
@@ -385,13 +385,13 @@ function ConfirmPanel({ target, confirmLoading, onCancel, onDownload, zoneId, er
             type="button" onClick={onDownload} disabled={confirmLoading || !!disabledReason}
             style={{
               padding: '16px 40px', borderRadius: '50px',
-              border: '1px solid #3b82f6', background: '#3b82f6',
+              ...srcPrimaryBtn,
               color: '#fff', fontSize: '18px', fontWeight: 600, minHeight: '56px',
               cursor: (confirmLoading || disabledReason) ? 'default' : 'pointer', transition: 'background 0.2s ease, border-color 0.2s ease',
               opacity: (confirmLoading || disabledReason) ? 0.5 : 1,
             }}
           >
-            {confirmLoading ? 'Sending...' : 'Download'}
+            {confirmLoading ? 'Sending…' : 'Download'}
           </button>
         </div>
       </div>
@@ -585,7 +585,7 @@ function ExpandedSourcesView({
           {loading && (
             <div data-sources-state="loading" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px', color: SRC_HEADING_COLOR, fontSize: '22px', ...srcAbove }}>
               <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,255,255,0.15)', borderTopColor: 'rgba(255,255,255,0.7)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-              Searching for sources...
+              Searching for sources…
             </div>
           )}
           {!loading && error && (
@@ -888,8 +888,8 @@ function ReleaseCard({
               background: grabbed
                 ? '#166534'
                 : grabbing
-                  ? '#1e3a5f'
-                  : '#1d4ed8',
+                  ? SRC_BLUE
+                  : SRC_BLUE,
               color: '#fff',
               opacity: grabbing ? 0.8 : disabledReason ? 0.4 : 1,
             }}
@@ -908,7 +908,7 @@ function ReleaseCard({
                   border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff',
                   borderRadius: '50%', animation: 'srcSpin 0.8s linear infinite',
                 }} />
-                Sending...
+                Sending…
               </>
             ) : (
               <>
@@ -1401,17 +1401,10 @@ function CompactSourcesView({
               borderRadius: '50%', animation: 'srcSpin 0.8s linear infinite',
             }} />
             <span style={{ fontSize: '16px', fontWeight: 500, color: 'rgba(255,255,255,0.5)' }}>
-              Searching<span style={{ display: 'inline-block', width: '24px', textAlign: 'left' }}>
-                <span style={{ animation: 'srcDot1 1.4s infinite' }}>.</span>
-                <span style={{ animation: 'srcDot2 1.4s infinite' }}>.</span>
-                <span style={{ animation: 'srcDot3 1.4s infinite' }}>.</span>
-              </span>
+              Searching…
             </span>
             <style>{`
               @keyframes srcSpin { to { transform: rotate(360deg) } }
-              @keyframes srcDot1 { 0%, 20% { opacity: 0 } 40%, 100% { opacity: 1 } }
-              @keyframes srcDot2 { 0%, 40% { opacity: 0 } 60%, 100% { opacity: 1 } }
-              @keyframes srcDot3 { 0%, 60% { opacity: 0 } 80%, 100% { opacity: 1 } }
             `}</style>
           </div>
         )}
@@ -1480,7 +1473,7 @@ function CompactSourcesView({
                   <line x1="12" y1="5" x2="12" y2="19" />
                   <line x1="5" y1="12" x2="19" y2="12" />
                 </svg>
-                Add to Watchlist
+                Add to watchlist
               </button>
             )}
           </div>
@@ -1536,7 +1529,7 @@ function CompactSourcesView({
             }}
           >
             <p style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 20px' }}>
-              Select Type
+              Select type
             </p>
             {grabErrorMsg && (
               <div style={{
