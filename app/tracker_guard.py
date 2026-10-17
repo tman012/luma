@@ -292,16 +292,23 @@ def reset_guard_for_tests(guard: Optional[TrackerGuard] = None) -> None:
 
 # ------------------------------------------------------------ keys and Test
 
-_KEY_RE = __import__('re').compile(r'^(site|host):[a-z0-9._-]{1,253}$')
+# Host part: a DNS name in ASCII form, or an IP literal (IPv6 has colons).
+_KEY_RE = __import__('re').compile(r'^(site|host):[a-z0-9._:-]{1,253}$')
 
 
 def normalize_host(url: str) -> str:
     """Lowercase host name without a trailing dot or a leading 'www.' (IDNA
-    names in their ASCII form); scheme, port, path and query are ignored."""
+    names in their ASCII form; IP literals in their compressed form, IPv6
+    without brackets); scheme, port, path and query are ignored."""
     try:
         host = (urlsplit(str(url or '').strip()).hostname or '').lower().rstrip('.')
     except ValueError:
         return ''
+    try:
+        import ipaddress
+        return str(ipaddress.ip_address(host.split('%')[0]))      # one spelling per IP literal
+    except ValueError:
+        pass
     try:
         host = host.encode('idna').decode('ascii')
     except UnicodeError:

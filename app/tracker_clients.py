@@ -488,8 +488,7 @@ CLIENTS: Dict[str, Dict[str, Callable]] = {
     'torznab': {'search': torznab_search, 'test': torznab_test},
     'beyondhd': {'search': beyondhd_search, 'test': beyondhd_test},
     'avistaz': {'search': avistaz_search, 'test': avistaz_test},
-    'iptorrents': {'search': iptorrents_search, 'test': iptorrents_test,
-                   'download_headers': iptorrents_download_headers},
+    'iptorrents': {'search': iptorrents_search, 'test': iptorrents_test},
 }
 
 
@@ -503,13 +502,6 @@ def client_for(type_id: str) -> Dict[str, Callable]:
 def test(cfg: Dict[str, Any], request: Request = http_request) -> None:
     """Raise TrackerError when *cfg* can't search; return None when it can."""
     client_for(cfg['type'])['test'](cfg, request)
-
-
-def download_headers(cfg: Dict[str, Any]) -> Dict[str, str]:
-    """Headers a release download from this tracker needs (IPTorrents: its
-    cookie and user agent). Callers send them only to the tracker's own host."""
-    fn = client_for(cfg['type']).get('download_headers')
-    return dict(fn(cfg)) if fn else {}
 
 
 def search(cfg: Dict[str, Any], query: str, categories: List[int], limit: int = 100,
