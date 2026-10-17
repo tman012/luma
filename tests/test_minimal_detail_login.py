@@ -78,3 +78,24 @@ def test_cards_carry_show_key_for_the_popup(test_app, plex):
         t.ON_DECK = old
     assert cw[0]['show_key'] == '9' and cw[0]['season'] == 1 and cw[0]['episode'] == 2
     assert 'show_key' not in cw[1]
+
+
+def test_signed_out_me_is_200_in_minimal_only(test_app, monkeypatch, tmp_path):
+    monkeypatch.setenv('LUMA_MINIMAL', '1')
+    r = test_app.test_client().get('/api/auth/me', environ_base=REMOTE)
+    assert r.status_code == 200 and r.json['authenticated'] is False
+    assert 'user' not in r.json
+    # Signed out stays signed out: protected data still answers 401.
+    assert test_app.test_client().get('/api/home', environ_base=REMOTE).status_code in (401, 302)
+    monkeypatch.delenv('LUMA_MINIMAL')
+    r = test_app.test_client().get('/api/auth/me', environ_base=REMOTE)
+    assert r.status_code == 401 and r.json['authenticated'] is False
+
+
+def test_settings_page_and_old_path_served_in_minimal(test_app, minimal_on):
+    from app import minimal
+    assert minimal.path_allowed('/settings') and minimal.path_allowed('/settings/libraries')
+    c = _client(test_app)
+    assert c.get('/settings', environ_base=REMOTE).status_code == 200
+    assert c.get('/settings/libraries', environ_base=REMOTE).status_code == 200
+    assert test_app.test_client().get('/settings', environ_base=REMOTE).status_code in (401, 302)

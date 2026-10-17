@@ -9253,7 +9253,9 @@ def auth_me():
             'needs_start': _start_flow.needs_start(),
             'pin_unlock': _start_flow.created_by_start() and not _start_flow.password_set(),
             'signup': _signup_open(),
-        }), 401
+        # Minimal builds: being signed out is an expected state, not an error
+        # (no red 401 in the browser console on every signed-out load).
+        }), (200 if _minimal.enabled() else 401)
     # Include user settings
     user_settings_data = user_auth.get_user_settings(user['id'])
     # Fetch full user record to get email

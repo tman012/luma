@@ -13,7 +13,8 @@ const modals = { openMovie: vi.fn(), openTv: vi.fn() };
 vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => modals }));
 
 import { MinimalHomePage } from '@/pages/MinimalHomePage';
-import { LibrariesEditor } from '@/pages/LibrariesPage';
+import { LibrariesEditor, LibrariesRedirect } from '@/pages/LibrariesPage';
+import { Route, Routes } from 'react-router';
 import { move } from '@/components/home/homeApi';
 
 const HOME = {
@@ -54,7 +55,7 @@ describe('Home', () => {
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Account' }));
     const items = screen.getAllByRole('menuitem').map(i => i.textContent?.trim());
-    expect(items).toEqual(['Libraries', 'Sign out']);
+    expect(items).toEqual(['Settings', 'Sign out']);
   });
 
   it('scrolls: the page unlocks html/body, rails scroll sideways', async () => {
@@ -140,6 +141,27 @@ describe('Libraries', () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ libraries: [] })));
     render(<MemoryRouter><LibrariesEditor /></MemoryRouter>);
     expect((await screen.findByTestId('libraries-empty')).textContent).toBe('Nothing here yet');
+  });
+
+  it('is the Settings page with a Home screen section and 44px controls', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ libraries: [
+      { id: '1', title: 'Movies', type: 'movie', enabled: true }, { id: '2', title: 'TV Shows', type: 'show', enabled: false }] })));
+    render(<MemoryRouter><LibrariesEditor /></MemoryRouter>);
+    await waitFor(() => screen.getByTestId('libraries'));
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Settings');
+    expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Home screen');
+    for (const b of [screen.getByLabelText('Move Movies down'), screen.getByLabelText('Move TV Shows up'), ...screen.getAllByRole('switch')]) {
+      expect(parseInt(b.style.width, 10)).toBeGreaterThanOrEqual(44);
+      expect(parseInt(b.style.height, 10)).toBeGreaterThanOrEqual(44);
+    }
+  });
+
+  it('/settings/libraries redirects to /settings', () => {
+    render(<MemoryRouter initialEntries={['/settings/libraries']}><Routes>
+      <Route path="/settings/libraries" element={<LibrariesRedirect />} />
+      <Route path="/settings" element={<p>settings page</p>} />
+    </Routes></MemoryRouter>);
+    expect(screen.getByText('settings page')).toBeTruthy();
   });
 
   it('move reorders within bounds', () => {

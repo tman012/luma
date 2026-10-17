@@ -74,6 +74,24 @@ export function SetupToast() {
   );
 }
 
+export const SIGNIN_EXPIRED = 'Sign-in expired. Try again.';
+
+/** The same brief top-center glass toast with a line of text; calls onDone when it has faded. */
+export function NoticeToast({ text, onDone }: { text: string; onDone: () => void }) {
+  const [reduced] = useState(() => prefersReducedMotion());
+  useEffect(() => {
+    const t = window.setTimeout(onDone, reduced ? FADE_IN_MS + HOLD_MS : TOTAL_MS);
+    return () => window.clearTimeout(t);
+  }, [onDone, reduced]);
+  return (
+    <div role="status" aria-live="polite" className="luma-setup-toast" data-testid="notice-toast"
+      data-reduced-motion={reduced ? 'true' : 'false'} style={{ ...toast, padding: '10px 18px' }}>
+      <style>{css}</style>
+      <span style={label}>{text}</span>
+    </div>
+  );
+}
+
 export const TOAST_TOP = 'calc(env(safe-area-inset-top, 0px) + 24px)';
 const toast: React.CSSProperties = {
   position: 'fixed', left: '50%', top: TOAST_TOP, transform: 'translate(-50%,0)', zIndex: 1000,

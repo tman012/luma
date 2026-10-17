@@ -21,7 +21,7 @@ DISABLED = [
     '/api/genre-roulette/status', '/api/request/home', '/api/bot/rooms', '/api/alfred/health',
     '/api/ha/areas', '/api/kiosk/settings', '/api/explore/cached', '/api/hero/refresh',
     '/api/sonarr/calendar', '/api/radarr/queue', '/api/settings', '/api/indexer/latest',
-    '/api/library/recent', '/api/weather', '/explore', '/settings', '/request', '/watchlist',
+    '/api/library/recent', '/api/weather', '/explore', '/request', '/watchlist',
 ]
 
 
@@ -102,7 +102,8 @@ def test_core_routes_stay_on_in_minimal_mode(test_app, minimal):
     c = test_app.test_client()
     assert c.get('/health').status_code == 200
     assert c.get('/api/start/status').json['needs_start'] is True
-    assert c.get('/api/auth/me', environ_base=REMOTE).status_code == 401
+    me = c.get('/api/auth/me', environ_base=REMOTE)
+    assert me.status_code == 200 and me.json['authenticated'] is False   # signed out is expected here
     assert c.get('/login').status_code == 200
     assert c.get('/sw.js').status_code == 200
 
@@ -197,7 +198,8 @@ def test_set_password_then_login(start_owner, test_app, monkeypatch, use_minimal
     # Sign-in uses /login from now on, not the PIN keypad.
     other = test_app.test_client()
     me = other.get('/api/auth/me', environ_base=REMOTE)
-    assert me.status_code == 401 and me.json['pin_unlock'] is False
+    assert me.status_code == (200 if use_minimal else 401)
+    assert me.json['authenticated'] is False and me.json['pin_unlock'] is False
 
     bad = other.post('/api/auth/login', json={'name': 'plexowner', 'pin': 'wrong password'}, environ_base=REMOTE)
     assert bad.status_code in (400, 401)
@@ -435,7 +437,7 @@ def test_minimal_mode_never_implicit_owner(test_app, minimal, peer, headers):
     app.main.settings.update({'security': {'auth_required': 'disabled_local', 'trusted_proxies': ''}})
     c = test_app.test_client()
     r = c.get('/api/auth/me', headers={**headers, 'Host': 'localhost'}, environ_base={'REMOTE_ADDR': peer})
-    assert r.status_code == 401
+    assert r.status_code == 200 and r.json['authenticated'] is False
     assert c.put('/api/security', json={'auth_required': 'disabled_local'}, headers=ORIGIN,
                  environ_base={'REMOTE_ADDR': peer}).status_code == 401
 

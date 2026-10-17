@@ -10,7 +10,7 @@ import { apiFetch } from '../apiClient';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 import { assetUrl } from '@/urlHelpers';
-import { markSetupJustFinished } from '@/components/start/SetupToast';
+import { markSetupJustFinished, NoticeToast, SIGNIN_EXPIRED } from '@/components/start/SetupToast';
 import { useAuth } from '@/contexts/AuthContext';
 import { isMinimal } from '@/minimal';
 import { openPlexPopup, plexAuthMode } from '@/utils/plexAuth';
@@ -51,6 +51,10 @@ export function StartPage() {
   const [step, setStep] = useState<Step>('loading');
   const [error, setError] = useState('');
   const [authUrl, setAuthUrl] = useState('');
+  // Luma restarted mid-setup (the Plex sign-in is gone): back to Welcome, with a toast.
+  const [notice, setNotice] = useState(0);
+  const clearNotice = useCallback(() => setNotice(0), []);
+  const restartedMidSetup = () => { setStep('welcome'); setAuthUrl(''); setError(''); setNotice(n => n + 1); };
   const [servers, setServers] = useState<Server[]>([]);
   const [serverName, setServerName] = useState('');
   const finishRef = useRef<() => void>(() => {});
@@ -102,8 +106,9 @@ export function StartPage() {
     setStep('connecting');
     const { ok, data } = await sendJson('/api/start/plex/server', { machine_id: s.machine_id });
     if (ok) { setStep('password'); return; }
-    setStep(count > 1 && !data.restart ? 'servers' : 'welcome');
-    if (!data.restart) setAuthUrl('');
+    if (data.restart) { restartedMidSetup(); return; }
+    setStep(count > 1 ? 'servers' : 'welcome');
+    setAuthUrl('');
     setError(data.error || `Couldn't connect to ${s.name}`);
   }, []);
 
@@ -112,7 +117,7 @@ export function StartPage() {
     const tick = async () => {
       const { ok, data } = await api<{ status?: string; servers?: Server[]; restart?: boolean }>('/api/start/plex/pin');
       if (!ok) {
-        if (data.restart) { closePopup(); setStep('welcome'); setAuthUrl(''); return; }
+        if (data.restart) { closePopup(); restartedMidSetup(); return; }
         pollRef.current = window.setTimeout(tick, 3000);
         return;
       }
@@ -180,6 +185,7 @@ export function StartPage() {
 
   return (
     <StartShell step={step}>
+      {notice > 0 && <NoticeToast key={notice} text={SIGNIN_EXPIRED} onDone={clearNotice} />}
       {step === 'welcome' && (
         <Center key="welcome">
           <Logo />
@@ -226,7 +232,7 @@ export function StartPage() {
         <Center key="password">
           <AccountStep
             onSaved={() => { setPasswordSet(true); if (isMinimal()) finish(); else setStep('access'); }}
-            onRestart={() => setStep('welcome')}
+            onRestart={restartedMidSetup}
             locked={busy}
           />
         </Center>

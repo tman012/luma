@@ -51,5 +51,13 @@ describe('Plex pop-up', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(1600); });
     expect(popup.close).toHaveBeenCalled();
     expect(await screen.findByRole('button', { name: /Continue with Plex/ })).toBeTruthy();
+    // Not silent: a brief top-center toast says why, and nothing else.
+    const toast = screen.getByTestId('notice-toast');
+    expect([...toast.querySelectorAll('span')].map(s => s.textContent)).toEqual(['Sign-in expired. Try again.']);
+    expect(toast.getAttribute('role')).toBe('status');
+    expect(toast.style.position).toBe('fixed');
+    expect(toast.style.left).toBe('50%');
+    await act(async () => { await vi.advanceTimersByTimeAsync(2400); });
+    expect(screen.queryByTestId('notice-toast')).toBeNull();
   });
 });
