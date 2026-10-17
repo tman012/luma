@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 // ---------------------------------------------------------------------------
 // UltraBlurOverlay — Shared blob-based color bleed overlay for media modals.
 //
@@ -183,7 +184,7 @@ function perceivedLuminance(color: string): number {
 // Component
 // ---------------------------------------------------------------------------
 
-export function UltraBlurOverlay({
+function BlurLayer({
   colors,
   variant,
   animationDelay = 0,
@@ -307,6 +308,38 @@ export function UltraBlurOverlay({
           }
         `}</style>
       )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Public component: when the palette changes after it's shown (the poster-
+// derived seed giving way to the fetched palette), the new layer fades in over
+// the old one, which is then dropped: an invisible crossfade, never a pop.
+// ---------------------------------------------------------------------------
+
+export const CROSSFADE_MS = 600;
+
+export function UltraBlurOverlay(props: UltraBlurOverlayProps) {
+  const { colors } = props;
+  const [prev, setPrev] = useState<UltraBlurColors | null>(null);
+  const shown = useRef<UltraBlurColors | null>(colors);
+  useEffect(() => {
+    const old = shown.current;
+    shown.current = colors;
+    if (!old || !colors || old === colors) { setPrev(null); return; }
+    setPrev(old);
+    const t = window.setTimeout(() => setPrev(null), CROSSFADE_MS + 50);
+    return () => window.clearTimeout(t);
+  }, [colors]);
+  if (!prev) return <BlurLayer {...props} />;
+  return (
+    <>
+      <BlurLayer {...props} colors={prev} />
+      <div data-blur-crossfade style={{ position: 'absolute', inset: 0, animation: `ultraBlurFadeIn ${CROSSFADE_MS}ms ease both` }}>
+        <BlurLayer {...props} />
+      </div>
+      <style>{'@keyframes ultraBlurFadeIn { from { opacity: 0; } to { opacity: 1; } }'}</style>
     </>
   );
 }

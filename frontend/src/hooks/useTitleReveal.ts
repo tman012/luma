@@ -5,7 +5,10 @@
 import { useEffect, useState } from 'react';
 
 export type TitleState = 'hold' | 'logo' | 'text';
-export const LOGO_WAIT_MS = 2000;
+/** Safety cap: past it, everything reveals at once anyway (text title and/or
+ * plain navy as the fallbacks). Prefetch keeps the usual hold near zero. */
+export const REVEAL_CAP_MS = 600;
+export const LOGO_WAIT_MS = REVEAL_CAP_MS;
 
 /** Loads and decodes an image off-screen; true once it's ready or failed. */
 function useDecoded(url: string | null | undefined): boolean {
@@ -37,11 +40,13 @@ export function useTitleReveal(
 ): TitleState {
   const [logo, setLogo] = useState<TitleState>('hold');
   const [timedOut, setTimedOut] = useState(false);
+  const [revealed, setRevealed] = useState<TitleState | null>(null);
   const backdropReady = useDecoded(backdropUrl);
 
   // New title (another item opened): start over.
   useEffect(() => {
     setLogo('hold');
+    setRevealed(null);
     setTimedOut(false);
     const t = window.setTimeout(() => setTimedOut(true), LOGO_WAIT_MS);
     return () => window.clearTimeout(t);
@@ -67,8 +72,14 @@ export function useTitleReveal(
     return () => { alive = false; img.onload = null; img.onerror = null; };
   }, [logoUrl, timedOut, logo]);
 
-  if (logo === 'hold') return timedOut ? 'text' : 'hold';
-  return backdropReady || timedOut ? logo : 'hold';
+  const now: TitleState = logo === 'hold'
+    ? (timedOut ? 'text' : 'hold')
+    : (backdropReady || timedOut ? logo : 'hold');
+  // Once revealed, stay revealed: a later backdrop or data change must never
+  // hide the popup again (one reveal per opening).
+  useEffect(() => { if (now !== 'hold' && revealed === null) setRevealed(now); }, [now, revealed]);
+  if (revealed !== null) return revealed === 'text' && now === 'logo' ? 'text' : revealed;
+  return now;
 }
 
 /** Opacity + fade for the backdrop and color blur, in step with the title. */
@@ -81,5 +92,6 @@ export function revealStyle(state: TitleState): React.CSSProperties {
 export function titleTextStyle(state: TitleState): React.CSSProperties {
   if (state === 'logo') return { display: 'none' };
   if (state === 'hold') return { display: 'block', visibility: 'hidden' };
-  return { display: 'block', animation: 'lumaTitleIn 250ms ease-out' };
+  // No fade of its own: the whole popup fades in as one (revealStyle).
+  return { display: 'block' };
 }

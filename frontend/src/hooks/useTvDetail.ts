@@ -15,9 +15,10 @@ import {
   type OwnershipMap,
 } from '@/services/sonarrApi';
 import { resolveOwnership, mediaKey } from '@/services/ownership';
-import { apiFetch } from '../apiClient';
+import { detailFetch } from '@/services/modalPrefetch';
+import { TMDB_BACKDROP_WAIT_MS } from './useMovieDetail';
 import { useModalColors } from './useModalColors';
-import { tmdbImg } from '@/utils/image';
+import { logoImg } from '@/utils/image';
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -162,10 +163,10 @@ export function useTvDetail(
 
     async function fetchClearlogo(id: number, signal: AbortSignal): Promise<string | null> {
       try {
-        const resp = await apiFetch(`/api/clearlogo/${id}?type=tv`, { signal });
+        const resp = await detailFetch(`/api/clearlogo/${id}?type=tv`, { signal });
         if (!resp.ok) return null;
         const data = (await resp.json()) as { clearlogo_url?: string };
-        return tmdbImg(data.clearlogo_url);
+        return logoImg(data.clearlogo_url);
       } catch {
         return null;
       }
@@ -180,7 +181,7 @@ export function useTvDetail(
       try {
         if (tmdbId) {
           // Fetch from TMDb
-          const resp = await apiFetch(`/api/tv/${tmdbId}`, { signal: controller.signal });
+          const resp = await detailFetch(`/api/tv/${tmdbId}`, { signal: controller.signal });
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const data = (await resp.json()) as Record<string, unknown>;
           if (!cancelled) {
@@ -204,15 +205,26 @@ export function useTvDetail(
           }
         } else if (ratingKey) {
           // Fetch from Plex metadata API (works for any item type)
-          const plexResp = await apiFetch(`/api/plex/tv/${ratingKey}`, { signal: controller.signal });
+          const plexResp = await detailFetch(`/api/plex/tv/${ratingKey}`, { signal: controller.signal });
           if (!plexResp.ok) throw new Error('Could not fetch show details from Plex');
           const plexData = (await plexResp.json()) as Record<string, unknown>;
           const plexTmdbId = plexData.tmdb_id as number | null;
 
-          // Render immediately from the Plex response (title/poster/etc are
-          // already here) instead of blocking on the second TMDb hop, then
-          // enrich below. Also unblock ownership/Sonarr right away.
-          if (!cancelled) {
+          // With a TMDb id, give TMDb a moment (usually cached by the card
+          // prefetch) so the first backdrop shown is the final one; without
+          // it, render from Plex right away. Either way nothing swaps later.
+          let earlyTmdb: Response | null = null;
+          if (plexTmdbId) {
+            let timer = 0;
+            earlyTmdb = await Promise.race([
+              detailFetch(`/api/tv/${plexTmdbId}`, { signal: controller.signal }).catch(() => null),
+              new Promise<null>((res) => { timer = window.setTimeout(() => res(null), TMDB_BACKDROP_WAIT_MS); }),
+            ]);
+            window.clearTimeout(timer);
+            if (cancelled) return;
+          }
+          const plexBackdropShown = !earlyTmdb;
+          if (!cancelled && plexBackdropShown) {
             const plexParsed = parsePlexTvResponse(plexData);
             plexParsed.ratingKey = ratingKey;
             plexParsed.isOwned = true;
@@ -224,7 +236,7 @@ export function useTvDetail(
 
           if (plexTmdbId && !cancelled) {
             // We got a TMDb ID from Plex guids — fetch rich details from TMDb
-            const tmdbResp = await apiFetch(`/api/tv/${plexTmdbId}`, { signal: controller.signal });
+            const tmdbResp = earlyTmdb ?? await detailFetch(`/api/tv/${plexTmdbId}`, { signal: controller.signal });
             if (tmdbResp.ok) {
               const tmdbData = (await tmdbResp.json()) as Record<string, unknown>;
               if (!cancelled) {
@@ -232,7 +244,9 @@ export function useTvDetail(
                 parsed.ratingKey = ratingKey;
                 parsed.tmdbId = plexTmdbId;
                 parsed.isOwned = true;
-                setShow(parsed);
+                // Never swap a backdrop that's already on screen.
+                setShow((prev) => (plexBackdropShown && prev?.backdropUrl ? { ...parsed, backdropUrl: prev.backdropUrl } : parsed));
+                setLoading(false);
                 if (parsed.tvdbId) setTvdbId(parsed.tvdbId);
                 extractTrailerAndEnrich(tmdbData);
                 if (!parsed.clearLogoUrl) {
@@ -246,6 +260,7 @@ export function useTvDetail(
               const parsed = parsePlexTvResponse(plexData);
               parsed.ratingKey = ratingKey;
               setShow(parsed);
+              setLoading(false);
               setTrailerKey(null);
               if (!parsed.clearLogoUrl && plexTmdbId) {
                 fetchClearlogo(plexTmdbId, controller.signal).then((logo) => {

@@ -5,7 +5,7 @@ import { apiFetch } from '@/apiClient';
 import type { UltraBlurColors } from '@/utils/modalParsers';
 
 export type ColorKind = 'movie' | 'tv';
-export const TMDB_PREFER_MS = 1000;
+export const TMDB_PREFER_MS = 400;
 const MAX_ENTRIES = 300;
 // Cached per source URL, so a card that only knows its Plex key (a TV show
 // before its TMDb id is known) still warms what the popup will ask for.
@@ -56,6 +56,23 @@ export function prefetchModalColors(kind: ColorKind, ratingKey?: number, tmdbId?
   if (ratingKey) void cached(plexUrl(ratingKey));
 }
 
+// Poster-derived palettes set by the tap that opens a popup (phone), read by
+// the popup on its first render so its first paint is already the blur.
+const seeds = new Map<string, UltraBlurColors>();
+const seedKey = (kind: ColorKind, ratingKey?: number, tmdbId?: number) =>
+  ratingKey ? `${kind}:rk:${ratingKey}` : `${kind}:tmdb:${tmdbId}`;
+
+export function setSeedColors(kind: ColorKind, ratingKey: number | undefined, tmdbId: number | undefined, c: UltraBlurColors): void {
+  if (!ratingKey && !tmdbId) return;
+  seeds.set(seedKey(kind, ratingKey, tmdbId), c);
+  if (seeds.size > 50) seeds.delete(seeds.keys().next().value as string);
+}
+
+export function getSeedColors(kind: ColorKind, ratingKey?: number, tmdbId?: number): UltraBlurColors | null {
+  return (ratingKey && seeds.get(seedKey(kind, ratingKey))) || (tmdbId && seeds.get(seedKey(kind, undefined, tmdbId))) || null;
+}
+
 export function _resetModalColors(): void {
   cache.clear();
+  seeds.clear();
 }

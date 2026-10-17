@@ -87,7 +87,7 @@ export const TMDB_BUSY_TEXT = 'TMDB is busy. Try again in a minute.';
 // ---------------------------------------------------------------------------
 
 import { posterUrl as tmdbPosterUrl, tmdbImg } from '@/utils/image';
-import { prefetchModalColors } from '@/services/modalColors';
+import { warmDetail } from '@/services/modalPrefetch';
 
 function titleKey(title: string, year: number | string | null | undefined): string {
   return `${(title || '').toLowerCase()}_${year || ''}`;
@@ -246,7 +246,7 @@ export async function batchCheckOwnership(
 function warmResult(item: SearchMovie): void {
   const rk = item.isOwned && item.rating_key ? Number(item.rating_key) : undefined;
   const tmdb = item.tmdb_id || item.id;
-  prefetchModalColors(item.media_type === 'tv' ? 'tv' : 'movie', rk, tmdb ? Number(tmdb) : undefined);
+  void warmDetail(item.media_type === 'tv' ? 'tv' : 'movie', rk, tmdb ? Number(tmdb) : undefined);
 }
 
 export { warmResult, getPosterUrl, getProfileUrl, getTitle, getYear, titleKey };

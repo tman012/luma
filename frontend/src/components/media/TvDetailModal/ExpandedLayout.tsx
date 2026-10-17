@@ -912,7 +912,8 @@ function SeasonDetailModal({
         }} />
 
         {/* Content container */}
-        <div data-scroll-container className="luma-scroll-y" style={{
+        <div data-scroll-container className="luma-scroll-y" data-reveal={titleState !== 'hold' ? 'shown' : 'hold'} style={{
+          ...revealStyle(titleState),
           position: 'relative', zIndex: 3,
           display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
           height: '100%', overflowY: 'auto', overflowX: 'hidden',
@@ -926,7 +927,7 @@ function SeasonDetailModal({
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             padding: t.contentPadding,
             opacity: phase === 'visible' ? 1 : 0,
-            transition: 'opacity 1s ease-in-out 0.8s',
+            transition: 'none', // the container's single reveal fades it
             willChange: 'opacity',
           }}>
             <div style={{
@@ -1468,7 +1469,8 @@ export function ExpandedLayout(props: TvModalViewProps) {
           }} />
 
           {/* Content — flex column, justify-end */}
-          <div style={{
+          <div data-reveal={loading || titleState !== 'hold' ? 'shown' : 'hold'} style={{
+            ...revealStyle(loading ? 'text' : titleState),
             position: 'relative',
             zIndex: 3,
             display: 'flex',
@@ -1523,7 +1525,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                     justifyContent: 'center',
                     padding: t.contentPadding,
                     opacity: phase === 'visible' ? 1 : 0,
-                    transition: 'opacity 1s ease-in-out 0.8s',
+                    transition: 'none', // the container's single reveal fades it
                     willChange: 'opacity',
                   }}
                 >

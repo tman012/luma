@@ -779,8 +779,11 @@ export function ExpandedLayout(props: MovieModalViewProps) {
         <div
           ref={scrollRef}
           data-scroll-container
+          data-reveal={loading || titleState !== 'hold' ? 'shown' : 'hold'}
           className="luma-scroll-y"
           style={{
+            // One reveal for all content, with the backdrop, blur and title.
+            ...revealStyle(loading ? 'text' : titleState),
             position: 'relative',
             zIndex: 3,
             display: 'flex',
@@ -871,7 +874,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 justifyContent: 'center',
                 padding: t.contentPadding,
                 opacity: phase === 'visible' ? 1 : 0,
-                transition: 'opacity 1s ease-in-out 0.8s',
+                transition: 'none', // the container's single reveal fades it
                 willChange: 'opacity',
               }}
             >

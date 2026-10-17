@@ -53,7 +53,28 @@ export function backdropUrl(
   path: string | undefined | null,
   size: BackdropSize = 'original',
 ): string | null {
-  return resolveImageUrl(path, size);
+  // Phones (minimal): w780 instead of the multi-MB original, so the popup's
+  // backdrop decodes fast enough to reveal with everything else.
+  return resolveImageUrl(path, phoneMinimal() && size === 'original' ? 'w780' : size);
+}
+
+/** Minimal mode on a phone-width screen (the desktop popup keeps its sizes). */
+export function phoneMinimal(): boolean {
+  return isMinimal() && typeof window !== 'undefined' && window.innerWidth < 1024;
+}
+
+/** Plex art for the popup backdrop: a 780x439 transcode on phones (minimal). */
+export function plexBackdrop(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return phoneMinimal() ? sizedPlexImg(url, 780, 439) : url;
+}
+
+/** A clearlogo URL as the popup loads it: w500 on phones (minimal), through
+ *  the TMDb proxy in minimal mode. */
+export function logoImg(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const sized = phoneMinimal() ? url.replace('/t/p/original/', '/t/p/w500/') : url;
+  return tmdbImg(sized);
 }
 
 /**

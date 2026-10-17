@@ -1,7 +1,8 @@
 /** Phone-first rails on Luma's purple-navy glass. */
 import { img, type Card, type Rail } from './homeApi';
 import { FONT } from '@/components/start/StartUI';
-import { prefetchModalColors } from '@/services/modalColors';
+import { useEffect, useRef } from 'react';
+import { scheduleWarm, warmDetail } from '@/services/modalPrefetch';
 
 export const GLASS: React.CSSProperties = {
   background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
@@ -16,22 +17,48 @@ export function RailRow({ title, children, testId }: { title: string; children: 
   );
 }
 
-/** Warm the detail popup's color blur with the ids openDetail will use. */
-export function warmCard(c: Card): void {
-  if (c.tmdb_id) return prefetchModalColors(c.type === 'movie' ? 'movie' : 'tv', undefined, c.tmdb_id);
-  if (c.type === 'movie') return prefetchModalColors('movie', Number(c.key));
-  prefetchModalColors('tv', Number(c.show_key || c.key));
+/** The ids openDetail will open a card's popup with. */
+export function cardIds(c: Card): { kind: 'movie' | 'tv'; ratingKey?: number; tmdbId?: number } {
+  const kind = c.type === 'movie' ? 'movie' : 'tv';
+  if (c.tmdb_id) return { kind, tmdbId: c.tmdb_id };
+  return { kind, ratingKey: Number(kind === 'movie' ? c.key : (c.show_key || c.key)) };
 }
 
-type OnOpen = ((card: Card) => void) | undefined;
+/** Warm the detail popup (metadata, backdrop, logo, color blur). */
+export function warmCard(c: Card): Promise<void> {
+  const { kind, ratingKey, tmdbId } = cardIds(c);
+  return warmDetail(kind, ratingKey, tmdbId).catch(() => {});
+}
+
+type OnOpen = ((card: Card, el?: HTMLElement | null) => void) | undefined;
+
+/** Cards on or near the screen get warmed (4 at a time); one that scrolls
+ *  away before its turn is dropped. */
+function useWarmWhenVisible(ref: React.RefObject<HTMLElement | null>, card: Card, on: boolean): void {
+  useEffect(() => {
+    const el = ref.current;
+    if (!on || !el || typeof IntersectionObserver === 'undefined') return;
+    let cancel = () => {};
+    const io = new IntersectionObserver((entries) => {
+      const e = entries[entries.length - 1];
+      cancel();
+      cancel = e?.isIntersecting ? scheduleWarm(`${card.type}:${card.key}:${card.tmdb_id ?? ''}`, () => warmCard(card)) : () => {};
+    }, { rootMargin: '150px' });
+    io.observe(el);
+    return () => { io.disconnect(); cancel(); };
+  }, [ref, card, on]);
+}
 
 /** A card is a plain button when it can open the detail popup. */
 function CardShell({ card, onOpen, style, children }: { card: Card; onOpen: OnOpen; style: React.CSSProperties; children: React.ReactNode }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  useWarmWhenVisible(ref, card, !!onOpen);
   if (!onOpen) return <div style={style}>{children}</div>;
+  const warm = () => { void warmCard(card); };
   return (
-    <button type="button" onClick={() => onOpen(card)} aria-label={card.title}
-      onPointerEnter={() => warmCard(card)} onPointerDown={() => warmCard(card)} onFocus={() => warmCard(card)}
-      data-testid={`card-${card.key}`} style={{ ...cardButton, ...style }}>
+    <button ref={ref} type="button" onClick={(e) => onOpen(card, e.currentTarget)} aria-label={card.title}
+      onPointerEnter={warm} onPointerDown={warm} onTouchStart={warm} onFocus={warm}
+      data-testid={`card-${card.key}`} className="luma-pressable" style={{ ...cardButton, ...style }}>
       {children}
     </button>
   );
@@ -86,7 +113,7 @@ export function SkeletonRails({ rails = 3 }: { rails?: number }) {
   );
 }
 
-export function HomeRails({ cw, rails, onOpen }: { cw: Card[]; rails: Rail[]; onOpen?: (card: Card) => void }) {
+export function HomeRails({ cw, rails, onOpen }: { cw: Card[]; rails: Rail[]; onOpen?: (card: Card, el?: HTMLElement | null) => void }) {
   return (
     <div data-testid="home-rails" className="luma-rails-in">
       {cw.length > 0 && (

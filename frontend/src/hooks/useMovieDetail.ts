@@ -1,7 +1,7 @@
 import { isMinimal } from '@/minimal';
 import { useState, useEffect, useRef } from 'react';
 import { pickBestTrailer } from '@/utils/pickBestTrailer';
-import { backdropUrl as tmdbBackdrop, tmdbImg } from '@/utils/image';
+import { backdropUrl as tmdbBackdrop, logoImg } from '@/utils/image';
 import {
   parsePlexResponse,
   parseTmdbResponse,
@@ -11,6 +11,7 @@ import {
   type UltraBlurColors,
 } from '@/utils/modalParsers';
 import { apiFetch } from '../apiClient';
+import { detailFetch } from '@/services/modalPrefetch';
 import { useModalColors } from './useModalColors';
 
 // ---------------------------------------------------------------------------
@@ -18,7 +19,7 @@ import { useModalColors } from './useModalColors';
 // ---------------------------------------------------------------------------
 
 /** How long a Plex-key opening waits for TMDb's HD backdrop. */
-export const TMDB_BACKDROP_WAIT_MS = 1500;
+export const TMDB_BACKDROP_WAIT_MS = 500;
 
 interface UseMovieDetailResult {
   detail: MediaDetail | null;
@@ -69,11 +70,11 @@ export function useMovieDetail(
       try {
         if (ratingKey) {
           // Plex path — also fetch TMDb in parallel when tmdbId is known
-          const plexPromise = apiFetch(`/api/plex/movie/${ratingKey}`, { signal: controller.signal })
+          const plexPromise = detailFetch(`/api/plex/movie/${ratingKey}`, { signal: controller.signal })
             .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }) as Promise<Record<string, unknown>>;
 
           const tmdbPromise: Promise<Record<string, unknown> | null> = tmdbId
-            ? apiFetch(`/api/movie/${tmdbId}`, { signal: controller.signal })
+            ? detailFetch(`/api/movie/${tmdbId}`, { signal: controller.signal })
                 .then((r) => (r.ok ? r.json() : null))
                 .catch(() => null)
             : Promise.resolve(null);
@@ -91,7 +92,7 @@ export function useMovieDetail(
           if (!tmdbData && !tmdbId && parsed.tmdbId) {
             let timer = 0;
             tmdbData = await Promise.race([
-              apiFetch(`/api/movie/${parsed.tmdbId}`, { signal: controller.signal })
+              detailFetch(`/api/movie/${parsed.tmdbId}`, { signal: controller.signal })
                 .then((r) => (r.ok ? (r.json() as Promise<Record<string, unknown>>) : null))
                 .catch(() => null),
               new Promise<null>((res) => { timer = window.setTimeout(() => res(null), TMDB_BACKDROP_WAIT_MS); }),
@@ -150,7 +151,7 @@ export function useMovieDetail(
           setDetail(parsed);
         } else if (tmdbId) {
           // TMDb-only path (unowned movies)
-          const resp = await apiFetch(`/api/movie/${tmdbId}`, { signal: controller.signal });
+          const resp = await detailFetch(`/api/movie/${tmdbId}`, { signal: controller.signal });
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const data = (await resp.json()) as Record<string, unknown>;
           if (!cancelled) {
@@ -331,11 +332,11 @@ export function useMovieDetail(
     const id = tmdbId ?? detail.tmdbId;
     if (!id) return;
     let cancelled = false;
-    apiFetch(`/api/clearlogo/${id}`)
+    detailFetch(`/api/clearlogo/${id}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data?.clearlogo_url) return;
-        setDetail((prev) => prev ? { ...prev, clearLogoUrl: tmdbImg(data.clearlogo_url) } : prev);
+        setDetail((prev) => prev ? { ...prev, clearLogoUrl: logoImg(data.clearlogo_url) } : prev);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -354,7 +355,7 @@ export function useMovieDetail(
   useEffect(() => {
     if (!resolvedTmdbId || tmdbFetchedRef.current) return;
     let cancelled = false;
-    apiFetch(`/api/movie/${resolvedTmdbId}`)
+    detailFetch(`/api/movie/${resolvedTmdbId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return;

@@ -18,6 +18,7 @@ import {
 import { mediaKey } from '@/services/ownership';
 import { withBase } from '@/urlHelpers';
 import { sizedPlexImg, tmdbImg } from '@/utils/image';
+import { openWhenReady } from '@/services/modalPrefetch';
 const MAX_SUGGESTIONS = 5;
 
 /** Normalize title for dedup: lowercase, & → and, strip non-alphanum except spaces */
@@ -43,6 +44,14 @@ interface MobileSearchOverlayProps {
 export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose }: MobileSearchOverlayProps) {
   const [query, setQuery] = useState(initialPerson?.name ?? initialQuery);
   const [results, setResults] = useState<SearchResults | null>(null);
+  // Warm the likeliest picks (top 3) so their popup opens like a second open.
+  useEffect(() => {
+    if (!results) return;
+    const t = window.setTimeout(() => {
+      [...results.owned, ...results.unowned].slice(0, 3).forEach(warmResult);
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [results]);
   const [loading, setLoading] = useState(false);
   const resultsRef = useRef<HTMLDivElement>(null);
   const { openMovie, openTv, close } = useModalHost();
@@ -262,7 +271,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
   }
   const topSuggestions = suggestions.slice(0, MAX_SUGGESTIONS);
 
-  const handleMediaClick = (item: SearchMovie) => {
+  const handleMediaClick = (item: SearchMovie, el?: HTMLElement | null) => {
     const tmdbId = item.tmdb_id || item.id;
     const rk = item.rating_key;
     const opts = {
@@ -273,11 +282,12 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
       searchQuery: query.trim() || undefined,
     };
     if (!opts.ratingKey && !opts.tmdbId) return;
-    if (item.media_type === 'tv') {
-      openTv(opts);
-    } else {
-      openMovie(opts);
-    }
+    // The popup opens only once it can show fully composed (the tapped row
+    // shows a pressed state meanwhile, 600 ms cap).
+    const kind = item.media_type === 'tv' ? 'tv' : 'movie';
+    void openWhenReady(kind, opts.ratingKey ? Number(opts.ratingKey) : undefined,
+      opts.tmdbId ? Number(opts.tmdbId) : undefined, el ?? null,
+      () => (kind === 'tv' ? openTv(opts) : openMovie(opts)));
     // Don't close search — user may come back from modal
   };
 
@@ -418,15 +428,16 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                 <button
                   key={`suggestion-${i}`}
                   type="button"
-                  onClick={() => {
+                  onClick={(e) => {
                     if (isPerson) {
                       handlePersonClick(person!);
                     } else {
-                      handleMediaClick(media!);
+                      handleMediaClick(media!, e.currentTarget);
                     }
                   }}
                   onPointerDown={() => { if (media) warmResult(media); }}
-                  className="flex w-full items-center gap-3 px-5 py-2.5 text-left active:bg-white/5"
+                  onTouchStart={() => { if (media) warmResult(media); }}
+                  className="luma-pressable flex w-full items-center gap-3 px-5 py-2.5 text-left active:bg-white/5"
                   data-testid="phone-search-row"
                 >
                   <RowThumb src={isPerson ? getProfileUrl(person!) : sizedPlexImg(getPosterUrl(media!), 120, 180)} round={isPerson} />

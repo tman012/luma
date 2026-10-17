@@ -5,7 +5,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { FONT, LOGO_SRC, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
-import { HomeRails, SkeletonRails, railCss } from '@/components/home/Rails';
+import { HomeRails, SkeletonRails, cardIds, railCss } from '@/components/home/Rails';
+import { openWhenReady } from '@/services/modalPrefetch';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import type { Card } from '@/components/home/homeApi';
 import { LUMA_BLUE } from '@/ui/lumaButton';
@@ -28,7 +29,12 @@ export function MinimalHomePage() {
   const [attempt, setAttempt] = useState(0);
   const [slow, setSlow] = useState(false);
   const modals = useModalHost();
-  const openCard = (c: Card) => openDetail(modals, c);
+  // Phone rails: the popup opens only once it can show fully composed (the
+  // tapped poster shows a pressed state meanwhile, 600 ms cap).
+  const openCard = (c: Card, el?: HTMLElement | null) => {
+    const { kind, ratingKey, tmdbId } = cardIds(c);
+    void openWhenReady(kind, ratingKey, tmdbId, el ?? null, () => openDetail(modals, c));
+  };
 
   const ready = !loading && authenticated && !startInProgress;
   useEffect(() => {

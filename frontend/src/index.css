@@ -1354,3 +1354,8 @@ html.luma-minimal [data-search-panel] { z-index: 70; }
 
 /* Detail popup: the text title fades in when it is the fallback. */
 @keyframes lumaTitleIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Phone: the tapped poster or row while its popup gets ready. */
+.luma-pressable{transition:transform 120ms ease,opacity 120ms ease}
+.luma-pressable[data-pressed="true"]{transform:scale(.96);opacity:.85}
+@media (prefers-reduced-motion: reduce){.luma-pressable[data-pressed="true"]{transform:none}}

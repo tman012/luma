@@ -16,6 +16,7 @@ import { MinimalHomePage } from '@/pages/MinimalHomePage';
 import { LibrariesEditor, LibrariesRedirect } from '@/pages/LibrariesPage';
 import { Route, Routes } from 'react-router';
 import { move } from '@/components/home/homeApi';
+import { _resetModalPrefetch } from '@/services/modalPrefetch';
 
 const HOME = {
   plex: true,
@@ -92,16 +93,21 @@ describe('Home', () => {
   });
 
   it('tapping a poster or Continue card opens the detail popup', async () => {
+    _resetModalPrefetch();
     vi.stubGlobal('fetch', vi.fn(async () => json({ ...HOME, continue_watching: [{ ...HOME.continue_watching[0], show_key: '9', season: 1, episode: 2 }] })));
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
     await waitFor(() => screen.getByTestId('home-rails'));
+    // The popup opens once it's ready (or at the 600 ms cap), never on the
+    // tap itself; the tapped card shows a pressed state meanwhile.
     fireEvent.click(screen.getByTestId('card-21'));
-    expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: 21, origin: 'continue_watching' });
+    expect(modals.openMovie).not.toHaveBeenCalled();
+    expect(screen.getByTestId('card-21').getAttribute('data-pressed')).toBe('true');
+    await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: 21, origin: 'continue_watching' }), { timeout: 1500 });
     fireEvent.click(screen.getByTestId('card-10'));
-    expect(modals.openTv).toHaveBeenLastCalledWith({ ratingKey: 9, origin: 'continue_watching',
-      episodeContext: { seasonNumber: 1, episodeNumber: 2, episodeRatingKey: 10 } });
+    await waitFor(() => expect(modals.openTv).toHaveBeenLastCalledWith({ ratingKey: 9, origin: 'continue_watching',
+      episodeContext: { seasonNumber: 1, episodeNumber: 2, episodeRatingKey: 10 } }), { timeout: 1500 });
     fireEvent.click(screen.getByTestId('card-31'));
-    expect(modals.openTv).toHaveBeenLastCalledWith({ ratingKey: 31, origin: 'recently_added_tv' });
+    await waitFor(() => expect(modals.openTv).toHaveBeenLastCalledWith({ ratingKey: 31, origin: 'recently_added_tv' }), { timeout: 1500 });
     // Continue cards keep the backdrop look (art + progress bar).
     expect(screen.getByTestId('card-10').querySelector('[data-testid="progress"]')).toBeTruthy();
   });
