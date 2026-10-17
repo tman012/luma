@@ -76,8 +76,9 @@ describe('Settings', () => {
     wide = true; stubMatchMedia();
     const fetchMock = api(); vi.stubGlobal('fetch', fetchMock);
     renderAt('/settings/home-screen');
-    await screen.findByTestId('libraries');
     const row = await screen.findByRole('button', { name: /Backdrop library/ });
+    // Desktop shows only the Backdrop library picker: no Libraries list, never fetched.
+    expect(screen.queryByTestId('libraries')).toBeNull();
     expect(screen.getByTestId('backdrop-value').textContent).toBe('Movies');
     fireEvent.click(row);
     const radios = screen.getAllByRole('radio');
@@ -128,7 +129,7 @@ describe('Settings', () => {
     wide = true; stubMatchMedia(); auth.user.is_admin = false;
     const fetchMock = api(); vi.stubGlobal('fetch', fetchMock);
     renderAt('/settings/home-screen');
-    await screen.findByTestId('libraries');
+    await screen.findByTestId('app-sidebar');
     expect(screen.getByRole('link', { name: 'Home' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull();
     expect(screen.queryByTestId('kiosk-library')).toBeNull();

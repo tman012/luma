@@ -85,13 +85,11 @@ export function SettingsPage() {
   );
 }
 
+/** Desktop (>=1024px): only the kiosk's Backdrop library (owner/admin).
+ * Phone: only the Libraries list. */
 function HomeScreenSection({ admin, wide }: { admin: boolean; wide: boolean }) {
-  return (
-    <>
-      <LibrariesEditor />
-      {admin && wide && <KioskLibraryPicker />}
-    </>
-  );
+  if (wide) return admin ? <KioskLibraryPicker /> : null;
+  return <LibrariesEditor />;
 }
 
 /** Desktop, owner/admin: Kiosk > Backdrop library (the web slideshow's movie library). */

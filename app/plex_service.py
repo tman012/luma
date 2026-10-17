@@ -82,13 +82,18 @@ class PlexService:
         try:
             resp = self._session.get(url, params=params, timeout=timeout)
             resp.raise_for_status()
+            # Decode tolerantly first: Plex can return invalid UTF-8 (seen on
+            # /library/sections/<id>/all), which must cost a character, not
+            # the whole response. Bad bytes become U+FFFD.
+            text = resp.content.decode('utf-8', errors='replace')
+            text = _ILLEGAL_XML_RE.sub('', text)
+            if '\ufffd' in text:
+                logger.info('Plex returned invalid UTF-8 for %s; replaced bad bytes', path)
             try:
-                return ET.fromstring(resp.content)
+                return ET.fromstring(text.encode('utf-8'))
             except ET.ParseError:
-                # Plex sometimes emits undeclared namespace prefixes (e.g. at:image),
-                # invalid XML chars, or unescaped ampersands. Sanitize and retry.
-                text = resp.content.decode('utf-8', errors='replace')
-                text = _ILLEGAL_XML_RE.sub('', text)
+                # Plex sometimes emits undeclared namespace prefixes (e.g. at:image)
+                # or unescaped ampersands. Sanitize and retry.
                 # Strip undeclared namespace-prefixed attributes (e.g. at:image="...")
                 # Plex sometimes emits a stray quote before the attr: "at:image="..."
                 text = re.sub(r'\s+"?\w+:\w+="[^"]*"', '', text)
