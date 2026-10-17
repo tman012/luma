@@ -23,7 +23,10 @@ export function CastPhoto({ src, alt, ready, fallback, style }: {
   }, [src, ready]);
   if (shown !== src || !src) {
     return <div role="img" aria-label={alt} data-cast-photo="placeholder"
-      style={{ ...style, backgroundImage: `url("${fallback}")`, backgroundSize: 'cover' }} />;
+      style={{ ...style, display: 'block', backgroundImage: `url("${fallback}")`, backgroundSize: 'cover' }} />;
   }
-  return <img src={src} alt={alt} data-cast-photo="loaded" style={style} />;
+  // Same box as the placeholder (block, explicit size): swapping in moves nothing.
+  const w = typeof style.width === 'string' ? parseInt(style.width, 10) : (style.width as number | undefined);
+  const h = typeof style.height === 'string' ? parseInt(style.height, 10) : (style.height as number | undefined);
+  return <img src={src} alt={alt} width={w} height={h} data-cast-photo="loaded" style={{ ...style, display: 'block' }} />;
 }
