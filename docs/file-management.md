@@ -23,13 +23,18 @@ store (`file_management.json` in the data dir, mode 0600). The seeded
 - Prod's Downloads Guard and the storage pill's manual cleanup skip each tagged
   torrent's own entry. A folder that holds one (a category folder) is never
   deleted whole; its other entries are offered one by one. Both delete nothing
-  while qBittorrent can't be read, and the manual cleanup is owner only:
-  the signed-in owner, or on a full build with LAN sign-in off, the implicit
-  LAN owner (as for the full build's other admin actions). Other admins,
-  plain, guest and Plex-approved users, and the service key (kiosk and
-  companion apps) never delete. Minimal builds don't offer it. Caveat: a LAN
-  kiosk browser with LAN sign-in off is the implicit owner and can't be told
-  apart from the owner's own browser.
+  while qBittorrent can't be read, and the manual cleanup is owner only.
+- Destructive file actions (the manual cleanup, removing a download with
+  `deleteFiles=true`, and any TV or movie delete later) need the owner signed
+  in with a session, even when LAN sign-in is off (PM ruling). Removing a
+  download without its files keeps today's access. Routes use `start_flow.require_signed_in_owner` (or the
+  `signed_in_owner_required` decorator): the implicit LAN owner, the service
+  key (kiosk, companion apps) and no session get 401 with `"sign_in": true`;
+  other admins and plain, guest and Plex-approved users get 403. The storage
+  sheet shows "Sign in to free up space" and Activity "Sign in to delete
+  files" instead of the delete (also after a 401), and /login
+  shows the form to an implicit LAN owner sent there for that action.
+  Everything else keeps today's LAN behavior.
 - `LUMA_TEST_QBIT_TAG` is refused (falls back to `luma-test`) when it equals an
   app's category: Radarr/Sonarr/..., `LUMA_QBIT_APP_CATEGORY`, or the
   `qbittorrent.app_category` setting.

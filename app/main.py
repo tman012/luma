@@ -306,6 +306,17 @@ def _require_admin():
     return None
 
 
+def _signed_in_owner_only(fn):
+    """Destructive file actions: start_flow.signed_in_owner_required, looked
+    up per request (start_flow is set up further down this module)."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return _start_flow.signed_in_owner_required(fn)(*args, **kwargs)
+    return wrapper
+
+
 def get_plex_for_request():
     """Resolve the correct PlexService for the current request.
 
@@ -4612,6 +4623,7 @@ def get_downloads_storage():
 
 
 @app.route('/api/storage/downloads/cleanup', methods=['POST'])
+@_signed_in_owner_only
 def cleanup_downloads_storage():
     """PERMANENTLY delete the oldest downloads until the target is freed.
 
@@ -4620,14 +4632,11 @@ def cleanup_downloads_storage():
     nothing is deleted while qBittorrent can't be read (the test install's
     downloads in a shared client can't be told apart without it).
 
-    Owner only, by the full build's own owner rule: the implicit LAN owner
-    (auth_required 'disabled_local') counts, as it does for the other admin
-    actions; other admins, plain and Plex-approved users and the service key
-    (companion and kiosk apps) never delete.
+    A destructive file action (PM ruling): only the owner signed in with a
+    session (start_flow.require_signed_in_owner). The implicit LAN owner, the
+    service key (kiosk, companion apps) and no session get 401 with
+    "sign_in": true; other admins and plain, guest or Plex-approved users 403.
     """
-    _user, err = _start_flow._owner_or_error(allow_implicit=True)
-    if err:
-        return err
     try:
         from app.storage_cleanup import run_cleanup, DEFAULT_TARGET_BYTES
         body = request.get_json(silent=True) or {}
@@ -16293,7 +16302,10 @@ def remove_from_tracking(torrent_hash):
     """Remove a torrent from qBittorrent (and optionally delete files on disk).
 
     Accepts deleteFiles / delete_files via query string or JSON body (default
-    false = remove torrent only, keep files). Also drops app tracking + busts
+    false = remove torrent only, keep files). With deleteFiles the owner must
+    be signed in with a session (start_flow.require_signed_in_owner); the
+    implicit LAN owner, the service key and no session get 401 with
+    "sign_in": true, everyone else 403. Also drops app tracking + busts
     the downloads-queue micro-cache so Activity refreshes immediately.
     """
     try:
@@ -16308,6 +16320,15 @@ def remove_from_tracking(torrent_hash):
             or 'false'
         )
         delete_files = str(raw).lower() in ('1', 'true', 'yes')
+        if delete_files:
+            # Deleting files is a destructive file action (PM ruling): only the
+            # owner signed in with a session, even with LAN sign-in off. Removing
+            # the torrent alone keeps today's access.
+            _user, err = _start_flow.require_signed_in_owner()
+            if err is not None:
+                resp, status = err
+                resp.headers['Cache-Control'] = 'no-store'
+                return resp, status
 
         h = (torrent_hash or '').strip().lower()
         if not h or len(h) < 16:

@@ -37,12 +37,13 @@ def _auth(mode):
     app.main.settings.update({'security': {'auth_required': mode}})
 
 
-def test_the_implicit_lan_owner_may_clean_up_on_a_full_build(full):
+def test_the_implicit_lan_owner_must_sign_in_to_clean_up(full):
+    # PM ruling (destructive file actions): LAN sign-in off doesn't count here.
     _client(full)                                  # the owner exists
     _auth('disabled_local')
     r = full.test_client().post(CLEANUP, json={'target_bytes': 7}, environ_base=LAN, headers=HDR)
-    assert r.status_code == 200
-    assert full.calls == [(7, {'require_qbit': True})]
+    assert r.status_code == 401 and r.get_json() == {'error': 'Sign in first', 'sign_in': True}
+    assert full.calls == []
 
 
 def test_lan_without_implicit_sign_in_still_needs_the_owner(full):

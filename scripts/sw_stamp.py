@@ -7,8 +7,8 @@ tests/test_sw_stamp.py fails when the frontend changed and the stamp didn't,
 or when the version isn't above LAST_SHIPPED, so a new build always ships a
 new SW (clients drop the old shell cache).
 
-LAST_SHIPPED is the newest SW version any deployed build carries (:5002 runs
-v138); TAKEN lists versions other branches hold (v139, cursor/sources-followup).
+LAST_SHIPPED is the newest SW version any deployed build carries (v140,
+a68b1be); TAKEN lists versions other branches hold (v139, cursor/sources-followup).
 A version above LAST_SHIPPED that isn't TAKEN hasn't
 shipped yet, so further frontend changes on the same branch may restamp it
 (--restamp) instead of bumping again; once it ships, raise LAST_SHIPPED and
@@ -33,7 +33,7 @@ STAMP = ROOT / 'static' / 'sw-stamp.json'
 SOURCES = ('frontend/src', 'frontend/public', 'frontend/index.html', 'frontend/package.json',
            'frontend/package-lock.json', 'frontend/vite.config.ts', 'frontend/tsconfig.json',
            'frontend/tsconfig.app.json')
-LAST_SHIPPED = 138           # :5002 runs v138
+LAST_SHIPPED = 140           # a68b1be (v140) is being pushed; :5002 ran v138
 TAKEN = frozenset({139})     # cursor/sources-followup ships v139
 VERSION_RE = re.compile(r"const CACHE_VERSION = '([a-z-]+)-v(\d+)';")
 
