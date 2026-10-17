@@ -46,13 +46,24 @@ _test_lock = threading.Lock()
 def init(*, get_current_user: Callable[[], Optional[dict]], get_owner: Callable[[], Optional[dict]],
          tester: Optional[Callable[[Dict[str, Any]], None]] = None,
          on_change: Optional[Callable[[Dict[str, Any]], None]] = None,
-         on_delete: Optional[Callable[[Dict[str, Any]], None]] = None) -> None:
+         on_delete: Optional[Callable[[Dict[str, Any]], None]] = None,
+         on_list_change: Optional[Callable[[], None]] = None) -> None:
     """*tester* runs one connection test (raises TrackerError); defaults to
     tracker_clients.test. *on_change*/*on_delete* get the stored record after
-    an edit or a delete (the search manager resets backoffs there)."""
+    an edit or a delete (the search manager resets backoffs there).
+    *on_list_change* runs after any add, edit, enable/disable or delete (cached
+    search answers no longer match the tracker list)."""
     _cfg.update(get_current_user=get_current_user, get_owner=get_owner,
                 tester=tester or (lambda cfg: tracker_clients.test(cfg)),
-                on_change=on_change or (lambda rec: None), on_delete=on_delete or (lambda rec: None))
+                on_change=on_change or (lambda rec: None), on_delete=on_delete or (lambda rec: None),
+                on_list_change=on_list_change or (lambda: None))
+
+
+def _list_changed() -> None:
+    try:
+        _cfg.get('on_list_change', lambda: None)()
+    except Exception as e:   # a cache reset must never fail the request
+        logger.warning('Tracker list change hook failed: %s', type(e).__name__)
 
 
 def _no_store(resp, status=200):
@@ -150,6 +161,7 @@ def add_tracker():
     rec, errors = get_store().create(data)
     if errors:
         return _invalid(errors)
+    _list_changed()
     return _no_store(jsonify({'tracker': get_store().public(rec)}), 201)
 
 
@@ -170,6 +182,7 @@ def edit_tracker(tracker_id: int):
     if errors:
         return _invalid(errors)
     _cfg['on_change'](rec)
+    _list_changed()
     return _no_store(jsonify({'tracker': get_store().public(rec)}))
 
 
@@ -181,6 +194,7 @@ def set_tracker_enabled(tracker_id: int):
     rec = get_store().set_enabled(tracker_id, data['enabled'])
     if rec is None:
         return _not_found()
+    _list_changed()
     return _no_store(jsonify({'tracker': get_store().public(rec)}))
 
 
@@ -190,6 +204,7 @@ def delete_tracker(tracker_id: int):
     if rec is None or not get_store().delete(tracker_id):
         return _not_found()
     _cfg['on_delete'](rec)
+    _list_changed()
     return _no_store(jsonify({'ok': True}))
 
 

@@ -216,13 +216,35 @@ def _match_categories(cfg: Dict[str, Any], requested: List[int]) -> List[int]:
 class TrackerSearch:
     def __init__(self, store: Optional[TrackerStore] = None, guard: Optional[TrackerGuard] = None,
                  request=None, tokens: Optional[ReleaseTokens] = None):
-        self.store = store or get_store()
-        self.guard = guard or get_guard()
+        self._store = store
+        self._guard = guard
         self.request = request or tracker_clients.http_request
-        self.tokens = tokens or ReleaseTokens(self.store)
+        self._tokens = tokens
+        self._tokens_for: Optional[TrackerStore] = None
         self._cache: Dict[tuple, Tuple[float, list]] = {}
         self._cache_lock = threading.Lock()
         self._skip_logged: Dict[tuple, Any] = {}
+
+    # The process-wide store and guard are looked up on use, so a store
+    # swapped in later (tests, a reloaded data dir) is the one searched.
+    @property
+    def store(self) -> TrackerStore:
+        return self._store or get_store()
+
+    @property
+    def guard(self) -> TrackerGuard:
+        return self._guard or get_guard()
+
+    @property
+    def tokens(self) -> ReleaseTokens:
+        if self._tokens is not None:
+            return self._tokens
+        store = self.store
+        with self._cache_lock:
+            if self._tokens_for is not store:
+                self._auto_tokens = ReleaseTokens(store)
+                self._tokens_for = store
+            return self._auto_tokens
 
     # -- one tracker -------------------------------------------------------
 
@@ -446,6 +468,7 @@ class LumaTrackersClient:
                 'download_url': it['downloadUrl'], 'info_hash': it.get('infoHash') or '',
                 'guid': it['guid'], 'protocol': it.get('protocol') or 'torrent',
                 'imdb_id': it.get('imdbId') or '', 'freeleech': it.get('freeleech', False),
+                'tracker_type': it.get('tracker_type') or '',
             })
         logger.info('Tracker search_all media_type=%s: %d results', media_type, len(out))
         return out

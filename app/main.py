@@ -2047,7 +2047,8 @@ def sources_all_results():
 
         client = get_indexer_client(settings)
         if not client:
-            return jsonify({'error': 'No indexer configured. Set up Prowlarr or Torznab in settings.'}), 503
+            # No trackers and no Prowlarr/Torznab: nothing to search, not an error.
+            return jsonify({'success': True, 'total': 0, 'releases': []})
 
         cache_key = (media_type, title.lower(), year)
         cached = _all_results_cache.get(cache_key)
@@ -2094,6 +2095,7 @@ def sources_all_results():
                 'origin': 'indexer',
                 'rejected': False,
                 'rejection_reasons': [],
+                'tracker_type': item.get('tracker_type', '') or '',
             })
 
         payload = {
@@ -20536,7 +20538,8 @@ from app import tracker_search as _tracker_search
 _tracker_routes.init(get_current_user=_get_current_user, get_owner=lambda: _access.owner(user_auth),
                      tester=lambda cfg: _tracker_search.get_search().test(cfg),
                      on_change=_tracker_search.on_tracker_changed,
-                     on_delete=_tracker_search.on_tracker_deleted)
+                     on_delete=_tracker_search.on_tracker_deleted,
+                     on_list_change=_all_results_cache.clear)
 app.register_blueprint(_tracker_routes.bp)
 
 
