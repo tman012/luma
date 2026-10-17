@@ -1976,6 +1976,27 @@ def radarr_movie_releases():
         logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
+def _indexer_viewer_denied():
+    """None when this request may make Luma search trackers or indexers;
+    else the 401/403 response. Checked before any cache read or outbound
+    call. With Luma's own trackers in use: the tracker member rule (a real
+    sign-in, admin or approved). Otherwise a signed-in user who is neither
+    admin nor approved gets 403. In-process jobs (latest_releases) pass."""
+    if getattr(g, 'luma_internal', False):
+        return None
+    if _tracker_sources_mod().trackers_in_use():
+        return _tracker_member_denied()
+    user = _get_current_user()
+    if user and not getattr(g, 'implicit_user', False) and not user.get('is_admin'):
+        try:
+            if user_auth.is_plex_approved(user):
+                return None
+        except Exception:
+            pass
+        return jsonify({'error': 'Access required'}), 403
+    return None
+
+
 @app.route('/api/indexer/browse')
 def indexer_browse():
     """Browse top releases across all configured indexers.
@@ -1986,6 +2007,9 @@ def indexer_browse():
         limit    – max results to return (default 25)
         query    – optional search term to narrow results
     """
+    denied = _indexer_viewer_denied()
+    if denied:
+        return denied
     try:
         from app.indexer_api import get_indexer_client
 
@@ -2510,6 +2534,7 @@ def latest_releases(params=None) -> list:
     RuntimeError when the view reports an error.
     """
     with app.test_request_context('/api/indexer/latest', query_string=dict(params or {})):
+        g.luma_internal = True
         rv = indexer_latest()
     status = 200
     if isinstance(rv, tuple):
@@ -2535,6 +2560,9 @@ def indexer_latest():
 
     Each result is enriched with a TMDb poster + tmdb_id when available.
     """
+    denied = _indexer_viewer_denied()
+    if denied:
+        return denied
     try:
         import time as _time
 
