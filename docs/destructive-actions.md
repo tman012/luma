@@ -26,7 +26,26 @@ with `state.signIn`.
   The storage sheet shows "Sign in to free up space" instead of the delete for
   an implicit LAN owner, and after a 401.
 
-Both routes take an optional JSON object. Any other non-empty body (a list,
+- `PUT /api/settings` when the change turns on or widens automatic deletion
+  (Downloads Guard). `app/auto_delete_guard._widens_auto_delete(old, new)`
+  compares the saved settings with the result of the same merge the save
+  does. It reads values with Downloads Guard's own parsers and limits. A
+  change widens when it:
+  - turns `automation.downloads_guard.enabled` on;
+  - raises `min_free_gb` (the guard fires at more free space);
+  - raises `reclaim_gb` (each run deletes more);
+  - raises `daily_cap_gb`, or sets it to 0 (no cap);
+  - lowers `check_interval_minutes` (runs more often);
+  - changes `media.downloads_root` while the guard is on (it would delete in
+    another folder).
+  Turning the guard off (even with other edits in the same save) or
+  tightening any of these stays open to any admin, as does the tracker
+  preference, which only sets what is spent first. A refused save changes
+  nothing. Non-admins get 403 as before. In Settings, Save becomes "Sign in
+  to save" after a 401 and opens /login. A new edit to that card brings Save
+  back.
+
+Both cleanup routes take an optional JSON object. Any other non-empty body (a list,
 string, number, `null`, or text that isn't JSON) gets 400
 `{"error": "Invalid request"}` and deletes nothing. The run route checks the
 body first; the cleanup route checks the session first, then the body.

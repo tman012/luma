@@ -8,7 +8,7 @@ const auth = { implicit: false, authenticated: true, loading: false, login: vi.f
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 const settingsStub = {
   settings: {}, savedSettings: {}, schema: {}, loading: false, getByPath: () => undefined, setByPath: () => {},
-  saveCard: async () => true, resetCard: () => {}, isCardDirty: () => false,
+  saveCard: async () => true, resetCard: () => {}, isCardDirty: () => false, needsSignIn: () => false,
   testConnection: async () => ({ success: true, message: '' }), reload: async () => {}, toasts: [], showToast: () => {}, dismissToast: () => {},
 };
 vi.mock('@/pages/settings/useSettings', () => ({ useSettings: () => settingsStub }));

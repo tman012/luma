@@ -44,6 +44,8 @@ export interface SettingsContextValue {
   saveCard: (paths: string[]) => Promise<boolean>;
   resetCard: (paths: string[]) => void;
   isCardDirty: (paths: string[]) => boolean;
+  /** The last save of these paths needs the owner signed in with a session. */
+  needsSignIn: (paths: string[]) => boolean;
   testConnection: (
     service: string,
     body?: Record<string, unknown>,
@@ -97,6 +99,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [schema, setSchema] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // Paths whose last save was refused until the owner signs in.
+  const [signInPaths, setSignInPaths] = useState<string[]>([]);
   const toastTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
   const showToast = useCallback((message: string, type: ToastType = 'info') => {
@@ -142,6 +146,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const setByPathFn = useCallback((path: string, value: unknown) => {
     setSettings((prev) => _setByPath(prev, path, value));
+    // A new edit is a new change: Save asks the server again.
+    setSignInPaths((prev) => (prev.includes(path) ? [] : prev));
   }, []);
 
   const saveCard = useCallback(
@@ -177,6 +183,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           node[parts[parts.length - 1]!] = value;
         }
         const result = await saveSettings(nested);
+        if (result.signIn) {
+          setSignInPaths(paths);
+          return false;
+        }
+        setSignInPaths([]);
         if (result.success) {
           if (result.settings) {
             setSettings(result.settings);
@@ -207,6 +218,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const resetCard = useCallback(
     (paths: string[]) => {
+      setSignInPaths((prev) => (paths.some((p) => prev.includes(p)) ? [] : prev));
       setSettings((prev) => {
         let updated = structuredClone(prev);
         for (const path of paths) {
@@ -230,6 +242,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       return false;
     },
     [settings, savedSettings],
+  );
+
+  const needsSignIn = useCallback(
+    (paths: string[]) => paths.some((p) => signInPaths.includes(p)),
+    [signInPaths],
   );
 
   const testConnectionFn = useCallback(
@@ -258,6 +275,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         saveCard,
         resetCard,
         isCardDirty,
+        needsSignIn,
         testConnection: testConnectionFn,
         reload,
         toasts,
