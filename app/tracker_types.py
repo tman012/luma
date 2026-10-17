@@ -149,6 +149,11 @@ def public_types() -> List[Dict[str, Any]]:
     return out
 
 
+def searches_by_id(type_id: str) -> bool:
+    """Types whose client searches by TMDB id when Sources has one (BeyondHD)."""
+    return (get_type(type_id) or {}).get('client') == 'beyondhd'
+
+
 def is_rate_strict(type_id: str) -> bool:
     return (get_type(type_id) or {}).get('family') == 'avistaz'
 

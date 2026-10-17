@@ -263,11 +263,15 @@ class TrackerSearch:
                        time.strftime('%H:%M:%S', time.localtime(until)))
 
     def search_one(self, cfg: Dict[str, Any], query: str, categories: List[int], limit: int,
-                   interactive: bool, imdb_id: str = '') -> List[Dict[str, Any]]:
+                   interactive: bool, imdb_id: str = '', tmdb_id: str = '', media_type: str = ''
+                   ) -> List[Dict[str, Any]]:
         """Guarded, cached search of one tracker; raw client results.
         Raises TrackerSkipped (guard) or TrackerError (the tracker failed)."""
         gk = guard_key(cfg)
-        ckey = (cfg['id'], (query or '').strip().lower(), tuple(categories), imdb_id or '', int(limit))
+        if not tt.searches_by_id(cfg.get('type')):
+            tmdb_id, media_type = '', ''
+        ckey = (cfg['id'], (query or '').strip().lower(), tuple(categories), imdb_id or '', int(limit),
+                str(tmdb_id or ''), media_type or '')
         ttl = TTL_INTERACTIVE if interactive else TTL_BACKGROUND
         now = time.time()
         with self._cache_lock:
@@ -293,9 +297,10 @@ class TrackerSearch:
             scope = address_scope(cfg, self.guard)
             try:
                 with scope:
-                    items = tracker_clients.search(cfg, query, categories, limit, self.request, imdb_id=imdb_id)
+                    items = tracker_clients.search(cfg, query, categories, limit, self.request, imdb_id=imdb_id,
+                                                   tmdb_id=str(tmdb_id or ''), media_type=media_type or '')
             except TrackerError as e:
-                st = tracker_clients.last_stats() if cfg.get('type') == 'iptorrents' else {}
+                st = tracker_clients.last_stats()
                 # One redacted line per failure: name, stage, reason, HTTP status. Never a URL or header.
                 logger.warning('Tracker %s (id %s) search failed: %s (HTTP %s, %s bytes, %s rows parsed)',
                                cfg['name'], cfg['id'], e.kind, e.status if e.status is not None else '-',
@@ -310,10 +315,18 @@ class TrackerSearch:
                 raise err from None
         self.guard.success(gk)
         self.store.set_status(cfg['id'], STATUS_OK, '')
-        st = tracker_clients.last_stats() if cfg.get('type') == 'iptorrents' else {}
-        logger.info('Tracker %s (id %s) search: HTTP %s, %s bytes, %s rows parsed, %d results',
+        st = tracker_clients.last_stats()
+        kinds = st.get('kinds') or {}
+        if not kinds:
+            for it in items:
+                k = tracker_clients.release_kind(it.get('title'))
+                kinds[k] = kinds.get(k, 0) + 1
+        logger.info('Tracker %s (id %s) search: HTTP %s, %s bytes, %s rows parsed, %d results, %s dropped, '
+                    'pages %s, by id %s, types %s',
                     cfg['name'], cfg['id'], st.get('status', '-'), st.get('bytes', '-'), st.get('rows', '-'),
-                    len(items))
+                    len(items), (st['rows'] - len(items)) if isinstance(st.get('rows'), int) else '-',
+                    st.get('pages', '-'), 'yes' if st.get('by_id') else 'no',
+                    ', '.join(f'{k} {v}' for k, v in sorted(kinds.items())) or '-')
         if items:          # an empty answer is never cached
             with self._cache_lock:
                 self._cache[ckey] = (time.time(), items)
@@ -353,7 +366,8 @@ class TrackerSearch:
         }
 
     def search(self, query: str, categories: List[int], limit: int, interactive: bool,
-               tracker_ids: Optional[List[int]] = None, imdb_id: str = '') -> Tuple[List[Dict[str, Any]], List[int], List[int]]:
+               tracker_ids: Optional[List[int]] = None, imdb_id: str = '', tmdb_id: str = '',
+               media_type: str = '') -> Tuple[List[Dict[str, Any]], List[int], List[int]]:
         """Fan out to enabled trackers (or *tracker_ids*). Returns
         (items in raw Prowlarr shape, ids searched, ids skipped)."""
         cfgs = self.store.enabled_configs()
@@ -371,7 +385,7 @@ class TrackerSearch:
         def one(job):
             c, cats = job
             try:
-                return c, self.search_one(c, query, cats, limit, interactive, imdb_id)
+                return c, self.search_one(c, query, cats, limit, interactive, imdb_id, tmdb_id, media_type)
             except TrackerSkipped:
                 skipped.append(c['id'])
             except TrackerError:
@@ -453,19 +467,24 @@ class LumaTrackersClient:
                     raw.append(it)
         return self._parse_items(raw)
 
-    def search_all(self, query: str, media_type: str, year: Optional[int] = None) -> List[Dict]:
+    supports_ids = True
+
+    def search_all(self, query: str, media_type: str, year: Optional[int] = None,
+                   tmdb_id: Optional[int] = None) -> List[Dict]:
         from app.indexer_api import (MOVIE_CATEGORIES_EXPANDED, TV_SPORTS_CATEGORIES,
                                      _build_search_query, _parse_title)
         # TV release names carry SxxEyy, not the first-air year: never add it for TV.
         q = (query or '').strip() if media_type == 'tv' else _build_search_query(query, year)
         cats = list(MOVIE_CATEGORIES_EXPANDED) + list(TV_SPORTS_CATEGORIES)
-        items, _, _ = self.engine.search(q, cats, 500, interactive=True)
+        tmdb = str(tmdb_id) if tmdb_id else ''
+        items, _, _ = self.engine.search(q, cats, 500, interactive=True, tmdb_id=tmdb, media_type=media_type)
         bare = (query or '').strip()
         if not items and bare and q != bare:
             # Release names often leave the year out (TV above all): one retry without it.
             logger.info('Tracker search_all media_type=%s: no results with the year, retrying without it',
                         media_type)
-            items, _, _ = self.engine.search(bare, cats, 500, interactive=True)
+            items, _, _ = self.engine.search(bare, cats, 500, interactive=True, tmdb_id=tmdb,
+                                             media_type=media_type)
         out = []
         for it in items:
             parsed = _parse_title(it['title'])

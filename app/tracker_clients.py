@@ -213,45 +213,111 @@ def torznab_test(cfg, request: Request = http_request):
 
 # ------------------------------------------------------------------ BeyondHD
 
-def beyondhd_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id=''):
+BHD_MAX_PAGES = 3                 # the API answers 100 rows a page
+BHD_PAGE_GAP_S = 2.0              # same spacing the guard keeps between requests
+_BHD_ID_RE = re.compile(r'\bS\d{1,3}(?:E\d{1,4})?\b', re.I)
+
+
+def bhd_query_text(text: str) -> str:
+    """BHD names drop most punctuation ('Dune Part Two', 'Oceans Eleven'):
+    apostrophes go, colons, commas and dashes become spaces."""
+    t = re.sub(r"[\u2019'`]", '', str(text or ''))
+    t = re.sub(r'[:;,!?\u2013\u2014]|\s-\s', ' ', t)
+    return ' '.join(t.split())
+
+
+def release_kind(name: str, bhd_type: str = '') -> str:
+    """WEB-DL, WEBRip, Remux, Encode or Other, for the per-type log counts."""
+    n = f' {str(name or "").upper().replace(".", " ")} {str(bhd_type or "").upper()} '
+    if 'REMUX' in n:
+        return 'Remux'
+    if re.search(r'\bWEB[ -]?RIP\b', n):
+        return 'WEBRip'
+    if re.search(r'\bWEB[ -]?DL\b|\bWEB\b', n):
+        return 'WEB-DL'
+    if re.search(r'\bBLU[ -]?RAY\b|\bBLURAY\b|\bBDRIP\b|\bX26[45]\b|\bH ?26[45]\b', n):
+        return 'Encode'
+    return 'Other'
+
+
+def _bhd_error(data: Dict[str, Any]) -> None:
+    msg = str(data.get('status_message') or '').lower()
+    if looks_banned(msg):
+        raise TrackerError('banned')
+    if 'key' in msg or 'auth' in msg or 'invalid' in msg:
+        raise TrackerError('auth')
+    if 'limit' in msg or 'too many' in msg:
+        raise TrackerError('rate')
+    raise TrackerError('response')
+
+
+def beyondhd_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id='',
+                    media_type=''):
+    """BHD's own API. With a TMDB id (and a known media type) the search is by
+    id: exact, and immune to punctuation or a year the release names don't
+    carry; for TV only the SxxEyy/Sxx part of the query is kept as text.
+    Pages are followed up to BHD_MAX_PAGES so a title with many Remux and
+    Encode uploads still gets its older WEB rows."""
     q, imdb = _split_imdb(query, imdb_id)
     body: Dict[str, Any] = {'action': 'search', 'rsskey': cfg.get('rss_key', '')}
-    if q:
-        body['search'] = q
-    if imdb:
-        body['imdb_id'] = imdb
-    if tmdb_id:
-        body['tmdb_id'] = str(tmdb_id)
-    kind = media_kind(categories)
-    if kind != 'any':
-        body['categories'] = 'Movies' if kind == 'movie' else 'TV'
-    # BeyondHD's API takes the key in the path; this URL is never logged.
-    resp = request('POST', f"{_base(cfg)}/api/torrents/{cfg.get('api_key', '')}", json=body,
-                   headers={'Accept': 'application/json'})
-    raise_for_status(resp)
-    data = _json(resp)
-    if not isinstance(data, dict):
-        raise TrackerError('response', resp.status)
-    if data.get('success') is False or _int(data.get('status_code', 1)) == 0:
-        msg = str(data.get('status_message') or '').lower()
-        if looks_banned(msg):
-            raise TrackerError('banned')
-        if 'key' in msg or 'auth' in msg or 'invalid' in msg:
-            raise TrackerError('auth')
-        if 'limit' in msg or 'too many' in msg:
-            raise TrackerError('rate')
-        raise TrackerError('response')
-    out = []
-    for r in data.get('results') or []:
-        if not isinstance(r, dict):
-            continue
-        out.append(_result(
-            r.get('name'), r.get('download_url'), r.get('size'), r.get('seeders'), r.get('leechers'),
-            freeleech=_int(r.get('freeleech')) == 1 or str(r.get('promo100') or '') == '1',
-            category=r.get('category'), guid=r.get('url') or r.get('id'), info_url=r.get('url') or '',
-            pub_date=_iso_to_rfc822(r.get('created_at')), imdb_id=r.get('imdb_id'),
-            info_hash=r.get('info_hash')))
-        if len(out) >= limit:
+    tmdb = str(tmdb_id or '').strip()
+    by_id = bool(tmdb.isdigit() and int(tmdb) > 0 and media_type in ('movie', 'tv'))
+    if by_id:
+        body['tmdb_id'] = tmdb
+        body['categories'] = 'Movies' if media_type == 'movie' else 'TV'
+        ep = _BHD_ID_RE.search(q or '') if media_type == 'tv' else None
+        if ep:
+            body['search'] = ep.group(0).upper()
+    else:
+        if q:
+            body['search'] = bhd_query_text(q)
+        if imdb:
+            body['imdb_id'] = imdb
+        kind = media_kind(categories)
+        if kind != 'any':
+            body['categories'] = 'Movies' if kind == 'movie' else 'TV'
+    out: List[Dict[str, Any]] = []
+    raw = 0
+    kinds: Dict[str, int] = {}
+    status, nbytes, pages, total = None, 0, 0, None
+    for page in range(1, BHD_MAX_PAGES + 1):
+        if page > 1:
+            _sleep(BHD_PAGE_GAP_S)
+            body['page'] = page
+        # BeyondHD's API takes the key in the path; this URL is never logged.
+        resp = request('POST', f"{_base(cfg)}/api/torrents/{cfg.get('api_key', '')}", json=dict(body),
+                       headers={'Accept': 'application/json'})
+        status, nbytes, pages = resp.status, nbytes + len(resp.body or b''), page
+        _set_stats(status=status, bytes=nbytes, rows=raw, kept=len(out), pages=pages, kinds=dict(kinds),
+                   by_id=by_id)
+        raise_for_status(resp)
+        data = _json(resp)
+        if not isinstance(data, dict):
+            raise TrackerError('response', resp.status)
+        if data.get('success') is False or _int(data.get('status_code', 1)) == 0:
+            _bhd_error(data)
+        rows = data.get('results') or []
+        if not isinstance(rows, list):
+            raise TrackerError('response', resp.status)
+        total = _int(data.get('total_results'), 0) or None
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            raw += 1
+            k = release_kind(r.get('name'), r.get('type'))
+            kinds[k] = kinds.get(k, 0) + 1
+            if not r.get('name') or not r.get('download_url') or len(out) >= limit:
+                continue
+            out.append(_result(
+                r.get('name'), r.get('download_url'), r.get('size'), r.get('seeders'), r.get('leechers'),
+                freeleech=_int(r.get('freeleech')) == 1 or str(r.get('promo100') or '') == '1',
+                category=r.get('category'), guid=r.get('url') or r.get('id'), info_url=r.get('url') or '',
+                pub_date=_iso_to_rfc822(r.get('created_at')), imdb_id=r.get('imdb_id'),
+                info_hash=r.get('info_hash')))
+        _set_stats(status=status, bytes=nbytes, rows=raw, kept=len(out), pages=pages, kinds=dict(kinds),
+                   by_id=by_id, total=total)
+        last = _int(data.get('total_pages'), 1)
+        if len(out) >= limit or page >= last or not rows:
             break
     return out
 
@@ -619,6 +685,10 @@ def test(cfg: Dict[str, Any], request: Request = http_request) -> None:
 
 
 def search(cfg: Dict[str, Any], query: str, categories: List[int], limit: int = 100,
-           request: Request = http_request, imdb_id: str = '', tmdb_id: str = '') -> List[Dict[str, Any]]:
+           request: Request = http_request, imdb_id: str = '', tmdb_id: str = '',
+           media_type: str = '') -> List[Dict[str, Any]]:
+    if (tt.get_type(cfg['type']) or {}).get('client') == 'beyondhd':
+        return beyondhd_search(cfg, query, categories, limit, request, imdb_id=imdb_id, tmdb_id=tmdb_id,
+                               media_type=media_type)
     return client_for(cfg['type'])['search'](cfg, query, categories, limit, request,
                                              imdb_id=imdb_id, tmdb_id=tmdb_id)

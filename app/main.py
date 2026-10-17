@@ -2175,7 +2175,7 @@ def sources_all_results():
         if denied:
             return denied
 
-        cache_key = (media_type, title.lower(), year)
+        cache_key = (media_type, title.lower(), year, request.args.get('tmdb_id', type=int))
         cached = _all_results_cache.get(cache_key)
         if cached:
             ts, data = cached
@@ -2185,7 +2185,11 @@ def sources_all_results():
                 return jsonify(data)
             _all_results_cache.pop(cache_key, None)
 
-        raw = client.search_all(title, media_type, year)
+        tmdb_id = request.args.get('tmdb_id', type=int)
+        if getattr(client, 'supports_ids', False):
+            raw = client.search_all(title, media_type, year, tmdb_id=tmdb_id if tmdb_id and tmdb_id > 0 else None)
+        else:
+            raw = client.search_all(title, media_type, year)
 
         releases = []
         for item in raw:
