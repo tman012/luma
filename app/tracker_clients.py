@@ -22,7 +22,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlencode, urljoin, urlsplit
 
 from app import tracker_types as tt
@@ -213,46 +213,216 @@ def torznab_test(cfg, request: Request = http_request):
 
 # ------------------------------------------------------------------ BeyondHD
 
-def beyondhd_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id=''):
+BHD_MAX_PAGES = 3                 # the API answers 100 rows a page
+BHD_PAGE_GAP_S = 2.0              # same spacing the guard keeps between requests
+_BHD_ID_RE = re.compile(r'\bS\d{1,3}(?:E\d{1,4})?\b', re.I)
+
+
+def bhd_query_text(text: str) -> str:
+    """BHD names drop most punctuation ('Dune Part Two', 'Oceans Eleven'):
+    apostrophes go, colons, commas and dashes become spaces."""
+    t = re.sub(r"[\u2019'`]", '', str(text or ''))
+    t = re.sub(r'[:;,!?\u2013\u2014]|\s-\s', ' ', t)
+    return ' '.join(t.split())
+
+
+def release_kind(name: str, bhd_type: str = '') -> str:
+    """WEB-DL, WEBRip, Remux, Encode or Other, for the per-type log counts."""
+    n = f' {str(name or "").upper().replace(".", " ")} {str(bhd_type or "").upper()} '
+    if 'REMUX' in n:
+        return 'Remux'
+    if re.search(r'\bWEB[ -]?RIP\b', n):
+        return 'WEBRip'
+    if re.search(r'\bWEB[ -]?DL\b|\bWEB\b', n):
+        return 'WEB-DL'
+    if re.search(r'\bBLU[ -]?RAY\b|\bBLURAY\b|\bBDRIP\b|\bX26[45]\b|\bH ?26[45]\b', n):
+        return 'Encode'
+    return 'Other'
+
+
+def _bhd_error(data: Dict[str, Any]) -> None:
+    msg = str(data.get('status_message') or '').lower()
+    if looks_banned(msg):
+        raise TrackerError('banned')
+    if 'key' in msg or 'auth' in msg or 'unauthori' in msg:
+        raise TrackerError('auth')
+    if 'limit' in msg or 'too many' in msg:
+        raise TrackerError('rate')
+    raise TrackerError('response')
+
+
+_TRAILING_YEAR_RE = re.compile(r'\s+(?:19|20)\d{2}$')
+BHD_CHAIN_BUDGET_S = 45.0         # no new attempt after this; Sources waits 75 s
+# Failures after which another attempt may still work. Rate limits, bans and
+# rejected keys end the search at once (and start the guard's backoff).
+_BHD_RETRYABLE = ('response', 'http', 'timeout', 'network', 'redirect', 'too_large')
+_monotonic = time.monotonic
+
+
+class OutOfBudget(Exception):
+    """The guard refused another request of a multi-request search (every
+    page and fallback is charged as its own request). Nothing was sent."""
+
+    def __init__(self, reason: str = ''):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def bhd_tmdb_param(tmdb_id: str, media_type: str) -> str:
+    """BHD's tmdb_id filter takes '<movie|tv>/<id>' (the same shape its
+    results carry, e.g. 'movie/693134'); a bare number matches nothing."""
+    return f"{'movie' if media_type == 'movie' else 'tv'}/{int(tmdb_id)}"
+
+
+def beyondhd_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id='',
+                    media_type=''):
+    """BHD's own API, text first exactly as before (the query as given),
+    then, only while nothing was found: the punctuation-stripped text, for
+    movies the title without the year, and last the TMDB id
+    ('movie/<id>' / 'tv/<id>', TV with its SxxEyy/Sxx text). An attempt that
+    fails with a bad answer, an HTTP error or a timeout moves on to the next;
+    a rate limit, ban or rejected key stops at once. When every attempt
+    failed the error is raised, never an empty list. The whole chain is one
+    search to the guard. Pages are followed up to BHD_MAX_PAGES."""
     q, imdb = _split_imdb(query, imdb_id)
-    body: Dict[str, Any] = {'action': 'search', 'rsskey': cfg.get('rss_key', '')}
-    if q:
-        body['search'] = q
-    if imdb:
-        body['imdb_id'] = imdb
-    if tmdb_id:
-        body['tmdb_id'] = str(tmdb_id)
-    kind = media_kind(categories)
-    if kind != 'any':
-        body['categories'] = 'Movies' if kind == 'movie' else 'TV'
-    # BeyondHD's API takes the key in the path; this URL is never logged.
-    resp = request('POST', f"{_base(cfg)}/api/torrents/{cfg.get('api_key', '')}", json=body,
-                   headers={'Accept': 'application/json'})
-    raise_for_status(resp)
-    data = _json(resp)
-    if not isinstance(data, dict):
-        raise TrackerError('response', resp.status)
-    if data.get('success') is False or _int(data.get('status_code', 1)) == 0:
-        msg = str(data.get('status_message') or '').lower()
-        if looks_banned(msg):
-            raise TrackerError('banned')
-        if 'key' in msg or 'auth' in msg or 'invalid' in msg:
-            raise TrackerError('auth')
-        if 'limit' in msg or 'too many' in msg:
-            raise TrackerError('rate')
-        raise TrackerError('response')
-    out = []
-    for r in data.get('results') or []:
-        if not isinstance(r, dict):
-            continue
-        out.append(_result(
-            r.get('name'), r.get('download_url'), r.get('size'), r.get('seeders'), r.get('leechers'),
-            freeleech=_int(r.get('freeleech')) == 1 or str(r.get('promo100') or '') == '1',
-            category=r.get('category'), guid=r.get('url') or r.get('id'), info_url=r.get('url') or '',
-            pub_date=_iso_to_rfc822(r.get('created_at')), imdb_id=r.get('imdb_id'),
-            info_hash=r.get('info_hash')))
-        if len(out) >= limit:
+    tmdb = str(tmdb_id or '').strip()
+    has_id = bool(tmdb.isdigit() and int(tmdb) > 0 and media_type in ('movie', 'tv'))
+    acc: Dict[str, Any] = {'status': None, 'bytes': 0, 'rows': 0, 'pages': 0, 'kinds': {}, 'total': None,
+                           'by_id': False, 'fallback': '', 'steps': []}
+    out: List[Dict[str, Any]] = []
+
+    def stats():
+        _set_stats(status=acc['status'], bytes=acc['bytes'], rows=acc['rows'], kept=len(out),
+                   pages=acc['pages'], kinds=dict(acc['kinds']), by_id=acc['by_id'], total=acc['total'],
+                   fallback=acc['fallback'], steps=list(acc['steps']), stopped=acc.get('stopped', ''))
+
+    def run(body: Dict[str, Any], step: Dict[str, Any]) -> int:
+        """All pages of one query; returns the raw rows it found."""
+        found = 0
+        for page in range(1, BHD_MAX_PAGES + 1):
+            if acc['pages']:
+                _sleep(BHD_PAGE_GAP_S)
+            b = dict(body)
+            if page > 1:
+                b['page'] = page
+            # BeyondHD's API takes the key in the path; this URL is never logged.
+            resp = request('POST', f"{_base(cfg)}/api/torrents/{cfg.get('api_key', '')}", json=b,
+                           headers={'Accept': 'application/json'})
+            acc['status'], acc['pages'] = resp.status, acc['pages'] + 1
+            acc['bytes'] += len(resp.body or b'')
+            step['http'] = resp.status
+            stats()
+            raise_for_status(resp)
+            data = _json(resp)
+            if not isinstance(data, dict):
+                raise TrackerError('response', resp.status)
+            step['success'] = data.get('success')
+            step['status_code'] = data.get('status_code')
+            if data.get('success') is False or _int(data.get('status_code', 1)) == 0:
+                _bhd_error(data)
+            rows = data.get('results') or []
+            if not isinstance(rows, list):
+                raise TrackerError('response', resp.status)
+            acc['total'] = _int(data.get('total_results'), 0) or None
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                found += 1
+                acc['rows'] += 1
+                k = release_kind(r.get('name'), r.get('type'))
+                acc['kinds'][k] = acc['kinds'].get(k, 0) + 1
+                if not r.get('name') or not r.get('download_url') or len(out) >= limit:
+                    continue
+                out.append(_result(
+                    r.get('name'), r.get('download_url'), r.get('size'), r.get('seeders'), r.get('leechers'),
+                    freeleech=_int(r.get('freeleech')) == 1 or str(r.get('promo100') or '') == '1',
+                    category=r.get('category'), guid=r.get('url') or r.get('id'), info_url=r.get('url') or '',
+                    pub_date=_iso_to_rfc822(r.get('created_at')), imdb_id=r.get('imdb_id'),
+                    info_hash=r.get('info_hash')))
+            stats()
+            if len(out) >= limit or page >= _int(data.get('total_pages'), 1) or not rows:
+                break
+        return found
+
+    base: Dict[str, Any] = {'action': 'search', 'rsskey': cfg.get('rss_key', '')}
+
+    def text_body(text: str) -> Dict[str, Any]:
+        b = dict(base)
+        if text:
+            b['search'] = text
+        if imdb:
+            b['imdb_id'] = imdb
+        kind = media_kind(categories)
+        if kind != 'any':
+            b['categories'] = 'Movies' if kind == 'movie' else 'TV'
+        return b
+
+    attempts: List[Tuple[str, Dict[str, Any]]] = []
+    seen = set()
+
+    def add(name: str, body: Dict[str, Any]) -> None:
+        key = json.dumps(body, sort_keys=True)
+        if key not in seen:
+            seen.add(key)
+            attempts.append((name, body))
+
+    raw_text = (q or '').strip()
+    clean = bhd_query_text(raw_text)
+    add('text', text_body(raw_text))                      # exactly what ee3bee4 sent
+    if clean and clean != raw_text:
+        add('text stripped', text_body(clean))
+    if media_type == 'movie' and clean:
+        bare = _TRAILING_YEAR_RE.sub('', clean)
+        if bare and bare != clean:
+            add('text no year', text_body(bare))
+    if has_id:
+        b = dict(base, tmdb_id=bhd_tmdb_param(tmdb, media_type))
+        ep = _BHD_ID_RE.search(raw_text) if media_type == 'tv' else None
+        if ep:
+            b['search'] = ep.group(0).upper()
+        add('id', b)
+
+    started = _monotonic()
+    errors: List[TrackerError] = []
+    answered = False
+    for i, (name, body) in enumerate(attempts):
+        if i and _monotonic() - started > BHD_CHAIN_BUDGET_S:
+            acc['stopped'] = 'budget'
             break
+        step: Dict[str, Any] = {'step': name, 'http': None, 'success': None, 'status_code': None, 'rows': 0}
+        acc['steps'].append(step)
+        if i:
+            acc['fallback'] = name
+        acc['by_id'] = name == 'id'
+        try:
+            step['rows'] = run(body, step)
+            answered = True
+        except OutOfBudget:
+            step['error'] = 'budget'
+            stats()
+            if answered or out:
+                break
+            raise
+        except TrackerError as e:
+            if name == 'id' and e.kind != 'rate':
+                # BHD refusing the id is an id problem, never a rejected key or a
+                # reason to back off: the text attempts above stand.
+                step['error'] = f'id ({e.kind})'
+                stats()
+                continue
+            step['error'] = e.kind
+            errors.append(e)
+            stats()
+            if e.kind not in _BHD_RETRYABLE:
+                if out:
+                    break
+                raise
+            continue
+        if step['rows']:
+            break
+    stats()
+    if not answered and errors:
+        raise errors[-1]
     return out
 
 
@@ -619,6 +789,10 @@ def test(cfg: Dict[str, Any], request: Request = http_request) -> None:
 
 
 def search(cfg: Dict[str, Any], query: str, categories: List[int], limit: int = 100,
-           request: Request = http_request, imdb_id: str = '', tmdb_id: str = '') -> List[Dict[str, Any]]:
+           request: Request = http_request, imdb_id: str = '', tmdb_id: str = '',
+           media_type: str = '') -> List[Dict[str, Any]]:
+    if (tt.get_type(cfg['type']) or {}).get('client') == 'beyondhd':
+        return beyondhd_search(cfg, query, categories, limit, request, imdb_id=imdb_id, tmdb_id=tmdb_id,
+                               media_type=media_type)
     return client_for(cfg['type'])['search'](cfg, query, categories, limit, request,
                                              imdb_id=imdb_id, tmdb_id=tmdb_id)

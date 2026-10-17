@@ -131,7 +131,7 @@ def test_all_results_refresh_flag_reaches_the_trackers(test_app, monkeypatch):
         def __init__(self):
             pass
 
-        def search_all(self, q, mt, year=None, refresh=False, statuses=None):
+        def search_all(self, q, mt, year=None, tmdb_id=None, refresh=False, statuses=None):
             seen.append(refresh)
             return []
     import app.indexer_api as ia

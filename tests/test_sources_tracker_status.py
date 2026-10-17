@@ -58,7 +58,7 @@ def _fake(monkeypatch, statuses, rows=()):
         def __init__(self):
             pass
 
-        def search_all(self, q, mt, year=None, refresh=False, statuses=None):
+        def search_all(self, q, mt, year=None, tmdb_id=None, refresh=False, statuses=None):
             statuses.extend(list(STAT))
             return list(rows)
     STAT = statuses
