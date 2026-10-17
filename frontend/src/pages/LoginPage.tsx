@@ -31,7 +31,8 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
-  const [error, setError] = useState('');
+  // A stale form post lands here with ?expired=1 (server /login, minimal mode).
+  const [error, setError] = useState(() => (expiredFromQuery(location.search) ? SESSION_EXPIRED : ''));
   const [busy, setBusy] = useState(false);
 
   const emailRef = useRef<HTMLInputElement>(null);
@@ -74,7 +75,8 @@ export function LoginPage() {
 
   async function handleSignIn(e?: React.FormEvent) {
     e?.preventDefault();
-    if (!email.trim() || !pin) return;
+    if (!email.trim()) { emailRef.current?.focus(); return; }
+    if (!pin) { pinRef.current?.focus(); return; }
     setBusy(true); setError('');
     const result = await login(email.trim(), pin);
     if (!result.success) { setError(result.error || INVALID_LOGIN); setPin(''); setBusy(false); setTimeout(() => pinRef.current?.focus(), 0); }
@@ -122,7 +124,8 @@ export function LoginPage() {
       <div style={columnStyle}>
         <Logo />
         <LogoGap />
-        <Title>{flow === 'signup' ? 'Create account' : 'Sign in'}</Title>
+        {/* Sign in has no visible heading (same as full mode); it stays for screen readers. */}
+        {flow === 'signup' ? <Title>Create account</Title> : <h1 style={SR_ONLY}>Sign in</h1>}
         <div style={formBlockStyle}>
         {/* SIGN IN */}
         {flow === 'signin' && (
@@ -146,8 +149,10 @@ export function LoginPage() {
                 onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
                 autoComplete="current-password" disabled={busy}
               />
-              {error && <p style={errorStyle} role="alert">{error}</p>}
-              <button type="submit" style={btnStyle(!email.trim() || !pin || busy)} disabled={busy || !email.trim() || !pin}>
+              {/* Reserved line: an error never moves the form. */}
+              <p style={errorStyle} role="alert" aria-live="polite">{error}</p>
+              {/* Stays blue when empty; submitting empty focuses the missing field. */}
+              <button type="submit" style={primaryBtnStyle} disabled={busy}>
                 {busy ? 'Signing in…' : 'Sign in'}
               </button>
             </form>
@@ -273,10 +278,19 @@ const btnStyle = (disabled: boolean): React.CSSProperties =>
 const INVALID_LOGIN = 'Invalid email, username, or password';
 const PASSWORD_SPACE_ERROR = "Password can't start or end with a space";
 
+const SESSION_EXPIRED = 'Your session expired. Sign in again.';
+
 const errorStyle: React.CSSProperties = {
-  color: '#f87171',
+  color: '#ef4444',
   fontSize: 13,
+  lineHeight: '18px',
+  minHeight: 18,
   margin: '10px 0 0',
+};
+
+const SR_ONLY: React.CSSProperties = {
+  position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+  overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0,
 };
 
 
@@ -312,4 +326,9 @@ export function nextFromQuery(search: string): string | null {
   const base = getUrlBase().replace(/\/+$/, '');
   const path = base && (next === base || next.startsWith(base + '/')) ? next.slice(base.length) || '/' : next;
   return path.startsWith('/login') ? '/' : path;
+}
+
+/** ?expired=1 from the server's /login after a stale form post. */
+export function expiredFromQuery(search: string): boolean {
+  return new URLSearchParams(search).get('expired') === '1';
 }

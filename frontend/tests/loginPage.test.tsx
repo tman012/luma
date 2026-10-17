@@ -8,7 +8,7 @@ const login = vi.fn(async () => ({ success: false, error: 'Invalid email, userna
 vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ login, authenticated: false, loading: false, needsStart: false, pinUnlock: false, signupOpen: false }),
 }));
-import { LoginPage } from '@/pages/LoginPage';
+import { LoginPage, expiredFromQuery } from '@/pages/LoginPage';
 import { LOGO_SRC } from '@/components/start/StartUI';
 
 const src = readFileSync(resolve(__dirname, '../src/pages/LoginPage.tsx'), 'utf8');
@@ -55,16 +55,73 @@ describe('LoginPage', () => {
     const submits = container.querySelectorAll('form button[type="submit"]');
     expect(submits.length).toBe(1);
     const btn = screen.getByRole('button', { name: 'Sign in' }) as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
-    expect(btn.style.opacity).toBe('');
-    expect(btn.style.color).toBe('rgb(199, 206, 219)');
-    fireEvent.change(user, { target: { value: 'taylor' } });
-    expect(btn.disabled).toBe(true);
-    fireEvent.change(pw, { target: { value: ' secret ' } });
+    // Designer: the button stays blue (not dimmed) while the form is empty.
     expect(btn.disabled).toBe(false);
+    expect(btn.style.opacity).toBe('');
+    expect(btn.style.background).toMatch(/rgb\(59, 130, 246\)|#3b82f6/);
+    expect(btn.style.color).toMatch(/rgb\(255, 255, 255\)|#fff/);
+    fireEvent.change(user, { target: { value: 'taylor' } });
+    fireEvent.change(pw, { target: { value: ' secret ' } });
     await act(async () => { fireEvent.submit(user.form!); });
     expect(login).toHaveBeenCalledWith('taylor', ' secret ');
     expect(await screen.findByText('Invalid email, username, or password')).toBeTruthy();
     expect(user.value).toBe('taylor');
+  });
+
+  it('the error is a reserved #ef4444 line between the fields and Sign in, no box', async () => {
+    login.mockClear();
+    const { container } = render(<MemoryRouter><LoginPage /></MemoryRouter>);
+    const line = screen.getByRole('alert');
+    const pw = container.querySelector('input[type="password"]') as HTMLInputElement;
+    const btn = screen.getByRole('button', { name: 'Sign in' });
+    expect(pw.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(line.nextElementSibling).toBe(btn);
+    // Same line, present and sized before and after an error: no jump.
+    expect(line.textContent).toBe('');
+    expect(line.style.minHeight).toBe('18px');
+    expect(line.style.lineHeight).toBe('18px');
+    expect(line.style.color).toMatch(/rgb\(239, 68, 68\)|#ef4444/);
+    expect(line.style.background).toBe('');
+    expect(line.style.border).toBe('');
+    expect(line.style.padding).toBe('');
+    fireEvent.change(container.querySelector('input[autocomplete="username"]')!, { target: { value: 'taylor' } });
+    fireEvent.change(pw, { target: { value: 'nope' } });
+    await act(async () => { fireEvent.submit(pw.form!); });
+    expect(screen.getByRole('alert')).toBe(line);
+    expect(line.textContent).toBe('Invalid email, username, or password');
+  });
+
+  it('no visible Sign in heading; it stays for screen readers', () => {
+    render(<MemoryRouter><LoginPage /></MemoryRouter>);
+    const h1 = screen.getByRole('heading', { level: 1 }) as HTMLElement;
+    expect(h1.textContent).toBe('Sign in');
+    expect(h1.style.position).toBe('absolute');
+    expect(h1.style.width).toBe('1px');
+    expect(h1.style.overflow).toBe('hidden');
+  });
+
+  it('an empty Sign in focuses the missing field and sends nothing', async () => {
+    login.mockClear();
+    const { container } = render(<MemoryRouter><LoginPage /></MemoryRouter>);
+    const user = container.querySelector('input[autocomplete="username"]') as HTMLInputElement;
+    const pw = container.querySelector('input[type="password"]') as HTMLInputElement;
+    await act(async () => { fireEvent.submit(user.form!); });
+    expect(document.activeElement).toBe(user);
+    fireEvent.change(user, { target: { value: 'taylor' } });
+    await act(async () => { fireEvent.submit(user.form!); });
+    expect(document.activeElement).toBe(pw);
+    expect(login).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toBe('');
+  });
+
+  it('?expired=1 says the session expired; typing clears it', () => {
+    expect(expiredFromQuery('?expired=1&next=%2Fx')).toBe(true);
+    expect(expiredFromQuery('?next=%2Fx')).toBe(false);
+    const { container } = render(<MemoryRouter initialEntries={['/login?next=%2F&expired=1']}><LoginPage /></MemoryRouter>);
+    const line = screen.getByRole('alert');
+    expect(line.textContent).toBe('Your session expired. Sign in again.');
+    expect(line.style.color).toMatch(/rgb\(239, 68, 68\)|#ef4444/);
+    fireEvent.change(container.querySelector('input[autocomplete="username"]')!, { target: { value: 't' } });
+    expect(line.textContent).toBe('');
   });
 });

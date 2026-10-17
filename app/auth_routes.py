@@ -183,7 +183,7 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
             display: flex;
             align-items: center;
             gap: 10px;
-            margin: 4px 0 24px 2px;
+            margin: 4px 0 8px 2px;
             font-size: 14px;
             color: var(--color-text-secondary);
             cursor: pointer;
@@ -203,14 +203,14 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
             transition: background 0.2s;
         }
         button[type="submit"]:hover { background: var(--color-accent-hover); }
+        /* Plain red line between Remember me and Sign in. Its height is
+           reserved, so showing an error never moves the form. */
         .error {
-            background: var(--color-glass-10);
-            border: 1px solid var(--color-glass-20);
-            color: var(--color-text-primary);
-            padding: 12px 16px;
-            border-radius: 12px;
-            margin-bottom: 18px;
-            font-size: 14px;
+            color: #ef4444;
+            font-size: 13px;
+            line-height: 18px;
+            min-height: 18px;
+            margin: 0 0 16px 2px;
         }
     </style>
 </head>
@@ -219,9 +219,6 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
         <img src="{{ url_for('static', filename='images/luma_text.webp') }}" alt="" draggable="false">
     </div>
     <main class="card">
-        {% if error %}
-        <div class="error{% if rate_limited %} rate-limited{% endif %}" role="alert">{{ error }}</div>
-        {% endif %}
         <form method="POST" action="{{ url_for('auth.login', next=next_url) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <div class="field">
@@ -236,6 +233,7 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
                 <input type="checkbox" id="remember" name="remember" checked>
                 <span>Remember me</span>
             </label>
+            <div class="error{% if rate_limited %} rate-limited{% endif %}" role="alert" aria-live="polite">{{ error }}</div>
             <button type="submit">Sign in</button>
         </form>
     </main>
@@ -251,6 +249,10 @@ def _no_store(response):
     response.headers['Cache-Control'] = 'no-store, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     return response
+
+
+# Session key for the name typed before a failed attempt (one read).
+_LAST_USERNAME = 'login_username'
 
 
 def _login_page(error='', rate_limited=False, next_url='/', username='', status=200):
@@ -281,11 +283,12 @@ def login():
     from app import minimal as _minimal
     if _minimal.enabled():
         # One sign-in screen: the SPA's one-page form (it reads ?next=).
-        # A stale form post (session expired) lands back on it too.
+        # A stale form post (session expired) lands back on it, which then
+        # says so (?expired=1).
         if request.method in ('GET', 'HEAD'):
             from app.main import _serve_spa
             return _no_store(make_response(_serve_spa()))
-        return redirect(url_for('auth.login', next=safe_next))
+        return redirect(url_for('auth.login', next=safe_next, expired='1'))
 
     if request.method in ('GET', 'HEAD'):
         # Generate CSRF token
@@ -294,8 +297,10 @@ def login():
         # Show login form
         error = request.args.get('error', '')
         rate_limited = request.args.get('rate_limited') == '1'
+        # The name typed before a failed attempt comes back filled in.
         return _login_page(error=error, rate_limited=rate_limited,
-                           next_url=safe_next)
+                           next_url=safe_next,
+                           username=session.pop(_LAST_USERNAME, '') if error else '')
     
     # POST - process login
     # Validate CSRF token
@@ -316,6 +321,7 @@ def login():
     if wait_time > 0:
         mins = max(1, (wait_time + 59) // 60)
         logger.warning(f"[auth] Rate limit exceeded for {username} from {client_ip}")
+        session[_LAST_USERNAME] = username
         return redirect(url_for('auth.login', 
                                error=f'Too many attempts. Try again in {mins} min.',
                                rate_limited='1',
@@ -325,6 +331,7 @@ def login():
     remember = request.form.get('remember') == 'on'
     
     if not username or not password:
+        session[_LAST_USERNAME] = username
         return redirect(url_for('auth.login', 
                                error='Username and password required',
                                next=safe_next))
@@ -335,6 +342,7 @@ def login():
     if not user:
         login_limiter.record_failure(client_ip, username)
         logger.info(f"[auth] Failed login attempt for user {username} from {client_ip}")
+        session[_LAST_USERNAME] = username
         return redirect(url_for('auth.login', 
                                error='Invalid email, username, or password',
                                next=safe_next))
@@ -342,6 +350,7 @@ def login():
     # Login successful - clear rate limit; the form token is single-use
     login_limiter.record_success(client_ip, username)
     session.pop('csrf_token', None)
+    session.pop(_LAST_USERNAME, None)
     
     # Create session
     token = user_auth.create_session(user['id'])
