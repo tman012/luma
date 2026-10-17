@@ -173,14 +173,15 @@ def _resolve(host: str):
     return sorted({i[4][0] for i in infos})
 
 
-def _host_ok(host: str, resolver=None) -> bool:
-    """Every address *host* resolves to is public (the same rule tracker HTTP
-    applies to every hop)."""
-    from app.tracker_http import address_allowed
+def _host_ok(host: str, port: int, resolver=None) -> bool:
+    """Every address *host* resolves to is public and *port* is allowed on it
+    (the same rules tracker HTTP applies to every hop: any port on a public
+    host, Luma's own ports refused only on Luma's own addresses)."""
+    from app.tracker_http import address_allowed, port_allowed
     addrs = (resolver or _resolve)(host)
     if not addrs:
         return False
-    return all(not _blocked_address(a) and address_allowed(a) for a in addrs)
+    return all(not _blocked_address(a) and address_allowed(a) and port_allowed(a, port) for a in addrs)
 
 
 def _secret_values(cfg: Dict[str, Any]):
@@ -243,11 +244,11 @@ def fetch_release(token: Optional[str], resolver=None) -> Tuple[str, Any]:
         if o is None:
             raise GrabError('This download link isn’t valid.', 502)
         if o == base:
-            if not _host_ok(o[1], resolver=resolver):
+            if not _host_ok(o[1], o[2], resolver=resolver):
                 raise GrabError('This download link isn’t allowed.', 502)
             return dict(creds)
         # Another origin: never with a saved credential.
-        if any(s in url for s in secrets) or not _host_ok(o[1], resolver=resolver):
+        if any(s in url for s in secrets) or not _host_ok(o[1], o[2], resolver=resolver):
             raise GrabError('This download link points to another site and wasn’t fetched.', 502)
         return {}
 

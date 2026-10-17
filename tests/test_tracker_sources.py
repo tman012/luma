@@ -13,7 +13,7 @@ import pytest
 import app.main
 import app.user_auth
 from app import indexer_api, tracker_clients, tracker_guard, tracker_routes, tracker_search, tracker_sources, tracker_store
-from app.tracker_guard import TrackerGuard
+from app.tracker_guard import TrackerGuard, guard_key
 from app.tracker_http import Response
 from app.tracker_search import ReleaseTokens, TrackerSearch
 from app.tracker_store import TrackerStore
@@ -363,6 +363,17 @@ def test_public_torznab_link_with_its_own_key_is_fetched(signed_in, env):
     assert len(env['qbit'].added) == 1
 
 
+@pytest.mark.parametrize('port', [9117, 9696, 5001])
+def test_any_port_on_a_public_host_is_fine(signed_in, env, port):
+    torznab(env['store'])
+    link = f'https://cdn.example:{port}/f/1.torrent'
+    env['mock'].set('t.example', R(body=rss(('The Nut Job 2014 1080p WEB-DL', link))))
+    env['mock'].set('cdn.example', R(body=torrent_bytes()))
+    rel = _search(signed_in)[0]
+    r = _grab(signed_in, rel['download_url'])
+    assert r.status_code == 200, r.get_data(as_text=True)
+
+
 def test_magnet_release_goes_to_qbittorrent_as_a_magnet(signed_in, env):
     torznab(env['store'])
     ih = hashlib.sha1(b'x').hexdigest()
@@ -420,7 +431,7 @@ def test_download_429_honors_retry_after_and_backs_off_search_too(signed_in, env
     rel = _search(signed_in)[0]
     r = _grab(signed_in, rel['download_url'])
     assert r.status_code == 429
-    blocked = env['guard'].blocked(rec['id'])
+    blocked = env['guard'].blocked(guard_key(env['store'].get(rec['id'])))
     assert blocked and blocked[1] == 'rate' and blocked[0] >= time.time() + 590
     n = len(env['mock'].calls)
     assert _grab(signed_in, rel['download_url']).status_code == 429
