@@ -83,7 +83,7 @@ store (`file_management.json` in the data dir, mode 0600). The seeded
 | `LUMA_TEST_DOWNLOADS_DIR` | `/downloads` (read-only) | Same path qBit saves to; `/downloads/incomplete` is skipped |
 | `LUMA_TEST_MEDIA_DIR` | `/media` | Parent of the library folders; any subfolder can be added, spaces included |
 | `LUMA_TEST_QBIT_TAG` | env | Default `luma-test`; set the same value on prod |
-| `LUMA_BROWSE_ROOTS` | env | Folders the library-path picker may browse, `:` or `,` separated (default `/media`); the downloads folder and every configured Movies and TV library path are always added. Nothing outside them is listed or opened, symlinks pointing out included |
+| `LUMA_BROWSE_ROOTS` | env | Folders the library-path picker may browse, `:` or `,` separated (default `/media`); the downloads folder and every configured library path are always added. Nothing outside them is listed or opened, symlinks pointing out included |
 | `LUMA_DOWNLOADS_ROOT` | env | Any absolute path (default `/downloads`); the only folder the mover reads from, and the folder storage cleanup measures. When qBittorrent reports another path (e.g. `/downloads` while this container sees `/storage/downloads`), the Library paths path map is required; a grab whose save path doesn't map under it shows "Path not mapped" in Settings > Library paths and Activity right away |
 
 Unset, both fall back to empty named volumes so the app still starts with zero
@@ -157,3 +157,16 @@ Proposed for luma-test:
    and colon titles, partial overlap with existing episodes, insufficient space.
 
 Estimate: about 1.5 days including UI (Movies/TV switch on rules, TV fallback).
+
+## TV libraries
+
+Settings > TV has no folders of its own. It lists the Library paths and the
+owner picks which are TV libraries (`GET/PUT /api/settings/tv/libraries`,
+`{"selected": [ids]}`, signed-in owner for changes). TV stores only those ids
+and each must be a current Library path. Removing a Library path drops it from
+the selection; TV's tv.db rows for it stay (hidden until it is selected again,
+or a scan finds the show in another selected library). TV paths saved by
+earlier builds are moved over once at start: a path that is already a Library
+path (same folder after normalizing) is selected, any other is added to
+Library paths and selected. The selector (`LibrarySelector`,
+`app/library_selection`) takes any section's URL for a later Movies section.
