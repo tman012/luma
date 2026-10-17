@@ -450,7 +450,6 @@ ENV_VAR_MAP: Dict[str, str] = {
     "QBITTORRENT_URL":  "qbittorrent.url",
     "QBITTORRENT_USER": "qbittorrent.username",
     "QBITTORRENT_PASS": "qbittorrent.password",
-    "QBITTORRENT_APP_CATEGORY": "qbittorrent.app_category",
     # Sonarr
     "SONARR_URL":     "sonarr.url",
     "SONARR_API_KEY": "sonarr.api_key",

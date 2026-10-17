@@ -137,7 +137,7 @@ def _sw(urls, spec):
 
 
 def test_sw_version_bumped():
-    assert "const CACHE_VERSION = 'media-kiosk-v133';" in (ROOT / 'static/sw.js').read_text()
+    assert "const CACHE_VERSION = 'media-kiosk-v134';" in (ROOT / 'static/sw.js').read_text()
 
 
 @pytest.mark.skipif(NODE is None, reason='node is not installed')

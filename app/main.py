@@ -2949,7 +2949,12 @@ def indexer_grab():
         indexer_id  – Prowlarr/Radarr indexer ID
         tmdb_id     – optional, used to add-if-missing
         title, year – fallback metadata if Radarr add is needed
+
+    Admin-only (PM ruling: grabs are admin-only, like /api/downloads/add).
     """
+    denied = _require_admin()
+    if denied:
+        return denied
     try:
         radarr = get_radarr_for_request()
         if not radarr:
@@ -4628,7 +4633,7 @@ def get_active_downloads_count():
             timeout=10
         )
 
-        if login_response.status_code != 200 or login_response.text.strip() != 'Ok.':
+        if login_response.status_code != 200 or _qbit_body(login_response) != 'Ok.':
             return jsonify({'count': 0})
 
         # Get torrents
@@ -9386,6 +9391,13 @@ def _qbit_add_fields() -> Dict[str, str]:
         fields['paused'] = 'true'
         fields['stopped'] = 'true'
     return fields
+
+
+def _qbit_body(resp) -> str:
+    """A qBittorrent answer as UTF-8 text. Its plain-text replies may carry
+    no charset, and requests' guess can misread them (see qbit_connector)."""
+    from app.qbit_connector import text_of
+    return text_of(resp)
 
 
 def _download_client_unavailable():
@@ -15424,7 +15436,7 @@ def get_download_history():
                 },
                 timeout=10,
             )
-            if login_resp.status_code == 200 and login_resp.text.strip() == 'Ok.':
+            if login_resp.status_code == 200 and _qbit_body(login_resp) == 'Ok.':
                 torrents_resp = session.get(
                     f"{settings.get('qbittorrent.url')}/api/v2/torrents/info",
                     timeout=10,
@@ -16490,7 +16502,7 @@ def add_torrent_to_qbittorrent():
         except req.exceptions.RequestException as e:
             logger.error(f"qBittorrent unreachable: {type(e).__name__}")
             return _download_client_unavailable()
-        if login_response.status_code != 200 or login_response.text.strip() != 'Ok.':
+        if login_response.status_code != 200 or _qbit_body(login_response) != 'Ok.':
             logger.error(f"qBittorrent login failed: {login_response.status_code}")
             return jsonify({'error': 'Download client sign-in failed'}), 502
 
@@ -16542,7 +16554,7 @@ def add_torrent_to_qbittorrent():
             logger.error(f"qBittorrent add request failed: {type(e).__name__}")
             return _download_client_unavailable()
 
-        logger.info(f"qBittorrent add response: status={add_response.status_code}, text='{add_response.text.strip()}'")
+        logger.info(f"qBittorrent add response: status={add_response.status_code}, text='{_qbit_body(add_response)[:80]}'")
         if add_response.status_code != 200:
             return jsonify({'error': f'qBittorrent returned HTTP {add_response.status_code}'}), 502
 
@@ -19285,6 +19297,22 @@ def get_settings():
         return jsonify({'error': str(e)}), 500
 
 
+def _unbind_qbit_password_on_new_url(data: dict) -> None:
+    """A saved qBittorrent password stays bound to the saved URL: a PUT
+    that changes the URL without typing a password clears it, so it is never
+    kept (and later sent) for another host. Mutates *data*."""
+    q = data.get('qbittorrent')
+    if not isinstance(q, dict) or not isinstance(q.get('url'), str):
+        return
+    from app import qbit_connector as _qc
+    saved_url = settings.get('qbittorrent.url') or ''
+    if not saved_url or _qc._same_url(q['url'], saved_url):
+        return
+    typed = q.get('password')
+    if not (isinstance(typed, str) and typed != SECRET_MASK):
+        q['password'] = ''
+
+
 @app.route('/api/settings', methods=['PUT'])
 def update_settings():
     """Partial-update settings via deep merge.
@@ -19301,6 +19329,7 @@ def update_settings():
         if not isinstance(data, dict):
             return jsonify({'success': False, 'errors': ['Request body must be a JSON object']}), 400
 
+        _unbind_qbit_password_on_new_url(data)
         success, errors = settings.update(data)
         if not success:
             return jsonify({'success': False, 'errors': errors}), 400
@@ -20407,37 +20436,42 @@ def test_radarr_connection():
 
 @app.route('/api/settings/test/qbittorrent', methods=['POST'])
 def test_qbittorrent_connection():
-    """Test authentication to qBittorrent."""
+    """Test authentication to qBittorrent.
+
+    The saved password goes only to the saved URL (the same rule as the
+    Connectors card): a changed URL needs the password typed again."""
     err = _require_admin()
     if err:
         return err
     try:
+        from app import qbit_connector as _qc
         body = request.get_json(silent=True) or {}
-        cfg = _test_settings('qbittorrent', body)
-        url = cfg.get('url', '').rstrip('/')
-        username = cfg.get('username', '')
-        password = cfg.get('password', '')
+        if not isinstance(body, dict):
+            body = {}
+        saved_url = settings.get('qbittorrent.url') or ''
+        url = (body.get('url') if isinstance(body.get('url'), str) else None)
+        url = (url if url is not None else saved_url).strip().rstrip('/')
+        username = body.get('username') if isinstance(body.get('username'), str) else (settings.get('qbittorrent.username') or '')
+        typed = body.get('password')
+        given = isinstance(typed, str) and typed != SECRET_MASK
         if not url:
             return jsonify({'success': False, 'message': 'qBittorrent URL is required'}), 400
-
-        resp = requests.post(
-            f"{url}/api/v2/auth/login",
-            data={'username': username, 'password': password},
-            timeout=5
-        )
-        if resp.status_code == 200 and resp.text.strip().upper() == 'OK.':
-            # Grab version
-            sid = resp.cookies.get('SID', '')
-            ver_resp = requests.get(f"{url}/api/v2/app/version", cookies={'SID': sid}, timeout=5)
-            version = ver_resp.text.strip() if ver_resp.status_code == 200 else 'unknown'
-            return jsonify({'success': True, 'message': f'Authenticated to qBittorrent {version}', 'details': {'version': version}})
-        return jsonify({'success': False, 'message': 'Authentication failed -- check username/password'}), 200
-    except requests.exceptions.Timeout:
-        return jsonify({'success': False, 'message': 'Connection timed out (5s)'}), 200
-    except requests.exceptions.ConnectionError:
-        return jsonify({'success': False, 'message': 'Could not connect to qBittorrent URL'}), 200
+        if given:
+            password = typed
+        elif _qc._same_url(url, saved_url):
+            password = settings.get('qbittorrent.password') or ''
+        elif settings.get('qbittorrent.password'):
+            return jsonify({'success': False, 'message': 'Enter the password for this URL'}), 400
+        else:
+            password = ''
+        problem, version = _qc.check(url, username, password)
+        if problem:
+            return jsonify({'success': False, 'message': problem}), 200
+        version = version or 'unknown'
+        return jsonify({'success': True, 'message': f'Authenticated to qBittorrent {version}', 'details': {'version': version}})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+        logger.error(f"qBittorrent test failed: {type(e).__name__}")
+        return jsonify({'success': False, 'message': 'Couldn’t test qBittorrent'}), 200
 
 
 @app.route('/api/settings/test/harmony', methods=['POST'])

@@ -185,10 +185,15 @@ def _text_of(r) -> str:
     return (r.text or '').strip()
 
 
+text_of = _text_of
+
+
 def check(url: str, username: str, password: str) -> Tuple[Optional[str], str]:
     """(None, version) when qBittorrent accepts the login, else (error, '').
     The error is short and never carries the URL, username or password."""
     session = requests.Session()
+    # Never via an environment proxy: the password goes to this URL only.
+    session.trust_env = False
     try:
         try:
             r = session.post(f'{url}/api/v2/auth/login', data={'username': username, 'password': password},

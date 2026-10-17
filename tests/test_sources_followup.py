@@ -89,16 +89,13 @@ def test_add_uses_configured_category_and_optional_paused(client, net, qbit, pau
     assert (data.get('paused'), data.get('stopped')) == (('true', 'true') if paused else (None, None))
 
 
-def test_add_paused_defaults_off_and_category_env_is_mapped():
+def test_add_paused_defaults_off_and_nothing_preconfigures_qbit():
+    from pathlib import Path
     from app import settings_manager as sm
     assert sm.SETTINGS_SCHEMA['qbittorrent']['add_paused']['default'] is False
-    assert sm.ENV_VAR_MAP['QBITTORRENT_APP_CATEGORY'] == 'qbittorrent.app_category'
-
-
-def test_test_build_compose_sets_luma_test_category():
-    from pathlib import Path
+    assert 'QBITTORRENT_APP_CATEGORY' not in sm.ENV_VAR_MAP
     text = (Path(app.main.__file__).resolve().parent.parent / 'docker-compose.test.yml').read_text()
-    assert 'QBITTORRENT_APP_CATEGORY=luma-test' in text
+    assert 'QBITTORRENT' not in text
 
 
 # ── outbound_guard total deadline ───────────────────────────────────────
@@ -205,3 +202,119 @@ def test_approved_user_and_internal_jobs_pass_the_gate(test_app, monkeypatch):
         assert app.main.latest_releases() == [{'title': 'cached'}]
     finally:
         app.main._LATEST_TORRENTS_CACHE.clear()
+
+
+# ── /api/indexer/grab is admin-only ─────────────────────────────────────
+
+@pytest.mark.parametrize('approved', [False, True])
+def test_indexer_grab_is_admin_only(test_app, monkeypatch, approved):
+    called = []
+    monkeypatch.setattr(app.main, 'get_radarr_for_request', lambda: called.append(1))
+    c = _member(test_app, approved=approved)
+    r = c.post('/api/indexer/grab', headers=ORIGIN, json={'guid': 'g', 'indexer_id': 1})
+    assert r.status_code == 403 and r.get_json()['error'] == 'Admin access required'
+    assert called == []
+
+
+def test_indexer_grab_admin_passes_the_gate(test_app, monkeypatch):
+    monkeypatch.setattr(app.main, 'get_radarr_for_request', lambda: None)
+    c = _member(test_app, approved=False, admin=True)
+    r = c.post('/api/indexer/grab', headers=ORIGIN, json={'guid': 'g', 'indexer_id': 1})
+    assert r.status_code == 503       # past the gate: Radarr isn't configured here
+
+
+# ── qBit login body without a charset ───────────────────────────────────
+
+class _Raw:
+    def __init__(self, content, status=200):
+        self.status_code, self.content = status, content
+
+    @property
+    def text(self):            # what requests may guess for a charset-less body
+        return self.content.decode('utf-16', 'replace')
+
+    def json(self):
+        return []
+
+
+def test_downloads_add_reads_qbit_login_as_utf8(client, net, qbit, monkeypatch):
+    _owner_client(client)
+    real_post = qbit.post
+
+    def post(url, **kw):
+        if url.endswith('/auth/login'):
+            qbit.logins += 1
+            return _Raw(b'Ok.')
+        return real_post(url, **kw)
+    monkeypatch.setattr(qbit, 'post', post)
+    r = _post(client, 'magnet:?xt=urn:btih:' + 'ef' * 20)
+    assert r.status_code == 200, r.get_json()
+    assert app.main._qbit_body(_Raw(b'Ok.\n')) == 'Ok.'
+
+
+# ── saved qBit password stays bound to the saved URL ────────────────────
+
+def _saved_qbit():
+    app.main.settings.update({'qbittorrent': {'url': 'http://qbit.saved:8080', 'username': 'u',
+                                              'password': 'saved-pw-for-tests'}})
+
+
+@pytest.fixture
+def checks(monkeypatch):
+    from app import qbit_connector
+    seen = []
+    monkeypatch.setattr(qbit_connector, 'check', lambda url, user, pw: (seen.append((url, user, pw)) or (None, 'v4.6.5')))
+    return seen
+
+
+def test_old_test_endpoint_uses_saved_password_only_for_saved_url(client, checks):
+    _owner_client(client)
+    _saved_qbit()
+    r = client.post('/api/settings/test/qbittorrent', headers=ORIGIN, environ_base=LAN,
+                    json={'url': 'http://qbit.saved:8080/', 'password': '********'})
+    assert r.get_json()['success'] is True
+    assert checks[-1] == ('http://qbit.saved:8080', 'u', 'saved-pw-for-tests')
+    r = client.post('/api/settings/test/qbittorrent', headers=ORIGIN, environ_base=LAN,
+                    json={'url': 'http://evil.example:8080', 'password': '********'})
+    assert r.status_code == 400 and len(checks) == 1
+    r = client.post('/api/settings/test/qbittorrent', headers=ORIGIN, environ_base=LAN,
+                    json={'url': 'http://evil.example:8080', 'password': 'typed'})
+    assert checks[-1] == ('http://evil.example:8080', 'u', 'typed')
+    assert 'saved-pw-for-tests' not in r.get_data(as_text=True)
+
+
+def test_put_settings_with_new_url_drops_the_saved_password(client):
+    _owner_client(client)
+    _saved_qbit()
+    r = client.put('/api/settings', headers=ORIGIN, environ_base=LAN,
+                   json={'qbittorrent': {'url': 'http://qbit.saved:8080', 'password': '********'}})
+    assert r.status_code == 200
+    assert app.main.settings.get('qbittorrent.password') == 'saved-pw-for-tests'
+    r = client.put('/api/settings', headers=ORIGIN, environ_base=LAN,
+                   json={'qbittorrent': {'url': 'http://other.example:8080', 'password': '********'}})
+    assert r.status_code == 200
+    assert app.main.settings.get('qbittorrent.password') == ''
+    _saved_qbit()
+    client.put('/api/settings', headers=ORIGIN, environ_base=LAN,
+               json={'qbittorrent': {'url': 'http://other.example:8080', 'password': 'new-typed'}})
+    assert app.main.settings.get('qbittorrent.password') == 'new-typed'
+
+
+def test_qbit_connector_check_ignores_env_proxies(monkeypatch):
+    from app import qbit_connector
+    made = []
+
+    class S:
+        trust_env = True
+
+        def __init__(self):
+            made.append(self)
+
+        def post(self, *a, **k):
+            raise requests.exceptions.ConnectionError()
+
+        def close(self):
+            pass
+    monkeypatch.setattr(qbit_connector.requests, 'Session', S)
+    qbit_connector.check('http://qbit.test', 'u', 'p')
+    assert made and made[0].trust_env is False

@@ -28,8 +28,6 @@ services:
       - LUMA_MINIMAL=1
       - LUMA_DISABLE_ADB=1
       - LUMA_NO_RESTART=1
-      # Grabs from the test build land in their own qBittorrent category.
-      - QBITTORRENT_APP_CATEGORY=luma-test
       - DATABASE_PATH=/app/data/media.db
       - LUMA_DATA_DIR=/app/data
       - LUMA_CACHE_DIR=/app/cache
