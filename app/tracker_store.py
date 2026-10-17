@@ -23,6 +23,7 @@ import copy
 import fcntl
 import logging
 import os
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -50,15 +51,32 @@ def _data_dir() -> Path:
     return Path(data_dir())
 
 
-GENERIC_TYPES = ('torznab', 'newznab')
+GENERIC_TYPES = tt.GENERIC_TYPES
+
+
+# Torznab/Newznab endpoints of an indexer proxy (Jackett, Prowlarr). Luma
+# talks to trackers directly; a proxy is not a tracker.
+_PROXY_PATHS = re.compile(r'(/api/v2\.0/indexers/|/prowlarr(/|$)|^/(?:[^/]+/)?\d+/api/?$|/api/v1/indexer)',
+                          re.IGNORECASE)
+
+
+def is_proxy_url(url: str) -> bool:
+    from urllib.parse import urlsplit
+    try:
+        return bool(_PROXY_PATHS.search(urlsplit(str(url or '')).path or ''))
+    except ValueError:
+        return False
 
 
 def _url_allowed(type_id: str, url: str) -> bool:
-    """Site types need https; no type may name localhost, a blocked IP
-    literal or a blocked port (host names are checked again on every request)."""
+    """Site types need https; Torznab/Newznab may not point at a Jackett or
+    Prowlarr endpoint; no type may name localhost or a blocked IP literal
+    (host names are checked again on every request)."""
     from urllib.parse import urlsplit
     from app.tracker_http import host_literal_blocked
     if type_id not in GENERIC_TYPES and urlsplit(url).scheme != 'https':
+        return False
+    if type_id in GENERIC_TYPES and is_proxy_url(url):
         return False
     return not host_literal_blocked(url)
 

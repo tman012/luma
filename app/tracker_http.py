@@ -3,8 +3,11 @@ redirects only, and short error strings that are safe to show the owner.
 
 Every hop (the first request and each redirect) is checked before anything
 is sent: the host name is resolved, every address it resolves to must be a
-public unicast address that is not this host's own, and the port must not be
-Luma's or Prowlarr's/Jackett's. The connection is then pinned to the checked
+public unicast address that is not this host's own (no loopback, RFC 1918,
+unique-local, CGNAT, link-local/metadata, 0.0.0.0, multicast or reserved
+ranges; no opt-in). Ports are not restricted on public hosts; Luma's own
+ports are refused on its own addresses (which are refused anyway, so this
+is a second line). The connection is then pinned to the checked
 address (TLS still verifies the certificate against the host name), so a DNS
 answer that changes between the check and the connect (rebinding) can't
 reach a blocked address. Proxies from the environment are not used.
@@ -32,9 +35,9 @@ CONNECT_TIMEOUT, READ_TIMEOUT = 6.0, 30.0
 MAX_REDIRECTS = 3
 TOTAL_DEADLINE_S = 60.0        # whole request, redirects and body included
 USER_AGENT = 'Luma'
-# Prowlarr and Jackett, and Luma's own default and test ports. Luma's
-# configured port (LUMA_PORT / PORT) is added at call time.
-BLOCKED_PORTS: FrozenSet[int] = frozenset({9696, 9117, 5001, 5002})
+# Luma's own default and test ports, refused on Luma's own addresses
+# (loopback and this host's). LUMA_PORT / PORT are added at call time.
+LUMA_PORTS: FrozenSet[int] = frozenset({5001, 5002})
 
 # Short, owner-facing messages (the Test result and the list status).
 MESSAGES = {
@@ -165,8 +168,8 @@ def own_addresses() -> FrozenSet[str]:
         return _own_cache[1]
 
 
-def _blocked_ports() -> FrozenSet[int]:
-    ports = set(BLOCKED_PORTS)
+def _luma_ports() -> FrozenSet[int]:
+    ports = set(LUMA_PORTS)
     for var in ('LUMA_PORT', 'PORT'):
         v = os.environ.get(var, '').strip()
         if v.isdigit():
@@ -194,16 +197,30 @@ def address_allowed(addr: str) -> bool:
     return str(ip) not in own_addresses()
 
 
+def port_allowed(addr: str, port: int) -> bool:
+    """Luma's own ports are refused on Luma's own addresses (loopback and this
+    host's); any port is fine on a public host."""
+    if port not in _luma_ports():
+        return True
+    try:
+        ip = ipaddress.ip_address(str(addr).split('%')[0])
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return not (ip.is_loopback or ip.is_unspecified or str(ip) in own_addresses())
+
+
 def host_literal_blocked(url: str) -> bool:
-    """For save-time validation: the URL names a blocked IP literal, a blocked
-    port or localhost. (Host names are checked when contacted.)"""
+    """For save-time validation: the URL names a blocked IP literal or
+    localhost. (Host names are checked when contacted.)"""
     try:
         p = urlsplit(str(url or ''))
         host = (p.hostname or '').lower()
-        port = p.port or _DEFAULT_PORTS.get(p.scheme)
+        p.port
     except ValueError:
         return True
-    if not host or host == 'localhost' or host.endswith('.localhost') or port in _blocked_ports():
+    if not host or host == 'localhost' or host.endswith('.localhost'):
         return True
     try:
         ipaddress.ip_address(host)
@@ -224,7 +241,7 @@ def check_target(url: str) -> Tuple[str, int]:
         raise TrackerError('blocked') from None
     if p.scheme not in _DEFAULT_PORTS or not host or port is None or p.username or p.password:
         raise TrackerError('blocked')
-    if port in _blocked_ports() or host.lower() == 'localhost' or host.lower().endswith('.localhost'):
+    if host.lower() == 'localhost' or host.lower().endswith('.localhost'):
         raise TrackerError('blocked')
     try:
         addrs = list(dict.fromkeys(resolve(host, port)))
@@ -232,7 +249,7 @@ def check_target(url: str) -> Tuple[str, int]:
         raise TrackerError('network') from None
     if not addrs:
         raise TrackerError('network')
-    if not all(address_allowed(a) for a in addrs):
+    if not all(address_allowed(a) and port_allowed(a, port) for a in addrs):
         raise TrackerError('blocked')
     return addrs[0].split('%')[0], port
 
