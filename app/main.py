@@ -514,6 +514,29 @@ def _auth_api_no_store(response):
     return response
 
 
+_LOGOUT_PATHS = ('/api/auth/logout', '/logout')
+
+
+@app.after_request
+def _signed_in_cache_hygiene(response):
+    """Browser caching that depends on who is signed in.
+
+    - A private, cacheable /api reply (signed-in images, reviews) varies by
+      the session cookie, so a shared browser never serves one user's copy
+      to the next account.
+    - A successful sign-out tells the browser to drop its HTTP cache for the
+      site (Clear-Site-Data; honored on HTTPS and localhost).
+    """
+    if request.path.startswith('/api/'):
+        cc = (response.headers.get('Cache-Control') or '').lower()
+        if 'private' in cc and 'no-store' not in cc:
+            response.vary.add('Cookie')
+    if (request.method == 'POST' and request.path in _LOGOUT_PATHS
+            and response.status_code < 400):
+        response.headers['Clear-Site-Data'] = '"cache"'
+    return response
+
+
 @app.after_request
 def set_static_cache_headers(response):
     path = request.path
