@@ -45,7 +45,20 @@ describe('Home', () => {
     const titles = screen.getAllByRole('heading', { level: 2 }).map(h => h.textContent);
     expect(titles).toEqual(['Continue watching', 'Recently added in Movies', 'Recently added in TV Shows']);
     expect((screen.getByTestId('progress') as HTMLElement).style.width).toBe('25%');
-    expect(screen.getByLabelText('Libraries')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Account' }));
+    const items = screen.getAllByRole('menuitem').map(i => i.textContent?.trim());
+    expect(items).toEqual(['Libraries', 'Sign out']);
+  });
+
+  it('shows Retry when Home fails, then loads', async () => {
+    const fetchMock = vi.fn(async () => { throw new Error('offline'); });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+    fetchMock.mockImplementation(async () => json(HOME));
+    await act(async () => { fireEvent.click(retry); });
+    await waitFor(() => expect(screen.getByTestId('home-rails')).toBeTruthy());
   });
 
   it('hides Libraries for non-admins', async () => {
@@ -53,7 +66,8 @@ describe('Home', () => {
     auth.user = { id: 2, name: 'guest', is_admin: false };
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
     await waitFor(() => screen.getByTestId('home-rails'));
-    expect(screen.queryByLabelText('Libraries')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Account' }));
+    expect(screen.getAllByRole('menuitem').map(i => i.textContent?.trim())).toEqual(['Sign out']);
     auth.user = { id: 1, name: 'taylor', is_admin: true };
   });
 });
