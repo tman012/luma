@@ -12363,6 +12363,9 @@ def player_play():
 
         if not rating_key or not client_ip:
             return jsonify({'error': 'rating_key and client_ip/room_id are required'}), 400
+        if client_ip == data.get('client_ip') and not _plex_client_target(client_ip):
+            # The address came from the caller, not from a configured device.
+            return jsonify({'error': 'Unknown client'}), 400
 
         dev_name = device.get('name', '?') if device else 'none'
         dev_harmony = device.get('harmonyActivity', '') if device else ''
@@ -12511,11 +12514,10 @@ def _play_via_kodi(service, rating_key, resume_offset, room_name, device_ip, adb
         # Kodi not running — launch via ADB intent with file URL (straight to playback)
         if has_adb:
             logger.info("Kodi: not running, launching via ADB intent with file URL")
-            target = f"{device_ip}:{adb_port}"
-            launch = run_adb(["adb", "-s", target, "shell",
-                              "am", "start", "-a", "android.intent.action.VIEW",
-                              "-d", file_url, "-t", "video/*",
-                              "-n", "org.xbmc.kodi/.Splash"], timeout=5)
+            target = _adb_target(device_ip, adb_port)
+            if not target:
+                return jsonify({'success': False, 'message': 'Unknown device'}), 400
+            launch = run_adb(_kodi_launch_args(target, file_url), timeout=5)
             logger.info(f"Kodi ADB intent: ok={launch['ok']}, "
                         f"out={launch['stdout'].strip()}, err={launch['stderr'].strip()}")
 
@@ -12641,7 +12643,9 @@ def _play_via_plex(service, rating_key, resume_offset, room_name, device_ip, adb
     metadata = plex_service.get_metadata(play_rk)
     title = metadata.get('title', '?') if metadata else '?'
     offset_ms = int(resume_offset) if resume_offset else 0
-    target = f"{device_ip}:{adb_port}"
+    target = _adb_target(device_ip, adb_port)
+    if not target:
+        return jsonify({'success': False, 'message': 'Unknown device'}), 400
 
     logger.info(
         f"Plex play: '{title}' (rk={play_rk}, source_rk={rating_key}, pq={play_queue_id}) "
@@ -12822,9 +12826,7 @@ def _plex_play_deeplink(run_adb, target, device_ip, machine_id, rating_key, offs
     session = None
     used = None
     for label, uri, extra in _plex_deeplink_candidates(machine_id, start_rk, offset_ms, play_queue_id):
-        cmd = "am start " + ("--ez android.intent.extra.START_PLAYBACK true " if extra else "") + \
-              f"-a android.intent.action.VIEW -d '{uri}' com.plexapp.android"
-        result = run_adb(["adb", "-s", target, "shell", cmd], timeout=15)
+        result = run_adb(_plex_deeplink_args(target, uri, extra), timeout=15)
         out = ((result.get('stdout') or '') + (result.get('stderr') or '')).strip().replace('\n', ' | ')
         logger.info("Plex deep-link %s on %s: ok=%s %s", label, target, result.get('ok'), out[:200])
         if not result.get('ok') or 'Error:' in out:
@@ -12924,7 +12926,6 @@ def _plex_play_shield(run_adb, _t, target, device_ip, machine_id, rating_key, of
         f"&port={server_port}"
         f"&protocol={server_protocol}"
         f"&type=video"
-        f"&X-Plex-Token={plex_token}"
     )
     if container:
         url += f"&containerKey={container}"
@@ -12934,7 +12935,7 @@ def _plex_play_shield(run_adb, _t, target, device_ip, machine_id, rating_key, of
     max_attempts = 1 if play_queue_id else 3
     for attempt in range(max_attempts):
         try:
-            resp = requests.get(url, timeout=5)
+            resp = requests.get(url, headers={'X-Plex-Token': plex_token}, timeout=5, allow_redirects=False)
             logger.info(f"Plex playMedia: status={resp.status_code} pq={play_queue_id}")
             if resp.status_code == 200:
                 logger.info(f"Plex playMedia succeeded on attempt {attempt + 1}")
@@ -13480,8 +13481,10 @@ def _query_adb_activity(device: dict) -> dict | None:
         # that have no matched Plex session, so there's no duplication.
 
         # Get media session info
-        media_cmd = f'adb -s {device_ip}:{adb_port} shell dumpsys media_session'
-        media_result = subprocess.run(media_cmd, shell=True, capture_output=True, text=True, timeout=5)
+        media_result = subprocess.run(
+            ['adb', '-s', f'{device_ip}:{adb_port}', 'shell', 'dumpsys', 'media_session'],
+            capture_output=True, text=True, timeout=5,
+        )
 
         state = 'stopped'
         title = None
@@ -13768,119 +13771,209 @@ def plex_active_sessions():
 
 # Legacy image proxy — prefer /api/img/plex for new code
 # Playback Control Endpoints for Now Playing Modal
+_PLEX_CLIENT_ADDR = re.compile(r'([A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)(?::([0-9]{1,5}))?', re.ASCII)
+
+
+def _plex_default_client_port() -> int:
+    try:
+        return int(settings.get('plex.client_port', 32500) or 32500)
+    except (TypeError, ValueError):
+        return 32500
+
+
+def _configured_plex_clients() -> set:
+    """(host, port) of every room device configured by the admin."""
+    default = _plex_default_client_port()
+    known = set()
+
+    def add(host, port=None):
+        if isinstance(host, str) and host:
+            try:
+                known.add((host.strip().lower(), int(port or default)))
+            except (TypeError, ValueError):
+                pass
+
+    for room in settings.get('devices.rooms') or []:
+        if not isinstance(room, dict):
+            continue
+        add(room.get('host'))
+        add(room.get('ip'))
+        for dev in room.get('devices') or []:
+            if not isinstance(dev, dict):
+                continue
+            add(dev.get('host'))
+            for svc in dev.get('services') or []:
+                if isinstance(svc, dict) and svc.get('plex_client_port'):
+                    add(dev.get('host'), svc.get('plex_client_port'))
+    return known
+
+
+def _discovered_plex_clients() -> set:
+    """(host, port) of the players the Plex server itself lists in /clients."""
+    plex_url = settings.get('plex.url')
+    plex_token = settings.get('plex.token')
+    if not plex_url or not plex_token:
+        return set()
+    try:
+        resp = requests.get(f"{plex_url}/clients", headers={'X-Plex-Token': plex_token, 'Accept': 'application/xml'},
+                            timeout=3, allow_redirects=False)
+        if resp.status_code != 200:
+            return set()
+        import xml.etree.ElementTree as ET
+        known = set()
+        for el in ET.fromstring(resp.content).iter('Server'):
+            host = el.get('host') or el.get('address')
+            try:
+                port = int(el.get('port') or 0)
+            except ValueError:
+                continue
+            if host and port:
+                known.add((host.strip().lower(), port))
+        return known
+    except Exception as e:
+        logger.debug(f"Plex /clients lookup failed: {type(e).__name__}")
+        return set()
+
+
+def _plex_client_target(raw):
+    """The (host, port) of a known Plex player for a caller-supplied address,
+    or None. Only an exact host[:port] that matches a configured room device or
+    a player the Plex server lists is accepted: no paths, queries or userinfo."""
+    if not isinstance(raw, str) or any(c in raw for c in '?#/@\\'):
+        return None
+    m = _PLEX_CLIENT_ADDR.fullmatch(raw)
+    if not m:
+        return None
+    port = int(m.group(2)) if m.group(2) else _plex_default_client_port()
+    if not 1 <= port <= 65535:
+        return None
+    target = (m.group(1).lower(), port)
+    if target in _configured_plex_clients() or target in _discovered_plex_clients():
+        return target
+    return None
+
+
+def _plex_player_target_or_error(data):
+    """Admin check plus a known client for the playback endpoints."""
+    err = _require_admin()
+    if err:
+        return None, err
+    client_ip = data.get('client_ip')
+    if not client_ip:
+        return None, (jsonify({'error': 'client_ip is required'}), 400)
+    target = _plex_client_target(client_ip)
+    if not target:
+        return None, (jsonify({'error': 'Unknown client'}), 400)
+    return target, None
+
+
+def _send_plex_player_command(target, command, params=None):
+    """Send a /player/playback command to a known client. The token goes in
+    a header, never the URL, and redirects are never followed."""
+    host, port = target
+    return requests.get(
+        f"http://{host}:{port}/player/playback/{command}",
+        params=params,
+        headers={'X-Plex-Token': settings.get('plex.token') or ''},
+        timeout=5,
+        allow_redirects=False,
+    )
+
+
 @app.route('/api/plex/playback/control', methods=['POST'])
 def plex_playback_control():
-    """Send play/pause command to Shield Plex client."""
+    """Send play/pause command to a Plex client."""
     try:
-        data = request.get_json() or {}
-        client_ip = data.get('client_ip')
+        data = request.get_json(silent=True) or {}
+        target, err = _plex_player_target_or_error(data)
+        if err:
+            return err
         command = data.get('command')  # 'play' or 'pause'
-
-        if not client_ip or not command:
+        if not command:
             return jsonify({'error': 'client_ip and command are required'}), 400
 
-        plex_token = settings.get('plex.token')
-        client_port = settings.get('plex.client_port', 32500)
-
-        # Map command to Plex endpoint
         endpoint = 'play' if command == 'play' else 'pause'
-        url = f"http://{client_ip}:{client_port}/player/playback/{endpoint}?X-Plex-Token={plex_token}"
-
-        response = requests.get(url, timeout=5)
-        logger.info(f"Playback control {command} sent to {client_ip}: {response.status_code}")
+        response = _send_plex_player_command(target, endpoint)
+        logger.info(f"Playback control {endpoint} sent to {target[0]}: {response.status_code}")
 
         return jsonify({'success': True, 'command': command})
 
     except Exception as e:
-        logger.error(f"Error sending playback control: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error sending playback control: {type(e).__name__}")
+        return jsonify({'error': 'Playback control failed'}), 500
 
 
 @app.route('/api/plex/playback/stop', methods=['POST'])
 def plex_playback_stop():
-    """Stop playback on Shield Plex client."""
+    """Stop playback on a Plex client."""
     try:
-        data = request.get_json() or {}
-        client_ip = data.get('client_ip')
+        data = request.get_json(silent=True) or {}
+        target, err = _plex_player_target_or_error(data)
+        if err:
+            return err
 
-        if not client_ip:
-            return jsonify({'error': 'client_ip is required'}), 400
-
-        plex_token = settings.get('plex.token')
-        client_port = settings.get('plex.client_port', 32500)
-
-        url = f"http://{client_ip}:{client_port}/player/playback/stop?X-Plex-Token={plex_token}"
-
-        response = requests.get(url, timeout=5)
-        logger.info(f"Playback stop sent to {client_ip}: {response.status_code}")
+        response = _send_plex_player_command(target, 'stop')
+        logger.info(f"Playback stop sent to {target[0]}: {response.status_code}")
 
         return jsonify({'success': True})
 
     except Exception as e:
-        logger.error(f"Error stopping playback: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error stopping playback: {type(e).__name__}")
+        return jsonify({'error': 'Playback stop failed'}), 500
 
 
 @app.route('/api/plex/playback/seek', methods=['POST'])
 def plex_playback_seek():
-    """Seek forward/backward by offset on Shield Plex client."""
+    """Step forward/backward on a Plex client."""
     try:
-        data = request.get_json() or {}
-        client_ip = data.get('client_ip')
-        offset_seconds = data.get('offset_seconds', 0)
+        data = request.get_json(silent=True) or {}
+        target, err = _plex_player_target_or_error(data)
+        if err:
+            return err
+        try:
+            offset_seconds = float(data.get('offset_seconds', 0) or 0)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'offset_seconds must be a number'}), 400
 
-        if not client_ip:
-            return jsonify({'error': 'client_ip is required'}), 400
+        response = _send_plex_player_command(target, 'stepForward' if offset_seconds > 0 else 'stepBack')
+        logger.info(f"Playback seek {offset_seconds}s sent to {target[0]}: {response.status_code}")
 
-        plex_token = settings.get('plex.token')
-        client_port = settings.get('plex.client_port', 32500)
-
-        # Use skipNext for forward, skipPrevious for backward (relative seek)
-        # For now, use stepForward/stepBack which is 30 seconds
-        if offset_seconds > 0:
-            url = f"http://{client_ip}:{client_port}/player/playback/stepForward?X-Plex-Token={plex_token}"
-        else:
-            url = f"http://{client_ip}:{client_port}/player/playback/stepBack?X-Plex-Token={plex_token}"
-
-        response = requests.get(url, timeout=5)
-        logger.info(f"Playback seek {offset_seconds}s sent to {client_ip}: {response.status_code}")
-
-        return jsonify({'success': True, 'offset': offset_seconds})
+        return jsonify({'success': True, 'offset': data.get('offset_seconds', 0)})
 
     except Exception as e:
-        logger.error(f"Error seeking playback: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error seeking playback: {type(e).__name__}")
+        return jsonify({'error': 'Playback seek failed'}), 500
 
 
 @app.route('/api/plex/playback/seekTo', methods=['POST'])
 def plex_playback_seek_to():
-    """Seek to specific position on Shield Plex client."""
+    """Seek to a specific position on a Plex client."""
     try:
-        data = request.get_json() or {}
-        client_ip = data.get('client_ip')
-        position_ms = data.get('position_ms', 0)
+        data = request.get_json(silent=True) or {}
+        target, err = _plex_player_target_or_error(data)
+        if err:
+            return err
+        try:
+            position_ms = max(0, int(data.get('position_ms', 0) or 0))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'position_ms must be a number'}), 400
 
-        if not client_ip:
-            return jsonify({'error': 'client_ip is required'}), 400
-
-        plex_token = settings.get('plex.token')
-        client_port = settings.get('plex.client_port', 32500)
-
-        url = f"http://{client_ip}:{client_port}/player/playback/seekTo?offset={position_ms}&X-Plex-Token={plex_token}"
-
-        response = requests.get(url, timeout=5)
-        logger.info(f"Playback seekTo {position_ms}ms sent to {client_ip}: {response.status_code}")
+        response = _send_plex_player_command(target, 'seekTo', params={'offset': position_ms})
+        logger.info(f"Playback seekTo {position_ms}ms sent to {target[0]}: {response.status_code}")
 
         return jsonify({'success': True, 'position_ms': position_ms})
 
     except Exception as e:
-        logger.error(f"Error seeking to position: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error seeking to position: {type(e).__name__}")
+        return jsonify({'error': 'Playback seek failed'}), 500
 
 
 @app.route('/api/plex/playback/subtitles', methods=['POST'])
 def plex_playback_subtitles():
     """Toggle subtitles using ADB KEYCODE_CAPTIONS."""
+    err = _require_admin()
+    if err:
+        return err
     try:
         data = request.get_json() or {}
         client_ip = data.get('client_ip')
@@ -13896,6 +13989,9 @@ def plex_playback_subtitles():
 
         if not client_ip:
             return jsonify({'error': 'client_ip or room_id is required'}), 400
+        target = _adb_target(client_ip, adb_port)
+        if not target:
+            return jsonify({'error': 'Unknown device'}), 400
 
         import subprocess
         import os
@@ -13903,9 +13999,9 @@ def plex_playback_subtitles():
         env = os.environ.copy()
         env['HOME'] = '/app/home'
 
-        subprocess.run(['adb', 'connect', f'{client_ip}:{adb_port}'], env=env, timeout=5)
+        subprocess.run(['adb', 'connect', target], env=env, capture_output=True, timeout=5)
         result = subprocess.run(
-            ['adb', '-s', f'{client_ip}:{adb_port}', 'shell', 'input', 'keyevent', '175'],
+            ['adb', '-s', target, 'shell', 'input', 'keyevent', '175'],
             env=env,
             capture_output=True,
             text=True,
@@ -17909,7 +18005,10 @@ def plex_clients():
 
 @app.route('/api/plex/client/control', methods=['POST'])
 def plex_client_control():
-    """Control a Plex client (play/pause/stop/seek/volume)."""
+    """Control a Plex client (play/pause/stop/seek/volume). Admin only."""
+    err = _require_admin()
+    if err:
+        return err
     try:
         data = request.json or {}
         client_name = data.get('client_name', '')
@@ -17925,10 +18024,13 @@ def plex_client_control():
         # For 'back' action, route to ADB (simpler, works regardless)
         if action == 'back':
             device_ip = data.get('device_ip', '')
-            adb_port = int(data.get('adb_port', 5555))
             if device_ip:
+                target = _adb_target(device_ip, data.get('adb_port', 5555))
+                if not target:
+                    return jsonify({'success': False, 'error': 'Unknown device'}), 400
                 from app.adb_utils import send_key_event
-                result = send_key_event(device_ip, adb_port, 'back')
+                host, _, port = target.rpartition(':')
+                result = send_key_event(host.strip('[]'), int(port), 'back')
                 return jsonify(result)
             return jsonify({'success': False, 'error': 'device_ip required for back action'}), 400
 
@@ -17947,10 +18049,51 @@ def plex_client_control():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _configured_device_hosts() -> set:
+    """Every device host the admin configured in rooms, lowercased."""
+    hosts = set()
+    for room in settings.get('devices.rooms') or []:
+        if not isinstance(room, dict):
+            continue
+        for h in (room.get('host'), room.get('ip')):
+            if isinstance(h, str) and h:
+                hosts.add(h.strip().lower())
+        for dev in room.get('devices') or []:
+            if isinstance(dev, dict) and isinstance(dev.get('host'), str) and dev['host']:
+                hosts.add(dev['host'].strip().lower())
+    return hosts
+
+
+def _adb_target(host, port):
+    """'host:port' for adb -s for a configured device, or None (see adb_utils)."""
+    from app.adb_utils import adb_target
+    return adb_target(host, port, _configured_device_hosts())
+
+
+def _kodi_launch_args(target, file_url):
+    """adb argv that opens *file_url* in Kodi; the device command is one quoted arg."""
+    from app.adb_utils import shell_command
+    return ['adb', '-s', target, 'shell',
+            shell_command('am', 'start', '-a', 'android.intent.action.VIEW', '-d', file_url,
+                          '-t', 'video/*', '-n', 'org.xbmc.kodi/.Splash')]
+
+
+def _plex_deeplink_args(target, uri, start_playback=False):
+    """adb argv that opens a Plex deep link; the device command is one quoted arg."""
+    from app.adb_utils import shell_command
+    extra = ['--ez', 'android.intent.extra.START_PLAYBACK', 'true'] if start_playback else []
+    return ['adb', '-s', target, 'shell',
+            shell_command('am', 'start', *extra, '-a', 'android.intent.action.VIEW', '-d', uri,
+                          'com.plexapp.android')]
+
+
 @app.route('/api/activity')  # alfred asks here first, then falls back to the ADB path
 @app.route('/api/adb/shield_activity')
 def adb_shield_activity():
-    """Get current activity/media playing on a room device via ADB."""
+    """Get current activity/media playing on a room device via ADB (read-only:
+    admins and approved users, configured devices only)."""
+    if not user_auth.is_plex_approved(_get_current_user()):
+        return jsonify({'error': 'Not allowed'}), 403
     try:
         room_id = request.args.get('room_id')
         device_ip = request.args.get('device_ip')
@@ -17963,22 +18106,23 @@ def adb_shield_activity():
                 adb_port = room.get('connectPort', adb_port)
         if not device_ip:
             device_ip = settings.get_default_device_ip()
+        target = _adb_target(device_ip, adb_port)
+        if not target:
+            return jsonify({'error': 'Unknown device'}), 400
 
         # Get current foreground app
-        app_cmd = f'adb -s {device_ip}:{adb_port} shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp"'
         app_result = subprocess.run(
-            app_cmd,
-            shell=True,
+            ['adb', '-s', target, 'shell', 'dumpsys', 'window'],
             capture_output=True,
             text=True,
             timeout=5
         )
+        focus_lines = [ln for ln in (app_result.stdout or '').splitlines()
+                       if 'mCurrentFocus' in ln or 'mFocusedApp' in ln]
 
         # Get media session info (works for YouTube, Netflix, Plex, Spotify, etc.)
-        media_cmd = f'adb -s {device_ip}:{adb_port} shell dumpsys media_session'
         media_result = subprocess.run(
-            media_cmd,
-            shell=True,
+            ['adb', '-s', target, 'shell', 'dumpsys', 'media_session'],
             capture_output=True,
             text=True,
             timeout=5
@@ -17987,8 +18131,8 @@ def adb_shield_activity():
         # Parse current app
         current_app = 'Unknown'
         current_package = ''
-        if app_result.returncode == 0:
-            output = app_result.stdout
+        if app_result.returncode == 0 and focus_lines:
+            output = '\n'.join(focus_lines)
             # Extract package name from mCurrentFocus or mFocusedApp
             import re
             match = re.search(r'([a-z0-9\.]+)/([a-z0-9\.]+)', output)
@@ -18125,9 +18269,9 @@ def adb_shield_activity():
                 plex_token = settings.get('plex.token')
                 if plex_token:
                     # Get active Plex sessions
-                    sessions_url = f"{plex_url}/status/sessions?X-Plex-Token={plex_token}"
-                    headers = {'Accept': 'application/json'}
-                    plex_response = requests.get(sessions_url, headers=headers, timeout=3)
+                    sessions_url = f"{plex_url}/status/sessions"
+                    headers = {'Accept': 'application/json', 'X-Plex-Token': plex_token}
+                    plex_response = requests.get(sessions_url, headers=headers, timeout=3, allow_redirects=False)
                     if plex_response.status_code == 200:
                         sessions_data = plex_response.json()
                         metadata_list = sessions_data.get('MediaContainer', {}).get('Metadata', [])
@@ -18171,10 +18315,11 @@ def adb_shield_activity():
                                 # Get artwork URLs
                                 thumb = session.get('thumb', '')
                                 art = session.get('art', '') or session.get('grandparentArt', '')
+                                # Through the image proxy: the token never reaches the browser.
                                 if thumb:
-                                    media_info['artwork_url'] = f"{plex_url}{thumb}?X-Plex-Token={plex_token}"
+                                    media_info['artwork_url'] = f"/api/img/plex?url={urllib.parse.quote(thumb, safe='/')}"
                                 if art:
-                                    media_info['backdrop_url'] = f"{plex_url}{art}?X-Plex-Token={plex_token}"
+                                    media_info['backdrop_url'] = f"/api/img/plex?url={urllib.parse.quote(art, safe='/')}"
 
                                 # Get player info
                                 media_info['player_name'] = player.get('title', 'Unknown')
@@ -18200,6 +18345,9 @@ def adb_shield_activity():
 @app.route('/api/adb/control', methods=['POST'])
 def adb_control():
     """Send ADB commands to control playback on a room device."""
+    err = _require_admin()
+    if err:
+        return err
     try:
         data = request.get_json() or {}
         room_id = data.get('room_id')
@@ -18241,12 +18389,14 @@ def adb_control():
         }
 
         if command not in keycodes:
-            return jsonify({'error': f'Unknown command: {command}'}), 400
+            return jsonify({'error': 'Unknown command'}), 400
 
         keycode = keycodes[command]
 
         # Send ADB command
-        target = f'{device_ip}:{adb_port}'
+        target = _adb_target(device_ip, adb_port)
+        if not target:
+            return jsonify({'error': 'Unknown device'}), 400
         env = {**os.environ, 'HOME': '/app/home'}
         logger.info(f"Sending ADB keyevent {keycode} to {target}")
 
