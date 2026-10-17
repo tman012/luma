@@ -12,8 +12,8 @@ import pytest
 
 import app.main
 import app.user_auth
-from app import indexer_api, tracker_clients, tracker_guard, tracker_routes, tracker_search, tracker_sources, tracker_store
-from app.tracker_guard import TrackerGuard, guard_key
+from app import indexer_api, tracker_clients, tracker_http, tracker_guard, tracker_routes, tracker_search, tracker_sources, tracker_store
+from app.tracker_guard import TrackerGuard, guard_key, ip_key
 from app.tracker_http import Response
 from app.tracker_search import ReleaseTokens, TrackerSearch
 from app.tracker_store import TrackerStore
@@ -77,8 +77,13 @@ class MockTrackers:
         return [c for c in self.calls if c['url'].split('//', 1)[1].split('/', 1)[0].split(':')[0] == host]
 
     def __call__(self, method, url, **kw):
-        self.calls.append({'method': method, 'url': url, **kw})
         host = url.split('//', 1)[1].split('/', 1)[0].split(':')[0]
+        # Like tracker_http.request: the address scope sees (and may refuse)
+        # every address before anything is sent.
+        scope = tracker_http.current_scope()
+        if scope is not None:
+            scope.visit((ADDRS.get(host) or [host])[0])
+        self.calls.append({'method': method, 'url': url, **kw})
         rs = self.by_host.get(host)
         if not rs:
             raise AssertionError(f'unexpected request to {host}')
@@ -492,3 +497,49 @@ def test_release_links_are_only_relative_paths(env):
     assert tracker_sources.release_token('https://evil.example/api/trackers/release/' + 'a' * 32) is None
     assert tracker_sources.release_token(DL) is None
     assert tracker_sources.release_token('magnet:?xt=urn:btih:abc') is None
+
+
+# ------------------------------------------------------------------ IP-keyed backoff (Torznab/Newznab)
+
+T_IP = ADDRS['t.example'][0]
+
+
+def test_grab_rate_limit_also_keys_the_server_address(signed_in, env):
+    torznab(env['store'])
+    env['mock'].set('t.example', R(body=rss(('The Nut Job 2014 1080p WEB-DL', DL))),
+                    R(429, headers={'Retry-After': '600'}))
+    rel = _search(signed_in)[0]
+    assert _grab(signed_in, rel['download_url']).status_code == 429
+    blocked = env['guard'].blocked(ip_key(T_IP))
+    assert blocked and blocked[1] == 'rate' and blocked[0] >= time.time() + 590
+
+
+def test_grab_respects_a_backoff_on_the_server_address(signed_in, env):
+    torznab(env['store'])
+    env['mock'].set('t.example', R(body=rss(('The Nut Job 2014 1080p WEB-DL', DL))), R(body=torrent_bytes()))
+    rel = _search(signed_in)[0]
+    calls = len(env['mock'].calls)
+    env['guard'].failure(ip_key(T_IP), 'rate', 600)      # e.g. another name for the same server
+    r = _grab(signed_in, rel['download_url'])
+    assert r.status_code == 429
+    assert len(env['mock'].calls) == calls and env['qbit'].added == []
+
+
+def test_grab_ban_page_backs_off_the_site_and_the_address(signed_in, env):
+    rec = torznab(env['store'])
+    env['mock'].set('t.example', R(body=rss(('The Nut Job 2014 1080p WEB-DL', DL))),
+                    R(body='<html>Your account is banned</html>'))
+    rel = _search(signed_in)[0]
+    r = _grab(signed_in, rel['download_url'])
+    assert r.status_code == 429 and env['qbit'].added == []
+    assert env['guard'].blocked(guard_key(env['store'].get(rec['id'])))[1] == 'banned'
+    assert env['guard'].blocked(ip_key(T_IP))[1] == 'banned'
+
+
+def test_site_type_grab_rate_limit_does_not_key_the_address(signed_in, env):
+    ipt(env['store'])
+    env['mock'].set('ipt.example', R(body=IPT_HTML), R(429, headers={'Retry-After': '600'}))
+    rel = _search(signed_in)[0]
+    assert _grab(signed_in, rel['download_url']).status_code == 429
+    assert env['guard'].blocked(ip_key(ADDRS['ipt.example'][0])) is None
+    assert env['guard'].blocked('site:iptorrents')[1] == 'rate'

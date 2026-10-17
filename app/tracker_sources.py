@@ -31,7 +31,8 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import urljoin, urlsplit
 
 from app import tracker_types as tt
-from app.tracker_http import TrackerError, raise_for_status
+from app.tracker_guard import address_scope, record_failure
+from app.tracker_http import TrackerError, looks_banned, raise_for_status
 
 logger = logging.getLogger(__name__)
 
@@ -259,30 +260,36 @@ def fetch_release(token: Optional[str], resolver=None) -> Tuple[str, Any]:
             raise GrabError('This tracker is rate limited right now. Try again later.', 429)
         engine.guard.wait_spacing(gk)
         url = target
+        # Torznab/Newznab: refuse a server whose resolved address is backing
+        # off, and key a new rate limit or ban to the addresses contacted.
+        scope = address_scope(cfg, engine.guard)
         try:
-            for _ in range(MAX_REDIRECTS + 1):
-                headers = plan(url)
-                resp = engine.request('GET', url, headers=headers, max_bytes=MAX_TORRENT_BYTES,
-                                      follow_redirects=False)
-                if resp.status in (301, 302, 303, 307, 308):
-                    loc = (resp.headers.get('Location') or resp.headers.get('location') or '').strip()
-                    if loc.lower().startswith('magnet:'):
-                        engine.guard.success(gk)
-                        return 'magnet', loc
-                    if not loc:
-                        raise TrackerError('redirect', resp.status)
-                    url = urljoin(url, loc)
-                    continue
-                raise_for_status(resp)
-                break
-            else:
-                raise TrackerError('redirect')
+            with scope:
+                for _ in range(MAX_REDIRECTS + 1):
+                    headers = plan(url)
+                    resp = engine.request('GET', url, headers=headers, max_bytes=MAX_TORRENT_BYTES,
+                                          follow_redirects=False)
+                    if resp.status in (301, 302, 303, 307, 308):
+                        loc = (resp.headers.get('Location') or resp.headers.get('location') or '').strip()
+                        if loc.lower().startswith('magnet:'):
+                            engine.guard.success(gk)
+                            return 'magnet', loc
+                        if not loc:
+                            raise TrackerError('redirect', resp.status)
+                        url = urljoin(url, loc)
+                        continue
+                    raise_for_status(resp)
+                    break
+                else:
+                    raise TrackerError('redirect')
         except TrackerError as e:
             if e.kind in ('rate', 'banned', 'auth'):
-                engine.guard.failure(gk, e.kind, e.retry_after)
+                record_failure(engine.guard, gk, e, scope)
             logger.info('Tracker %s (id %s) download failed: %s', cfg['name'], cfg['id'], e.kind)
             if e.kind == 'rate':
                 raise GrabError('This tracker is rate limited right now. Try again later.', 429) from None
+            if e.kind == 'banned':
+                raise GrabError('This tracker is paused right now. Try again later.', 429) from None
             if e.kind == 'auth':
                 raise GrabError('The tracker refused the download. Check its sign-in in Settings.', 502) from None
             if e.kind == 'too_large':
@@ -297,5 +304,9 @@ def fetch_release(token: Optional[str], resolver=None) -> Tuple[str, Any]:
     if resp.status == 200 and _is_torrent(body):
         engine.guard.success(gk)
         return 'torrent', body
+    if looks_banned(body[:4000].decode('utf-8', 'ignore')):
+        record_failure(engine.guard, gk, TrackerError('banned', resp.status), scope)
+        logger.info('Tracker %s (id %s) download refused: banned', cfg['name'], cfg['id'])
+        raise GrabError('This tracker is paused right now. Try again later.', 429)
     logger.info('Tracker %s (id %s) download was not a torrent', cfg['name'], cfg['id'])
     raise GrabError('The tracker didn’t send a torrent. Search again.', 502)
