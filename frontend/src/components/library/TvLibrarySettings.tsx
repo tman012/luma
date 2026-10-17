@@ -13,12 +13,14 @@ import {
 } from './LibraryPathsSettings';
 import { SAVE_FAILED } from './libraryPathsApi';
 import {
-  addTvPath, deleteTvPath, editTvPath, fileCounts, lastScanText, loadTv, loadTvLibrary, matchFolder, rematchShow,
+  addTvPath, deleteTvPath, editTvPath, episodeCount, lastScanText, loadTv, loadTvLibrary, matchFolder, needsReview, rematchShow,
   saveUpgrades, searchShows, showLabel, startScan,
   type Candidate, type Show, type TvLibrary, type TvSettingsView, type Unmatched, type UpgradeMode,
 } from './tvLibraryApi';
 
 export const POLL_MS = 2000;
+/** Space between sections (Library paths, Scan, Unmatched, Shows, Upgrades), as on Library paths. */
+export const SECTION_GAP = 28;
 type Editing = { kind: 'path'; id: string | null } | { kind: 'show'; id: number } | { kind: 'folder'; id: number } | null;
 
 export function TvLibrarySettings({ wide }: { wide: boolean }) {
@@ -56,7 +58,7 @@ export function TvLibrarySettings({ wide }: { wide: boolean }) {
 
   return (
     <WideCtx.Provider value={wide}>
-    <section data-testid="tv-section" style={{ ...pad(wide), display: 'flex', flexDirection: 'column', gap: 28, fontFamily: FONT }}>
+    <section data-testid="tv-section" style={{ ...pad(wide), display: 'flex', flexDirection: 'column', gap: SECTION_GAP, fontFamily: FONT }}>
       <style>{libraryPathsCss}</style>
       <style>{trackersCss}</style>
       {toast && <NoticeToast key={toast + seq.current} text={toast} onDone={() => setToast('')} />}
@@ -78,23 +80,24 @@ export function TvLibrarySettings({ wide }: { wide: boolean }) {
             : <AddRow label="Add path" first={view.paths.length === 0} testId="tv-add-path"
                 onClick={() => setEditing({ kind: 'path', id: null })} />}
         </div>
-        {view.paths.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, flexWrap: 'wrap' }}>
-            <button type="button" className="lp-focus" data-testid="tv-scan" disabled={running}
-              onClick={() => startScan().then(r => {
-                if (r.ok) setLib(l => (l ? { ...l, scan: r.data.scan } : l)); else say(r.error);
-                refreshLib();
-              })}
-              style={{ ...primary, opacity: running ? 0.5 : 1, cursor: running ? 'default' : 'pointer' }}>
-              {running ? 'Scanning…' : 'Scan'}
-            </button>
-            <span data-testid="tv-scan-status" role="status"
-              style={{ fontSize: 14, color: lib?.scan.error ? T.dangerText : 'rgba(255,255,255,0.55)' }}>
-              {lib?.scan.error || (lib ? lastScanText(lib.scan.last_scan) : '')}
-            </span>
-          </div>
-        )}
       </div>
+
+      {view.paths.length > 0 && (
+        <div data-testid="tv-scan-row" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <button type="button" className="lp-focus" data-testid="tv-scan" disabled={running}
+            onClick={() => startScan().then(r => {
+              if (r.ok) setLib(l => (l ? { ...l, scan: r.data.scan } : l)); else say(r.error);
+              refreshLib();
+            })}
+            style={{ ...primary, opacity: running ? 0.5 : 1, cursor: running ? 'default' : 'pointer' }}>
+            {running ? 'Scanning…' : 'Scan'}
+          </button>
+          <span data-testid="tv-scan-status" role="status"
+            style={{ fontSize: 14, color: lib?.scan.error ? T.dangerText : 'rgba(255,255,255,0.55)' }}>
+            {lib?.scan.error || (lib ? lastScanText(lib.scan.last_scan) : '')}
+          </span>
+        </div>
+      )}
 
       {lib && lib.unmatched.length > 0 && (
         <div data-testid="tv-unmatched">
@@ -152,7 +155,13 @@ function ShowRow({ s, first, open, onOpen }: { s: Show; first: boolean; open: bo
     <div data-testid="tv-show" style={{ ...rowBtn, cursor: 'default', ...(first ? null : topBorder) }}>
       <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <span style={titleText(true)}>{showLabel(s)}</span>
-        <span style={subText(true)} title={`${s.path_name} · ${s.folder}`}>{fileCounts(s)}</span>
+        <span style={{ ...subText(true), display: 'flex', alignItems: 'center', gap: 6 }} title={`${s.path_name} · ${s.folder}`}>
+          {needsReview(s) && (
+            <span role="img" aria-label="Needs review" data-testid="tv-review-dot"
+              style={{ width: 8, height: 8, borderRadius: 4, background: T.warning, flex: 'none' }} />
+          )}
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{episodeCount(s)}</span>
+        </span>
       </span>
       <button type="button" className="lp-focus" data-testid="tv-wrong-show" aria-expanded={open} onClick={onOpen}
         style={linkBtn}>Wrong show?</button>

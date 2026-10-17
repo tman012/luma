@@ -9,7 +9,7 @@ export interface TvSettingsView { paths: LibPath[]; upgrades: { mode: UpgradeMod
 export interface Candidate { tmdb_id: number; title: string; year: number | null; poster_path?: string | null }
 export interface Show {
   id: number; tmdb_id: number; title: string; year: number | null; path_id: string; path_name: string; folder: string;
-  poster_path: string | null; monitored: boolean; files: number; linked: number; mismatch: number; unrecognized: number;
+  poster_path: string | null; monitored: boolean; files: number; episodes: number; linked: number; mismatch: number; unrecognized: number;
 }
 export interface Unmatched {
   id: number; path_id: string; path_name: string; folder: string; guess_title: string | null; guess_year: number | null;
@@ -55,14 +55,11 @@ export const matchFolder = (id: number, tmdb_id: number) =>
 /** "Severance (2022)" or "Severance". */
 export const showLabel = (c: { title: string; year: number | null }) => (c.year ? `${c.title} (${c.year})` : c.title);
 
-/** "3 linked · 1 mismatch · 2 unrecognized", or "No files". */
-export function fileCounts(s: Show): string {
-  if (!s.files) return 'No files';
-  const parts = [`${s.linked} linked`];
-  if (s.mismatch) parts.push(`${s.mismatch} mismatch`);
-  if (s.unrecognized) parts.push(`${s.unrecognized} unrecognized`);
-  return parts.join(' · ');
-}
+/** "12 episodes", "1 episode". */
+export const episodeCount = (s: Show) => `${s.episodes} ${s.episodes === 1 ? 'episode' : 'episodes'}`;
+
+/** Some files don't fit an episode of the show (mismatch or unrecognized). */
+export const needsReview = (s: Show) => s.mismatch + s.unrecognized > 0;
 
 /** "Last scan 3:05 PM" today, else "Last scan Oct 16"; "Not scanned yet". */
 export function lastScanText(ts: number | null, now = Date.now()): string {

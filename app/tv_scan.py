@@ -498,13 +498,16 @@ def library_view() -> Dict[str, Any]:
         for r in conn.execute(
                 'SELECT s.id, s.tmdb_id, s.title, s.year, s.path_id, s.folder, s.poster_path, s.monitored,'
                 " SUM(f.state = 'linked') AS linked, SUM(f.state = 'mismatch') AS mismatch,"
-                " SUM(f.state = 'unrecognized') AS unrecognized, COUNT(f.id) AS files"
+                " SUM(f.state = 'unrecognized') AS unrecognized, COUNT(f.id) AS files,"
+                ' (SELECT COUNT(DISTINCT l.episode_id) FROM episode_file_links l'
+                '  JOIN episode_files lf ON lf.id = l.file_id WHERE lf.series_id = s.id) AS episodes'
                 ' FROM series s LEFT JOIN episode_files f ON f.series_id = s.id'
                 ' WHERE s.path_id IS NOT NULL GROUP BY s.id ORDER BY s.title COLLATE NOCASE'):
             shows.append({'id': r['id'], 'tmdb_id': r['tmdb_id'], 'title': r['title'], 'year': r['year'],
                           'path_id': r['path_id'], 'path_name': names.get(r['path_id'], ''), 'folder': r['folder'],
                           'poster_path': r['poster_path'], 'monitored': bool(r['monitored']),
-                          'files': r['files'] or 0, 'linked': r['linked'] or 0, 'mismatch': r['mismatch'] or 0,
+                          'files': r['files'] or 0, 'episodes': r['episodes'] or 0,
+                          'linked': r['linked'] or 0, 'mismatch': r['mismatch'] or 0,
                           'unrecognized': r['unrecognized'] or 0})
         unmatched = []
         for r in conn.execute('SELECT * FROM unmatched ORDER BY folder COLLATE NOCASE'):
