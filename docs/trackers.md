@@ -16,7 +16,7 @@ A fresh install has neither file and zero trackers. Nothing is preconfigured.
 
 Torznab, Newznab, AvistaZ, BeyondHD, CinemaZ, ExoticaZ, IPTorrents, MoreThanTV, PrivateHD. Each type lists its own fields (`GET /api/trackers/types`); fields with `"secret": true` are masked.
 
-Torznab and Newznab are for trackers that serve their own Torznab or Newznab API on a public host. A Jackett or Prowlarr endpoint (`/api/v2.0/indexers/...`, `/<id>/api`, `/prowlarr/...`, `/api/v1/indexer...`) is refused as "Invalid URL".
+Torznab and Newznab are for trackers that serve their own Torznab or Newznab API on a public host. A Jackett or Prowlarr endpoint (`/api/v2.0/indexers/...`, `/api/v1/indexer...`, a `/prowlarr` segment, or `/<id>/api` at any depth; a year such as `/2024/api` is fine) is refused as "Invalid URL". The check runs on the path a server would see (percent-decoded, `//` collapsed, `.` and `..` resolved), on save, on Test and on every request and redirect hop, same-site ones included.
 
 ## API (owner only)
 

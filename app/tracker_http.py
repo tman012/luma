@@ -25,7 +25,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -229,6 +229,57 @@ def host_literal_blocked(url: str) -> bool:
     return not address_allowed(host)
 
 
+# ------------------------------------------------------------------ indexer proxies
+
+def normalized_path(path: str) -> str:
+    """A URL path the way a server sees it: percent-decoded (repeatedly, so
+    double encoding can't hide a segment), backslashes as slashes, repeated
+    slashes collapsed, '.' and '..' segments resolved, lowercase."""
+    p = str(path or '')
+    for _ in range(4):
+        q = unquote(p)
+        if q == p:
+            break
+        p = q
+    p = p.replace('\\', '/')
+    out: List[str] = []
+    for seg in p.split('/'):
+        if seg in ('', '.'):
+            continue
+        if seg == '..':
+            if out:
+                out.pop()
+            continue
+        out.append(seg)
+    return '/' + '/'.join(out).lower()
+
+
+def _prowlarr_id(seg: str) -> bool:
+    """A Prowlarr indexer id segment: a small number, not a year (/2024/api
+    is a normal path)."""
+    if not seg.isdigit() or seg.startswith('0') or len(seg) > 4:
+        return False
+    return not (len(seg) == 4 and 1900 <= int(seg) <= 2099)
+
+
+def is_proxy_url(url: str) -> bool:
+    """True when *url* is a Jackett or Prowlarr endpoint: Jackett's
+    /api/v2.0/indexers/..., Prowlarr's /api/v1/indexer..., a /prowlarr
+    segment, or Prowlarr's /<id>/api feed at any depth (any URL base).
+    Luma talks to trackers directly; a proxy is not a tracker."""
+    try:
+        path = urlsplit(str(url or '')).path or ''
+    except ValueError:
+        return True
+    segs = normalized_path(path).strip('/').split('/')
+    for i in range(len(segs)):
+        if segs[i:i + 3] == ['api', 'v2.0', 'indexers'] or segs[i:i + 3] == ['api', 'v1', 'indexer']:
+            return True
+        if segs[i] == 'prowlarr':
+            return True
+    return len(segs) >= 2 and segs[-1] == 'api' and _prowlarr_id(segs[-2])
+
+
 def check_target(url: str) -> Tuple[str, int]:
     """Resolve *url*'s host and return (pinned address, port), or raise
     TrackerError('blocked') when any resolved address or the port is not
@@ -336,6 +387,8 @@ def request(method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
             if time.monotonic() > deadline:
                 raise TrackerError('timeout')
             address, _port_ = check_target(cur_url)        # every hop, before anything is sent
+            if is_proxy_url(cur_url):                      # every hop, same-site redirects included
+                raise TrackerError('blocked')
             if sess is not None and session is None:
                 sess.close()
             sess = session or _pinned_session(cur_url, address)
