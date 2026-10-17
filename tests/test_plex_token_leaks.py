@@ -159,7 +159,8 @@ def test_no_token_in_any_url_in_main():
 
 
 def _fake_adb(cmd, **k):
-    if 'dumpsys window' in cmd:
+    assert isinstance(cmd, list) and not k.get('shell')
+    if cmd[-1] == 'window':
         out = 'mCurrentFocus=Window{1 u0 com.plexapp.android/com.plexapp.main}'
     else:
         out = '\n'.join([
@@ -174,7 +175,7 @@ def _fake_adb(cmd, **k):
 @pytest.mark.parametrize('path', ['/api/activity', '/api/adb/shield_activity'])
 def test_activity_artwork_goes_through_proxy(plex, monkeypatch, path):
     client, calls, state = plex
-    state['user'] = MEMBER
+    state['user'] = ADMIN
     monkeypatch.setattr(app.main.subprocess, 'run', _fake_adb)
     sessions = {'MediaContainer': {'Metadata': [{
         'type': 'movie', 'title': 'Heat', 'year': 1995, 'duration': 600000, 'viewOffset': 60000,
