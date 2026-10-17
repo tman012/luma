@@ -1,12 +1,13 @@
-/** Settings > Connectors (owner only): the TMDB API key and the Trakt client
- * ID. Both stay on the server; the browser only learns whether one is saved
- * and its last 4. */
+/** Settings > Connectors (owner only): the TMDB API key, the Trakt client
+ * ID and qBittorrent. Keys stay on the server; the browser only learns
+ * whether one is saved and its last 4 (never any of the qBittorrent password). */
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/apiClient';
 import { FONT } from '@/components/start/StartUI';
 import { LUMA_BLUE } from '@/ui/lumaButton';
 import { NoticeToast } from '@/components/start/SetupToast';
 import { useKioskWidth } from '@/components/home/KioskHome';
+import { QbitConnector } from '@/components/home/QbitConnector';
 
 type Masked = { set: boolean; last4: string };
 interface View { tmdb: Masked; trakt?: Masked }
@@ -47,6 +48,7 @@ export function ConnectorsSettings() {
         <ConnectorGroup key={g.id} group={g} masked={view[g.id] || { set: false, last4: '' }}
           onSaved={(v, removed) => { setView(v); setToast(removed ? 'Removed' : 'Saved'); }} />
       ))}
+      <QbitConnector onSaved={setToast} />
     </section>
   );
 }
