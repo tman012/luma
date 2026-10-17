@@ -13,7 +13,7 @@ import {
 } from './LibraryPathsSettings';
 import { SAVE_FAILED } from './libraryPathsApi';
 import {
-  addTvPath, deleteTvPath, editTvPath, episodeCount, lastScanText, loadTv, loadTvLibrary, matchFolder, needsReview, rematchShow,
+  addTvPath, deleteTvPath, editTvPath, showSubtitle, lastScanText, loadTv, loadTvLibrary, matchFolder, needsReview, rematchShow,
   saveUpgrades, searchShows, showLabel, startScan,
   type Candidate, type Show, type TvLibrary, type TvSettingsView, type Unmatched, type UpgradeMode,
 } from './tvLibraryApi';
@@ -151,23 +151,57 @@ export function TvLibrarySettings({ wide }: { wide: boolean }) {
 // ---------------------------------------------------------------- rows
 
 function ShowRow({ s, first, open, onOpen }: { s: Show; first: boolean; open: boolean; onOpen: () => void }) {
-  return (
-    <div data-testid="tv-show" style={{ ...rowBtn, cursor: 'default', ...(first ? null : topBorder) }}>
-      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={titleText(true)}>{showLabel(s)}</span>
-        <span style={{ ...subText(true), display: 'flex', alignItems: 'center', gap: 6 }} title={`${s.path_name} · ${s.folder}`}>
-          {needsReview(s) && (
-            <span role="img" aria-label="Needs review" data-testid="tv-review-dot"
-              style={{ width: 8, height: 8, borderRadius: 4, background: T.warning, flex: 'none' }} />
-          )}
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{episodeCount(s)}</span>
-        </span>
+  const [details, setDetails] = useState(false);
+  const review = needsReview(s);
+  const lines = s.review || [];
+  const subtitle = (
+    <>
+      {review && (
+        <span role="img" aria-label="Needs review" data-testid="tv-review-dot"
+          style={{ width: 8, height: 8, borderRadius: 4, background: T.warning, flex: 'none' }} />
+      )}
+      <span data-testid="tv-show-subtitle" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {showSubtitle(s)}
       </span>
-      <button type="button" className="lp-focus" data-testid="tv-wrong-show" aria-expanded={open} onClick={onOpen}
-        style={linkBtn}>Wrong show?</button>
+      {review && lines.length > 0 && (
+        <span aria-hidden="true" style={{ display: 'inline-flex', flex: 'none', transform: details ? 'rotate(90deg)' : undefined }}>
+          <ChevronIcon size={12} />
+        </span>
+      )}
+    </>
+  );
+  const subStyle: React.CSSProperties = { ...subText(true), display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 };
+  return (
+    <div style={first ? undefined : topBorder}>
+      <div data-testid="tv-show" style={{ ...rowBtn, cursor: 'default' }}>
+        <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span style={titleText(true)}>{showLabel(s)}</span>
+          {review && lines.length > 0 ? (
+            <button type="button" className="lp-focus" data-testid="tv-review-toggle" aria-expanded={details}
+              onClick={() => setDetails(d => !d)} title={`${s.path_name} · ${s.folder}`}
+              style={{ ...subStyle, background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', font: 'inherit', fontSize: subStyle.fontSize }}>
+              {subtitle}
+            </button>
+          ) : (
+            <span style={subStyle} title={`${s.path_name} · ${s.folder}`}>{subtitle}</span>
+          )}
+        </span>
+        <button type="button" className="lp-focus" data-testid="tv-wrong-show" aria-expanded={open} onClick={onOpen}
+          style={linkBtn}>Wrong show?</button>
+      </div>
+      {details && lines.length > 0 && (
+        <ul data-testid="tv-review-list" style={reviewList}>
+          {lines.map(l => <li key={l} style={{ listStyle: 'none' }}>{l}</li>)}
+        </ul>
+      )}
     </div>
   );
 }
+
+const reviewList: React.CSSProperties = {
+  margin: '-4px 0 0', padding: '0 16px 12px', display: 'flex', flexDirection: 'column', gap: 4,
+  fontSize: 13, lineHeight: '18px', color: T.text2,
+};
 
 function UnmatchedRow({ u, first, open, onOpen }: { u: Unmatched; first: boolean; open: boolean; onOpen: () => void }) {
   return (

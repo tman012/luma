@@ -656,6 +656,59 @@ def match_unmatched(unmatched_id: int, tmdb_id: int, now: Optional[float] = None
 
 # --------------------------------------------------------------------------- view
 
+REVIEW_MAX = 20
+_MONTHS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+
+
+def _ep_code(season: int, episodes: List[int]) -> str:
+    code = f'S{season:02d}E{episodes[0]:02d}'
+    return code + (f'\u2013E{episodes[-1]:02d}' if len(episodes) > 1 else '')
+
+
+def _day(air_date: str) -> str:
+    try:
+        y, m, d = (int(x) for x in air_date.split('-'))
+        return f'{_MONTHS[m - 1]} {d}, {y}'
+    except (ValueError, IndexError):
+        return air_date
+
+
+def review_lines(conn, sid: int) -> List[str]:
+    """What needs review in a show, in words: one line per file whose numbering
+    doesn't fit ("S03E01 is in Season 2", "S02E40 isn't an episode of this
+    show"), then one line for files with no episode in the name."""
+    lines: List[Tuple[Tuple, str]] = []
+    unrecognized = 0
+    for r in conn.execute("SELECT rel_path, state, parsed FROM episode_files WHERE series_id = ?"
+                          " AND state IN ('mismatch', 'unrecognized') ORDER BY rel_path", (sid,)):
+        if r['state'] == 'unrecognized':
+            unrecognized += 1
+            continue
+        try:
+            p = json.loads(r['parsed'] or '{}')
+        except ValueError:
+            p = {}
+        season, eps = p.get('season'), [e for e in p.get('episodes') or [] if isinstance(e, int)]
+        if isinstance(season, int) and eps:
+            rel_in_show = r['rel_path'].split('/', 1)[-1]
+            folder_season = tv_release.season_from_folder(rel_in_show)
+            code = _ep_code(season, eps)
+            text = (f'{code} is in Season {folder_season}' if folder_season is not None and folder_season != season
+                    else f"{code} isn't an episode of this show")
+            lines.append(((0, season, eps[0], text), text))
+        elif isinstance(p.get('air_date'), str):
+            text = f"{_day(p['air_date'])} isn't an episode of this show"
+            lines.append(((1, 0, 0, p['air_date']), text))
+        else:
+            unrecognized += 1
+    out = [t for _, t in sorted(lines)]
+    if len(out) > REVIEW_MAX:
+        out = out[:REVIEW_MAX - 1] + [f'{len(out) - REVIEW_MAX + 1} more files don\u2019t fit an episode']
+    if unrecognized:
+        out.append(f"{unrecognized} {'file' if unrecognized == 1 else 'files'} not recognized")
+    return out
+
+
 def library_view() -> Dict[str, Any]:
     from app import tv_settings
     names = {p['id']: p['name'] for p in tv_settings.load()['paths']}
@@ -674,7 +727,8 @@ def library_view() -> Dict[str, Any]:
                           'poster_path': r['poster_path'], 'monitored': bool(r['monitored']),
                           'files': r['files'] or 0, 'episodes': r['episodes'] or 0,
                           'linked': r['linked'] or 0, 'mismatch': r['mismatch'] or 0,
-                          'unrecognized': r['unrecognized'] or 0})
+                          'unrecognized': r['unrecognized'] or 0,
+                          'review': review_lines(conn, r['id']) if (r['mismatch'] or r['unrecognized']) else []})
         unmatched = []
         for r in conn.execute('SELECT * FROM unmatched ORDER BY folder COLLATE NOCASE'):
             try:

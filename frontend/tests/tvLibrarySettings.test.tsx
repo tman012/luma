@@ -5,12 +5,13 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SECTION_GAP, TvLibrarySettings, UPGRADE_OPTIONS } from '@/components/library/TvLibrarySettings';
-import { episodeCount, lastScanText, needsReview, showLabel } from '@/components/library/tvLibraryApi';
+import { episodeCount, lastScanText, needsReview, reviewCount, showLabel, showSubtitle } from '@/components/library/tvLibraryApi';
 
 const res = (body: unknown, status = 200) => ({ ok: status < 300, status, json: async () => body }) as Response;
 const PATH = { id: 't_0000aaaa', name: 'TV', path: '/media/TV', status: 'ok' };
 const SEV = { id: 1, tmdb_id: 95396, title: 'Severance', year: 2022, path_id: PATH.id, path_name: 'TV', folder: 'Severance (2022)',
-  poster_path: null, monitored: false, files: 6, episodes: 4, linked: 3, mismatch: 2, unrecognized: 1 };
+  poster_path: null, monitored: false, files: 6, episodes: 4, linked: 3, mismatch: 2, unrecognized: 1,
+  review: ['S03E01 is in Season 2', "S02E40 isn't an episode of this show", '1 file not recognized'] };
 const DARK = { ...SEV, id: 3, tmdb_id: 70523, title: 'Dark', year: 2017, folder: 'Dark', files: 1, episodes: 1, linked: 1, mismatch: 0, unrecognized: 0 };
 const MYS = { id: 7, path_id: PATH.id, path_name: 'TV', folder: 'Mystery Show', guess_title: 'Mystery Show', guess_year: null,
   candidates: [{ tmdb_id: 1001, title: 'Mystery Show', year: 2015 }, { tmdb_id: 1002, title: 'Mystery Show', year: 2019 }],
@@ -61,9 +62,9 @@ describe('Settings > TV', () => {
     await screen.findByText('Severance (2022)');
     expect(within(screen.getByTestId('tv-paths')).getByText('/media/TV')).toBeTruthy();
     const rows = screen.getAllByTestId('tv-show');
-    expect(within(rows[0]!).getByText('4 episodes')).toBeTruthy();
+    expect(within(rows[0]!).getByTestId('tv-show-subtitle').textContent).toBe('4 episodes \u00b7 3 need review');
     expect(within(rows[0]!).getByTestId('tv-review-dot').getAttribute('aria-label')).toBe('Needs review');
-    expect(within(rows[1]!).getByText('1 episode')).toBeTruthy();
+    expect(within(rows[1]!).getByTestId('tv-show-subtitle').textContent).toBe('1 episode');
     expect(within(rows[1]!).queryByTestId('tv-review-dot')).toBeNull();
     expect(screen.queryByText(/linked|mismatch|unrecognized/)).toBeNull();
     expect(within(screen.getByTestId('tv-unmatched')).getByText('Mystery Show')).toBeTruthy();
@@ -164,5 +165,31 @@ describe('labels', () => {
     const now = new Date(2026, 9, 17, 17, 0).getTime();
     expect(lastScanText(new Date(2026, 9, 17, 15, 5).getTime() / 1000, now)).toBe('Last scan 3:05 PM');
     expect(lastScanText(new Date(2026, 9, 16, 9, 0).getTime() / 1000, now)).toBe('Last scan Oct 16');
+  });
+});
+
+
+describe('needs review, in words (Tester tv1-8646479 M7/M8)', () => {
+  it('subtitle counts what needs review, singular and plural', () => {
+    expect(showSubtitle(SEV)).toBe('4 episodes \u00b7 3 need review');
+    expect(reviewCount({ ...SEV, mismatch: 0 })).toBe('1 needs review');
+    expect(showSubtitle(DARK)).toBe('1 episode');
+  });
+
+  it('tapping the subtitle lists what needs review; shows with nothing to review have no toggle', async () => {
+    render(<TvLibrarySettings wide />);
+    await screen.findByText('Severance (2022)');
+    const rows = screen.getAllByTestId('tv-show');
+    expect(within(rows[1]!).queryByTestId('tv-review-toggle')).toBeNull();
+    const toggle = within(rows[0]!).getByTestId('tv-review-toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId('tv-review-list')).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const items = Array.from(screen.getByTestId('tv-review-list').querySelectorAll('li')).map(li => li.textContent);
+    expect(items).toEqual(['S03E01 is in Season 2', "S02E40 isn't an episode of this show", '1 file not recognized']);
+    expect(screen.queryByText(/linked|mismatch|unrecognized/)).toBeNull();
+    fireEvent.click(toggle);
+    expect(screen.queryByTestId('tv-review-list')).toBeNull();
   });
 });

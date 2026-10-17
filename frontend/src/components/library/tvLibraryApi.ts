@@ -10,6 +10,8 @@ export interface Candidate { tmdb_id: number; title: string; year: number | null
 export interface Show {
   id: number; tmdb_id: number; title: string; year: number | null; path_id: string; path_name: string; folder: string;
   poster_path: string | null; monitored: boolean; files: number; episodes: number; linked: number; mismatch: number; unrecognized: number;
+  /** What needs review, in words ("S03E01 is in Season 2", "1 file not recognized"). */
+  review?: string[];
 }
 export interface Unmatched {
   id: number; path_id: string; path_name: string; folder: string; guess_title: string | null; guess_year: number | null;
@@ -60,6 +62,15 @@ export const episodeCount = (s: Show) => `${s.episodes} ${s.episodes === 1 ? 'ep
 
 /** Some files don't fit an episode of the show (mismatch or unrecognized). */
 export const needsReview = (s: Show) => s.mismatch + s.unrecognized > 0;
+
+/** "2 need review", "1 needs review", '' when nothing does. */
+export function reviewCount(s: Show): string {
+  const n = s.mismatch + s.unrecognized;
+  return n ? `${n} ${n === 1 ? 'needs' : 'need'} review` : '';
+}
+
+/** The show's subtitle: "4 episodes · 2 need review". */
+export const showSubtitle = (s: Show) => [episodeCount(s), reviewCount(s)].filter(Boolean).join(' \u00b7 ');
 
 /** "Last scan 3:05 PM" today, else "Last scan Oct 16"; "Not scanned yet". */
 export function lastScanText(ts: number | null, now = Date.now()): string {
