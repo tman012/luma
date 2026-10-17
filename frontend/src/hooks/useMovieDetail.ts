@@ -45,7 +45,9 @@ export function useMovieDetail(
   const [detail, setDetail] = useState<MediaDetail | null>(null);
   const [ratings, setRatings] = useState<Ratings | null>(null);
   const [loading, setLoading] = useState(true);
-  const [ratingsLoading, setRatingsLoading] = useState(true);
+  // Minimal mode shows Plex ratings only: an unowned title has none to wait for.
+  const noRatings = isMinimal() && !ratingKey;
+  const [ratingsLoading, setRatingsLoading] = useState(!noRatings);
   const [error, setError] = useState(false);
   const [trailerKey, setTrailerKey] = useState<string | null | undefined>(undefined);
 
@@ -227,6 +229,7 @@ export function useMovieDetail(
   const movieYear = detail?.year;
   useEffect(() => {
     if (!movieTitle) return;
+    if (noRatings) { setRatingsLoading(false); return; }
 
     const controller = new AbortController();
     let cancelled = false;
@@ -311,7 +314,7 @@ export function useMovieDetail(
       cancelled = true;
       controller.abort();
     };
-  }, [movieTitle, movieYear, ratingKey, reloadNonce]);
+  }, [movieTitle, movieYear, ratingKey, reloadNonce, noRatings]);
 
   // -------------------------------------------------------------------------
   // Fetch UltraBlurColors — race Plex (fast) vs TMDb (slow but higher quality)

@@ -17,7 +17,8 @@ import { MobileUpgradeSheet } from './MobileUpgradeSheet';
 import { UltraBlurOverlay } from '@/components/media/UltraBlurOverlay';
 import { SimilarPanel } from './SimilarPanel';
 import { CollectionsSheet } from '@/components/collections/CollectionsSheet';
-import { RatingsBar } from '@/components/media/RatingsBar';
+import { RatingsBar, RATINGS_SLOT_SM } from '@/components/media/RatingsBar';
+import { buildRatingItems } from '@/utils/ratingIcons';
 import { BackdropHero } from '@/components/media/BackdropHero';
 import { useBackdropEffects } from '@/hooks/useBackdropEffects';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
@@ -106,6 +107,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   const {
     detail,
     ratings,
+    ratingsLoading,
     trailerKey,
     ultraBlurColors,
     loading,
@@ -137,6 +139,14 @@ export function CompactLayout(props: MovieModalViewProps) {
   useEffect(() => {
     if (composed) window.dispatchEvent(new Event(REVEALED_EVENT));
   }, [composed]);
+  // Ratings arrive after the details: if the sheet shows before them, keep
+  // their row reserved (and never collapse it) so nothing below moves.
+  const hasRatings = !!ratings && buildRatingItems(ratings).length > 0;
+  const [reserveRatings, setReserveRatings] = useState(false);
+  useEffect(() => { setReserveRatings(false); }, [detail?.title]);
+  useEffect(() => {
+    if (composed && (ratingsLoading || hasRatings)) setReserveRatings(true);
+  }, [composed, ratingsLoading, hasRatings]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const topScrimRef = useRef<HTMLDivElement>(null);
@@ -621,7 +631,9 @@ export function CompactLayout(props: MovieModalViewProps) {
                   )}
 
                   {/* Ratings bar — centered icons */}
-                  {ratings && <RatingsBar ratings={ratings} size="sm" />}
+                  <div data-ratings-slot style={{ minHeight: reserveRatings ? `${RATINGS_SLOT_SM}px` : 0 }}>
+                    {ratings && <RatingsBar ratings={ratings} size="sm" />}
+                  </div>
 
                   {/* Primary action area */}
                   <div data-modal-actions>
