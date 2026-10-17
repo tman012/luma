@@ -4,6 +4,7 @@
  * palette that arrives after the wait is dropped for this opening. */
 import { useEffect, useState } from 'react';
 import { modalColors, getSeedColors, type ColorKind } from '@/services/modalColors';
+import { remainingCap } from '@/services/modalPrefetch';
 import type { UltraBlurColors } from '@/utils/modalParsers';
 
 export const COLOR_WAIT_MS = 600;
@@ -25,7 +26,7 @@ export function useModalColors(
     setSettled(!!seed);
     let live = true;
     let waiting = !seed;
-    const t = window.setTimeout(() => { if (live && waiting) { waiting = false; if (!seed) live = false; setSettled(true); } }, COLOR_WAIT_MS);
+    const t = window.setTimeout(() => { if (live && waiting) { waiting = false; if (!seed) live = false; setSettled(true); } }, remainingCap(COLOR_WAIT_MS));
     modalColors(kind, ratingKey, tmdbId).then(c => {
       if (!live) return;
       live = false;

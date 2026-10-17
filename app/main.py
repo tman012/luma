@@ -12358,6 +12358,13 @@ def _plex_image_path(raw: str):
     return raw if _PLEX_IMG_PATH.fullmatch(raw) else None
 
 
+# Plex's own people photos: full-size originals (~0.3-0.5 MB each). Only this
+# exact host and shape is accepted, and only as a small transcode through the
+# user's Plex server (the token goes to that server only, never to plex.tv).
+_PLEX_PEOPLE_URL = re.compile(r'https://metadata-static\.plex\.tv/[0-9a-f]/people/[0-9a-f]{32}\.(?:jpe?g|png)', re.I)
+PEOPLE_THUMB_MAX = 400
+
+
 @app.route('/api/img/plex')
 def img_plex_proxy():
     """Secure proxy for Plex images. Never exposes PLEX_TOKEN to the browser.
@@ -12373,10 +12380,14 @@ def img_plex_proxy():
     if not plex_path:
         return 'Missing url parameter', 400
 
-    # Security: only Plex's own image paths, never an outside URL.
-    plex_path = _plex_image_path(plex_path)
-    if not plex_path:
-        return 'Not a Plex image path', 400
+    people = bool(_PLEX_PEOPLE_URL.fullmatch(plex_path.strip()))
+    if people:
+        plex_path = plex_path.strip()
+    else:
+        # Security: only Plex's own image paths, never an outside URL.
+        plex_path = _plex_image_path(plex_path)
+        if not plex_path:
+            return 'Not a Plex image path', 400
 
     # Optional resize via Plex photo transcoder (clamped to sane bounds)
     def _clamp_dim(raw):
@@ -12388,6 +12399,12 @@ def img_plex_proxy():
 
     req_w = _clamp_dim(request.args.get('w'))
     req_h = _clamp_dim(request.args.get('h'))
+    if people:
+        # People photos only ever as a thumbnail, never the original.
+        if not (req_w or req_h):
+            return 'Size required', 400
+        req_w = min(req_w, PEOPLE_THUMB_MAX) if req_w else None
+        req_h = min(req_h, PEOPLE_THUMB_MAX) if req_h else None
 
     # Try user's Plex first, fall back to global
     _user_plex = get_plex_for_request()
@@ -12417,7 +12434,7 @@ def img_plex_proxy():
             timeout=15,
             stream=True,
         )
-        if resp.status_code != 200 and full_url != original_url:
+        if resp.status_code != 200 and full_url != original_url and not people:
             # Transcoder refused: serve the original rather than no image.
             resp = requests.get(original_url, headers={'X-Plex-Token': plex_token}, timeout=15, stream=True)
 
@@ -12436,7 +12453,7 @@ def img_plex_proxy():
         # Versioned Plex paths (/thumb/<updatedAt>) change URL when the art changes -> cache a day.
         # Unversioned ones (/library/metadata/<rk>/thumb) keep the same URL after a Fix Match or
         # poster change, so make the browser revalidate (cheap 304 via ETag) instead of showing old art.
-        versioned = bool(_re.search(r'/(thumb|art|clearLogo|banner|theme)/\d+', plex_path))
+        versioned = people or bool(_re.search(r'/(thumb|art|clearLogo|banner|theme)/\d+', plex_path))
         etag = '"' + _hl.md5(body).hexdigest() + '"'
         if not versioned and request.headers.get('If-None-Match') == etag:
             return Response(status=304, headers={'ETag': etag, 'Cache-Control': 'private, no-cache'})

@@ -87,7 +87,7 @@ export const TMDB_BUSY_TEXT = 'TMDB is busy. Try again in a minute.';
 // ---------------------------------------------------------------------------
 
 import { posterUrl as tmdbPosterUrl, tmdbImg } from '@/utils/image';
-import { warmDetail } from '@/services/modalPrefetch';
+import { scheduleWarm, warmDetail } from '@/services/modalPrefetch';
 
 function titleKey(title: string, year: number | string | null | undefined): string {
   return `${(title || '').toLowerCase()}_${year || ''}`;
@@ -243,10 +243,24 @@ export async function batchCheckOwnership(
 
 /** Warm a result's detail popup colors (hover, focus, tap), with the same
  *  ids the popup will be opened with. */
-function warmResult(item: SearchMovie): void {
+function warmResult(item: SearchMovie, opts?: { images?: boolean }): Promise<void> {
   const rk = item.isOwned && item.rating_key ? Number(item.rating_key) : undefined;
   const tmdb = item.tmdb_id || item.id;
-  void warmDetail(item.media_type === 'tv' ? 'tv' : 'movie', rk, tmdb ? Number(tmdb) : undefined);
+  return warmDetail(item.media_type === 'tv' ? 'tv' : 'movie', rk, tmdb ? Number(tmdb) : undefined, opts).catch(() => {});
 }
 
-export { warmResult, getPosterUrl, getProfileUrl, getTitle, getYear, titleKey };
+/** Phone search: warm what's on screen as soon as results land: the top rows
+ *  fully (details, backdrop, logo), the next ones' details only, through the
+ *  4-at-a-time queue. Returns a cancel for rows not started yet. */
+export const WARM_FULL_ROWS = 4;
+export const WARM_META_ROWS = 10;
+function warmResults(items: SearchMovie[]): () => void {
+  const cancels = items.slice(0, WARM_META_ROWS).map((item, i) => {
+    const full = i < WARM_FULL_ROWS;
+    const key = `search:${item.media_type}:${item.rating_key ?? ''}:${item.tmdb_id || item.id || ''}:${full ? 'full' : 'meta'}`;
+    return scheduleWarm(key, () => warmResult(item, { images: full }));
+  });
+  return () => cancels.forEach((c) => c());
+}
+
+export { warmResult, warmResults, getPosterUrl, getProfileUrl, getTitle, getYear, titleKey };

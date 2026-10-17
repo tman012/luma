@@ -11,7 +11,7 @@ import {
   type UltraBlurColors,
 } from '@/utils/modalParsers';
 import { apiFetch } from '../apiClient';
-import { detailFetch } from '@/services/modalPrefetch';
+import { detailFetch, remainingCap } from '@/services/modalPrefetch';
 import { useModalColors } from './useModalColors';
 
 // ---------------------------------------------------------------------------
@@ -95,7 +95,7 @@ export function useMovieDetail(
               detailFetch(`/api/movie/${parsed.tmdbId}`, { signal: controller.signal })
                 .then((r) => (r.ok ? (r.json() as Promise<Record<string, unknown>>) : null))
                 .catch(() => null),
-              new Promise<null>((res) => { timer = window.setTimeout(() => res(null), TMDB_BACKDROP_WAIT_MS); }),
+              new Promise<null>((res) => { timer = window.setTimeout(() => res(null), remainingCap(TMDB_BACKDROP_WAIT_MS)); }),
             ]);
             window.clearTimeout(timer);
             if (cancelled) return;

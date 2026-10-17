@@ -15,7 +15,7 @@ import {
   type OwnershipMap,
 } from '@/services/sonarrApi';
 import { resolveOwnership, mediaKey } from '@/services/ownership';
-import { detailFetch } from '@/services/modalPrefetch';
+import { detailFetch, remainingCap } from '@/services/modalPrefetch';
 import { TMDB_BACKDROP_WAIT_MS } from './useMovieDetail';
 import { useModalColors } from './useModalColors';
 import { logoImg } from '@/utils/image';
@@ -218,7 +218,7 @@ export function useTvDetail(
             let timer = 0;
             earlyTmdb = await Promise.race([
               detailFetch(`/api/tv/${plexTmdbId}`, { signal: controller.signal }).catch(() => null),
-              new Promise<null>((res) => { timer = window.setTimeout(() => res(null), TMDB_BACKDROP_WAIT_MS); }),
+              new Promise<null>((res) => { timer = window.setTimeout(() => res(null), remainingCap(TMDB_BACKDROP_WAIT_MS)); }),
             ]);
             window.clearTimeout(timer);
             if (cancelled) return;

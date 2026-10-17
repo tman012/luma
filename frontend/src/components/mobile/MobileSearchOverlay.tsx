@@ -7,6 +7,7 @@ import {
   getPosterUrl,
   getProfileUrl,
   warmResult,
+  warmResults,
   getTitle,
   getYear,
   TMDB_BUSY_TEXT,
@@ -44,13 +45,10 @@ interface MobileSearchOverlayProps {
 export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose }: MobileSearchOverlayProps) {
   const [query, setQuery] = useState(initialPerson?.name ?? initialQuery);
   const [results, setResults] = useState<SearchResults | null>(null);
-  // Warm the likeliest picks (top 3) so their popup opens like a second open.
+  // Warm the rows on screen right away so a first open is like a second.
   useEffect(() => {
     if (!results) return;
-    const t = window.setTimeout(() => {
-      [...results.owned, ...results.unowned].slice(0, 3).forEach(warmResult);
-    }, 250);
-    return () => window.clearTimeout(t);
+    return warmResults([...results.owned, ...results.unowned]);
   }, [results]);
   const [loading, setLoading] = useState(false);
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -436,8 +434,8 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                       handleMediaClick(media!, e.currentTarget);
                     }
                   }}
-                  onPointerDown={() => { if (media) warmResult(media); }}
-                  onTouchStart={() => { if (media) warmResult(media); }}
+                  onPointerDown={() => { if (media) void warmResult(media); }}
+                  onTouchStart={() => { if (media) void warmResult(media); }}
                   className="luma-pressable relative flex h-[72px] w-full items-center gap-[12px] px-[16px] text-left active:bg-white/5"
                   data-testid="phone-search-row"
                 >
