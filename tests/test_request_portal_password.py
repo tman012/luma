@@ -1,5 +1,6 @@
 """Tests for request portal password handling (Item 1)."""
 
+from tests.portal_threads import init_portal
 import pytest
 import json
 from unittest.mock import Mock, patch
@@ -33,7 +34,7 @@ def app():
     
     with patch.object(request_portal, 'cfg', side_effect=mock_cfg):
         with patch.object(request_portal, '_settings', mock_settings):
-            request_portal.init_app(app, mock_settings)
+            init_portal(app, mock_settings)
     
     return app
 

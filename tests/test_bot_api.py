@@ -1,5 +1,6 @@
 """Tests for app/bot_api.py"""
 
+from tests.portal_threads import init_portal
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from flask import Flask, g
@@ -126,7 +127,7 @@ class TestBotApiAuth:
         # Register request_portal routes
         mock_settings = Mock()
         mock_settings.get.return_value = {}
-        request_portal.init_app(app, mock_settings)
+        init_portal(app, mock_settings)
         
         # Non-admin user
         with app.test_request_context('/'):
@@ -151,7 +152,7 @@ class TestBotApiAuth:
         # Register request_portal routes
         mock_settings = Mock()
         mock_settings.get.return_value = {}
-        request_portal.init_app(app, mock_settings)
+        init_portal(app, mock_settings)
         
         # Set g.current_user to non-admin
         with app.test_request_context('/'):
