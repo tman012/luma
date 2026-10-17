@@ -50,11 +50,7 @@ class _View:
 
 def _root(view: _View, path: str = ROOT) -> str:
     """The folder deletions are confined to, resolved as
-    storage_cleanup.downloads_root() does: LUMA_DOWNLOADS_ROOT, when set,
-    decides and the setting is ignored (so editing it moves nothing)."""
-    if path == ROOT and (os.environ.get('LUMA_DOWNLOADS_ROOT') or '').strip().startswith('/'):
-        from app import file_management as _fm
-        return os.path.realpath(_fm.downloads_root())
+    storage_cleanup.downloads_root() does."""
     root = view.get(path)
     if not root or not isinstance(root, str):
         try:
