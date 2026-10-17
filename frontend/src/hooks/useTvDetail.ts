@@ -15,7 +15,10 @@ import {
   type OwnershipMap,
 } from '@/services/sonarrApi';
 import { resolveOwnership, mediaKey } from '@/services/ownership';
-import { apiFetch } from '../apiClient';
+import { detailFetch } from '@/services/modalPrefetch';
+import { TMDB_BACKDROP_WAIT_MS } from './useMovieDetail';
+import { useModalColors } from './useModalColors';
+import { logoImg } from '@/utils/image';
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -34,8 +37,6 @@ interface UseTvDetailResult {
   trailerKey: string | null | undefined;
   ultraBlurColors: UltraBlurColors | null;
   resolvedTmdbId: number | undefined;
-  /** The backdrop and clearlogo URLs won't change any more (see useArtReveal). */
-  artFinal: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -59,9 +60,6 @@ export function useTvDetail(
   const [tvdbId, setTvdbId] = useState<number | null>(null);
   const [ownership, setOwnership] = useState<OwnershipMap>({});
   const [showOwned, setShowOwned] = useState(false);
-  const [artDone, setArtDone] = useState({ backdrop: false, logo: false });
-  const markArt = (part: 'backdrop' | 'logo') =>
-    setArtDone((p) => (p[part] ? p : { ...p, [part]: true }));
 
   // Sonarr status
   const [sonarrStatus, setSonarrStatus] = useState<SonarrStatus | null>(null);
@@ -70,7 +68,6 @@ export function useTvDetail(
   const [trailerKey, setTrailerKey] = useState<string | null | undefined>(undefined);
 
   // UltraBlur
-  const [ultraBlurColors, setUltraBlurColors] = useState<UltraBlurColors | null>(null);
 
   // Resolved tmdbId (from props or from show data)
   const resolvedTmdbId = tmdbId ?? show?.tmdbId;
@@ -166,24 +163,25 @@ export function useTvDetail(
 
     async function fetchClearlogo(id: number, signal: AbortSignal): Promise<string | null> {
       try {
-        const resp = await apiFetch(`/api/clearlogo/${id}?type=tv`, { signal });
+        const resp = await detailFetch(`/api/clearlogo/${id}?type=tv`, { signal });
         if (!resp.ok) return null;
         const data = (await resp.json()) as { clearlogo_url?: string };
-        return data.clearlogo_url ?? null;
+        return logoImg(data.clearlogo_url);
       } catch {
         return null;
       }
     }
 
     async function fetchDetail() {
+      // Another show opened: drop the old one so its backdrop never shows.
       setLoading(true);
+      setShow(null);
       setError(false);
-      setArtDone({ backdrop: false, logo: false });
 
       try {
         if (tmdbId) {
           // Fetch from TMDb
-          const resp = await apiFetch(`/api/tv/${tmdbId}`, { signal: controller.signal });
+          const resp = await detailFetch(`/api/tv/${tmdbId}`, { signal: controller.signal });
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const data = (await resp.json()) as Record<string, unknown>;
           if (!cancelled) {
@@ -198,27 +196,35 @@ export function useTvDetail(
             // Unblock ownership + Sonarr fetches immediately (no longer waits for seasons)
             if (parsed.tvdbId) setTvdbId(parsed.tvdbId);
             extractTrailerAndEnrich(data);
-            markArt('backdrop');
-            if (parsed.clearLogoUrl) markArt('logo');
             // Fire-and-forget clearlogo fetch (no longer blocks modal render)
             if (!parsed.clearLogoUrl) {
               fetchClearlogo(tmdbId, controller.signal).then((logo) => {
-                if (!cancelled && logo) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo } : prev);
-                if (!cancelled) markArt('logo');
+                if (!cancelled) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo ?? prev.clearLogoUrl, logoSettled: true } : prev);
               });
             }
           }
         } else if (ratingKey) {
           // Fetch from Plex metadata API (works for any item type)
-          const plexResp = await apiFetch(`/api/plex/tv/${ratingKey}`, { signal: controller.signal });
+          const plexResp = await detailFetch(`/api/plex/tv/${ratingKey}`, { signal: controller.signal });
           if (!plexResp.ok) throw new Error('Could not fetch show details from Plex');
           const plexData = (await plexResp.json()) as Record<string, unknown>;
           const plexTmdbId = plexData.tmdb_id as number | null;
 
-          // Render immediately from the Plex response (title/poster/etc are
-          // already here) instead of blocking on the second TMDb hop, then
-          // enrich below. Also unblock ownership/Sonarr right away.
-          if (!cancelled) {
+          // With a TMDb id, give TMDb a moment (usually cached by the card
+          // prefetch) so the first backdrop shown is the final one; without
+          // it, render from Plex right away. Either way nothing swaps later.
+          let earlyTmdb: Response | null = null;
+          if (plexTmdbId) {
+            let timer = 0;
+            earlyTmdb = await Promise.race([
+              detailFetch(`/api/tv/${plexTmdbId}`, { signal: controller.signal }).catch(() => null),
+              new Promise<null>((res) => { timer = window.setTimeout(() => res(null), TMDB_BACKDROP_WAIT_MS); }),
+            ]);
+            window.clearTimeout(timer);
+            if (cancelled) return;
+          }
+          const plexBackdropShown = !earlyTmdb;
+          if (!cancelled && plexBackdropShown) {
             const plexParsed = parsePlexTvResponse(plexData);
             plexParsed.ratingKey = ratingKey;
             plexParsed.isOwned = true;
@@ -230,7 +236,7 @@ export function useTvDetail(
 
           if (plexTmdbId && !cancelled) {
             // We got a TMDb ID from Plex guids — fetch rich details from TMDb
-            const tmdbResp = await apiFetch(`/api/tv/${plexTmdbId}`, { signal: controller.signal });
+            const tmdbResp = earlyTmdb ?? await detailFetch(`/api/tv/${plexTmdbId}`, { signal: controller.signal });
             if (tmdbResp.ok) {
               const tmdbData = (await tmdbResp.json()) as Record<string, unknown>;
               if (!cancelled) {
@@ -238,15 +244,14 @@ export function useTvDetail(
                 parsed.ratingKey = ratingKey;
                 parsed.tmdbId = plexTmdbId;
                 parsed.isOwned = true;
-                setShow(parsed);
-                markArt('backdrop');
-                if (parsed.clearLogoUrl) markArt('logo');
+                // Never swap a backdrop that's already on screen.
+                setShow((prev) => (plexBackdropShown && prev?.backdropUrl ? { ...parsed, backdropUrl: prev.backdropUrl } : parsed));
+                setLoading(false);
                 if (parsed.tvdbId) setTvdbId(parsed.tvdbId);
                 extractTrailerAndEnrich(tmdbData);
                 if (!parsed.clearLogoUrl) {
                   fetchClearlogo(plexTmdbId, controller.signal).then((logo) => {
-                    if (!cancelled && logo) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo } : prev);
-                    if (!cancelled) markArt('logo');
+                    if (!cancelled) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo ?? prev.clearLogoUrl, logoSettled: true } : prev);
                   });
                 }
               }
@@ -255,13 +260,11 @@ export function useTvDetail(
               const parsed = parsePlexTvResponse(plexData);
               parsed.ratingKey = ratingKey;
               setShow(parsed);
+              setLoading(false);
               setTrailerKey(null);
-              markArt('backdrop');
-              if (parsed.clearLogoUrl || !plexTmdbId) markArt('logo');
               if (!parsed.clearLogoUrl && plexTmdbId) {
                 fetchClearlogo(plexTmdbId, controller.signal).then((logo) => {
-                  if (!cancelled && logo) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo } : prev);
-                  if (!cancelled) markArt('logo');
+                  if (!cancelled) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo ?? prev.clearLogoUrl, logoSettled: true } : prev);
                 });
               }
             }
@@ -269,9 +272,9 @@ export function useTvDetail(
             // No TMDb ID available, use Plex data directly
             const parsed = parsePlexTvResponse(plexData);
             parsed.ratingKey = ratingKey;
+            parsed.logoSettled = true; // no TMDb id: Plex's logo (or none) is final
             setShow(parsed);
             setTrailerKey(null); // No TMDb data, no trailer
-            setArtDone({ backdrop: true, logo: true });
 
             // If Plex provided a tvdb_id directly, use it for ownership/Sonarr
             const plexTvdbId = plexData.tvdb_id as number | null;
@@ -287,7 +290,6 @@ export function useTvDetail(
         if (e?.name !== 'AbortError' && !cancelled) {
           setError(true);
           setTrailerKey(null);
-          setArtDone({ backdrop: true, logo: true });
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -401,42 +403,13 @@ export function useTvDetail(
   }, [tvdbId, resolvedTmdbId]);
 
   // -------------------------------------------------------------------------
-  // Fetch UltraBlurColors
+  // Color blur: cached per item, settled before the popup leaves its loading
+  // state. With only a rating key, wait for the show (its TMDb id) first so
+  // the palette is fetched once with the final ids.
   // -------------------------------------------------------------------------
-  useEffect(() => {
-    if (!ratingKey && !resolvedTmdbId) return;
-    const controller = new AbortController();
-    let cancelled = false;
-
-    async function fetchUltraBlur() {
-      try {
-        // Fire both sources in parallel, prefer TMDb
-        const tmdbPromise = resolvedTmdbId
-          ? apiFetch(`/api/tmdb/colors/${resolvedTmdbId}?type=tv`, { signal: controller.signal })
-              .then((r) => r.ok ? r.json() as Promise<UltraBlurColors> : null)
-              .catch(() => null)
-          : Promise.resolve(null);
-        const plexPromise = ratingKey
-          ? apiFetch(`/api/plex/ultrablur/${ratingKey}`, { signal: controller.signal })
-              .then((r) => r.ok ? r.json() as Promise<UltraBlurColors> : null)
-              .catch(() => null)
-          : Promise.resolve(null);
-
-        const [tmdbColors, plexColors] = await Promise.all([tmdbPromise, plexPromise]);
-
-        if (cancelled) return;
-        const pick = (tmdbColors && (tmdbColors.topLeft || tmdbColors.topRight)) ? tmdbColors
-          : (plexColors && (plexColors.topLeft || plexColors.topRight)) ? plexColors
-          : null;
-        if (pick) setUltraBlurColors(pick);
-      } catch {
-        // UltraBlurColors are non-critical
-      }
-    }
-
-    fetchUltraBlur();
-    return () => { cancelled = true; controller.abort(); };
-  }, [ratingKey, resolvedTmdbId]);
+  const colorsEnabled = !!tmdbId || (!loading && (!!show || error));
+  const { colors: ultraBlurColors, settled: colorsSettled } =
+    useModalColors('tv', ratingKey, resolvedTmdbId, colorsEnabled);
 
   return {
     show,
@@ -445,12 +418,11 @@ export function useTvDetail(
     ownership,
     showOwned,
     sonarrStatus,
-    loading,
+    loading: loading || (!colorsSettled && !error),
     error,
     seasonsLoading,
     trailerKey,
     ultraBlurColors,
     resolvedTmdbId,
-    artFinal: artDone.backdrop && artDone.logo,
   };
 }

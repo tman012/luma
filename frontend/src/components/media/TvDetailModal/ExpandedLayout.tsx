@@ -1,6 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useArtReveal } from '@/hooks/useArtReveal';
-import { ART_PLACEHOLDER_BG, artFadeStyle } from '@/utils/modalArt';
 import { createPortal } from 'react-dom';
 import {
   PERSON_FALLBACK_SVG,
@@ -1213,13 +1211,6 @@ export function ExpandedLayout(props: TvModalViewProps) {
   const { isTablet } = useLayoutMode();
   const t = isTablet ? TOKENS.tablet : TOKENS.desktop;
   const perf = useTabletPerf();
-  const artItemKey = show?.ratingKey ?? show?.tmdbId ?? 'none';
-  const backdropSrc = show?.backdropUrl
-    ? (perf.limitBackdropResolution && show.backdropUrl.includes('/t/p/original')
-      ? show.backdropUrl.replace('/t/p/original', '/t/p/w1280')
-      : show.backdropUrl)
-    : null;
-  const art = useArtReveal(backdropSrc || show?.posterUrl, show?.clearLogoUrl, props.artFinal);
   const overlayRef = useRef<HTMLDivElement>(null);
   const logoRef = useRef<HTMLDivElement>(null);
 
@@ -1420,7 +1411,6 @@ export function ExpandedLayout(props: TvModalViewProps) {
           {!loading && !error && show && (
             <div
               style={{
-                background: ART_PLACEHOLDER_BG,
                 position: 'absolute',
                 inset: 0,
                 zIndex: 0,
@@ -1432,11 +1422,11 @@ export function ExpandedLayout(props: TvModalViewProps) {
             >
               {show.backdropUrl ? (
                 <img
-                  key={`bd-${artItemKey}`}
-                  src={backdropSrc ?? undefined}
+                  src={perf.limitBackdropResolution && show.backdropUrl.includes('/t/p/original')
+                    ? show.backdropUrl.replace('/t/p/original', '/t/p/w1280')
+                    : show.backdropUrl}
                   alt=""
                   style={{
-                    ...artFadeStyle(art.ready),
                     width: '100%',
                     height: '100%',
                     objectFit: 'cover',
@@ -1445,7 +1435,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                   }}
                 />
               ) : show.posterUrl ? (
-                <img key={`poster-${artItemKey}`} src={show.posterUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', ...artFadeStyle(art.ready, 0.6) }} />
+                <img src={show.posterUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.6 }} />
               ) : null}
               {show.backdropUrl && (
                 <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 30%, transparent 40%, rgba(0,0,0,0.2) 100%)', pointerEvents: 'none' }} />
@@ -1539,12 +1529,11 @@ export function ExpandedLayout(props: TvModalViewProps) {
                     transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
                     transform: shelfOpen ? 'translateY(-15vh)' : 'translateY(0)',
                   }}>
-                    {show.clearLogoUrl && !art.logoFailed ? (
+                    {show.clearLogoUrl ? (
                       <img
-                        key={`logo-${artItemKey}`}
                         src={show.clearLogoUrl}
                         alt={show.title}
-                        style={{ ...artFadeStyle(art.ready),
+                        style={{
                           maxWidth: '100%',
                           maxHeight: t.logo.maxHeight,
                           objectFit: 'contain',
@@ -1559,7 +1548,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                       />
                     ) : null}
                     <h1 style={{
-                      display: show.clearLogoUrl && !art.logoFailed ? 'none' : 'block', ...artFadeStyle(art.ready),
+                      display: show.clearLogoUrl ? 'none' : 'block',
                       fontSize: t.titleFontSize,
                       fontWeight: 700,
                       color: '#fff',

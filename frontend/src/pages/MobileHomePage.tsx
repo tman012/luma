@@ -4,6 +4,7 @@ import { useHomeRails, type HomeRailState } from '@/features/home/useHomeRails';
 import type { HomeRailId } from '@/features/home/homeRails';
 import type { NormalizedMediaItem } from '@/types/media';
 import { openModalForItem } from '@/utils/modalNavigation';
+import { itemIds, openItemWhenReady, warmIds, warmKey } from '@/services/modalOpen';
 import { MobileHeader } from '@/components/mobile/MobileHeader';
 import { MobilePushBanner } from '@/components/mobile/MobilePushBanner';
 import { MobileRail } from '@/components/mobile/MobileRail';
@@ -78,8 +79,10 @@ export function MobileHomePage() {
   }, [modalHost]);
 
   const handleTap = useCallback(
-    (item: NormalizedMediaItem, source: ModalSource) => {
-      openModalForItem(modalHost, item, source, { onPersonSearch });
+    (item: NormalizedMediaItem, source: ModalSource, el?: HTMLElement | null) => {
+      // The popup opens only once it can show fully composed (the tapped
+      // poster shows a pressed state meanwhile, 600 ms cap).
+      openItemWhenReady(item, el ?? null, () => { openModalForItem(modalHost, item, source, { onPersonSearch }); });
     },
     [modalHost, onPersonSearch],
   );
@@ -186,7 +189,9 @@ export function MobileHomePage() {
             inWatchlist={item.inWatchlist}
             showOrb={!isOwned}
             digitalReleaseLabel={id === 'watchlist' ? item.digitalReleaseLabel : undefined}
-            onTap={() => handleTap(item, RAIL_MODAL_SOURCE[id])}
+            onTap={(el) => handleTap(item, RAIL_MODAL_SOURCE[id], el)}
+            warmKey={warmKey(itemIds(item))}
+            warm={() => warmIds(itemIds(item))}
             onLongPress={id === 'what_youre_missing' ? () => handleMissingLongPress(item) : undefined}
           />
         ))}

@@ -1,6 +1,7 @@
+import { sheetBase } from '@/utils/posterColors';
+import { REVEALED_EVENT } from '@/services/modalPrefetch';
+import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useArtReveal } from '@/hooks/useArtReveal';
-import { artFadeStyle } from '@/utils/modalArt';
 import { createPortal } from 'react-dom';
 import { formatRuntime } from '@/utils/image';
 import {
@@ -127,6 +128,14 @@ export function CompactLayout(props: MovieModalViewProps) {
     onUpgradeAdded,
     onWatchlistRemoved,
   } = props;
+  const titleState = useTitleReveal(logoInput(detail), detail?.title, detail?.backdropUrl || detail?.posterUrl);
+  // Phone: the sheet stays off-screen until it can show fully composed
+  // (details, backdrop, logo and colors, or the 600 ms cap), then slides in.
+  const composed = !!error || (!loading && !!detail && titleState !== 'hold');
+  const sheetBg = sheetBase(ultraBlurColors) ?? '#15102a';
+  useEffect(() => {
+    if (composed) window.dispatchEvent(new Event(REVEALED_EVENT));
+  }, [composed]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const topScrimRef = useRef<HTMLDivElement>(null);
@@ -211,8 +220,6 @@ export function CompactLayout(props: MovieModalViewProps) {
 
   // Plex-like backdrop effects: crop/zoom header + UltraBlur color bleed
   const backdropEffects = useBackdropEffects(detail?.backdropUrl, ultraBlurColors);
-  const artItemKey = detail?.ratingKey ?? detail?.tmdbId ?? 'none';
-  const art = useArtReveal(detail ? (detail.backdropUrl || detail.posterUrl) : null, detail?.clearLogoUrl, props.artFinal);
 
   // -------------------------------------------------------------------------
   // Body scroll lock + safe-area background
@@ -341,7 +348,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   const springBezier = 'cubic-bezier(0.22, 1, 0.36, 1)';
   // Use translate3d to force GPU compositing for smooth animations
   const cardTransform =
-    phase === 'entering'
+    phase === 'entering' || !composed
       ? 'translate3d(0, 100%, 0)'
       : phase === 'visible'
         ? 'translate3d(0, 0, 0)'
@@ -357,6 +364,7 @@ export function CompactLayout(props: MovieModalViewProps) {
     <div
       data-modal="MovieDetailModal"
       data-variant="mobile"
+      data-composed={composed ? "true" : "false"}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
         position: 'fixed',
@@ -366,7 +374,7 @@ export function CompactLayout(props: MovieModalViewProps) {
         bottom: 0,
         zIndex: 10000,
         backgroundColor: 'rgba(0,0,0,0.6)',
-        opacity: phase === 'entering' ? 0 : 1,
+        opacity: phase === 'entering' || !composed ? 0 : 1,
         transition: 'opacity 250ms ease-out',
       }}
     >
@@ -381,7 +389,7 @@ export function CompactLayout(props: MovieModalViewProps) {
           borderTopLeftRadius: '14px',
           borderTopRightRadius: '14px',
           overflow: 'hidden',
-          backgroundColor: '#15102a',
+          backgroundColor: sheetBg,
           display: 'flex',
           flexDirection: 'column',
           transform: cardTransform,
@@ -479,18 +487,18 @@ export function CompactLayout(props: MovieModalViewProps) {
                 effects={backdropEffects}
                 phase={phase}
                 containerRef={backdropRef}
-                revealed={art.ready}
-                itemKey={artItemKey}
+                hold={titleState === 'hold'}
               />
 
               {/* === CENTERED CONTENT AREA === */}
-              <div ref={contentRef} style={{
+              <div ref={contentRef} data-reveal={titleState !== 'hold' ? 'shown' : 'hold'} style={{
                 position: 'relative',
                 zIndex: 3,
                 textAlign: 'center',
                 marginTop: '-100px',
-                opacity: phase === 'visible' ? 1 : 0,
-                transition: 'opacity 1.2s ease-in-out 1.1s',
+                // One reveal for everything (backdrop, blur, title, text, buttons).
+                opacity: titleState === 'hold' ? 0 : 1,
+                transition: 'opacity 0.45s ease-out',
                 willChange: 'opacity',
               }}>
                 {/* UltraBlur — scrolls with content, slides up over backdrop */}
@@ -509,7 +517,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                       maskImage: 'linear-gradient(to bottom, transparent 0%, black 80px)',
                     }}
                   >
-                    <UltraBlurOverlay colors={ultraBlurColors} variant="mobile" animationDelay={300} />
+                    <UltraBlurOverlay hold={titleState === 'hold'} colors={ultraBlurColors} variant="mobile" animationDelay={300} />
                   </div>
                 )}
 
@@ -526,12 +534,11 @@ export function CompactLayout(props: MovieModalViewProps) {
                     overflow: 'visible',
                   }}
                 >
-                  {detail.clearLogoUrl && !art.logoFailed ? (
+                  {titleState === 'logo' && detail.clearLogoUrl ? (
                     <img
-                      key={`logo-${artItemKey}`}
                       src={detail.clearLogoUrl}
                       alt={detail.title}
-                      style={{ ...artFadeStyle(art.ready),
+                      style={{
                         maxWidth: 'calc(100% - 32px)',
                         maxHeight: '200px',
                         objectFit: 'contain',
@@ -547,7 +554,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   ) : null}
                   <h1
                     style={{
-                      display: detail.clearLogoUrl && !art.logoFailed ? 'none' : 'block', ...artFadeStyle(art.ready),
+                      ...titleTextStyle(titleState),
                       fontSize: '28px',
                       fontWeight: 700,
                       color: '#fff',
@@ -1119,7 +1126,7 @@ export function CompactLayout(props: MovieModalViewProps) {
             zIndex: 10,
             pointerEvents: 'none',
             overflow: 'hidden',
-            backgroundColor: '#15102a',
+            backgroundColor: sheetBg,
             WebkitMaskImage: 'linear-gradient(to bottom, black 0px, black 34px, rgba(0,0,0,0.6) 58px, transparent 92px)',
             maskImage: 'linear-gradient(to bottom, black 0px, black 34px, rgba(0,0,0,0.6) 58px, transparent 92px)',
             opacity: 0,
@@ -1135,6 +1142,7 @@ export function CompactLayout(props: MovieModalViewProps) {
               effects={backdropEffects}
               phase={phase}
               containerRef={topBackdropRef}
+              hold={titleState === 'hold'}
             />
           )}
           {ultraBlurColors && (
@@ -1152,7 +1160,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                 willChange: 'transform',
               }}
             >
-              <UltraBlurOverlay colors={ultraBlurColors} variant="mobile" />
+              <UltraBlurOverlay hold={titleState === 'hold'} colors={ultraBlurColors} variant="mobile" />
             </div>
           )}
         </div>

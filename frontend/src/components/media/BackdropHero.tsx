@@ -12,12 +12,13 @@
 // Used by both MovieDetailModal/CompactLayout and TvDetailModal/CompactLayout.
 // ---------------------------------------------------------------------------
 
-import { useMemo } from 'react';
-import { ART_PLACEHOLDER_BG, artFadeStyle } from '@/utils/modalArt';
+import { useCallback, useMemo, useState } from 'react';
 import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
 import type { BackdropEffects } from '@/hooks/useBackdropEffects';
 
 export interface BackdropHeroProps {
+  /** Keep the art hidden (navy) until the popup reveals it with the title. */
+  hold?: boolean;
   /** Primary backdrop image URL. */
   backdropUrl?: string | null;
   /** Fallback poster URL when no backdrop available. */
@@ -30,10 +31,6 @@ export interface BackdropHeroProps {
   children?: React.ReactNode;
   /** Ref to the container div, for parallax scroll effects. */
   containerRef?: React.RefObject<HTMLDivElement | null>;
-  /** False keeps the image hidden (navy shows) until it has decoded. */
-  revealed?: boolean;
-  /** Remounts the image per item so an old one is never shown. */
-  itemKey?: string | number;
 }
 
 export function BackdropHero({
@@ -43,8 +40,7 @@ export function BackdropHero({
   phase,
   children,
   containerRef,
-  revealed = true,
-  itemKey,
+  hold = false,
 }: BackdropHeroProps) {
   const containerStyle = useMemo<React.CSSProperties>(
     () => ({
@@ -54,7 +50,6 @@ export function BackdropHero({
       height: typeof BACKDROP_HEIGHT === 'number' ? `${BACKDROP_HEIGHT}px` : BACKDROP_HEIGHT,
       overflow: 'hidden',
       zIndex: 0,
-      background: ART_PLACEHOLDER_BG,
       borderTopLeftRadius: '14px',
       borderTopRightRadius: '14px',
       opacity: phase === 'visible' ? 1 : 0,
@@ -65,25 +60,41 @@ export function BackdropHero({
     [phase, effects.headerContainerMask],
   );
 
+  // Each image is its own element (keyed by URL) and stays invisible until it
+  // has loaded, then fades in over navy: opening another title never shows
+  // the previous title's art, and nothing jumps while the new one decodes.
+  const src = backdropUrl || posterUrl || null;
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const loaded = !!src && loadedSrc === src && !hold;
+  const markLoaded = useCallback((el: HTMLImageElement | null) => {
+    if (el && src && el.complete && el.naturalWidth > 0) setLoadedSrc(src);
+  }, [src]);
+  const fade: React.CSSProperties = { transition: 'opacity 0.45s ease-out' };
+
   return (
-    <div ref={containerRef} style={containerStyle}>
+    <div ref={containerRef} style={{ ...containerStyle, background: '#15102a' }} data-backdrop-loaded={loaded ? 'true' : 'false'}>
       {backdropUrl ? (
         <img
-          key={`bd-${itemKey ?? ''}`}
+          key={backdropUrl}
+          ref={markLoaded}
           src={backdropUrl}
           alt=""
-          style={{ ...effects.headerImgStyle, ...artFadeStyle(revealed) }}
+          onLoad={() => setLoadedSrc(backdropUrl)}
+          style={{ ...effects.headerImgStyle, ...fade, opacity: loaded ? 1 : 0 }}
         />
       ) : posterUrl ? (
         <img
-          key={`poster-${itemKey ?? ''}`}
+          key={posterUrl}
+          ref={markLoaded}
           src={posterUrl}
           alt=""
+          onLoad={() => setLoadedSrc(posterUrl)}
           style={{
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            ...artFadeStyle(revealed, 0.6),
+            ...fade,
+            opacity: loaded ? 0.6 : 0,
           }}
         />
       ) : null}

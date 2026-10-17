@@ -4,7 +4,7 @@
 // data-fetching logic can be reused by Web and Mobile modals.
 // ---------------------------------------------------------------------------
 
-import { posterUrl as tmdbPoster, backdropUrl as tmdbBackdrop } from '@/utils/image';
+import { posterUrl as tmdbPoster, backdropUrl as tmdbBackdrop, plexBackdrop, logoImg } from '@/utils/image';
 import { apiUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,9 @@ export interface MediaDetail {
   plexBackdropUrl?: string | null;
   posterUrl: string | null;
   clearLogoUrl: string | null;
+  /** True once the logo lookup has finished (a null clearLogoUrl then means
+   *  'no logo', not 'still loading'). */
+  logoSettled?: boolean;
   genres: string[];
   cast: CastMember[];
   directors: Director[];
@@ -62,6 +65,9 @@ export interface TvShowDetail {
   backdropUrl: string | null;
   posterUrl: string | null;
   clearLogoUrl: string | null;
+  /** True once the logo lookup has finished (a null clearLogoUrl then means
+   *  'no logo', not 'still loading'). */
+  logoSettled?: boolean;
   genres: string[];
   cast: CastMember[];
   creators: Director[];
@@ -226,10 +232,10 @@ export function parsePlexResponse(data: Record<string, unknown>): MediaDetail {
     durationMs: (data.duration as number) ?? 0,
     // Prefer TMDb backdrop (set by useMovieDetail enrichment) over Plex proxy
     // When tmdb_id exists, skip Plex backdrop — TMDb original is higher quality
-    backdropUrl: data.tmdb_id ? null : (data.backdrop_url as string) ?? null,
+    backdropUrl: data.tmdb_id ? null : plexBackdrop((data.backdrop_url as string) ?? null),
     plexBackdropUrl: (data.backdrop_url as string) ?? null,
     posterUrl: (data.poster_url as string) ?? null,
-    clearLogoUrl: (data.clearlogo_url as string) ?? null,
+    clearLogoUrl: logoImg((data.clearlogo_url as string) ?? null),
     genres,
     cast,
     directors,
@@ -453,14 +459,14 @@ export function parsePlexTvResponse(data: Record<string, unknown>): TvShowDetail
     summary: (data.summary as string) ?? '',
     contentRating: (data.content_rating as string) ?? (data.contentRating as string) ?? null,
     rating: (data.rating as number) ?? null,
-    backdropUrl: (data.artPath as string)
+    backdropUrl: plexBackdrop((data.artPath as string)
       ? apiUrl(`/api/img/plex?url=${data.artPath as string}`)
-      : (data.backdrop_url as string) ?? null,
+      : (data.backdrop_url as string) ?? null),
     posterUrl: (data.thumbPath as string)
       ? apiUrl(`/api/img/plex?url=${data.thumbPath as string}`)
       : (data.poster_url as string) ?? null,
     clearLogoUrl: (data.clearLogoPath as string)
-      ? apiUrl(`/api/img/plex?url=${data.clearLogoPath as string}`)
+      ? logoImg(apiUrl(`/api/img/plex?url=${data.clearLogoPath as string}`))
       : null,
     genres,
     cast,

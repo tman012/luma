@@ -8,6 +8,8 @@
 import { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
 import { useModalHost, type ModalSource } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
+import { itemIds, openItemWhenReady, warmIds, warmKey } from '@/services/modalOpen';
+import { useWarmWhenVisible } from '@/hooks/useWarmWhenVisible';
 import { MobileHeader } from '@/components/mobile/MobileHeader';
 import { cn } from '@/utils/cn';
 import { useExploreRails } from '@/features/explore/useExploreRails';
@@ -84,17 +86,22 @@ const MobileExploreCard = memo(function MobileExploreCard({
   onClick,
 }: {
   movie: NormalizedMediaItem;
-  onClick: () => void;
+  onClick: (el: HTMLButtonElement) => void;
 }) {
   const [imgLoaded, setImgLoaded] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  const warm = useCallback(() => warmIds(itemIds(movie)), [movie]);
+  useWarmWhenVisible(ref, warmKey(itemIds(movie)), warm);
   const orb = getOrbColor(movie);
   const uploadDate = getUploadDate(movie);
 
   return (
     <button
+      ref={ref}
       type="button"
-      onClick={onClick}
-      className="flex gap-3 w-full text-left outline-none active:bg-white/5 rounded-lg p-2 -mx-2 transition-colors"
+      onClick={(e) => onClick(e.currentTarget)}
+      onTouchStart={() => { void warm(); }}
+      className="luma-pressable flex gap-3 w-full text-left outline-none active:bg-white/5 rounded-lg p-2 -mx-2 transition-colors"
     >
       {/* Small poster */}
       <div className="relative w-[72px] shrink-0 aspect-[2/3] overflow-hidden rounded-md">
@@ -227,6 +234,24 @@ function MobileFilterDropdown({
   );
 }
 
+/** A rail poster that warms its popup while visible (queued) and on touch. */
+function WarmButton({ item, onClick, className, children }: {
+  item: NormalizedMediaItem;
+  onClick: (el: HTMLButtonElement) => void;
+  className: string;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const warm = useCallback(() => warmIds(itemIds(item)), [item]);
+  useWarmWhenVisible(ref, warmKey(itemIds(item)), warm);
+  return (
+    <button ref={ref} type="button" onClick={(e) => onClick(e.currentTarget)}
+      onTouchStart={() => { void warm(); }} className={className}>
+      {children}
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // MobilePosterRail — horizontal poster strip (Anticipated rails)
 // ---------------------------------------------------------------------------
@@ -238,7 +263,7 @@ const MobilePosterRail = memo(function MobilePosterRail({
 }: {
   title: string;
   items: NormalizedMediaItem[] | undefined;
-  onCardClick: (item: NormalizedMediaItem) => void;
+  onCardClick: (item: NormalizedMediaItem, el?: HTMLElement | null) => void;
 }) {
   if (!items || items.length === 0) return null;
   return (
@@ -249,11 +274,11 @@ const MobilePosterRail = memo(function MobilePosterRail({
         style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' }}
       >
         {items.map((item) => (
-          <button
+          <WarmButton
             key={item.id}
-            type="button"
-            onClick={() => onCardClick(item)}
-            className="w-[120px] shrink-0 text-left"
+            item={item}
+            onClick={(el) => onCardClick(item, el)}
+            className="luma-pressable w-[120px] shrink-0 text-left"
           >
             <div className="aspect-[2/3] w-full overflow-hidden rounded-lg bg-white/5">
               {item.posterUrl ? (
@@ -270,7 +295,7 @@ const MobilePosterRail = memo(function MobilePosterRail({
               )}
             </div>
             <p className="mt-1 truncate text-[12px] text-white/80">{item.title}</p>
-          </button>
+          </WarmButton>
         ))}
       </div>
     </section>
@@ -343,13 +368,17 @@ export function MobileExplorePage() {
     window.dispatchEvent(new CustomEvent('mobilePersonSearch', { detail: { name, personId } }));
   }, [modalHost]);
 
-  const handleCardClick = useCallback((movie: NormalizedMediaItem) => {
-    openModalForItem(
-      modalHost,
-      movie,
-      'mobile_explore_grid' as ModalSource,
-      { onPersonSearch },
-    );
+  const handleCardClick = useCallback((movie: NormalizedMediaItem, el?: HTMLElement | null) => {
+    // The popup opens only once it can show fully composed (the tapped card
+    // shows a pressed state meanwhile, 600 ms cap).
+    openItemWhenReady(movie, el ?? null, () => {
+      openModalForItem(
+        modalHost,
+        movie,
+        'mobile_explore_grid' as ModalSource,
+        { onPersonSearch },
+      );
+    });
   }, [modalHost, onPersonSearch]);
 
   return (
@@ -439,7 +468,7 @@ export function MobileExplorePage() {
               <MobileExploreCard
                 key={movie.id}
                 movie={movie}
-                onClick={() => handleCardClick(movie)}
+                onClick={(el) => handleCardClick(movie, el)}
               />
             ))}
           </div>

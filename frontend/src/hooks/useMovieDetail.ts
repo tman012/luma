@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { pickBestTrailer } from '@/utils/pickBestTrailer';
-import { movieBackdropFinalAfterDetail } from '@/utils/modalArt';
-import { backdropUrl as tmdbBackdrop } from '@/utils/image';
+import { backdropUrl as tmdbBackdrop, logoImg } from '@/utils/image';
 import {
   parsePlexResponse,
   parseTmdbResponse,
@@ -11,10 +10,15 @@ import {
   type UltraBlurColors,
 } from '@/utils/modalParsers';
 import { apiFetch } from '../apiClient';
+import { detailFetch } from '@/services/modalPrefetch';
+import { useModalColors } from './useModalColors';
 
 // ---------------------------------------------------------------------------
 // Return type
 // ---------------------------------------------------------------------------
+
+/** How long a Plex-key opening waits for TMDb's HD backdrop. */
+export const TMDB_BACKDROP_WAIT_MS = 500;
 
 interface UseMovieDetailResult {
   detail: MediaDetail | null;
@@ -25,8 +29,6 @@ interface UseMovieDetailResult {
   trailerKey: string | null | undefined;
   ultraBlurColors: UltraBlurColors | null;
   resolvedTmdbId: number | undefined;
-  /** The backdrop and clearlogo URLs won't change any more (see useArtReveal). */
-  artFinal: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -45,10 +47,6 @@ export function useMovieDetail(
   const [ratingsLoading, setRatingsLoading] = useState(true);
   const [error, setError] = useState(false);
   const [trailerKey, setTrailerKey] = useState<string | null | undefined>(undefined);
-  const [ultraBlurColors, setUltraBlurColors] = useState<UltraBlurColors | null>(null);
-  const [artDone, setArtDone] = useState({ backdrop: false, logo: false });
-  const markArt = (part: 'backdrop' | 'logo') =>
-    setArtDone((p) => (p[part] ? p : { ...p, [part]: true }));
 
   // Track whether TMDb data was already fetched in the main effect (avoid duplicate fetch)
   const tmdbFetchedRef = useRef(false);
@@ -61,32 +59,46 @@ export function useMovieDetail(
     const controller = new AbortController();
     let cancelled = false;
     tmdbFetchedRef.current = false;
-    // A new item (or Fix Match reload): hide the art until the new URLs settle.
-    setArtDone({ backdrop: false, logo: false });
 
     async function fetchDetail() {
       // A reload keeps the current content on screen until the new data lands.
-      if (!reloadNonce) setLoading(true);
+      // Another title opened: drop the old one so its backdrop never shows.
+      if (!reloadNonce) { setLoading(true); setDetail(null); }
       setError(false);
 
       try {
         if (ratingKey) {
           // Plex path — also fetch TMDb in parallel when tmdbId is known
-          const plexPromise = apiFetch(`/api/plex/movie/${ratingKey}`, { signal: controller.signal })
+          const plexPromise = detailFetch(`/api/plex/movie/${ratingKey}`, { signal: controller.signal })
             .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }) as Promise<Record<string, unknown>>;
 
           const tmdbPromise: Promise<Record<string, unknown> | null> = tmdbId
-            ? apiFetch(`/api/movie/${tmdbId}`, { signal: controller.signal })
+            ? detailFetch(`/api/movie/${tmdbId}`, { signal: controller.signal })
                 .then((r) => (r.ok ? r.json() : null))
                 .catch(() => null)
             : Promise.resolve(null);
 
-          const [plexData, tmdbData] = await Promise.all([plexPromise, tmdbPromise]);
+          const [plexData, tmdbFirst] = await Promise.all([plexPromise, tmdbPromise]);
           if (cancelled) return;
 
           const parsed = parsePlexResponse(plexData);
           parsed.ratingKey = ratingKey;
           if (tmdbId) parsed.tmdbId = tmdbId;
+
+          // Opened with only a Plex key (Home rails): get TMDb now, briefly,
+          // so the first backdrop shown is the final one (no swap later).
+          let tmdbData = tmdbFirst;
+          if (!tmdbData && !tmdbId && parsed.tmdbId) {
+            let timer = 0;
+            tmdbData = await Promise.race([
+              detailFetch(`/api/movie/${parsed.tmdbId}`, { signal: controller.signal })
+                .then((r) => (r.ok ? (r.json() as Promise<Record<string, unknown>>) : null))
+                .catch(() => null),
+              new Promise<null>((res) => { timer = window.setTimeout(() => res(null), TMDB_BACKDROP_WAIT_MS); }),
+            ]);
+            window.clearTimeout(timer);
+            if (cancelled) return;
+          }
 
           // Merge TMDb HD backdrop + trailer immediately (no second flash)
           if (tmdbData) {
@@ -136,12 +148,9 @@ export function useMovieDetail(
           }
 
           setDetail(parsed);
-          if (movieBackdropFinalAfterDetail({
-            tmdbIdProp: !!tmdbId, tmdbMerged: !!tmdbData, parsedTmdbId: !!parsed.tmdbId,
-          })) markArt('backdrop');
         } else if (tmdbId) {
           // TMDb-only path (unowned movies)
-          const resp = await apiFetch(`/api/movie/${tmdbId}`, { signal: controller.signal });
+          const resp = await detailFetch(`/api/movie/${tmdbId}`, { signal: controller.signal });
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const data = (await resp.json()) as Record<string, unknown>;
           if (!cancelled) {
@@ -154,7 +163,6 @@ export function useMovieDetail(
             setTrailerKey(pickBestTrailer(videos as unknown as Parameters<typeof pickBestTrailer>[0]));
 
             setDetail(parsed);
-            markArt('backdrop');
           }
         } else {
           throw new Error('No ratingKey or tmdbId provided');
@@ -164,7 +172,6 @@ export function useMovieDetail(
         if (e?.name !== 'AbortError' && !cancelled) {
           setError(true);
           setRatingsLoading(false); // Don't block modal visibility on error
-          setArtDone({ backdrop: true, logo: true });
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -308,49 +315,9 @@ export function useMovieDetail(
   // Fetch UltraBlurColors — race Plex (fast) vs TMDb (slow but higher quality)
   // Show Plex colors immediately, upgrade to TMDb if it resolves with data.
   // -------------------------------------------------------------------------
-  useEffect(() => {
-    if (!ratingKey && !tmdbId) return;
-
-    const controller = new AbortController();
-    let cancelled = false;
-    let resolved = false;
-
-    function hasColors(data: UltraBlurColors) {
-      return !!(data.topLeft || data.topRight || data.bottomRight || data.bottomLeft);
-    }
-
-    // Plex: instant (metadata lookup, no image processing)
-    if (ratingKey) {
-      apiFetch(`/api/plex/ultrablur/${ratingKey}`, { signal: controller.signal })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data: UltraBlurColors | null) => {
-          if (!cancelled && data && hasColors(data) && !resolved) {
-            resolved = true;
-            setUltraBlurColors(data);
-          }
-        })
-        .catch(() => {});
-    }
-
-    // TMDb: slower (downloads image + extracts palette) but matches HD backdrop
-    if (tmdbId) {
-      apiFetch(`/api/tmdb/colors/${tmdbId}`, { signal: controller.signal })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data: UltraBlurColors | null) => {
-          if (!cancelled && data && hasColors(data)) {
-            // Always upgrade to TMDb colors when available (even if Plex was shown first)
-            resolved = true;
-            setUltraBlurColors(data);
-          }
-        })
-        .catch(() => {});
-    }
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [ratingKey, tmdbId, reloadNonce]);
+  // Color blur: cached per item (warmed from card hover/tap), settled before
+  // the popup leaves its loading state so it fades in with the backdrop.
+  const { colors: ultraBlurColors, settled: colorsSettled } = useModalColors('movie', ratingKey, tmdbId);
 
   // -------------------------------------------------------------------------
   // Fetch clearlogo from TMDb — always prefer TMDb over Plex (Plex sometimes
@@ -361,21 +328,16 @@ export function useMovieDetail(
   useEffect(() => {
     if (!detail) return;
     const id = tmdbId ?? detail.tmdbId;
-    if (!id) {
-      markArt('logo');
-      return;
-    }
+    // Settled means a null logo is final ('no logo'), so the title shows as
+    // text right away instead of waiting out the reveal cap.
+    const settle = (url: string | null) => setDetail((prev) => prev
+      ? { ...prev, clearLogoUrl: url ?? prev.clearLogoUrl, logoSettled: true } : prev);
+    if (!id) { settle(null); return; }
     let cancelled = false;
-    apiFetch(`/api/clearlogo/${id}`)
+    detailFetch(`/api/clearlogo/${id}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (cancelled || !data?.clearlogo_url) return;
-        setDetail((prev) => prev ? { ...prev, clearLogoUrl: data.clearlogo_url } : prev);
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) markArt('logo');
-      });
+      .then((data) => { if (!cancelled) settle(logoImg(data?.clearlogo_url ?? null)); })
+      .catch(() => { if (!cancelled) settle(null); });
     return () => { cancelled = true; };
   }, [detail?.tmdbId, tmdbId, reloadNonce]);
 
@@ -392,7 +354,7 @@ export function useMovieDetail(
   useEffect(() => {
     if (!resolvedTmdbId || tmdbFetchedRef.current) return;
     let cancelled = false;
-    apiFetch(`/api/movie/${resolvedTmdbId}`)
+    detailFetch(`/api/movie/${resolvedTmdbId}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data) return;
@@ -402,7 +364,8 @@ export function useMovieDetail(
         // Always prefer TMDb backdrop over Plex backdrop
         if (data.backdrop_path) {
           const resolvedBackdrop = tmdbBackdrop(data.backdrop_path as string);
-          setDetail((prev) => prev ? { ...prev, backdropUrl: resolvedBackdrop } : prev);
+          // Only fill a missing backdrop: never swap one that's on screen.
+          setDetail((prev) => prev && !prev.backdropUrl ? { ...prev, backdropUrl: resolvedBackdrop } : prev);
         }
 
         const coll = extractBelongsToCollection(data as Record<string, unknown>);
@@ -440,9 +403,6 @@ export function useMovieDetail(
       })
       .catch(() => {
         if (!cancelled) setTrailerKey(null);
-      })
-      .finally(() => {
-        if (!cancelled) markArt('backdrop');
       });
     return () => { cancelled = true; };
   }, [resolvedTmdbId]);
@@ -450,12 +410,11 @@ export function useMovieDetail(
   return {
     detail,
     ratings,
-    loading,
+    loading: loading || (!colorsSettled && !error),
     ratingsLoading,
     error,
     trailerKey,
     ultraBlurColors,
     resolvedTmdbId,
-    artFinal: artDone.backdrop && artDone.logo,
   };
 }

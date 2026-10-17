@@ -33,7 +33,28 @@ export function backdropUrl(
   path: string | undefined | null,
   size: BackdropSize = 'original',
 ): string | null {
-  return resolveImageUrl(path, size);
+  // Phones: w780 instead of the multi-MB original, so the popup's backdrop
+  // decodes fast enough to reveal with everything else.
+  return resolveImageUrl(path, phoneScreen() && size === 'original' ? 'w780' : size);
+}
+
+/** Phone-width screen: the detail popup's compact layout (desktop keeps its sizes). */
+export function phoneScreen(): boolean {
+  return typeof window !== 'undefined' && window.innerWidth < 768;
+}
+
+/** Plex art for the popup backdrop: a 780x439 transcode on phones. */
+export function plexBackdrop(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return phoneScreen() ? sizedPlexImg(url, 780, 439) : url;
+}
+
+/** A clearlogo URL as the popup loads it: on phones, TMDb w500 or a
+ *  500px-wide Plex transcode. */
+export function logoImg(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (!phoneScreen()) return url;
+  return sizedPlexImg(url.replace('/t/p/original/', '/t/p/w500/'), 500);
 }
 
 /**

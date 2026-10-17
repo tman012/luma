@@ -81,6 +81,7 @@ export interface SearchResults {
 // Helpers
 // ---------------------------------------------------------------------------
 
+import { warmDetail } from '@/services/modalPrefetch';
 import { posterUrl as tmdbPosterUrl } from '@/utils/image';
 
 function titleKey(title: string, year: number | string | null | undefined): string {
@@ -229,4 +230,12 @@ export async function batchCheckOwnership(
 // Re-export helpers for use in components
 // ---------------------------------------------------------------------------
 
-export { getPosterUrl, getTitle, getYear, titleKey };
+/** Warm a result's detail popup (metadata, backdrop, logo, color blur), with
+ *  the same ids the popup will be opened with. */
+function warmResult(item: SearchMovie): void {
+  const rk = item.isOwned && item.rating_key ? Number(item.rating_key) : undefined;
+  const tmdb = item.tmdb_id || item.id;
+  void warmDetail(item.media_type === 'tv' ? 'tv' : 'movie', rk, tmdb ? Number(tmdb) : undefined);
+}
+
+export { warmResult, getPosterUrl, getTitle, getYear, titleKey };

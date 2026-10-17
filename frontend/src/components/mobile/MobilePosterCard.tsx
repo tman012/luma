@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
+import { useWarmWhenVisible } from '@/hooks/useWarmWhenVisible';
 
 interface MobilePosterCardProps {
   posterUrl: string | null;
@@ -10,7 +11,10 @@ interface MobilePosterCardProps {
   showOrb?: boolean;
   voteAverage?: number | null;
   digitalReleaseLabel?: string | null;
-  onTap: () => void;
+  onTap: (el: HTMLButtonElement) => void;
+  /** Phone prefetch: warmed while visible (queued) and on touch. */
+  warmKey?: string | null;
+  warm?: () => Promise<void>;
   onLongPress?: () => void;
 }
 
@@ -23,6 +27,8 @@ export function MobilePosterCard({
   inWatchlist,
   showOrb = true,
   onTap,
+  warmKey = null,
+  warm,
   onLongPress,
   digitalReleaseLabel,
 }: MobilePosterCardProps) {
@@ -46,7 +52,12 @@ export function MobilePosterCard({
     onLongPress();
   }, [onLongPress, clearLongPress]);
 
+  const cardRef = useRef<HTMLButtonElement>(null);
+  const noWarm = useCallback(() => Promise.resolve(), []);
+  useWarmWhenVisible(cardRef, warm ? warmKey : null, warm ?? noWarm);
+
   const onTouchStart = useCallback((e: React.TouchEvent) => {
+    if (warm) void warm();
     if (!onLongPress) return;
     const t = e.touches[0];
     if (!t) return;
@@ -54,7 +65,7 @@ export function MobilePosterCard({
     touchOriginRef.current = { x: t.clientX, y: t.clientY };
     clearLongPress();
     longTimerRef.current = window.setTimeout(() => fireLongPress(), 450);
-  }, [onLongPress, clearLongPress, fireLongPress]);
+  }, [onLongPress, clearLongPress, fireLongPress, warm]);
 
   const onTouchMove = useCallback((e: React.TouchEvent) => {
     if (!onLongPress || longTimerRef.current == null) return;
@@ -79,12 +90,13 @@ export function MobilePosterCard({
   return (
     <button
       type="button"
-      onClick={() => {
+      ref={cardRef}
+      onClick={(e) => {
         if (didLongPressRef.current) {
           didLongPressRef.current = false;
           return;
         }
-        onTap();
+        onTap(e.currentTarget);
       }}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -95,7 +107,7 @@ export function MobilePosterCard({
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
       onTouchCancel={onTouchEnd}
-      className={`mobile-poster-card w-[115px] flex-shrink-0 snap-start text-left${suppressNative ? ' longpress-poster' : ''}`}
+      className={`luma-pressable mobile-poster-card w-[115px] flex-shrink-0 snap-start text-left${suppressNative ? ' longpress-poster' : ''}`}
       style={suppressNative ? {
         outline: 'none',
         WebkitTapHighlightColor: 'transparent',

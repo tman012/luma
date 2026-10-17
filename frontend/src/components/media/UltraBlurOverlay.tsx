@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 // ---------------------------------------------------------------------------
 // UltraBlurOverlay — Shared blob-based color bleed overlay for media modals.
 //
@@ -18,6 +19,9 @@ import type { UltraBlurColors } from '@/utils/modalParsers';
 // ---------------------------------------------------------------------------
 
 interface UltraBlurOverlayProps {
+  /** Stays invisible while true, then fades in with the backdrop and title
+   *  (useTitleReveal). Replaces the delayed keyframe fade when set. */
+  hold?: boolean;
   colors: UltraBlurColors | null;
   variant: 'web' | 'mobile' | 'tablet';
   /** Delay before opacity fade-in animation (ms). 0 = no animation. */
@@ -180,12 +184,13 @@ function perceivedLuminance(color: string): number {
 // Component
 // ---------------------------------------------------------------------------
 
-export function UltraBlurOverlay({
+function BlurLayer({
   colors,
   variant,
   animationDelay = 0,
   borderRadius,
   lite = false,
+  hold,
 }: UltraBlurOverlayProps) {
   if (!colors) return null;
 
@@ -231,7 +236,7 @@ export function UltraBlurOverlay({
   const filterStr = filterParts.length > 0 ? filterParts.join(' ') : 'none';
 
   // Build animation style for delayed fade-in
-  const hasAnimation = animationDelay > 0;
+  const hasAnimation = animationDelay > 0 && hold === undefined;
   const animationName = 'ultraBlurFadeIn';
 
   return (
@@ -249,10 +254,13 @@ export function UltraBlurOverlay({
           maskImage: mask,
           borderRadius: resolvedRadius,
           backfaceVisibility: 'hidden',
+          ...(hold !== undefined ? { opacity: hold ? 0 : 1, transition: 'opacity 0.45s ease-out' } : {}),
           // Animation: start invisible if delayed, animate to visible
           ...(hasAnimation
             ? {
-                animation: `${animationName} 0.7s ease ${animationDelay}ms both`,
+                // Fades in with the backdrop (the palette is settled before the
+                // popup renders it), never after it.
+                animation: `${animationName} 0.45s ease-out both`,
               }
             : {}),
         }}
@@ -300,6 +308,38 @@ export function UltraBlurOverlay({
           }
         `}</style>
       )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Public component: when the palette changes after it's shown (the poster-
+// derived seed giving way to the fetched palette), the new layer fades in over
+// the old one, which is then dropped: an invisible crossfade, never a pop.
+// ---------------------------------------------------------------------------
+
+export const CROSSFADE_MS = 600;
+
+export function UltraBlurOverlay(props: UltraBlurOverlayProps) {
+  const { colors } = props;
+  const [prev, setPrev] = useState<UltraBlurColors | null>(null);
+  const shown = useRef<UltraBlurColors | null>(colors);
+  useEffect(() => {
+    const old = shown.current;
+    shown.current = colors;
+    if (!old || !colors || old === colors) { setPrev(null); return; }
+    setPrev(old);
+    const t = window.setTimeout(() => setPrev(null), CROSSFADE_MS + 50);
+    return () => window.clearTimeout(t);
+  }, [colors]);
+  if (!prev) return <BlurLayer {...props} />;
+  return (
+    <>
+      <BlurLayer {...props} colors={prev} />
+      <div data-blur-crossfade style={{ position: 'absolute', inset: 0, animation: `ultraBlurFadeIn ${CROSSFADE_MS}ms ease both` }}>
+        <BlurLayer {...props} />
+      </div>
+      <style>{'@keyframes ultraBlurFadeIn { from { opacity: 0; } to { opacity: 1; } }'}</style>
     </>
   );
 }

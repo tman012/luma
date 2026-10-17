@@ -1,6 +1,4 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useArtReveal } from '@/hooks/useArtReveal';
-import { ART_PLACEHOLDER_BG, artFadeStyle } from '@/utils/modalArt';
 import { createPortal } from 'react-dom';
 import { formatRuntime } from '@/utils/image';
 import {
@@ -325,8 +323,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
   const logoRef = useRef<HTMLDivElement>(null);
-  const artItemKey = detail?.ratingKey ?? detail?.tmdbId ?? 'none';
-  const art = useArtReveal(detail ? (detail.backdropUrl || detail.posterUrl) : null, detail?.clearLogoUrl, props.artFinal);
 
   // Backdrop effects hook no longer needed — full-bleed backdrop with scrim handles readability
   const [showAlreadyInWatchlist, setShowAlreadyInWatchlist] = useState(false);
@@ -710,7 +706,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
           <div
             ref={backdropRef}
             style={{
-              background: ART_PLACEHOLDER_BG,
               position: 'absolute',
               inset: 0,
               zIndex: 0,
@@ -722,11 +717,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
           >
             {detail.backdropUrl ? (
               <img
-                key={`bd-${artItemKey}`}
                 src={detail.backdropUrl}
                 alt=""
                 style={{
-                  ...artFadeStyle(art.ready),
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover',
@@ -736,10 +729,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               />
             ) : detail.posterUrl ? (
               <img
-                key={`poster-${artItemKey}`}
                 src={detail.posterUrl}
                 alt=""
-                style={{ width: '100%', height: '100%', objectFit: 'cover', ...artFadeStyle(art.ready, 0.6) }}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.6 }}
               />
             ) : null}
             {/* Vignette */}
@@ -886,12 +878,11 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
                 transform: showCastShelf ? 'translateY(-15vh)' : 'translateY(0)',
               }}>
-                {detail.clearLogoUrl && !art.logoFailed ? (
+                {detail.clearLogoUrl ? (
                   <img
-                    key={`logo-${artItemKey}`}
                     src={detail.clearLogoUrl}
                     alt={detail.title}
-                    style={{ ...artFadeStyle(art.ready),
+                    style={{
                       maxWidth: '100%',
                       maxHeight: t.logo.maxHeight,
                       objectFit: 'contain',
@@ -907,7 +898,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 ) : null}
                 <h1
                   style={{
-                    display: detail.clearLogoUrl && !art.logoFailed ? 'none' : 'block', ...artFadeStyle(art.ready),
+                    display: detail.clearLogoUrl ? 'none' : 'block',
                     fontSize: t.titleFontSize,
                     fontWeight: 700,
                     color: '#fff',
