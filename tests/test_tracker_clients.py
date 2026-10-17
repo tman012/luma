@@ -246,7 +246,8 @@ def test_iptorrents_search_parses_table():
     (R(302, b'', {'Location': '/login.php'}), 'Unauthorized'),
     (R(body='<form><input name="username"><input name="password"></form>'), 'Unauthorized'),
     (R(body='<p>You are banned</p>'), 'Banned'),
-    (R(body='<p>No Torrents Found!</p>'), None),
+    (R(body='<a href="/lout.php">Log out</a><p>No Torrents Found!</p>'), None),
+    (R(body='<p>No Torrents Found!</p>'), 'Unauthorized'),     # no sign-out link: signed out
 ])
 def test_iptorrents_auth_and_empty(resp, expect):
     t = FakeTracker(resp)

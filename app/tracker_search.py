@@ -248,12 +248,12 @@ class TrackerSearch:
 
     # -- one tracker -------------------------------------------------------
 
-    def _log_once(self, key: tuple, window: Any, msg: str, *args) -> None:
+    def _log_once(self, key: tuple, window: Any, msg: str, *args, level: int = logging.INFO) -> None:
         with self._cache_lock:
             if self._skip_logged.get(key) == window:
                 return
             self._skip_logged[key] = window
-        logger.info(msg, *args)
+        logger.log(level, msg, *args)
 
     def _record_failure(self, cfg: Dict[str, Any], gk: str, err: TrackerError, scope=None) -> None:
         until = record_failure(self.guard, gk, err, scope)
@@ -273,6 +273,7 @@ class TrackerSearch:
         with self._cache_lock:
             hit = self._cache.get(ckey)
         if hit and now - hit[0] < ttl:
+            logger.info('Tracker %s (id %s) search: cached answer, %d results', cfg['name'], cfg['id'], len(hit[1]))
             return hit[1]
         strict = tt.is_rate_strict(cfg['type'])
         with self.guard.tracker_lock(gk):
@@ -283,7 +284,8 @@ class TrackerSearch:
             reason = self.guard.take(gk, interactive, strict)
             if reason:
                 self._log_once((gk, 'skip'), int(time.time() // 900),
-                               'Tracker %s (id %s) search not sent: %s', cfg['name'], cfg['id'], reason)
+                               'Tracker %s (id %s) search not sent: %s', cfg['name'], cfg['id'], reason,
+                               level=logging.WARNING)
                 if hit:
                     return hit[1]
                 raise TrackerSkipped(reason)
@@ -293,16 +295,25 @@ class TrackerSearch:
                 with scope:
                     items = tracker_clients.search(cfg, query, categories, limit, self.request, imdb_id=imdb_id)
             except TrackerError as e:
+                st = tracker_clients.last_stats() if cfg.get('type') == 'iptorrents' else {}
+                # One redacted line per failure: name, stage, reason, HTTP status. Never a URL or header.
+                logger.warning('Tracker %s (id %s) search failed: %s (HTTP %s, %s bytes, %s rows parsed)',
+                               cfg['name'], cfg['id'], e.kind, e.status if e.status is not None else '-',
+                               st.get('bytes', '-'), st.get('rows', '-'))
                 self._record_failure(cfg, gk, e, scope)
                 raise
             except Exception as e:       # parser bug: treat as a bad answer, never leak details
-                logger.warning('Tracker %s (id %s) answer not understood (%s)', cfg['name'], cfg['id'],
+                logger.warning('Tracker %s (id %s) search failed: parse (%s)', cfg['name'], cfg['id'],
                                type(e).__name__)
                 err = TrackerError('response')
                 self._record_failure(cfg, gk, err)
                 raise err from None
         self.guard.success(gk)
         self.store.set_status(cfg['id'], STATUS_OK, '')
+        st = tracker_clients.last_stats() if cfg.get('type') == 'iptorrents' else {}
+        logger.info('Tracker %s (id %s) search: HTTP %s, %s bytes, %s rows parsed, %d results',
+                    cfg['name'], cfg['id'], st.get('status', '-'), st.get('bytes', '-'), st.get('rows', '-'),
+                    len(items))
         if items:          # an empty answer is never cached
             with self._cache_lock:
                 self._cache[ckey] = (time.time(), items)
@@ -325,13 +336,13 @@ class TrackerSearch:
         target = link or magnet
         if not target:
             return None
+        title = r.get('title') or ''
+        if not title or _has_secret(title, secret_values):
+            return None
         token = self.tokens.issue(int(cfg['id']), target)
         # Always the hashed id: a tracker's details/comments link often
         # carries a passkey that isn't one of the configured secret values.
         guid = f"luma-tracker:{cfg['id']}:{hashlib.sha256(target.encode('utf-8')).hexdigest()[:24]}"
-        title = r.get('title') or ''
-        if not title or _has_secret(title, secret_values):
-            return None
         return {
             'title': title, 'size': r.get('size') or 0, 'seeders': r.get('seeders') or 0,
             'leechers': r.get('leechers') or 0, 'indexer': cfg['name'], 'indexerId': int(cfg['id']),
@@ -372,10 +383,19 @@ class TrackerSearch:
             with ThreadPoolExecutor(max_workers=min(8, len(jobs))) as pool:
                 for c, results in pool.map(one, jobs):
                     sv = _secret_values(c)
+                    kept = 0
                     for r in results:
                         it = self.to_item(c, r, sv)
                         if it:
                             items.append(it)
+                            kept += 1
+                    if results and not kept:
+                        # Every row was dropped: never serve that answer again from the cache.
+                        logger.warning('Tracker %s (id %s) search: %d results, 0 kept', c['name'], c['id'],
+                                       len(results))
+                        with self._cache_lock:
+                            for k in [k for k in self._cache if k[0] == c['id']]:
+                                self._cache.pop(k, None)
             self.tokens.flush()
         prio = {c['id']: c['priority'] for c, _ in jobs}
         items.sort(key=lambda i: (prio.get(i['indexerId'], 99), -int(i.get('seeders') or 0)))
@@ -436,9 +456,16 @@ class LumaTrackersClient:
     def search_all(self, query: str, media_type: str, year: Optional[int] = None) -> List[Dict]:
         from app.indexer_api import (MOVIE_CATEGORIES_EXPANDED, TV_SPORTS_CATEGORIES,
                                      _build_search_query, _parse_title)
-        q = _build_search_query(query, year)
+        # TV release names carry SxxEyy, not the first-air year: never add it for TV.
+        q = (query or '').strip() if media_type == 'tv' else _build_search_query(query, year)
         cats = list(MOVIE_CATEGORIES_EXPANDED) + list(TV_SPORTS_CATEGORIES)
         items, _, _ = self.engine.search(q, cats, 500, interactive=True)
+        bare = (query or '').strip()
+        if not items and bare and q != bare:
+            # Release names often leave the year out (TV above all): one retry without it.
+            logger.info('Tracker search_all media_type=%s: no results with the year, retrying without it',
+                        media_type)
+            items, _, _ = self.engine.search(bare, cats, 500, interactive=True)
         out = []
         for it in items:
             parsed = _parse_title(it['title'])

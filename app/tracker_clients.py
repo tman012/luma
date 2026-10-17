@@ -389,8 +389,21 @@ def _parse_size(text: str) -> int:
         return 0
 
 
+_IPT_DETAILS_RE = re.compile(r'^(?:https?://[^/]+)?/(?:t/\d+|details\.php\?id=\d+)(?:[/?#]|$)')
+_IPT_CAT_RE = re.compile(r'^(?:/t)?\?(\d+)$')
+_IPT_TABLE_RE = re.compile(r'<table\b[^>]*\bid\s*=\s*["\']?torrents\b', re.I)
+# Only a signed-in IPT page links its sign-out page.
+_IPT_SIGNED_IN = ('lout.php', 'logout.php')
+_IPT_BADGE_RE = re.compile(r'\s*\b(FreeLeech|New)\b\s*$', re.I)
+
+
 class _IPTParser(HTMLParser):
-    """Rows of the torrents table: cell text, links and freeleech markers."""
+    """Rows of IPT's torrents table: cell text (with each cell's classes),
+    links, the details link text (the release name) and freeleech markers.
+
+    IPT's pages are minified: attributes may be unquoted and optional end
+    tags (</td>, </tr>) may be left out, so a cell or row also ends where
+    the next one starts."""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -398,68 +411,134 @@ class _IPTParser(HTMLParser):
         self.rows: List[Dict[str, Any]] = []
         self.row: Optional[Dict[str, Any]] = None
         self.cell: Optional[List[str]] = None
+        self.cell_class = ''
+        self.name: Optional[List[str]] = None      # inside the details link
+
+    def _end_cell(self):
+        if self.row is not None and self.cell is not None:
+            self.row['cells'].append(' '.join(''.join(self.cell).split()))
+            self.row['classes'].append(self.cell_class)
+        self.cell = None
+        self.name = None
+
+    def _end_row(self):
+        self._end_cell()
+        if self.row is not None:
+            self.rows.append(self.row)
+        self.row = None
 
     def handle_starttag(self, tag, attrs):
-        a = dict(attrs)
+        a = {k: (v or '') for k, v in attrs}
         if tag == 'table':
-            if self.depth or a.get('id') == 'torrents':
+            if self.depth:
                 self.depth += 1
+            elif a.get('id', '').strip().lower() == 'torrents':
+                self.depth = 1
             return
         if not self.depth:
             return
-        if tag == 'tr':
-            self.row = {'cells': [], 'links': [], 'free': False}
+        if tag == 'tr' and self.depth == 1:
+            self._end_row()
+            self.row = {'cells': [], 'classes': [], 'links': [], 'free': False, 'name': ''}
         elif self.row is None:
             return
-        elif tag == 'td':
+        elif tag in ('td', 'th') and self.depth == 1:
+            self._end_cell()
             self.cell = []
+            self.cell_class = a.get('class', '').lower()
         elif tag == 'a' and a.get('href'):
-            self.row['links'].append(a['href'])
-        elif tag == 'span' and 'free' in (a.get('class') or '').lower():
+            href = a['href'].strip()
+            self.row['links'].append(href)
+            if not self.row['name'] and _IPT_DETAILS_RE.match(href) and '#' not in href:
+                self.name = []
+        elif tag == 'span' and 'free' in a.get('class', '').lower():
             self.row['free'] = True
 
     def handle_endtag(self, tag):
         if not self.depth:
             return
         if tag == 'table':
+            if self.depth == 1:
+                self._end_row()
             self.depth -= 1
-        elif tag == 'td' and self.row is not None and self.cell is not None:
-            self.row['cells'].append(' '.join(''.join(self.cell).split()))
-            self.cell = None
-        elif tag == 'tr' and self.row is not None:
-            self.rows.append(self.row)
-            self.row = None
+        elif tag == 'a' and self.name is not None and self.row is not None:
+            text = ' '.join(''.join(self.name).split())
+            if text:
+                self.row['name'] = text
+            self.name = None
+        elif self.depth != 1:
+            return
+        elif tag in ('td', 'th'):
+            self._end_cell()
+        elif tag == 'tr':
+            self._end_row()
 
     def handle_data(self, data):
         if self.cell is not None:
             self.cell.append(data)
             if self.row is not None and data.strip().lower() == 'freeleech':
                 self.row['free'] = True
+        if self.name is not None:
+            self.name.append(data)
 
 
-def parse_iptorrents(html: str, base: str, limit: int) -> List[Dict[str, Any]]:
+# Rows parsed / kept by the last IPT search on this thread (for the log line).
+_stats = threading.local()
+
+
+def last_stats() -> Dict[str, Any]:
+    return dict(getattr(_stats, 'value', None) or {})
+
+
+def _set_stats(**kw) -> None:
+    _stats.value = kw
+
+
+def _cell_int(row, cls: str) -> Optional[int]:
+    for c, k in zip(row['cells'], row['classes']):
+        if cls in k.split():
+            return _int(c.replace(',', ''))
+    return None
+
+
+def parse_iptorrents(html: str, base: str, limit: int, counts: Optional[Dict[str, int]] = None
+                     ) -> List[Dict[str, Any]]:
     p = _IPTParser()
     p.feed(html)
+    p.close()
+    p._end_row()
     out = []
+    rows = 0
     for row in p.rows:
-        dl = next((h for h in row['links'] if '/download.php/' in h), '')
+        dl = next((h for h in row['links'] if '/download.php' in h), '')
         if not dl:
             continue
-        det = next((h for h in row['links'] if re.match(r'^/t/\d+', h)), '')
-        cat = next((h for h in row['links'] if re.match(r'^/t\?\d+', h)), '')
+        rows += 1
+        det = next((h for h in row['links'] if _IPT_DETAILS_RE.match(h) and '#' not in h), '')
+        cat = next((m.group(1) for m in (_IPT_CAT_RE.match(h) for h in row['links']) if m), '')
         cells = row['cells']
+        title = row['name']
+        if not title and len(cells) > 1:
+            title = _IPT_BADGE_RE.sub('', cells[1])
+        if not title:
+            continue
         nums = [c for c in cells if re.fullmatch(r'[\d,]+', c)]
+        seeders = _cell_int(row, 't_seeders')
+        leechers = _cell_int(row, 't_leechers')
+        if seeders is None:
+            seeders = _int(nums[-2].replace(',', '')) if len(nums) >= 2 else 0
+        if leechers is None:
+            leechers = _int(nums[-1].replace(',', '')) if nums else 0
         size_cell = next((c for c in cells if _SIZE_RE.fullmatch(c.strip())), '')
-        title = cells[1] if len(cells) > 1 else ''
-        title = re.sub(r'\s*(FreeLeech|New)\b.*$', '', title, flags=re.I) if title else title
         info = urljoin(base + '/', det) if det else ''
-        out.append(_result(title, urljoin(base + '/', dl), _parse_size(size_cell),
-                           _int(nums[-2].replace(',', '')) if len(nums) >= 2 else 0,
-                           _int(nums[-1].replace(',', '')) if nums else 0,
-                           freeleech=row['free'], category=cat.split('?', 1)[1] if cat else '',
+        out.append(_result(title, urljoin(base + '/', dl), _parse_size(size_cell), seeders, leechers,
+                           freeleech=row['free'], category=cat,
                            guid=info or urljoin(base + '/', dl), info_url=info))
         if len(out) >= limit:
             break
+    if counts is not None:
+        counts['rows'] = rows
+        counts['kept'] = len(out)
     return out
 
 
@@ -468,27 +547,47 @@ def iptorrents_headers(cfg) -> Dict[str, str]:
             'User-Agent': str(cfg.get('user_agent') or '').strip() or DEFAULT_UA}
 
 
+def _ipt_signed_out(text: str) -> bool:
+    low = text.lower()
+    if 'name="username"' in low or "name='username'" in low or 'name=username' in low:
+        return True
+    if 'name="password"' in low or "name='password'" in low or 'name=password' in low:
+        return True
+    return not any(m in low for m in _IPT_SIGNED_IN)
+
+
 def iptorrents_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id=''):
     q, imdb = _split_imdb(query, imdb_id)
     q = q or imdb
     kind = media_kind(categories)
     cats = IPT_MOVIE_CATS if kind == 'movie' else IPT_TV_CATS if kind == 'tv' else ()
     parts = [str(c) for c in cats] + [urlencode({'q': q, 'qf': 'all' if IMDB_RE.match(q or '') else ''}), 'o=added']
+    _set_stats(status=None, bytes=0, rows=0, kept=0)
     resp = request('GET', f"{_base(cfg)}/t?{'&'.join(parts)}", headers=iptorrents_headers(cfg),
                    follow_redirects=False)
     text = resp.text()
+    _set_stats(status=resp.status, bytes=len(resp.body or b''), rows=0, kept=0)
     if resp.status in (301, 302, 303, 307, 308):
-        raise TrackerError('auth', resp.status)
+        raise TrackerError('auth', resp.status)          # IPT sends a signed-out visitor to its login page
     raise_for_status(resp)
-    if 'id="torrents"' not in text:
+    if not _IPT_TABLE_RE.search(text):
+        if looks_banned(text) and _ipt_signed_out(text):
+            raise TrackerError('banned', resp.status)
+        if _ipt_signed_out(text):
+            # A login form, or a page without the sign-out link: the cookie
+            # was not accepted. Never "0 results".
+            raise TrackerError('auth', resp.status)
         if looks_banned(text):
             raise TrackerError('banned', resp.status)
-        if 'name="username"' in text or 'login.php' in text or 'name="password"' in text:
-            raise TrackerError('auth', resp.status)
         if 'no torrents found' in text.lower():
             return []
         raise TrackerError('response', resp.status)
-    return parse_iptorrents(text, _base(cfg), limit)
+    counts: Dict[str, int] = {}
+    out = parse_iptorrents(text, _base(cfg), limit, counts)
+    _set_stats(status=resp.status, bytes=len(resp.body or b''), **counts)
+    if counts.get('rows') and not out:
+        raise TrackerError('response', resp.status)      # rows we can't read: a parser problem, not "no results"
+    return out
 
 
 def iptorrents_test(cfg, request: Request = http_request):
