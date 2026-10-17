@@ -20381,6 +20381,10 @@ _start_flow.init(
 )
 app.register_blueprint(_start_flow.bp)
 
+from app import tracker_routes as _tracker_routes
+_tracker_routes.init(get_current_user=_get_current_user, get_owner=lambda: _access.owner(user_auth))
+app.register_blueprint(_tracker_routes.bp)
+
 
 if __name__ == '__main__':
     # Initialize services (database, caches, background threads)
