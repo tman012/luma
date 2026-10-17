@@ -6,6 +6,9 @@ import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { FONT, LOGO_SRC, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
 import { HomeRails, SkeletonRails, railCss } from '@/components/home/Rails';
+import { useModalHost } from '@/contexts/ModalHostContext';
+import type { Card } from '@/components/home/homeApi';
+import { LUMA_BLUE } from '@/ui/lumaButton';
 import { fetchHome, type HomeData } from '@/components/home/homeApi';
 
 export function MinimalHomePage() {
@@ -17,15 +20,22 @@ export function MinimalHomePage() {
   const [data, setData] = useState<HomeData | null>(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const [slow, setSlow] = useState(false);
+  const modals = useModalHost();
+  const openCard = (c: Card) => openDetail(modals, c);
 
   const ready = !loading && authenticated && !startInProgress;
   useEffect(() => {
     if (!ready) return;
     let alive = true;
     setFailed(false);
+    setSlow(false);
+    setData(null);
+    // A skeleton that's still up after 8 s means Plex isn't answering.
+    const timer = window.setTimeout(() => { if (alive) setSlow(true); }, SKELETON_TIMEOUT_MS);
     // One request returns every rail, so all of them appear together.
     fetchHome().then(d => { if (alive) setData(d); }).catch(() => { if (alive) setFailed(true); });
-    return () => { alive = false; };
+    return () => { alive = false; window.clearTimeout(timer); };
   }, [ready, attempt]);
 
   if (loading) return null;
@@ -48,16 +58,41 @@ export function MinimalHomePage() {
         )}
       </header>
       <main style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
-        {data ? <HomeRails cw={data.continue_watching} rails={data.rails} />
-          : failed ? (
-            <div style={failBox} role="alert">
-              <p style={{ margin: 0 }}>Couldn't load Home</p>
-              <button type="button" onClick={() => setAttempt(a => a + 1)} style={retryBtn}>Retry</button>
-            </div>
-          ) : <SkeletonRails />}
+        {homeView(data, failed || slow, () => setAttempt(a => a + 1), openCard)}
       </main>
     </div>
   );
+}
+
+export const SKELETON_TIMEOUT_MS = 8000;
+
+/** Opens main's movie or TV popup; episodes and seasons open their show. */
+export function openDetail(modals: { openMovie: (o: object) => void; openTv: (o: object) => void }, c: Card) {
+  const key = Number(c.key);
+  if (c.type === 'movie') return modals.openMovie({ ratingKey: key, origin: 'continue_watching' });
+  const show = Number(c.show_key || c.key);
+  if (c.type === 'episode' && c.season && c.episode) {
+    return modals.openTv({ ratingKey: show, origin: 'continue_watching',
+      episodeContext: { seasonNumber: c.season, episodeNumber: c.episode, episodeRatingKey: key } });
+  }
+  modals.openTv({ ratingKey: show, origin: 'recently_added_tv' });
+}
+
+function homeView(data: HomeData | null, down: boolean, retry: () => void, onOpen: (c: Card) => void) {
+  if (data && data.plex !== false) {
+    const any = data.continue_watching.length > 0 || data.rails.some(r => r.items.length > 0);
+    if (any) return <HomeRails cw={data.continue_watching} rails={data.rails} onOpen={onOpen} />;
+    return <div style={emptyBox} data-testid="home-empty"><p style={emptyLine}>Nothing here yet</p></div>;
+  }
+  if (data || down) {
+    return (
+      <div style={emptyBox} role="alert" data-testid="home-down">
+        <p style={emptyLine}>Can't reach Plex</p>
+        <button type="button" onClick={retry} style={retryBtn}>Retry</button>
+      </div>
+    );
+  }
+  return <SkeletonRails />;
 }
 
 /** Avatar button with a small menu: Libraries (admins) and Sign out. */
@@ -114,13 +149,15 @@ const menuItem: React.CSSProperties = {
   background: 'transparent', border: 'none', color: '#fff', font: 'inherit', fontSize: 15,
   textDecoration: 'none', cursor: 'pointer', textAlign: 'left',
 };
-const failBox: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: '96px 20px',
-  color: 'rgba(255,255,255,0.75)', fontSize: 15,
+// Centered in the space under the header: one muted line, optional Retry pill.
+const emptyBox: React.CSSProperties = {
+  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16,
+  minHeight: 'calc(100dvh - 160px)', padding: '0 20px',
 };
+const emptyLine: React.CSSProperties = { margin: 0, color: 'rgba(255,255,255,0.6)', fontSize: 15 };
 const retryBtn: React.CSSProperties = {
-  padding: '10px 20px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.18)',
-  background: 'rgba(255,255,255,0.08)', color: '#fff', font: 'inherit', cursor: 'pointer',
+  padding: '10px 22px', borderRadius: 999, border: 0, background: LUMA_BLUE,
+  color: '#fff', font: 'inherit', fontWeight: 600, cursor: 'pointer',
 };
 
 function LibrariesIcon() {

@@ -750,7 +750,7 @@ export function CompactLayout(props: TvModalViewProps) {
                     )}
 
                     {/* Primary action area */}
-                    <div>
+                    <div data-modal-actions>
                     {(activeSeasonData ? seasonDetailIsOwned : showOwned) ? (
                       /* Watch button — full-width white pill */
                       <button
@@ -885,6 +885,7 @@ export function CompactLayout(props: TvModalViewProps) {
 
                     {/* Action buttons row — circular icons */}
                     <div
+                      data-modal-actions
                       style={{
                         display: 'flex',
                         justifyContent: 'center',

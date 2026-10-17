@@ -51,6 +51,10 @@ export function LibrariesEditor() {
           <div data-testid="libraries-skeleton" style={list}>
             {[0, 1, 2].map(i => <div key={i} className="luma-shimmer" style={{ height: 60 }} />)}
           </div>
+        ) : libs.length === 0 ? (
+          <div data-testid="libraries-empty" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 'calc(100dvh - 200px)' }}>
+            <p style={{ margin: 0, color: 'rgba(255,255,255,0.6)', fontSize: 15 }}>Nothing here yet</p>
+          </div>
         ) : (
           <ul style={list} data-testid="libraries">
             {libs.map((l, i) => (

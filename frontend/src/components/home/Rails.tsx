@@ -15,24 +15,37 @@ export function RailRow({ title, children, testId }: { title: string; children: 
   );
 }
 
-export function PosterCard({ card }: { card: Card }) {
+type OnOpen = ((card: Card) => void) | undefined;
+
+/** A card is a plain button when it can open the detail popup. */
+function CardShell({ card, onOpen, style, children }: { card: Card; onOpen: OnOpen; style: React.CSSProperties; children: React.ReactNode }) {
+  if (!onOpen) return <div style={style}>{children}</div>;
+  return (
+    <button type="button" onClick={() => onOpen(card)} aria-label={card.title}
+      data-testid={`card-${card.key}`} style={{ ...cardButton, ...style }}>
+      {children}
+    </button>
+  );
+}
+
+export function PosterCard({ card, onOpen }: { card: Card; onOpen?: OnOpen }) {
   const src = img(card.poster);
   return (
-    <div style={posterCard}>
+    <CardShell card={card} onOpen={onOpen} style={posterCard}>
       <div style={{ ...posterImg, ...GLASS }}>
         {src && <img src={src} alt="" loading="lazy" style={fill} draggable={false} />}
       </div>
       <div style={cardTitle}>{card.title}</div>
       {card.subtitle && <div style={cardSub}>{card.subtitle}</div>}
-    </div>
+    </CardShell>
   );
 }
 
-export function WideCard({ card }: { card: Card }) {
+export function WideCard({ card, onOpen }: { card: Card; onOpen?: OnOpen }) {
   const src = img(card.art || card.poster);
   const pct = Math.max(0, Math.min(1, card.progress || 0));
   return (
-    <div style={wideCard}>
+    <CardShell card={card} onOpen={onOpen} style={wideCard}>
       <div style={{ ...wideImg, ...GLASS }}>
         {src && <img src={src} alt="" loading="lazy" style={fill} draggable={false} />}
         {pct > 0 && (
@@ -41,7 +54,7 @@ export function WideCard({ card }: { card: Card }) {
       </div>
       <div style={cardTitle}>{card.title}</div>
       {card.subtitle && <div style={cardSub}>{card.subtitle}</div>}
-    </div>
+    </CardShell>
   );
 }
 
@@ -64,17 +77,17 @@ export function SkeletonRails({ rails = 3 }: { rails?: number }) {
   );
 }
 
-export function HomeRails({ cw, rails }: { cw: Card[]; rails: Rail[] }) {
+export function HomeRails({ cw, rails, onOpen }: { cw: Card[]; rails: Rail[]; onOpen?: (card: Card) => void }) {
   return (
     <div data-testid="home-rails" className="luma-rails-in">
       {cw.length > 0 && (
         <RailRow title="Continue watching" testId="rail-continue">
-          {cw.map(c => <WideCard key={c.key} card={c} />)}
+          {cw.map(c => <WideCard key={c.key} card={c} onOpen={onOpen} />)}
         </RailRow>
       )}
       {rails.filter(r => r.items.length > 0).map(r => (
         <RailRow key={r.id} title={`Recently added in ${r.title}`} testId={`rail-${r.id}`}>
-          {r.items.map(c => <PosterCard key={c.key} card={c} />)}
+          {r.items.map(c => <PosterCard key={c.key} card={c} onOpen={onOpen} />)}
         </RailRow>
       ))}
     </div>
@@ -91,6 +104,10 @@ export const railCss = `
 @media (prefers-reduced-motion: reduce){.luma-shimmer{animation:none}.luma-rails-in{animation:none}}
 `;
 
+const cardButton: React.CSSProperties = {
+  display: 'block', padding: 0, margin: 0, border: 0, background: 'none', color: 'inherit',
+  font: 'inherit', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+};
 const railWrap: React.CSSProperties = { marginTop: 28 };
 const railTitle: React.CSSProperties = {
   margin: '0 20px 12px', fontSize: 19, fontWeight: 600, letterSpacing: '-0.01em', fontFamily: FONT, color: '#fff',

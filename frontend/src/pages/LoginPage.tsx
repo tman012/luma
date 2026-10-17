@@ -8,6 +8,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { StartShell, Logo, LogoGap, Title, primaryBtn, fieldInput, fieldLabel, FONT } from '@/components/start/StartUI';
 import { useNavigate, useLocation } from 'react-router';
+import { getUrlBase } from '@/urlHelpers';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiFetch } from '../apiClient';
 
@@ -41,7 +42,7 @@ export function LoginPage() {
 
   useEffect(() => {
     if (!loading && authenticated) {
-      const from = (location.state as any)?.from || '/';
+      const from = (location.state as any)?.from || nextFromQuery(location.search) || '/';
       navigate(from, { replace: true });
     }
   }, [authenticated, loading, navigate, location]);
@@ -303,3 +304,12 @@ const dividerLineStyle: React.CSSProperties = {
   height: 1,
   background: 'rgba(255,255,255,0.1)',
 };
+
+/** ?next= from the server's /login redirect: same-site paths only, URL base stripped. */
+export function nextFromQuery(search: string): string | null {
+  const next = new URLSearchParams(search).get('next');
+  if (!next || !next.startsWith('/') || next.startsWith('//') || next.includes('\\')) return null;
+  const base = getUrlBase().replace(/\/+$/, '');
+  const path = base && (next === base || next.startsWith(base + '/')) ? next.slice(base.length) || '/' : next;
+  return path.startsWith('/login') ? '/' : path;
+}

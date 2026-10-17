@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const auth = { authenticated: true, loading: false, needsStart: false, startInProgress: false, pinUnlock: false,
   user: { id: 1, name: 'taylor', is_admin: true }, implicit: false, logout: vi.fn() };
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
+const modals = { openMovie: vi.fn(), openTv: vi.fn() };
+vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => modals }));
 
 import { MinimalHomePage } from '@/pages/MinimalHomePage';
 import { LibrariesEditor } from '@/pages/LibrariesPage';
@@ -74,6 +76,47 @@ describe('Home', () => {
     await waitFor(() => expect(screen.getByTestId('home-rails')).toBeTruthy());
   });
 
+  it('tapping a poster or Continue card opens the detail popup', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ...HOME, continue_watching: [{ ...HOME.continue_watching[0], show_key: '9', season: 1, episode: 2 }] })));
+    render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
+    await waitFor(() => screen.getByTestId('home-rails'));
+    fireEvent.click(screen.getByTestId('card-21'));
+    expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: 21, origin: 'continue_watching' });
+    fireEvent.click(screen.getByTestId('card-10'));
+    expect(modals.openTv).toHaveBeenLastCalledWith({ ratingKey: 9, origin: 'continue_watching',
+      episodeContext: { seasonNumber: 1, episodeNumber: 2, episodeRatingKey: 10 } });
+    fireEvent.click(screen.getByTestId('card-31'));
+    expect(modals.openTv).toHaveBeenLastCalledWith({ ratingKey: 31, origin: 'recently_added_tv' });
+    // Continue cards keep the backdrop look (art + progress bar).
+    expect(screen.getByTestId('card-10').querySelector('[data-testid="progress"]')).toBeTruthy();
+  });
+
+  it('says Nothing here yet when every rail is empty', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ plex: true, continue_watching: [], rails: [] })));
+    render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
+    expect((await screen.findByTestId('home-empty')).textContent).toBe('Nothing here yet');
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  it("says Can't reach Plex with a Retry pill when Plex is down", async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ plex: false, continue_watching: [], rails: [] })));
+    render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
+    const box = await screen.findByTestId('home-down');
+    expect(box.textContent).toBe("Can't reach PlexRetry");
+  });
+
+  it("gives up on the skeleton after 8 s", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
+    expect(screen.getByTestId('home-skeleton')).toBeTruthy();
+    await act(async () => { vi.advanceTimersByTime(7900); });
+    expect(screen.queryByTestId('home-down')).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(200); });
+    expect(screen.getByTestId('home-down')).toBeTruthy();
+    vi.useRealTimers();
+  });
+
   it('hides Libraries for non-admins', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json(HOME)));
     auth.user = { id: 2, name: 'guest', is_admin: false };
@@ -88,6 +131,12 @@ describe('Home', () => {
 describe('Libraries', () => {
   beforeEach(() => { vi.restoreAllMocks(); });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  it('says Nothing here yet with no libraries', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ libraries: [] })));
+    render(<MemoryRouter><LibrariesEditor /></MemoryRouter>);
+    expect((await screen.findByTestId('libraries-empty')).textContent).toBe('Nothing here yet');
+  });
 
   it('move reorders within bounds', () => {
     expect(move([1, 2, 3], 0, 1)).toEqual([2, 1, 3]);

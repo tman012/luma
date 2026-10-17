@@ -1341,3 +1341,9 @@ input[type="search"]::-webkit-search-cancel-button {
 @supports (height: 100lvh) {
   [data-modal="MovieDetailModal"], [data-modal="TvDetailModal"] { bottom: auto !important; height: 100lvh !important; }
 }
+
+/* LUMA_MINIMAL: the movie/TV popup is display-only (no play, request, grab,
+   watchlist, sources or file-info controls). */
+html.luma-minimal [data-modal-actions] {
+  display: none !important;
+}

@@ -1669,7 +1669,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                         </div>
 
                         {/* Action pills */}
-                        <div style={{
+                        <div data-modal-actions style={{
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',

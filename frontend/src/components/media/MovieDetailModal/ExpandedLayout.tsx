@@ -37,6 +37,7 @@ import { FixMatchSheet, type FixMatchResult } from './FixMatchSheet';
 import { FileInfoSheet, FileInfoIcon } from './FileInfoSheet';
 import { TopReviewsRow, ReviewSheet, useTopReviews, type TopReview } from '@/components/media/TopReviews';
 import { apiFetch } from '../../../apiClient';
+import { isMinimal } from '@/minimal';
 
 // ---------------------------------------------------------------------------
 // CastShelf — slide-up shelf with preloaded circular cast photos
@@ -648,7 +649,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
         }}
       >
         {/* ⓘ File Info — sits just left of the close X (44px chip + 12px gap) */}
-        {canShowFileInfo && (
+        {canShowFileInfo && !isMinimal() && (
           <FileInfoButton
             top={t.close.top}
             right={`calc(${t.close.right} + 56px)`}
@@ -981,7 +982,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 </div>
 
                 {/* Action pills */}
-                <div
+                <div data-modal-actions
                   style={{
                     display: 'flex',
                     alignItems: 'center',

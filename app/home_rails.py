@@ -91,9 +91,14 @@ def _img(path: Optional[str], width: int) -> Optional[str]:
 
 
 def _sections(plex) -> List[Dict[str, Any]]:
+    return _sections_or_none(plex) or []
+
+
+def _sections_or_none(plex) -> Optional[List[Dict[str, Any]]]:
+    """None when Plex doesn't answer, so Home can say "Can't reach Plex"."""
     root = plex._get('/library/sections', timeout=8)
     if root is None:
-        return []
+        return None
     return [{'id': d.get('key', ''), 'title': d.get('title', ''), 'type': d.get('type', '')}
             for d in root.findall('./Directory') if d.get('key')]
 
@@ -105,6 +110,7 @@ def _card(el: ET.Element, wide: bool = False) -> Optional[Dict[str, Any]]:
     if not key:
         return None
     title = el.get('title', '')
+    show_key = None
     subtitle = el.get('year', '') or ''
     poster = el.get('thumb')
     if kind == 'episode':
@@ -112,14 +118,21 @@ def _card(el: ET.Element, wide: bool = False) -> Optional[Dict[str, Any]]:
         s, e = el.get('parentIndex'), el.get('index')
         subtitle = f'S{s} E{e}' if s and e else el.get('title', '')
         poster = el.get('grandparentThumb') or el.get('parentThumb') or poster
+        show_key = el.get('grandparentRatingKey')
     elif kind == 'season':
         title = el.get('parentTitle') or title
         subtitle = el.get('title', '')
         poster = el.get('parentThumb') or poster
+        show_key = el.get('parentRatingKey')
     card: Dict[str, Any] = {
         'key': key, 'type': kind, 'title': title, 'subtitle': subtitle,
         'poster': _img(poster, POSTER_W),
     }
+    # Tapping a card opens the detail popup: episodes and seasons open their show.
+    if show_key:
+        card['show_key'] = show_key
+    if kind == 'episode' and el.get('parentIndex') and el.get('index'):
+        card['season'], card['episode'] = int(el.get('parentIndex')), int(el.get('index'))
     if wide:
         card['art'] = _img(el.get('art') or el.get('grandparentArt'), WIDE_W)
         duration = int(el.get('duration') or 0)
@@ -176,9 +189,10 @@ def home():
     if err:
         return err
     plex = _plex()
-    if plex is None:
+    sections = _sections_or_none(plex) if plex is not None else None
+    if sections is None:
         return jsonify({'continue_watching': [], 'rails': [], 'plex': False})
-    libs = [l for l in arrange(_sections(plex), load_prefs()) if l['enabled']]
+    libs = [l for l in arrange(sections, load_prefs()) if l['enabled']]
     from flask import current_app
     flask_app = current_app._get_current_object()
 

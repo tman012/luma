@@ -100,7 +100,8 @@ def test_home_payload(test_app, plex):
     cw = body['continue_watching']
     assert cw[0] == {'key': '10', 'type': 'episode', 'title': 'Severance', 'subtitle': 'S1 E2',
                      'poster': '/api/img/plex?url=%2Flibrary%2Fmetadata%2F9%2Fthumb%2F1&w=300',
-                     'art': '/api/img/plex?url=%2Flibrary%2Fmetadata%2F9%2Fart%2F1&w=480', 'progress': 0.25}
+                     'art': '/api/img/plex?url=%2Flibrary%2Fmetadata%2F9%2Fart%2F1&w=480', 'progress': 0.25,
+                     'season': 1, 'episode': 2}
     assert cw[1]['progress'] == 0 and cw[1]['subtitle'] == '2021'
     assert [x['title'] for x in body['rails']] == ['Movies', 'TV Shows', 'Kids']
     assert body['rails'][1]['items'][0]['title'] == 'Andor'

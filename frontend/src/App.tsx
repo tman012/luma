@@ -230,6 +230,11 @@ function MinimalApp() {
   return (
     <BrowserRouter basename={routerBasename()}>
       <AuthProvider>
+        {/* Main's movie/TV popup, display-only here (html.luma-minimal hides its actions). */}
+        <TVModeProvider>
+        <LayoutModeProvider>
+        <SpatialNavProvider>
+        <AppModalHost>
         <Routes>
           <Route path="/" element={<MinimalHomePage />} />
           <Route path="/login" element={<LoginPage />} />
@@ -238,6 +243,10 @@ function MinimalApp() {
           <Route path="/settings/libraries" element={<LibrariesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </AppModalHost>
+        </SpatialNavProvider>
+        </LayoutModeProvider>
+        </TVModeProvider>
         <SetupToast />
       </AuthProvider>
     </BrowserRouter>
@@ -247,7 +256,10 @@ function MinimalApp() {
 export default function App() {
   useVisualViewport();
 
-  if (isMinimal()) return <MinimalApp />;
+  if (isMinimal()) {
+    document.documentElement.classList.add('luma-minimal');
+    return <MinimalApp />;
+  }
 
   return (
     <BrowserRouter basename={routerBasename()}>

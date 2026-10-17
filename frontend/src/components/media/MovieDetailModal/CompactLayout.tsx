@@ -604,7 +604,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   {ratings && <RatingsBar ratings={ratings} size="sm" />}
 
                   {/* Primary action area */}
-                  <div>
+                  <div data-modal-actions>
                   {isOwned ? (
                     /* Watch button — full-width white pill */
                     <button
@@ -721,6 +721,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                     scale down with the viewport (vw) instead of overflowing. */}
                 <div
                   data-action-row
+                  data-modal-actions
                   onClick={(e) => e.stopPropagation()}
                   style={{
                     display: 'grid',
@@ -1197,6 +1198,7 @@ export function CompactLayout(props: MovieModalViewProps) {
           <button
             type="button"
             data-file-info-button
+            data-modal-actions
             onClick={() => setShowFileInfo(true)}
             style={{
               position: 'absolute',

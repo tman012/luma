@@ -2,6 +2,7 @@ import { apiFetch } from '@/apiClient';
 
 export interface Card {
   key: string; type: string; title: string; subtitle: string;
+  show_key?: string; season?: number; episode?: number;
   poster: string | null; art?: string | null; progress?: number;
 }
 export interface Rail { id: string; title: string; type: string; items: Card[] }

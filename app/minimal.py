@@ -20,6 +20,13 @@ ALLOWED_PATHS = frozenset({
     '/api/home', '/api/home/libraries', '/api/img/plex', '/settings/libraries',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/')
+# Read-only data for main's movie/TV detail popup (tapping a Home card).
+# GET only, sign-in required like everything else in minimal mode.
+DETAIL_READ_PREFIXES = (
+    '/api/plex/movie/', '/api/plex/tv/', '/api/movie/', '/api/tv/',
+    '/api/plex/ratings/', '/api/plex/ultrablur/', '/api/tmdb/colors/',
+    '/api/clearlogo/', '/api/ratings/', '/api/rt/reviews', '/api/plex/lookup',
+)
 # Inside /static/, these belong to disabled features.
 BLOCKED_PREFIXES = ('/static/request/', '/static/hero_cache/')
 # Under /api/auth/, these belong to disabled features (no self sign-up).
@@ -33,8 +40,10 @@ def enabled() -> bool:
     return os.environ.get('LUMA_MINIMAL', '').strip().lower() in _TRUE
 
 
-def path_allowed(path: str) -> bool:
+def path_allowed(path: str, method: str = 'GET') -> bool:
     path = path or '/'
+    if path.startswith(DETAIL_READ_PREFIXES):
+        return method in ('GET', 'HEAD') and '..' not in path
     if len(path) > 1 and path.endswith('/') and path.rstrip('/') in ALLOWED_PATHS:
         path = path.rstrip('/')
     if path in ALLOWED_PATHS:

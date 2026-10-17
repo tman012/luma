@@ -220,7 +220,7 @@ def _note_lan_host():
 @app.before_request
 def minimal_mode_gate():
     """LUMA_MINIMAL=1: every route outside the core answers 404."""
-    if _minimal.enabled() and not _minimal.path_allowed(request.path):
+    if _minimal.enabled() and not _minimal.path_allowed(request.path, request.method):
         from flask import abort
         abort(404)
 
@@ -12162,7 +12162,7 @@ def plex_health():
 
 _PLEX_IMG_PATH = re.compile(
     r'/library/(?:metadata|collections)/\d+/(?:thumb|art|clearLogo|banner|composite|poster)(?:/\d+)?'
-    r'|/library/sections/\d+/composite/\d+')
+    r'|/library/sections/\d+/composite/\d+', re.ASCII)
 
 
 def _plex_image_path(raw: str):

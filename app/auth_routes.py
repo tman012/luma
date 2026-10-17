@@ -277,7 +277,16 @@ def login():
     
     next_param = request.args.get('next', '/')
     safe_next = _safe_redirect_url(next_param)
-    
+
+    from app import minimal as _minimal
+    if _minimal.enabled():
+        # One sign-in screen: the SPA's one-page form (it reads ?next=).
+        # A stale form post (session expired) lands back on it too.
+        if request.method in ('GET', 'HEAD'):
+            from app.main import _serve_spa
+            return _no_store(make_response(_serve_spa()))
+        return redirect(url_for('auth.login', next=safe_next))
+
     if request.method in ('GET', 'HEAD'):
         # Generate CSRF token
         csrf_token = _generate_csrf_token()
