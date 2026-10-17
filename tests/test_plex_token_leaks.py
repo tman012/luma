@@ -46,6 +46,7 @@ def plex(test_app, monkeypatch):
     })
     calls = []
     state = {'user': ADMIN, 'clients_xml': b'<MediaContainer/>'}
+    monkeypatch.setattr(app.main, '_plex_clients_cache', {})
     monkeypatch.setattr(app.main, '_get_current_user', lambda: state['user'])
 
     def fake_get(url, **k):
@@ -138,7 +139,11 @@ def test_client_listed_by_plex_is_accepted(plex):
     r = _post(client, '/api/plex/playback/stop', {'client_ip': '10.0.0.7'})
     assert r.status_code == 200
     assert calls[-1].url == 'http://10.0.0.7:32500/player/playback/stop'
-    _assert_token_only_in_headers(calls)
+    # A player known only from /clients never gets the owner token.
+    assert 'X-Plex-Token' not in calls[-1].headers
+    assert calls[-1].headers['X-Plex-Target-Client-Identifier'] == 'abc'
+    assert calls[-1].allow_redirects is False
+    _assert_token_only_in_headers([c for c in calls if c.url.endswith('/clients')])
     r = _post(client, '/api/plex/playback/stop', {'client_ip': '10.0.0.7:6124'})
     assert r.status_code == 400
 
@@ -196,3 +201,92 @@ def test_activity_artwork_goes_through_proxy(plex, monkeypatch, path):
     assert media['backdrop_url'] == '/api/img/plex?url=/library/metadata/5/art/1700000000'
     assert calls and calls[0].url == 'http://plex.test/status/sessions'
     _assert_token_only_in_headers(calls)
+
+def test_rogue_clients_player_never_gets_token(plex):
+    """A device that announces itself to Plex is listed in /clients; it must
+    not receive the owner token."""
+    client, calls, state = plex
+    state['clients_xml'] = (b'<MediaContainer><Server name="Rogue" host="10.0.0.66" port="6124" '
+                            b'machineIdentifier="rogue-id"/></MediaContainer>')
+    for path, extra in PLAYBACK:
+        r = _post(client, path, {'client_ip': '10.0.0.66:6124', **extra})
+        assert r.status_code == 200
+    player = [c for c in calls if '/player/' in c.url]
+    assert len(player) == len(PLAYBACK)
+    for c in player:
+        assert 'X-Plex-Token' not in c.headers
+        assert TOKEN not in json.dumps(c.headers) and TOKEN not in c.url
+        assert c.headers['X-Plex-Target-Client-Identifier'] == 'rogue-id'
+
+
+def test_player_play_non_admin_gets_403(plex):
+    client, calls, state = plex
+    state['user'] = MEMBER
+    r = _post(client, '/api/player/play', {'rating_key': 5, 'room_id': 'r1'})
+    assert r.status_code == 403
+    assert calls == []
+
+
+@pytest.mark.parametrize('path, field', [('/api/plex/playback/seek', 'offset_seconds'),
+                                         ('/api/plex/playback/seekTo', 'position_ms')])
+@pytest.mark.parametrize('raw', ['true', 'false', 'NaN', 'Infinity', '-Infinity', '"nan"', '"inf"',
+                                 '1e400', 'null', '"x"', '[1]', '{}'])
+def test_seek_rejects_non_finite_values(plex, path, field, raw):
+    client, calls, _ = plex
+    body = '{"client_ip": "10.0.0.5", "%s": %s}' % (field, raw)
+    r = client.post(path, data=body, content_type='application/json', environ_base=LAN)
+    assert r.status_code == 400, (raw, r.status_code)
+    assert [c for c in calls if '/player/' in c.url] == []
+
+
+@pytest.mark.parametrize('value, sent', [(-5, 0), (1234.9, 1234), (10 ** 12, 24 * 3600 * 1000), ('600000', 600000)])
+def test_seek_to_clamped(plex, value, sent):
+    client, calls, _ = plex
+    r = _post(client, '/api/plex/playback/seekTo', {'client_ip': '10.0.0.5', 'position_ms': value})
+    assert r.status_code == 200
+    assert [c for c in calls if '/player/' in c.url][-1].params == {'offset': sent}
+
+
+def test_bracketed_ipv6_room_devices(plex):
+    client, calls, _ = plex
+    rooms = app.main.settings.get('devices.rooms')
+    rooms.append({'id': 'r3', 'name': 'Office', 'devices': [{'id': 'd3', 'host': '[fd00::5]'},
+                                                             {'id': 'd4', 'host': 'FD00:0:0::6'}]})
+    app.main.settings.update({'devices': {'rooms': rooms}})
+    for ip, url in [('[fd00::5]', 'http://[fd00::5]:32500/'), ('[fd00::6]:32500', 'http://[fd00::6]:32500/'),
+                    ('[FD00::5]', 'http://[fd00::5]:32500/')]:
+        r = _post(client, '/api/plex/playback/stop', {'client_ip': ip})
+        assert r.status_code == 200, ip
+        assert calls[-1].url.startswith(url)
+        assert calls[-1].headers['X-Plex-Token'] == TOKEN
+    for ip in ['fd00::5', '[fd00::5]:6124', '[10.0.0.5]', '[fd00::7]', '[fd00::5%eth0]', '[fd00::5]x']:
+        assert _post(client, '/api/plex/playback/stop', {'client_ip': ip}).status_code == 400, ip
+
+
+def test_clients_list_cached_45s(plex, monkeypatch):
+    client, calls, state = plex
+    now = [1000.0]
+    monkeypatch.setattr(app.main.time, 'time', lambda: now[0])
+    state['clients_xml'] = (b'<MediaContainer><Server host="10.0.0.7" port="32500" '
+                            b'machineIdentifier="abc"/></MediaContainer>')
+
+    def fetches():
+        return len([c for c in calls if c.url.endswith('/clients')])
+    for _ in range(3):
+        assert _post(client, '/api/plex/playback/stop', {'client_ip': '10.0.0.7'}).status_code == 200
+    assert fetches() == 1
+    now[0] += 44
+    _post(client, '/api/plex/playback/stop', {'client_ip': '10.0.0.7'})
+    assert fetches() == 1
+    now[0] += 2
+    _post(client, '/api/plex/playback/stop', {'client_ip': '10.0.0.7'})
+    assert fetches() == 2
+
+
+def test_no_token_query_params_in_app():
+    import pathlib
+    root = pathlib.Path(app.main.__file__).parent
+    for f in root.rglob('*.py'):
+        src = f.read_text()
+        assert "params={'X-Plex-Token'" not in src, f
+        assert "'X-Plex-Token': token,\n" not in src, f

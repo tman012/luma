@@ -12247,6 +12247,9 @@ def player_play():
     Resolves the target device + service from the v3 room hierarchy,
     wakes the device (ADB/WoL/Harmony), then plays via Kodi JSON-RPC.
     """
+    err = _require_admin()
+    if err:
+        return err
     try:
         data = request.get_json() or {}
         rating_key = data.get('rating_key')
@@ -12959,8 +12962,9 @@ def _plex_status(rating_key, device_ip=None):
     try:
         resp = requests.get(
             f"{plex_url}/status/sessions",
-            params={'X-Plex-Token': plex_token},
-            timeout=5
+            headers={'X-Plex-Token': plex_token},
+            timeout=5,
+            allow_redirects=False,
         )
         if resp.status_code != 200:
             return stopped
@@ -13219,7 +13223,7 @@ def _lookup_kodi_artwork(title: str, year: int | None = None) -> dict:
                     import xml.etree.ElementTree as ET
                     meta_resp = requests.get(
                         f"{plex_url}/library/metadata/{matched_key}",
-                        params={'X-Plex-Token': plex_token}, timeout=3,
+                        headers={'X-Plex-Token': plex_token}, timeout=3, allow_redirects=False,
                     )
                     if meta_resp.status_code == 200:
                         root = ET.fromstring(meta_resp.content)
@@ -13593,7 +13597,8 @@ def plex_active_sessions():
         if plex_url and plex_token:
             try:
                 sessions_url = f"{plex_url}/status/sessions"
-                response = requests.get(sessions_url, params={'X-Plex-Token': plex_token}, timeout=5)
+                response = requests.get(sessions_url, headers={'X-Plex-Token': plex_token}, timeout=5,
+                                        allow_redirects=False)
                 if response.status_code == 200:
                     import xml.etree.ElementTree as ET
                     root = ET.fromstring(response.content)
@@ -13739,7 +13744,10 @@ def plex_active_sessions():
 
 # Legacy image proxy — prefer /api/img/plex for new code
 # Playback Control Endpoints for Now Playing Modal
-_PLEX_CLIENT_ADDR = re.compile(r'([A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)(?::([0-9]{1,5}))?', re.ASCII)
+_PLEX_CLIENT_ADDR = re.compile(
+    r'(?:\[([0-9A-Fa-f:.]+)\]|([A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?))(?::([0-9]{1,5}))?', re.ASCII)
+_PLEX_CLIENTS_TTL = 45  # seconds a Plex /clients answer is reused
+_plex_clients_cache: dict = {}
 
 
 def _plex_default_client_port() -> int:
@@ -13749,15 +13757,35 @@ def _plex_default_client_port() -> int:
         return 32500
 
 
+def _plex_norm_host(host):
+    """A comparable host: lowercase name, or a compressed IP (IPv6 without
+    brackets). None when it is not a usable host."""
+    import ipaddress
+    if not isinstance(host, str):
+        return None
+    h = host.strip()
+    bracketed = h.startswith('[') and h.endswith(']')
+    if bracketed:
+        h = h[1:-1]
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        return None if bracketed or not h else h.lower()
+    if bracketed and ip.version != 6:
+        return None
+    return ip.compressed
+
+
 def _configured_plex_clients() -> set:
     """(host, port) of every room device configured by the admin."""
     default = _plex_default_client_port()
     known = set()
 
     def add(host, port=None):
-        if isinstance(host, str) and host:
+        h = _plex_norm_host(host)
+        if h:
             try:
-                known.add((host.strip().lower(), int(port or default)))
+                known.add((h, int(port or default)))
             except (TypeError, ValueError):
                 pass
 
@@ -13776,46 +13804,54 @@ def _configured_plex_clients() -> set:
     return known
 
 
-def _discovered_plex_clients() -> set:
-    """(host, port) of the players the Plex server itself lists in /clients."""
+def _discovered_plex_clients() -> dict:
+    """{(host, port): machineIdentifier} of the players the Plex server lists
+    in /clients, reused for 45 seconds."""
     plex_url = settings.get('plex.url')
     plex_token = settings.get('plex.token')
     if not plex_url or not plex_token:
-        return set()
+        return {}
+    now = time.time()
+    cached = _plex_clients_cache.get('entry')
+    if cached and cached[0] == plex_url and now - cached[1] < _PLEX_CLIENTS_TTL:
+        return cached[2]
+    known = {}
     try:
         resp = requests.get(f"{plex_url}/clients", headers={'X-Plex-Token': plex_token, 'Accept': 'application/xml'},
                             timeout=3, allow_redirects=False)
-        if resp.status_code != 200:
-            return set()
-        import xml.etree.ElementTree as ET
-        known = set()
-        for el in ET.fromstring(resp.content).iter('Server'):
-            host = el.get('host') or el.get('address')
-            try:
-                port = int(el.get('port') or 0)
-            except ValueError:
-                continue
-            if host and port:
-                known.add((host.strip().lower(), port))
-        return known
+        if resp.status_code == 200:
+            import xml.etree.ElementTree as ET
+            for el in ET.fromstring(resp.content).iter('Server'):
+                host = _plex_norm_host(el.get('host') or el.get('address'))
+                try:
+                    port = int(el.get('port') or 0)
+                except ValueError:
+                    continue
+                if host and port:
+                    known[(host, port)] = el.get('machineIdentifier') or ''
     except Exception as e:
         logger.debug(f"Plex /clients lookup failed: {type(e).__name__}")
-        return set()
+    _plex_clients_cache['entry'] = (plex_url, now, known)
+    return known
 
 
 def _plex_client_target(raw):
     """The (host, port) of a known Plex player for a caller-supplied address,
-    or None. Only an exact host[:port] that matches a configured room device or
-    a player the Plex server lists is accepted: no paths, queries or userinfo."""
+    or None. Only an exact host[:port] (IPv6 in brackets) that matches a
+    configured room device or a player the Plex server lists is accepted:
+    no paths, queries or userinfo."""
     if not isinstance(raw, str) or any(c in raw for c in '?#/@\\'):
         return None
     m = _PLEX_CLIENT_ADDR.fullmatch(raw)
     if not m:
         return None
-    port = int(m.group(2)) if m.group(2) else _plex_default_client_port()
+    host = _plex_norm_host(f'[{m.group(1)}]' if m.group(1) is not None else m.group(2))
+    if not host:
+        return None
+    port = int(m.group(3)) if m.group(3) else _plex_default_client_port()
     if not 1 <= port <= 65535:
         return None
-    target = (m.group(1).lower(), port)
+    target = (host, port)
     if target in _configured_plex_clients() or target in _discovered_plex_clients():
         return target
     return None
@@ -13836,16 +13872,49 @@ def _plex_player_target_or_error(data):
 
 
 def _send_plex_player_command(target, command, params=None):
-    """Send a /player/playback command to a known client. The token goes in
-    a header, never the URL, and redirects are never followed."""
+    """Send a /player/playback command to a known client. Only a room device
+    the admin configured gets the token (as a header, never in the URL); a
+    player known only from Plex /clients is addressed by its identifier.
+    Redirects are never followed."""
     host, port = target
+    headers = {'X-Plex-Client-Identifier': 'luma'}
+    if target in _configured_plex_clients():
+        headers['X-Plex-Token'] = settings.get('plex.token') or ''
+    else:
+        machine_id = _discovered_plex_clients().get(target)
+        if machine_id:
+            headers['X-Plex-Target-Client-Identifier'] = machine_id
+    netloc = f'[{host}]' if ':' in host else host
     return requests.get(
-        f"http://{host}:{port}/player/playback/{command}",
+        f"http://{netloc}:{port}/player/playback/{command}",
         params=params,
-        headers={'X-Plex-Token': settings.get('plex.token') or ''},
+        headers=headers,
         timeout=5,
         allow_redirects=False,
     )
+
+
+def _finite_number(value):
+    """A finite float from a JSON number or numeric string; None for bools,
+    NaN, infinity or anything else."""
+    import math
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            value = float(value)
+        except ValueError:
+            return None
+    if not isinstance(value, (int, float)):
+        return None
+    try:
+        value = float(value)
+    except OverflowError:
+        return None
+    return value if math.isfinite(value) else None
+
+
+_SEEK_MAX_MS = 24 * 60 * 60 * 1000
 
 
 @app.route('/api/plex/playback/control', methods=['POST'])
@@ -13898,9 +13967,8 @@ def plex_playback_seek():
         target, err = _plex_player_target_or_error(data)
         if err:
             return err
-        try:
-            offset_seconds = float(data.get('offset_seconds', 0) or 0)
-        except (TypeError, ValueError):
+        offset_seconds = _finite_number(data.get('offset_seconds', 0))
+        if offset_seconds is None:
             return jsonify({'error': 'offset_seconds must be a number'}), 400
 
         response = _send_plex_player_command(target, 'stepForward' if offset_seconds > 0 else 'stepBack')
@@ -13921,10 +13989,10 @@ def plex_playback_seek_to():
         target, err = _plex_player_target_or_error(data)
         if err:
             return err
-        try:
-            position_ms = max(0, int(data.get('position_ms', 0) or 0))
-        except (TypeError, ValueError):
+        position_ms = _finite_number(data.get('position_ms', 0))
+        if position_ms is None:
             return jsonify({'error': 'position_ms must be a number'}), 400
+        position_ms = int(min(max(position_ms, 0), _SEEK_MAX_MS))
 
         response = _send_plex_player_command(target, 'seekTo', params={'offset': position_ms})
         logger.info(f"Playback seekTo {position_ms}ms sent to {target[0]}: {response.status_code}")
