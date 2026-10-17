@@ -318,7 +318,10 @@ def scan_all(now: Optional[float] = None, retry_unmatched: bool = True) -> Dict[
         total['paths'] += 1
         for k, v in counts.items():
             total[k] += v
-    tv_store.set_meta(LAST_SCAN_KEY, repr(now))
+    if total['paths']:
+        tv_store.set_meta(LAST_SCAN_KEY, repr(now))
+    # else every path was missing or unreadable (an unmounted share): no
+    # last-scan time, so the next scheduler tick tries again.
     return total
 
 

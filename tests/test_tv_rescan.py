@@ -87,3 +87,25 @@ def test_scheduler_thread_starts_once_and_stops(monkeypatch):
 def test_a_broken_settings_store_never_kills_the_thread(monkeypatch):
     monkeypatch.setattr(tv_settings, 'load', lambda: (_ for _ in ()).throw(OSError('disk')))
     assert tv_scan.tick(1e9) is False
+
+
+# Tester tv1-8646479 M3: a scan that could read no path at all doesn't count.
+
+def test_all_paths_missing_is_retried_next_tick(lib, tmp_path):
+    import shutil
+    moved = tmp_path / 'unmounted'
+    shutil.move(str(lib), str(moved))                 # the share is gone
+    assert tv_scan.tick(2e6) is True
+    assert tv_scan.status()['summary']['missing'] == [PID] and tv_scan.status()['summary']['paths'] == 0
+    assert tv_scan.last_scan() is None and tv_scan.due(2e6 + 300)
+    shutil.move(str(moved), str(lib))                 # back again: the next tick scans
+    assert tv_scan.tick(2e6 + 300) is True
+    assert tv_scan.last_scan() == 2e6 + 300 and len(rows('SELECT id FROM series')) == 5
+
+
+def test_one_readable_path_still_counts(lib, tmp_path):
+    st = tv_settings.load()
+    st['paths'].append({'id': 't_0000bbbb', 'name': 'Gone', 'path': str(tmp_path / 'nope')})
+    tv_settings.save(st)
+    assert tv_scan.tick(3e6) is True
+    assert tv_scan.status()['summary']['missing'] == ['t_0000bbbb'] and tv_scan.last_scan() == 3e6
