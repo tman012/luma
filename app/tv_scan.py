@@ -60,8 +60,10 @@ def _real_under(path: str, root: str) -> bool:
 
 def show_folders(root_real: str) -> List[str]:
     """Top-level folders of a library path (no hidden ones, none that point
-    outside it)."""
-    out = []
+    outside it). A folder reached twice (a symlink to another show folder, or
+    a loop back to the library path) counts once: real folders first, then by
+    name, the first to reach a (dev, inode) keeps it."""
+    entries = []
     with os.scandir(root_real) as it:
         for e in it:
             if e.name.startswith('.'):
@@ -69,20 +71,40 @@ def show_folders(root_real: str) -> List[str]:
             try:
                 if not e.is_dir(follow_symlinks=True):
                     continue
+                if e.is_symlink() and not _real_under(e.path, root_real):
+                    continue
+                st = e.stat(follow_symlinks=True)
             except OSError:
                 continue
-            if e.is_symlink() and not _real_under(e.path, root_real):
-                continue
-            out.append(e.name)
+            entries.append((e.is_symlink(), e.name.casefold(), e.name, (st.st_dev, st.st_ino)))
+    root_st = os.stat(root_real)
+    seen = {(root_st.st_dev, root_st.st_ino)}
+    out = []
+    for _link, _key, name, ident in sorted(entries):
+        if ident in seen:
+            continue
+        seen.add(ident)
+        out.append(name)
     return sorted(out, key=str.casefold)
 
 
 def video_files(show_dir: str, root_real: str) -> Iterator[Tuple[str, os.stat_result]]:
-    """(path relative to the show folder, stat) for every video file under it."""
+    """(path relative to the show folder, stat) for every video file under it.
+    Each folder and file is read once by (dev, inode), so a symlink loop or a
+    link to a sibling folder never counts a file twice."""
     n = 0
     stack: List[Tuple[str, str, int]] = [(show_dir, '', 0)]
+    dirs_seen: set = set()
+    files_seen: set = set()
     while stack:
         d, rel, depth = stack.pop()
+        try:
+            dst = os.stat(d)
+        except OSError:
+            continue
+        if (dst.st_dev, dst.st_ino) in dirs_seen:
+            continue
+        dirs_seen.add((dst.st_dev, dst.st_ino))
         try:
             with os.scandir(d) as it:
                 entries = sorted(it, key=lambda e: e.name)
@@ -106,6 +128,9 @@ def video_files(show_dir: str, root_real: str) -> Iterator[Tuple[str, os.stat_re
                 st = e.stat(follow_symlinks=True)
             except OSError:
                 continue
+            if (st.st_dev, st.st_ino) in files_seen:
+                continue
+            files_seen.add((st.st_dev, st.st_ino))
             yield sub, st
             n += 1
             if n >= MAX_FILES_PER_SHOW:

@@ -135,7 +135,7 @@ def test_scan_works_over_a_read_only_tree(lib, tmp_path):
 
 # --------------------------------------------------------------------------- the code itself
 
-OS_ALLOWED = {'scandir', 'path', 'stat_result', 'fsdecode', 'sep', 'environ'}
+OS_ALLOWED = {'scandir', 'path', 'stat_result', 'fsdecode', 'sep', 'environ', 'stat'}  # stat: read-only, for (dev, inode) dedupe
 OS_PATH_ALLOWED = {'realpath', 'commonpath', 'join', 'splitext', 'isdir', 'basename', 'dirname', 'normpath',
                    'abspath', 'exists'}
 # str.replace is fine (pathlib is banned, so there is no Path.replace to reach)
