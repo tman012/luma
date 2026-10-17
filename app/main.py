@@ -651,7 +651,7 @@ def start_services(app_instance):
     # LUMA_MINIMAL=1: no caches, automations, schedulers or tunnel; only the
     # library search index (it reads Plex, and TMDB only with a Connectors key).
     if _minimal.enabled():
-        logger.warning('LUMA_MINIMAL is set: background threads are NOT started (except the search index and the library mover)')
+        logger.warning('LUMA_MINIMAL is set: background threads are NOT started (except the search index, the library mover and the TV rescan)')
         if not skip_bg:
             try:
                 fast_search_index.start()
@@ -664,6 +664,13 @@ def start_services(app_instance):
                 library_mover.start()
             except Exception as e:
                 logger.error(f"Failed to start the library mover: {type(e).__name__}")
+            # Rescans the TV library paths every rescan_interval_h (read-only);
+            # idle until a TV path is saved.
+            try:
+                from app import tv_scan
+                tv_scan.start_scheduler()
+            except Exception as e:
+                logger.error(f"Failed to start the TV rescan: {type(e).__name__}")
         return
 
     # Initialize library caches

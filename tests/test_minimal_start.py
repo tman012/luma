@@ -144,9 +144,10 @@ def patched_start(test_app, monkeypatch):
             mock.patch('app.main.explore_cache_updater') as explore, \
             mock.patch('app.main.tunnel_auto_start') as tunnel, \
             mock.patch('app.library_mover.start') as mover, \
+            mock.patch('app.tv_scan.start_scheduler') as tv_rescan, \
             mock.patch('threading.Thread') as thread:
         yield dict(init_db=init_db, ua_init=ua_init, search=search_start, hero=hero_start,
-                   explore=explore, tunnel=tunnel, thread=thread, mover=mover, fakes=fakes)
+                   explore=explore, tunnel=tunnel, thread=thread, mover=mover, tv_rescan=tv_rescan, fakes=fakes)
 
 
 def _started(fakes):
@@ -154,7 +155,7 @@ def _started(fakes):
 
 
 def test_minimal_mode_starts_no_background_threads(test_app, patched_start, minimal):
-    """Only the library search index and the library mover start."""
+    """Only the library search index, the library mover and the TV rescan start."""
     from app.main import start_services
     test_app.config['START_BACKGROUND_THREADS'] = True
     start_services(test_app)
@@ -164,6 +165,7 @@ def test_minimal_mode_starts_no_background_threads(test_app, patched_start, mini
     p['thread'].assert_not_called()
     p['search'].assert_called_once()
     p['mover'].assert_called_once()
+    p['tv_rescan'].assert_called_once()
     for k in ('hero', 'explore', 'tunnel'):
         p[k].assert_not_called()
     assert _started(p['fakes']) == []
@@ -178,6 +180,7 @@ def test_flag_unset_starts_background_threads(test_app, patched_start, monkeypat
     assert p['thread'].called
     p['search'].assert_called_once()
     p['mover'].assert_not_called()          # production keeps its own auto-rename monitor
+    p['tv_rescan'].assert_not_called()      # TV is luma-test only
     assert sorted(_started(p['fakes'])) == sorted(AUTOMATION_MODULES)
 
 

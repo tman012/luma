@@ -364,6 +364,58 @@ def status() -> Dict[str, Any]:
             'last_scan': last_scan(), 'summary': _state['summary']}
 
 
+# --------------------------------------------------------------------------- scheduled rescan
+
+TICK_S = 300                    # how often the scheduler looks; scans run every rescan_interval_h
+_sched_stop = threading.Event()
+_sched_thread: Optional[threading.Thread] = None
+
+
+def due(now: float) -> bool:
+    """A scheduled scan is due: TV paths exist and the last scan is older
+    than rescan_interval_h (or there never was one)."""
+    from app import tv_settings
+    st = tv_settings.load()
+    if not st['paths']:
+        return False
+    last = last_scan()
+    return last is None or now - last >= st['rescan_interval_h'] * 3600
+
+
+def tick(now: Optional[float] = None) -> bool:
+    """One scheduler step: scan when due. Scheduled scans keep unmatched
+    folders as they are (a manual Scan asks TMDB about them again)."""
+    now = time.time() if now is None else now
+    try:
+        if not due(now):
+            return False
+    except Exception as e:
+        logger.warning('TV rescan check failed: %s', type(e).__name__)
+        return False
+    return run(retry_unmatched=False, now=now)
+
+
+def _loop() -> None:
+    while not _sched_stop.wait(TICK_S):
+        tick()
+
+
+def start_scheduler() -> bool:
+    """Start the rescan thread once (main.start_services, minimal builds).
+    Idle until TV paths are saved."""
+    global _sched_thread
+    if _sched_thread is not None and _sched_thread.is_alive():
+        return False
+    _sched_stop.clear()
+    _sched_thread = threading.Thread(target=_loop, daemon=True, name='tv-rescan')
+    _sched_thread.start()
+    return True
+
+
+def stop_scheduler() -> None:
+    _sched_stop.set()
+
+
 # --------------------------------------------------------------------------- fix-match
 
 NOT_FOUND = 'Not found'

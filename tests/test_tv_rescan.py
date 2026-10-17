@@ -1,0 +1,89 @@
+"""Scheduled TV rescan: every rescan_interval_h, last scan time in tv.db meta,
+idle with no TV paths, unmatched folders left for a manual Scan."""
+import threading
+
+import pytest
+
+from app import tv_scan, tv_settings, tv_store
+from tests.test_file_management import store  # noqa: F401
+from tests.test_tv_library_paths import tv_env  # noqa: F401
+from tests.test_tv_scan import PID, lib, rows  # noqa: F401
+from tests.tv_fake import fake_tmdb  # noqa: F401
+
+H = 3600
+
+
+def test_idle_without_tv_paths(tv_env, fake_tmdb):  # noqa: F811
+    assert tv_scan.due(1e9) is False
+    assert tv_scan.tick(1e9) is False
+    assert fake_tmdb.calls == [] and tv_scan.last_scan() is None
+
+
+def test_first_tick_scans_then_waits_for_the_interval(lib):
+    assert tv_scan.due(10_000.0)
+    assert tv_scan.tick(10_000.0) is True
+    assert tv_store.get_meta('last_scan') == '10000.0' and tv_scan.last_scan() == 10_000.0
+    assert len(rows('SELECT id FROM series')) == 5
+    assert tv_scan.tick(10_000.0 + 6 * H - 1) is False                 # default 6 h
+    assert tv_scan.tick(10_000.0 + 6 * H) is True
+    assert tv_scan.last_scan() == 10_000.0 + 6 * H
+
+
+def test_interval_comes_from_tv_settings(lib):
+    st = tv_settings.load()
+    st['rescan_interval_h'] = 24
+    tv_settings.save(st)
+    tv_scan.tick(0.0 + 1)
+    assert not tv_scan.due(1 + 23 * H) and tv_scan.due(1 + 24 * H)
+
+
+def test_a_manual_scan_resets_the_clock(lib):
+    tv_scan.scan_all(now=50_000.0)
+    assert not tv_scan.due(50_000.0 + 5 * H)
+
+
+def test_scheduled_scans_leave_unmatched_for_a_manual_scan(lib, fake_tmdb):  # noqa: F811
+    tv_scan.scan_all(now=1.0)
+    fake_tmdb.calls.clear()
+    assert tv_scan.tick(1.0 + 7 * H)
+    assert not any(c[0] == 'search' for c in fake_tmdb.calls)
+    assert len(rows('SELECT id FROM unmatched')) == 3
+
+
+def test_a_running_scan_is_not_doubled(lib):
+    assert tv_scan._scan_lock.acquire(blocking=False)
+    try:
+        assert tv_scan.tick(1e9) is False
+    finally:
+        tv_scan._scan_lock.release()
+
+
+def test_a_tmdb_error_is_recorded_and_retried_next_tick(lib, fake_tmdb):  # noqa: F811
+    from app import tv_tmdb
+    fake_tmdb.fail = tv_tmdb.UNREACHABLE
+    assert tv_scan.tick(1e6) is True
+    assert tv_scan.status()['error'] == "Couldn't reach TMDB"
+    fake_tmdb.fail = None
+    assert tv_scan.due(1e6 + 60)              # the failed scan didn't count
+    tv_scan.tick(1e6 + 60)
+    assert tv_scan.status()['error'] is None and tv_scan.last_scan() == 1e6 + 60
+
+
+def test_scheduler_thread_starts_once_and_stops(monkeypatch):
+    ticks = threading.Event()
+    monkeypatch.setattr(tv_scan, 'TICK_S', 0.01)
+    monkeypatch.setattr(tv_scan, 'tick', lambda now=None: ticks.set())
+    try:
+        assert tv_scan.start_scheduler() is True
+        assert tv_scan.start_scheduler() is False
+        assert ticks.wait(2)
+        assert tv_scan._sched_thread.name == 'tv-rescan' and tv_scan._sched_thread.daemon
+    finally:
+        tv_scan.stop_scheduler()
+        tv_scan._sched_thread.join(2)
+    assert not tv_scan._sched_thread.is_alive()
+
+
+def test_a_broken_settings_store_never_kills_the_thread(monkeypatch):
+    monkeypatch.setattr(tv_settings, 'load', lambda: (_ for _ in ()).throw(OSError('disk')))
+    assert tv_scan.tick(1e9) is False
