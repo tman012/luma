@@ -3,7 +3,10 @@
 // Cache strategy summary:
 //   Navigation (HTML)       → NetworkFirst (fallback to cached shell)
 //   /assets/* (hashed)      → CacheFirst (immutable, hash-busted by Vite)
-//   /api/img/* (Plex proxy) → CacheFirst (URL includes full path as key)
+//   /api/img/* (images)     → Network only: they need sign-in, so the SW never
+//                              keeps them; the browser's own HTTP cache
+//                              (private, max-age) does the caching
+//   /static/hero_cache/*    → Network only (library art, needs sign-in)
 //   /static/images/*        → NetworkFirst (icons change without hash)
 //   /static/* (other)       → NetworkFirst (JS/CSS may change without hash)
 //   /api/* (data)           → Network only (never cached)
@@ -21,7 +24,7 @@
 
 // BUILD_ID is replaced at build time or bumped manually per deploy.
 // When sw.js byte-content changes, the browser installs a new SW.
-const CACHE_VERSION = 'media-kiosk-v111';
+const CACHE_VERSION = 'media-kiosk-v112';
 
 // Separate cache for large immutable assets — purged when version bumps
 const IMMUTABLE_CACHE = 'media-immutable-v24';
@@ -64,6 +67,13 @@ function isAppShell(resp) {
   if (resp.headers.get('X-Luma-App-Shell') !== '1') return false;
   const p = appPath(new URL(resp.url || self.location.href).pathname);
   return p !== '/login' && p !== '/logout';
+}
+
+// Never keep a reply the server marked no-store or private.
+function cacheable(resp) {
+  if (!resp || !resp.ok) return false;
+  const cc = (resp.headers.get('Cache-Control') || '').toLowerCase();
+  return !/(^|[\s,])(no-store|private)([\s,=]|$)/.test(cc);
 }
 
 function saveShell(resp) {
@@ -153,8 +163,15 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  if (path.startsWith('/api/') && !path.startsWith('/api/img/')) {
-    return; // Let browser handle normally
+  // All API routes, images included (they need sign-in): the browser
+  // handles them, and its HTTP cache honors private, max-age.
+  if (path.startsWith('/api/')) {
+    return;
+  }
+
+  // Library art also needs sign-in: never kept by the SW.
+  if (path.startsWith('/static/hero_cache/')) {
+    return;
   }
 
   // --- Hashed assets (/assets/index-ABC123.js) — CacheFirst (immutable) ---
@@ -164,27 +181,9 @@ self.addEventListener('fetch', event => {
       caches.match(event.request).then(cached => {
         if (cached) return cached;
         return fetch(event.request).then(resp => {
-          if (resp.ok) {
+          if (cacheable(resp)) {
             const clone = resp.clone();
             caches.open(IMMUTABLE_CACHE).then(c => c.put(event.request, clone));
-          }
-          return resp;
-        });
-      })
-    );
-    return;
-  }
-
-  // --- Image proxy routes (/api/img/*) — CacheFirst ---
-  // URL includes the full Plex/TMDb path, so same URL = same image.
-  if (path.startsWith('/api/img/')) {
-    event.respondWith(
-      caches.match(event.request).then(cached => {
-        if (cached) return cached;
-        return fetch(event.request).then(resp => {
-          if (resp.ok) {
-            const clone = resp.clone();
-            caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
           }
           return resp;
         });
@@ -211,7 +210,7 @@ self.addEventListener('fetch', event => {
   if (path.startsWith('/static/images/')) {
     event.respondWith(
       fetch(event.request).then(resp => {
-        if (resp.ok) {
+        if (cacheable(resp)) {
           const clone = resp.clone();
           caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
         }
@@ -226,7 +225,7 @@ self.addEventListener('fetch', event => {
   if (path.startsWith('/static/')) {
     event.respondWith(
       fetch(event.request).then(resp => {
-        if (resp.ok) {
+        if (cacheable(resp)) {
           const clone = resp.clone();
           caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
         }

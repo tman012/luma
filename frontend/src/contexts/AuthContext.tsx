@@ -10,9 +10,11 @@ import {
   useState,
   useEffect,
   useCallback,
+  useRef,
   ReactNode,
 } from 'react';
 import { apiFetch } from '../apiClient';
+import { clearUserCaches } from '@/services/clearUserCaches';
 
 export interface UserInfo {
   id: number;
@@ -80,12 +82,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     plexAccessStatus: null,
     ...NO_START,
   });
+  // The account the caches were filled for; a different one clears them.
+  const cachedFor = useRef<number | null>(null);
+  const noteUser = useCallback((id: number | null | undefined) => {
+    if (id == null) return;
+    if (cachedFor.current != null && cachedFor.current !== id) clearUserCaches();
+    cachedFor.current = id;
+  }, []);
 
   const refreshUser = useCallback(async () => {
     try {
       const res = await apiFetch('/api/auth/me');
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.authenticated) {
+        noteUser(data.user?.id);
         setState({
           user: data.user,
           userSettings: data.user_settings || {},
@@ -111,7 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // network error — stay unauthenticated
     }
     setState({ user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null, ...NO_START });
-  }, []);
+  }, [noteUser]);
 
   // Restore session on mount
   useEffect(() => {
@@ -127,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       const data = await res.json();
       if (res.ok && data.success) {
+        noteUser(data.user?.id);
         // Set initial auth state, then refresh to get full settings + needsSetup
         setState({
           user: data.user,
@@ -144,12 +155,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       return { success: false, error: 'Network error' };
     }
-  }, [refreshUser]);
+  }, [refreshUser, noteUser]);
 
   const logout = useCallback(async () => {
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch {}
+    clearUserCaches();
+    cachedFor.current = null;
     setState({ user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null, ...NO_START });
   }, []);
 

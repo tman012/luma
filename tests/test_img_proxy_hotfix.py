@@ -322,3 +322,15 @@ def test_other_outside_urls_stay_refused(plex, url):
     r = client.get('/api/img/plex', query_string={'url': url, 'w': 120}, environ_base=LAN)
     assert r.status_code == 400
     assert calls == []
+
+
+@pytest.mark.parametrize('url', [
+    'https://metadata-static.plex.tv/b/people/B604D520903D1D1F445458008AB9D1F3.jpg',
+    'https://metadata-static.plex.tv/b/people/b604d520903d1d1f445458008ab9d1f3.JPG',
+    'https://METADATA-STATIC.plex.tv/b/people/b604d520903d1d1f445458008ab9d1f3.jpg',
+])
+def test_people_photo_match_is_case_sensitive(plex, url):
+    client, calls, _ = plex
+    r = client.get('/api/img/plex', query_string={'url': url, 'w': 120}, environ_base=LAN)
+    assert r.status_code == 400
+    assert calls == []

@@ -93,7 +93,7 @@ export function formatSize(bytes: number): string {
 
 /** Plex's own people photos (metadata-static.plex.tv) are multi-MB originals:
  *  load them as a small transcode through the image proxy instead. */
-const PLEX_PEOPLE = /^https:\/\/metadata-static\.plex\.tv\/[0-9a-f]\/people\/[0-9a-f]{32}\.(?:jpe?g|png)$/i;
+const PLEX_PEOPLE = /^https:\/\/metadata-static\.plex\.tv\/[0-9a-f]\/people\/[0-9a-f]{32}\.(?:jpe?g|png)$/;
 export const CAST_THUMB_W = 120;
 
 export function castThumb(url: string | null | undefined): string | null {

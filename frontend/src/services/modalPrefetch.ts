@@ -123,12 +123,16 @@ export async function warmDetail(
 export const WARM_CONCURRENCY = 4;
 const queue: { key: string; run: () => Promise<void> }[] = [];
 const started = new Set<string>();
+/** Warm-ups remembered so a title isn't warmed twice; the oldest are
+ *  forgotten past this (Set keeps insertion order). */
+export const STARTED_MAX = 500;
 let active = 0;
 
 function pump(): void {
   while (active < WARM_CONCURRENCY && queue.length) {
     const job = queue.shift()!;
     started.add(job.key);
+    if (started.size > STARTED_MAX) started.delete(started.values().next().value!);
     active += 1;
     job.run().catch(() => {}).finally(() => { active -= 1; pump(); });
   }
@@ -167,6 +171,7 @@ export const OPEN_CAP_MS = 600;
 export const REVEALED_EVENT = 'luma:detail-revealed';
 let pending = false;
 let tapAt = 0;
+let pressTimer = 0;
 const now = () => Date.now();
 
 /** Time left on the cap counted from the TAP (detail fetch included), or
@@ -199,9 +204,14 @@ export async function openWhenReady(
     pending = false;
   }
   // Keep the pressed state until the sheet shows (or a short safety net).
-  const done = () => { card?.removeAttribute('data-pressed'); window.removeEventListener(REVEALED_EVENT, done); };
+  window.clearTimeout(pressTimer);
+  const done = () => {
+    window.clearTimeout(pressTimer);
+    card?.removeAttribute('data-pressed');
+    window.removeEventListener(REVEALED_EVENT, done);
+  };
   window.addEventListener(REVEALED_EVENT, done);
-  window.setTimeout(done, 1500);
+  pressTimer = window.setTimeout(done, 1500);
   open();
 }
 
@@ -214,4 +224,6 @@ export function _resetModalPrefetch(): void {
   active = 0;
   pending = false;
   tapAt = 0;
+  window.clearTimeout(pressTimer);
+  pressTimer = 0;
 }

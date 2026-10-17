@@ -1438,7 +1438,7 @@ def _auth_guard():
         if not getattr(g, 'current_user', None) or getattr(g, 'implicit_user', False):
             # For API calls, return 401
             if request.path.startswith('/api/'):
-                return jsonify({"error": "Authentication required"}), 401
+                return jsonify({"error": "Authentication required"}), 401, {'Cache-Control': 'private, no-store'}
             # For HTML pages, redirect to login
             url_base = app.config.get('URL_BASE', '')
             from urllib.parse import quote
@@ -12128,7 +12128,7 @@ _PLEX_IMG_MAX_BYTES = 20 * 1024 * 1024
 # Only this exact host and shape is accepted, and only as a small transcode by
 # the user's Plex server (the token goes to that server only, never to plex.tv).
 _PLEX_PEOPLE_URL = re.compile(
-    r'https://metadata-static\.plex\.tv/[0-9a-f]/people/[0-9a-f]{32}\.(?:jpe?g|png)', re.ASCII | re.IGNORECASE)
+    r'https://metadata-static\.plex\.tv/[0-9a-f]/people/[0-9a-f]{32}\.(?:jpe?g|png)', re.ASCII)
 _PLEX_PEOPLE_MAX = 400
 
 
