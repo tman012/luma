@@ -219,12 +219,86 @@ def test_rogue_clients_player_never_gets_token(plex):
         assert c.headers['X-Plex-Target-Client-Identifier'] == 'rogue-id'
 
 
-def test_player_play_non_admin_gets_403(plex):
+@pytest.fixture
+def play(plex, monkeypatch):
+    """Real users with each approval state; playback itself is stubbed."""
+    import app.user_auth as ua
     client, calls, state = plex
-    state['user'] = MEMBER
+    state['clients_xml'] = (b'<MediaContainer><Server host="10.0.0.7" port="32500" '
+                            b'machineIdentifier="abc"/></MediaContainer>')
+    ids = {}
+    ids['approved'] = ua.create_user('approved', '1234')['id']
+    ua.save_user_settings(ids['approved'], {'use_shared_server': True, 'plex_access_status': 'approved'})
+    ids['unapproved'] = ua.create_user('unapproved', '1234')['id']
+    ids['pending'] = ua.create_user('pendingplex', '1234')['id']
+    ua.save_user_settings(ids['pending'], {'plex_access_status': 'pending'})
+    ids['denied'] = ua.create_user('denied', '1234')['id']
+    ua.save_user_settings(ids['denied'], {'use_shared_server': False, 'plex_access_status': 'denied'})
+    ids['revoked'] = ua.create_user('revoked', '1234')['id']
+    ua.save_user_settings(ids['revoked'], {'use_shared_server': True, 'plex_access_status': 'denied'})
+    ids['inactive'] = ua.create_user('inactive', '1234', status='pending')['id']
+    ua.save_user_settings(ids['inactive'], {'use_shared_server': True, 'plex_access_status': 'approved'})
+    played = []
+
+    def fake_play(service, rating_key, resume_offset, room_name, device_ip, *a, **k):
+        played.append(device_ip)
+        return app.main.jsonify({'success': True})
+    monkeypatch.setattr(app.main, '_play_via_plex', fake_play)
+    monkeypatch.setattr(app.main, '_play_via_kodi', fake_play)
+
+    def as_user(kind):
+        state['user'] = None if kind == 'anonymous' else (
+            ADMIN if kind == 'admin' else {'id': ids[kind], 'username': kind, 'is_admin': False})
+    return client, calls, as_user, played
+
+
+@pytest.mark.parametrize('kind', ['unapproved', 'pending', 'denied', 'revoked', 'inactive', 'anonymous'])
+def test_player_play_refused_for_unapproved_users(play, kind):
+    client, calls, as_user, played = play
+    as_user(kind)
     r = _post(client, '/api/player/play', {'rating_key': 5, 'room_id': 'r1'})
     assert r.status_code == 403
-    assert calls == []
+    assert played == [] and calls == []
+
+
+@pytest.mark.parametrize('body, host', [
+    ({'rating_key': 5, 'room_id': 'r1'}, '10.0.0.5'),
+    ({'rating_key': 5, 'room_id': 'r1', 'device_id': 'd1'}, '10.0.0.5'),
+    ({'rating_key': 5, 'room_id': 'r2'}, '10.0.0.6'),
+    ({'rating_key': 5, 'client_ip': '10.0.0.6'}, '10.0.0.6'),
+])
+def test_player_play_approved_user_to_configured_device(play, body, host):
+    client, _, as_user, played = play
+    as_user('approved')
+    r = _post(client, '/api/player/play', body)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert played == [host]
+
+
+@pytest.mark.parametrize('body', [
+    {'rating_key': 5, 'client_ip': '10.0.0.99'},
+    {'rating_key': 5, 'client_ip': '10.0.0.7'},          # listed by Plex /clients only
+    {'rating_key': 5, 'client_ip': '10.0.0.5:6124'},
+    {'rating_key': 5, 'client_ip': '127.0.0.1:6124/steal?'},
+    {'rating_key': 5, 'client_ip': '10.0.0.5; id'},
+    {'rating_key': 5, 'room_id': 'r2', 'client_ip': '10.0.0.99'},  # flat room: body overrides
+])
+def test_player_play_approved_user_cannot_pick_other_hosts(play, body):
+    client, calls, as_user, played = play
+    as_user('approved')
+    r = _post(client, '/api/player/play', body)
+    assert r.status_code == 403
+    assert played == []
+
+
+def test_player_play_admin_full_access(play):
+    client, calls, as_user, played = play
+    as_user('admin')
+    assert _post(client, '/api/player/play', {'rating_key': 5, 'room_id': 'r1'}).status_code == 200
+    assert played == ['10.0.0.5']
+    assert _post(client, '/api/player/play', {'rating_key': 5, 'client_ip': '10.0.0.99'}).status_code == 400
+    assert _post(client, '/api/player/play', {'rating_key': 5, 'client_ip': '10.0.0.7'}).status_code == 200
+    assert played[-1] == '10.0.0.7'
 
 
 @pytest.mark.parametrize('path, field', [('/api/plex/playback/seek', 'offset_seconds'),
@@ -290,3 +364,62 @@ def test_no_token_query_params_in_app():
         src = f.read_text()
         assert "params={'X-Plex-Token'" not in src, f
         assert "'X-Plex-Token': token,\n" not in src, f
+
+
+def test_seek_zero_is_refused(plex):
+    client, calls, _ = plex
+    for body in ({'client_ip': '10.0.0.5', 'offset_seconds': 0}, {'client_ip': '10.0.0.5', 'offset_seconds': -0.0},
+                 {'client_ip': '10.0.0.5'}):
+        assert _post(client, '/api/plex/playback/seek', body).status_code == 400
+    assert [c for c in calls if '/player/' in c.url] == []
+
+
+def test_clients_cache_keyed_on_token(plex):
+    client, calls, state = plex
+    state['clients_xml'] = (b'<MediaContainer><Server host="10.0.0.7" port="32500" '
+                            b'machineIdentifier="abc"/></MediaContainer>')
+    _post(client, '/api/plex/playback/stop', {'client_ip': '10.0.0.7'})
+    _post(client, '/api/plex/playback/stop', {'client_ip': '10.0.0.7'})
+    assert len([c for c in calls if c.url.endswith('/clients')]) == 1
+    app.main.settings.update({'plex': {'token': 'rotated-token'}})
+    _post(client, '/api/plex/playback/stop', {'client_ip': '10.0.0.7'})
+    assert len([c for c in calls if c.url.endswith('/clients')]) == 2
+    assert TOKEN not in repr(app.main._plex_clients_cache)
+
+
+def test_hero_cache_plex_download_token_in_header_and_no_redirects(tmp_path, monkeypatch):
+    """A fake Plex that 302s elsewhere: the download fails and nothing is
+    fetched from the redirect target; the token is never in a URL."""
+    import requests
+    from requests.adapters import BaseAdapter
+    from requests.models import Response as RResponse
+    from app.hero_cache import HeroCache
+
+    seen = []
+
+    class FakePlex(BaseAdapter):
+        def send(self, request, **kwargs):
+            seen.append((request.url, request.headers.get('X-Plex-Token')))
+            r = RResponse()
+            r.request, r.url = request, request.url
+            r.raw = __import__('io').BytesIO(b'stolen')
+            if request.url.startswith('http://plex.test/'):
+                r.status_code = 302
+                r.headers['Location'] = 'http://evil.test/steal'
+            else:
+                r.status_code = 200
+            return r
+
+        def close(self):
+            pass
+
+    hc = HeroCache.__new__(HeroCache)
+    hc.plex_url, hc.plex_token = 'http://plex.test', TOKEN
+    hc.cache_dir = tmp_path
+    hc.session = requests.Session()
+    hc.session.mount('http://', FakePlex())
+    url = hc._plex_download_url('/library/metadata/5/thumb/1')
+    assert TOKEN not in url
+    assert hc.download_image(url, 'p.jpg', headers=hc._plex_headers()) is None
+    assert seen == [('http://plex.test/library/metadata/5/thumb/1', TOKEN)]
+    assert not (tmp_path / 'p.jpg').exists()

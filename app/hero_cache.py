@@ -336,8 +336,12 @@ class HeroCache:
         return images
 
     def _plex_download_url(self, plex_path: str) -> str:
-        """Build a Plex download URL with the current token (never stored)."""
-        return f"{self.plex_url}{plex_path}?{urllib.parse.urlencode({'X-Plex-Token': self.plex_token})}"
+        """The Plex URL for an image path. The token never goes in it; see
+        _plex_headers()."""
+        return f"{self.plex_url}{plex_path}"
+
+    def _plex_headers(self) -> dict:
+        return {'X-Plex-Token': self.plex_token}
 
     @staticmethod
     def _strip_tokens(movies: List[Dict]) -> bool:
@@ -371,7 +375,7 @@ class HeroCache:
             return ext
         return 'jpg'
     
-    def download_image(self, url: str, filename: str) -> Optional[str]:
+    def download_image(self, url: str, filename: str, headers: Optional[dict] = None) -> Optional[str]:
         """Download an image into the cache directory.
 
         Writes to ``<filename>.tmp`` and atomically renames it into place.
@@ -383,7 +387,12 @@ class HeroCache:
         filepath = self.cache_dir / filename
         tmp_filepath = self.cache_dir / f"{filename}.tmp"
         try:
-            response = self.session.get(url, stream=True, timeout=30)
+            if headers:
+                # Plex: the token rides in a header and a redirect (which would
+                # carry it elsewhere) is a failure, not followed.
+                response = self.session.get(url, stream=True, timeout=30, headers=headers, allow_redirects=False)
+            else:
+                response = self.session.get(url, stream=True, timeout=30)
             if response.status_code == 200:
                 with open(tmp_filepath, 'wb') as f:
                     shutil.copyfileobj(response.raw, f)
@@ -581,7 +590,8 @@ class HeroCache:
                 plex_poster_path = f"/library/metadata/{rating_key}/thumb"
                 poster_cache_file = f"movie_{rating_key}_poster.jpg"
                 poster_upstream_url = plex_poster_path
-                downloaded = self.download_image(self._plex_download_url(plex_poster_path), poster_cache_file)
+                downloaded = self.download_image(self._plex_download_url(plex_poster_path), poster_cache_file,
+                                                 headers=self._plex_headers())
                 if downloaded:
                     poster_url = poster_cache_file
                 # Fallback to proxy if caching fails
@@ -727,12 +737,12 @@ class HeroCache:
             for idx, field_type, cache_filename, upstream_url in missing:
                 if upstream_url:
                     # Add current Plex token if this is a Plex path
-                    download_url = upstream_url
+                    download_url, dl_headers = upstream_url, None
                     if upstream_url.startswith('/library/'):
-                        download_url = self._plex_download_url(upstream_url)
+                        download_url, dl_headers = self._plex_download_url(upstream_url), self._plex_headers()
 
                     logger.info(f"Healing {field_type}: {cache_filename} from {upstream_url[:80]}...")
-                    result = self.download_image(download_url, cache_filename)
+                    result = self.download_image(download_url, cache_filename, headers=dl_headers)
                     if not result:
                         raise Exception(f"Failed to download {cache_filename}")
             

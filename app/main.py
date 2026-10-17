@@ -12246,10 +12246,14 @@ def player_play():
 
     Resolves the target device + service from the v3 room hierarchy,
     wakes the device (ADB/WoL/Harmony), then plays via Kodi JSON-RPC.
+
+    Admins may target any configured device or a player Plex lists; approved
+    users only devices configured in Luma's rooms.
     """
-    err = _require_admin()
-    if err:
-        return err
+    user = _get_current_user()
+    if not user_auth.is_plex_approved(user):
+        return jsonify({'error': 'Not allowed'}), 403
+    is_admin = bool(user.get('is_admin'))
     try:
         data = request.get_json() or {}
         rating_key = data.get('rating_key')
@@ -12335,7 +12339,11 @@ def player_play():
 
         if not rating_key or not client_ip:
             return jsonify({'error': 'rating_key and client_ip/room_id are required'}), 400
-        if client_ip == data.get('client_ip') and not _plex_client_target(client_ip):
+        if not is_admin:
+            # Approved users: only a device configured in Luma's rooms.
+            if _plex_norm_host(client_ip) not in {h for h, _ in _configured_plex_clients()}:
+                return jsonify({'error': 'Unknown client'}), 403
+        elif client_ip == data.get('client_ip') and not _plex_client_target(client_ip):
             # The address came from the caller, not from a configured device.
             return jsonify({'error': 'Unknown client'}), 400
 
@@ -13812,8 +13820,11 @@ def _discovered_plex_clients() -> dict:
     if not plex_url or not plex_token:
         return {}
     now = time.time()
+    import hashlib
+    # Keyed on the server and token, so a Plex settings change is never served stale.
+    key = (plex_url, hashlib.sha256(plex_token.encode()).hexdigest())
     cached = _plex_clients_cache.get('entry')
-    if cached and cached[0] == plex_url and now - cached[1] < _PLEX_CLIENTS_TTL:
+    if cached and cached[0] == key and now - cached[1] < _PLEX_CLIENTS_TTL:
         return cached[2]
     known = {}
     try:
@@ -13831,7 +13842,7 @@ def _discovered_plex_clients() -> dict:
                     known[(host, port)] = el.get('machineIdentifier') or ''
     except Exception as e:
         logger.debug(f"Plex /clients lookup failed: {type(e).__name__}")
-    _plex_clients_cache['entry'] = (plex_url, now, known)
+    _plex_clients_cache['entry'] = (key, now, known)
     return known
 
 
@@ -13968,8 +13979,8 @@ def plex_playback_seek():
         if err:
             return err
         offset_seconds = _finite_number(data.get('offset_seconds', 0))
-        if offset_seconds is None:
-            return jsonify({'error': 'offset_seconds must be a number'}), 400
+        if offset_seconds is None or offset_seconds == 0:
+            return jsonify({'error': 'offset_seconds must be a non-zero number'}), 400
 
         response = _send_plex_player_command(target, 'stepForward' if offset_seconds > 0 else 'stepBack')
         logger.info(f"Playback seek {offset_seconds}s sent to {target[0]}: {response.status_code}")
