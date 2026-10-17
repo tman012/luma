@@ -125,3 +125,24 @@ def test_the_decorator_on_any_route(full, monkeypatch):
                                             + owner.get_cookie('luma_auth_session').value}):
         app.main.load_current_user()
         assert delete_something() == 'deleted' and hit == [1]
+
+
+@pytest.mark.parametrize('raw', ['[]', '[5]', '"x"', '0', '7', 'null', 'false', '{not json'])
+def test_a_body_that_isnt_a_json_object_is_400(full, raw):
+    owner = _client(full)
+    r = owner.post(CLEANUP, data=raw, content_type='application/json', environ_base=LAN, headers=HDR)
+    assert r.status_code == 400 and r.get_json() == {'error': 'Invalid request'}
+    assert full.calls == []
+
+
+def test_a_bad_body_from_a_non_owner_is_still_refused_first(full):
+    _client(full)
+    r = full.test_client().post(CLEANUP, data='[]', content_type='application/json',
+                                environ_base=LAN, headers=HDR)
+    assert r.status_code == 401 and full.calls == []
+
+
+def test_an_empty_body_uses_the_default_target(full):
+    owner = _client(full)
+    r = owner.post(CLEANUP, environ_base=LAN, headers=HDR)
+    assert r.status_code == 200 and full.calls == [storage_cleanup.DEFAULT_TARGET_BYTES]
