@@ -3326,11 +3326,11 @@ def radarr_queue():
             try:
                 qbit_url = settings.get('qbittorrent.url')
                 if qbit_url:
-                    qs = req.Session()
+                    qs = _qbit_new_session()  # no proxy, never follows a redirect
                     lr = qs.post(f"{qbit_url}/api/v2/auth/login", data={
                         'username': settings.get('qbittorrent.username'),
                         'password': settings.get('qbittorrent.password'),
-                    }, timeout=8)
+                    }, timeout=8, allow_redirects=False)
                     if lr.status_code == 200 and lr.text.strip() == 'Ok.':
                         tr = qs.get(f"{qbit_url}/api/v2/torrents/info", timeout=8)
                         if tr.status_code == 200:
@@ -4694,14 +4694,14 @@ def get_active_downloads_count():
         import requests as req
 
         # Login to qBittorrent
-        session = req.Session()
+        session = _qbit_new_session()  # no proxy, never follows a redirect
         login_response = session.post(
             f"{settings.get('qbittorrent.url')}/api/v2/auth/login",
             data={
                 'username': settings.get('qbittorrent.username'),
                 'password': settings.get('qbittorrent.password')
             },
-            timeout=10
+            timeout=10, allow_redirects=False
         )
 
         if login_response.status_code != 200 or _qbit_body(login_response) != 'Ok.':
@@ -4754,11 +4754,11 @@ def get_downloads_queue():
         qbit_url = settings.get('qbittorrent.url')
         if not qbit_url:
             return jsonify({'downloads': []})
-        qs = req.Session()
+        qs = _qbit_new_session()  # no proxy, never follows a redirect
         lr = qs.post(f"{qbit_url}/api/v2/auth/login", data={
             'username': settings.get('qbittorrent.username'),
             'password': settings.get('qbittorrent.password'),
-        }, timeout=8)
+        }, timeout=8, allow_redirects=False)
         if lr.status_code != 200 or lr.text.strip() != 'Ok.':
             return jsonify({'downloads': []})
         tr = qs.get(f"{qbit_url}/api/v2/torrents/info", timeout=8)
@@ -9462,6 +9462,13 @@ def _qbit_add_fields() -> Dict[str, str]:
         fields['paused'] = 'true'
         fields['stopped'] = 'true'
     return fields
+
+
+def _qbit_new_session():
+    """Session for any request carrying the qBit password or SID cookie:
+    no environment proxy, never follows a redirect (see qbit_connector)."""
+    from app.qbit_connector import new_session
+    return new_session()
 
 
 def _qbit_body(resp) -> str:
@@ -15498,14 +15505,14 @@ def get_download_history():
         # --- Fetch completed torrents from qBittorrent ---
         qb_items = []
         try:
-            session = req.Session()
+            session = _qbit_new_session()  # no proxy, never follows a redirect
             login_resp = session.post(
                 f"{settings.get('qbittorrent.url')}/api/v2/auth/login",
                 data={
                     'username': settings.get('qbittorrent.username'),
                     'password': settings.get('qbittorrent.password'),
                 },
-                timeout=10,
+                timeout=10, allow_redirects=False,
             )
             if login_resp.status_code == 200 and _qbit_body(login_resp) == 'Ok.':
                 torrents_resp = session.get(
@@ -16300,14 +16307,14 @@ def remove_from_tracking(torrent_hash):
         if not qbit_url:
             return jsonify({'success': False, 'error': 'qBittorrent not configured', 'needs_setup': 'qbittorrent'}), 500
 
-        qs = req.Session()
+        qs = _qbit_new_session()  # no proxy, never follows a redirect
         lr = qs.post(
             f"{qbit_url}/api/v2/auth/login",
             data={
                 'username': settings.get('qbittorrent.username'),
                 'password': settings.get('qbittorrent.password'),
             },
-            timeout=8,
+            timeout=8, allow_redirects=False,
         )
         if lr.status_code != 200 or lr.text.strip() != 'Ok.':
             return jsonify({'success': False, 'error': 'qBittorrent login failed'}), 502
@@ -16574,12 +16581,12 @@ def add_torrent_to_qbittorrent():
 
         # The link is checked (and fetched through the guard) before qBit is
         # contacted at all, so a refused link never logs in to qBittorrent.
-        session = req.Session()
+        session = _qbit_new_session()  # no proxy, never follows a redirect
         try:
             login_response = session.post(
                 f"{qbit_url}/api/v2/auth/login",
                 data={'username': qbit_user, 'password': qbit_pass},
-                timeout=10,
+                timeout=10, allow_redirects=False,
             )
         except req.exceptions.RequestException as e:
             logger.error(f"qBittorrent unreachable: {type(e).__name__}")

@@ -422,16 +422,17 @@ class AutoRenamer:
         """Perform a fresh qBittorrent login and return the session."""
         try:
             qbit_url, qbit_user, qbit_pass = self._qbit_settings()
-            session = requests.Session()
+            from app.qbit_connector import new_session
+            session = new_session()       # no proxy, never follows a redirect
             response = session.post(
                 f"{qbit_url}/api/v2/auth/login",
                 data={'username': qbit_user, 'password': qbit_pass},
-                timeout=10,
+                timeout=10, allow_redirects=False,
             )
             if response.status_code == 200 and response.text.strip() == 'Ok.':
                 return session
             else:
-                logger.error(f"❌ qBittorrent login failed: {response.status_code} - {response.text}")
+                logger.error(f"❌ qBittorrent login failed: HTTP {response.status_code}")
                 return None
         except Exception as e:
             logger.error(f"qBittorrent login error: {e}")
