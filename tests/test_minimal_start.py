@@ -299,14 +299,98 @@ def test_set_password_is_one_shot(test_app, start_owner):
     assert user_auth.get_user_by_id(user['id'])['pin_hash'] == before
 
 
-def test_set_password_attempt_limit(test_app, start_owner):
-    from app import login_limiter
+def test_signed_out_spam_never_locks_out_owner(test_app, start_owner):
+    from app import login_limiter, start_flow, user_auth
     c, user = start_owner
     other = test_app.test_client()
-    for _ in range(login_limiter.MAX_FAILURES):
+    forged = test_app.test_client()
+    forged.set_cookie('luma_auth_session', user_auth.create_session(user['id']))
+    forged.set_cookie(start_flow.SETUP_COOKIE, 'forged.value', path='/api/start/')
+    for _ in range(login_limiter.MAX_FAILURES * 3):
         assert other.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 401
+        assert forged.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 403
+    assert login_limiter._fail == {}
+    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 200
+
+
+def test_owner_bad_attempts_hit_limit(test_app, start_owner):
+    from app import login_limiter
+    c, _ = start_owner
+    for _ in range(login_limiter.MAX_FAILURES):
+        assert c.post('/api/start/password', json={'password': 'short', 'confirm': 'short'},
+                      headers=ORIGIN).status_code == 400
     r = c.post('/api/start/password', json=GOOD, headers=ORIGIN)
     assert r.status_code == 429 and int(r.headers['Retry-After']) > 0
+
+
+def test_parallel_valid_posts_set_once(test_app, start_owner):
+    import threading
+    from app import start_flow, user_auth
+    c, user = start_owner
+    n = 6
+    clients = []
+    for _ in range(n):
+        k = test_app.test_client()
+        k.set_cookie('luma_auth_session', user_auth.create_session(user['id']))
+        _setup_cookie(test_app, k, user['id'])
+        clients.append(k)
+    barrier = threading.Barrier(n)
+    codes = []
+
+    def go(k, i):
+        barrier.wait()
+        pw = f'parallel-pass-{i}'
+        codes.append(k.post('/api/start/password', json={'password': pw, 'confirm': pw},
+                            headers=ORIGIN).status_code)
+    threads = [threading.Thread(target=go, args=(k, i)) for i, k in enumerate(clients)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(30)
+    assert sorted(codes) == [200] + [409] * (n - 1)
+    st = start_flow._load_state()
+    assert st['password_set'] is True and not st.get('password_claimed')
+
+
+def test_claim_released_when_hashing_fails(test_app, start_owner):
+    from app import start_flow, user_auth
+    c, _ = start_owner
+    with mock.patch.object(user_auth, 'update_pin', side_effect=RuntimeError('boom')):
+        test_app.config['PROPAGATE_EXCEPTIONS'] = False
+        try:
+            assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 500
+        finally:
+            test_app.config['PROPAGATE_EXCEPTIONS'] = None
+    st = start_flow._load_state()
+    assert not st.get('password_claimed') and not st.get('password_set')
+    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 200
+
+
+@pytest.mark.parametrize('base,expected', [('', '/api/start/'), ('/luma', '/luma/api/start/'),
+                                           ('/luma/', '/luma/api/start/')])
+def test_setup_cookie_path_follows_url_base(test_app, start_owner, base, expected):
+    from app import start_flow
+    c, _ = start_owner
+    old = test_app.config.get('URL_BASE')
+    test_app.config['URL_BASE'] = base
+    try:
+        with test_app.test_request_context():
+            assert start_flow._setup_cookie_path() == expected
+        r = c.post('/api/start/password', json=GOOD, headers=ORIGIN)
+        assert r.status_code == 200
+        dels = [h for h in r.headers.getlist('Set-Cookie') if h.startswith(start_flow.SETUP_COOKIE + '=;')]
+        assert dels and f'Path={expected}' in dels[0]
+    finally:
+        test_app.config['URL_BASE'] = old
+
+
+def test_setup_cookie_non_dict_payload_rejected(test_app, start_owner):
+    from app import start_flow
+    c, _ = start_owner
+    with test_app.test_request_context():
+        tok = start_flow._serializer().dumps(['not', 'a', 'dict'])
+    c.set_cookie(start_flow.SETUP_COOKIE, tok, path='/api/start/')
+    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 403
 
 
 def test_security_reports_password(start_owner):

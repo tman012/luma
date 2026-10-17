@@ -253,15 +253,23 @@ def _setup_cookie_ok(st: Dict[str, Any], uid: int) -> bool:
     raw = request.cookies.get(SETUP_COOKIE, '')
     if not raw:
         return False
+    from itsdangerous import BadData
     try:
         data = _serializer().loads(raw, max_age=SETUP_TTL)
-    except Exception:
+    except BadData:
+        return False
+    if not isinstance(data, dict):
         return False
     return (data.get('uid') == uid == st.get('owner_uid')
             and str(data.get('plex') or '') == str(st.get('owner_plex_id') or ''))
 
 
 PASSWORD_LIMIT_ID = 'start-password'
+
+
+def _setup_cookie_path() -> str:
+    from flask import current_app
+    return (current_app.config.get('URL_BASE') or '').rstrip('/') + '/api/start/'
 
 
 @bp.route('/api/start/password', methods=['POST'])
@@ -273,47 +281,62 @@ def start_password():
     setup cookie plus its real session, never an implicit local owner) may
     call it, once; afterwards changes go through normal sign-in."""
     from flask import g
-    from app import access, login_limiter
-    ip = access.client_ip(request, _cfg['settings']) or request.remote_addr or ''
-    wait = login_limiter.retry_after(ip, PASSWORD_LIMIT_ID)
+    from app import login_limiter
+
+    # Signed-out, implicit, cookie-less or forged requests get a plain refusal
+    # and never touch the limiter, so nobody else can lock the owner out.
+    user = _cfg['get_current_user']()
+    if not user or getattr(g, 'implicit_user', False) or not user.get('token'):
+        return jsonify({'error': 'Sign in first'}), 401
+    st = _load_state()
+    if not _in_progress(user) or not user.get('id'):
+        return jsonify({'error': 'Start again', 'restart': True}), 409
+    if user['id'] != st.get('owner_uid') or not _setup_cookie_ok(st, user['id']):
+        return jsonify({'error': 'Start again', 'restart': True}), 403
+
+    # Only the owner's own Plex-verified browser gets here: limit its attempts.
+    limit_id = f"{PASSWORD_LIMIT_ID}:uid:{user['id']}"
+    wait = login_limiter.retry_after('', limit_id)
     if wait:
         resp = jsonify({'error': 'Too many attempts. Try again later.', 'retry_after': wait})
         resp.headers['Retry-After'] = str(wait)
         return resp, 429
 
-    def refuse(status, message, **extra):
-        login_limiter.record_failure(ip, PASSWORD_LIMIT_ID)
-        return jsonify({'error': message, **extra}), status
+    def bad(message):
+        login_limiter.record_failure('', limit_id)
+        return jsonify({'error': message}), 400
 
-    user = _cfg['get_current_user']()
-    if not user or getattr(g, 'implicit_user', False) or not user.get('token'):
-        return refuse(401, 'Sign in first')
-    st = _load_state()
-    if not _in_progress(user) or not user.get('id'):
-        return refuse(409, 'Start again', restart=True)
-    if st.get('password_set'):
-        return refuse(409, 'Password already set')
-    if user['id'] != st.get('owner_uid') or not _setup_cookie_ok(st, user['id']):
-        return refuse(403, 'Start again', restart=True)
     body = request.get_json(silent=True) or {}
     password = body.get('password')
     confirm = body.get('confirm')
     if not isinstance(password, str) or not isinstance(confirm, str):
-        return jsonify({'error': 'Enter a password'}), 400
+        return bad('Enter a password')
     if len(password) < PASSWORD_MIN:
-        return jsonify({'error': f'Use at least {PASSWORD_MIN} characters'}), 400
+        return bad(f'Use at least {PASSWORD_MIN} characters')
     if len(password) > PASSWORD_MAX:
-        return jsonify({'error': f'Use at most {PASSWORD_MAX} characters'}), 400
+        return bad(f'Use at most {PASSWORD_MAX} characters')
     if password != confirm:
-        return jsonify({'error': "Passwords don't match"}), 400
-    _cfg['user_auth'].update_pin(user['id'], password)
-    st = _load_state()
-    st['password_set'] = True
-    _save_state(st)
-    login_limiter.record_success(ip, PASSWORD_LIMIT_ID)
+        return bad("Passwords don't match")
+
+    with _lock:
+        st = _load_state()
+        if st.get('password_set') or st.get('password_claimed'):
+            return jsonify({'error': 'Password already set'}), 409
+        st['password_claimed'] = True
+        _save_state(st)
+        try:
+            _cfg['user_auth'].update_pin(user['id'], password)
+        except Exception:
+            st.pop('password_claimed', None)
+            _save_state(st)
+            raise
+        st.pop('password_claimed', None)
+        st['password_set'] = True
+        _save_state(st)
+    login_limiter.record_success('', limit_id)
     logger.info('Start: owner password set')
     resp = make_response(jsonify({'ok': True}))
-    resp.delete_cookie(SETUP_COOKIE, path='/api/start/')
+    resp.delete_cookie(SETUP_COOKIE, path=_setup_cookie_path())
     return resp
 
 
@@ -411,7 +434,7 @@ def start_plex_server():
     _cfg['settings'].update({'security': {'auth_required': 'enabled' if minimal.enabled() else 'disabled_local'}})
     plex_id = str(account.get('id') or '')
     st.update(server_name=server['name'], admin_via_start=True, completed=False, pin_set=False,
-              password_set=False, owner_uid=user['id'], owner_plex_id=plex_id)
+              password_set=False, password_claimed=False, owner_uid=user['id'], owner_plex_id=plex_id)
     st.pop('nonce', None)
     _save_state(st)
     with _lock:
@@ -425,7 +448,7 @@ def start_plex_server():
                     path=current_app.config.get('URL_BASE') or '/')
     resp.delete_cookie(START_COOKIE, path='/')
     resp.set_cookie(SETUP_COOKIE, setup_token(user['id'], plex_id), max_age=SETUP_TTL, httponly=True,
-                    samesite='Strict', secure=request.is_secure, path='/api/start/')
+                    samesite='Strict', secure=request.is_secure, path=_setup_cookie_path())
     logger.info('Start: owner account created')
     return resp
 
