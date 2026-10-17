@@ -12332,6 +12332,9 @@ def player_play():
 
         if not rating_key or not client_ip:
             return jsonify({'error': 'rating_key and client_ip/room_id are required'}), 400
+        if client_ip == data.get('client_ip') and not _plex_client_target(client_ip):
+            # The address came from the caller, not from a configured device.
+            return jsonify({'error': 'Unknown client'}), 400
 
         dev_name = device.get('name', '?') if device else 'none'
         dev_harmony = device.get('harmonyActivity', '') if device else ''
@@ -12893,7 +12896,6 @@ def _plex_play_shield(run_adb, _t, target, device_ip, machine_id, rating_key, of
         f"&port={server_port}"
         f"&protocol={server_protocol}"
         f"&type=video"
-        f"&X-Plex-Token={plex_token}"
     )
     if container:
         url += f"&containerKey={container}"
@@ -12903,7 +12905,7 @@ def _plex_play_shield(run_adb, _t, target, device_ip, machine_id, rating_key, of
     max_attempts = 1 if play_queue_id else 3
     for attempt in range(max_attempts):
         try:
-            resp = requests.get(url, timeout=5)
+            resp = requests.get(url, headers={'X-Plex-Token': plex_token}, timeout=5, allow_redirects=False)
             logger.info(f"Plex playMedia: status={resp.status_code} pq={play_queue_id}")
             if resp.status_code == 200:
                 logger.info(f"Plex playMedia succeeded on attempt {attempt + 1}")
@@ -13737,114 +13739,201 @@ def plex_active_sessions():
 
 # Legacy image proxy — prefer /api/img/plex for new code
 # Playback Control Endpoints for Now Playing Modal
+_PLEX_CLIENT_ADDR = re.compile(r'([A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)(?::([0-9]{1,5}))?', re.ASCII)
+
+
+def _plex_default_client_port() -> int:
+    try:
+        return int(settings.get('plex.client_port', 32500) or 32500)
+    except (TypeError, ValueError):
+        return 32500
+
+
+def _configured_plex_clients() -> set:
+    """(host, port) of every room device configured by the admin."""
+    default = _plex_default_client_port()
+    known = set()
+
+    def add(host, port=None):
+        if isinstance(host, str) and host:
+            try:
+                known.add((host.strip().lower(), int(port or default)))
+            except (TypeError, ValueError):
+                pass
+
+    for room in settings.get('devices.rooms') or []:
+        if not isinstance(room, dict):
+            continue
+        add(room.get('host'))
+        add(room.get('ip'))
+        for dev in room.get('devices') or []:
+            if not isinstance(dev, dict):
+                continue
+            add(dev.get('host'))
+            for svc in dev.get('services') or []:
+                if isinstance(svc, dict) and svc.get('plex_client_port'):
+                    add(dev.get('host'), svc.get('plex_client_port'))
+    return known
+
+
+def _discovered_plex_clients() -> set:
+    """(host, port) of the players the Plex server itself lists in /clients."""
+    plex_url = settings.get('plex.url')
+    plex_token = settings.get('plex.token')
+    if not plex_url or not plex_token:
+        return set()
+    try:
+        resp = requests.get(f"{plex_url}/clients", headers={'X-Plex-Token': plex_token, 'Accept': 'application/xml'},
+                            timeout=3, allow_redirects=False)
+        if resp.status_code != 200:
+            return set()
+        import xml.etree.ElementTree as ET
+        known = set()
+        for el in ET.fromstring(resp.content).iter('Server'):
+            host = el.get('host') or el.get('address')
+            try:
+                port = int(el.get('port') or 0)
+            except ValueError:
+                continue
+            if host and port:
+                known.add((host.strip().lower(), port))
+        return known
+    except Exception as e:
+        logger.debug(f"Plex /clients lookup failed: {type(e).__name__}")
+        return set()
+
+
+def _plex_client_target(raw):
+    """The (host, port) of a known Plex player for a caller-supplied address,
+    or None. Only an exact host[:port] that matches a configured room device or
+    a player the Plex server lists is accepted: no paths, queries or userinfo."""
+    if not isinstance(raw, str) or any(c in raw for c in '?#/@\\'):
+        return None
+    m = _PLEX_CLIENT_ADDR.fullmatch(raw)
+    if not m:
+        return None
+    port = int(m.group(2)) if m.group(2) else _plex_default_client_port()
+    if not 1 <= port <= 65535:
+        return None
+    target = (m.group(1).lower(), port)
+    if target in _configured_plex_clients() or target in _discovered_plex_clients():
+        return target
+    return None
+
+
+def _plex_player_target_or_error(data):
+    """Admin check plus a known client for the playback endpoints."""
+    err = _require_admin()
+    if err:
+        return None, err
+    client_ip = data.get('client_ip')
+    if not client_ip:
+        return None, (jsonify({'error': 'client_ip is required'}), 400)
+    target = _plex_client_target(client_ip)
+    if not target:
+        return None, (jsonify({'error': 'Unknown client'}), 400)
+    return target, None
+
+
+def _send_plex_player_command(target, command, params=None):
+    """Send a /player/playback command to a known client. The token goes in
+    a header, never the URL, and redirects are never followed."""
+    host, port = target
+    return requests.get(
+        f"http://{host}:{port}/player/playback/{command}",
+        params=params,
+        headers={'X-Plex-Token': settings.get('plex.token') or ''},
+        timeout=5,
+        allow_redirects=False,
+    )
+
+
 @app.route('/api/plex/playback/control', methods=['POST'])
 def plex_playback_control():
-    """Send play/pause command to Shield Plex client."""
+    """Send play/pause command to a Plex client."""
     try:
-        data = request.get_json() or {}
-        client_ip = data.get('client_ip')
+        data = request.get_json(silent=True) or {}
+        target, err = _plex_player_target_or_error(data)
+        if err:
+            return err
         command = data.get('command')  # 'play' or 'pause'
-
-        if not client_ip or not command:
+        if not command:
             return jsonify({'error': 'client_ip and command are required'}), 400
 
-        plex_token = settings.get('plex.token')
-        client_port = settings.get('plex.client_port', 32500)
-
-        # Map command to Plex endpoint
         endpoint = 'play' if command == 'play' else 'pause'
-        url = f"http://{client_ip}:{client_port}/player/playback/{endpoint}?X-Plex-Token={plex_token}"
-
-        response = requests.get(url, timeout=5)
-        logger.info(f"Playback control {command} sent to {client_ip}: {response.status_code}")
+        response = _send_plex_player_command(target, endpoint)
+        logger.info(f"Playback control {endpoint} sent to {target[0]}: {response.status_code}")
 
         return jsonify({'success': True, 'command': command})
 
     except Exception as e:
-        logger.error(f"Error sending playback control: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error sending playback control: {type(e).__name__}")
+        return jsonify({'error': 'Playback control failed'}), 500
 
 
 @app.route('/api/plex/playback/stop', methods=['POST'])
 def plex_playback_stop():
-    """Stop playback on Shield Plex client."""
+    """Stop playback on a Plex client."""
     try:
-        data = request.get_json() or {}
-        client_ip = data.get('client_ip')
+        data = request.get_json(silent=True) or {}
+        target, err = _plex_player_target_or_error(data)
+        if err:
+            return err
 
-        if not client_ip:
-            return jsonify({'error': 'client_ip is required'}), 400
-
-        plex_token = settings.get('plex.token')
-        client_port = settings.get('plex.client_port', 32500)
-
-        url = f"http://{client_ip}:{client_port}/player/playback/stop?X-Plex-Token={plex_token}"
-
-        response = requests.get(url, timeout=5)
-        logger.info(f"Playback stop sent to {client_ip}: {response.status_code}")
+        response = _send_plex_player_command(target, 'stop')
+        logger.info(f"Playback stop sent to {target[0]}: {response.status_code}")
 
         return jsonify({'success': True})
 
     except Exception as e:
-        logger.error(f"Error stopping playback: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error stopping playback: {type(e).__name__}")
+        return jsonify({'error': 'Playback stop failed'}), 500
 
 
 @app.route('/api/plex/playback/seek', methods=['POST'])
 def plex_playback_seek():
-    """Seek forward/backward by offset on Shield Plex client."""
+    """Step forward/backward on a Plex client."""
     try:
-        data = request.get_json() or {}
-        client_ip = data.get('client_ip')
-        offset_seconds = data.get('offset_seconds', 0)
+        data = request.get_json(silent=True) or {}
+        target, err = _plex_player_target_or_error(data)
+        if err:
+            return err
+        try:
+            offset_seconds = float(data.get('offset_seconds', 0) or 0)
+        except (TypeError, ValueError):
+            return jsonify({'error': 'offset_seconds must be a number'}), 400
 
-        if not client_ip:
-            return jsonify({'error': 'client_ip is required'}), 400
+        response = _send_plex_player_command(target, 'stepForward' if offset_seconds > 0 else 'stepBack')
+        logger.info(f"Playback seek {offset_seconds}s sent to {target[0]}: {response.status_code}")
 
-        plex_token = settings.get('plex.token')
-        client_port = settings.get('plex.client_port', 32500)
-
-        # Use skipNext for forward, skipPrevious for backward (relative seek)
-        # For now, use stepForward/stepBack which is 30 seconds
-        if offset_seconds > 0:
-            url = f"http://{client_ip}:{client_port}/player/playback/stepForward?X-Plex-Token={plex_token}"
-        else:
-            url = f"http://{client_ip}:{client_port}/player/playback/stepBack?X-Plex-Token={plex_token}"
-
-        response = requests.get(url, timeout=5)
-        logger.info(f"Playback seek {offset_seconds}s sent to {client_ip}: {response.status_code}")
-
-        return jsonify({'success': True, 'offset': offset_seconds})
+        return jsonify({'success': True, 'offset': data.get('offset_seconds', 0)})
 
     except Exception as e:
-        logger.error(f"Error seeking playback: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error seeking playback: {type(e).__name__}")
+        return jsonify({'error': 'Playback seek failed'}), 500
 
 
 @app.route('/api/plex/playback/seekTo', methods=['POST'])
 def plex_playback_seek_to():
-    """Seek to specific position on Shield Plex client."""
+    """Seek to a specific position on a Plex client."""
     try:
-        data = request.get_json() or {}
-        client_ip = data.get('client_ip')
-        position_ms = data.get('position_ms', 0)
+        data = request.get_json(silent=True) or {}
+        target, err = _plex_player_target_or_error(data)
+        if err:
+            return err
+        try:
+            position_ms = max(0, int(data.get('position_ms', 0) or 0))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'position_ms must be a number'}), 400
 
-        if not client_ip:
-            return jsonify({'error': 'client_ip is required'}), 400
-
-        plex_token = settings.get('plex.token')
-        client_port = settings.get('plex.client_port', 32500)
-
-        url = f"http://{client_ip}:{client_port}/player/playback/seekTo?offset={position_ms}&X-Plex-Token={plex_token}"
-
-        response = requests.get(url, timeout=5)
-        logger.info(f"Playback seekTo {position_ms}ms sent to {client_ip}: {response.status_code}")
+        response = _send_plex_player_command(target, 'seekTo', params={'offset': position_ms})
+        logger.info(f"Playback seekTo {position_ms}ms sent to {target[0]}: {response.status_code}")
 
         return jsonify({'success': True, 'position_ms': position_ms})
 
     except Exception as e:
-        logger.error(f"Error seeking to position: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error seeking to position: {type(e).__name__}")
+        return jsonify({'error': 'Playback seek failed'}), 500
 
 
 @app.route('/api/plex/playback/subtitles', methods=['POST'])
@@ -18094,9 +18183,9 @@ def adb_shield_activity():
                 plex_token = settings.get('plex.token')
                 if plex_token:
                     # Get active Plex sessions
-                    sessions_url = f"{plex_url}/status/sessions?X-Plex-Token={plex_token}"
-                    headers = {'Accept': 'application/json'}
-                    plex_response = requests.get(sessions_url, headers=headers, timeout=3)
+                    sessions_url = f"{plex_url}/status/sessions"
+                    headers = {'Accept': 'application/json', 'X-Plex-Token': plex_token}
+                    plex_response = requests.get(sessions_url, headers=headers, timeout=3, allow_redirects=False)
                     if plex_response.status_code == 200:
                         sessions_data = plex_response.json()
                         metadata_list = sessions_data.get('MediaContainer', {}).get('Metadata', [])
@@ -18140,10 +18229,11 @@ def adb_shield_activity():
                                 # Get artwork URLs
                                 thumb = session.get('thumb', '')
                                 art = session.get('art', '') or session.get('grandparentArt', '')
+                                # Through the image proxy: the token never reaches the browser.
                                 if thumb:
-                                    media_info['artwork_url'] = f"{plex_url}{thumb}?X-Plex-Token={plex_token}"
+                                    media_info['artwork_url'] = f"/api/img/plex?url={urllib.parse.quote(thumb, safe='/')}"
                                 if art:
-                                    media_info['backdrop_url'] = f"{plex_url}{art}?X-Plex-Token={plex_token}"
+                                    media_info['backdrop_url'] = f"/api/img/plex?url={urllib.parse.quote(art, safe='/')}"
 
                                 # Get player info
                                 media_info['player_name'] = player.get('title', 'Unknown')
