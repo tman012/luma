@@ -275,3 +275,14 @@ def test_download_add_uses_saved_connector(minimal, monkeypatch):
     assert login[2] == {'username': 'admin', 'password': PW}
     add = [x for x in seen if x[1].endswith('/torrents/add')][0]
     assert add[2]['category'] == 'luma-test'
+
+
+def test_charsetless_ascii_body_is_read_as_utf8():
+    """A short body with no charset is decoded as UTF-8, not requests' guess."""
+    import requests
+    r = requests.models.Response()
+    r.status_code, r._content, r.headers['Content-Type'] = 200, b'v4.6.5', 'application/octet-stream'
+    assert qbit_connector._text_of(r) == 'v4.6.5'
+    r2 = requests.models.Response()
+    r2.status_code, r2._content = 200, b'Ok.'
+    assert qbit_connector._text_of(r2) == 'Ok.'

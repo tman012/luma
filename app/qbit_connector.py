@@ -176,6 +176,15 @@ def _throttled(uid: Any, bucket: str) -> bool:
     return False
 
 
+def _text_of(r) -> str:
+    """The body as UTF-8. qBittorrent's plain-text answers may carry no
+    charset, and requests' guess can misread a short ASCII body."""
+    raw = getattr(r, 'content', None)
+    if isinstance(raw, bytes):
+        return raw.decode('utf-8', 'replace').strip()
+    return (r.text or '').strip()
+
+
 def check(url: str, username: str, password: str) -> Tuple[Optional[str], str]:
     """(None, version) when qBittorrent accepts the login, else (error, '').
     The error is short and never carries the URL, username or password."""
@@ -190,7 +199,7 @@ def check(url: str, username: str, password: str) -> Tuple[Optional[str], str]:
             return TIMED_OUT, ''
         except requests.exceptions.RequestException:
             return UNREACHABLE, ''
-        body = (r.text or '').strip()
+        body = _text_of(r)
         if r.status_code == 403:
             return BANNED, ''
         if r.status_code == 401:
@@ -213,7 +222,7 @@ def check(url: str, username: str, password: str) -> Tuple[Optional[str], str]:
             return BAD_LOGIN, ''
         if v.status_code != 200:
             return UNEXPECTED, ''
-        version = (v.text or '').strip()
+        version = _text_of(v)
         return None, version if VERSION_RE.match(version) else ''
     finally:
         session.close()
