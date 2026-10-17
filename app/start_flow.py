@@ -168,6 +168,11 @@ def clear_stale_claim() -> None:
 
 
 def needs_start() -> bool:
+    """True only while no account exists. Once any user (the owner) exists,
+    setup is closed for good: every claim endpoint (Plex PIN, poll, server,
+    Skip) checks this first and refuses, whatever the setup window says and
+    across any number of restarts. Only the 24 h window resets on restart,
+    and it only matters while this is True."""
     return not _cfg['user_auth'].list_users()
 
 
@@ -732,7 +737,11 @@ def start_skip():
         _save_state(st)
     with _lock:
         _pending.pop(_nonce(), None)
-    logger.info('Start: owner account created (Plex skipped)')
+    from app import access
+    settings = _cfg.get('settings')
+    client = access.client_ip(request, settings) if settings is not None else None
+    logger.info('Start: owner account created (Plex skipped) from %s (peer %s, host %s)',
+                client or 'unknown', request.remote_addr or 'unknown', request.host)
     session = ua.create_session(user['id'])
     resp = make_response(jsonify({'ok': True}))
     from flask import current_app

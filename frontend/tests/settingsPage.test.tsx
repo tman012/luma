@@ -20,10 +20,11 @@ function stubMatchMedia() {
 const LIBS = [{ id: '1', title: 'Movies', type: 'movie', enabled: true }, { id: '2', title: 'TV Shows', type: 'show', enabled: true }];
 const KIOSK = { id: '1', libraries: [{ id: '1', title: 'Movies' }, { id: '9', title: '4K Movies' }] };
 let plexOwner = true;
+let plexConnected = false;
 function api() {
   return vi.fn(async (url: string, init?: RequestInit) => {
     if (String(url).includes('/api/settings/plex/pin')) return json({ status: 'none' });
-    if (String(url).includes('/api/settings/plex')) return plexOwner ? json({ connected: false, server: '' }) : json({ error: 'Owner only' }, false);
+    if (String(url).includes('/api/settings/plex')) return plexOwner ? json({ connected: plexConnected, server: plexConnected ? 'Basement' : '' }) : json({ error: 'Owner only' }, false);
     if (String(url).includes('/api/home/kiosk')) {
       if (init?.method === 'PUT') return json({ ...KIOSK, id: JSON.parse(String(init.body)).id });
       return json(KIOSK);
@@ -41,7 +42,7 @@ function renderAt(path: string) {
 }
 
 describe('Settings', () => {
-  beforeEach(() => { auth.user.is_admin = true; plexOwner = true; });
+  beforeEach(() => { auth.user.is_admin = true; plexOwner = true; plexConnected = false; });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
   it('web: persistent sidebar (Home, Settings > Home screen active) beside the section', async () => {
@@ -157,5 +158,40 @@ describe('Settings', () => {
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/settings/home-screen'));
     expect(screen.queryByRole('link', { name: 'Plex' })).toBeNull();
     expect(screen.queryByTestId('plex-settings')).toBeNull();
+  });
+
+  it("Change server asks 'Change server?' with Cancel and Change first", async () => {
+    wide = true; stubMatchMedia(); plexConnected = true;
+    const fetchMock = api(); vi.stubGlobal('fetch', fetchMock);
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    renderAt('/settings/plex');
+    expect((await screen.findByTestId('plex-server-name')).textContent).toBe('Basement');
+    fireEvent.click(await screen.findByRole('button', { name: 'Change server' }));
+    const dlg = screen.getByRole('alertdialog');
+    expect(dlg.textContent).toBe('Change server?CancelChange');   // no extra text
+    expect(document.activeElement?.textContent).toBe('Cancel');
+    const pinPosts = () => fetchMock.mock.calls.filter(c => String(c[0]).includes('/api/settings/plex/pin') && c[1]?.method === 'POST').length;
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Change server' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(pinPosts()).toBe(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Change server' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await waitFor(() => expect(pinPosts()).toBe(1));
+    expect(open).toHaveBeenCalled();   // the Plex pop-up opens inside the Change click
+    open.mockRestore();
+  });
+
+  it('Connect Plex (not yet connected) starts sign-in without a confirm', async () => {
+    wide = true; stubMatchMedia();
+    const fetchMock = api(); vi.stubGlobal('fetch', fetchMock);
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    renderAt('/settings/plex');
+    fireEvent.click(await screen.findByRole('button', { name: 'Connect Plex' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    await waitFor(() => expect(fetchMock.mock.calls.some(c => String(c[0]).includes('/api/settings/plex/pin') && c[1]?.method === 'POST')).toBe(true));
+    open.mockRestore();
   });
 });

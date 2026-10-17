@@ -40,6 +40,7 @@ export function PlexSettings() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [servers, setServers] = useState<Server[]>([]);
   const [error, setError] = useState('');
+  const [confirming, setConfirming] = useState(false);
   const timer = useRef<number | null>(null);
   const popup = useRef<Window | null>(null);
 
@@ -138,14 +139,61 @@ export function PlexSettings() {
         ) : phase === 'connecting' ? (
           <span role="status" style={{ color: 'rgba(255,255,255,0.7)', fontSize: 15, fontFamily: FONT }}>Connecting…</span>
         ) : phase === 'idle' && status !== null ? (
-          <button type="button" style={primary} onClick={connect}>
+          <button type="button" style={primary} onClick={() => (status.connected ? setConfirming(true) : connect())}>
             {status.connected ? 'Change server' : 'Connect Plex'}
           </button>
         ) : null}
       </div>
+      {confirming && (
+        <ConfirmDialog title="Change server?" confirm="Change"
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => { setConfirming(false); connect(); }} />
+      )}
     </section>
   );
 }
+
+/** Navy confirm dialog: a title and two buttons, nothing else. Esc or the
+ * scrim cancel; focus starts on Cancel and stays inside. */
+export function ConfirmDialog({ title, confirm, onCancel, onConfirm }: {
+  title: string; confirm: string; onCancel: () => void; onConfirm: () => void;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const cancelBtn = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const back = document.activeElement as HTMLElement | null;
+    cancelBtn.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); onCancel(); return; }
+      if (e.key !== 'Tab' || !box.current) return;
+      const els = [...box.current.querySelectorAll<HTMLElement>('button')];
+      const a = els[0]!, z = els[els.length - 1]!;
+      if (e.shiftKey && document.activeElement === a) { e.preventDefault(); z.focus(); }
+      else if (!e.shiftKey && document.activeElement === z) { e.preventDefault(); a.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); back?.focus?.(); };
+  }, [onCancel]);
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div data-testid="confirm-scrim" onClick={onCancel} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)' }} />
+      <div ref={box} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" style={dialog}>
+        <h2 id="confirm-title" style={{ margin: 0, fontSize: 17, fontWeight: 600, fontFamily: FONT, color: 'rgba(255,255,255,0.95)' }}>{title}</h2>
+        <div style={{ display: 'flex', gap: 12, marginTop: 24, width: '100%' }}>
+          <button ref={cancelBtn} type="button" style={{ ...ghostBtn, flex: 1 }} onClick={onCancel}>Cancel</button>
+          <button type="button" style={{ ...primary, flex: 1 }} onClick={onConfirm}>{confirm}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const dialog: React.CSSProperties = {
+  position: 'relative', width: '100%', maxWidth: 320, padding: 24, borderRadius: 20, boxSizing: 'border-box',
+  display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center',
+  background: 'rgba(21,16,42,0.96)', border: '1px solid rgba(255,255,255,0.1)',
+  backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', boxShadow: '0 20px 48px rgba(0,0,0,0.5)',
+};
 
 const sectionTitle: React.CSSProperties = {
   margin: '24px 4px 8px', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.5)', fontFamily: FONT,

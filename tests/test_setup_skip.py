@@ -140,6 +140,69 @@ class SkipTest(_Base):
         self.assertEqual(len(self.ua.list_users()), 1)
 
 
+class OwnerClosesSetupForGoodTest(_Base):
+    def _restart(self):
+        """What a container restart resets: process memory and the window clock."""
+        self.sf._pending.clear()
+        self.sf._owner_pending.clear()
+        self.sf._boot = time.monotonic()
+        self.sf.clear_stale_claim()
+
+    def _all_refused(self, c):
+        st = c.get('/api/start/status', environ_base=LAN, base_url=f'http://{HOST}').json
+        self.assertFalse(st['needs_start'])
+        self.assertNotIn('skip', st)
+        self.assertNotIn('closed', st)
+        with self._fake_plex():
+            for method, path, body in (('post', '/api/start/skip', {'username': 'intruder', 'password': 'correct horse'}),
+                                       ('post', '/api/start/plex/pin', {}),
+                                       ('get', '/api/start/plex/pin', None),
+                                       ('post', '/api/start/plex/server', {'machine_id': 'm1'})):
+                kw = dict(environ_base=LAN, base_url=f'http://{HOST}', headers=ORIGIN)
+                r = getattr(c, method)(path, json=body, **kw) if body is not None else getattr(c, method)(path, **kw)
+                self.assertEqual(r.status_code, 409, (path, r.json))
+        self.assertEqual([u['name'] for u in self.ua.list_users()], ['taylor'])
+        self.assertEqual(self.saved, [])
+
+    def test_restart_with_an_owner_keeps_setup_closed(self):
+        self.assertEqual(self.skip().status_code, 200)
+        for _ in range(3):                      # any number of restarts
+            self._restart()
+            self.assertTrue(self.sf.setup_window_open())   # the window clock did reset...
+            self._all_refused(self.app.test_client())       # ...but an owner exists: closed for good
+        # Even a browser holding a stale start cookie from before the restart.
+        c = self.app.test_client()
+        c.set_cookie(self.sf.START_COOKIE, 'old-nonce')
+        self._all_refused(c)
+
+    def test_restart_with_a_plex_owner_keeps_setup_closed(self):
+        c = self.client
+        with self._fake_plex():
+            c.post('/api/start/plex/pin', environ_base=LAN, base_url=f'http://{HOST}')
+            c.get('/api/start/plex/pin', environ_base=LAN, base_url=f'http://{HOST}')
+        with mock.patch.object(self.sf, 'probe', return_value=True):
+            self.assertEqual(c.post('/api/start/plex/server', json={'machine_id': 'm1'}, environ_base=LAN,
+                                    base_url=f'http://{HOST}').status_code, 200)
+        self.saved.clear()
+        self.ua.set_name_and_password(self.ua.list_users()[0]['id'], 'taylor', 'correct horse') \
+            if hasattr(self.ua, 'set_name_and_password') else None
+        self._restart()
+        self._all_refused(self.app.test_client())
+
+    def test_restart_with_no_owner_reopens_the_window(self):
+        with mock.patch.object(self.sf, '_boot', time.monotonic() - self.sf.SETUP_WINDOW - 1):
+            self.assertEqual(self.skip().status_code, 403)
+        self._restart()
+        self.assertEqual(self.skip().status_code, 200)
+
+    def test_skip_claim_is_logged_with_the_client_ip(self):
+        with self.assertLogs('app.start_flow', level='INFO') as logs:
+            self.assertEqual(self.skip().status_code, 200)
+        line = next(l for l in logs.output if 'Plex skipped' in l)
+        self.assertIn('INFO', line)
+        self.assertIn('192.168.1.57', line)
+
+
 class SettingsPlexTest(_Base):
     def _owner(self):
         r = self.skip()
