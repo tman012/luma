@@ -58,7 +58,7 @@ CAPS = '<?xml version="1.0"?><caps><server title="x"/><searching><search availab
 
 
 def torznab_cfg(**kw):
-    c = {'id': 1, 'type': 'torznab', 'name': 'J', 'url': 'http://jackett.local/api/torznab', 'api_key': KEY,
+    c = {'id': 1, 'type': 'torznab', 'name': 'J', 'url': 'http://tracker.example/api/torznab', 'api_key': KEY,
          'categories': [2000]}
     c.update(kw)
     return c

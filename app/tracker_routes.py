@@ -18,7 +18,9 @@ to the URL it was saved with (see TrackerStore).
 
 Test goes through app.tracker_guard like searches do: it counts toward the
 per-tracker and global caps, a rate-limit or ban backoff refuses it, and a
-429 or ban answer starts a persisted backoff that honors Retry-After.
+429 or ban answer starts a persisted backoff that honors Retry-After. All of
+it is keyed by site (type for known sites, normalized host for
+Torznab/Newznab), never by record id.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from typing import Any, Callable, Dict, List, Optional
 from flask import Blueprint, jsonify, request
 
 from app import tracker_clients
-from app.tracker_guard import guarded_test
+from app.tracker_guard import guard_key, guarded_test, normalize_host
 from app.tracker_http import TrackerError
 from app.tracker_store import (STATUS_ERROR, STATUS_OK, CredentialsUnreadable, get_store)
 from app.tracker_types import public_types
@@ -60,12 +62,13 @@ def init(*, get_current_user: Callable[[], Optional[dict]], get_owner: Callable[
     owner (no session). *tester* runs one connection test (raises
     TrackerError); defaults to tracker_clients.test. It always runs inside
     tracker_guard.guarded_test. *on_change*/*on_delete* get the stored record
-    after an edit or a delete (the search manager resets backoffs there).
+    after an edit or a delete (the search manager resets backoffs and drops
+    release links there); *on_change* also gets url_changed=bool.
     *on_list_change* runs after any add, edit, enable/disable or delete (cached
     search answers no longer match the tracker list)."""
     _cfg.update(get_current_user=get_current_user, get_owner=get_owner, is_implicit=is_implicit,
                 tester=tester or (lambda cfg: tracker_clients.test(cfg)),
-                on_change=on_change or (lambda rec: None), on_delete=on_delete or (lambda rec: None),
+                on_change=on_change or (lambda rec, **kw: None), on_delete=on_delete or (lambda rec: None),
                 on_list_change=on_list_change or (lambda: None))
 
 
@@ -121,19 +124,11 @@ def _not_found():
 
 
 def _throttle_keys(cfg: Dict[str, Any]) -> List[str]:
-    """The saved tracker (by id) and the site host (www. ignored): changing
-    the path, case or type of a URL does not get a fresh budget."""
-    from urllib.parse import urlsplit
-    try:
-        host = (urlsplit(str(cfg.get('url') or '')).hostname or '').lower()
-    except ValueError:
-        host = ''
-    if host.startswith('www.'):
-        host = host[4:]
-    keys = [f'host:{host}']
-    if cfg.get('id') is not None:
-        keys.append(f"id:{cfg['id']}")
-    return keys
+    """The guard key (site type, or normalized host for Torznab/Newznab) and
+    the normalized host: never the record id, so re-adding, editing, an
+    unsaved form or another path on the same host shares one budget."""
+    keys = [guard_key(cfg), f"host:{normalize_host(cfg.get('url')) or '-'}"]
+    return list(dict.fromkeys(keys))
 
 
 def _test_allowed(cfg: Dict[str, Any]) -> bool:
@@ -209,13 +204,14 @@ def edit_tracker(tracker_id: int):
     data = _body()
     if data is None:
         return _invalid({'_': 'Invalid'})
+    before = get_store().get(tracker_id)
     try:
         rec, errors = get_store().update(tracker_id, data)
     except CredentialsUnreadable:
         return _unreadable()
     if errors:
         return _invalid(errors)
-    _cfg['on_change'](rec)
+    _cfg['on_change'](rec, url_changed=bool(before) and before.get('url') != rec.get('url'))
     _list_changed()
     return _no_store(jsonify({'tracker': get_store().public(rec)}))
 

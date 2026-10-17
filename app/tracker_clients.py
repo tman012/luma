@@ -267,8 +267,11 @@ _avz_lock = threading.Lock()
 
 
 def _avz_key(cfg) -> str:
+    """Token cache key: the site (normalized host) and the account, so a
+    path or case variant of the URL reuses a valid token."""
     import hashlib
-    raw = '\0'.join(str(cfg.get(k) or '') for k in ('url', 'username', 'password', 'pid'))
+    from app.tracker_guard import normalize_host
+    raw = '\0'.join([normalize_host(cfg.get('url'))] + [str(cfg.get(k) or '') for k in ('username', 'password', 'pid')])
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
 
@@ -283,6 +286,8 @@ def _avz_token(cfg, request: Request, force: bool = False) -> str:
         hit = _avz_tokens.get(key)
         if hit and not force and hit[1] > now + 60:
             return hit[0]
+    # '/api/v1/jackett/...' is the AvistaZ sites' own API path name; nothing
+    # here talks to Jackett.
     resp = request('POST', f'{_base(cfg)}/api/v1/jackett/auth',
                    data={'username': cfg.get('username', ''), 'password': cfg.get('password', ''),
                          'pid': cfg.get('pid', '')},
@@ -483,7 +488,8 @@ CLIENTS: Dict[str, Dict[str, Callable]] = {
     'torznab': {'search': torznab_search, 'test': torznab_test},
     'beyondhd': {'search': beyondhd_search, 'test': beyondhd_test},
     'avistaz': {'search': avistaz_search, 'test': avistaz_test},
-    'iptorrents': {'search': iptorrents_search, 'test': iptorrents_test},
+    'iptorrents': {'search': iptorrents_search, 'test': iptorrents_test,
+                   'download_headers': iptorrents_download_headers},
 }
 
 
@@ -497,6 +503,13 @@ def client_for(type_id: str) -> Dict[str, Callable]:
 def test(cfg: Dict[str, Any], request: Request = http_request) -> None:
     """Raise TrackerError when *cfg* can't search; return None when it can."""
     client_for(cfg['type'])['test'](cfg, request)
+
+
+def download_headers(cfg: Dict[str, Any]) -> Dict[str, str]:
+    """Headers a release download from this tracker needs (IPTorrents: its
+    cookie and user agent). Callers send them only to the tracker's own host."""
+    fn = client_for(cfg['type']).get('download_headers')
+    return dict(fn(cfg)) if fn else {}
 
 
 def search(cfg: Dict[str, Any], query: str, categories: List[int], limit: int = 100,

@@ -12,7 +12,7 @@ import requests
 import app.main
 import app.user_auth
 from app import tracker_clients, tracker_guard, tracker_http, tracker_routes, tracker_store
-from app.tracker_guard import LIMITS, TrackerGuard, guard_key, host_key
+from app.tracker_guard import LIMITS, TrackerGuard, guard_key, normalize_host
 from app.tracker_http import Response, TrackerError
 from app.tracker_store import SECRET_MASK, TrackerStore
 
@@ -20,6 +20,7 @@ LAN = {'REMOTE_ADDR': '192.168.1.20'}
 COOKIE = 'uid=1234567; pass=abcdefabcdefabcdefabcdefabcdef12'
 APIKEY = 'ak_0123456789abcdef0123456789abcdef'
 PUBLIC_IP = '93.184.215.14'
+IPT_KEY = 'site:iptorrents'       # guard key of every IPTorrents tracker
 
 
 @pytest.fixture(autouse=True)
@@ -85,7 +86,7 @@ def _ipt(**over):
 
 
 def _torznab(**over):
-    body = {'type': 'torznab', 'name': 'Jack', 'url': 'http://jackett.example/api', 'api_key': APIKEY,
+    body = {'type': 'torznab', 'name': 'Idx', 'url': 'http://idx.example/api', 'api_key': APIKEY,
             'categories': [2000], 'priority': 20}
     body.update(over)
     return body
@@ -195,7 +196,7 @@ def test_test_429_starts_persisted_backoff_with_retry_after(owner, store, sent, 
     tracker_routes._test_log.clear()
     # A fresh guard (a restart) reads the backoff back from disk and refuses.
     fresh = TrackerGuard(tmp_path / 'tracker_guard.json')
-    until, kind = fresh.blocked(tid)
+    until, kind = fresh.blocked(IPT_KEY)
     assert kind == 'rate' and 890 < until - time.time() <= 900
     tracker_guard.reset_guard_for_tests(fresh)
     r = _post(owner, f'/api/trackers/{tid}/test', {})
@@ -211,7 +212,7 @@ def test_test_ban_backs_off_a_day(owner, store, sent):
     tid = _post(owner, '/api/trackers', _ipt()).get_json()['tracker']['id']
     state['err'] = TrackerError('banned', 403)
     assert _post(owner, f'/api/trackers/{tid}/test', {}).get_json()['error'] == 'Banned'
-    until, kind = tracker_guard.get_guard().blocked(tid)
+    until, kind = tracker_guard.get_guard().blocked(IPT_KEY)
     assert kind == 'banned' and until - time.time() > 23 * 3600
 
 
@@ -220,7 +221,7 @@ def test_test_counts_toward_hourly_cap(owner, store, sent):
     tid = _post(owner, '/api/trackers', _ipt()).get_json()['tracker']['id']
     g = tracker_guard.get_guard()
     now = time.time()
-    g.log[tid] = [[now - 60, 'i'] for _ in range(LIMITS['interactive_per_hour'])]
+    g.log[IPT_KEY] = [[now - 60, 'i'] for _ in range(LIMITS['interactive_per_hour'])]
     assert _post(owner, f'/api/trackers/{tid}/test', {}).get_json() == {'ok': False, 'error': 'Rate limited'}
     assert calls == []
 
@@ -230,7 +231,7 @@ def test_test_counts_toward_global_cap(owner, store, sent):
     tid = _post(owner, '/api/trackers', _ipt()).get_json()['tracker']['id']
     g = tracker_guard.get_guard()
     now = time.time()
-    g.log[999] = [[now - 60, 'b'] for _ in range(LIMITS['global_per_hour'])]
+    g.log['host:other.example'] = [[now - 60, 'b'] for _ in range(LIMITS['global_per_hour'])]
     assert _post(owner, f'/api/trackers/{tid}/test', {}).get_json()['error'] == 'Rate limited'
     assert calls == []
 
@@ -239,29 +240,41 @@ def test_successful_test_is_recorded_against_the_tracker(owner, store, sent):
     tid = _post(owner, '/api/trackers', _ipt()).get_json()['tracker']['id']
     assert _post(owner, f'/api/trackers/{tid}/test', {}).get_json()['ok'] is True
     g = tracker_guard.get_guard()
-    assert len(g.log[tid]) == 1 and g.log[tid][0][1] == 'i'
+    assert len(g.log[IPT_KEY]) == 1 and g.log[IPT_KEY][0][1] == 'i'
 
 
-def test_unsaved_tests_count_by_host(owner, store, sent):
+def test_unsaved_tests_count_by_site(owner, store, sent):
     calls, _ = sent
     g = tracker_guard.get_guard()
-    form = _ipt(url='https://new-site.example')
-    assert _post(owner, '/api/trackers/test', form).get_json()['ok'] is True
-    assert len(g.log[host_key('https://www.new-site.example')]) == 1
+    assert _post(owner, '/api/trackers/test', _ipt(url='https://new-site.example')).get_json()['ok'] is True
+    assert len(g.log[IPT_KEY]) == 1
+    assert _post(owner, '/api/trackers/test', _torznab(url='https://WWW.Idx2.example/x/api')).get_json()['ok'] is True
+    assert len(g.log['host:idx2.example']) == 1
 
 
 def test_credential_backoff_does_not_block_test(owner, store, sent):
     calls, _ = sent
     tid = _post(owner, '/api/trackers', _ipt()).get_json()['tracker']['id']
-    tracker_guard.get_guard().failure(tid, 'auth')
+    tracker_guard.get_guard().failure(IPT_KEY, 'auth')
     assert _post(owner, f'/api/trackers/{tid}/test', {}).get_json()['ok'] is True
-    assert tracker_guard.get_guard().blocked(tid) is None
+    assert tracker_guard.get_guard().blocked(IPT_KEY) is None
 
 
 def test_guard_key_rules():
-    assert guard_key({'id': 4, 'type': 'iptorrents', 'url': 'https://a.example'}) == 4
-    assert guard_key({'id': None, 'type': 'iptorrents', 'url': 'https://a.example'}) == host_key('https://a.example')
-    assert guard_key({'id': 4, 'type': 'privatehd', 'url': 'https://www.phd.example'}) == host_key('https://phd.example')
+    # Known sites: by type, whatever the id or mirror domain.
+    for cfg in ({'id': 4, 'type': 'iptorrents', 'url': 'https://a.example'},
+                {'id': None, 'type': 'iptorrents', 'url': 'https://b.example/x'},
+                {'id': 9, 'type': 'IPTorrents', 'url': 'https://www.a.example'}):
+        assert guard_key(cfg) == IPT_KEY
+    assert guard_key({'id': 4, 'type': 'privatehd', 'url': 'https://www.phd.example'}) == 'site:privatehd'
+    # Torznab/Newznab: by normalized host; id, scheme, port, path and case don't matter.
+    keys = {guard_key({'id': i, 'type': t, 'url': u}) for i, t, u in [
+        (1, 'torznab', 'https://idx.example/api'), (None, 'torznab', 'http://WWW.IDX.example./other/api'),
+        (7, 'newznab', 'https://idx.example:8443/api')]}
+    assert keys == {'host:idx.example'}
+    assert guard_key({'id': 1, 'type': 'torznab', 'url': 'https://idx-two.example/api'}) == 'host:idx-two.example'
+    assert normalize_host('https://bücher.example/x') == 'xn--bcher-kva.example'
+    assert normalize_host('not a url') == '' and guard_key({'type': 'torznab', 'url': ''}) == 'host:-'
 
 
 # ------------------------------------------------------------------ B3: no stale reads
@@ -320,8 +333,8 @@ def test_delete_drops_avistaz_tokens(owner, store, sent):
     ('http://t.example/x', 'https://t.example/y', True),
     ('https://t.example/x', 'http://t.example/y', False),
     ('https://t.example/x', 'https://t.example:8443/y', False),
-    ('http://t.example:9117/x', 'http://t.example:9118/y', False),
-    ('http://t.example:9117/x', 'https://t.example/y', False),
+    ('http://t.example:8080/x', 'http://t.example:8081/y', False),
+    ('http://t.example:8080/x', 'https://t.example/y', False),
     ('https://t.example/x', 'ftp://t.example/y', False),
     ('https://t.example/x', 'https://evil.example/y', False),
 ])
@@ -385,7 +398,6 @@ def test_any_blocked_answer_blocks_the_host(monkeypatch):
 
 
 @pytest.mark.parametrize('url', [
-    'https://t.example:9696/', 'http://t.example:9117/', 'https://t.example:5001/', 'http://t.example:5002/',
     'http://localhost/', 'http://a.localhost/', 'ftp://t.example/', 'https://user:pw@t.example/',
 ])
 def test_blocked_targets(url):
@@ -394,10 +406,25 @@ def test_blocked_targets(url):
     assert e.value.kind == 'blocked'
 
 
-def test_luma_configured_port_is_blocked(monkeypatch):
+@pytest.mark.parametrize('port', [9696, 9117, 5001, 5002, 8443, 6701])
+def test_any_port_is_fine_on_a_public_host(port, monkeypatch):
+    monkeypatch.setattr(tracker_http, 'own_addresses', lambda: frozenset())
     monkeypatch.setenv('LUMA_PORT', '6701')
-    with pytest.raises(TrackerError):
-        tracker_http.check_target('https://t.example:6701/')
+    assert tracker_http.check_target(f'https://t.example:{port}/') == (PUBLIC_IP, port)
+
+
+def test_luma_ports_are_refused_on_luma_addresses(monkeypatch):
+    monkeypatch.setenv('LUMA_PORT', '6701')
+    monkeypatch.setattr(tracker_http, 'own_addresses', lambda: frozenset({'203.0.113.7'}))
+    for addr in ('127.0.0.1', '::1', '::ffff:127.0.0.1', '0.0.0.0', '203.0.113.7'):
+        for port in (5001, 5002, 6701):
+            assert tracker_http.port_allowed(addr, port) is False, (addr, port)
+    assert tracker_http.port_allowed(PUBLIC_IP, 6701) is True
+    assert tracker_http.port_allowed('127.0.0.1', 9696) is True       # the address itself is refused anyway
+    monkeypatch.setattr(tracker_http, 'resolve', lambda h, p: ['203.0.113.7'])
+    with pytest.raises(TrackerError) as e:
+        tracker_http.check_target('https://own-name.example:6701/')
+    assert e.value.kind == 'blocked'
 
 
 def test_unresolvable_host_is_a_connection_error(monkeypatch):
@@ -497,7 +524,7 @@ def test_total_deadline(monkeypatch):
 @pytest.mark.parametrize('url', [
     'http://127.0.0.1:6701/api/adb', 'http://169.254.169.254/latest', 'http://10.0.0.5:8080/api',
     'http://192.168.1.62:9696/api', 'http://[::1]/api', 'http://localhost/api', 'http://0.0.0.0/api',
-    'http://100.64.0.1/api', 'https://t.example:9696/api',
+    'http://100.64.0.1/api', 'http://[fd00::5]/api', 'http://172.20.0.2:8117/api', 'http://224.0.0.1/api',
 ])
 def test_api_refuses_blocked_urls_on_save_and_test(owner, store, sent, url):
     calls, _ = sent
@@ -511,7 +538,8 @@ def test_api_refuses_blocked_urls_on_save_and_test(owner, store, sent, url):
 def test_site_types_need_https(owner, store, sent):
     r = _post(owner, '/api/trackers', _ipt(url='http://iptorrents.example'))
     assert r.status_code == 400 and r.get_json()['fields'] == {'url': 'Invalid URL'}
-    assert _post(owner, '/api/trackers', _torznab(url='http://jackett.example/api')).status_code == 201
+    assert _post(owner, '/api/trackers', _torznab(url='http://idx.example/api')).status_code == 201
+    assert _post(owner, '/api/trackers', _torznab(name='Pub', url='https://pub.example:9696/api')).status_code == 201
 
 
 def test_host_name_resolving_inside_is_refused_at_test(owner, store, monkeypatch):
@@ -542,8 +570,8 @@ def test_ban_is_persisted_and_refuses_test_after_restart(owner, store, sent, tmp
 
 def test_click_throttle_is_per_host_not_per_url_spelling(owner, store, sent):
     calls, _ = sent
-    assert _post(owner, '/api/trackers/test', _torznab(url='http://jackett.example/api')).get_json()['ok'] is True
-    for variant in ('http://JACKETT.example/api/', 'http://www.jackett.example/other', 'https://jackett.example/x'):
+    assert _post(owner, '/api/trackers/test', _torznab(url='http://idx.example/api')).get_json()['ok'] is True
+    for variant in ('http://IDX.example/api/', 'http://www.idx.example/other', 'https://idx.example/x'):
         r = _post(owner, '/api/trackers/test', _torznab(url=variant))
         assert r.get_json() == {'ok': False, 'error': 'Rate limited'}, variant
     assert len(calls) == 1
@@ -566,3 +594,118 @@ def test_avistaz_test_reuses_a_valid_token(monkeypatch):
     tracker_clients.test(dict(cfg, pid='pid_changed_2'), fake)      # new credentials: new sign-in
     assert calls.count('https://phd.example/api/v1/jackett/auth') == 2
     tracker_clients.clear_avistaz_tokens()
+
+
+# ------------------------------------------------------------------ PM rule: state keyed by site, not record id
+
+def _ban(owner, sent, body):
+    calls, state = sent
+    tid = _post(owner, '/api/trackers', body).get_json()['tracker']['id']
+    state['err'] = TrackerError('rate', 429, retry_after=1800)
+    assert _post(owner, f'/api/trackers/{tid}/test', {}).get_json()['error'] == 'Rate limited'
+    state['err'] = None
+    tracker_routes._test_log.clear()        # only the persisted guard is left to refuse
+    return tid
+
+
+@pytest.mark.parametrize('body', [_ipt(), _torznab()])
+def test_readding_a_tracker_keeps_its_backoff(owner, store, sent, body):
+    calls, _ = sent
+    tid = _ban(owner, sent, body)
+    assert owner.delete(f'/api/trackers/{tid}').status_code == 200
+    new = _post(owner, '/api/trackers', body).get_json()['tracker']['id']
+    assert new != tid
+    assert _post(owner, f'/api/trackers/{new}/test', {}).get_json() == {'ok': False, 'error': 'Rate limited'}
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('body,edit', [
+    (_ipt(), {'name': 'Renamed', 'cookie': 'uid=2; pass=other'}),
+    (_ipt(), {'url': 'https://iptorrents-mirror.example', 'cookie': 'uid=2; pass=other'}),
+    (_torznab(), {'url': 'https://www.idx.example/v2/api', 'api_key': 'ak_another_key_000000000000'}),
+])
+def test_editing_a_tracker_keeps_its_backoff(owner, store, sent, body, edit):
+    calls, _ = sent
+    tid = _ban(owner, sent, body)
+    assert _put(owner, f'/api/trackers/{tid}', edit).status_code == 200
+    assert _post(owner, f'/api/trackers/{tid}/test', {}).get_json() == {'ok': False, 'error': 'Rate limited'}
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('body,form', [
+    (_ipt(), _ipt(url='https://iptorrents-other.example', cookie='uid=3; pass=x')),
+    (_torznab(), _torznab(url='https://IDX.example/another/path/api', api_key='')),
+])
+def test_unsaved_form_and_other_path_hit_the_same_backoff(owner, store, sent, body, form):
+    calls, _ = sent
+    _ban(owner, sent, body)
+    assert _post(owner, '/api/trackers/test', form).get_json() == {'ok': False, 'error': 'Rate limited'}
+    assert len(calls) == 1
+
+
+def test_one_budget_per_site_across_records_paths_and_forms(owner, store, sent):
+    calls, _ = sent
+    g = tracker_guard.get_guard()
+    a = _post(owner, '/api/trackers', _torznab(name='A', url='https://idx.example/api')).get_json()['tracker']['id']
+    b = _post(owner, '/api/trackers', _torznab(name='B', url='https://idx.example/other/api')).get_json()['tracker']['id']
+    for path, body in ((f'/api/trackers/{a}/test', {}), (f'/api/trackers/{b}/test', {}),
+                       ('/api/trackers/test', _torznab(url='http://www.idx.example/third/api'))):
+        tracker_routes._test_log.clear()
+        assert _post(owner, path, body).get_json()['ok'] is True
+    assert len(g.log['host:idx.example']) == 3
+    assert not any(isinstance(k, int) or k.startswith('id:') for k in g.log)
+    # Fill the shared hourly budget: every record and form of that host is refused.
+    now = time.time()
+    g.log['host:idx.example'] = [[now - 60, 'i'] for _ in range(LIMITS['interactive_per_hour'])]
+    for path, body in ((f'/api/trackers/{a}/test', {}), (f'/api/trackers/{b}/test', {}),
+                       ('/api/trackers/test', _torznab(url='https://idx.example/fresh/api'))):
+        tracker_routes._test_log.clear()
+        assert _post(owner, path, body).get_json() == {'ok': False, 'error': 'Rate limited'}, path
+    assert len(calls) == 3
+    # Another host has its own budget.
+    tracker_routes._test_log.clear()
+    assert _post(owner, '/api/trackers/test', _torznab(url='https://idx-two.example/api')).get_json()['ok'] is True
+
+
+def test_ipt_mirrors_share_one_budget_and_ban(owner, store, sent):
+    calls, _ = sent
+    _ban(owner, sent, _ipt())
+    tid2 = _post(owner, '/api/trackers', _ipt(name='IPT mirror', url='https://ipt-mirror.example')).get_json()['tracker']['id']
+    assert _post(owner, f'/api/trackers/{tid2}/test', {}).get_json() == {'ok': False, 'error': 'Rate limited'}
+    assert len(calls) == 1
+
+
+def test_old_id_keyed_guard_state_is_dropped(tmp_path):
+    p = tmp_path / 'tracker_guard.json'
+    p.write_text(json.dumps({'log': {'3': [[time.time(), 'i']]}, 'buckets': {}, 'streak': {'3': 1},
+                             'cooldown': {'3': [time.time() + 600, 'rate'],
+                                          'host:idx.example': [time.time() + 600, 'rate']}}))
+    g = TrackerGuard(p)
+    assert g.blocked('host:idx.example')[1] == 'rate'
+    assert set(g.cooldown) == {'host:idx.example'} and g.log == {} and g.streak == {}
+    assert g.fail_closed_until == 0
+
+
+# ------------------------------------------------------------------ PM rule: no Jackett or Prowlarr
+
+@pytest.mark.parametrize('url', [
+    'https://jackett.example/api/v2.0/indexers/iptorrents/results/torznab',
+    'https://jackett.example/api/v2.0/indexers/all/results/torznab/api',
+    'https://prowlarr.example/5/api', 'https://prowlarr.example/prowlarr/5/api',
+    'https://media.example/prowlarr/api', 'https://prowlarr.example/api/v1/indexer/5',
+])
+def test_jackett_and_prowlarr_endpoints_are_refused(owner, store, sent, url):
+    calls, _ = sent
+    for t in ('torznab', 'newznab'):
+        r = _post(owner, '/api/trackers', _torznab(type=t, url=url))
+        assert r.status_code == 400 and r.get_json()['fields'] == {'url': 'Invalid URL'}, (t, url)
+        assert _post(owner, '/api/trackers/test', _torznab(type=t, url=url)).status_code == 400
+    assert calls == [] and store.list() == []
+
+
+def test_own_torznab_endpoints_are_accepted(owner, store, sent):
+    for i, url in enumerate(('https://tracker.example/api', 'https://tracker.example/api/torznab',
+                             'https://tracker.example/torznab/api', 'https://tracker.example/rss/api')):
+        assert _post(owner, '/api/trackers', _torznab(name=f'T{i}', url=url)).status_code == 201, url
+    tid = store.list()[0]['id']
+    assert _put(owner, f'/api/trackers/{tid}', {'url': 'https://tracker.example/7/api'}).status_code == 400
