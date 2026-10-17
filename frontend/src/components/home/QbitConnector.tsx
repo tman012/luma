@@ -142,7 +142,7 @@ function QbitForm({ view, onSaved }: { view: QbitView; onSaved: (v: QbitView) =>
           <button type="button" style={ghostBtn} disabled={testing} aria-busy={testing} onClick={test} data-testid="qbit-test">
             {testing ? 'Testing…' : 'Test'}
           </button>
-          <button type="submit" style={{ ...primary, opacity: canSave ? 1 : 0.5 }} disabled={!canSave} data-testid="qbit-save">Save</button>
+          <button type="submit" style={{ ...primary, opacity: canSave ? 1 : 0.4 }} disabled={!canSave} data-testid="qbit-save">Save</button>
           <span role="status" aria-live="polite" data-testid="qbit-result"
             style={{ fontSize: 13, minWidth: 0, overflowWrap: 'anywhere', color: result ? (result.ok ? '#22c55e' : '#f87171') : 'transparent' }}>
             {result?.text}
@@ -161,7 +161,7 @@ const card: React.CSSProperties = {
   border: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, margin: 0,
 };
 const labelStyle: React.CSSProperties = {
-  display: 'block', margin: '0 0 6px', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.7)', fontFamily: FONT,
+  display: 'block', margin: '0 0 6px', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.7)', fontFamily: FONT,
 };
 const dot = (on: boolean): React.CSSProperties => ({
   width: 8, height: 8, borderRadius: 4, background: on ? '#22c55e' : 'rgba(255,255,255,0.3)',

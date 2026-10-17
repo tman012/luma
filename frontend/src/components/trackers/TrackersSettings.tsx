@@ -510,7 +510,8 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         {testBtn}
         {saveBtn}
-        {status}
+        {/* 12px from Save comes from the row gap; no extra margin. */}
+        <span style={{ display: 'inline-flex', minWidth: 0 }} data-testid="tracker-test-slot">{status}</span>
         {tracker && (
           <button type="button" className="lt-btn lt-focus" style={{ ...dangerTextBtn, marginLeft: 'auto' }}
             onClick={() => setConfirm('delete')} data-testid="tracker-delete">Delete</button>
@@ -522,7 +523,8 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
     <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
       {saveBtn}
       {testBtn}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>{status}{formErr}</div>
+      {/* Phone: the Test result has its own line under the buttons. */}
+      <div data-testid="tracker-test-slot" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, width: '100%' }}>{status}{formErr}</div>
       {tracker && (
         <button type="button" className="lt-btn lt-row" onClick={() => setConfirm('delete')} data-testid="tracker-delete"
           style={{ marginTop: 24, height: 56, width: '100%', border: 'none', background: 'none', color: DANGER, fontSize: 17,

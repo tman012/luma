@@ -115,7 +115,7 @@ function ConnectorGroup({ group, masked, onSaved }: {
           <button type="button" style={ghostBtn} disabled={testing || (!trimmed && !saved)} onClick={test} data-testid={`${id}-test`}>
             {testing ? 'Testing…' : 'Test'}
           </button>
-          <button type="button" style={{ ...primary, opacity: trimmed && !saving ? 1 : 0.5 }}
+          <button type="button" style={{ ...primary, opacity: trimmed && !saving ? 1 : 0.4 }}
                   disabled={!trimmed || saving} onClick={() => save(trimmed)} data-testid={`${id}-save`}>
             Save
           </button>
@@ -152,7 +152,7 @@ const card: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 6, fontFamily: FONT,
 };
 const label: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.7)',
+  display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.7)',
 };
 const dot = (on: boolean): React.CSSProperties => ({
   width: 8, height: 8, borderRadius: 4, background: on ? '#22c55e' : 'rgba(255,255,255,0.3)',

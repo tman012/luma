@@ -43,6 +43,7 @@ export const trackersCss = `
 .lt-ghost:hover:not(:disabled),.lt-row:hover,.lt-pick:hover{background:rgba(255,255,255,.06)}
 .lt-row:active,.lt-pick:active{background:rgba(255,255,255,.06)}
 .lt-btn:disabled{opacity:.5;cursor:default}
+.lt-primary:disabled{opacity:.4}
 .lt-focus:focus-visible,.lt-btn:focus-visible,.lt-row:focus-visible,.lt-pick:focus-visible,.lt-chip:focus-visible{outline:2px solid ${BLUE_HOVER};outline-offset:-2px}
 .lt-input{width:100%;box-sizing:border-box;height:44px;padding:0 14px;border-radius:10px;background:${GLASS};
   border:1px solid rgba(255,255,255,.12);color:${TEXT};font-size:15px;font-family:${FONT};outline:none;
