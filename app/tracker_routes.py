@@ -10,9 +10,15 @@ DELETE /api/trackers/<id>          delete
 POST   /api/trackers/<id>/test     test the saved tracker, updates its status
 POST   /api/trackers/test          test an unsaved form ({"id": n} fills masked secrets)
 
-Only the install owner (the first active admin, including the implicit LAN
-owner) may call these. The service API key is not the owner. Secrets never
-leave the server: responses carry SECRET_MASK, Test answers a short message.
+Only the install owner (the first active admin), signed in with a session,
+may call these. The implicit LAN owner (no sign-in) gets 401, and the service
+API key is not the owner. Secrets never leave the server: responses carry
+SECRET_MASK, Test answers a short message. A stored secret is only ever sent
+to the URL it was saved with (see TrackerStore).
+
+Test goes through app.tracker_guard like searches do: it counts toward the
+per-tracker and global caps, a rate-limit or ban backoff refuses it, and a
+429 or ban answer starts a persisted backoff that honors Retry-After.
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ from typing import Any, Callable, Dict, List, Optional
 from flask import Blueprint, jsonify, request
 
 from app import tracker_clients
+from app.tracker_guard import guarded_test
 from app.tracker_http import TrackerError
 from app.tracker_store import (STATUS_ERROR, STATUS_OK, CredentialsUnreadable, get_store)
 from app.tracker_types import public_types
@@ -44,10 +51,13 @@ _test_lock = threading.Lock()
 
 
 def init(*, get_current_user: Callable[[], Optional[dict]], get_owner: Callable[[], Optional[dict]],
+         is_implicit: Callable[[], bool],
          tester: Optional[Callable[[Dict[str, Any]], None]] = None) -> None:
-    """*tester* runs one connection test (raises TrackerError); defaults to
-    tracker_clients.test. The search manager swaps in its guarded version."""
-    _cfg.update(get_current_user=get_current_user, get_owner=get_owner,
+    """*is_implicit* tells whether the current user is the implicit LAN
+    owner (no session). *tester* runs one connection test (raises
+    TrackerError); defaults to tracker_clients.test. It always runs inside
+    tracker_guard.guarded_test."""
+    _cfg.update(get_current_user=get_current_user, get_owner=get_owner, is_implicit=is_implicit,
                 tester=tester or (lambda cfg: tracker_clients.test(cfg)))
 
 
@@ -61,7 +71,7 @@ def _no_store(resp, status=200):
 
 def _require_owner():
     user = _cfg['get_current_user']()
-    if not user:
+    if not user or _cfg['is_implicit']():
         return _no_store(jsonify({'error': 'Authentication required'}), 401)
     owner = _cfg['get_owner']()
     uid = user.get('id')
@@ -84,6 +94,11 @@ def _invalid(fields: Dict[str, str]):
     if fields.get('_') == 'Not found':
         return _no_store(jsonify({'error': 'Not found'}), 404)
     return _no_store(jsonify({'error': 'Invalid', 'fields': fields}), 400)
+
+
+def _unreadable():
+    """The secret key file is unreadable or invalid: nothing can be saved."""
+    return _no_store(jsonify({'error': UNREADABLE}), 409)
 
 
 def _not_found():
@@ -112,7 +127,7 @@ def _run_test(cfg: Dict[str, Any]) -> Optional[str]:
     if not _test_allowed(cfg):
         return 'Rate limited'
     try:
-        _cfg['tester'](cfg)
+        guarded_test(cfg, _cfg['tester'])
         return None
     except TrackerError as e:
         logger.info('Tracker test failed: %s (%s)', cfg.get('name') or cfg.get('type'), e.kind)
@@ -143,7 +158,10 @@ def add_tracker():
     data = _body()
     if data is None:
         return _invalid({'_': 'Invalid'})
-    rec, errors = get_store().create(data)
+    try:
+        rec, errors = get_store().create(data)
+    except CredentialsUnreadable:
+        return _unreadable()
     if errors:
         return _invalid(errors)
     return _no_store(jsonify({'tracker': get_store().public(rec)}), 201)
@@ -162,7 +180,10 @@ def edit_tracker(tracker_id: int):
     data = _body()
     if data is None:
         return _invalid({'_': 'Invalid'})
-    rec, errors = get_store().update(tracker_id, data)
+    try:
+        rec, errors = get_store().update(tracker_id, data)
+    except CredentialsUnreadable:
+        return _unreadable()
     if errors:
         return _invalid(errors)
     return _no_store(jsonify({'tracker': get_store().public(rec)}))
@@ -183,6 +204,7 @@ def set_tracker_enabled(tracker_id: int):
 def delete_tracker(tracker_id: int):
     if not get_store().delete(tracker_id):
         return _not_found()
+    tracker_clients.clear_avistaz_tokens()
     return _no_store(jsonify({'ok': True}))
 
 

@@ -9,7 +9,8 @@ import pytest
 
 import app.main
 import app.user_auth
-from app import tracker_routes, tracker_store, tracker_types
+from app import tracker_clients, tracker_guard, tracker_routes, tracker_store, tracker_types
+from app.tracker_guard import TrackerGuard
 from app.tracker_http import TrackerError
 from app.tracker_store import SECRET_MASK, TrackerStore
 
@@ -26,8 +27,13 @@ APIKEY = 'ak_0123456789abcdef0123456789abcdef'
 def store(tmp_path):
     s = TrackerStore(tmp_path / 'trackers.json', tmp_path / 'tracker_secrets.key')
     tracker_store.reset_store_for_tests(s)
+    tracker_guard.reset_guard_for_tests(TrackerGuard(tmp_path / 'tracker_guard.json'))
     tracker_routes._test_log.clear()
+    old_spacing = tracker_guard.LIMITS['min_interval_s']
+    tracker_guard.LIMITS['min_interval_s'] = 0.0
     yield s
+    tracker_guard.LIMITS['min_interval_s'] = old_spacing
+    tracker_guard.reset_guard_for_tests(None)
     tracker_store.reset_store_for_tests(None)
 
 
@@ -47,9 +53,12 @@ def tested(monkeypatch):
 
 @pytest.fixture
 def owner_client(test_app, store):
+    """The owner on the LAN, signed in: tracker routes need a session."""
     owner = app.user_auth.create_user('owner', 'pin-1234567', is_admin=True)
     c = test_app.test_client()
     c.environ_base.update(LAN)
+    c.environ_base.update({'HTTP_ORIGIN': 'http://localhost', 'HTTP_HOST': 'localhost'})
+    c.set_cookie(app.main.AUTH_COOKIE, app.user_auth.create_session(owner['id']))
     return c, owner
 
 

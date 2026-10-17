@@ -9,6 +9,10 @@ The client never receives a secret: public() replaces every stored secret
 with SECRET_MASK. On an edit, a secret field sent back as SECRET_MASK keeps
 the stored value. Secrets are never logged.
 
+A stored secret only ever goes to the URL it was saved with. Changing a
+tracker's URL clears its stored secrets (the owner re-enters them), and a
+Test of a form whose URL differs from the saved one never uses them.
+
 A fresh install has no trackers file and therefore zero trackers; nothing is
 seeded.
 """
@@ -56,7 +60,7 @@ class TrackerStore:
         self._key_path = Path(key_path) if key_path else None
         self._lock = threading.RLock()
         self._data: Dict[str, Any] = {'version': 1, 'next_id': 1, 'trackers': []}
-        self._stamp: Optional[Tuple[int, int]] = None
+        self._stamp: Optional[Tuple[int, ...]] = None
         self._fernet = None
 
     # ------------------------------------------------------------ files
@@ -86,7 +90,10 @@ class TrackerStore:
                     os.close(fd)
 
     def _reload(self) -> None:
-        """Re-read the file when it changed on disk (another worker wrote it)."""
+        """Re-read the file (another worker may have written it). Always a
+        full read: an mtime/size check can miss a same-size write within the
+        filesystem's timestamp granularity. The file is small (at most
+        MAX_TRACKERS records) and callers hold the file lock."""
         import json
         from app.paths import quarantine
         try:
@@ -95,9 +102,7 @@ class TrackerStore:
             self._data = {'version': 1, 'next_id': 1, 'trackers': []}
             self._stamp = None
             return
-        stamp = (st.st_mtime_ns, st.st_size)
-        if stamp == self._stamp:
-            return
+        stamp = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
         try:
             with open(self.path, encoding='utf-8') as fh:
                 raw = json.load(fh)
@@ -130,7 +135,7 @@ class TrackerStore:
         from app.paths import atomic_write_json
         atomic_write_json(self.path, self._data, mode=0o600)
         st = os.stat(self.path)
-        self._stamp = (st.st_mtime_ns, st.st_size)
+        self._stamp = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
 
     # ------------------------------------------------------------ crypto
 
@@ -284,6 +289,8 @@ class TrackerStore:
             if url is None:
                 errors['url'] = tt.INVALID_URL
             rec['url'] = url or ''
+        # Stored secrets are bound to the saved URL: a new URL drops them.
+        url_changed = existing is not None and rec['url'] != existing.get('url')
         # enabled
         enabled = payload.get('enabled', base.get('enabled', True))
         if not isinstance(enabled, bool):
@@ -330,7 +337,9 @@ class TrackerStore:
         changes: Dict[str, Optional[str]] = {}
         stored = base.get('secrets') or {}
         for k in tt.secret_keys(type_id):
-            has_stored = bool(stored.get(k))
+            has_stored = bool(stored.get(k)) and not url_changed
+            if url_changed and stored.get(k):
+                changes[k] = None           # cleared unless a new value follows
             if k not in payload or payload[k] == SECRET_MASK:
                 if not has_stored and fields[k]['required']:
                     errors[k] = tt.REQUIRED
@@ -344,7 +353,7 @@ class TrackerStore:
             if not v:
                 if fields[k]['required']:
                     errors[k] = tt.REQUIRED
-                elif has_stored:
+                elif has_stored or (url_changed and stored.get(k)):
                     changes[k] = None
                 continue
             if len(v) > tt.VALUE_MAX:
@@ -480,7 +489,11 @@ class TrackerStore:
                 errors.pop('name')          # testing an unsaved copy is fine
             if errors:
                 return None, errors
-            cfg = {'id': tracker_id, 'type': rec['type'], 'name': rec['name'], 'url': rec['url'],
+            same_url = cur is not None and rec['url'] == cur.get('url')
+            # A form pointing somewhere else is a different tracker: no stored
+            # secret, and its Test counts against that host, not this id.
+            cfg = {'id': tracker_id if same_url else None, 'type': rec['type'], 'name': rec['name'],
+                   'url': rec['url'],
                    'categories': rec['categories'], 'priority': rec['priority'], 'enabled': rec['enabled']}
             cfg.update(rec['settings'])
             stored = (cur or {}).get('secrets') or {}
@@ -488,7 +501,7 @@ class TrackerStore:
                 if k in changes:
                     if changes[k] is not None:
                         cfg[k] = changes[k]
-                elif stored.get(k):
+                elif same_url and stored.get(k):
                     cfg[k] = self._decrypt(stored[k])
             return cfg, {}
 

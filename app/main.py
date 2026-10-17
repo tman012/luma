@@ -20532,7 +20532,8 @@ _start_flow.init(
 app.register_blueprint(_start_flow.bp)
 
 from app import tracker_routes as _tracker_routes
-_tracker_routes.init(get_current_user=_get_current_user, get_owner=lambda: _access.owner(user_auth))
+_tracker_routes.init(get_current_user=_get_current_user, get_owner=lambda: _access.owner(user_auth),
+                     is_implicit=lambda: bool(getattr(g, 'implicit_user', False)))
 app.register_blueprint(_tracker_routes.bp)
 
 

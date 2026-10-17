@@ -105,6 +105,16 @@ def raise_for_status(resp: Response) -> None:
     raise TrackerError('http', s)
 
 
+_DEFAULT_PORTS = {'http': 80, 'https': 443}
+
+
+def _port(p) -> Optional[int]:
+    try:
+        return p.port or _DEFAULT_PORTS.get(p.scheme)
+    except ValueError:
+        return None
+
+
 def _same_origin(a: str, b: str) -> bool:
     pa, pb = urlsplit(a), urlsplit(b)
     host_a, host_b = (pa.hostname or '').lower(), (pb.hostname or '').lower()
@@ -112,10 +122,18 @@ def _same_origin(a: str, b: str) -> bool:
         host_a = host_a[4:]
     if host_b.startswith('www.'):
         host_b = host_b[4:]
-    if host_a != host_b:
+    if host_a != host_b or pb.scheme not in _DEFAULT_PORTS:
         return False
     # https -> http is a downgrade; http -> https is fine.
-    return not (pa.scheme == 'https' and pb.scheme != 'https')
+    if pa.scheme == 'https' and pb.scheme != 'https':
+        return False
+    port_a, port_b = _port(pa), _port(pb)
+    if port_a is None or port_b is None:
+        return False
+    if port_a == port_b:
+        return True
+    # The usual http -> https upgrade moves from the default 80 to the default 443.
+    return pa.scheme == 'http' and pb.scheme == 'https' and port_a == 80 and port_b == 443
 
 
 def request(method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
