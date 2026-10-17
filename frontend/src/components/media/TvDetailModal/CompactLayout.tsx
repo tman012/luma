@@ -710,7 +710,7 @@ export function CompactLayout(props: TvModalViewProps) {
                       setSelectedSeason(sn);
                       setShowEpisodesSheet(true);
                     }}
-                    onOpenSources={tvdbId && isOwner
+                    onOpenSources={isOwner
                       ? () => setShowSources({
                           type: 'episode',
                           season: episodeData.seasonNumber,
@@ -916,6 +916,7 @@ export function CompactLayout(props: TvModalViewProps) {
 
                       {/* Sources (owner) */}
                       {isOwner && (
+                        <span data-modal-sources="" style={{ display: 'contents' }}>
                         <ActionButton
                         icon={
                           <svg
@@ -941,6 +942,7 @@ export function CompactLayout(props: TvModalViewProps) {
                           setShowSources({ type: 'season', season });
                         }}
                       />
+                        </span>
                       )}
 
                       {/* Seasons / Episodes toggle — show as soon as we know
@@ -1272,11 +1274,11 @@ export function CompactLayout(props: TvModalViewProps) {
       )}
 
       {/* Sources panel — bottom sheet */}
-      {showSources && tvdbId && (
+      {showSources && (tvdbId || show?.title) && (
         <TvSourcesPanel
           target={showSources}
           targetName={sourcesTargetName(showSources, seasons, episodeData)}
-          tvdbId={tvdbId}
+          tvdbId={tvdbId ?? 0}
           tmdbId={resolvedTmdbId}
           title={show?.title}
           year={show?.year ?? null}

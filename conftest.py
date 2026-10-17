@@ -278,3 +278,13 @@ def test_app():
     flask_app.config['START_BACKGROUND_THREADS'] = False
     
     return flask_app
+
+
+@pytest.fixture(autouse=True)
+def tracker_test_env(monkeypatch):
+    """Tracker code never does real DNS or real pauses in tests: every name
+    resolves to one public address and the AvistaZ sign-in gap doesn't
+    sleep, unless a test swaps in its own."""
+    from app import tracker_clients, tracker_http
+    monkeypatch.setattr(tracker_http, 'resolve', lambda host, port: ['93.184.215.14'])
+    monkeypatch.setattr(tracker_clients, '_sleep', lambda s: None)

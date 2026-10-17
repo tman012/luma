@@ -39,6 +39,8 @@ export interface TvProcessedRelease {
   infoHash?: string;
   /** Protocol — usenet rows can't ride the qBit pipeline. */
   protocol?: string;
+  /** Tracker type for rows from Settings > Trackers (drives the IPT preference). */
+  trackerType?: string;
   /** Whether the release is a full-season pack or a single episode, parsed from
    *  the title. Drives the season/episode segmentation in the TV sources panel. */
   packType: 'season' | 'episode';
@@ -139,6 +141,7 @@ function indexerToProcessed(r: AllResultsRelease): TvProcessedRelease {
     downloadUrl: r.downloadUrl,
     infoHash: r.infoHash,
     protocol: r.protocol,
+    trackerType: r.trackerType,
     ...detectTvScope(r.title),
   };
 }
@@ -196,7 +199,10 @@ export function useTvSourcesData({
           series_id?: number;
           episode_id?: number;
         };
-        if (target.type === 'season') {
+        if (!tvdbId) {
+          // No TVDB id: Sonarr can't search this show; the trackers still can.
+          data = { success: false, releases: [] };
+        } else if (target.type === 'season') {
           data = await searchSeasonReleases(tvdbId, target.season, tmdbId);
         } else {
           data = await searchEpisodeReleases(
@@ -226,8 +232,16 @@ export function useTvSourcesData({
         // while overriding so wrong matched metadata does not narrow to zero.
         const indexerTitle = ((indexerQuery || '').trim() || title || '').trim();
         const indexerYear = (indexerQuery || '').trim() ? null : (year ?? null);
+        // Without Sonarr (or with no trackers) an answered sweep is still an
+        // answer: only a sweep that failed outright counts toward an error.
+        let indexerOk = !!indexerTitle;
         const indexerRaw = indexerTitle
           ? await fetchAllResults(indexerTitle, 'tv', indexerYear, tmdbId, controller.signal)
+              .catch((err: unknown) => {
+                if ((err as { name?: string })?.name === 'AbortError') throw err;
+                indexerOk = false;
+                return [] as AllResultsRelease[];
+              })
           : [];
         const indexerReleases = indexerRaw.map(indexerToProcessed);
         const merged = mergeReleases(arrReleases, indexerReleases) as TvProcessedRelease[];
@@ -235,7 +249,7 @@ export function useTvSourcesData({
         if (!cancelled) {
           setReleases(merged);
           // Only surface an error when we truly have nothing to show.
-          if (!sonarrOk && merged.length === 0) setError(true);
+          if (!sonarrOk && !indexerOk && merged.length === 0) setError(true);
         }
       } catch (err: unknown) {
         const e = err as { name?: string };

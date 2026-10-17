@@ -60,8 +60,11 @@ def _avistaz_family(name: str, url: str) -> Dict[str, Any]:
     }
 
 
-# type id -> definition. 'client' picks the search/test code in tracker_clients;
-# 'family' groups trackers that share one account rate limit.
+# type id -> definition. 'client' picks the search/test code in tracker_clients.
+# 'family' 'avistaz' marks the AvistaZ network sites: every request to them
+# (user or background) goes through tracker_guard's strict token bucket.
+# Budgets and backoffs are keyed per type for known sites and per host for
+# Torznab/Newznab (tracker_guard.guard_key), not per family or record.
 TRACKER_TYPES: Dict[str, Dict[str, Any]] = {
     'torznab': {
         'name': 'Torznab', 'protocol': 'torrent', 'client': 'torznab', 'family': '',

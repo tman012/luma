@@ -5,6 +5,8 @@ import { FocusZone } from '@/components/tv/FocusZone';
 import { useFocusable } from '@/hooks/useFocusable';
 import { ManualMatchPicker } from '@/components/media/ManualMatchPicker';
 import { grabToLibrary } from '@/services/allSourcesApi';
+import { useIndexerConfigured } from '@/services/sourcesAvailability';
+import { START_GLOW } from '@/components/start/StartUI';
 import {
   TrackerSeedPills,
   SegmentRow,
@@ -118,7 +120,7 @@ function SourcesScreen({ children, zIndex, onBack, backdropUrl, clearLogoUrl, mo
   return (
     <div
       style={{
-        position: 'fixed', inset: 0, background: '#000', zIndex,
+        position: 'fixed', inset: 0, backgroundColor: 'var(--color-kiosk-black)', backgroundImage: START_GLOW, zIndex,
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         padding: '40px clamp(20px, 5vw, 60px)',
       }}
@@ -246,7 +248,7 @@ function FocusableReleaseRow({ release, onClick, index, zoneId, isWeb, recommend
       style={{
         display: 'flex', flexDirection: 'column', gap: '10px',
         padding: isWeb ? '22px 28px' : '18px 22px',
-        background: release.rejected ? '#2a2520' : '#333',
+        background: release.rejected ? '#2a2520' : 'rgba(255,255,255,0.04)',
         border: `2px solid ${recommended ? 'rgba(74, 222, 128, 0.45)' : (release.rejected ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255, 255, 255, 0.15)')}`,
         borderLeft: `3px solid ${recommended ? '#4ade80' : (release.rejected ? 'rgba(245, 158, 11, 0.5)' : 'rgba(255,255,255,0.15)')}`,
         borderRadius: '16px',
@@ -311,7 +313,7 @@ function ConfirmPanel({ target, confirmLoading, onCancel, onDownload, zoneId, er
   });
   return (
     <>
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center', marginBottom: '16px' }}>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center', marginBottom: '16px', position: 'relative', zIndex: 1 }}>
         <span style={{
           display: 'inline-block', padding: '6px 18px', borderRadius: '12px', fontSize: '15px', fontWeight: 700,
           background: getBadgeColor(target.indexer).bg, color: getBadgeColor(target.indexer).fg,
@@ -322,8 +324,9 @@ function ConfirmPanel({ target, confirmLoading, onCancel, onDownload, zoneId, er
       </div>
       <div
         style={{
-          background: '#222', borderRadius: '20px', padding: '36px',
-          width: '520px', maxWidth: '90%', border: '1px solid rgba(255,255,255,0.1)',
+          background: 'linear-gradient(rgba(255,255,255,0.06), rgba(255,255,255,0.06)), #15102a', borderRadius: '20px', padding: '36px',
+          width: '520px', maxWidth: '90%', border: '1px solid rgba(255,255,255,0.08)',
+          position: 'relative', zIndex: 1,
         }}
       >
         <p style={{ margin: '0 0 16px', fontSize: '15px', fontWeight: 500, color: '#fff', lineHeight: 1.5, wordBreak: 'break-word', textAlign: 'center' }}>
@@ -381,7 +384,7 @@ function ConfirmPanel({ target, confirmLoading, onCancel, onDownload, zoneId, er
             type="button" onClick={onDownload} disabled={confirmLoading || !!disabledReason}
             style={{
               padding: '16px 40px', borderRadius: '50px',
-              border: '1px solid #999', background: '#555',
+              border: '1px solid #3b82f6', background: '#3b82f6',
               color: '#fff', fontSize: '18px', fontWeight: 600, minHeight: '56px',
               cursor: (confirmLoading || disabledReason) ? 'default' : 'pointer', transition: 'background 0.2s ease, border-color 0.2s ease',
               opacity: (confirmLoading || disabledReason) ? 0.5 : 1,
@@ -555,7 +558,7 @@ function ExpandedSourcesView({
     padding: '16px 22px',
     borderRadius: '16px',
     border: '2px solid rgba(255, 255, 255, 0.15)',
-    background: '#333',
+    background: 'rgba(255,255,255,0.04)',
     color: '#fff', cursor: 'pointer',
     display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center',
     gap: '12px', transition: 'background 0.2s ease, border-color 0.2s ease',
@@ -622,8 +625,8 @@ function ExpandedSourcesView({
           <style>{`
             @keyframes spin { to { transform: rotate(360deg); } }
             @media (hover: hover) {
-              [data-source-tile]:hover { background: #444 !important; border-color: rgba(255,255,255,0.25) !important; }
-              [data-source-row]:hover { background: #444 !important; border-color: rgba(255,255,255,0.25) !important; }
+              [data-source-tile]:hover { background: rgba(255,255,255,0.08) !important; border-color: rgba(255,255,255,0.25) !important; }
+              [data-source-row]:hover { background: rgba(255,255,255,0.08) !important; border-color: rgba(255,255,255,0.25) !important; }
             }
           `}</style>
         </SourcesScreen>
@@ -793,7 +796,7 @@ function ReleaseCard({
       role="button"
       onClick={() => onToggle(releaseKey(release))}
       style={{
-        background: expanded ? '#1a1a1c' : '#111112',
+        background: expanded ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)',
         borderRadius: '14px',
         padding: '14px 16px',
         marginBottom: '8px',
@@ -1298,6 +1301,7 @@ function CompactSourcesView({
   }, [handleDismiss]);
 
   const noSources = !loading && !error && visibleReleases.length === 0;
+  const indexerConfigured = useIndexerConfigured();
   const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
 
   return (
@@ -1440,8 +1444,17 @@ function CompactSourcesView({
           </div>
         )}
 
+        {/* No trackers (and no Prowlarr): a clean empty state */}
+        {noSources && indexerConfigured === false && (
+          <div data-sources-empty="" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 24px 60px' }}>
+            <span style={{ fontSize: '17px', fontWeight: 600, color: 'rgba(255,255,255,0.7)', textAlign: 'center' }}>
+              Sources not found
+            </span>
+          </div>
+        )}
+
         {/* No sources — prompt to add to watchlist */}
-        {noSources && (
+        {noSources && indexerConfigured === true && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 24px 60px', gap: '20px' }}>
             <span style={{ fontSize: '17px', fontWeight: 600, color: 'rgba(255,255,255,0.7)', textAlign: 'center' }}>
               Sources not found

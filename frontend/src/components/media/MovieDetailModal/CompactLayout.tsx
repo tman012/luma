@@ -823,6 +823,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   )}
 
                   {/* Sources */}
+                  <span data-modal-sources="" style={{ display: 'contents' }}>
                   <ActionButton
                     circle={actionCircle}
                     fontSize={actionFont}
@@ -845,6 +846,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                     label="Sources"
                     onClick={handleSourcesToggle}
                   />
+                  </span>
 
                   {/* Similar — movies only; needs a TMDb id to ask for
                       recommendations, so it hides on the rare Plex item we

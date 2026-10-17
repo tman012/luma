@@ -1075,6 +1075,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                       onClick={handleUpgradeOpen}
                     />
                   )}
+                  <span data-modal-sources="" style={{ display: 'contents' }}>
                   <PillButton
                     focusKey="mm-info-sources"
                     zoneId="movie-detail-modal"
@@ -1090,6 +1091,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                     label="Sources"
                     onClick={handleSourcesOpen}
                   />
+                  </span>
                   {similarTmdbId && (
                     <PillButton
                       focusKey="mm-info-similar"

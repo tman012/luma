@@ -108,6 +108,8 @@ export interface ProcessedRelease {
   downloadUrl?: string;
   /** Torrent info hash (lowercased dedup key). May be empty. */
   infoHash?: string;
+  /** Tracker type for rows from Settings > Trackers (drives the IPT preference). */
+  trackerType?: string;
 }
 
 export interface SourceTypeGroup {
