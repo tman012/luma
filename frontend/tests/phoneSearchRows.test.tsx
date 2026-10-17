@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/contexts/ModalHostContext', () => ({
@@ -34,8 +34,12 @@ describe('phone search rows (Designer spec)', () => {
     const img = movie.querySelector('img')!;
     expect(img.getAttribute('src')).toContain('/api/img/tmdb');
     expect(movie.querySelector('[data-testid="row-icon-movie"]')).toBeTruthy(); // until it loads
-    fireEvent.load(img);
-    expect(movie.querySelector('[data-testid="row-icon-movie"]')).toBeNull();
+    // (A late re-render can remount the thumb, so load whatever img is current.)
+    await waitFor(() => {
+      const cur = screen.getAllByTestId('phone-search-row').find((r) => r.textContent?.includes('Interstellar'))!;
+      fireEvent.load(cur.querySelector('img')!);
+      expect(cur.querySelector('[data-testid="row-icon-movie"]')).toBeNull();
+    });
     const person = rows.find((r) => r.textContent?.includes('McConaughey'))!;
     expect(person.querySelector('[data-testid="row-thumb"]')!.className).toContain('rounded-full');
     expect(thumbs.some((t) => t.className.includes('h-[60px] w-[40px]'))).toBe(true);
