@@ -251,7 +251,7 @@ def test_logo_alt_empty_and_error_text(test_app):
     tok = re.search(r'name="csrf_token" value="([^"]+)"', page.get_data(as_text=True)).group(1)
     r = c.post('/login', data={'username': 'owner', 'password': 'bad', 'csrf_token': tok},
                environ_base={'REMOTE_ADDR': IP}, follow_redirects=True)
-    assert 'Wrong email, username or password.' in r.get_data(as_text=True)
+    assert 'Invalid email, username, or password' in r.get_data(as_text=True)
 
 
 def test_logout_get_405_is_no_store(test_app):

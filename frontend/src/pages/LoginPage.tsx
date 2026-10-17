@@ -84,10 +84,10 @@ export function LoginPage() {
 
   async function handlePinSubmit(e?: React.FormEvent) {
     e?.preventDefault();
-    if (pin.length < 4) { setError('Password must be at least 4 characters'); return; }
+    if (!pin) return;
     setBusy(true); setError('');
     const result = await login(email.trim(), pin);
-    if (!result.success) { setError(result.error || 'Incorrect password'); setPin(''); setBusy(false); }
+    if (!result.success) { setError(result.error || INVALID_LOGIN); setPin(''); setBusy(false); }
   }
 
   function handleRegEmailNext(e: React.FormEvent) {
@@ -102,6 +102,7 @@ export function LoginPage() {
   }
   function handleRegPinNext(e?: React.FormEvent) {
     e?.preventDefault();
+    if (pin !== pin.trim()) { setError(PASSWORD_SPACE_ERROR); return; }
     if (pin.length < 4) { setError('Password must be at least 4 characters'); return; }
     setConfirmPin(''); setError(''); setSignupStep('confirm');
   }
@@ -147,7 +148,7 @@ export function LoginPage() {
                   autoComplete="username" autoCapitalize="off" spellCheck={false} disabled={busy}
                 />
                 {error && <p style={errorStyle}>{error}</p>}
-                <button type="submit" style={{ ...primaryBtnStyle, opacity: (!email.trim() || busy) ? 0.5 : 1, cursor: (!email.trim() || busy) ? 'not-allowed' : 'pointer' }} disabled={busy || !email.trim()}>
+                <button type="submit" style={btnStyle(!email.trim() || busy)} disabled={busy || !email.trim()}>
                   {busy ? 'Checking…' : 'Continue'}
                 </button>
               </form>
@@ -157,21 +158,23 @@ export function LoginPage() {
                 <p style={{ margin: '0 0 20px', fontSize: 14, color: 'rgba(255,255,255,0.5)', textAlign: 'center' }}>
                   Welcome back, <strong style={{ color: 'rgba(255,255,255,0.9)' }}>{name}</strong>
                 </p>
-                <label style={labelStyle}>Password</label>
+                <input type="text" name="username" value={email} autoComplete="username" readOnly hidden />
+                <label style={labelStyle} htmlFor="login-password">Password</label>
                 <input
+                  id="login-password"
                   ref={pinRef}
-                  style={{ ...inputStyle, WebkitTextSecurity: 'disc' } as any}
-                  type="text"
+                  style={inputStyle}
+                  type="password"
                   value={pin}
                   onChange={(e) => { setPin(e.target.value); setError(''); }}
                   onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
                   onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
-                  autoComplete="off"
-                  name="pin-entry"
+                  autoComplete="current-password"
+                  name="password"
                   disabled={busy}
                 />
                 {error && <p style={errorStyle}>{error}</p>}
-                <button type="submit" style={{ ...primaryBtnStyle, opacity: (pin.length < 4 || busy) ? 0.5 : 1, cursor: (pin.length < 4 || busy) ? 'not-allowed' : 'pointer' }} disabled={busy || pin.length < 4}>
+                <button type="submit" style={btnStyle(!pin || busy)} disabled={busy || !pin}>
                   {busy ? 'Signing in…' : 'Sign in'}
                 </button>
                 <button type="button" onClick={() => { setSigninStep('email'); setEmail(''); setPin(''); setError(''); }} style={linkBtnStyle}>
@@ -209,7 +212,7 @@ export function LoginPage() {
                   autoComplete="email" autoCapitalize="off"
                 />
                 {error && <p style={errorStyle}>{error}</p>}
-                <button type="submit" style={{ ...primaryBtnStyle, opacity: !email.trim() ? 0.5 : 1, cursor: !email.trim() ? 'not-allowed' : 'pointer' }} disabled={!email.trim()}>
+                <button type="submit" style={btnStyle(!email.trim())} disabled={!email.trim()}>
                   Continue
                 </button>
               </form>
@@ -227,7 +230,7 @@ export function LoginPage() {
                   onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
                   autoComplete="new-password"                />
                 {error && <p style={errorStyle}>{error}</p>}
-                <button type="submit" style={{ ...primaryBtnStyle, opacity: pin.length < 4 ? 0.5 : 1, cursor: pin.length < 4 ? 'not-allowed' : 'pointer' }} disabled={pin.length < 4}>
+                <button type="submit" style={btnStyle(pin.length < 4)} disabled={pin.length < 4}>
                   Continue
                 </button>
               </form>
@@ -243,7 +246,7 @@ export function LoginPage() {
                   autoComplete="new-password" disabled={busy}
                 />
                 {error && <p style={errorStyle}>{error}</p>}
-                <button type="submit" style={{ ...primaryBtnStyle, opacity: (confirmPin.length < 4 || busy) ? 0.5 : 1, cursor: (confirmPin.length < 4 || busy) ? 'not-allowed' : 'pointer' }} disabled={busy || confirmPin.length < 4}>
+                <button type="submit" style={btnStyle(confirmPin.length < 4 || busy)} disabled={busy || confirmPin.length < 4}>
                   {busy ? 'Creating…' : 'Create account'}
                 </button>
               </form>
@@ -293,7 +296,13 @@ const labelStyle: React.CSSProperties = fieldLabel;
 
 const inputStyle: React.CSSProperties = { ...fieldInput, transition: 'border-color 0.15s' };
 
-const primaryBtnStyle: React.CSSProperties = { ...primaryBtn, display: 'block', marginTop: 24, transition: 'opacity 0.15s' };
+const primaryBtnStyle: React.CSSProperties = { ...primaryBtn, display: 'block', marginTop: 24, transition: 'background 0.15s, color 0.15s' };
+// Disabled stays readable (about 7:1) instead of fading the blue button.
+const DISABLED_BTN = { background: '#2b3658', color: '#c7cedb' } as const;
+const btnStyle = (disabled: boolean): React.CSSProperties =>
+  disabled ? { ...primaryBtnStyle, ...DISABLED_BTN, cursor: 'not-allowed' } : primaryBtnStyle;
+const INVALID_LOGIN = 'Invalid email, username, or password';
+const PASSWORD_SPACE_ERROR = "Password can't start or end with a space";
 
 const errorStyle: React.CSSProperties = {
   color: '#f87171',

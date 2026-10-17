@@ -8943,11 +8943,11 @@ def auth_login():
         data = request.get_json(force=True) or {}
         email = (data.get('email') or '').strip()
         name = (data.get('name') or '').strip()
-        pin = str(data.get('pin') or '').strip()
+        pin = str(data.get('pin') or '')
 
         identifier = email or name
         if not identifier or not pin:
-            return jsonify({'success': False, 'error': 'Email and password are required'}), 400
+            return jsonify({'success': False, 'error': 'Enter your email or username and password'}), 400
 
         from app import login_limiter
         client_ip = _access.client_ip(request, settings) or (request.remote_addr or '')
@@ -8968,7 +8968,7 @@ def auth_login():
             user = None
         if not user:
             login_limiter.record_failure(client_ip, identifier)
-            return jsonify({'success': False, 'error': 'Invalid email or password'}), 401
+            return jsonify({'success': False, 'error': 'Invalid email, username, or password'}), 401
         login_limiter.record_success(client_ip, identifier)
 
         token = user_auth.create_session(user['id'])
@@ -9017,7 +9017,7 @@ def auth_register():
         data = request.get_json(force=True) or {}
         name = (data.get('name') or '').strip()
         email = (data.get('email') or '').strip().lower()
-        pin = str(data.get('pin') or '').strip()
+        pin = str(data.get('pin') or '')
 
         if not user_auth.list_users():
             return jsonify({'success': False, 'error': 'Luma is not set up yet', 'needs_start': True}), 409
@@ -9027,6 +9027,8 @@ def auth_register():
             return jsonify({'success': False, 'error': 'Name is required'}), 400
         if not email:
             return jsonify({'success': False, 'error': 'Email is required'}), 400
+        if user_auth.password_space_problem(pin):
+            return jsonify({'success': False, 'error': user_auth.PASSWORD_SPACE_ERROR}), 400
         if not pin or len(pin) < 4:
             return jsonify({'success': False, 'error': 'Password must be at least 4 characters'}), 400
 
@@ -9696,11 +9698,13 @@ def admin_create_user():
     try:
         data = request.get_json(force=True) or {}
         name = (data.get('name') or '').strip()
-        pin = str(data.get('pin') or '').strip()
+        pin = str(data.get('pin') or '')
         is_admin = bool(data.get('is_admin', False))
 
         if not name:
             return jsonify({'error': 'Name is required'}), 400
+        if user_auth.password_space_problem(pin):
+            return jsonify({'error': user_auth.PASSWORD_SPACE_ERROR}), 400
         if not pin or len(pin) < 4:
             return jsonify({'error': 'Password must be at least 4 characters'}), 400
 
@@ -9720,7 +9724,9 @@ def admin_reset_pin(user_id: int):
         return err
     try:
         data = request.get_json(force=True) or {}
-        pin = str(data.get('pin') or '').strip()
+        pin = str(data.get('pin') or '')
+        if user_auth.password_space_problem(pin):
+            return jsonify({'error': user_auth.PASSWORD_SPACE_ERROR}), 400
         if not pin or len(pin) < 4:
             return jsonify({'error': 'Password must be at least 4 characters'}), 400
         user = user_auth.get_user_by_id(user_id)

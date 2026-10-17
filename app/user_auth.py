@@ -358,6 +358,17 @@ def deny_user(user_id: int) -> bool:
     return True
 
 
+PASSWORD_SPACE_ERROR = "Password can't start or end with a space"
+
+
+def password_space_problem(password: str) -> str:
+    """The error for a password with leading or trailing whitespace, else ''.
+    Passwords are stored and checked exactly as typed, never stripped."""
+    if isinstance(password, str) and password and password != password.strip():
+        return PASSWORD_SPACE_ERROR
+    return ''
+
+
 def set_name_and_password(user_id: int, name: str, password: str) -> None:
     """Rename a user and set their password in one transaction.
     Raises ValueError when the name is unusable or taken."""

@@ -153,8 +153,11 @@ def test_home_without_plex(test_app):
         home_rails._cfg.update(old)
 
 
-def test_minimal_mode_allows_home_with_auth(test_app, plex, monkeypatch):
+def test_minimal_mode_allows_home_with_auth(test_app, plex, monkeypatch, tmp_path):
     monkeypatch.setenv('LUMA_MINIMAL', '1')
+    # A stand-in SPA build, so the page route doesn't depend on `npm run build`.
+    (tmp_path / 'index.html').write_text('<!doctype html><div id="root"></div>')
+    monkeypatch.setitem(test_app.config, 'SPA_DIR', str(tmp_path))
     from app import minimal
     for p in ('/api/home', '/api/home/libraries', '/api/img/plex', '/settings/libraries'):
         assert minimal.path_allowed(p)

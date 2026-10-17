@@ -327,7 +327,7 @@ def login():
         login_limiter.record_failure(client_ip, username)
         logger.info(f"[auth] Failed login attempt for user {username} from {client_ip}")
         return redirect(url_for('auth.login', 
-                               error='Wrong email, username or password.',
+                               error='Invalid email, username, or password',
                                next=safe_next))
     
     # Login successful - clear rate limit; the form token is single-use

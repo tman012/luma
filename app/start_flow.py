@@ -414,6 +414,10 @@ def start_account():
         return bad("Username can't contain @")
     if not isinstance(password, str) or not password.strip():
         return bad('Enter a password')
+    space = _cfg['user_auth'].password_space_problem(password) \
+        if hasattr(_cfg['user_auth'], 'password_space_problem') else ''
+    if space:
+        return bad(space)
     if len(password) < PASSWORD_MIN:
         return bad(f'Use at least {PASSWORD_MIN} characters')
     if len(password) > PASSWORD_MAX:
