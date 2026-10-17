@@ -344,7 +344,10 @@ def avistaz_search(cfg, query, categories, limit, request: Request = http_reques
 
 
 def avistaz_test(cfg, request: Request = http_request):
-    _avz_token(cfg, request, force=True)
+    """A one-item search: signs in only when there is no valid token for
+    these credentials (a changed password or PID is a new token key), and
+    re-signs in once if the site rejects the token."""
+    avistaz_search(cfg, '', [2000], 1, request)
 
 
 # ------------------------------------------------------------------ IPTorrents

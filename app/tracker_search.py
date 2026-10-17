@@ -24,14 +24,12 @@ import logging
 import secrets
 import threading
 import time
-import zlib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlsplit
 
 from app import tracker_clients, tracker_types as tt
-from app.tracker_guard import TrackerGuard, get_guard
+from app.tracker_guard import TrackerGuard, get_guard, guard_key, guarded_test
 from app.tracker_http import TrackerError
 from app.tracker_store import STATUS_ERROR, STATUS_OK, TrackerStore, get_store
 
@@ -183,15 +181,6 @@ def _has_secret(value: str, secret_values: List[str]) -> bool:
     return any(s in value for s in secret_values)
 
 
-def guard_key(cfg: Dict[str, Any]) -> int:
-    """Guard counters key. AvistaZ-family trackers are keyed by site host so
-    deleting and re-adding the same site can't reset its rate limit."""
-    if tt.is_rate_strict(cfg.get('type')):
-        host = (urlsplit(str(cfg.get('url') or '')).hostname or '').lower()
-        if host.startswith('www.'):
-            host = host[4:]
-        return 1_000_000_000 + zlib.crc32(host.encode('utf-8'))
-    return int(cfg['id'])
 
 
 def _match_categories(cfg: Dict[str, Any], requested: List[int]) -> List[int]:
@@ -310,28 +299,9 @@ class TrackerSearch:
         return items
 
     def test(self, cfg: Dict[str, Any]) -> None:
-        """Connection test through the guard. Counts as a user request; a
-        rate limit or ban backoff is honored, other backoffs are not (the
-        owner may just have fixed the credentials)."""
-        tid = cfg.get('id')
-        gk = guard_key(cfg) if tid is not None or tt.is_rate_strict(cfg['type']) else None
-        if gk is not None:
-            blocked = self.guard.blocked(gk)
-            if blocked and blocked[1] in ('rate', 'banned', 'paused'):
-                raise TrackerError('banned' if blocked[1] == 'banned' else 'rate')
-            if blocked:
-                self.guard.clear(gk)
-            reason = self.guard.take(gk, True, tt.is_rate_strict(cfg['type']))
-            if reason:
-                raise TrackerError('rate')
-        try:
-            tracker_clients.test(cfg, self.request)
-        except TrackerError as e:
-            if gk is not None and e.kind in ('rate', 'banned'):
-                self.guard.failure(gk, e.kind, e.retry_after)
-            raise
-        if gk is not None:
-            self.guard.success(gk)
+        """Connection test through the same guard as searches (see
+        tracker_guard.guarded_test)."""
+        guarded_test(cfg, lambda c: tracker_clients.test(c, self.request), self.guard)
 
     # -- results -----------------------------------------------------------
 
