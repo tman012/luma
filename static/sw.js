@@ -21,7 +21,7 @@
 
 // BUILD_ID is replaced at build time or bumped manually per deploy.
 // When sw.js byte-content changes, the browser installs a new SW.
-const CACHE_VERSION = 'media-kiosk-v125';
+const CACHE_VERSION = 'media-kiosk-v126';
 
 // Separate cache for large immutable assets — purged when version bumps
 const IMMUTABLE_CACHE = 'media-immutable-v24';
@@ -118,6 +118,14 @@ self.addEventListener('activate', event => {
   event.waitUntil(self.clients.claim());
 });
 
+// Only plain successful responses are kept: never one the server marked
+// no-store (or private), and never a proxied image (/api/* isn't cached).
+function cacheable(resp) {
+  if (!resp || !resp.ok) return false;
+  const cc = (resp.headers && resp.headers.get && resp.headers.get('Cache-Control')) || '';
+  return !/no-store|private/i.test(cc);
+}
+
 // Drop any proxied image an older worker cached (sign-out, account switch).
 function purgeImages() {
   return caches.keys().then(names => Promise.all(names.map(n =>
@@ -176,7 +184,7 @@ self.addEventListener('fetch', event => {
       caches.match(event.request).then(cached => {
         if (cached) return cached;
         return fetch(event.request).then(resp => {
-          if (resp.ok) {
+          if (cacheable(resp)) {
             const clone = resp.clone();
             caches.open(IMMUTABLE_CACHE).then(c => c.put(event.request, clone));
           }
@@ -207,7 +215,7 @@ self.addEventListener('fetch', event => {
   if (path.startsWith('/static/images/')) {
     event.respondWith(
       fetch(event.request).then(resp => {
-        if (resp.ok) {
+        if (cacheable(resp)) {
           const clone = resp.clone();
           caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
         }
@@ -222,7 +230,7 @@ self.addEventListener('fetch', event => {
   if (path.startsWith('/static/')) {
     event.respondWith(
       fetch(event.request).then(resp => {
-        if (resp.ok) {
+        if (cacheable(resp)) {
           const clone = resp.clone();
           caches.open(CACHE_VERSION).then(c => c.put(event.request, clone));
         }
