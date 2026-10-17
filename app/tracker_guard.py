@@ -6,6 +6,11 @@ so mirror domains share one budget), Torznab/Newznab by normalized host
 ('host:example.org'). Re-adding, editing, testing an unsaved form or using a
 different path for the same site all hit the same persisted state.
 
+Torznab/Newznab rate limits and bans also cover the server's resolved IP
+('ip:203.0.113.7'): another hostname or the IP literal of a backed-off
+server is refused too (see address_scope). Site types are keyed by type
+already, and a CDN address shared with other sites never blocks them.
+
 Rules:
 
 * user (interactive) searches and Tests: 40 per tracker per hour;
@@ -146,7 +151,7 @@ class TrackerGuard:
             _FAIL: self.fail_closed_until,
         }
         try:
-            atomic_write_json(self.path, state)
+            atomic_write_json(self.path, state, mode=0o600)   # lists tracker hosts
         except OSError as e:
             logger.warning('Tracker guard state not saved: %s', type(e).__name__)
 
@@ -293,7 +298,7 @@ def reset_guard_for_tests(guard: Optional[TrackerGuard] = None) -> None:
 # ------------------------------------------------------------ keys and Test
 
 # Host part: a DNS name in ASCII form, or an IP literal (IPv6 has colons).
-_KEY_RE = __import__('re').compile(r'^(site|host):[a-z0-9._:-]{1,253}$')
+_KEY_RE = __import__('re').compile(r'^(site|host|ip):[a-z0-9._:-]{1,253}$')
 
 
 def normalize_host(url: str) -> str:
@@ -331,6 +336,44 @@ def guard_key(cfg: Dict) -> str:
     return f'host:{normalize_host(cfg.get("url")) or "-"}'
 
 
+_IP_KINDS = ('rate', 'banned')
+
+
+def ip_key(address: str) -> str:
+    import ipaddress
+    return f'ip:{ipaddress.ip_address(str(address).split("%")[0])}'
+
+
+def address_scope(cfg: Dict, guard: Optional[TrackerGuard] = None):
+    """An AddressScope for one request to *cfg*'s tracker. For Torznab and
+    Newznab it refuses (TrackerError, nothing sent) any resolved address in
+    a rate-limit or ban backoff; record_failure then extends a new one to
+    the addresses contacted. Site types get a plain scope."""
+    from app import tracker_types as tt
+    from app.tracker_http import AddressScope, TrackerError
+    g = guard or get_guard()
+    if not tt.is_generic(str(cfg.get('type') or '').strip().lower()):
+        return AddressScope()
+
+    def gate(address: str) -> None:
+        cd = g.blocked(ip_key(address))
+        if cd and cd[1] in _IP_KINDS:
+            raise TrackerError(cd[1])
+    scope = AddressScope(gate)
+    scope.by_ip = True
+    return scope
+
+
+def record_failure(g: TrackerGuard, gk: str, err, scope=None) -> float:
+    """Start the site's backoff after *err*; a rate limit or ban on a
+    Torznab/Newznab server also covers the addresses it was reached at."""
+    until = g.failure(gk, err.kind, err.retry_after)
+    if scope is not None and getattr(scope, 'by_ip', False) and err.kind in _IP_KINDS:
+        for a in scope.addresses:
+            g.failure(ip_key(a), err.kind, err.retry_after)
+    return until
+
+
 def guarded_test(cfg: Dict, run, guard: Optional[TrackerGuard] = None) -> None:
     """Run a connection test through the same limiter as searches.
 
@@ -355,10 +398,12 @@ def guarded_test(cfg: Dict, run, guard: Optional[TrackerGuard] = None) -> None:
         raise TrackerError('rate')
     with g.tracker_lock(gk):
         g.wait_spacing(gk)
+        scope = address_scope(cfg, g)
         try:
-            run(cfg)
+            with scope:
+                run(cfg)
         except TrackerError as e:
             if e.kind in ('rate', 'banned'):
-                g.failure(gk, e.kind, e.retry_after)
+                record_failure(g, gk, e, scope)
             raise
     g.success(gk)

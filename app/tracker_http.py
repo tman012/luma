@@ -19,6 +19,7 @@ API keys, passkeys and cookies.
 from __future__ import annotations
 
 import ipaddress
+import re
 import os
 import socket
 import threading
@@ -150,14 +151,53 @@ _own_lock = threading.Lock()
 _own_cache: Tuple[float, FrozenSet[str]] = (0.0, frozenset())
 
 
+# Linux interface tables (IPv4 local routes, IPv6 addresses); swappable for tests.
+PROC_FIB_TRIE = '/proc/net/fib_trie'
+PROC_IF_INET6 = '/proc/net/if_inet6'
+
+
+def interface_addresses() -> FrozenSet[str]:
+    """Every address on this host's interfaces, read from the kernel's
+    tables (Linux; nothing elsewhere): the IPv4 '/32 host LOCAL' routes and
+    the IPv6 interface addresses."""
+    found = set()
+    try:
+        with open(PROC_FIB_TRIE, encoding='ascii', errors='replace') as fh:
+            last = None
+            for line in fh:
+                text = line.strip()
+                if text.startswith(('|--', '+--')):
+                    last = text[3:].split()[0] if len(text) > 3 else None
+                elif last and text.startswith('/32') and 'LOCAL' in text.split():
+                    try:
+                        found.add(str(ipaddress.IPv4Address(last)))
+                    except ValueError:
+                        pass
+    except OSError:
+        pass
+    try:
+        with open(PROC_IF_INET6, encoding='ascii', errors='replace') as fh:
+            for line in fh:
+                hexaddr = (line.split() or [''])[0]
+                if len(hexaddr) == 32:
+                    try:
+                        found.add(str(ipaddress.IPv6Address(int(hexaddr, 16))))
+                    except ValueError:
+                        pass
+    except OSError:
+        pass
+    return frozenset(found)
+
+
 def own_addresses() -> FrozenSet[str]:
-    """This host's own addresses (cached 5 min)."""
+    """This host's own addresses (cached 5 min): every interface address
+    plus whatever the host name resolves to."""
     global _own_cache
     with _own_lock:
         ts, addrs = _own_cache
         if time.time() - ts < 300:
             return addrs
-        found = set()
+        found = set(interface_addresses())
         try:
             for name in {socket.gethostname(), socket.getfqdn()}:
                 for info in socket.getaddrinfo(name, None):
@@ -166,6 +206,12 @@ def own_addresses() -> FrozenSet[str]:
             pass
         _own_cache = (time.time(), frozenset(found))
         return _own_cache[1]
+
+
+def reset_own_addresses_cache() -> None:
+    global _own_cache
+    with _own_lock:
+        _own_cache = (0.0, frozenset())
 
 
 def _luma_ports() -> FrozenSet[int]:
@@ -177,16 +223,23 @@ def _luma_ports() -> FrozenSet[int]:
     return frozenset(ports)
 
 
+_NAT64 = ipaddress.ip_network('64:ff9b::/96')
+
+
 def address_allowed(addr: str) -> bool:
     """Public unicast only: no loopback, RFC 1918 / unique-local, link-local
     (cloud metadata included), CGNAT, 0.0.0.0/unspecified, multicast,
-    reserved or documentation ranges, and none of this host's addresses."""
+    reserved or documentation ranges, deprecated IPv6 site-local
+    (fec0::/10), and none of this host's addresses."""
     try:
         ip = ipaddress.ip_address(str(addr).split('%')[0])
     except ValueError:
         return False
     if isinstance(ip, ipaddress.IPv6Address):
-        for embedded in (ip.ipv4_mapped, ip.sixtofour, (ip.teredo or (None, None))[1]):
+        if ip.is_site_local:
+            return False
+        nat64 = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF) if ip in _NAT64 else None
+        for embedded in (ip.ipv4_mapped, ip.sixtofour, (ip.teredo or (None, None))[1], nat64):
             if embedded is not None:
                 return address_allowed(str(embedded))
     if (not ip.is_global or ip.is_multicast or ip.is_unspecified or ip.is_loopback or ip.is_link_local
@@ -211,22 +264,51 @@ def port_allowed(addr: str, port: int) -> bool:
     return not (ip.is_loopback or ip.is_unspecified or str(ip) in own_addresses())
 
 
+_INET_ATON_RE = re.compile(r'^(0x[0-9a-f]+|[0-9]+)(\.(0x[0-9a-f]+|[0-9]+)){0,3}$')
+
+
+def ip_literal(host: str) -> Optional[str]:
+    """The address *host* stands for when it is an IP literal in any form a
+    resolver accepts (127.1, 2130706433, 0x7f.1, 0177.0.0.1, IPv6), else
+    None."""
+    host = (host or '').lower().rstrip('.')
+    try:
+        return str(ipaddress.ip_address(host.split('%')[0]))
+    except ValueError:
+        pass
+    if _INET_ATON_RE.match(host):
+        try:
+            return socket.inet_ntoa(socket.inet_aton(host))
+        except OSError:
+            return None
+    return None
+
+
 def host_literal_blocked(url: str) -> bool:
-    """For save-time validation: the URL names a blocked IP literal or
-    localhost. (Host names are checked when contacted.)"""
+    """For save-time validation: the URL names localhost (any case, trailing
+    dot) or a blocked IP literal in any spelling. (Host names are resolved
+    by name_blocked and checked again whenever contacted.)"""
     try:
         p = urlsplit(str(url or ''))
-        host = (p.hostname or '').lower()
+        host = (p.hostname or '').lower().rstrip('.')
         p.port
     except ValueError:
         return True
     if not host or host == 'localhost' or host.endswith('.localhost'):
         return True
+    lit = ip_literal(host)
+    return lit is not None and not address_allowed(lit)
+
+
+def name_blocked(url: str) -> bool:
+    """For save-time validation: the URL's host name resolves, and to an
+    address (or port) that is not allowed. A name that doesn't resolve now
+    is not refused here; Test and every request check it again."""
     try:
-        ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return not address_allowed(host)
+        check_target(url)
+    except TrackerError as e:
+        return e.kind == 'blocked'
+    return False
 
 
 # ------------------------------------------------------------------ indexer proxies
@@ -292,7 +374,8 @@ def check_target(url: str) -> Tuple[str, int]:
         raise TrackerError('blocked') from None
     if p.scheme not in _DEFAULT_PORTS or not host or port is None or p.username or p.password:
         raise TrackerError('blocked')
-    if host.lower() == 'localhost' or host.lower().endswith('.localhost'):
+    bare = host.lower().rstrip('.')
+    if bare == 'localhost' or bare.endswith('.localhost'):
         raise TrackerError('blocked')
     try:
         addrs = list(dict.fromkeys(resolve(host, port)))
@@ -369,6 +452,40 @@ def _same_origin(a: str, b: str) -> bool:
     return pa.scheme == 'http' and pb.scheme == 'https' and port_a == 80 and port_b == 443
 
 
+# ------------------------------------------------------------------ address scope
+
+_scope = threading.local()
+
+
+class AddressScope:
+    """While active (a with block, per thread), every address a request is
+    about to contact goes through *gate* first (which may raise
+    TrackerError to refuse it without sending) and is recorded in
+    .addresses. app.tracker_guard uses it to key backoffs by resolved IP."""
+
+    def __init__(self, gate: Optional[Callable[[str], None]] = None):
+        self.gate = gate
+        self.addresses: List[str] = []
+
+    def visit(self, address: str) -> None:
+        if self.gate is not None:
+            self.gate(address)
+        if address not in self.addresses:
+            self.addresses.append(address)
+
+    def __enter__(self) -> 'AddressScope':
+        self._prev = getattr(_scope, 'current', None)
+        _scope.current = self
+        return self
+
+    def __exit__(self, *exc) -> None:
+        _scope.current = self._prev
+
+
+def current_scope() -> Optional[AddressScope]:
+    return getattr(_scope, 'current', None)
+
+
 def request(method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
             params: Any = None, data: Any = None, json: Any = None,
             timeout: Optional[tuple] = None, max_bytes: int = MAX_BYTES,
@@ -389,6 +506,9 @@ def request(method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
             address, _port_ = check_target(cur_url)        # every hop, before anything is sent
             if is_proxy_url(cur_url):                      # every hop, same-site redirects included
                 raise TrackerError('blocked')
+            scope = current_scope()
+            if scope is not None:
+                scope.visit(str(ipaddress.ip_address(address)))   # may refuse a backed-off server
             if sess is not None and session is None:
                 sess.close()
             sess = session or _pinned_session(cur_url, address)
