@@ -49,6 +49,7 @@ class FakeQbit:
         self.sessions = 0
         self.down = False
         self.extra = []
+        self.files = {}          # hash -> torrents/files answer
 
     def factory(self):
         q = self
@@ -64,6 +65,8 @@ class FakeQbit:
 
             def get(self, url, params=None, timeout=None, **kw):
                 q.calls.append(('GET', url, dict(params or {})))
+                if url.endswith('/api/v2/torrents/files'):
+                    return Resp(data=q.files.get((params or {}).get('hash')))
                 assert url.endswith('/api/v2/torrents/info'), url
                 want = set((params or {}).get('hashes', '').split('|'))
                 return Resp(data=[t for h, t in q.torrents.items() if h in want] + list(q.extra))
@@ -83,6 +86,7 @@ def env(tmp_path, monkeypatch):
     lm.init(settings=settings)
     dl = tmp_path / 'downloads'
     (dl / 'incomplete').mkdir(parents=True)
+    monkeypatch.setenv('LUMA_DOWNLOADS_ROOT', str(dl))
     media = tmp_path / 'media'
     for n in ('Movies', 'Recently Released', 'Full Rips'):
         (media / n).mkdir(parents=True)
@@ -203,12 +207,23 @@ def test_tracked_but_untagged_is_production_s_and_is_dropped(env):
     assert not any(os.scandir(env.media / 'Movies'))
 
 
-def test_category_named_like_the_tag_counts_as_ours(env, monkeypatch):
+def test_a_category_named_like_the_tag_is_not_ours(env, monkeypatch):
+    """Only the tag counts, never the category."""
     monkeypatch.setenv('LUMA_TEST_QBIT_TAG', 'qa-box')
     add_path('Movies', env.media / 'Movies')
     movie_file(env, 'Heat.1995.mkv')
     lm.track(H1, TMDB, 'Heat.1995')
     torrent(env, H1, 'Heat.1995.mkv', tags='other, stuff', category='QA-box')
+    assert env.tick()['dropped'] == 1
+    assert not any(os.scandir(env.media / 'Movies'))
+
+
+def test_the_tag_is_matched_casefolded(env, monkeypatch):
+    monkeypatch.setenv('LUMA_TEST_QBIT_TAG', 'qa-box')
+    add_path('Movies', env.media / 'Movies')
+    movie_file(env, 'Heat.1995.mkv')
+    lm.track(H1, TMDB, 'Heat.1995')
+    torrent(env, H1, 'Heat.1995.mkv', tags='other, QA-Box', category='radarr')
     assert env.tick()['filed'] == 1
 
 
@@ -449,13 +464,16 @@ def test_as_root_files_get_the_library_folder_s_owner(env, monkeypatch):
     st = os.stat(env.media / 'Movies')
     chowned = []
     monkeypatch.setattr(lm.os, 'geteuid', lambda: 0)
-    monkeypatch.setattr(lm.os, 'chown', lambda p, u, g, follow_symlinks=True: chowned.append(
-        (os.path.basename(p), u, g, follow_symlinks)))
+
+    def fchown(fd, u, g):
+        chowned.append((os.path.basename(os.readlink(f'/proc/self/fd/{fd}')), u, g))
+    monkeypatch.setattr(lm.os, 'fchown', fchown)
+    monkeypatch.setattr(lm.os, 'chown', lambda p, *a, **k: (_ for _ in ()).throw(AssertionError('path chown')))
     lm.track(H1, TMDB, 'Heat.1995')
     torrent(env, H1, 'Heat.1995.mkv')
     env.tick()
-    assert ('Heat (1995)', st.st_uid, st.st_gid, False) in chowned
-    assert any(n.endswith('.luma-partial') and (u, g) == (st.st_uid, st.st_gid) for n, u, g, _f in chowned)
+    assert ('Heat (1995)', st.st_uid, st.st_gid) in chowned
+    assert any(n.endswith('.luma-partial') and (u, g) == (st.st_uid, st.st_gid) for n, u, g in chowned)
     assert job(H1)['state'] == 'done'
 
 
@@ -467,6 +485,7 @@ def test_not_root_leaves_ownership_alone(env, monkeypatch):
     def boom(*a, **k):
         raise AssertionError('chown must not run when not root')
     monkeypatch.setattr(lm.os, 'chown', boom)
+    monkeypatch.setattr(lm.os, 'fchown', boom)
     lm.track(H1, TMDB, 'Heat.1995')
     torrent(env, H1, 'Heat.1995.mkv')
     env.tick()
@@ -477,8 +496,14 @@ def test_never_chmods_777(env, monkeypatch):
     add_path('Movies', env.media / 'Movies')
     movie_file(env, 'Heat.1995.mkv')
     modes = []
-    real = os.chmod
-    monkeypatch.setattr(lm.os, 'chmod', lambda p, m, *a, **k: (modes.append(m), real(p, m))[1])
+    real = os.fchmod
+    monkeypatch.setattr(lm.os, 'fchmod', lambda fd, m: (modes.append(m), real(fd, m))[1])
+    real_chmod = os.chmod
+
+    def chmod(p, m, *a, **k):
+        assert not str(p).startswith(str(env.media)), 'chmod by path in the library'
+        return real_chmod(p, m, *a, **k)
+    monkeypatch.setattr(lm.os, 'chmod', chmod)
     lm.track(H1, TMDB, 'Heat.1995')
     torrent(env, H1, 'Heat.1995.mkv')
     env.tick()
@@ -513,7 +538,7 @@ def test_disk_full_mid_copy_is_insufficient_space(env, monkeypatch):
     torrent(env, H1, 'Heat.1995.mkv')
     env.tick()
     assert job(H1)['error'] == 'insufficient space' and job(H1)['state'] == 'skipped'
-    assert not [f for f in os.listdir(env.media / 'Movies' / 'Heat (1995)')]
+    assert not (env.media / 'Movies' / 'Heat (1995)').exists()   # the folder this pass made is gone too
 
 
 def test_hardlink_needs_no_space(env, monkeypatch):
@@ -556,7 +581,7 @@ def test_size_mismatch_is_a_failure_not_a_file(env, monkeypatch):
     torrent(env, H1, 'Heat.1995.mkv')
     env.tick()
     assert job(H1)['attempts'] == 1
-    assert os.listdir(env.media / 'Movies' / 'Heat (1995)') == []
+    assert not (env.media / 'Movies' / 'Heat (1995)').exists()
 
 
 # ------------------------------------------------------------------ rules, TMDB, map, parts, TV

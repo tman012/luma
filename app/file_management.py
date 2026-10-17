@@ -56,6 +56,13 @@ UNITS = {'months': 1, 'years': 12}
 MAX_MONTHS = 600
 TRANSFERS = ('copy', 'hardlink')
 JOBS_KEEP = 100
+# The folder qBittorrent's downloads are mounted at (compose: /downloads). The
+# mover only ever reads from inside it, whatever save path qBittorrent reports.
+DOWNLOADS_ROOT_ENV = 'LUMA_DOWNLOADS_ROOT'
+DEFAULT_DOWNLOADS_ROOT = '/downloads'
+# Mover errors that a corrected path map can fix: such jobs go back to waiting.
+PATH_ERRORS = ('outside the downloads folder', 'download folder not available',
+               'qBittorrent gave no download path', 'files not found')
 
 # Never a library path (or a path map's local side), nor anything inside one.
 BLOCKED_ROOTS = ('/proc', '/sys', '/dev', '/etc', '/app', '/bin', '/sbin', '/boot', '/lib',
@@ -69,6 +76,7 @@ NOT_FOUND = 'Folder not found'
 NOT_WRITABLE = "Can't write to this folder"
 DUPLICATE = 'Already added'
 OVERLAPS = 'Overlaps another library path'
+IN_DOWNLOADS = 'Overlaps the downloads folder'
 NAME_TAKEN = 'Name already used'
 IN_USE = 'In use by a rule or the fallback'
 TOO_MANY = 'Too many'
@@ -172,6 +180,19 @@ def _under(path: str, root: str) -> bool:
         return False
 
 
+def downloads_root() -> str:
+    """Real path of the downloads folder (LUMA_DOWNLOADS_ROOT, else /downloads)."""
+    raw = (os.environ.get(DOWNLOADS_ROOT_ENV) or '').strip()
+    if not raw.startswith('/'):
+        raw = DEFAULT_DOWNLOADS_ROOT
+    return os.path.realpath(raw)
+
+
+def overlaps_downloads(real: str) -> bool:
+    dl = downloads_root()
+    return _under(real, dl) or _under(dl, real)
+
+
 def blocked(real: str) -> bool:
     """A system or Luma-internal folder: never a library or download root."""
     if real == '/':
@@ -226,6 +247,8 @@ def check_library_path(raw: Any, others: List[Dict[str, Any]]) -> Tuple[Optional
     real = os.path.realpath(p)
     if blocked(real):
         return None, NOT_ALLOWED
+    if overlaps_downloads(real):
+        return None, IN_DOWNLOADS
     if not os.path.isdir(real):
         return None, NOT_FOUND
     for o in others:
@@ -537,7 +560,24 @@ def view(data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         'fallback_path_id': data['fallback_path_id'],
         'path_map': copy.deepcopy(data['path_map']),
         'transfer': data['transfer'],
+        'not_found': sorted(
+            ({'title': j.get('title') or '', 'since': j.get('pending_since') or 0}
+             for j in data['jobs'].values()
+             if j.get('state') == 'waiting' and j.get('status') == 'files not found'),
+            key=lambda x: x['since'])[:50],
     }
+
+
+def requeue_path_errors(data: Dict[str, Any]) -> int:
+    """Put jobs skipped for a path problem back to waiting (after the path map
+    changes). Returns how many."""
+    n = 0
+    for j in data['jobs'].values():
+        if j.get('state') == 'skipped' and j.get('error') in PATH_ERRORS:
+            j.update(state='waiting', error='', attempts=0, misses=0, status='', pending_since=None)
+            j.pop('finished', None)
+            n += 1
+    return n
 
 
 def _body() -> Dict[str, Any]:
@@ -660,6 +700,11 @@ def library_mapping_put():
             errors['transfer'] = INVALID
         if errors:
             return _no_store(jsonify({'errors': errors}), 400)
+        changed = path_map != data['path_map']
         data['path_map'], data['transfer'] = path_map, transfer
+        if changed:
+            n = requeue_path_errors(data)
+            if n:
+                logger.info('Library mover: %d skipped grab(s) back to waiting after a path map change', n)
         save(data)
         return _no_store(jsonify(view(data)))

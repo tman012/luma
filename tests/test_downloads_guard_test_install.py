@@ -80,14 +80,14 @@ def test_a_folder_holding_tagged_data_is_skipped_whole(downloads):
     assert 'LumaSub' not in _names(storage_cleanup.scan_candidates(str(root)))
 
 
-def test_category_named_like_the_tag_counts_and_other_tags_do_not(downloads):
+def test_only_the_tag_counts_not_a_category_or_other_tags(downloads):
     root, state = downloads
     state['torrents'] = [
         _t('Prod.Movie.2001.1080p', '/downloads/Prod.Movie.2001.1080p', category='luma-test'),
         _t('Prod.Single.2002.mkv', '/downloads/Prod.Single.2002.mkv', tags='luma-testing', category='luma'),
     ]
     names = _names(storage_cleanup.scan_candidates(str(root)))
-    assert 'Prod.Movie.2001.1080p' not in names
+    assert 'Prod.Movie.2001.1080p' in names
     assert 'Prod.Single.2002.mkv' in names
 
 
@@ -128,12 +128,45 @@ def test_guard_fails_safe_when_qbit_unreadable(downloads, monkeypatch):
     assert sorted(os.listdir(root)) == before
 
 
-def test_manual_cleanup_keeps_its_age_guard_only_behavior_when_qbit_is_down(downloads):
-    """The storage pill's cleanup (require_qbit=False) is unchanged when qBit is down."""
+def test_manual_cleanup_deletes_nothing_when_qbit_is_down(downloads):
+    """The storage pill's cleanup also needs qBittorrent: without it the
+    test install's downloads can't be told apart."""
     root, state = downloads
     state['torrents'] = None
+    before = sorted(os.listdir(root))
     out = storage_cleanup.run_cleanup(1)
+    assert out['success'] is False and out['error'] == storage_cleanup.QBIT_UNREADABLE
+    assert sorted(os.listdir(root)) == before
+
+
+def test_opting_out_of_qbit_keeps_the_age_only_behavior(downloads):
+    root, state = downloads
+    state['torrents'] = None
+    out = storage_cleanup.run_cleanup(1, require_qbit=False)
     assert out['success'] is True and len(out['deleted']) == 1
+
+
+def test_a_category_folder_holding_tagged_data_offers_its_other_entries(downloads):
+    root, state = downloads
+    _entry(root, 'radarr', sub='Prod.Cat.2003/Prod.Cat.2003.mkv')
+    _entry(root, 'radarr', sub='Test.Cat.2023/Test.Cat.2023.mkv')
+    state['torrents'] = state['torrents'] + [
+        _t('Prod.Cat.2003', '/downloads/radarr/Prod.Cat.2003', category='radarr'),
+        _t('Test.Cat.2023', '/downloads/radarr/Test.Cat.2023', tags='luma-test', category='radarr')]
+    names = _names(storage_cleanup.scan_candidates(str(root)))
+    assert 'radarr' not in names and 'radarr/Test.Cat.2023' not in names
+    assert 'radarr/Prod.Cat.2003' in names
+    out = storage_cleanup.run_cleanup(10 * GIB, require_qbit=True)
+    assert out['success'] is True
+    assert (root / 'radarr' / 'Test.Cat.2023').exists()
+    assert not (root / 'radarr' / 'Prod.Cat.2003').exists()
+
+
+def test_luma_test_entry_names_are_only_each_torrent_s_own_entry():
+    names = storage_cleanup.luma_test_entry_names([
+        _t('Test.Cat.2023', '/downloads/radarr/Test.Cat.2023', tags='luma-test', category='radarr'),
+        _t('Prod.Cat.2003', '/downloads/radarr/Prod.Cat.2003', category='radarr')])
+    assert names == {'Test.Cat.2023'}
 
 
 class _Settings:

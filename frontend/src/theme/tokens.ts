@@ -7,6 +7,7 @@ export const T = {
   danger: 'var(--color-danger)',
   dangerText: 'var(--color-danger-text)',
   success: 'var(--color-success)',
+  warning: 'var(--color-warning)',
   text: 'var(--color-text-primary)',
   text2: 'var(--color-text-secondary)',
   text3: 'var(--color-text-muted)',

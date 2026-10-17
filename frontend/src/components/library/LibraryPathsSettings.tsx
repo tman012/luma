@@ -44,7 +44,7 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
       if (r.ok) { setView(r.view); setFbError(''); return; }
       setView(before);
       if (r.errors.fallback_path_id) setFbError(r.errors.fallback_path_id);
-      setToast(r.error && r.error !== SAVE_FAILED ? r.error : SAVE_FAILED);
+      setToast(r.error || SAVE_FAILED);
     });
   }, []);
 
@@ -143,9 +143,9 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
 // ---------------------------------------------------------------- paths
 
 const STATUS: Record<LibPath['status'], { color: string; text: string }> = {
-  ok: { color: '#22c55e', text: '' },
-  missing: { color: '#ef4444', text: 'Missing' },
-  read_only: { color: '#f59e0b', text: 'Read-only' },
+  ok: { color: T.success, text: '' },
+  missing: { color: T.danger, text: 'Missing' },
+  read_only: { color: T.warning, text: 'Read-only' },
 };
 
 function PathRow({ path, first, onOpen }: { path: LibPath; first: boolean; onOpen: () => void }) {

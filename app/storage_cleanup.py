@@ -163,10 +163,11 @@ def luma_test_entry_names(torrents: List[Dict[str, Any]]) -> Set[str]:
     Production and the test install (LUMA_MINIMAL, :5002) can share one
     qBittorrent; the test install tags its torrents (app/qbit_owner) and copies
     them into its own library some time after they finish. Their data is never
-    a cleanup candidate here, finished or not. Every component of the torrent's
-    data path is protected, not just the last one, so a folder that merely
-    contains test-install data (a category subfolder) is skipped whole: an extra
-    protected name can only skip a deletion, never cause one.
+    a cleanup candidate here, finished or not. Only each torrent's own entry is
+    named (the last part of its data path): a category folder that holds it is
+    not, so its other downloads stay cleanable. scan_candidates never offers a
+    folder holding a protected entry whole; it offers that folder's other
+    entries one by one instead.
     """
     from app.qbit_owner import is_test_torrent
 
@@ -178,10 +179,35 @@ def luma_test_entry_names(torrents: List[Dict[str, Any]]) -> Set[str]:
             val = t.get(key)
             if not val:
                 continue
-            for part in str(val).replace('\\', '/').split('/'):
-                if part and part not in ('.', '..'):
-                    names.add(part)
+            part = os.path.basename(str(val).replace('\\', '/').rstrip('/'))
+            if part and part not in ('.', '..'):
+                names.add(part)
     return names
+
+
+HOLD_DEPTH = 4   # how deep a folder is searched for a protected entry
+
+
+def _holds(path: str, protected: Set[str], depth: int = HOLD_DEPTH) -> bool:
+    """True when a protected name sits anywhere within *depth* levels under
+    *path* (a folder). Unreadable means True: never delete what can't be seen."""
+    if not protected or depth <= 0:
+        return depth <= 0 and bool(protected)
+    try:
+        with os.scandir(path) as it:
+            entries = list(it)
+    except OSError:
+        return True
+    for e in entries:
+        if e.name in protected:
+            return True
+    for e in entries:
+        try:
+            if e.is_dir(follow_symlinks=False) and _holds(e.path, protected, depth - 1):
+                return True
+        except OSError:
+            return True
+    return False
 
 
 def scan_candidates(root: Optional[str] = None,
@@ -202,17 +228,33 @@ def scan_candidates(root: Optional[str] = None,
     cutoff = time.time() - MIN_AGE_HOURS * 3600
     candidates: List[Dict] = []
 
-    for name in os.listdir(root):
-        if name.startswith('.'):
-            continue
-        if name.lower() in PROTECTED_NAMES:
-            continue
-        if name.lower().endswith(PARTIAL_SUFFIXES):
-            continue
-        if name in protected:
-            continue
+    def eligible(name: str) -> bool:
+        return not (name.startswith('.') or name.lower() in PROTECTED_NAMES
+                    or name.lower().endswith(PARTIAL_SUFFIXES) or name in protected)
 
+    entries: List[Tuple[str, str, str]] = []     # (shown name, path, entry name)
+    for name in os.listdir(root):
+        if not eligible(name):
+            continue
         path = os.path.join(root, name)
+        if protected and os.path.isdir(path) and not os.path.islink(path) and _holds(path, protected):
+            # A folder (a category, say) holding the test install's data: its
+            # other entries are candidates one by one, never the folder.
+            try:
+                children = os.listdir(path)
+            except OSError:
+                continue
+            for child in children:
+                cpath = os.path.join(path, child)
+                if not eligible(child):
+                    continue
+                if os.path.isdir(cpath) and not os.path.islink(cpath) and _holds(cpath, protected):
+                    continue
+                entries.append((f'{name}/{child}', cpath, child))
+            continue
+        entries.append((name, path, name))
+
+    for name, path, entry in entries:
         # Refuse anything that resolves outside the downloads tree.
         if not os.path.realpath(path).startswith(root + os.sep):
             continue
@@ -223,7 +265,7 @@ def scan_candidates(root: Optional[str] = None,
         if size <= 0:
             continue
 
-        record = (attribution or {}).get(name)
+        record = (attribution or {}).get(entry)
         trackers = sorted(tracker_files.entry_trackers(record))
         candidates.append({
             'name': name,
@@ -247,7 +289,7 @@ def scan_candidates(root: Optional[str] = None,
 def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, root: Optional[str] = None,
                  prefer_trackers: Optional[List[str]] = None,
                  snapshot: Optional[Tuple] = None,
-                 require_qbit: bool = False) -> Dict:
+                 require_qbit: bool = True) -> Dict:
     """Pick the oldest entries that together reach `target_bytes`.
 
     Selection stops at the first entry that meets or exceeds the target, so the
@@ -389,7 +431,7 @@ def _forget_torrents(names: List[str]) -> int:
 
 def run_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES,
                 prefer_trackers: Optional[List[str]] = None,
-                require_qbit: bool = False) -> Dict:
+                require_qbit: bool = True) -> Dict:
     """PERMANENTLY delete the oldest downloads until `target_bytes` is freed.
 
     With `prefer_trackers`, spends those trackers' oldest entries first and only
@@ -428,7 +470,7 @@ def run_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES,
         else:
             failed.append(entry['name'])
 
-    forgotten = _forget_torrents([d['name'] for d in deleted])
+    forgotten = _forget_torrents([os.path.basename(d['name']) for d in deleted])
     after = usage()
 
     logger.info(

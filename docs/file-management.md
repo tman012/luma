@@ -12,15 +12,23 @@ store (`file_management.json` in the data dir, mode 0600). The seeded
 - The mover asks qBit only for hashes it tracks (`torrents/info?hashes=`); it
   never lists the whole client. A tracked torrent without the tag is dropped,
   never copied (for example, a release prod grabbed first).
-- Prod's AutoRenamer skips torrents carrying the tag (or a category equal to
-  it), in both its tracked-download path and its Radarr category scan. Nothing
+- Only the tag counts, never a category. A `LUMA_TEST_QBIT_TAG` equal to an
+  app's category (`luma`, `radarr`, `sonarr`, ...) is refused and `luma-test`
+  used instead, with a warning in the log.
+- Prod's AutoRenamer skips torrents carrying the tag, in both its tracked-download path and its Radarr category scan. Nothing
   else in prod changed. Edge case: if prod grabs a release luma-test already
   grabbed (same hash, now tagged), prod drops it rather than copying it.
 - A torrent removed from qBit is dropped after 3 consecutive misses. qBit
   being unreachable is not a miss.
-- Prod's Downloads Guard (oldest-first cleanup of the downloads folder) is not
-  tag-aware and can delete luma-test's finished downloads. Unchanged on purpose
-  (out of scope); flag for a later pass.
+- Prod's Downloads Guard and the storage pill's manual cleanup skip each tagged
+  torrent's own entry. A folder that holds one (a category folder) is never
+  deleted whole; its other entries are offered one by one. Both delete nothing
+  while qBittorrent can't be read, and the manual cleanup is owner only.
+- qBittorrent bans an IP after 5 failed sign-ins. The mover stops after 3
+  rejected sign-ins and keeps that count on disk (`qbit_login.json`, 0600,
+  keyed by a hash of the credentials), so a restart or a Save with the same
+  credentials doesn't reset it. New credentials or a successful Test of the
+  saved ones do.
 
 ## Mounts (Ops)
 
@@ -31,6 +39,7 @@ store (`file_management.json` in the data dir, mode 0600). The seeded
 | `LUMA_TEST_DOWNLOADS_DIR` | `/downloads` (read-only) | Same path qBit saves to; `/downloads/incomplete` is skipped |
 | `LUMA_TEST_MEDIA_DIR` | `/media` | Parent of the library folders; any subfolder can be added, spaces included |
 | `LUMA_TEST_QBIT_TAG` | env | Default `luma-test`; set the same value on prod |
+| `LUMA_DOWNLOADS_ROOT` | env | Default `/downloads`; the only folder the mover reads from |
 
 Unset, both fall back to empty named volumes so the app still starts with zero
 paths. `docs/examples/docker-compose.library-paths.yml` is a generic override
@@ -53,7 +62,20 @@ read-only and as a separate mount from `/media`, that is always the case on
   is chowned to the uid:gid of the configured library path (for example
   1000:1000); otherwise ownership is left alone. No chmod 777, no Telegram.
 - Copies go to a hidden `.name.luma-partial` file (O_EXCL, no symlink follow),
-  then are linked into place. Symlinks in downloads are never followed.
+  then are linked into place, or renamed with `RENAME_NOREPLACE` where links
+  aren't supported. Symlinks in downloads are never followed.
+- Sources: only files inside `LUMA_DOWNLOADS_ROOT`, whatever save path qBit
+  reports. Each file is opened `O_NOFOLLOW` and must be the same inode that
+  was checked; a hardlink links that open inode. A save path outside the root
+  waits for a path map (Settings) and is listed as `files not found` after an
+  hour; changing the path map puts grabs skipped for a path error back in the
+  queue.
+- Destination: the library folder and the title folder are opened as directory
+  descriptors; modes and owners are set on open descriptors, never by path.
+  A failed pass removes the files it put in place and the folder it created.
+- qBit's "don't create subfolder" layout (content path equal to the save
+  path) files only the torrent's own files, listed by `torrents/files`.
+- A library path inside, equal to, or holding the downloads folder is refused.
 
 # TV scoping note (later pass)
 

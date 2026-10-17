@@ -104,7 +104,8 @@ def test_custom_tag_from_the_environment(renamer, monkeypatch):
 
 
 @pytest.mark.parametrize('raw,expect', [('', 'luma-test'), ('qa-box', 'qa-box'), ('bad,tag', 'luma-test'),
-                                        ('x' * 65, 'luma-test'), (' spaced name ', 'spaced name')])
+                                        ('x' * 65, 'luma-test'), (' spaced name ', 'spaced name'),
+                                        ('luma', 'luma-test'), ('Radarr', 'luma-test'), ('sonarr', 'luma-test')])
 def test_tag_name(monkeypatch, raw, expect):
     monkeypatch.setenv('LUMA_TEST_QBIT_TAG', raw)
     assert qbit_owner.tag_name() == expect
@@ -113,7 +114,8 @@ def test_tag_name(monkeypatch, raw, expect):
 def test_is_test_torrent_shapes():
     assert qbit_owner.is_test_torrent({'tags': 'a,luma-test'})
     assert qbit_owner.is_test_torrent({'tags': ['LUMA-TEST']})
-    assert qbit_owner.is_test_torrent({'category': ' Luma-Test '})
+    assert not qbit_owner.is_test_torrent({'category': ' Luma-Test '})   # only the tag counts
+    assert not qbit_owner.is_test_torrent({'tags': '', 'category': 'luma-test'})
     assert not qbit_owner.is_test_torrent({'tags': 'luma-testing', 'category': 'luma'})
     assert not qbit_owner.is_test_torrent({})
     assert not qbit_owner.is_test_torrent(None)

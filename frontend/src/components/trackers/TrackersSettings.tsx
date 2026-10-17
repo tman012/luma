@@ -27,10 +27,11 @@ import {
   SearchIcon, secondaryBtn, Spinner, srOnly, SUCCESS, Switch, TEXT, TEXT_2, TEXT_3, TopToast, trackersCss,
   dangerTextBtn,
 } from './trackersUi';
+import { SAVE_FAILED } from '@/utils/messages';
 
 export const TRACKERS_BASE = '/settings/trackers';
 export const SAVED = 'Saved';
-export const SAVE_FAILED = "Couldn't save";
+export { SAVE_FAILED };
 export const LOAD_FAILED = "Couldn't load trackers";
 export const SEARCH_FROM = 8;          // the picker gets a search field above this many types
 export const TEST_STATUS_MS = 4000;

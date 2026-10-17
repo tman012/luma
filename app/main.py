@@ -4616,8 +4616,13 @@ def cleanup_downloads_storage():
     """PERMANENTLY delete the oldest downloads until the target is freed.
 
     Body: {"target_bytes": <int>} — defaults to 100 GiB. Destructive and not
-    undoable; the UI gates it behind an explicit confirm.
+    undoable; the UI gates it behind an explicit confirm. Owner only, and
+    nothing is deleted while qBittorrent can't be read (the test install's
+    downloads in a shared client can't be told apart without it).
     """
+    _user, err = _start_flow._owner_or_error()
+    if err:
+        return err
     try:
         from app.storage_cleanup import run_cleanup, DEFAULT_TARGET_BYTES
         body = request.get_json(silent=True) or {}
@@ -4629,7 +4634,7 @@ def cleanup_downloads_storage():
         if target <= 0:
             return jsonify({'success': False, 'error': 'target_bytes must be positive'}), 400
 
-        result = run_cleanup(target)
+        result = run_cleanup(target, require_qbit=True)
         return jsonify(result), (200 if result.get('success') else 500)
     except Exception as e:
         logger.error(f"Error cleaning up downloads storage: {e}")

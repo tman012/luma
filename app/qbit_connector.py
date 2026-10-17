@@ -217,6 +217,30 @@ def _changed() -> None:
             logger.exception('qBittorrent change listener failed')
 
 
+_verified_listeners: list = []
+
+
+def on_verified(fn: Callable[[], None]) -> None:
+    """Call fn after a Test signs in with the saved credentials."""
+    if fn not in _verified_listeners:
+        _verified_listeners.append(fn)
+
+
+def _verified() -> None:
+    for fn in list(_verified_listeners):
+        try:
+            fn()
+        except Exception:
+            logger.exception('qBittorrent verified listener failed')
+
+
+def _is_saved(cfg: Dict[str, Any]) -> bool:
+    s = _cfg['settings']
+    return (normalize_url(cfg.get('url') or '') == normalize_url(s.get('qbittorrent.url') or '')
+            and (cfg.get('username') or '') == (s.get('qbittorrent.username') or '')
+            and (cfg.get('password') or '') == (s.get('qbittorrent.password') or ''))
+
+
 def check(url: str, username: str, password: str) -> Tuple[Optional[str], str]:
     """(None, version) when qBittorrent accepts the login, else (error, '').
     The error is short and never carries the URL, username or password."""
@@ -319,4 +343,6 @@ def qbit_test():
         logger.info('qBittorrent test failed: %s', problem)
         return _no_store(jsonify({'ok': False, 'error': problem}))
     _changed()
+    if _is_saved(cfg):
+        _verified()
     return _no_store(jsonify({'ok': True, 'message': CONNECTED, 'version': version}))

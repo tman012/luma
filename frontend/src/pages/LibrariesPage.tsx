@@ -27,6 +27,7 @@ import { ConnectorsSettings } from '@/components/home/ConnectorsSettings';
 import { TrackersSettings, useTrackersAccess } from '@/components/trackers/TrackersSettings';
 import { LibraryPathsSettings } from '@/components/library/LibraryPathsSettings';
 import { isMinimal } from '@/minimal';
+import { SAVE_FAILED } from '@/utils/messages';
 
 export const SETTINGS_SECTIONS = [
   { slug: 'home-screen', label: 'Home screen' },
@@ -36,7 +37,7 @@ export const SETTINGS_SECTIONS = [
   { slug: 'library-paths', label: 'Library paths' },   // owner only
 ] as const;
 const DEFAULT_SECTION = SETTINGS_SECTIONS[0].slug;
-export const SAVE_FAILED = "Couldn't save";
+export { SAVE_FAILED };
 
 /** /settings/libraries is now /settings/home-screen. */
 export function LibrariesRedirect() {

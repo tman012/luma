@@ -1,5 +1,6 @@
 /** Settings > Library paths API (owner only, luma-test builds). */
 import { apiFetch } from '@/apiClient';
+import { SAVE_FAILED } from '@/utils/messages';
 
 export const LP_URL = '/api/settings/library-paths';
 export const RULES_URL = '/api/settings/library-rules';
@@ -22,7 +23,7 @@ export type Errors = Record<string, string>;
 export type Result = { ok: true; view: LibraryView } | { ok: false; errors: Errors; error: string };
 
 export const UNREACHABLE = "Couldn't reach Luma";
-export const SAVE_FAILED = "Couldn't save";
+export { SAVE_FAILED };
 
 export const RESOLUTIONS: { id: string; label: string }[] = [
   { id: '2160p', label: '2160p' }, { id: '1080p', label: '1080p' }, { id: '720p', label: '720p' }, { id: 'sd', label: 'SD' },

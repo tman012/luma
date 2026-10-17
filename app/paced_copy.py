@@ -35,7 +35,7 @@ def _drop_cache(fd: int):
         pass
 
 
-def _paced_copy(source: str, destination: str, on_progress=None, exclusive: bool = False) -> int:
+def _paced_copy(source, destination: str, on_progress=None, exclusive: bool = False) -> int:
     """Copy source → destination without letting dirty pages pile up.
 
     Each COPY_FLUSH_BYTES window is handed to a flusher thread so its fsync
@@ -46,6 +46,7 @@ def _paced_copy(source: str, destination: str, on_progress=None, exclusive: bool
     `on_progress` is called with the byte count after each completed window.
     With `exclusive`, the destination must not exist yet and must not be a
     symlink (O_CREAT | O_EXCL | O_NOFOLLOW); FileExistsError says it was there.
+    `source` may be an open file descriptor (read from its start, left open).
     Returns the number of bytes copied.
     """
     windows = queue.Queue(maxsize=1)
@@ -70,7 +71,12 @@ def _paced_copy(source: str, destination: str, on_progress=None, exclusive: bool
         dst_file = os.fdopen(os.open(destination, flags, 0o664), 'wb')
     else:
         dst_file = open(destination, 'wb')
-    with open(source, 'rb') as src, dst_file as dst:
+    if isinstance(source, int):
+        os.lseek(source, 0, os.SEEK_SET)
+        src_file = open(source, 'rb', closefd=False)
+    else:
+        src_file = open(source, 'rb')
+    with src_file as src, dst_file as dst:
         fd = dst.fileno()
         thread = threading.Thread(target=flusher, args=(fd,), daemon=True)
         thread.start()
