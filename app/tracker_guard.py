@@ -301,6 +301,21 @@ def reset_guard_for_tests(guard: Optional[TrackerGuard] = None) -> None:
 _KEY_RE = __import__('re').compile(r'^(site|host|ip):[a-z0-9._:-]{1,253}$')
 
 
+def canonical_ip(value: str) -> str:
+    """One spelling per address: compressed form, no zone, and an IPv4
+    address wrapped in IPv6 (::ffff:a.b.c.d mapped, ::a.b.c.d compatible)
+    as plain IPv4, so a mapped spelling can't dodge a backoff.
+    Raises ValueError for a non-address."""
+    import ipaddress
+    ip = ipaddress.ip_address(str(value).strip().strip('[]').split('%')[0])
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            return str(ip.ipv4_mapped)
+        if int(ip) >> 32 == 0 and int(ip) >= 1 << 24:
+            return str(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF))
+    return str(ip)
+
+
 def normalize_host(url: str) -> str:
     """Lowercase host name without a trailing dot or a leading 'www.' (IDNA
     names in their ASCII form; IP literals in their compressed form, IPv6
@@ -310,8 +325,7 @@ def normalize_host(url: str) -> str:
     except ValueError:
         return ''
     try:
-        import ipaddress
-        return str(ipaddress.ip_address(host.split('%')[0]))      # one spelling per IP literal
+        return canonical_ip(host)      # one spelling per IP literal
     except ValueError:
         pass
     try:
@@ -340,8 +354,7 @@ _IP_KINDS = ('rate', 'banned')
 
 
 def ip_key(address: str) -> str:
-    import ipaddress
-    return f'ip:{ipaddress.ip_address(str(address).split("%")[0])}'
+    return f'ip:{canonical_ip(address)}'
 
 
 def address_scope(cfg: Dict, guard: Optional[TrackerGuard] = None):

@@ -40,7 +40,7 @@ class Net:
             return _real_getaddrinfo(host, port, *a, flags=socket.AI_NUMERICHOST,
                                      type=socket.SOCK_STREAM)
 
-        def _open(scheme, ip, port, host, target, headers, timeout, max_bytes):
+        def _open(scheme, ip, port, host, target, headers, timeout, max_bytes, **_kw):
             self.opens.append((scheme, ip, port, host, target, headers['Host']))
             return self.routes.get((ip, host, target), (404, {}, b''))
 

@@ -203,7 +203,7 @@ def test_sources_returns_segmentable_releases_without_secrets(client, env):
     assert web['indexer'] == 'Jack' and web['seeders'] == 80 and web['size'] == 6 * 1024 ** 3
     assert web['tracker_type'] == 'torznab' and web['protocol'] == 'torrent'
     assert web['download_url'].startswith('/api/trackers/release/')
-    assert web['guid'] == 'https://t.example/details/The.Nut.Job.2014.1080p.WEB-DL.DDP5.1.H.264-GRP'
+    assert web['guid'].startswith('luma-tracker:')   # always hashed: details links can carry a passkey
     assert PASSKEY not in r.get_data(as_text=True) and APIKEY not in r.get_data(as_text=True)
     sent = env['mock'].calls[0]
     assert sent['params']['q'] == 'The Nut Job 2014' and sent['params']['apikey'] == APIKEY

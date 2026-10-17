@@ -20,11 +20,14 @@ Every hop:
     changes between the check and the connect cannot redirect the request;
   * redirects are never followed automatically: each Location is resolved
     against the current URL and checked again as a new hop, up to MAX_HOPS;
-  * environment proxies are ignored and the body size is capped.
+  * environment proxies are ignored and the body size is capped;
+  * one total deadline covers every hop, so a server that trickles bytes (or
+    a slow redirect chain) cannot hold the request open past TOTAL_TIMEOUT.
 """
 
 import ipaddress
 import socket
+import time
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlsplit
 
@@ -34,6 +37,7 @@ MAX_HOPS = 5
 MAX_BYTES = 10 * 1024 * 1024
 CONNECT_TIMEOUT = 10.0
 READ_TIMEOUT = 30.0
+TOTAL_TIMEOUT = 30.0
 USER_AGENT = 'Luma'
 
 _REDIRECTS = (301, 302, 303, 307, 308)
@@ -162,8 +166,9 @@ def _host_header(host: str, port: int, scheme: str) -> str:
 
 def _open(scheme: str, ip: str, port: int, host: str, target: str,
           headers: Dict[str, str], timeout: urllib3.Timeout,
-          max_bytes: int) -> Tuple[int, Dict[str, str], bytes]:
-    """One request to the pinned address. No redirects, no retries, no proxy."""
+          max_bytes: int, deadline: Optional[float] = None) -> Tuple[int, Dict[str, str], bytes]:
+    """One request to the pinned address. No redirects, no retries, no proxy.
+    *deadline* is a time.monotonic() value the whole read must finish by."""
     if scheme == 'https':
         pool = urllib3.HTTPSConnectionPool(
             ip, port=port, timeout=timeout, retries=False, maxsize=1,
@@ -177,8 +182,19 @@ def _open(scheme: str, ip: str, port: int, host: str, target: str,
                             assert_same_host=False)
         try:
             chunks, size = [], 0
+            read = getattr(resp, 'read1', None) or resp.read
             while True:
-                chunk = resp.read(65536)
+                if deadline is not None:
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        raise FetchError('Request took too long')
+                    sock = getattr(getattr(resp, 'connection', None), 'sock', None)
+                    if sock is not None:
+                        try:
+                            sock.settimeout(max(0.05, min(left, timeout.read_timeout or left)))
+                        except OSError:
+                            pass
+                chunk = read(65536)
                 if not chunk:
                     break
                 size += len(chunk)
@@ -198,16 +214,27 @@ def _open(scheme: str, ip: str, port: int, host: str, target: str,
 
 def fetch(url: str, *, max_hops: int = MAX_HOPS, max_bytes: int = MAX_BYTES,
           connect_timeout: float = CONNECT_TIMEOUT,
-          read_timeout: float = READ_TIMEOUT) -> Response:
+          read_timeout: float = READ_TIMEOUT,
+          total_timeout: Optional[float] = None) -> Response:
     """GET a user-supplied URL with every hop checked and its address pinned.
 
     A redirect to a magnet: link ends the chain and is returned as the final
     URL (status 3xx, empty body) so the caller can hand it to qBittorrent.
-    Raises BlockedURL for a refused URL/hop and FetchError for failures."""
-    timeout = urllib3.Timeout(connect=connect_timeout, read=read_timeout)
+    Raises BlockedURL for a refused URL/hop and FetchError for failures,
+    including running past *total_timeout* seconds across all hops and body
+    reads. By default that is connect + read timeout, capped at TOTAL_TIMEOUT,
+    so a 1 byte/s upstream can't hold a worker thread past it."""
+    if total_timeout is None:
+        total_timeout = min(TOTAL_TIMEOUT, connect_timeout + read_timeout)
+    deadline = time.monotonic() + total_timeout
     current = url
     for _hop in range(max_hops + 1):
         scheme, host, port, ip, target = check_url(current)
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise FetchError('Request took too long')
+        timeout = urllib3.Timeout(connect=min(connect_timeout, left),
+                                  read=min(read_timeout, left))
         headers = {
             'Host': _host_header(host, port, scheme),
             'User-Agent': USER_AGENT,
@@ -215,7 +242,8 @@ def fetch(url: str, *, max_hops: int = MAX_HOPS, max_bytes: int = MAX_BYTES,
             'Accept-Encoding': 'identity',
         }
         status, resp_headers, body = _open(scheme, ip, port, host, target,
-                                           headers, timeout, max_bytes)
+                                           headers, timeout, max_bytes,
+                                           deadline=deadline)
         lower = {k.lower(): v for k, v in resp_headers.items()}
         location = lower.get('location')
         if status in _REDIRECTS and location:

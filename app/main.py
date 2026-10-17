@@ -2147,6 +2147,104 @@ def _tracker_member_denied():
         _get_current_user, bool(getattr(g, 'implicit_user', False)), user_auth.is_plex_approved)
 
 
+import hashlib as _hashlib_links
+import threading as _threading_links
+
+_SECRET_QUERY_KEYS = frozenset({
+    'passkey', 'apikey', 'api_key', 'api-key', 'key', 'token', 'authkey', 'auth',
+    'torrent_pass', 'rsskey', 'rss_key', 'pass', 'password', 'secret', 'sid', 'uid', 'hash_key',
+})
+_SECRETISH_SEGMENT = re.compile(r'^[A-Za-z0-9]{24,}$')
+
+
+def _strip_link_secrets(value: str) -> str:
+    """An http(s) link safe to show anyone: no user info or fragment, and no
+    query parameter that carries a passkey or API key. A path segment that
+    looks like a key (24+ letters and digits) replaces the whole link with an
+    opaque id. Anything that isn't an http(s) link is returned unchanged."""
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    v = value or ''
+    if not v.lower().startswith(('http://', 'https://')):
+        return v
+    try:
+        parts = urlsplit(v)
+        port = parts.port
+    except ValueError:
+        return ''
+    if any(_SECRETISH_SEGMENT.match(seg) for seg in parts.path.split('/')):
+        return 'luma-link:' + _hashlib_links.sha256(v.encode('utf-8')).hexdigest()[:24]
+    netloc = parts.hostname or ''
+    if ':' in netloc:
+        netloc = f"[{netloc}]"
+    if port:
+        netloc = f"{netloc}:{port}"
+    query = urlencode([(k, val) for k, val in parse_qsl(parts.query, keep_blank_values=True)
+                       if k.lower() not in _SECRET_QUERY_KEYS])
+    return urlunsplit((parts.scheme, netloc, parts.path, query, ''))
+
+
+# Opaque links for indexer (Prowlarr/Torznab) download URLs that carry a key.
+# The real URL stays here; /api/downloads/add swaps it back server-side.
+SOURCE_LINK_PREFIX = '/api/sources/link/'
+_SOURCE_LINK_TTL = 6 * 3600
+_SOURCE_LINK_MAX = 20000
+_source_links: Dict[str, tuple] = {}
+_source_links_lock = _threading_links.Lock()
+
+
+def _public_download_link(url: str) -> str:
+    """*url* as the browser may see it. A release link or magnet is returned
+    as is; an http(s) link that carries a key becomes an opaque link."""
+    u = url or ''
+    if not u.lower().startswith(('http://', 'https://')):
+        return u
+    if _strip_link_secrets(u) == u:
+        return u
+    token = _hashlib_links.sha256(('luma-src:' + u).encode('utf-8')).hexdigest()[:32]
+    now = time.time()
+    with _source_links_lock:
+        _source_links[token] = (now, u)
+        if len(_source_links) > _SOURCE_LINK_MAX:
+            for k, _ in sorted(_source_links.items(), key=lambda kv: kv[1][0])[:1000]:
+                _source_links.pop(k, None)
+    return SOURCE_LINK_PREFIX + token
+
+
+def _resolve_source_link(url: str):
+    """(is_source_link, real_url_or_None) for a link from _public_download_link."""
+    u = (url or '').strip()
+    base = (app.config.get('URL_BASE') or '').rstrip('/')
+    if base and u.startswith(base + SOURCE_LINK_PREFIX):
+        u = u[len(base):]
+    if not u.startswith(SOURCE_LINK_PREFIX):
+        return False, None
+    token = u[len(SOURCE_LINK_PREFIX):]
+    with _source_links_lock:
+        hit = _source_links.get(token)
+    if not hit or time.time() - hit[0] > _SOURCE_LINK_TTL:
+        return True, None
+    return True, hit[1]
+
+
+_RESULT_URL_FIELDS = ('guid', 'info_url', 'comments', 'details', 'link', 'url')
+
+
+def _all_results_public(payload: dict) -> dict:
+    """The all-results payload as sent to any viewer, owner included: every
+    URL field loses its user info, fragment and key-carrying parameters
+    (trackers put passkeys there), and download links that carry a key are
+    opaque, so the full links never leave the server."""
+    out = []
+    for r in payload.get('releases') or []:
+        r = dict(r)
+        for k in _RESULT_URL_FIELDS:
+            if isinstance(r.get(k), str):
+                r[k] = _strip_link_secrets(r[k])
+        r['download_url'] = _public_download_link(r.get('download_url') or '')
+        out.append(r)
+    return {**payload, 'releases': out}
+
+
 @app.route('/api/sources/all-results')
 def sources_all_results():
     """Raw, broad-category indexer search with NO quality filtering.
@@ -2182,7 +2280,7 @@ def sources_all_results():
             ttl = (_ALL_RESULTS_CACHE_TTL if data.get('releases')
                    else _ALL_RESULTS_EMPTY_TTL)
             if time.time() - ts < ttl:
-                return jsonify(data)
+                return jsonify(_all_results_public(data))
             _all_results_cache.pop(cache_key, None)
 
         raw = client.search_all(title, media_type, year)
@@ -2229,7 +2327,7 @@ def sources_all_results():
             'releases': releases,
         }
         _all_results_cache[cache_key] = (time.time(), payload)
-        return jsonify(payload)
+        return jsonify(_all_results_public(payload))
 
     except Exception as e:
         logger.error(f"Error in sources_all_results: {e}")
@@ -9251,6 +9349,22 @@ def _qbit_app_category() -> str:
     return (settings.get('qbittorrent.app_category') or 'luma').strip() or 'luma'
 
 
+def _qbit_add_fields() -> Dict[str, str]:
+    """Form fields for every torrents/add Luma sends: the configured app
+    category, and paused when Settings → qBittorrent → Add paused is on
+    (qBit 4.x reads `paused`, 5.x reads `stopped`)."""
+    fields = {'category': _qbit_app_category(), 'autoTMM': 'false'}
+    if settings.get('qbittorrent.add_paused'):
+        fields['paused'] = 'true'
+        fields['stopped'] = 'true'
+    return fields
+
+
+def _download_client_unavailable():
+    """qBittorrent couldn't be reached. Generic on purpose: no host or port."""
+    return jsonify({'error': 'Download client unavailable'}), 503
+
+
 def _telegram_admin_chat_id() -> str:
     """Telegram chat that receives admin approve/deny requests.
 
@@ -16203,12 +16317,8 @@ def _fetch_pasted_torrent(url: str):
 def _safe_magnet(uri: str) -> Optional[str]:
     """A magnet URI that is one line, or None. qBittorrent splits its `urls`
     field on newlines, so a second line would be fetched by qBit itself."""
-    uri = (uri or '').strip()
-    if not uri.lower().startswith('magnet:'):
-        return None
-    if any(c in uri for c in '\r\n\x00'):
-        return None
-    return uri
+    from app.tracker_sources import safe_magnet
+    return safe_magnet(uri)
 
 
 @app.route('/api/downloads/add', methods=['POST'])
@@ -16243,6 +16353,11 @@ def add_torrent_to_qbittorrent():
 
         if not torrent_url:
             return jsonify({'error': 'Missing torrent_url'}), 400
+        is_src_link, real_url = _resolve_source_link(torrent_url)
+        if is_src_link:
+            if not real_url:
+                return jsonify({'error': 'This download link has expired. Search again.'}), 410
+            torrent_url = real_url
         if torrent_url.lower().startswith('magnet:'):
             if not _safe_magnet(torrent_url):
                 return jsonify({'error': 'Link not allowed'}), 400
@@ -16262,16 +16377,6 @@ def add_torrent_to_qbittorrent():
         if not qbit_url:
             return jsonify({'error': 'qBittorrent isn’t set up'}), 503
 
-        session = req.Session()
-        login_response = session.post(
-            f"{qbit_url}/api/v2/auth/login",
-            data={'username': qbit_user, 'password': qbit_pass},
-            timeout=10,
-        )
-        if login_response.status_code != 200 or login_response.text.strip() != 'Ok.':
-            logger.error(f"qBittorrent login failed: {login_response.status_code}")
-            return jsonify({'error': 'Failed to login to qBittorrent'}), 500
-
         logger.info(f"Grab-to-library: {torrent_name or '(unnamed)'}")
 
         is_magnet = torrent_url.lower().startswith('magnet:')
@@ -16287,8 +16392,10 @@ def add_torrent_to_qbittorrent():
             except _tsrc.GrabError as e:
                 return jsonify({'error': e.message}), e.status
             if kind == 'magnet':
+                add_url = _safe_magnet(got)
+                if not add_url:
+                    return jsonify({'error': 'Link not allowed'}), 400
                 is_magnet = True
-                add_url = got
                 expected_hash = _magnet_info_hash(got)
             else:
                 torrent_bytes = got
@@ -16307,8 +16414,8 @@ def add_torrent_to_qbittorrent():
                 logger.warning(f"Refused torrent link: {e}")
                 return jsonify({'error': 'Link not allowed'}), 400
             except Exception as e:
-                logger.error(f"Failed to fetch torrent from indexer: {e}")
-                return jsonify({'error': f'Could not fetch the torrent from the indexer: {e}'}), 502
+                logger.error(f"Failed to fetch torrent from indexer: {type(e).__name__}")
+                return jsonify({'error': 'Couldn’t get the torrent from that link'}), 502
 
             final_url = (dl.url or '').lower()
             body_head = dl.content[:8].lower() if dl.content else b''
@@ -16343,6 +16450,22 @@ def add_torrent_to_qbittorrent():
                              'Nothing was added — re-search for a fresh source and try again.'
                 }), 502
 
+        # The link is checked (and fetched through the guard) before qBit is
+        # contacted at all, so a refused link never logs in to qBittorrent.
+        session = req.Session()
+        try:
+            login_response = session.post(
+                f"{qbit_url}/api/v2/auth/login",
+                data={'username': qbit_user, 'password': qbit_pass},
+                timeout=10,
+            )
+        except req.exceptions.RequestException as e:
+            logger.error(f"qBittorrent unreachable: {type(e).__name__}")
+            return _download_client_unavailable()
+        if login_response.status_code != 200 or login_response.text.strip() != 'Ok.':
+            logger.error(f"qBittorrent login failed: {login_response.status_code}")
+            return jsonify({'error': 'Download client sign-in failed'}), 502
+
         def _qbit_category_torrents():
             try:
                 tr = session.get(
@@ -16372,23 +16495,24 @@ def add_torrent_to_qbittorrent():
 
         # Add to qBit — upload the validated bytes when we have them, otherwise
         # hand over the magnet URI (qBit resolves magnets via DHT itself).
+        add_fields = _qbit_add_fields()
         try:
             if torrent_bytes is not None:
                 add_response = session.post(
                     f"{qbit_url}/api/v2/torrents/add",
                     files={'torrents': ('release.torrent', torrent_bytes, 'application/x-bittorrent')},
-                    data={'category': _qbit_app_category(), 'autoTMM': 'false'},
+                    data=add_fields,
                     timeout=30,
                 )
             else:
                 add_response = session.post(
                     f"{qbit_url}/api/v2/torrents/add",
-                    data={'urls': add_url, 'category': _qbit_app_category(), 'autoTMM': 'false'},
+                    data={'urls': add_url, **add_fields},
                     timeout=30,
                 )
         except Exception as e:
-            logger.error(f"qBittorrent add request failed: {e}")
-            return jsonify({'error': f'qBittorrent add request failed: {e}'}), 502
+            logger.error(f"qBittorrent add request failed: {type(e).__name__}")
+            return _download_client_unavailable()
 
         logger.info(f"qBittorrent add response: status={add_response.status_code}, text='{add_response.text.strip()}'")
         if add_response.status_code != 200:
@@ -16442,8 +16566,14 @@ def add_torrent_to_qbittorrent():
         })
 
     except Exception as e:
-        logger.error(f"Error adding torrent: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error adding torrent: {type(e).__name__}")
+        try:
+            import requests as _rq
+            if isinstance(e, _rq.exceptions.RequestException):
+                return _download_client_unavailable()
+        except Exception:
+            pass
+        return jsonify({'error': 'Couldn’t add download'}), 500
 
 # Sonarr Integration Endpoints
 @app.route('/api/sonarr/add', methods=['POST'])

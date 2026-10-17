@@ -326,9 +326,9 @@ class TrackerSearch:
         if not target:
             return None
         token = self.tokens.issue(int(cfg['id']), target)
-        guid = r.get('info_url') or r.get('guid') or ''
-        if not guid or _has_secret(guid, secret_values) or guid == link:
-            guid = f"luma-tracker:{cfg['id']}:{hashlib.sha256(target.encode('utf-8')).hexdigest()[:24]}"
+        # Always the hashed id: a tracker's details/comments link often
+        # carries a passkey that isn't one of the configured secret values.
+        guid = f"luma-tracker:{cfg['id']}:{hashlib.sha256(target.encode('utf-8')).hexdigest()[:24]}"
         title = r.get('title') or ''
         if not title or _has_secret(title, secret_values):
             return None

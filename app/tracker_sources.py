@@ -204,6 +204,25 @@ def _is_torrent(body: bytes) -> bool:
 
 # ------------------------------------------------------------------ grab
 
+def safe_magnet(uri: Any) -> Optional[str]:
+    """A magnet URI with no control characters (one line), or None.
+    qBittorrent splits its `urls` field on newlines, so a second line (for
+    example a Torznab magneturl carrying &#10;) would be fetched by qBit."""
+    s = str(uri or '').strip()
+    if not s.lower().startswith('magnet:'):
+        return None
+    if any(ord(c) < 0x20 or ord(c) == 0x7f for c in s):
+        return None
+    return s
+
+
+def _magnet_or_refuse(uri: Any) -> Tuple[str, str]:
+    m = safe_magnet(uri)
+    if not m:
+        raise GrabError('This download link isn’t allowed.', 502)
+    return 'magnet', m
+
+
 def fetch_release(token: Optional[str], resolver=None) -> Tuple[str, Any]:
     """('magnet', uri) or ('torrent', bytes) for a release token.
 
@@ -229,7 +248,7 @@ def fetch_release(token: Optional[str], resolver=None) -> Tuple[str, Any]:
         raise GrabError('This tracker’s saved sign-in can’t be read. Edit it in Settings.', 409) from None
 
     if target.lower().startswith('magnet:'):
-        return 'magnet', target
+        return _magnet_or_refuse(target)
 
     base = _origin(str(cfg.get('url') or ''))
     if base is None:
@@ -273,7 +292,7 @@ def fetch_release(token: Optional[str], resolver=None) -> Tuple[str, Any]:
                         loc = (resp.headers.get('Location') or resp.headers.get('location') or '').strip()
                         if loc.lower().startswith('magnet:'):
                             engine.guard.success(gk)
-                            return 'magnet', loc
+                            return _magnet_or_refuse(loc)
                         if not loc:
                             raise TrackerError('redirect', resp.status)
                         url = urljoin(url, loc)
@@ -300,7 +319,8 @@ def fetch_release(token: Optional[str], resolver=None) -> Tuple[str, Any]:
     head = body[:8].lower()
     if head.startswith(b'magnet:'):
         engine.guard.success(gk)
-        return 'magnet', body.decode('utf-8', 'ignore').strip().splitlines()[0]
+        lines = body.decode('utf-8', 'ignore').strip().splitlines()
+        return _magnet_or_refuse(lines[0] if lines else '')
     if resp.status == 200 and _is_torrent(body):
         engine.guard.success(gk)
         return 'torrent', body

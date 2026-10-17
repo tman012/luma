@@ -51,6 +51,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
         "username":        {"type": "string", "default": "", "sensitive": False, "description": "qBittorrent login username"},
         "password":        {"type": "string", "default": "", "sensitive": True,  "description": "qBittorrent login password"},
         "app_category":    {"type": "string", "default": "luma", "sensitive": False, "description": "Category for manual app downloads"},
+        "add_paused":      {"type": "boolean", "default": False, "sensitive": False, "description": "Add downloads paused"},
         "radarr_category": {"type": "string", "default": "radarr", "sensitive": False, "description": "Category for Radarr downloads"},
     },
     "sonarr": {
@@ -449,6 +450,7 @@ ENV_VAR_MAP: Dict[str, str] = {
     "QBITTORRENT_URL":  "qbittorrent.url",
     "QBITTORRENT_USER": "qbittorrent.username",
     "QBITTORRENT_PASS": "qbittorrent.password",
+    "QBITTORRENT_APP_CATEGORY": "qbittorrent.app_category",
     # Sonarr
     "SONARR_URL":     "sonarr.url",
     "SONARR_API_KEY": "sonarr.api_key",
