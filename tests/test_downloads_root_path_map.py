@@ -71,10 +71,9 @@ def test_storage_cleanup_uses_the_same_root(monkeypatch, tmp_path):
 def test_no_hardcoded_slash_downloads_left():
     """Only the one default (fm.DEFAULT_DOWNLOADS_ROOT, plus Config's env
     default and the settings schema default) names /downloads. The shared
-    app/auto_delete_guard.py (kept byte-identical with cursor/sources-followup)
-    keeps its own last-resort fallback."""
-    allowed = {'app/file_management.py': 1, 'app/config.py': 1, 'app/settings_manager.py': 1,
-               'app/auto_delete_guard.py': 1}
+    app/auto_delete_guard.py (byte-identical with prod-destructive-guard
+    63ea469) compares the stored value as saved, with no fallback."""
+    allowed = {'app/file_management.py': 1, 'app/config.py': 1, 'app/settings_manager.py': 1}
     pat = re.compile(r"""['"]/downloads/?['"]""")
     for p in sorted((ROOT / 'app').glob('*.py')):
         rel = p.relative_to(ROOT).as_posix()
