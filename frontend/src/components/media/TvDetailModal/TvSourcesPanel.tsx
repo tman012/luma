@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { srcAbove, srcCancelBtn, srcPrimaryBtn, SRC_BLUE, SRC_HEADING_COLOR, NO_SOURCES, sourcesCount } from '../sourcesTheme';
-import { TrackerStatusNotice } from '../sourcesTrackerStatus';
+import { TrackerStatusLine, TrackerStatusNotice } from '../sourcesTrackerStatus';
 import { createPortal } from 'react-dom';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useTvSourcesData, type TvProcessedRelease } from './useTvSourcesData';
@@ -1407,6 +1407,7 @@ function CompactTvSourcesView({
             <p style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 20px' }}>
               Select type
             </p>
+            <TrackerStatusLine trackers={trackers} />
             {grabErrorMsg && (
               <div style={{
                 background: 'rgba(239, 68, 68, 0.15)',

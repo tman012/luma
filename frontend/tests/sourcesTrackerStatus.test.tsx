@@ -3,7 +3,7 @@ import { resolve } from 'path';
 import { render, cleanup, fireEvent, renderHook, waitFor, act } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fetchAllResults, trackerStatusText, type TrackerStatus } from '@/services/allSourcesApi';
-import { TrackerStatusNotice } from '@/components/media/sourcesTrackerStatus';
+import { TrackerStatusLine, TrackerStatusNotice } from '@/components/media/sourcesTrackerStatus';
 import { useMovieSourcesData } from '@/components/media/MovieDetailModal/useMovieSourcesData';
 
 const read = (p: string) => readFileSync(resolve(__dirname, '../src', p), 'utf8');
@@ -75,5 +75,22 @@ describe('Override pill overlap (PM 3)', () => {
     const logo = src.slice(src.indexOf('data-modal-logo') - 900, src.indexOf('data-modal-logo'));
     expect(logo).toContain("opacity: phase === 'visible' && !showSourcesShelf ? 1 : 0");
     expect(logo).toContain("visibility: showSourcesShelf ? 'hidden' : undefined");
+  });
+});
+
+describe('phone TV list, partial failure (Designer)', () => {
+  it('one line with every failed tracker, nothing when all answered', () => {
+    const { container } = render(<TrackerStatusLine trackers={[{ name: 'IPTorrents', status: 'auth' }, { name: 'TL', status: 'rate' }]} />);
+    expect(container.textContent).toBe('IPTorrents sign-in failed · TL search limit reached');
+    cleanup();
+    const empty = render(<TrackerStatusLine trackers={[]} />);
+    expect(empty.container.textContent).toBe('');
+  });
+
+  it('the "Select type" heading stays, with the status line right under it', () => {
+    const src = read('components/media/TvDetailModal/TvSourcesPanel.tsx');
+    const at = src.indexOf('Select type');
+    const after = src.slice(at, at + 200);
+    expect(after).toMatch(/^Select type\s*<\/p>\s*<TrackerStatusLine trackers=\{trackers\} \/>/);
   });
 });
