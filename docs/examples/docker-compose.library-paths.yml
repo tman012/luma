@@ -1,0 +1,19 @@
+# Example: Settings > Library paths on the fresh-install build (LUMA_MINIMAL).
+#
+#   docker compose -p luma-test -f docker-compose.test.yml \
+#     -f docs/examples/docker-compose.library-paths.yml up -d
+#
+# Every host path is a placeholder you set in the shell or an .env file.
+# Mount the downloads at the path qBittorrent reports (here /downloads) so no
+# path map is needed; otherwise add one in Settings > Library paths.
+services:
+  luma-test:
+    environment:
+      # qBittorrent tag on this install's torrents. Production skips torrents
+      # with it, so keep the same value in production's environment if you change it.
+      - LUMA_TEST_QBIT_TAG=${LUMA_TEST_QBIT_TAG:-luma-test}
+    volumes:
+      # Read-only: Luma copies (or hardlinks) from here and never changes it.
+      - ${DOWNLOADS_HOST_DIR:?set DOWNLOADS_HOST_DIR}:/downloads:ro
+      # The parent of your library folders; add each one in Settings.
+      - ${MEDIA_HOST_DIR:?set MEDIA_HOST_DIR}:/media

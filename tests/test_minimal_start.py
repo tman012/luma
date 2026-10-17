@@ -143,9 +143,10 @@ def patched_start(test_app, monkeypatch):
             mock.patch.object(app.main.hero_cache, 'start_scheduler') as hero_start, \
             mock.patch('app.main.explore_cache_updater') as explore, \
             mock.patch('app.main.tunnel_auto_start') as tunnel, \
+            mock.patch('app.library_mover.start') as mover, \
             mock.patch('threading.Thread') as thread:
         yield dict(init_db=init_db, ua_init=ua_init, search=search_start, hero=hero_start,
-                   explore=explore, tunnel=tunnel, thread=thread, fakes=fakes)
+                   explore=explore, tunnel=tunnel, thread=thread, mover=mover, fakes=fakes)
 
 
 def _started(fakes):
@@ -153,7 +154,7 @@ def _started(fakes):
 
 
 def test_minimal_mode_starts_no_background_threads(test_app, patched_start, minimal):
-    """Only the library search index starts (search works in minimal builds)."""
+    """Only the library search index and the library mover start."""
     from app.main import start_services
     test_app.config['START_BACKGROUND_THREADS'] = True
     start_services(test_app)
@@ -162,6 +163,7 @@ def test_minimal_mode_starts_no_background_threads(test_app, patched_start, mini
     p['ua_init'].assert_called_once()
     p['thread'].assert_not_called()
     p['search'].assert_called_once()
+    p['mover'].assert_called_once()
     for k in ('hero', 'explore', 'tunnel'):
         p[k].assert_not_called()
     assert _started(p['fakes']) == []
@@ -175,6 +177,7 @@ def test_flag_unset_starts_background_threads(test_app, patched_start, monkeypat
     p = patched_start
     assert p['thread'].called
     p['search'].assert_called_once()
+    p['mover'].assert_not_called()          # production keeps its own auto-rename monitor
     assert sorted(_started(p['fakes'])) == sorted(AUTOMATION_MODULES)
 
 

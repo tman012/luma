@@ -635,12 +635,19 @@ def start_services(app_instance):
     # LUMA_MINIMAL=1: no caches, automations, schedulers or tunnel; only the
     # library search index (it reads Plex, and TMDB only with a Connectors key).
     if _minimal.enabled():
-        logger.warning('LUMA_MINIMAL is set: background threads are NOT started (except the search index)')
+        logger.warning('LUMA_MINIMAL is set: background threads are NOT started (except the search index and the library mover)')
         if not skip_bg:
             try:
                 fast_search_index.start()
             except Exception as e:
                 logger.error(f"Failed to start fast search index: {e}")
+            # Files finished grabs into Settings > Library paths; idle (no
+            # qBittorrent calls) until a path is saved.
+            try:
+                from app import library_mover
+                library_mover.start()
+            except Exception as e:
+                logger.error(f"Failed to start the library mover: {type(e).__name__}")
         return
 
     # Initialize library caches
@@ -16418,6 +16425,18 @@ def _safe_magnet(uri: str) -> Optional[str]:
     return safe_magnet(uri)
 
 
+def _track_grab(torrent_hash, tmdb_data, torrent_name=None):
+    """Hand a confirmed grab to whatever files it into the library: the
+    library mover in minimal builds (never prod's auto-rename monitor), prod's
+    AutoRenamer otherwise."""
+    if _minimal.enabled():
+        from app import library_mover
+        library_mover.track(torrent_hash, tmdb_data, torrent_name)
+        return
+    from app.auto_rename import auto_renamer
+    auto_renamer.track_download(torrent_hash, tmdb_data)
+
+
 @app.route('/api/downloads/add', methods=['POST'])
 def add_torrent_to_qbittorrent():
     """Add a torrent to qBittorrent and track it.
@@ -16438,7 +16457,6 @@ def add_torrent_to_qbittorrent():
     if denied:
         return denied
     try:
-        from app.auto_rename import auto_renamer
         from app.outbound_guard import BlockedURL
         import requests as req
         import time as _time
@@ -16585,7 +16603,7 @@ def add_torrent_to_qbittorrent():
             logger.info(f"Torrent already in qBittorrent (hash {expected_hash}) — reusing")
             if tmdb_data:
                 try:
-                    auto_renamer.track_download(expected_hash, tmdb_data)
+                    _track_grab(expected_hash, tmdb_data, torrent_name)
                 except Exception as e:
                     logger.error(f"Failed to track existing download: {e}")
             return jsonify({'success': True, 'message': 'Already downloading', 'hash': expected_hash})
@@ -16593,6 +16611,11 @@ def add_torrent_to_qbittorrent():
         # Add to qBit — upload the validated bytes when we have them, otherwise
         # hand over the magnet URI (qBit resolves magnets via DHT itself).
         add_fields = _qbit_add_fields()
+        if _minimal.enabled():
+            # The test install's own torrents carry its tag (shared qBittorrent,
+            # see app/qbit_owner): it moves only those; prod skips them.
+            from app.qbit_owner import tag_name
+            add_fields['tags'] = tag_name()
         try:
             if torrent_bytes is not None:
                 add_response = session.post(
@@ -16651,7 +16674,7 @@ def add_torrent_to_qbittorrent():
         # Positively identified — NOW it is safe to track for rename/library move.
         if tmdb_data:
             try:
-                auto_renamer.track_download(confirmed_hash, tmdb_data)
+                _track_grab(confirmed_hash, tmdb_data, torrent_name)
                 logger.info(f"Download tracked for: {tmdb_data.get('title')}")
             except Exception as e:
                 logger.error(f"Failed to track download: {e}")
@@ -21318,6 +21341,13 @@ app.register_blueprint(_connectors.bp)
 from app import qbit_connector as _qbit_connector
 _qbit_connector.init(settings=settings, owner_or_error=_start_flow._owner_or_error)
 app.register_blueprint(_qbit_connector.bp)
+
+# Settings > Library paths and the library mover (LUMA_MINIMAL builds only).
+from app import file_management as _file_management
+from app import library_mover as _library_mover
+_file_management.init(settings=settings, owner_or_error=_start_flow._owner_or_error)
+_library_mover.init(settings=settings)
+app.register_blueprint(_file_management.bp)
 
 from app import home_rails as _home_rails
 _home_rails.init(get_plex=lambda: plex_service, get_current_user=_get_current_user,
