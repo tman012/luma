@@ -13,7 +13,6 @@ bool).
 """
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, List
 
 PREFIX = 'automation.downloads_guard.'
@@ -25,7 +24,8 @@ INTERVAL = PREFIX + 'check_interval_minutes'
 ROOT = 'media.downloads_root'
 
 # Settings that choose a folder the guard or the manual cleanup deletes from
-# (storage_cleanup.downloads_root()). Any change to one widens, guard on or off.
+# (storage_cleanup.downloads_root()). Any change to one's stored value widens,
+# clearing included, guard on or off.
 DELETE_ROOTS = (ROOT,)
 
 # Every path _widens_auto_delete can name, in the order it names them.
@@ -48,17 +48,10 @@ class _View:
         return node
 
 
-def _root(view: _View, path: str = ROOT) -> str:
-    """The folder deletions are confined to, resolved as
-    storage_cleanup.downloads_root() does."""
-    root = view.get(path)
-    if not root or not isinstance(root, str):
-        try:
-            from app.config import Config
-            root = Config.DOWNLOADS_ROOT
-        except Exception:
-            root = '/downloads'
-    return os.path.realpath(root)
+def _folder(view: _View, path: str = ROOT) -> Any:
+    """The stored value of a folder setting, as saved: no resolving, no
+    fallback. Any change to it counts, clearing included."""
+    return view.get(path)
 
 
 def _widens_auto_delete(old: Dict[str, Any], new: Dict[str, Any]) -> List[str]:
@@ -74,9 +67,11 @@ def _widens_auto_delete(old: Dict[str, Any], new: Dict[str, Any]) -> List[str]:
     - daily_cap_gb: higher, or a cap changed to 0 (no cap). A change from 0
       to a cap tightens.
     - check_interval_minutes: shorter (runs more often).
-    - media.downloads_root: any change of the resolved folder, guard on or
-      off (the manual cleanup deletes from it any time, and the guard does
-      the moment it is turned on).
+    - media.downloads_root: any change to the stored value, clearing
+      included, guard on or off (the manual cleanup deletes from it any
+      time, and the guard does the moment it is turned on). Compared as
+      saved, with no resolving and no fallback; a save that leaves it
+      unchanged is fine.
     The tracker preference only orders what is spent first, never how much,
     so it is not a widening.
     """
@@ -85,7 +80,7 @@ def _widens_auto_delete(old: Dict[str, Any], new: Dict[str, Any]) -> List[str]:
     # The folder the guard and the manual cleanup delete from counts whether
     # or not the guard is on (PM ruling): the cleanup uses it any time, and
     # the guard uses it the moment it is turned on.
-    moved = [p for p in DELETE_ROOTS if _root(n, p) != _root(o, p)]
+    moved = [p for p in DELETE_ROOTS if _folder(n, p) != _folder(o, p)]
     if not dg.enabled(n):
         return moved
     widened: List[str] = []
