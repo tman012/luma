@@ -27,6 +27,9 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      - name: Frontend unit tests
+        run: node --experimental-strip-types --test frontend/tests/*.test.ts
+
       - name: Check the SPA and the request page for hard-coded URLs
         run: bash frontend/check-hardcoded-urls.sh frontend/dist/assets frontend/src static/request
 

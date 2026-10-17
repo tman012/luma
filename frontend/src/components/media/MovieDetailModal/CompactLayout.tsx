@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useArtReveal } from '@/hooks/useArtReveal';
+import { artFadeStyle } from '@/utils/modalArt';
 import { createPortal } from 'react-dom';
 import { formatRuntime } from '@/utils/image';
 import {
@@ -209,6 +211,8 @@ export function CompactLayout(props: MovieModalViewProps) {
 
   // Plex-like backdrop effects: crop/zoom header + UltraBlur color bleed
   const backdropEffects = useBackdropEffects(detail?.backdropUrl, ultraBlurColors);
+  const artItemKey = detail?.ratingKey ?? detail?.tmdbId ?? 'none';
+  const art = useArtReveal(detail ? (detail.backdropUrl || detail.posterUrl) : null, detail?.clearLogoUrl, props.artFinal);
 
   // -------------------------------------------------------------------------
   // Body scroll lock + safe-area background
@@ -475,6 +479,8 @@ export function CompactLayout(props: MovieModalViewProps) {
                 effects={backdropEffects}
                 phase={phase}
                 containerRef={backdropRef}
+                revealed={art.ready}
+                itemKey={artItemKey}
               />
 
               {/* === CENTERED CONTENT AREA === */}
@@ -520,11 +526,12 @@ export function CompactLayout(props: MovieModalViewProps) {
                     overflow: 'visible',
                   }}
                 >
-                  {detail.clearLogoUrl ? (
+                  {detail.clearLogoUrl && !art.logoFailed ? (
                     <img
+                      key={`logo-${artItemKey}`}
                       src={detail.clearLogoUrl}
                       alt={detail.title}
-                      style={{
+                      style={{ ...artFadeStyle(art.ready),
                         maxWidth: 'calc(100% - 32px)',
                         maxHeight: '200px',
                         objectFit: 'contain',
@@ -540,7 +547,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   ) : null}
                   <h1
                     style={{
-                      display: detail.clearLogoUrl ? 'none' : 'block',
+                      display: detail.clearLogoUrl && !art.logoFailed ? 'none' : 'block', ...artFadeStyle(art.ready),
                       fontSize: '28px',
                       fontWeight: 700,
                       color: '#fff',

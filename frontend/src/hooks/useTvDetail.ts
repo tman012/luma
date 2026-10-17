@@ -34,6 +34,8 @@ interface UseTvDetailResult {
   trailerKey: string | null | undefined;
   ultraBlurColors: UltraBlurColors | null;
   resolvedTmdbId: number | undefined;
+  /** The backdrop and clearlogo URLs won't change any more (see useArtReveal). */
+  artFinal: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,6 +59,9 @@ export function useTvDetail(
   const [tvdbId, setTvdbId] = useState<number | null>(null);
   const [ownership, setOwnership] = useState<OwnershipMap>({});
   const [showOwned, setShowOwned] = useState(false);
+  const [artDone, setArtDone] = useState({ backdrop: false, logo: false });
+  const markArt = (part: 'backdrop' | 'logo') =>
+    setArtDone((p) => (p[part] ? p : { ...p, [part]: true }));
 
   // Sonarr status
   const [sonarrStatus, setSonarrStatus] = useState<SonarrStatus | null>(null);
@@ -173,6 +178,7 @@ export function useTvDetail(
     async function fetchDetail() {
       setLoading(true);
       setError(false);
+      setArtDone({ backdrop: false, logo: false });
 
       try {
         if (tmdbId) {
@@ -192,10 +198,13 @@ export function useTvDetail(
             // Unblock ownership + Sonarr fetches immediately (no longer waits for seasons)
             if (parsed.tvdbId) setTvdbId(parsed.tvdbId);
             extractTrailerAndEnrich(data);
+            markArt('backdrop');
+            if (parsed.clearLogoUrl) markArt('logo');
             // Fire-and-forget clearlogo fetch (no longer blocks modal render)
             if (!parsed.clearLogoUrl) {
               fetchClearlogo(tmdbId, controller.signal).then((logo) => {
                 if (!cancelled && logo) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo } : prev);
+                if (!cancelled) markArt('logo');
               });
             }
           }
@@ -230,11 +239,14 @@ export function useTvDetail(
                 parsed.tmdbId = plexTmdbId;
                 parsed.isOwned = true;
                 setShow(parsed);
+                markArt('backdrop');
+                if (parsed.clearLogoUrl) markArt('logo');
                 if (parsed.tvdbId) setTvdbId(parsed.tvdbId);
                 extractTrailerAndEnrich(tmdbData);
                 if (!parsed.clearLogoUrl) {
                   fetchClearlogo(plexTmdbId, controller.signal).then((logo) => {
                     if (!cancelled && logo) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo } : prev);
+                    if (!cancelled) markArt('logo');
                   });
                 }
               }
@@ -244,9 +256,12 @@ export function useTvDetail(
               parsed.ratingKey = ratingKey;
               setShow(parsed);
               setTrailerKey(null);
+              markArt('backdrop');
+              if (parsed.clearLogoUrl || !plexTmdbId) markArt('logo');
               if (!parsed.clearLogoUrl && plexTmdbId) {
                 fetchClearlogo(plexTmdbId, controller.signal).then((logo) => {
                   if (!cancelled && logo) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo } : prev);
+                  if (!cancelled) markArt('logo');
                 });
               }
             }
@@ -256,6 +271,7 @@ export function useTvDetail(
             parsed.ratingKey = ratingKey;
             setShow(parsed);
             setTrailerKey(null); // No TMDb data, no trailer
+            setArtDone({ backdrop: true, logo: true });
 
             // If Plex provided a tvdb_id directly, use it for ownership/Sonarr
             const plexTvdbId = plexData.tvdb_id as number | null;
@@ -271,6 +287,7 @@ export function useTvDetail(
         if (e?.name !== 'AbortError' && !cancelled) {
           setError(true);
           setTrailerKey(null);
+          setArtDone({ backdrop: true, logo: true });
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -434,5 +451,6 @@ export function useTvDetail(
     trailerKey,
     ultraBlurColors,
     resolvedTmdbId,
+    artFinal: artDone.backdrop && artDone.logo,
   };
 }

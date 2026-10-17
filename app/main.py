@@ -12118,6 +12118,10 @@ _PLEX_IMG_PATH = re.compile(
     r'|/library/sections/[0-9]+/composite/[0-9]+',
     re.ASCII)
 _PLEX_NO_STORE = {'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'}
+# A served image may be kept by this browser for a day (never by a shared
+# cache); without it every detail modal re-downloads its backdrop and logo.
+# Errors and refusals above stay no-store.
+_PLEX_IMG_CACHE = {'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff'}
 _PLEX_IMG_TYPES = frozenset({'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'})
 _PLEX_IMG_MAX_BYTES = 20 * 1024 * 1024
 
@@ -12222,7 +12226,7 @@ def img_plex_proxy():
                 body += chunk
                 if len(body) > _PLEX_IMG_MAX_BYTES:
                     return too_big
-            return Response(bytes(body), content_type=ctype, headers=_PLEX_NO_STORE)
+            return Response(bytes(body), content_type=ctype, headers=_PLEX_IMG_CACHE)
         finally:
             resp.close()
     except requests.RequestException as e:

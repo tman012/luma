@@ -37,6 +37,7 @@ export function TvDetailModal({
     seasonsLoading,
     ultraBlurColors,
     resolvedTmdbId,
+    artFinal,
   } = tvData;
 
   // Local episode context state — initialized from prop, updated by episode row clicks
@@ -210,6 +211,7 @@ export function TvDetailModal({
   // Build view-model props
   const viewProps = {
     show,
+    artFinal,
     seasons,
     tvdbId,
     ownership,

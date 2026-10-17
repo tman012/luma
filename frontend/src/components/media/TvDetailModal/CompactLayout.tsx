@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useArtReveal } from '@/hooks/useArtReveal';
+import { artFadeStyle } from '@/utils/modalArt';
 import { createPortal } from 'react-dom';
 import {
   PERSON_FALLBACK_SVG,
@@ -307,6 +309,9 @@ export function CompactLayout(props: TvModalViewProps) {
 
   // Plex-like backdrop effects: crop/zoom header + UltraBlur color bleed
   const backdropEffects = useBackdropEffects(show?.backdropUrl, ultraBlurColors);
+  const artItemKey = show?.ratingKey ?? show?.tmdbId ?? 'none';
+  const art = useArtReveal(show ? (show.backdropUrl || show.posterUrl) : null,
+    show?.clearLogoUrl ? withBase(show.clearLogoUrl) : null, props.artFinal);
 
   // -----------------------------------------------------------------------
   // Body scroll lock + safe-area background
@@ -552,6 +557,8 @@ export function CompactLayout(props: TvModalViewProps) {
                 effects={backdropEffects}
                 phase={phase}
                 containerRef={backdropRef}
+                revealed={art.ready}
+                itemKey={artItemKey}
               />
 
               {/* === CENTERED CONTENT AREA === */}
@@ -596,11 +603,12 @@ export function CompactLayout(props: TvModalViewProps) {
                     overflow: 'visible',
                   }}
                 >
-                  {show.clearLogoUrl ? (
+                  {show.clearLogoUrl && !art.logoFailed ? (
                     <img
+                      key={`logo-${artItemKey}`}
                       src={show.clearLogoUrl ? withBase(show.clearLogoUrl) : undefined}
                       alt={show.title}
-                      style={{
+                      style={{ ...artFadeStyle(art.ready),
                         maxWidth: 'calc(100% - 32px)',
                         maxHeight: '200px',
                         objectFit: 'contain',
@@ -616,7 +624,7 @@ export function CompactLayout(props: TvModalViewProps) {
                   ) : null}
                   <h1
                     style={{
-                      display: show.clearLogoUrl ? 'none' : 'block',
+                      display: show.clearLogoUrl && !art.logoFailed ? 'none' : 'block', ...artFadeStyle(art.ready),
                       fontSize: '28px',
                       fontWeight: 700,
                       color: '#fff',

@@ -26,7 +26,7 @@ export function MovieDetailModal({
   const [ids, setIds] = useState<{ ratingKey?: number; tmdbId?: number }>({ ratingKey, tmdbId });
   const [reloadNonce, setReloadNonce] = useState(0);
   const [matchToast, setMatchToast] = useState<string | null>(null);
-  const { detail, ratings, loading, error, trailerKey, ultraBlurColors, resolvedTmdbId } =
+  const { detail, ratings, loading, error, trailerKey, ultraBlurColors, resolvedTmdbId, artFinal } =
     useMovieDetail(ids.ratingKey, ids.tmdbId, reloadNonce);
 
   const handleMatched = useCallback((r: FixMatchResult) => {
@@ -113,6 +113,7 @@ export function MovieDetailModal({
   // Build view-model props
   const viewProps = {
     detail,
+    artFinal,
     ratings,
     trailerKey,
     ultraBlurColors,

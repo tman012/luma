@@ -95,7 +95,7 @@ def test_valid_plex_image_shapes_allowed(plex, path, upstream):
     assert r.data == b'img'
     assert calls == ['http://plex.test' + upstream]
     assert r.headers['Content-Type'] == 'image/jpeg'
-    assert r.headers['Cache-Control'] == 'private, no-store'
+    assert r.headers['Cache-Control'] == 'private, max-age=86400'
     assert r.headers['X-Content-Type-Options'] == 'nosniff'
     assert 'ETag' not in r.headers
 
@@ -244,4 +244,31 @@ def test_plex_not_configured_never_stored(test_app, monkeypatch):
     monkeypatch.setattr(app.main.settings, 'get', lambda *a, **k: None)
     r = test_app.test_client().get('/api/img/plex?url=/library/metadata/1/thumb', environ_base=LAN)
     assert r.status_code == 503
+    assert r.headers['Cache-Control'] == 'private, no-store'
+
+
+
+# --- browser caching of served images (modal backdrop/logo) -----------------
+
+@pytest.mark.parametrize('path', [
+    '/library/metadata/5/art/1700000000', '/library/metadata/5/art',
+    '/library/metadata/5/clearLogo/1700000000', '/library/metadata/5/clearLogo',
+    '/library/metadata/5/thumb/1700000000', '/library/metadata/5/thumb',
+])
+@pytest.mark.parametrize('size', ['', '&w=1280&h=720'])
+def test_served_images_cached_privately_for_a_day(plex, path, size):
+    client = plex[0] if isinstance(plex, tuple) else plex
+    r = client.get('/api/img/plex?url=' + path + size, environ_base=LAN)
+    assert r.status_code == 200
+    assert r.headers['Cache-Control'] == 'private, max-age=86400'
+    assert 'public' not in r.headers['Cache-Control'] and 'no-store' not in r.headers['Cache-Control']
+    assert r.headers['X-Content-Type-Options'] == 'nosniff'
+    assert 'ETag' not in r.headers
+
+
+@pytest.mark.parametrize('query', ['', '?url=', '?url=/library/../:/prefs', '?url=http://evil.test/x.jpg'])
+def test_refusals_still_never_stored(plex, query):
+    client = plex[0] if isinstance(plex, tuple) else plex
+    r = client.get('/api/img/plex' + query, environ_base=LAN)
+    assert r.status_code == 400
     assert r.headers['Cache-Control'] == 'private, no-store'

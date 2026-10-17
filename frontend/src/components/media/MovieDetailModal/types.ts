@@ -9,6 +9,7 @@ export interface MovieModalViewProps {
   trailerKey: string | null | undefined;
   ultraBlurColors: UltraBlurColors | null;
   resolvedTmdbId: number | undefined;
+  artFinal: boolean;
   loading: boolean;
   error: boolean;
   // Phase animation

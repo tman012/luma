@@ -13,6 +13,7 @@
 // ---------------------------------------------------------------------------
 
 import { useMemo } from 'react';
+import { ART_PLACEHOLDER_BG, artFadeStyle } from '@/utils/modalArt';
 import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
 import type { BackdropEffects } from '@/hooks/useBackdropEffects';
 
@@ -29,6 +30,10 @@ export interface BackdropHeroProps {
   children?: React.ReactNode;
   /** Ref to the container div, for parallax scroll effects. */
   containerRef?: React.RefObject<HTMLDivElement | null>;
+  /** False keeps the image hidden (navy shows) until it has decoded. */
+  revealed?: boolean;
+  /** Remounts the image per item so an old one is never shown. */
+  itemKey?: string | number;
 }
 
 export function BackdropHero({
@@ -38,6 +43,8 @@ export function BackdropHero({
   phase,
   children,
   containerRef,
+  revealed = true,
+  itemKey,
 }: BackdropHeroProps) {
   const containerStyle = useMemo<React.CSSProperties>(
     () => ({
@@ -47,6 +54,7 @@ export function BackdropHero({
       height: typeof BACKDROP_HEIGHT === 'number' ? `${BACKDROP_HEIGHT}px` : BACKDROP_HEIGHT,
       overflow: 'hidden',
       zIndex: 0,
+      background: ART_PLACEHOLDER_BG,
       borderTopLeftRadius: '14px',
       borderTopRightRadius: '14px',
       opacity: phase === 'visible' ? 1 : 0,
@@ -61,19 +69,21 @@ export function BackdropHero({
     <div ref={containerRef} style={containerStyle}>
       {backdropUrl ? (
         <img
+          key={`bd-${itemKey ?? ''}`}
           src={backdropUrl}
           alt=""
-          style={effects.headerImgStyle}
+          style={{ ...effects.headerImgStyle, ...artFadeStyle(revealed) }}
         />
       ) : posterUrl ? (
         <img
+          key={`poster-${itemKey ?? ''}`}
           src={posterUrl}
           alt=""
           style={{
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            opacity: 0.6,
+            ...artFadeStyle(revealed, 0.6),
           }}
         />
       ) : null}

@@ -45,6 +45,7 @@ export interface TvModalViewProps {
   seasonsLoading: boolean;
   ultraBlurColors: UltraBlurColors | null;
   resolvedTmdbId: number | undefined;
+  artFinal: boolean;
   // UI state
   selectedSeason: number;
   setSelectedSeason: (n: number) => void;

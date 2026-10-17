@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { pickBestTrailer } from '@/utils/pickBestTrailer';
+import { movieBackdropFinalAfterDetail } from '@/utils/modalArt';
 import { backdropUrl as tmdbBackdrop } from '@/utils/image';
 import {
   parsePlexResponse,
@@ -24,6 +25,8 @@ interface UseMovieDetailResult {
   trailerKey: string | null | undefined;
   ultraBlurColors: UltraBlurColors | null;
   resolvedTmdbId: number | undefined;
+  /** The backdrop and clearlogo URLs won't change any more (see useArtReveal). */
+  artFinal: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -43,6 +46,9 @@ export function useMovieDetail(
   const [error, setError] = useState(false);
   const [trailerKey, setTrailerKey] = useState<string | null | undefined>(undefined);
   const [ultraBlurColors, setUltraBlurColors] = useState<UltraBlurColors | null>(null);
+  const [artDone, setArtDone] = useState({ backdrop: false, logo: false });
+  const markArt = (part: 'backdrop' | 'logo') =>
+    setArtDone((p) => (p[part] ? p : { ...p, [part]: true }));
 
   // Track whether TMDb data was already fetched in the main effect (avoid duplicate fetch)
   const tmdbFetchedRef = useRef(false);
@@ -55,6 +61,8 @@ export function useMovieDetail(
     const controller = new AbortController();
     let cancelled = false;
     tmdbFetchedRef.current = false;
+    // A new item (or Fix Match reload): hide the art until the new URLs settle.
+    setArtDone({ backdrop: false, logo: false });
 
     async function fetchDetail() {
       // A reload keeps the current content on screen until the new data lands.
@@ -128,6 +136,9 @@ export function useMovieDetail(
           }
 
           setDetail(parsed);
+          if (movieBackdropFinalAfterDetail({
+            tmdbIdProp: !!tmdbId, tmdbMerged: !!tmdbData, parsedTmdbId: !!parsed.tmdbId,
+          })) markArt('backdrop');
         } else if (tmdbId) {
           // TMDb-only path (unowned movies)
           const resp = await apiFetch(`/api/movie/${tmdbId}`, { signal: controller.signal });
@@ -143,6 +154,7 @@ export function useMovieDetail(
             setTrailerKey(pickBestTrailer(videos as unknown as Parameters<typeof pickBestTrailer>[0]));
 
             setDetail(parsed);
+            markArt('backdrop');
           }
         } else {
           throw new Error('No ratingKey or tmdbId provided');
@@ -152,6 +164,7 @@ export function useMovieDetail(
         if (e?.name !== 'AbortError' && !cancelled) {
           setError(true);
           setRatingsLoading(false); // Don't block modal visibility on error
+          setArtDone({ backdrop: true, logo: true });
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -348,7 +361,10 @@ export function useMovieDetail(
   useEffect(() => {
     if (!detail) return;
     const id = tmdbId ?? detail.tmdbId;
-    if (!id) return;
+    if (!id) {
+      markArt('logo');
+      return;
+    }
     let cancelled = false;
     apiFetch(`/api/clearlogo/${id}`)
       .then((r) => (r.ok ? r.json() : null))
@@ -356,7 +372,10 @@ export function useMovieDetail(
         if (cancelled || !data?.clearlogo_url) return;
         setDetail((prev) => prev ? { ...prev, clearLogoUrl: data.clearlogo_url } : prev);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) markArt('logo');
+      });
     return () => { cancelled = true; };
   }, [detail?.tmdbId, tmdbId, reloadNonce]);
 
@@ -421,6 +440,9 @@ export function useMovieDetail(
       })
       .catch(() => {
         if (!cancelled) setTrailerKey(null);
+      })
+      .finally(() => {
+        if (!cancelled) markArt('backdrop');
       });
     return () => { cancelled = true; };
   }, [resolvedTmdbId]);
@@ -434,5 +456,6 @@ export function useMovieDetail(
     trailerKey,
     ultraBlurColors,
     resolvedTmdbId,
+    artFinal: artDone.backdrop && artDone.logo,
   };
 }
