@@ -122,10 +122,17 @@ def test_the_helper_a_new_downloads_root_widens_on_or_off():
     off_moved = _settings(enabled=False)
     off_moved['media']['downloads_root'] = '/'
     assert adg._widens_auto_delete(_settings(), off_moved) == [adg.ROOT]
-    # the same folder spelled differently is not a move
-    same = _settings(enabled=False)
-    same['media']['downloads_root'] = '/downloads/'
-    assert adg._widens_auto_delete(off_old, same) == []
+    # any change to the stored value counts: no resolving, no fallback
+    for value in ('/downloads/', '', None):
+        changed = _settings(enabled=False)
+        changed['media']['downloads_root'] = value
+        assert adg._widens_auto_delete(off_old, changed) == [adg.ROOT], value
+    gone = _settings(enabled=False)
+    del gone['media']['downloads_root']
+    assert adg._widens_auto_delete(off_old, gone) == [adg.ROOT]
+    # unchanged is fine, on or off
+    assert adg._widens_auto_delete(off_old, _settings(enabled=False)) == []
+    assert adg._widens_auto_delete(_settings(), _settings()) == []
     assert adg.ROOT in adg.DELETE_ROOTS and adg.ROOT in adg.WIDENING_PATHS
 
 
@@ -326,3 +333,31 @@ def test_the_veto_runs_under_the_settings_lock(full, monkeypatch):
     c, _ = _as(full, 'implicit')
     assert _put(c, _guard(reclaim_gb=999)).status_code == 401
     assert seen == [True]
+
+
+@pytest.mark.parametrize('who', ['implicit', 'key', 'admin'])
+@pytest.mark.parametrize('on', [True, False])
+def test_clearing_the_downloads_root_is_refused(full, who, on):
+    app.main.settings.update(_guard(enabled=on))
+    before = app.main.settings.get('media.downloads_root')
+    c, extra = _as(full, who)
+    r = _put(c, {'media': {'downloads_root': ''}}, LAN, dict(HDR, **extra))
+    assert r.status_code == (403 if who == 'admin' else 401)
+    assert app.main.settings.get('media.downloads_root') == before
+
+
+@pytest.mark.parametrize('who', ['implicit', 'key', 'admin'])
+def test_resaving_the_same_downloads_root_is_fine(full, who):
+    app.main.settings.update(_guard(enabled=False))
+    same = app.main.settings.get('media.downloads_root')
+    c, extra = _as(full, who)
+    r = _put(c, {'media': {'downloads_root': same}, 'automation': {'downloads_guard': {'reclaim_gb': 50}}},
+             LAN, dict(HDR, **extra))
+    assert r.status_code == 200, r.get_json()
+    assert _now('reclaim_gb') == 50
+
+
+def test_the_owner_may_clear_the_downloads_root(full):
+    _as(full, 'owner')
+    assert _put(full.owner, {'media': {'downloads_root': ''}}).status_code == 200
+    assert app.main.settings.get('media.downloads_root') == ''

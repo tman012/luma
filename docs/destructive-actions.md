@@ -41,10 +41,13 @@ with `state.signIn`.
   - raises `reclaim_gb` (each run deletes more);
   - raises `daily_cap_gb`, or sets it to 0 (no cap);
   - lowers `check_interval_minutes` (runs more often);
-  - changes `media.downloads_root`, **guard on or off**. It is the folder
-    the guard and the manual cleanup delete from (`auto_delete_guard.DELETE_ROOTS`
-    lists every such setting), so moving it always needs the owner, even in
-    the same save that turns the guard off.
+  - changes `media.downloads_root` in any way, clearing it included,
+    **guard on or off**. It is the folder the guard and the manual cleanup
+    delete from (`auto_delete_guard.DELETE_ROOTS` lists every such setting).
+    The stored value is compared as saved, with no resolving and no fallback.
+    Even the same folder written differently counts, and so does a change in
+    the same save that turns the guard off. A save that leaves it unchanged
+    is fine.
   Turning the guard off (even with other number edits in the same save) or
   tightening any of these stays open to any admin, as does the tracker
   preference, which only sets what is spent first. A refused save changes
