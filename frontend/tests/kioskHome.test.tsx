@@ -88,13 +88,13 @@ describe('web kiosk home (>=1024px)', () => {
     expect(screen.getByRole('button', { name: 'Account' }).style.width).toBe('48px');
   });
 
-  it('only the title (or logo art) and the avatar are interactive; the title opens the popup', async () => {
+  it('only the title (or logo art), search and the avatar are interactive; the title opens the popup', async () => {
     modals.openMovie.mockClear();
     vi.stubGlobal('fetch', vi.fn(async () => json({ success: true, movies: TEN })));
     const { container } = renderHome();
     await waitFor(() => screen.getByText('Movie 0'));
     const focusable = container.querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"]), [role="button"], input, select, textarea');
-    expect([...focusable].map(e => e.getAttribute('aria-label') || e.textContent)).toEqual(['Movie 0', 'Account']);
+    expect([...focusable].map(e => e.getAttribute('aria-label') || e.textContent)).toEqual(['Movie 0', 'Search', 'Account']);
     const hero = container.querySelector('[data-hero-display-only]') as HTMLElement;
     // The backdrop, plot and genres open nothing; a drag doesn't swipe.
     fireEvent.click(hero);

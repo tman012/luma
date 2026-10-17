@@ -29,7 +29,7 @@ ALLOWED_PATHS = frozenset({
     # Settings > Connectors: Trakt (its rails join Home's list once connected).
     '/api/settings/connectors/trakt', '/api/settings/connectors/trakt/test',
 })
-ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/')
+ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/', '/settings/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).
 # GET only, sign-in required like everything else in minimal mode.
 DETAIL_READ_PREFIXES = (

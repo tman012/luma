@@ -134,6 +134,20 @@ def token_similarity(query_tokens: List[str], title_tokens: List[str]) -> float:
     return 0.6 * (matched / len(query_tokens))
 
 
+def _one_edit(a: str, b: str) -> bool:
+    """True when two words of 3+ letters differ by exactly one substituted,
+    inserted or deleted letter (same first letter, so 'cat' != 'bat')."""
+    if len(a) < 3 or len(b) < 3 or a == b or abs(len(a) - len(b)) > 1 or a[0] != b[0]:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b)) == 1
+    short, long_ = (a, b) if len(a) < len(b) else (b, a)
+    for i in range(len(long_)):
+        if long_[:i] + long_[i + 1:] == short:
+            return True
+    return False
+
+
 def fuzzy_match_score(query: str, title: str, query_norm: str, title_norm: str) -> Tuple[float, str]:
     """
     Calculate fuzzy match score for a query against a title.
@@ -189,6 +203,10 @@ def fuzzy_match_score(query: str, title: str, query_norm: str, title_norm: str) 
                 best_match = 0.0
                 for t_token in title_tokens:
                     token_ratio = fuzz.ratio(q_token, t_token) / 100.0
+                    if token_ratio < 0.7 and _one_edit(q_token, t_token):
+                        # Short words: one wrong letter ('nit' for 'nut')
+                        # scores 0.67 by ratio but is a plain typo.
+                        token_ratio = 0.7
                     best_match = max(best_match, token_ratio)
                 min_token_scores.append(best_match)
             

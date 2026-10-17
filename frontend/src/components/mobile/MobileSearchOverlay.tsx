@@ -360,7 +360,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
             enterKeyHint="search"
             value={query}
             onChange={(e) => handleInput(e.target.value)}
-            placeholder="Search for titles, people, and more..."
+            placeholder="Search"
             className="flex-1 h-10 bg-transparent text-base text-white placeholder:text-white/40 outline-none"
           />
           {query && (
@@ -391,7 +391,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
         {/* No results */}
         {!loading && !personLoading && !personView && results && topSuggestions.length === 0 && (
           <p className="py-16 text-center text-sm text-white/40">
-            No results found
+            No results
           </p>
         )}
 
@@ -423,7 +423,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                   }}
                   className="flex w-full items-center justify-between px-5 py-4 text-left active:bg-white/5"
                 >
-                  <span className="truncate text-[17px] italic text-white">
+                  <span className="truncate text-[16px] font-medium text-white">
                     {label}
                   </span>
                   <span className="ml-4 shrink-0 text-[13px] text-white/40">
@@ -463,7 +463,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                 {/* In Library */}
                 {personView.owned.length > 0 && !findMoreExpanded && (
                   <div className="mb-6">
-                    <h3 className="text-[16px] font-semibold text-white/70 mb-3">In Your Library</h3>
+                    <h3 className="text-[16px] font-semibold text-white/70 mb-3">In your library</h3>
                     <div className="flex flex-col gap-0.5">
                       {personView.owned.map((credit, i) => (
                         <CreditRow

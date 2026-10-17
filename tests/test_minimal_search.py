@@ -248,3 +248,59 @@ def test_root_log_filter_masks_keys(capsys):
     from app.main import _RedactSecretsFilter
     rec = logging.LogRecord('x', logging.ERROR, __file__, 1, 'GET /3/movie/1?api_key=%s', (KEY,), None)
     assert _RedactSecretsFilter().filter(rec) and KEY not in rec.getMessage()
+
+
+@pytest.mark.parametrize('path', ['/settings/anything-new', '/settings/plex?pinID=1', '/settings/connectors/'])
+def test_any_settings_section_reloads(minimal, path):
+    c = _client(minimal)
+    r = c.get(path, environ_base=REMOTE)
+    assert r.status_code == 200 and b'id="root"' in r.data
+
+
+def test_plex_change_server_same_tab_return_lands_in_settings(minimal, monkeypatch):
+    """Change server in same-tab mode (PWA or pop-up blocked): Plex sends the
+    browser back to /settings/plex on this host, which must load the app."""
+    from urllib.parse import parse_qs, urlsplit, unquote
+    from app import start_flow
+    monkeypatch.setattr(start_flow, 'create_pin', lambda: {'id': 42, 'code': 'abcd'})
+    monkeypatch.setattr(start_flow, 'valid_host', lambda h: 'localhost')
+    c = _client(minimal)
+    r = c.post('/api/settings/plex/pin', json={'mode': 'redirect'}, environ_base=REMOTE,
+               headers={'Origin': 'http://localhost', 'Host': 'localhost'})
+    assert r.status_code == 200
+    auth = r.get_json()['auth_url']
+    fwd = unquote(auth.split('forwardUrl=', 1)[1].split('&', 1)[0])
+    assert fwd == 'http://localhost/settings/plex'
+    back = c.get(urlsplit(fwd).path, environ_base=REMOTE)
+    assert back.status_code == 200 and b'id="root"' in back.data
+
+
+def test_library_search_one_letter_typo_without_tmdb_key():
+    from app.fast_search import FastSearchIndex, normalize_text, _one_edit
+    idx = FastSearchIndex()
+    titles = ['The Nut Job', 'The Nut Job 2: Nutty by Nature', 'Nightcrawler', 'The Night Of', 'Not Okay']
+    idx._index = [{'rating_key': str(i), 'title': t, 'year': 2014, 'media_type': 'movie', 'title_lower': t.lower(),
+                   'title_normalized': normalize_text(t), 'content_rating': '', 'genres': [], 'genres_lower': [],
+                   'section_id': 1, 'section_name': 'Movies', 'viewCount': 0, 'viewOffset': 0} for i, t in enumerate(titles)]
+    idx._initialized = True
+    for q in ('the nit job', 'The Nit Job', 'nit job', 'the nut jab'):
+        assert [r['title'] for r in idx.search(q)][:1] == ['The Nut Job'], q
+    assert _one_edit('nit', 'nut') and _one_edit('job', 'jobs') and not _one_edit('cat', 'bat')
+    assert not _one_edit('it', 'at')
+
+
+def test_api_library_search_the_nit_job(minimal, monkeypatch):
+    from app.fast_search import FastSearchIndex, normalize_text
+    idx = FastSearchIndex()
+    t = 'The Nut Job'
+    idx._index = [{'rating_key': '7', 'title': t, 'year': 2014, 'media_type': 'movie', 'title_lower': t.lower(),
+                   'title_normalized': normalize_text(t), 'content_rating': '', 'genres': [], 'genres_lower': [],
+                   'section_id': 1, 'section_name': 'Movies', 'viewCount': 0, 'viewOffset': 0,
+                   'thumb': '/library/metadata/7/thumb/1'}]
+    idx._initialized = True
+    monkeypatch.setattr(app.main, 'fast_search_index', idx)
+    app.main.settings.update({'apis': {'tmdb': {'api_key': '', 'connector_saved': False}}})
+    c = _client(minimal)
+    movies = c.get('/api/library/search?q=the nit job', environ_base=REMOTE).get_json()['movies']
+    assert movies[0]['title'] == 'The Nut Job'
+    assert movies[0]['poster_url'] == '/api/img/plex?url=/library/metadata/7/thumb/1'

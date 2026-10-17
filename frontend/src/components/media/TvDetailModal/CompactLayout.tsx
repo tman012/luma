@@ -1091,7 +1091,7 @@ export function CompactLayout(props: TvModalViewProps) {
                         padding: '0 16px',
                       }}
                     >
-                      Cast & Crew
+                      Cast &amp; crew
                     </h2>
                     <div
                       style={{

@@ -1630,13 +1630,17 @@ def _serve_spa():
 @app.route('/start')
 @app.route('/unlock')
 @app.route('/settings/libraries')
-@app.route('/settings/home-screen')
-@app.route('/settings/plex')
-@app.route('/settings/connectors')
 @app.route('/admin')
 @app.route('/setup')
 def spa_route():
     """Serve React SPA for all frontend routes."""
+    return _serve_spa()
+
+
+@app.route('/settings/<path:section>')
+def spa_settings_route(section):
+    """Any Settings section (/settings/plex, /settings/connectors, a Plex
+    sign-in returning in the same tab, ...) reloads into the SPA."""
     return _serve_spa()
 
 @app.route('/rate/<int:tmdb_id>')

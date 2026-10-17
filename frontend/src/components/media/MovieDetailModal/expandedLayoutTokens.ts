@@ -94,7 +94,7 @@ export const TOKENS = {
     },
     ultraBlurVariant: 'web' as 'tablet' | 'web',
     ultraBlurMask: 'linear-gradient(to bottom, transparent 25%, black 55%)',
-    scrim: 'linear-gradient(to bottom, transparent 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.88) 100%)',
+    scrim: 'linear-gradient(to bottom, transparent 35%, rgba(21,16,42,0.4) 55%, rgba(21,16,42,0.88) 100%)',
     backdrop: {
       imgFilter: 'contrast(1.08) saturate(1.12)' as string | undefined,
     },

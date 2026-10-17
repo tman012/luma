@@ -788,7 +788,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
               onChange={(e) => handleInput(e.target.value)}
               onFocus={() => { setFocused(true); if (results) setShowResults(true); }}
               onBlur={() => { /* focused cleared by click-outside / Escape */ }}
-              placeholder="Search movies, TV shows, people..."
+              placeholder="Search"
               className="w-full min-w-0 h-12 md:h-14 bg-transparent text-[clamp(16px,2vw,22px)] text-text-primary placeholder:text-text-faint outline-none"
             />
             {query && (
@@ -873,7 +873,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
           {/* All tab — no results (compact only) */}
           {d.mode === 'compact' && tabs.all && showResults && !loading && results && unifiedResults.length === 0 && (
             <div className="border-t border-white/10 py-8 text-center text-[16px] text-text-muted">
-              No results for &ldquo;{query}&rdquo;
+              No results
             </div>
           )}
         </div>
@@ -939,7 +939,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
           {/* No results */}
           {!loading && results && ownedCount === 0 && unownedCount === 0 && (tabs.all ? unifiedResults.length === 0 : true) && !personView && !personLoading && (
             <p className="py-12 text-center text-[20px] text-text-muted">
-              No results found for &ldquo;{query}&rdquo;
+              No results
             </p>
           )}
 
@@ -1039,7 +1039,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
               {!tabs.people && !unownedExpanded && filteredOwned.length > 0 && (
                 <div className="mb-8">
                   {!ownedExpanded && (
-                    <h3 className="mb-4 text-[18px] font-semibold text-text-primary">In Your Library</h3>
+                    <h3 className="mb-4 text-[18px] font-semibold text-text-primary">In your library</h3>
                   )}
                   {ownedExpanded && (
                     <button
@@ -1048,7 +1048,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                       className="mb-3 flex items-center gap-2 text-[18px] font-semibold text-text-primary hover:text-white transition-colors"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-                      In Your Library
+                      In your library
                     </button>
                   )}
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

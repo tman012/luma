@@ -115,7 +115,7 @@ function CastShelf({
         )}
         {hasReviews && cast.length > 0 && (
           <h2 style={{ fontSize: 22, fontWeight: 600, color: '#fff', margin: '0 0 14px', padding: `0 ${sidePad}px`, textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
-            Cast &amp; Crew
+            Cast &amp; crew
           </h2>
         )}
         <div style={{ position: 'relative' }}>

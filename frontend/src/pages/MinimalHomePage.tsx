@@ -64,13 +64,13 @@ export function MinimalHomePage() {
       <div data-step="home" data-layout="kiosk">
         <KioskHome />
         <header style={kioskBar} data-testid="kiosk-header">
-          <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="kiosk-logo" style={{ height: 64, width: 'auto' }} draggable={false} />
-          <div style={headRight}>
-            <button type="button" style={searchBtn} aria-label="Search" onClick={openSearch} data-testid="search-button">
-              <SearchIcon size={20} />
+          <div style={headLeft}>
+            <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="kiosk-logo" style={{ height: 64, width: 'auto' }} draggable={false} />
+            <button type="button" style={kioskSearchBtn} aria-label="Search" onClick={openSearch} data-testid="search-button">
+              <SearchIcon size={22} />
             </button>
-            {menu(48)}
           </div>
+          {menu(48)}
         </header>
       </div>
     );
@@ -167,11 +167,17 @@ export const kioskBar: React.CSSProperties = {
   background: 'linear-gradient(to bottom, rgba(0,0,0,0.8), transparent)',
 };
 const headRight: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 12 };
+const headLeft: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 20 };
 /** 44px circular search button, left of the avatar. */
 const searchBtn: React.CSSProperties = {
   width: 44, height: 44, borderRadius: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
   background: 'rgba(255,255,255,0.10)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', cursor: 'pointer',
   backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', padding: 0,
+};
+/** Web/desktop: 48px navy-glass circle right of the 64px logo. */
+const kioskSearchBtn: React.CSSProperties = {
+  ...searchBtn, width: 48, height: 48, borderRadius: 24, background: 'rgba(21,16,42,0.55)',
+  border: '1px solid rgba(255,255,255,0.12)',
 };
 export const iconBtn: React.CSSProperties = {
   width: 40, height: 40, borderRadius: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
