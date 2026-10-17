@@ -4622,11 +4622,17 @@ def get_downloads_storage():
 
 
 @app.route('/api/storage/downloads/cleanup', methods=['POST'])
+@_signed_in_owner_only
 def cleanup_downloads_storage():
     """PERMANENTLY delete the oldest downloads until the target is freed.
 
     Body: {"target_bytes": <int>} — defaults to 100 GiB. Destructive and not
     undoable; the UI gates it behind an explicit confirm.
+
+    A destructive file action (PM ruling): only the owner signed in with a
+    session (start_flow.require_signed_in_owner). The implicit LAN owner, the
+    service key (kiosk, companion apps) and no session get 401 with
+    "sign_in": true; other admins and plain, guest or Plex-approved users 403.
     """
     try:
         from app.storage_cleanup import run_cleanup, DEFAULT_TARGET_BYTES
