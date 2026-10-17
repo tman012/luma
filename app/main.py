@@ -292,7 +292,7 @@ def _require_auth():
     """Return an error response if the request is not authenticated.
     Returns None if auth is OK."""
     if not _get_current_user():
-        return jsonify({"error": "Authentication required"}), 401
+        return jsonify({"error": "Authentication required", "sign_in": True}), 401
     return None
 
 
@@ -300,7 +300,7 @@ def _require_admin():
     """Return an error response if the current user is not admin."""
     user = _get_current_user()
     if not user:
-        return jsonify({"error": "Authentication required"}), 401
+        return jsonify({"error": "Authentication required", "sign_in": True}), 401
     if not user.get("is_admin"):
         return jsonify({"error": "Admin access required"}), 403
     return None
@@ -1576,7 +1576,7 @@ def _auth_guard():
         if not getattr(g, 'current_user', None) or getattr(g, 'implicit_user', False):
             # For API calls, return 401
             if request.path.startswith('/api/'):
-                return jsonify({"error": "Authentication required"}), 401, {'Cache-Control': 'private, no-store'}
+                return jsonify({"error": "Authentication required", "sign_in": True}), 401, {'Cache-Control': 'private, no-store'}
             # For HTML pages, redirect to login
             url_base = app.config.get('URL_BASE', '')
             from urllib.parse import quote
@@ -19625,7 +19625,7 @@ def get_rooms():
     # Admins use global rooms; non-admin users fall back to per-user rooms
     user = _get_current_user()
     if not user:
-        return jsonify({"error": "Authentication required"}), 401
+        return jsonify({"error": "Authentication required", "sign_in": True}), 401
     is_admin = user.get('is_admin')
     try:
         if is_admin:

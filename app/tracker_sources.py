@@ -118,7 +118,7 @@ def member_denied(get_user: Callable[[], Optional[dict]], implicit: bool,
     from flask import jsonify
     user = get_user()
     if not user or implicit:
-        return jsonify({'error': 'Authentication required'}), 401
+        return jsonify({'error': 'Authentication required', 'sign_in': True}), 401
     if user.get('is_admin'):
         return None
     try:

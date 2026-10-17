@@ -234,7 +234,7 @@ def _plex():
 def _need_user():
     user = _cfg['get_current_user']()
     if not user:
-        return None, (jsonify({'error': 'Authentication required'}), 401)
+        return None, (jsonify({'error': 'Authentication required', 'sign_in': True}), 401)
     return user, None
 
 

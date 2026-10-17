@@ -1839,7 +1839,7 @@ def request_tv(tmdb_id: int):
 def _need_admin():
     u = getattr(g, 'current_user', None)
     if not u:
-        return jsonify({'error': 'Authentication required'}), 401
+        return jsonify({'error': 'Authentication required', 'sign_in': True}), 401
     if not u.get('is_admin'):
         return jsonify({'error': 'Admin access required'}), 403
     return None
