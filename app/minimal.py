@@ -16,6 +16,8 @@ _TRUE = ('1', 'true', 'yes', 'on')
 ALLOWED_PATHS = frozenset({
     '/', '/start', '/login', '/logout', '/unlock', '/health',
     '/manifest.json', '/sw.js', '/api/security', '/api/version',
+    # Home (#11): rails, the Libraries choice and proxied posters. Sign-in required.
+    '/api/home', '/api/home/libraries', '/api/img/plex', '/settings/libraries',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/')
 # Inside /static/, these belong to disabled features.

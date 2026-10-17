@@ -1583,6 +1583,7 @@ def _serve_spa():
 @app.route('/upgrades')
 @app.route('/start')
 @app.route('/unlock')
+@app.route('/settings/libraries')
 @app.route('/admin')
 @app.route('/setup')
 def spa_route():
@@ -20382,6 +20383,10 @@ _start_flow.init(
     get_current_user=_get_current_user, secret=app.config['SECRET_KEY'],
 )
 app.register_blueprint(_start_flow.bp)
+
+from app import home_rails as _home_rails
+_home_rails.init(get_plex=lambda: plex_service, get_current_user=_get_current_user)
+app.register_blueprint(_home_rails.bp)
 
 
 if __name__ == '__main__':
