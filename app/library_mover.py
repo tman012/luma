@@ -97,6 +97,12 @@ def _check_space(folder: str, need: int) -> None:
 
 def init(*, settings) -> None:
     _cfg['settings'] = settings
+    reset_login()
+    try:
+        from app import qbit_connector
+        qbit_connector.on_change(reset_login)
+    except Exception:   # the connector is optional in tests
+        pass
 
 
 # --------------------------------------------------------------------------- tracking
@@ -160,24 +166,96 @@ def _prune(data) -> None:
 
 # --------------------------------------------------------------------------- qBittorrent
 
-def _qbit_session(session_factory) -> Tuple[Optional[Any], str]:
-    from app.qbit_connector import normalize_url, text_of
+# qBittorrent bans an IP after 5 failed sign-ins (its default), and this IP is
+# shared with production. After a rejected sign-in ('Fails.', 401 or 403) the
+# mover waits LOGIN_BACKOFF_S * 2**(n-1) before trying again, and after
+# LOGIN_MAX_FAILURES in a row it stops until the credentials change or the owner
+# saves or tests the qBittorrent connector. An unreachable qBit is not a failed
+# sign-in (nothing was checked) but is backed off the same way, capped.
+LOGIN_BACKOFF_S = 60
+LOGIN_MAX_FAILURES = 3
+UNREACHABLE_MAX_WAIT_S = 900
+_login: Dict[str, Any] = {}
+_login_lock = threading.Lock()
+
+
+def reset_login() -> None:
+    with _login_lock:
+        _login.clear()
+        _login.update(failures=0, unreachable=0, next_at=0.0, held=False, creds=None)
+
+
+def login_state() -> Dict[str, Any]:
+    with _login_lock:
+        return dict(_login)
+
+
+def _creds_key(url: str, user: str, password: str) -> str:
+    import hashlib
+    return hashlib.sha256('\x00'.join((url, user, password)).encode('utf-8', 'replace')).hexdigest()
+
+
+def _qbit_session(session_factory, now: Optional[float] = None) -> Tuple[Optional[Any], str]:
+    from app.qbit_connector import new_session, normalize_url, text_of
+    now = time.time() if now is None else now
     s = _cfg['settings']
     url = normalize_url(s.get('qbittorrent.url') or '')
     if not url:
         return None, ''
-    sess = session_factory()
+    user = s.get('qbittorrent.username') or ''
+    password = s.get('qbittorrent.password') or ''
+    key = _creds_key(url, user, password)
+    with _login_lock:
+        if not _login:
+            _login.update(failures=0, unreachable=0, next_at=0.0, held=False, creds=None)
+        if _login.get('creds') != key:          # new credentials: a fresh start
+            _login.update(failures=0, unreachable=0, next_at=0.0, held=False, creds=key)
+        if _login['held'] or now < _login['next_at']:
+            return None, url
+    sess = new_session(session_factory)
     try:
-        r = sess.post(f'{url}/api/v2/auth/login',
-                      data={'username': s.get('qbittorrent.username') or '',
-                            'password': s.get('qbittorrent.password') or ''}, timeout=10)
+        r = sess.post(f'{url}/api/v2/auth/login', data={'username': user, 'password': password},
+                      timeout=10, allow_redirects=False)
     except requests.RequestException as e:
+        with _login_lock:
+            _login['unreachable'] += 1
+            _login['next_at'] = now + min(UNREACHABLE_MAX_WAIT_S, 30 * 2 ** (_login['unreachable'] - 1))
         logger.warning('Library mover: qBittorrent unreachable (%s)', type(e).__name__)
+        _close(sess)
         return None, url
-    if r.status_code != 200 or text_of(r).strip() != 'Ok.':
-        logger.warning('Library mover: qBittorrent sign-in failed (%s)', r.status_code)
-        return None, url
-    return sess, url
+    body = text_of(r).strip()
+    if r.status_code == 200 and body == 'Ok.':
+        with _login_lock:
+            _login.update(failures=0, unreachable=0, next_at=0.0, held=False)
+        return sess, url
+    _close(sess)
+    rejected = r.status_code in (401, 403) or (r.status_code == 200 and body == 'Fails.')
+    with _login_lock:
+        _login['unreachable'] = 0
+        if rejected:
+            _login['failures'] += 1
+            if _login['failures'] >= LOGIN_MAX_FAILURES:
+                _login['held'] = True
+            else:
+                _login['next_at'] = now + LOGIN_BACKOFF_S * 2 ** (_login['failures'] - 1)
+        else:                                   # not a qBit answer we know: back off, don't count
+            _login['next_at'] = now + UNREACHABLE_MAX_WAIT_S
+        held, n = _login['held'], _login['failures']
+    if held:
+        logger.error('Library mover: qBittorrent refused sign-in %d times; paused until the '
+                     'qBittorrent connector is saved or tested', n)
+    else:
+        logger.warning('Library mover: qBittorrent sign-in failed (HTTP %s)', r.status_code)
+    return None, url
+
+
+def _close(sess) -> None:
+    close = getattr(sess, 'close', None)
+    if close:
+        try:
+            close()
+        except Exception:
+            pass
 
 
 def _torrents(sess, url: str, hashes: List[str]) -> Optional[Dict[str, Dict[str, Any]]]:
@@ -186,7 +264,8 @@ def _torrents(sess, url: str, hashes: List[str]) -> Optional[Dict[str, Dict[str,
     for i in range(0, len(hashes), BATCH):
         batch = hashes[i:i + BATCH]
         try:
-            r = sess.get(f'{url}/api/v2/torrents/info', params={'hashes': '|'.join(batch)}, timeout=10)
+            r = sess.get(f'{url}/api/v2/torrents/info', params={'hashes': '|'.join(batch)}, timeout=10,
+                         allow_redirects=False)
             data = r.json() if r.status_code == 200 else None
         except (requests.RequestException, ValueError):
             data = None
@@ -515,15 +594,13 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
     waiting = {h: j for h, j in data['jobs'].items() if j.get('state') == 'waiting'}
     if not waiting:
         return summary
-    sess, url = _qbit_session(session_factory)
+    sess, url = _qbit_session(session_factory, now)
     if not sess:
         return summary
     try:
         torrents = _torrents(sess, url, sorted(waiting))
     finally:
-        close = getattr(sess, 'close', None)
-        if close:
-            close()
+        _close(sess)
     if torrents is None:
         return summary
     tag = qbit_owner.tag_name()

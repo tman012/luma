@@ -189,12 +189,38 @@ def _text_of(r) -> str:
 text_of = _text_of
 
 
+def new_session(factory: Optional[Callable] = None):
+    """A session for qBittorrent: never via an environment proxy (the password
+    goes to the configured URL only). Callers pass allow_redirects=False."""
+    session = (factory or requests.Session)()
+    try:
+        session.trust_env = False
+    except AttributeError:
+        pass
+    return session
+
+
+_change_listeners: list = []
+
+
+def on_change(fn: Callable[[], None]) -> None:
+    """Call fn after the connector is saved or a test signs in."""
+    if fn not in _change_listeners:
+        _change_listeners.append(fn)
+
+
+def _changed() -> None:
+    for fn in list(_change_listeners):
+        try:
+            fn()
+        except Exception:
+            logger.exception('qBittorrent change listener failed')
+
+
 def check(url: str, username: str, password: str) -> Tuple[Optional[str], str]:
     """(None, version) when qBittorrent accepts the login, else (error, '').
     The error is short and never carries the URL, username or password."""
-    session = requests.Session()
-    # Never via an environment proxy: the password goes to this URL only.
-    session.trust_env = False
+    session = new_session()
     try:
         try:
             r = session.post(f'{url}/api/v2/auth/login', data={'username': username, 'password': password},
@@ -268,6 +294,7 @@ def qbit_save():
         logger.warning('qBittorrent settings rejected (%d problems)', len(problems))
         return _no_store(jsonify({'error': "Couldn't save"}), 400)
     logger.info('qBittorrent connector saved')
+    _changed()
     return _no_store(jsonify(view()))
 
 
@@ -291,4 +318,5 @@ def qbit_test():
     if problem:
         logger.info('qBittorrent test failed: %s', problem)
         return _no_store(jsonify({'ok': False, 'error': problem}))
+    _changed()
     return _no_store(jsonify({'ok': True, 'message': CONNECTED, 'version': version}))

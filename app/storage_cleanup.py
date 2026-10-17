@@ -46,6 +46,9 @@ PROTECTED_NAMES = {'incomplete', 'complete', 'temp', '.recycle'}
 # Partial-download suffixes written by qBittorrent / other clients.
 PARTIAL_SUFFIXES = ('.!qb', '.part', '.parts', '.tmp', '.downloading')
 
+QBIT_UNREADABLE = ('qBittorrent unreachable — cannot tell which downloads belong to '
+                   'the test install, so nothing was deleted this cycle')
+
 # Hard ceiling on a single run so a bad target can't empty the folder.
 MAX_TARGET_BYTES = 2 * 1024 ** 4  # 2 TiB
 
@@ -142,7 +145,7 @@ def _qbit_snapshot() -> Tuple[Optional[Dict[str, Dict[str, Any]]], Set[str]]:
         logger.warning("storage_cleanup: qBittorrent unreachable — relying on age guard only")
         return None, set()
 
-    protected: Set[str] = set()
+    protected: Set[str] = set(luma_test_entry_names(torrents))
     for t in torrents:
         if not ((t.get('progress') or 0) < 1.0 or t.get('state') in tracker_files.BUSY_STATES):
             continue
@@ -152,6 +155,33 @@ def _qbit_snapshot() -> Tuple[Optional[Dict[str, Dict[str, Any]]], Set[str]]:
                 protected.add(os.path.basename(str(val).rstrip('/')))
 
     return tracker_files.by_entry(torrents), protected
+
+
+def luma_test_entry_names(torrents: List[Dict[str, Any]]) -> Set[str]:
+    """Entry names that hold data of torrents the test install added.
+
+    Production and the test install (LUMA_MINIMAL, :5002) can share one
+    qBittorrent; the test install tags its torrents (app/qbit_owner) and copies
+    them into its own library some time after they finish. Their data is never
+    a cleanup candidate here, finished or not. Every component of the torrent's
+    data path is protected, not just the last one, so a folder that merely
+    contains test-install data (a category subfolder) is skipped whole: an extra
+    protected name can only skip a deletion, never cause one.
+    """
+    from app.qbit_owner import is_test_torrent
+
+    names: Set[str] = set()
+    for t in torrents:
+        if not is_test_torrent(t):
+            continue
+        for key in ('name', 'content_path', 'root_path'):
+            val = t.get(key)
+            if not val:
+                continue
+            for part in str(val).replace('\\', '/').split('/'):
+                if part and part not in ('.', '..'):
+                    names.add(part)
+    return names
 
 
 def scan_candidates(root: Optional[str] = None,
@@ -216,7 +246,8 @@ def scan_candidates(root: Optional[str] = None,
 
 def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, root: Optional[str] = None,
                  prefer_trackers: Optional[List[str]] = None,
-                 snapshot: Optional[Tuple] = None) -> Dict:
+                 snapshot: Optional[Tuple] = None,
+                 require_qbit: bool = False) -> Dict:
     """Pick the oldest entries that together reach `target_bytes`.
 
     Selection stops at the first entry that meets or exceeds the target, so the
@@ -241,6 +272,17 @@ def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, root: Optional[str] =
     if snapshot is None:
         snapshot = _qbit_snapshot()
     attribution = snapshot[0]
+
+    # The unattended guard (require_qbit) deletes nothing while qBittorrent
+    # can't be read: without it, the test install's downloads can't be told
+    # apart from production's, and they may not be copied yet.
+    if require_qbit and attribution is None:
+        return {
+            'target_bytes': target_bytes, 'planned_bytes': 0, 'entries': [],
+            'eligible_count': 0, 'short': True,
+            'preferred_bytes': 0, 'fallback_bytes': 0,
+            'error': QBIT_UNREADABLE,
+        }
 
     if prefer and attribution is None:
         return {
@@ -346,7 +388,8 @@ def _forget_torrents(names: List[str]) -> int:
 
 
 def run_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES,
-                prefer_trackers: Optional[List[str]] = None) -> Dict:
+                prefer_trackers: Optional[List[str]] = None,
+                require_qbit: bool = False) -> Dict:
     """PERMANENTLY delete the oldest downloads until `target_bytes` is freed.
 
     With `prefer_trackers`, spends those trackers' oldest entries first and only
@@ -363,7 +406,8 @@ def run_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES,
         }
 
     before = usage()
-    plan = plan_cleanup(target_bytes, root, prefer_trackers=prefer_trackers)
+    plan = plan_cleanup(target_bytes, root, prefer_trackers=prefer_trackers,
+                        require_qbit=require_qbit)
     if plan.get('error'):
         return {'success': False, 'error': plan['error'], 'before': before,
                 'after': before, 'freed_bytes': 0, 'deleted_count': 0,
