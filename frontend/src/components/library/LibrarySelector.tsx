@@ -95,6 +95,6 @@ const linkBtn: React.CSSProperties = {
 };
 const check: React.CSSProperties = {
   width: 24, height: 24, borderRadius: 12, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-  border: '1.5px solid rgba(255,255,255,0.3)', boxSizing: 'border-box', color: '#fff',
+  border: '1.5px solid rgba(255,255,255,0.3)', boxSizing: 'border-box', color: T.white,
 };
 const checkOn: React.CSSProperties = { background: T.accent, border: `1.5px solid ${T.accent}` };

@@ -11,7 +11,7 @@ import { move } from '@/components/home/homeApi';
 import { CategoryChip, PlusIcon, Switch, trackersCss } from '@/components/trackers/trackersUi';
 import { FolderBrowser } from './FolderBrowser';
 import {
-  RESOLUTIONS, SAVE_FAILED, SOURCES, addPath, deletePath, editPath, loadLibrary, ruleSummary, saveMapping, saveRules, sinceText,
+  RESOLUTIONS, SAVE_FAILED, SOURCES, addPath, deletePath, editPath, loadLibrary, moviePaths, ruleSummary, saveMapping, saveRules, sinceText,
   type Errors, type LibPath, type LibraryView, type PathMapRow, type Result, type Rule, type Transfer, type Unit,
 } from './libraryPathsApi';
 
@@ -32,7 +32,12 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
     loadLibrary().then(r => (r.ok ? setView(r.view) : setLoadFailed(true)));
   }, []);
 
-  const fallbackFor = (v: LibraryView) => v.fallback_path_id ?? (v.paths.length === 1 ? v.paths[0]?.id ?? null : null);
+  // Movies choices leave out paths TV selected (as the server's pick_destination does).
+  const fallbackFor = (v: LibraryView) => {
+    const movies = moviePaths(v.paths);
+    if (v.fallback_path_id && movies.some(p => p.id === v.fallback_path_id)) return v.fallback_path_id;
+    return movies.length === 1 ? movies[0]?.id ?? null : null;
+  };
 
   /** Optimistic save of the rules list (switch, reorder); reverts on failure. */
   const commitRules = useCallback((v: LibraryView, rules: Rule[]) => {
@@ -60,6 +65,7 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
   };
   const byId = new Map(view.paths.map(p => [p.id, p]));
   const fb = fallbackFor(view);
+  const movies = moviePaths(view.paths);
 
   return (
     <WideCtx.Provider value={wide}>
@@ -89,10 +95,10 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
         </div>
       </div>
 
-      {view.paths.length > 0 && (
+      {movies.length > 0 && (
         <div data-testid="lp-rules">
           <h3 style={sectionLabel}>Rules</h3>
-          <RulesList view={view} byId={byId} editing={editing} setEditing={setEditing} commit={commitRules}
+          <RulesList view={view} paths={movies} byId={byId} editing={editing} setEditing={setEditing} commit={commitRules}
             onSaveRule={(index, rule) => {
               const rules = index === null ? [...view.rules, rule] : view.rules.map((x, i) => (i === index ? rule : x));
               return saveRules(rules, fb).then(r => {
@@ -101,9 +107,9 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
               });
             }}
             onDeleteRule={index => saveRules(view.rules.filter((_, i) => i !== index), fb).then(r => done(r, 'Removed'))} />
-          {view.paths.length > 1 && (
+          {movies.length > 1 && (
             <div data-testid="lp-fallback" style={{ marginTop: 12 }}>
-              <Picker label="Fallback" options={view.paths.map(p => ({ id: p.id, label: p.name }))} value={fb} error={fbError}
+              <Picker label="Fallback" options={movies.map(p => ({ id: p.id, label: p.name }))} value={fb} error={fbError}
                 onChoose={id => {
                   setFbError('');
                   saveRules(view.rules, id).then(r => { if (r.ok) setView(r.view); else setToast(r.error); });
@@ -251,8 +257,9 @@ export function PathForm({ path, first, onSave, onCancel, onDelete }: {
 
 // ---------------------------------------------------------------- rules
 
-function RulesList({ view, byId, editing, setEditing, commit, onSaveRule, onDeleteRule }: {
-  view: LibraryView; byId: Map<string, LibPath>; editing: Editing; setEditing: (e: Editing) => void;
+function RulesList({ view, paths, byId, editing, setEditing, commit, onSaveRule, onDeleteRule }: {
+  /** The Movies destinations a rule may pick (not TV-selected). */
+  view: LibraryView; paths: LibPath[]; byId: Map<string, LibPath>; editing: Editing; setEditing: (e: Editing) => void;
   commit: (v: LibraryView, rules: Rule[]) => void;
   onSaveRule: (index: number | null, rule: Rule) => Promise<Result>; onDeleteRule: (index: number) => Promise<Result>;
 }) {
@@ -282,7 +289,7 @@ function RulesList({ view, byId, editing, setEditing, commit, onSaveRule, onDele
           if (editing?.kind === 'rule' && editing.index === i) {
             return (
               <li key={key}>
-                <RuleForm index={i} rule={r} paths={view.paths} first={i === 0} onCancel={() => setEditing(null)}
+                <RuleForm index={i} rule={r} paths={paths} first={i === 0} onCancel={() => setEditing(null)}
                   onSave={rule => onSaveRule(i, rule)} onDelete={() => onDeleteRule(i)} />
               </li>
             );
@@ -336,7 +343,7 @@ function RulesList({ view, byId, editing, setEditing, commit, onSaveRule, onDele
         })}
       </ul>
       {adding
-        ? <RuleForm index={rules.length} paths={view.paths} first={rules.length === 0} onCancel={() => setEditing(null)}
+        ? <RuleForm index={rules.length} paths={paths} first={rules.length === 0} onCancel={() => setEditing(null)}
             onSave={rule => onSaveRule(null, rule)} />
         : <AddRow label="Add rule" first={rules.length === 0} testId="lp-add-rule" onClick={() => setEditing({ kind: 'rule', index: null })} />}
     </div>

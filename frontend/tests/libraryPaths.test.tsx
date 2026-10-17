@@ -253,6 +253,44 @@ describe('Settings > Library paths', () => {
     expect(within(screen.getByTestId('lp-fallback')).queryByRole('alert')).toBeNull();
   });
 
+  it('paths TV selected are never offered as Movies rule destinations or the fallback', async () => {
+    const tv = { id: 'p_tvshows1', name: 'TV', path: '/media/TV', status: 'ok' as const, used_by: ['tv'] };
+    const anime = { id: 'p_anime001', name: 'Anime', path: '/media/Anime', status: 'ok' as const, used_by: ['tv'] };
+    state = { ...base(), paths: [...base().paths, tv, anime] };
+    render(<LibraryPathsSettings wide />);
+    // still listed (and editable) under Paths
+    await waitFor(() => expect(screen.getAllByTestId('lp-path').map(r => r.textContent)).toContain('TV/media/TV'));
+    fireEvent.click(screen.getByTestId('lp-fallback-toggle'));
+    const fbNames = within(screen.getByTestId('lp-fallback')).getAllByRole('radio').map(r => r.textContent);
+    expect(fbNames).toEqual(['Movies', '4K Movies', 'Old drive']);
+    fireEvent.click(screen.getByTestId('lp-add-rule'));
+    fireEvent.click(screen.getByTestId('lp-dest'));
+    const destNames = within(screen.getByTestId('lp-dest').parentElement!).getAllByRole('radio').map(r => r.textContent);
+    expect(destNames).toEqual(['Movies', '4K Movies', 'Old drive']);
+  });
+
+  it('one Movies path plus TV-selected paths: that one is the fallback without asking, as before', async () => {
+    const tv = { id: 'p_tvshows1', name: 'TV', path: '/media/TV', status: 'ok' as const, used_by: ['tv'] };
+    state = { paths: [tv, base().paths[0]!], rules: [], fallback_path_id: null, path_map: [], transfer: 'copy' };
+    render(<LibraryPathsSettings wide />);
+    fireEvent.click(await screen.findByTestId('lp-add-rule'));
+    expect(screen.queryByTestId('lp-fallback')).toBeNull();
+    fireEvent.click(screen.getByTestId('lp-dest'));
+    expect(screen.getAllByRole('radio').map(r => r.textContent)).not.toContain('TV');
+    fireEvent.click(screen.getByRole('radio', { name: 'Movies' }));
+    fireEvent.click(screen.getByTestId('lp-save'));
+    await waitFor(() => expect(rulesPut()!.body!.fallback_path_id).toBe('p_movies01'));
+  });
+
+  it('only TV-selected paths: no Rules or fallback for Movies', async () => {
+    const tv = { id: 'p_tvshows1', name: 'TV', path: '/media/TV', status: 'ok' as const, used_by: ['tv'] };
+    state = { paths: [tv], rules: [], fallback_path_id: null, path_map: [], transfer: 'copy' };
+    render(<LibraryPathsSettings wide />);
+    await screen.findAllByTestId('lp-path');
+    expect(screen.queryByTestId('lp-rules')).toBeNull();
+    expect(screen.queryByTestId('lp-fallback')).toBeNull();
+  });
+
   it('one path is the fallback without asking', async () => {
     state = { paths: [base().paths[0]!], rules: [], fallback_path_id: null, path_map: [], transfer: 'copy' };
     render(<LibraryPathsSettings wide />);

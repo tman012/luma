@@ -7,7 +7,13 @@ export const RULES_URL = '/api/settings/library-rules';
 export const MAP_URL = '/api/settings/library-paths/mapping';
 
 export type PathStatus = 'ok' | 'missing' | 'read_only';
-export interface LibPath { id: string; name: string; path: string; status: PathStatus }
+export interface LibPath {
+  id: string; name: string; path: string; status: PathStatus;
+  /** Sections (TV) that selected this path: never a Movies rule destination or the fallback. */
+  used_by?: string[];
+}
+/** The paths Movies may file into: not selected by another section (TV). */
+export const moviePaths = (paths: LibPath[]) => paths.filter(p => !p.used_by?.length);
 export type Unit = 'months' | 'years';
 export interface Rule {
   id?: string; enabled: boolean; path_id: string;
