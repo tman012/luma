@@ -12216,22 +12216,28 @@ def img_plex_proxy():
         return 'Plex not configured', 503
 
     try:
+        original_url = f"{plex_url}{plex_path}"
         if req_w or req_h:
+            # Plex's photo transcoder needs both width and height. With only
+            # one given, fit inside a box twice as long the other way
+            # (minSize=0), so the requested side is the one that limits.
             from urllib.parse import quote
-            params = f"minSize=1&upscale=0&url={quote(plex_path, safe='')}"
-            if req_w:
-                params += f"&width={req_w}"
-            if req_h:
-                params += f"&height={req_h}"
-            full_url = f"{plex_url}/photo/:/transcode?{params}"
+            fit = 0 if not (req_w and req_h) else 1
+            w = req_w or min(2000, req_h * 2)
+            h = req_h or min(2000, req_w * 2)
+            full_url = (f"{plex_url}/photo/:/transcode?minSize={fit}&upscale=0"
+                        f"&width={w}&height={h}&url={quote(plex_path, safe='')}")
         else:
-            full_url = f"{plex_url}{plex_path}"
+            full_url = original_url
         resp = requests.get(
             full_url,
             headers={'X-Plex-Token': plex_token},
             timeout=15,
             stream=True,
         )
+        if resp.status_code != 200 and full_url != original_url:
+            # Transcoder refused: serve the original rather than no image.
+            resp = requests.get(original_url, headers={'X-Plex-Token': plex_token}, timeout=15, stream=True)
 
         if resp.status_code != 200:
             # Negative-cache briefly so a grid of broken images doesn't hammer
