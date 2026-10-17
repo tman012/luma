@@ -189,12 +189,31 @@ def _certs(tmp_path):
 
 
 def _torrent(c, seen):
+    """Answer only after a full request line arrived, and record that line.
+    Under TLS 1.3 the server can finish its handshake before the client
+    checks the certificate, so a client that rejects the name may close the
+    connection (or leave stray bytes) without ever sending a request; only a
+    complete request line counts as a request."""
+    buf = b''
     try:
-        c.recv(4096)
-        seen.append('request')
+        while b'\r\n' not in buf and len(buf) < 8192:
+            try:
+                data = c.recv(4096)
+            except (ssl.SSLError, OSError):
+                return
+            if not data:
+                return
+            buf += data
+        if b'\r\n' not in buf:
+            return
+        seen.append(buf.split(b'\r\n', 1)[0])
         c.sendall(b'HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n' % len(TORRENT) + TORRENT)
     finally:
         c.close()
+
+
+def _request_lines(seen):
+    return [x for x in seen if isinstance(x, bytes)]
 
 
 @pytest.mark.parametrize('host,ok', [('right.test', True), ('wrong.test', False)])
@@ -211,12 +230,15 @@ def test_tls_name_mismatch_is_502_and_nothing_added(client, qbit, monkeypatch, t
         r = _post(client, f'https://{host}:{port}/t.torrent', env=REMOTE)
     finally:
         srv.close()
+    # What the client got and what reached qBittorrent decide this, plus
+    # whether a full request line ever arrived; never the server's own log.
     if ok:   # positive control: same server, right name, trusted CA
         assert r.status_code == 200, r.get_json()
-        assert seen == ['request'] and len(qbit.added) == 1
+        assert _request_lines(seen) == [b'GET /t.torrent HTTP/1.1'] and len(qbit.added) == 1
     else:
         assert r.status_code == 502, r.get_json()
-        assert 'request' not in seen and qbit.added == []
+        assert qbit.added == []
+        assert _request_lines(seen) == []
 
 
 # ── (4b) Reviewer F1: trickled status line / headers are cut too ────────
