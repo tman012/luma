@@ -4,6 +4,7 @@
  */
 import { useEffect } from 'react';
 import { assetUrl } from '@/urlHelpers';
+import { T } from '@/theme/tokens';
 import { LUMA_BLUE, PLEX_AMBER, primaryButtonColors } from '@/ui/lumaButton';
 
 export const FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
@@ -157,8 +158,9 @@ export function PinPad({ value, onChange, onComplete, shake, disabled, compact }
 /** Luma's navy backdrop, shared by Home and every sign-in surface. */
 export const NAVY_BG = 'radial-gradient(ellipse at 50% 30%, #262a66 0%, #15102a 55%, #0a0818 100%)';
 
-/** Flat base under the glow, the gradient's middle stop. */
-export const NAVY_BASE = '#15102a';
+/** Flat base under the glow, the gradient's middle stop: the theme token
+ * (--color-kiosk-black, #15102a), not a literal. */
+export const NAVY_BASE = T.navyBase;
 
 /** The navy glow as one fixed, viewport-sized layer. Long pages scroll over it
  * instead of repainting a `background-attachment: fixed` gradient, which left a

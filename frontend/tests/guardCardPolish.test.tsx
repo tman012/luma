@@ -62,7 +62,7 @@ describe('guard card helper text', () => {
 describe('navy glass surfaces', () => {
   const src = (p: string) => readFileSync(`${process.cwd()}/src/${p}`, 'utf8');
   it('tokens are navy (#15102a base), not near-black', () => {
-    expect(NAVY_GLASS_PANEL).toContain('#15102a');
+    expect(NAVY_GLASS_PANEL).toContain('var(--color-kiosk-black)');
     expect(NAVY_GLASS_POPOVER).toContain('rgb(21 16 42');
     expect(NAVY_GLASS_POPOVER).toContain('var(--color-glass-6)');
     expect(NAVY_GLASS_BORDER).toBe('1px solid var(--color-glass-12)');
