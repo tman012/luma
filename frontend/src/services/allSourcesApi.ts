@@ -37,6 +37,8 @@ export interface AllResultsRelease {
   origin: 'indexer';
   rejected: boolean;
   rejectionReasons: string[];
+  /** Tracker type from Settings > Trackers ('iptorrents', 'torznab', ...); '' for Prowlarr rows. */
+  trackerType: string;
 }
 
 export interface TmdbMatchResult {
@@ -99,6 +101,7 @@ function normalizeIndexerRelease(r: Record<string, unknown>): AllResultsRelease 
     origin: 'indexer',
     rejected: (r.rejected as boolean) ?? false,
     rejectionReasons: (r.rejection_reasons as string[]) ?? [],
+    trackerType: (r.tracker_type as string) || '',
   };
 }
 

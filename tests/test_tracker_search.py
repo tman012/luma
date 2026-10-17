@@ -120,9 +120,12 @@ def _settings_without_indexer(real_get):
 
 @pytest.fixture
 def client(test_app, env):
-    app.user_auth.create_user('owner', 'pin-1234567', is_admin=True)
+    owner = app.user_auth.create_user('owner', 'pin-1234567', is_admin=True)
     c = test_app.test_client()
     c.environ_base.update(LAN)
+    # Searching trackers needs a real sign-in; implicit LAN access gets 401.
+    c.set_cookie(app.main.AUTH_COOKIE, app.user_auth.create_session(owner['id']))
+    c.environ_base['HTTP_ORIGIN'] = 'http://localhost'
     return c
 
 

@@ -96,6 +96,7 @@ function indexerToProcessed(r: AllResultsRelease): ProcessedRelease {
     origin: 'indexer',
     downloadUrl: r.downloadUrl,
     infoHash: r.infoHash,
+    trackerType: r.trackerType,
   };
 }
 

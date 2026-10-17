@@ -5,6 +5,7 @@ import { FocusZone } from '@/components/tv/FocusZone';
 import { useFocusable } from '@/hooks/useFocusable';
 import { ManualMatchPicker } from '@/components/media/ManualMatchPicker';
 import { grabToLibrary } from '@/services/allSourcesApi';
+import { useIndexerConfigured } from '@/services/sourcesAvailability';
 import {
   TrackerSeedPills,
   SegmentRow,
@@ -1298,6 +1299,7 @@ function CompactSourcesView({
   }, [handleDismiss]);
 
   const noSources = !loading && !error && visibleReleases.length === 0;
+  const indexerConfigured = useIndexerConfigured();
   const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
 
   return (
@@ -1440,8 +1442,17 @@ function CompactSourcesView({
           </div>
         )}
 
+        {/* No trackers (and no Prowlarr): a clean empty state */}
+        {noSources && indexerConfigured === false && (
+          <div data-sources-empty="" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 24px 60px' }}>
+            <span style={{ fontSize: '17px', fontWeight: 600, color: 'rgba(255,255,255,0.7)', textAlign: 'center' }}>
+              Sources not found
+            </span>
+          </div>
+        )}
+
         {/* No sources — prompt to add to watchlist */}
-        {noSources && (
+        {noSources && indexerConfigured === true && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 24px 60px', gap: '20px' }}>
             <span style={{ fontSize: '17px', fontWeight: 600, color: 'rgba(255,255,255,0.7)', textAlign: 'center' }}>
               Sources not found
