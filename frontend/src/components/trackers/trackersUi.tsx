@@ -234,3 +234,24 @@ export const srOnly: React.CSSProperties = {
   position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0,0,0,0)',
   whiteSpace: 'nowrap', border: 0,
 };
+
+// ---------------------------------------------------------------- category chip
+
+/** A toggle chip (Trackers categories, Library paths conditions): 44px on
+ * phones, 36px on desktop, fully rounded, 14px/500. */
+export function CategoryChip({ on, label, wide, onToggle, testId }: {
+  on: boolean; label: string; wide: boolean; onToggle: () => void; testId?: string;
+}) {
+  return (
+    <button type="button" className="lt-chip lt-btn" aria-pressed={on} onClick={onToggle} data-testid={testId}
+      style={{
+        height: wide ? 36 : 44, padding: '0 14px', borderRadius: 999, fontFamily: FONT, fontSize: 14, fontWeight: 500,
+        cursor: 'pointer', boxSizing: 'border-box',
+        border: on ? `1px solid ${BLUE}` : '1px solid rgba(255,255,255,0.10)',
+        background: on ? 'rgba(59,130,246,0.18)' : 'rgba(255,255,255,0.06)',
+        color: on ? T.white : 'rgba(255,255,255,0.70)',
+      }}>
+      {label}
+    </button>
+  );
+}

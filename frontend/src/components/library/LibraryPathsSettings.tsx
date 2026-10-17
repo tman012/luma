@@ -2,19 +2,21 @@
  * movie downloads are copied. Paths, ordered rules (first match wins, drag or
  * arrow keys to reorder, switch on/off, instant save), the fallback, Copy or
  * Hardlink, and an optional qBittorrent-to-Luma path map. */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { T } from '@/theme/tokens';
 import { FONT } from '@/components/start/StartUI';
 import { NoticeToast } from '@/components/start/SetupToast';
 import { CheckIcon, ChevronIcon, GripIcon, XIcon } from '@/components/nav/AppNav';
 import { move } from '@/components/home/homeApi';
-import { PlusIcon, Switch } from '@/components/trackers/trackersUi';
+import { CategoryChip, PlusIcon, Switch, trackersCss } from '@/components/trackers/trackersUi';
 import {
   RESOLUTIONS, SAVE_FAILED, SOURCES, addPath, deletePath, editPath, loadLibrary, ruleSummary, saveMapping, saveRules,
   type Errors, type LibPath, type LibraryView, type PathMapRow, type Result, type Rule, type Transfer, type Unit,
 } from './libraryPathsApi';
 
 const ROW_H = 64;
+/** Desktop (>=1024px) or phone, for type sizes and chip heights. */
+const WideCtx = createContext(true);
 type Editing = { kind: 'path'; id: string | null } | { kind: 'rule'; index: number | null } | { kind: 'map' } | null;
 
 export function LibraryPathsSettings({ wide }: { wide: boolean }) {
@@ -59,8 +61,10 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
   const fb = fallbackFor(view);
 
   return (
+    <WideCtx.Provider value={wide}>
     <section data-testid="library-paths-section" style={{ ...pad(wide), display: 'flex', flexDirection: 'column', gap: 28, fontFamily: FONT }}>
       <style>{libraryPathsCss}</style>
+      <style>{trackersCss}</style>
       {toast && <NoticeToast key={toast + seq.current} text={toast} onDone={() => setToast('')} />}
 
       <div data-testid="lp-paths">
@@ -132,28 +136,32 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
         </div>
       </div>
     </section>
+    </WideCtx.Provider>
   );
 }
 
 // ---------------------------------------------------------------- paths
 
 const STATUS: Record<LibPath['status'], { color: string; text: string }> = {
-  ok: { color: T.success, text: '' },
-  missing: { color: T.danger, text: 'Folder not found' },
+  ok: { color: '#22c55e', text: '' },
+  missing: { color: '#ef4444', text: 'Missing' },
   read_only: { color: '#f59e0b', text: 'Read-only' },
 };
 
 function PathRow({ path, first, onOpen }: { path: LibPath; first: boolean; onOpen: () => void }) {
   const s = STATUS[path.status] || STATUS.missing;
+  const wide = useContext(WideCtx);
   return (
     <button type="button" className="lp-row" data-testid="lp-path" data-status={path.status} onClick={onOpen}
       aria-label={`Edit ${path.name}`} style={{ ...rowBtn, ...(first ? null : topBorder) }}>
-      <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: s.color, flex: 'none' }} />
+      <span aria-hidden="true" data-testid="lp-status-dot" style={{ width: 8, height: 8, borderRadius: 4, background: s.color, flex: 'none' }} />
       <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left' }}>
-        <span style={primaryText}>{path.name}</span>
-        <span style={secondaryText} title={path.path}>{path.path}</span>
+        <span style={titleText(wide)}>{path.name}</span>
+        <span style={subText(wide)} title={path.path}>{path.path}</span>
       </span>
-      {s.text && <span style={{ fontSize: 13, color: s.color === T.danger ? T.dangerText : s.color, flex: 'none' }}>{s.text}</span>}
+      {s.text && (
+        <span data-testid="lp-status" style={{ fontSize: 13, fontWeight: 500, color: s.color, flex: 'none', textAlign: 'right' }}>{s.text}</span>
+      )}
       <span style={{ display: 'inline-flex', color: T.text4, flex: 'none' }}><ChevronIcon /></span>
     </button>
   );
@@ -193,6 +201,7 @@ function RulesList({ view, byId, editing, setEditing, commit, onSaveRule, onDele
   onSaveRule: (index: number | null, rule: Rule) => Promise<Result>; onDeleteRule: (index: number) => Promise<Result>;
 }) {
   const rules = view.rules;
+  const wide = useContext(WideCtx);
   const [drag, setDrag] = useState<{ key: string; from: number; startY: number; dy: number } | null>(null);
   const handles = useRef(new Map<string, HTMLButtonElement>());
   const refocus = useRef<string | null>(null);
@@ -260,8 +269,8 @@ function RulesList({ view, byId, editing, setEditing, commit, onSaveRule, onDele
               <button type="button" className="lp-row" aria-label={`Edit rule ${i + 1}`} onClick={() => setEditing({ kind: 'rule', index: i })}
                 style={{ ...rowBtnBare, opacity: r.enabled ? 1 : 0.5 }}>
                 <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left' }}>
-                  <span style={primaryText} data-testid="lp-rule-summary">{ruleSummary(r)}</span>
-                  <span style={secondaryText} data-testid="lp-rule-dest">{dest}</span>
+                  <span style={titleText(wide)} data-testid="lp-rule-summary">{ruleSummary(r)}</span>
+                  <span style={subText(wide)} data-testid="lp-rule-dest">{dest}</span>
                 </span>
               </button>
               <Switch on={r.enabled} label={`Rule ${i + 1}`}
@@ -308,28 +317,24 @@ function RuleForm({ index, rule, paths, first, onSave, onCancel, onDelete }: {
     <form data-testid="lp-rule-form" style={{ ...formBox, ...(first ? null : topBorder) }}
       onSubmit={e => { e.preventDefault(); if (!busy && pathId && (!unit || nOk)) submit(); }}>
       <div>
-        <label htmlFor="lp-dest" style={labelStyle}>Destination</label>
-        <select id="lp-dest" data-testid="lp-dest" value={pathId} onChange={e => setPathId(e.target.value)}
-          style={{ ...inputStyle, ...(errors[`${k}.path_id`] ? invalid : null) }}>
-          {!pathId && <option value="" disabled>Choose</option>}
-          {paths.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
+        <span id="lp-dest-label" style={labelStyle}>Destination</span>
+        <RowSelect labelId="lp-dest-label" testId="lp-dest" value={pathId} error={errors[`${k}.path_id`]}
+          options={paths.map(p => ({ id: p.id, label: p.name }))} onChoose={setPathId} />
         {errors[`${k}.path_id`] && <span style={fieldError}>{errors[`${k}.path_id`]}</span>}
       </div>
       <div>
-        <label htmlFor="lp-released" style={labelStyle}>Released within</label>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <span id="lp-released-label" style={labelStyle}>Released within</span>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           {unit && (
             <input id="lp-released-n" data-testid="lp-released-n" aria-label="Number" inputMode="numeric" value={n}
               onChange={e => setN(e.target.value.replace(/\D/g, '').slice(0, 3))}
               style={{ ...inputStyle, width: 80, flex: 'none', ...(!nOk || errors[`${k}.released_within`] ? invalid : null) }} />
           )}
-          <select id="lp-released" data-testid="lp-released" value={unit} onChange={e => setUnit(e.target.value as Unit | '')}
-            style={{ ...inputStyle, flex: 1 }}>
-            <option value="">Any time</option>
-            <option value="months">Months</option>
-            <option value="years">Years</option>
-          </select>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <RowSelect labelId="lp-released-label" testId="lp-released" value={unit}
+              options={[{ id: '', label: 'Any time' }, { id: 'months', label: 'Months' }, { id: 'years', label: 'Years' }]}
+              onChoose={v => setUnit(v as Unit | '')} />
+          </div>
         </div>
         {errors[`${k}.released_within`] && <span style={fieldError}>{errors[`${k}.released_within`]}</span>}
       </div>
@@ -343,20 +348,54 @@ function RuleForm({ index, rule, paths, first, onSave, onCancel, onDelete }: {
 function Chips({ label, options, value, onToggle }: {
   label: string; options: { id: string; label: string }[]; value: string[]; onToggle: (id: string) => void;
 }) {
+  const wide = useContext(WideCtx);
   return (
     <div role="group" aria-label={label}>
       <span style={labelStyle}>{label}</span>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        {options.map(o => {
-          const on = value.includes(o.id);
-          return (
-            <button key={o.id} type="button" aria-pressed={on} data-testid={`lp-chip-${o.id}`} className="lp-focus" onClick={() => onToggle(o.id)}
-              style={{ ...chip, ...(on ? chipOn : null) }}>
-              {o.label}
-            </button>
-          );
-        })}
+        {options.map(o => (
+          <CategoryChip key={o.id} on={value.includes(o.id)} label={o.label} wide={wide}
+            testId={`lp-chip-${o.id}`} onToggle={() => onToggle(o.id)} />
+        ))}
       </div>
+    </div>
+  );
+}
+
+/** An input-style row (44px) that opens its choices below, like the Fallback
+ * picker; no native select arrow. */
+function RowSelect({ labelId, testId, value, options, error, onChoose }: {
+  labelId: string; testId: string; value: string; options: { id: string; label: string }[];
+  error?: string; onChoose: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = options.find(o => o.id === value);
+  return (
+    <div style={{ ...selectBox, ...(error ? invalid : null) }}>
+      <button type="button" className="lp-row" data-testid={testId} aria-expanded={open} aria-labelledby={`${labelId} ${testId}-value`}
+        onClick={() => setOpen(o => !o)} style={selectRow}>
+        <span id={`${testId}-value`} style={{ flex: 1, minWidth: 0, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden',
+          textOverflow: 'ellipsis', color: current ? T.white : T.text3 }}>
+          {current ? current.label : 'Choose'}
+        </span>
+        <span aria-hidden="true" style={{ display: 'inline-flex', color: T.text3, transition: 'transform 150ms', transform: open ? 'rotate(90deg)' : 'none' }}>
+          <ChevronIcon />
+        </span>
+      </button>
+      {open && (
+        <div role="radiogroup" aria-labelledby={labelId}>
+          {options.map(o => {
+            const on = o.id === value;
+            return (
+              <button key={o.id || 'none'} type="button" role="radio" aria-checked={on} className="lp-row"
+                onClick={() => { setOpen(false); onChoose(o.id); }} style={{ ...selectRow, ...topBorder }}>
+                <span style={{ flex: 1, textAlign: 'left' }}>{o.label}</span>
+                <span style={{ display: 'inline-flex', color: T.accent, width: 20 }}>{on && <CheckIcon />}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -368,11 +407,12 @@ function Picker({ label, options, value, error, onChoose }: {
 }) {
   const [open, setOpen] = useState(false);
   const current = options.find(o => o.id === value);
+  const wide = useContext(WideCtx);
   return (
     <>
       <div style={{ ...card, ...(error ? invalid : null) }}>
         <button type="button" className="lp-row" style={rowBtn} aria-expanded={open} onClick={() => setOpen(o => !o)} data-testid="lp-fallback-toggle">
-          <span style={{ ...primaryText, flex: 1 }}>{label}</span>
+          <span style={{ ...titleText(wide), flex: 1 }}>{label}</span>
           <span style={{ color: T.text2, fontSize: 15 }} data-testid="lp-fallback-value">{current?.label || ''}</span>
           <span style={{ display: 'inline-flex', color: T.text3, transition: 'transform 150ms', transform: open ? 'rotate(90deg)' : 'none' }}>
             <ChevronIcon />
@@ -386,7 +426,7 @@ function Picker({ label, options, value, error, onChoose }: {
                 <button key={o.id} type="button" role="radio" aria-checked={on} className="lp-row"
                   onClick={() => { setOpen(false); if (!on) onChoose(o.id); }}
                   style={{ ...rowBtn, ...topBorder, paddingLeft: 28 }}>
-                  <span style={{ ...primaryText, flex: 1 }}>{o.label}</span>
+                  <span style={{ ...titleText(wide), flex: 1 }}>{o.label}</span>
                   <span style={{ display: 'inline-flex', color: T.accent, width: 20 }}>{on && <CheckIcon />}</span>
                 </button>
               );
@@ -521,6 +561,19 @@ const rowBtn: React.CSSProperties = {
   background: 'none', cursor: 'pointer', fontFamily: FONT, boxSizing: 'border-box', color: T.text, textAlign: 'left',
 };
 const rowBtnBare: React.CSSProperties = { ...rowBtn, flex: 1, minWidth: 0, width: 'auto', padding: '10px 4px', borderTop: 'none' };
+const titleText = (wide: boolean): React.CSSProperties => ({
+  ...primaryText, fontSize: wide ? 15 : 16, fontWeight: 500,
+});
+const subText = (wide: boolean): React.CSSProperties => ({
+  ...secondaryText, fontSize: wide ? 13 : 14, color: wide ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.55)',
+});
+const selectBox: React.CSSProperties = {
+  borderRadius: 12, background: 'rgba(255,255,255,0.06)', border: `1px solid ${T.glass12}`, overflow: 'hidden',
+};
+const selectRow: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 12, width: '100%', height: 44, padding: '0 14px', border: 'none',
+  background: 'none', cursor: 'pointer', fontFamily: FONT, fontSize: 16, color: T.white, boxSizing: 'border-box',
+};
 const primaryText: React.CSSProperties = {
   fontSize: 16, fontWeight: 500, color: 'rgba(255,255,255,0.95)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
 };
@@ -543,17 +596,12 @@ const labelStyle: React.CSSProperties = {
   display: 'block', margin: '0 0 6px', fontSize: 13, fontWeight: 500, color: T.text2, fontFamily: FONT,
 };
 const inputStyle: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box', height: 44, padding: '0 14px', borderRadius: 10,
-  background: T.glass, border: `1px solid ${T.glass12}`, color: T.white, fontSize: 16, fontFamily: FONT, outline: 'none',
+  width: '100%', boxSizing: 'border-box', height: 44, padding: '0 14px', borderRadius: 12,
+  background: 'rgba(255,255,255,0.06)', border: `1px solid ${T.glass12}`, color: T.white, fontSize: 16, fontFamily: FONT, outline: 'none',
   colorScheme: 'dark',
 };
 const invalid: React.CSSProperties = { border: `1px solid ${T.danger}` };
 const fieldError: React.CSSProperties = { display: 'block', marginTop: 6, fontSize: 13, color: T.dangerText, fontFamily: FONT };
-const chip: React.CSSProperties = {
-  minHeight: 36, padding: '0 14px', borderRadius: 18, border: `1px solid ${T.glass12}`, background: T.glass,
-  color: T.text2, fontSize: 14, fontWeight: 500, fontFamily: FONT, cursor: 'pointer',
-};
-const chipOn: React.CSSProperties = { background: 'rgba(59,130,246,0.18)', border: `1px solid ${T.accent}`, color: T.white };
 const segment: React.CSSProperties = {
   display: 'flex', padding: 3, borderRadius: 12, background: T.glass, border: `1px solid ${T.glass8}`, maxWidth: 320,
 };

@@ -81,6 +81,10 @@ const rulesPut = () => last(c => c.url.endsWith('/api/settings/library-rules'));
 /** Visible text: <style> blocks dropped. */
 const textOf = (el: Element) => { const c = el.cloneNode(true) as Element; c.querySelectorAll('style').forEach(x => x.remove()); return c.textContent; };
 const toastText = async () => textOf(await screen.findByTestId('notice-toast'));
+const choose = (testId: string, label: string) => {
+  fireEvent.click(screen.getByTestId(testId));
+  fireEvent.click(screen.getByRole('radio', { name: label }));
+};
 const summaries = () => screen.getAllByTestId('lp-rule-summary').map(e => e.textContent);
 
 beforeEach(() => {
@@ -96,7 +100,16 @@ describe('Settings > Library paths', () => {
     const section = await screen.findByTestId('library-paths-section');
     const rows = screen.getAllByTestId('lp-path');
     expect(rows.map(r => r.getAttribute('data-status'))).toEqual(['ok', 'ok', 'missing']);
-    expect(rows[2]!.textContent).toContain('Folder not found');
+    expect(rows[2]!.textContent).toContain('Missing');
+    // Status: green dot alone when OK; amber Read-only, red Missing (13px/500).
+    expect(within(rows[0]!).queryByTestId('lp-status')).toBeNull();
+    expect(within(rows[0]!).getByTestId('lp-status-dot').style.background).toBe('rgb(34, 197, 94)');
+    const missing = within(rows[2]!).getByTestId('lp-status');
+    expect(missing.textContent).toBe('Missing');
+    expect(missing.style.color).toBe('rgb(239, 68, 68)');
+    expect(missing.style.fontSize).toBe('13px');
+    expect(missing.style.fontWeight).toBe('500');
+    expect(within(rows[2]!).getByTestId('lp-status-dot').style.background).toBe('rgb(239, 68, 68)');
     expect(summaries()).toEqual(['2160p', 'Past 6 months']);
     expect(screen.getAllByTestId('lp-rule-dest').map(e => e.textContent)).toEqual(['4K Movies', 'Movies']);
     expect(screen.getByTestId('lp-fallback-value').textContent).toBe('Movies');
@@ -104,7 +117,7 @@ describe('Settings > Library paths', () => {
     expect(screen.getAllByTestId('lp-map-row')).toHaveLength(1);
     // No helper or explanatory text: just labels, names, paths and buttons.
     expect(textOf(section)).toBe(
-      'PathsMovies/media/Movies4K Movies/media/4K MoviesOld drive/media/Old DriveFolder not foundAdd path'
+      'PathsMovies/media/Movies4K Movies/media/4K MoviesOld drive/media/Old DriveMissingAdd path'
       + 'Rules2160p4K MoviesPast 6 monthsMoviesAdd ruleFallbackMovies'
       + 'TransferCopyHardlinkPath map/data/torrents/downloadsAdd mapping');
     // Only the new store's API: never the seeded media.* settings.
@@ -195,8 +208,8 @@ describe('Settings > Library paths', () => {
     fireEvent.click(await screen.findByTestId('lp-add-rule'));
     const save = screen.getByTestId('lp-save') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
-    fireEvent.change(screen.getByTestId('lp-dest'), { target: { value: 'p_oldone01' } });
-    fireEvent.change(screen.getByTestId('lp-released'), { target: { value: 'years' } });
+    choose('lp-dest', 'Old drive');
+    choose('lp-released', 'Years');
     fireEvent.change(screen.getByTestId('lp-released-n'), { target: { value: '2y' } });
     expect((screen.getByTestId('lp-released-n') as HTMLInputElement).value).toBe('2');
     fireEvent.click(screen.getByTestId('lp-chip-1080p'));
@@ -216,7 +229,7 @@ describe('Settings > Library paths', () => {
       ? res({ errors: { 'rules.0.released_within': 'Invalid' } }, 400) : null);
     render(<LibraryPathsSettings wide />);
     fireEvent.click(await screen.findByRole('button', { name: 'Edit rule 1' }));
-    fireEvent.change(screen.getByTestId('lp-released'), { target: { value: 'months' } });
+    choose('lp-released', 'Months');
     fireEvent.change(screen.getByTestId('lp-released-n'), { target: { value: '999' } });
     fireEvent.click(screen.getByTestId('lp-save'));
     expect(await screen.findByText('Invalid')).toBeTruthy();
@@ -230,7 +243,7 @@ describe('Settings > Library paths', () => {
       ? res({ errors: { fallback_path_id: 'Required' } }, 400) : null);
     render(<LibraryPathsSettings wide />);
     fireEvent.click(await screen.findByTestId('lp-add-rule'));
-    fireEvent.change(screen.getByTestId('lp-dest'), { target: { value: 'p_4kmovie1' } });
+    choose('lp-dest', '4K Movies');
     fireEvent.click(screen.getByTestId('lp-save'));
     expect((await within(screen.getByTestId('lp-fallback')).findByRole('alert')).textContent).toBe('Required');
     fireEvent.click(screen.getByTestId('lp-fallback-toggle'));
@@ -245,7 +258,7 @@ describe('Settings > Library paths', () => {
     render(<LibraryPathsSettings wide />);
     fireEvent.click(await screen.findByTestId('lp-add-rule'));
     expect(screen.queryByTestId('lp-fallback')).toBeNull();
-    fireEvent.change(screen.getByTestId('lp-dest'), { target: { value: 'p_movies01' } });
+    choose('lp-dest', 'Movies');
     fireEvent.click(screen.getByTestId('lp-save'));
     await waitFor(() => expect(rulesPut()!.body!.fallback_path_id).toBe('p_movies01'));
   });
@@ -282,6 +295,47 @@ describe('Settings > Library paths', () => {
     answer = c => (c.method === 'GET' ? res({ error: 'Owner only' }, 403) : null);
     render(<LibraryPathsSettings wide />);
     expect((await screen.findByRole('alert')).textContent).toBe("Couldn't load library paths");
+  });
+
+  it('designer polish: chips, row pickers without a native select, desktop type sizes, Delete at the left', async () => {
+    render(<LibraryPathsSettings wide />);
+    const title = (await screen.findAllByTestId('lp-rule-summary'))[0]!;
+    expect(title.style.fontSize).toBe('15px');
+    expect(title.style.fontWeight).toBe('500');
+    const sub = screen.getAllByTestId('lp-rule-dest')[0]!;
+    expect(sub.style.fontSize).toBe('13px');
+    expect(sub.style.color).toBe('rgba(255, 255, 255, 0.5)');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit rule 2' }));
+    const form = screen.getByTestId('lp-rule-form');
+    expect(form.querySelector('select')).toBeNull();
+    const dest = screen.getByTestId('lp-dest');
+    expect(dest.style.height).toBe('44px');
+    expect((dest.parentElement as HTMLElement).style.borderRadius).toBe('12px');
+    expect((dest.parentElement as HTMLElement).style.background).toBe('rgba(255, 255, 255, 0.06)');
+    expect(screen.getByTestId('lp-released').textContent).toBe('Months');
+    const off = screen.getByTestId('lp-chip-2160p');
+    expect(off.getAttribute('aria-pressed')).toBe('false');
+    expect(off.style.height).toBe('36px');
+    expect(off.style.borderRadius).toBe('999px');
+    expect(off.style.padding).toBe('0px 14px');
+    expect(off.style.fontSize).toBe('14px');
+    expect(off.style.background).toBe('rgba(255, 255, 255, 0.06)');
+    expect(off.style.border).toBe('1px solid rgba(255, 255, 255, 0.1)');
+    expect(off.style.color).toBe('rgba(255, 255, 255, 0.7)');
+    fireEvent.click(off);
+    expect(off.style.background).toBe('rgba(59, 130, 246, 0.18)');
+    expect(off.style.border).toBe('1px solid var(--color-accent)');   // #3b82f6
+    expect(off.style.color).toBe('var(--color-white-pure)');
+    const buttons = [...form.querySelectorAll('button')].filter(b => ['Delete', 'Cancel', 'Save'].includes(b.textContent || ''));
+    expect(buttons.map(b => b.textContent)).toEqual(['Delete', 'Cancel', 'Save']);
+    expect(screen.getByTestId('lp-delete').style.color).toBe('var(--color-danger-text)');
+  });
+
+  it('phone: chips are 44px and titles 16px', async () => {
+    render(<LibraryPathsSettings wide={false} />);
+    expect((await screen.findAllByTestId('lp-rule-summary'))[0]!.style.fontSize).toBe('16px');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit rule 1' }));
+    expect(screen.getByTestId('lp-chip-2160p').style.height).toBe('44px');
   });
 
   it('summaries are American English', () => {
