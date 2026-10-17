@@ -4,6 +4,7 @@
  */
 
 import { useCallback, type ReactNode } from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import { useSettings } from '../useSettings';
 import { TestButton } from './TestButton';
 import { cn } from '@/utils/cn';
@@ -41,9 +42,12 @@ export function SettingsCard({
   children,
   className,
 }: SettingsCardProps) {
-  const { saveCard, resetCard, isCardDirty, testConnection } = useSettings();
+  const { saveCard, resetCard, isCardDirty, needsSignIn, testConnection } = useSettings();
 
   const dirty = isCardDirty(paths);
+  // Turning on or widening automatic deletion needs the owner signed in with
+  // a session; the server answers 401 and Save becomes a sign-in.
+  const signIn = dirty && !!needsSignIn?.(paths);
 
   const handleSave = useCallback(() => saveCard(paths), [saveCard, paths]);
   const handleReset = useCallback(() => resetCard(paths), [resetCard, paths]);
@@ -108,19 +112,43 @@ export function SettingsCard({
             </svg>
             Reset
           </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={!dirty}
-            className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" />
-            </svg>
-            Save
-          </button>
+          {signIn ? (
+            <SignInToSave />
+          ) : (
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={!dirty}
+              className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px]"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" />
+              </svg>
+              Save
+            </button>
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+/** Label of the sign-in prompt on Save (sentence case, no helper text). */
+export const SIGN_IN_TO_SAVE = 'Sign in to save';
+
+/** Replaces Save when the server wants the owner signed in for this change.
+ * Its own component, so cards outside a router never call useNavigate. */
+function SignInToSave() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (
+    <button
+      type="button"
+      data-testid="settings-sign-in-to-save"
+      onClick={() => navigate('/login', { state: { from: location.pathname + location.search, signIn: true } })}
+      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-emerald-600 min-h-[44px]"
+    >
+      {SIGN_IN_TO_SAVE}
+    </button>
   );
 }
