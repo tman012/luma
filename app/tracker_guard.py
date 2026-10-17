@@ -24,6 +24,11 @@ Rules:
   ban: 24 h; rejected credentials: 1 h (cleared when the credentials change);
   network/timeouts/5xx: 5 min (doubling, max 1 h); bad answers: 15 min.
 
+Purpose budgets: a background request may name a purpose ('tv'); it is then
+also held to that purpose's caps (PURPOSE_LIMITS: per tracker per day and per
+hour, across trackers per day, and a minimum gap per tracker), on top of all
+the limits above. The log records it as 'b:<purpose>'.
+
 State persists in $LUMA_DATA_DIR/tracker_guard.json so a restart can't reset
 the counters. An unreadable state file is moved aside and searches pause for
 an hour (fail closed).
@@ -54,6 +59,15 @@ LIMITS = {
     'network_s': 300, 'network_max_s': 3600,
     'response_s': 900, 'response_max_s': 6 * 3600,
 }
+# Per-purpose caps for background requests, on top of LIMITS. The TV caps are
+# fixed in code (app.tv_budget), not settings.
+def _purpose_limits() -> Dict[str, Dict[str, float]]:
+    from app import tv_budget
+    return {tv_budget.PURPOSE: tv_budget.GUARD_LIMITS}
+
+
+_PURPOSE_RE = __import__('re').compile(r'^[a-z]{1,16}$')
+_KIND_RE = __import__('re').compile(r'^[ib](:[a-z]{1,16})?$')
 FAIL_CLOSED_S = 3600
 MAX_COOLDOWN_S = 24 * 3600
 FILENAME = 'tracker_guard.json'
@@ -120,7 +134,8 @@ class TrackerGuard:
             if i is None or not isinstance(entries, list):
                 continue
             self.log[i] = [[_num(e[0]), e[1]] for e in entries
-                           if isinstance(e, list) and len(e) == 2 and e[1] in ('i', 'b')
+                           if isinstance(e, list) and len(e) == 2 and isinstance(e[1], str)
+                           and _KIND_RE.match(e[1])
                            and _num(e[0]) and _num(e[0]) > now - 86400]
         for k, v in raw.get('buckets', {}).items():
             i = key(k)
@@ -189,13 +204,49 @@ class TrackerGuard:
         for k in list(self.log):
             self.log[k] = [e for e in self.log[k] if e[0] > day]
         mine = self.log.get(tid, [])
-        return (sum(1 for t, kind in mine if t > hr and kind == 'i'), len(mine),
+        return (sum(1 for t, kind in mine if t > hr and kind[:1] == 'i'), len(mine),
                 sum(1 for v in self.log.values() for t, _ in v if t > hr))
 
-    def take(self, tid: str, interactive: bool, strict: bool, now: Optional[float] = None) -> Optional[str]:
-        """None when a request to *tid* may be sent now (and records it), else
-        the reason it may not."""
+    def purpose_counts(self, tid: str, purpose: str, now: Optional[float] = None) -> Dict[str, float]:
+        """{'hour', 'day', 'all_day', 'last'} for *purpose*: this tracker's
+        requests in the last hour and 24 h, every tracker's in 24 h, and the
+        time of this tracker's latest (0 when none)."""
         now = time.time() if now is None else now
+        kind = f'b:{purpose}'
+        with self._lock:
+            self._load()
+            day, hr = now - 86400, now - 3600
+            mine = [t for t, k in self.log.get(tid, []) if k == kind and t > day]
+            return {'hour': sum(1 for t in mine if t > hr), 'day': len(mine),
+                    'all_day': sum(1 for v in self.log.values() for t, k in v if k == kind and t > day),
+                    'last': max(mine, default=0.0)}
+
+    def _purpose_refusal(self, tid: str, purpose: str, now: float) -> Optional[str]:
+        lim = _purpose_limits().get(purpose)
+        if lim is None:
+            return f'unknown purpose {purpose}'
+        c = self.purpose_counts(tid, purpose, now)
+        if c['day'] >= lim['per_tracker_day']:
+            return f"{purpose} daily cap {int(lim['per_tracker_day'])}"
+        if c['hour'] >= lim['per_tracker_hour']:
+            return f"{purpose} hourly cap {int(lim['per_tracker_hour'])}"
+        if c['all_day'] >= lim['all_trackers_day']:
+            return f"{purpose} daily cap across trackers {int(lim['all_trackers_day'])}"
+        if c['last'] and now - c['last'] < lim['min_gap_s']:
+            return f'{purpose} spacing'
+        return None
+
+    def take(self, tid: str, interactive: bool, strict: bool, now: Optional[float] = None,
+             purpose: Optional[str] = None) -> Optional[str]:
+        """None when a request to *tid* may be sent now (and records it), else
+        the reason it may not. A background request with a *purpose* is also
+        held to that purpose's caps; an interactive one is charged to the
+        interactive budget as before."""
+        now = time.time() if now is None else now
+        if purpose is not None and (interactive or not isinstance(purpose, str) or not _PURPOSE_RE.match(purpose)):
+            purpose = None if interactive else '?'
+        if purpose == '?':
+            return 'invalid purpose'
         with self._lock:
             self._load()
             if self.fail_closed_until > now:
@@ -204,6 +255,10 @@ class TrackerGuard:
             if cd and cd[0] > now:
                 return f'backoff ({cd[1]})'
             hr, day, glob = self.counts(tid, now)
+            if purpose:
+                why = self._purpose_refusal(tid, purpose, now)
+                if why:
+                    return why
             if day >= LIMITS['per_day']:
                 return f"daily cap {LIMITS['per_day']}"
             if glob >= LIMITS['global_per_hour']:
@@ -216,7 +271,8 @@ class TrackerGuard:
                 if b[0] < 1.0:
                     return 'rate limit (bucket empty)'
                 b[0] -= 1.0
-            self.log.setdefault(tid, []).append([now, 'i' if interactive else 'b'])
+            kind = 'i' if interactive else ('b:' + purpose if purpose else 'b')
+            self.log.setdefault(tid, []).append([now, kind])
             self._save()
             return None
 

@@ -306,9 +306,11 @@ class TrackerSearch:
 
     def search_one(self, cfg: Dict[str, Any], query: str, categories: List[int], limit: int,
                    interactive: bool, imdb_id: str = '', tmdb_id: str = '', media_type: str = '',
-                   refresh: bool = False) -> List[Dict[str, Any]]:
+                   refresh: bool = False, purpose: Optional[str] = None) -> List[Dict[str, Any]]:
         """Guarded, cached search of one tracker; raw client results.
         Raises TrackerSkipped (guard) or TrackerError (the tracker failed).
+        A background search with a *purpose* ('tv') is also held to that
+        purpose's budget in the guard (every page it sends is counted).
 
         Negative cache: a signed-in answer with zero raw rows is remembered
         for NEG_TTL per tracker and exact query. Never after an error (auth,
@@ -344,7 +346,7 @@ class TrackerSearch:
                 fresh = self._cache.get(ckey)
             if fresh and time.time() - fresh[0] < ttl:
                 return fresh[1]
-            reason = self.guard.take(gk, interactive, strict)
+            reason = self.guard.take(gk, interactive, strict, purpose=purpose)
             if reason:
                 self._log_once((gk, 'skip'), int(time.time() // 900),
                                'Tracker %s (id %s) search not sent: %s', cfg['name'], cfg['id'], reason,
@@ -360,7 +362,7 @@ class TrackerSearch:
                 # Caps count HTTP requests: the first was taken above, every page and
                 # fallback after it is taken here, and none is sent once refused.
                 if sent[0]:
-                    why = self.guard.take(gk, interactive, strict)
+                    why = self.guard.take(gk, interactive, strict, purpose=purpose)
                     if why:
                         raise tracker_clients.OutOfBudget(why)
                 sent[0] += 1

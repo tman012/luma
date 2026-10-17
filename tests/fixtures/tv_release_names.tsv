@@ -1,0 +1,160 @@
+# Shared TV release-name corpus: tests/test_tv_release.py (app/tv_release.py) and
+# frontend tv_release_corpus.test.ts (detectTvScope) both read it.
+# name<TAB>pack_type<TAB>pack_episode<TAB>parse summary
+The.Bear.S03E05.1080p.WEB.h264-ETHEL	episode	5	ep S03E05
+The.Bear.S03E05.Doors.2160p.HULU.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX	episode	5	ep S03E05
+Severance.S02E10.Cold.Harbor.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-FLUX	episode	10	ep S02E10
+Slow.Horses.S04E01.720p.WEB.H264-SuccessfulCrab	episode	1	ep S04E01
+Shogun.2024.S01E01.Anjin.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb	episode	1	ep S01E01
+Doctor.Who.2005.S13E01.720p.HDTV.x264-ORGANiC	episode	1	ep S13E01
+Doctor.Who.2023.S01E03.Boom.1080p.DSNP.WEB-DL.DDP5.1.H.264-FLUX	episode	3	ep S01E03
+The.Office.US.S05E14.Lecture.Circuit.Part.1.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb	episode	14	ep S05E14
+House.of.the.Dragon.S02E08.1080p.WEB.H264-SuccessfulCrab	episode	8	ep S02E08
+The.Last.of.Us.S01E03.Long.Long.Time.2160p.HMAX.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX	episode	3	ep S01E03
+Fallout.S01E01.The.End.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX	episode	1	ep S01E01
+Andor.S02E12.2160p.DSNP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX	episode	12	ep S02E12
+The.Penguin.S01E08.A.Great.or.Little.Thing.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX	episode	8	ep S01E08
+Abbott.Elementary.S04E01.720p.HDTV.x264-SYNCOPY	episode	1	ep S04E01
+Only.Murders.in.the.Building.S04E10.1080p.WEB.h264-ETHEL	episode	10	ep S04E10
+Ted.Lasso.S03E12.So.Long.Farewell.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-CMRG	episode	12	ep S03E12
+Succession.S04E10.With.Open.Eyes.REPACK.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb	episode	10	ep S04E10
+Breaking.Bad.S05E16.Felina.1080p.BluRay.x264-ROVERS	episode	16	ep S05E16
+Better.Call.Saul.S06E13.Saul.Gone.2160p.NF.WEB-DL.DDP5.1.HDR.HEVC-FLUX	episode	13	ep S06E13
+The.Wire.S01E01.The.Target.720p.BluRay.x264-SiNNERS	episode	1	ep S01E01
+Seinfeld.S09E23.The.Finale.1080p.NF.WEB-DL.DDP2.0.x264-NTb	episode	23	ep S09E23
+Friends.S10E17.E18.The.Last.One.1080p.BluRay.x265-RARBG	episode	17	multi S10E17E18
+Friends.S10E17E18.The.Last.One.720p.BluRay.x264	episode	17	multi S10E17E18
+The.Simpsons.S35E01.Homers.Adventures.Through.the.Windshield.Glass.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb	episode	1	ep S35E01
+The.Simpsons.S36E100.1080p.WEB.h264-GRP	episode	100	ep S36E100
+Grey's.Anatomy.S21E01.720p.HDTV.x264-SYNCOPY	episode	1	ep S21E01
+Law.and.Order.SVU.S26E01.1080p.WEB.h264-ETHEL	episode	1	ep S26E01
+NCIS.S22E05.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb	episode	5	ep S22E05
+Jeopardy.S41E030.720p.HDTV.x264-NoGRP	episode	30	ep S41E30
+One.Piece.S21E1052.1080p.WEB.H264-SKYANiME	episode	105	ep S21E1052
+Show.Name.S01E01E02E03.1080p.WEB-DL	episode	1	multi S01E01E02E03
+Show.Name.S01E01-E03.1080p.WEB-DL	season		multi S01E01E02E03
+Show.Name.S01E01-03.720p.HDTV	season		multi S01E01E02E03
+Show.Name.S02E09-E10.1080p.AMZN.WEB-DL	season		multi S02E09E10
+Show Name S02E05-07 720p	season		multi S02E05E06E07
+Show Name - S02E05 - Episode Title [1080p]	episode	5	ep S02E05
+Show Name - S01E01 - Pilot (1080p BluRay x265 10bit)	episode	1	ep S01E01
+show.name.s01e05.hdtv.x264	episode	5	ep S01E05
+SHOW.NAME.S01E05.HDTV.X264	episode	5	ep S01E05
+Show_Name_S01E05_720p	episode	5	ep S01E05
+Show Name S1E5 720p	episode	5	ep S01E05
+Show.Name.s1e5.720p	episode	5	ep S01E05
+Show.Name.S01.E05.720p.HDTV	season		ep S01E05
+Show.Name.1x05.HDTV.XviD-LOL	episode	5	ep S01E05
+Show Name 1x05 Title	episode	5	ep S01E05
+Show.Name.12x23.720p.HDTV	episode	23	ep S12E23
+Show.Name.1x05-1x06.HDTV	episode	5	multi S01E05E06
+Show.Name.2x10.Title.720p	episode	10	ep S02E10
+The.Bear.S03.1080p.WEB.h264-ETHEL	season		season S03
+The.Bear.S03.COMPLETE.2160p.HULU.WEB-DL.DDP5.1.DV.HDR.H.265-FLUX	season		season S03
+Severance.S01.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-FLUX	season		season S01
+Severance.S02.2160p.ATVP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX	season		season S02
+The.Wire.S01.720p.BluRay.x264-SiNNERS	season		season S01
+Breaking.Bad.S05.1080p.BluRay.x264-ROVERS	season		season S05
+Fargo.S05.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb	season		season S05
+Show.Name.Season.2.1080p.BluRay.x264	season		season S02
+Show Name Season 2 1080p	season		season S02
+Show.Name.Season.02.Complete.720p	season		season S02
+Show Name (2019) Season 1 S01 1080p BluRay x265 HEVC 10bit	season		season S01
+Show.Name.S01.COMPLETE.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-EPSiLON	season		season S01
+Show.Name.S10.1080p.WEB-DL	season		season S10
+Show.Name.S2.1080p	season		season S02
+The.Office.US.S01-S09.1080p.BluRay.x264	season		seasons S01,S02,S03,S04,S05,S06,S07,S08,S09
+Breaking.Bad.S01-S05.COMPLETE.1080p.BluRay.x264	season		seasons S01,S02,S03,S04,S05
+Show.Name.S01-S03.1080p	season		seasons S01,S02,S03
+Show.Name.S01-03.1080p	season		seasons S01,S02,S03
+Show Name Seasons 1-3 1080p	season		seasons S01,S02,S03
+Show Name Season 1-4 720p	season		seasons S01,S02,S03,S04
+Show.Name.Seasons.1.to.3.720p	season		seasons S01,S02,S03
+The.Daily.Show.2024.10.05.720p.WEB.h264-GRP	season		daily 2024-10-05
+The.Daily.Show.2024.10.05.Guest.Name.1080p.WEB.h264-GRP	season		daily 2024-10-05
+Jimmy.Kimmel.Live.2024.11.20.720p.WEB.h264-JEBAITED	season		daily 2024-11-20
+The.Tonight.Show.Starring.Jimmy.Fallon.2025.01.15.Guest.1080p.WEB.h264-GRP	season		daily 2025-01-15
+Last.Week.Tonight.with.John.Oliver.2024.06.02.1080p.WEB.H264-GRP	season		daily 2024-06-02
+Late.Night.with.Seth.Meyers.2024-03-07.720p.WEB	season		daily 2024-03-07
+Real.Time.with.Bill.Maher.2024.13.40.720p	season		none
+Saturday.Night.Live.S50E01.Jean.Smart.1080p.WEB.h264-GRP	episode	1	ep S50E01
+[SubsPlease] One Piece - 1052 (1080p) [A1B2C3D4].mkv	season		abs 1052
+[SubsPlease] Jujutsu Kaisen - 47 (1080p) [ABCDEF12].mkv	season		abs 47
+[Erai-raws] Boruto - 293 [1080p][Multiple Subtitle].mkv	season		abs 293
+[HorribleSubs] Naruto Shippuden - 500 [720p].mkv	season		abs 500
+[SubsPlease] Frieren - 28 (1080p) [ABCDEF12].mkv	season		abs 28
+[Judas] One Piece - 1000-1010 [1080p]	season		abs 1000,1001,1002,1003,1004,1005,1006,1007,1008,1009,1010
+[SubsPlease] Dandadan - 01v2 (1080p) [ABCDEF12].mkv	season		abs 1
+[SubsPlease] Sousou no Frieren S2 - 03 (1080p) [ABCDEF12].mkv	season		ep S02E03
+[Erai-raws] Kaiju No. 8 - 12 [1080p][Multiple Subtitle].mkv	season		abs 12
+1923.S01E01.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb	episode	1	ep S01E01
+1923.S02E03.720p.WEB.h264-ETHEL	episode	3	ep S02E03
+9-1-1.S08E01.1080p.WEB.h264-SuccessfulCrab	episode	1	ep S08E01
+9-1-1.Lone.Star.S05E01.720p.HDTV.x264-SYNCOPY	episode	1	ep S05E01
+24.S09E12.Day.9.11.00.PM-12.00.AM.1080p.BluRay.x264	episode	12	ep S09E12
+The.100.S07E16.1080p.WEB.h264	episode	16	ep S07E16
+Westworld.S04E08.Que.Sera.Sera.1080p.HMAX.WEB-DL.DD5.1.H.264-NTb	episode	8	ep S04E08
+Star.Trek.Strange.New.Worlds.S03E01.Hegemony.Part.II.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX	episode	1	ep S03E01
+Battlestar.Galactica.2004.S04E20.Daybreak.Part.2.1080p.BluRay.x264	episode	20	ep S04E20
+Battlestar.Galactica.2004.S01.1080p.BluRay.x264	season		season S01
+Shameless.US.S11E12.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb	episode	12	ep S11E12
+The.Boys.S04E08.Assassination.Run.2160p.AMZN.WEB-DL.DDP5.1.HDR.H.265-FLUX	episode	8	ep S04E08
+Dark.S03E08.German.1080p.NF.WEB-DL.DDP5.1.x264-AGLET	episode	8	ep S03E08
+Money.Heist.S05E10.SPANISH.1080p.NF.WEB-DL.DDP5.1.x264-NTb	episode	10	ep S05E10
+Lupin.S03E07.FRENCH.1080p.NF.WEB-DL.DDP5.1.x264-NTb	episode	7	ep S03E07
+Squid.Game.S02E07.KOREAN.2160p.NF.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX	episode	7	ep S02E07
+Babylon.Berlin.S04.GERMAN.1080p.BluRay.x264-WDC	season		season S04
+Les.Revenants.S01E01.FRENCH.720p.HDTV.x264-GKS	episode	1	ep S01E01
+Shōgun.S01E10.A.Dream.of.a.Dream.1080p.DSNP.WEB-DL.DDP5.1.H.264-FLUX	episode	10	ep S01E10
+Pokémon.S25E01.1080p.NF.WEB-DL	episode	1	ep S25E01
+The.Office.US.S05E14.PROPER.720p.HDTV.x264-ORENJI	episode	14	ep S05E14
+The.Office.US.S05E14.REPACK.720p.HDTV.x264-ORENJI	episode	14	ep S05E14
+Show.Name.S01E05.PROPER.REPACK.1080p.WEB.h264-GRP	episode	5	ep S01E05
+Show.Name.S01E05.RERIP.1080p.WEB.h264-GRP	episode	5	ep S01E05
+Show.Name.S01E05.iNTERNAL.1080p.WEB.h264-GRP	episode	5	ep S01E05
+Show.Name.S01E05.1080p.WEB.h264-GRP[rarbg]	episode	5	ep S01E05
+Show.Name.S01E05.1080p.WEB.h264-GRP.mkv	episode	5	ep S01E05
+Show.Name.S01E05.480p.x264-mSD	episode	5	ep S01E05
+Show.Name.S01E05.576p.BluRay.x264	episode	5	ep S01E05
+Show.Name.S01E05.1080i.HDTV.MPA2.0.H.264-GRP	episode	5	ep S01E05
+Show.Name.S01E05.XviD-AFG	episode	5	ep S01E05
+Show.Name.S01E05.WEBRip.x264-ION10	episode	5	ep S01E05
+Show.Name.S01E05.2160p.UHD.BluRay.REMUX.HDR.HEVC.Atmos-EPSiLON	episode	5	ep S01E05
+The.Mandalorian.S03E08.Chapter.24.The.Return.IMAX.2160p.DSNP.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX	episode	8	ep S03E08
+Show.Name.S00E01.Special.1080p.WEB	episode	1	ep S00E01
+Doctor.Who.2005.S00E150.The.Day.of.the.Doctor.1080p.BluRay	episode	150	ep S00E150
+Show.Name.S00.Specials.1080p	season		season S00
+Show.Name.Specials.1080p	season		none
+Show.Name.2019.1080p.BluRay.x264	season		none
+Some.Movie.2010.1080p.BluRay.x264-SPARKS	season		none
+Show.Name.Complete.Series.1080p.BluRay	season		none
+Show.Name.E05.1080p	season		none
+Show.Name.Episode.5.1080p	season		none
+Show.Name.Part.1.1080p	season		none
+Show.Name.Vol.1.1080p	season		none
+Show.Name.S01E05.1080p.WEB.h264-GRP.nfo	episode	5	ep S01E05
+Show.Name.S01E05.en.srt	episode	5	ep S01E05
+Show.Name.s01e05.mp4	episode	5	ep S01E05
+Show.Name.S01E05.avi	episode	5	ep S01E05
+Show.Name.S2025E01.1080p.WEB	season		none
+MasterChef.US.S15E01.720p.HDTV.x264-SYNCOPY	episode	1	ep S15E01
+Survivor.S47E13.1080p.WEB.h264-GRP	episode	13	ep S47E13
+The.Great.British.Bake.Off.S15E10.1080p.WEB.h264-GRP	episode	10	ep S15E10
+Top.Gear.S33E01.1080p.WEB.h264-GRP	episode	1	ep S33E01
+Planet.Earth.III.S01E01.Coasts.2160p.iP.WEB-DL.AAC2.0.HLG.H.265-NTb	episode	1	ep S01E01
+Blue.Planet.II.S01.2160p.UHD.BluRay.x265-TERMiNAL	season		season S01
+Ms.Marvel.S01E06.No.Normal.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb	episode	6	ep S01E06
+Mr.Robot.S04E13.Hello.Elliot.1080p.AMZN.WEB-DL.DDP5.1.H.264-NTb	episode	13	ep S04E13
+Mr.and.Mrs.Smith.2024.S01E01.First.Date.1080p.AMZN.WEB-DL.DDP5.1.H.264-FLUX	episode	1	ep S01E01
+What.We.Do.in.the.Shadows.S06E11.1080p.WEB.h264-ETHEL	episode	11	ep S06E11
+It's.Always.Sunny.in.Philadelphia.S16E08.1080p.WEB.h264-ETHEL	episode	8	ep S16E08
+Marvel's.Daredevil.S03E13.1080p.NF.WEB-DL	episode	13	ep S03E13
+Daredevil.Born.Again.S01E09.2160p.DSNP.WEB-DL	episode	9	ep S01E09
+Agatha.All.Along.S01E01E02.1080p.DSNP.WEB-DL.DDP5.1.H.264-NTb	episode	1	multi S01E01E02
+Wednesday.S01E01-E08.1080p.NF.WEB-DL	season		multi S01E01E02E03E04E05E06E07E08
+The.Rings.of.Power.S02E01-02.1080p.AMZN.WEB-DL	season		multi S02E01E02
+Show.Name.S01E01-E99.1080p	season		ep S01E01
+Show.Name.S03E05E07.720p	episode	5	multi S03E05E07
+Show.Name.S01.E01.E02.720p	season		multi S01E01E02
+Show.Name.S01E05-1080p.WEB	season		ep S01E05
+Show.Name.S01E05.1080p-GRP	episode	5	ep S01E05

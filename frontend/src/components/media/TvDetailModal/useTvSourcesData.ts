@@ -54,7 +54,7 @@ export interface TvProcessedRelease {
  * `1x05` style counts too. Everything else — season packs, complete-series,
  * multi-episode ranges — is treated as a season-scoped pack.
  */
-function detectTvScope(title: string): { packType: 'season' | 'episode'; packEpisode: number | null } {
+export function detectTvScope(title: string): { packType: 'season' | 'episode'; packEpisode: number | null } {
   const t = title || '';
   // Multi-episode range (S01E01-E10 / S01E01-10 / E01-E10) → season-scoped pack.
   if (/S\d{1,2}\s?E\d{1,3}\s?-\s?E?\d{1,3}/i.test(t) || /\bE\d{1,3}\s?-\s?E\d{1,3}\b/i.test(t)) {

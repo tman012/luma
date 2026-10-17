@@ -1,0 +1,430 @@
+"""TV Phase 0 foundations: per-section tracker lists (store + API), TV purpose
+budgets in the tracker guard, tv_settings.json and tv.db."""
+
+import json
+import os
+import sqlite3
+import stat
+
+import pytest
+
+import app.main
+from app import minimal, section_trackers as st, tracker_guard, tv_budget, tv_settings, tv_store
+from app.tracker_guard import TrackerGuard
+from tests.test_file_management import HDR, minimal as minimal_app, store  # noqa: F401
+from tests.test_home_rails import REMOTE, _client
+
+T0 = 1_800_000_000.0
+
+
+# ---------------------------------------------------------------- section tracker lists
+
+def _rec(i, name, enabled=True, cats=(5000,), type_='torznab', priority=25):
+    return {'id': i, 'name': name, 'type': type_, 'enabled': enabled, 'categories': list(cats),
+            'priority': priority, 'url': f'https://t{i}.example/api'}
+
+
+RECS = [_rec(1, 'Alpha', priority=10), _rec(2, 'Bravo', priority=5), _rec(3, 'Charlie', cats=(2000,)),
+        _rec(4, 'Delta', enabled=False)]
+
+
+@pytest.fixture
+def sec(tmp_path, monkeypatch):
+    monkeypatch.setitem(st._cfg, 'store_path', str(tmp_path / 'st' / st.STORE_NAME))
+    monkeypatch.setitem(st._cfg, 'list_trackers', lambda: [dict(r) for r in RECS])
+    return tmp_path / 'st' / st.STORE_NAME
+
+
+def test_nothing_is_on_by_default(sec):
+    rows = st.arrange('tv')
+    assert [r['id'] for r in rows] == [2, 1, 3, 4]               # new trackers: global priority order
+    assert not any(r['enabled'] for r in rows)
+    assert st.ordered_ids('tv') == [] and st.ordered_ids('movies') == []
+    assert not sec.exists()                                      # a read writes nothing
+
+
+def test_flags_global_switch_and_category(sec):
+    rows = {r['id']: r for r in st.arrange('tv')}
+    assert rows[3]['has_category'] is False and rows[1]['has_category'] is True
+    assert rows[4]['global_enabled'] is False
+    assert {r['id']: r['has_category'] for r in st.arrange('movies')} == {2: False, 1: False, 3: True, 4: False}
+
+
+def test_order_and_allow_list(sec):
+    new, err = st.check_put('tv', {'trackers': [{'id': 4, 'enabled': True}, {'id': 3, 'enabled': True},
+                                                {'id': 1, 'enabled': True}, {'id': 2, 'enabled': False}]}, RECS)
+    assert err is None
+    st.save({'sections': {'tv': new}})
+    assert [r['id'] for r in st.arrange('tv')] == [4, 3, 1, 2]
+    assert st.ordered_ids('tv') == [1]                           # 4 off globally, 3 has no TV category
+    assert stat.S_IMODE(os.stat(sec).st_mode) == 0o600
+    assert st.load()['sections']['movies'] == {'order': [], 'enabled': []}
+
+
+def test_a_new_tracker_lands_last_and_off(sec, monkeypatch):
+    st.save({'sections': {'tv': {'order': [1, 2], 'enabled': [1, 2]}}})
+    monkeypatch.setitem(st._cfg, 'list_trackers', lambda: RECS + [_rec(9, 'Echo', priority=1)])
+    rows = st.arrange('tv')
+    assert [r['id'] for r in rows] == [1, 2, 9, 3, 4]             # listed ones first, the rest by priority
+    assert [r['enabled'] for r in rows] == [True, True, False, False, False]
+
+
+def test_forget_drops_a_deleted_tracker(sec):
+    st.save({'sections': {'tv': {'order': [1, 2], 'enabled': [1, 2]}, 'movies': {'order': [2], 'enabled': [2]}}})
+    st.forget(2)
+    d = st.load()['sections']
+    assert d['tv'] == {'order': [1], 'enabled': [1]} and d['movies'] == {'order': [], 'enabled': []}
+
+
+@pytest.mark.parametrize('body,error', [
+    (None, st.INVALID), ({}, st.INVALID), ({'trackers': 'x'}, st.INVALID),
+    ({'trackers': [{'id': 1}]}, st.INVALID), ({'trackers': [{'id': '1', 'enabled': True}]}, st.INVALID),
+    ({'trackers': [{'id': True, 'enabled': True}]}, st.INVALID),
+    ({'trackers': [{'id': 1, 'enabled': 1}]}, st.INVALID),
+    ({'trackers': [{'id': 77, 'enabled': True}]}, st.UNKNOWN),
+    ({'trackers': [{'id': 1, 'enabled': True}] * (st.MAX_IDS + 1)}, st.INVALID),
+])
+def test_put_validation(body, error):
+    assert st.check_put('tv', body, RECS) == (None, error)
+
+
+def test_put_ignores_duplicates():
+    new, err = st.check_put('tv', {'trackers': [{'id': 1, 'enabled': True}, {'id': 1, 'enabled': False}]}, RECS)
+    assert err is None and new == {'order': [1], 'enabled': [1]}
+
+
+def test_unreadable_store_is_quarantined(sec):
+    sec.parent.mkdir(parents=True)
+    sec.write_text('{nope')
+    assert st.load() == st.empty()
+    assert not sec.exists() and any(p.name.startswith(st.STORE_NAME + '.bad-') for p in sec.parent.iterdir())
+
+
+def test_store_normalizes_junk(sec):
+    sec.parent.mkdir(parents=True)
+    sec.write_text(json.dumps({'sections': {'tv': {'order': [1, 1, 'x', -2, True, 3], 'enabled': [3, 8]},
+                                            'other': {'order': [5]}}}))
+    assert st.load()['sections'] == {'tv': {'order': [1, 3], 'enabled': [3]}, 'movies': {'order': [], 'enabled': []}}
+
+
+# routes ---------------------------------------------------------------------
+
+URL = '/api/settings/sections/tv/trackers'
+
+
+@pytest.fixture
+def owner(minimal_app, sec):
+    return _client(minimal_app)
+
+
+def test_routes_owner_gets_and_puts(owner):
+    r = owner.get(URL, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-store'
+    body = r.get_json()
+    assert body['section'] == 'tv' and [t['id'] for t in body['trackers']] == [2, 1, 3, 4]
+    assert body['trackers'][0]['budget'] == {'used': 0, 'cap': tv_budget.AUTO_PER_TRACKER_DAILY}
+    r = owner.put(URL, json={'trackers': [{'id': 1, 'enabled': True}, {'id': 2, 'enabled': True}]},
+                  environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200
+    assert [(t['id'], t['enabled']) for t in r.get_json()['trackers']] == [(1, True), (2, True), (3, False), (4, False)]
+    assert st.ordered_ids('tv') == [1, 2]
+    assert owner.put(URL, json={'trackers': [{'id': 99, 'enabled': True}]}, environ_base=REMOTE,
+                     headers=HDR).get_json() == {'error': st.UNKNOWN}
+    assert owner.get('/api/settings/sections/movies/trackers', environ_base=REMOTE, headers=HDR).status_code == 200
+    assert owner.get('/api/settings/sections/music/trackers', environ_base=REMOTE, headers=HDR).status_code == 404
+
+
+def test_routes_are_owner_only(minimal_app, sec):
+    from app import user_auth
+    _client(minimal_app)                                         # the owner
+    anon = minimal_app.test_client()
+    assert anon.get(URL, environ_base=REMOTE, headers=HDR).status_code == 401
+    other = _client(minimal_app, name='second')                  # a second admin
+    for meth, kw in (('get', {}), ('put', {'json': {'trackers': []}})):
+        assert getattr(other, meth)(URL, environ_base=REMOTE, headers=HDR, **kw).status_code == 403
+    plain = _client(minimal_app, admin=False, name='plain')
+    assert plain.get(URL, environ_base=REMOTE, headers=HDR).status_code == 403
+    assert not sec.exists()
+    assert user_auth  # noqa
+
+
+def test_routes_are_404_on_prod_builds(test_app, sec, monkeypatch):
+    monkeypatch.delenv('LUMA_MINIMAL', raising=False)
+    c = _client(test_app)
+    assert c.get(URL, environ_base=REMOTE, headers=HDR).status_code == 404
+    assert c.get('/api/settings/tv', environ_base=REMOTE, headers=HDR).status_code == 404
+
+
+def test_minimal_allowlist():
+    for p, m in ((URL, 'GET'), (URL, 'PUT'), ('/api/settings/sections/movies/trackers', 'GET'),
+                 ('/api/settings/tv', 'GET'), ('/api/settings/tv', 'PUT')):
+        assert minimal.path_allowed(p, m), p
+
+
+def test_deleting_a_tracker_drops_it_from_sections(sec):
+    st.save({'sections': {'tv': {'order': [1, 2], 'enabled': [2]}}})
+    app.main._on_tracker_deleted({'id': 2, 'name': 'Bravo', 'type': 'torznab'})
+    assert st.load()['sections']['tv'] == {'order': [1], 'enabled': []}
+
+
+# ---------------------------------------------------------------- guard purpose budgets
+
+@pytest.fixture
+def guard(tmp_path):
+    return TrackerGuard(tmp_path / 'tracker_guard.json')
+
+
+def test_tv_is_capped_at_8_a_day_per_tracker(guard):
+    assert tv_budget.AUTO_PER_TRACKER_DAILY == 8
+    sent = []
+    t = T0
+    while t < T0 + 86400:
+        if guard.take('site:iptorrents', False, False, now=t, purpose='tv') is None:
+            sent.append(t)
+        t += 60
+    assert len(sent) == 8
+    assert all(b - a >= tv_budget.AUTO_MIN_GAP_S for a, b in zip(sent, sent[1:]))
+    # the next day frees the budget again
+    assert guard.take('site:iptorrents', False, False, now=sent[0] + 86400 + 1, purpose='tv') is None
+
+
+def test_tv_hourly_cap_and_spacing(guard):
+    assert guard.take('site:x', False, False, now=T0, purpose='tv') is None
+    assert guard.take('site:x', False, False, now=T0 + 10, purpose='tv') == 'tv spacing'
+    assert guard.take('site:x', False, False, now=T0 + 600, purpose='tv') is None
+    assert guard.take('site:x', False, False, now=T0 + 1200, purpose='tv') == f'tv hourly cap {tv_budget.AUTO_PER_TRACKER_HOURLY}'
+
+
+def test_tv_cap_across_trackers(guard, monkeypatch):
+    monkeypatch.setitem(tv_budget.GUARD_LIMITS, 'all_trackers_day', 3)
+    for i in range(3):
+        assert guard.take(f'host:t{i}.example', False, False, now=T0, purpose='tv') is None
+    assert guard.take('host:t9.example', False, False, now=T0, purpose='tv').startswith('tv daily cap across')
+
+
+def test_tv_counts_on_top_of_the_guard_limits(guard):
+    for i in range(5):                                          # empty the background bucket
+        assert guard.take('site:x', False, False, now=T0 + i) is None
+    assert guard.take('site:x', False, False, now=T0 + 10, purpose='tv') == 'rate limit (bucket empty)'
+    assert guard.purpose_counts('site:x', 'tv', T0 + 10)['day'] == 0   # a refused request isn't counted
+
+
+def test_other_traffic_does_not_use_tvs_budget_and_manual_is_interactive(guard):
+    for i in range(20):
+        assert guard.take('site:x', True, False, now=T0 + i, purpose='tv') is None   # manual: interactive budget
+    assert guard.purpose_counts('site:x', 'tv', T0 + 30)['day'] == 0
+    assert guard.counts('site:x', T0 + 30)[0] == 20
+
+
+def test_purpose_log_persists_and_reloads(guard, tmp_path):
+    assert guard.take('site:x', False, False, now=T0, purpose='tv') is None
+    raw = json.loads((tmp_path / 'tracker_guard.json').read_text())
+    assert raw['log']['site:x'][0][1] == 'b:tv'
+    fresh = TrackerGuard(tmp_path / 'tracker_guard.json')
+    import time
+    now = time.time()
+    fresh.log = {}
+    fresh._loaded = False
+    # entries older than a day are dropped on load; a recent one survives
+    raw['log']['site:x'] = [[now - 10, 'b:tv'], [now - 20, 'b:junk!'], [now - 30, 'x']]
+    (tmp_path / 'tracker_guard.json').write_text(json.dumps(raw))
+    assert fresh.purpose_counts('site:x', 'tv', now)['day'] == 1
+    assert fresh.log['site:x'] == [[now - 10, 'b:tv']]
+
+
+@pytest.mark.parametrize('purpose', ['TV', 'tv!', '', 'x' * 17, 7])
+def test_invalid_purpose_is_refused(guard, purpose):
+    assert guard.take('site:x', False, False, now=T0, purpose=purpose) == 'invalid purpose'
+
+
+def test_unknown_purpose_is_refused(guard):
+    assert guard.take('site:x', False, False, now=T0, purpose='music') == 'unknown purpose music'
+
+
+def test_tv_budget_take_and_usage(guard):
+    cfg = {'type': 'iptorrents', 'url': 'https://iptorrents.com'}
+    assert tv_budget.take(cfg, now=T0, guard=guard) is None
+    assert tv_budget.usage(cfg, now=T0 + 1, guard=guard) == {'used': 1, 'cap': 8}
+    assert guard.log == {'site:iptorrents': [[T0, 'b:tv']]}
+
+
+def test_search_one_charges_the_purpose(guard, monkeypatch):
+    from app import tracker_clients, tracker_search
+    s = tracker_search.TrackerSearch(guard=guard)
+    monkeypatch.setattr(tracker_clients, 'search', lambda cfg, *a, **k: [])
+    monkeypatch.setattr(guard, 'wait_spacing', lambda tid: None)
+    cfg = {'id': 1, 'type': 'torznab', 'name': 'A', 'url': 'https://a.example/api', 'categories': [5000]}
+    s.search_one(cfg, 'Show S01E01', [5000], 50, False, purpose='tv')
+    assert [k for _t, k in guard.log['host:a.example']] == ['b:tv']
+
+
+# ---------------------------------------------------------------- tv_settings.json
+
+@pytest.fixture
+def tvs(tmp_path, monkeypatch):
+    monkeypatch.setitem(tv_settings._cfg, 'store_path', str(tmp_path / 'tvs' / tv_settings.STORE_NAME))
+    return tmp_path / 'tvs' / tv_settings.STORE_NAME
+
+
+def test_defaults_follow_the_pm_rulings(tvs):
+    d = tv_settings.load()
+    assert d['naming']['series_folder'] == '{title} ({year})'
+    assert d['upgrades'] == {'mode': 'keep_both'}
+    assert d['automation']['enabled'] is False and d['automation']['feed_enabled'] is False
+    assert d['paths'] == [] and d['rules'] == []
+    assert not any('cap' in k for k in d['automation'])             # caps are code, not settings
+    assert not tvs.exists()
+
+
+def test_series_folder_naming(tvs):
+    assert tv_settings.series_folder('The Bear', 2022) == 'The Bear (2022)'
+    assert tv_settings.series_folder('Shōgun', '') == 'Shōgun'
+    assert tv_settings.series_folder('Marvel: {Agents}/S.H.I.E.L.D.', 2013) == 'Marvel- {Agents}S.H.I.E.L.D. (2013)'
+    d = tv_settings.load()
+    d['naming']['series_folder'] = '{title} [{year}] {{tmdb-{tmdb_id}}}'
+    assert tv_settings.series_folder('Andor', 2022, d, tmdb_id=83867) == 'Andor [2022] {tmdb-83867}'
+    assert tv_settings.series_folder('Andor', None, d, tmdb_id=83867) == 'Andor {tmdb-83867}'
+
+
+@pytest.mark.parametrize('key,value,ok', [
+    ('series_folder', '{title} ({year})', True), ('series_folder', '{title}', True),
+    ('series_folder', '{year}', False), ('series_folder', '{title}/{year}', False),
+    ('series_folder', '{title} {season}', False), ('series_folder', '{title!r}', False),
+    ('series_folder', '{title:>40}', False), ('series_folder', '{title', False), ('series_folder', '', False),
+    ('season_folder', 'Season {season:02}', True), ('season_folder', 'S{season}', True),
+    ('episode', '{series} - S{season:02}E{episode:02} - {episode_title}', True),
+    ('episode', '{series} - {episode_title}', False), ('daily', '{series} - {air_date}', True),
+    ('specials_folder', 'Specials', True), ('specials_folder', '..', False), ('episode', 7, False),
+])
+def test_template_validation(key, value, ok):
+    assert (tv_settings.check_template(key, value)[1] is None) is ok
+
+
+def test_put_applies_and_rejects(tvs):
+    d = tv_settings.load()
+    assert tv_settings.apply_put(d, {'upgrades': {'mode': 'replace_verified'},
+                                     'naming': {'series_folder': '{title}'},
+                                     'automation': {'enabled': True, 'first_search_delay_h': 6}}) == {}
+    assert d['upgrades']['mode'] == 'replace_verified' and d['naming']['series_folder'] == '{title}'
+    d = tv_settings.load()
+    errs = tv_settings.apply_put(d, {'upgrades': {'mode': 'delete_old'}, 'naming': {'episode': '{x}'},
+                                     'automation': {'daily_cap': 99}, 'paths': []})
+    assert set(errs) == {'upgrades.mode', 'naming.episode', 'automation', '_'}
+
+
+def test_settings_routes(minimal_app, tvs):
+    c = _client(minimal_app)
+    r = c.get('/api/settings/tv', environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and r.get_json()['upgrades'] == {'mode': 'keep_both'}
+    r = c.put('/api/settings/tv', json={'upgrades': {'mode': 'replace_verified'}}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and tv_settings.load()['upgrades']['mode'] == 'replace_verified'
+    assert stat.S_IMODE(os.stat(tvs).st_mode) == 0o600
+    r = c.put('/api/settings/tv', json={'upgrades': {'mode': 'x'}}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 400 and tv_settings.load()['upgrades']['mode'] == 'replace_verified'
+    other = _client(minimal_app, name='second')
+    assert other.get('/api/settings/tv', environ_base=REMOTE, headers=HDR).status_code == 403
+    assert minimal_app.test_client().get('/api/settings/tv', environ_base=REMOTE, headers=HDR).status_code == 401
+
+
+def test_settings_unreadable_file_is_quarantined(tvs):
+    tvs.parent.mkdir(parents=True)
+    tvs.write_text('[')
+    assert tv_settings.load() == tv_settings.empty()
+    assert not tvs.exists()
+
+
+# ---------------------------------------------------------------- tv.db
+
+@pytest.fixture
+def db(tmp_path):
+    tv_store.init(str(tmp_path / 'db' / 'tv.db'))
+    yield tmp_path / 'db' / 'tv.db'
+    tv_store.init(None)
+    tv_store._cfg.pop('path', None)
+
+
+def test_schema_is_created_with_wal_and_0600(db):
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 1
+    with tv_store.connect() as conn:
+        assert conn.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert {'series', 'seasons', 'episodes', 'episode_files', 'episode_file_links', 'quality_profiles',
+            'grabs', 'history', 'search_log', 'blocklist', 'unmatched'} <= names
+    assert stat.S_IMODE(os.stat(db).st_mode) == 0o600
+
+
+def test_constraints(db):
+    with tv_store.write() as conn:
+        conn.execute("INSERT INTO series (tmdb_id, title, added_at) VALUES (1, 'A', 0)")
+    with pytest.raises(sqlite3.IntegrityError):
+        with tv_store.write() as conn:
+            conn.execute("INSERT INTO series (tmdb_id, title, added_at) VALUES (1, 'B', 0)")
+    with pytest.raises(sqlite3.IntegrityError):
+        with tv_store.write() as conn:
+            conn.execute("INSERT INTO series (tmdb_id, series_type, added_at) VALUES (2, 'weird', 0)")
+    with pytest.raises(sqlite3.IntegrityError):                   # foreign keys are on
+        with tv_store.write() as conn:
+            conn.execute('INSERT INTO seasons (series_id, season_number) VALUES (999, 1)')
+    with tv_store.write() as conn:
+        sid = conn.execute('SELECT id FROM series').fetchone()[0]
+        conn.execute('INSERT INTO episodes (series_id, season_number, episode_number) VALUES (?, 1, 1)', (sid,))
+        conn.execute('DELETE FROM series WHERE id = ?', (sid,))
+    with tv_store.connect() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM episodes').fetchone()[0] == 0
+
+
+def test_a_failed_write_rolls_back(db):
+    with pytest.raises(RuntimeError):
+        with tv_store.write() as conn:
+            conn.execute("INSERT INTO series (tmdb_id, title, added_at) VALUES (5, 'A', 0)")
+            raise RuntimeError('boom')
+    with tv_store.connect() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM series').fetchone()[0] == 0
+
+
+def test_corrupt_file_is_quarantined_and_starts_empty(db):
+    db.parent.mkdir(parents=True)
+    db.write_bytes(b'this is not a database' * 100)
+    assert tv_store.schema_version() == 1
+    assert any(p.name.startswith('tv.db.bad-') for p in db.parent.iterdir())
+
+
+def test_a_newer_schema_is_refused(db):
+    db.parent.mkdir(parents=True)
+    conn = sqlite3.connect(str(db))
+    conn.execute('PRAGMA user_version = 99')
+    conn.close()
+    with pytest.raises(RuntimeError):
+        tv_store.schema_version()
+    assert db.exists()                                            # never thrown away
+
+
+def test_migrations_run_in_order(db, monkeypatch):
+    monkeypatch.setattr(tv_store, 'MIGRATIONS', tv_store.MIGRATIONS + ['ALTER TABLE series ADD COLUMN extra TEXT'])
+    monkeypatch.setattr(tv_store, 'SCHEMA_VERSION', 2)
+    assert tv_store.schema_version() == 2
+    with tv_store.connect() as conn:
+        assert 'extra' in [r[1] for r in conn.execute('PRAGMA table_info(series)')]
+
+
+def test_search_log_and_counts(db):
+    for i in range(3):
+        tv_store.log_search(tracker_key='site:iptorrents', purpose='episode', series_id=1, query='Show S01E01',
+                            results=4, outcome='ok', now=T0 + i)
+    tv_store.log_search(tracker_key='site:iptorrents', purpose='feed', now=T0 + 5)
+    tv_store.log_search(tracker_key='host:a.example', purpose='season', now=T0 - 2 * 86400)
+    assert tv_store.search_counts('tv', now=T0 + 10) == {'site:iptorrents': {'episode': 3, 'feed': 1}}
+    tv_store.log_search(tracker_key='site:x', purpose='manual', now=T0 + 40 * 86400)   # prunes > 30 days
+    with tv_store.connect() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM search_log').fetchone()[0] == 1
+    with pytest.raises(ValueError):
+        tv_store.log_search(tracker_key='site:x', purpose='rss')
+    with pytest.raises(ValueError):
+        tv_store.log_search(tracker_key='', purpose='feed')
+
+
+def test_history(db):
+    hid = tv_store.add_history('grabbed', episode_ids=[1, 2], detail={'title': 'x'}, now=T0)
+    with tv_store.connect() as conn:
+        row = conn.execute('SELECT * FROM history WHERE id = ?', (hid,)).fetchone()
+    assert row['event'] == 'grabbed' and json.loads(row['episode_ids']) == [1, 2]

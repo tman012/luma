@@ -103,13 +103,13 @@ describe('Settings > Library paths', () => {
     expect(rows[2]!.textContent).toContain('Missing');
     // Status: green dot alone when OK; amber Read-only, red Missing (13px/500).
     expect(within(rows[0]!).queryByTestId('lp-status')).toBeNull();
-    expect(within(rows[0]!).getByTestId('lp-status-dot').style.background).toBe('rgb(34, 197, 94)');
+    expect(within(rows[0]!).getByTestId('lp-status-dot').style.background).toBe('var(--color-success)');
     const missing = within(rows[2]!).getByTestId('lp-status');
     expect(missing.textContent).toBe('Missing');
-    expect(missing.style.color).toBe('rgb(239, 68, 68)');
+    expect(missing.style.color).toBe('var(--color-danger)');
     expect(missing.style.fontSize).toBe('13px');
     expect(missing.style.fontWeight).toBe('500');
-    expect(within(rows[2]!).getByTestId('lp-status-dot').style.background).toBe('rgb(239, 68, 68)');
+    expect(within(rows[2]!).getByTestId('lp-status-dot').style.background).toBe('var(--color-danger)');
     expect(summaries()).toEqual(['2160p', 'Past 6 months']);
     expect(screen.getAllByTestId('lp-rule-dest').map(e => e.textContent)).toEqual(['4K Movies', 'Movies']);
     expect(screen.getByTestId('lp-fallback-value').textContent).toBe('Movies');
@@ -356,11 +356,11 @@ const renderAt = (path: string) => render(<MemoryRouter initialEntries={[path]}>
 describe('Settings wiring for Library paths', () => {
   beforeEach(() => { auth.user.is_admin = true; });
 
-  it('minimal build, owner: last in the list; the section loads', async () => {
+  it('minimal build, owner: after Trackers, before TV; the section loads', async () => {
     (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__ = true;
     renderAt('/settings/library-paths');
     const nav = screen.getByTestId('settings-nav');
-    await waitFor(() => expect(within(nav).getAllByRole('link').map(a => a.textContent).at(-1)).toBe('Library paths'));
+    await waitFor(() => expect(within(nav).getAllByRole('link').map(a => a.textContent).slice(-2)).toEqual(['Library paths', 'TV']));
     expect(within(nav).getByRole('link', { name: 'Library paths' }).getAttribute('aria-current')).toBe('page');
     expect(screen.getByRole('heading', { level: 2, name: 'Library paths' })).toBeTruthy();
     expect(await screen.findByTestId('library-paths-section')).toBeTruthy();

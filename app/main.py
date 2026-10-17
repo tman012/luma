@@ -21369,12 +21369,30 @@ app.register_blueprint(_home_rails.bp)
 
 from app import tracker_routes as _tracker_routes
 from app import tracker_search as _tracker_search
+from app import section_trackers as _section_trackers
+
+
+def _on_tracker_deleted(rec):
+    _tracker_search.on_tracker_deleted(rec)
+    try:
+        _section_trackers.forget(rec.get('id'))
+    except Exception as e:
+        logger.warning('Section tracker lists not updated after a delete: %s', type(e).__name__)
+
+
 _tracker_routes.init(get_current_user=_get_current_user, get_owner=lambda: _access.owner(user_auth),
                      is_implicit=lambda: bool(getattr(g, 'implicit_user', False)),
                      on_change=_tracker_search.on_tracker_changed,
-                     on_delete=_tracker_search.on_tracker_deleted,
+                     on_delete=_on_tracker_deleted,
                      on_list_change=_all_results_cache.clear)
 app.register_blueprint(_tracker_routes.bp)
+
+# TV (luma-test builds; owner only): per-section tracker lists and TV settings.
+from app import tv_settings as _tv_settings
+_section_trackers.init(owner_or_error=_start_flow._owner_or_error)
+app.register_blueprint(_section_trackers.bp)
+_tv_settings.init(owner_or_error=_start_flow._owner_or_error)
+app.register_blueprint(_tv_settings.bp)
 
 
 if __name__ == '__main__':

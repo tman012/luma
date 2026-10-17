@@ -2,7 +2,8 @@
 
 qBittorrent bans an IP after 5 failed sign-ins by default, and :5002 shares the
 IP with production. Rejected sign-ins back off exponentially and stop after 3
-in a row until the credentials change or the connector is saved or tested.
+in a row until the credentials change or a Test of the saved credentials
+succeeds. The count survives a restart and a Save.
 """
 import pytest
 import requests
@@ -96,12 +97,22 @@ def test_new_credentials_start_fresh(waiting):
     assert len(c.logins) == 4 and lm.login_state()['held'] is False
 
 
-@pytest.mark.parametrize('how', ['save', 'test'])
-def test_saving_or_testing_the_connector_releases_the_hold(waiting, how):
+def test_saving_the_connector_keeps_the_hold(waiting):
+    """A Save with the same credentials is not a fresh start (it would allow 3
+    more rejected sign-ins, past qBittorrent's 5-failure ban)."""
     c = Client()
     run(c, range(0, 600, 30))
     assert lm.login_state()['held'] is True
-    qbit_connector._changed()                  # what Save and a successful Test call
+    qbit_connector._changed()                  # what Save calls
+    run(c, [630, 3600, 7200])
+    assert len(c.logins) == 3
+
+
+def test_a_successful_test_of_the_saved_credentials_releases_the_hold(waiting):
+    c = Client()
+    run(c, range(0, 600, 30))
+    assert lm.login_state()['held'] is True
+    qbit_connector._verified()                 # what a successful Test of the saved credentials calls
     run(c, [630])
     assert len(c.logins) == 4
 
@@ -109,8 +120,10 @@ def test_saving_or_testing_the_connector_releases_the_hold(waiting, how):
 def test_connector_save_and_test_routes_notify(monkeypatch):
     import inspect
     assert '_changed()' in inspect.getsource(qbit_connector.qbit_save)
+    assert '_verified()' not in inspect.getsource(qbit_connector.qbit_save)
     src = inspect.getsource(qbit_connector.qbit_test)
     assert src.index('_changed()') > src.index('if problem:')   # only after a successful sign-in
+    assert src.index('_verified()') > src.index('if _is_saved(cfg):') > src.index('if problem:')
 
 
 def test_a_success_resets_the_count(waiting):

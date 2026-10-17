@@ -40,9 +40,13 @@ ALLOWED_PATHS = frozenset({
     '/api/downloads/add', '/api/tmdb/match-search', '/settings/trackers',
     # Settings > Library paths (owner only; the routes check that themselves).
     '/api/settings/library-paths', '/api/settings/library-rules',
+    # TV settings (owner only; the route checks).
+    '/api/settings/tv',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/', '/settings/',
-                    '/api/trackers/', '/api/settings/library-paths/')
+                    '/api/trackers/', '/api/settings/library-paths/',
+                    # Per-section tracker lists (owner only; the routes check).
+                    '/api/settings/sections/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).
 # GET only, sign-in required like everything else in minimal mode.
 DETAIL_READ_PREFIXES = (
