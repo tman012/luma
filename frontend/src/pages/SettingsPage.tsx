@@ -47,7 +47,7 @@ class SettingsErrorBoundary extends Component<
             <button
               type="button"
               onClick={() => this.setState({ error: null })}
-              className="px-4 py-2 bg-emerald-500 rounded-lg text-sm font-medium"
+              className="px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium"
             >
               Retry
             </button>

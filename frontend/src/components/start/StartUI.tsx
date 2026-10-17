@@ -4,6 +4,7 @@
  */
 import { useEffect } from 'react';
 import { assetUrl } from '@/urlHelpers';
+import { LUMA_BLUE, PLEX_AMBER, primaryButtonColors } from '@/ui/lumaButton';
 
 export const FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 
@@ -174,14 +175,14 @@ export const TRIM: React.CSSProperties = { textBoxTrim: 'trim-both', textBoxEdge
 const title: React.CSSProperties = { margin: 0, fontSize: 28, fontWeight: 600, letterSpacing: '-0.01em', textAlign: 'center', ...TRIM };
 const sub: React.CSSProperties = { margin: '8px 0 0', fontSize: 15, color: 'rgba(255,255,255,0.55)', textAlign: 'center' };
 export const primaryBtn: React.CSSProperties = {
-  width: '100%', height: 50, borderRadius: 25, border: 'none', background: '#fff', color: '#15102a',
+  width: '100%', height: 50, borderRadius: 25, border: 'none', ...primaryButtonColors,
   fontSize: 17, fontWeight: 600, fontFamily: FONT, cursor: 'pointer',
 };
-/** Luma blue: the one primary-action color. */
-export const LUMA_BLUE = '#3b82f6';
-export const accentBtn: React.CSSProperties = { ...primaryBtn, background: LUMA_BLUE, color: '#fff' };
+export { LUMA_BLUE };
+/** Alias kept for the Create account step; identical to primaryBtn. */
+export const accentBtn: React.CSSProperties = primaryBtn;
 export const plexBtn: React.CSSProperties = {
-  ...primaryBtn, background: '#e5a00d', color: '#1f1f1f', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  ...primaryBtn, background: PLEX_AMBER, color: '#1f1f1f', display: 'flex', alignItems: 'center', justifyContent: 'center',
 };
 export const linkBtn: React.CSSProperties = {
   background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)', fontSize: 15, fontFamily: FONT,

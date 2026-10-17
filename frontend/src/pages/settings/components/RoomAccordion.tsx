@@ -435,7 +435,7 @@ export function RoomAccordion() {
         <button
           type="button"
           onClick={() => openRoomForm()}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-2 text-[12px] font-semibold text-white hover:bg-emerald-600 min-h-[36px]"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-accent hover:bg-accent-hover px-3 py-2 text-[12px] font-semibold text-white  min-h-[36px]"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
@@ -494,7 +494,7 @@ export function RoomAccordion() {
                             <span className="text-[13px] font-medium text-white/80">{device.name}</span>
                             <span className="ml-2 text-[11px] text-white/25">{platformLabel(device.platform)}</span>
                             {isDefault && (
-                              <span className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-emerald-500/15 text-emerald-400">
+                              <span className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-accent hover:bg-accent-hover/15 text-emerald-400">
                                 Default
                               </span>
                             )}
@@ -525,7 +525,7 @@ export function RoomAccordion() {
                               <button
                                 type="button"
                                 onClick={() => setDefault(room.id, device.id, device.services[0]?.id ?? '')}
-                                className="rounded-lg px-2 py-1.5 text-[11px] text-white/40 hover:text-emerald-400 hover:bg-emerald-500/10"
+                                className="rounded-lg px-2 py-1.5 text-[11px] text-white/40 hover:text-emerald-400 hover:bg-accent hover:bg-accent-hover/10"
                               >
                                 Set Default
                               </button>
@@ -600,7 +600,7 @@ export function RoomAccordion() {
                               <button
                                 type="button"
                                 onClick={() => openServiceForm(room.id, device.id)}
-                                className="rounded-lg px-2 py-1 text-[11px] text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20"
+                                className="rounded-lg px-2 py-1 text-[11px] text-emerald-400 bg-accent hover:bg-accent-hover/10 hover:bg-accent hover:bg-accent-hover/20"
                               >
                                 + Add
                               </button>
@@ -652,7 +652,7 @@ export function RoomAccordion() {
                                   )}
                                 </div>
                                 <div className="mt-3 flex gap-2">
-                                  <button type="button" onClick={saveServiceForm} className="rounded-lg bg-emerald-500 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-emerald-600">Save</button>
+                                  <button type="button" onClick={saveServiceForm} className="rounded-lg bg-accent hover:bg-accent-hover px-3 py-1.5 text-[12px] font-semibold text-white ">Save</button>
                                   <button type="button" onClick={() => { setServiceForm(null); setServiceEditId(null); }} className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10">Cancel</button>
                                 </div>
                               </div>
@@ -673,7 +673,7 @@ export function RoomAccordion() {
                   <button
                     type="button"
                     onClick={() => openDeviceForm(room.id)}
-                    className="w-full rounded-lg border border-dashed border-emerald-500/25 py-2.5 text-[12px] font-medium text-emerald-400/80 hover:text-emerald-300 hover:border-emerald-500/40 hover:bg-emerald-500/5 transition-colors"
+                    className="w-full rounded-lg border border-dashed border-emerald-500/25 py-2.5 text-[12px] font-medium text-emerald-400/80 hover:text-emerald-300 hover:border-emerald-500/40 hover:bg-accent hover:bg-accent-hover/5 transition-colors"
                   >
                     + Add Device
                   </button>
@@ -770,7 +770,7 @@ export function RoomAccordion() {
                         )}
                       </div>
                       <div className="mt-3 flex gap-2">
-                        <button type="button" onClick={saveDeviceForm} className="rounded-lg bg-emerald-500 px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-emerald-600">Save</button>
+                        <button type="button" onClick={saveDeviceForm} className="rounded-lg bg-accent hover:bg-accent-hover px-3 py-1.5 text-[12px] font-semibold text-white ">Save</button>
                         <button type="button" onClick={() => { setDeviceForm(null); setDeviceEditId(null); }} className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-1.5 text-[12px] text-white/60 hover:bg-white/10">Cancel</button>
                       </div>
                     </div>
@@ -813,7 +813,7 @@ export function RoomAccordion() {
               onClick={() => setRoomForm((p) => ({ ...p, useHarmonyHub: !p?.useHarmonyHub }))}
               className={cn(
                 'relative h-[26px] w-[46px] shrink-0 rounded-full transition-colors',
-                roomForm.useHarmonyHub ? 'bg-emerald-500' : 'bg-white/15',
+                roomForm.useHarmonyHub ? 'bg-accent hover:bg-accent-hover' : 'bg-white/15',
               )}
             >
               <span className={cn('absolute top-[3px] left-[3px] h-[20px] w-[20px] rounded-full bg-white shadow-sm transition-transform', roomForm.useHarmonyHub && 'translate-x-[20px]')} />
@@ -827,7 +827,7 @@ export function RoomAccordion() {
             </div>
           )}
           <div className="mt-4 flex gap-2.5">
-            <button type="button" onClick={saveRoomForm} className="rounded-lg bg-emerald-500 px-3.5 py-2 text-[12px] font-semibold text-white hover:bg-emerald-600 min-h-[36px]">
+            <button type="button" onClick={saveRoomForm} className="rounded-lg bg-accent hover:bg-accent-hover px-3.5 py-2 text-[12px] font-semibold text-white  min-h-[36px]">
               {roomEditId ? 'Update Room' : 'Save Room'}
             </button>
             <button type="button" onClick={() => { setRoomForm(null); setRoomEditId(null); }} className="rounded-lg border border-white/10 bg-white/[0.06] px-3.5 py-2 text-[12px] text-white/60 hover:bg-white/10 min-h-[36px]">

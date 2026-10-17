@@ -1,4 +1,5 @@
 import { apiFetch } from '../apiClient';
+import { primaryButtonColors } from '@/ui/lumaButton';
 /**
  * MySettingsPage — Personal settings for non-admin users.
  *
@@ -552,8 +553,7 @@ const saveBtnStyle: React.CSSProperties = {
   padding: '10px 0',
   fontSize: 13,
   fontWeight: 600,
-  color: '#fff',
-  background: 'rgba(168,85,247,0.5)',
+  ...primaryButtonColors,
   border: 'none',
   borderRadius: 10,
   cursor: 'pointer',

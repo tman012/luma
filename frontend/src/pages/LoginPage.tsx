@@ -4,6 +4,7 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { primaryButtonColors } from '@/ui/lumaButton';
 import { useNavigate, useLocation } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiFetch } from '../apiClient';
@@ -192,7 +193,7 @@ export function LoginPage() {
         {flow === 'signup' && (
           <>
             <h2 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 600, color: 'rgba(255,255,255,0.9)', textAlign: 'center' }}>
-              Create Account
+              Create account
             </h2>
             {signupStep === 'email' && (
               <form onSubmit={handleRegEmailNext}>
@@ -240,7 +241,7 @@ export function LoginPage() {
                 />
                 {error && <p style={errorStyle}>{error}</p>}
                 <button type="submit" style={{ ...primaryBtnStyle, opacity: (confirmPin.length < 4 || busy) ? 0.5 : 1, cursor: (confirmPin.length < 4 || busy) ? 'not-allowed' : 'pointer' }} disabled={busy || confirmPin.length < 4}>
-                  {busy ? 'Creating…' : 'Create Account'}
+                  {busy ? 'Creating…' : 'Create account'}
                 </button>
               </form>
             )}
@@ -329,8 +330,7 @@ const primaryBtnStyle: React.CSSProperties = {
   marginTop: 20,
   fontSize: 16,
   fontWeight: 700,
-  color: '#ffffff',
-  background: 'rgba(255,255,255,0.12)',
+  ...primaryButtonColors,
   border: 'none',
   borderRadius: 50,
   cursor: 'pointer',
