@@ -13,6 +13,7 @@ import { FocusZone } from '@/components/tv/FocusZone';
 import { apiFetch } from '../../apiClient';
 import { apiUrl } from '@/urlHelpers';
 import { useVoice } from '@/contexts/VoiceContext';
+import { NAVY_GLASS_BORDER, NAVY_GLASS_POPOVER } from '@/theme/tokens';
 
 const NAV_ITEMS = [
   { label: 'Explore', to: '/explore' },
@@ -671,7 +672,9 @@ export function TopBar() {
           </button>
 
           {dropdownOpen && (
-            <div className="absolute right-0 top-full mt-3 w-[520px] overflow-hidden rounded-2xl border border-white/10 bg-black/95 shadow-2xl backdrop-blur-xl">
+            <div data-testid="notifications-popover"
+              className="absolute right-0 top-full mt-3 w-[520px] overflow-hidden rounded-2xl shadow-2xl backdrop-blur-xl"
+              style={{ background: NAVY_GLASS_POPOVER, border: NAVY_GLASS_BORDER }}>
               {/* Rooms collapsible section */}
               {rooms.length > 0 && (
                 <div className="border-b border-white/8">

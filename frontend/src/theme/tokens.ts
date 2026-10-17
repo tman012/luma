@@ -17,3 +17,10 @@ export const T = {
   glass12: 'var(--color-glass-12)',
   white: 'var(--color-white-pure)',
 } as const;
+
+/** Navy glass surfaces (Designer): the navy base (--color-kiosk-black, #15102a)
+ * under the 6% white glass. PANEL is a full-height sheet (Settings popup);
+ * POPOVER floats over the page, so it is slightly see-through and blurred. */
+export const NAVY_GLASS_PANEL = 'radial-gradient(ellipse at 50% 0%, rgb(38 42 102 / 0.55) 0%, rgb(21 16 42 / 0) 60%), #15102a';
+export const NAVY_GLASS_POPOVER = 'linear-gradient(var(--color-glass-6), var(--color-glass-6)), rgb(21 16 42 / 0.94)';
+export const NAVY_GLASS_BORDER = '1px solid var(--color-glass-12)';

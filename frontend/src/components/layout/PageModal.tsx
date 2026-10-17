@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
+import { NAVY_GLASS_BORDER, NAVY_GLASS_PANEL } from '@/theme/tokens';
 
 interface Props {
   children: ReactNode;
@@ -78,6 +79,7 @@ export function PageModal({ children }: Props) {
     >
       {/* Card — same dimensions as MovieDetailModal */}
       <div
+        data-testid="page-modal-card"
         style={{
           position: 'relative',
           width: '100%',
@@ -85,7 +87,8 @@ export function PageModal({ children }: Props) {
           height: '90vh',
           borderRadius: '20px',
           overflow: 'hidden',
-          backgroundColor: '#141414',
+          background: NAVY_GLASS_PANEL,
+          border: NAVY_GLASS_BORDER,
           boxShadow: '0 32px 100px rgba(0,0,0,0.8)',
           transform: cardScale,
           opacity: cardOpacity,
