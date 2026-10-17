@@ -11,13 +11,13 @@ export function OfflineNotice({ onRetry, busy }: { onRetry: () => void; busy: bo
     <StartShell step="offline">
       <Center>
         <div role="status" data-testid="offline-notice"><Title>{OFFLINE_TITLE}</Title></div>
+        <Bottom>
+          <button type="button" className="luma-start-btn" style={primaryBtn} onClick={onRetry} disabled={busy}
+            data-testid="offline-retry">
+            {OFFLINE_RETRY}
+          </button>
+        </Bottom>
       </Center>
-      <Bottom>
-        <button type="button" className="luma-start-btn" style={primaryBtn} onClick={onRetry} disabled={busy}
-          data-testid="offline-retry">
-          {OFFLINE_RETRY}
-        </button>
-      </Bottom>
     </StartShell>
   );
 }

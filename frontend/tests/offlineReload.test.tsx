@@ -21,6 +21,8 @@ describe('offline reload', () => {
     expect((await screen.findByTestId('offline-notice')).textContent).toBe("Can't reach Luma");
     expect(screen.queryByTestId('probe')).toBeNull();
     expect(screen.getByTestId('offline-retry').textContent).toBe('Try again');
+    // the button sits under the title in the centered column (not after the full-height block)
+    expect(screen.getByTestId('offline-notice').parentElement!.contains(screen.getByTestId('offline-retry'))).toBe(true);
   });
 
   it('back online (the online event or Try again) restores the session', async () => {
