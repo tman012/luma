@@ -1,5 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { srcAbove, srcCancelBtn, srcPrimaryBtn, SRC_BLUE, SRC_HEADING_COLOR, NO_SOURCES, sourcesCount } from '../sourcesTheme';
+import { TrackerStatusNotice } from '../sourcesTrackerStatus';
+import type { TrackerStatus } from '@/services/allSourcesApi';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useMovieSourcesData } from './useMovieSourcesData';
 import { FocusZone } from '@/components/tv/FocusZone';
@@ -422,7 +424,11 @@ function ExpandedSourcesView({
   onGrabbed,
   isTablet,
   isWeb,
+  trackers = [],
+  onRetry,
 }: {
+  trackers?: TrackerStatus[];
+  onRetry?: () => void;
   releases: ProcessedRelease[];
   loading: boolean;
   error: boolean;
@@ -595,8 +601,9 @@ function ExpandedSourcesView({
               </span>
             </div>
           )}
-          {!loading && !error && releases.length === 0 && (
-            <div data-sources-state="empty" style={{ color: SRC_HEADING_COLOR, fontSize: '22px', ...srcAbove }}>{NO_SOURCES}</div>
+          {!loading && !error && releases.length === 0 && (trackers.length > 0
+            ? <TrackerStatusNotice trackers={trackers} onRetry={onRetry} fontSize={22} />
+            : <div data-sources-state="empty" style={{ color: SRC_HEADING_COLOR, fontSize: '22px', ...srcAbove }}>{NO_SOURCES}</div>
           )}
           {!loading && !error && qualityGroups.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '560px', position: 'relative', zIndex: 1 }}>
@@ -956,7 +963,11 @@ function CompactSourcesView({
   onClose,
   onGrabbed,
   onAddToWatchlist,
+  trackers = [],
+  onRetry,
 }: {
+  trackers?: TrackerStatus[];
+  onRetry?: () => void;
   releases: ProcessedRelease[];
   loading: boolean;
   error: boolean;
@@ -1431,9 +1442,10 @@ function CompactSourcesView({
         {/* No sources — prompt to add to watchlist */}
         {noSources && indexerConfigured === true && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 24px 60px', gap: '20px' }}>
+            {trackers.length > 0 ? <TrackerStatusNotice trackers={trackers} onRetry={onRetry} /> : (
             <span style={{ fontSize: '17px', fontWeight: 600, color: 'rgba(255,255,255,0.7)', textAlign: 'center' }}>
               {NO_SOURCES}
-            </span>
+            </span>)}
             {indexerQuery && (
               <button
                 type="button"
@@ -1804,7 +1816,7 @@ export function SourcesPanel({
   // All results are fetched up front (rejected + indexer rows included). We show
   // everything, segmented by resolution → type and sorted by seeders within each
   // segment — no filtering, no toggle.
-  const { loading, error, timedOut, slow, releases, movieId } = useMovieSourcesData({
+  const { loading, error, timedOut, slow, releases, movieId, trackers, retry } = useMovieSourcesData({
     tmdbId,
     title,
     year,
@@ -1829,6 +1841,8 @@ export function SourcesPanel({
         onClose={onClose}
         onGrabbed={onGrabbed}
         onAddToWatchlist={onAddToWatchlist}
+        trackers={trackers}
+        onRetry={retry}
       />
     );
   }
@@ -1855,6 +1869,8 @@ export function SourcesPanel({
       onGrabbed={onGrabbed}
       isTablet={isTablet}
       isWeb={isWeb}
+      trackers={trackers}
+      onRetry={retry}
     />
   );
 }

@@ -2362,8 +2362,9 @@ def sources_all_results():
             _all_results_cache.pop(cache_key, None)
 
         from app.tracker_search import LumaTrackersClient as _LTC
-        raw = (client.search_all(title, media_type, year, refresh=refresh) if isinstance(client, _LTC)
-               else client.search_all(title, media_type, year))
+        statuses: list = []
+        raw = (client.search_all(title, media_type, year, refresh=refresh, statuses=statuses)
+               if isinstance(client, _LTC) else client.search_all(title, media_type, year))
 
         releases = []
         for item in raw:
@@ -2405,16 +2406,18 @@ def sources_all_results():
             'success': True,
             'total': len(releases),
             'releases': releases,
+            # Trackers that were not searched or failed: name + short status only.
+            'trackers': [{'name': x['name'], 'status': x['status']} for x in statuses],
         }
         if releases:       # an empty answer is never cached: the next search asks again
             _all_results_cache[cache_key] = (time.time(), payload)
         return jsonify(_all_results_public(payload))
 
     except Exception as e:
-        logger.error(f"Error in sources_all_results: {e}")
+        logger.error(f"Error in sources_all_results: {type(e).__name__}")
         import traceback
         logger.error(traceback.format_exc())
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Search failed'}), 500
 
 
 @app.route('/api/tmdb/match-search')

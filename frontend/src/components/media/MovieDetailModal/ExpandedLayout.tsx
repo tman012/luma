@@ -25,6 +25,7 @@ import { SegmentRow, sortTrackerTopsFirst, needsLibraryGrab, grabDisabledReason,
 import { fetchIndexerConfigured, useDownloadClientReady } from '@/services/sourcesAvailability';
 import { grabToLibrary } from '@/services/allSourcesApi';
 import { ManualMatchPicker } from '@/components/media/ManualMatchPicker';
+import { TrackerStatusNotice } from '@/components/media/sourcesTrackerStatus';
 import { srcPanel, srcAbove, srcConfirmCard, srcPrimaryBtn, srcCancelBtn, SRC_ROW_BG, SRC_HEADING_COLOR, SRC_HOVER_CSS, NO_SOURCES } from '@/components/media/sourcesTheme';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useTabletPerf } from '@/hooks/useTabletPerf';
@@ -482,6 +483,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
     timedOut: sourcesTimedOut,
     releases: sourcesReleases,
     movieId: sourcesMovieId,
+    trackers: sourcesTrackers,
+    retry: sourcesRetry,
   } = useMovieSourcesData({
     tmdbId: detail?.tmdbId,
     title: detail?.title ?? '',
@@ -913,10 +916,14 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 padding: t.contentPadding,
-                opacity: phase === 'visible' ? 1 : 0,
+                // Hidden under Sources: the logo/title sits above the Sources
+                // layer and would collide with the Override search pill.
+                opacity: phase === 'visible' && !showSourcesShelf ? 1 : 0,
+                visibility: showSourcesShelf ? 'hidden' : undefined,
                 transition: 'none', // the container's single reveal fades it
                 willChange: 'opacity',
               }}
+              data-modal-logo=""
             >
               {/* Push logo up when cast shelf is open */}
               <div style={{
@@ -1417,11 +1424,13 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                   </div>
                 )}
                 {/* No results */}
-                {!sourcesLoading && !sourcesError && sourcesReleases.length === 0 && (
+                {!sourcesLoading && !sourcesError && sourcesReleases.length === 0 && (sourcesTrackers.length > 0
+                  ? <TrackerStatusNotice trackers={sourcesTrackers} onRetry={sourcesRetry} fontSize={28} />
+                  : (
                   <div data-sources-state="empty" style={{ textAlign: 'center', ...srcAbove }}>
                     <span style={{ fontSize: '28px', color: SRC_HEADING_COLOR }}>{NO_SOURCES}</span>
                   </div>
-                )}
+                ))}
 
                 {/* Results — multi-level drill-down */}
                 {!sourcesLoading && !sourcesError && sourcesReleases.length > 0 && (() => {

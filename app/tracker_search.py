@@ -50,6 +50,27 @@ class TrackerSkipped(Exception):
     """A request to a tracker was deliberately not sent (rate limit or backoff)."""
 
 
+def search_status(err: Exception) -> str:
+    """Short per-tracker status for the Sources UI: 'auth' (sign-in failed,
+    banned, or in an auth/ban backoff), 'rate' (rate limit, caps, rate backoff)
+    or 'unavailable' (anything else)."""
+    if isinstance(err, TrackerSkipped):
+        reason = str(err)
+        if reason.startswith('backoff ('):
+            kind = reason[len('backoff ('):].rstrip(')')
+        elif 'cap' in reason or 'rate limit' in reason:
+            kind = 'rate'
+        else:
+            kind = 'unavailable'
+    else:
+        kind = getattr(err, 'kind', '')
+    if kind in ('auth', 'banned'):
+        return 'auth'
+    if kind == 'rate':
+        return 'rate'
+    return 'unavailable'
+
+
 # ------------------------------------------------------------------ release tokens
 
 class ReleaseTokens:
@@ -388,9 +409,12 @@ class TrackerSearch:
 
     def search(self, query: str, categories: List[int], limit: int, interactive: bool,
                tracker_ids: Optional[List[int]] = None, imdb_id: str = '',
-               refresh: bool = False) -> Tuple[List[Dict[str, Any]], List[int], List[int]]:
+               refresh: bool = False, statuses: Optional[List[Dict[str, Any]]] = None,
+               ) -> Tuple[List[Dict[str, Any]], List[int], List[int]]:
         """Fan out to enabled trackers (or *tracker_ids*). Returns
-        (items in raw Prowlarr shape, ids searched, ids skipped)."""
+        (items in raw Prowlarr shape, ids searched, ids skipped). When
+        *statuses* is a list, each tracker that was skipped or failed adds
+        {'id', 'name', 'status'} (see search_status)."""
         cfgs = self.store.enabled_configs()
         if tracker_ids:
             want = {int(i) for i in tracker_ids}
@@ -407,10 +431,14 @@ class TrackerSearch:
             c, cats = job
             try:
                 return c, self.search_one(c, query, cats, limit, interactive, imdb_id, refresh=refresh)
-            except TrackerSkipped:
+            except TrackerSkipped as e:
                 skipped.append(c['id'])
-            except TrackerError:
+                if statuses is not None:
+                    statuses.append({'id': c['id'], 'name': c['name'], 'status': search_status(e)})
+            except TrackerError as e:
                 failed.append(c['id'])
+                if statuses is not None:
+                    statuses.append({'id': c['id'], 'name': c['name'], 'status': search_status(e)})
             return c, []
 
         items: List[Dict[str, Any]] = []
@@ -489,19 +517,23 @@ class LumaTrackersClient:
         return self._parse_items(raw)
 
     def search_all(self, query: str, media_type: str, year: Optional[int] = None,
-                   refresh: bool = False) -> List[Dict]:
+                   refresh: bool = False, statuses: Optional[List[Dict[str, Any]]] = None) -> List[Dict]:
         from app.indexer_api import (MOVIE_CATEGORIES_EXPANDED, TV_SPORTS_CATEGORIES,
                                      _build_search_query, _parse_title)
         # TV release names carry SxxEyy, not the first-air year: never add it for TV.
         q = (query or '').strip() if media_type == 'tv' else _build_search_query(query, year)
         cats = list(MOVIE_CATEGORIES_EXPANDED) + list(TV_SPORTS_CATEGORIES)
-        items, _, _ = self.engine.search(q, cats, 500, interactive=True, refresh=refresh)
+        st: List[Dict[str, Any]] = []
+        items, _, _ = self.engine.search(q, cats, 500, interactive=True, refresh=refresh, statuses=st)
         bare = (query or '').strip()
         if not items and bare and q != bare:
             # Release names often leave the year out (TV above all): one retry without it.
             logger.info('Tracker search_all media_type=%s: no results with the year, retrying without it',
                         media_type)
-            items, _, _ = self.engine.search(bare, cats, 500, interactive=True, refresh=refresh)
+            st = []
+            items, _, _ = self.engine.search(bare, cats, 500, interactive=True, refresh=refresh, statuses=st)
+        if statuses is not None:
+            statuses.extend(sorted(st, key=lambda x: x['name'].lower()))
         out = []
         for it in items:
             parsed = _parse_title(it['title'])

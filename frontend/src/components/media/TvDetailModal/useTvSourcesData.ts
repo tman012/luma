@@ -5,14 +5,14 @@
  * and TvMobileSourcesPanel (compact). Both modes now use this single hook.
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   searchSeasonReleases,
   searchEpisodeReleases,
   downloadRelease,
   type SonarrRelease,
 } from '@/services/sonarrApi';
-import { fetchAllResults, mergeReleases, type AllResultsRelease } from '@/services/allSourcesApi';
+import { fetchAllResults, mergeReleases, type AllResultsRelease, type TrackerStatus } from '@/services/allSourcesApi';
 import { classifySourceType } from '@/components/media/sourcesShared';
 import type { SourcesTarget } from './types';
 
@@ -148,6 +148,39 @@ function indexerToProcessed(r: AllResultsRelease): TvProcessedRelease {
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
+/**
+ * Tracker queries for a season browse or an episode. A season asks twice:
+ * `Title S01` (the season and its episodes) and the bare title, which is
+ * what catches multi-season packs ("S01-S05", "Complete") on trackers that
+ * match whole words. The results are then kept only if they cover the season.
+ */
+export function tvIndexerQueries(title: string | undefined, target: SourcesTarget): string[] {
+  const q = tvIndexerQuery(title, target);
+  if (!q) return [];
+  const bare = (title || '').trim();
+  return target.type === 'season' && q !== bare ? [q, bare] : [q];
+}
+
+/** Whether a release title covers *season*: S01 / S01E05 / 1x05 / Season 1,
+ * a range like S01-S05 / S01-05 / Seasons 1-5, or a complete-series pack
+ * with no season marker. A title that names only other seasons does not. */
+export function coversSeason(title: string, season: number): boolean {
+  const t = (title || '').replace(/[._]+/g, ' ');
+  let marked = false;
+  for (const m of t.matchAll(/\b(?:S|Seasons?\s*)(\d{1,2})\s*(?:-|–|to)\s*(?:S|Season\s*)?(\d{1,2})\b/gi)) {
+    marked = true;
+    const lo = parseInt(m[1]!, 10), hi = parseInt(m[2]!, 10);
+    if (season >= Math.min(lo, hi) && season <= Math.max(lo, hi)) return true;
+  }
+  const stripped = t.replace(/\b(?:S|Seasons?\s*)\d{1,2}\s*(?:-|–|to)\s*(?:S|Season\s*)?\d{1,2}\b/gi, ' ');
+  for (const m of stripped.matchAll(/\bS(\d{1,2})(?:\s?E\d{1,3})*\b|\bSeason\s*(\d{1,2})\b|\b(\d{1,2})x\d{2,3}\b/gi)) {
+    marked = true;
+    if (parseInt(m[1] ?? m[2] ?? m[3]!, 10) === season) return true;
+  }
+  if (marked) return false;
+  return /\b(complete|collection|all seasons)\b/i.test(t);
+}
+
 /** The tracker query for a show: its title plus S01E05 for an episode or S01 for a season. */
 export function tvIndexerQuery(title: string | undefined, target: SourcesTarget): string {
   const t = (title || '').trim();
@@ -179,6 +212,10 @@ interface UseTvSourcesDataResult {
   releases: TvProcessedRelease[];
   downloadIds: { seriesId?: number; episodeId?: number };
   handleGrab: (guid: string, indexerId: number) => Promise<boolean>;
+  /** Trackers that were not searched or failed (sign-in, limits). */
+  trackers: TrackerStatus[];
+  /** Search again, skipping the server's caches. */
+  retry: () => void;
 }
 
 export function useTvSourcesData({
@@ -198,16 +235,24 @@ export function useTvSourcesData({
   }>({});
   // Override search / clear override is an explicit retry: skip server caches.
   const lastQuery = useRef<string | null | undefined>(undefined);
+  const [trackers, setTrackers] = useState<TrackerStatus[]>([]);
+  // Bumped by Retry: a new search that skips the server's caches.
+  const [attempt, setAttempt] = useState(0);
+  const lastAttempt = useRef(0);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   useEffect(() => {
     const controller = new AbortController();
     let cancelled = false;
-    const refresh = lastQuery.current !== undefined && lastQuery.current !== (indexerQuery ?? null);
+    const refresh = (lastQuery.current !== undefined && lastQuery.current !== (indexerQuery ?? null))
+      || attempt !== lastAttempt.current;
     lastQuery.current = indexerQuery ?? null;
+    lastAttempt.current = attempt;
 
     async function fetchReleases() {
       setLoading(true);
       setError(false);
+      setTrackers([]);
       try {
         let data: {
           success: boolean;
@@ -248,24 +293,37 @@ export function useTvSourcesData({
         // while overriding so wrong matched metadata does not narrow to zero.
         // TV release names carry SxxEyy (or Sxx for a season), never the
         // first-air year: the year is never sent for TV.
-        const indexerTitle = (indexerQuery || '').trim() || tvIndexerQuery(title, target);
+        const override = (indexerQuery || '').trim();
+        const queries = override ? [override] : tvIndexerQueries(title, target);
         const indexerYear = null;
         // Without Sonarr (or with no trackers) an answered sweep is still an
         // answer: only a sweep that failed outright counts toward an error.
-        let indexerOk = !!indexerTitle;
-        const indexerRaw = indexerTitle
-          ? await fetchAllResults(indexerTitle, 'tv', indexerYear, tmdbId, controller.signal, refresh)
-              .catch((err: unknown) => {
-                if ((err as { name?: string })?.name === 'AbortError') throw err;
-                indexerOk = false;
-                return [] as AllResultsRelease[];
-              })
-          : [];
+        let indexerOk = queries.length > 0;
+        let answered = 0;
+        const statuses = new Map<string, TrackerStatus>();
+        const runs = await Promise.all(queries.map((q) =>
+          fetchAllResults(q, 'tv', indexerYear, tmdbId, controller.signal, refresh,
+            (t) => t.forEach((x) => statuses.set(x.name, x)))
+            .then((rows) => { answered++; return rows; })
+            .catch((err: unknown) => {
+              if ((err as { name?: string })?.name === 'AbortError') throw err;
+              return [] as AllResultsRelease[];
+            })));
+        if (queries.length && !answered) indexerOk = false;
+        const seen = new Set<string>();
+        const indexerRaw = runs.flat().filter((r) => {
+          const k = r.downloadUrl || r.guid || r.title;
+          if (seen.has(k)) return false;
+          seen.add(k);
+          // The bare-title query also brings other seasons: keep what covers this one.
+          return override || target.type !== 'season' || coversSeason(r.title, target.season);
+        });
         const indexerReleases = indexerRaw.map(indexerToProcessed);
         const merged = mergeReleases(arrReleases, indexerReleases) as TvProcessedRelease[];
         merged.sort((a, b) => b.seeders - a.seeders);
         if (!cancelled) {
           setReleases(merged);
+          setTrackers([...statuses.values()]);
           // Only surface an error when we truly have nothing to show.
           if (!sonarrOk && !indexerOk && merged.length === 0) setError(true);
         }
@@ -282,7 +340,7 @@ export function useTvSourcesData({
       cancelled = true;
       controller.abort();
     };
-  }, [tvdbId, tmdbId, target, title, year, indexerQuery]);
+  }, [tvdbId, tmdbId, target, title, year, indexerQuery, attempt]);
 
   const handleGrab = async (
     guid: string,
@@ -301,5 +359,5 @@ export function useTvSourcesData({
     }
   };
 
-  return { loading, error, releases, downloadIds, handleGrab };
+  return { loading, error, releases, downloadIds, handleGrab, trackers, retry };
 }

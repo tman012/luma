@@ -41,6 +41,19 @@ export interface AllResultsRelease {
   trackerType: string;
 }
 
+/** A tracker that was not searched or failed, as all-results reports it. */
+export interface TrackerStatus {
+  name: string;
+  status: 'auth' | 'rate' | 'unavailable';
+}
+
+/** Short status line for one tracker, e.g. "IPTorrents sign-in failed". */
+export function trackerStatusText(t: TrackerStatus): string {
+  if (t.status === 'auth') return `${t.name} sign-in failed`;
+  if (t.status === 'rate') return `${t.name} search limit reached`;
+  return `${t.name} unavailable`;
+}
+
 export interface TmdbMatchResult {
   tmdb_id: number;
   media_type: MediaType;
@@ -67,6 +80,8 @@ export async function fetchAllResults(
   signal?: AbortSignal,
   /** An explicit user retry: the server skips its caches (empty answers too). */
   refresh = false,
+  /** Receives the trackers that were not searched or failed. */
+  onTrackers?: (trackers: TrackerStatus[]) => void,
 ): Promise<AllResultsRelease[]> {
   if (!title) throw new Error('fetchAllResults: title is required');
   const params = new URLSearchParams();
@@ -82,7 +97,16 @@ export async function fetchAllResults(
     // blowing up the Arr results the modal already has.
     return [];
   }
-  const data = (await resp.json()) as { releases?: Record<string, unknown>[] };
+  const data = (await resp.json()) as { releases?: Record<string, unknown>[]; trackers?: unknown };
+  if (onTrackers) {
+    const list = Array.isArray(data.trackers) ? data.trackers : [];
+    onTrackers(list
+      .filter((t): t is { name: string; status: string } => !!t && typeof (t as { name?: unknown }).name === 'string')
+      .map((t) => ({
+        name: t.name,
+        status: t.status === 'auth' || t.status === 'rate' ? t.status : 'unavailable',
+      })));
+  }
   return (data.releases ?? []).map(normalizeIndexerRelease);
 }
 

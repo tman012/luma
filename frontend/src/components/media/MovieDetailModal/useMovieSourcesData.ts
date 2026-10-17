@@ -22,10 +22,10 @@ import { apiFetch } from '../../../apiClient';
  * server-side budget, which reads as "broken" rather than "slow".
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { processRawReleases, extractResolution, type ProcessedRelease } from './sourcesUtils';
 import { classifySourceType } from '@/components/media/sourcesShared';
-import { fetchAllResults, mergeReleases, type AllResultsRelease } from '@/services/allSourcesApi';
+import { fetchAllResults, mergeReleases, type AllResultsRelease, type TrackerStatus } from '@/services/allSourcesApi';
 
 /** Radarr's interactive search gets 120s server-side; allow slack past that. */
 const ARR_TIMEOUT_MS = 130_000;
@@ -61,11 +61,16 @@ interface UseMovieSourcesDataResult {
   slow: boolean;
   releases: ProcessedRelease[];
   movieId: number;
+  /** Trackers that were not searched or failed (sign-in, limits). */
+  trackers: TrackerStatus[];
+  /** Search again, skipping the server's caches. */
+  retry: () => void;
 }
 
 interface SourcesResult {
   releases: ProcessedRelease[];
   movieId: number;
+  trackers: TrackerStatus[];
   /** Both legs failed — there is nothing to show. */
   failed: boolean;
   timedOut: boolean;
@@ -131,6 +136,7 @@ async function loadSources(
   // TMDb hits) turns "aew forbidden door" into "… 2021" and zeroes IPT Sports.
   const indexerTitle = (indexerQuery || '').trim() || title;
   const indexerYear = (indexerQuery || '').trim() ? null : year;
+  let trackers: TrackerStatus[] = [];
 
   /** Radarr interactive search. Throws when the call fails or times out. */
   async function fetchArr(): Promise<{ releases: ProcessedRelease[]; movieId: number }> {
@@ -158,7 +164,8 @@ async function loadSources(
   // there's no reason to make Radarr wait behind it.
   const [arrOutcome, indexerOutcome] = await Promise.allSettled([
     fetchArr(),
-    fetchAllResults(indexerTitle, 'movie', indexerYear, tmdbId, indexerClock.signal, refresh)
+    fetchAllResults(indexerTitle, 'movie', indexerYear, tmdbId, indexerClock.signal, refresh,
+      (t) => { trackers = t; })
       .finally(() => indexerClock.clear()),
   ]);
 
@@ -173,6 +180,7 @@ async function loadSources(
     // kept — the panel decides client-side whether to show them.
     releases: mergeReleases(arr?.releases ?? [], indexerReleases) as ProcessedRelease[],
     movieId: arr?.movieId ?? 0,
+    trackers,
     // Only a total failure is an error. One leg down still renders rows; zero
     // rows from two healthy legs is "no sources", which the panel handles.
     failed: arrOutcome.status === 'rejected' && indexerOutcome.status === 'rejected',
@@ -204,9 +212,10 @@ function searchKey(
   title: string,
   year: number | null,
   indexerQuery?: string | null,
+  refresh = false,
 ): string {
   const iq = (indexerQuery || '').trim().toLowerCase();
-  return `${tmdbId ?? ''}|${title.toLowerCase()}|${year ?? ''}|iq:${iq}`;
+  return `${tmdbId ?? ''}|${title.toLowerCase()}|${year ?? ''}|iq:${iq}${refresh ? '|refresh' : ''}`;
 }
 
 function requestSources(
@@ -216,7 +225,7 @@ function requestSources(
   indexerQuery?: string | null,
   refresh = false,
 ): Promise<SourcesResult> {
-  const key = searchKey(tmdbId, title, year, indexerQuery);
+  const key = searchKey(tmdbId, title, year, indexerQuery, refresh);
   const running = inFlight.get(key);
   if (running) return running;
 
@@ -240,8 +249,13 @@ export function useMovieSourcesData({
   const [releases, setReleases] = useState<ProcessedRelease[]>([]);
   const [movieId, setMovieId] = useState(0);
   const [settledKey, setSettledKey] = useState<string | null>(null);
+  const [trackers, setTrackers] = useState<TrackerStatus[]>([]);
+  // Bumped by Retry: a new search that skips the server's caches.
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
-  const key = enabled && title ? searchKey(tmdbId, title, year, indexerQuery) : null;
+  const base = enabled && title ? searchKey(tmdbId, title, year, indexerQuery) : null;
+  const key = base === null ? null : `${base}#${attempt}`;
 
   // Derived rather than a `loading` state: a state flag only flips once the
   // effect runs, which leaves one painted frame where the panel is enabled,
@@ -250,6 +264,7 @@ export function useMovieSourcesData({
   const loading = key !== null && settledKey !== key;
   // Override search / clear override is an explicit retry: skip server caches.
   const lastQuery = useRef<string | null | undefined>(undefined);
+  const lastAttempt = useRef(0);
 
   useEffect(() => {
     if (key === null) return;
@@ -262,19 +277,23 @@ export function useMovieSourcesData({
     // re-search can never leave the panel showing results that no longer
     // belong to it (and so reopening the shelf reads as loading again).
     setReleases([]);
+    setTrackers([]);
     setSettledKey(null);
 
     const slowTimer = setTimeout(() => {
       if (!cancelled) setSlow(true);
     }, SLOW_AFTER_MS);
 
-    const refresh = lastQuery.current !== undefined && lastQuery.current !== (indexerQuery ?? null);
+    const refresh = (lastQuery.current !== undefined && lastQuery.current !== (indexerQuery ?? null))
+      || attempt !== lastAttempt.current;
     lastQuery.current = indexerQuery ?? null;
+    lastAttempt.current = attempt;
     requestSources(tmdbId, title, year, indexerQuery, refresh)
       .then((result) => {
         if (cancelled) return;
         setReleases(result.releases);
         setMovieId(result.movieId);
+        setTrackers(result.trackers);
         setError(result.failed);
         setTimedOut(result.timedOut);
         setSettledKey(key);
@@ -290,7 +309,7 @@ export function useMovieSourcesData({
       cancelled = true;
       clearTimeout(slowTimer);
     };
-  }, [key, tmdbId, title, year, indexerQuery]);
+  }, [key, tmdbId, title, year, indexerQuery, attempt]);
 
-  return { loading, error, timedOut, slow: loading && slow, releases, movieId };
+  return { loading, error, timedOut, slow: loading && slow, releases, movieId, trackers, retry };
 }
