@@ -14,9 +14,19 @@ describe('Downloads Guard: Clean up now', () => {
     expect(await triggerDownloadsGuardRun(false)).toEqual({ ok: false, dry_run: false, signIn: true });
   });
 
-  it('a 403 is an error, not a sign-in', async () => {
+  it('a 403 reads as plain words, not raw text and not a sign-in (Tester ab1c841 #1)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => res({ error: 'Owner only' }, 403)));
-    await expect(triggerDownloadsGuardRun(false)).rejects.toThrow('Owner only');
+    await expect(triggerDownloadsGuardRun(false)).rejects.toThrow('Only the owner can delete downloads');
+  });
+
+  it('a 401 without sign_in is not a sign-in either', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => res({ error: 'Authentication required' }, 401)));
+    await expect(triggerDownloadsGuardRun(false)).rejects.toThrow('Cleanup failed');
+  });
+
+  it('other failures never show raw server text', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => res({ error: 'Traceback (most recent call last)' }, 500)));
+    await expect(triggerDownloadsGuardRun(false)).rejects.toThrow('Cleanup failed');
   });
 
   it('a signed-in owner runs as before, and the body says dry_run false', async () => {

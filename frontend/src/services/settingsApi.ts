@@ -1209,10 +1209,14 @@ export async function triggerDownloadsGuardRun(dryRun = true): Promise<{ ok: boo
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dry_run: dryRun }),
   });
-  if (resp.status === 401 && !dryRun) return { ok: false, dry_run: false, signIn: true };
   if (!resp.ok) {
-    const body = await resp.json().catch(() => ({}));
-    throw new Error((body && body.error) || 'Failed');
+    const body = (await resp.json().catch(() => ({}))) as { sign_in?: boolean };
+    // Only a 401 that asks for sign-in offers it; other refusals get plain words.
+    if (resp.status === 401 && body && body.sign_in) return { ok: false, dry_run: dryRun, signIn: true };
+    if (resp.status === 403) throw new Error(OWNER_ONLY_DELETE);
+    throw new Error('Cleanup failed');
   }
   return resp.json();
 }
+
+export const OWNER_ONLY_DELETE = 'Only the owner can delete downloads';
