@@ -1,10 +1,14 @@
 """Rate limits and backoff for Luma's own trackers (app.tracker_store).
 
-Same rules as the Prowlarr guard in app.indexer_api, kept in a separate state
-file because tracker ids and Prowlarr indexer ids are unrelated numbering
-spaces:
+Counters, budgets and backoffs are keyed by the tracker's site, never by the
+saved record id (see guard_key): known site types by type ('site:iptorrents',
+so mirror domains share one budget), Torznab/Newznab by normalized host
+('host:example.org'). Re-adding, editing, testing an unsaved form or using a
+different path for the same site all hit the same persisted state.
 
-* user (interactive) searches: 40 per tracker per hour;
+Rules:
+
+* user (interactive) searches and Tests: 40 per tracker per hour;
 * background searches: token bucket, burst 5, one token per 180 s (20/h);
 * AvistaZ family (AvistaZ, PrivateHD, CinemaZ, ExoticaZ): every request,
   user or background, goes through the bucket, so 20/h with a burst of 5;
@@ -28,6 +32,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +67,14 @@ class TrackerGuard:
         self._path = Path(path) if path else None
         self._lock = threading.RLock()
         self._loaded = False
-        self.log: Dict[int, List[list]] = {}          # id -> [[ts, 'i'|'b'], ...]
-        self.buckets: Dict[int, List[float]] = {}     # id -> [tokens, ts]
-        self.cooldown: Dict[int, Tuple[float, str]] = {}   # id -> (until, kind)
-        self.streak: Dict[int, int] = {}
+        # Keys are guard_key() strings ('site:<type>' or 'host:<host>').
+        self.log: Dict[str, List[list]] = {}          # key -> [[ts, 'i'|'b'], ...]
+        self.buckets: Dict[str, List[float]] = {}     # key -> [tokens, ts]
+        self.cooldown: Dict[str, Tuple[float, str]] = {}   # key -> (until, kind)
+        self.streak: Dict[str, int] = {}
         self.fail_closed_until = 0.0
-        self.last_sent: Dict[int, float] = {}
-        self._tracker_locks: Dict[int, threading.Lock] = {}
+        self.last_sent: Dict[str, float] = {}
+        self._tracker_locks: Dict[str, threading.Lock] = {}
 
     @property
     def path(self) -> Path:
@@ -101,10 +107,8 @@ class TrackerGuard:
         now = time.time()
 
         def key(k):
-            try:
-                return int(k)
-            except (TypeError, ValueError):
-                return None
+            # Only site/host keys; anything else (an older id-keyed file) is dropped.
+            return k if isinstance(k, str) and _KEY_RE.match(k) else None
 
         for k, entries in raw.get('log', {}).items():
             i = key(k)
@@ -148,14 +152,14 @@ class TrackerGuard:
 
     # ------------------------------------------------------------ decisions
 
-    def tracker_lock(self, tid: int) -> threading.Lock:
+    def tracker_lock(self, tid: str) -> threading.Lock:
         with self._lock:
             lk = self._tracker_locks.get(tid)
             if lk is None:
                 lk = self._tracker_locks[tid] = threading.Lock()
             return lk
 
-    def blocked(self, tid: int, now: Optional[float] = None) -> Optional[Tuple[float, str]]:
+    def blocked(self, tid: str, now: Optional[float] = None) -> Optional[Tuple[float, str]]:
         """(until, kind) when *tid* is in backoff or the guard failed closed."""
         now = time.time() if now is None else now
         with self._lock:
@@ -167,7 +171,7 @@ class TrackerGuard:
                 return cd
             return None
 
-    def _tokens(self, tid: int, now: float) -> List[float]:
+    def _tokens(self, tid: str, now: float) -> List[float]:
         b = self.buckets.get(tid)
         if b is None:
             b = self.buckets[tid] = [float(LIMITS['burst']), now]
@@ -175,7 +179,7 @@ class TrackerGuard:
         b[1] = now
         return b
 
-    def counts(self, tid: int, now: float) -> Tuple[int, int, int]:
+    def counts(self, tid: str, now: float) -> Tuple[int, int, int]:
         day, hr = now - 86400, now - 3600
         for k in list(self.log):
             self.log[k] = [e for e in self.log[k] if e[0] > day]
@@ -183,7 +187,7 @@ class TrackerGuard:
         return (sum(1 for t, kind in mine if t > hr and kind == 'i'), len(mine),
                 sum(1 for v in self.log.values() for t, _ in v if t > hr))
 
-    def take(self, tid: int, interactive: bool, strict: bool, now: Optional[float] = None) -> Optional[str]:
+    def take(self, tid: str, interactive: bool, strict: bool, now: Optional[float] = None) -> Optional[str]:
         """None when a request to *tid* may be sent now (and records it), else
         the reason it may not."""
         now = time.time() if now is None else now
@@ -211,7 +215,7 @@ class TrackerGuard:
             self._save()
             return None
 
-    def wait_spacing(self, tid: int) -> None:
+    def wait_spacing(self, tid: str) -> None:
         """Sleep so requests to one tracker are at least min_interval_s apart
         (call while holding tracker_lock(tid))."""
         wait = LIMITS['min_interval_s'] - (time.time() - self.last_sent.get(tid, 0.0))
@@ -219,7 +223,7 @@ class TrackerGuard:
             time.sleep(wait)
         self.last_sent[tid] = time.time()
 
-    def success(self, tid: int) -> None:
+    def success(self, tid: str) -> None:
         with self._lock:
             self._load()
             changed = bool(self.streak.pop(tid, 0)) or tid in self.cooldown
@@ -227,7 +231,7 @@ class TrackerGuard:
             if changed:
                 self._save()
 
-    def failure(self, tid: int, kind: str, retry_after: Optional[float] = None,
+    def failure(self, tid: str, kind: str, retry_after: Optional[float] = None,
                 now: Optional[float] = None) -> float:
         """Start a backoff for *tid* after a failed request; returns its end."""
         now = time.time() if now is None else now
@@ -255,7 +259,7 @@ class TrackerGuard:
             self._save()
             return until
 
-    def clear(self, tid: int, kinds: Tuple[str, ...] = ('auth', 'response', 'timeout', 'network', 'tls', 'http')) -> None:
+    def clear(self, tid: str, kinds: Tuple[str, ...] = ('auth', 'response', 'timeout', 'network', 'tls', 'http')) -> None:
         """Forget a backoff of the given kinds (credentials or URL changed).
         Rate limits and bans are never cleared early."""
         with self._lock:
@@ -266,15 +270,6 @@ class TrackerGuard:
                 self.streak.pop(tid, None)
                 self._save()
 
-    def forget(self, tid: int) -> None:
-        """Drop everything about a deleted tracker except its request log
-        (the global hourly cap still counts those requests)."""
-        with self._lock:
-            self._load()
-            self.buckets.pop(tid, None)
-            self.cooldown.pop(tid, None)
-            self.streak.pop(tid, None)
-            self._save()
 
 
 _guard: Optional[TrackerGuard] = None
@@ -297,25 +292,36 @@ def reset_guard_for_tests(guard: Optional[TrackerGuard] = None) -> None:
 
 # ------------------------------------------------------------ keys and Test
 
-def host_key(url: str) -> int:
-    """Counter key for a site host (www. ignored), outside the tracker id range."""
-    import zlib
-    from urllib.parse import urlsplit
-    host = (urlsplit(str(url or '')).hostname or '').lower()
+_KEY_RE = __import__('re').compile(r'^(site|host):[a-z0-9._-]{1,253}$')
+
+
+def normalize_host(url: str) -> str:
+    """Lowercase host name without a trailing dot or a leading 'www.' (IDNA
+    names in their ASCII form); scheme, port, path and query are ignored."""
+    try:
+        host = (urlsplit(str(url or '').strip()).hostname or '').lower().rstrip('.')
+    except ValueError:
+        return ''
+    try:
+        host = host.encode('idna').decode('ascii')
+    except UnicodeError:
+        pass
     if host.startswith('www.'):
         host = host[4:]
-    return 1_000_000_000 + zlib.crc32(host.encode('utf-8'))
+    return host
 
 
-def guard_key(cfg: Dict) -> int:
-    """Guard counters key for a tracker config. Saved trackers count by id.
-    AvistaZ-family trackers, and anything without an id (an unsaved form,
-    or a form whose URL no longer matches the saved one), count by site host,
-    so deleting and re-adding a site can't reset its limits."""
+def guard_key(cfg: Dict) -> str:
+    """Guard key for a tracker config, saved or not. Known site types count
+    by type (every mirror domain of a site shares one budget); Torznab and
+    Newznab count by normalized host. The saved record id never matters, so
+    deleting and re-adding, editing, an unsaved Test form or another path on
+    the same host can't reset a budget or a backoff."""
     from app import tracker_types as tt
-    if cfg.get('id') is None or tt.is_rate_strict(cfg.get('type')):
-        return host_key(cfg.get('url'))
-    return int(cfg['id'])
+    type_id = str(cfg.get('type') or '').strip().lower()
+    if tt.get_type(type_id) is not None and not tt.is_generic(type_id):
+        return f'site:{type_id}'
+    return f'host:{normalize_host(cfg.get("url")) or "-"}'
 
 
 def guarded_test(cfg: Dict, run, guard: Optional[TrackerGuard] = None) -> None:

@@ -101,8 +101,15 @@ TRACKER_TYPES: Dict[str, Dict[str, Any]] = {
     'privatehd': _avistaz_family('PrivateHD', 'https://privatehd.to'),
 }
 
-# Torznab and Newznab first, then the site definitions alphabetically.
-_GENERIC = ('torznab', 'newznab')
+# Torznab and Newznab are for trackers that serve their own Torznab or
+# Newznab API on a public host (never a Jackett or Prowlarr proxy; see
+# tracker_store). They come first, then the site definitions alphabetically.
+GENERIC_TYPES = ('torznab', 'newznab')
+_GENERIC = GENERIC_TYPES
+
+
+def is_generic(type_id: str) -> bool:
+    return str(type_id or '').strip().lower() in GENERIC_TYPES
 
 
 def type_ids() -> List[str]:

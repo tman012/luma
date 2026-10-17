@@ -18,7 +18,9 @@ to the URL it was saved with (see TrackerStore).
 
 Test goes through app.tracker_guard like searches do: it counts toward the
 per-tracker and global caps, a rate-limit or ban backoff refuses it, and a
-429 or ban answer starts a persisted backoff that honors Retry-After.
+429 or ban answer starts a persisted backoff that honors Retry-After. All of
+it is keyed by site (type for known sites, normalized host for
+Torznab/Newznab), never by record id.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from typing import Any, Callable, Dict, List, Optional
 from flask import Blueprint, jsonify, request
 
 from app import tracker_clients
-from app.tracker_guard import guarded_test
+from app.tracker_guard import guard_key, guarded_test, normalize_host
 from app.tracker_http import TrackerError
 from app.tracker_store import (STATUS_ERROR, STATUS_OK, CredentialsUnreadable, get_store)
 from app.tracker_types import public_types
@@ -106,19 +108,11 @@ def _not_found():
 
 
 def _throttle_keys(cfg: Dict[str, Any]) -> List[str]:
-    """The saved tracker (by id) and the site host (www. ignored): changing
-    the path, case or type of a URL does not get a fresh budget."""
-    from urllib.parse import urlsplit
-    try:
-        host = (urlsplit(str(cfg.get('url') or '')).hostname or '').lower()
-    except ValueError:
-        host = ''
-    if host.startswith('www.'):
-        host = host[4:]
-    keys = [f'host:{host}']
-    if cfg.get('id') is not None:
-        keys.append(f"id:{cfg['id']}")
-    return keys
+    """The guard key (site type, or normalized host for Torznab/Newznab) and
+    the normalized host: never the record id, so re-adding, editing, an
+    unsaved form or another path on the same host shares one budget."""
+    keys = [guard_key(cfg), f"host:{normalize_host(cfg.get('url')) or '-'}"]
+    return list(dict.fromkeys(keys))
 
 
 def _test_allowed(cfg: Dict[str, Any]) -> bool:

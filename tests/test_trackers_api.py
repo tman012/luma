@@ -97,7 +97,7 @@ def test_nothing_seeded_on_disk(owner_client, store):
 
 # ------------------------------------------------------------------ types
 
-def test_type_list_covers_prowlarr_types_with_schemas(owner_client):
+def test_type_list_has_generic_and_site_types_with_schemas(owner_client):
     c, _ = owner_client
     types = c.get('/api/trackers/types').get_json()['types']
     ids = [t['id'] for t in types]
@@ -243,7 +243,7 @@ def test_required_secret_cannot_be_cleared(owner_client, store):
 
 def test_optional_secret_can_be_cleared(owner_client, store):
     c, _ = owner_client
-    body = {'type': 'torznab', 'name': 'Jackett', 'url': 'http://jackett.example:8117/api/v2.0/indexers/x/results/torznab',
+    body = {'type': 'torznab', 'name': 'Own API', 'url': 'http://tracker.example:8117/api/torznab',
             'api_key': APIKEY}
     tid = _post(c, '/api/trackers', body).get_json()['tracker']['id']
     assert _put(c, f'/api/trackers/{tid}', {'api_key': ''}).status_code == 200
