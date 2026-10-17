@@ -106,6 +106,6 @@ def test_garbage_never_raises():
 
 
 def test_parse_file_bare_number_in_season_folder():
-    r = tv_release.parse_file('05.mkv', 'Show/Season 2/05.mkv')
+    r = tr.parse_file('05.mkv', 'Show/Season 2/05.mkv')
     assert (r.kind, r.season, r.episodes) == ('episode', 2, [5])
-    assert tv_release.parse_file('05.mkv', 'Show/Extras/05.mkv').kind == 'unknown'
+    assert tr.parse_file('05.mkv', 'Show/Extras/05.mkv').kind == 'unknown'
