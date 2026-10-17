@@ -114,7 +114,9 @@ def test_data_dir_resolvers_use_app_paths(tmp_path, monkeypatch):
 # 2) hero image containment ----------------------------------------------------
 
 @pytest.fixture
-def hero_client(tmp_path, monkeypatch):
+def hero_client(test_app, tmp_path, monkeypatch):
+    # test_app resets the sign-in mode, so random test order can't leave this
+    # local client behind a login redirect.
     import app.main as m
     hero = tmp_path / 'hero'
     hero.mkdir()

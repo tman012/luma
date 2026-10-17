@@ -2208,7 +2208,11 @@ class TestTMDbSearchesHonorRetryAfter(unittest.TestCase):
         with patch('app.main.requests.get') as get:
             r = local_client(self.main.app).get('/api/tmdb/match-search?query=Retryafterprobe')
         self.assertEqual(r.status_code, 200)
-        get.assert_not_called()
+        # requests.get is patched process-wide, so a background warm-up thread
+        # left by an earlier test (portal trending) may show up here; only TMDb
+        # search calls from this request matter.
+        searches = [c for c in get.call_args_list if c.args and '/search/' in str(c.args[0])]
+        self.assertEqual(searches, [])
 
     def test_refresh_tmdb_titles_skipped_when_backed_off(self):
         index = FastSearchIndex()

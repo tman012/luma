@@ -23,10 +23,21 @@ def _tmpdir(test, prefix):
     return d
 
 
+def _open_lan_settings(test, main):
+    """These tests serve files to a local client and must not depend on the
+    sign-in mode an earlier test left behind (random order in CI)."""
+    import copy
+    saved = copy.deepcopy(main.settings.get('security') or {})
+    main.settings.update({'security': {'auth_required': 'disabled_local', 'trusted_proxies': '',
+                                       'trusted_proxy_header': '', 'hostnames': ''}})
+    test.addCleanup(main.settings.update, {'security': saved})
+
+
 class TestSpaOutsideStatic(unittest.TestCase):
     def setUp(self):
         from app import main
         self.main = main
+        _open_lan_settings(self, main)
         self.client = main.app.test_client()
         self.static = _tmpdir(self, 'static_')          # like a bind-mounted ./static: no spa/
         self.spa = _tmpdir(self, 'spa_')
@@ -171,6 +182,7 @@ class TestHeroStartupOnce(unittest.TestCase):
 class TestLegacyHeroUrls(unittest.TestCase):
     def setUp(self):
         from app import main
+        _open_lan_settings(self, main)
         self.client = main.app.test_client()
         self.static = _tmpdir(self, 'static_')
         self.hero = _tmpdir(self, 'hero_')
