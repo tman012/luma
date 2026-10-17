@@ -2413,7 +2413,9 @@ def sources_all_results():
             # Trackers that were not searched or failed: name + short status only.
             'trackers': [{'name': x['name'], 'status': x['status']} for x in statuses],
         }
-        if releases:       # an empty answer is never cached: the next search asks again
+        # Cached only when every tracker answered: an empty answer, or one with a
+        # tracker that failed or was skipped, is asked again next time.
+        if releases and not statuses:
             _all_results_cache[cache_key] = (time.time(), payload)
         return jsonify(_all_results_public(payload))
 

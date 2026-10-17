@@ -323,6 +323,10 @@ class TrackerSearch:
                 str(tmdb_id or ''), media_type or '')
         ttl = TTL_INTERACTIVE if interactive else TTL_BACKGROUND
         now = time.time()
+        if refresh:
+            # An explicit Retry clears this tracker's failure backoff, as Settings
+            # Test does (auth, timeouts, bad answers). Rate limits and bans stay.
+            self.guard.clear(gk)
         with self._cache_lock:
             neg = self._neg_store()
             if refresh:

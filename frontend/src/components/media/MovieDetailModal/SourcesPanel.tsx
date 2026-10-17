@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { srcAbove, srcCancelBtn, srcPrimaryBtn, SRC_BLUE, SRC_HEADING_COLOR, NO_SOURCES, sourcesCount } from '../sourcesTheme';
-import { TrackerStatusNotice } from '../sourcesTrackerStatus';
+import { TrackerStatusBar, TrackerStatusNotice } from '../sourcesTrackerStatus';
 import type { TrackerStatus } from '@/services/allSourcesApi';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useMovieSourcesData } from './useMovieSourcesData';
@@ -604,6 +604,9 @@ function ExpandedSourcesView({
           {!loading && !error && releases.length === 0 && (trackers.length > 0
             ? <TrackerStatusNotice trackers={trackers} onRetry={onRetry} fontSize={22} />
             : <div data-sources-state="empty" style={{ color: SRC_HEADING_COLOR, fontSize: '22px', ...srcAbove }}>{NO_SOURCES}</div>
+          )}
+          {!loading && !error && releases.length > 0 && (
+            <TrackerStatusBar trackers={trackers} onRetry={onRetry} fontSize={18} />
           )}
           {!loading && !error && qualityGroups.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '560px', position: 'relative', zIndex: 1 }}>
@@ -1491,6 +1494,9 @@ function CompactSourcesView({
             )}
           </div>
         )}
+
+        {/* Some trackers failed while others returned rows */}
+        {!loading && !error && !noSources && <TrackerStatusBar trackers={trackers} onRetry={onRetry} />}
 
         {/* === STEP 1: Resolution === */}
         {!flatOverride && !loading && !error && visibleReleases.length > 0 && step === 'resolution' && (

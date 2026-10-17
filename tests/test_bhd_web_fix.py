@@ -211,10 +211,18 @@ def test_all_errors_logged_and_counted_as_failure(engine, caplog):
 
 
 def test_chain_stops_starting_attempts_after_its_time_budget(monkeypatch):
-    t = iter([0.0, 10.0, 50.0, 60.0, 70.0])
-    monkeypatch.setattr(tc, '_monotonic', lambda: next(t))
-    m = Mock(R(EMPTY))
+    clock = [0.0]
+    monkeypatch.setattr(tc, '_monotonic', lambda: clock[0])
+
+    class Slow(Mock):
+        def __call__(self, method, url, **kw):
+            clock[0] += 30.0                      # every request takes 30 s
+            return super().__call__(method, url, **kw)
+    m = Slow(R(EMPTY))
     assert movie(m) == [] and len(m.calls) == 2
+    # Each request only gets what is left of the 45 s chain budget.
+    assert [c['deadline_s'] for c in m.calls] == [45.0, 15.0]
+    assert tc.last_stats()['stopped'] == 'budget'
 
 
 # ------------------------------------------------------------------ budget per HTTP request

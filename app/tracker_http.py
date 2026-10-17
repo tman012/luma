@@ -492,15 +492,21 @@ def current_scope() -> Optional[AddressScope]:
 def request(method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
             params: Any = None, data: Any = None, json: Any = None,
             timeout: Optional[tuple] = None, max_bytes: int = MAX_BYTES,
-            follow_redirects: bool = True, session: Optional[requests.Session] = None) -> Response:
+            follow_redirects: bool = True, session: Optional[requests.Session] = None,
+            deadline_s: Optional[float] = None) -> Response:
     """One request with a size cap. Redirects are followed only to the same
     host (never https -> http), at most MAX_REDIRECTS times; any other
     redirect is returned as is so the caller can treat it (for example a
-    sign-in page). Raises TrackerError on timeouts and network errors."""
+    sign-in page). Raises TrackerError on timeouts and network errors.
+    *deadline_s* shortens the whole-request deadline (never past
+    TOTAL_DEADLINE_S), e.g. to what is left of a caller's own budget."""
     hdrs = {'User-Agent': USER_AGENT}
     hdrs.update(headers or {})
     cur_url, cur_method, cur_params, cur_data, cur_json = url, method.upper(), params, data, json
-    deadline = time.monotonic() + TOTAL_DEADLINE_S
+    total = TOTAL_DEADLINE_S if deadline_s is None else max(0.5, min(TOTAL_DEADLINE_S, float(deadline_s)))
+    deadline = time.monotonic() + total
+    if deadline_s is not None and timeout is None:
+        timeout = (min(CONNECT_TIMEOUT, total), min(READ_TIMEOUT, total))
     sess = None
     try:
         for _ in range(MAX_REDIRECTS + 1):

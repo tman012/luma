@@ -1,6 +1,6 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import { srcAbove, srcCancelBtn, srcPrimaryBtn, SRC_BLUE, SRC_HEADING_COLOR, NO_SOURCES, sourcesCount } from '../sourcesTheme';
-import { TrackerStatusNotice } from '../sourcesTrackerStatus';
+import { TrackerStatusBar, TrackerStatusNotice } from '../sourcesTrackerStatus';
 import { createPortal } from 'react-dom';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useTvSourcesData, type TvProcessedRelease } from './useTvSourcesData';
@@ -299,6 +299,9 @@ function ExpandedTvSourcesView({
           <div data-sources-state="error" style={{ color: SRC_HEADING_COLOR, fontSize: '22px', ...srcAbove }}>
             Failed to load sources
           </div>
+        )}
+        {!loading && !error && releases.length > 0 && (
+          <TrackerStatusBar trackers={trackers} onRetry={retry} fontSize={18} />
         )}
         {/* Scope rows — pick Full season vs an individual episode first. */}
         {!loading && !error && showScopeStep && (
@@ -1306,6 +1309,9 @@ function CompactTvSourcesView({
             )}
           </div>
         )}
+
+        {/* Some trackers failed while others returned rows */}
+        {!loading && !error && !noSources && <TrackerStatusBar trackers={trackers} onRetry={retry} />}
 
         {/* === STEP 0: Scope (full season vs individual episode) === */}
         {!flatOverride && !loading && !error && visibleReleases.length > 0 && step === 'scope' && (

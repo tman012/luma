@@ -1,4 +1,5 @@
 import { apiFetch } from '../../../apiClient';
+import { isMinimal } from '@/minimal';
 /**
  * useMovieSourcesData — the ONE implementation of "search sources for a movie".
  *
@@ -162,8 +163,12 @@ async function loadSources(
 
   // Both legs in flight at once — the indexer sweep is the slow one and
   // there's no reason to make Radarr wait behind it.
+  // LUMA_MINIMAL builds have no Radarr: the trackers are the only leg, so no
+  // /api/radarr call is made (it only answers 404 there).
+  const minimal = isMinimal();
+  if (minimal) arrClock.clear();
   const [arrOutcome, indexerOutcome] = await Promise.allSettled([
-    fetchArr(),
+    minimal ? Promise.reject(new Error('no radarr')) : fetchArr(),
     fetchAllResults(indexerTitle, 'movie', indexerYear, tmdbId, indexerClock.signal, refresh,
       (t) => { trackers = t; })
       .finally(() => indexerClock.clear()),

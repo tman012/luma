@@ -25,7 +25,7 @@ import { SegmentRow, sortTrackerTopsFirst, needsLibraryGrab, grabDisabledReason,
 import { fetchIndexerConfigured, useDownloadClientReady } from '@/services/sourcesAvailability';
 import { grabToLibrary } from '@/services/allSourcesApi';
 import { ManualMatchPicker } from '@/components/media/ManualMatchPicker';
-import { TrackerStatusNotice } from '@/components/media/sourcesTrackerStatus';
+import { TrackerStatusBar, TrackerStatusNotice } from '@/components/media/sourcesTrackerStatus';
 import { srcPanel, srcAbove, srcConfirmCard, srcPrimaryBtn, srcCancelBtn, SRC_ROW_BG, SRC_HEADING_COLOR, SRC_HOVER_CSS, NO_SOURCES } from '@/components/media/sourcesTheme';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useTabletPerf } from '@/hooks/useTabletPerf';
@@ -1432,6 +1432,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                   </div>
                 ))}
 
+                {!sourcesLoading && !sourcesError && sourcesReleases.length > 0 && (
+                  <TrackerStatusBar trackers={sourcesTrackers} onRetry={sourcesRetry} fontSize={24} />
+                )}
                 {/* Results — multi-level drill-down */}
                 {!sourcesLoading && !sourcesError && sourcesReleases.length > 0 && (() => {
                   // Level 4: Confirm download

@@ -78,3 +78,100 @@ def test_stats_are_reset_per_search_so_torznab_is_not_judged_by_bhd(tmp_path):
     tc._set_stats(rows=9, steps=[{'error': 'response'}])        # left over from a BHD search
     assert eng.search_one(cfg, 'Dune', [2000], 10, True) == []
     assert eng._neg_store()                                      # judged on its own answer
+
+
+# ------------------------------------------------------------------ Tester bugs 5/6/3 (4049342)
+
+def test_bhd_request_never_outlives_the_chain_budget(monkeypatch):
+    """Bug 5: an attempt starting at 44.9 s gets the 3 s floor, not 60 s; the
+    whole chain stays well under the 75 s Sources wait."""
+    from tests.test_bhd_web_fix import Mock, movie
+    clock = [0.0]
+    monkeypatch.setattr(tc, '_monotonic', lambda: clock[0])
+    monkeypatch.setattr(tc, '_sleep', lambda s: clock.__setitem__(0, clock[0] + s))
+    seen = []
+
+    class M(Mock):
+        def __call__(self, method, url, **kw):
+            seen.append(kw['deadline_s'])
+            clock[0] += kw['deadline_s']          # worst case: every request runs to its deadline
+            return R(EMPTY)
+    movie(M(R(EMPTY)))
+    assert seen[0] == tc.BHD_CHAIN_BUDGET_S and all(d <= tc.BHD_CHAIN_BUDGET_S for d in seen)
+    assert clock[0] <= tc.BHD_CHAIN_BUDGET_S + tc.BHD_MIN_REQUEST_S + tc.BHD_PAGE_GAP_S * 3 < 75
+
+
+def test_no_new_page_past_the_chain_deadline(monkeypatch):
+    from tests.fixtures import bhd_pages
+    from tests.test_bhd_web_fix import Mock, movie
+    clock = [0.0]
+    monkeypatch.setattr(tc, '_monotonic', lambda: clock[0])
+
+    class M(Mock):
+        def __call__(self, method, url, **kw):
+            clock[0] += 50.0
+            return super().__call__(method, url, **kw)
+    m = M(R(bhd_pages.page1()), R(bhd_pages.page2()))       # page 1 of 2
+    out = movie(m)
+    assert len(m.calls) == 1 and len(out) == 100 and tc.last_stats()['stopped'] == 'budget'
+
+
+def test_tracker_http_request_deadline_is_capped_by_the_caller(monkeypatch):
+    from app import tracker_http as th
+    seen = {}
+
+    class S:
+        def request(self, *a, **kw):
+            seen.update(kw)
+            raise th.requests.exceptions.Timeout()
+
+        def close(self):
+            pass
+    monkeypatch.setattr(th, 'check_target', lambda u: ('93.184.216.34', 443))
+    monkeypatch.setattr(th, '_pinned_session', lambda u, a: S())
+    with pytest.raises(th.TrackerError):
+        th.request('GET', 'https://t.example/x', deadline_s=4.0)
+    assert seen['timeout'] == (min(th.CONNECT_TIMEOUT, 4.0), min(th.READ_TIMEOUT, 4.0))
+
+
+def test_retry_clears_the_trackers_failure_backoff_like_test(engine):
+    """Bug 6: Retry (refresh) asks again at once after an auth/http backoff."""
+    eng, mock = engine
+    eng.guard.failure('site:beyondhd', 'auth')
+    st = []
+    LumaTrackersClient(eng).search_all('Dune', 'movie', None, statuses=st)
+    assert st and st[0]['status'] == 'auth' and not mock.calls       # backoff: nothing sent
+    mock.resps = [R(WEB_ONLY)]
+    st = []
+    out = LumaTrackersClient(eng).search_all('Dune', 'movie', None, refresh=True, statuses=st)
+    assert len(out) == 4 and not st and eng.guard.blocked('site:beyondhd') is None
+
+
+@pytest.mark.parametrize('kind', ['rate', 'banned'])
+def test_retry_never_clears_a_rate_limit_or_ban(engine, kind):
+    eng, mock = engine
+    eng.guard.failure('site:beyondhd', kind)
+    LumaTrackersClient(eng).search_all('Dune', 'movie', None, refresh=True)
+    assert not mock.calls and eng.guard.blocked('site:beyondhd')[1] == kind
+
+
+def test_partial_failure_is_not_route_cached(test_app, monkeypatch):
+    """Bug 3: rows from one tracker plus another tracker's error are shown with
+    that tracker's status, and the answer is not cached."""
+    import app.indexer_api as ia
+    import app.main
+
+    class Fake(LumaTrackersClient):
+        def __init__(self):
+            pass
+
+        def search_all(self, q, mt, year=None, tmdb_id=None, refresh=False, statuses=None):
+            statuses.append({'id': 2, 'name': 'BHD', 'status': 'unavailable'})
+            return [{'title': 'Dune.2021.1080p.WEB-DL-GRP', 'indexer': 'IPT', 'indexer_id': 1, 'size': 1,
+                     'seeders': 5, 'download_url': '/api/trackers/release/abc', 'guid': 'g1'}]
+    monkeypatch.setattr(ia, 'get_indexer_client', lambda s: Fake())
+    monkeypatch.setattr(app.main, '_indexer_viewer_denied', lambda: None)
+    app.main._all_results_cache.clear()
+    j = test_app.test_client().get('/api/sources/all-results?title=Dune&media_type=movie').get_json()
+    assert len(j['releases']) == 1 and j['trackers'] == [{'name': 'BHD', 'status': 'unavailable'}]
+    assert not app.main._all_results_cache

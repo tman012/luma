@@ -252,7 +252,8 @@ def _bhd_error(data: Dict[str, Any]) -> None:
 
 
 _TRAILING_YEAR_RE = re.compile(r'\s+(?:19|20)\d{2}$')
-BHD_CHAIN_BUDGET_S = 45.0         # no new attempt after this; Sources waits 75 s
+BHD_CHAIN_BUDGET_S = 45.0         # no new attempt or page after this; Sources waits 75 s
+BHD_MIN_REQUEST_S = 3.0           # the first request of an attempt always gets this much
 # Failures after which another attempt may still work. Rate limits, bans and
 # rejected keys end the search at once (and start the guard's backoff).
 _BHD_RETRYABLE = ('response', 'http', 'timeout', 'network', 'redirect', 'too_large')
@@ -300,14 +301,20 @@ def beyondhd_search(cfg, query, categories, limit, request: Request = http_reque
         """All pages of one query; returns the raw rows it found."""
         found = 0
         for page in range(1, BHD_MAX_PAGES + 1):
+            if page > 1 and _monotonic() - started > BHD_CHAIN_BUDGET_S:
+                acc['stopped'] = 'budget'              # no new page past the chain deadline
+                break
             if acc['pages']:
                 _sleep(BHD_PAGE_GAP_S)
             b = dict(body)
             if page > 1:
                 b['page'] = page
+            # Every request may only use what is left of the chain's budget, so a
+            # slow answer can't carry the chain past it (Sources waits 75 s).
+            left = max(BHD_MIN_REQUEST_S, BHD_CHAIN_BUDGET_S - (_monotonic() - started))
             # BeyondHD's API takes the key in the path; this URL is never logged.
             resp = request('POST', f"{_base(cfg)}/api/torrents/{cfg.get('api_key', '')}", json=b,
-                           headers={'Accept': 'application/json'})
+                           headers={'Accept': 'application/json'}, deadline_s=left)
             acc['status'], acc['pages'] = resp.status, acc['pages'] + 1
             acc['bytes'] += len(resp.body or b'')
             step['http'] = resp.status
