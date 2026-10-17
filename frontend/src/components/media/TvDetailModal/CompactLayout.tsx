@@ -540,7 +540,7 @@ export function CompactLayout(props: TvModalViewProps) {
               }}
             >
               <p style={{ fontSize: '16px', color: 'rgba(255,255,255,0.8)' }}>
-                Could not load details
+                Couldn’t load details
               </p>
               <button
                 type="button"
@@ -549,7 +549,7 @@ export function CompactLayout(props: TvModalViewProps) {
                   padding: '10px 28px',
                   borderRadius: '8px',
                   border: 'none',
-                  background: 'rgba(255,255,255,0.1)',
+                  background: 'var(--color-accent)',
                   color: '#fff',
                   fontSize: '15px',
                   cursor: 'pointer',
@@ -1110,7 +1110,7 @@ export function CompactLayout(props: TvModalViewProps) {
                         padding: '0 16px',
                       }}
                     >
-                      Cast & Crew
+                      Cast &amp; crew
                     </h2>
                     <div
                       style={{
