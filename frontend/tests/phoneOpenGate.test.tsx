@@ -82,8 +82,15 @@ describe('phone sheet markup', () => {
   for (const f of ['components/media/MovieDetailModal/CompactLayout.tsx', 'components/media/TvDetailModal/CompactLayout.tsx']) {
     it(`${f}: stays off-screen until composed and paints the blur base, not navy`, () => {
       const s = read(f);
-      expect(s).toContain("phase === 'entering' || !composed\n      ? 'translate3d(0, 100%, 0)'");
+      // Hidden until composed, then the whole sheet fades in as one piece.
+      expect(s).toContain("const cardOpacity = phase === 'exiting' || (phase !== 'entering' && composed) ? 1 : 0;");
+      expect(s).toContain('opacity: cardOpacity,');
       expect(s).toContain("opacity: phase === 'entering' || !composed ? 0 : 1");
+      // No slide that uncovers an empty sheet; nothing inside fades on its own.
+      expect(s).not.toMatch(/phase === 'entering' \|\| !composed\n\s+\? 'translate3d\(0, 100%, 0\)'/);
+      expect(s).toContain("hold={titleState === 'hold'} instant");
+      expect(s).toContain("transition: 'none', // the sheet itself fades in, composed");
+      expect(s).toContain('ready={composed}'); // cast photos load after the reveal
       expect(s).toContain("const sheetBg = sheetBase(ultraBlurColors) ?? '#15102a'");
       expect(s).not.toContain("backgroundColor: '#15102a'");
     });

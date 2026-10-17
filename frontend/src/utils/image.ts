@@ -69,13 +69,13 @@ export function plexBackdrop(url: string | null | undefined): string | null {
   return phoneMinimal() ? sizedPlexImg(url, 780, 439) : url;
 }
 
-/** A clearlogo URL as the popup loads it: w500 (TMDb or Plex) on phones
+/** A clearlogo URL as the popup loads it: w300 (TMDb or Plex) on phones
  *  (minimal), through the TMDb proxy in minimal mode. */
 export function logoImg(url: string | null | undefined): string | null {
   if (!url) return null;
   if (!phoneMinimal()) return tmdbImg(url);
-  // Phones: TMDb w500, or a 500px-wide Plex transcode.
-  return sizedPlexImg(tmdbImg(url.replace('/t/p/original/', '/t/p/w500/')), 500);
+  // Phones: TMDb w300, or a 300px-wide Plex transcode (a logo is ~240 CSS px).
+  return sizedPlexImg(tmdbImg(url.replace('/t/p/original/', '/t/p/w300/')), 300);
 }
 
 /**
@@ -110,4 +110,15 @@ export function formatRuntime(ms: number | undefined | null): string {
 export function formatSize(bytes: number): string {
   const gb = bytes / (1024 * 1024 * 1024);
   return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(gb * 1024).toFixed(0)} MB`;
+}
+
+/** Plex's own people photos (metadata-static.plex.tv) are multi-MB originals:
+ *  load them as a small transcode through the image proxy instead. */
+const PLEX_PEOPLE = /^https:\/\/metadata-static\.plex\.tv\/[0-9a-f]\/people\/[0-9a-f]{32}\.(?:jpe?g|png)$/i;
+export const CAST_THUMB_W = 120;
+
+export function castThumb(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (PLEX_PEOPLE.test(url)) return withBase(`/api/img/plex?url=${encodeURIComponent(url)}&w=${CAST_THUMB_W}`);
+  return tmdbImg(url.replace('/t/p/original/', '/t/p/w185/'));
 }

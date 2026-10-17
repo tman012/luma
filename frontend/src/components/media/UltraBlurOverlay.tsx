@@ -22,6 +22,8 @@ interface UltraBlurOverlayProps {
   /** Stays invisible while true, then fades in with the backdrop and title
    *  (useTitleReveal). Replaces the delayed keyframe fade when set. */
   hold?: boolean;
+  /** No fade of its own on reveal (the phone sheet fades in as one). */
+  instant?: boolean;
   colors: UltraBlurColors | null;
   variant: 'web' | 'mobile' | 'tablet';
   /** Delay before opacity fade-in animation (ms). 0 = no animation. */
@@ -191,6 +193,7 @@ function BlurLayer({
   borderRadius,
   lite = false,
   hold,
+  instant,
 }: UltraBlurOverlayProps) {
   if (!colors) return null;
 
@@ -254,7 +257,7 @@ function BlurLayer({
           maskImage: mask,
           borderRadius: resolvedRadius,
           backfaceVisibility: 'hidden',
-          ...(hold !== undefined ? { opacity: hold ? 0 : 1, transition: 'opacity 0.45s ease-out' } : {}),
+          ...(hold !== undefined ? { opacity: hold ? 0 : 1, transition: instant ? 'none' : 'opacity 0.45s ease-out' } : {}),
           // Animation: start invisible if delayed, animate to visible
           ...(hasAnimation
             ? {

@@ -15,7 +15,7 @@ import {
   type OwnershipMap,
 } from '@/services/sonarrApi';
 import { resolveOwnership, mediaKey } from '@/services/ownership';
-import { detailFetch } from '@/services/modalPrefetch';
+import { detailFetch, remainingCap } from '@/services/modalPrefetch';
 import { TMDB_BACKDROP_WAIT_MS } from './useMovieDetail';
 import { useModalColors } from './useModalColors';
 import { logoImg } from '@/utils/image';
@@ -69,8 +69,13 @@ export function useTvDetail(
 
   // UltraBlur
 
+  // With a Plex key, the tmdbId prop (from search) is only a hint used to
+  // start /api/tv in parallel; Plex's validated tmdb_id decides. undefined
+  // until /api/plex/tv answers, then the id (or null for none / rejected).
+  const [plexTmdb, setPlexTmdb] = useState<number | null | undefined>(undefined);
+
   // Resolved tmdbId (from props or from show data)
-  const resolvedTmdbId = tmdbId ?? show?.tmdbId;
+  const resolvedTmdbId = ratingKey ? (plexTmdb ?? undefined) : (tmdbId ?? show?.tmdbId);
 
   // -------------------------------------------------------------------------
   // Extract trailer key + enrich cast from an already-fetched TMDb response.
@@ -177,19 +182,16 @@ export function useTvDetail(
       setLoading(true);
       setShow(null);
       setError(false);
+      setPlexTmdb(undefined);
 
       try {
-        if (tmdbId) {
+        if (tmdbId && !ratingKey) {
           // Fetch from TMDb
           const resp = await detailFetch(`/api/tv/${tmdbId}`, { signal: controller.signal });
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           const data = (await resp.json()) as Record<string, unknown>;
           if (!cancelled) {
             const parsed = parseTmdbTvResponse(data);
-            if (ratingKey) {
-              parsed.ratingKey = ratingKey;
-              parsed.isOwned = true;
-            }
             parsed.tmdbId = tmdbId;
             // Show modal immediately, fetch clearlogo in background
             setShow(parsed);
@@ -204,11 +206,15 @@ export function useTvDetail(
             }
           }
         } else if (ratingKey) {
-          // Fetch from Plex metadata API (works for any item type)
+          // Fetch from Plex metadata API (works for any item type). A tmdbId
+          // hint starts /api/tv now; detailFetch shares it with the request
+          // below when Plex confirms the same id.
+          if (tmdbId) void detailFetch(`/api/tv/${tmdbId}`).catch(() => null);
           const plexResp = await detailFetch(`/api/plex/tv/${ratingKey}`, { signal: controller.signal });
           if (!plexResp.ok) throw new Error('Could not fetch show details from Plex');
           const plexData = (await plexResp.json()) as Record<string, unknown>;
-          const plexTmdbId = plexData.tmdb_id as number | null;
+          const plexTmdbId = (plexData.tmdb_id as number | null) || null;
+          if (!cancelled) setPlexTmdb(plexTmdbId);
 
           // With a TMDb id, give TMDb a moment (usually cached by the card
           // prefetch) so the first backdrop shown is the final one; without
@@ -218,7 +224,7 @@ export function useTvDetail(
             let timer = 0;
             earlyTmdb = await Promise.race([
               detailFetch(`/api/tv/${plexTmdbId}`, { signal: controller.signal }).catch(() => null),
-              new Promise<null>((res) => { timer = window.setTimeout(() => res(null), TMDB_BACKDROP_WAIT_MS); }),
+              new Promise<null>((res) => { timer = window.setTimeout(() => res(null), remainingCap(TMDB_BACKDROP_WAIT_MS)); }),
             ]);
             window.clearTimeout(timer);
             if (cancelled) return;
@@ -408,8 +414,9 @@ export function useTvDetail(
   // the palette is fetched once with the final ids.
   // -------------------------------------------------------------------------
   const colorsEnabled = !!tmdbId || (!loading && (!!show || error));
+  const colorsTmdbId = ratingKey ? (plexTmdb === undefined ? tmdbId : (plexTmdb ?? undefined)) : resolvedTmdbId;
   const { colors: ultraBlurColors, settled: colorsSettled } =
-    useModalColors('tv', ratingKey, resolvedTmdbId, colorsEnabled);
+    useModalColors('tv', ratingKey, colorsTmdbId, colorsEnabled);
 
   return {
     show,

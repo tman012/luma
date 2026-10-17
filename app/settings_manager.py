@@ -1667,9 +1667,15 @@ class SettingsManager:
     def get_default_device_ip(self) -> str:
         """Return the IP of the first room (replaces devices.shield.ip)."""
         room = self.get_room(0)
-        if room:
-            return room.get("ip", "")
-        return ""
+        if not room:
+            return ""
+        host = room.get("host") or room.get("ip")
+        if not host:
+            for dev in room.get("devices") or []:
+                if isinstance(dev, dict) and dev.get("host"):
+                    host = dev["host"]
+                    break
+        return host or ""
 
     def get_default_adb_port(self) -> int:
         """Return the ADB port of the first room (replaces devices.shield.adb_port)."""

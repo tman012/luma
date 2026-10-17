@@ -8,7 +8,7 @@ import { apiFetch } from '@/apiClient';
 import { backdropUrl as tmdbBackdrop, logoImg } from '@/utils/image';
 import { colorsFromImage } from '@/utils/posterColors';
 import { parsePlexResponse, parsePlexTvResponse } from '@/utils/modalParsers';
-import { modalColors, prefetchModalColors, setSeedColors } from '@/services/modalColors';
+import { getSeedColors, modalColors, prefetchModalColors, setSeedColors } from '@/services/modalColors';
 
 export const DETAIL_TTL_MS = 5 * 60 * 1000;
 const MAX_ENTRIES = 150;
@@ -83,8 +83,11 @@ export function clearlogoPath(kind: 'movie' | 'tv', tmdbId: number): string {
 }
 
 /** Warm everything a movie/TV popup opened with these ids will need. */
-export async function warmDetail(kind: 'movie' | 'tv', ratingKey?: number, tmdbId?: number): Promise<void> {
+export async function warmDetail(
+  kind: 'movie' | 'tv', ratingKey?: number, tmdbId?: number, opts: { images?: boolean } = {},
+): Promise<void> {
   if (!ratingKey && !tmdbId) return;
+  const images = opts.images !== false;
   prefetchModalColors(kind, ratingKey, tmdbId);
   let tid = tmdbId;
   let plexBackdrop: string | null = null;
@@ -95,18 +98,22 @@ export async function warmDetail(kind: 'movie' | 'tv', ratingKey?: number, tmdbI
       tid = (parsed.tmdbId as number | undefined) || (plex.tmdb_id as number | undefined) || undefined;
       plexBackdrop = parsed.backdropUrl || parsed.posterUrl || null;
     }
-  } else if (ratingKey && kind === 'movie') {
-    void json(`/api/plex/movie/${ratingKey}`);
+  } else if (ratingKey) {
+    // Both ids (owned search results): warm Plex too, which runs the
+    // server-side tmdb_id type check the popup waits on.
+    void json(kind === 'movie' ? `/api/plex/movie/${ratingKey}` : `/api/plex/tv/${ratingKey}`);
   }
   const [tm, logo] = await Promise.all([
     tid ? json(kind === 'movie' ? `/api/movie/${tid}` : `/api/tv/${tid}`) : Promise.resolve(null),
     tid ? json(clearlogoPath(kind, tid)) : Promise.resolve(null),
   ]);
+  if (!images) return; // metadata only (rows further down the list)
   const path = tm?.backdrop_path as string | undefined;
   await Promise.all([
     preloadImage(path ? tmdbBackdrop(path) : plexBackdrop),
     preloadImage(logoImg((logo?.clearlogo_url as string | undefined) ?? null)),
-    modalColors(kind, ratingKey, tmdbId),
+    // With a poster-derived seed the palette never gates the reveal.
+    getSeedColors(kind, ratingKey, tmdbId) ? Promise.resolve(null) : modalColors(kind, ratingKey, tmdbId),
   ]);
 }
 
@@ -129,8 +136,19 @@ function pump(): void {
   }
 }
 
+/** Background prefetch is off when the user asked to save data or the link
+ *  is 2G (a tap still warms its own card). */
+export function canPrefetch(): boolean {
+  if (typeof navigator === 'undefined') return true;
+  const c = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  if (!c) return true;
+  if (c.saveData) return false;
+  return c.effectiveType !== '2g' && c.effectiveType !== 'slow-2g';
+}
+
 /** Queue a warm-up; returns a cancel that drops it if it hasn't started. */
 export function scheduleWarm(key: string, run: () => Promise<void>): () => void {
+  if (!canPrefetch()) return () => {};
   if (started.has(key) || queue.some((j) => j.key === key)) return () => {};
   const job = { key, run };
   queue.push(job);
@@ -150,6 +168,17 @@ export function scheduleWarm(key: string, run: () => Promise<void>): () => void 
 export const OPEN_CAP_MS = 600;
 export const REVEALED_EVENT = 'luma:detail-revealed';
 let pending = false;
+let tapAt = 0;
+const now = () => Date.now();
+
+/** Time left on the cap counted from the TAP (detail fetch included), or
+ * `fallback` when the popup wasn't opened through openWhenReady just now. */
+export function remainingCap(fallback: number): number {
+  if (!tapAt) return fallback;
+  const elapsed = now() - tapAt;
+  if (elapsed > 5000) return fallback;
+  return Math.max(0, OPEN_CAP_MS - elapsed);
+}
 
 export async function openWhenReady(
   kind: 'movie' | 'tv', ratingKey: number | undefined, tmdbId: number | undefined,
@@ -157,6 +186,7 @@ export async function openWhenReady(
 ): Promise<void> {
   if (pending) return;
   pending = true;
+  tapAt = now();
   const seed = colorsFromImage(card?.querySelector('img') ?? null);
   if (seed) setSeedColors(kind, ratingKey, tmdbId, seed);
   card?.setAttribute('data-pressed', 'true');
@@ -164,7 +194,7 @@ export async function openWhenReady(
   try {
     await Promise.race([
       warmDetail(kind, ratingKey, tmdbId).catch(() => {}),
-      new Promise<void>((res) => { timer = window.setTimeout(res, OPEN_CAP_MS); }),
+      new Promise<void>((res) => { timer = window.setTimeout(res, remainingCap(OPEN_CAP_MS)); }),
     ]);
   } finally {
     window.clearTimeout(timer);
@@ -185,4 +215,5 @@ export function _resetModalPrefetch(): void {
   started.clear();
   active = 0;
   pending = false;
+  tapAt = 0;
 }

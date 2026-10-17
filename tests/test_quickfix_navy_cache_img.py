@@ -48,7 +48,7 @@ def test_sw_and_index_are_never_cached(test_app):
         r = c.get(path, environ_base=LAN)
         assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-cache', path
     sw = (ROOT / 'static/sw.js').read_text()
-    assert "CACHE_VERSION = 'media-kiosk-v122'" in sw
+    assert "CACHE_VERSION = 'media-kiosk-v130'" in sw
     assert "fetch(event.request, { cache: 'no-store' })" in sw
     assert 'self.skipWaiting()' in sw and 'self.clients.claim()' in sw
 
@@ -67,6 +67,12 @@ class _Resp:
 
     def __init__(self, ctype='image/jpeg'):
         self.headers = {'Content-Type': ctype}
+
+    def iter_content(self, chunk_size=1):
+        yield self.content
+
+    def close(self):
+        pass
 
 
 @pytest.fixture
@@ -119,15 +125,16 @@ def test_proxy_refuses_non_images(proxy, ctype):
     c, _, state = proxy
     state['ctype'] = ctype
     r = c.get('/api/img/plex', query_string={'url': '/library/metadata/5/thumb'}, environ_base=LAN)
-    assert r.status_code == 502 and r.headers['Cache-Control'] == 'no-store'
+    assert r.status_code == 502 and r.headers['Cache-Control'] == 'private, no-store'
 
 
 @pytest.mark.parametrize('url', ['/library/metadata/5/art/1700000000', '/library/metadata/5/clearLogo/1700000000',
                                  '/library/metadata/5/thumb/1700000000'])
-def test_proxy_caches_versioned_backdrops_and_logos_a_day(proxy, url):
+def test_proxy_never_stores_versioned_backdrops_and_logos(proxy, url):
+    # Prod hotfix #12: replies can depend on who is signed in, so nothing is stored.
     c, _, _ = proxy
     r = c.get('/api/img/plex', query_string={'url': url, 'w': 1280, 'h': 720}, environ_base=LAN)
-    assert r.status_code == 200 and r.headers['Cache-Control'] == 'private, max-age=86400'
+    assert r.status_code == 200 and r.headers['Cache-Control'] == 'private, no-store'
 
 
 def test_proxy_errors_are_never_cached(proxy, monkeypatch):
@@ -137,7 +144,7 @@ def test_proxy_errors_are_never_cached(proxy, monkeypatch):
         status_code = 404
     monkeypatch.setattr(app.main.requests, 'get', lambda url, **k: Missing())
     r = c.get('/api/img/plex', query_string={'url': '/library/metadata/5/art/1700000000'}, environ_base=LAN)
-    assert r.status_code == 404 and r.headers['Cache-Control'] == 'no-store'
+    assert r.status_code == 404 and r.headers['Cache-Control'] == 'private, no-store'
 
 
 # -- minimal mode: no sign-up ------------------------------------------------------
@@ -161,3 +168,53 @@ def test_home_image_urls_include_url_base_once(test_app, monkeypatch):
         url = home_rails._img('/library/metadata/1/thumb', 300)
     assert url == '/luma/api/img/plex?url=%2Flibrary%2Fmetadata%2F1%2Fthumb&w=300'
     assert not re.search(r'/luma/luma/', url)
+
+
+# -- Plex people photos: thumbnails through the user's Plex transcoder only --------
+
+PEOPLE = 'https://metadata-static.plex.tv/b/people/b604d520903d1d1f445458008ab9d1f3.jpg'
+
+
+def test_people_photo_is_a_small_transcode_via_the_users_plex(proxy):
+    c, calls, _ = proxy
+    r = c.get('/api/img/plex', query_string={'url': PEOPLE, 'w': 120}, environ_base=LAN)
+    assert r.status_code == 200 and r.headers['Cache-Control'] == 'private, no-store'
+    assert len(calls) == 1
+    assert calls[0].startswith('http://plex.test/photo/:/transcode?') and 'width=120' in calls[0]
+    assert 'metadata-static.plex.tv' in calls[0]  # quoted inner url, fetched by Plex, not by us
+
+
+def test_people_photo_needs_a_size_and_is_capped(proxy):
+    c, calls, _ = proxy
+    assert c.get('/api/img/plex', query_string={'url': PEOPLE}, environ_base=LAN).status_code == 400
+    assert calls == []
+    c.get('/api/img/plex', query_string={'url': PEOPLE, 'w': 2000}, environ_base=LAN)
+    assert 'width=400' in calls[0]
+
+
+def test_people_photo_never_falls_back_to_the_original(proxy, monkeypatch):
+    c, _, _ = proxy
+    seen = []
+
+    class Refused(_Resp):
+        status_code = 500
+
+    def fake_get(url, **k):
+        seen.append(url)
+        return Refused()
+    monkeypatch.setattr(app.main.requests, 'get', fake_get)
+    r = c.get('/api/img/plex', query_string={'url': PEOPLE, 'w': 120}, environ_base=LAN)
+    assert r.status_code == 404 and r.headers['Cache-Control'] == 'private, no-store'
+    assert len(seen) == 1 and not any(u.startswith('https://metadata-static') for u in seen)
+
+
+@pytest.mark.parametrize('url', [
+    'https://metadata-static.plex.tv.evil.example/b/people/b604d520903d1d1f445458008ab9d1f3.jpg',
+    'http://metadata-static.plex.tv/b/people/b604d520903d1d1f445458008ab9d1f3.jpg',
+    'https://metadata-static.plex.tv/b/people/../../x.jpg',
+    'https://metadata-static.plex.tv/b/movies/b604d520903d1d1f445458008ab9d1f3.jpg',
+])
+def test_other_outside_urls_stay_refused(proxy, url):
+    c, calls, _ = proxy
+    assert c.get('/api/img/plex', query_string={'url': url, 'w': 120}, environ_base=LAN).status_code == 400
+    assert calls == []

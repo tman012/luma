@@ -67,15 +67,22 @@ function getRecorderMimeType(): string | undefined {
 // ---------------------------------------------------------------------------
 let _sharedTtsCtx: AudioContext | null = null;
 
-function getSharedTtsContext(): AudioContext {
+// Null where Web Audio is missing (older browsers, test DOMs), so the
+// gesture listener never throws.
+function getSharedTtsContext(): AudioContext | null {
   if (!_sharedTtsCtx || _sharedTtsCtx.state === 'closed') {
-    _sharedTtsCtx = new AudioContext();
+    const Ctor = typeof window !== 'undefined'
+      ? (window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
+      : undefined;
+    if (!Ctor) return null;
+    try { _sharedTtsCtx = new Ctor(); } catch { return null; }
   }
   return _sharedTtsCtx;
 }
 
 function _unlockAudio() {
   const ctx = getSharedTtsContext();
+  if (!ctx) return;
   if (ctx.state === 'suspended') {
     ctx.resume().catch(() => {});
   }
@@ -223,6 +230,11 @@ export function useVoiceAssistant(options?: UseVoiceAssistantOptions): UseVoiceA
 
         // --- 2. Resume the pre-unlocked AudioContext ---
         const ctx = getSharedTtsContext();
+        if (!ctx) {
+          console.warn('[TTS] Web Audio is not available');
+          setIsSpeaking(false);
+          return;
+        }
         if (ctx.state === 'suspended') {
           try { await ctx.resume(); } catch (e) { console.warn('[TTS] ctx.resume() failed:', e); }
         }

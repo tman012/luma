@@ -243,6 +243,22 @@ def calculate_popularity_score(item: Dict[str, Any]) -> float:
     return 0.0
 
 
+def tmdb_id_from_guids(guids, legacy_guid: Optional[str] = None) -> Optional[int]:
+    """The TMDb id from a Plex item's Guid list ([{'id': 'tmdb://603'}, ...]),
+    or from a legacy agent guid ('com.plexapp.agents.themoviedb://603?lang=en')."""
+    for g in guids or []:
+        gid = str((g or {}).get('id', '')) if isinstance(g, dict) else ''
+        if gid.startswith('tmdb://'):
+            try:
+                n = int(gid[len('tmdb://'):])
+            except ValueError:
+                continue
+            if n > 0:
+                return n
+    m = re.search(r'themoviedb://(\d+)', legacy_guid or '')
+    return int(m.group(1)) if m and int(m.group(1)) > 0 else None
+
+
 class FastSearchIndex:
     """In-memory media search index backed by Plex library data (movies + TV shows)."""
 
@@ -278,8 +294,8 @@ class FastSearchIndex:
         """Return [(section_id, title, media_type, plex_type)] for the sections to index."""
         try:
             resp = requests.get(f"{plex_url}/library/sections",
-                                params={'X-Plex-Token': plex_token},
-                                headers={'Accept': 'application/json'}, timeout=15)
+                                headers={'Accept': 'application/json', 'X-Plex-Token': plex_token},
+                                timeout=15, allow_redirects=False)
             resp.raise_for_status()
             dirs = resp.json().get('MediaContainer', {}).get('Directory', []) or []
         except Exception as e:
@@ -335,6 +351,7 @@ class FastSearchIndex:
                 'X-Plex-Token': plex_token,
                 'X-Plex-Container-Start': start,
                 'X-Plex-Container-Size': page_size,
+                'includeGuids': 1,  # tmdb:// id, so search results carry it
             }
             try:
                 resp = requests.get(
@@ -374,6 +391,7 @@ class FastSearchIndex:
                     'viewCount': item.get('viewCount', 0),
                     'viewOffset': item.get('viewOffset', 0),
                     'thumb': thumb,
+                    'tmdb_id': tmdb_id_from_guids(item.get('Guid'), item.get('guid')),
                 })
 
             start += page_size

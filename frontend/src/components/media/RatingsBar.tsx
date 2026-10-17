@@ -1,5 +1,5 @@
 import type { Ratings } from '@/utils/modalParsers';
-import { buildRatingItems } from '@/utils/ratingIcons';
+import { buildRatingItems, RATING_ICON_ASPECT } from '@/utils/ratingIcons';
 
 type RatingsBarSize = 'sm' | 'md' | 'lg' | 'xl';
 
@@ -29,12 +29,17 @@ export function RatingsBar({ ratings, size = 'md', style }: RatingsBarProps) {
         alignItems: 'center',
         justifyContent: 'center',
         gap: `${preset.gap}px`,
+        minHeight: `${preset.iconHeight}px`,
         marginTop: size === 'sm' ? '12px' : '14px',
         flexWrap: 'wrap',
         ...style,
       }}
     >
-      {items.map((item) => (
+      {items.map((item) => {
+        // Fixed box per icon (width from the file's aspect), set before load.
+        const h = Math.round(preset.iconHeight * (item.heightScale ?? 1));
+        const w = Math.round(h * (RATING_ICON_ASPECT[item.icon] ?? 1));
+        return (
         <div
           key={item.label}
           style={{
@@ -47,7 +52,9 @@ export function RatingsBar({ ratings, size = 'md', style }: RatingsBarProps) {
           <img
             src={item.icon}
             alt={item.label}
-            style={{ height: `${Math.round(preset.iconHeight * (item.heightScale ?? 1))}px`, width: 'auto' }}
+            width={w}
+            height={h}
+            style={{ height: `${h}px`, width: `${w}px`, display: 'block', flexShrink: 0 }}
           />
           <span
             style={{
@@ -59,7 +66,12 @@ export function RatingsBar({ ratings, size = 'md', style }: RatingsBarProps) {
             {item.value}
           </span>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
+
+/** Height the sm bar takes (margin + icon row), reserved on the phone sheet
+ *  while ratings are still loading so their arrival doesn't push content. */
+export const RATINGS_SLOT_SM = 12 + sizePresets.sm.iconHeight;

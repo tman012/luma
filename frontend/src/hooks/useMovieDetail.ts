@@ -11,7 +11,7 @@ import {
   type UltraBlurColors,
 } from '@/utils/modalParsers';
 import { apiFetch } from '../apiClient';
-import { detailFetch } from '@/services/modalPrefetch';
+import { detailFetch, remainingCap } from '@/services/modalPrefetch';
 import { useModalColors } from './useModalColors';
 
 // ---------------------------------------------------------------------------
@@ -45,7 +45,9 @@ export function useMovieDetail(
   const [detail, setDetail] = useState<MediaDetail | null>(null);
   const [ratings, setRatings] = useState<Ratings | null>(null);
   const [loading, setLoading] = useState(true);
-  const [ratingsLoading, setRatingsLoading] = useState(true);
+  // Minimal mode shows Plex ratings only: an unowned title has none to wait for.
+  const noRatings = isMinimal() && !ratingKey;
+  const [ratingsLoading, setRatingsLoading] = useState(!noRatings);
   const [error, setError] = useState(false);
   const [trailerKey, setTrailerKey] = useState<string | null | undefined>(undefined);
 
@@ -79,23 +81,29 @@ export function useMovieDetail(
                 .catch(() => null)
             : Promise.resolve(null);
 
-          const [plexData, tmdbFirst] = await Promise.all([plexPromise, tmdbPromise]);
+          const [plexData, tmdbRaced] = await Promise.all([plexPromise, tmdbPromise]);
           if (cancelled) return;
 
           const parsed = parsePlexResponse(plexData);
           parsed.ratingKey = ratingKey;
-          if (tmdbId) parsed.tmdbId = tmdbId;
+          // With a Plex key, the tmdbId prop (from search) is only a hint used
+          // to start /api/movie in parallel; Plex's validated tmdb_id decides.
+          // A mismatch (bad agent match, or the id isn't a movie) drops the
+          // early TMDb answer so an unrelated title never shows.
+          const plexTid = 'tmdb_id' in plexData ? ((plexData.tmdb_id as number | null) || undefined) : tmdbId;
+          const tmdbFirst = tmdbId && plexTid === tmdbId ? tmdbRaced : null;
+          parsed.tmdbId = plexTid ?? parsed.tmdbId;
 
           // Opened with only a Plex key (Home rails): get TMDb now, briefly,
           // so the first backdrop shown is the final one (no swap later).
           let tmdbData = tmdbFirst;
-          if (!tmdbData && !tmdbId && parsed.tmdbId) {
+          if (!tmdbData && parsed.tmdbId && parsed.tmdbId !== tmdbId) {
             let timer = 0;
             tmdbData = await Promise.race([
               detailFetch(`/api/movie/${parsed.tmdbId}`, { signal: controller.signal })
                 .then((r) => (r.ok ? (r.json() as Promise<Record<string, unknown>>) : null))
                 .catch(() => null),
-              new Promise<null>((res) => { timer = window.setTimeout(() => res(null), TMDB_BACKDROP_WAIT_MS); }),
+              new Promise<null>((res) => { timer = window.setTimeout(() => res(null), remainingCap(TMDB_BACKDROP_WAIT_MS)); }),
             ]);
             window.clearTimeout(timer);
             if (cancelled) return;
@@ -227,6 +235,7 @@ export function useMovieDetail(
   const movieYear = detail?.year;
   useEffect(() => {
     if (!movieTitle) return;
+    if (noRatings) { setRatingsLoading(false); return; }
 
     const controller = new AbortController();
     let cancelled = false;
@@ -311,7 +320,7 @@ export function useMovieDetail(
       cancelled = true;
       controller.abort();
     };
-  }, [movieTitle, movieYear, ratingKey, reloadNonce]);
+  }, [movieTitle, movieYear, ratingKey, reloadNonce, noRatings]);
 
   // -------------------------------------------------------------------------
   // Fetch UltraBlurColors — race Plex (fast) vs TMDb (slow but higher quality)
@@ -319,7 +328,9 @@ export function useMovieDetail(
   // -------------------------------------------------------------------------
   // Color blur: cached per item (warmed from card hover/tap), settled before
   // the popup leaves its loading state so it fades in with the backdrop.
-  const { colors: ultraBlurColors, settled: colorsSettled } = useModalColors('movie', ratingKey, tmdbId);
+  // With a Plex key, Plex's validated tmdb_id wins over the search hint.
+  const effectiveTmdbId = ratingKey && detail ? (detail.tmdbId ?? undefined) : tmdbId;
+  const { colors: ultraBlurColors, settled: colorsSettled } = useModalColors('movie', ratingKey, effectiveTmdbId);
 
   // -------------------------------------------------------------------------
   // Fetch clearlogo from TMDb — always prefer TMDb over Plex (Plex sometimes
@@ -329,7 +340,7 @@ export function useMovieDetail(
   // -------------------------------------------------------------------------
   useEffect(() => {
     if (!detail) return;
-    const id = tmdbId ?? detail.tmdbId;
+    const id = ratingKey ? detail.tmdbId : (tmdbId ?? detail.tmdbId);
     // Settled means a null logo is final ('no logo'), so the title shows as
     // text right away instead of waiting out the reveal cap.
     const settle = (url: string | null) => setDetail((prev) => prev
@@ -341,12 +352,12 @@ export function useMovieDetail(
       .then((data) => { if (!cancelled) settle(logoImg(data?.clearlogo_url ?? null)); })
       .catch(() => { if (!cancelled) settle(null); });
     return () => { cancelled = true; };
-  }, [detail?.tmdbId, tmdbId, reloadNonce]);
+  }, [!!detail, detail?.tmdbId, tmdbId, ratingKey, reloadNonce]);
 
   // -------------------------------------------------------------------------
   // Resolve tmdbId for sources: prefer the one from props, then from detail
   // -------------------------------------------------------------------------
-  const resolvedTmdbId = tmdbId ?? detail?.tmdbId;
+  const resolvedTmdbId = ratingKey && detail ? (detail.tmdbId ?? undefined) : (tmdbId ?? detail?.tmdbId);
 
   // -------------------------------------------------------------------------
   // Fetch trailer key + enrich cast with TMDb person IDs

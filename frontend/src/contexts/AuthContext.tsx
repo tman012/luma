@@ -86,6 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await apiFetch('/api/auth/me');
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.authenticated) {
+        noteSignedInUser(data.user?.id);
         setState({
           user: data.user,
           userSettings: data.user_settings || {},
@@ -127,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       const data = await res.json();
       if (res.ok && data.success) {
+        noteSignedInUser(data.user?.id);
         // Set initial auth state, then refresh to get full settings + needsSetup
         setState({
           user: data.user,
@@ -150,7 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await apiFetch('/api/auth/logout', { method: 'POST' });
     } catch {}
-    purgeCachedImages();
+    clearAllCaches();
     setState({ user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null, ...NO_START });
   }, []);
 
@@ -188,13 +190,26 @@ export function useAuth() {
   return ctx;
 }
 
-/** Sign-out: drop any poster an older service worker cached (v111+ never caches them). */
-function purgeCachedImages() {
+/** Last signed-in account on this device (an id, not a secret), so a switch
+ *  to another account clears what the previous one left behind. */
+export const LAST_USER_KEY = 'luma:last-user';
+
+/** Sign-out or account switch: the service worker and the page drop every
+ *  Cache Storage entry (the browser's own HTTP cache is left alone). */
+export function clearAllCaches(): void {
   try {
-    navigator.serviceWorker?.controller?.postMessage('PURGE_IMAGES');
+    navigator.serviceWorker?.controller?.postMessage('CLEAR_ALL_CACHES');
     if (typeof caches === 'undefined') return;
-    void caches.keys().then(names => Promise.all(names.map(n => caches.open(n).then(c => c.keys().then(reqs =>
-      Promise.all(reqs.filter(r => new URL(r.url).pathname.includes('/api/img/')).map(r => c.delete(r))))))))
-      .catch(() => {});
-  } catch { /* no cache access: nothing to purge */ }
+    void caches.keys().then((names) => Promise.all(names.map((n) => caches.delete(n)))).catch(() => {});
+  } catch { /* no cache access: nothing to clear */ }
+}
+
+export function noteSignedInUser(id: unknown): void {
+  if (id == null) return;
+  const now = String(id);
+  try {
+    const prev = localStorage.getItem(LAST_USER_KEY);
+    if (prev !== null && prev !== now) clearAllCaches();
+    localStorage.setItem(LAST_USER_KEY, now);
+  } catch { /* storage blocked: sign-out still clears */ }
 }
