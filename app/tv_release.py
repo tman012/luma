@@ -214,7 +214,7 @@ def parse_file(name: str, rel_path: str = '') -> Release:
     if folder_season is None:
         return r
     s = _strip(name)
-    m = _EP_ONLY_RE.search(s) or re.match(r'^\s*(\d{1,3})(?![0-9])\s*[-._ ]', s)
+    m = _EP_ONLY_RE.search(s) or re.match(r'^\s*(\d{1,3})(?![0-9])\s*(?:[-._ ]|$)', s)
     if m:
         out = Release(kind='episode', season=folder_season, episodes=[int(m.group(1))])
         out.title = r.title

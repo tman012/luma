@@ -1,0 +1,174 @@
+"""Phase 1 scan: shows, unmatched with candidates, file states, monitored=0,
+history, rows only for gone folders, Scan and library routes."""
+import json
+import os
+import time
+
+import pytest
+
+from app import tv_scan, tv_settings, tv_store, tv_tmdb
+from tests.test_file_management import HDR, minimal as minimal_app, store  # noqa: F401
+from tests.test_home_rails import REMOTE, _client
+from tests.test_tv_library_paths import tv_env  # noqa: F401
+from tests.tv_fake import fake_tmdb  # noqa: F401
+from tests.tv_tree import build
+
+PID = 't_0000aaaa'
+
+
+@pytest.fixture
+def lib(tv_env, fake_tmdb, tmp_path):  # noqa: F811
+    root = build(tv_env / 'TV', outside=tmp_path / 'outside')
+    tv_settings.save({'paths': [{'id': PID, 'name': 'TV', 'path': str(root)}]})
+    tv_scan._state.update(running=False, error=None, summary=None)
+    return root
+
+
+def rows(sql, *a):
+    with tv_store.connect() as conn:
+        return [dict(r) for r in conn.execute(sql, a)]
+
+
+def test_scan_matches_and_records(lib):
+    out = tv_scan.scan_all(now=1000.0)
+    assert out['paths'] == 1 and out['shows'] == 5 and out['unmatched'] == 3
+    shows = {r['folder']: r for r in rows('SELECT * FROM series')}
+    assert {f: s['tmdb_id'] for f, s in shows.items()} == {
+        'Severance (2022)': 95396, 'The Office (US) {tvdb-73244}': 2316, 'Dark [tmdbid-70523]': 70523,
+        'Taskmaster [imdbid-tt4934214]': 63770, 'The Daily Show': 4000}
+    assert 'Escaped (2010)' not in shows and '.hidden' not in shows and 'readme.txt' not in shows
+    assert all(s['monitored'] == 0 and s['monitor_new_seasons'] == 0 for s in shows.values())
+    assert shows['Severance (2022)']['tvdb_id'] == 371980 and shows['Severance (2022)']['imdb_id'] == 'tt11280740'
+    un = {r['folder']: r for r in rows('SELECT * FROM unmatched')}
+    assert set(un) == {'Mystery Show', 'Zzz Nothing', 'Empty Show (2020)'}
+    assert sorted(c['tmdb_id'] for c in json.loads(un['Mystery Show']['candidates'])) == [1001, 1002]
+    assert un['Zzz Nothing']['reason'] == 'no_results'
+    assert tv_scan.last_scan() == 1000.0
+
+
+def test_file_states(lib):
+    tv_scan.scan_all(now=1000.0)
+    f = {r['rel_path']: r for r in rows('SELECT * FROM episode_files')}
+    S = 'Severance (2022)/'
+    assert f[S + 'Season 01/Severance - S01E01 - Good News About Hell.mkv']['state'] == 'linked'
+    assert f[S + 'Season 01/Severance.S01E02.1080p.WEB-DL-GRP.mkv']['state'] == 'linked'
+    assert f[S + 'Season 01/Severance.S01E02.1080p.WEB-DL-GRP.mkv']['resolution'] == '1080p'
+    assert f[S + 'Season 01/Severance.S02E05.mkv']['state'] == 'mismatch'
+    assert f[S + 'Season 02/Severance.S02E01E02.2160p.mkv']['state'] == 'linked'
+    assert f[S + 'Season 02/Severance.S02E40.mkv']['state'] == 'mismatch'
+    assert f[S + 'Extras/Behind the scenes.mkv']['state'] == 'unrecognized'
+    assert S + 'Season 01/folder.jpg' not in f and S + 'Season 01/Severance.S01E01.nfo' not in f
+    assert f['The Office (US) {tvdb-73244}/Season 2/05.mkv']['state'] == 'linked'
+    assert f['The Daily Show/The.Daily.Show.2024.10.03.mkv']['state'] == 'linked'
+    assert 'Dark [tmdbid-70523]/link.S01E02.mkv' not in f            # symlink out of the library
+    assert all(r['origin'] == 'scan' for r in f.values())
+    multi = f[S + 'Season 02/Severance.S02E01E02.2160p.mkv']
+    eps = rows('SELECT e.season_number, e.episode_number FROM episode_file_links l JOIN episodes e'
+               ' ON e.id = l.episode_id WHERE l.file_id = ?', multi['id'])
+    assert sorted((e['season_number'], e['episode_number']) for e in eps) == [(2, 1), (2, 2)]
+    assert json.loads(multi['parsed'])['summary'] == 'multi S02E01E02'
+    st = os.stat(lib / 'Severance (2022)' / 'Season 02' / 'Severance.S02E01E02.2160p.mkv')
+    assert (multi['size'], multi['ino']) == (st.st_size, st.st_ino)
+    assert rows('SELECT COUNT(*) AS n FROM episodes WHERE monitored != 0')[0]['n'] == 0
+
+
+def test_history_records_matches(lib):
+    tv_scan.scan_all(now=1000.0)
+    h = rows("SELECT event, detail FROM history WHERE event = 'matched'")
+    vias = sorted(json.loads(r['detail'])['via'] for r in h)
+    assert vias == ['imdb', 'search', 'search', 'tmdb', 'tvdb']
+
+
+def test_rescan_is_stable_and_drops_gone_rows_only(lib):
+    tv_scan.scan_all(now=1000.0)
+    ids = {r['folder']: r['id'] for r in rows('SELECT id, folder FROM series')}
+    n_files = len(rows('SELECT id FROM episode_files'))
+    tv_scan.scan_all(now=2000.0)
+    assert {r['folder']: r['id'] for r in rows('SELECT id, folder FROM series')} == ids
+    assert len(rows('SELECT id FROM episode_files')) == n_files
+    os.rename(lib / 'Dark [tmdbid-70523]', lib.parent / 'Dark-moved-away')      # the user moved it
+    (lib / 'Severance (2022)' / 'Season 02' / 'Severance.S02E40.mkv').unlink()
+    tv_scan.scan_all(now=3000.0)
+    folders = {r['folder'] for r in rows('SELECT folder FROM series')}
+    assert 'Dark [tmdbid-70523]' not in folders and 'Severance (2022)' in folders
+    assert not any(r['rel_path'].endswith('S02E40.mkv') for r in rows('SELECT rel_path FROM episode_files'))
+
+
+def test_missing_library_path_keeps_its_rows(lib):
+    tv_scan.scan_all(now=1000.0)
+    before = len(rows('SELECT id FROM series'))
+    os.rename(lib, lib.parent / 'TV-unmounted')
+    out = tv_scan.scan_all(now=2000.0)
+    assert out['missing'] == [PID] and len(rows('SELECT id FROM series')) == before
+
+
+def test_scheduled_style_scan_keeps_unmatched_without_asking_tmdb(lib, fake_tmdb):  # noqa: F811
+    tv_scan.scan_all(now=1000.0)
+    fake_tmdb.calls.clear()
+    tv_scan.scan_all(now=2000.0, retry_unmatched=False)
+    assert not any(c[0] == 'search' for c in fake_tmdb.calls)
+    assert len(rows('SELECT id FROM unmatched')) == 3
+
+
+def test_same_show_in_two_folders(lib):
+    tv_scan.scan_all(now=1000.0)
+    (lib / 'Severance').mkdir()                      # added later: the first folder keeps the show
+    tv_scan.scan_all(now=2000.0)
+    un = {r['folder']: r for r in rows('SELECT * FROM unmatched')}
+    assert un['Severance']['reason'] == 'duplicate'
+    assert [c['tmdb_id'] for c in json.loads(un['Severance']['candidates'])] == [95396]
+    assert rows("SELECT folder FROM series WHERE tmdb_id = 95396") == [{'folder': 'Severance (2022)'}]
+
+
+def test_no_tmdb_key_stops_with_a_clear_error(lib, fake_tmdb):  # noqa: F811
+    fake_tmdb.fail = tv_tmdb.NO_KEY
+    assert tv_scan.run() is True
+    assert tv_scan.status()['error'] == 'Add a TMDB key in Connectors'
+    assert rows('SELECT id FROM series') == [] and rows('SELECT id FROM unmatched') == []
+
+
+def test_one_scan_at_a_time(lib):
+    assert tv_scan._scan_lock.acquire(blocking=False)
+    try:
+        assert tv_scan.run() is False and tv_scan.start() is False
+        assert tv_scan.status()['running'] is True
+    finally:
+        tv_scan._scan_lock.release()
+
+
+# ------------------------------------------------------------------ routes
+
+@pytest.fixture
+def owner(minimal_app, lib):
+    return _client(minimal_app)
+
+
+def test_scan_route_and_library_view(owner, lib, monkeypatch):
+    started = []
+    monkeypatch.setattr(tv_scan.threading, 'Thread',
+                        lambda target, kwargs, **k: type('T', (), {'start': lambda self: started.append(target(**kwargs))})())
+    r = owner.post('/api/settings/tv/scan', environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 202 and r.headers['Cache-Control'] == 'no-store' and started == [True]
+    body = owner.get('/api/settings/tv/library', environ_base=REMOTE, headers=HDR).get_json()
+    sev = next(s for s in body['shows'] if s['folder'] == 'Severance (2022)')
+    assert (sev['title'], sev['year'], sev['path_name'], sev['monitored']) == ('Severance', 2022, 'TV', False)
+    assert (sev['files'], sev['linked'], sev['mismatch'], sev['unrecognized']) == (6, 3, 2, 1)
+    assert {u['folder'] for u in body['unmatched']} == {'Mystery Show', 'Zzz Nothing', 'Empty Show (2020)'}
+    assert body['scan']['running'] is False and body['scan']['error'] is None and body['scan']['last_scan']
+
+
+def test_scan_route_409_while_running(owner):
+    assert tv_scan._scan_lock.acquire(blocking=False)
+    try:
+        r = owner.post('/api/settings/tv/scan', environ_base=REMOTE, headers=HDR)
+        assert r.status_code == 409 and r.get_json()['error'] == 'A scan is already running'
+    finally:
+        tv_scan._scan_lock.release()
+
+
+def test_routes_owner_only(minimal_app, lib):
+    _client(minimal_app)
+    other = _client(minimal_app, name='second')
+    for m, u in (('get', '/api/settings/tv/library'), ('post', '/api/settings/tv/scan')):
+        assert getattr(other, m)(u, environ_base=REMOTE, headers=HDR).status_code == 403
+        assert getattr(minimal_app.test_client(), m)(u, environ_base=REMOTE, headers=HDR).status_code == 401

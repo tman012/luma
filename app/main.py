@@ -21497,6 +21497,11 @@ app.register_blueprint(_section_trackers.bp)
 _tv_settings.init(owner_or_error=_start_flow._owner_or_error)
 app.register_blueprint(_tv_settings.bp)
 
+# TV library scan (Phase 1): TMDB key from Settings > Connectors.
+from app import tv_tmdb as _tv_tmdb, tv_library_routes as _tv_library_routes
+_tv_tmdb.init(get_key=lambda: settings.get('apis.tmdb.api_key') or os.environ.get('TMDB_API_KEY', ''))
+app.register_blueprint(_tv_library_routes.bp)
+
 
 if __name__ == '__main__':
     # Initialize services (database, caches, background threads)
