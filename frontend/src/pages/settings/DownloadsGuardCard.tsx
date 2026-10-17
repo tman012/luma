@@ -470,18 +470,15 @@ export function DownloadsGuardCard() {
               Cancel
             </button>
             <span className="text-[11px] text-rose-200/60">
-              This cannot be undone. Preview first to see exactly what goes.
+              This cannot be undone.
             </span>
           </>
         ) : (
           <>
             <button type="button" onClick={() => setConfirming(true)} disabled={busy !== null || running}
               className="rounded-lg border border-amber-500/25 bg-amber-500/12 px-3 py-2 text-[12px] font-semibold text-amber-300 disabled:opacity-40">
-              {running ? 'Running…' : 'Clean up now (deletes for real)'}
+              {running ? 'Running…' : 'Clean up now'}
             </button>
-            <span className="text-[11px] text-white/30">
-              Runs even when free space is above the floor. Preview is always safe.
-            </span>
           </>
         )}
       </div>

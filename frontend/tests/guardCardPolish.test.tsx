@@ -1,6 +1,6 @@
 // Tester ab1c841 #5 (full mode): navy glass Settings popup and Notifications popover,
 // MB amounts in the guard log, no "— preferred", no helper text on the guard card.
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -53,9 +53,13 @@ describe('guard card helper text', () => {
     const text = document.body.textContent || '';
     for (const helper of ['Watches free space', 'Nothing is deleted until this is on', 'How often to look',
       'Deleting starts below', 'How much to free', 'backstop', 'No preference', 'Spends the oldest',
-      'the figure the trigger uses', 'never treated as belonging']) {
+      'the figure the trigger uses', 'never treated as belonging', 'Preview first', 'Preview is always safe', 'deletes for real']) {
       expect(text).not.toContain(helper);
     }
+    fireEvent.click(await screen.findByRole('button', { name: 'Clean up now' }));
+    const confirm = document.body.textContent || '';
+    expect(confirm).toContain('This cannot be undone.');
+    expect(confirm).not.toContain('Preview first');
   });
 });
 
