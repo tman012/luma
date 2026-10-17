@@ -146,6 +146,18 @@ function indexerToProcessed(r: AllResultsRelease): TvProcessedRelease {
   };
 }
 
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/** The tracker query for a show: its title plus S01E05 for an episode or S01 for a season. */
+export function tvIndexerQuery(title: string | undefined, target: SourcesTarget): string {
+  const t = (title || '').trim();
+  if (!t) return '';
+  if (typeof target.season !== 'number' || !Number.isFinite(target.season)) return t;
+  if (target.type === 'season') return `${t} S${pad2(target.season)}`;
+  if (typeof target.episode === 'number') return `${t} S${pad2(target.season)}E${pad2(target.episode)}`;
+  return t;
+}
+
 interface UseTvSourcesDataOptions {
   target: SourcesTarget;
   tvdbId: number;
@@ -230,8 +242,10 @@ export function useTvSourcesData({
         // them client-side unless the user toggles "Show rejected".
         // Plain-text override replaces only this indexer query string. Omit year
         // while overriding so wrong matched metadata does not narrow to zero.
-        const indexerTitle = ((indexerQuery || '').trim() || title || '').trim();
-        const indexerYear = (indexerQuery || '').trim() ? null : (year ?? null);
+        // TV release names carry SxxEyy (or Sxx for a season), never the
+        // first-air year: the year is never sent for TV.
+        const indexerTitle = (indexerQuery || '').trim() || tvIndexerQuery(title, target);
+        const indexerYear = null;
         // Without Sonarr (or with no trackers) an answered sweep is still an
         // answer: only a sweep that failed outright counts toward an error.
         let indexerOk = !!indexerTitle;

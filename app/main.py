@@ -2228,7 +2228,8 @@ def sources_all_results():
             'total': len(releases),
             'releases': releases,
         }
-        _all_results_cache[cache_key] = (time.time(), payload)
+        if releases:       # an empty answer is never cached: the next search asks again
+            _all_results_cache[cache_key] = (time.time(), payload)
         return jsonify(payload)
 
     except Exception as e:

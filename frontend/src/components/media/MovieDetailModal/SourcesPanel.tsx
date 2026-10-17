@@ -1459,11 +1459,6 @@ function CompactSourcesView({
             <span style={{ fontSize: '17px', fontWeight: 600, color: 'rgba(255,255,255,0.7)', textAlign: 'center' }}>
               Sources not found
             </span>
-            <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.35)', textAlign: 'center', maxWidth: '300px', lineHeight: 1.4 }}>
-              {indexerQuery
-                ? 'No indexer hits for that plain-text query.'
-                : 'Fancy titles often miss on trackers — try Override search with a plain query.'}
-            </span>
             {indexerQuery && (
               <button
                 type="button"
