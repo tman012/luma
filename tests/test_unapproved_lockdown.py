@@ -131,3 +131,14 @@ def test_approval_takes_effect_without_new_session(people):
     ua.save_user_settings(ids['pending'], {'use_shared_server': True, 'plex_access_status': 'approved'})
     r = client.get('/api/library/recent/cached', environ_base=REMOTE)
     assert r.get_json(silent=True) != {'error': 'Not allowed'}
+
+@pytest.mark.parametrize('path', DATA)
+def test_own_server_user_without_approval_refused(people, path):
+    """PM decision: a user's own Plex server doesn't unlock the owner's data
+    (anyone can enter an address); only approved or shared access does."""
+    test_app, ids = people
+    uid = ua.create_user('ownserver', '1234')['id']
+    ua.save_user_settings(uid, {'plex_url': 'http://203.0.113.50:32400', 'plex_token': 'their-own'})
+    client = test_app.test_client()
+    client.set_cookie('luma_auth_session', ua.create_session(uid))
+    assert client.get(path, environ_base=REMOTE).status_code == 403
