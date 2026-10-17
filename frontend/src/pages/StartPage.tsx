@@ -4,6 +4,8 @@ import { apiFetch } from '../apiClient';
  *
  * Welcome (Continue with Plex) → (pick a server when there are several) →
  * Create account → (Access, full build only) → Home, with a one-time toast.
+ * On the same network as Luma, Welcome also offers Skip: Create account
+ * without Plex, which is connected later in Settings > Plex.
  * Only reachable while the install has no users (the backend refuses every
  * Plex step once an account exists) and never shown again once finished.
  */
@@ -19,7 +21,7 @@ import {
   primaryBtn, accentBtn, plexBtn, linkBtn, list, row, FONT, fieldInput,
 } from '@/components/start/StartUI';
 
-type Step = 'loading' | 'welcome' | 'servers' | 'connecting' | 'password' | 'access';
+type Step = 'loading' | 'welcome' | 'servers' | 'connecting' | 'password' | 'skip' | 'access';
 export type AuthRequired = 'disabled_local' | 'enabled';
 type Mode = AuthRequired;
 
@@ -60,6 +62,8 @@ export function StartPage() {
   const finishRef = useRef<() => void>(() => {});
   const [busy, setBusy] = useState(false);
   const [passwordSet, setPasswordSet] = useState(false);
+  const [canSkip, setCanSkip] = useState(false);
+  const [closed, setClosed] = useState(false);
   const pollRef = useRef<number | null>(null);
   const popupRef = useRef<Window | null>(null);
   const pollFnRef = useRef<() => void>(() => {});
@@ -78,8 +82,10 @@ export function StartPage() {
   // Resume where this browser left off (e.g. a reload mid-setup).
   useEffect(() => {
     let alive = true;
-    api<{ needs_start: boolean; in_progress: boolean; server?: string; password_set?: boolean; step?: string }>('/api/start/status').then(({ data }) => {
+    api<{ needs_start: boolean; in_progress: boolean; server?: string; password_set?: boolean; step?: string; skip?: boolean; closed?: boolean }>('/api/start/status').then(({ data }) => {
       if (!alive) return;
+      setCanSkip(!!data.skip);
+      setClosed(!!data.closed);
       if (data.needs_start && data.step === 'plex') {
         // Back from Plex (same window): keep polling the PIN this browser started.
         setStep('welcome');
@@ -190,6 +196,9 @@ export function StartPage() {
         <Center key="welcome">
           <Logo />
           <Bottom>
+            {closed ? (
+              <ErrorLine text="Setup closed. Restart Luma to try again." />
+            ) : <>
             {error && <ErrorLine text={error} />}
             {authUrl && !error ? (
               <>
@@ -198,10 +207,16 @@ export function StartPage() {
                 <button style={linkBtn} onClick={() => { stopPolling(); closePopup(); setAuthUrl(''); setError(''); }}>Cancel</button>
               </>
             ) : (
-              <button className="luma-start-btn" style={plexBtn} onClick={signInWithPlex} disabled={busy}>
-                <PlexMark /> Continue with Plex
-              </button>
+              <>
+                <button className="luma-start-btn" style={plexBtn} onClick={signInWithPlex} disabled={busy}>
+                  <PlexMark /> Continue with Plex
+                </button>
+                {canSkip && (
+                  <button type="button" style={skipBtn} onClick={() => { setError(''); setStep('skip'); }} disabled={busy}>Skip</button>
+                )}
+              </>
             )}
+            </>}
           </Bottom>
         </Center>
       )}
@@ -238,6 +253,18 @@ export function StartPage() {
         </Center>
       )}
 
+      {step === 'skip' && (
+        <Center key="skip">
+          <AccountStep
+            endpoint="/api/start/skip"
+            onSaved={async () => { setPasswordSet(true); await refreshUser(); if (isMinimal()) finish(); else setStep('access'); }}
+            onRestart={() => setStep('welcome')}
+            onBack={() => setStep('welcome')}
+            locked={busy}
+          />
+        </Center>
+      )}
+
       {step === 'access' && (
         <Center key="access">
           <AccessChooser onSaved={() => finish()} passwordSet={passwordSet} />
@@ -249,8 +276,8 @@ export function StartPage() {
 }
 
 /** Create account: the owner's username and password for /login. */
-export function AccountStep({ onSaved, onRestart, locked = false }: {
-  onSaved: () => void; onRestart: () => void; locked?: boolean;
+export function AccountStep({ onSaved, onRestart, onBack, locked = false, endpoint = '/api/start/account' }: {
+  onSaved: () => void; onRestart: () => void; onBack?: () => void; locked?: boolean; endpoint?: string;
 }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -262,7 +289,7 @@ export function AccountStep({ onSaved, onRestart, locked = false }: {
     e.preventDefault();
     if (busy) return;
     setSaving(true);
-    const { ok, data } = await sendJson('/api/start/account', { username, password });
+    const { ok, data } = await sendJson(endpoint, { username, password });
     setSaving(false);
     if (ok) { onSaved(); return; }
     if (data.restart) { onRestart(); return; }
@@ -297,10 +324,16 @@ export function AccountStep({ onSaved, onRestart, locked = false }: {
         <button type="submit" className="luma-start-btn" style={accentBtn} disabled={busy || !username.trim() || !password}>
           Create account
         </button>
+        {onBack && <button type="button" style={skipBtn} onClick={onBack} disabled={busy}>Back</button>}
       </Bottom>
     </form>
   );
 }
+
+/** Quiet text button, 44 px tall (Skip, Back). */
+const skipBtn: React.CSSProperties = {
+  ...linkBtn, minHeight: 44, minWidth: 88, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+};
 
 const pwLabel: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 6, width: '100%', fontSize: 13, fontWeight: 500,

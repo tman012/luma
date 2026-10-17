@@ -19,8 +19,11 @@ function stubMatchMedia() {
 }
 const LIBS = [{ id: '1', title: 'Movies', type: 'movie', enabled: true }, { id: '2', title: 'TV Shows', type: 'show', enabled: true }];
 const KIOSK = { id: '1', libraries: [{ id: '1', title: 'Movies' }, { id: '9', title: '4K Movies' }] };
+let plexOwner = true;
 function api() {
   return vi.fn(async (url: string, init?: RequestInit) => {
+    if (String(url).includes('/api/settings/plex/pin')) return json({ status: 'none' });
+    if (String(url).includes('/api/settings/plex')) return plexOwner ? json({ connected: false, server: '' }) : json({ error: 'Owner only' }, false);
     if (String(url).includes('/api/home/kiosk')) {
       if (init?.method === 'PUT') return json({ ...KIOSK, id: JSON.parse(String(init.body)).id });
       return json(KIOSK);
@@ -38,7 +41,7 @@ function renderAt(path: string) {
 }
 
 describe('Settings', () => {
-  beforeEach(() => { auth.user.is_admin = true; });
+  beforeEach(() => { auth.user.is_admin = true; plexOwner = true; });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
   it('web: persistent sidebar (Home, Settings > Home screen active) beside the section', async () => {
@@ -135,5 +138,24 @@ describe('Settings', () => {
     wide = true; stubMatchMedia(); vi.stubGlobal('fetch', api());
     renderAt('/settings/nope');
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/settings/home-screen'));
+  });
+
+  it('Plex: an owner-only sub-item under Settings; Not connected + Connect Plex', async () => {
+    wide = true; stubMatchMedia(); vi.stubGlobal('fetch', api());
+    renderAt('/settings/plex');
+    const item = await screen.findByRole('link', { name: 'Plex' });
+    expect(item.getAttribute('aria-current')).toBe('page');
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Plex');
+    expect((await screen.findByTestId('plex-server-name')).textContent).toBe('Not connected');
+    const btn = await screen.findByRole('button', { name: 'Connect Plex' });
+    expect(parseInt(btn.style.minHeight, 10)).toBeGreaterThanOrEqual(44);
+  });
+
+  it('non-owners: no Plex sub-item, and /settings/plex goes to Home screen', async () => {
+    wide = true; stubMatchMedia(); plexOwner = false; vi.stubGlobal('fetch', api());
+    renderAt('/settings/plex');
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/settings/home-screen'));
+    expect(screen.queryByRole('link', { name: 'Plex' })).toBeNull();
+    expect(screen.queryByTestId('plex-settings')).toBeNull();
   });
 });

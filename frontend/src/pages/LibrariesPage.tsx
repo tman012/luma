@@ -18,8 +18,12 @@ import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { useKioskWidth } from '@/components/home/KioskHome';
 import { CheckIcon, ChevronIcon, GripIcon, MenuButton, NavDrawer, SIDEBAR_W, Sidebar } from '@/components/nav/AppNav';
 import { NoticeToast } from '@/components/start/SetupToast';
+import { PlexSettings, usePlexOwner } from '@/components/home/PlexSettings';
 
-export const SETTINGS_SECTIONS = [{ slug: 'home-screen', label: 'Home screen' }] as const;
+export const SETTINGS_SECTIONS = [
+  { slug: 'home-screen', label: 'Home screen' },
+  { slug: 'plex', label: 'Plex' },   // owner only
+] as const;
 const DEFAULT_SECTION = SETTINGS_SECTIONS[0].slug;
 export const SAVE_FAILED = "Couldn't save";
 
@@ -36,6 +40,7 @@ export function SettingsPage() {
   const [drawer, setDrawer] = useState(false);
   const [busy, setBusy] = useState(false);
   const closeDrawer = useCallback(() => setDrawer(false), []);
+  const owner = usePlexOwner(!!user?.is_admin);
   useBodyScroll();
   if (loading) return null;
   if (!authenticated) return <Navigate to="/login" replace />;
@@ -46,7 +51,10 @@ export function SettingsPage() {
   const avatar = (size: number) => !implicit
     ? <AccountMenu name={user?.name || ''} busy={busy} onSignOut={signOut} size={size} />
     : <span style={{ width: size }} />;
-  const content = <HomeScreenSection admin={admin} wide={wide} />;
+  if (known.slug === 'plex' && owner === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
+  const content = known.slug === 'plex'
+    ? (owner ? <PlexSettings /> : null)
+    : <HomeScreenSection admin={admin} wide={wide} />;
 
   if (wide) {
     return (

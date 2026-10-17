@@ -8,23 +8,26 @@ import { useAuth } from '@/contexts/AuthContext';
 import { assetUrl } from '@/urlHelpers';
 import { FONT, LOGO_SRC } from '@/components/start/StartUI';
 import { LUMA_BLUE } from '@/ui/lumaButton';
+import { usePlexOwner } from '@/components/home/PlexSettings';
 
 export const SIDEBAR_W = 220;
 const NAVY = '#15102a';
 const GLASS = 'rgba(21,16,42,0.92)';
 
-interface NavSub { to: string; label: string }
+interface NavSub { to: string; label: string; ownerOnly?: boolean }
 interface NavEntry { to: string; label: string; icon: 'home' | 'settings'; adminOnly?: boolean; subs?: NavSub[] }
 
 export const NAV: NavEntry[] = [
   { to: '/', label: 'Home', icon: 'home' },
   { to: '/settings', label: 'Settings', icon: 'settings', adminOnly: true,
-    subs: [{ to: '/settings/home-screen', label: 'Home screen' }] },
+    subs: [{ to: '/settings/home-screen', label: 'Home screen' }, { to: '/settings/plex', label: 'Plex', ownerOnly: true }] },
 ];
 
 function useEntries(): NavEntry[] {
   const { user } = useAuth();
-  return NAV.filter(e => !e.adminOnly || user?.is_admin);
+  const owner = usePlexOwner(!!user?.is_admin);
+  return NAV.filter(e => !e.adminOnly || user?.is_admin)
+    .map(e => (e.subs ? { ...e, subs: e.subs.filter(s => !s.ownerOnly || owner) } : e));
 }
 
 // --- icons (lucide shapes, ISC) ----------------------------------------------

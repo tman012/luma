@@ -1,4 +1,6 @@
-"""Start flow for a brand-new install: Welcome, Sign in with Plex, Password, Access, Done.
+"""Start flow for a brand-new install: Welcome, Sign in with Plex (or Skip,
+same network only), Create account, Access, Done. Plex can be connected
+later from Settings > Plex (owner only, /api/settings/plex*).
 
 The Plex account that signs in becomes the owner (admin). The Access step
 (PUT /api/security) picks when a PIN is required, like Sonarr/Radarr v4's
@@ -44,6 +46,67 @@ bp = Blueprint('start_flow', __name__)
 _cfg: Dict[str, Any] = {}
 _pending: Dict[str, Dict[str, Any]] = {}   # start nonce -> {pin_id, token, servers}
 _lock = threading.Lock()
+# Held while the first (owner) account is created, by either path (Plex or
+# Skip): the check "no users yet" and the insert happen under it, so two
+# racing requests can never both become the owner. Luma runs one gunicorn
+# worker (gunicorn.conf.py), so a process lock covers every request.
+_first_account = threading.Lock()
+
+# The setup window: a fresh install can be claimed for 24 hours after this
+# process started. After that every setup endpoint refuses until Luma (the
+# container) restarts, so a forgotten install isn't claimable forever.
+SETUP_WINDOW = 24 * 3600
+_boot = time.monotonic()
+
+
+def setup_window_open() -> bool:
+    return time.monotonic() - _boot < SETUP_WINDOW
+
+
+def _window_closed():
+    """The refusal once the setup window has closed (None while it's open)."""
+    if needs_start() and not setup_window_open():
+        return jsonify({'error': 'Setup closed. Restart Luma to try again.', 'closed': True}), 403
+    return None
+
+
+# Headers that mean a proxy, tunnel or CDN relayed the request.
+_PROXY_HEADER_NAMES = ('forwarded', 'x-real-ip', 'via', 'true-client-ip', 'x-client-ip',
+                       'cdn-loop', 'x-original-forwarded-for')
+
+
+def _proxied(headers) -> bool:
+    for name in headers.keys():
+        n = name.lower()
+        if n.startswith(('x-forwarded-', 'cf-')) or n in _PROXY_HEADER_NAMES:
+            return True
+    return False
+
+
+def skip_allowed(req=None) -> bool:
+    """Skipping Plex (owner created by username and password alone) is only
+    for someone on the same network as Luma.
+
+    Judged by the real TCP peer. Forwarding headers count only from a
+    configured trusted proxy (security.trusted_proxies), and then the
+    forwarded client must itself be a LAN address. Anything relayed from an
+    untrusted peer (Caddy, a tunnel, any X-Forwarded-*/Forwarded/Via header)
+    and anything that came through Cloudflare (any cf-* header) is not LAN.
+    The Host must also be one of this install's own names, so a public page
+    rebinding its DNS to a LAN address can't claim the install from a
+    visitor's browser."""
+    from app import access
+    req = req or request
+    settings = _cfg.get('settings')
+    nets = access.trusted_proxies(settings) if settings is not None else []
+    peer = req.remote_addr or ''
+    if any(k.lower().startswith('cf-') for k in req.headers.keys()) or access.via_cloudflare(req):
+        return False
+    if _proxied(req.headers) and not access._in(nets, peer):
+        return False
+    if not access.is_known_host(req.host, settings):
+        return False
+    return access.is_local_request(req, settings)
 
 
 def init(*, settings, user_auth, session_cookie: str, client_id: str,
@@ -120,6 +183,9 @@ def _nonce() -> str:
 def _require_fresh():
     if not needs_start():
         return jsonify({'error': 'Luma is already set up'}), 409
+    closed = _window_closed()
+    if closed:
+        return closed
     st = _load_state()
     if not _nonce() or _nonce() != st.get('nonce'):
         # No (or a stale) start cookie: this browser didn't begin the sign-in.
@@ -187,7 +253,7 @@ def valid_host(host: str) -> Optional[str]:
     return host if known else None
 
 
-def forward_url(mode: str = 'popup') -> str:
+def forward_url(mode: str = 'popup', path: str = START_PATH) -> str:
     """Where Plex sends the browser after sign-in. Pop-up mode: nowhere (the
     opener polls the PIN and closes the pop-up). Same-tab mode: this server's
     validated origin plus the URL base and /start. Empty when the host can't
@@ -200,7 +266,7 @@ def forward_url(mode: str = 'popup') -> str:
         return ''
     scheme = 'https' if request.scheme == 'https' else 'http'
     base = (current_app.config.get('URL_BASE') or '').rstrip('/')
-    return f"{scheme}://{host}{base}{START_PATH}"
+    return f"{scheme}://{host}{base}{path}"
 
 
 def auth_url(code: str, forward: str = '') -> str:
@@ -304,6 +370,9 @@ def start_status():
     fresh = needs_start()
     out = {'needs_start': fresh, 'in_progress': (not fresh) and _in_progress(user)}
     if fresh:
+        out['skip'] = skip_allowed()
+        if not setup_window_open():
+            out['closed'] = True
         out['step'] = 'welcome'
         # This browser started a Plex sign-in that's still open (e.g. it
         # went to Plex in the same window): resume polling, no new PIN.
@@ -454,6 +523,9 @@ def start_account():
 def start_plex_pin():
     if not needs_start():
         return jsonify({'error': 'Luma is already set up'}), 409
+    closed = _window_closed()
+    if closed:
+        return closed
     try:
         pin = create_pin()
     except Exception as e:
@@ -547,11 +619,14 @@ def start_plex_server():
     st = _load_state()
     account = st.get('account') or {}
     ua = _cfg['user_auth']
-    try:
-        user = ua.create_user(_owner_name(ua, account.get('name')), secrets.token_urlsafe(24), is_admin=True,
-                              status='active', email=account.get('email') or None)
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 409
+    with _first_account:
+        if not needs_start():
+            return jsonify({'error': 'Luma is already set up'}), 409
+        try:
+            user = ua.create_user(_owner_name(ua, account.get('name')), secrets.token_urlsafe(24), is_admin=True,
+                                  status='active', email=account.get('email') or None)
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 409
     from app import minimal
     # A minimal (test) build never opens local addresses: every request signs in.
     _cfg['settings'].update({'security': {'auth_required': 'enabled' if minimal.enabled() else 'disabled_local'}})
@@ -574,6 +649,218 @@ def start_plex_server():
                     samesite='Strict', secure=request.is_secure, path=_setup_cookie_path())
     logger.info('Start: owner account created')
     return resp
+
+
+def _same_origin_browser_request() -> bool:
+    """A same-origin request: never cross-site (Sec-Fetch-Site), and an
+    Origin or Referer that names this server is required. Signed-out
+    requests skip the global CSRF guard, so Skip checks this itself."""
+    from app.auth_routes import is_same_origin
+    if request.headers.get('Sec-Fetch-Site', '').lower() in ('cross-site', 'same-site'):
+        return False
+    origin = request.headers.get('Origin')
+    referer = request.headers.get('Referer')
+    if origin:
+        return is_same_origin(origin)
+    return bool(referer) and is_same_origin(referer)
+
+
+def _validate_new_account(body) -> tuple:
+    """(username, password, error) with the same rules as Create account."""
+    ua = _cfg['user_auth']
+    username = body.get('username')
+    password = body.get('password')
+    if not isinstance(username, str) or not username.strip():
+        return None, None, 'Enter a username'
+    username = ua.normalize_name(username) if hasattr(ua, 'normalize_name') else username.strip()
+    if not username:
+        return None, None, 'Enter a username'
+    if len(username) > USERNAME_MAX:
+        return None, None, f'Use at most {USERNAME_MAX} characters for the username'
+    if '@' in username:
+        return None, None, "Username can't contain @"
+    problem = getattr(ua, 'name_problem', lambda n: None)(username)
+    if problem:
+        return None, None, problem
+    if not isinstance(password, str) or not password.strip():
+        return None, None, 'Enter a password'
+    space = ua.password_space_problem(password) if hasattr(ua, 'password_space_problem') else ''
+    if space:
+        return None, None, space
+    if len(password) < PASSWORD_MIN:
+        return None, None, f'Use at least {PASSWORD_MIN} characters'
+    if len(password) > PASSWORD_MAX:
+        return None, None, f'Use at most {PASSWORD_MAX} characters'
+    return username, password, None
+
+
+@bp.route('/api/start/skip', methods=['POST'])
+def start_skip():
+    """Skip Plex: the owner is created from a username and password alone.
+
+    Only while the install is fresh and the setup window is open, only from
+    the same network as Luma (skip_allowed: real LAN peer, no relay or
+    Cloudflare headers, one of this install's own host names), only from a
+    same-origin page, and only once: the "no users yet" check and the insert
+    happen under the first-account lock. Plex is connected later from
+    Settings > Plex."""
+    if not needs_start():
+        return jsonify({'error': 'Luma is already set up'}), 409
+    closed = _window_closed()
+    if closed:
+        return closed
+    if not skip_allowed() or not _same_origin_browser_request():
+        return jsonify({'error': 'Continue with Plex to set up Luma from here'}), 403
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({'error': 'Enter a username'}), 400
+    username, password, problem = _validate_new_account(body)
+    if problem:
+        return jsonify({'error': problem}), 400
+    ua = _cfg['user_auth']
+    with _first_account:
+        if not needs_start():
+            return jsonify({'error': 'Luma is already set up'}), 409
+        try:
+            user = ua.create_user(username, password, is_admin=True, status='active')
+        except ValueError as e:
+            return jsonify({'error': str(e)}), 400
+        from app import minimal
+        _cfg['settings'].update({'security': {'auth_required': 'enabled' if minimal.enabled() else 'disabled_local'}})
+        st = {'admin_via_start': True, 'completed': False, 'pin_set': False, 'password_set': True,
+              'owner_uid': user['id'], 'owner_plex_id': '', 'server_name': '', 'plex_skipped': True}
+        _save_state(st)
+    with _lock:
+        _pending.pop(_nonce(), None)
+    logger.info('Start: owner account created (Plex skipped)')
+    session = ua.create_session(user['id'])
+    resp = make_response(jsonify({'ok': True}))
+    from flask import current_app
+    resp.set_cookie(_cfg['session_cookie'], session, max_age=60 * 60 * 24 * 30,
+                    httponly=True, samesite='Lax', secure=request.is_secure,
+                    path=current_app.config.get('URL_BASE') or '/')
+    resp.delete_cookie(START_COOKIE, path='/')
+    return resp
+
+
+# ---------------------------------------------------------------------------
+# Settings > Plex: connect (or switch) the Plex server later. Owner only.
+# ---------------------------------------------------------------------------
+
+SETTINGS_PLEX_PATH = '/settings/plex'
+_owner_pending: Dict[int, Dict[str, Any]] = {}   # owner uid -> {pin_id, created, token, servers}
+
+
+def _owner_or_error():
+    """(user, None) for the signed-in owner; else (None, error response).
+    The owner is the account setup created; installs set up before the
+    Start flow fall back to the first admin."""
+    from flask import g
+    user = _cfg['get_current_user']()
+    if not user or getattr(g, 'implicit_user', False) or not user.get('id'):
+        return None, (jsonify({'error': 'Sign in first'}), 401)
+    if not user.get('is_admin'):
+        return None, (jsonify({'error': 'Owner only'}), 403)
+    owner = _load_state().get('owner_uid')
+    if not owner:
+        admins = [u for u in _cfg['user_auth'].list_users() if u.get('is_admin')]
+        owner = min((u['id'] for u in admins), default=None)
+    if user['id'] != owner:
+        return None, (jsonify({'error': 'Owner only'}), 403)
+    return user, None
+
+
+def _plex_configured() -> bool:
+    s = _cfg['settings']
+    return bool(s.get('plex.url') and s.get('plex.token'))
+
+
+@bp.route('/api/settings/plex', methods=['GET'])
+def settings_plex_status():
+    user, err = _owner_or_error()
+    if err:
+        return err
+    st = _load_state()
+    return jsonify({'connected': _plex_configured(), 'server': st.get('server_name') or ''})
+
+
+@bp.route('/api/settings/plex/pin', methods=['POST'])
+def settings_plex_pin():
+    user, err = _owner_or_error()
+    if err:
+        return err
+    try:
+        pin = create_pin()
+    except Exception as e:
+        logger.warning(f'Settings: could not create Plex PIN: {e}')
+        return jsonify({'error': "Couldn't reach Plex. Try again."}), 502
+    with _lock:
+        _owner_pending[user['id']] = {'pin_id': pin['id'], 'created': time.time()}
+    mode = (request.get_json(silent=True) or {}).get('mode')
+    if mode not in PLEX_AUTH_MODES:
+        mode = 'popup'
+    return jsonify({'id': pin['id'], 'auth_url': auth_url(pin['code'], forward_url(mode, SETTINGS_PLEX_PATH))})
+
+
+@bp.route('/api/settings/plex/pin', methods=['GET'])
+def settings_plex_poll():
+    user, err = _owner_or_error()
+    if err:
+        return err
+    with _lock:
+        p = dict(_owner_pending.get(user['id']) or {})
+    if not p.get('pin_id'):
+        return jsonify({'status': 'none'})
+    if time.time() - p.get('created', 0) > 15 * 60:
+        # A sign-in (and any Plex token it got) lives 15 minutes at most.
+        with _lock:
+            _owner_pending.pop(user['id'], None)
+        return jsonify({'status': 'expired'})
+    if not p.get('token'):
+        try:
+            token = check_pin(p['pin_id'])
+        except Exception as e:
+            logger.warning(f'Settings: Plex PIN check failed: {e}')
+            return jsonify({'status': 'waiting'})
+        if not token:
+            return jsonify({'status': 'waiting'})
+        try:
+            servers = get_owned_servers(token)
+        except Exception as e:
+            logger.warning(f'Settings: Plex server lookup failed: {e}')
+            return jsonify({'error': "Couldn't reach Plex. Try again."}), 502
+        p.update(token=token, servers=servers)
+        with _lock:
+            _owner_pending[user['id']] = p
+    return jsonify({'status': 'authorized',
+                    'servers': [{'machine_id': s['machine_id'], 'name': s['name']} for s in p.get('servers') or []]})
+
+
+@bp.route('/api/settings/plex/server', methods=['POST'])
+def settings_plex_server():
+    user, err = _owner_or_error()
+    if err:
+        return err
+    machine_id = ((request.get_json(silent=True) or {}).get('machine_id') or '')
+    machine_id = machine_id.strip() if isinstance(machine_id, str) else ''
+    with _lock:
+        p = dict(_owner_pending.get(user['id']) or {})
+    server = next((s for s in p.get('servers') or [] if s['machine_id'] == machine_id), None)
+    if not p.get('token') or not server or time.time() - p.get('created', 0) > 15 * 60:
+        return jsonify({'error': 'Sign in with Plex again'}), 409
+    token = server.get('access_token') or p['token']
+    conn = pick_connection(server, token)
+    if not conn:
+        return jsonify({'error': f"Couldn't connect to {server['name']}"}), 502
+    libraries = _cfg['on_plex_saved'](conn['uri'], token, machine_id)
+    with _lock:
+        _owner_pending.pop(user['id'], None)
+        st = _load_state()
+        st['server_name'] = server['name']
+        st.pop('plex_skipped', None)
+        _save_state(st)
+    logger.info(f"Settings: connected to Plex server via {conn['kind']} connection ({libraries} libraries)")
+    return jsonify({'ok': True, 'server': server['name'], 'libraries': libraries})
 
 
 @bp.route('/api/start/finish', methods=['POST'])

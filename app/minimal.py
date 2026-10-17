@@ -17,7 +17,8 @@ ALLOWED_PATHS = frozenset({
     '/', '/start', '/login', '/logout', '/unlock', '/health',
     '/manifest.json', '/sw.js', '/api/security', '/api/version',
     # Home (#11): rails, the Libraries choice and proxied posters. Sign-in required.
-    '/api/home', '/api/home/libraries', '/api/img/plex', '/settings', '/settings/libraries', '/settings/home-screen',
+    '/api/home', '/api/home/libraries', '/api/img/plex', '/settings', '/settings/libraries', '/settings/home-screen', '/settings/plex',
+    '/api/settings/plex', '/api/settings/plex/pin', '/api/settings/plex/server',
     # Web kiosk home (#12, >=1024px): prod's hero slideshow data. Sign-in required.
     '/api/hero/content', '/api/home/kiosk',
 })

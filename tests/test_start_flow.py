@@ -150,7 +150,7 @@ class StartFlowTest(unittest.TestCase):
 
     def test_full_flow(self):
         c = self.client
-        self.assertEqual(c.get('/api/start/status').json, {'needs_start': True, 'in_progress': False, 'step': 'welcome'})
+        self.assertEqual(c.get('/api/start/status').json, {'needs_start': True, 'in_progress': False, 'step': 'welcome', 'skip': True})
         with self._fake_plex(authorized=False):
             r = c.post('/api/start/plex/pin')
             self.assertEqual(r.status_code, 200)
