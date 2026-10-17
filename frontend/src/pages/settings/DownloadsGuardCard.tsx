@@ -104,8 +104,7 @@ function TrackerPicker({ summary }: { summary: DownloadsGuardTrackerSummary | nu
 
       {summary && !summary.available && (
         <p className="text-[12px] text-amber-300/70">
-          qBittorrent unreachable — trackers can’t be listed. While that is the case a
-          tracker-scoped run is refused rather than widened to everything.
+          qBittorrent unreachable
         </p>
       )}
 
@@ -128,13 +127,6 @@ function TrackerPicker({ summary }: { summary: DownloadsGuardTrackerSummary | nu
         })}
       </div>
 
-      <p className="text-[11px] text-white/35">
-        {selected.length === 0
-          ? 'No preference — deletes the oldest files in the folder regardless of tracker.'
-          : `Spends the oldest ${selected.length === 1 ? 'file' : 'files'} from ${
-              selected.length === 1 ? 'this tracker' : `these ${selected.length} trackers`
-            } first, then widens to everything else once they run dry.`}
-      </p>
 
       {summary && summary.unclassified_count > 0 && (
         <p className="text-[11px] text-white/30">
@@ -142,8 +134,6 @@ function TrackerPicker({ summary }: { summary: DownloadsGuardTrackerSummary | nu
           be matched to a tracker
           {summary.unknown_hosts.length > 0 &&
             `: ${summary.unknown_hosts.slice(0, 3).map((h) => h.host).join(', ')}`}
-          . These are never treated as belonging to a chosen tracker — they’re only
-          eligible once the chosen ones run out.
         </p>
       )}
     </div>
@@ -184,7 +174,6 @@ function StatusPanel({ status }: { status: DownloadsGuardStatus | null }) {
             {formatBytes(pending)} still downloading &rarr;{' '}
             <span className="font-semibold">{formatBytes(ev.projected_free_bytes)}</span> free
             when it lands
-            <span className="ml-1 text-white/30">(the figure the trigger uses)</span>
           </p>
         )}
       </div>
@@ -263,16 +252,16 @@ function EntryList({
 }
 
 /** Mirrors downloads_guard.summarise() so the card reads like the log. */
-function describe(r: DownloadsGuardResult): string {
+export function describe(r: DownloadsGuardResult): string {
   if (r.error) return r.error;
   if (!r.triggered) return r.reason || 'nothing to do';
   if (!r.freed_bytes) return `Nothing deleted — ${r.reason}`;
   const verb = r.dry_run ? 'Would free' : 'Freed';
   const parts = [`${verb} ${formatBytes(r.freed_bytes)} across ${r.deleted.length} entries`];
   if (r.freed_fallback_bytes) {
-    parts.push(
-      `${formatBytes(r.freed_preferred_bytes)} preferred + ${formatBytes(r.freed_fallback_bytes)} other`,
-    );
+    parts.push(r.freed_preferred_bytes
+      ? `${formatBytes(r.freed_preferred_bytes)} from chosen trackers + ${formatBytes(r.freed_fallback_bytes)} other`
+      : `${formatBytes(r.freed_fallback_bytes)} from other trackers`);
   }
   if (r.short) parts.push('short of target — ran out of eligible entries');
   if (r.failed.length) parts.push(`${r.failed.length} failed to delete`);
@@ -374,7 +363,6 @@ export function DownloadsGuardCard() {
           <path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" />
         </svg>
       }
-      note="Watches free space on the downloads folder. When it drops below the floor, permanently deletes the oldest downloads — from the trackers you nominate first, widening to everything else only once those run dry — until the reclaim amount is freed. Deletion cannot be undone. Files newer than 48 hours, in-flight torrents, and anything outside the downloads folder are never touched. Freeing a slab past the floor rather than just up to it is what stops it re-firing on every check."
       headerRight={
         <button type="button" onClick={handlePreview} disabled={busy !== null || running}
           className="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-[12px] font-semibold text-white/80 disabled:opacity-40">
@@ -382,19 +370,17 @@ export function DownloadsGuardCard() {
         </button>
       }
     >
-      <ToggleSwitch label="Enable Downloads Guard" path="automation.downloads_guard.enabled"
-        hint="Nothing is deleted until this is on" />
+      <ToggleSwitch label="Enable Downloads Guard" path="automation.downloads_guard.enabled" />
       <FormField label="Check every (minutes)" path="automation.downloads_guard.check_interval_minutes"
-        type="number" min={1} max={1440} hint="How often to look at free space (default 15)" />
+        type="number" min={1} max={1440} />
 
       <FormField label="Free-space floor (GB)" path="automation.downloads_guard.min_free_gb"
-        type="number" min={1} max={10000} hint="Deleting starts below this (default 150)" />
+        type="number" min={1} max={10000} />
       <FormField label="Reclaim per run (GB)" path="automation.downloads_guard.reclaim_gb"
-        type="number" min={1} max={2000} hint="How much to free once triggered (default 100)" />
+        type="number" min={1} max={2000} />
 
       <FormField label="Daily limit (GB)" path="automation.downloads_guard.daily_cap_gb"
-        type="number" min={0} max={20000}
-        hint="Most this may delete in a day — a backstop against a bad setting. 0 = no limit (default 500)" />
+        type="number" min={0} max={20000} />
 
       <TrackerPicker summary={summary} />
 

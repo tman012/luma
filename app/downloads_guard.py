@@ -336,10 +336,10 @@ def evaluate(settings=None, allow_fetch: bool = True) -> Dict[str, Any]:
     # guard firing above its own floor.
     def _where() -> str:
         if pending:
-            return (f"{projected / GIB:.0f} GB free once the "
-                    f"{pending / GIB:.0f} GB in flight lands "
-                    f"({free / GIB:.0f} GB free right now)")
-        return f"{free / GIB:.0f} GB free"
+            return (f"{_size(projected)} free once the "
+                    f"{_size(pending)} in flight lands "
+                    f"({_size(free)} free right now)")
+        return f"{_size(free)} free"
 
     if not out['available']:
         out['reason'] = f"downloads folder not readable ({use.get('path')})"
@@ -348,11 +348,11 @@ def evaluate(settings=None, allow_fetch: bool = True) -> Dict[str, Any]:
         out['reason'] = 'disabled'
         return out
     if projected >= floor:
-        out['reason'] = f"{_where()} is at or above the {floor / GIB:.0f} GB floor"
+        out['reason'] = f"{_where()} is at or above the {_size(floor)} floor"
         return out
     if cap and spent >= cap:
-        out['reason'] = (f"daily ceiling reached — {spent / GIB:.0f} GB already "
-                         f"deleted today of {cap / GIB:.0f} GB allowed")
+        out['reason'] = (f"daily ceiling reached — {_size(spent)} already "
+                         f"deleted today of {_size(cap)} allowed")
         return out
 
     out['triggered'] = True
@@ -361,8 +361,8 @@ def evaluate(settings=None, allow_fetch: bool = True) -> Dict[str, Any]:
     # trigger with nothing done and only a log line to show for it.
     allowed = want if not cap else min(want, cap - spent)
     out['target_bytes'] = allowed
-    out['reason'] = (f"{_where()} is below the {floor / GIB:.0f} GB floor — "
-                     f"reclaiming {allowed / GIB:.0f} GB")
+    out['reason'] = (f"{_where()} is below the {_size(floor)} floor — "
+                     f"reclaiming {_size(allowed)}")
     return out
 
 
@@ -449,13 +449,13 @@ def run_cycle(dry_run: bool = False, force: bool = False) -> Dict[str, Any]:
         spent = verdict['freed_today_bytes']
         if cap and spent >= cap:
             result['error'] = verdict['reason'] if 'ceiling' in verdict['reason'] else (
-                f"daily ceiling reached — {spent / GIB:.0f} GB already deleted today")
+                f"daily ceiling reached — {_size(spent)} already deleted today")
             return result
         want = verdict['reclaim_bytes']
         verdict['target_bytes'] = want if not cap else min(want, cap - spent)
         result['triggered'] = True
         result['reason'] = (f"manual run — reclaiming "
-                            f"{verdict['target_bytes'] / GIB:.0f} GB")
+                            f"{_size(verdict['target_bytes'])}")
 
     if not result['triggered']:
         return result
@@ -505,6 +505,18 @@ def run_cycle(dry_run: bool = False, force: bool = False) -> Dict[str, Any]:
     return result
 
 
+def _size(n: Any) -> str:
+    """Bytes as the settings card shows them (formatBytes): TB, GB or MB, so a
+    few MB never reads as "0 GB"."""
+    n = n or 0
+    if n >= 1024 ** 4:
+        tb = n / 1024 ** 4
+        return f"{tb:.0f} TB" if tb >= 10 else f"{tb:.1f} TB"
+    if n >= GIB:
+        return f"{round(n / GIB)} GB"
+    return f"{round(n / 1024 ** 2)} MB"
+
+
 def summarise(r: Dict[str, Any]) -> str:
     """One line describing a run, matching what the settings card renders."""
     if r.get('error'):
@@ -517,19 +529,20 @@ def summarise(r: Dict[str, Any]) -> str:
         return f"nothing deleted — {r.get('reason', 'no eligible entries')}"
 
     verb = 'would free' if r.get('dry_run') else 'freed'
-    parts = [f"{verb} {freed / GIB:.0f} GB across {len(r.get('deleted', []))} entries"]
+    parts = [f"{verb} {_size(freed)} across {len(r.get('deleted', []))} entries"]
     pref = r.get('freed_preferred_bytes', 0)
     fall = r.get('freed_fallback_bytes', 0)
     # Named whenever the run had to reach past the preferred trackers — that is
     # the signal the preferred pool has run dry, and it should never be silent.
     if fall:
-        parts.append(f"{pref / GIB:.0f} GB preferred + {fall / GIB:.0f} GB other")
+        parts.append(f"{_size(pref)} from chosen trackers + {_size(fall)} other" if pref
+                     else f"{_size(fall)} from other trackers")
     if r.get('short'):
         parts.append('short of target — ran out of eligible entries')
     if r.get('failed'):
         parts.append(f"{len(r['failed'])} failed to delete")
     if not r.get('dry_run'):
-        parts.append(f"{r.get('free_after_bytes', 0) / GIB:.0f} GB free now")
+        parts.append(f"{_size(r.get('free_after_bytes', 0))} free now")
     return ' · '.join(parts)
 
 
