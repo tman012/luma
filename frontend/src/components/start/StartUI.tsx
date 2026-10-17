@@ -184,6 +184,14 @@ export const accentBtn: React.CSSProperties = primaryBtn;
 export const plexBtn: React.CSSProperties = {
   ...primaryBtn, background: PLEX_AMBER, color: '#1f1f1f', display: 'flex', alignItems: 'center', justifyContent: 'center',
 };
+/** Shared text field and its label (Create account, /login). */
+export const fieldInput: React.CSSProperties = {
+  width: '100%', boxSizing: 'border-box', padding: '14px 16px', borderRadius: 12, fontSize: 16, fontFamily: FONT,
+  color: '#fff', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.14)', outline: 'none',
+};
+export const fieldLabel: React.CSSProperties = {
+  display: 'block', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.7)', textAlign: 'left', marginBottom: 6,
+};
 export const linkBtn: React.CSSProperties = {
   background: 'none', border: 'none', color: 'rgba(255,255,255,0.6)', fontSize: 15, fontFamily: FONT,
   padding: '10px 16px', cursor: 'pointer', textDecoration: 'none',

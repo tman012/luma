@@ -16,7 +16,7 @@ import { isMinimal } from '@/minimal';
 import { openPlexPopup, plexAuthMode } from '@/utils/plexAuth';
 import {
   StartShell, Center, Bottom, Title, ErrorLine, Status, Logo, LogoGap, PlexMark, PinPad,
-  primaryBtn, accentBtn, plexBtn, linkBtn, list, row, FONT,
+  primaryBtn, accentBtn, plexBtn, linkBtn, list, row, FONT, fieldInput,
 } from '@/components/start/StartUI';
 
 type Step = 'loading' | 'welcome' | 'servers' | 'connecting' | 'password' | 'access';
@@ -301,10 +301,7 @@ const pwLabel: React.CSSProperties = {
 const pwForm: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', maxWidth: 360,
 };
-const pwInput: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box', padding: '14px 16px', borderRadius: 12, fontSize: 16, fontFamily: FONT,
-  color: '#fff', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.14)', outline: 'none',
-};
+const pwInput: React.CSSProperties = fieldInput;
 
 /** "Require PIN" segmented choice with an inline keypad (entered twice). */
 export function AccessChooser({ onSaved, initial = 'disabled_local', pinSet = false, passwordSet = false }: {

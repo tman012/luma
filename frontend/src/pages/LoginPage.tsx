@@ -1,10 +1,12 @@
 /**
- * LoginPage — Dark themed login matching the landing page aesthetic.
+ * LoginPage — sign-in on Luma's navy backdrop, matching Get Started's
+ * Create account step: wordmark, 32px gap, heading, shared fields and the
+ * blue primary button.
  * Password fields use type="password" for proper keyboard on mobile.
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { primaryButtonColors } from '@/ui/lumaButton';
+import { StartShell, Logo, LogoGap, Title, primaryBtn, fieldInput, fieldLabel, linkBtn, FONT } from '@/components/start/StartUI';
 import { useNavigate, useLocation } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiFetch } from '../apiClient';
@@ -121,12 +123,16 @@ export function LoginPage() {
   }
 
   if (loading) {
-    return <div style={pageStyle}><div style={cardStyle}><p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, textAlign: 'center', margin: 0 }}>Loading…</p></div></div>;
+    return <StartShell step="login"><div /></StartShell>;
   }
 
   return (
-    <div style={pageStyle}>
-      <div style={cardStyle}>
+    <StartShell step="login">
+      <div style={columnStyle}>
+        <Logo />
+        <LogoGap />
+        <Title>{flow === 'signup' ? 'Create account' : 'Sign in'}</Title>
+        <div style={formBlockStyle}>
         {/* SIGN IN */}
         {flow === 'signin' && (
           <>
@@ -137,7 +143,7 @@ export function LoginPage() {
                   ref={emailRef} style={inputStyle} type="text" value={email}
                   onChange={(e) => { setEmail(e.target.value); setError(''); }}
                   onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
                   autoComplete="username" autoCapitalize="off" spellCheck={false} disabled={busy}
                 />
                 {error && <p style={errorStyle}>{error}</p>}
@@ -159,14 +165,14 @@ export function LoginPage() {
                   value={pin}
                   onChange={(e) => { setPin(e.target.value); setError(''); }}
                   onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
                   autoComplete="off"
                   name="pin-entry"
                   disabled={busy}
                 />
                 {error && <p style={errorStyle}>{error}</p>}
                 <button type="submit" style={{ ...primaryBtnStyle, opacity: (pin.length < 4 || busy) ? 0.5 : 1, cursor: (pin.length < 4 || busy) ? 'not-allowed' : 'pointer' }} disabled={busy || pin.length < 4}>
-                  {busy ? 'Signing In…' : 'Sign In'}
+                  {busy ? 'Signing in…' : 'Sign in'}
                 </button>
                 <button type="button" onClick={() => { setSigninStep('email'); setEmail(''); setPin(''); setError(''); }} style={linkBtnStyle}>
                   Use a different account
@@ -192,9 +198,6 @@ export function LoginPage() {
         {/* SIGN UP */}
         {flow === 'signup' && (
           <>
-            <h2 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 600, color: 'rgba(255,255,255,0.9)', textAlign: 'center' }}>
-              Create account
-            </h2>
             {signupStep === 'email' && (
               <form onSubmit={handleRegEmailNext}>
                 <label style={labelStyle}>Email address</label>
@@ -202,7 +205,7 @@ export function LoginPage() {
                   ref={regEmailRef} style={inputStyle} type="email" value={email}
                   onChange={(e) => { setEmail(e.target.value); setError(''); }}
                   onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
                   autoComplete="email" autoCapitalize="off"
                 />
                 {error && <p style={errorStyle}>{error}</p>}
@@ -221,7 +224,7 @@ export function LoginPage() {
                   ref={regPinRef} style={inputStyle} type="password" value={pin}
                   onChange={(e) => { setPin(e.target.value); setError(''); }}
                   onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
                   autoComplete="new-password"                />
                 {error && <p style={errorStyle}>{error}</p>}
                 <button type="submit" style={{ ...primaryBtnStyle, opacity: pin.length < 4 ? 0.5 : 1, cursor: pin.length < 4 ? 'not-allowed' : 'pointer' }} disabled={pin.length < 4}>
@@ -231,12 +234,12 @@ export function LoginPage() {
             )}
             {signupStep === 'confirm' && (
               <form onSubmit={handleRegisterSubmit}>
-                <label style={labelStyle}>Confirm Password</label>
+                <label style={labelStyle}>Confirm password</label>
                 <input
                   ref={confirmPinRef} style={inputStyle} type="password" value={confirmPin}
                   onChange={(e) => { setConfirmPin(e.target.value); setError(''); }}
                   onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; }}
+                  onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
                   autoComplete="new-password" disabled={busy}
                 />
                 {error && <p style={errorStyle}>{error}</p>}
@@ -268,8 +271,9 @@ export function LoginPage() {
             )}
           </>
         )}
+        </div>
       </div>
-    </div>
+    </StartShell>
   );
 }
 
@@ -277,66 +281,19 @@ export function LoginPage() {
 // Styles
 // ---------------------------------------------------------------------------
 
-const pageStyle: React.CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  background: 'radial-gradient(ellipse at 50% 40%, #3a1a3a 0%, #1a0a1e 40%, #0a0410 100%)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  padding: '24px 16px',
-  boxSizing: 'border-box',
-  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+const columnStyle: React.CSSProperties = {
+  minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+  padding: 'calc(env(safe-area-inset-top) + 32px) 24px calc(env(safe-area-inset-bottom) + 32px)', boxSizing: 'border-box',
+  fontFamily: FONT,
 };
 
-const cardStyle: React.CSSProperties = {
-  width: '100%',
-  maxWidth: 400,
-  background: 'rgba(255,255,255,0.06)',
-  border: '1px solid rgba(255,255,255,0.1)',
-  borderRadius: 16,
-  padding: '40px 36px 36px',
-  boxSizing: 'border-box',
-  backdropFilter: 'blur(24px)',
-  WebkitBackdropFilter: 'blur(24px)',
-};
+const formBlockStyle: React.CSSProperties = { width: '100%', maxWidth: 360, marginTop: 28 };
 
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  fontSize: 13,
-  fontWeight: 500,
-  color: 'rgba(255,255,255,0.5)',
-  marginBottom: 8,
-};
+const labelStyle: React.CSSProperties = fieldLabel;
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '12px 14px',
-  fontSize: 16,
-  color: 'rgba(255,255,255,0.95)',
-  background: 'rgba(255,255,255,0.06)',
-  border: '1px solid rgba(255,255,255,0.12)',
-  borderRadius: 8,
-  outline: 'none',
-  boxSizing: 'border-box',
-  transition: 'border-color 0.15s',
-  fontFamily: 'inherit',
-};
+const inputStyle: React.CSSProperties = { ...fieldInput, transition: 'border-color 0.15s' };
 
-const primaryBtnStyle: React.CSSProperties = {
-  display: 'block',
-  width: '100%',
-  padding: '13px 0',
-  marginTop: 20,
-  fontSize: 16,
-  fontWeight: 700,
-  ...primaryButtonColors,
-  border: 'none',
-  borderRadius: 50,
-  cursor: 'pointer',
-  fontFamily: 'inherit',
-  transition: 'opacity 0.15s',
-};
+const primaryBtnStyle: React.CSSProperties = { ...primaryBtn, display: 'block', marginTop: 24, transition: 'opacity 0.15s' };
 
 const errorStyle: React.CSSProperties = {
   color: '#f87171',
@@ -344,20 +301,7 @@ const errorStyle: React.CSSProperties = {
   margin: '10px 0 0',
 };
 
-const linkBtnStyle: React.CSSProperties = {
-  display: 'block',
-  width: '100%',
-  background: 'none',
-  border: 'none',
-  color: 'rgba(255,255,255,0.4)',
-  fontSize: 13,
-  cursor: 'pointer',
-  padding: '12px 0 0',
-  fontFamily: 'inherit',
-  textDecoration: 'underline',
-  textDecorationColor: 'rgba(255,255,255,0.15)',
-  textAlign: 'center',
-};
+const linkBtnStyle: React.CSSProperties = { ...linkBtn, display: 'block', width: '100%', textAlign: 'center', marginTop: 8 };
 
 const textLinkStyle: React.CSSProperties = {
   background: 'none',

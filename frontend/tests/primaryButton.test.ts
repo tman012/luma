@@ -21,8 +21,11 @@ describe('shared primary button', () => {
     expect(PRIMARY_BUTTON_CLASS).toContain('bg-accent');
     expect(read('index.css')).toContain('--color-accent: #3b82f6;');
   });
-  it.each(['pages/LoginPage.tsx', 'pages/MySettingsPage.tsx'])('%s uses the shared colors', (p) => {
-    expect(read(p)).toContain('...primaryButtonColors');
+  it('My Settings uses the shared colors', () => {
+    expect(read('pages/MySettingsPage.tsx')).toContain('...primaryButtonColors');
+  });
+  it('login uses the shared primary button', () => {
+    expect(read('pages/LoginPage.tsx')).toContain('{ ...primaryBtn,');
   });
   it('login and Get Started use sentence case', () => {
     expect(read('pages/LoginPage.tsx')).not.toContain('Create Account');
