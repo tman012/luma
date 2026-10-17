@@ -43,9 +43,17 @@ def test_rematch_repoints_and_relinks(scanned):
 
 
 def test_rematch_to_a_show_owned_by_another_folder(scanned):
+    # Tester tv1-8646479 M2: no 409 dead end. The pick moves Dark here; Dark's
+    # folder becomes the unmatched duplicate, its candidate Dark itself.
+    dark = _sid('Dark [tmdbid-70523]')
     out = tv_scan.rematch(_sid('Severance (2022)'), 70523, now=2000.0)
-    assert out['ok'] is False and out['status'] == 409 and out['error'] == tv_scan.TAKEN
-    assert rows('SELECT tmdb_id FROM series WHERE folder = ?', 'Severance (2022)')[0]['tmdb_id'] == 95396
+    assert out == {'ok': True, 'series_id': dark}
+    assert rows('SELECT id, tmdb_id FROM series WHERE folder = ?', 'Severance (2022)') == [{'id': dark, 'tmdb_id': 70523}]
+    assert rows('SELECT id FROM series WHERE tmdb_id = 95396') == []
+    un = rows('SELECT * FROM unmatched WHERE folder = ?', 'Dark [tmdbid-70523]')[0]
+    assert un['reason'] == 'duplicate' and [(c['tmdb_id'], c['title']) for c in json.loads(un['candidates'])] == [(70523, 'Dark')]
+    h = json.loads(rows("SELECT detail FROM history WHERE event = 'rematched' AND series_id = ?", dark)[-1]['detail'])
+    assert (h['from_folder'], h['from_tmdb_id'], h['folder']) == ('Dark [tmdbid-70523]', 95396, 'Severance (2022)')
 
 
 def test_rematch_unknown(scanned):
@@ -117,7 +125,8 @@ def test_match_routes(owner):
     assert r.status_code == 200
     assert next(s for s in r.get_json()['shows'] if s['id'] == sid)['title'] == 'Bluey'
     r = owner.put(f'/api/settings/tv/shows/{sid}/match', json={'tmdb_id': 70523}, environ_base=REMOTE, headers=HDR)
-    assert r.status_code == 409 and r.get_json()['error'] == tv_scan.TAKEN
+    assert r.status_code == 200 and 'Dark [tmdbid-70523]' in {u['folder'] for u in r.get_json()['unmatched']}
+    sid = next(s['id'] for s in r.get_json()['shows'] if s['folder'] == 'Severance (2022)')
     for bad in ({}, {'tmdb_id': '5'}, {'tmdb_id': True}, {'tmdb_id': -1}, [1], 'x'):
         r = owner.put(f'/api/settings/tv/shows/{sid}/match', json=bad, environ_base=REMOTE, headers=HDR)
         assert r.status_code == 400 and r.get_json()['error'] == 'Pick a show'

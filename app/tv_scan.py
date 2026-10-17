@@ -17,6 +17,10 @@ running a scan over a fixture tree and by reading this file's calls.
     mismatch      it names an episode, but the numbering doesn't fit
                   (unknown episode, or the folder says another season),
     unrecognized  no episode could be read from it.
+* Two folders with the same show: the better one keeps it (folder_rank:
+  exact title and year, then the most linked files, then naming); the other
+  is unmatched ('duplicate') with the show's real TMDB title as its
+  candidate. "Match" or "Wrong show?" on either moves the show there.
 * A folder or file that is gone loses its rows (rows only). A missing or
   unreadable library path is skipped as a whole, so an unmounted share never
   empties the list.
@@ -191,12 +195,17 @@ def refresh_episodes(sid: int, tmdb_id: int, now: float) -> None:
 
 def _store_unmatched(path_id: str, folder: str, m: Dict[str, Any], now: float, reason: Optional[str] = None) -> None:
     with tv_store.write() as conn:
-        conn.execute('INSERT INTO unmatched (path_id, folder, guess_title, guess_year, candidates, reason, ts)'
-                     ' VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(path_id, folder) DO UPDATE SET'
-                     ' guess_title = excluded.guess_title, guess_year = excluded.guess_year,'
-                     ' candidates = excluded.candidates, reason = excluded.reason, ts = excluded.ts',
-                     (path_id, folder, m['guess']['title'], m['guess']['year'],
-                      json.dumps(m.get('candidates') or []), reason or m.get('reason') or 'not_exact', now))
+        _store_unmatched_conn(conn, path_id, folder, m, now, reason)
+
+
+def _store_unmatched_conn(conn, path_id: str, folder: str, m: Dict[str, Any], now: float,
+                          reason: Optional[str] = None) -> None:
+    conn.execute('INSERT INTO unmatched (path_id, folder, guess_title, guess_year, candidates, reason, ts)'
+                 ' VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(path_id, folder) DO UPDATE SET'
+                 ' guess_title = excluded.guess_title, guess_year = excluded.guess_year,'
+                 ' candidates = excluded.candidates, reason = excluded.reason, ts = excluded.ts',
+                 (path_id, folder, m['guess']['title'], m['guess']['year'],
+                  json.dumps(m.get('candidates') or []), reason or m.get('reason') or 'not_exact', now))
 
 
 # --------------------------------------------------------------------------- files
@@ -256,6 +265,94 @@ def scan_files(sid: int, path_id: str, folder: str, root_real: str, now: float) 
     return counts
 
 
+# --------------------------------------------------------------------------- duplicates
+
+def _show_brief(row) -> Dict[str, Any]:
+    """The show a series row holds, as a picker candidate (its real TMDB title)."""
+    return {'tmdb_id': row['tmdb_id'], 'title': row['title'] or '', 'original_title': row['original_title'] or '',
+            'year': row['year'], 'poster_path': row['poster_path'], 'overview': (row['overview'] or '')[:500]}
+
+
+def _linkable(conn, sid: int, folder: str, root_real: str) -> int:
+    """How many video files in *folder* would link to show *sid*'s episodes (reads only)."""
+    return sum(1 for rel, _ in video_files(os.path.join(root_real, folder), root_real)
+               if classify(conn, sid, rel)[0] == 'linked')
+
+
+def folder_rank(folder: str, show, linked: int) -> Tuple[int, int, int, int]:
+    """Which of two folders holding the same show keeps it (higher wins):
+    1. match quality: the folder's title and year are the show's (2), its
+       title only (1), anything else, e.g. an ID-tagged release name (0);
+    2. the most files linked to the show's episodes;
+    3. naming: no id tag, then the shorter name."""
+    g = tv_match.parse_folder(folder)
+    try:
+        aliases = json.loads(show['aliases'] or '[]')
+    except (ValueError, TypeError):
+        aliases = []
+    names = {tv_match.normalize(t) for t in [show['title'], show['original_title'], *aliases] if t}
+    title_ok = bool(g['title']) and tv_match.normalize(g['title']) in names
+    quality = 2 if title_ok and g['year'] is not None and g['year'] == show['year'] else 1 if title_ok and g['year'] is None else 0
+    return quality, linked, int(not g['ids']), -len(folder)
+
+
+def _demote(conn, row, now: float) -> None:
+    """Record a show's old folder as an unmatched duplicate, its candidate the show itself."""
+    g = tv_match.parse_folder(row['folder'])
+    _store_unmatched_conn(conn, row['path_id'], row['folder'],
+                          {'guess': {'title': g['title'], 'year': g['year']}, 'candidates': [_show_brief(row)]},
+                          now, 'duplicate')
+
+
+def take_over(owner_id: int, path_id: str, folder: str, now: float, *, via: str, event: str,
+              drop_series_id: Optional[int] = None) -> int:
+    """Move show *owner_id* (its episodes, settings and history) to *folder*;
+    its old folder becomes an unmatched duplicate. *drop_series_id* is the
+    folder's own series row (Wrong show?), replaced by the show. Rows only."""
+    with tv_store.write() as conn:
+        old = conn.execute('SELECT * FROM series WHERE id = ?', (owner_id,)).fetchone()
+        if drop_series_id is not None and drop_series_id != owner_id:
+            prev = conn.execute('SELECT tmdb_id, title FROM series WHERE id = ?', (drop_series_id,)).fetchone()
+            conn.execute('DELETE FROM series WHERE id = ?', (drop_series_id,))
+        else:
+            prev = None
+        conn.execute('UPDATE series SET path_id = ?, folder = ? WHERE id = ?', (path_id, folder, owner_id))
+        conn.execute('DELETE FROM unmatched WHERE path_id = ? AND folder = ?', (path_id, folder))
+        _demote(conn, old, now)
+        detail = {'via': via, 'folder': folder, 'path_id': path_id, 'tmdb_id': old['tmdb_id'], 'title': old['title'],
+                  'from_folder': old['folder'], 'from_path_id': old['path_id']}
+        if prev is not None:
+            detail.update(from_tmdb_id=prev['tmdb_id'], from_title=prev['title'])
+        conn.execute('INSERT INTO history (ts, series_id, episode_ids, event, detail) VALUES (?, ?, ?, ?, ?)',
+                     (now, owner_id, '[]', event, json.dumps(detail)))
+    return owner_id
+
+
+def _resolve_duplicate(owner, pid: str, folder: str, root_real: str, now: float, via: str) -> Optional[int]:
+    """A scan found *folder* holding the show *owner* already has. The better
+    folder (folder_rank) keeps it; the other is an unmatched duplicate whose
+    candidate is the show's real TMDB title. The show id when *folder* won."""
+    owner_root = os.path.realpath(_path_of(owner['path_id']) or '')
+    with tv_store.connect() as conn:
+        mine = folder_rank(folder, owner, _linkable(conn, owner['id'], folder, root_real))
+        theirs_linked = conn.execute("SELECT COUNT(*) AS n FROM episode_files WHERE series_id = ? AND state = 'linked'",
+                                     (owner['id'],)).fetchone()['n']
+        if not theirs_linked and owner_root and os.path.isdir(os.path.join(owner_root, owner['folder'])):
+            theirs_linked = _linkable(conn, owner['id'], owner['folder'], owner_root)
+    theirs = folder_rank(owner['folder'], owner, theirs_linked)
+    if mine > theirs:
+        return take_over(owner['id'], pid, folder, now, via=via, event='matched')
+    g = tv_match.parse_folder(folder)
+    _store_unmatched(pid, folder, {'guess': {'title': g['title'], 'year': g['year']},
+                                   'candidates': [_show_brief(owner)]}, now, reason='duplicate')
+    return None
+
+
+def _path_of(path_id: str) -> Optional[str]:
+    from app import tv_settings
+    return next((p['path'] for p in tv_settings.load()['paths'] if p['id'] == path_id), None)
+
+
 # --------------------------------------------------------------------------- scan
 
 def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> Dict[str, int]:
@@ -275,8 +372,16 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
             conn.execute('DELETE FROM series WHERE path_id = ? AND folder = ?', (pid, f))
         for f in unmatched - set(folders):
             conn.execute('DELETE FROM unmatched WHERE path_id = ? AND folder = ?', (pid, f))
+    demoted, done = set(), set()
     for folder in folders:
-        row = known.get(folder)
+        done.add(folder)
+        if folder in demoted:                 # lost its show to a better folder in this scan
+            out['unmatched'] += 1
+            continue
+        with tv_store.connect() as conn:      # fresh: a duplicate may have moved a show this scan
+            r = conn.execute('SELECT id, folder, tmdb_id, tmdb_refreshed_at FROM series'
+                             ' WHERE path_id = ? AND folder = ?', (pid, folder)).fetchone()
+        row = dict(r) if r else None
         if row is None:
             if folder in unmatched and not retry_unmatched:
                 out['unmatched'] += 1
@@ -284,10 +389,19 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
             m = tv_match.match(folder)
             sid = None
             if m['status'] == 'matched':
-                sid = store_show(pid, folder, m['tmdb_id'], now, via=m['via'])
-                if sid is None:
-                    taken = [b for b in [tv_tmdb.brief({'id': m['tmdb_id'], 'name': m['guess']['title']})] if b]
-                    _store_unmatched(pid, folder, dict(m, candidates=taken), now, reason='duplicate')
+                with tv_store.connect() as conn:
+                    owner = conn.execute('SELECT * FROM series WHERE tmdb_id = ?', (m['tmdb_id'],)).fetchone()
+                if owner is not None:
+                    sid = _resolve_duplicate(owner, pid, folder, root_real, now, via=m['via'])
+                    if sid is not None and owner['path_id'] == pid:
+                        demoted.add(owner['folder'])
+                        if owner['folder'] in done:   # already counted as a show
+                            out['shows'] -= 1
+                            out['unmatched'] += 1
+                else:
+                    sid = store_show(pid, folder, m['tmdb_id'], now, via=m['via'])
+                    if sid is None:               # TMDB lost the show between the two reads
+                        _store_unmatched(pid, folder, dict(m, candidates=[]), now, reason='not_exact')
             else:
                 _store_unmatched(pid, folder, m, now)
             if sid is None:
@@ -442,7 +556,13 @@ def _apply(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str, eve
     with tv_store.connect() as conn:
         other = conn.execute('SELECT id FROM series WHERE tmdb_id = ?', (tmdb_id,)).fetchone()
     if other and other['id'] != series_id:
-        return {'ok': False, 'error': TAKEN, 'status': 409}
+        # The show is in another folder (a duplicate): the owner's pick moves
+        # it here and the other folder becomes the unmatched duplicate.
+        sid = take_over(other['id'], path_id, folder, now, via=via, event=event, drop_series_id=series_id)
+        root = _root_for(path_id)
+        if root is not None:
+            scan_files(sid, path_id, folder, root, now)
+        return {'ok': True, 'series_id': sid}
     if not tv_tmdb.show(tmdb_id):
         return {'ok': False, 'error': SHOW_NOT_FOUND, 'status': 404}
     sid = store_show(path_id, folder, tmdb_id, now, via=via, event=event, series_id=series_id)
