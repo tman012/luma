@@ -108,7 +108,7 @@ export interface Ratings {
 // Constants
 // ---------------------------------------------------------------------------
 
-export const CARD_BG = '#141414';
+export const CARD_BG = 'var(--color-kiosk-black)';
 
 /** Person silhouette SVG fallback for cast/crew with no photo */
 export const PERSON_FALLBACK_SVG = `data:image/svg+xml,${encodeURIComponent(

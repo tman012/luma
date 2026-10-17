@@ -5,7 +5,7 @@
 // anchored at bottom, clearlogo centered in upper portion, pill actions.
 // ---------------------------------------------------------------------------
 
-const CARD_BG = '#141414';
+const CARD_BG = 'var(--color-kiosk-black)';
 
 export const TOKENS = {
   tablet: {
@@ -72,7 +72,7 @@ export const TOKENS = {
   desktop: {
     overlay: {
       alignItems: 'center' as const,
-      background: 'rgba(0,0,0,0.7)',
+      background: 'var(--color-kiosk-black)',
       padding: '20px' as number | string,
     },
     card: {
@@ -80,7 +80,7 @@ export const TOKENS = {
       height: '90vh',
       borderRadius: '20px' as number | string,
       boxShadow: '0 32px 100px rgba(0,0,0,0.8)',
-      bgUltraBlur: '#0a0a0a',
+      bgUltraBlur: 'var(--color-kiosk-black)',
     },
     close: {
       top: '28px',

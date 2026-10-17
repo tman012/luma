@@ -738,7 +738,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
         <div
           className={cn(
             'fixed inset-0',
-            personView || personLoading ? 'z-[60] bg-kiosk-black' : 'z-20 bg-neutral-900/92',
+            personView || personLoading ? 'z-[60] bg-kiosk-black' : 'z-20 bg-kiosk-black/95 kiosk-search-dim',
           )}
           onClick={() => clearSearch()}
           onTouchEnd={(e) => { e.preventDefault(); clearSearch(); }}
@@ -761,7 +761,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
       >
       {/* Search bar — hidden when idle or viewing person filmography */}
       {!personView && !personLoading && isActive && (
-        <div className={cn('flex w-full min-w-0 flex-col rounded-2xl border border-white/15 shadow-lg shadow-black/50', tk.search.barMaxW)} style={{ background: 'rgba(38,38,46,0.97)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}>
+        <div className={cn('flex w-full min-w-0 flex-col rounded-2xl border border-white/15 shadow-lg shadow-black/50', tk.search.barMaxW)} style={{ background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}>
           <div className="flex items-center gap-4 px-6 py-4">
             {/* Search icon — larger in expanded mode */}
             <svg
@@ -893,7 +893,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
             </svg>
           </button>
           {personView?.profileUrl && (
-            <div className="h-[100px] w-[100px] overflow-hidden rounded-full bg-[#2a2a2a] shadow-lg shadow-black/40">
+            <div className="h-[100px] w-[100px] overflow-hidden rounded-full bg-glass-10 shadow-lg shadow-black/40">
               <img
                 src={personView.profileUrl}
                 alt={personView.name}
@@ -926,7 +926,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
               : 'min(820px, calc(var(--vvh, 100vh) - 220px))',
             ...(personView || personLoading
               ? {}
-              : { background: 'rgba(38,38,46,0.97)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }),
+              : { background: 'rgba(255,255,255,0.06)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }),
           }}
         >
           {/* Loading */}

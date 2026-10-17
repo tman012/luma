@@ -270,7 +270,7 @@ export function PersonDetailModal({
         display: 'flex',
         alignItems: isCompact ? 'stretch' : isTablet ? 'stretch' : 'center',
         justifyContent: 'center',
-        backgroundColor: isCompact ? 'rgba(0,0,0,0.6)' : isTablet ? 'transparent' : 'rgba(0,0,0,0.7)',
+        backgroundColor: isCompact ? 'rgba(0,0,0,0.6)' : isTablet ? 'transparent' : 'var(--color-kiosk-black)',
         padding: isCompact ? 0 : isTablet ? 0 : '20px',
       }}
     >
@@ -434,8 +434,8 @@ export function PersonDetailModal({
                       minWidth: 0,
                       padding: isCompact ? '10px 12px' : '11px 24px',
                       borderRadius: '50px',
-                      border: isActive ? '1px solid rgba(167,139,250,0.4)' : '1px solid rgba(255,255,255,0.12)',
-                      background: isActive ? 'rgba(167,139,250,0.2)' : 'rgba(255,255,255,0.06)',
+                      border: isActive ? '1px solid rgba(59,130,246,0.4)' : '1px solid rgba(255,255,255,0.12)',
+                      background: isActive ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.06)',
                       color: isActive ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.6)',
                       fontSize: isCompact ? '14px' : '16px',
                       fontWeight: isActive ? 600 : 500,
@@ -520,8 +520,8 @@ export function PersonDetailModal({
                     style={{
                       padding: isCompact ? '4px 8px' : '6px 14px',
                       borderRadius: isCompact ? '6px' : '999px',
-                      border: unownedOnly ? '1px solid rgba(167,139,250,0.4)' : '1px solid transparent',
-                      background: unownedOnly ? 'rgba(167,139,250,0.2)' : 'transparent',
+                      border: unownedOnly ? '1px solid rgba(59,130,246,0.4)' : '1px solid transparent',
+                      background: unownedOnly ? 'rgba(59,130,246,0.2)' : 'transparent',
                       color: unownedOnly ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.5)',
                       fontSize: isCompact ? '12px' : '14px',
                       fontWeight: unownedOnly ? 600 : 500,

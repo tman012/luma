@@ -207,3 +207,44 @@ def test_key_never_logged(minimal, no_tmdb_network, caplog):
     c.put('/api/settings/connectors/tmdb', json={'api_key': KEY}, environ_base=REMOTE, headers=hdr)
     c.post('/api/settings/connectors/tmdb/test', json={'api_key': KEY}, environ_base=REMOTE, headers=hdr)
     assert KEY not in caplog.text
+
+
+# ------------------------------------------------------------------ follow-ups
+
+@pytest.mark.parametrize('path', ['/settings/connectors', '/settings/plex', '/settings/home-screen'])
+def test_settings_deep_links_reload(minimal, path):
+    c = _client(minimal)
+    r = c.get(path, environ_base=REMOTE)
+    assert r.status_code == 200 and b'id="root"' in r.data
+
+
+def test_tmdb_errors_never_log_the_key(caplog, monkeypatch):
+    import logging
+    import requests as rq
+    from app.main import TMDBClient, _redact_secrets
+
+    class R:
+        status_code = 401
+        url = f'https://api.themoviedb.org/3/search/movie?query=x&api_key={KEY}'
+
+        def raise_for_status(self):
+            raise rq.HTTPError(f'401 Client Error: Unauthorized for url: {self.url}')
+
+        def json(self):
+            return {}
+    monkeypatch.setattr(app.main.requests, 'get', lambda *a, **k: R())
+    monkeypatch.setattr(app.main.fast_search_index, '_is_tmdb_rate_limited', lambda: False)
+    caplog.set_level(logging.DEBUG)
+    t = TMDBClient(KEY)
+    for fn in (t.search_movies, t.search_tv, t.search_multi):
+        fn('x')
+    t.search_people('x')
+    assert 'TMDB' in caplog.text and KEY not in caplog.text
+    assert _redact_secrets(f'u?a=1&api_key={KEY}&b=2') == 'u?a=1&api_key=***&b=2'
+
+
+def test_root_log_filter_masks_keys(capsys):
+    import logging
+    from app.main import _RedactSecretsFilter
+    rec = logging.LogRecord('x', logging.ERROR, __file__, 1, 'GET /3/movie/1?api_key=%s', (KEY,), None)
+    assert _RedactSecretsFilter().filter(rec) and KEY not in rec.getMessage()

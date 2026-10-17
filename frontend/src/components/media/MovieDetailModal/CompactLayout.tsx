@@ -445,7 +445,7 @@ export function CompactLayout(props: MovieModalViewProps) {
               }}
             >
               <p style={{ fontSize: '16px', color: 'rgba(255,255,255,0.6)' }}>
-                Could not load details
+                Couldn’t load details
               </p>
               <button
                 type="button"
@@ -454,7 +454,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   padding: '10px 28px',
                   borderRadius: '8px',
                   border: 'none',
-                  background: 'rgba(255,255,255,0.1)',
+                  background: 'var(--color-accent)',
                   color: '#fff',
                   fontSize: '15px',
                   cursor: 'pointer',

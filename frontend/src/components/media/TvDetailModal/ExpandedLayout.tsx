@@ -656,7 +656,7 @@ function SeasonGridModal({
                 <div style={{
                   width: `${posterW}px`, height: `${posterH}px`,
                   borderRadius: '10px', overflow: 'hidden',
-                  background: '#1a1a1a', position: 'relative',
+                  background: 'rgba(255,255,255,0.06)', position: 'relative',
                   boxShadow: '0 6px 20px rgba(0,0,0,0.4)',
                 }}>
                   {seasonPosterSrc ? (
@@ -1488,10 +1488,10 @@ export function ExpandedLayout(props: TvModalViewProps) {
             {/* Error state */}
             {!loading && error && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '20px', flex: 1 }}>
-                <p style={{ fontSize: '22px', color: 'rgba(255,255,255,0.7)' }}>Could not load details</p>
+                <p style={{ fontSize: '22px', color: 'rgba(255,255,255,0.7)' }}>Couldn’t load details</p>
                 <button type="button" onClick={onClose} style={{
                   padding: '12px 29px', borderRadius: '10px', border: 'none',
-                  background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.95)', fontSize: '18px', cursor: 'pointer',
+                  background: 'var(--color-accent)', color: 'rgba(255,255,255,0.95)', fontSize: '18px', cursor: 'pointer',
                 }}>
                   Close
                 </button>

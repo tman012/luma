@@ -826,7 +826,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
             }}
           >
             <p style={{ fontSize: '22px', color: 'rgba(255,255,255,0.7)' }}>
-              Could not load details
+              Couldn’t load details
             </p>
             <button
               type="button"
@@ -835,7 +835,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 padding: '12px 29px',
                 borderRadius: '10px',
                 border: 'none',
-                background: 'rgba(255,255,255,0.1)',
+                background: 'var(--color-accent)',
                 color: 'rgba(255,255,255,0.95)',
                 fontSize: '18px',
                 cursor: 'pointer',

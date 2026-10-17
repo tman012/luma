@@ -1347,3 +1347,7 @@ input[type="search"]::-webkit-search-cancel-button {
 html.luma-minimal [data-modal-actions] {
   display: none !important;
 }
+
+/* LUMA_MINIMAL: the search layer covers the home header (no nav behind it). */
+html.luma-minimal .kiosk-search-dim { z-index: 60; }
+html.luma-minimal [data-search-panel] { z-index: 70; }

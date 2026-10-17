@@ -90,6 +90,31 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+_SECRET_QS = re.compile(r'((?:api_?key|access_token|token|apikey|passkey)=)[^&\s\'"]+', re.I)
+
+
+def _redact_secrets(value) -> str:
+    """Text for a log line with credential query params masked (requests puts
+    the full URL, api_key included, in HTTPError messages)."""
+    return _SECRET_QS.sub(r'\1***', str(value))
+
+
+class _RedactSecretsFilter(logging.Filter):
+    def filter(self, record):
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        red = _redact_secrets(msg)
+        if red != msg:
+            record.msg, record.args = red, ()
+        return True
+
+
+for _h in logging.getLogger().handlers:
+    _h.addFilter(_RedactSecretsFilter())
+
 # Flask app setup
 static_folder = os.environ.get('FLASK_STATIC_FOLDER') or '/app/static'
 # static_url_path is pinned: Flask otherwise derives it from the folder's
@@ -1154,7 +1179,7 @@ class TMDBClient:
             data = response.json()
             return data.get('results', [])
         except Exception as e:
-            logger.error(f"TMDB search error: {e}")
+            logger.error(f"TMDB search error: {_redact_secrets(e)}")
             return []
 
     def search_tv(self, query: str, year: Optional[int] = None) -> List[Dict]:
@@ -1186,7 +1211,7 @@ class TMDBClient:
             data = response.json()
             return data.get('results', [])
         except Exception as e:
-            logger.error(f"TMDB TV search error: {e}")
+            logger.error(f"TMDB TV search error: {_redact_secrets(e)}")
             return []
 
     def search_multi(self, query: str) -> List[Dict]:
@@ -1224,7 +1249,7 @@ class TMDBClient:
             fast_search_index._reset_tmdb_backoff()
             return response.json().get('results', [])
         except Exception as e:
-            logger.error(f"TMDB multi search error: {e}")
+            logger.error(f"TMDB multi search error: {_redact_secrets(e)}")
             return []
 
     def search_people(self, query: str) -> List[Dict]:
@@ -1296,7 +1321,7 @@ class TMDBClient:
             ), reverse=True)
             return all_results
         except Exception as e:
-            logger.error(f"TMDB people search error: {e}")
+            logger.error(f"TMDB people search error: {_redact_secrets(e)}")
             return []
 
     def get_movie_details(self, tmdb_id: int) -> Optional[Dict]:
@@ -1313,7 +1338,7 @@ class TMDBClient:
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            logger.error(f"TMDB movie details error: {e}")
+            logger.error(f"TMDB movie details error: {_redact_secrets(e)}")
             return None
 
     def get_movie_similar(self, tmdb_id: int) -> List[Dict]:
@@ -1338,7 +1363,7 @@ class TMDBClient:
                 response.raise_for_status()
                 return response.json().get('results', []) or []
             except Exception as e:
-                logger.warning(f"TMDB movie {kind} error for {tmdb_id}: {e}")
+                logger.warning(f"TMDB movie {kind} error for {tmdb_id}: {_redact_secrets(e)}")
                 return []
 
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -1368,7 +1393,7 @@ class TMDBClient:
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            logger.error(f"TMDB TV details error: {e}")
+            logger.error(f"TMDB TV details error: {_redact_secrets(e)}")
             return None
 
     def get_popular(self, page: int = 1) -> List[Dict]:
@@ -1386,7 +1411,7 @@ class TMDBClient:
             data = response.json()
             return data.get('results', [])
         except Exception as e:
-            logger.error(f"TMDB popular error: {e}")
+            logger.error(f"TMDB popular error: {_redact_secrets(e)}")
             return []
 
     def get_trending(self, media_type: str = 'movie', time_window: str = 'week') -> List[Dict]:
@@ -1404,7 +1429,7 @@ class TMDBClient:
             data = response.json()
             return data.get('results', [])
         except Exception as e:
-            logger.error(f"TMDB trending error: {e}")
+            logger.error(f"TMDB trending error: {_redact_secrets(e)}")
             return []
 
 # Initialize TMDB client
@@ -1605,6 +1630,9 @@ def _serve_spa():
 @app.route('/start')
 @app.route('/unlock')
 @app.route('/settings/libraries')
+@app.route('/settings/home-screen')
+@app.route('/settings/plex')
+@app.route('/settings/connectors')
 @app.route('/admin')
 @app.route('/setup')
 def spa_route():

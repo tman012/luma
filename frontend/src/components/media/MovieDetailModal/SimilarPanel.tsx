@@ -418,7 +418,7 @@ export function SimilarPanel({ tmdbId, ratingKey, title, onClose }: SimilarPanel
           position: 'absolute', top: 20, left: 20, zIndex: 10,
           width: 72, height: 72, borderRadius: '50%',
           border: '1px solid rgba(255,255,255,0.15)',
-          background: d.isTablet ? 'rgba(20,20,20,0.85)' : 'rgba(20,20,20,0.7)',
+          background: d.isTablet ? 'rgba(21,16,42,0.85)' : 'rgba(21,16,42,0.7)',
           backdropFilter: d.isTablet ? 'none' : 'blur(20px) saturate(1.8)',
           WebkitBackdropFilter: d.isTablet ? 'none' : 'blur(20px) saturate(1.8)',
           color: 'rgba(255,255,255,0.9)', cursor: 'pointer',
