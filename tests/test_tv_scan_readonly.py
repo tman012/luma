@@ -69,7 +69,8 @@ def no_writes(lib, monkeypatch, tmp_path):
     real_open, real_os_open = builtins.open, os.open
 
     def g_open(file, mode='r', *a, **k):
-        if inside(file) if isinstance(file, (str, bytes, os.PathLike)) else False:
+        writing = any(c in str(mode) for c in 'wax+')
+        if writing and isinstance(file, (str, bytes, os.PathLike)) and inside(file):
             hits.append(('open', file, mode))
             raise AssertionError(f'open() on a library path: {file} {mode}')
         return real_open(file, mode, *a, **k)
@@ -80,7 +81,7 @@ def no_writes(lib, monkeypatch, tmp_path):
             raise AssertionError(f'os.open for writing on a library path: {path}')
         return real_os_open(path, flags, *a, **k)
 
-    monkeypatch.setattr(builtins, 'open', g_open)        # the scan doesn't even read file contents
+    monkeypatch.setattr(builtins, 'open', g_open)        # reads: test_scan_reads_no_file_contents
     monkeypatch.setattr(os, 'open', g_os_open)
     return hits
 
