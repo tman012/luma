@@ -30,6 +30,12 @@ export function warmCard(c: Card): Promise<void> {
   return warmDetail(kind, ratingKey, tmdbId).catch(() => {});
 }
 
+/** One warm-up per title (the same title in two rails shares it). */
+export function warmKey(c: Card): string {
+  const { kind, ratingKey, tmdbId } = cardIds(c);
+  return `${kind}:${ratingKey ?? ''}:${tmdbId ?? ''}`;
+}
+
 type OnOpen = ((card: Card, el?: HTMLElement | null) => void) | undefined;
 
 /** Cards on or near the screen get warmed (4 at a time); one that scrolls
@@ -42,7 +48,7 @@ function useWarmWhenVisible(ref: React.RefObject<HTMLElement | null>, card: Card
     const io = new IntersectionObserver((entries) => {
       const e = entries[entries.length - 1];
       cancel();
-      cancel = e?.isIntersecting ? scheduleWarm(`${card.type}:${card.key}:${card.tmdb_id ?? ''}`, () => warmCard(card)) : () => {};
+      cancel = e?.isIntersecting ? scheduleWarm(warmKey(card), () => warmCard(card)) : () => {};
     }, { rootMargin: '150px' });
     io.observe(el);
     return () => { io.disconnect(); cancel(); };
