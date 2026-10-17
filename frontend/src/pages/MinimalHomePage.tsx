@@ -89,6 +89,7 @@ export function MinimalHomePage() {
             {menu(40)}
           </div>
         </header>
+        <div style={{ height: 'calc(env(safe-area-inset-top) + 56px)' }} aria-hidden="true" />
         <main style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
           {homeView(data, failed || slow, () => setAttempt(a => a + 1), openCard)}
         </main>
@@ -159,6 +160,10 @@ export const homeBar: React.CSSProperties = {
 export const phoneBar: React.CSSProperties = {
   ...homeBar, height: 'calc(env(safe-area-inset-top) + 56px)', boxSizing: 'border-box',
   padding: 'env(safe-area-inset-top) 12px 0 16px',
+  // Pinned while scrolling; navy solid at the top fading out, no line or shadow.
+  position: 'fixed', top: 0, left: 0, right: 0, zIndex: 20,
+  background: 'linear-gradient(to bottom, var(--color-kiosk-black) 0%, var(--color-kiosk-black) 35%, transparent 100%)',
+  backdropFilter: 'none', WebkitBackdropFilter: 'none', borderBottom: 'none', boxShadow: 'none',
 };
 /** Web kiosk header: overlays the slideshow, top gradient, no glass. */
 export const kioskBar: React.CSSProperties = {

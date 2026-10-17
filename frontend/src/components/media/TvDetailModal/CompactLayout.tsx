@@ -1,3 +1,4 @@
+import { useTitleReveal, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -186,6 +187,7 @@ export function CompactLayout(props: TvModalViewProps) {
     shuffleTarget,
     setShuffleTarget,
   } = props;
+  const titleState = useTitleReveal(show?.clearLogoUrl, show?.title);
 
   // Determine if we're in active episode-mode display
   // isEpisodeIntent: episodeContext is set → hide show content immediately
@@ -596,7 +598,7 @@ export function CompactLayout(props: TvModalViewProps) {
                     overflow: 'visible',
                   }}
                 >
-                  {show.clearLogoUrl ? (
+                  {titleState === 'logo' && show.clearLogoUrl ? (
                     <img
                       src={show.clearLogoUrl ? withBase(show.clearLogoUrl) : undefined}
                       alt={show.title}
@@ -616,7 +618,7 @@ export function CompactLayout(props: TvModalViewProps) {
                   ) : null}
                   <h1
                     style={{
-                      display: show.clearLogoUrl ? 'none' : 'block',
+                      ...titleTextStyle(titleState),
                       fontSize: '28px',
                       fontWeight: 700,
                       color: '#fff',

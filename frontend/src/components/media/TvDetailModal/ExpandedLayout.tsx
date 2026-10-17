@@ -1,3 +1,4 @@
+import { useTitleReveal, titleTextStyle } from '@/hooks/useTitleReveal';
 import { isMinimal } from '@/minimal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -768,6 +769,7 @@ function SeasonDetailModal({
   onAddSeasonToWatchlist?: (season: number) => Promise<boolean> | void;
   onClose: () => void;
 }) {
+  const titleState = useTitleReveal(show?.clearLogoUrl, show?.title);
   const [showEpisodeGrid, setShowEpisodeGrid] = useState(false);
   const [showCastShelf, setShowCastShelf] = useState(false);
   // Optimistic: this season was just added to the watchlist this session.
@@ -933,7 +935,7 @@ function SeasonDetailModal({
               transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
               transform: shelfOpen ? 'translateY(-15vh)' : 'translateY(0)',
             }}>
-              {show.clearLogoUrl ? (
+              {titleState === 'logo' && show.clearLogoUrl ? (
                 <img
                   src={show.clearLogoUrl}
                   alt={show.title}
@@ -947,7 +949,7 @@ function SeasonDetailModal({
                 />
               ) : null}
               <h1 style={{
-                display: show.clearLogoUrl ? 'none' : 'block',
+                ...titleTextStyle(titleState),
                 fontSize: t.titleFontSize, fontWeight: 700, color: '#fff',
                 lineHeight: 1.15, margin: 0,
                 textShadow: '0 2px 12px rgba(0,0,0,0.6)', letterSpacing: '-0.02em',
@@ -1198,6 +1200,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
     showFullShow,
     onEpisodeClick,
   } = props;
+  const titleState = useTitleReveal(show?.clearLogoUrl, show?.title);
 
   // Determine if we're in active episode-mode display
   const isEpisodeIntent = !showFullShow && !!episodeContext;
@@ -1530,7 +1533,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                     transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
                     transform: shelfOpen ? 'translateY(-15vh)' : 'translateY(0)',
                   }}>
-                    {show.clearLogoUrl ? (
+                    {titleState === 'logo' && show.clearLogoUrl ? (
                       <img
                         src={show.clearLogoUrl}
                         alt={show.title}
@@ -1549,7 +1552,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                       />
                     ) : null}
                     <h1 style={{
-                      display: show.clearLogoUrl ? 'none' : 'block',
+                      ...titleTextStyle(titleState),
                       fontSize: t.titleFontSize,
                       fontWeight: 700,
                       color: '#fff',

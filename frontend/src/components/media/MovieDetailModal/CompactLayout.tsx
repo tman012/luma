@@ -1,3 +1,4 @@
+import { useTitleReveal, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { formatRuntime } from '@/utils/image';
@@ -125,6 +126,7 @@ export function CompactLayout(props: MovieModalViewProps) {
     onUpgradeAdded,
     onWatchlistRemoved,
   } = props;
+  const titleState = useTitleReveal(detail?.clearLogoUrl, detail?.title);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const topScrimRef = useRef<HTMLDivElement>(null);
@@ -520,7 +522,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                     overflow: 'visible',
                   }}
                 >
-                  {detail.clearLogoUrl ? (
+                  {titleState === 'logo' && detail.clearLogoUrl ? (
                     <img
                       src={detail.clearLogoUrl}
                       alt={detail.title}
@@ -540,7 +542,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                   ) : null}
                   <h1
                     style={{
-                      display: detail.clearLogoUrl ? 'none' : 'block',
+                      ...titleTextStyle(titleState),
                       fontSize: '28px',
                       fontWeight: 700,
                       color: '#fff',

@@ -1,3 +1,4 @@
+import { useTitleReveal, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { formatRuntime } from '@/utils/image';
@@ -319,6 +320,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
     onWatchlistRemoved,
     onSourcesGrabbed,
   } = props;
+  const titleState = useTitleReveal(detail?.clearLogoUrl, detail?.title);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -879,7 +881,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
                 transform: showCastShelf ? 'translateY(-15vh)' : 'translateY(0)',
               }}>
-                {detail.clearLogoUrl ? (
+                {titleState === 'logo' && detail.clearLogoUrl ? (
                   <img
                     src={detail.clearLogoUrl}
                     alt={detail.title}
@@ -899,7 +901,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 ) : null}
                 <h1
                   style={{
-                    display: detail.clearLogoUrl ? 'none' : 'block',
+                    ...titleTextStyle(titleState),
                     fontSize: t.titleFontSize,
                     fontWeight: 700,
                     color: '#fff',

@@ -1351,3 +1351,6 @@ html.luma-minimal [data-modal-actions] {
 /* LUMA_MINIMAL: the search layer covers the home header (no nav behind it). */
 html.luma-minimal .kiosk-search-dim { z-index: 60; }
 html.luma-minimal [data-search-panel] { z-index: 70; }
+
+/* Detail popup: the text title fades in when it is the fallback. */
+@keyframes lumaTitleIn { from { opacity: 0; } to { opacity: 1; } }

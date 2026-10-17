@@ -41,7 +41,7 @@ export function ConnectorsSettings() {
 
   if (!view) return null;
   return (
-    <section data-testid="connectors-section" style={{ padding: wide ? 0 : '0 16px', display: 'flex', flexDirection: 'column', gap: 28 }}>
+    <section data-testid="connectors-section" style={{ padding: wide ? 0 : '0 20px', display: 'flex', flexDirection: 'column', gap: 28 }}>
       {toast && <NoticeToast key={toast} text={toast} onDone={() => setToast('')} />}
       {GROUPS.map(g => (
         <ConnectorGroup key={g.id} group={g} masked={view[g.id] || { set: false, last4: '' }}
