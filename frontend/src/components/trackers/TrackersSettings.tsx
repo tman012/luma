@@ -25,7 +25,7 @@ import {
   BLUE_HOVER, ChevronLeft, ChevronRight, CheckMark, CloseIcon, circle, circleHit, ConfirmDialog, DANGER,
   DANGER_TEXT, DIVIDER, EyeIcon, EyeOffIcon, FONT, GLASS, GLASS_BORDER, Modal, PhoneHeader, PlusIcon, primaryBtn,
   SearchIcon, secondaryBtn, Spinner, srOnly, SUCCESS, Switch, TEXT, TEXT_2, TEXT_3, TopToast, trackersCss,
-  useTransient, dangerTextBtn,
+  dangerTextBtn,
 } from './trackersUi';
 
 export const TRACKERS_BASE = '/settings/trackers';
@@ -34,6 +34,7 @@ export const SAVE_FAILED = "Couldn't save";
 export const LOAD_FAILED = "Couldn't load trackers";
 export const SEARCH_FROM = 8;          // the picker gets a search field above this many types
 export const TEST_STATUS_MS = 4000;
+export const CHIP_PHONE_H = 44;       // phone: every tap target is at least 44px
 
 type Access = 'unknown' | 'owner' | 'denied';
 
@@ -357,7 +358,13 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [result, setResult] = useTransient<TestResult>(TEST_STATUS_MS);
+  // "Connected" fades after 4 s; a failed Test stays until the next edit or Test.
+  const [result, setResult] = useState<TestResult | null>(null);
+  useEffect(() => {
+    if (!result?.ok) return;
+    const t = window.setTimeout(() => setResult(null), TEST_STATUS_MS);
+    return () => window.clearTimeout(t);
+  }, [result]);
   const [confirm, setConfirm] = useState<'discard' | 'delete' | null>(null);
   const [deleting, setDeleting] = useState(false);
   const alive = useRef(true);
@@ -385,6 +392,7 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
       return next;
     });
     setFormError('');
+    setResult(r => (r && !r.ok ? null : r));
   };
   const setValue = (key: string, v: string) => { setForm(f => ({ ...f, values: { ...f.values, [key]: v } })); clearServer(key); };
   const setSecret = (key: string, v: string) => {
@@ -394,6 +402,7 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
   const toggleCategory = (id: number) => {
     setForm(f => ({ ...f, categories: f.categories.includes(id) ? f.categories.filter(c => c !== id) : [...f.categories, id] }));
     setTouched(t => ({ ...t, categories: true }));
+    setResult(r => (r && !r.ok ? null : r));
     clearServer('categories');
   };
   const blur = (key: string) => setTouched(t => ({ ...t, [key]: true }));
@@ -462,10 +471,10 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 }}>
         <span id="tracker-enabled-label" style={{ fontSize: wide ? 15 : 17, fontWeight: wide ? 500 : 400, color: TEXT }}>Enabled</span>
-        <Switch small={wide} on={form.enabled} label="Enabled" onChange={on => setForm(f => ({ ...f, enabled: on }))} />
+        <Switch small={wide} on={form.enabled} label="Enabled" onChange={on => { setForm(f => ({ ...f, enabled: on })); setResult(r => (r && !r.ok ? null : r)); }} />
       </div>
       {type.fields.map(f => (
-        <Field key={f.key} field={f} type={type} form={form} error={shownError(f.key)}
+        <Field key={f.key} wide={wide} field={f} type={type} form={form} error={shownError(f.key)}
           kept={kept.has(f.key)} unreadable={unreadable && f.secret && tracker?.[f.key] === SECRET_MASK}
           onValue={setValue} onSecret={setSecret} onCategory={toggleCategory} onBlur={blur} />
       ))}
@@ -584,8 +593,8 @@ function FieldError({ id, text }: { id: string; text: string }) {
   );
 }
 
-function Field({ field, type, form, error, kept, unreadable, onValue, onSecret, onCategory, onBlur }: {
-  field: TrackerField; type: TrackerType; form: FormState; error: string; kept: boolean; unreadable: boolean;
+function Field({ wide, field, type, form, error, kept, unreadable, onValue, onSecret, onCategory, onBlur }: {
+  wide: boolean; field: TrackerField; type: TrackerType; form: FormState; error: string; kept: boolean; unreadable: boolean;
   onValue: (k: string, v: string) => void; onSecret: (k: string, v: string) => void; onCategory: (id: number) => void;
   onBlur: (k: string) => void;
 }) {
@@ -608,7 +617,7 @@ function Field({ field, type, form, error, kept, unreadable, onValue, onSecret, 
             return (
               <button key={c.id} type="button" className="lt-chip lt-btn" aria-pressed={on} onClick={() => onCategory(c.id)}
                 data-testid="tracker-category"
-                style={{ height: 36, padding: '0 14px', borderRadius: 18, fontFamily: FONT, fontSize: 14, fontWeight: 500,
+                style={{ height: wide ? 36 : CHIP_PHONE_H, padding: '0 14px', borderRadius: wide ? 18 : CHIP_PHONE_H / 2, fontFamily: FONT, fontSize: 14, fontWeight: 500,
                   cursor: 'pointer', border: on ? '1px solid rgba(59,130,246,0.35)' : '1px solid rgba(255,255,255,0.12)',
                   background: on ? 'rgba(59,130,246,0.18)' : GLASS, color: on ? BLUE_HOVER : TEXT_2 }}>
                 {c.name}

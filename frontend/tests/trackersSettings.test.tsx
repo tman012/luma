@@ -532,3 +532,54 @@ describe('Tracker form: edit and secrets', () => {
     expect(dlg.style.borderRadius).toBe('20px 20px 0 0');
   });
 });
+
+describe('Trackers polish (Designer, #22/#23)', () => {
+  it('a failed Test keeps its specific error past 4 s, and an edit clears it', async () => {
+    override = url => (url.endsWith('/api/trackers/test') ? res({ ok: false, error: 'Unauthorized' }) : null);
+    renderAt('/settings/trackers/new?type=torznab');
+    await screen.findByTestId('tracker-form');
+    fill('Name', 'X');
+    fill('URL', 'https://idx.example');
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Test' }));
+    await waitFor(() => expect(screen.getByTestId('tracker-test-result').textContent).toBe('Unauthorized'));
+    await act(async () => { vi.advanceTimersByTime(10000); });
+    expect(screen.getByTestId('tracker-test-result').textContent).toBe('Unauthorized');
+    fill('Name', 'Y');
+    expect(screen.getByTestId('tracker-test-result').textContent).toBe('');
+  });
+
+  it('the form has a real Enabled switch, and turning it off is saved', async () => {
+    db = [rec({ id: 7, name: 'Idx', type: 'torznab', api_key: MASK })];
+    renderAt('/settings/trackers/7');
+    await screen.findByTestId('tracker-form');
+    const sw = screen.getByRole('switch', { name: 'Enabled' });
+    expect(sw.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(sw);
+    expect(sw.getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(lastCall(c => c.method === 'PUT' && /\/api\/trackers\/7$/.test(c.url))?.body?.enabled).toBe(false));
+    expect(JSON.stringify(calls)).not.toContain('"api_key":"********"');
+  });
+
+  it('phone: rows, inputs, buttons and category chips are all at least 44px tall', async () => {
+    db = [rec({ id: 7, name: 'Idx', type: 'torznab', api_key: MASK })];
+    renderAt('/settings/trackers', false);
+    const row = (await screen.findAllByTestId('tracker-row'))[0]!;
+    expect(row.style.height).toBe('56px');
+    expect(screen.getByRole('switch', { name: 'Idx' }).style.height).toBe('44px');
+    cleanup();
+    renderAt('/settings/trackers/7', false);
+    await screen.findByTestId('tracker-form');
+    for (const chip of screen.getAllByTestId('tracker-category')) expect(chip.style.height).toBe('44px');
+    expect(screen.getByTestId('tracker-save').style.height).toBe('44px');
+    expect(screen.getByTestId('tracker-test').style.height).toBe('44px');
+    expect(screen.getByTestId('tracker-delete').style.height).toBe('56px');
+  });
+
+  it('desktop keeps the 36px chips', async () => {
+    renderAt('/settings/trackers/new?type=torznab');
+    await screen.findByTestId('tracker-form');
+    for (const chip of screen.getAllByTestId('tracker-category')) expect(chip.style.height).toBe('36px');
+  });
+});

@@ -63,6 +63,7 @@ export const trackersCss = `
 @keyframes lt-pop{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:none}}
 @keyframes lt-up{from{transform:translateY(100%)}to{transform:none}}
 @keyframes lt-toast{0%{opacity:0;transform:translate(-50%,-8px)}9%,87%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,0)}}
+@media (max-width: 1023px){.lt-input{font-size:16px}}
 @media (prefers-reduced-motion: reduce){.lt-pop,.lt-up,.lt-toast{animation:lt-fade 160ms ease both}.lt-spin{animation-duration:2s}}
 `;
 
