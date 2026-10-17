@@ -21513,13 +21513,7 @@ app.register_blueprint(_qbit_connector.bp)
 # Settings > Library paths and the library mover (LUMA_MINIMAL builds only).
 from app import file_management as _file_management
 from app import library_mover as _library_mover
-def _tv_library_paths():
-    from app import tv_settings
-    return tv_settings.tv_paths()
-
-
-_file_management.init(settings=settings, owner_or_error=_start_flow._owner_or_error,
-                      other_paths=_tv_library_paths)   # Movies and TV paths never overlap
+_file_management.init(settings=settings, owner_or_error=_start_flow._owner_or_error)
 from app import qbit_owner as _qbit_owner  # noqa: E402
 _qbit_owner.init(settings=settings)
 _library_mover.init(settings=settings)
@@ -21555,8 +21549,10 @@ app.register_blueprint(_tracker_routes.bp)
 from app import tv_settings as _tv_settings
 _section_trackers.init(owner_or_error=_start_flow._owner_or_error)
 app.register_blueprint(_section_trackers.bp)
-_tv_settings.init(owner_or_error=_start_flow._owner_or_error)
+_tv_settings.init(owner_or_error=_start_flow._owner_or_error,
+                  signed_in_owner=_start_flow.require_signed_in_owner)
 app.register_blueprint(_tv_settings.bp)
+_tv_settings.migrate_on_start()   # TV paths of earlier builds become Library path selections
 
 # TV library scan (Phase 1): TMDB key from Settings > Connectors.
 from app import tv_tmdb as _tv_tmdb, tv_library_routes as _tv_library_routes

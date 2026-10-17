@@ -6,20 +6,30 @@ import time
 
 import pytest
 
-from app import tv_scan, tv_settings, tv_store, tv_tmdb
+from app import file_management as fm, tv_scan, tv_settings, tv_store, tv_tmdb
 from tests.test_file_management import HDR, minimal as minimal_app, store  # noqa: F401
 from tests.test_home_rails import REMOTE, _client
-from tests.test_tv_library_paths import tv_env  # noqa: F401
+from tests.test_tv_libraries import tv_env  # noqa: F401
 from tests.tv_fake import fake_tmdb  # noqa: F401
 from tests.tv_tree import build
 
-PID = 't_0000aaaa'
+PID = 'p_0000aaaa'
+
+
+def select(pid, root, name='TV'):
+    """Make *root* a Library path *pid* and select it as a TV library."""
+    data = fm.load()
+    data['paths'] = [p for p in data['paths'] if p['id'] != pid] + [{'id': pid, 'name': name, 'path': str(root)}]
+    fm.save(data)
+    st = tv_settings.load()
+    st['libraries'] = [i for i in st['libraries'] if i != pid] + [pid]
+    tv_settings.save(st)
 
 
 @pytest.fixture
 def lib(tv_env, fake_tmdb, tmp_path):  # noqa: F811
     root = build(tv_env / 'TV', outside=tmp_path / 'outside')
-    tv_settings.save({'paths': [{'id': PID, 'name': 'TV', 'path': str(root)}]})
+    select(PID, root)
     tv_scan._state.update(running=False, error=None, summary=None)
     tv_scan._backoff.update(fails=0, until=0.0)
     return root

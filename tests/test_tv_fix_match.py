@@ -7,7 +7,7 @@ import pytest
 from app import tv_scan, tv_store, tv_tmdb
 from tests.test_file_management import HDR, minimal as minimal_app, store  # noqa: F401
 from tests.test_home_rails import REMOTE, _client
-from tests.test_tv_library_paths import tv_env  # noqa: F401
+from tests.test_tv_libraries import tv_env  # noqa: F401
 from tests.test_tv_scan import lib, rows  # noqa: F401
 from tests.tv_fake import fake_tmdb  # noqa: F401
 from tests.tv_tree import snapshot
@@ -38,7 +38,7 @@ def test_rematch_repoints_and_relinks(scanned):
     assert f['Severance (2022)/Season 02/Severance.S02E01E02.2160p.mkv'] == 'mismatch'  # it has no season 2
     h = rows("SELECT detail FROM history WHERE event = 'rematched'")
     assert len(h) == 1 and json.loads(h[0]['detail']) == {
-        'via': 'manual', 'folder': 'Severance (2022)', 'path_id': 't_0000aaaa', 'tmdb_id': 1001,
+        'via': 'manual', 'folder': 'Severance (2022)', 'path_id': 'p_0000aaaa', 'tmdb_id': 1001,
         'title': 'Mystery Show', 'from_tmdb_id': 95396, 'from_title': 'Severance'}
 
 
@@ -71,7 +71,7 @@ def test_match_unmatched(scanned):
     assert rows('SELECT state FROM episode_files WHERE series_id = ?', s['id']) == [{'state': 'linked'}]
     h = [json.loads(r['detail']) for r in rows("SELECT detail FROM history WHERE event = 'matched'"
                                                ' AND series_id = ?', s['id'])]
-    assert h == [{'via': 'manual', 'folder': 'Mystery Show', 'path_id': 't_0000aaaa', 'tmdb_id': 1002,
+    assert h == [{'via': 'manual', 'folder': 'Mystery Show', 'path_id': 'p_0000aaaa', 'tmdb_id': 1002,
                   'title': 'Mystery Show'}]
     tv_scan.scan_all(now=3000.0)                                      # a rescan keeps the manual match
     assert rows('SELECT tmdb_id FROM series WHERE folder = ?', 'Mystery Show') == [{'tmdb_id': 1002}]

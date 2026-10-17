@@ -359,7 +359,15 @@ def take_over(owner_id: int, path_id: str, folder: str, now: float, *, via: str,
 def _resolve_duplicate(owner, pid: str, folder: str, root_real: str, now: float, via: str) -> Optional[int]:
     """A scan found *folder* holding the show *owner* already has. The better
     folder (folder_rank) keeps it; the other is an unmatched duplicate whose
-    candidate is the show's real TMDB title. The show id when *folder* won."""
+    candidate is the show's real TMDB title. The show id when *folder* won.
+    A show whose library is no longer selected (or no longer a Library path)
+    moves here outright, keeping its tv.db row; its file rows from that
+    library are dropped (rows only)."""
+    if _path_of(owner['path_id']) is None:
+        sid = take_over(owner['id'], pid, folder, now, via=via, event='matched')
+        with tv_store.write() as conn:
+            conn.execute('DELETE FROM episode_files WHERE series_id = ? AND path_id IS NOT ?', (sid, pid))
+        return sid
     owner_root = os.path.realpath(_path_of(owner['path_id']) or '')
     with tv_store.connect() as conn:
         mine = folder_rank(folder, owner, _linkable(conn, owner['id'], folder, root_real))
@@ -378,7 +386,7 @@ def _resolve_duplicate(owner, pid: str, folder: str, root_real: str, now: float,
 
 def _path_of(path_id: str) -> Optional[str]:
     from app import tv_settings
-    return next((p['path'] for p in tv_settings.load()['paths'] if p['id'] == path_id), None)
+    return next((p['path'] for p in tv_settings.libraries() if p['id'] == path_id), None)
 
 
 # --------------------------------------------------------------------------- scan
@@ -451,7 +459,7 @@ def scan_all(now: Optional[float] = None, retry_unmatched: bool = True) -> Dict[
     from app import tv_settings
     now = time.time() if now is None else now
     total = {'paths': 0, 'shows': 0, 'unmatched': 0, 'linked': 0, 'mismatch': 0, 'unrecognized': 0, 'missing': []}
-    for rec in tv_settings.load()['paths']:
+    for rec in tv_settings.libraries():
         try:
             counts = scan_path(rec, now, retry_unmatched)
         except (FileNotFoundError, NotADirectoryError, PermissionError):
@@ -530,11 +538,11 @@ def backoff_s(fails: int) -> int:
 
 
 def due(now: float) -> bool:
-    """A scheduled scan is due: TV paths exist and the last scan is older
+    """A scheduled scan is due: TV libraries are selected and the last scan is older
     than rescan_interval_h (or there never was one)."""
     from app import tv_settings
     st = tv_settings.load()
-    if not st['paths']:
+    if not tv_settings.libraries():
         return False
     last = last_scan()
     return last is None or now - last >= st['rescan_interval_h'] * 3600
@@ -562,7 +570,7 @@ def _loop() -> None:
 
 def start_scheduler() -> bool:
     """Start the rescan thread once (main.start_services, minimal builds).
-    Idle until TV paths are saved."""
+    Idle until TV libraries are selected."""
     global _sched_thread
     if _sched_thread is not None and _sched_thread.is_alive():
         return False
@@ -587,7 +595,7 @@ LOCK_WAIT_S = 30
 
 def _root_for(path_id: str) -> Optional[str]:
     from app import file_management as fm, tv_settings
-    for rec in tv_settings.load()['paths']:
+    for rec in tv_settings.libraries():
         if rec['id'] == path_id:
             root = os.path.realpath(rec['path'])
             return root if not fm.blocked(root) and os.path.isdir(root) else None
@@ -711,7 +719,9 @@ def review_lines(conn, sid: int) -> List[str]:
 
 def library_view() -> Dict[str, Any]:
     from app import tv_settings
-    names = {p['id']: p['name'] for p in tv_settings.load()['paths']}
+    # Only the selected libraries' shows; a deselected or removed one's rows
+    # stay in tv.db and show again when it is selected again.
+    names = {p['id']: p['name'] for p in tv_settings.libraries()}
     with tv_store.connect() as conn:
         shows = []
         for r in conn.execute(
@@ -722,6 +732,8 @@ def library_view() -> Dict[str, Any]:
                 '  JOIN episode_files lf ON lf.id = l.file_id WHERE lf.series_id = s.id) AS episodes'
                 ' FROM series s LEFT JOIN episode_files f ON f.series_id = s.id'
                 ' WHERE s.path_id IS NOT NULL GROUP BY s.id ORDER BY s.title COLLATE NOCASE'):
+            if r['path_id'] not in names:
+                continue
             shows.append({'id': r['id'], 'tmdb_id': r['tmdb_id'], 'title': r['title'], 'year': r['year'],
                           'path_id': r['path_id'], 'path_name': names.get(r['path_id'], ''), 'folder': r['folder'],
                           'poster_path': r['poster_path'], 'monitored': bool(r['monitored']),
@@ -731,6 +743,8 @@ def library_view() -> Dict[str, Any]:
                           'review': review_lines(conn, r['id']) if (r['mismatch'] or r['unrecognized']) else []})
         unmatched = []
         for r in conn.execute('SELECT * FROM unmatched ORDER BY folder COLLATE NOCASE'):
+            if r['path_id'] not in names:
+                continue
             try:
                 cands = json.loads(r['candidates'] or '[]')
             except ValueError:

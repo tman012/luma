@@ -6,8 +6,8 @@ import pytest
 
 from app import tv_scan, tv_settings, tv_store
 from tests.test_file_management import store  # noqa: F401
-from tests.test_tv_library_paths import tv_env  # noqa: F401
-from tests.test_tv_scan import PID, lib, rows  # noqa: F401
+from tests.test_tv_libraries import tv_env  # noqa: F401
+from tests.test_tv_scan import PID, lib, rows, select  # noqa: F401
 from tests.tv_fake import fake_tmdb  # noqa: F401
 
 H = 3600
@@ -105,11 +105,9 @@ def test_all_paths_missing_is_retried_next_tick(lib, tmp_path):
 
 
 def test_one_readable_path_still_counts(lib, tmp_path):
-    st = tv_settings.load()
-    st['paths'].append({'id': 't_0000bbbb', 'name': 'Gone', 'path': str(tmp_path / 'nope')})
-    tv_settings.save(st)
+    select('p_0000bbbb', tmp_path / 'nope', name='Gone')
     assert tv_scan.tick(3e6) is True
-    assert tv_scan.status()['summary']['missing'] == ['t_0000bbbb'] and tv_scan.last_scan() == 3e6
+    assert tv_scan.status()['summary']['missing'] == ['p_0000bbbb'] and tv_scan.last_scan() == 3e6
 
 
 

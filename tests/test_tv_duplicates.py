@@ -6,7 +6,7 @@ import shutil
 
 from app import tv_scan
 from tests.test_file_management import store  # noqa: F401
-from tests.test_tv_library_paths import tv_env  # noqa: F401
+from tests.test_tv_libraries import tv_env  # noqa: F401
 from tests.test_tv_scan import PID, lib, rows  # noqa: F401
 from tests.tv_fake import fake_tmdb  # noqa: F401
 from tests.tv_tree import snapshot

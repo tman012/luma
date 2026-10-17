@@ -9,7 +9,7 @@ import pytest
 from app import file_management as fm, tv_settings
 from tests.test_file_management import HDR, minimal as minimal_app, store  # noqa: F401
 from tests.test_home_rails import REMOTE, _client
-from tests.test_tv_library_paths import tv_env  # noqa: F401
+from tests.test_tv_libraries import tv_env  # noqa: F401
 
 URL = '/api/settings/library-paths/browse'
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,9 +73,9 @@ def test_default_roots_are_media_downloads_and_configured(tree, monkeypatch, tmp
     lib.mkdir(parents=True)
     tvlib = tmp_path / 'tv-elsewhere'
     tvlib.mkdir()
-    fm.save({**fm.load(), 'paths': [{'id': 'p_00000001', 'name': 'M', 'path': str(lib)}]})
-    tv_settings.save({'paths': [{'id': 't_00000001', 'name': 'T', 'path': str(tvlib)}]})
-    monkeypatch.setitem(fm._cfg, 'other_paths', tv_settings.tv_paths)
+    fm.save({**fm.load(), 'paths': [{'id': 'p_00000001', 'name': 'M', 'path': str(lib)},
+                                    {'id': 'p_00000002', 'name': 'T', 'path': str(tvlib)}]})
+    tv_settings.save({'libraries': ['p_00000002']})
     roots = fm.browse_roots()
     expect = {os.path.realpath(fm.downloads_root()), str(lib), str(tvlib)}
     if os.path.isdir('/media') and not fm.blocked('/media'):

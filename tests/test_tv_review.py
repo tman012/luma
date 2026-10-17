@@ -1,7 +1,7 @@
 """Tester tv1-8646479 M7/M8: what needs review in a show, in words (sentence case, no jargon)."""
 from app import tv_scan
 from tests.test_file_management import store  # noqa: F401
-from tests.test_tv_library_paths import tv_env  # noqa: F401
+from tests.test_tv_libraries import tv_env  # noqa: F401
 from tests.test_tv_scan import lib, rows  # noqa: F401
 from tests.tv_fake import fake_tmdb  # noqa: F401
 

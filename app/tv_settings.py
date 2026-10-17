@@ -3,12 +3,18 @@ dir (0600), separate from file_management.json (whose path map and transfer
 mode TV shares).
 
     {"version": 1,
-     "paths": [], "rules": [], "fallback_path_id": null,
+     "libraries": ["p_..."], "rules": [], "fallback_path_id": null,
      "naming": {"series_folder": "{title} ({year})", ...},
      "upgrades": {"mode": "keep_both" | "replace_verified"},
      "automation": {"enabled": false, ...},
      "rescan_interval_h": 6}
 
+* Libraries: TV has no folders of its own. Folders are added in Settings >
+  Library paths; TV keeps the ids of the ones selected as TV libraries
+  (app/library_selection). A Library path removed later leaves the selection;
+  its shows stay in tv.db, hidden until it is selected again or a scan finds
+  them in another selected library. Earlier builds' own TV paths ("paths")
+  are moved over once by migrate().
 * Naming: a scan accepts any existing folder name; only new series get a
   folder from `series_folder`, which starts at "Title (Year)".
 * Upgrades: keep_both (the old file stays and is listed as superseded) until
@@ -16,18 +22,10 @@ mode TV shares).
   is in place and verified).
 * Automation is off. The tracker caps live in app/tv_budget (code, not here).
 
-GET /api/settings/tv     the settings (with the TV library paths)
-PUT /api/settings/tv     {"naming": {...}, "upgrades": {...}, "automation": {...}} (any subset)
-POST   /api/settings/tv/paths        add a TV library path {name, path}
-PUT    /api/settings/tv/paths/<id>   rename or repoint it
-DELETE /api/settings/tv/paths/<id>   409 while a rule or the fallback uses it; its
-                                     scanned shows leave tv.db (files are never touched)
-
-TV library paths get the same checks as Library paths (file_management), and
-overlap is checked across both stores and the downloads folder. One
-difference: no write probe. Phase 1 only reads TV folders, so nothing is
-created in them; a folder Luma can't write to is accepted and shows
-"Read-only".
+GET /api/settings/tv             the settings ("paths": the selected TV libraries)
+PUT /api/settings/tv             {"naming": {...}, "upgrades": {...}, "automation": {...}} (any subset)
+GET /api/settings/tv/libraries   every Library path, with "selected"
+PUT /api/settings/tv/libraries   {"selected": [Library path ids]} (signed-in owner)
 
 Owner only, luma-test builds only.
 """
@@ -41,10 +39,12 @@ import re
 import string
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from flask import Blueprint, jsonify, request
 
+from app import file_management as _fm
+from app import library_selection
 from app import paths as _paths
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,8 @@ _lock = threading.RLock()
 
 STORE_NAME = 'tv_settings.json'
 MAX_PATHS = 20
-_TV_ID_RE = re.compile(r'^t_[0-9a-f]{8}$')
+_TV_ID_RE = re.compile(r'^t_[0-9a-f]{8}$')      # an earlier build's own TV paths (migrate)
+_LIB_ID_RE = re.compile(r'^p_[0-9a-f]{8}$')     # Library path ids (file_management)
 UPGRADE_MODES = ('keep_both', 'replace_verified')
 DEFAULT_NAMING = {
     'series_folder': '{title} ({year})',
@@ -87,7 +88,7 @@ _FMT_RE = re.compile(r'^0?\d?$')
 
 
 def empty() -> Dict[str, Any]:
-    return {'version': 1, 'paths': [], 'rules': [], 'fallback_path_id': None,
+    return {'version': 1, 'paths': [], 'libraries': [], 'rules': [], 'fallback_path_id': None,
             'naming': dict(DEFAULT_NAMING), 'upgrades': {'mode': 'keep_both'},
             'automation': dict(DEFAULT_AUTOMATION), 'rescan_interval_h': 6}
 
@@ -135,6 +136,12 @@ def _normalize(raw: Any) -> Dict[str, Any]:
                       if isinstance(x, dict) and isinstance(x.get('id'), str) and _TV_ID_RE.match(x['id'])
                       and isinstance(x.get('name'), str) and isinstance(x.get('path'), str)
                       and x['path'].startswith('/')][:MAX_PATHS]
+    if isinstance(raw.get('libraries'), list):
+        seen: List[str] = []
+        for x in raw['libraries']:
+            if isinstance(x, str) and _LIB_ID_RE.match(x) and x not in seen:
+                seen.append(x)
+        d['libraries'] = seen[:library_selection.MAX_SELECTED]
     if isinstance(raw.get('fallback_path_id'), str):
         d['fallback_path_id'] = raw['fallback_path_id']
     naming = raw.get('naming') if isinstance(raw.get('naming'), dict) else {}
@@ -242,72 +249,121 @@ def series_folder(title: Any, year: Any, data: Optional[Dict[str, Any]] = None, 
 
 
 def view(data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The settings, with the selected TV libraries as 'paths' ({id, name, path, status})."""
     from app import file_management as fm
     d = data if data is not None else load()
     out = {k: copy.deepcopy(d[k]) for k in ('naming', 'upgrades', 'automation', 'rescan_interval_h')}
-    out['paths'] = [{**p, 'status': fm.path_status(p)} for p in d['paths']]
+    out['paths'] = [{**p, 'status': fm.path_status(p)} for p in libraries(migrate_first=True)]
     return out
 
 
-# --------------------------------------------------------------------------- TV library paths
+# --------------------------------------------------------------------------- TV libraries
 
-def tv_paths() -> list:
-    """The TV library paths (for the Movies side's cross-store overlap check)."""
-    return copy.deepcopy(load()['paths'])
+def _drop_library(pid: str) -> None:
+    """A Library path was removed: drop it from the selection. Its shows stay
+    in tv.db, hidden while no selected library holds them; a scan that finds
+    one of them in a selected library moves it there (tv_scan._resolve_duplicate)."""
+    with _lock:
+        data = load()
+        if pid in data['libraries']:
+            data['libraries'] = [i for i in data['libraries'] if i != pid]
+            save(data)
+            logger.info('TV library dropped: its Library path was removed')
 
 
-def check_tv_path(raw: Any, others: list, current: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
-    """(path, None) or (None, error): Library paths' checks against *others*
-    (the other TV paths) plus every Movies library path and the downloads
-    folder, and the folder picker's rule: inside the browse roots
-    (LUMA_BROWSE_ROOTS, else /media). *current* (an edit's saved path) is kept
-    even if it predates that rule. No write probe (see the module docstring)."""
+def selected_ids(migrate_first: bool = True) -> List[str]:
+    """The selected Library path ids. Settings reads first move an earlier
+    build's TV paths over (migrate); the scan never writes, so it passes
+    migrate_first=False (main migrates at start)."""
+    data = load()
+    if data['paths'] and migrate_first:
+        migrate()
+        data = load()
+    return list(data['libraries'])
+
+
+def libraries(migrate_first: bool = False) -> List[Dict[str, Any]]:
+    """The TV libraries: the selected Library paths that still exist ({id, name, path})."""
+    return library_selection.resolve(selected_ids(migrate_first), _fm.load()['paths'])
+
+
+def _same_folder(a: str, b: str) -> bool:
+    import os
+    return os.path.realpath(os.path.normpath(a)) == os.path.realpath(os.path.normpath(b))
+
+
+def _free_name(name: str, taken: List[str]) -> str:
     from app import file_management as fm
-    p, err = fm.clean_abs_path(raw)
-    if err:
-        return None, err
-    real = fm.os.path.realpath(p)
-    if fm.blocked(real):
-        return None, fm.NOT_ALLOWED
-    if fm.overlaps_downloads(real):
-        return None, fm.IN_DOWNLOADS
-    if not fm.os.path.isdir(real):
-        return None, fm.NOT_FOUND
-    unchanged = current is not None and fm.os.path.realpath(current) == real
-    if not unchanged and not fm.inside_browse_roots(real):
-        return None, fm.NOT_ALLOWED
-    for o in list(others) + fm.load()['paths']:
-        other = fm.os.path.realpath(o['path'])
-        if other == real:
-            return None, fm.DUPLICATE
-        if fm._under(real, other) or fm._under(other, real):
-            return None, fm.OVERLAPS
-    return p, None
+    used = {t.casefold() for t in taken}
+    base = (name or 'TV').strip()[:fm.NAME_MAX] or 'TV'
+    for n in [base] + [f'{base[:fm.NAME_MAX - 5]} (TV)'] + [f'{base[:fm.NAME_MAX - 8]} (TV {i})' for i in range(2, 100)]:
+        if n.casefold() not in used:
+            return n
+    return fm._new_id('TV', used)
 
 
-def _new_tv_id(taken) -> str:
-    import secrets
-    while True:
-        i = f't_{secrets.token_hex(4)}'
-        if i not in taken:
-            return i
-
-
-def _forget_path(pid: str) -> None:
-    """Drop a removed path's shows and unmatched folders from tv.db (rows only)."""
+def _move_rows(old: str, new: str) -> None:
+    """Point tv.db rows from an earlier TV path id at its Library path id.
+    Rows a second copy of the same folder already holds are dropped (that
+    folder is scanned once from now on)."""
     from app import tv_store
+    with tv_store.write() as conn:
+        for table in ('series', 'unmatched', 'episode_files'):
+            conn.execute(f'UPDATE OR IGNORE {table} SET path_id = ? WHERE path_id = ?', (new, old))
+            conn.execute(f'DELETE FROM {table} WHERE path_id = ?', (old,))
+
+
+def migrate() -> Dict[str, str]:
+    """Turn an earlier build's own TV paths into Library path selections.
+    A TV path whose folder is already a Library path (same folder after
+    normalizing) selects it; any other is added to Library paths (name kept,
+    "(TV)" added if the name is taken) and selected. tv.db rows follow to the
+    Library path's id. Running it again changes nothing. {old id: new id}."""
+    from app import file_management as fm
+    with _lock, fm.lock():
+        data = load()
+        if not data['paths']:
+            return {}
+        lib = fm.load()
+        added, mapping = 0, {}
+        for rec in data['paths']:
+            hit = next((p for p in lib['paths'] if _same_folder(p['path'], rec['path'])), None)
+            if hit is None:
+                hit = {'id': fm._new_id('p', {p['id'] for p in lib['paths']}),
+                       'name': _free_name(rec['name'], [p['name'] for p in lib['paths']]), 'path': rec['path']}
+                lib['paths'].append(hit)
+                added += 1
+            mapping[rec['id']] = hit['id']
+        if added:
+            fm.save(lib)                  # first: a rerun after a crash then matches these
+        for old, new in mapping.items():
+            if old != new:
+                _move_rows(old, new)
+        chosen = set(data['libraries']) | set(mapping.values())
+        data['libraries'] = [p['id'] for p in lib['paths'] if p['id'] in chosen]
+        data['rules'] = [dict(r, path_id=mapping.get(r.get('path_id'), r.get('path_id'))) for r in data['rules']]
+        if data['fallback_path_id'] in mapping:
+            data['fallback_path_id'] = mapping[data['fallback_path_id']]
+        data['paths'] = []
+        save(data)
+    logger.info('TV paths moved to Library paths: %d selected, %d added', len(set(mapping.values())), added)
+    return mapping
+
+
+def migrate_on_start() -> None:
     try:
-        with tv_store.write() as conn:
-            conn.execute('DELETE FROM series WHERE path_id = ?', (pid,))
-            conn.execute('DELETE FROM unmatched WHERE path_id = ?', (pid,))
-    except Exception as e:
-        logger.warning('tv.db rows for a removed TV path not dropped: %s', type(e).__name__)
+        migrate()
+    except Exception as e:            # the next read tries again
+        logger.warning('TV paths not moved to Library paths yet: %s', type(e).__name__)
 
 
 # --------------------------------------------------------------------------- routes
 
-def init(*, owner_or_error: Callable, store_path: Optional[str] = None) -> None:
+def init(*, owner_or_error: Callable, signed_in_owner: Optional[Callable] = None,
+         store_path: Optional[str] = None) -> None:
     _cfg.update(owner_or_error=owner_or_error)
+    if signed_in_owner is not None:
+        _cfg['signed_in_owner'] = signed_in_owner
     if store_path:
         _cfg['store_path'] = store_path
 
@@ -326,6 +382,9 @@ def _guard():
     return err
 
 
+_fm.on_path_removed(lambda pid: _drop_library(pid))
+
+
 @bp.route('/api/settings/tv', methods=['GET'])
 def tv_settings_get():
     err = _guard()
@@ -334,82 +393,32 @@ def tv_settings_get():
     return _no_store(jsonify(view()))
 
 
-def _body() -> Dict[str, Any]:
-    b = request.get_json(silent=True)
-    return b if isinstance(b, dict) else {}
+def _signed_in_owner():
+    """None, or the 404 (full builds), 401 (sign_in) or 403 for a change by
+    anyone but the signed-in owner."""
+    from app import minimal
+    if not minimal.enabled():
+        return jsonify({'error': 'Not found'}), 404
+    fn = _cfg.get('signed_in_owner')
+    if fn is None:
+        from app import start_flow
+        fn = start_flow.require_signed_in_owner
+    return fn()[1]
 
 
-@bp.route('/api/settings/tv/paths', methods=['POST'])
-def tv_paths_add():
-    from app import file_management as fm
-    err = _guard()
-    if err:
-        return err
-    body = _body()
-    with _lock, fm.lock():
-        data = load()
-        if len(data['paths']) >= MAX_PATHS:
-            return _no_store(jsonify({'errors': {'path': fm.TOO_MANY}}), 400)
-        name, e1 = fm.check_name(body.get('name'), data['paths'])
-        path, e2 = check_tv_path(body.get('path'), data['paths'])
-        errors = {k: v for k, v in (('name', e1), ('path', e2)) if v}
-        if errors:
-            return _no_store(jsonify({'errors': errors}), 400)
-        data['paths'].append({'id': _new_tv_id({p['id'] for p in data['paths']}), 'name': name, 'path': path})
-        save(data)
-        logger.info('TV library path added: %s', name)
-        return _no_store(jsonify(view(data)), 201)
+def _set_libraries(ids: List[str]) -> None:
+    data = load()
+    data['libraries'] = ids
+    save(data)
 
 
-@bp.route('/api/settings/tv/paths/<pid>', methods=['PUT'])
-def tv_paths_edit(pid):
-    from app import file_management as fm
-    err = _guard()
-    if err:
-        return err
-    body = _body()
-    with _lock, fm.lock():
-        data = load()
-        rec = next((p for p in data['paths'] if p['id'] == pid), None)
-        if not rec:
-            return _no_store(jsonify({'error': 'Not found'}), 404)
-        others = [p for p in data['paths'] if p['id'] != pid]
-        errors = {}
-        name, path = rec['name'], rec['path']
-        if 'name' in body:
-            name, e = fm.check_name(body.get('name'), others)
-            if e:
-                errors['name'] = e
-        if 'path' in body:
-            path, e = check_tv_path(body.get('path'), others, current=rec['path'])
-            if e:
-                errors['path'] = e
-        if errors:
-            return _no_store(jsonify({'errors': errors}), 400)
-        moved = fm.os.path.realpath(path) != fm.os.path.realpath(rec['path'])
-        rec.update(name=name, path=path)
-        save(data)
-    if moved:
-        _forget_path(pid)                 # a new folder: rescan it from scratch
-    return _no_store(jsonify(view(data)))
+def _libraries_changed(before: List[str], after: List[str]) -> None:
+    logger.info('TV libraries: %d selected', len(after))
 
 
-@bp.route('/api/settings/tv/paths/<pid>', methods=['DELETE'])
-def tv_paths_delete(pid):
-    from app import file_management as fm
-    err = _guard()
-    if err:
-        return err
-    with _lock:
-        data = load()
-        if not any(p['id'] == pid for p in data['paths']):
-            return _no_store(jsonify({'error': 'Not found'}), 404)
-        if data['fallback_path_id'] == pid or any(r.get('path_id') == pid for r in data['rules']):
-            return _no_store(jsonify({'error': fm.IN_USE}), 409)
-        data['paths'] = [p for p in data['paths'] if p['id'] != pid]
-        save(data)
-    _forget_path(pid)
-    return _no_store(jsonify(view(data)))
+library_selection.register(bp, '/api/settings/tv/libraries', endpoint='tv_libraries',
+                           get_ids=selected_ids, set_ids=_set_libraries, read_guard=_guard,
+                           write_guard=_signed_in_owner, section_lock=_lock, on_change=_libraries_changed)
 
 
 @bp.route('/api/settings/tv', methods=['PUT'])

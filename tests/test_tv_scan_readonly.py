@@ -18,11 +18,12 @@ import pytest
 
 from app import tv_scan, tv_settings
 from tests.test_file_management import store  # noqa: F401
-from tests.test_tv_library_paths import tv_env  # noqa: F401
+from tests.test_tv_libraries import tv_env  # noqa: F401
 from tests.tv_fake import fake_tmdb  # noqa: F401
+from tests.test_tv_scan import select
 from tests.tv_tree import build, snapshot
 
-PID = 't_0000bbbb'
+PID = 'p_0000bbbb'
 APP = Path(__file__).resolve().parents[1] / 'app'
 SCANNER_MODULES = ('tv_scan.py', 'tv_match.py', 'tv_library_routes.py')
 
@@ -32,7 +33,7 @@ def lib(tv_env, fake_tmdb, tmp_path):  # noqa: F811
     root = build(tv_env / 'TV', outside=tmp_path / 'outside')
     os.chmod(root / 'Dark [tmdbid-70523]' / 'Dark.S01E01.mkv', 0o640)        # a mix of modes
     os.utime(root / 'Severance (2022)' / 'Season 01', ns=(1_600_000_000_000_000_000,) * 2)
-    tv_settings.save({'paths': [{'id': PID, 'name': 'TV', 'path': str(root)}]})
+    select(PID, root)
     return root
 
 

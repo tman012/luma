@@ -269,10 +269,9 @@ def inside_browse_roots(real: str) -> bool:
 def browse_roots() -> List[str]:
     """Real paths the folder picker may show: LUMA_BROWSE_ROOTS (':' or ','
     separated absolute paths, else /media), the downloads folder, and every
-    configured Movies and TV library path. Missing or blocked ones are
-    dropped, and a root inside another is folded into it."""
-    cands = _base_browse_roots() + [downloads_root()] + [p['path'] for p in load()['paths']] + \
-        [p['path'] for p in other_store_paths()]
+    configured library path (TV selects from these). Missing or blocked ones
+    are dropped, and a root inside another is folded into it."""
+    cands = _base_browse_roots() + [downloads_root()] + [p['path'] for p in load()['paths']]
     reals: List[str] = []
     for c in cands:
         p, err = clean_abs_path(c)
@@ -323,20 +322,27 @@ def browse(raw: Optional[str]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]
     return {'path': p, 'parent': parent, 'dirs': dirs[:BROWSE_MAX]}, None
 
 
-def other_store_paths() -> List[Dict[str, Any]]:
-    """Library paths kept by another store (TV), so the two never overlap."""
-    fn = _cfg.get('other_paths')
-    try:
-        return list(fn()) if fn else []
-    except Exception as e:
-        logger.warning('Other library paths unreadable: %s', type(e).__name__)
-        return []
+_removed_hooks: List[Callable[[str], None]] = []
+
+
+def on_path_removed(fn: Callable[[str], None]) -> None:
+    """Call *fn(path_id)* after a Library path is removed (sections that
+    select Library paths, such as TV, drop it from their selection)."""
+    if fn not in _removed_hooks:
+        _removed_hooks.append(fn)
+
+
+def _path_removed(pid: str) -> None:
+    for fn in list(_removed_hooks):
+        try:
+            fn(pid)
+        except Exception as e:
+            logger.warning('A section did not drop a removed library path: %s', type(e).__name__)
 
 
 def check_library_path(raw: Any, others: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[str]]:
     """(path to store, None) or (None, error) for a library folder. *others*
-    are this store's other paths; the TV store's are added here."""
-    others = list(others) + other_store_paths()
+    are this store's other paths (TV selects from these, it has none of its own)."""
     p, err = clean_abs_path(raw)
     if err:
         return None, err
@@ -626,11 +632,8 @@ def map_path(path: str, path_map: List[Dict[str, str]]) -> str:
 
 # ------------------------------------------------------------------ routes
 
-def init(*, settings, owner_or_error: Callable, store_path: Optional[str] = None,
-         other_paths: Optional[Callable[[], List[Dict[str, Any]]]] = None) -> None:
+def init(*, settings, owner_or_error: Callable, store_path: Optional[str] = None) -> None:
     _cfg.update(settings=settings, owner_or_error=owner_or_error)
-    if other_paths is not None:
-        _cfg['other_paths'] = other_paths
     if store_path:
         _cfg['store_path'] = store_path
 
@@ -787,7 +790,8 @@ def library_paths_delete(pid):
             return _no_store(jsonify({'error': IN_USE}), 409)
         data['paths'] = [p for p in data['paths'] if p['id'] != pid]
         save(data)
-        return _no_store(jsonify(view(data)))
+    _path_removed(pid)
+    return _no_store(jsonify(view(data)))
 
 
 @bp.route('/api/settings/library-rules', methods=['PUT'])
