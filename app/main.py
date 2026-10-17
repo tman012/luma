@@ -617,6 +617,11 @@ def start_services(app_instance):
     
     # Initialize database
     init_database()
+    try:
+        from app import tracker_search as _ts_migrate
+        _ts_migrate.reset_bhd_id_backoffs_once()
+    except Exception as e:      # a migration must never stop the app
+        logger.warning('Tracker id-backoff reset skipped: %s', type(e).__name__)
     
     # Initialize user auth tables
     try:

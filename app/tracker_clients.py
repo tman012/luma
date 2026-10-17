@@ -259,6 +259,15 @@ _BHD_RETRYABLE = ('response', 'http', 'timeout', 'network', 'redirect', 'too_lar
 _monotonic = time.monotonic
 
 
+class OutOfBudget(Exception):
+    """The guard refused another request of a multi-request search (every
+    page and fallback is charged as its own request). Nothing was sent."""
+
+    def __init__(self, reason: str = ''):
+        super().__init__(reason)
+        self.reason = reason
+
+
 def bhd_tmdb_param(tmdb_id: str, media_type: str) -> str:
     """BHD's tmdb_id filter takes '<movie|tv>/<id>' (the same shape its
     results carry, e.g. 'movie/693134'); a bare number matches nothing."""
@@ -387,11 +396,25 @@ def beyondhd_search(cfg, query, categories, limit, request: Request = http_reque
         try:
             step['rows'] = run(body, step)
             answered = True
+        except OutOfBudget:
+            step['error'] = 'budget'
+            stats()
+            if answered or out:
+                break
+            raise
         except TrackerError as e:
+            if name == 'id' and e.kind != 'rate':
+                # BHD refusing the id is an id problem, never a rejected key or a
+                # reason to back off: the text attempts above stand.
+                step['error'] = f'id ({e.kind})'
+                stats()
+                continue
             step['error'] = e.kind
             errors.append(e)
             stats()
             if e.kind not in _BHD_RETRYABLE:
+                if out:
+                    break
                 raise
             continue
         if step['rows']:

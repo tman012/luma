@@ -308,10 +308,29 @@ class TrackerSearch:
                 raise TrackerSkipped(reason)
             self.guard.wait_spacing(gk)
             scope = address_scope(cfg, self.guard)
+            sent = [0]
+
+            def charged(*a, **kw):
+                # Caps count HTTP requests: the first was taken above, every page and
+                # fallback after it is taken here, and none is sent once refused.
+                if sent[0]:
+                    why = self.guard.take(gk, interactive, strict)
+                    if why:
+                        raise tracker_clients.OutOfBudget(why)
+                sent[0] += 1
+                return self.request(*a, **kw)
             try:
                 with scope:
-                    items = tracker_clients.search(cfg, query, categories, limit, self.request, imdb_id=imdb_id,
+                    items = tracker_clients.search(cfg, query, categories, limit, charged, imdb_id=imdb_id,
                                                    tmdb_id=str(tmdb_id or ''), media_type=media_type or '')
+            except tracker_clients.OutOfBudget as e:
+                self._log_steps(cfg, tracker_clients.last_stats())
+                self._log_once((gk, 'skip'), int(time.time() // 900),
+                               'Tracker %s (id %s) search not sent: %s', cfg['name'], cfg['id'], e.reason,
+                               level=logging.WARNING)
+                if hit:
+                    return hit[1]
+                raise TrackerSkipped(e.reason) from None
             except TrackerError as e:
                 st = tracker_clients.last_stats()
                 self._log_steps(cfg, st)
@@ -572,3 +591,56 @@ def has_enabled_trackers() -> bool:
         return any(r.get('enabled', True) for r in get_store().list())
     except Exception:
         return False
+
+
+# ------------------------------------------------------------------ one-time migrations
+
+BHD_ID_RESET_MARKER = '.migrated-bhd-id-backoff-v1'
+# BHD's answer to a TMDB id it can't use, as a stored status message would
+# carry it. Generic 'Unauthorized' (bad key, 401/403) never matches.
+_ID_REJECTION_RE = __import__('re').compile(
+    r'\b(tmdb|imdb)(_id)?\b.{0,40}\b(invalid|not valid|not found|rejected|unknown|malformed)\b'
+    r'|\b(invalid|not valid|rejected|unknown|malformed)\b.{0,40}\b(tmdb|imdb)(_id)?\b', __import__('re').I)
+
+
+def is_id_rejection(message: str) -> bool:
+    return bool(_ID_REJECTION_RE.search(str(message or '')))
+
+
+def reset_bhd_id_backoffs_once(store: Optional[TrackerStore] = None, guard: Optional[TrackerGuard] = None,
+                               marker: Optional[Path] = None) -> int:
+    """Once per install (marker file, created exclusively so one worker runs
+    it): clear a BeyondHD 'auth' backoff that came from BHD rejecting a TMDB
+    id (builds d02df0a/a534e21 sent ids BHD could refuse), identified only by
+    a stored status message matching the id-rejection pattern. A real auth
+    failure (bad key, 401/403: stored as 'Unauthorized') is never cleared.
+    Returns how many trackers were reset."""
+    import os
+    from app.tracker_types import searches_by_id
+    store = store or get_store()
+    guard = guard or get_guard()
+    if marker is None:
+        from app.first_run import data_dir
+        marker = Path(data_dir()) / BHD_ID_RESET_MARKER
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(marker), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return 0
+    os.close(fd)
+    reset = 0
+    for rec in store.list():
+        if not searches_by_id(rec.get('type')):
+            continue
+        st = rec.get('status') or {}
+        if st.get('state') != STATUS_ERROR or not is_id_rejection(st.get('message', '')):
+            continue
+        gk = guard_key(rec)
+        cd = guard.blocked(gk)
+        if cd and cd[1] == 'auth':
+            guard.clear(gk, kinds=('auth',))
+        store.set_status(rec['id'], 'untested', '')
+        reset += 1
+        logger.warning('Tracker %s (id %s): cleared a backoff from a rejected TMDB id (one-time reset)',
+                       rec['name'], rec['id'])
+    return reset

@@ -184,13 +184,13 @@ def test_rate_limit_or_key_rejection_stops_the_chain():
         assert e.value.kind == kind and len(m.calls) == 1
 
 
-def test_chain_is_one_budget_unit_and_logs_each_step(engine, caplog):
+def test_chain_logs_each_step(engine, caplog):
     eng, mock = engine
     mock.resps = [R(FAIL), R(EMPTY), R(EMPTY), R(WEB_ONLY)]
     caplog.set_level(logging.INFO)
     out = LumaTrackersClient(eng).search_all('Dune: Part Two', 'movie', 2024, tmdb_id=693134)
     assert len(out) == 4 and len(mock.calls) == 4
-    assert len(eng.guard.log.get('site:beyondhd', [])) == 1
+    assert len(eng.guard.log.get('site:beyondhd', [])) == 4      # caps count HTTP requests
     msgs = [r.getMessage() for r in caplog.records]
     assert 'Tracker BHD (id 1) search step 1 text: HTTP 200, success False, status_code 0, error response' in msgs
     assert 'Tracker BHD (id 1) search step 2 text stripped: HTTP 200, success True, status_code 1, 0 rows' in msgs
@@ -215,3 +215,94 @@ def test_chain_stops_starting_attempts_after_its_time_budget(monkeypatch):
     monkeypatch.setattr(tc, '_monotonic', lambda: next(t))
     m = Mock(R(EMPTY))
     assert movie(m) == [] and len(m.calls) == 2
+
+
+# ------------------------------------------------------------------ budget per HTTP request
+
+def test_every_page_and_fallback_is_charged(engine):
+    eng, mock = engine
+    mock.resps = [R(EMPTY), R(EMPTY), R(EMPTY), R(WEB_ONLY)]
+    LumaTrackersClient(eng).search_all('Dune: Part Two', 'movie', 2024, tmdb_id=693134)
+    assert len(mock.calls) == 4 and len(eng.guard.log['site:beyondhd']) == 4
+
+
+def test_pages_are_charged_too(engine):
+    eng, mock = engine
+    mock.resps = [R(bhd_pages.page1()), R(bhd_pages.page2())]
+    assert len(LumaTrackersClient(eng).search_all('Dune Part Two', 'movie', 2024)) == 104
+    assert len(eng.guard.log['site:beyondhd']) == 2
+
+
+def test_chain_stops_when_the_budget_runs_out(engine, monkeypatch):
+    from app import tracker_guard
+    eng, mock = engine
+    monkeypatch.setitem(tracker_guard.LIMITS, 'interactive_per_hour', 2)
+    mock.resps = [R(EMPTY)]
+    assert LumaTrackersClient(eng).search_all('Dune: Part Two', 'movie', 2024, tmdb_id=693134) == []
+    assert len(mock.calls) == 2 and len(eng.guard.log['site:beyondhd']) == 2
+    assert eng.guard.blocked('site:beyondhd') is None          # running out is not a backoff
+
+
+def test_budget_out_keeps_rows_already_found(engine, monkeypatch):
+    from app import tracker_guard
+    eng, mock = engine
+    monkeypatch.setitem(tracker_guard.LIMITS, 'interactive_per_hour', 1)
+    mock.resps = [R(bhd_pages.page1())]                      # total_pages 2, but no budget for page 2
+    assert len(LumaTrackersClient(eng).search_all('Dune Part Two', 'movie', 2024)) == 100
+    assert len(mock.calls) == 1
+
+
+# ------------------------------------------------------------------ id errors
+
+@pytest.mark.parametrize('bad', [
+    R({'status_code': 0, 'success': False, 'status_message': 'Invalid tmdb_id'}),
+    R({'status_code': 0, 'success': False, 'status_message': 'Unauthorized'}),
+    R({}, 401), R({}, 403), R({}, 422),
+])
+def test_rejected_id_is_never_auth_or_backoff(engine, bad, caplog):
+    eng, mock = engine
+    mock.resps = [R(EMPTY), R(EMPTY), R(EMPTY), bad]
+    caplog.set_level(logging.INFO)
+    assert LumaTrackersClient(eng).search_all('Dune: Part Two', 'movie', 2024, tmdb_id=693134) == []
+    assert eng.guard.blocked('site:beyondhd') is None
+    assert eng.store.get(1)['status']['state'] == 'ok'
+    assert 'search step 4 id: HTTP' in caplog.text and 'error id (' in caplog.text
+
+
+def test_rate_limit_on_the_id_still_stops_and_backs_off(engine):
+    eng, mock = engine
+    mock.resps = [R(EMPTY), R(EMPTY), R(EMPTY), R({}, 429)]
+    LumaTrackersClient(eng).search_all('Dune: Part Two', 'movie', 2024, tmdb_id=693134)
+    assert eng.guard.blocked('site:beyondhd')[1] == 'rate'
+
+
+# ------------------------------------------------------------------ one-time reset
+
+def _auth_backoff(eng, message):
+    from app.tracker_store import STATUS_ERROR
+    eng.guard.failure('site:beyondhd', 'auth')
+    eng.store.set_status(1, STATUS_ERROR, message)
+
+
+def test_reset_clears_an_id_rejection_backoff_once(engine, tmp_path, caplog):
+    from app.tracker_search import reset_bhd_id_backoffs_once
+    eng, _ = engine
+    _auth_backoff(eng, 'Invalid tmdb_id')
+    caplog.set_level(logging.INFO)
+    marker = tmp_path / 'm'
+    assert reset_bhd_id_backoffs_once(eng.store, eng.guard, marker) == 1
+    assert eng.guard.blocked('site:beyondhd') is None and eng.store.get(1)['status']['state'] == 'untested'
+    assert 'cleared a backoff from a rejected TMDB id' in caplog.text and KEY not in caplog.text
+    _auth_backoff(eng, 'Invalid tmdb_id')
+    assert reset_bhd_id_backoffs_once(eng.store, eng.guard, marker) == 0     # runs once
+    assert eng.guard.blocked('site:beyondhd')[1] == 'auth'
+
+
+@pytest.mark.parametrize('msg', ['Unauthorized', 'HTTP 403', 'Invalid API key', ''])
+def test_reset_keeps_a_real_auth_backoff(engine, tmp_path, msg):
+    from app.tracker_search import reset_bhd_id_backoffs_once
+    eng, _ = engine
+    _auth_backoff(eng, msg)
+    assert reset_bhd_id_backoffs_once(eng.store, eng.guard, tmp_path / 'm') == 0
+    assert eng.guard.blocked('site:beyondhd')[1] == 'auth'
+    assert eng.store.get(1)['status']['state'] == 'error'

@@ -300,7 +300,9 @@ def test_avistaz_family_is_rate_strict_for_user_searches(env):
             sent += 1
         except TrackerSkipped:
             pass
-    assert sent == 5
+    # Caps count HTTP requests: the first search also signs in (2 requests), so a
+    # burst of 5 tokens covers 4 searches.
+    assert sent == 4
 
 
 def test_tracker_only_gets_categories_it_is_set_up_for(env):
