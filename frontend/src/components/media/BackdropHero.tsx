@@ -12,7 +12,7 @@
 // Used by both MovieDetailModal/CompactLayout and TvDetailModal/CompactLayout.
 // ---------------------------------------------------------------------------
 
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
 import type { BackdropEffects } from '@/hooks/useBackdropEffects';
 
@@ -57,23 +57,41 @@ export function BackdropHero({
     [phase, effects.headerContainerMask],
   );
 
+  // Each image is its own element (keyed by URL) and stays invisible until it
+  // has loaded, then fades in over navy: opening another title never shows
+  // the previous title's art, and nothing jumps while the new one decodes.
+  const src = backdropUrl || posterUrl || null;
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const loaded = !!src && loadedSrc === src;
+  const markLoaded = useCallback((el: HTMLImageElement | null) => {
+    if (el && src && el.complete && el.naturalWidth > 0) setLoadedSrc(src);
+  }, [src]);
+  const fade: React.CSSProperties = { transition: 'opacity 0.3s ease-out' };
+
   return (
-    <div ref={containerRef} style={containerStyle}>
+    <div ref={containerRef} style={{ ...containerStyle, background: '#15102a' }} data-backdrop-loaded={loaded ? 'true' : 'false'}>
       {backdropUrl ? (
         <img
+          key={backdropUrl}
+          ref={markLoaded}
           src={backdropUrl}
           alt=""
-          style={effects.headerImgStyle}
+          onLoad={() => setLoadedSrc(backdropUrl)}
+          style={{ ...effects.headerImgStyle, ...fade, opacity: loaded ? 1 : 0 }}
         />
       ) : posterUrl ? (
         <img
+          key={posterUrl}
+          ref={markLoaded}
           src={posterUrl}
           alt=""
+          onLoad={() => setLoadedSrc(posterUrl)}
           style={{
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            opacity: 0.6,
+            ...fade,
+            opacity: loaded ? 0.6 : 0,
           }}
         />
       ) : null}

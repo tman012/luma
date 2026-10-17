@@ -11094,6 +11094,11 @@ def _build_hero_movies():
 
     # Max-age date filter (always applied)
     max_age_days = settings.get('ui.hero.max_age_days', 30)
+    minimal_kiosk = _minimal.enabled()
+    if minimal_kiosk:
+        # Web kiosk (#12): the selected library's newest items, however old,
+        # so a library with items never shows an empty screen.
+        max_age_days = 0
 
     # Fetch from Plex — boost mode needs a larger pool
     if boost:
@@ -11188,7 +11193,7 @@ def _build_hero_movies():
     # Build response with proxy image URLs
     movies = []
     for item in items:
-        if item.get('type', 'movie') != 'movie':
+        if item.get('type', 'movie') != 'movie' and not minimal_kiosk:
             continue
         movie = {
             'rating_key': item['rating_key'],

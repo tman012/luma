@@ -48,3 +48,31 @@ def test_hero_limit_defaults_to_ten(test_app):
 
 def test_kiosk_settings_stays_off_in_minimal(test_app, minimal_on):
     assert _client(test_app).get('/api/kiosk/settings', environ_base=REMOTE).status_code == 404
+
+
+class _OldPlex:
+    plex_url = 'http://plex.kiosk-test'
+
+    def health_check(self):
+        return {'default_movie_section_id': 1}
+
+    def get_recently_added(self, section_id=None, limit=10):
+        old = 1_000_000_000  # 2001: far older than the 30-day window
+        return [{'rating_key': 900 + i, 'title': f'Old {i}', 'type': 'movie', 'added_at': old - i,
+                 'artPath': f'/library/metadata/{900 + i}/art/1', 'genres': []} for i in range(limit)]
+
+
+@pytest.mark.parametrize('minimal, expected', [(True, 10), (False, 0)])
+def test_minimal_kiosk_shows_newest_ten_regardless_of_age(test_app, monkeypatch, minimal, expected):
+    if minimal:
+        monkeypatch.setenv('LUMA_MINIMAL', '1')
+    else:
+        monkeypatch.delenv('LUMA_MINIMAL', raising=False)
+    monkeypatch.setattr(app.main, 'get_plex_for_request', lambda: _OldPlex())
+    app.main._hero_result_cache.clear()
+    with test_app.test_request_context('/api/hero/content'):
+        movies, _ = app.main._build_hero_movies()
+    app.main._hero_result_cache.clear()
+    assert len(movies) == expected     # prod keeps its 30-day window
+    if minimal:
+        assert [m['title'] for m in movies] == [f'Old {i}' for i in range(10)]
