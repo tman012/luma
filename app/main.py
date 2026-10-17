@@ -2224,12 +2224,17 @@ _source_links_lock = _threading_links.Lock()
 
 
 def _public_download_link(url: str) -> str:
-    """*url* as the browser may see it. A release link or magnet is returned
-    as is; an http(s) link that carries a key becomes an opaque link."""
-    u = url or ''
-    if not u.lower().startswith(('http://', 'https://')):
-        return u
-    if _strip_link_secrets(u) == u:
+    """*url* as the browser may see it. Luma's own opaque links (tracker
+    release links, source links) are kept; EVERY other link (http(s), magnet,
+    anything else) becomes an opaque source link, whatever it looks like, so
+    no key or announce passkey ever leaves the server. downloads/add swaps it
+    back and still runs every guard on the real link."""
+    u = (url or '').strip()
+    if not u:
+        return ''
+    base = (app.config.get('URL_BASE') or '').rstrip('/')
+    bare = u[len(base):] if base and u.startswith(base + '/') else u
+    if bare.startswith((SOURCE_LINK_PREFIX, _TRACKER_RELEASE_PREFIX)) and '://' not in bare:
         return u
     token = _hashlib_links.sha256(('luma-src:' + u).encode('utf-8')).hexdigest()[:32]
     now = time.time()
@@ -2239,6 +2244,9 @@ def _public_download_link(url: str) -> str:
             for k, _ in sorted(_source_links.items(), key=lambda kv: kv[1][0])[:1000]:
                 _source_links.pop(k, None)
     return SOURCE_LINK_PREFIX + token
+
+
+_TRACKER_RELEASE_PREFIX = '/api/trackers/release/'
 
 
 def _resolve_source_link(url: str):
@@ -2258,20 +2266,54 @@ def _resolve_source_link(url: str):
 
 
 _RESULT_URL_FIELDS = ('guid', 'info_url', 'comments', 'details', 'link', 'url')
+_LINKISH = re.compile(r'(?i)^\s*(?:[a-z][a-z0-9+.-]*:|//)|://')
+
+
+def _opaque_id(value: str) -> str:
+    return 'luma-link:' + _hashlib_links.sha256(value.strip().encode('utf-8')).hexdigest()[:24]
+
+
+def _configured_indexer_keys() -> list:
+    keys = []
+    for k in ('indexer.api_key', 'prowlarr.api_key', 'jackett.api_key'):
+        try:
+            v = settings.get(k) or ''
+        except Exception:
+            v = ''
+        if isinstance(v, str) and len(v.strip()) >= 6:
+            keys.append(v.strip())
+    return keys
+
+
+def _scrub_keys(value, keys):
+    if not isinstance(value, str) or not keys:
+        return value
+    for k in keys:
+        if k in value:
+            value = value.replace(k, '')
+    return value
 
 
 def _all_results_public(payload: dict) -> dict:
-    """The all-results payload as sent to any viewer, owner included: every
-    URL field loses its user info, fragment and key-carrying parameters
-    (trackers put passkeys there), and download links that carry a key are
-    opaque, so the full links never leave the server."""
+    """The all-results payload as sent to any viewer, owner included:
+    - every download link is opaque (see _public_download_link);
+    - every URL-ish field (guid, info/details/comments links, magnets, any
+      scheme or '//' value) becomes a stable opaque id, never a URL;
+    - the configured indexer API key is removed from every string field."""
+    keys = _configured_indexer_keys()
     out = []
     for r in payload.get('releases') or []:
         r = dict(r)
-        for k in _RESULT_URL_FIELDS:
-            if isinstance(r.get(k), str):
-                r[k] = _strip_link_secrets(r[k])
         r['download_url'] = _public_download_link(r.get('download_url') or '')
+        for k in _RESULT_URL_FIELDS:
+            v = r.get(k)
+            if isinstance(v, str) and v.strip() and not v.startswith(('luma-link:', 'luma-tracker:')) and _LINKISH.search(v):
+                r[k] = _opaque_id(v)
+        for k, v in list(r.items()):
+            if k != 'download_url' and isinstance(v, str):
+                r[k] = _scrub_keys(v, keys)
+                if r[k] != v and k in _RESULT_URL_FIELDS:
+                    r[k] = _opaque_id(v)
         out.append(r)
     return {**payload, 'releases': out}
 
@@ -2300,7 +2342,9 @@ def sources_all_results():
         if not client:
             # No trackers and no Prowlarr/Torznab: nothing to search, not an error.
             return jsonify({'success': True, 'total': 0, 'releases': []})
-        denied = _tracker_member_denied() if _tracker_sources_mod().trackers_in_use() else None
+        # Viewer check before any cache read or outbound call, on BOTH paths:
+        # Luma's trackers (member rule) and Prowlarr/Torznab (admin or approved).
+        denied = _indexer_viewer_denied()
         if denied:
             return denied
 
