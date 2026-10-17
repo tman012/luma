@@ -144,7 +144,7 @@ def test_connectors_fresh_install_has_no_key(minimal):
     app.main.settings.update({'apis': {'tmdb': {'api_key': '', 'connector_saved': False}}})
     c = _client(minimal)
     r = c.get('/api/settings/connectors', environ_base=REMOTE)
-    assert r.status_code == 200 and r.get_json() == {'tmdb': {'set': False, 'last4': ''}}
+    assert r.status_code == 200 and r.get_json()['tmdb'] == {'set': False, 'last4': ''}
     assert r.headers['Cache-Control'] == 'no-store'
 
 
@@ -153,7 +153,7 @@ def test_save_masks_key_and_enables_tmdb(minimal, no_tmdb_network, monkeypatch):
     hdr = {'Origin': 'http://localhost', 'Host': 'localhost'}
     r = c.put('/api/settings/connectors/tmdb', json={'api_key': KEY}, environ_base=REMOTE, headers=hdr)
     assert r.status_code == 200
-    assert r.get_json() == {'tmdb': {'set': True, 'last4': KEY[-4:]}}
+    assert r.get_json()['tmdb'] == {'set': True, 'last4': KEY[-4:]}
     assert KEY not in r.get_data(as_text=True)
     g = c.get('/api/settings/connectors', environ_base=REMOTE)
     assert KEY not in g.get_data(as_text=True)
@@ -166,7 +166,7 @@ def test_save_masks_key_and_enables_tmdb(minimal, no_tmdb_network, monkeypatch):
     assert r.get_json() == {'ok': True, 'message': 'Connected'}
     # Remove.
     r = c.put('/api/settings/connectors/tmdb', json={'api_key': ''}, environ_base=REMOTE, headers=hdr)
-    assert r.get_json() == {'tmdb': {'set': False, 'last4': ''}}
+    assert r.get_json()['tmdb'] == {'set': False, 'last4': ''}
     assert app.main.settings.get('apis.tmdb.api_key') == ''
     assert not app.main.tmdb.api_key
 

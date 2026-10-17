@@ -1,4 +1,4 @@
-"""Settings > Connectors: the TMDB API key (owner only).
+"""Settings > Connectors: the TMDB API key and the Trakt client ID (owner only).
 
 The key is stored server-side in settings (apis.tmdb.api_key, a sensitive
 field) and never sent back to the browser: GET answers whether one is saved
@@ -8,6 +8,8 @@ In a minimal (LUMA_MINIMAL=1) build nothing is preconfigured: TMDB stays off
 until the owner saves a key here. An env TMDB_API_KEY, a key bootstrapped
 into settings.json from the env, or the legacy Config class is ignored
 (settings_manager gates apis.tmdb.api_key on apis.tmdb.connector_saved).
+Trakt works the same way: prod's client-ID check, and nothing from the env or
+a bootstrapped settings.json counts until the owner saves one here.
 """
 
 from __future__ import annotations
@@ -26,12 +28,15 @@ _cfg: Dict[str, Callable] = {}
 
 MASK = '********'
 TMDB_TEST_URL = 'https://api.themoviedb.org/3/configuration'
+TRAKT_TEST_URL = 'https://api.trakt.tv/shows/trending'
 KEY_MAX = 512
 _tests: Dict[int, list] = {}
 
 
-def init(*, settings, owner_or_error: Callable, on_tmdb_key: Callable[[str], None]) -> None:
-    _cfg.update(settings=settings, owner_or_error=owner_or_error, on_tmdb_key=on_tmdb_key)
+def init(*, settings, owner_or_error: Callable, on_tmdb_key: Callable[[str], None],
+         on_trakt_change: Callable[[], None] = lambda: None) -> None:
+    _cfg.update(settings=settings, owner_or_error=owner_or_error, on_tmdb_key=on_tmdb_key,
+                on_trakt_change=on_trakt_change)
 
 
 def _no_store(resp, status=200):
@@ -44,9 +49,23 @@ def _stored_key() -> str:
     return str(_cfg['settings'].get('apis.tmdb.api_key') or '').strip()
 
 
+def _stored_trakt() -> str:
+    s = _cfg['settings']
+    if not s.get('apis.trakt.enabled', False):
+        return ''
+    return str(s.get('apis.trakt.client_id') or '').strip()
+
+
+def _masked(key: str) -> dict:
+    return {'set': bool(key), 'last4': key[-4:] if len(key) >= 8 else ''}
+
+
+def trakt_connected() -> bool:
+    return bool(_cfg) and bool(_stored_trakt())
+
+
 def _view() -> dict:
-    key = _stored_key()
-    return {'tmdb': {'set': bool(key), 'last4': key[-4:] if len(key) >= 8 else ''}}
+    return {'tmdb': _masked(_stored_key()), 'trakt': _masked(_stored_trakt())}
 
 
 def _clean(raw) -> Optional[str]:
@@ -77,14 +96,34 @@ def test_tmdb_key(key: str) -> Optional[str]:
     return None
 
 
-def _throttled(uid: int) -> bool:
+def test_trakt_client_id(client_id: str) -> Optional[str]:
+    """None when Trakt accepts *client_id* (prod's check), else a short error."""
+    try:
+        r = requests.get(TRAKT_TEST_URL, params={'limit': 1}, timeout=8, headers={
+            'Content-Type': 'application/json', 'trakt-api-version': '2', 'trakt-api-key': client_id})
+    except requests.exceptions.Timeout:
+        return 'Timed out'
+    except Exception:
+        return "Can't reach Trakt"
+    if r.status_code in (401, 403):
+        return 'Invalid client ID'
+    if r.status_code == 429:
+        return 'Rate limited'
+    if r.status_code != 200:
+        return 'Unexpected response'
+    return None
+
+
+def _throttled(uid: int, bucket: str = 'test') -> bool:
+    """10 upstream checks a minute per user and bucket (Test and Save apart)."""
     now = time.time()
-    log = [t for t in _tests.get(uid, []) if t > now - 60]
+    k = (uid, bucket)
+    log = [t for t in _tests.get(k, []) if t > now - 60]
     if len(log) >= 10:
-        _tests[uid] = log
+        _tests[k] = log
         return True
     log.append(now)
-    _tests[uid] = log
+    _tests[k] = log
     return False
 
 
@@ -106,7 +145,7 @@ def connectors_tmdb_test():
     key = _stored_key() if raw in (MASK, None) else _clean(raw)
     if not key:
         return _no_store(jsonify({'ok': False, 'error': 'Required'}), 400)
-    if _throttled(user['id']):
+    if _throttled(user['id'], 'tmdb-test'):
         return _no_store(jsonify({'ok': False, 'error': 'Rate limited'}))
     problem = test_tmdb_key(key)
     if problem:
@@ -133,10 +172,61 @@ def connectors_tmdb_save():
     key = _clean(raw)
     if not key:
         return _no_store(jsonify({'error': 'Invalid key'}), 400)
+    if _throttled(user['id'], 'tmdb-save'):
+        return _no_store(jsonify({'error': 'Rate limited'}), 429)
     problem = test_tmdb_key(key)
     if problem:
         return _no_store(jsonify({'error': problem}), 400)
     _cfg['settings'].update({'apis': {'tmdb': {'api_key': key, 'connector_saved': True}}})
     _cfg['on_tmdb_key'](key)
     logger.info('TMDB key saved')
+    return _no_store(jsonify(_view()))
+
+
+@bp.route('/api/settings/connectors/trakt/test', methods=['POST'])
+def connectors_trakt_test():
+    user, err = _cfg['owner_or_error']()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    raw = body.get('client_id', MASK) if isinstance(body, dict) else MASK
+    cid = _stored_trakt() if raw in (MASK, None) else _clean(raw)
+    if not cid:
+        return _no_store(jsonify({'ok': False, 'error': 'Required'}), 400)
+    if _throttled(user['id'], 'trakt-test'):
+        return _no_store(jsonify({'ok': False, 'error': 'Rate limited'}))
+    problem = test_trakt_client_id(cid)
+    if problem:
+        return _no_store(jsonify({'ok': False, 'error': problem}))
+    return _no_store(jsonify({'ok': True, 'message': 'Connected'}))
+
+
+@bp.route('/api/settings/connectors/trakt', methods=['PUT'])
+def connectors_trakt_save():
+    user, err = _cfg['owner_or_error']()
+    if err:
+        return err
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or 'client_id' not in body:
+        return _no_store(jsonify({'error': 'Required'}), 400)
+    raw = body.get('client_id')
+    if raw == MASK:
+        return _no_store(jsonify(_view()))
+    if raw in ('', None):
+        _cfg['settings'].update({'apis': {'trakt': {'client_id': '', 'client_secret': '', 'enabled': False,
+                                                    'connector_saved': True}}})
+        _cfg['on_trakt_change']()
+        logger.info('Trakt client ID removed')
+        return _no_store(jsonify(_view()))
+    cid = _clean(raw)
+    if not cid:
+        return _no_store(jsonify({'error': 'Invalid client ID'}), 400)
+    if _throttled(user['id'], 'trakt-save'):
+        return _no_store(jsonify({'error': 'Rate limited'}), 429)
+    problem = test_trakt_client_id(cid)
+    if problem:
+        return _no_store(jsonify({'error': problem}), 400)
+    _cfg['settings'].update({'apis': {'trakt': {'client_id': cid, 'enabled': True, 'connector_saved': True}}})
+    _cfg['on_trakt_change']()
+    logger.info('Trakt client ID saved')
     return _no_store(jsonify(_view()))

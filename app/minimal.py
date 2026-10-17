@@ -26,6 +26,8 @@ ALLOWED_PATHS = frozenset({
     # Settings > Connectors (owner only): the TMDB key.
     '/settings/connectors', '/api/settings/connectors', '/api/settings/connectors/tmdb',
     '/api/settings/connectors/tmdb/test',
+    # Settings > Connectors: Trakt (its rails join Home's list once connected).
+    '/api/settings/connectors/trakt', '/api/settings/connectors/trakt/test',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).

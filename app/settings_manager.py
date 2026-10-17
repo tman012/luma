@@ -123,6 +123,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "enabled":       {"type": "boolean", "default": False, "sensitive": False, "description": "Enable Trakt integration"},
             "client_id":     {"type": "string",  "default": "",    "sensitive": True,  "description": "Trakt API client ID"},
             "client_secret": {"type": "string",  "default": "",    "sensitive": True,  "description": "Trakt API client secret (optional)"},
+            "connector_saved": {"type": "boolean", "default": False, "sensitive": False, "description": "Client ID saved in Settings > Connectors (minimal builds use only that one)"},
         },
         "openai": {
             "_type": "object",
@@ -1494,6 +1495,27 @@ def _minimal_tmdb_locked(data: dict) -> bool:
     return minimal.enabled() and _get_nested(data, 'apis.tmdb.connector_saved', False) is not True
 
 
+# Minimal builds: values that count only once saved in Settings > Connectors.
+_MINIMAL_CONNECTOR_GATED = {
+    'apis.tmdb.api_key': ('apis.tmdb.connector_saved', ''),
+    'apis.trakt.client_id': ('apis.trakt.connector_saved', ''),
+    'apis.trakt.client_secret': ('apis.trakt.connector_saved', ''),
+    'apis.trakt.enabled': ('apis.trakt.connector_saved', False),
+}
+
+
+def _minimal_gated(data: dict, dotted_path: str):
+    """(True, blank) when *dotted_path* is a connector value a minimal build
+    must ignore because the owner hasn't saved it in Connectors."""
+    gate = _MINIMAL_CONNECTOR_GATED.get(dotted_path)
+    if not gate:
+        return False, None
+    from app import minimal
+    if minimal.enabled() and _get_nested(data, gate[0], False) is not True:
+        return True, gate[1]
+    return False, None
+
+
 class SettingsManager:
     """Thread-safe, file-backed settings store with schema validation.
 
@@ -1520,11 +1542,12 @@ class SettingsManager:
     def get(self, dotted_path: str, default: Any = None) -> Any:
         """Return a single settings value by dotted path (e.g. ``plex.url``).
 
-        Minimal builds: the TMDB key counts only once the owner saved it in
-        Settings > Connectors (never a key bootstrapped from the env)."""
+        Minimal builds: the TMDB key and Trakt client ID count only once the
+        owner saved them in Settings > Connectors (never env or bootstrapped)."""
         with self._lock:
-            if dotted_path == 'apis.tmdb.api_key' and _minimal_tmdb_locked(self._settings):
-                return ''
+            locked, blank = _minimal_gated(self._settings, dotted_path)
+            if locked:
+                return blank
             return _get_nested(self._settings, dotted_path, default)
 
     def get_all(self) -> Dict[str, Any]:

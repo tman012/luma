@@ -20575,12 +20575,42 @@ def _on_tmdb_key(key: str) -> None:
         pass
 
 
+def _on_trakt_change() -> None:
+    """A Connectors save or remove: drop cached Trakt rails at once."""
+    _trakt_cache.clear()
+
+
+_TRAKT_VIEWS = {
+    'trakt_movies': lambda: trakt_trending_movies(),
+    'trakt_shows': lambda: trakt_trending_shows(),
+    'trakt_anticipated_movies': lambda: trakt_anticipated_movies(),
+    'trakt_anticipated_shows': lambda: trakt_anticipated_shows(),
+}
+
+
+def _fetch_trakt_rail(rail_id: str) -> list:
+    """Prod's Trakt endpoint output for a Home rail (its cache, 429 handling
+    and TMDB poster lookup), called in-process with limit=20."""
+    view = _TRAKT_VIEWS.get(rail_id)
+    if view is None:
+        return []
+    with app.test_request_context('/', query_string={'limit': '20', 'page': '1'}):
+        rv = view()
+    resp, code = (rv if isinstance(rv, tuple) else (rv, 200))
+    if code != 200:
+        return []
+    data = resp.get_json(silent=True) or {}
+    return data.get('movies') or data.get('shows') or []
+
+
 from app import connectors as _connectors
-_connectors.init(settings=settings, owner_or_error=_start_flow._owner_or_error, on_tmdb_key=_on_tmdb_key)
+_connectors.init(settings=settings, owner_or_error=_start_flow._owner_or_error, on_tmdb_key=_on_tmdb_key,
+                 on_trakt_change=_on_trakt_change)
 app.register_blueprint(_connectors.bp)
 
 from app import home_rails as _home_rails
-_home_rails.init(get_plex=lambda: plex_service, get_current_user=_get_current_user)
+_home_rails.init(get_plex=lambda: plex_service, get_current_user=_get_current_user,
+                 trakt_connected=_connectors.trakt_connected, fetch_trakt=_fetch_trakt_rail)
 app.register_blueprint(_home_rails.bp)
 
 

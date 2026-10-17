@@ -2,6 +2,10 @@
 a recently-added rail for each selected library, plus the Libraries choice
 (which libraries get a rail, in what order).
 
+Once Trakt is connected (Settings > Connectors), prod's Trakt rails (Trending
+Movies, Trending Shows, Anticipated Movies, Anticipated Shows) join the same
+list: same switch, same drag order, one saved order/visibility for both.
+
 Everything is fetched server-side with the owner's Plex token; the browser
 only sees titles and proxied image paths (/api/img/plex, no token).
 """
@@ -34,8 +38,57 @@ _cfg: Dict[str, Any] = {}
 _lock = threading.Lock()
 
 
-def init(*, get_plex: Callable[[], Any], get_current_user: Callable[[], Optional[dict]]):
-    _cfg.update(get_plex=get_plex, get_current_user=get_current_user)
+# Prod's Trakt rails (exploreRails.ts): id, title, card type, prod endpoint.
+TRAKT_RAILS = (
+    ('trakt_movies', 'Trending Movies', 'movie', '/api/trakt/movies/trending'),
+    ('trakt_shows', 'Trending Shows', 'show', '/api/trakt/shows/trending'),
+    ('trakt_anticipated_movies', 'Anticipated Movies', 'movie', '/api/trakt/movies/anticipated'),
+    ('trakt_anticipated_shows', 'Anticipated Shows', 'show', '/api/trakt/shows/anticipated'),
+)
+TRAKT_IDS = frozenset(r[0] for r in TRAKT_RAILS)
+TMDB_POSTER = 'https://image.tmdb.org/t/p/w342'
+
+
+def init(*, get_plex: Callable[[], Any], get_current_user: Callable[[], Optional[dict]],
+         trakt_connected: Callable[[], bool] = lambda: False,
+         fetch_trakt: Optional[Callable[[str], List[Dict[str, Any]]]] = None):
+    _cfg.update(get_plex=get_plex, get_current_user=get_current_user,
+                trakt_connected=trakt_connected, fetch_trakt=fetch_trakt)
+
+
+def trakt_rails() -> List[Dict[str, Any]]:
+    """Trakt rails as list entries, only while Trakt is connected."""
+    try:
+        on = bool(_cfg.get('trakt_connected', lambda: False)())
+    except Exception:
+        on = False
+    if not on:
+        return []
+    return [{'id': rid, 'title': title, 'type': kind, 'source': 'trakt'} for rid, title, kind, _ in TRAKT_RAILS]
+
+
+def trakt_items(rail_id: str) -> List[Dict[str, Any]]:
+    """Cards for a Trakt rail from prod's endpoint output. Tapping one opens the
+    TMDB detail popup (tmdb_id); no Plex rating key."""
+    fetch = _cfg.get('fetch_trakt')
+    kind = next((k for rid, _, k, _ in TRAKT_RAILS if rid == rail_id), None)
+    if not fetch or not kind:
+        return []
+    try:
+        raw = fetch(rail_id) or []
+    except Exception as e:  # noqa: BLE001 - a rail failing must not break Home
+        logger.warning('Trakt rail %s failed: %s', rail_id, type(e).__name__)
+        return []
+    out = []
+    for it in raw[:RAIL_LIMIT]:
+        tmdb_id = it.get('tmdb_id') if isinstance(it, dict) else None
+        if not isinstance(tmdb_id, int) or tmdb_id <= 0:
+            continue
+        poster = it.get('poster_path')
+        out.append({'key': f'tmdb-{kind}-{tmdb_id}', 'type': kind, 'title': str(it.get('title') or ''),
+                    'subtitle': str(it.get('year') or ''), 'tmdb_id': tmdb_id,
+                    'poster': f'{TMDB_POSTER}{poster}' if isinstance(poster, str) and poster.startswith('/') else None})
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -65,16 +118,18 @@ def save_prefs(prefs: Dict[str, List[str]]) -> None:
     tmp.replace(p)
 
 
-def arrange(sections: List[Dict[str, Any]], prefs: Dict[str, List[str]]) -> List[Dict[str, Any]]:
-    """Movie and show libraries in the saved order (new ones last, in Plex's
-    order), each with enabled = not hidden. All on by default."""
-    usable = [s for s in sections if s.get('type') in RAIL_TYPES]
+def arrange(sections: List[Dict[str, Any]], prefs: Dict[str, List[str]],
+            extra: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
+    """Movie and show libraries plus any *extra* rails (Trakt) in one saved
+    order (new ones last: Plex's order, then the extras), each with
+    enabled = not hidden. All on by default."""
+    usable = [s for s in sections if s.get('type') in RAIL_TYPES] + list(extra or [])
     rank = {sid: i for i, sid in enumerate(prefs.get('order') or [])}
     hidden = set(prefs.get('hidden') or [])
     indexed = list(enumerate(usable))
     indexed.sort(key=lambda t: (rank.get(str(t[1]['id']), len(rank) + t[0])))
     return [{'id': str(s['id']), 'title': s.get('title', ''), 'type': s['type'],
-             'enabled': str(s['id']) not in hidden} for _, s in indexed]
+             'source': s.get('source', 'plex'), 'enabled': str(s['id']) not in hidden} for _, s in indexed]
 
 
 # ---------------------------------------------------------------------------
@@ -192,7 +247,7 @@ def home():
     sections = _sections_or_none(plex) if plex is not None else None
     if sections is None:
         return jsonify({'continue_watching': [], 'rails': [], 'plex': False})
-    libs = [l for l in arrange(sections, load_prefs()) if l['enabled']]
+    libs = [l for l in arrange(sections, load_prefs(), trakt_rails()) if l['enabled']]
     from flask import current_app
     flask_app = current_app._get_current_object()
 
@@ -203,7 +258,8 @@ def home():
 
     with ThreadPoolExecutor(max_workers=min(6, len(libs) + 1)) as pool:
         cw = pool.submit(in_app, continue_watching, plex)
-        rails = [(l, pool.submit(in_app, recently_added, plex, l['id'])) for l in libs]
+        rails = [(l, pool.submit(in_app, trakt_items, l['id']) if l['source'] == 'trakt'
+                  else pool.submit(in_app, recently_added, plex, l['id'])) for l in libs]
         out_rails = [{'id': l['id'], 'title': l['title'], 'type': l['type'], 'items': f.result()}
                      for l, f in rails]
         cw_items = cw.result()
@@ -218,7 +274,7 @@ def libraries():
     if err:
         return err
     plex = _plex()
-    libs = arrange(_sections(plex), load_prefs()) if plex else []
+    libs = arrange(_sections(plex) if plex else [], load_prefs(), trakt_rails())
     return jsonify({'libraries': libs})
 
 
@@ -247,8 +303,9 @@ def save_libraries():
     plex = _plex()
     known = {l['id'] for l in arrange(_sections(plex), {'order': [], 'hidden': []})} if plex else set()
     if known:
-        order = [s for s in order if s in known]
-        hidden = [s for s in hidden if s in known]
+        # Trakt rails keep their place while Trakt is disconnected.
+        order = [s for s in order if s in known or s in TRAKT_IDS]
+        hidden = [s for s in hidden if s in known or s in TRAKT_IDS]
     with _lock:
         save_prefs({'order': order, 'hidden': hidden})
-    return jsonify({'libraries': arrange(_sections(plex), load_prefs()) if plex else []})
+    return jsonify({'libraries': arrange(_sections(plex) if plex else [], load_prefs(), trakt_rails())})

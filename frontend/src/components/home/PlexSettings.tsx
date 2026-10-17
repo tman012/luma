@@ -23,14 +23,17 @@ const post = <T,>(url: string, body: unknown) =>
 
 /** True for the owner (the Plex settings answer only them); null while checking. */
 export function usePlexOwner(admin: boolean): boolean | null {
-  const [owner, setOwner] = useState<boolean | null>(admin ? null : false);
+  // Unknown (null) until /api/settings/plex answers for an admin, so a reload
+  // of /settings/plex or /settings/connectors doesn't bounce while auth loads.
+  const [owner, setOwner] = useState<boolean | null>(null);
   useEffect(() => {
-    if (!admin) { setOwner(false); return; }
+    if (!admin) return;
     let alive = true;
+    setOwner(null);
     call('/api/settings/plex').then(r => { if (alive) setOwner(r.ok); });
     return () => { alive = false; };
   }, [admin]);
-  return owner;
+  return admin ? owner : false;
 }
 
 type Phase = 'idle' | 'waiting' | 'servers' | 'connecting';

@@ -101,6 +101,11 @@ export const SKELETON_TIMEOUT_MS = 8000;
 
 /** Opens main's movie or TV popup; episodes and seasons open their show. */
 export function openDetail(modals: { openMovie: (o: object) => void; openTv: (o: object) => void }, c: Card) {
+  if (c.tmdb_id) {
+    return c.type === 'movie'
+      ? modals.openMovie({ tmdbId: c.tmdb_id, origin: 'trakt_movies' })
+      : modals.openTv({ tmdbId: c.tmdb_id, origin: 'trakt_shows' });
+  }
   const key = Number(c.key);
   if (c.type === 'movie') return modals.openMovie({ ratingKey: key, origin: 'continue_watching' });
   const show = Number(c.show_key || c.key);

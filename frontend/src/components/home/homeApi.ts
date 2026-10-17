@@ -6,10 +6,12 @@ export interface Card {
   key: string; type: string; title: string; subtitle: string;
   show_key?: string; season?: number; episode?: number;
   poster: string | null; art?: string | null; progress?: number;
+  /** Trakt rail cards: open the TMDB detail popup (no Plex rating key). */
+  tmdb_id?: number;
 }
 export interface Rail { id: string; title: string; type: string; items: Card[] }
 export interface HomeData { continue_watching: Card[]; rails: Rail[]; plex: boolean }
-export interface Library { id: string; title: string; type: string; enabled: boolean }
+export interface Library { id: string; title: string; type: string; enabled: boolean; source?: 'plex' | 'trakt' }
 
 /** Image URLs come from the server complete (URL base included): use as is. */
 export const img = (p: string | null | undefined) => p || null;
