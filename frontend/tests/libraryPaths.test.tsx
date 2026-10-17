@@ -291,6 +291,34 @@ describe('Settings > Library paths', () => {
     expect(screen.queryByTestId('lp-fallback')).toBeNull();
   });
 
+  it("Taylor's :5002 config with TV selecting p_48f684d2: Movies choices leave TV out, fallback and rule unchanged", async () => {
+    const rule = { id: 'r_5002a001', enabled: true, path_id: 'p_c48f1d47', released_within: { n: 1, unit: 'years' as const },
+      resolution: ['1080p', '720p', 'sd'], source: [] };
+    state = {
+      paths: [
+        { id: 'p_48f684d2', name: 'TV', path: '/media/Video/TV', status: 'ok', used_by: ['tv'] },
+        { id: 'p_81f2cd3e', name: 'Movies', path: '/media/Video/Movies', status: 'ok', used_by: [] },
+        { id: 'p_c48f1d47', name: 'Recently Released', path: '/media/Video/Recently Released', status: 'ok', used_by: [] },
+      ],
+      rules: [rule], fallback_path_id: 'p_81f2cd3e', path_map: [], transfer: 'copy',
+    };
+    render(<LibraryPathsSettings wide />);
+    expect(await screen.findByTestId('lp-fallback-value')).toHaveProperty('textContent', 'Movies');
+    expect(screen.getAllByTestId('lp-path').map(r => r.textContent)).toContain('TV/media/Video/TV');
+    expect(screen.getAllByTestId('lp-rule-dest').map(e => e.textContent)).toEqual(['Recently Released']);
+    fireEvent.click(screen.getByTestId('lp-fallback-toggle'));
+    expect(within(screen.getByTestId('lp-fallback')).getAllByRole('radio').map(r => r.textContent))
+      .toEqual(['Movies', 'Recently Released']);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit rule 1' }));
+    fireEvent.click(screen.getByTestId('lp-dest'));
+    expect(within(screen.getByTestId('lp-dest').parentElement!).getAllByRole('radio').map(r => r.textContent))
+      .toEqual(['Movies', 'Recently Released']);
+    // toggling the rule saves the same rule and the same explicit fallback
+    fireEvent.click(screen.getByTestId('lp-cancel'));
+    fireEvent.click(screen.getByRole('switch', { name: 'Rule 1' }));
+    await waitFor(() => expect(rulesPut()!.body).toEqual({ rules: [{ ...rule, enabled: false }], fallback_path_id: 'p_81f2cd3e' }));
+  });
+
   it('one path is the fallback without asking', async () => {
     state = { paths: [base().paths[0]!], rules: [], fallback_path_id: null, path_map: [], transfer: 'copy' };
     render(<LibraryPathsSettings wide />);
