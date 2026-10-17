@@ -128,6 +128,7 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
             --color-glass-20: rgb(255 255 255 / 0.20);
             --color-accent: #3b82f6;
             --color-accent-hover: #60a5fa;
+            --color-danger: #ef4444;
             --color-text-primary: rgb(255 255 255 / 0.95);
             --color-text-secondary: rgb(255 255 255 / 0.70);
             --color-text-muted: rgb(255 255 255 / 0.50);
@@ -206,7 +207,7 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
         /* Plain red line between Remember me and Sign in. Its height is
            reserved, so showing an error never moves the form. */
         .error {
-            color: #ef4444;
+            color: var(--color-danger);
             font-size: 13px;
             line-height: 18px;
             min-height: 18px;

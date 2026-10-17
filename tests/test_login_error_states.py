@@ -54,7 +54,8 @@ def test_clean_form_reserves_an_empty_error_line(full):
 def test_error_line_style_is_plain_red_13px_with_reserved_height(full):
     html = full.get('/login', environ_base=IP).get_data(as_text=True)
     css = _css(html, '.error')
-    assert 'color: #ef4444' in css and 'font-size: 13px' in css
+    assert 'color: var(--color-danger)' in css and 'font-size: 13px' in css
+    assert re.search(r'--color-danger: #ef4444;', html)
     assert 'min-height: 18px' in css and 'line-height: 18px' in css
     for boxy in ('background', 'border', 'padding', 'border-radius'):
         assert boxy not in css, boxy
