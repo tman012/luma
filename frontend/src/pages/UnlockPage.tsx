@@ -43,7 +43,7 @@ export function UnlockPage() {
   return (
     <StartShell step="unlock">
       <Center>
-        <Logo top="10vh" />
+        <Logo />
         <div style={{ minHeight: 20, marginTop: 18 }}>{error && <ErrorLine text={error} />}</div>
         <PinPad value={pin} onChange={v => { setError(''); setPin(v); }} onComplete={submit} shake={shake} disabled={busy} />
       </Center>

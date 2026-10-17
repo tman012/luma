@@ -214,8 +214,12 @@ class StartFlowTest(unittest.TestCase):
         with self._fake_plex():
             self.client.post('/api/start/plex/pin')
             other = self.app.test_client()
-            self.assertEqual(other.get('/api/start/plex/pin').status_code, 409)
-            self.assertEqual(other.post('/api/start/plex/server', json={'machine_id': 'm1'}).status_code, 409)
+            self.assertEqual(other.get('/api/start/plex/pin').status_code, 401)
+            self.assertEqual(other.post('/api/start/plex/server', json={'machine_id': 'm1'}).status_code, 401)
+            self.assertTrue(other.post('/api/start/plex/server', json={'machine_id': 'm1'}).json['restart'])
+            # Already set up stays 409.
+        self.ua.create_user('someone', '12345678', is_admin=True)
+        self.assertEqual(self.app.test_client().post('/api/start/plex/server', json={'machine_id': 'm1'}).status_code, 409)
 
     def test_existing_install_never_sees_start(self):
         self.ua.create_user('someone', '1234', is_admin=True)

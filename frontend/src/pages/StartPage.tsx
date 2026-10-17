@@ -2,7 +2,7 @@ import { apiFetch } from '../apiClient';
 /**
  * StartPage — first-run setup for a fresh install.
  *
- * Welcome → Sign in with Plex → (pick a server) → Set password → Access → Done.
+ * Welcome → Sign in with Plex → (pick a server) → Create Account → Access → Done.
  * Only reachable while the install has no users (the backend refuses every
  * Plex step once an account exists) and never shown again after Done.
  */
@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { isMinimal } from '@/minimal';
+import { openPlexPopup, plexAuthMode } from '@/utils/plexAuth';
 import {
   StartShell, Center, Bottom, Title, Sub, ErrorLine, Status, Logo, PlexMark, Check, PinPad,
   primaryBtn, plexBtn, linkBtn, list, row, FONT,
@@ -52,6 +53,7 @@ export function StartPage() {
   const [busy, setBusy] = useState(false);
   const [passwordSet, setPasswordSet] = useState(false);
   const pollRef = useRef<number | null>(null);
+  const pollFnRef = useRef<() => void>(() => {});
 
   const stopPolling = () => {
     if (pollRef.current !== null) window.clearTimeout(pollRef.current);
@@ -61,8 +63,15 @@ export function StartPage() {
   // Resume where this browser left off (e.g. a reload mid-setup).
   useEffect(() => {
     let alive = true;
-    api<{ needs_start: boolean; in_progress: boolean; server?: string; password_set?: boolean }>('/api/start/status').then(({ data }) => {
+    api<{ needs_start: boolean; in_progress: boolean; server?: string; password_set?: boolean; step?: string }>('/api/start/status').then(({ data }) => {
       if (!alive) return;
+      if (data.needs_start && data.step === 'plex') {
+        // Back from Plex (same window): keep polling the PIN this browser started.
+        setStep('plex');
+        setAuthUrl('pending');
+        pollFnRef.current();
+        return;
+      }
       if (data.in_progress) {
         setServerName(data.server || '');
         setPasswordSet(!!data.password_set);
@@ -105,21 +114,30 @@ export function StartPage() {
     pollRef.current = window.setTimeout(tick, 1500);
   }, [chooseServer]);
 
+  pollFnRef.current = poll;
+
   const signInWithPlex = async () => {
     setError('');
     setBusy(true);
-    // Open the tab inside the click so popup blockers allow it, then point it at Plex.
-    const tab = window.open('about:blank', '_blank');
-    const { ok, data } = await sendJson('/api/start/plex/pin');
+    // Open the pop-up inside the click so blockers allow it, then point it at Plex.
+    const popup = openPlexPopup();
+    const mode = plexAuthMode(popup);
+    const { ok, data } = await sendJson('/api/start/plex/pin', { 'mode': mode });
     setBusy(false);
     if (!ok || !data.auth_url) {
-      tab?.close();
+      popup?.close();
       setError(data.error || "Couldn't reach Plex. Try again.");
       return;
     }
     setAuthUrl(data.auth_url);
-    if (tab) tab.location.href = data.auth_url;
-    poll();
+    if (popup) {
+      popup.location.href = data.auth_url;
+      poll();
+    } else {
+      // Blocked pop-up or installed app: go to Plex in this tab; Plex sends
+      // the browser back to /start, which resumes polling.
+      window.location.href = data.auth_url;
+    }
   };
 
   const finish = async () => {
@@ -163,7 +181,7 @@ export function StartPage() {
             {authUrl && !error ? (
               <>
                 <Status text="Waiting for Plex…" />
-                <a href={authUrl} target="_blank" rel="noreferrer" style={linkBtn}>Open Plex again</a>
+                {authUrl !== 'pending' && <a href={authUrl} target="_blank" rel="noreferrer" style={linkBtn}>Open Plex again</a>}
               </>
             ) : (
               <button className="luma-start-btn" style={plexBtn} onClick={signInWithPlex} disabled={busy}>
@@ -199,7 +217,7 @@ export function StartPage() {
 
       {step === 'password' && (
         <Center key="password">
-          <PasswordStep onSaved={() => { setPasswordSet(true); setStep(isMinimal() ? 'done' : 'access'); }} onRestart={() => setStep('welcome')} />
+          <AccountStep onSaved={() => { setPasswordSet(true); setStep(isMinimal() ? 'done' : 'access'); }} onRestart={() => setStep('welcome')} />
         </Center>
       )}
 
@@ -225,19 +243,18 @@ export function StartPage() {
   );
 }
 
-/** The owner's own password, used at /login from then on. */
-export function PasswordStep({ onSaved, onRestart }: { onSaved: () => void; onRestart: () => void }) {
+/** Create Account: the owner's username and password for /login. */
+export function AccountStep({ onSaved, onRestart }: { onSaved: () => void; onRestart: () => void }) {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (busy) return;
-    if (password !== confirm) { setError("Passwords don't match"); return; }
     setBusy(true);
-    const { ok, data } = await sendJson('/api/start/password', { password, confirm });
+    const { ok, data } = await sendJson('/api/start/account', { username, password });
     setBusy(false);
     if (ok) { onSaved(); return; }
     if (data.restart) { onRestart(); return; }
@@ -245,32 +262,42 @@ export function PasswordStep({ onSaved, onRestart }: { onSaved: () => void; onRe
   };
 
   return (
-    <form id="start-password" method="post" action="#" onSubmit={submit} style={pwForm}>
-      <Title>Set password</Title>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%', marginTop: 28 }}>
-        <input
-          id="new-password" name="new-password" type="password" autoComplete="new-password" aria-label="Password"
-          placeholder="Password" value={password} onChange={e => { setError(''); setPassword(e.target.value); }}
-          style={pwInput} autoFocus disabled={busy} maxLength={256}
-        />
-        <input
-          id="confirm-password" name="confirm-password" type="password" autoComplete="new-password" aria-label="Confirm password"
-          placeholder="Confirm password" value={confirm} onChange={e => { setError(''); setConfirm(e.target.value); }}
-          style={pwInput} disabled={busy} maxLength={256}
-        />
+    <form id="start-account" method="post" action="#" onSubmit={submit} style={pwForm}>
+      <Title>Create Account</Title>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%', marginTop: 28 }}>
+        <label style={pwLabel}>
+          Username
+          <input
+            id="username" name="username" type="text" autoComplete="username" autoCapitalize="none"
+            spellCheck={false} value={username} onChange={e => { setError(''); setUsername(e.target.value); }}
+            style={pwInput} disabled={busy} maxLength={64} autoFocus
+          />
+        </label>
+        <label style={pwLabel}>
+          Password
+          <input
+            id="new-password" name="new-password" type="password" autoComplete="new-password"
+            value={password} onChange={e => { setError(''); setPassword(e.target.value); }}
+            style={pwInput} disabled={busy} maxLength={256}
+          />
+        </label>
       </div>
       <Bottom>
         {error && <ErrorLine text={error} />}
-        <button type="submit" className="luma-start-btn" style={primaryBtn} disabled={busy || !password || !confirm}>
-          Continue
+        <button type="submit" className="luma-start-btn" style={primaryBtn} disabled={busy || !username.trim() || !password}>
+          Create Account
         </button>
       </Bottom>
     </form>
   );
 }
 
+const pwLabel: React.CSSProperties = {
+  display: 'flex', flexDirection: 'column', gap: 6, width: '100%', fontSize: 13, fontWeight: 500,
+  color: 'rgba(255,255,255,0.7)', textAlign: 'left',
+};
 const pwForm: React.CSSProperties = {
-  display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', maxWidth: 360, flex: 1,
+  display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', maxWidth: 360,
 };
 const pwInput: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '14px 16px', borderRadius: 12, fontSize: 16, fontFamily: FONT,
@@ -278,7 +305,7 @@ const pwInput: React.CSSProperties = {
 };
 
 /** "Require PIN" segmented choice with an inline keypad (entered twice). */
-export function AccessChooser({ onSaved, initial = 'disabled_local', pinSet = false, compactTitle, passwordSet = false }: {
+export function AccessChooser({ onSaved, initial = 'disabled_local', pinSet = false, passwordSet = false }: {
   onSaved: (mode: Mode) => void;
   initial?: Mode;
   pinSet?: boolean;
@@ -318,7 +345,7 @@ export function AccessChooser({ onSaved, initial = 'disabled_local', pinSet = fa
   const heading = passwordSet ? 'Require sign-in' : 'Require PIN';
   return (
     <>
-      <h1 style={{ margin: 0, marginTop: compactTitle ? 0 : 'min(10vh, 90px)', fontSize: 28, fontWeight: 600, textAlign: 'center' }}>
+      <h1 style={{ margin: 0, marginTop: 0, fontSize: 28, fontWeight: 600, textAlign: 'center' }}>
         {heading}
       </h1>
       <div role="radiogroup" aria-label={heading} style={seg}>
@@ -347,7 +374,7 @@ export function AccessChooser({ onSaved, initial = 'disabled_local', pinSet = fa
           )}
         </>
       ) : (
-        <div style={{ width: '100%', maxWidth: 360, marginTop: 'auto', paddingBottom: 'max(48px, 8vh)', display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
+        <div style={{ width: '100%', maxWidth: 360, marginTop: 32, display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center' }}>
           {error && <ErrorLine text={error} />}
           <button className="luma-start-btn" style={primaryBtn} onClick={() => save()} disabled={busy}>Continue</button>
         </div>

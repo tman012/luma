@@ -76,7 +76,7 @@ def test_flag_parsing(monkeypatch):
 def test_path_rules():
     from app.minimal import path_allowed
     for p in ('/', '/start', '/login', '/logout', '/unlock', '/health', '/sw.js', '/manifest.json',
-              '/api/auth/me', '/api/auth/login', '/api/start/status', '/api/start/password',
+              '/api/auth/me', '/api/auth/login', '/api/start/status', '/api/start/account',
               '/api/security', '/api/version', '/assets/index.js', '/static/images/luma_text.webp',
               '/fonts/x.woff2', '/start/'):
         assert path_allowed(p), p
@@ -188,7 +188,7 @@ def test_set_password_then_login(start_owner, test_app, monkeypatch, use_minimal
     st = c.get('/api/start/status').json
     assert (st['in_progress'], st['password_set']) == (True, False)
 
-    r = c.post('/api/start/password', json={'password': 'correct horse battery', 'confirm': 'correct horse battery'},
+    r = c.post('/api/start/account', json={'username': 'plexowner', 'password': 'correct horse battery'},
                headers=ORIGIN)
     assert r.status_code == 200, r.get_data(as_text=True)
     assert c.get('/api/start/status').json['password_set'] is True
@@ -215,7 +215,7 @@ def test_set_password_then_login(start_owner, test_app, monkeypatch, use_minimal
 def test_login_form_after_set_password(start_owner, test_app, monkeypatch):
     import re
     c, _ = start_owner
-    c.post('/api/start/password', json={'password': 'hunter2-but-longer', 'confirm': 'hunter2-but-longer'},
+    c.post('/api/start/account', json={'username': 'plexowner', 'password': 'hunter2-but-longer'},
            headers=ORIGIN)
     f = test_app.test_client()
     page = f.get('/login', environ_base=REMOTE).get_data(as_text=True)
@@ -229,26 +229,30 @@ def test_login_form_after_set_password(start_owner, test_app, monkeypatch):
 
 
 @pytest.mark.parametrize('body,msg', [
-    ({'password': 'short', 'confirm': 'short'}, 'at least'),
-    ({'password': 'long enough 1', 'confirm': 'long enough 2'}, "don't match"),
-    ({'password': 'x' * 257, 'confirm': 'x' * 257}, 'at most'),
-    ({'password': 12345678, 'confirm': 12345678}, 'Enter a password'),
-    ({}, 'Enter a password'),
+    ({'username': 'plexowner', 'password': 'short'}, 'at least'),
+    ({'username': 'plexowner', 'password': 'x' * 257}, 'at most'),
+    ({'username': 'plexowner', 'password': 12345678}, 'Enter a password'),
+    ({'username': 'plexowner', 'password': ' ' * 10}, 'Enter a password'),
+    ({'username': '   ', 'password': 'long enough 1'}, 'Enter a username'),
+    ({'password': 'long enough 1'}, 'Enter a username'),
+    ({'username': 'me@example.com', 'password': 'long enough 1'}, "can't contain @"),
+    ({'username': 'u' * 65, 'password': 'long enough 1'}, 'at most 64'),
+    ({}, 'Enter a username'),
 ])
 def test_set_password_validation(start_owner, body, msg):
     c, _ = start_owner
-    r = c.post('/api/start/password', json=body, headers=ORIGIN)
+    r = c.post('/api/start/account', json=body, headers=ORIGIN)
     assert r.status_code == 400 and msg in r.json['error']
 
 
-GOOD = {'password': 'abcdefgh-1', 'confirm': 'abcdefgh-1'}
+GOOD = {'username': 'plexowner', 'password': 'abcdefgh-1'}
 
 
 def test_set_password_refused_outside_start(test_app, start_owner):
     from app import start_flow
     c, _ = start_owner
     start_flow._save_state({**start_flow._load_state(), 'completed': True})
-    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 409
+    assert c.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 409
 
 
 @pytest.mark.parametrize('peer', ['127.0.0.1', '192.168.1.20', '10.0.0.7'])
@@ -257,12 +261,12 @@ def test_implicit_local_owner_cannot_set_password(test_app, start_owner, peer):
     import app.main
     app.main.settings.update({'security': {'auth_required': 'disabled_local'}})
     anon = test_app.test_client()
-    r = anon.post('/api/start/password', json=GOOD, headers={**ORIGIN, 'Host': 'localhost'},
+    r = anon.post('/api/start/account', json=GOOD, headers={**ORIGIN, 'Host': 'localhost'},
                   environ_base={'REMOTE_ADDR': peer})
     assert r.status_code == 401
     # Even with a stolen setup cookie but no real session.
     _setup_cookie(test_app, anon, start_owner[1]['id'])
-    r = anon.post('/api/start/password', json=GOOD, headers=ORIGIN, environ_base={'REMOTE_ADDR': peer})
+    r = anon.post('/api/start/account', json=GOOD, headers=ORIGIN, environ_base={'REMOTE_ADDR': peer})
     assert r.status_code == 401
 
 
@@ -271,31 +275,31 @@ def test_session_without_setup_cookie_rejected(test_app, start_owner):
     _, user = start_owner
     other = test_app.test_client()
     other.set_cookie('luma_auth_session', user_auth.create_session(user['id']))
-    assert other.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 403
+    assert other.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 403
     other.set_cookie(start_flow.SETUP_COOKIE, 'forged.value', path='/api/start/')
-    assert other.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 403
+    assert other.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 403
 
 
 def test_setup_cookie_for_another_uid_or_plex_account_rejected(test_app, start_owner):
     c, user = start_owner
     _setup_cookie(test_app, c, user['id'] + 1)
-    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 403
+    assert c.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 403
     _setup_cookie(test_app, c, user['id'], plex_id='someone-else')
-    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 403
+    assert c.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 403
     _setup_cookie(test_app, c, user['id'])
-    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 200
+    assert c.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 200
 
 
 def test_set_password_is_one_shot(test_app, start_owner):
     from app import start_flow, user_auth
     c, user = start_owner
-    r = c.post('/api/start/password', json=GOOD, headers=ORIGIN)
+    r = c.post('/api/start/account', json=GOOD, headers=ORIGIN)
     assert r.status_code == 200
     assert any(h.startswith(start_flow.SETUP_COOKIE + '=;') for h in r.headers.getlist('Set-Cookie'))
     before = user_auth.get_user_by_id(user['id'])['pin_hash']
     _setup_cookie(test_app, c, user['id'])
-    again = {'password': 'another-pass-2', 'confirm': 'another-pass-2'}
-    assert c.post('/api/start/password', json=again, headers=ORIGIN).status_code == 409
+    again = {'username': 'plexowner', 'password': 'another-pass-2'}
+    assert c.post('/api/start/account', json=again, headers=ORIGIN).status_code == 409
     assert user_auth.get_user_by_id(user['id'])['pin_hash'] == before
 
 
@@ -307,19 +311,19 @@ def test_signed_out_spam_never_locks_out_owner(test_app, start_owner):
     forged.set_cookie('luma_auth_session', user_auth.create_session(user['id']))
     forged.set_cookie(start_flow.SETUP_COOKIE, 'forged.value', path='/api/start/')
     for _ in range(login_limiter.MAX_FAILURES * 3):
-        assert other.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 401
-        assert forged.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 403
+        assert other.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 401
+        assert forged.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 403
     assert login_limiter._fail == {}
-    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 200
+    assert c.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 200
 
 
 def test_owner_bad_attempts_hit_limit(test_app, start_owner):
     from app import login_limiter
     c, _ = start_owner
     for _ in range(login_limiter.MAX_FAILURES):
-        assert c.post('/api/start/password', json={'password': 'short', 'confirm': 'short'},
+        assert c.post('/api/start/account', json={'username': 'plexowner', 'password': 'short'},
                       headers=ORIGIN).status_code == 400
-    r = c.post('/api/start/password', json=GOOD, headers=ORIGIN)
+    r = c.post('/api/start/account', json=GOOD, headers=ORIGIN)
     assert r.status_code == 429 and int(r.headers['Retry-After']) > 0
 
 
@@ -340,7 +344,7 @@ def test_parallel_valid_posts_set_once(test_app, start_owner):
     def go(k, i):
         barrier.wait()
         pw = f'parallel-pass-{i}'
-        codes.append(k.post('/api/start/password', json={'password': pw, 'confirm': pw},
+        codes.append(k.post('/api/start/account', json={'username': 'plexowner', 'password': pw},
                             headers=ORIGIN).status_code)
     threads = [threading.Thread(target=go, args=(k, i)) for i, k in enumerate(clients)]
     for t in threads:
@@ -353,17 +357,17 @@ def test_parallel_valid_posts_set_once(test_app, start_owner):
 
 
 def test_claim_released_when_hashing_fails(test_app, start_owner):
-    from app import start_flow, user_auth
+    from app import start_flow
     c, _ = start_owner
-    with mock.patch.object(user_auth, 'update_pin', side_effect=RuntimeError('boom')):
+    with mock.patch.object(start_flow._cfg['user_auth'], 'set_name_and_password', side_effect=RuntimeError('boom')):
         test_app.config['PROPAGATE_EXCEPTIONS'] = False
         try:
-            assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 500
+            assert c.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 500
         finally:
             test_app.config['PROPAGATE_EXCEPTIONS'] = None
     st = start_flow._load_state()
     assert not st.get('password_claimed') and not st.get('password_set')
-    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 200
+    assert c.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 200
 
 
 @pytest.mark.parametrize('base,expected', [('', '/api/start/'), ('/luma', '/luma/api/start/'),
@@ -376,7 +380,7 @@ def test_setup_cookie_path_follows_url_base(test_app, start_owner, base, expecte
     try:
         with test_app.test_request_context():
             assert start_flow._setup_cookie_path() == expected
-        r = c.post('/api/start/password', json=GOOD, headers=ORIGIN)
+        r = c.post('/api/start/account', json=GOOD, headers=ORIGIN)
         assert r.status_code == 200
         dels = [h for h in r.headers.getlist('Set-Cookie') if h.startswith(start_flow.SETUP_COOKIE + '=;')]
         assert dels and f'Path={expected}' in dels[0]
@@ -390,13 +394,13 @@ def test_setup_cookie_non_dict_payload_rejected(test_app, start_owner):
     with test_app.test_request_context():
         tok = start_flow._serializer().dumps(['not', 'a', 'dict'])
     c.set_cookie(start_flow.SETUP_COOKIE, tok, path='/api/start/')
-    assert c.post('/api/start/password', json=GOOD, headers=ORIGIN).status_code == 403
+    assert c.post('/api/start/account', json=GOOD, headers=ORIGIN).status_code == 403
 
 
 def test_security_reports_password(start_owner):
     c, _ = start_owner
     assert c.get('/api/security').json['pin_set'] is False
-    c.post('/api/start/password', json=GOOD, headers=ORIGIN)
+    c.post('/api/start/account', json=GOOD, headers=ORIGIN)
     body = c.get('/api/security').json
     assert body['pin_set'] is True and body['password_set'] is True
 
@@ -451,3 +455,159 @@ def test_flag_unset_lan_keeps_implicit_owner(test_app, monkeypatch):
     r = test_app.test_client().get('/api/auth/me', headers={'Host': 'localhost'},
                                    environ_base={'REMOTE_ADDR': '127.0.0.1'})
     assert r.status_code == 200 and r.json['implicit'] is True
+
+
+# -- blank password, Plex forwardUrl ------------------------------------------
+
+def test_blank_password_rejected_and_counted(test_app, start_owner):
+    from app import login_limiter
+    c, user = start_owner
+    r = c.post('/api/start/account', json={'username': 'plexowner', 'password': ' ' * 10}, headers=ORIGIN)
+    assert r.status_code == 400 and 'Enter a password' in r.json['error']
+    assert login_limiter._fail.get(f"id:start-password:uid:{user['id']}")
+
+
+class _PinResp:
+    status_code = 201
+    ok = True
+
+    def json(self):
+        return {'id': 42, 'code': 'abcd'}
+
+    def raise_for_status(self):
+        pass
+
+
+@pytest.mark.parametrize('base', ['', '/luma', '/luma/'])
+def test_auth_url_has_encoded_forward_url(test_app, minimal, base):
+    from urllib.parse import parse_qs, urlsplit
+    old = test_app.config.get('URL_BASE')
+    test_app.config['URL_BASE'] = base
+    try:
+        with mock.patch('app.start_flow.requests.post', return_value=_PinResp()):
+            r = test_app.test_client().post('/api/start/plex/pin', headers=ORIGIN,
+                                            base_url='http://192.168.1.62:5002', environ_base=REMOTE)
+        assert r.status_code == 200, r.get_data(as_text=True)
+        url = r.json['auth_url']
+        frag = urlsplit(url).fragment
+        assert frag.startswith('?')
+        q = parse_qs(frag[1:])
+        assert q['forwardUrl'] == ['http://192.168.1.62:5002' + base.rstrip('/') + '/start/plex-done']
+        assert 'forwardUrl=http%3A%2F%2F192.168.1.62%3A5002' in url
+    finally:
+        test_app.config['URL_BASE'] = old
+
+
+def test_forward_url_ignores_untrusted_forwarded_host(test_app, minimal):
+    import app.main
+    app.main.settings.update({'security': {'trusted_proxies': ''}})
+    with mock.patch('app.start_flow.requests.post', return_value=_PinResp()):
+        r = test_app.test_client().post('/api/start/plex/pin', base_url='http://192.168.1.62:5002',
+                                        headers={**ORIGIN, 'X-Forwarded-Host': 'evil.example',
+                                                 'X-Forwarded-Proto': 'https'}, environ_base=REMOTE)
+    assert 'evil.example' not in r.json['auth_url']
+    assert 'forwardUrl=http%3A%2F%2F192.168.1.62%3A5002' in r.json['auth_url']
+
+
+def test_plex_done_page_signed_out_and_never_creates_pin(test_app, minimal):
+    with mock.patch('app.start_flow.create_pin') as create:
+        r = test_app.test_client().get('/start/plex-done', environ_base=REMOTE)
+    assert r.status_code != 404
+    assert '/login' not in (r.headers.get('Location') or '')
+    create.assert_not_called()
+
+
+def test_status_resumes_open_plex_sign_in(test_app, minimal):
+    c = test_app.test_client()
+    assert c.get('/api/start/status', environ_base=REMOTE).json['step'] == 'welcome'
+    with mock.patch('app.start_flow.requests.post', return_value=_PinResp()):
+        c.post('/api/start/plex/pin', headers=ORIGIN, environ_base=REMOTE)
+    with mock.patch('app.start_flow.create_pin') as create:
+        st = c.get('/api/start/status', environ_base=REMOTE).json
+    assert st['step'] == 'plex'
+    create.assert_not_called()
+    assert test_app.test_client().get('/api/start/status', environ_base=REMOTE).json['step'] == 'welcome'
+
+
+
+# -- Create Account: username --------------------------------------------------
+
+def test_status_exposes_no_suggested_username(start_owner):
+    c, _ = start_owner
+    body = c.get('/api/start/status').json
+    assert 'username' not in body and 'plexowner' not in str(body)
+
+
+def test_create_account_field_starts_empty():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[1] / 'frontend' / 'src' / 'pages' / 'StartPage.tsx').read_text()
+    step = src.split('export function AccountStep', 1)[1].split('\nconst pwLabel', 1)[0]
+    assert "const [username, setUsername] = useState('');" in step
+    assert 'initialUsername' not in src
+    assert 'id="username" name="username"' in step and 'autoComplete="username"' in step
+    assert 'id="new-password" name="new-password"' in step and 'autoComplete="new-password"' in step
+
+
+def _login(test_app, ident, pw):
+    return test_app.test_client().post('/api/auth/login', json={'name': ident, 'pin': pw}, environ_base=REMOTE)
+
+
+def test_changed_username_signs_in_old_name_does_not(test_app, start_owner):
+    from app import user_auth
+    c, user = start_owner
+    r = c.post('/api/start/account', json={'username': '  Taylor  ', 'password': 'pass-word-1'}, headers=ORIGIN)
+    assert r.status_code == 200, r.json
+    u = user_auth.get_user_by_id(user['id'])
+    assert u['name'] == 'Taylor' and u['email'] == 'owner@example.com'
+    assert _login(test_app, 'taylor', 'pass-word-1').status_code == 200
+    assert _login(test_app, 'owner@example.com', 'pass-word-1').status_code == 200
+    assert _login(test_app, 'plexowner', 'pass-word-1').status_code in (400, 401)
+
+
+def test_duplicate_username_rejected_and_counted(test_app, start_owner):
+    import secrets
+    from app import login_limiter, user_auth
+    c, user = start_owner
+    user_auth.create_user('Existing', secrets.token_urlsafe(12), email='else@example.com')
+    for name in ('existing', 'EXISTING'):
+        r = c.post('/api/start/account', json={'username': name, 'password': 'pass-word-1'}, headers=ORIGIN)
+        assert r.status_code == 400 and 'already exists' in r.json['error']
+    assert len(login_limiter._fail[f"id:start-password:uid:{user['id']}"]) == 2
+    from app import start_flow
+    assert not start_flow._load_state().get('password_claimed')
+    assert c.post('/api/start/account', json={'username': 'fresh', 'password': 'pass-word-1'},
+                  headers=ORIGIN).status_code == 200
+
+
+def test_account_without_email(test_app, start_owner):
+    from app import user_auth
+    c, user = start_owner
+    with user_auth._get_db() as conn:
+        conn.execute('UPDATE users SET email = NULL WHERE id = ?', (user['id'],))
+    r = c.post('/api/start/account', json={'username': 'noemail', 'password': 'pass-word-1'}, headers=ORIGIN)
+    assert r.status_code == 200
+    assert user_auth.get_user_by_id(user['id'])['email'] is None
+    assert _login(test_app, 'noemail', 'pass-word-1').status_code == 200
+
+
+@pytest.mark.parametrize('mode,path', [('popup', '/start/plex-done'), ('redirect', '/start'),
+                                       (None, '/start/plex-done'), ('bogus', '/start/plex-done')])
+def test_forward_url_per_mode(test_app, minimal, mode, path):
+    from urllib.parse import parse_qs, urlsplit
+    old = test_app.config.get('URL_BASE')
+    test_app.config['URL_BASE'] = '/luma'
+    try:
+        body = {} if mode is None else {'mode': mode}
+        with mock.patch('app.start_flow.requests.post', return_value=_PinResp()):
+            r = test_app.test_client().post('/api/start/plex/pin', json=body, headers=ORIGIN,
+                                            base_url='http://192.168.1.62:5002', environ_base=REMOTE)
+        q = parse_qs(urlsplit(r.json['auth_url']).fragment[1:])
+        assert q['forwardUrl'] == ['http://192.168.1.62:5002/luma' + path]
+    finally:
+        test_app.config['URL_BASE'] = old
+
+
+def test_plex_server_without_start_cookie_is_401(test_app, minimal):
+    r = test_app.test_client().post('/api/start/plex/server', json={'machine_id': 'm1'}, headers=ORIGIN,
+                                    environ_base=REMOTE)
+    assert r.status_code == 401 and r.json['restart'] is True

@@ -114,6 +114,7 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
     <meta name="theme-color" content="#15102a">
     <meta name="color-scheme" content="dark">
     <title>Sign in - Luma</title>
+    <meta name="apple-mobile-web-app-title" content="Luma">
     <link rel="icon" href="{{ url_for('static', filename='images/icon-192.png') }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
     <style>
@@ -142,7 +143,7 @@ LOGIN_PAGE_HTML = '''<!DOCTYPE html>
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 24px 16px 48px;
+            padding: 24px 16px;
             color: var(--color-text-primary);
             -webkit-font-smoothing: antialiased;
         }

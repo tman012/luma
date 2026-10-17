@@ -45,6 +45,11 @@ COPY scripts/healthcheck.py ./scripts/healthcheck.py
 # ./static (dev/live-reload setups) cannot hide it. Served via SPA_DIR.
 COPY --from=frontend-build /frontend/dist/ ./spa/
 
+# Git commit of this build, reported by /api/version
+# (docker compose build --build-arg GIT_SHA=$(git rev-parse HEAD)).
+ARG GIT_SHA=unknown
+RUN echo "$GIT_SHA" > /app/GIT_SHA
+
 # Create data directory and home for ADB
 RUN mkdir -p /app/data /app/cache /app/home/.android
 

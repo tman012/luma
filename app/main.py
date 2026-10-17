@@ -1583,6 +1583,7 @@ def _serve_spa():
 @app.route('/upgrades')
 @app.route('/start')
 @app.route('/unlock')
+@app.route('/start/plex-done')
 @app.route('/admin')
 @app.route('/setup')
 def spa_route():
@@ -10075,21 +10076,20 @@ def _get_app_version():
     """Return a version string that changes on each deploy/build."""
     global _app_version
     if _app_version is None:
-        # Try git short SHA first
-        try:
-            sha = subprocess.check_output(
-                ['git', 'rev-parse', '--short', 'HEAD'],
-                stderr=subprocess.DEVNULL,
-                timeout=3
-            ).decode().strip()
-            if sha:
-                _app_version = sha
-        except Exception:
-            pass
+        # The build's git SHA (baked in or read from .git; never a subprocess)
+        from app import build_info
+        sha = build_info.git_sha()
+        if sha != build_info.UNKNOWN:
+            _app_version = sha[:7]
         # Fallback: use process start time as a stable build stamp
         if _app_version is None:
             _app_version = datetime.now().strftime('%Y%m%d%H%M%S')
     return _app_version
+
+def _build_info_sha():
+    from app import build_info
+    return build_info.git_sha()
+
 
 @app.route('/api/version')
 def api_version():
@@ -10098,7 +10098,7 @@ def api_version():
     version = _get_app_version()
     resp = jsonify({
         'version': version,
-        'git': version,
+        'git': _build_info_sha(),
         'built_at': datetime.now().isoformat()
     })
     resp.headers['Cache-Control'] = 'no-store'

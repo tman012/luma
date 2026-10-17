@@ -28,6 +28,7 @@ import { ConnectServiceHost } from '@/components/connect/ConnectServiceHost';
 import { apiFetch } from './apiClient';
 import { isMinimal } from './minimal';
 import { MinimalHomePage } from '@/pages/MinimalHomePage';
+import { PlexDonePage } from '@/pages/PlexDonePage';
 
 // Lazy-load non-home routes — keeps initial bundle small
 const ExploreKioskPage = lazy(() => import('@/pages/ExploreKioskPage').then(m => ({ default: m.ExploreKioskPage })));
@@ -225,6 +226,7 @@ function MinimalApp() {
           <Route path="/" element={<MinimalHomePage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/start" element={<StartPage />} />
+          <Route path="/start/plex-done" element={<PlexDonePage />} />
           <Route path="/unlock" element={<UnlockPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
@@ -262,6 +264,7 @@ export default function App() {
                     <Route path="/" element={<Home />} />
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/start" element={<StartPage />} />
+                    <Route path="/start/plex-done" element={<PlexDonePage />} />
                     <Route path="/unlock" element={<UnlockPage />} />
 
                     {/* Setup — requires auth */}

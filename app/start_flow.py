@@ -94,7 +94,8 @@ def _require_fresh():
         return jsonify({'error': 'Luma is already set up'}), 409
     st = _load_state()
     if not _nonce() or _nonce() != st.get('nonce'):
-        return jsonify({'error': 'Start again', 'restart': True}), 409
+        # No (or a stale) start cookie: this browser didn't begin the sign-in.
+        return jsonify({'error': 'Start again', 'restart': True}), 401
     return None
 
 
@@ -124,12 +125,29 @@ def create_pin() -> Dict[str, Any]:
     return {'id': d['id'], 'code': d['code']}
 
 
-def auth_url(code: str) -> str:
-    q = urllib.parse.urlencode({
+PLEX_DONE_PATH = '/start/plex-done'   # pop-up: closes itself
+START_PATH = '/start'                  # same tab: resumes the flow
+
+
+def forward_url(mode: str = 'popup') -> str:
+    """Where Plex sends the browser after sign-in: this request's own origin
+    (scheme and host as seen through trusted proxies) plus the URL base, then
+    the self-closing done page (pop-up) or /start (same-tab redirect)."""
+    from flask import current_app
+    base = (current_app.config.get('URL_BASE') or '').rstrip('/')
+    path = START_PATH if mode == 'redirect' else PLEX_DONE_PATH
+    return f"{request.host_url.rstrip('/')}{base}{path}"
+
+
+def auth_url(code: str, forward: str = '') -> str:
+    params = {
         'clientID': _cfg['client_id'],
         'code': code,
         'context[device][product]': PRODUCT,
-    })
+    }
+    if forward:
+        params['forwardUrl'] = forward
+    q = urllib.parse.urlencode(params)
     return f'https://app.plex.tv/auth#?{q}'
 
 
@@ -223,6 +241,14 @@ def start_status():
     out = {'needs_start': fresh, 'in_progress': (not fresh) and _in_progress(user)}
     if fresh:
         out['step'] = 'welcome'
+        # This browser started a Plex sign-in that's still open (e.g. it
+        # went to Plex in the same window): resume polling, no new PIN.
+        nonce = _nonce()
+        if nonce and nonce == _load_state().get('nonce'):
+            with _lock:
+                p = _pending.get(nonce) or {}
+            if p.get('pin_id') and time.time() - p.get('created', 0) <= 15 * 60:
+                out['step'] = 'plex'
     elif out['in_progress']:
         out['step'] = 'done'
         out['server'] = _load_state().get('server_name', '')
@@ -232,6 +258,7 @@ def start_status():
 
 PASSWORD_MIN = 8
 PASSWORD_MAX = 256
+USERNAME_MAX = 64
 
 
 _fallback_secret = secrets.token_bytes(32)
@@ -272,10 +299,11 @@ def _setup_cookie_path() -> str:
     return (current_app.config.get('URL_BASE') or '').rstrip('/') + '/api/start/'
 
 
-@bp.route('/api/start/password', methods=['POST'])
-def start_password():
-    """The owner replaces the random password from the Plex step with one
-    of their own (hashed the same way /login verifies it).
+@bp.route('/api/start/account', methods=['POST'])
+def start_account():
+    """Create Account: the owner picks the username and password for the
+    account the Plex step created (hashed the same way /login verifies it).
+    The Plex email stays on the account only if Plex gave one.
 
     Only the browser that completed the Plex step (signed SameSite=Strict
     setup cookie plus its real session, never an implicit local owner) may
@@ -307,16 +335,21 @@ def start_password():
         return jsonify({'error': message}), 400
 
     body = request.get_json(silent=True) or {}
+    username = body.get('username')
     password = body.get('password')
-    confirm = body.get('confirm')
-    if not isinstance(password, str) or not isinstance(confirm, str):
+    if not isinstance(username, str) or not username.strip():
+        return bad('Enter a username')
+    username = username.strip()
+    if len(username) > USERNAME_MAX:
+        return bad(f'Use at most {USERNAME_MAX} characters for the username')
+    if '@' in username:
+        return bad("Username can't contain @")
+    if not isinstance(password, str) or not password.strip():
         return bad('Enter a password')
     if len(password) < PASSWORD_MIN:
         return bad(f'Use at least {PASSWORD_MIN} characters')
     if len(password) > PASSWORD_MAX:
         return bad(f'Use at most {PASSWORD_MAX} characters')
-    if password != confirm:
-        return bad("Passwords don't match")
 
     with _lock:
         st = _load_state()
@@ -325,7 +358,12 @@ def start_password():
         st['password_claimed'] = True
         _save_state(st)
         try:
-            _cfg['user_auth'].update_pin(user['id'], password)
+            _cfg['user_auth'].set_name_and_password(user['id'], username, password)
+        except ValueError as e:
+            st.pop('password_claimed', None)
+            _save_state(st)
+            login_limiter.record_failure('', limit_id)
+            return jsonify({'error': str(e)}), 400
         except Exception:
             st.pop('password_claimed', None)
             _save_state(st)
@@ -334,7 +372,7 @@ def start_password():
         st['password_set'] = True
         _save_state(st)
     login_limiter.record_success('', limit_id)
-    logger.info('Start: owner password set')
+    logger.info('Start: owner account created')
     resp = make_response(jsonify({'ok': True}))
     resp.delete_cookie(SETUP_COOKIE, path=_setup_cookie_path())
     return resp
@@ -357,7 +395,7 @@ def start_plex_pin():
         _save_state(st)
     with _lock:
         _pending[nonce] = {'pin_id': pin['id'], 'created': time.time()}
-    resp = make_response(jsonify({'id': pin['id'], 'auth_url': auth_url(pin['code'])}))
+    resp = make_response(jsonify({'id': pin['id'], 'auth_url': auth_url(pin['code'], forward_url(str((request.get_json(silent=True) or {}).get('mode') or 'popup')))}))
     resp.set_cookie(START_COOKIE, nonce, max_age=3600, httponly=True, samesite='Lax', path='/')
     return resp
 

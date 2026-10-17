@@ -12,6 +12,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     init: true
     # Bridge network (not the host network production uses). Reachable from
     # the LAN at <server>:5002; the app listens on its usual 5001 inside.

@@ -271,6 +271,18 @@ def deny_user(user_id: int) -> bool:
     return True
 
 
+def set_name_and_password(user_id: int, name: str, password: str) -> None:
+    """Rename a user and set their password in one transaction.
+    Raises ValueError when the name is unusable or taken."""
+    name = (name or '').strip()
+    problem = identity_conflict(name, exclude_id=user_id)
+    if problem:
+        raise ValueError(problem)
+    pin_hash = generate_password_hash(password)
+    with _get_db() as conn:
+        conn.execute("UPDATE users SET name = ?, pin_hash = ? WHERE id = ?", (name, pin_hash, user_id))
+
+
 def update_pin(user_id: int, new_pin: str) -> None:
     """Update a user's PIN."""
     with _get_db() as conn:

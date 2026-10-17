@@ -97,8 +97,11 @@ Get Started (Plex sign-in, server pick, Set password, access), sign-in and the
 main screen. No background threads start, and every other route returns 404.
 
 ```bash
-docker compose -p luma-test -f docker-compose.test.yml up -d --build
+GIT_SHA=$(git rev-parse HEAD) docker compose -p luma-test -f docker-compose.test.yml up -d --build
 ```
+
+`GIT_SHA` is baked into the image and reported by `/api/version` (`git`);
+without it the build reports `unknown`.
 
 - Container `luma-test`, image tag `luma:minimal-test` (never `luma:latest`).
 - Bridge network, published as `5002:5001`: open `http://<server LAN IP>:5002`

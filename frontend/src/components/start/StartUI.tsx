@@ -52,7 +52,7 @@ export function Status({ text }: { text: string }) {
     </p>
   );
 }
-export function Logo({ top = '14vh' }: { top?: string }) {
+export function Logo({ top = '0' }: { top?: string }) {
   return (
     <img
       src={assetUrl('/static/images/luma_text.webp')}
@@ -150,14 +150,14 @@ const page: React.CSSProperties = {
   color: '#fff', fontFamily: FONT, WebkitFontSmoothing: 'antialiased',
 };
 const center: React.CSSProperties = {
-  minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center',
-  padding: 'env(safe-area-inset-top) 24px env(safe-area-inset-bottom)', boxSizing: 'border-box',
+  minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+  padding: 'calc(env(safe-area-inset-top) + 32px) 24px calc(env(safe-area-inset-bottom) + 32px)', boxSizing: 'border-box',
 };
 const bottom: React.CSSProperties = {
-  marginTop: 'auto', width: '100%', maxWidth: 360, paddingBottom: 'max(48px, 8vh)',
-  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+  marginTop: 32, width: '100%', maxWidth: 360,
+  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16,
 };
-const title: React.CSSProperties = { margin: 0, marginTop: 'min(18vh, 160px)', fontSize: 28, fontWeight: 600, letterSpacing: '-0.01em', textAlign: 'center' };
+const title: React.CSSProperties = { margin: 0, fontSize: 28, fontWeight: 600, letterSpacing: '-0.01em', textAlign: 'center' };
 const sub: React.CSSProperties = { margin: '8px 0 0', fontSize: 15, color: 'rgba(255,255,255,0.55)', textAlign: 'center' };
 export const primaryBtn: React.CSSProperties = {
   width: '100%', height: 50, borderRadius: 25, border: 'none', background: '#fff', color: '#15102a',

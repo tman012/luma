@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { StartShell, Center, Bottom, Sub, Logo, linkBtn } from '@/components/start/StartUI';
+import { StartShell, Center, Bottom, Sub, Logo, primaryBtn } from '@/components/start/StartUI';
 
 export function MinimalHomePage() {
   const { authenticated, loading, needsStart, startInProgress, pinUnlock, user, implicit, logout } = useAuth();
@@ -26,7 +26,7 @@ export function MinimalHomePage() {
         {user?.name && <Sub>{user.name}</Sub>}
         <Bottom>
           {!implicit && (
-            <button style={linkBtn} onClick={signOut} disabled={busy}>Sign out</button>
+            <button className="luma-start-btn" style={primaryBtn} onClick={signOut} disabled={busy}>Sign out</button>
           )}
         </Bottom>
       </Center>
