@@ -421,8 +421,9 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
               const typeLabel = isPerson
                 ? 'Person'
                 : media?.media_type === 'tv'
-                  ? 'TV Show'
+                  ? 'TV show'
                   : 'Movie';
+              const last = i === topSuggestions.length - 1;
 
               return (
                 <button
@@ -437,16 +438,18 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                   }}
                   onPointerDown={() => { if (media) warmResult(media); }}
                   onTouchStart={() => { if (media) warmResult(media); }}
-                  className="luma-pressable flex w-full items-center gap-3 px-5 py-2.5 text-left active:bg-white/5"
+                  className="luma-pressable relative flex h-[72px] w-full items-center gap-[12px] px-[16px] text-left active:bg-white/5"
                   data-testid="phone-search-row"
                 >
-                  <RowThumb src={isPerson ? getProfileUrl(person!) : sizedPlexImg(getPosterUrl(media!), 120, 180)} round={isPerson} />
-                  <span className="min-w-0 flex-1 truncate text-[16px] font-medium text-white">
-                    {label}
+                  <RowThumb src={isPerson ? getProfileUrl(person!) : sizedPlexImg(getPosterUrl(media!), 120, 180)} round={isPerson}
+                    kind={media?.media_type === 'tv' ? 'tv' : 'movie'} />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-[16px] font-medium leading-[20px] text-white/95" data-testid="row-title">{label}</span>
+                    <span className="mt-[2px] truncate text-[13px] leading-[17px] text-white/50" data-testid="row-meta">
+                      {year ? `${year} · ${typeLabel}` : typeLabel}
+                    </span>
                   </span>
-                  <span className="ml-4 shrink-0 text-[13px] text-white/40">
-                    {year ? `${year} · ${typeLabel}` : typeLabel}
-                  </span>
+                  {!last && <span aria-hidden="true" data-testid="row-divider" className="absolute bottom-0 left-[68px] right-0 h-px bg-white/[0.06]" />}
                 </button>
               );
             })}
@@ -584,17 +587,35 @@ function CreditRow({ credit, onClick }: { credit: PersonCredit; onClick: () => v
 /** Phone result thumbnail: the same poster pipeline as desktop (Plex through
  *  /api/img/plex, TMDb through the image proxy in minimal mode). A missing or
  *  broken image leaves the navy glass placeholder. */
-function RowThumb({ src, round }: { src: string | null; round?: boolean }) {
+function RowThumb({ src, round, kind = 'movie' }: { src: string | null; round?: boolean; kind?: 'movie' | 'tv' }) {
   const [broken, setBroken] = useState(false);
-  useEffect(() => setBroken(false), [src]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => { setBroken(false); setLoaded(false); }, [src]);
+  const showImg = !!src && !broken;
   return (
     <span
       aria-hidden="true"
-      className={`block shrink-0 overflow-hidden bg-glass-5 ${round ? 'h-[36px] w-[36px] rounded-full' : 'h-[54px] w-[36px] rounded-md'}`}
+      data-testid="row-thumb"
+      className={`relative flex shrink-0 items-center justify-center overflow-hidden bg-white/[0.06] ${round ? 'h-[40px] w-[40px] rounded-full' : 'h-[60px] w-[40px] rounded-[6px]'}`}
     >
-      {src && !broken && (
-        <img src={src} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" onError={() => setBroken(true)} />
+      {!round && !(showImg && loaded) && <RowIcon kind={kind} />}
+      {showImg && (
+        <img src={src!} alt="" loading="lazy" decoding="async" onLoad={() => setLoaded(true)} onError={() => setBroken(true)}
+          className="absolute inset-0 h-full w-full object-cover" style={{ opacity: loaded ? 1 : 0 }} />
       )}
     </span>
+  );
+}
+
+/** Film or TV mark for a missing or loading thumbnail. */
+function RowIcon({ kind }: { kind: 'movie' | 'tv' }) {
+  return (
+    <svg data-testid={`row-icon-${kind}`} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      {kind === 'tv' ? (
+        <><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M8 3l4 4 4-4" /></>
+      ) : (
+        <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4" /></>
+      )}
+    </svg>
   );
 }
