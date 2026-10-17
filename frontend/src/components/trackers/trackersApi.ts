@@ -26,10 +26,15 @@ export type Payload = Record<string, unknown>;
 
 /** What a call came back with: ok, the HTTP status (0 = unreachable) and the JSON body. */
 export interface Result<T> { ok: boolean; status: number; data: T }
-export interface ErrorBody { error?: string; fields?: Record<string, string> }
+export interface ErrorBody { error?: string; fields?: Record<string, string>; sign_in?: boolean }
 export interface TestBody { ok?: boolean; message?: string; error?: string; fields?: Record<string, string> }
 
 export const UNREACHABLE = "Couldn't reach Luma";
+export const SIGN_IN_TO_EDIT = 'Sign in to edit trackers';
+
+/** A 401 that asks for sign-in (expired cookie, no session). Other 401s and
+ * 403s mean this user can't use trackers at all. */
+export const needsSignIn = (r: Result<ErrorBody>) => r.status === 401 && !!r.data.sign_in;
 
 async function call<T>(url: string, init?: RequestInit): Promise<Result<T & ErrorBody>> {
   try {

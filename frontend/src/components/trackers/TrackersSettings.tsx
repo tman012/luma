@@ -15,7 +15,7 @@ import type React from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import {
   createTracker, deleteTracker, fetchTrackers, fetchTypes, setTrackerEnabled, testSavedTracker, testTrackerForm,
-  updateTracker, SECRET_MASK, UNREACHABLE, type Tracker, type TrackerField, type TrackerType,
+  updateTracker, needsSignIn, SECRET_MASK, SIGN_IN_TO_EDIT, UNREACHABLE, type Tracker, type TrackerField, type TrackerType,
 } from './trackersApi';
 import {
   initialForm, isDirty, keptSecrets, splitServerErrors, toPayload, validate, UNREADABLE,
@@ -40,7 +40,7 @@ export const TEST_SPACING_MS = 3200;
 export const TEST_RATE_LIMITED = 'Too many tests. Try again in a few minutes.';
 export const CHIP_PHONE_H = 44;       // phone: every tap target is at least 44px
 
-type Access = 'unknown' | 'owner' | 'denied';
+type Access = 'unknown' | 'owner' | 'denied' | 'signIn';
 
 /** Whether the signed-in user may use Settings > Trackers: null until known,
  * then true only for the owner with a session (the API answers 401/403
@@ -57,8 +57,9 @@ export function useTrackersAccess(enabled: boolean): boolean | null {
       // Only 401/403/404 mean "not the owner". A busy or failing server
       // (429, 5xx, unreachable) keeps Trackers visible: the section shows
       // "Couldn't load trackers" with Retry instead of vanishing.
+      // A 401 asking for sign-in keeps it too: the section offers Sign in.
       const transient = r.status === 0 || r.status === 429 || r.status >= 500;
-      setOk(transient);
+      setOk(transient || needsSignIn(r));
     });
     return () => { alive = false; };
   }, [enabled]);
@@ -101,6 +102,7 @@ export function TrackersSettings({ wide, base = TRACKERS_BASE, onExit }: Tracker
     const n = ++seq.current;
     const r = await fetchTrackers();
     if (n !== seq.current) return;
+    if (needsSignIn(r)) { setAccess('signIn'); return; }
     if (r.status === 401 || r.status === 403) { setAccess('denied'); return; }
     if (!r.ok || !Array.isArray(r.data.trackers)) { setLoadError(true); return; }
     setLoadError(false);
@@ -110,10 +112,11 @@ export function TrackersSettings({ wide, base = TRACKERS_BASE, onExit }: Tracker
   const load = useCallback(async () => {
     setLoadError(false);
     const [t] = await Promise.all([fetchTypes(), loadTrackers()]);
+    if (needsSignIn(t)) { setAccess('signIn'); return; }
     if (t.status === 401 || t.status === 403) { setAccess('denied'); return; }
     if (!t.ok || !Array.isArray(t.data.types)) { setLoadError(true); return; }
     setTypes(t.data.types);
-    setAccess(a => (a === 'denied' ? a : 'owner'));
+    setAccess(a => (a === 'denied' || a === 'signIn' ? a : 'owner'));
   }, [loadTrackers]);
 
   useEffect(() => { load(); }, [load]);
@@ -129,19 +132,24 @@ export function TrackersSettings({ wide, base = TRACKERS_BASE, onExit }: Tracker
       setTrackers(list => list && list.map(x => (x.id === saved.id ? saved : x)));
     } else {
       setTrackers(list => list && list.map(x => (x.id === t.id ? { ...x, enabled: t.enabled } : x)));
-      if (r.status === 404) loadTrackers();
+      if (needsSignIn(r)) setAccess('signIn');
+      else if (r.status === 404) loadTrackers();
       else show(SAVE_FAILED);
     }
   }, [loadTrackers, show]);
 
   if (access === 'denied') return null;
+  const signIn = () => setAccess('signIn');
 
   const toastEl = toast && <TopToast key={toast.n} text={toast.text} onDone={() => setToast(null)} />;
   const shell = (body: React.ReactNode) => (
     <>
       <style>{trackersCss}</style>
       {toastEl}
-      <section data-testid="trackers-section" data-view={view.kind} style={{ fontFamily: FONT, color: TEXT }}>{body}</section>
+      <section data-testid="trackers-section" data-view={view.kind} style={{ fontFamily: FONT, color: TEXT }}>
+        {access === 'signIn' && <SignInRow wide={wide} />}
+        {body}
+      </section>
     </>
   );
 
@@ -155,6 +163,9 @@ export function TrackersSettings({ wide, base = TRACKERS_BASE, onExit }: Tracker
         </div>
       </>,
     );
+  }
+  if (access === 'signIn' && (!types || !trackers)) {
+    return shell(wide ? <ListTitle onAdd={null} /> : <PhoneHeader title="Trackers" onBack={onExit || (() => navigate('/settings'))} />);
   }
   if (!types || !trackers) return shell(null);
 
@@ -173,7 +184,7 @@ export function TrackersSettings({ wide, base = TRACKERS_BASE, onExit }: Tracker
         }}
         onDeleted={() => { if (tracker) setTrackers(list => list && list.filter(x => x.id !== tracker.id)); loadTrackers(); toList(); }}
         onGone={() => { loadTrackers(); toList(); }}
-        onTested={() => loadTrackers()} />,
+        onTested={() => loadTrackers()} onSignIn={signIn} />,
     );
   }
 
@@ -188,6 +199,21 @@ export function TrackersSettings({ wide, base = TRACKERS_BASE, onExit }: Tracker
         onToggle={toggle} onExit={onExit || (() => navigate('/settings'))} />
       {view.kind === 'pick' && <TypePicker wide types={types} onPick={pick} onClose={toList} />}
     </>,
+  );
+}
+
+/** Sign in again when the session is gone; the user comes back here after. */
+function SignInRow({ wide }: { wide: boolean }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (
+    <div style={{ display: 'flex', justifyContent: wide ? 'flex-end' : 'stretch', margin: '0 0 16px' }}>
+      <button type="button" className="lt-btn lt-primary" data-testid="trackers-sign-in"
+        style={{ ...primaryBtn, height: wide ? 40 : 44, padding: '0 16px', width: wide ? undefined : '100%' }}
+        onClick={() => navigate('/login', { state: { from: location.pathname + location.search, signIn: true } })}>
+        {SIGN_IN_TO_EDIT}
+      </button>
+    </div>
   );
 }
 
@@ -358,9 +384,10 @@ function TypePicker({ wide, types, onPick, onClose }: {
 
 interface TestResult { ok: boolean; text: string }
 
-function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, onTested }: {
+function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, onTested, onSignIn }: {
   wide: boolean; type: TrackerType; tracker: Tracker | null;
   onBack: () => void; onSaved: (t: Tracker | null) => void; onDeleted: () => void; onGone: () => void; onTested: () => void;
+  onSignIn: () => void;
 }) {
   // The form opens with the tracker as it was; a status refresh after Test must not reset it.
   const [start] = useState(() => initialForm(type, tracker));
@@ -437,6 +464,7 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
     if (!alive.current) return;
     setSaving(false);
     if (r.ok) { onSaved(r.data.tracker || null); return; }
+    if (needsSignIn(r)) { onSignIn(); return; }
     if (r.status === 404) { onGone(); return; }
     if (r.status === 409) { setFormError(r.data.error || UNREADABLE); return; }
     if (r.status === 400 && r.data.fields) { applyServer(r.data.fields, SAVE_FAILED); return; }
@@ -459,6 +487,7 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
       : await testTrackerForm({ ...toPayload(type, form, tracker), ...(tracker ? { id: tracker.id } : null) });
     if (!alive.current) return;
     setTesting(false);
+    if (needsSignIn(r)) { onSignIn(); return; }
     if (r.status === 404) { onGone(); return; }
     if (r.status === 400 && r.data.fields) {
       applyServer(r.data.fields, '');
@@ -481,6 +510,7 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
     if (!alive.current) return;
     setDeleting(false);
     setConfirm(null);
+    if (needsSignIn(r)) { onSignIn(); return; }
     if (r.ok || r.status === 404) { onDeleted(); return; }
     setFormError(r.status === 0 ? UNREACHABLE : "Couldn't delete");
   };
