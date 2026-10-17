@@ -50,6 +50,19 @@ def _data_dir() -> Path:
     return Path(data_dir())
 
 
+GENERIC_TYPES = ('torznab', 'newznab')
+
+
+def _url_allowed(type_id: str, url: str) -> bool:
+    """Site types need https; no type may name localhost, a blocked IP
+    literal or a blocked port (host names are checked again on every request)."""
+    from urllib.parse import urlsplit
+    from app.tracker_http import host_literal_blocked
+    if type_id not in GENERIC_TYPES and urlsplit(url).scheme != 'https':
+        return False
+    return not host_literal_blocked(url)
+
+
 def _has_control(s: str) -> bool:
     return any(ord(c) < 32 or ord(c) == 127 for c in s)
 
@@ -286,7 +299,7 @@ class TrackerStore:
             rec['url'] = ''
         else:
             url = tt.normalize_url(raw_url)
-            if url is None:
+            if url is None or not _url_allowed(type_id, url):
                 errors['url'] = tt.INVALID_URL
             rec['url'] = url or ''
         # Stored secrets are bound to the saved URL: a new URL drops them.

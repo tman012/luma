@@ -105,20 +105,33 @@ def _not_found():
     return _no_store(jsonify({'error': 'Not found'}), 404)
 
 
-def _throttle_key(cfg: Dict[str, Any]) -> str:
-    return f"{cfg.get('type')}|{str(cfg.get('url') or '').lower()}"
+def _throttle_keys(cfg: Dict[str, Any]) -> List[str]:
+    """The saved tracker (by id) and the site host (www. ignored): changing
+    the path, case or type of a URL does not get a fresh budget."""
+    from urllib.parse import urlsplit
+    try:
+        host = (urlsplit(str(cfg.get('url') or '')).hostname or '').lower()
+    except ValueError:
+        host = ''
+    if host.startswith('www.'):
+        host = host[4:]
+    keys = [f'host:{host}']
+    if cfg.get('id') is not None:
+        keys.append(f"id:{cfg['id']}")
+    return keys
 
 
 def _test_allowed(cfg: Dict[str, Any]) -> bool:
-    """A few Test clicks are fine; a stuck key must not hammer a tracker."""
-    key, now = _throttle_key(cfg), time.time()
+    """A few Test clicks are fine; a stuck key must not hammer a tracker.
+    (The persisted limits live in app.tracker_guard; this is the click debounce.)"""
+    keys, now = _throttle_keys(cfg), time.time()
     with _test_lock:
-        log = [t for t in _test_log.get(key, []) if t > now - TEST_WINDOW_S]
-        if (log and now - log[-1] < TEST_SPACING_S) or len(log) >= TEST_MAX:
-            _test_log[key] = log
+        logs = {k: [t for t in _test_log.get(k, []) if t > now - TEST_WINDOW_S] for k in keys}
+        _test_log.update(logs)
+        if any((log and now - log[-1] < TEST_SPACING_S) or len(log) >= TEST_MAX for log in logs.values()):
             return False
-        log.append(now)
-        _test_log[key] = log
+        for log in logs.values():
+            log.append(now)
         return True
 
 

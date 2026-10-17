@@ -1,23 +1,40 @@
 """HTTP for tracker requests: timeouts, a response size cap, same-host
 redirects only, and short error strings that are safe to show the owner.
 
+Every hop (the first request and each redirect) is checked before anything
+is sent: the host name is resolved, every address it resolves to must be a
+public unicast address that is not this host's own, and the port must not be
+Luma's or Prowlarr's/Jackett's. The connection is then pinned to the checked
+address (TLS still verifies the certificate against the host name), so a DNS
+answer that changes between the check and the connect (rebinding) can't
+reach a blocked address. Proxies from the environment are not used.
+
 Nothing here logs a URL, a header or a body: tracker URLs and headers carry
 API keys, passkeys and cookies.
 """
 
 from __future__ import annotations
 
+import ipaddress
+import os
+import socket
+import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
-from urllib.parse import urljoin, urlsplit
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import requests
+from requests.adapters import HTTPAdapter
 
 MAX_BYTES = 8 * 1024 * 1024
 CONNECT_TIMEOUT, READ_TIMEOUT = 6.0, 30.0
 MAX_REDIRECTS = 3
+TOTAL_DEADLINE_S = 60.0        # whole request, redirects and body included
 USER_AGENT = 'Luma'
+# Prowlarr and Jackett, and Luma's own default and test ports. Luma's
+# configured port (LUMA_PORT / PORT) is added at call time.
+BLOCKED_PORTS: FrozenSet[int] = frozenset({9696, 9117, 5001, 5002})
 
 # Short, owner-facing messages (the Test result and the list status).
 MESSAGES = {
@@ -31,6 +48,7 @@ MESSAGES = {
     'too_large': 'Response too large',
     'redirect': 'Unexpected redirect',
     'http': 'Server error',
+    'blocked': 'Address not allowed',
 }
 
 
@@ -115,6 +133,153 @@ def _port(p) -> Optional[int]:
         return None
 
 
+# ------------------------------------------------------------------ address policy
+
+def _default_resolve(host: str, port: int) -> List[str]:
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    return [i[4][0] for i in infos]
+
+
+# Swappable for tests (tests have no DNS); returns the addresses for host.
+resolve: Callable[[str, int], List[str]] = _default_resolve
+
+_own_lock = threading.Lock()
+_own_cache: Tuple[float, FrozenSet[str]] = (0.0, frozenset())
+
+
+def own_addresses() -> FrozenSet[str]:
+    """This host's own addresses (cached 5 min)."""
+    global _own_cache
+    with _own_lock:
+        ts, addrs = _own_cache
+        if time.time() - ts < 300:
+            return addrs
+        found = set()
+        try:
+            for name in {socket.gethostname(), socket.getfqdn()}:
+                for info in socket.getaddrinfo(name, None):
+                    found.add(str(ipaddress.ip_address(info[4][0].split('%')[0])))
+        except (OSError, ValueError, UnicodeError):
+            pass
+        _own_cache = (time.time(), frozenset(found))
+        return _own_cache[1]
+
+
+def _blocked_ports() -> FrozenSet[int]:
+    ports = set(BLOCKED_PORTS)
+    for var in ('LUMA_PORT', 'PORT'):
+        v = os.environ.get(var, '').strip()
+        if v.isdigit():
+            ports.add(int(v))
+    return frozenset(ports)
+
+
+def address_allowed(addr: str) -> bool:
+    """Public unicast only: no loopback, RFC 1918 / unique-local, link-local
+    (cloud metadata included), CGNAT, 0.0.0.0/unspecified, multicast,
+    reserved or documentation ranges, and none of this host's addresses."""
+    try:
+        ip = ipaddress.ip_address(str(addr).split('%')[0])
+    except ValueError:
+        return False
+    if isinstance(ip, ipaddress.IPv6Address):
+        for embedded in (ip.ipv4_mapped, ip.sixtofour, (ip.teredo or (None, None))[1]):
+            if embedded is not None:
+                return address_allowed(str(embedded))
+    if (not ip.is_global or ip.is_multicast or ip.is_unspecified or ip.is_loopback or ip.is_link_local
+            or ip.is_private or ip.is_reserved):
+        return False
+    if ip in ipaddress.ip_network('100.64.0.0/10'):
+        return False
+    return str(ip) not in own_addresses()
+
+
+def host_literal_blocked(url: str) -> bool:
+    """For save-time validation: the URL names a blocked IP literal, a blocked
+    port or localhost. (Host names are checked when contacted.)"""
+    try:
+        p = urlsplit(str(url or ''))
+        host = (p.hostname or '').lower()
+        port = p.port or _DEFAULT_PORTS.get(p.scheme)
+    except ValueError:
+        return True
+    if not host or host == 'localhost' or host.endswith('.localhost') or port in _blocked_ports():
+        return True
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return not address_allowed(host)
+
+
+def check_target(url: str) -> Tuple[str, int]:
+    """Resolve *url*'s host and return (pinned address, port), or raise
+    TrackerError('blocked') when any resolved address or the port is not
+    allowed, 'network' when it does not resolve."""
+    try:
+        p = urlsplit(url)
+        host = p.hostname or ''
+        port = p.port or _DEFAULT_PORTS.get(p.scheme)
+    except ValueError:
+        raise TrackerError('blocked') from None
+    if p.scheme not in _DEFAULT_PORTS or not host or port is None or p.username or p.password:
+        raise TrackerError('blocked')
+    if port in _blocked_ports() or host.lower() == 'localhost' or host.lower().endswith('.localhost'):
+        raise TrackerError('blocked')
+    try:
+        addrs = list(dict.fromkeys(resolve(host, port)))
+    except (OSError, UnicodeError, ValueError):
+        raise TrackerError('network') from None
+    if not addrs:
+        raise TrackerError('network')
+    if not all(address_allowed(a) for a in addrs):
+        raise TrackerError('blocked')
+    return addrs[0].split('%')[0], port
+
+
+class PinnedAdapter(HTTPAdapter):
+    """Sends to one checked address while keeping the host name for the Host
+    header, TLS SNI and certificate verification."""
+
+    def __init__(self, host: str, address: str, **kw):
+        self._host = host
+        self._address = address
+        super().__init__(max_retries=0, **kw)
+
+    def _pin_pool(self, conn):
+        if hasattr(conn, 'assert_hostname'):        # HTTPS pool
+            conn.assert_hostname = self._host
+            conn.conn_kw = dict(getattr(conn, 'conn_kw', {}) or {}, server_hostname=self._host)
+        return conn
+
+    def get_connection(self, url, proxies=None):          # requests < 2.32
+        return self._pin_pool(super().get_connection(url, None))
+
+    def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):   # >= 2.32
+        return self._pin_pool(super().get_connection_with_tls_context(request, verify, None, cert))
+
+    def send(self, request, **kw):
+        p = urlsplit(request.url)
+        if (p.hostname or '').lower() != self._host.lower():
+            raise TrackerError('blocked')
+        addr = f'[{self._address}]' if ':' in self._address else self._address
+        netloc = f'{addr}:{p.port}' if p.port else addr
+        request.headers.setdefault('Host', p.netloc.rsplit('@', 1)[-1])
+        request.url = urlunsplit((p.scheme, netloc, p.path, p.query, p.fragment))
+        kw['proxies'] = {}
+        return super().send(request, **kw)
+
+
+def _pinned_session(url: str, address: str) -> requests.Session:
+    sess = requests.Session()
+    sess.trust_env = False
+    host = urlsplit(url).hostname or ''
+    adapter = PinnedAdapter(host, address)
+    sess.mount('http://', adapter)
+    sess.mount('https://', adapter)
+    return sess
+
+
 def _same_origin(a: str, b: str) -> bool:
     pa, pb = urlsplit(a), urlsplit(b)
     host_a, host_b = (pa.hostname or '').lower(), (pb.hostname or '').lower()
@@ -144,12 +309,19 @@ def request(method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
     host (never https -> http), at most MAX_REDIRECTS times; any other
     redirect is returned as is so the caller can treat it (for example a
     sign-in page). Raises TrackerError on timeouts and network errors."""
-    sess = session or requests.Session()
     hdrs = {'User-Agent': USER_AGENT}
     hdrs.update(headers or {})
     cur_url, cur_method, cur_params, cur_data, cur_json = url, method.upper(), params, data, json
+    deadline = time.monotonic() + TOTAL_DEADLINE_S
+    sess = None
     try:
         for _ in range(MAX_REDIRECTS + 1):
+            if time.monotonic() > deadline:
+                raise TrackerError('timeout')
+            address, _port_ = check_target(cur_url)        # every hop, before anything is sent
+            if sess is not None and session is None:
+                sess.close()
+            sess = session or _pinned_session(cur_url, address)
             try:
                 r = sess.request(cur_method, cur_url, headers=hdrs, params=cur_params, data=cur_data,
                                  json=cur_json, timeout=timeout or (CONNECT_TIMEOUT, READ_TIMEOUT),
@@ -166,7 +338,7 @@ def request(method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
             try:
                 loc = r.headers.get('Location') if r.status_code in (301, 302, 303, 307, 308) else None
                 if loc and follow_redirects:
-                    nxt = urljoin(getattr(r, 'url', '') or cur_url, loc)
+                    nxt = urljoin(cur_url, loc)      # r.url names the pinned address
                     if _same_origin(url, nxt):
                         if r.status_code == 303 or (r.status_code in (301, 302) and cur_method == 'POST'):
                             cur_method, cur_data, cur_json = 'GET', None, None
@@ -178,15 +350,16 @@ def request(method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
                         body.extend(chunk)
                         if len(body) > max_bytes:
                             raise TrackerError('too_large', r.status_code)
+                        if time.monotonic() > deadline:
+                            raise TrackerError('timeout')
                 except requests.exceptions.Timeout:
                     raise TrackerError('timeout') from None
                 except requests.exceptions.RequestException:
                     raise TrackerError('network') from None
-                return Response(r.status_code, {k: v for k, v in r.headers.items()}, bytes(body),
-                                getattr(r, 'url', cur_url) or cur_url)
+                return Response(r.status_code, {k: v for k, v in r.headers.items()}, bytes(body), cur_url)
             finally:
                 r.close()
         raise TrackerError('redirect')
     finally:
-        if session is None:
+        if session is None and sess is not None:
             sess.close()

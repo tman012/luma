@@ -1,11 +1,13 @@
 """#16 review: secrets bound to their saved URL, sign-in required, Test through
 the persisted guard (429 / Retry-After), no stale reads, clean key errors."""
 
+import io
 import json
 import threading
 import time
 
 import pytest
+import requests
 
 import app.main
 import app.user_auth
@@ -17,6 +19,12 @@ from app.tracker_store import SECRET_MASK, TrackerStore
 LAN = {'REMOTE_ADDR': '192.168.1.20'}
 COOKIE = 'uid=1234567; pass=abcdefabcdefabcdefabcdefabcdef12'
 APIKEY = 'ak_0123456789abcdef0123456789abcdef'
+PUBLIC_IP = '93.184.215.14'
+
+
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch):
+    monkeypatch.setattr(tracker_http, 'resolve', lambda host, port: [PUBLIC_IP])
 
 
 @pytest.fixture
@@ -143,9 +151,11 @@ def test_url_change_clears_stored_secrets(owner, store, sent):
     calls, _ = sent
     tid = _post(owner, '/api/trackers', _ipt()).get_json()['tracker']['id']
     # Masked (or missing) required secret with a new URL: refused, nothing changes.
-    for body in ({'url': 'http://169.254.169.254', 'cookie': SECRET_MASK}, {'url': 'https://new.example'}):
+    for body in ({'url': 'https://new.example', 'cookie': SECRET_MASK}, {'url': 'https://new.example'}):
         r = _put(owner, f'/api/trackers/{tid}', body)
         assert r.status_code == 400 and r.get_json()['fields'] == {'cookie': 'Required'}
+    r = _put(owner, f'/api/trackers/{tid}', {'url': 'http://169.254.169.254', 'cookie': SECRET_MASK})
+    assert r.status_code == 400 and r.get_json()['fields'] == {'url': 'Invalid URL', 'cookie': 'Required'}
     assert store.get(tid)['url'] == 'https://iptorrents.example'
     assert store.config(store.get(tid))['cookie'] == COOKIE
     # A saved-tracker Test still goes only to the saved URL.
@@ -341,3 +351,218 @@ def test_redirect_to_other_port_is_not_followed():
             pass
     r = tracker_http.request('GET', 'https://t.example/api', session=S())
     assert r.status == 302 and S.calls == ['https://t.example/api']
+
+
+# ------------------------------------------------------------------ SSRF: address policy
+
+@pytest.mark.parametrize('addr', [
+    '127.0.0.1', '127.8.9.10', '10.0.0.5', '172.16.0.1', '172.31.255.255', '192.168.1.62',
+    '169.254.169.254', '169.254.0.1', '100.64.0.1', '100.127.255.254', '0.0.0.0', '224.0.0.1',
+    '239.255.255.250', '255.255.255.255', '198.18.0.1', '192.0.2.1', '::1', '::', 'fe80::1', 'fc00::1',
+    'fd12:3456::1', 'ff02::1', '::ffff:10.0.0.1', '::ffff:127.0.0.1', '2002:a00:1::', '64:ff9b::a00:1',
+    'not-an-ip',
+])
+def test_blocked_addresses(addr):
+    assert tracker_http.address_allowed(addr) is False
+
+
+@pytest.mark.parametrize('addr', ['93.184.215.14', '1.1.1.1', '2606:4700:4700::1111'])
+def test_public_addresses_allowed(addr, monkeypatch):
+    monkeypatch.setattr(tracker_http, 'own_addresses', lambda: frozenset())
+    assert tracker_http.address_allowed(addr) is True
+
+
+def test_own_public_address_is_blocked(monkeypatch):
+    monkeypatch.setattr(tracker_http, 'own_addresses', lambda: frozenset({'93.184.215.14'}))
+    assert tracker_http.address_allowed('93.184.215.14') is False
+
+
+def test_any_blocked_answer_blocks_the_host(monkeypatch):
+    monkeypatch.setattr(tracker_http, 'resolve', lambda h, p: ['93.184.215.14', '127.0.0.1'])
+    with pytest.raises(TrackerError) as e:
+        tracker_http.check_target('https://mixed.example/x')
+    assert str(e.value) == 'Address not allowed'
+
+
+@pytest.mark.parametrize('url', [
+    'https://t.example:9696/', 'http://t.example:9117/', 'https://t.example:5001/', 'http://t.example:5002/',
+    'http://localhost/', 'http://a.localhost/', 'ftp://t.example/', 'https://user:pw@t.example/',
+])
+def test_blocked_targets(url):
+    with pytest.raises(TrackerError) as e:
+        tracker_http.check_target(url)
+    assert e.value.kind == 'blocked'
+
+
+def test_luma_configured_port_is_blocked(monkeypatch):
+    monkeypatch.setenv('LUMA_PORT', '6701')
+    with pytest.raises(TrackerError):
+        tracker_http.check_target('https://t.example:6701/')
+
+
+def test_unresolvable_host_is_a_connection_error(monkeypatch):
+    def boom(h, p):
+        raise OSError('nx')
+    monkeypatch.setattr(tracker_http, 'resolve', boom)
+    with pytest.raises(TrackerError) as e:
+        tracker_http.check_target('https://nx.example/')
+    assert e.value.kind == 'network'
+
+
+class _Resp:
+    def __init__(self, status, headers=None, body=b''):
+        self.status_code, self.headers, self._body, self.url = status, headers or {}, body, ''
+
+    def iter_content(self, n):
+        return iter([self._body])
+
+    def close(self):
+        pass
+
+
+class _Sess:
+    def __init__(self, *responses):
+        self.responses, self.calls = list(responses), []
+
+    def request(self, method, url, **kw):
+        self.calls.append(url)
+        return self.responses.pop(0)
+
+    def close(self):
+        pass
+
+
+def test_redirect_hop_is_rechecked_before_it_is_sent(monkeypatch):
+    answers = iter([['93.184.215.14'], ['10.0.0.9']])     # rebinding between hops
+    monkeypatch.setattr(tracker_http, 'resolve', lambda h, p: next(answers))
+    s = _Sess(_Resp(302, {'Location': '/next'}), _Resp(200, body=b'secret-internal'))
+    with pytest.raises(TrackerError) as e:
+        tracker_http.request('GET', 'https://t.example/start', session=s)
+    assert e.value.kind == 'blocked' and s.calls == ['https://t.example/start']
+
+
+def test_first_hop_to_blocked_address_sends_nothing(monkeypatch):
+    monkeypatch.setattr(tracker_http, 'resolve', lambda h, p: ['169.254.169.254'])
+    s = _Sess(_Resp(200))
+    with pytest.raises(TrackerError):
+        tracker_http.request('GET', 'http://metadata.example/latest', session=s)
+    assert s.calls == []
+
+
+def test_connection_is_pinned_to_the_checked_address(monkeypatch):
+    seen = {}
+
+    def fake_send(self, request, **kw):
+        seen['url'], seen['host'], seen['proxies'] = request.url, request.headers.get('Host'), kw.get('proxies')
+        r = requests.Response()
+        r.status_code, r.raw, r.url = 200, io.BytesIO(b'ok'), request.url
+        return r
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, 'send', fake_send)
+    monkeypatch.setattr(tracker_http, 'resolve', lambda h, p: ['93.184.215.14'])
+    r = tracker_http.request('GET', 'https://tracker.example:8443/api?q=1')
+    assert r.status == 200 and r.body == b'ok'
+    assert seen['url'] == 'https://93.184.215.14:8443/api?q=1'
+    assert seen['host'] == 'tracker.example:8443' and seen['proxies'] == {}
+    assert r.url == 'https://tracker.example:8443/api?q=1'
+
+
+def test_pinned_https_pool_verifies_the_host_name():
+    a = tracker_http.PinnedAdapter('tracker.example', '93.184.215.14')
+    req = requests.Request('GET', 'https://93.184.215.14/x').prepare()
+    try:
+        pool = a.get_connection_with_tls_context(req, True)
+    except AttributeError:
+        pool = a.get_connection('https://93.184.215.14/x')
+    assert pool.host == '93.184.215.14'
+    assert pool.assert_hostname == 'tracker.example'
+    assert pool.conn_kw['server_hostname'] == 'tracker.example'
+
+
+def test_adapter_refuses_a_different_host():
+    a = tracker_http.PinnedAdapter('tracker.example', '93.184.215.14')
+    req = requests.Request('GET', 'https://other.example/x').prepare()
+    with pytest.raises(TrackerError):
+        a.send(req)
+
+
+def test_total_deadline(monkeypatch):
+    monkeypatch.setattr(tracker_http, 'TOTAL_DEADLINE_S', -1.0)
+    with pytest.raises(TrackerError) as e:
+        tracker_http.request('GET', 'https://t.example/', session=_Sess(_Resp(200)))
+    assert e.value.kind == 'timeout'
+
+
+# ------------------------------------------------------------------ SSRF through the API
+
+@pytest.mark.parametrize('url', [
+    'http://127.0.0.1:6701/api/adb', 'http://169.254.169.254/latest', 'http://10.0.0.5:8080/api',
+    'http://192.168.1.62:9696/api', 'http://[::1]/api', 'http://localhost/api', 'http://0.0.0.0/api',
+    'http://100.64.0.1/api', 'https://t.example:9696/api',
+])
+def test_api_refuses_blocked_urls_on_save_and_test(owner, store, sent, url):
+    calls, _ = sent
+    r = _post(owner, '/api/trackers', _torznab(url=url))
+    assert r.status_code == 400 and r.get_json()['fields'] == {'url': 'Invalid URL'}
+    r = _post(owner, '/api/trackers/test', _torznab(url=url))
+    assert r.status_code == 400
+    assert calls == [] and store.list() == []
+
+
+def test_site_types_need_https(owner, store, sent):
+    r = _post(owner, '/api/trackers', _ipt(url='http://iptorrents.example'))
+    assert r.status_code == 400 and r.get_json()['fields'] == {'url': 'Invalid URL'}
+    assert _post(owner, '/api/trackers', _torznab(url='http://jackett.example/api')).status_code == 201
+
+
+def test_host_name_resolving_inside_is_refused_at_test(owner, store, monkeypatch):
+    """The real Test path: a public-looking name that resolves to loopback."""
+    monkeypatch.setitem(tracker_routes._cfg, 'tester', lambda cfg: tracker_clients.test(cfg))
+    monkeypatch.setattr(tracker_http, 'resolve', lambda h, p: ['127.0.0.1'])
+    sent_reqs = []
+    monkeypatch.setattr(requests.Session, 'request', lambda *a, **kw: sent_reqs.append(a) or None)
+    r = _post(owner, '/api/trackers/test', _torznab(url='http://sneaky.example/api'))
+    assert r.get_json() == {'ok': False, 'error': 'Address not allowed'}
+    assert sent_reqs == []
+
+
+# ------------------------------------------------------------------ I1 / I2
+
+def test_ban_is_persisted_and_refuses_test_after_restart(owner, store, sent, tmp_path):
+    calls, state = sent
+    tid = _post(owner, '/api/trackers', _ipt()).get_json()['tracker']['id']
+    state['err'] = TrackerError('banned', 403)
+    _post(owner, f'/api/trackers/{tid}/test', {})
+    state['err'] = None
+    tracker_routes._test_log.clear()
+    tracker_guard.reset_guard_for_tests(TrackerGuard(tmp_path / 'tracker_guard.json'))
+    assert _post(owner, f'/api/trackers/{tid}/test', {}).get_json() == {'ok': False, 'error': 'Banned'}
+    assert len(calls) == 1
+    assert store.get(tid)['status']['message'] == 'Banned'
+
+
+def test_click_throttle_is_per_host_not_per_url_spelling(owner, store, sent):
+    calls, _ = sent
+    assert _post(owner, '/api/trackers/test', _torznab(url='http://jackett.example/api')).get_json()['ok'] is True
+    for variant in ('http://JACKETT.example/api/', 'http://www.jackett.example/other', 'https://jackett.example/x'):
+        r = _post(owner, '/api/trackers/test', _torznab(url=variant))
+        assert r.get_json() == {'ok': False, 'error': 'Rate limited'}, variant
+    assert len(calls) == 1
+
+
+def test_avistaz_test_reuses_a_valid_token(monkeypatch):
+    tracker_clients.clear_avistaz_tokens()
+    calls = []
+
+    def fake(method, url, **kw):
+        calls.append(url.split('?')[0])
+        if url.endswith('/auth'):
+            return Response(200, {}, b'{"token": "tok", "expiry": 3600}')
+        return Response(200, {}, b'{"data": []}')
+    cfg = {'id': 3, 'type': 'privatehd', 'name': 'PHD', 'url': 'https://phd.example', 'username': 'me',
+           'password': 'pw_secret_1', 'pid': 'pid_secret_1', 'categories': [2000]}
+    tracker_clients.test(cfg, fake)
+    tracker_clients.test(cfg, fake)
+    assert calls.count('https://phd.example/api/v1/jackett/auth') == 1
+    tracker_clients.test(dict(cfg, pid='pid_changed_2'), fake)      # new credentials: new sign-in
+    assert calls.count('https://phd.example/api/v1/jackett/auth') == 2
+    tracker_clients.clear_avistaz_tokens()

@@ -243,7 +243,7 @@ def test_required_secret_cannot_be_cleared(owner_client, store):
 
 def test_optional_secret_can_be_cleared(owner_client, store):
     c, _ = owner_client
-    body = {'type': 'torznab', 'name': 'Jackett', 'url': 'http://jackett.local:9117/api/v2.0/indexers/x/results/torznab',
+    body = {'type': 'torznab', 'name': 'Jackett', 'url': 'http://jackett.example:8117/api/v2.0/indexers/x/results/torznab',
             'api_key': APIKEY}
     tid = _post(c, '/api/trackers', body).get_json()['tracker']['id']
     assert _put(c, f'/api/trackers/{tid}', {'api_key': ''}).status_code == 200
