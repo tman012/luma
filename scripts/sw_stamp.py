@@ -4,10 +4,21 @@
 static/sw-stamp.json records the SW cache version (static/sw.js
 CACHE_VERSION) and a SHA-256 of the frontend sources it was bumped for.
 tests/test_sw_stamp.py fails when the frontend changed and the stamp didn't,
-so a new build always ships a new SW (clients drop the old shell cache).
+or when the version isn't above LAST_SHIPPED, so a new build always ships a
+new SW (clients drop the old shell cache).
 
-    python3 scripts/sw_stamp.py          # check; exit 1 when a bump is due
-    python3 scripts/sw_stamp.py --bump   # bump CACHE_VERSION by one and restamp
+LAST_SHIPPED is the newest SW version any deployed build carries (:5002 runs
+v138); TAKEN lists versions other branches hold (v139, cursor/sources-followup).
+A version above LAST_SHIPPED that isn't TAKEN hasn't
+shipped yet, so further frontend changes on the same branch may restamp it
+(--restamp) instead of bumping again; once it ships, raise LAST_SHIPPED and
+the next change has to --bump. Version tests assert "above LAST_SHIPPED",
+never a fixed number.
+
+    python3 scripts/sw_stamp.py            # check; exit 1 when a bump is due
+    python3 scripts/sw_stamp.py --bump     # CACHE_VERSION + 1, and restamp
+    python3 scripts/sw_stamp.py --set 140  # CACHE_VERSION = 140 (must be above LAST_SHIPPED)
+    python3 scripts/sw_stamp.py --restamp  # same unshipped version, new frontend hash
 """
 import hashlib
 import json
@@ -22,6 +33,8 @@ STAMP = ROOT / 'static' / 'sw-stamp.json'
 SOURCES = ('frontend/src', 'frontend/public', 'frontend/index.html', 'frontend/package.json',
            'frontend/package-lock.json', 'frontend/vite.config.ts', 'frontend/tsconfig.json',
            'frontend/tsconfig.app.json')
+LAST_SHIPPED = 138           # :5002 runs v138
+TAKEN = frozenset({139})     # cursor/sources-followup ships v139
 VERSION_RE = re.compile(r"const CACHE_VERSION = '([a-z-]+)-v(\d+)';")
 
 
@@ -40,6 +53,13 @@ def frontend_sha256() -> str:
     return h.hexdigest()
 
 
+def version_number() -> int:
+    m = VERSION_RE.search(SW.read_text())
+    if not m:
+        raise SystemExit('CACHE_VERSION not found in static/sw.js')
+    return int(m.group(2))
+
+
 def cache_version() -> str:
     m = VERSION_RE.search(SW.read_text())
     if not m:
@@ -54,6 +74,10 @@ def check() -> list:
     except (OSError, ValueError):
         return ['static/sw-stamp.json is missing or unreadable']
     out = []
+    if version_number() <= LAST_SHIPPED:
+        out.append(f'sw.js is v{version_number()}, not above the last shipped v{LAST_SHIPPED}: run scripts/sw_stamp.py --bump')
+    elif version_number() in TAKEN:
+        out.append(f'v{version_number()} is taken by another branch: run scripts/sw_stamp.py --bump')
     if stamp.get('cache_version') != cache_version():
         out.append(f"sw-stamp.json is for {stamp.get('cache_version')}, sw.js is {cache_version()}")
     if stamp.get('frontend_sha256') != frontend_sha256():
@@ -61,18 +85,40 @@ def check() -> list:
     return out
 
 
-def bump() -> str:
+def set_version(n: int) -> str:
+    if n <= LAST_SHIPPED or n in TAKEN:
+        raise SystemExit(f'v{n} is shipped or taken (last shipped v{LAST_SHIPPED}, taken {sorted(TAKEN)})')
     text = SW.read_text()
     m = VERSION_RE.search(text)
-    new = f'{m.group(1)}-v{int(m.group(2)) + 1}'
+    new = f'{m.group(1)}-v{n}'
     SW.write_text(text[:m.start()] + f"const CACHE_VERSION = '{new}';" + text[m.end():])
-    STAMP.write_text(json.dumps({'cache_version': new, 'frontend_sha256': frontend_sha256()}, indent=2) + '\n')
-    return new
+    return restamp()
+
+
+def bump() -> str:
+    n = max(version_number() + 1, LAST_SHIPPED + 1)
+    while n in TAKEN:
+        n += 1
+    return set_version(n)
+
+
+def restamp() -> str:
+    """Record the current frontend for the current (unshipped) version."""
+    if version_number() <= LAST_SHIPPED or version_number() in TAKEN:
+        raise SystemExit(f'v{version_number()} is shipped or taken: --bump instead')
+    STAMP.write_text(json.dumps({'cache_version': cache_version(), 'frontend_sha256': frontend_sha256()},
+                                indent=2) + '\n')
+    return cache_version()
 
 
 if __name__ == '__main__':
-    if '--bump' in sys.argv[1:]:
+    args = sys.argv[1:]
+    if '--bump' in args:
         print(bump())
+    elif '--set' in args:
+        print(set_version(int(args[args.index('--set') + 1])))
+    elif '--restamp' in args:
+        print(restamp())
     else:
         problems = check()
         print('\n'.join(problems) or 'ok')

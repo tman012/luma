@@ -185,7 +185,8 @@ def test_install_never_saves_sign_in_or_redirect(spec):
 def test_sw_version_bumped():
     src = (ROOT / 'static/sw.js').read_text()
     n = int(re.search(r"media-kiosk-v(\d+)", src).group(1))
-    assert n >= 106
+    from scripts.sw_stamp import LAST_SHIPPED
+    assert n > LAST_SHIPPED
 
 
 def test_app_page_is_marked(test_app, tmp_path, monkeypatch):

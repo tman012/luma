@@ -50,7 +50,8 @@ def test_sw_and_index_are_never_cached(test_app):
     sw = (ROOT / 'static/sw.js').read_text()
     import re
     m = re.search(r"CACHE_VERSION = 'media-kiosk-v(\d+)'", sw)
-    assert m and int(m.group(1)) >= 138
+    from scripts.sw_stamp import LAST_SHIPPED   # each frontend change bumps it (tests/test_sw_stamp.py)
+    assert m and int(m.group(1)) > LAST_SHIPPED
     assert "fetch(event.request, { cache: 'no-store' })" in sw
     assert 'self.skipWaiting()' in sw and 'self.clients.claim()' in sw
 
