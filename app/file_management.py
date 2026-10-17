@@ -562,9 +562,10 @@ def view(data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         'transfer': data['transfer'],
         'downloads': downloads_status(),
         'not_found': sorted(
-            ({'title': j.get('title') or '', 'since': j.get('pending_since') or 0}
+            ({'title': j.get('title') or '', 'since': j.get('pending_since') or 0,
+              'reason': 'not_mapped' if j.get('status') == 'path not mapped' else 'not_found'}
              for j in data['jobs'].values()
-             if j.get('state') == 'waiting' and j.get('status') == 'files not found'),
+             if j.get('state') == 'waiting' and j.get('status') in ('files not found', 'path not mapped')),
             key=lambda x: x['since'])[:50],
     }
 

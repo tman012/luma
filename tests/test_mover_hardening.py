@@ -37,18 +37,17 @@ def test_P1_save_path_outside_the_downloads_root_is_never_read(env, tmp_path):
     assert not any(os.scandir(env.media / 'Movies'))
 
 
-def test_never_found_is_flagged_after_an_hour_and_listed(env, tmp_path):
+def test_an_unmapped_save_path_is_flagged_at_once_and_listed(env, tmp_path):
     add_path('Movies', env.media / 'Movies')
     lm.track(H1, TMDB, 'Heat.1995')
     t = torrent(env, H1, 'Heat.1995.mkv')
     t['save_path'] = '/qbit-only/downloads/'
     t['content_path'] = '/qbit-only/downloads/Heat.1995.mkv'
     env.tick(now=1000)
-    env.tick(now=1000 + lm.NOT_FOUND_AFTER_S - 1)
-    assert not job(H1).get('status')
+    assert job(H1)['state'] == 'waiting' and job(H1)['status'] == lm.PATH_NOT_MAPPED
     env.tick(now=1000 + lm.NOT_FOUND_AFTER_S)
-    assert job(H1)['state'] == 'waiting' and job(H1)['status'] == lm.FILES_NOT_FOUND
-    assert fm.view()['not_found'] == [{'title': 'Heat', 'since': 1000}]
+    assert job(H1)['status'] == lm.PATH_NOT_MAPPED          # never turns into "files not found"
+    assert fm.view()['not_found'] == [{'title': 'Heat', 'since': 1000, 'reason': 'not_mapped'}]
     # the map fixes it: filed, flag cleared
     movie_file(env, 'Heat.1995.mkv', b'x' * 200)
     fm.update(lambda d: d.__setitem__('path_map', [{'remote': '/qbit-only/downloads', 'local': str(env.dl)}]))

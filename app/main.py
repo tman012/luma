@@ -4745,6 +4745,46 @@ def get_active_downloads_count():
         return jsonify({'count': 0})
 
 _queue_cache: dict = {'ts': 0.0, 'data': None}
+
+
+def _mark_not_mapped(downloads, torrents, meta_by_hash, seen_hashes):
+    """Activity: a waiting library-mover job flagged 'path not mapped' shows as
+    status 'not_mapped' (its row, or a new one for a finished torrent)."""
+    try:
+        from app import file_management as _fm, library_mover as _lm
+        jobs = _fm.load().get('jobs') or {}
+    except Exception:
+        return
+    flagged = {h.lower(): j for h, j in jobs.items()
+               if isinstance(j, dict) and j.get('state') == 'waiting' and j.get('status') == _lm.PATH_NOT_MAPPED}
+    if not flagged:
+        return
+    rows = {d.get('hash'): d for d in downloads if d.get('hash')}
+    by_hash = {(t.get('hash') or '').lower(): t for t in torrents}
+    for h, job in flagged.items():
+        if h in rows:
+            rows[h].update(status='not_mapped', state='not_mapped')
+            continue
+        t = by_hash.get(h) or {}
+        meta = meta_by_hash.get(h, {})
+        downloads.append({
+            'title': meta.get('title') or job.get('title') or t.get('name') or 'Unknown',
+            'name': t.get('name') or job.get('name') or '',
+            'hash': h,
+            'year': meta.get('year') or job.get('year') or 0,
+            'tmdb_id': meta.get('tmdb_id') or job.get('tmdb_id'),
+            'poster_path': meta.get('poster_path'),
+            'media_type': meta.get('media_type') or 'movie',
+            'progress': 1.0,
+            'size_total': t.get('total_size', 0),
+            'size_remaining': 0,
+            'speed': 0,
+            'eta': None,
+            'status': 'not_mapped',
+            'state': 'not_mapped',
+            'tracker': _normalize_tracker_url(t.get('tracker', '')) if t else None,
+            'queue_id': meta.get('queue_id'),
+        })
 _QUEUE_CACHE_TTL = 3   # seconds — collapse the burst of concurrent pollers
 
 
@@ -4983,6 +5023,11 @@ def get_downloads_queue():
             'tracker': _normalize_tracker_url(t.get('tracker', '')),
             'queue_id': meta.get('queue_id'),
         })
+
+    # 5b) Grabs whose qBit save path doesn't map under the downloads folder
+    #     (LUMA_DOWNLOADS_ROOT, any path; the Library paths path map): say so
+    #     instead of failing silently.
+    _mark_not_mapped(downloads, torrents, meta_by_hash, seen_hashes)
 
     # 6) Poster backfill. The meta sources above only carry artwork while
     #    Radarr's live queue still knows the item — Radarr drops it the moment

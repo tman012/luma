@@ -26,6 +26,16 @@ from app.qbit_owner import is_test_torrent
 logger = logging.getLogger('AutoRenamer')
 
 
+def _mapped_qbit_path(path: str) -> str:
+    """qBittorrent's path through the Library paths path map (qBit may report
+    /downloads while this container sees LUMA_DOWNLOADS_ROOT, any path)."""
+    try:
+        from app import file_management as _fm
+        return _fm.map_path(path, _fm.load()['path_map'])
+    except Exception:
+        return path
+
+
 @dataclass
 class DownloadInfo:
     """Information about a download and its TMDb match"""
@@ -785,18 +795,15 @@ class AutoRenamer:
 
         # Check if we're in Docker
         if Config.IS_DOCKER:
-            # In Docker, qBittorrent paths should match our container paths
-            # The container sees downloads under /downloads
+            # In Docker: the downloads folder is LUMA_DOWNLOADS_ROOT (any path),
+            # and qBittorrent's paths go through the Library paths path map.
+            from app import file_management as _fm
+            dl_root = _fm.downloads_root()
             possible_mappings = [
-                # Direct mapping should work as both containers see /downloads
                 qbittorrent_path,
-                # Try container download paths with the torrent folder
-                os.path.join('/downloads', torrent_folder),
-                # Handle case where qBittorrent reports just filename
-                os.path.join('/downloads', torrent_folder) if not qbittorrent_path.startswith('/') else qbittorrent_path,
-                # Replace common qBittorrent paths
-                qbittorrent_path.replace('/data/downloads/', '/downloads/'),
-                # Fallback to config path
+                _mapped_qbit_path(qbittorrent_path),
+                os.path.join(dl_root, torrent_folder),
+                qbittorrent_path.replace('/data/downloads/', dl_root.rstrip('/') + '/'),
                 os.path.join(Config.DOWNLOADS_ROOT, torrent_folder),
             ]
         else:
@@ -807,10 +814,9 @@ class AutoRenamer:
 
                 # Windows D: drive mapping (primary location)
                 os.path.join('D:\\', torrent_folder),
-                qbittorrent_path.replace('/downloads/', 'D:\\'),
 
-                # Common Docker mappings (for mixed environments)
-                qbittorrent_path.replace('/downloads/', Config.DOWNLOADS_ROOT + '/'),
+                # qBittorrent's path through the Library paths path map
+                _mapped_qbit_path(qbittorrent_path),
 
                 # Handle case where qBittorrent path is just the filename
                 os.path.join(Config.DOWNLOADS_ROOT, torrent_folder),

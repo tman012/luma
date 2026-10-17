@@ -45,7 +45,7 @@ interface ActiveDownload {
   mediaType: 'movie' | 'tv';
   progress: number;      // 0..1
   eta: string | null;
-  status: string;        // 'downloading' | 'stalled' | 'copying' | 'importing'
+  status: string;        // 'downloading' | 'stalled' | 'copying' | 'importing' | 'not_mapped'
   tracker: string | null;
   name: string;
   hash: string;          // qBittorrent info-hash (for remove / delete+files)
@@ -64,6 +64,7 @@ const THUMB_W = 78;
  * sign-in button (the storage sheet's button glass). */
 export const CARD_BG = T.glass;                         // rgba(255,255,255,0.06)
 export const CARD_BORDER = '1px solid rgba(255,255,255,0.08)';   // white 8% (--color-glass-8)
+export const PATH_NOT_MAPPED = 'Path not mapped';
 export const NO_ART_BG = 'rgba(255,255,255,0.04)';
 export const SIGN_IN_BUTTON = { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' };
 const THUMB_H = 117;
@@ -448,7 +449,8 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
         {active.map((dl, i) => {
           const c = dl.tracker ? getBadgeColor(dl.tracker) : null;
           const pct = Math.round(dl.progress * 100);
-          const stalled = dl.status === 'stalled';
+          const notMapped = dl.status === 'not_mapped';
+          const stalled = dl.status === 'stalled' || notMapped;
           const copying = dl.status === 'copying';
           const importing = dl.status === 'importing';
           const accent = copying || importing ? '#4ade80' : stalled ? '#fbbf24' : '#60a5fa';
@@ -456,6 +458,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
           const statusLabel = importing
             ? 'Processing…'
             : copying ? `Copying to library… ${pct}%`
+            : notMapped ? PATH_NOT_MAPPED
             : stalled ? 'Stalled'
             : dl.eta ? `${dl.eta} left` : 'Downloading…';
           const speedStr = dl.status === 'downloading' && dl.speed > 0 ? fmtSpeed(dl.speed) : null;

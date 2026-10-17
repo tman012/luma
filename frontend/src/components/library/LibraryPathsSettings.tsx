@@ -174,7 +174,9 @@ function DownloadsStatus({ view }: { view: LibraryView }) {
               <span style={titleText(wide)}>{j.title || 'Untitled'}</span>
               <span style={subText(wide)}>{sinceText(j.since)}</span>
             </span>
-            <span style={{ fontSize: 13, fontWeight: 500, color: T.danger, flex: 'none' }}>Files not found</span>
+            <span data-testid="lp-not-found-status" style={{ fontSize: 13, fontWeight: 500, color: T.danger, flex: 'none' }}>
+              {j.reason === 'not_mapped' ? 'Path not mapped' : 'Files not found'}
+            </span>
           </div>
         ))}
       </div>

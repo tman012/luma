@@ -46,7 +46,7 @@ def test_downloads_root_missing_moves_nothing_and_flags_after_an_hour(env, monke
     env.tick(now=1000 + lm.NOT_FOUND_AFTER_S)
     assert job(H1)['status'] == lm.FILES_NOT_FOUND
     assert 'not found for 60 min (download folder not available)' in caplog.text
-    assert fm.view()['not_found'] == [{'title': 'Heat', 'since': 1000}]
+    assert fm.view()['not_found'] == [{'title': 'Heat', 'since': 1000, 'reason': 'not_found'}]
     assert src.read_bytes() == b'x' * 200 and not any(os.scandir(env.media / 'Movies'))
 
 
@@ -95,8 +95,7 @@ def test_B5_path_map_put_files_a_flagged_grab_next_pass(minimal, env):
     t = torrent(env, H1, 'Heat.1995.mkv')
     t['save_path'], t['content_path'] = '/qbit/dl/', '/qbit/dl/Heat.1995.mkv'
     env.tick(now=1000)
-    env.tick(now=1000 + lm.NOT_FOUND_AFTER_S)
-    assert job(H1)['status'] == lm.FILES_NOT_FOUND
+    assert job(H1)['status'] == lm.PATH_NOT_MAPPED          # said at once, no hour's wait
     movie_file(env, 'Heat.1995.mkv', b'x' * 200)
     c = _client(minimal)
     r = c.put(MAPPING, json={'path_map': [{'remote': '/qbit/dl', 'local': str(env.dl)}], 'transfer': 'copy'},

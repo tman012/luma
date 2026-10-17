@@ -16,7 +16,7 @@ export interface Rule {
 }
 export interface PathMapRow { remote: string; local: string }
 export type Transfer = 'copy' | 'hardlink';
-export interface NotFound { title: string; since: number }
+export interface NotFound { title: string; since: number; reason?: 'not_found' | 'not_mapped' }
 export interface LibraryView {
   paths: LibPath[]; rules: Rule[]; fallback_path_id: string | null; path_map: PathMapRow[]; transfer: Transfer;
   downloads?: { path: string; status: 'ok' | 'missing' };

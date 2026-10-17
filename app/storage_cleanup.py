@@ -54,7 +54,11 @@ MAX_TARGET_BYTES = 2 * 1024 ** 4  # 2 TiB
 
 
 def downloads_root() -> str:
-    """Resolve the downloads directory from settings, falling back to Config."""
+    """The downloads folder: LUMA_DOWNLOADS_ROOT when set (the same folder the
+    library mover reads, any path), else settings, else Config."""
+    if (os.environ.get('LUMA_DOWNLOADS_ROOT') or '').strip().startswith('/'):
+        from app import file_management as _fm
+        return _fm.downloads_root()
     root = None
     try:
         from app.settings_manager import SettingsManager
@@ -66,7 +70,8 @@ def downloads_root() -> str:
             from app.config import Config
             root = Config.DOWNLOADS_ROOT
         except Exception:
-            root = '/downloads'
+            from app import file_management as _fm
+            root = _fm.DEFAULT_DOWNLOADS_ROOT
     return os.path.realpath(root)
 
 

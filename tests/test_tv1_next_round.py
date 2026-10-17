@@ -292,7 +292,7 @@ def test_no_qbit_sign_in_while_the_downloads_folder_is_missing(env):
     assert fm.load()['jobs'][H1]['status'] == lm.FILES_NOT_FOUND
     v = fm.view()
     assert v['downloads'] == {'path': str(env.dl), 'status': 'missing'}
-    assert v['not_found'] == [{'title': fm.load()['jobs'][H1]['title'], 'since': 1000}]
+    assert v['not_found'] == [{'title': fm.load()['jobs'][H1]['title'], 'since': 1000, 'reason': 'not_found'}]
 
 
 def test_view_reports_a_readable_downloads_folder(env):

@@ -10,7 +10,7 @@ const auth = { implicit: false };
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => ({ openMovie: vi.fn(), openTv: vi.fn(), openPerson: vi.fn() }) }));
 
-import { ActivityFeed, CARD_BG, CARD_BORDER, NO_ART_BG, SIGN_IN_BUTTON, SIGN_IN_TO_DELETE, removeDownload } from '@/components/activity/ActivityFeed';
+import { ActivityFeed, PATH_NOT_MAPPED, CARD_BG, CARD_BORDER, NO_ART_BG, SIGN_IN_BUTTON, SIGN_IN_TO_DELETE, removeDownload } from '@/components/activity/ActivityFeed';
 
 const H = 'a'.repeat(40);
 const QUEUE = { downloads: [{ name: 'Some.Show.S01.1080p.WEB-GRP', hash: H, progress: 0.5, status: 'downloading',
@@ -113,5 +113,19 @@ describe('Activity card: navy glass tokens (Designer)', () => {
       const src = readFileSync(resolve(__dirname, '../src/components/activity', f), 'utf8');
       expect(src, f).not.toMatch(/#111|#1f1f|#222|#000(?![0-9a-f])/i);
     }
+  });
+});
+
+describe('Activity: a grab whose path is not mapped', () => {
+  it('shows Path not mapped instead of failing silently', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes('/api/downloads/queue')) return res({ downloads: [{ ...QUEUE.downloads[0], progress: 1, status: 'not_mapped', size_remaining: 0 }] });
+      if (u.includes('/api/downloads/history')) return res({ entries: [] });
+      return res({});
+    }));
+    render(<MemoryRouter><ActivityFeed /></MemoryRouter>);
+    expect(await screen.findByText(PATH_NOT_MAPPED)).toBeTruthy();
+    expect(PATH_NOT_MAPPED).toBe('Path not mapped');
   });
 });

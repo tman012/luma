@@ -413,6 +413,17 @@ describe('Settings > Library paths > Downloads (QA-UI1)', () => {
     expect(lost.map(r => r.textContent)).toEqual(['HeatSince Oct 16Files not found', 'RoninSince Oct 16Files not found']);
   });
 
+  it('a grab whose save path does not map under the downloads folder says Path not mapped', async () => {
+    const since = Math.floor(new Date(2026, 9, 16, 9, 5).getTime() / 1000);
+    state = { ...base(), downloads: { path: '/storage/downloads', status: 'ok' },
+      not_found: [{ title: 'Heat', since, reason: 'not_mapped' }, { title: 'Ronin', since: since + 60, reason: 'not_found' }] };
+    render(<LibraryPathsSettings wide />);
+    const box = await screen.findByTestId('lp-downloads');
+    expect(within(box).getByTestId('lp-downloads-folder').textContent).toContain('/storage/downloads');
+    const lost = within(box).getAllByTestId('lp-not-found');
+    expect(lost.map(r => r.textContent)).toEqual(['HeatSince Oct 16Path not mapped', 'RoninSince Oct 16Files not found']);
+  });
+
   it('a readable downloads folder shows no status and no list when nothing is lost', async () => {
     state = { ...base(), downloads: { path: '/downloads', status: 'ok' }, not_found: [] };
     render(<LibraryPathsSettings wide />);

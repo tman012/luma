@@ -838,6 +838,7 @@ def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root:
 NOT_MAPPED = 'not in the downloads folder'
 NO_DOWNLOADS = 'download folder not available'
 FILES_NOT_FOUND = 'files not found'
+PATH_NOT_MAPPED = 'path not mapped'   # qBit's save path doesn't map under the downloads root
 NOT_FOUND_AFTER_S = 3600   # a grab whose files can't be reached this long is flagged
 # Pending reasons that mean "can't see the files" (a path map or mount problem)
 # rather than "not ready yet".
@@ -982,6 +983,17 @@ def _note_pending(h: str, job: Dict[str, Any], reason: str, now: float) -> None:
             _set_job(h, pending_since=None, status='')
         return
     since = job.get('pending_since')
+    if reason == NOT_MAPPED:
+        # No waiting it out: only a path map (or LUMA_DOWNLOADS_ROOT) fixes it,
+        # so say so right away instead of failing silently.
+        if job.get('status') != PATH_NOT_MAPPED:
+            logger.warning('Library mover: save path for %s does not map under the downloads folder %s',
+                           job.get('title'), fm.downloads_root())
+            _set_job(h, pending_since=since if since is not None else now, status=PATH_NOT_MAPPED)
+        return
+    if job.get('status') == PATH_NOT_MAPPED:
+        _set_job(h, pending_since=now, status='')
+        return
     if since is None:
         _set_job(h, pending_since=now)
         return
