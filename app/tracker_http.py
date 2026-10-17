@@ -316,7 +316,9 @@ def name_blocked(url: str) -> bool:
 def normalized_path(path: str) -> str:
     """A URL path the way a server sees it: percent-decoded (repeatedly, so
     double encoding can't hide a segment), backslashes as slashes, repeated
-    slashes collapsed, '.' and '..' segments resolved, lowercase."""
+    slashes collapsed, '.' and '..' segments resolved, lowercase. Path
+    parameters (';...' in a segment, e.g. '/api;/v2.0') are dropped, as
+    servers that honor them route '/api;x' like '/api'."""
     p = str(path or '')
     for _ in range(4):
         q = unquote(p)
@@ -326,6 +328,7 @@ def normalized_path(path: str) -> str:
     p = p.replace('\\', '/')
     out: List[str] = []
     for seg in p.split('/'):
+        seg = seg.split(';', 1)[0]
         if seg in ('', '.'):
             continue
         if seg == '..':
