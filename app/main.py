@@ -1715,9 +1715,12 @@ def get_sources_config():
     """Return the effective movie sources provider for the frontend."""
     try:
         radarr_configured = bool(settings.get('radarr.api_key'))
+        from app import tracker_sources as _tsrc
         return jsonify({
             'movie_provider': 'radarr',
             'radarr_configured': radarr_configured,
+            # Trackers (Settings > Trackers) or a Prowlarr/Torznab connection.
+            'indexer_configured': _tsrc.indexer_available(settings),
         })
     except Exception as e:
         logger.error(f"Error getting sources config: {e}")
@@ -2025,6 +2028,19 @@ _tmdb_match_cache: Dict[tuple, tuple] = {}     # (query, media_type) → (timest
 _TMDB_MATCH_CACHE_TTL = 600                    # 10 minutes
 
 
+def _tracker_sources_mod():
+    from app import tracker_sources
+    return tracker_sources
+
+
+def _tracker_member_denied():
+    """None when this request may use Luma's trackers (a real sign-in, admin
+    or approved user); else the 401/403 response. Implicit LAN access is
+    anonymous here."""
+    return _tracker_sources_mod().member_denied(
+        _get_current_user, bool(getattr(g, 'implicit_user', False)), user_auth.is_plex_approved)
+
+
 @app.route('/api/sources/all-results')
 def sources_all_results():
     """Raw, broad-category indexer search with NO quality filtering.
@@ -2049,6 +2065,9 @@ def sources_all_results():
         if not client:
             # No trackers and no Prowlarr/Torznab: nothing to search, not an error.
             return jsonify({'success': True, 'total': 0, 'releases': []})
+        denied = _tracker_member_denied() if _tracker_sources_mod().trackers_in_use() else None
+        if denied:
+            return denied
 
         cache_key = (media_type, title.lower(), year)
         cached = _all_results_cache.get(cache_key)
@@ -15883,9 +15902,20 @@ def add_torrent_to_qbittorrent():
         if not torrent_url:
             return jsonify({'error': 'Missing torrent_url'}), 400
 
+        # A Sources row from Luma's own trackers carries a release link, not
+        # the tracker's real link (that one holds a passkey and stays here).
+        _tsrc = _tracker_sources_mod()
+        release_tok = _tsrc.release_token(torrent_url)
+        if release_tok is not None:
+            denied = _tracker_member_denied()
+            if denied:
+                return denied
+
         qbit_url = settings.get('qbittorrent.url')
         qbit_user = settings.get('qbittorrent.username')
         qbit_pass = settings.get('qbittorrent.password')
+        if not qbit_url:
+            return jsonify({'error': 'qBittorrent isn’t set up'}), 503
 
         session = req.Session()
         login_response = session.post(
@@ -15902,8 +15932,23 @@ def add_torrent_to_qbittorrent():
         is_magnet = torrent_url.lower().startswith('magnet:')
         expected_hash = None
         torrent_bytes = None
+        # What qBit is handed for a magnet. For a release link that's the
+        # tracker's magnet; torrent_url (the release link) is what gets recorded.
+        add_url = torrent_url
 
-        if is_magnet:
+        if release_tok is not None:
+            try:
+                kind, got = _tsrc.fetch_release(release_tok)
+            except _tsrc.GrabError as e:
+                return jsonify({'error': e.message}), e.status
+            if kind == 'magnet':
+                is_magnet = True
+                add_url = got
+                expected_hash = _magnet_info_hash(got)
+            else:
+                torrent_bytes = got
+                expected_hash = _torrent_info_hash(got)
+        elif is_magnet:
             expected_hash = _magnet_info_hash(torrent_url)
         else:
             # Fetch the .torrent ourselves. This is the crux of the fix: if the
@@ -15920,11 +15965,11 @@ def add_torrent_to_qbittorrent():
 
             if final_url.startswith('magnet:'):
                 is_magnet = True
-                torrent_url = dl.url
+                torrent_url = add_url = dl.url
                 expected_hash = _magnet_info_hash(torrent_url)
             elif body_head.startswith(b'magnet:'):
                 is_magnet = True
-                torrent_url = dl.content.decode('utf-8', 'ignore').strip().splitlines()[0]
+                torrent_url = add_url = dl.content.decode('utf-8', 'ignore').strip().splitlines()[0]
                 expected_hash = _magnet_info_hash(torrent_url)
             elif dl.status_code == 200 and dl.content[:1] == b'd':
                 torrent_bytes = dl.content
@@ -15981,7 +16026,7 @@ def add_torrent_to_qbittorrent():
             else:
                 add_response = session.post(
                     f"{qbit_url}/api/v2/torrents/add",
-                    data={'urls': torrent_url, 'category': _qbit_app_category(), 'autoTMM': 'false'},
+                    data={'urls': add_url, 'category': _qbit_app_category(), 'autoTMM': 'false'},
                     timeout=30,
                 )
         except Exception as e:

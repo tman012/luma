@@ -27,6 +27,8 @@ export interface ReleaseLike {
   guid?: string;
   downloadUrl?: string;
   infoHash?: string;
+  /** Settings > Trackers type ('iptorrents', ...), when the row came from one. */
+  trackerType?: string;
 }
 
 const STANDARD_RESOLUTIONS = new Set(['720p', '1080p']);
@@ -44,6 +46,12 @@ export function releaseKey(r: ReleaseLike): string {
 
 export function isIptIndexer(indexer: string): boolean {
   return IPT_RE.test((indexer || '').toUpperCase());
+}
+
+/** IPTorrents row: a Settings > Trackers IPTorrents tracker (whatever the
+ *  owner named it), or a Prowlarr indexer named IPT / IPTorrents. */
+export function isIptRelease(r: Pick<ReleaseLike, 'indexer' | 'trackerType'>): boolean {
+  return r.trackerType === 'iptorrents' || isIptIndexer(r.indexer);
 }
 
 export function is4KResolution(resolution: string): boolean {
@@ -106,7 +114,7 @@ function resolutionRank(resolution: string): number {
  * meaning a should rank above b (same convention as compareStandardRank).
  */
 export function compareBucketRank(a: ReleaseLike, b: ReleaseLike): number {
-  const ipt = Number(isIptIndexer(b.indexer)) - Number(isIptIndexer(a.indexer));
+  const ipt = Number(isIptRelease(b)) - Number(isIptRelease(a));
   if (ipt !== 0) return ipt;
 
   // Non-4K: prefer standard-safe / x264 over x265 when choosing among equals.
@@ -123,7 +131,7 @@ export function compareBucketRank(a: ReleaseLike, b: ReleaseLike): number {
 
 /** Compare across mixed resolutions (legacy flat-list helper). IPT > res > seeders. */
 export function compareStandardRank(a: ReleaseLike, b: ReleaseLike): number {
-  const ipt = Number(isIptIndexer(b.indexer)) - Number(isIptIndexer(a.indexer));
+  const ipt = Number(isIptRelease(b)) - Number(isIptRelease(a));
   if (ipt !== 0) return ipt;
   const res = resolutionRank(b.resolution) - resolutionRank(a.resolution);
   if (res !== 0) return res;
