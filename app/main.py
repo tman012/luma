@@ -1445,6 +1445,38 @@ def _auth_guard():
             target = request.path + (f'?{request.query_string.decode("latin-1")}' if request.query_string else '')
             return redirect(f'{url_base}/login?next={quote(target)}')
 
+# Signed-in users who aren't approved (pending, denied, still on /setup, or
+# inactive) may only reach their own account and setup endpoints; every other
+# API, and the cached library art, holds the owner's library data.
+_UNAPPROVED_API_ALLOWED = ('/api/auth/', '/api/user/', '/api/start/', '/api/push/',
+                           '/api/notifications/', '/api/request/')
+_UNAPPROVED_API_ALLOWED_EXACT = {'/api/version'}
+
+
+def _library_data_path(path: str) -> bool:
+    if path.startswith('/api/'):
+        return not (path in _UNAPPROVED_API_ALLOWED_EXACT or path.startswith(_UNAPPROVED_API_ALLOWED))
+    return path.startswith('/static/hero_cache/')
+
+
+@app.before_request
+def _unapproved_user_guard():
+    """403 on library data for users without approved or shared access.
+    Admins, the LAN implicit owner, the service key and a LAN visitor on an
+    install with no owner yet are unaffected; a signed-out remote visitor was
+    already refused by _auth_guard."""
+    if not _library_data_path(request.path) or _is_auth_exempt(request.path, request.method):
+        return None
+    user = _get_current_user()
+    if user is None:
+        if _access.should_authenticate(settings, request):
+            return jsonify({'error': 'Not allowed'}), 403
+        return None
+    if user.get('is_admin') or user_auth.is_plex_approved(user):
+        return None
+    return jsonify({'error': 'Not allowed'}), 403
+
+
 # CSRF protection for API state-changing requests (must run after load_current_user)
 @app.before_request
 def _csrf_api_guard():
@@ -19119,6 +19151,9 @@ def set_default_target():
 @app.route('/api/rooms/<room_id>/devices/<device_id>/test', methods=['POST'])
 def test_device_connection(room_id, device_id):
     """Test ADB connectivity to a specific device."""
+    err = _require_admin()
+    if err:
+        return err
     from app.adb_utils import test_room_connection as _test_room
     try:
         device = settings.get_device(room_id, device_id)
@@ -19143,6 +19178,9 @@ def test_device_connection(room_id, device_id):
 @app.route('/api/rooms/<room_id>/devices/<device_id>/pair', methods=['POST'])
 def pair_device_endpoint(room_id, device_id):
     """Pair with a device, then connect."""
+    err = _require_admin()
+    if err:
+        return err
     from app.adb_utils import adb_pair, adb_connect
     try:
         device = settings.get_device(room_id, device_id)
@@ -19203,6 +19241,9 @@ def pair_device_endpoint(room_id, device_id):
 @app.route('/api/rooms/<room_id>/test', methods=['POST'])
 def test_room_connection_legacy(room_id):
     """Test ADB connectivity to first device in a room."""
+    err = _require_admin()
+    if err:
+        return err
     from app.adb_utils import test_room_connection as _test_room
     try:
         room = settings.get_room_by_id(room_id)
@@ -19232,6 +19273,9 @@ def test_room_connection_legacy(room_id):
 @app.route('/api/rooms/<room_id>/pair', methods=['POST'])
 def pair_room_legacy(room_id):
     """Pair with first device in a room (legacy compat)."""
+    err = _require_admin()
+    if err:
+        return err
     from app.adb_utils import adb_pair, adb_connect
     try:
         room = settings.get_room_by_id(room_id)
