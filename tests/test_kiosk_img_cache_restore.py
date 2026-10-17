@@ -137,8 +137,8 @@ def _sw(urls, spec):
     return json.loads(out.stdout)
 
 
-# Highest service-worker version that has shipped (:5002 runs v138).
-LAST_SHIPPED_SW_VERSION = 138
+# Highest service-worker version shipped or taken (v140 and v141 are taken).
+LAST_SHIPPED_SW_VERSION = 141
 
 
 def test_sw_version_bumped():

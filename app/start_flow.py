@@ -760,13 +760,20 @@ SETTINGS_PLEX_PATH = '/settings/plex'
 _owner_pending: Dict[int, Dict[str, Any]] = {}   # owner uid -> {pin_id, created, token, servers}
 
 
-def _owner_or_error():
+def _owner_or_error(allow_implicit: bool = False):
     """(user, None) for the signed-in owner; else (None, error response).
     The owner is the account setup created; installs set up before the
-    Start flow fall back to the first admin."""
+    Start flow fall back to the first admin.
+
+    allow_implicit: also accept the implicit LAN owner (auth_required
+    'disabled_local' on a full build), the way the full build's other admin
+    actions do. It is still the owner's account, never another admin, a
+    plain or Plex-approved user, or the service key. Minimal builds never
+    have an implicit user."""
     from flask import g
     user = _cfg['get_current_user']()
-    if not user or getattr(g, 'implicit_user', False) or not user.get('id'):
+    implicit = bool(getattr(g, 'implicit_user', False))
+    if not user or (implicit and not allow_implicit) or not user.get('id'):
         return None, (jsonify({'error': 'Sign in first'}), 401)
     if not user.get('is_admin'):
         return None, (jsonify({'error': 'Owner only'}), 403)
@@ -777,6 +784,38 @@ def _owner_or_error():
     if user['id'] != owner:
         return None, (jsonify({'error': 'Owner only'}), 403)
     return user, None
+
+
+SIGN_IN_FIRST = 'Sign in first'
+
+
+def require_signed_in_owner():
+    """(user, None) or (None, error response) for destructive file actions
+    (manual downloads cleanup, and any TV or movie delete): only the owner
+    signed in with a real session. The implicit LAN owner (LAN sign-in off)
+    gets 401 even though it may do everything else; so do the service key
+    (kiosk and companion apps) and no session. Other admins and plain, guest
+    or Plex-approved users get 403. A 401 carries "sign_in": true so the UI
+    can offer a sign-in for that action."""
+    user, err = _owner_or_error(allow_implicit=False)
+    if err is not None and err[1] == 401:
+        return None, (jsonify({'error': SIGN_IN_FIRST, 'sign_in': True}), 401)
+    return user, err
+
+
+def signed_in_owner_required(fn):
+    """Route decorator for require_signed_in_owner."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        _user, err = require_signed_in_owner()
+        if err is not None:
+            resp, status = err
+            resp.headers['Cache-Control'] = 'no-store'
+            return resp, status
+        return fn(*args, **kwargs)
+    return wrapper
 
 
 def _plex_configured() -> bool:

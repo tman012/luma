@@ -1193,11 +1193,16 @@ export async function fetchDownloadsGuardStatus(): Promise<{
   return resp.json();
 }
 
-export async function triggerDownloadsGuardRun(dryRun = true): Promise<{ ok: boolean; dry_run: boolean }> {
+export async function triggerDownloadsGuardRun(dryRun = true): Promise<{ ok: boolean; dry_run: boolean; signIn?: boolean }> {
   const resp = await apiFetch('/api/downloads-guard/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dry_run: dryRun }),
   });
+  // A real run deletes files: it needs the owner signed in with a session,
+  // even on the LAN (401 with sign_in). Other accounts get 403.
+  if (resp.status === 401) return { ok: false, dry_run: dryRun, signIn: true };
+  if (resp.status === 403) throw new Error('Only the owner can delete downloads');
+  if (!resp.ok) throw new Error('Cleanup failed');
   return resp.json();
 }
