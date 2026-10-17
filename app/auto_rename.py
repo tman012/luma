@@ -21,7 +21,7 @@ from app.config import Config
 from app.movie_library import MovieLibrary  # Import MovieLibrary for real-time updates
 # The paced copy moved to app/paced_copy.py unchanged; same names here.
 from app.paced_copy import COPY_CHUNK_BYTES, COPY_FLUSH_BYTES, _drop_cache, _paced_copy  # noqa: F401
-from app.qbit_owner import is_test_torrent, tag_name
+from app.qbit_owner import is_test_torrent
 
 logger = logging.getLogger('AutoRenamer')
 
@@ -1769,14 +1769,6 @@ class AutoRenamer:
                 continue
 
             torrent_info = self.get_torrent_info(torrent_hash)
-
-            # A torrent the test install added (shared qBittorrent) is never
-            # moved from here, even when its hash was tracked: stop tracking it.
-            if torrent_info and is_test_torrent(torrent_info):
-                logger.info(f"Not moving {download_info.title}: the test install added it ({tag_name()})")
-                del self.tracked_downloads[torrent_hash]
-                self.save_monitor_data()
-                continue
 
             if not torrent_info:
                 # Torrent might have been removed

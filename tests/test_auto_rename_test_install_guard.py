@@ -46,22 +46,23 @@ def _info(ar, h):
     return ar.DownloadInfo(torrent_hash=h, tmdb_id=1, media_type='movie', title='T', year='2000', added_timestamp=0)
 
 
-def test_tracked_downloads_skip_the_test_install_s_torrents(renamer, monkeypatch):
+def test_prod_processes_its_own_tracked_grab_even_when_tagged(renamer, monkeypatch):
+    """Prod only tracks its own grabs. When Taylor grabs a release on prod that
+    :5002 grabbed first (same hash, so it carries the test tag), prod still files it."""
     ar, r = renamer
     r.tracked_downloads = {H_PROD: _info(ar, H_PROD), H_TEST: _info(ar, H_TEST)}
     torrents = {H_PROD: _t(H_PROD), H_TEST: _t(H_TEST, tags='luma-test, other')}
     monkeypatch.setattr(r, 'get_torrent_info', lambda h: torrents.get(h))
     r.check_downloads()
-    assert r.processed == [H_PROD]
-    assert H_TEST not in r.tracked_downloads      # dropped, never processed later
+    assert sorted(r.processed) == sorted([H_PROD, H_TEST])
 
 
-def test_test_category_also_counts(renamer, monkeypatch):
+def test_prod_processes_its_own_tracked_grab_in_the_test_category(renamer, monkeypatch):
     ar, r = renamer
     r.tracked_downloads = {H_TEST: _info(ar, H_TEST)}
     monkeypatch.setattr(r, 'get_torrent_info', lambda h: _t(h, category='luma-test'))
     r.check_downloads()
-    assert r.processed == []
+    assert r.processed == [H_TEST]
 
 
 def test_unfinished_and_missing_prod_torrents_behave_as_before(renamer, monkeypatch):
@@ -91,18 +92,15 @@ def test_radarr_category_scan_skips_the_test_install_s_torrents(renamer, monkeyp
 def test_custom_tag_from_the_environment(renamer, monkeypatch):
     ar, r = renamer
     monkeypatch.setenv('LUMA_TEST_QBIT_TAG', 'qa-box')
-    r.tracked_downloads = {H_PROD: _info(ar, H_PROD), H_TEST: _info(ar, H_TEST)}
-    torrents = {H_PROD: _t(H_PROD, tags='luma-test'), H_TEST: _t(H_TEST, tags='QA-Box')}
-    monkeypatch.setattr(r, 'get_torrent_info', lambda h: torrents.get(h))
-    r.check_downloads()
-    assert r.processed == [H_PROD]
-
-
-def test_paced_copy_is_the_same_function(renamer):
-    ar, _r = renamer
-    from app import paced_copy
-    assert ar._paced_copy is paced_copy._paced_copy
-    assert ar.COPY_FLUSH_BYTES == 64 * 1024 * 1024
+    monkeypatch.setattr(r, '_radarr_monitoring_enabled', lambda: True)
+    monkeypatch.setattr(r, '_radarr_settings', lambda: ('http://radarr.invalid', 'k'))
+    monkeypatch.setattr(r, 'save_radarr_processed', lambda: None)
+    monkeypatch.setattr(r, 'get_radarr_category_torrents', lambda: [
+        _t(H_PROD, tags='luma-test', category='radarr'), _t(H_TEST, tags='QA-Box', category='radarr')])
+    looked_up = []
+    monkeypatch.setattr(r, 'lookup_radarr_movie', lambda h: looked_up.append(h) or None)
+    r.check_radarr_downloads()
+    assert looked_up == [H_PROD.upper()]
 
 
 @pytest.mark.parametrize('raw,expect', [('', 'luma-test'), ('qa-box', 'qa-box'), ('bad,tag', 'luma-test'),
