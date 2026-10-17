@@ -23,7 +23,7 @@
 
 ### Settings sheet
 - Opens as a full-screen sheet sliding up 300ms, top corners radius 20px, 8px below safe-area top; Home visible dimmed behind the gap.
-- Sheet bg #1b1533 (navy raised), no blur needed.
+- Sheet bg #15102a (navy token) with an rgba(255,255,255,.04) overlay and the StartUI navy glow at top. Never #1b1533 or any plum value.
 - Header 56px: circular close button left (36px circle rgba(255,255,255,.10), lucide X 18px white 90%, 44px target, 16px from edge); title "Settings" centered 17px/600 white 95%.
 - List starts 16px below: plain full-width rows 56px, padding 0 20px, label 17px/400 white 95%, ChevronRight 18px white 30% at right. 1px rgba(255,255,255,.08) dividers inset 20px on both sides, none after the last row. No cards, no icons, no search (one section for now).
 - Rows: Home screen.
@@ -39,3 +39,27 @@
 - No Kiosk group on phone. Saves instantly, no Save button.
 
 Sentence case, American English, no helper text.
+
+## Settings > Trackers (Prowlarr port)
+Section order in the list: Home screen, Trackers. Route /settings/trackers, /settings/trackers/new, /settings/trackers/:id.
+Tokens: bg #15102a, glass rgba(255,255,255,.06) + 1px rgba(255,255,255,.08), primary #3b82f6 (hover #60a5fa), danger #ef4444, success #22c55e, text white 95/70/50%. Sentence case, no helper text, no placeholder sentences.
+
+### Tracker list
+- Desktop: content title "Trackers" 20px/600 with a blue "Add tracker" button (40px, radius 10px, Plus icon) right-aligned on the same line. One glass card, radius 16px; rows 56px, padding 0 20px: status dot 8px (green ok, red failing, white 30% off), name 15px/500 white 95%, type 13px white 50% (Torznab / Newznab), switch 44x26 at right (on #3b82f6). Row click opens edit; the switch toggles enable without opening. Dividers 1px white 8%. Disabled rows: name white 50%.
+- Phone (Plex iOS sheet): header circular back + centered "Trackers" + circular Plus (36px, rgba(255,255,255,.10)) at right. Plain 56px rows as above, switch 51x31, chevron omitted (row tap = edit).
+- Empty: one row "No trackers" white 50% plus the Add tracker button (desktop) / Plus (phone). No explanatory copy.
+
+### Add tracker: type picker
+- Desktop: modal 480px, #15102a + glass, radius 20px, title "Add tracker" 18px/600, close X circle top-right. Phone: pushed page in the sheet, title "Add tracker".
+- Plain rows 56px: type name 16px/500 (Torznab, Newznab, later definitions alphabetically), ChevronRight white 30%. If the list exceeds 8, add a search field (40px, glass, Search icon, placeholder "Search").
+- Picking a type opens the form.
+
+### Tracker form (add and edit)
+- Desktop: replaces the list in the content column, back link "Trackers" with ChevronLeft above title (title = tracker name, or type name when new). Phone: pushed page, circular back, centered title.
+- Top row: "Enabled" label + switch (default on).
+- Fields, stacked, 16px gap: label 13px/600 white 70% 6px above a 44px input (glass bg rgba(255,255,255,.06), 1px white 12% border, radius 10px, 15px text, focus border #3b82f6 + 3px rgba(59,130,246,.25) ring). Fields per type schema; typical: Name, URL, API key (masked, eye toggle), Categories (multi-select chips, selected = rgba(59,130,246,.18) + #60a5fa text), Priority (number). Field errors: border #ef4444, 13px #f87171 one-line message under the field ("Required", "Invalid URL").
+- Actions row, 24px above, left to right: "Test" secondary (glass, white 95%), "Save" primary blue; "Delete" danger text button far right (edit only). Phone: full-width stacked, Save first, then Test, Delete as a plain red row at the bottom separated by 24px.
+- Test: button shows a spinner while running, then inline status beside/under it for 4s: green Check "Connected" or red X with the server's short error ("Unauthorized", "Timed out"). No toasts for Test.
+- Save: disabled until valid and changed; on success go back to the list with the top toast "Saved". Unsaved changes + back = confirm dialog "Discard changes?" with Discard (red) / Keep editing.
+- Delete: confirm dialog "Delete <name>?" with Delete (red #ef4444) and Cancel; on success back to the list.
+- Dialogs: 400px desktop / bottom sheet on phone, #15102a + glass, radius 20px, buttons 44px.

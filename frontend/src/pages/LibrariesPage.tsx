@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { FONT, LOGO_SRC } from '@/components/start/StartUI';
+import { FONT, LOGO_SRC, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
 import { LUMA_BLUE } from '@/ui/lumaButton';
 import {
@@ -351,7 +351,10 @@ const sheetBackdrop: React.CSSProperties = {
 };
 const sheet: React.CSSProperties = {
   position: 'absolute', top: 'calc(env(safe-area-inset-top) + 8px)', left: 0, right: 0, bottom: 0,
-  background: 'var(--color-kiosk-black)', borderRadius: '20px 20px 0 0', overflowX: 'hidden', overflowY: 'auto',
+  // App navy token (#15102a = --color-kiosk-black) + white 4% + the StartUI navy glow at top.
+  backgroundColor: 'var(--color-kiosk-black)',
+  backgroundImage: `linear-gradient(rgba(255,255,255,0.04), rgba(255,255,255,0.04)), ${NAVY_BG}`,
+  borderRadius: '20px 20px 0 0', overflowX: 'hidden', overflowY: 'auto',
   fontFamily: FONT, color: '#fff', overscrollBehavior: 'contain',
 };
 const sheetHeader: React.CSSProperties = {

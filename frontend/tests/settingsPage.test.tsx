@@ -92,7 +92,10 @@ describe('Settings', () => {
     renderAt('/settings');
     const sheet = screen.getByTestId('settings-sheet');
     expect(sheet.getAttribute('role')).toBe('dialog');
-    expect(sheet.style.background).toBe('var(--color-kiosk-black)');   // app navy token, no new hex
+    expect(sheet.style.backgroundColor).toBe('var(--color-kiosk-black)');   // app navy token, no new hex
+    expect(sheet.style.backgroundImage).toContain('rgba(255, 255, 255, 0.04)');
+    expect(sheet.style.backgroundImage).toContain('radial-gradient');
+    expect(sheet.outerHTML).not.toContain('1b1533');
     expect(sheet.style.borderRadius).toBe('20px 20px 0 0');
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Settings');
     expect(screen.queryByRole('button', { name: 'Account' })).toBeNull();
