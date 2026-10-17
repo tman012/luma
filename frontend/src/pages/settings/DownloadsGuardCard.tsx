@@ -12,6 +12,8 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router';
+import { useAuth } from '@/contexts/AuthContext';
 import { SettingsCard } from './components/SettingsCard';
 import { FormField } from './components/FormField';
 import { ToggleSwitch } from './components/ToggleSwitch';
@@ -31,6 +33,7 @@ import {
 } from '@/services/settingsApi';
 
 const TRACKERS_PATH = 'automation.downloads_guard.trackers';
+export const SIGN_IN_TO_CLEAN = 'Sign in to clean up';
 
 const ALL_PATHS = [
   'automation.downloads_guard.enabled',
@@ -285,6 +288,12 @@ export function DownloadsGuardCard() {
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const { implicit } = useAuth();
+  const [needSignIn, setNeedSignIn] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const signIn = () => navigate('/login', { state: { from: location.pathname + location.search, signIn: true } });
+  const showSignIn = Boolean(implicit) || needSignIn;
 
   const running = Boolean(status?.running);
 
@@ -344,8 +353,9 @@ export function DownloadsGuardCard() {
   const handleRunNow = () => withBusy('run', async () => {
     const baselineCheck = status?.last_check ?? null;
     const baselineRun = status?.last_run ?? null;
-    await triggerDownloadsGuardRun(false);
+    const r = await triggerDownloadsGuardRun(false);
     setConfirming(false);
+    if (r.signIn) { setNeedSignIn(true); return ''; }
     pollUntilIdle(baselineCheck, baselineRun);
     return 'Cleanup started — the result appears below.';
   });
@@ -458,7 +468,12 @@ export function DownloadsGuardCard() {
       )}
 
       <div className="col-span-full flex flex-wrap items-center gap-2">
-        {confirming ? (
+        {showSignIn ? (
+          <button type="button" onClick={signIn} data-testid="guard-sign-in"
+            className="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-[12px] font-semibold text-white/90">
+            {SIGN_IN_TO_CLEAN}
+          </button>
+        ) : confirming ? (
           <>
             <button type="button" onClick={handleRunNow} disabled={busy !== null || running}
               className="rounded-lg border border-rose-500/30 bg-rose-500/15 px-3 py-2 text-[12px] font-semibold text-rose-200 disabled:opacity-40">
