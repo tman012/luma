@@ -217,3 +217,48 @@ def test_tls_name_mismatch_is_502_and_nothing_added(client, qbit, monkeypatch, t
     else:
         assert r.status_code == 502, r.get_json()
         assert 'request' not in seen and qbit.added == []
+
+
+# ── (4b) Reviewer F1: trickled status line / headers are cut too ────────
+
+def _header_drip(c, seen):
+    c.recv(4096)
+    seen.append('request')
+    try:
+        c.sendall(b'HTTP/1.1 200 OK\r\n')
+        for i in range(200):            # one header byte every 0.2 s, never ending
+            time.sleep(0.2)
+            c.sendall(b'X')
+    except OSError:
+        pass
+    finally:
+        c.close()
+
+
+def _status_drip(c, seen):
+    c.recv(4096)
+    seen.append('request')
+    try:
+        for b in b'HTTP/1.1 200 OK' * 20:
+            time.sleep(0.2)
+            c.sendall(bytes([b]))
+    except OSError:
+        pass
+    finally:
+        c.close()
+
+
+@pytest.mark.parametrize('handler', [_header_drip, _status_drip])
+def test_header_trickle_cut_by_total_deadline(monkeypatch, handler):
+    _allow_loopback(monkeypatch, {'drip.test'})
+    srv, port, seen = _serve(handler)
+    t = time.monotonic()
+    try:
+        with pytest.raises(og.FetchError) as e:
+            og.fetch(f'http://drip.test:{port}/x', read_timeout=5.0, connect_timeout=5.0, total_timeout=1.5)
+    finally:
+        took = time.monotonic() - t
+        srv.close()
+    assert seen == ['request']
+    assert str(e.value) == 'Request took too long'
+    assert took < 3.0, f'held for {took:.1f}s with total_timeout=1.5'

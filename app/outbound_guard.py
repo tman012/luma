@@ -27,6 +27,7 @@ Every hop:
 
 import ipaddress
 import socket
+import threading
 import time
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urljoin, urlsplit
@@ -176,6 +177,29 @@ def _open(scheme: str, ip: str, port: int, host: str, target: str,
     else:
         pool = urllib3.HTTPConnectionPool(ip, port=port, timeout=timeout,
                                           retries=False, maxsize=1)
+    # Watchdog: the socket timeout only bounds each recv, so a server that
+    # trickles the status line or headers could hold urlopen() open forever.
+    # At the deadline the live socket is shut down, which ends any read.
+    conns: list = []
+    expired = threading.Event()
+    base_cls = getattr(pool, 'ConnectionCls', None)
+    if base_cls is not None:
+        class _Tracked(base_cls):  # type: ignore[misc, valid-type]
+            def connect(self):
+                conns.append(self)
+                super().connect()
+                if expired.is_set():
+                    _kill_sockets(conns)
+
+        pool.ConnectionCls = _Tracked
+    timer = None
+    if deadline is not None:
+        def _expire():
+            expired.set()
+            _kill_sockets(conns)
+        timer = threading.Timer(max(0.0, deadline - time.monotonic()), _expire)
+        timer.daemon = True
+        timer.start()
     try:
         resp = pool.urlopen('GET', target, headers=headers, redirect=False,
                             retries=False, preload_content=False,
@@ -186,7 +210,7 @@ def _open(scheme: str, ip: str, port: int, host: str, target: str,
             while True:
                 if deadline is not None:
                     left = deadline - time.monotonic()
-                    if left <= 0:
+                    if left <= 0 or expired.is_set():
                         raise FetchError('Request took too long')
                     sock = getattr(getattr(resp, 'connection', None), 'sock', None)
                     if sock is not None:
@@ -196,6 +220,8 @@ def _open(scheme: str, ip: str, port: int, host: str, target: str,
                             pass
                 chunk = read(65536)
                 if not chunk:
+                    if expired.is_set():
+                        raise FetchError('Request took too long')
                     break
                 size += len(chunk)
                 if size > max_bytes:
@@ -207,9 +233,24 @@ def _open(scheme: str, ip: str, port: int, host: str, target: str,
     except FetchError:
         raise
     except Exception as exc:
+        if expired.is_set():
+            raise FetchError('Request took too long') from exc
         raise FetchError(f'Request to {host} failed: {type(exc).__name__}') from exc
     finally:
+        if timer is not None:
+            timer.cancel()
         pool.close()
+
+
+def _kill_sockets(conns) -> None:
+    for c in list(conns):
+        sock = getattr(c, 'sock', None)
+        if sock is None:
+            continue
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
 
 
 def fetch(url: str, *, max_hops: int = MAX_HOPS, max_bytes: int = MAX_BYTES,
