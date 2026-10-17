@@ -137,8 +137,20 @@ CREATE TABLE unmatched (
 );
 """
 
+# Phase 1 (library scan): a scanned file's link state, one series and one
+# unmatched row per library folder, and a small key/value table (last scan).
+SCHEMA_V2 = """
+ALTER TABLE episode_files ADD COLUMN state TEXT NOT NULL DEFAULT 'linked'
+  CHECK (state IN ('linked', 'unrecognized', 'mismatch'));
+ALTER TABLE episode_files ADD COLUMN parsed TEXT;
+CREATE UNIQUE INDEX series_folder ON series(path_id, folder) WHERE path_id IS NOT NULL AND folder IS NOT NULL;
+CREATE UNIQUE INDEX unmatched_folder ON unmatched(path_id, folder);
+CREATE INDEX episode_files_series ON episode_files(series_id);
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+"""
+
 # MIGRATIONS[n] takes user_version n to n + 1.
-MIGRATIONS: List[str] = [SCHEMA_V1]
+MIGRATIONS: List[str] = [SCHEMA_V1, SCHEMA_V2]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -345,3 +357,18 @@ def add_history(event: str, *, series_id: Optional[int] = None, episode_ids: Opt
                            (time.time() if now is None else now, series_id, json.dumps(episode_ids or []),
                             event[:40], json.dumps(detail or {})))
         return int(cur.lastrowid)
+
+
+def get_meta(key: str) -> Optional[str]:
+    with connect() as conn:
+        row = conn.execute('SELECT value FROM meta WHERE key = ?', (key,)).fetchone()
+        return row[0] if row else None
+
+
+def set_meta(key: str, value: Optional[str]) -> None:
+    with write() as conn:
+        if value is None:
+            conn.execute('DELETE FROM meta WHERE key = ?', (key,))
+        else:
+            conn.execute('INSERT INTO meta (key, value) VALUES (?, ?)'
+                         ' ON CONFLICT(key) DO UPDATE SET value = excluded.value', (key, value))

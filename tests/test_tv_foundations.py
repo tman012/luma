@@ -387,7 +387,7 @@ def db(tmp_path):
 
 
 def test_schema_is_created_with_wal_and_0600(db):
-    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 1
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 2
     with tv_store.connect() as conn:
         assert conn.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -428,7 +428,7 @@ def test_a_failed_write_rolls_back(db):
 def test_corrupt_file_is_quarantined_and_starts_empty(db):
     db.parent.mkdir(parents=True)
     db.write_bytes(b'this is not a database' * 100)
-    assert tv_store.schema_version() == 1
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION
     assert any(p.name.startswith('tv.db.bad-') for p in db.parent.iterdir())
 
 
@@ -444,10 +444,31 @@ def test_a_newer_schema_is_refused(db):
 
 def test_migrations_run_in_order(db, monkeypatch):
     monkeypatch.setattr(tv_store, 'MIGRATIONS', tv_store.MIGRATIONS + ['ALTER TABLE series ADD COLUMN extra TEXT'])
-    monkeypatch.setattr(tv_store, 'SCHEMA_VERSION', 2)
-    assert tv_store.schema_version() == 2
+    monkeypatch.setattr(tv_store, 'SCHEMA_VERSION', len(tv_store.MIGRATIONS))
+    assert tv_store.schema_version() == len(tv_store.MIGRATIONS)
     with tv_store.connect() as conn:
         assert 'extra' in [r[1] for r in conn.execute('PRAGMA table_info(series)')]
+
+
+def test_a_version_1_file_migrates_to_version_2(db):
+    db.parent.mkdir(parents=True)
+    conn = sqlite3.connect(str(db))
+    for stmt in tv_store._statements(tv_store.SCHEMA_V1):
+        conn.execute(stmt)
+    conn.execute("INSERT INTO series (tmdb_id, title, added_at, path_id, folder) VALUES (1, 'A', 0, 'tp_00000001', 'A')")
+    conn.execute("INSERT INTO episode_files (series_id, path_id, rel_path, origin, added_at)"
+                 " VALUES (1, 'tp_00000001', 'A/a.mkv', 'scan', 0)")
+    conn.execute('PRAGMA user_version = 1')
+    conn.commit()
+    conn.close()
+    assert tv_store.schema_version() == 2
+    with tv_store.connect() as conn:
+        assert conn.execute('SELECT state, parsed FROM episode_files').fetchone()[:] == ('linked', None)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO series (tmdb_id, title, added_at, path_id, folder) VALUES (2, 'B', 0, 'tp_00000001', 'A')")
+        conn.execute("INSERT INTO unmatched (path_id, folder, ts) VALUES ('tp_00000001', 'X', 0)")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO unmatched (path_id, folder, ts) VALUES ('tp_00000001', 'X', 1)")
 
 
 def test_search_log_and_counts(db):
@@ -471,3 +492,12 @@ def test_history(db):
     with tv_store.connect() as conn:
         row = conn.execute('SELECT * FROM history WHERE id = ?', (hid,)).fetchone()
     assert row['event'] == 'grabbed' and json.loads(row['episode_ids']) == [1, 2]
+
+
+def test_meta(db):
+    assert tv_store.get_meta('last_scan') is None
+    tv_store.set_meta('last_scan', '1.5')
+    tv_store.set_meta('last_scan', '2.5')
+    assert tv_store.get_meta('last_scan') == '2.5'
+    tv_store.set_meta('last_scan', None)
+    assert tv_store.get_meta('last_scan') is None
