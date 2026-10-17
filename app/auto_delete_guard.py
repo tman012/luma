@@ -24,8 +24,12 @@ DAILY_CAP = PREFIX + 'daily_cap_gb'
 INTERVAL = PREFIX + 'check_interval_minutes'
 ROOT = 'media.downloads_root'
 
+# Settings that choose a folder the guard or the manual cleanup deletes from
+# (storage_cleanup.downloads_root()). Any change to one widens, guard on or off.
+DELETE_ROOTS = (ROOT,)
+
 # Every path _widens_auto_delete can name, in the order it names them.
-WIDENING_PATHS = (ENABLED, MIN_FREE, RECLAIM, DAILY_CAP, INTERVAL, ROOT)
+WIDENING_PATHS = (ENABLED, MIN_FREE, RECLAIM, DAILY_CAP, INTERVAL) + DELETE_ROOTS
 
 
 class _View:
@@ -44,10 +48,10 @@ class _View:
         return node
 
 
-def _root(view: _View) -> str:
+def _root(view: _View, path: str = ROOT) -> str:
     """The folder deletions are confined to, resolved as
     storage_cleanup.downloads_root() does."""
-    root = view.get(ROOT)
+    root = view.get(path)
     if not root or not isinstance(root, str):
         try:
             from app.config import Config
@@ -59,9 +63,10 @@ def _root(view: _View) -> str:
 
 def _widens_auto_delete(old: Dict[str, Any], new: Dict[str, Any]) -> List[str]:
     """Paths whose change from *old* to *new* lets automatic deletion delete
-    more. When the guard is off in *new*, nothing widens, because turning it
-    off (with or without other edits) always narrows. Turning it back on
-    counts again later.
+    more. A change to a folder deletions come from (DELETE_ROOTS) always
+    widens, guard on or off. Otherwise, when the guard is off in *new*,
+    nothing widens, because turning it off (with or without other number
+    edits) always narrows. Turning it back on counts again later.
 
     - enabled: off to on.
     - min_free_gb: higher (the guard fires at more free space).
@@ -69,15 +74,20 @@ def _widens_auto_delete(old: Dict[str, Any], new: Dict[str, Any]) -> List[str]:
     - daily_cap_gb: higher, or a cap changed to 0 (no cap). A change from 0
       to a cap tightens.
     - check_interval_minutes: shorter (runs more often).
-    - media.downloads_root: any change of the resolved folder while the
-      guard is on (deletion moves to a different set of files).
+    - media.downloads_root: any change of the resolved folder, guard on or
+      off (the manual cleanup deletes from it any time, and the guard does
+      the moment it is turned on).
     The tracker preference only orders what is spent first, never how much,
     so it is not a widening.
     """
     from app import downloads_guard as dg
     o, n = _View(old), _View(new)
+    # The folder the guard and the manual cleanup delete from counts whether
+    # or not the guard is on (PM ruling): the cleanup uses it any time, and
+    # the guard uses it the moment it is turned on.
+    moved = [p for p in DELETE_ROOTS if _root(n, p) != _root(o, p)]
     if not dg.enabled(n):
-        return []
+        return moved
     widened: List[str] = []
     if not dg.enabled(o):
         widened.append(ENABLED)
@@ -90,6 +100,4 @@ def _widens_auto_delete(old: Dict[str, Any], new: Dict[str, Any]) -> List[str]:
         widened.append(DAILY_CAP)
     if dg.check_interval_seconds(n) < dg.check_interval_seconds(o):
         widened.append(INTERVAL)
-    if _root(n) != _root(o):
-        widened.append(ROOT)
-    return widened
+    return widened + moved
