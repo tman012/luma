@@ -3,7 +3,8 @@
 // Cache strategy summary:
 //   Navigation (HTML)       → NetworkFirst (fallback to cached shell)
 //   /assets/* (hashed)      → CacheFirst (immutable, hash-busted by Vite)
-//   /api/img/* (Plex proxy) → Network only (posters are per-account, never cached)
+//   /api/img/* (Plex proxy) → Network only (per-account; only the browser's own
+//                             HTTP cache keeps them, private + Vary: Cookie)
 //   /static/images/*        → NetworkFirst (icons change without hash)
 //   /static/* (other)       → NetworkFirst (JS/CSS may change without hash)
 //   /api/* (data)           → Network only (never cached)
@@ -21,7 +22,7 @@
 
 // BUILD_ID is replaced at build time or bumped manually per deploy.
 // When sw.js byte-content changes, the browser installs a new SW.
-const CACHE_VERSION = 'media-kiosk-v130';
+const CACHE_VERSION = 'media-kiosk-v131';
 
 // Separate cache for large immutable assets — purged when version bumps
 const IMMUTABLE_CACHE = 'media-immutable-v24';
@@ -119,9 +120,13 @@ self.addEventListener('activate', event => {
 });
 
 // Only plain successful responses are kept: never one the server marked
-// no-store (or private), and never a proxied image (/api/* isn't cached).
+// no-store (or private), and never anything under /api/ (proxied images
+// included), whatever its headers say.
 function cacheable(resp) {
   if (!resp || !resp.ok) return false;
+  let p = null;
+  try { p = appPath(new URL(resp.url, self.location.origin).pathname); } catch (e) { /* no URL: headers decide */ }
+  if (p !== null && p.startsWith('/api/')) return false;
   const cc = (resp.headers && resp.headers.get && resp.headers.get('Cache-Control')) || '';
   return !/no-store|private/i.test(cc);
 }

@@ -1,5 +1,6 @@
 """Prod hotfix: /api/img/plex only proxies Plex library image paths, only
-answers with images, and never lets a shared cache keep a reply."""
+answers with images, and never lets a shared cache keep a reply (served
+images are private to this browser for a day; errors are never stored)."""
 
 from types import SimpleNamespace
 
@@ -95,7 +96,7 @@ def test_valid_plex_image_shapes_allowed(plex, path, upstream):
     assert r.data == b'img'
     assert calls == ['http://plex.test' + upstream]
     assert r.headers['Content-Type'] == 'image/jpeg'
-    assert r.headers['Cache-Control'] == 'private, no-store'
+    assert r.headers['Cache-Control'] == 'private, max-age=86400'
     assert r.headers['X-Content-Type-Options'] == 'nosniff'
     assert 'ETag' not in r.headers
 
