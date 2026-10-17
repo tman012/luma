@@ -27,6 +27,8 @@ export interface CleanupResult {
   short: boolean;
   after: StorageUsage | null;
   error?: string;
+  /** The server wants the owner signed in with a session (LAN access isn't enough). */
+  signIn?: boolean;
 }
 
 interface RawUsage {
@@ -56,8 +58,33 @@ export async function fetchDownloadsStorage(): Promise<StorageUsage> {
   return mapUsage(raw);
 }
 
+const NOTHING: CleanupResult = {
+  success: false, freedBytes: 0, deletedCount: 0, deleted: [], failed: [], short: false, after: null,
+};
+
 export async function cleanupDownloads(targetBytes?: number): Promise<CleanupResult> {
-  const raw = await apiFetch<{
+  let raw: Awaited<ReturnType<typeof postCleanup>>;
+  try {
+    raw = await postCleanup(targetBytes);
+  } catch (e) {
+    // 401: destructive actions need a signed-in owner session, even on the LAN.
+    if ((e as { status?: number })?.status === 401) return { ...NOTHING, signIn: true };
+    throw e;
+  }
+  return {
+    success: raw.success ?? false,
+    freedBytes: raw.freed_bytes ?? 0,
+    deletedCount: raw.deleted_count ?? 0,
+    deleted: (raw.deleted ?? []).map((d) => ({ name: d.name, sizeBytes: d.size_bytes })),
+    failed: raw.failed ?? [],
+    short: raw.short ?? false,
+    after: raw.after ? mapUsage(raw.after) : null,
+    error: raw.error,
+  };
+}
+
+function postCleanup(targetBytes?: number) {
+  return apiFetch<{
     success?: boolean;
     freed_bytes?: number;
     deleted_count?: number;
@@ -70,17 +97,6 @@ export async function cleanupDownloads(targetBytes?: number): Promise<CleanupRes
     method: 'POST',
     body: JSON.stringify(targetBytes ? { target_bytes: targetBytes } : {}),
   });
-
-  return {
-    success: raw.success ?? false,
-    freedBytes: raw.freed_bytes ?? 0,
-    deletedCount: raw.deleted_count ?? 0,
-    deleted: (raw.deleted ?? []).map((d) => ({ name: d.name, sizeBytes: d.size_bytes })),
-    failed: raw.failed ?? [],
-    short: raw.short ?? false,
-    after: raw.after ? mapUsage(raw.after) : null,
-    error: raw.error,
-  };
 }
 
 /** Human-readable size — "1.5 TB", "820 GB", "-". */

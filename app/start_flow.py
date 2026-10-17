@@ -786,6 +786,38 @@ def _owner_or_error(allow_implicit: bool = False):
     return user, None
 
 
+SIGN_IN_FIRST = 'Sign in first'
+
+
+def require_signed_in_owner():
+    """(user, None) or (None, error response) for destructive file actions
+    (manual downloads cleanup, and any TV or movie delete): only the owner
+    signed in with a real session. The implicit LAN owner (LAN sign-in off)
+    gets 401 even though it may do everything else; so do the service key
+    (kiosk and companion apps) and no session. Other admins and plain, guest
+    or Plex-approved users get 403. A 401 carries "sign_in": true so the UI
+    can offer a sign-in for that action."""
+    user, err = _owner_or_error(allow_implicit=False)
+    if err is not None and err[1] == 401:
+        return None, (jsonify({'error': SIGN_IN_FIRST, 'sign_in': True}), 401)
+    return user, err
+
+
+def signed_in_owner_required(fn):
+    """Route decorator for require_signed_in_owner."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        _user, err = require_signed_in_owner()
+        if err is not None:
+            resp, status = err
+            resp.headers['Cache-Control'] = 'no-store'
+            return resp, status
+        return fn(*args, **kwargs)
+    return wrapper
+
+
 def _plex_configured() -> bool:
     s = _cfg['settings']
     return bool(s.get('plex.url') and s.get('plex.token'))

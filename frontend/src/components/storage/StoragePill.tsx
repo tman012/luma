@@ -7,6 +7,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useLocation, useNavigate } from 'react-router';
+import { useAuth } from '@/contexts/AuthContext';
 import { useNotificationsContext } from '@/contexts/NotificationsContext';
 import {
   fetchDownloadsStorage,
@@ -26,7 +28,9 @@ const USAGE_POLL_IDLE_MS = 60_000;
 const USAGE_POLL_ACTIVE_MS = 15_000;
 
 type SheetPhase = 'entering' | 'visible' | 'exiting' | 'gone';
-type Step = 'idle' | 'confirm' | 'running' | 'done' | 'error';
+type Step = 'idle' | 'confirm' | 'running' | 'done' | 'error' | 'signin';
+/** Label of the sign-in prompt for the cleanup (sentence case, no helper text). */
+export const SIGN_IN_TO_FREE = 'Sign in to free up space';
 
 // ---------------------------------------------------------------------------
 // Pill
@@ -141,6 +145,14 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
   const [step, setStep] = useState<Step>('idle');
   const [result, setResult] = useState<CleanupResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Deleting files needs the owner signed in with a session; LAN access without
+  // sign-in (implicit) gets a sign-in prompt instead of the delete.
+  const { implicit } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const signIn = useCallback(() => {
+    navigate('/login', { state: { from: location.pathname + location.search, signIn: true } });
+  }, [navigate, location.pathname, location.search]);
 
   useEffect(() => {
     if (!open) return;
@@ -171,6 +183,7 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
     setError(null);
     try {
       const res = await cleanupDownloads(usage?.cleanupTargetBytes);
+      if (res.signIn) { setStep('signin'); return; }
       setResult(res);
       if (res.after) onUsageChange(res.after);
       else await fetchDownloadsStorage().then(onUsageChange).catch(() => {});
@@ -251,7 +264,11 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
 
           {/* Action area */}
           <div style={{ marginTop: 22 }}>
-            {step === 'idle' && (
+            {(step === 'signin' || (step === 'idle' && implicit)) && (
+              <SheetButton onClick={signIn} label={SIGN_IN_TO_FREE} testId="storage-sign-in" />
+            )}
+
+            {step === 'idle' && !implicit && (
               <SheetButton
                 onClick={() => setStep('confirm')}
                 disabled={!usage?.available}
@@ -335,15 +352,17 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
   );
 }
 
-function SheetButton({ onClick, label, sublabel, disabled }: {
+function SheetButton({ onClick, label, sublabel, disabled, testId }: {
   onClick: () => void;
   label: string;
   sublabel?: string;
   disabled?: boolean;
+  testId?: string;
 }) {
   return (
     <button
       type="button"
+      data-testid={testId}
       onClick={onClick}
       disabled={disabled}
       style={{

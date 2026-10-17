@@ -16,9 +16,12 @@ type Flow = 'signin' | 'signup';
 type SignUpStep = 'email' | 'pin' | 'confirm' | 'pending';
 
 export function LoginPage() {
-  const { login, authenticated, loading, needsStart, pinUnlock, signupOpen } = useAuth();
+  const { login, authenticated, loading, needsStart, pinUnlock, signupOpen, implicit } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  // Signed in implicitly (LAN, no sign-in) and sent here to sign in for a
+  // destructive action: show the form instead of bouncing back.
+  const signingIn = implicit && !!(location.state as { signIn?: boolean } | null)?.signIn;
 
   const [flow, setFlow] = useState<Flow>(
     (location.state as any)?.flow === 'signup' ? 'signup' : 'signin',
@@ -41,11 +44,11 @@ export function LoginPage() {
   const regPinRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!loading && authenticated) {
+    if (!loading && authenticated && !signingIn) {
       const from = (location.state as any)?.from || nextFromQuery(location.search) || '/';
       navigate(from, { replace: true });
     }
-  }, [authenticated, loading, navigate, location]);
+  }, [authenticated, loading, navigate, location, signingIn]);
 
   // Fresh install → Start flow; single-account install → PIN keypad.
   useEffect(() => {
