@@ -24,6 +24,9 @@ describe('Trackers sign-in', () => {
     vi.stubGlobal('fetch', vi.fn(async () => res(SIGN_IN, 401)));
     renderAt('/settings/trackers', wide);
     const btn = await screen.findByTestId('trackers-sign-in');
+    // under the title / phone header, never above it
+    const section = screen.getByTestId('trackers-section');
+    expect(section.firstElementChild!.contains(btn)).toBe(false);
     expect(btn.textContent).toBe('Sign in to edit trackers');
     fireEvent.click(btn);
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/login|{"from":"/settings/trackers","signIn":true}'));
@@ -48,6 +51,7 @@ describe('Trackers sign-in', () => {
     expect(screen.queryByTestId('trackers-sign-in')).toBeNull();
     fireEvent.click(screen.getByRole('switch'));
     expect((await screen.findByTestId('trackers-sign-in')).textContent).toBe('Sign in to edit trackers');
+    expect(screen.queryByTestId('trackers-card')).toBeNull();          // the list that can't be saved is gone
   });
 
   it('useTrackersAccess keeps Trackers listed on a 401 with sign_in', async () => {

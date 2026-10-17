@@ -146,10 +146,7 @@ export function TrackersSettings({ wide, base = TRACKERS_BASE, onExit }: Tracker
     <>
       <style>{trackersCss}</style>
       {toastEl}
-      <section data-testid="trackers-section" data-view={view.kind} style={{ fontFamily: FONT, color: TEXT }}>
-        {access === 'signIn' && <SignInRow wide={wide} />}
-        {body}
-      </section>
+      <section data-testid="trackers-section" data-view={view.kind} style={{ fontFamily: FONT, color: TEXT }}>{body}</section>
     </>
   );
 
@@ -164,8 +161,14 @@ export function TrackersSettings({ wide, base = TRACKERS_BASE, onExit }: Tracker
       </>,
     );
   }
-  if (access === 'signIn' && (!types || !trackers)) {
-    return shell(wide ? <ListTitle onAdd={null} /> : <PhoneHeader title="Trackers" onBack={onExit || (() => navigate('/settings'))} />);
+  if (access === 'signIn') {
+    // The session is gone (load, or mid-edit): nothing here works until sign-in.
+    return shell(
+      <>
+        {wide ? <ListTitle onAdd={null} /> : <PhoneHeader title="Trackers" onBack={onExit || (() => navigate('/settings'))} />}
+        <SignInRow wide={wide} />
+      </>,
+    );
   }
   if (!types || !trackers) return shell(null);
 
@@ -207,7 +210,7 @@ function SignInRow({ wide }: { wide: boolean }) {
   const navigate = useNavigate();
   const location = useLocation();
   return (
-    <div style={{ display: 'flex', justifyContent: wide ? 'flex-end' : 'stretch', margin: '0 0 16px' }}>
+    <div style={{ display: 'flex', justifyContent: wide ? 'flex-start' : 'stretch', margin: wide ? '0 0 16px' : '8px 16px 16px' }}>
       <button type="button" className="lt-btn lt-primary" data-testid="trackers-sign-in"
         style={{ ...primaryBtn, height: wide ? 40 : 44, padding: '0 16px', width: wide ? undefined : '100%' }}
         onClick={() => navigate('/login', { state: { from: location.pathname + location.search, signIn: true } })}>
