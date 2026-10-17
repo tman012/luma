@@ -256,10 +256,12 @@ def tv_paths() -> list:
     return copy.deepcopy(load()['paths'])
 
 
-def check_tv_path(raw: Any, others: list) -> Tuple[Optional[str], Optional[str]]:
+def check_tv_path(raw: Any, others: list, current: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
     """(path, None) or (None, error): Library paths' checks against *others*
     (the other TV paths) plus every Movies library path and the downloads
-    folder. No write probe (see the module docstring)."""
+    folder, and the folder picker's rule: inside the browse roots
+    (LUMA_BROWSE_ROOTS, else /media). *current* (an edit's saved path) is kept
+    even if it predates that rule. No write probe (see the module docstring)."""
     from app import file_management as fm
     p, err = fm.clean_abs_path(raw)
     if err:
@@ -271,6 +273,9 @@ def check_tv_path(raw: Any, others: list) -> Tuple[Optional[str], Optional[str]]
         return None, fm.IN_DOWNLOADS
     if not fm.os.path.isdir(real):
         return None, fm.NOT_FOUND
+    unchanged = current is not None and fm.os.path.realpath(current) == real
+    if not unchanged and not fm.inside_browse_roots(real):
+        return None, fm.NOT_ALLOWED
     for o in list(others) + fm.load()['paths']:
         other = fm.os.path.realpath(o['path'])
         if other == real:
@@ -376,7 +381,7 @@ def tv_paths_edit(pid):
             if e:
                 errors['name'] = e
         if 'path' in body:
-            path, e = check_tv_path(body.get('path'), others)
+            path, e = check_tv_path(body.get('path'), others, current=rec['path'])
             if e:
                 errors['path'] = e
         if errors:

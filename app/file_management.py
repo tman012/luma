@@ -247,14 +247,31 @@ DEFAULT_BROWSE_ROOTS = ('/media',)
 BROWSE_MAX = 500
 
 
+def _base_browse_roots() -> List[str]:
+    raw = (os.environ.get(BROWSE_ROOTS_ENV) or '').strip()
+    return [r.strip() for r in re.split(r'[:,]', raw) if r.strip()] if raw else list(DEFAULT_BROWSE_ROOTS)
+
+
+def inside_browse_roots(real: str) -> bool:
+    """*real* is inside LUMA_BROWSE_ROOTS (else /media): where the folder
+    picker starts. Library paths themselves don't count, so a new path can't
+    vouch for itself."""
+    for c in _base_browse_roots():
+        p, err = clean_abs_path(c)
+        if err:
+            continue
+        root = os.path.realpath(p)
+        if not blocked(root) and (real == root or _under(real, root)):
+            return True
+    return False
+
+
 def browse_roots() -> List[str]:
     """Real paths the folder picker may show: LUMA_BROWSE_ROOTS (':' or ','
     separated absolute paths, else /media), the downloads folder, and every
     configured Movies and TV library path. Missing or blocked ones are
     dropped, and a root inside another is folded into it."""
-    raw = (os.environ.get(BROWSE_ROOTS_ENV) or '').strip()
-    base = [r.strip() for r in re.split(r'[:,]', raw) if r.strip()] if raw else list(DEFAULT_BROWSE_ROOTS)
-    cands = base + [downloads_root()] + [p['path'] for p in load()['paths']] + \
+    cands = _base_browse_roots() + [downloads_root()] + [p['path'] for p in load()['paths']] + \
         [p['path'] for p in other_store_paths()]
     reals: List[str] = []
     for c in cands:

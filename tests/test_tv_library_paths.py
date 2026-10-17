@@ -22,6 +22,7 @@ def tv_env(tmp_path, monkeypatch, store):  # noqa: F811
     dl.mkdir()
     monkeypatch.setenv('LUMA_DOWNLOADS_ROOT', str(dl))
     media = tmp_path / 'media'
+    monkeypatch.setenv('LUMA_BROWSE_ROOTS', str(media))
     for n in ('TV', 'Anime', 'Movies', 'Kids TV'):
         (media / n).mkdir(parents=True)
     yield media
@@ -163,3 +164,34 @@ def test_bad_store_rows_are_dropped(tv_env):
                                 {'id': 'bad', 'name': 'B', 'path': '/b'},
                                 {'id': 't_0000000c', 'name': 'C', 'path': 'relative'}]})
     assert [p['id'] for p in tv_settings.load()['paths']] == ['t_0000000a']
+
+
+# Tester tv1-8646479 M4: TV paths follow the folder picker's rule (inside the browse roots).
+
+def test_path_outside_the_browse_roots_is_refused(owner, tv_env, tmp_path):
+    outside = tmp_path / 'elsewhere' / 'TV'
+    outside.mkdir(parents=True)
+    r = _add(owner, 'TV', outside)
+    assert r.status_code == 400 and r.get_json()['errors'] == {'path': fm.NOT_ALLOWED}
+    link = tv_env / 'escape'
+    link.symlink_to(outside)
+    r = _add(owner, 'TV', link)
+    assert r.status_code == 400 and r.get_json()['errors'] == {'path': fm.NOT_ALLOWED}
+    assert _add(owner, 'TV', tv_env / 'TV').status_code == 201
+
+
+def test_default_root_is_media(owner, tv_env, monkeypatch):
+    monkeypatch.delenv('LUMA_BROWSE_ROOTS')
+    r = _add(owner, 'TV', tv_env / 'TV')
+    assert r.status_code == 400 and r.get_json()['errors'] == {'path': fm.NOT_ALLOWED}
+
+
+def test_an_existing_path_outside_the_roots_can_still_be_renamed(owner, tv_env, tmp_path, monkeypatch):
+    assert _add(owner, 'TV', tv_env / 'TV').status_code == 201
+    pid = tv_settings.load()['paths'][0]['id']
+    monkeypatch.setenv('LUMA_BROWSE_ROOTS', str(tmp_path / 'other'))
+    (tmp_path / 'other').mkdir()
+    r = owner.put(f'{URL}/{pid}', json={'name': 'Shows', 'path': str(tv_env / 'TV')}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and r.get_json()['paths'][0]['name'] == 'Shows'
+    r = owner.put(f'{URL}/{pid}', json={'path': str(tv_env / 'Anime')}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 400 and r.get_json()['errors'] == {'path': fm.NOT_ALLOWED}
