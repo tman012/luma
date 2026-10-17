@@ -26,6 +26,11 @@ with `state.signIn`.
   The storage sheet shows "Sign in to free up space" instead of the delete for
   an implicit LAN owner, and after a 401.
 
+- `/api/downloads/remove/<hash>` with `deleteFiles` (query) or `delete_files`
+  (body) true: removes the torrent and its files on disk. The check runs before
+  qBittorrent is contacted. Without files, removing keeps today's access.
+  Activity shows "Sign in to delete files" instead of "Delete torrent + files"
+  to an implicit LAN owner, and after a 401 (from cursor/tv-phase1 56b522d).
 - `PUT /api/settings` when the change turns on or widens automatic deletion
   (Downloads Guard). `app/auto_delete_guard._widens_auto_delete(old, new)`
   compares the saved settings with the result of the same merge the save

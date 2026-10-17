@@ -1,0 +1,90 @@
+/** PM ruling: deleting a download's files needs the owner signed in with a
+ * session, even with LAN sign-in off. Activity offers a sign-in instead. */
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const auth = { implicit: false };
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
+vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => ({ openMovie: vi.fn(), openTv: vi.fn(), openPerson: vi.fn() }) }));
+
+import { ActivityFeed, SIGN_IN_TO_DELETE, removeDownload } from '@/components/activity/ActivityFeed';
+
+const H = 'a'.repeat(40);
+const QUEUE = { downloads: [{ name: 'Some.Show.S01.1080p.WEB-GRP', hash: H, progress: 0.5, status: 'downloading',
+  size_total: 10, size_remaining: 5, speed: 1, media_type: 'tv' }] };
+let removeStatus = 200;
+const calls: string[] = [];
+const res = (body: unknown, status = 200) => ({ ok: status < 300, status, statusText: '', json: async () => body }) as Response;
+
+function Where() {
+  const loc = useLocation();
+  return <div data-testid="where">{loc.pathname}|{JSON.stringify(loc.state)}</div>;
+}
+
+beforeEach(() => {
+  auth.implicit = false; removeStatus = 200; calls.length = 0;
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const u = String(url);
+    if (u.includes('/api/downloads/remove/')) {
+      calls.push(`${init?.method} ${u.slice(u.indexOf('/api/'))}`);
+      return removeStatus === 401 ? res({ error: 'Sign in first', sign_in: true }, 401) : res({ success: true, deleteFiles: true });
+    }
+    if (u.includes('/api/downloads/queue')) return res(QUEUE);
+    if (u.includes('/api/downloads/history')) return res({ entries: [] });
+    return res({});
+  }));
+});
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+async function openRow() {
+  render(
+    <MemoryRouter initialEntries={['/activity']}>
+      <Routes>
+        <Route path="/activity" element={<ActivityFeed />} />
+        <Route path="/login" element={<Where />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  const name = await screen.findByText('Some.Show.S01.1080p.WEB-GRP');
+  await act(async () => { fireEvent.click(name); });
+}
+
+describe('Activity: delete torrent + files', () => {
+  it('the implicit LAN owner gets a sign-in prompt instead of the delete', async () => {
+    auth.implicit = true;
+    await openRow();
+    const btn = screen.getByTestId('activity-sign-in');
+    expect(btn.textContent).toBe(SIGN_IN_TO_DELETE);
+    expect(SIGN_IN_TO_DELETE).toBe('Sign in to delete files');
+    expect(screen.queryByText('Delete torrent + files')).toBeNull();
+    await act(async () => { fireEvent.click(btn); });
+    expect(screen.getByTestId('where').textContent).toBe('/login|{"from":"/activity","signIn":true}');
+    expect(calls).toEqual([]);
+  });
+
+  it('a signed-in owner deletes as before', async () => {
+    await openRow();
+    expect(screen.queryByTestId('activity-sign-in')).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByText('Delete torrent + files')); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Delete torrent + files' })); });
+    await waitFor(() => expect(calls).toEqual([`DELETE /api/downloads/remove/${H}?deleteFiles=true`]));
+  });
+
+  it('a 401 brings the row back with the sign-in prompt, no error text', async () => {
+    removeStatus = 401;
+    await openRow();
+    await act(async () => { fireEvent.click(screen.getByText('Delete torrent + files')); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Delete torrent + files' })); });
+    const name = await screen.findByText('Some.Show.S01.1080p.WEB-GRP');
+    if (!screen.queryByTestId('activity-sign-in')) await act(async () => { fireEvent.click(name); });
+    expect((await screen.findByTestId('activity-sign-in')).textContent).toBe('Sign in to delete files');
+    expect(screen.queryByText(/Remove failed|Sign in first/)).toBeNull();
+  });
+
+  it('removeDownload reads a 401 as sign in only for a files delete', async () => {
+    removeStatus = 401;
+    expect(await removeDownload(H, true)).toEqual({ ok: false, signIn: true });
+    expect((await removeDownload(H, false)).signIn).toBeUndefined();
+  });
+});
