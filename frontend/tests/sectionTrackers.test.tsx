@@ -62,9 +62,42 @@ describe('SectionTrackersList', () => {
     await waitFor(() => expect(rows()).toHaveLength(4));
     expect(screen.getByText('Trackers')).toBeTruthy();
     expect(names()).toEqual(['IPTorrents', 'BeyondHD', 'Movies Only', 'Paused']);
-    const meta = screen.getAllByTestId('section-tracker-meta').map(m => m.textContent);
-    expect(meta).toEqual(['IPTorrents · 3 of 8 today', 'BeyondHD', 'Torznab · No TV category', 'Torznab · Off in Trackers']);
+    const meta = rows().map(r => r.querySelector('[data-testid="section-tracker-meta"]')?.textContent ?? '');
+    // The type is left out when it is the name; an empty line isn't drawn.
+    expect(meta).toEqual(['3 of 8 today', '', 'Torznab · No TV category', 'Torznab · Off in Trackers']);
     expect(screen.getAllByRole('switch').map(s => s.getAttribute('aria-checked'))).toEqual(['true', 'false', 'true', 'false']);
+  });
+
+  it('rows that cannot be searched show their saved switch disabled at 40%', async () => {
+    render(<SectionTrackersList section="tv" label="Trackers" />);
+    await waitFor(() => expect(rows()).toHaveLength(4));
+    const sw = (n: string) => screen.getByRole('switch', { name: n }) as HTMLButtonElement;
+    for (const n of ['Movies Only', 'Paused']) {
+      expect(sw(n).disabled).toBe(true);
+      expect(sw(n).style.opacity).toBe('0.4');
+      fireEvent.click(sw(n));
+    }
+    expect(sw('Movies Only').getAttribute('aria-checked')).toBe('true');    // saved state still shown
+    expect(sw('Paused').getAttribute('aria-checked')).toBe('false');
+    for (const n of ['IPTorrents', 'BeyondHD']) {
+      expect(sw(n).disabled).toBe(false);
+      expect(sw(n).style.opacity).toBe('1');
+    }
+    await new Promise(r => setTimeout(r, 20));
+    expect(calls.filter(c => c.method === 'PUT')).toHaveLength(0);
+  });
+
+  it('desktop rows: titles 15/500, subtitles 13px muted; phone titles 16', async () => {
+    render(<SectionTrackersList section="tv" label="Trackers" wide />);
+    await waitFor(() => expect(rows()).toHaveLength(4));
+    const title = screen.getAllByTestId('section-tracker-name')[0]!;
+    expect([title.style.fontSize, title.style.fontWeight]).toEqual(['15px', '500']);
+    const sub = screen.getAllByTestId('section-tracker-meta')[0]!;
+    expect([sub.style.fontSize, sub.style.color]).toEqual(['13px', 'var(--color-text-muted)']);
+    cleanup();
+    render(<SectionTrackersList section="tv" label="Trackers" />);
+    await waitFor(() => expect(rows()).toHaveLength(4));
+    expect(screen.getAllByTestId('section-tracker-name')[0]!.style.fontSize).toBe('16px');
   });
 
   it('a switch saves the whole list in order', async () => {
@@ -120,11 +153,26 @@ describe('Settings > TV', () => {
       const url = String(input);
       if (url.includes('/api/settings/sections/tv/trackers')) return server()(url, init);
       if (url.includes('/api/settings/plex')) return res({ owner: true, configured: true });
+      if (url.includes('/api/trackers/types')) return res({ types: [] });
       return res({}, 404);
     }));
     await act(async () => { page('/settings/tv'); });
     await waitFor(() => expect(screen.getByTestId('section-trackers-tv')).toBeTruthy());
     await waitFor(() => expect(rows()).toHaveLength(4));
+  });
+
+  it('the owner nav lists Trackers, in order', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string) => {
+      const url = String(input);
+      if (url.includes('/api/settings/plex')) return res({ owner: true, configured: true });
+      if (url.includes('/api/trackers/types')) return res({ types: [] });
+      if (url.includes('/api/settings/sections/tv/trackers')) return res({ section: 'tv', trackers: [] });
+      return res({}, 404);
+    }));
+    await act(async () => { page('/settings/tv'); });
+    const nav = screen.getByTestId('settings-nav');
+    await waitFor(() => expect(Array.from(nav.querySelectorAll('a')).map(a => a.textContent))
+      .toEqual(['Home screen', 'Plex', 'Connectors', 'Trackers', 'Library paths', 'TV']));
   });
 
   it('is not offered on production builds', async () => {

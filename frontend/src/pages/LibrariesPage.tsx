@@ -77,7 +77,7 @@ export function SettingsPage() {
         : slug === 'library-paths'
           ? (owner ? <LibraryPathsSettings wide={wide} /> : null)
           : slug === 'tv'
-            ? (owner ? <div style={{ padding: wide ? 0 : '8px 20px 0' }}><SectionTrackersList section="tv" label="Trackers" /></div> : null)
+            ? (owner ? <div style={{ padding: wide ? 0 : '8px 20px 0' }}><SectionTrackersList section="tv" label="Trackers" wide={wide} /></div> : null)
             : <HomeScreenSection admin={admin} wide={wide} />;
   // Trackers draws its own title row (desktop) and header (phone: Plus, pushed pages).
   const ownChrome = known?.slug === 'trackers';

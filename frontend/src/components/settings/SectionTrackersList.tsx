@@ -14,7 +14,7 @@ import {
 
 const ROW_H = 64;
 
-export function SectionTrackersList({ section, label }: { section: Section; label: string }) {
+export function SectionTrackersList({ section, label, wide = false }: { section: Section; label: string; wide?: boolean }) {
   const [list, setList] = useState<SectionTracker[] | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [toast, setToast] = useState('');
@@ -76,6 +76,9 @@ export function SectionTrackersList({ section, label }: { section: Section; labe
             const y = lifted ? drag!.dy : shiftFor(i, list.length);
             const why = blockedReason(t, section);
             const dim = !t.enabled || !!why;
+            const sub = [t.type_name !== t.name ? t.type_name : '', why,
+              t.enabled && !why && t.budget ? `${t.budget.used} of ${t.budget.cap} today` : '']
+              .filter(Boolean).join(' · ');
             return (
               <li key={t.id} data-testid="section-tracker-row" data-lifted={lifted ? 'true' : undefined}
                 style={{
@@ -109,14 +112,11 @@ export function SectionTrackersList({ section, label }: { section: Section; labe
                   <GripIcon />
                 </button>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span data-testid="section-tracker-name" style={{ ...name, color: dim ? T.text3 : T.text }}>{t.name}</span>
-                  <span style={meta} data-testid="section-tracker-meta">
-                    {[t.type_name, why, t.enabled && !why && t.budget ? `${t.budget.used} of ${t.budget.cap} today` : '']
-                      .filter(Boolean).join(' · ')}
-                  </span>
+                  <span data-testid="section-tracker-name" style={{ ...name, ...(wide ? nameWide : null), color: dim ? T.text3 : T.text }}>{t.name}</span>
+                  {sub && <span style={meta} data-testid="section-tracker-meta">{sub}</span>}
                 </div>
-                <Switch on={t.enabled} label={t.name}
-                  onChange={on => commit(list.map(x => (x.id === t.id ? { ...x, enabled: on } : x)))} />
+                <Switch on={t.enabled} label={t.name} disabled={!!why}
+                  onChange={on => { if (!why) commit(list.map(x => (x.id === t.id ? { ...x, enabled: on } : x))); }} />
               </li>
             );
           })}
@@ -149,6 +149,7 @@ const handle: React.CSSProperties = {
 const name: React.CSSProperties = {
   fontSize: 16, fontWeight: 500, fontFamily: FONT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
 };
+const nameWide: React.CSSProperties = { fontSize: 15, fontWeight: 500 };
 const meta: React.CSSProperties = {
   fontSize: 13, color: T.text3, fontFamily: FONT, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
 };
