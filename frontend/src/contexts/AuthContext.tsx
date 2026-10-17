@@ -15,6 +15,7 @@ import {
 import { apiFetch } from '../apiClient';
 import { _resetModalPrefetch } from '@/services/modalPrefetch';
 import { _resetModalColors } from '@/services/modalColors';
+import { OfflineNotice } from '@/components/OfflineNotice';
 
 export interface UserInfo {
   id: number;
@@ -59,6 +60,9 @@ interface AuthState {
   authRequired: 'disabled_local' | 'enabled' | null;
   /** Account requests are accepted from this device. */
   signupOpen: boolean;
+  /** Luma couldn't be reached on load and this device was signed in before:
+   * the offline notice shows instead of the Sign in form. */
+  offline: boolean;
 }
 
 interface AuthContextValue extends AuthState {
@@ -70,7 +74,18 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const NO_START = { needsStart: false, startInProgress: false, pinUnlock: false, implicit: false, authRequired: null, signupOpen: false } as const;
+const NO_START = { needsStart: false, startInProgress: false, pinUnlock: false, implicit: false, authRequired: null, signupOpen: false, offline: false } as const;
+
+/** The network failed (not an answer from Luma) and this device had a signed-in
+ * user, or the browser says it is offline. */
+function looksOffline(): boolean {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+    return localStorage.getItem(LAST_USER_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
@@ -102,6 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           implicit: !!data.implicit,
           authRequired: data.auth_required || null,
           signupOpen: false,
+          offline: false,
         });
         return;
       }
@@ -111,15 +127,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       return;
     } catch {
-      // network error — stay unauthenticated
+      // Network error: no answer from Luma, so the session is unknown, not gone.
     }
-    setState({ user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null, ...NO_START });
+    setState({ user: null, userSettings: {}, loading: false, authenticated: false, needsSetup: false, plexAccessStatus: null,
+      ...NO_START, offline: looksOffline() });
   }, []);
 
   // Restore session on mount
   useEffect(() => {
     refreshUser();
   }, [refreshUser]);
+
+  // Offline: check again as soon as the browser is back online.
+  const [retrying, setRetrying] = useState(false);
+  const retry = useCallback(() => {
+    setRetrying(true);
+    void refreshUser().finally(() => setRetrying(false));
+  }, [refreshUser]);
+  useEffect(() => {
+    if (!state.offline) return;
+    window.addEventListener('online', retry);
+    return () => window.removeEventListener('online', retry);
+  }, [state.offline, retry]);
 
   const login = useCallback(async (identifier: string, pin: string) => {
     try {
@@ -181,7 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{ ...state, login, logout, refreshUser, saveUserSettings }}>
-      {children}
+      {state.offline ? <OfflineNotice onRetry={retry} busy={retrying} /> : children}
     </AuthContext.Provider>
   );
 }
