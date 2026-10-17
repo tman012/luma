@@ -286,6 +286,7 @@ def fetch_release(token: Optional[str], resolver=None) -> Tuple[str, Any]:
             with scope:
                 for _ in range(MAX_REDIRECTS + 1):
                     headers = plan(url)
+                    engine.guard.mark_sent(gk)   # each redirect hop is a request too
                     resp = engine.request('GET', url, headers=headers, max_bytes=MAX_TORRENT_BYTES,
                                           follow_redirects=False)
                     if resp.status in (301, 302, 303, 307, 308):

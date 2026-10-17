@@ -377,6 +377,7 @@ class TrackerSearch:
                     if why:
                         raise tracker_clients.OutOfBudget(why)
                 sent[0] += 1
+                self.guard.mark_sent(gk)     # spacing counts from the LAST request sent
                 return self.request(*a, **kw)
             # Stats are per thread: clear the last tracker's, so a client that sets
             # none (Torznab) is never judged or logged by another's numbers.

@@ -226,6 +226,13 @@ class TrackerGuard:
         wait = LIMITS['min_interval_s'] - (time.time() - self.last_sent.get(tid, 0.0))
         if wait > 0:
             time.sleep(wait)
+        self.mark_sent(tid)
+
+    def mark_sent(self, tid: str) -> None:
+        """Stamp the spacing timer: a request to *tid* goes out now. Call it
+        for EVERY charged request of a chain (pages, fallbacks, redirects),
+        not only the first, so the next wait_spacing counts from the last
+        request sent. Otherwise back-to-back Retries can send within ms."""
         self.last_sent[tid] = time.time()
 
     def success(self, tid: str) -> None:
@@ -419,4 +426,6 @@ def guarded_test(cfg: Dict, run, guard: Optional[TrackerGuard] = None) -> None:
             if e.kind in ('rate', 'banned'):
                 record_failure(g, gk, e, scope)
             raise
+        finally:
+            g.mark_sent(gk)          # a Test may send several requests
     g.success(gk)
