@@ -317,6 +317,18 @@ def _signed_in_owner_only(fn):
     return wrapper
 
 
+def _json_object_body():
+    """The request's JSON body as a dict: ({}, None) with no body, (body, None)
+    for a JSON object, and (None, 400 {"error": "Invalid request"}) for any
+    other body (a list, string, number, null, or text that isn't JSON)."""
+    if not request.get_data(cache=True).strip():
+        return {}, None
+    body = request.get_json(silent=True, force=True)
+    if isinstance(body, dict):
+        return body, None
+    return None, (jsonify({'error': 'Invalid request'}), 400)
+
+
 def get_plex_for_request():
     """Resolve the correct PlexService for the current request.
 
@@ -4646,7 +4658,9 @@ def cleanup_downloads_storage():
     """
     try:
         from app.storage_cleanup import run_cleanup, DEFAULT_TARGET_BYTES
-        body = request.get_json(silent=True) or {}
+        body, bad = _json_object_body()
+        if bad is not None:
+            return bad
         target = body.get('target_bytes') or DEFAULT_TARGET_BYTES
         try:
             target = int(target)
@@ -4706,10 +4720,14 @@ def downloads_guard_run():
 
     Defaults to dry_run — pass {"dry_run": false} to actually delete. The daily
     ceiling and every guard in storage_cleanup still apply either way. A real
-    run needs the signed-in owner (start_flow.require_signed_in_owner).
+    run needs the signed-in owner (start_flow.require_signed_in_owner). A body
+    that isn't a JSON object gets 400 {"error": "Invalid request"}.
     """
     from app import downloads_guard
-    dry = bool((request.get_json(silent=True) or {}).get('dry_run', True))
+    body, bad = _json_object_body()
+    if bad is not None:
+        return bad
+    dry = bool(body.get('dry_run', True))
     if not dry:
         # A real run deletes files (PM ruling): only the owner signed in with a
         # session. Implicit LAN owner, service key and no session get 401 with
@@ -19507,6 +19525,18 @@ def _unbind_qbit_password_on_new_url(data: dict) -> None:
         q['password'] = ''
 
 
+def _auto_delete_widened_by(partial: dict) -> list:
+    """The automatic-deletion settings *partial* would widen if saved
+    (auto_delete_guard._widens_auto_delete on the settings before and after
+    the same merge settings.update does)."""
+    from app import settings_manager as _sm
+    from app.auto_delete_guard import _widens_auto_delete
+    old = settings.get_all()
+    cleaned = _sm._strip_mask_values(partial, _sm.SETTINGS_SCHEMA)
+    new = _sm._coerce_types(_sm._deep_merge(old, cleaned), _sm.SETTINGS_SCHEMA)
+    return _widens_auto_delete(old, new)
+
+
 @app.route('/api/settings', methods=['PUT'])
 def update_settings():
     """Partial-update settings via deep merge.
@@ -19514,6 +19544,12 @@ def update_settings():
     Accepts a JSON body with any subset of settings keys.  Keys whose value
     is the mask sentinel ("********") are silently ignored so the frontend
     can round-trip a GET response back to PUT without destroying secrets.
+
+    A change that turns on or widens automatic deletion
+    (auto_delete_guard._widens_auto_delete) needs the owner signed in with a
+    session: the implicit LAN owner, the service key and no session get 401
+    {"error": "Sign in first", "sign_in": true}; other admins get 403. Turning
+    Downloads Guard off or tightening it stays open to any admin.
     """
     err = _require_admin()
     if err:
@@ -19524,6 +19560,16 @@ def update_settings():
             return jsonify({'success': False, 'errors': ['Request body must be a JSON object']}), 400
 
         _unbind_qbit_password_on_new_url(data)
+        # PM ruling: turning on or widening automatic deletion (Downloads
+        # Guard) needs the owner signed in with a session; turning it off or
+        # tightening it stays open to any admin.
+        widened = _auto_delete_widened_by(data)
+        if widened:
+            _user, owner_err = _start_flow.require_signed_in_owner()
+            if owner_err is not None:
+                resp, status = owner_err
+                resp.headers['Cache-Control'] = 'no-store'
+                return resp, status
         success, errors = settings.update(data)
         if not success:
             return jsonify({'success': False, 'errors': errors}), 400

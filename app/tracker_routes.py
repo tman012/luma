@@ -89,7 +89,9 @@ def _no_store(resp, status=200):
 
 def _require_owner():
     user = _cfg['get_current_user']()
-    if not user or _cfg['is_implicit']():
+    # No session, the implicit LAN owner and the service key (no user id):
+    # 401 with "sign_in", like start_flow.require_signed_in_owner.
+    if not user or _cfg['is_implicit']() or not user.get('id'):
         return _no_store(jsonify({'error': 'Authentication required', 'sign_in': True}), 401)
     owner = _cfg['get_owner']()
     uid = user.get('id')

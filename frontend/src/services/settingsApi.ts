@@ -13,6 +13,9 @@ interface SettingsResponse {
   success: boolean;
   settings?: Record<string, unknown>;
   errors?: string[];
+  /** The change turns on or widens automatic deletion and needs the owner
+   * signed in with a session (LAN access isn't enough). */
+  signIn?: boolean;
 }
 
 interface TestResult {
@@ -100,6 +103,11 @@ export async function saveSettings(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(changes),
   });
+  if (resp.status === 401) return { success: false, signIn: true };
+  if (resp.status === 403) {
+    const body = (await resp.json().catch(() => ({}))) as { error?: string };
+    return { success: false, errors: [body.error === 'Owner only' ? 'Only the owner can change this' : 'Save failed'] };
+  }
   return resp.json();
 }
 
