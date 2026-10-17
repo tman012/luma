@@ -25,7 +25,7 @@ describe('Sources copy', () => {
   it.each(SOURCES_FILES)('%s has no helper lines or old copy', (p) => {
     const src = read(p);
     for (const s of ['No sources found', 'Sources not found', 'Select Resolution', 'Fancy titles',
-      'Taking longer than usual', 'Radarr and the indexers', 'Check Sonarr connection', '} sources<']) {
+      'Taking longer than usual', 'Indexers only', 'Radarr and the indexers', 'Check Sonarr connection', '} sources<']) {
       expect(src, s).not.toContain(s);
     }
   });
