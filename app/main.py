@@ -13480,8 +13480,10 @@ def _query_adb_activity(device: dict) -> dict | None:
         # that have no matched Plex session, so there's no duplication.
 
         # Get media session info
-        media_cmd = f'adb -s {device_ip}:{adb_port} shell dumpsys media_session'
-        media_result = subprocess.run(media_cmd, shell=True, capture_output=True, text=True, timeout=5)
+        media_result = subprocess.run(
+            ['adb', '-s', f'{device_ip}:{adb_port}', 'shell', 'dumpsys', 'media_session'],
+            capture_output=True, text=True, timeout=5,
+        )
 
         state = 'stopped'
         title = None
@@ -13881,6 +13883,9 @@ def plex_playback_seek_to():
 @app.route('/api/plex/playback/subtitles', methods=['POST'])
 def plex_playback_subtitles():
     """Toggle subtitles using ADB KEYCODE_CAPTIONS."""
+    err = _require_admin()
+    if err:
+        return err
     try:
         data = request.get_json() or {}
         client_ip = data.get('client_ip')
@@ -13896,6 +13901,9 @@ def plex_playback_subtitles():
 
         if not client_ip:
             return jsonify({'error': 'client_ip or room_id is required'}), 400
+        target = _adb_target(client_ip, adb_port)
+        if not target:
+            return jsonify({'error': 'Unknown device'}), 400
 
         import subprocess
         import os
@@ -13903,9 +13911,9 @@ def plex_playback_subtitles():
         env = os.environ.copy()
         env['HOME'] = '/app/home'
 
-        subprocess.run(['adb', 'connect', f'{client_ip}:{adb_port}'], env=env, timeout=5)
+        subprocess.run(['adb', 'connect', target], env=env, capture_output=True, timeout=5)
         result = subprocess.run(
-            ['adb', '-s', f'{client_ip}:{adb_port}', 'shell', 'input', 'keyevent', '175'],
+            ['adb', '-s', target, 'shell', 'input', 'keyevent', '175'],
             env=env,
             capture_output=True,
             text=True,
@@ -17947,10 +17955,58 @@ def plex_client_control():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+_ADB_HOSTNAME = re.compile(
+    r'(?=.{1,253}\Z)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*',
+    re.ASCII)
+
+
+def _configured_device_hosts() -> set:
+    """Every device host the admin configured in rooms, lowercased."""
+    hosts = set()
+    for room in settings.get('devices.rooms') or []:
+        if not isinstance(room, dict):
+            continue
+        for h in (room.get('host'), room.get('ip')):
+            if isinstance(h, str) and h:
+                hosts.add(h.strip().lower())
+        for dev in room.get('devices') or []:
+            if isinstance(dev, dict) and isinstance(dev.get('host'), str) and dev['host']:
+                hosts.add(dev['host'].strip().lower())
+    return hosts
+
+
+def _adb_target(host, port):
+    """'host:port' for adb -s, or None. The host must be a plain IP address or
+    hostname that matches a configured device, and the port 1-65535."""
+    import ipaddress
+    if not isinstance(host, str) or not host or '%' in host:
+        return None
+    if isinstance(port, bool):
+        return None
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return None
+    if not 1 <= port <= 65535:
+        return None
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+        if not _ADB_HOSTNAME.fullmatch(host):
+            return None
+    if host.lower() not in _configured_device_hosts():
+        return None
+    return f'[{ip.compressed}]:{port}' if ip is not None and ip.version == 6 else f'{host.lower()}:{port}'
+
+
 @app.route('/api/activity')  # alfred asks here first, then falls back to the ADB path
 @app.route('/api/adb/shield_activity')
 def adb_shield_activity():
     """Get current activity/media playing on a room device via ADB."""
+    err = _require_admin()
+    if err:
+        return err
     try:
         room_id = request.args.get('room_id')
         device_ip = request.args.get('device_ip')
@@ -17963,22 +18019,23 @@ def adb_shield_activity():
                 adb_port = room.get('connectPort', adb_port)
         if not device_ip:
             device_ip = settings.get_default_device_ip()
+        target = _adb_target(device_ip, adb_port)
+        if not target:
+            return jsonify({'error': 'Unknown device'}), 400
 
         # Get current foreground app
-        app_cmd = f'adb -s {device_ip}:{adb_port} shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp"'
         app_result = subprocess.run(
-            app_cmd,
-            shell=True,
+            ['adb', '-s', target, 'shell', 'dumpsys', 'window'],
             capture_output=True,
             text=True,
             timeout=5
         )
+        focus_lines = [ln for ln in (app_result.stdout or '').splitlines()
+                       if 'mCurrentFocus' in ln or 'mFocusedApp' in ln]
 
         # Get media session info (works for YouTube, Netflix, Plex, Spotify, etc.)
-        media_cmd = f'adb -s {device_ip}:{adb_port} shell dumpsys media_session'
         media_result = subprocess.run(
-            media_cmd,
-            shell=True,
+            ['adb', '-s', target, 'shell', 'dumpsys', 'media_session'],
             capture_output=True,
             text=True,
             timeout=5
@@ -17987,8 +18044,8 @@ def adb_shield_activity():
         # Parse current app
         current_app = 'Unknown'
         current_package = ''
-        if app_result.returncode == 0:
-            output = app_result.stdout
+        if app_result.returncode == 0 and focus_lines:
+            output = '\n'.join(focus_lines)
             # Extract package name from mCurrentFocus or mFocusedApp
             import re
             match = re.search(r'([a-z0-9\.]+)/([a-z0-9\.]+)', output)
@@ -18200,6 +18257,9 @@ def adb_shield_activity():
 @app.route('/api/adb/control', methods=['POST'])
 def adb_control():
     """Send ADB commands to control playback on a room device."""
+    err = _require_admin()
+    if err:
+        return err
     try:
         data = request.get_json() or {}
         room_id = data.get('room_id')
@@ -18246,7 +18306,9 @@ def adb_control():
         keycode = keycodes[command]
 
         # Send ADB command
-        target = f'{device_ip}:{adb_port}'
+        target = _adb_target(device_ip, adb_port)
+        if not target:
+            return jsonify({'error': 'Unknown device'}), 400
         env = {**os.environ, 'HOME': '/app/home'}
         logger.info(f"Sending ADB keyevent {keycode} to {target}")
 
