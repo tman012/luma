@@ -143,6 +143,73 @@ def reset_shared_state(request):
     request_portal._settings = saved_portal_settings
 
 
+@pytest.fixture(autouse=True)
+def isolate_auth_state(request):
+    """Every unit test, unittest.TestCase ones included, leaves sign-in state
+    as it found it: the security settings section is restored and users (and
+    their sessions) created during the test are removed. Without this, a test
+    that turned auth on or left a user behind made later tests that expect
+    LAN no-sign-in fail with 302/401, depending on pytest-randomly's order."""
+    if not _SANDBOX['data'] or _is_e2e_item(request.node):
+        yield
+        return
+    import sys
+    main = sys.modules.get('app.main')
+    sec_before = main.settings.get_section('security') if main else None
+    # API keys too: a TMDB key left behind sends later tests' hero and search
+    # paths to the network (thread pools, real requests) in some orders.
+    apis_before = main.settings.get_section('apis') if main else None
+    max_uid = _max_user_id()
+    yield
+    main = sys.modules.get('app.main')
+    if main is None:
+        return
+    if apis_before is not None and main.settings.get_section('apis') != apis_before:
+        main.settings.update({'apis': apis_before})
+    if sec_before is not None and main.settings.get_section('security') != sec_before:
+        main.settings.update({'security': sec_before})
+    elif sec_before is None:
+        sec = main.settings.get_section('security')
+        if sec.get('auth_required') != 'disabled_local' or sec.get('trusted_proxies'):
+            main.settings.update({'security': {'auth_required': 'disabled_local', 'trusted_proxies': '',
+                                               'trusted_proxy_header': ''}})
+    _drop_users_after(max_uid)
+
+
+def _max_user_id():
+    try:
+        import app.user_auth
+        sandbox_db_path()
+        conn = app.user_auth._get_db()
+        try:
+            return conn.execute('SELECT COALESCE(MAX(id), 0) FROM users').fetchone()[0]
+        finally:
+            conn.close()
+    except UnsafeDatabaseReset:
+        raise
+    except Exception:
+        return None
+
+
+def _drop_users_after(max_uid):
+    if max_uid is None:
+        return
+    try:
+        import app.user_auth
+        sandbox_db_path()
+        conn = app.user_auth._get_db()
+        try:
+            conn.execute('DELETE FROM user_sessions WHERE user_id > ?', (max_uid,))
+            conn.execute('DELETE FROM users WHERE id > ?', (max_uid,))
+            conn.commit()
+        finally:
+            conn.close()
+    except UnsafeDatabaseReset:
+        raise
+    except Exception:
+        pass
+
+
 @pytest.fixture
 def test_app():
     """Create a real Flask app from app.main for integration tests."""
