@@ -157,6 +157,21 @@ export function PinPad({ value, onChange, onComplete, shake, disabled, compact }
 /** Luma's navy backdrop, shared by Home and every sign-in surface. */
 export const NAVY_BG = 'radial-gradient(ellipse at 50% 30%, #262a66 0%, #15102a 55%, #0a0818 100%)';
 
+/** Flat base under the glow, the gradient's middle stop. */
+export const NAVY_BASE = '#15102a';
+
+/** The navy glow as one fixed, viewport-sized layer. Long pages scroll over it
+ * instead of repainting a `background-attachment: fixed` gradient, which left a
+ * seam where the gradient restarted. Put it first inside a page styled with
+ * glowPage (flat NAVY_BASE, its own stacking context). */
+export function GlowLayer() {
+  return <div aria-hidden="true" data-testid="glow-layer" style={glowLayer} />;
+}
+export const glowLayer: React.CSSProperties = {
+  position: 'fixed', inset: 0, background: NAVY_BG, pointerEvents: 'none', zIndex: -1,
+};
+export const glowPage: React.CSSProperties = { background: NAVY_BASE, isolation: 'isolate', position: 'relative' };
+
 /* ── Styles ─────────────────────────────────────────────────────────────── */
 
 export const START_GLOW = 'radial-gradient(ellipse at 50% 30%, #262a66 0%, #15102a 55%, #0a0818 100%)';

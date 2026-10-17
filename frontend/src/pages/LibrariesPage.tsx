@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
-import { FONT, LOGO_SRC, NAVY_BG } from '@/components/start/StartUI';
+import { FONT, GlowLayer, LOGO_SRC, NAVY_BG, glowPage } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
 import { LUMA_BLUE } from '@/ui/lumaButton';
 import {
@@ -92,7 +92,8 @@ export function SettingsPage() {
     if (!known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
     const signOut = async () => { setBusy(true); await logout(); navigate('/login', { replace: true }); };
     return (
-      <div style={homePage} data-step="settings" data-layout="desktop">
+      <div style={settingsPage} data-step="settings" data-layout="desktop">
+        <GlowLayer />
         <style>{css}</style>
         <header style={deskHeader}>
           <Link to="/" aria-label="Home" style={{ display: 'inline-flex', borderRadius: 12 }} className="luma-focus">
@@ -465,3 +466,7 @@ const pickerRow: React.CSSProperties = {
 
 /** @deprecated name kept for imports: the page is Settings now. */
 export const LibrariesPage = SettingsPage;
+
+/** Desktop settings: flat navy under one fixed glow layer (no seam on long
+ * sections such as Library paths and TV). */
+export const settingsPage: React.CSSProperties = { ...homePage, backgroundAttachment: undefined, ...glowPage };
