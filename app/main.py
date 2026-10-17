@@ -317,6 +317,18 @@ def _signed_in_owner_only(fn):
     return wrapper
 
 
+def _json_object_body():
+    """The request's JSON body as a dict: ({}, None) with no body, (body, None)
+    for a JSON object, and (None, 400 {"error": "Invalid request"}) for any
+    other body (a list, string, number, null, or text that isn't JSON)."""
+    if not request.get_data(cache=True).strip():
+        return {}, None
+    body = request.get_json(silent=True, force=True)
+    if isinstance(body, dict):
+        return body, None
+    return None, (jsonify({'error': 'Invalid request'}), 400)
+
+
 def get_plex_for_request():
     """Resolve the correct PlexService for the current request.
 
@@ -4636,7 +4648,9 @@ def cleanup_downloads_storage():
     """
     try:
         from app.storage_cleanup import run_cleanup, DEFAULT_TARGET_BYTES
-        body = request.get_json(silent=True) or {}
+        body, bad = _json_object_body()
+        if bad is not None:
+            return bad
         target = body.get('target_bytes') or DEFAULT_TARGET_BYTES
         try:
             target = int(target)
@@ -4702,11 +4716,14 @@ def downloads_guard_run():
     The implicit LAN owner, the service key (kiosk, companion apps) and no
     session get 401 {"error": "Sign in first", "sign_in": true}; other admins
     and plain, guest or Plex-approved users get 403. A dry run deletes nothing
-    and keeps today's access.
+    and keeps today's access. A body that isn't a JSON object gets 400
+    {"error": "Invalid request"}.
     """
     from app import downloads_guard
-    body = request.get_json(silent=True)
-    dry = (body if isinstance(body, dict) else {}).get('dry_run', True)
+    body, bad = _json_object_body()
+    if bad is not None:
+        return bad
+    dry = body.get('dry_run', True)
     if not bool(dry):
         # A real run (the same test trigger_manual_run gets) deletes: check first.
         _user, err = _start_flow.require_signed_in_owner()

@@ -135,3 +135,23 @@ def test_the_decorator_gives_the_same_answers(full):
     with full.test_request_context('/x', environ_base=LAN, headers={'Cookie': f'{ck.key}={ck.value}'}):
         app.main.load_current_user()
         assert delete_something() == 'deleted' and hit == [1]
+
+
+BAD_BODIES = ['[]', '[false]', '"x"', '0', '1.5', 'null', 'true', '{not json']
+
+
+@pytest.mark.parametrize('raw', BAD_BODIES)
+@pytest.mark.parametrize('who', ['owner', 'implicit', 'viewer'])
+def test_a_body_that_isnt_a_json_object_is_400(full, raw, who):
+    owner = _client(full)
+    c = {'owner': owner, 'implicit': full.test_client(),
+         'viewer': _client(full, admin=False, name='v')}[who]
+    r = c.post(RUN, data=raw, content_type='application/json', environ_base=LAN, headers=HDR)
+    assert r.status_code == 400 and r.get_json() == {'error': 'Invalid request'}
+    assert full.runs == []
+
+
+def test_an_empty_body_is_still_a_dry_run(full):
+    r = full.test_client().post(RUN, environ_base=LAN, headers=HDR)
+    assert r.status_code == 200 and r.get_json() == {'ok': True, 'dry_run': True}
+    assert full.runs == [True]

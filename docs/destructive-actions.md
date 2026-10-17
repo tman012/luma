@@ -26,5 +26,10 @@ with `state.signIn`.
   The storage sheet shows "Sign in to free up space" instead of the delete for
   an implicit LAN owner, and after a 401.
 
+Both routes take an optional JSON object. Any other non-empty body (a list,
+string, number, `null`, or text that isn't JSON) gets 400
+`{"error": "Invalid request"}` and deletes nothing. The run route checks the
+body first; the cleanup route checks the session first, then the body.
+
 From outside the LAN, a request with no session is stopped by the app-wide
 sign-in check first. It is still a 401, but its body is that check's own.
