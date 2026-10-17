@@ -82,7 +82,7 @@ describe('Trackers list', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Trackers' })).toBeTruthy();
     const add = screen.getByRole('button', { name: 'Add tracker' });
     expect(add.style.height).toBe('40px');
-    expect(add.style.background).toBe('rgb(59, 130, 246)');
+    expect(add.style.background).toBe('var(--color-accent)');
     expect(screen.getByTestId('trackers-section').textContent).toBe('TrackersAdd trackerNo trackers');
     const card = screen.getByTestId('trackers-card');
     expect(card.style.borderRadius).toBe('16px');
@@ -115,9 +115,9 @@ describe('Trackers list', () => {
     expect(rows.map(r => within(r).getByTestId('tracker-name').textContent)).toEqual(['Alpha', 'Bravo', 'Charlie', 'Delta']);
     expect(rows.map(r => within(r).getByTestId('tracker-type').textContent)).toEqual(['Torznab', 'IPTorrents', 'Newznab', 'Torznab']);
     const dots = rows.map(r => within(r).getByTestId('tracker-dot'));
-    expect(dots.map(d => d.style.background)).toEqual(['rgb(34, 197, 94)', 'rgb(239, 68, 68)', 'rgba(255, 255, 255, 0.3)', 'rgba(255, 255, 255, 0.3)']);
-    expect(within(rows[2]!).getByTestId('tracker-name').style.color).toBe('rgba(255, 255, 255, 0.5)');
-    expect(within(rows[0]!).getByTestId('tracker-name').style.color).toBe('rgba(255, 255, 255, 0.95)');
+    expect(dots.map(d => d.style.background)).toEqual(['var(--color-success)', 'var(--color-danger)', 'rgba(255, 255, 255, 0.3)', 'rgba(255, 255, 255, 0.3)']);
+    expect(within(rows[2]!).getByTestId('tracker-name').style.color).toBe('var(--color-text-muted)');
+    expect(within(rows[0]!).getByTestId('tracker-name').style.color).toBe('var(--color-text-primary)');
     expect(rows[0]!.style.height).toBe('56px');
     // desktop switch 44x26
     const track = within(rows[0]!).getByRole('switch').querySelector('[data-track]') as HTMLElement;
@@ -309,6 +309,39 @@ describe('Tracker form: add', () => {
     expect((await screen.findByTestId('tracker-form-error')).textContent).toBe('Credentials unreadable');
   });
 
+  it.each([[403, 'Owner access required'], [429, 'Too many changes. Try again in a minute.']])(
+    'Save shows the server message on %i', async (status, msg) => {
+      override = (url, method) => (method === 'POST' && url.endsWith('/api/trackers') ? res({ error: msg }, status) : null);
+      renderAt('/settings/trackers/new?type=torznab');
+      await screen.findByTestId('tracker-form');
+      fill('Name', 'X');
+      fill('URL', 'https://idx.example');
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      expect((await screen.findByTestId('tracker-form-error')).textContent).toBe(msg);
+    });
+
+  it('useTrackersAccess retries 429/5xx instead of hiding Trackers', async () => {
+    function Probe({ retry }: { retry: number[] }) { const a = useTrackersAccess(true, retry); return <p data-testid="a">{String(a)}</p>; }
+    const fast = [1, 1, 1];
+    let n = 0;
+    override = url => (url.endsWith('/api/trackers/types') && n++ < 2 ? res({ error: 'Busy' }, n === 1 ? 429 : 503) : null);
+    const r1 = render(<Probe retry={fast} />);
+    await waitFor(() => expect(screen.getByTestId('a').textContent).toBe('true'));
+    expect(n).toBe(3);
+    r1.unmount();
+    // Still failing after every retry: the section shows anyway (its list has Retry).
+    override = url => (url.endsWith('/api/trackers/types') ? res({ error: 'Busy' }, 502) : null);
+    const r2 = render(<Probe retry={fast} />);
+    await waitFor(() => expect(screen.getByTestId('a').textContent).toBe('true'));
+    r2.unmount();
+    // 403 is final: no retry.
+    override = null; denied = 403;
+    const before = calls.length;
+    render(<Probe retry={fast} />);
+    await waitFor(() => expect(screen.getByTestId('a').textContent).toBe('false'));
+    expect(calls.length - before).toBe(1);
+  });
+
   it('Test: spinner, then "Connected" for 4 s; the form body goes to /api/trackers/test', async () => {
     let release: (r: Response) => void = () => {};
     override = url => (url.endsWith('/api/trackers/test') ? new Promise<Response>(r => { release = r; }) : null);
@@ -338,7 +371,7 @@ describe('Tracker form: add', () => {
     fill('URL', 'https://idx.example');
     fireEvent.click(screen.getByRole('button', { name: 'Test' }));
     const out = await screen.findByText(msg);
-    expect(screen.getByTestId('tracker-test-result').style.color).toBe('rgb(248, 113, 113)');
+    expect(screen.getByTestId('tracker-test-result').style.color).toBe('var(--color-danger-text)');
     expect(out).toBeTruthy();
   });
 
@@ -359,7 +392,7 @@ describe('Tracker form: add', () => {
     const dlg = await screen.findByRole('dialog', { name: 'Discard changes?' });
     expect(dlg.style.maxWidth).toBe('400px');
     const discard = within(dlg).getByRole('button', { name: 'Discard' });
-    expect(discard.style.background).toBe('rgb(239, 68, 68)');
+    expect(discard.style.background).toBe('var(--color-danger)');
     fireEvent.click(within(dlg).getByRole('button', { name: 'Keep editing' }));
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(where()).toBe('/settings/trackers/new?type=torznab');
@@ -484,7 +517,7 @@ describe('Tracker form: edit and secrets', () => {
     await screen.findByTestId('tracker-form');
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     const dlg = await screen.findByRole('dialog', { name: 'Delete Idx?' });
-    expect(within(dlg).getByRole('button', { name: 'Delete' }).style.background).toBe('rgb(239, 68, 68)');
+    expect(within(dlg).getByRole('button', { name: 'Delete' }).style.background).toBe('var(--color-danger)');
     fireEvent.click(within(dlg).getByRole('button', { name: 'Cancel' }));
     expect(lastCall(c => c.method === 'DELETE')).toBeUndefined();
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
@@ -518,7 +551,7 @@ describe('Tracker form: edit and secrets', () => {
     expect(order).toEqual(['Save', 'Test', 'Delete']);
     expect(screen.getByRole('button', { name: 'Save' }).style.width).toBe('100%');
     const del = screen.getByRole('button', { name: 'Delete' });
-    expect(del.style.color).toBe('rgb(239, 68, 68)');
+    expect(del.style.color).toBe('var(--color-danger)');
     expect(del.style.marginTop).toBe('24px');
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     await waitFor(() => expect(where()).toBe('/settings/trackers'));

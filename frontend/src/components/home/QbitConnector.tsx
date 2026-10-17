@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { apiFetch } from '@/apiClient';
 import { FONT } from '@/components/start/StartUI';
-import { LUMA_BLUE } from '@/ui/lumaButton';
+import { T } from '@/theme/tokens';
 
 export const QBIT_API = '/api/settings/connectors/qbittorrent';
 export const QBIT_UNREACHABLE = "Couldn't reach Luma";
@@ -144,7 +144,7 @@ function QbitForm({ view, onSaved }: { view: QbitView; onSaved: (v: QbitView) =>
           </button>
           <button type="submit" style={{ ...primary, opacity: canSave ? 1 : 0.4 }} disabled={!canSave} data-testid="qbit-save">Save</button>
           <span role="status" aria-live="polite" data-testid="qbit-result"
-            style={{ fontSize: 13, minWidth: 0, overflowWrap: 'anywhere', color: result ? (result.ok ? '#22c55e' : '#f87171') : 'transparent' }}>
+            style={{ fontSize: 13, minWidth: 0, overflowWrap: 'anywhere', color: result ? (result.ok ? T.success : T.dangerText) : 'transparent' }}>
             {result?.text}
           </span>
         </div>
@@ -154,35 +154,35 @@ function QbitForm({ view, onSaved }: { view: QbitView; onSaved: (v: QbitView) =>
 }
 
 const groupHeader: React.CSSProperties = {
-  margin: '0 4px 8px', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.5)', fontFamily: FONT,
+  margin: '0 4px 8px', fontSize: 13, fontWeight: 600, color: T.text3, fontFamily: FONT,
 };
 const card: React.CSSProperties = {
-  borderRadius: 16, padding: 20, background: 'rgba(255,255,255,0.06)',
-  border: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, margin: 0,
+  borderRadius: 16, padding: 20, background: T.glass,
+  border: `1px solid ${T.glass8}`, display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, margin: 0,
 };
 const labelStyle: React.CSSProperties = {
-  display: 'block', margin: '0 0 6px', fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.7)', fontFamily: FONT,
+  display: 'block', margin: '0 0 6px', fontSize: 13, fontWeight: 500, color: T.text2, fontFamily: FONT,
 };
 const dot = (on: boolean): React.CSSProperties => ({
-  width: 8, height: 8, borderRadius: 4, background: on ? '#22c55e' : 'rgba(255,255,255,0.3)',
+  width: 8, height: 8, borderRadius: 4, background: on ? T.success : T.text4,
 });
 const inputStyle: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', height: 44, padding: '0 14px', borderRadius: 10,
-  background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff',
+  background: T.glass, border: `1px solid ${T.glass12}`, color: T.white,
   fontSize: 16, fontFamily: FONT, outline: 'none',
 };
-const invalid: React.CSSProperties = { border: '1px solid #ef4444' };
-const fieldError: React.CSSProperties = { display: 'block', marginTop: 6, fontSize: 13, color: '#f87171' };
+const invalid: React.CSSProperties = { border: `1px solid ${T.danger}` };
+const fieldError: React.CSSProperties = { display: 'block', marginTop: 6, fontSize: 13, color: T.dangerText };
 const eye: React.CSSProperties = {
   position: 'absolute', right: 0, top: 0, height: 44, minWidth: 56, padding: '0 12px', borderRadius: 10, border: 'none',
-  background: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 13, fontFamily: FONT, cursor: 'pointer',
+  background: 'none', color: T.text2, fontSize: 13, fontFamily: FONT, cursor: 'pointer',
 };
 const actions: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 12, marginTop: 8, flexWrap: 'wrap' };
 const primary: React.CSSProperties = {
-  minHeight: 44, padding: '0 22px', borderRadius: 10, border: 'none', background: LUMA_BLUE, color: '#fff',
+  minHeight: 44, padding: '0 22px', borderRadius: 10, border: 'none', background: T.accent, color: T.white,
   fontSize: 15, fontWeight: 600, fontFamily: FONT, cursor: 'pointer',
 };
 const ghostBtn: React.CSSProperties = {
-  minHeight: 44, padding: '0 18px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)',
-  background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.95)', fontSize: 15, fontFamily: FONT, cursor: 'pointer',
+  minHeight: 44, padding: '0 18px', borderRadius: 10, border: `1px solid ${T.glass12}`,
+  background: T.glass, color: T.text, fontSize: 15, fontFamily: FONT, cursor: 'pointer',
 };

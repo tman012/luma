@@ -5,19 +5,20 @@
 import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { FONT } from '@/components/start/StartUI';
+import { T } from '@/theme/tokens';
 
-export const NAVY = '#15102a';
-export const BLUE = '#3b82f6';
-export const BLUE_HOVER = '#60a5fa';
-export const DANGER = '#ef4444';
-export const DANGER_TEXT = '#f87171';
-export const SUCCESS = '#22c55e';
-export const TEXT = 'rgba(255,255,255,0.95)';
-export const TEXT_2 = 'rgba(255,255,255,0.7)';
-export const TEXT_3 = 'rgba(255,255,255,0.5)';
-export const GLASS = 'rgba(255,255,255,0.06)';
-export const GLASS_BORDER = '1px solid rgba(255,255,255,0.08)';
-export const DIVIDER = 'rgba(255,255,255,0.08)';
+export const NAVY = T.navy;
+export const BLUE = T.accent;
+export const BLUE_HOVER = T.accentHover;
+export const DANGER = T.danger;
+export const DANGER_TEXT = T.dangerText;
+export const SUCCESS = T.success;
+export const TEXT = T.text;
+export const TEXT_2 = T.text2;
+export const TEXT_3 = T.text3;
+export const GLASS = T.glass;
+export const GLASS_BORDER = `1px solid ${T.glass8}`;
+export const DIVIDER = T.glass8;
 export { FONT };
 
 // ---------------------------------------------------------------- icons
@@ -71,12 +72,12 @@ export const trackersCss = `
 // ---------------------------------------------------------------- buttons
 
 export const primaryBtn: React.CSSProperties = {
-  height: 44, padding: '0 22px', borderRadius: 10, border: 'none', background: BLUE, color: '#fff',
+  height: 44, padding: '0 22px', borderRadius: 10, border: 'none', background: BLUE, color: T.white,
   fontSize: 15, fontWeight: 600, fontFamily: FONT, cursor: 'pointer', display: 'inline-flex',
   alignItems: 'center', justifyContent: 'center', gap: 8, boxSizing: 'border-box',
 };
 export const secondaryBtn: React.CSSProperties = {
-  ...primaryBtn, background: GLASS, border: '1px solid rgba(255,255,255,0.12)', color: TEXT, fontWeight: 500,
+  ...primaryBtn, background: GLASS, border: `1px solid ${T.glass12}`, color: TEXT, fontWeight: 500,
 };
 export const dangerTextBtn: React.CSSProperties = {
   ...primaryBtn, background: 'none', color: DANGER, padding: '0 8px', fontWeight: 500,

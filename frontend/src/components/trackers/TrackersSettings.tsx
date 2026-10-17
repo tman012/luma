@@ -41,15 +41,31 @@ type Access = 'unknown' | 'owner' | 'denied';
 /** Whether the signed-in user may use Settings > Trackers: null until known,
  * then true only for the owner with a session (the API answers 401/403
  * otherwise). Pass enabled=false to skip the check (not an admin, no session). */
-export function useTrackersAccess(enabled: boolean): boolean | null {
+/** Retry delays (ms) for a transient answer (429, 5xx, unreachable). */
+export const ACCESS_RETRY_MS = [1000, 3000, 8000];
+
+export function useTrackersAccess(enabled: boolean, retryMs: number[] = ACCESS_RETRY_MS): boolean | null {
   const [ok, setOk] = useState<boolean | null>(null);
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     setOk(null);
-    fetchTypes().then(r => { if (alive) setOk(r.ok && Array.isArray(r.data.types)); });
-    return () => { alive = false; };
-  }, [enabled]);
+    const attempt = (n: number) => {
+      fetchTypes().then(r => {
+        if (!alive) return;
+        if (r.ok) { setOk(Array.isArray(r.data.types)); return; }
+        const transient = r.status === 0 || r.status === 429 || r.status >= 500;
+        if (!transient) { setOk(false); return; }       // 401/403/404: not the owner
+        // A busy or restarting server must not hide Trackers: retry, then show
+        // the section anyway (its own list load shows the error and Retry).
+        if (n < retryMs.length) timer = setTimeout(() => attempt(n + 1), retryMs[n]);
+        else setOk(true);
+      });
+    };
+    attempt(0);
+    return () => { alive = false; if (timer) clearTimeout(timer); };
+  }, [enabled, retryMs]);
   return enabled ? ok : false;
 }
 
@@ -427,6 +443,8 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
     if (r.status === 404) { onGone(); return; }
     if (r.status === 409) { setFormError(r.data.error || UNREADABLE); return; }
     if (r.status === 400 && r.data.fields) { applyServer(r.data.fields, SAVE_FAILED); return; }
+    // 403 (owner access, session) and 429 (rate limited): the server's own words.
+    if ((r.status === 403 || r.status === 429) && r.data.error) { setFormError(r.data.error); return; }
     setFormError(r.status === 0 ? UNREACHABLE : SAVE_FAILED);
   };
 

@@ -80,7 +80,7 @@ describe('Settings > Connectors > qBittorrent', () => {
     await screen.findByTestId('connector-qbittorrent');
     fireEvent.click(screen.getByTestId('qbit-test'));
     await waitFor(() => expect(screen.getByTestId('qbit-result').textContent).toBe('Connected (v4.6.5)'));
-    expect(screen.getByTestId('qbit-result').style.color).toBe('rgb(34, 197, 94)');
+    expect(screen.getByTestId('qbit-result').style.color).toBe('var(--color-success)');
     expect(last(c => c.url.endsWith('/test'))!.body).toEqual({ url: 'http://qbit.local:8080', username: 'admin', category: 'luma-test' });
   });
 
@@ -91,7 +91,7 @@ describe('Settings > Connectors > qBittorrent', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     fireEvent.click(screen.getByTestId('qbit-test'));
     await waitFor(() => expect(screen.getByTestId('qbit-result').textContent).toBe('Wrong username or password'));
-    expect(screen.getByTestId('qbit-result').style.color).toBe('rgb(248, 113, 113)');
+    expect(screen.getByTestId('qbit-result').style.color).toBe('var(--color-danger-text)');
     await act(async () => { vi.advanceTimersByTime(10000); });
     expect(screen.getByTestId('qbit-result').textContent).toBe('Wrong username or password');
     type('password', 'x');
@@ -151,6 +151,6 @@ describe('Settings > Connectors > qBittorrent', () => {
     }
     expect(screen.getByTestId('qbit-save').style.minHeight).toBe('44px');
     expect(screen.getByTestId('qbit-test').style.minHeight).toBe('44px');
-    expect(screen.getByTestId('qbit-save').style.background).toBe('rgb(59, 130, 246)');
+    expect(screen.getByTestId('qbit-save').style.background).toBe('var(--color-accent)');
   });
 });

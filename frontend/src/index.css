@@ -20,6 +20,13 @@ html.layout-compact .settings-tab-header {
   --color-text-muted: rgb(255 255 255 / 0.50);
   --color-text-faint: rgb(255 255 255 / 0.30);
   --color-seeder-green: #10b981;
+  --color-danger: #ef4444;
+  --color-danger-text: #f87171;
+  --color-success: #22c55e;
+  --color-glass-6: rgb(255 255 255 / 0.06);
+  --color-glass-8: rgb(255 255 255 / 0.08);
+  --color-glass-12: rgb(255 255 255 / 0.12);
+  --color-white-pure: #fff;
 
   /* Animation durations */
   --animate-ken-burns: ken-burns 25s ease-in-out infinite alternate;

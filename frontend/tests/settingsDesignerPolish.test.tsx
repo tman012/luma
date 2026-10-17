@@ -26,7 +26,7 @@ describe('Designer polish: Settings', () => {
     render(<ConnectorsSettings />);
     await screen.findByTestId('connector-qbittorrent');
     const save = screen.getByTestId('qbit-save') as HTMLButtonElement;
-    expect(save.style.background).toBe('rgb(59, 130, 246)');
+    expect(save.style.background).toBe('var(--color-accent)');
     expect(save.style.opacity).toBe('0.4');
     fireEvent.change(screen.getByTestId('qbit-category'), { target: { value: 'movies' } });
     expect(save.style.opacity).toBe('1');
@@ -44,7 +44,7 @@ describe('Designer polish: Settings', () => {
       if (!s.fontSize) continue;
       expect(s.fontSize).toBe('13px');
       expect(s.fontWeight).toBe('500');
-      expect(s.color).toBe('rgba(255, 255, 255, 0.7)');
+      expect(['rgba(255, 255, 255, 0.7)', 'var(--color-text-secondary)']).toContain(s.color);
     }
   });
 });
