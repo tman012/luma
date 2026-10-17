@@ -4698,11 +4698,22 @@ def downloads_guard_run():
     """Fire a run now, past the free-space floor.
 
     Defaults to dry_run — pass {"dry_run": false} to actually delete. The daily
-    ceiling and every guard in storage_cleanup still apply either way.
+    ceiling and every guard in storage_cleanup still apply either way. A real
+    run needs the signed-in owner (start_flow.require_signed_in_owner).
     """
     from app import downloads_guard
-    dry = (request.get_json(silent=True) or {}).get('dry_run', True)
-    downloads_guard.trigger_manual_run(dry_run=bool(dry))
+    dry = bool((request.get_json(silent=True) or {}).get('dry_run', True))
+    if not dry:
+        # A real run deletes files (PM ruling): only the owner signed in with a
+        # session. Implicit LAN owner, service key and no session get 401 with
+        # "sign_in": true; other admins and everyone else 403. A dry run keeps
+        # today's access.
+        _user, err = _start_flow.require_signed_in_owner()
+        if err is not None:
+            resp, status = err
+            resp.headers['Cache-Control'] = 'no-store'
+            return resp, status
+    downloads_guard.trigger_manual_run(dry_run=dry)
     return jsonify({'ok': True, 'dry_run': bool(dry)})
 
 

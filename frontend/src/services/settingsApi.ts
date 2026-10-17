@@ -1193,11 +1193,18 @@ export async function fetchDownloadsGuardStatus(): Promise<{
   return resp.json();
 }
 
-export async function triggerDownloadsGuardRun(dryRun = true): Promise<{ ok: boolean; dry_run: boolean }> {
+/** A real run (dryRun false) needs the signed-in owner: a 401 comes back as
+ * { ok: false, signIn: true } so the card can offer sign-in instead. */
+export async function triggerDownloadsGuardRun(dryRun = true): Promise<{ ok: boolean; dry_run: boolean; signIn?: boolean }> {
   const resp = await apiFetch('/api/downloads-guard/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ dry_run: dryRun }),
   });
+  if (resp.status === 401 && !dryRun) return { ok: false, dry_run: false, signIn: true };
+  if (!resp.ok) {
+    const body = await resp.json().catch(() => ({}));
+    throw new Error((body && body.error) || 'Failed');
+  }
   return resp.json();
 }

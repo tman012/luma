@@ -182,3 +182,143 @@ def test_removing_without_files_keeps_todays_access(full, qbit):
     assert r.status_code == 200
     r = _remove(full.test_client(), False, REMOTE, dict(HDR, **{'X-API-Key': KEY}))   # service key, as today
     assert r.status_code == 200
+
+
+# ------------------------------------------------- /api/downloads-guard/run (prod blocker)
+
+GUARD_RUN = '/api/downloads-guard/run'
+
+
+@pytest.fixture
+def guard(full, monkeypatch):
+    from app import downloads_guard
+    runs = []
+    monkeypatch.setattr(downloads_guard, 'trigger_manual_run', lambda dry_run=True: runs.append(dry_run))
+    full.runs = runs
+    return full
+
+
+def _run(c, dry, env=LAN, headers=HDR):
+    body = {} if dry is None else {'dry_run': dry}
+    return c.post(GUARD_RUN, json=body, environ_base=env, headers=headers)
+
+
+@pytest.mark.parametrize('env', [LAN, REMOTE])
+def test_guard_real_run_signed_in_owner_may(guard, env):
+    owner = _client(guard)
+    r = _run(owner, False, env)
+    assert r.status_code == 200 and r.get_json() == {'ok': True, 'dry_run': False}
+    assert guard.runs == [False]
+
+
+def test_guard_real_run_implicit_lan_owner_gets_401(guard):
+    _client(guard)
+    r = _run(guard.test_client(), False)
+    assert r.status_code == 401 and r.get_json() == {'error': 'Sign in first', 'sign_in': True}
+    assert r.headers['Cache-Control'] == 'no-store'
+    assert guard.runs == []
+
+
+@pytest.mark.parametrize('env', [LAN, REMOTE])
+def test_guard_real_run_service_key_gets_401(guard, env):
+    _client(guard)
+    r = _run(guard.test_client(), False, env, dict(HDR, **{'X-API-Key': KEY}))
+    assert r.status_code == 401 and r.get_json()['sign_in'] is True
+    assert guard.runs == []
+
+
+def test_guard_real_run_remote_no_session_gets_401(guard):
+    _client(guard)
+    r = _run(guard.test_client(), False, REMOTE)
+    assert r.status_code == 401
+    assert guard.runs == []
+
+
+@pytest.mark.parametrize('who', ['admin', 'viewer', 'guest'])
+def test_guard_real_run_others_get_403(guard, who):
+    _client(guard)
+    c = _client(guard, admin=(who == 'admin'), name=who)
+    r = _run(c, False)
+    assert r.status_code == 403 and r.get_json() == {'error': 'Owner only'}
+    assert guard.runs == []
+
+
+def test_guard_real_run_plex_approved_viewer_gets_403(guard, monkeypatch):
+    from app import user_auth
+    _client(guard)
+    c = _client(guard, admin=False, name='plexer')
+    monkeypatch.setattr(user_auth, 'is_plex_approved', lambda u: True)
+    assert _run(c, False).status_code == 403 and guard.runs == []
+
+
+@pytest.mark.parametrize('dry', [True, None])
+def test_guard_dry_run_keeps_todays_access(guard, dry):
+    """Dry runs delete nothing: the implicit LAN owner still may, as today."""
+    _client(guard)
+    r = _run(guard.test_client(), dry)
+    assert r.status_code == 200 and r.get_json() == {'ok': True, 'dry_run': True}
+    owner = _client(guard, name='owner2')
+    assert _run(owner, dry).status_code == 200
+    assert guard.runs == [True, True]
+
+
+def test_guard_dry_run_remote_no_session_is_unchanged(guard):
+    _client(guard)
+    assert _run(guard.test_client(), True, REMOTE).status_code == 401
+    assert guard.runs == []
+
+
+# ------------------------------------------------- tracker routes' 401
+
+def test_tracker_routes_401_says_sign_in(full):
+    _client(full)
+    r = full.test_client().get('/api/trackers', environ_base=LAN, headers=HDR)
+    assert r.status_code == 401 and r.get_json()['sign_in'] is True
+
+
+# ------------------------------------------------- full boot smoke
+
+def test_full_boot_with_init_db_guards_the_real_run(tmp_path):
+    """A fresh interpreter: user_auth.init_db(), start_services, then the
+    destructive routes answer 401 sign_in for the implicit LAN owner."""
+    import json
+    import os
+    import subprocess
+    import sys
+    import textwrap
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    data = tmp_path / 'data'
+    data.mkdir()
+    env = {k: v for k, v in os.environ.items() if k not in ('LUMA_URL_BASE', 'SETTINGS_PATH', 'LUMA_MINIMAL')}
+    env.update({'DATABASE_PATH': str(data / 'media.db'), 'LUMA_STATE_DIR': str(data), 'LUMA_DATA_DIR': str(data),
+                'BASE_DIR': str(data), 'LUMA_CACHE_DIR': str(tmp_path / 'cache'),
+                'HERO_CACHE_DIR': str(tmp_path / 'hero'), 'LUMA_SKIP_BACKGROUND_THREADS': '1'})
+    script = textwrap.dedent('''
+        import json
+        from werkzeug.test import Client
+        import app.user_auth as ua
+        ua.init_db()
+        ua.create_user('owner', '1234', is_admin=True)
+        import app.main as m
+        m.app.config['START_BACKGROUND_THREADS'] = False
+        m.start_services(m.app)
+        c = Client(m.app.wsgi_app)
+        lan = {'REMOTE_ADDR': '192.168.1.20'}
+        h = {'X-Requested-With': 'XMLHttpRequest'}
+        out = {}
+        for name, url, body in (('run', '/api/downloads-guard/run', {'dry_run': False}),
+                                ('cleanup', '/api/storage/downloads/cleanup', {'target_bytes': 5}),
+                                ('remove', '/api/downloads/remove/' + 'a' * 40 + '?deleteFiles=true', {})):
+            r = c.post(url, json=body, environ_base=lan, headers=h)
+            out[name] = [r.status_code, json.loads(r.get_data() or b'null')]
+        me = c.get('/api/auth/me', environ_base=lan)
+        out['me'] = json.loads(me.get_data())
+        print(json.dumps(out))
+    ''')
+    p = subprocess.run([sys.executable, '-c', script], cwd=root, env=env, capture_output=True, text=True, timeout=120)
+    assert p.returncode == 0, p.stderr[-3000:]
+    out = json.loads(p.stdout.strip().splitlines()[-1])
+    assert out['me']['implicit'] is True
+    for name in ('run', 'cleanup', 'remove'):
+        assert out[name] == [401, {'error': 'Sign in first', 'sign_in': True}], (name, out[name])

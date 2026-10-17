@@ -90,7 +90,7 @@ def _no_store(resp, status=200):
 def _require_owner():
     user = _cfg['get_current_user']()
     if not user or _cfg['is_implicit']():
-        return _no_store(jsonify({'error': 'Authentication required'}), 401)
+        return _no_store(jsonify({'error': 'Authentication required', 'sign_in': True}), 401)
     owner = _cfg['get_owner']()
     uid = user.get('id')
     if not owner or not uid or uid != owner.get('id') or not user.get('is_admin'):
