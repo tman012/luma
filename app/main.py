@@ -5612,6 +5612,31 @@ _TMDB_DETAIL_CACHE_MAX = 500
 _tmdb_type_validation_cache: Dict[str, tuple] = {}  # "{type}:{id}" → (ts, bool)
 _tmdb_type_validation_lock = threading.Lock()
 _TMDB_TYPE_VALIDATION_TTL = 7 * 24 * 3600  # 7 days
+_TMDB_TYPE_VALIDATION_MAX = 5000  # bounded: expired first, then oldest
+
+
+def _store_tmdb_type_validation(cache_key: str, ts: float, result: bool) -> None:
+    """Cache a definitive type check, keeping the cache bounded (lock held by caller)."""
+    cache = _tmdb_type_validation_cache
+    cache.pop(cache_key, None)
+    cache[cache_key] = (ts, result)
+    if len(cache) <= _TMDB_TYPE_VALIDATION_MAX:
+        return
+    for k in [k for k, (t, _) in cache.items() if ts - t >= _TMDB_TYPE_VALIDATION_TTL]:
+        del cache[k]
+    while len(cache) > _TMDB_TYPE_VALIDATION_MAX:
+        del cache[next(iter(cache))]  # insertion order = oldest first
+
+
+def _cached_tmdb_type(tmdb_id: Optional[int], expected_type: str) -> Optional[bool]:
+    """The cached type check for tmdb_id, or None when unknown. Never hits TMDb."""
+    if not tmdb_id:
+        return None
+    with _tmdb_type_validation_lock:
+        cached = _tmdb_type_validation_cache.get(f"{expected_type}:{tmdb_id}")
+    if cached and time.time() - cached[0] < _TMDB_TYPE_VALIDATION_TTL:
+        return cached[1]
+    return None
 
 
 def _validate_tmdb_id_type(tmdb_id: Optional[int], expected_type: str) -> Optional[bool]:
@@ -5654,7 +5679,7 @@ def _validate_tmdb_id_type(tmdb_id: Optional[int], expected_type: str) -> Option
         return None
 
     with _tmdb_type_validation_lock:
-        _tmdb_type_validation_cache[cache_key] = (now, result)
+        _store_tmdb_type_validation(cache_key, now, result)
     return result
 
 
@@ -8528,6 +8553,13 @@ def library_search():
                     'backdrop_url': f"{script_root}/api/img/plex?url={urllib.parse.quote(item['art'], safe='/')}" if item.get('art') else None,
                     'clearlogo_url': None,
                 }
+                # Movies carry their tmdb_id so the modal can start /api/movie
+                # alongside /api/plex/movie (which still validates the id).
+                # An id already known to be the wrong type is left out.
+                tmdb_hint = item.get('tmdb_id')
+                if (item.get('media_type') == 'movie' and tmdb_hint
+                        and _cached_tmdb_type(tmdb_hint, 'movie') is not False):
+                    formatted['tmdb_id'] = tmdb_hint
                 if item.get('added_at'):
                     formatted['added_date'] = datetime.fromtimestamp(item['added_at']).strftime('%Y-%m-%d')
                 
@@ -8571,6 +8603,8 @@ def library_search():
                     m['poster_url'] = f"/api/img/plex?url={m['thumbPath']}" if m.get('thumbPath') else None
                     m['backdrop_url'] = f"/api/img/plex?url={m['artPath']}" if m.get('artPath') else None
                     m['clearlogo_url'] = f"/api/img/plex?url={m['clearLogoPath']}" if m.get('clearLogoPath') else None
+                    if m.get('tmdb_id') and _cached_tmdb_type(m['tmdb_id'], 'movie') is False:
+                        m['tmdb_id'] = None
                     if m.get('added_at'):
                         m['added_date'] = datetime.fromtimestamp(m['added_at']).strftime('%Y-%m-%d')
                     all_movies.append(m)
