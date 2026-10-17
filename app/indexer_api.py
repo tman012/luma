@@ -1262,7 +1262,14 @@ class TorznabClient:
 # ---------------------------------------------------------------------------
 
 def get_indexer_client(settings) -> Optional[Any]:
-    """Return the appropriate indexer client based on settings, or None."""
+    """Return the appropriate indexer client based on settings, or None.
+
+    As soon as the owner has at least one enabled tracker in Settings >
+    Trackers, searches go straight to those trackers (app.tracker_search) and
+    the Prowlarr/Torznab settings are not used."""
+    from app.tracker_search import LumaTrackersClient, has_enabled_trackers
+    if has_enabled_trackers():
+        return LumaTrackersClient()
     provider = settings.get('indexer.provider') or 'prowlarr'
     api_key = settings.get('indexer.api_key') or ''
 

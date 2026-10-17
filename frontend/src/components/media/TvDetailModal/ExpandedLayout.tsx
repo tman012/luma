@@ -1609,7 +1609,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                             )
                           : undefined}
                         onViewShow={() => { props.setShowFullShow(true); setSelectedSeason(-1); }}
-                        onOpenSources={tvdbId && isOwner
+                        onOpenSources={isOwner
                           ? () => setShowSources({
                               type: 'episode',
                               season: episodeData.seasonNumber,
@@ -1759,6 +1759,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
 
                           {/* Sources (owner) */}
                           {isOwner && (
+                          <span data-modal-sources="" style={{ display: 'contents' }}>
                           <PillButton
                             focusKey="tm-sources"
                             zoneId="tv-detail-modal"
@@ -1777,6 +1778,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                               setShowSources({ type: 'season', season });
                             }}
                           />
+                          </span>
                           )}
 
                           {/* Cast */}
@@ -1857,11 +1859,11 @@ export function ExpandedLayout(props: TvModalViewProps) {
           )}
 
           {/* Sources panel */}
-          {showSources && tvdbId && show && (
+          {showSources && show && (
             <TvSourcesPanel
               target={showSources}
               targetName={sourcesTargetName(showSources, seasons, episodeData)}
-              tvdbId={tvdbId}
+              tvdbId={tvdbId ?? 0}
               tmdbId={resolvedTmdbId}
               title={show.title}
               year={show.year}
