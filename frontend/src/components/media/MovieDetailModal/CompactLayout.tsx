@@ -318,7 +318,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   const canShowFileInfo = authenticated && isOwned && !!detail?.ratingKey;
   // Action row sizing — count must mirror the conditional buttons below.
   const actionCount =
-    (trailerKey ? 1 : 0) + (isOwned ? 1 : 0) + 1 /* Sources (Reviews moved to the Ratings & Reviews row) */ +
+    (trailerKey ? 1 : 0) + (isOwned ? 1 : 0) + (isOwner ? 1 : 0) /* Sources: admins only, grabs are admin-only */ +
     (similarTmdbId ? 1 : 0) + (collectionId != null ? 1 : 0);
   const denseActions = actionCount >= 6;
   const actionCircle = denseActions ? 'min(46px, 11.8vw)' : actionCount === 5 ? 'min(50px, 12.8vw)' : '50px';
@@ -822,7 +822,8 @@ export function CompactLayout(props: MovieModalViewProps) {
                     />
                   )}
 
-                  {/* Sources */}
+                  {/* Sources — admins only (grabs are admin-only), like TV */}
+                  {isOwner && (
                   <span data-modal-sources="" style={{ display: 'contents' }}>
                   <ActionButton
                     circle={actionCircle}
@@ -847,6 +848,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                     onClick={handleSourcesToggle}
                   />
                   </span>
+                  )}
 
                   {/* Similar — movies only; needs a TMDb id to ask for
                       recommendations, so it hides on the rare Plex item we

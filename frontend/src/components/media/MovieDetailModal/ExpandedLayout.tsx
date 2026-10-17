@@ -23,6 +23,8 @@ import {
 import { useMovieSourcesData } from './useMovieSourcesData';
 import { SegmentRow, sortTrackerTopsFirst, needsLibraryGrab, IndexerQueryOverride } from '@/components/media/sourcesShared';
 import { grabToLibrary } from '@/services/allSourcesApi';
+import { ManualMatchPicker } from '@/components/media/ManualMatchPicker';
+import { srcPanel, srcAbove, srcConfirmCard, srcPrimaryBtn, srcCancelBtn, SRC_ROW_BG, SRC_HEADING_COLOR, SRC_HOVER_CSS, NO_SOURCES } from '@/components/media/sourcesTheme';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useTabletPerf } from '@/hooks/useTabletPerf';
 import { useFocusable } from '@/hooks/useFocusable';
@@ -363,6 +365,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   const [srcConfirmTarget, setSrcConfirmTarget] = useState<ProcessedRelease | null>(null);
   const [srcConfirmLoading, setSrcConfirmLoading] = useState(false);
   const [srcGrabError, setSrcGrabError] = useState<string | null>(null);
+  // "Pick a title to match": a raw row on a movie with no TMDb id.
+  const [srcMatchFor, setSrcMatchFor] = useState<ProcessedRelease | null>(null);
   const { isTablet } = useLayoutMode();
   const t = isTablet ? TOKENS.tablet : TOKENS.desktop;
   const perf = useTabletPerf();
@@ -472,7 +476,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
     loading: sourcesLoading,
     error: sourcesError,
     timedOut: sourcesTimedOut,
-    slow: sourcesSlow,
     releases: sourcesReleases,
     movieId: sourcesMovieId,
   } = useMovieSourcesData({
@@ -483,13 +486,46 @@ export function ExpandedLayout(props: MovieModalViewProps) {
     enabled: showSourcesShelf && !!detail,
   });
 
-  // Handle sources confirm download
-  const handleSrcDownload = useCallback(async () => {
-    if (!srcConfirmTarget) return;
+  // Raw indexer row or a rejected Arr row → grab-to-library (bypasses Arr).
+  const runSrcLibraryGrab = useCallback(async (
+    target: ProcessedRelease, ident: { tmdbId?: number | null; title: string; year: number | null },
+  ) => {
     setSrcConfirmLoading(true);
     setSrcGrabError(null);
     try {
-      // Raw indexer row or a rejected Arr row → grab-to-library (bypasses Arr).
+      const result = await grabToLibrary({
+        downloadUrl: target.downloadUrl ?? '',
+        torrentName: target.title,
+        tmdbId: ident.tmdbId ?? undefined,
+        mediaType: 'movie',
+        title: ident.title,
+        year: ident.year,
+      });
+      if (result.success) {
+        setSrcConfirmLoading(false);
+        setSrcConfirmTarget(null);
+        setShowSourcesShelf(false);
+        window.dispatchEvent(new Event('download-grabbed'));
+        onSourcesGrabbed?.();
+        return;
+      }
+      setSrcGrabError(result.error || "Couldn't add download");
+    } catch {
+      setSrcGrabError("Can't reach server");
+    }
+    setSrcConfirmLoading(false);
+  }, [onSourcesGrabbed]);
+
+  // Handle sources confirm download
+  const handleSrcDownload = useCallback(async () => {
+    if (!srcConfirmTarget) return;
+    if (needsLibraryGrab(srcConfirmTarget) && !detail?.tmdbId) {
+      setSrcMatchFor(srcConfirmTarget);       // pick a title first
+      return;
+    }
+    setSrcConfirmLoading(true);
+    setSrcGrabError(null);
+    try {
       if (needsLibraryGrab(srcConfirmTarget)) {
         const result = await grabToLibrary({
           downloadUrl: srcConfirmTarget.downloadUrl ?? '',
@@ -507,7 +543,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
           onSourcesGrabbed?.();
           return;
         }
-        setSrcGrabError(result.error || 'Failed to add download');
+        setSrcGrabError(result.error || "Couldn't add download");
         setSrcConfirmLoading(false);
         return;
       }
@@ -532,7 +568,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
       const data = await resp.json().catch(() => ({}));
       setSrcGrabError(data.error || `Failed to grab release (${resp.status})`);
     } catch {
-      setSrcGrabError('Network error — could not reach server');
+      setSrcGrabError("Can't reach server");
     }
     setSrcConfirmLoading(false);
   }, [srcConfirmTarget, sourcesMovieId, onSourcesGrabbed, detail]);
@@ -1075,6 +1111,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                       onClick={handleUpgradeOpen}
                     />
                   )}
+                  {/* Sources — admins only (grabs are admin-only), like TV */}
+                  {isOwner && (
                   <span data-modal-sources="" style={{ display: 'contents' }}>
                   <PillButton
                     focusKey="mm-info-sources"
@@ -1092,6 +1130,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                     onClick={handleSourcesOpen}
                   />
                   </span>
+                  )}
                   {similarTmdbId && (
                     <PillButton
                       focusKey="mm-info-similar"
@@ -1332,7 +1371,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
           <>
             <div
               onClick={() => setShowSourcesShelf(false)}
-              style={{ position: 'absolute', inset: 0, zIndex: 7, background: 'rgba(0,0,0,0.85)' }}
+              data-sources-backdrop=""
+              style={{ position: 'absolute', inset: 0, zIndex: 7, ...srcPanel }}
             />
             <div
               ref={sourcesShelfRef}
@@ -1348,6 +1388,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               }}
             >
               <div style={{ pointerEvents: 'auto', width: '100%', maxWidth: '900px', padding: '0 32px' }}>
+                <style>{SRC_HOVER_CSS}</style>
                 <IndexerQueryOverride
                   mediaTitle={detail.title ?? ''}
                   defaultQuery={props.searchQuery}
@@ -1358,33 +1399,23 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 />
                 {/* Loading */}
                 {sourcesLoading && (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px' }}>
+                  <div data-sources-state="loading" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '24px', ...srcAbove }}>
                     <div style={{ width: '72px', height: '72px', border: '4px solid rgba(255,255,255,0.15)', borderTopColor: 'rgba(255,255,255,0.7)', borderRadius: '50%', animation: 'webModalSpin 0.8s linear infinite' }} />
-                    <span style={{ fontSize: '36px', color: 'rgba(255,255,255,0.6)', fontWeight: 500 }}>Searching for sources...</span>
-                    {sourcesSlow && (
-                      <span style={{ fontSize: '22px', color: 'rgba(255,255,255,0.4)', textAlign: 'center', maxWidth: '620px' }}>
-                        Taking longer than usual — indexers are slow to answer while the library is busy.
-                      </span>
-                    )}
+                    <span style={{ fontSize: '36px', color: SRC_HEADING_COLOR, fontWeight: 500 }}>Searching for sources...</span>
                   </div>
                 )}
                 {/* Error */}
                 {!sourcesLoading && sourcesError && (
-                  <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    <span style={{ fontSize: '28px', color: 'rgba(255,255,255,0.6)' }}>
+                  <div data-sources-state="error" style={{ textAlign: 'center', ...srcAbove }}>
+                    <span style={{ fontSize: '28px', color: SRC_HEADING_COLOR }}>
                       {sourcesTimedOut ? 'Search timed out' : 'Failed to load sources'}
-                    </span>
-                    <span style={{ fontSize: '20px', color: 'rgba(255,255,255,0.35)' }}>
-                      {sourcesTimedOut
-                        ? 'Radarr and the indexers did not answer in time. Close and reopen to retry.'
-                        : 'Radarr and the indexers both failed to answer'}
                     </span>
                   </div>
                 )}
                 {/* No results */}
                 {!sourcesLoading && !sourcesError && sourcesReleases.length === 0 && (
-                  <div style={{ textAlign: 'center' }}>
-                    <span style={{ fontSize: '28px', color: 'rgba(255,255,255,0.6)' }}>No sources found</span>
+                  <div data-sources-state="empty" style={{ textAlign: 'center', ...srcAbove }}>
+                    <span style={{ fontSize: '28px', color: SRC_HEADING_COLOR }}>{NO_SOURCES}</span>
                   </div>
                 )}
 
@@ -1395,7 +1426,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                     const badge = getBadgeColor(srcConfirmTarget.indexer);
                     const ageDays = srcConfirmTarget.age != null ? Math.round(srcConfirmTarget.age) : null;
                     return (
-                      <div style={{ textAlign: 'center' }}>
+                      <div data-sources-confirm="" style={{ textAlign: 'center', ...srcConfirmCard, padding: '36px', width: '520px', maxWidth: '90%', margin: '0 auto' }}>
                         <span style={{
                           display: 'inline-block', padding: '8px 20px', borderRadius: '12px', fontSize: '20px', fontWeight: 700,
                           background: badge.bg, color: badge.fg, border: `1px solid ${badge.border}`, marginBottom: '16px',
@@ -1429,11 +1460,13 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                         )}
                         <div style={{ display: 'flex', gap: '20px', justifyContent: 'center' }}>
                           <button type="button" onClick={() => setSrcConfirmTarget(null)} disabled={srcConfirmLoading}
-                            style={{ padding: '18px 40px', borderRadius: '50px', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.08)', color: '#fff', fontSize: '22px', fontWeight: 600, cursor: srcConfirmLoading ? 'default' : 'pointer' }}>
+                            data-sources-cancel=""
+                            style={{ padding: '18px 40px', borderRadius: '50px', ...srcCancelBtn, fontSize: '22px', fontWeight: 600, cursor: srcConfirmLoading ? 'default' : 'pointer' }}>
                             Cancel
                           </button>
                           <button type="button" onClick={handleSrcDownload} disabled={srcConfirmLoading}
-                            style={{ padding: '18px 44px', borderRadius: '50px', border: '1px solid rgba(255,255,255,0.3)', background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: '22px', fontWeight: 600, cursor: srcConfirmLoading ? 'default' : 'pointer', opacity: srcConfirmLoading ? 0.7 : 1 }}>
+                            data-sources-download=""
+                            style={{ padding: '18px 44px', borderRadius: '50px', ...srcPrimaryBtn, fontSize: '22px', fontWeight: 600, cursor: srcConfirmLoading ? 'default' : 'pointer', opacity: srcConfirmLoading ? 0.7 : 1 }}>
                             {srcConfirmLoading ? 'Sending...' : 'Download'}
                           </button>
                         </div>
@@ -1463,13 +1496,13 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                             })}
                           </div>
                         )}
-                        <div data-scroll-container className="luma-scroll-y" style={{ maxHeight: '55vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y' }}>
+                        <div data-scroll-container className="luma-scroll-y" style={{ maxHeight: '55vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y', ...srcAbove }}>
                           {srcFilteredReleases.map((release, i) => {
                             const rBadge = getBadgeColor(release.indexer);
                             const ageDays = release.age != null ? Math.round(release.age) : null;
                             return (
-                              <div key={release.guid || i} role="button" onClick={() => { setSrcConfirmTarget(release); setSrcGrabError(null); }}
-                                style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '18px 24px', background: 'rgba(30, 30, 30, 0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '14px', cursor: 'pointer', transition: 'background 0.2s ease' }}>
+                              <div key={release.guid || i} role="button" data-source-row="" onClick={() => { setSrcConfirmTarget(release); setSrcGrabError(null); }}
+                                style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '18px 24px', background: SRC_ROW_BG, border: '1px solid rgba(255,255,255,0.08)', borderRadius: '14px', cursor: 'pointer', transition: 'background 0.2s ease', ...srcAbove }}>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                                   <span style={{ display: 'inline-block', padding: '4px 12px', borderRadius: '8px', fontSize: '13px', fontWeight: 700, alignSelf: 'flex-start', background: rBadge.bg, color: rBadge.fg, border: `1px solid ${rBadge.border}` }}>
                                     {release.indexer}
@@ -1518,7 +1551,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                   // Level 1: Quality selection (default) — normalized rows, count only
                   return (
                     <>
-                      <h2 style={{ fontSize: '30px', fontWeight: 600, color: '#fff', margin: '0 0 20px', textAlign: 'center' }}>Sources</h2>
+                      <h2 style={{ fontSize: '30px', fontWeight: 600, color: '#fff', margin: '0 0 20px', textAlign: 'center', ...srcAbove }}>Sources</h2>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '560px', margin: '0 auto' }}>
                         {srcQualityGroups.map(group => (
                           <SegmentRow
@@ -1538,6 +1571,20 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               </div>
             </div>
           </>
+        )}
+
+        {/* Manual match picker — portaled above the modal and Sources */}
+        {srcMatchFor && (
+          <ManualMatchPicker
+            initialQuery={detail?.title || srcMatchFor.title}
+            mediaType="movie"
+            onCancel={() => setSrcMatchFor(null)}
+            onSelect={(m) => {
+              const target = srcMatchFor;
+              setSrcMatchFor(null);
+              runSrcLibraryGrab(target, { tmdbId: m.tmdb_id, title: m.title, year: m.year ?? null });
+            }}
+          />
         )}
 
         {/* Remove from Watchlist confirm */}

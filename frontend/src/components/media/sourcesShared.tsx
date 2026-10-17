@@ -10,6 +10,7 @@
  * TvProcessedRelease (TV) satisfy them.
  */
 
+import { SRC_ROW_BG, sourcesCount } from './sourcesTheme';
 import { useState, useEffect, useRef } from 'react';
 
 // ---------------------------------------------------------------------------
@@ -205,13 +206,15 @@ export function SegmentRow({ label, count, releases, colorFor, onClick, showPill
       style={{
         width: '100%', minHeight: '64px', display: 'flex', flexDirection: 'column',
         gap: '10px', alignItems: 'stretch', justifyContent: 'center', padding: '14px 20px',
-        borderRadius: '16px', border: '1px solid rgba(255,255,255,0.12)',
-        background: 'rgba(255,255,255,0.06)', color: '#fff', cursor: 'pointer', transition: 'background 0.15s',
+        borderRadius: '16px', border: '1px solid rgba(255,255,255,0.08)',
+        background: SRC_ROW_BG, color: '#fff', cursor: 'pointer', transition: 'background 0.15s',
+        position: 'relative', zIndex: 1,
       }}
+      data-source-row=""
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span style={{ fontSize: '18px', fontWeight: 700 }}>{label}</span>
-        <span style={{ fontSize: '14px', fontWeight: 500, color: 'rgba(255,255,255,0.35)' }}>{count} sources</span>
+        <span style={{ fontSize: '14px', fontWeight: 500, color: 'rgba(255,255,255,0.5)' }}>{sourcesCount(count)}</span>
       </div>
       {showPills && <TrackerSeedPills releases={releases} colorFor={colorFor} />}
     </button>

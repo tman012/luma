@@ -172,10 +172,10 @@ export async function grabToLibrary(
       }),
     });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) return { success: false, error: data.error || `HTTP ${resp.status}` };
+    if (!resp.ok) return { success: false, error: data.error || "Couldn't add download" };
     return { success: true, message: data.message };
   } catch {
-    return { success: false, error: 'Network error — could not reach server' };
+    return { success: false, error: "Can't reach server" };
   }
 }
 

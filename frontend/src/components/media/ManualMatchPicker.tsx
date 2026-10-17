@@ -14,6 +14,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { tmdbMatchSearch, type TmdbMatchResult, type MediaType } from '@/services/allSourcesApi';
 import { posterUrl } from '@/utils/image';
 import { apiUrl } from '@/urlHelpers';
@@ -26,6 +27,8 @@ interface ManualMatchPickerProps {
   onSelect: (match: { tmdb_id: number; media_type: MediaType; title: string; year: number | null }) => void;
   onCancel: () => void;
 }
+
+export const MATCH_PICKER_Z = 10100;
 
 export function ManualMatchPicker({
   initialQuery,
@@ -79,14 +82,17 @@ export function ManualMatchPicker({
     return () => window.removeEventListener('keydown', handleKey, true);
   }, [onCancel]);
 
-  return (
+  // Portaled to <body> above every Sources screen (z 10001-10005) and the
+  // desktop modal, so it is never stuck behind them.
+  return createPortal(
     <div
       role="dialog"
       aria-label="Match title"
+      data-match-picker=""
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 300,
+        zIndex: MATCH_PICKER_Z,
         background: 'rgba(0,0,0,0.75)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
@@ -242,6 +248,7 @@ export function ManualMatchPicker({
         </div>
       </div>
       <style>{`@keyframes mmpSpin { to { transform: rotate(360deg); } }`}</style>
-    </div>
+    </div>,
+    document.body,
   );
 }

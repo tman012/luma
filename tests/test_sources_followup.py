@@ -318,3 +318,19 @@ def test_qbit_connector_check_ignores_env_proxies(monkeypatch):
     monkeypatch.setattr(qbit_connector.requests, 'Session', S)
     qbit_connector.check('http://qbit.test', 'u', 'p')
     assert made and made[0].trust_env is False
+
+
+# ── No "Connect Radarr" sheet over Sources when trackers are set up ─────
+
+@pytest.mark.parametrize('trackers', [True, False])
+def test_movie_releases_without_radarr(test_app, monkeypatch, trackers):
+    monkeypatch.setattr(tracker_sources, 'trackers_in_use', lambda: trackers)
+    monkeypatch.setattr(app.main, 'get_radarr_for_request', lambda: None)
+    c = _member(test_app, approved=False, admin=True)
+    r = c.get('/api/radarr/movie/releases?tmdb_id=603')
+    body = r.get_json()
+    if trackers:
+        assert r.status_code == 200 and 'needs_setup' not in body
+        assert body['releases'] == [] and body['radarr_configured'] is False
+    else:
+        assert r.status_code == 503 and body['needs_setup'] == 'radarr'

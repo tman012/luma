@@ -1838,6 +1838,10 @@ def radarr_movie_releases():
     try:
         radarr = get_radarr_for_request()
         if not radarr:
+            # Sources works from Luma's own trackers alone: no Radarr is not an
+            # error there, and no "Connect Radarr" sheet pops over Sources.
+            if _tracker_sources_mod().trackers_in_use():
+                return jsonify({'success': True, 'releases': [], 'movie_id': 0, 'radarr_configured': False})
             return jsonify({'error': 'Radarr is not configured', 'needs_setup': 'radarr'}), 503
 
         tmdb_id = request.args.get('tmdb_id', type=int)

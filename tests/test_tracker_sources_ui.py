@@ -140,7 +140,7 @@ def test_zero_trackers_empty_state_is_clean():
         src = _read(f)
         i = src.index('noSources && indexerConfigured === false')
         block = src[i:src.index(')}', i)]
-        assert 'Sources not found' in block
+        assert '{NO_SOURCES}' in block and 'Sources not found' not in src   # "No sources" (Designer)
         assert block.count('<span') == 1 and '<button' not in block, f   # title only: no helper, no action
         assert 'noSources && indexerConfigured === true' in src
 

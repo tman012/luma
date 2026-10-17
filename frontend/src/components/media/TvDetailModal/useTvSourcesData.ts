@@ -152,7 +152,7 @@ interface UseTvSourcesDataOptions {
   tmdbId?: number;
   /** Show title — used for the ungated indexer sweep in all-results mode. */
   title?: string;
-  /** Show first-air year — narrows the indexer sweep. */
+  /** Show first-air year. Not sent to the indexer sweep (see below). */
   year?: number | null;
   /**
    * Optional plain-text query used ONLY for the ungated indexer / Prowlarr
@@ -231,7 +231,9 @@ export function useTvSourcesData({
         // Plain-text override replaces only this indexer query string. Omit year
         // while overriding so wrong matched metadata does not narrow to zero.
         const indexerTitle = ((indexerQuery || '').trim() || title || '').trim();
-        const indexerYear = (indexerQuery || '').trim() ? null : (year ?? null);
+        // TV releases rarely carry the show's year ("Show.S01E02…"), so the
+        // sweep never adds it: 'Title YEAR' misses year-less releases.
+        const indexerYear = null;
         // Without Sonarr (or with no trackers) an answered sweep is still an
         // answer: only a sweep that failed outright counts toward an error.
         let indexerOk = !!indexerTitle;

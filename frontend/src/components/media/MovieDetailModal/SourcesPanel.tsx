@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
+import { srcAbove, srcCancelBtn, SRC_HEADING_COLOR, NO_SOURCES, sourcesCount } from '../sourcesTheme';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useMovieSourcesData } from './useMovieSourcesData';
 import { FocusZone } from '@/components/tv/FocusZone';
@@ -193,7 +194,7 @@ function FocusableQualityTile({ group, onClick, tileStyle, isTablet, isWeb, zone
     <button ref={ref} {...focusProps} type="button" onClick={onClick} style={tileStyle} data-source-tile>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
         <span style={{ fontSize: (isTablet || isWeb) ? '24px' : '20px', fontWeight: 700, whiteSpace: 'nowrap' }}>{displayResolution(group.quality)}</span>
-        <span style={{ fontSize: (isTablet || isWeb) ? '16px' : '14px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap' }}>{group.totalCount} sources</span>
+        <span style={{ fontSize: (isTablet || isWeb) ? '16px' : '14px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap' }}>{sourcesCount(group.totalCount)}</span>
       </div>
     </button>
   );
@@ -217,7 +218,7 @@ function FocusableSourceTile({ st, onClick, tileStyle, isTablet, isWeb, zoneId }
     <button ref={ref} {...focusProps} type="button" onClick={onClick} style={tileStyle} data-source-tile>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
         <span style={{ fontSize: (isTablet || isWeb) ? '24px' : '20px', fontWeight: 700, whiteSpace: 'nowrap' }}>{st.type}</span>
-        <span style={{ fontSize: (isTablet || isWeb) ? '16px' : '14px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap' }}>{st.items.length} sources</span>
+        <span style={{ fontSize: (isTablet || isWeb) ? '16px' : '14px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap' }}>{sourcesCount(st.items.length)}</span>
       </div>
       <TrackerSeedPills releases={st.items} colorFor={getBadgeColor} max={6} />
     </button>
@@ -371,7 +372,7 @@ function ConfirmPanel({ target, confirmLoading, onCancel, onDownload, zoneId, er
             type="button" onClick={onCancel} disabled={confirmLoading}
             style={{
               padding: '16px 36px', borderRadius: '50px',
-              border: '1px solid #777', background: '#444',
+              ...srcCancelBtn,
               color: '#fff', fontSize: '18px', fontWeight: 600, minHeight: '56px',
               cursor: confirmLoading ? 'default' : 'pointer', transition: 'background 0.2s ease, border-color 0.2s ease',
             }}
@@ -407,7 +408,7 @@ function ExpandedSourcesView({
   loading,
   error,
   timedOut,
-  slow,
+  slow: _slow,
   movieId,
   grabContext,
   title,
@@ -582,30 +583,20 @@ function ExpandedSourcesView({
             />
           </div>
           {loading && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px', color: 'rgba(255,255,255,0.5)', fontSize: '22px' }}>
+            <div data-sources-state="loading" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '20px', color: SRC_HEADING_COLOR, fontSize: '22px', ...srcAbove }}>
               <div style={{ width: '40px', height: '40px', border: '3px solid rgba(255,255,255,0.15)', borderTopColor: 'rgba(255,255,255,0.7)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
               Searching for sources...
-              {slow && (
-                <span style={{ fontSize: '17px', color: 'rgba(255,255,255,0.35)', textAlign: 'center', maxWidth: '520px' }}>
-                  Taking longer than usual — indexers are slow to answer while the library is busy.
-                </span>
-              )}
             </div>
           )}
           {!loading && error && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-              <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: '22px' }}>
+            <div data-sources-state="error" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', ...srcAbove }}>
+              <span style={{ color: SRC_HEADING_COLOR, fontSize: '22px' }}>
                 {timedOut ? 'Search timed out' : 'Failed to load sources'}
-              </span>
-              <span style={{ color: 'rgba(255,255,255,0.3)', fontSize: '16px' }}>
-                {timedOut
-                  ? 'Radarr and the indexers did not answer in time. Close and reopen to retry.'
-                  : 'Radarr and the indexers both failed to answer'}
               </span>
             </div>
           )}
           {!loading && !error && releases.length === 0 && (
-            <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '22px' }}>No sources found</div>
+            <div data-sources-state="empty" style={{ color: SRC_HEADING_COLOR, fontSize: '22px', ...srcAbove }}>{NO_SOURCES}</div>
           )}
           {!loading && !error && qualityGroups.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '560px', position: 'relative', zIndex: 1 }}>
@@ -683,7 +674,7 @@ function ExpandedSourcesView({
                               </svg>
                             </button>
                           ) : (
-                            <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.35)' }}>{st.items.length} sources</span>
+                            <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.35)' }}>{sourcesCount(st.items.length)}</span>
                           )}
                         </div>
                       </div>
@@ -955,7 +946,7 @@ function CompactSourcesView({
   loading,
   error,
   timedOut,
-  slow,
+  slow: _slow,
   movieId,
   grabContext,
   indexerQuery,
@@ -1416,11 +1407,6 @@ function CompactSourcesView({
                 <span style={{ animation: 'srcDot3 1.4s infinite' }}>.</span>
               </span>
             </span>
-            {slow && (
-              <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.3)', textAlign: 'center', maxWidth: '280px', lineHeight: 1.4, marginTop: '-12px' }}>
-                Taking longer than usual — indexers are slow to answer while the library is busy.
-              </span>
-            )}
             <style>{`
               @keyframes srcSpin { to { transform: rotate(360deg) } }
               @keyframes srcDot1 { 0%, 20% { opacity: 0 } 40%, 100% { opacity: 1 } }
@@ -1436,11 +1422,6 @@ function CompactSourcesView({
             <span style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(255,255,255,0.5)' }}>
               {timedOut ? 'Search timed out' : 'Failed to load sources'}
             </span>
-            <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.3)', textAlign: 'center', maxWidth: '280px', lineHeight: 1.4 }}>
-              {timedOut
-                ? 'Radarr and the indexers did not answer in time. Close and reopen to retry.'
-                : 'Radarr and the indexers both failed to answer'}
-            </span>
           </div>
         )}
 
@@ -1448,7 +1429,7 @@ function CompactSourcesView({
         {noSources && indexerConfigured === false && (
           <div data-sources-empty="" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 24px 60px' }}>
             <span style={{ fontSize: '17px', fontWeight: 600, color: 'rgba(255,255,255,0.7)', textAlign: 'center' }}>
-              Sources not found
+              {NO_SOURCES}
             </span>
           </div>
         )}
@@ -1457,12 +1438,7 @@ function CompactSourcesView({
         {noSources && indexerConfigured === true && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 24px 60px', gap: '20px' }}>
             <span style={{ fontSize: '17px', fontWeight: 600, color: 'rgba(255,255,255,0.7)', textAlign: 'center' }}>
-              Sources not found
-            </span>
-            <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.35)', textAlign: 'center', maxWidth: '300px', lineHeight: 1.4 }}>
-              {indexerQuery
-                ? 'No indexer hits for that plain-text query.'
-                : 'Fancy titles often miss on trackers — try Override search with a plain query.'}
+              {NO_SOURCES}
             </span>
             {indexerQuery && (
               <button
@@ -1525,7 +1501,7 @@ function CompactSourcesView({
             }}
           >
             <p style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 16px' }}>
-              Select Resolution
+              Select resolution
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {availableQualities.map(q => (
@@ -1623,7 +1599,7 @@ function CompactSourcesView({
                               </svg>
                             </button>
                           ) : (
-                            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.35)' }}>{bucket.length} sources</span>
+                            <span style={{ fontSize: '12px', color: 'rgba(255,255,255,0.35)' }}>{sourcesCount(bucket.length)}</span>
                           )}
                         </div>
                       </div>
