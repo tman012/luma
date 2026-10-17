@@ -1,4 +1,5 @@
 import { sheetBase } from '@/utils/posterColors';
+import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
 import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -424,19 +425,23 @@ export function CompactLayout(props: TvModalViewProps) {
 
   // Slide up from bottom on enter, slide back down on exit
   const ENTER_DURATION = 600;
+  const SHEET_FADE_MS = 200;
   const EXIT_DURATION = 400;
   const springBezier = 'cubic-bezier(0.22, 1, 0.36, 1)';
   // Use translate3d to force GPU compositing for smooth animations
   const cardTransform =
-    phase === 'entering' || !composed
+    phase === 'exiting'
       ? 'translate3d(0, 100%, 0)'
-      : phase === 'visible'
-        ? 'translate3d(0, 0, 0)'
-        : 'translate3d(0, 100%, 0)';
+      : phase === 'entering' || !composed
+        ? 'translate3d(0, 16px, 0)'
+        : 'translate3d(0, 0, 0)';
   const cardTransition =
     phase === 'exiting'
       ? `transform ${EXIT_DURATION}ms cubic-bezier(0.4, 0, 1, 1)`
-      : `transform ${ENTER_DURATION}ms ${springBezier}`;
+      : `transform ${ENTER_DURATION}ms ${springBezier}, opacity ${SHEET_FADE_MS}ms ease-out`;
+  // The sheet only ever shows composed: it fades in as one piece (no slide
+  // that would uncover an empty sheet first), and nothing in it fades alone.
+  const cardOpacity = phase === 'exiting' || (phase !== 'entering' && composed) ? 1 : 0;
 
   if (phase === 'gone') return null;
 
@@ -472,6 +477,7 @@ export function CompactLayout(props: TvModalViewProps) {
           display: 'flex',
           flexDirection: 'column',
           transform: cardTransform,
+          opacity: cardOpacity,
           transition: cardTransition,
           willChange: 'transform',
           backfaceVisibility: 'hidden',
@@ -564,7 +570,7 @@ export function CompactLayout(props: TvModalViewProps) {
                 effects={backdropEffects}
                 phase={phase}
                 containerRef={backdropRef}
-                hold={titleState === 'hold'}
+                hold={titleState === 'hold'} instant
               />
 
               {/* === CENTERED CONTENT AREA === */}
@@ -575,7 +581,7 @@ export function CompactLayout(props: TvModalViewProps) {
                 marginTop: '-220px',
                 // One reveal for everything (backdrop, blur, title, text, buttons).
                 opacity: titleState === 'hold' ? 0 : 1,
-                transition: 'opacity 0.45s ease-out',
+                transition: 'none', // the sheet itself fades in, composed
                 willChange: 'opacity',
               }}>
                 {/* UltraBlur — scrolls with content, slides up over backdrop */}
@@ -594,7 +600,7 @@ export function CompactLayout(props: TvModalViewProps) {
                       maskImage: 'linear-gradient(to bottom, transparent 0%, black 80px)',
                     }}
                   >
-                    <UltraBlurOverlay hold={titleState === 'hold'} colors={ultraBlurColors} variant="mobile" animationDelay={300} />
+                    <UltraBlurOverlay hold={titleState === 'hold'} instant colors={ultraBlurColors} variant="mobile" animationDelay={300} />
                   </div>
                 )}
                 {/* Clearlogo / Title */}
@@ -1135,10 +1141,11 @@ export function CompactLayout(props: TvModalViewProps) {
                               cursor: 'pointer',
                             }}
                           >
-                            <img
-                              src={imgUrl ?? PERSON_FALLBACK_SVG}
+                            <CastPhoto
+                              src={imgUrl}
                               alt={member.name}
-                              loading="lazy"
+                              ready={composed}
+                              fallback={PERSON_FALLBACK_SVG}
                               style={{
                                 width: '90px',
                                 height: '90px',
@@ -1146,9 +1153,6 @@ export function CompactLayout(props: TvModalViewProps) {
                                 objectFit: 'cover',
                                 background: 'rgba(255,255,255,0.1)',
                                 marginBottom: '8px',
-                              }}
-                              onError={(e) => {
-                                (e.currentTarget as HTMLImageElement).src = PERSON_FALLBACK_SVG;
                               }}
                             />
                             <p

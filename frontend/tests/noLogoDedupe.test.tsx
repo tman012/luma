@@ -65,11 +65,11 @@ describe('movie detail: one /api/movie request, settled no-logo', () => {
 });
 
 describe('phone logo size', () => {
-  it('uses w500 for TMDb and a 500px transcode for Plex logos on phones', () => {
+  it('uses w300 for TMDb and a 300px transcode for Plex logos on phones', () => {
     Object.defineProperty(window, 'innerWidth', { value: 390, configurable: true });
-    expect(logoImg('https://image.tmdb.org/t/p/original/a.png')).toContain('w500');
-    expect(logoImg('/api/img/plex?url=/library/metadata/1/clearLogo')).toContain('w=500');
+    expect(logoImg('https://image.tmdb.org/t/p/original/a.png')).toContain('w300');
+    expect(logoImg('/api/img/plex?url=/library/metadata/1/clearLogo')).toContain('w=300');
     Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true });
-    expect(logoImg('/api/img/plex?url=/library/metadata/1/clearLogo')).not.toContain('w=500');
+    expect(logoImg('/api/img/plex?url=/library/metadata/1/clearLogo')).not.toContain('w=300');
   });
 });

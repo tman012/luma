@@ -12,6 +12,7 @@ import {
   type SearchResults,
   type PersonCredit,
   warmResult,
+  warmResults,
 } from '@/services/searchApi';
 import { mediaKey } from '@/services/ownership';
 import { withBase } from '@/urlHelpers';
@@ -56,13 +57,10 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didInitialSearch = useRef(false);
 
-  // Warm the likeliest picks (top 3) so their popup opens like a second open.
+  // Warm the rows on screen right away so a first open is like a second.
   useEffect(() => {
     if (!results) return;
-    const t = window.setTimeout(() => {
-      [...results.owned, ...results.unowned].slice(0, 3).forEach(warmResult);
-    }, 250);
-    return () => window.clearTimeout(t);
+    return warmResults([...results.owned, ...results.unowned]);
   }, [results]);
 
   // Paint html background for safe-area coverage
@@ -433,8 +431,8 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                       handleMediaClick(media!, e.currentTarget);
                     }
                   }}
-                  onTouchStart={() => { if (media) warmResult(media); }}
-                  onFocus={() => { if (media) warmResult(media); }}
+                  onTouchStart={() => { if (media) void warmResult(media); }}
+                  onFocus={() => { if (media) void warmResult(media); }}
                   className="luma-pressable flex w-full items-center justify-between px-5 py-4 text-left active:bg-white/5"
                 >
                   <span className="truncate text-[17px] italic text-white">

@@ -12124,6 +12124,12 @@ _PLEX_NO_STORE = {'Cache-Control': 'private, no-store', 'X-Content-Type-Options'
 _PLEX_IMG_CACHE = {'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff'}
 _PLEX_IMG_TYPES = frozenset({'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'})
 _PLEX_IMG_MAX_BYTES = 20 * 1024 * 1024
+# Plex's own people photos (cast and crew): full-size originals on plex.tv.
+# Only this exact host and shape is accepted, and only as a small transcode by
+# the user's Plex server (the token goes to that server only, never to plex.tv).
+_PLEX_PEOPLE_URL = re.compile(
+    r'https://metadata-static\.plex\.tv/[0-9a-f]/people/[0-9a-f]{32}\.(?:jpe?g|png)', re.ASCII | re.IGNORECASE)
+_PLEX_PEOPLE_MAX = 400
 
 
 def _plex_image_path(raw: str):
@@ -12159,10 +12165,12 @@ def img_plex_proxy():
     if not plex_path:
         return Response('Missing url parameter', status=400, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
-    # Security: only Plex's own library image paths, never an outside URL.
-    plex_path = _plex_image_path(plex_path)
-    if not plex_path:
-        return Response('Not a Plex image path', status=400, mimetype='text/plain', headers=_PLEX_NO_STORE)
+    people = bool(_PLEX_PEOPLE_URL.fullmatch(plex_path))
+    if not people:
+        # Security: only Plex's own library image paths, never an outside URL.
+        plex_path = _plex_image_path(plex_path)
+        if not plex_path:
+            return Response('Not a Plex image path', status=400, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
     # Optional resize via Plex photo transcoder (clamped to sane bounds)
     def _clamp_dim(raw):
@@ -12174,6 +12182,12 @@ def img_plex_proxy():
 
     req_w = _clamp_dim(request.args.get('w'))
     req_h = _clamp_dim(request.args.get('h'))
+    if people:
+        # People photos only ever as a small transcode, never the original.
+        if not (req_w or req_h):
+            return Response('Size required', status=400, mimetype='text/plain', headers=_PLEX_NO_STORE)
+        req_w = min(req_w, _PLEX_PEOPLE_MAX) if req_w else None
+        req_h = min(req_h, _PLEX_PEOPLE_MAX) if req_h else None
 
     # Try user's Plex first, fall back to global
     _user_plex = get_plex_for_request()

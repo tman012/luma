@@ -19,7 +19,7 @@ vi.mock('@/apiClient', () => ({
 }));
 
 import { useMovieDetail } from '@/hooks/useMovieDetail';
-import { _resetModalPrefetch, warmDetail, WARM_CONCURRENCY } from '@/services/modalPrefetch';
+import { _resetModalPrefetch, canPrefetch, warmDetail, WARM_CONCURRENCY } from '@/services/modalPrefetch';
 import { _resetModalColors } from '@/services/modalColors';
 import { backdropUrl, logoImg, plexBackdrop } from '@/utils/image';
 import { parsePlexResponse, parsePlexTvResponse } from '@/utils/modalParsers';
@@ -46,7 +46,7 @@ beforeEach(() => {
   _resetModalPrefetch(); _resetModalColors();
   setWidth(1440);
 });
-afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); Object.defineProperty(navigator, 'connection', { value: undefined, configurable: true }); });
 
 describe('one /api/movie request per opening', () => {
   const movieCalls = () => calls.filter((u) => u === '/api/movie/42').length;
@@ -74,17 +74,17 @@ describe('one /api/movie request per opening', () => {
 describe('phone image sizes', () => {
   const TMDB_LOGO = 'https://image.tmdb.org/t/p/original/logo.png';
 
-  it('phone: TMDB w780 backdrop, w500 logo on every path, sized Plex art', () => {
+  it('phone: TMDB w780 backdrop, w300 logo on every path, sized Plex art', () => {
     setWidth(390);
     expect(backdropUrl('/b.jpg')).toContain('/w780/b.jpg');
-    expect(logoImg(TMDB_LOGO)).toBe('https://image.tmdb.org/t/p/w500/logo.png');
+    expect(logoImg(TMDB_LOGO)).toBe('https://image.tmdb.org/t/p/w300/logo.png');
     // Plex movie path (logo from Plex's metadata) and Plex TV path
-    expect(parsePlexResponse({ title: 'x', clearlogo_url: TMDB_LOGO }).clearLogoUrl).toContain('/t/p/w500/');
+    expect(parsePlexResponse({ title: 'x', clearlogo_url: TMDB_LOGO }).clearLogoUrl).toContain('/t/p/w300/');
     expect(parsePlexResponse({ title: 'x', backdrop_url: '/api/img/plex?url=/library/metadata/1/art/2' }).backdropUrl)
       .toContain('w=780&h=439');
     expect(plexBackdrop('/api/img/plex?url=/library/metadata/1/art/2')).toContain('w=780&h=439');
-    expect(logoImg('/api/img/plex?url=/library/metadata/1/clearLogo/3')).toContain('w=500');
-    expect(parsePlexTvResponse({ title: 'x', clearLogoPath: '/library/metadata/1/clearLogo/3' }).clearLogoUrl).toContain('w=500');
+    expect(logoImg('/api/img/plex?url=/library/metadata/1/clearLogo/3')).toContain('w=300');
+    expect(parsePlexTvResponse({ title: 'x', clearLogoPath: '/library/metadata/1/clearLogo/3' }).clearLogoUrl).toContain('w=300');
     expect(parsePlexTvResponse({ title: 'x', artPath: '/library/metadata/1/art/2' }).backdropUrl).toContain('w=780');
   });
 
@@ -134,5 +134,32 @@ describe('phone poster cards', () => {
     show(4, false); // scrolled away before its turn
     await act(async () => { pending.shift()!(); for (let i = 0; i < 4; i++) await Promise.resolve(); });
     expect(runs).toEqual(['k0', 'k1', 'k2', 'k3', 'k5']);
+  });
+
+  it('the same title on two cards gets one warm-up (one key per title)', () => {
+    const runs: string[] = [];
+    const warm = () => { runs.push('x'); return new Promise<void>(() => {}); };
+    render(<div>
+      <MobilePosterCard posterUrl={null} title="a" onTap={() => {}} warmKey="movie:9:42" warm={warm} />
+      <MobilePosterCard posterUrl={null} title="b" onTap={() => {}} warmKey="movie:9:42" warm={warm} />
+    </div>);
+    show(0, true); show(1, true);
+    expect(runs.length).toBe(1);
+  });
+
+  it.each([[{ saveData: true }], [{ effectiveType: '2g' }], [{ effectiveType: 'slow-2g' }]])('no background warm-up with %o (a touch still warms)', (conn) => {
+    Object.defineProperty(navigator, 'connection', { value: conn, configurable: true });
+    expect(canPrefetch()).toBe(false);
+    const warm = vi.fn(() => Promise.resolve());
+    const { container } = render(<MobilePosterCard posterUrl={null} title="a" onTap={() => {}} warmKey="movie:1:" warm={warm} />);
+    show(0, true);
+    expect(warm).not.toHaveBeenCalled();
+    fireEvent.touchStart(container.querySelector('button')!, { touches: [{ clientX: 1, clientY: 1 }] });
+    expect(warm).toHaveBeenCalledTimes(1);
+  });
+
+  it('prefetches on 4G', () => {
+    Object.defineProperty(navigator, 'connection', { value: { effectiveType: '4g', saveData: false }, configurable: true });
+    expect(canPrefetch()).toBe(true);
   });
 });

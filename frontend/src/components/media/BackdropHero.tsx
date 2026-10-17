@@ -19,6 +19,8 @@ import type { BackdropEffects } from '@/hooks/useBackdropEffects';
 export interface BackdropHeroProps {
   /** Keep the art hidden (navy) until the popup reveals it with the title. */
   hold?: boolean;
+  /** No fades of its own (the phone sheet fades in as one, composed). */
+  instant?: boolean;
   /** Primary backdrop image URL. */
   backdropUrl?: string | null;
   /** Fallback poster URL when no backdrop available. */
@@ -41,6 +43,7 @@ export function BackdropHero({
   children,
   containerRef,
   hold = false,
+  instant = false,
 }: BackdropHeroProps) {
   const containerStyle = useMemo<React.CSSProperties>(
     () => ({
@@ -52,12 +55,12 @@ export function BackdropHero({
       zIndex: 0,
       borderTopLeftRadius: '14px',
       borderTopRightRadius: '14px',
-      opacity: phase === 'visible' ? 1 : 0,
-      transition: 'opacity 0.4s ease-out',
+      opacity: instant || phase === 'visible' ? 1 : 0,
+      transition: instant ? 'none' : 'opacity 0.4s ease-out',
       willChange: 'opacity',
       ...effects.headerContainerMask,
     }),
-    [phase, effects.headerContainerMask],
+    [phase, instant, effects.headerContainerMask],
   );
 
   // Each image is its own element (keyed by URL) and stays invisible until it
@@ -69,10 +72,10 @@ export function BackdropHero({
   const markLoaded = useCallback((el: HTMLImageElement | null) => {
     if (el && src && el.complete && el.naturalWidth > 0) setLoadedSrc(src);
   }, [src]);
-  const fade: React.CSSProperties = { transition: 'opacity 0.45s ease-out' };
+  const fade: React.CSSProperties = { transition: instant ? 'none' : 'opacity 0.45s ease-out' };
 
   return (
-    <div ref={containerRef} style={{ ...containerStyle, background: '#15102a' }} data-backdrop-loaded={loaded ? 'true' : 'false'}>
+    <div ref={containerRef} style={{ ...containerStyle, background: instant ? 'transparent' : '#15102a' }} data-backdrop-loaded={loaded ? 'true' : 'false'}>
       {backdropUrl ? (
         <img
           key={backdropUrl}

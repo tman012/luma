@@ -4,7 +4,7 @@
 // data-fetching logic can be reused by Web and Mobile modals.
 // ---------------------------------------------------------------------------
 
-import { posterUrl as tmdbPoster, backdropUrl as tmdbBackdrop, plexBackdrop, logoImg } from '@/utils/image';
+import { posterUrl as tmdbPoster, backdropUrl as tmdbBackdrop, plexBackdrop, logoImg, castThumb } from '@/utils/image';
 import { apiUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
@@ -485,7 +485,7 @@ export function parsePlexTvResponse(data: Record<string, unknown>): TvShowDetail
 // ---------------------------------------------------------------------------
 
 export function getCastImageUrl(member: CastMember | Director): string | null {
-  if ('thumb' in member && member.thumb) return member.thumb;
+  if ('thumb' in member && member.thumb) return castThumb(member.thumb);
   if ('profilePath' in member && member.profilePath)
     return tmdbPoster(member.profilePath, 'w185');
   return null;

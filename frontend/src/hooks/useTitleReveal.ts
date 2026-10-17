@@ -3,6 +3,7 @@
  * title right away when the lookup settled with no logo (null), when the logo
  * fails, or at REVEAL_CAP_MS. Once the text title shows it stays (no late jump to a logo). */
 import { useEffect, useState } from 'react';
+import { remainingCap } from '@/services/modalPrefetch';
 
 export type TitleState = 'hold' | 'logo' | 'text';
 /** Safety cap: past it, everything reveals at once anyway (text title and/or
@@ -48,7 +49,8 @@ export function useTitleReveal(
     setLogo('hold');
     setRevealed(null);
     setTimedOut(false);
-    const t = window.setTimeout(() => setTimedOut(true), LOGO_WAIT_MS);
+    // The cap counts from the tap that opened the popup (detail fetch included).
+    const t = window.setTimeout(() => setTimedOut(true), remainingCap(LOGO_WAIT_MS));
     return () => window.clearTimeout(t);
   }, [key]);
 

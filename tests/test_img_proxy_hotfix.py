@@ -272,3 +272,53 @@ def test_refusals_still_never_stored(plex, query):
     r = client.get('/api/img/plex' + query, environ_base=LAN)
     assert r.status_code == 400
     assert r.headers['Cache-Control'] == 'private, no-store'
+
+
+# -- Plex people photos (cast/crew): a small transcode by the user's Plex only --
+
+PEOPLE = 'https://metadata-static.plex.tv/b/people/b604d520903d1d1f445458008ab9d1f3.jpg'
+
+
+def test_people_photo_is_a_small_transcode_via_the_users_plex(plex):
+    client, calls, state = plex
+    r = client.get('/api/img/plex', query_string={'url': PEOPLE, 'w': 120}, environ_base=LAN)
+    assert r.status_code == 200 and r.headers['Cache-Control'] == 'private, max-age=86400'
+    assert len(calls) == 1
+    assert calls[0].startswith('http://plex.test/photo/:/transcode?') and 'width=120' in calls[0]
+    assert 'metadata-static.plex.tv' in calls[0]  # quoted inner url, fetched by Plex, not by us
+    assert state['kwargs']['headers'] == {'X-Plex-Token': 't'}
+    assert state['kwargs']['allow_redirects'] is False
+
+
+def test_people_photo_needs_a_size_and_is_capped(plex):
+    client, calls, _ = plex
+    r = client.get('/api/img/plex', query_string={'url': PEOPLE}, environ_base=LAN)
+    assert r.status_code == 400 and r.headers['Cache-Control'] == 'private, no-store'
+    assert calls == []
+    client.get('/api/img/plex', query_string={'url': PEOPLE, 'w': 2000, 'h': 2000}, environ_base=LAN)
+    assert 'width=400' in calls[0] and 'height=400' in calls[0]
+
+
+def test_people_photo_never_falls_back_to_the_original(plex):
+    client, calls, state = plex
+    state['resp'] = _Resp(status=500)
+    r = client.get('/api/img/plex', query_string={'url': PEOPLE, 'w': 120}, environ_base=LAN)
+    assert r.status_code == 404 and r.headers['Cache-Control'] == 'private, no-store'
+    assert len(calls) == 1 and not any(u.startswith('https://metadata-static') for u in calls)
+
+
+@pytest.mark.parametrize('url', [
+    'https://metadata-static.plex.tv.evil.example/b/people/b604d520903d1d1f445458008ab9d1f3.jpg',
+    'http://metadata-static.plex.tv/b/people/b604d520903d1d1f445458008ab9d1f3.jpg',
+    'https://metadata-static.plex.tv/b/people/../../x.jpg',
+    'https://metadata-static.plex.tv/b/movies/b604d520903d1d1f445458008ab9d1f3.jpg',
+    'https://metadata-static.plex.tv/b/people/b604d520903d1d1f445458008ab9d1f3.jpg?x=1',
+    'https://metadata-static.plex.tv/b/people/b604d520903d1d1f445458008ab9d1f3.svg',
+    ' https://metadata-static.plex.tv/b/people/b604d520903d1d1f445458008ab9d1f3.jpg',
+    'https://user@metadata-static.plex.tv/b/people/b604d520903d1d1f445458008ab9d1f3.jpg',
+])
+def test_other_outside_urls_stay_refused(plex, url):
+    client, calls, _ = plex
+    r = client.get('/api/img/plex', query_string={'url': url, 'w': 120}, environ_base=LAN)
+    assert r.status_code == 400
+    assert calls == []
