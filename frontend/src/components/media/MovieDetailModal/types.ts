@@ -6,6 +6,8 @@ export interface MovieModalViewProps {
   // Data from useMovieDetail
   detail: MediaDetail | null;
   ratings: Ratings | null;
+  /** Ratings still loading (the phone sheet reserves their row meanwhile). */
+  ratingsLoading?: boolean;
   trailerKey: string | null | undefined;
   ultraBlurColors: UltraBlurColors | null;
   resolvedTmdbId: number | undefined;

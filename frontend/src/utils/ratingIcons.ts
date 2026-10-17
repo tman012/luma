@@ -15,6 +15,17 @@ export const RATING_ICONS = {
   tmdb: assetUrl(`/static/images/tmdb-logo-short.svg${V}`),
 } as const;
 
+/** Width / height of each icon file, so the bar can size every icon before it
+ *  loads (no layout shift when the files arrive). */
+export const RATING_ICON_ASPECT: Record<string, number> = {
+  [RATING_ICONS.imdb]: 595 / 362,
+  [RATING_ICONS.rtCriticFresh]: 500 / 510,
+  [RATING_ICONS.rtCriticRotten]: 500 / 483,
+  [RATING_ICONS.rtAudienceGood]: 500 / 659,
+  [RATING_ICONS.rtAudienceBad]: 960 / 727,
+  [RATING_ICONS.metacritic]: 1,
+};
+
 /** Freshness threshold (>= means fresh/good, < means rotten/bad) */
 export const RT_FRESH_THRESHOLD = 60;
 
