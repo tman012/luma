@@ -33,7 +33,9 @@ class Fake:
 
             def close(self):
                 pass
-        return S()
+        s = S()
+        fake.sessions = getattr(fake, 'sessions', []) + [s]
+        return s
 
 
 @pytest.fixture
@@ -103,3 +105,26 @@ def test_no_key_never_calls(fake):
     with pytest.raises(tv_tmdb.TmdbError, match='Connectors'):
         tv_tmdb.search('x')
     assert fake.calls == []
+
+
+def test_session_ignores_the_environment(fake, monkeypatch):
+    """Reviewer: trust_env=False, so HTTP(S)_PROXY or ~/.netrc never see the TMDB key."""
+    fake.answers = [Resp(body={'results': []})]
+    tv_tmdb.search('x')
+    assert fake.sessions[-1].trust_env is False
+
+
+def test_real_session_ignores_proxy_env(monkeypatch):
+    import requests
+    seen = []
+
+    class Rec(requests.Session):
+        def get(self, url, **kw):
+            seen.append(self.trust_env)
+            raise requests.ConnectionError('offline')
+    monkeypatch.setenv('HTTPS_PROXY', 'http://proxy.invalid:3128')
+    monkeypatch.setattr(tv_tmdb, 'MIN_GAP_S', 0)
+    tv_tmdb.init(get_key=lambda: 'k' * 32, session_factory=Rec)
+    with pytest.raises(tv_tmdb.TmdbError):
+        tv_tmdb.search('x')
+    assert seen == [False]

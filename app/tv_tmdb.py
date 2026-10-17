@@ -68,6 +68,7 @@ def _get(path: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[st
     q = dict(params or {})
     q['api_key'] = key
     sess = (_cfg.get('session_factory') or requests.Session)()
+    sess.trust_env = False          # no proxy or .netrc from the environment: the key goes to TMDB only
     try:
         for attempt in (1, 2):
             _pace()
