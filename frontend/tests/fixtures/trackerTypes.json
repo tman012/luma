@@ -1,0 +1,782 @@
+[
+ {
+  "id": "torznab",
+  "name": "Torznab",
+  "protocol": "torrent",
+  "fields": [
+   {
+    "key": "name",
+    "label": "Name",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "url",
+    "label": "URL",
+    "kind": "url",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "api_key",
+    "label": "API key",
+    "kind": "secret",
+    "required": false,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "categories",
+    "label": "Categories",
+    "kind": "categories",
+    "required": true,
+    "secret": false,
+    "default": [
+     2000,
+     5000
+    ]
+   },
+   {
+    "key": "priority",
+    "label": "Priority",
+    "kind": "number",
+    "required": true,
+    "secret": false,
+    "default": 25
+   }
+  ],
+  "categories": [
+   {
+    "id": 2000,
+    "name": "Movies"
+   },
+   {
+    "id": 2030,
+    "name": "Movies/SD"
+   },
+   {
+    "id": 2040,
+    "name": "Movies/HD"
+   },
+   {
+    "id": 2045,
+    "name": "Movies/UHD"
+   },
+   {
+    "id": 2050,
+    "name": "Movies/BluRay"
+   },
+   {
+    "id": 2060,
+    "name": "Movies/3D"
+   },
+   {
+    "id": 2070,
+    "name": "Movies/DVD"
+   },
+   {
+    "id": 2080,
+    "name": "Movies/WEB-DL"
+   },
+   {
+    "id": 5000,
+    "name": "TV"
+   },
+   {
+    "id": 5030,
+    "name": "TV/SD"
+   },
+   {
+    "id": 5040,
+    "name": "TV/HD"
+   },
+   {
+    "id": 5045,
+    "name": "TV/UHD"
+   },
+   {
+    "id": 5060,
+    "name": "TV/Sport"
+   },
+   {
+    "id": 5070,
+    "name": "TV/Anime"
+   },
+   {
+    "id": 5080,
+    "name": "TV/Documentary"
+   }
+  ]
+ },
+ {
+  "id": "newznab",
+  "name": "Newznab",
+  "protocol": "usenet",
+  "fields": [
+   {
+    "key": "name",
+    "label": "Name",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "url",
+    "label": "URL",
+    "kind": "url",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "api_key",
+    "label": "API key",
+    "kind": "secret",
+    "required": false,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "categories",
+    "label": "Categories",
+    "kind": "categories",
+    "required": true,
+    "secret": false,
+    "default": [
+     2000,
+     5000
+    ]
+   },
+   {
+    "key": "priority",
+    "label": "Priority",
+    "kind": "number",
+    "required": true,
+    "secret": false,
+    "default": 25
+   }
+  ],
+  "categories": [
+   {
+    "id": 2000,
+    "name": "Movies"
+   },
+   {
+    "id": 2030,
+    "name": "Movies/SD"
+   },
+   {
+    "id": 2040,
+    "name": "Movies/HD"
+   },
+   {
+    "id": 2045,
+    "name": "Movies/UHD"
+   },
+   {
+    "id": 2050,
+    "name": "Movies/BluRay"
+   },
+   {
+    "id": 2060,
+    "name": "Movies/3D"
+   },
+   {
+    "id": 2070,
+    "name": "Movies/DVD"
+   },
+   {
+    "id": 2080,
+    "name": "Movies/WEB-DL"
+   },
+   {
+    "id": 5000,
+    "name": "TV"
+   },
+   {
+    "id": 5030,
+    "name": "TV/SD"
+   },
+   {
+    "id": 5040,
+    "name": "TV/HD"
+   },
+   {
+    "id": 5045,
+    "name": "TV/UHD"
+   },
+   {
+    "id": 5060,
+    "name": "TV/Sport"
+   },
+   {
+    "id": 5070,
+    "name": "TV/Anime"
+   },
+   {
+    "id": 5080,
+    "name": "TV/Documentary"
+   }
+  ]
+ },
+ {
+  "id": "avistaz",
+  "name": "AvistaZ",
+  "protocol": "torrent",
+  "fields": [
+   {
+    "key": "name",
+    "label": "Name",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "url",
+    "label": "URL",
+    "kind": "url",
+    "required": true,
+    "secret": false,
+    "default": "https://avistaz.to"
+   },
+   {
+    "key": "username",
+    "label": "Username",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "password",
+    "label": "Password",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "pid",
+    "label": "PID",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "categories",
+    "label": "Categories",
+    "kind": "categories",
+    "required": true,
+    "secret": false,
+    "default": [
+     2000,
+     5000
+    ]
+   },
+   {
+    "key": "priority",
+    "label": "Priority",
+    "kind": "number",
+    "required": true,
+    "secret": false,
+    "default": 25
+   }
+  ],
+  "categories": [
+   {
+    "id": 2000,
+    "name": "Movies"
+   },
+   {
+    "id": 5000,
+    "name": "TV"
+   }
+  ]
+ },
+ {
+  "id": "beyondhd",
+  "name": "BeyondHD",
+  "protocol": "torrent",
+  "fields": [
+   {
+    "key": "name",
+    "label": "Name",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "url",
+    "label": "URL",
+    "kind": "url",
+    "required": true,
+    "secret": false,
+    "default": "https://beyond-hd.me"
+   },
+   {
+    "key": "api_key",
+    "label": "API key",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "rss_key",
+    "label": "RSS key",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "categories",
+    "label": "Categories",
+    "kind": "categories",
+    "required": true,
+    "secret": false,
+    "default": [
+     2000,
+     5000
+    ]
+   },
+   {
+    "key": "priority",
+    "label": "Priority",
+    "kind": "number",
+    "required": true,
+    "secret": false,
+    "default": 25
+   }
+  ],
+  "categories": [
+   {
+    "id": 2000,
+    "name": "Movies"
+   },
+   {
+    "id": 5000,
+    "name": "TV"
+   }
+  ]
+ },
+ {
+  "id": "cinemaz",
+  "name": "CinemaZ",
+  "protocol": "torrent",
+  "fields": [
+   {
+    "key": "name",
+    "label": "Name",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "url",
+    "label": "URL",
+    "kind": "url",
+    "required": true,
+    "secret": false,
+    "default": "https://cinemaz.to"
+   },
+   {
+    "key": "username",
+    "label": "Username",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "password",
+    "label": "Password",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "pid",
+    "label": "PID",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "categories",
+    "label": "Categories",
+    "kind": "categories",
+    "required": true,
+    "secret": false,
+    "default": [
+     2000,
+     5000
+    ]
+   },
+   {
+    "key": "priority",
+    "label": "Priority",
+    "kind": "number",
+    "required": true,
+    "secret": false,
+    "default": 25
+   }
+  ],
+  "categories": [
+   {
+    "id": 2000,
+    "name": "Movies"
+   },
+   {
+    "id": 5000,
+    "name": "TV"
+   }
+  ]
+ },
+ {
+  "id": "exoticaz",
+  "name": "ExoticaZ",
+  "protocol": "torrent",
+  "fields": [
+   {
+    "key": "name",
+    "label": "Name",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "url",
+    "label": "URL",
+    "kind": "url",
+    "required": true,
+    "secret": false,
+    "default": "https://exoticaz.to"
+   },
+   {
+    "key": "username",
+    "label": "Username",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "password",
+    "label": "Password",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "pid",
+    "label": "PID",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "categories",
+    "label": "Categories",
+    "kind": "categories",
+    "required": true,
+    "secret": false,
+    "default": [
+     2000,
+     5000
+    ]
+   },
+   {
+    "key": "priority",
+    "label": "Priority",
+    "kind": "number",
+    "required": true,
+    "secret": false,
+    "default": 25
+   }
+  ],
+  "categories": [
+   {
+    "id": 2000,
+    "name": "Movies"
+   },
+   {
+    "id": 5000,
+    "name": "TV"
+   }
+  ]
+ },
+ {
+  "id": "iptorrents",
+  "name": "IPTorrents",
+  "protocol": "torrent",
+  "fields": [
+   {
+    "key": "name",
+    "label": "Name",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "url",
+    "label": "URL",
+    "kind": "url",
+    "required": true,
+    "secret": false,
+    "default": "https://iptorrents.com"
+   },
+   {
+    "key": "cookie",
+    "label": "Cookie",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "user_agent",
+    "label": "User agent",
+    "kind": "text",
+    "required": false,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "categories",
+    "label": "Categories",
+    "kind": "categories",
+    "required": true,
+    "secret": false,
+    "default": [
+     2000,
+     5000
+    ]
+   },
+   {
+    "key": "priority",
+    "label": "Priority",
+    "kind": "number",
+    "required": true,
+    "secret": false,
+    "default": 25
+   }
+  ],
+  "categories": [
+   {
+    "id": 2000,
+    "name": "Movies"
+   },
+   {
+    "id": 5000,
+    "name": "TV"
+   },
+   {
+    "id": 5060,
+    "name": "TV/Sport"
+   }
+  ]
+ },
+ {
+  "id": "morethantv",
+  "name": "MoreThanTV",
+  "protocol": "torrent",
+  "fields": [
+   {
+    "key": "name",
+    "label": "Name",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "url",
+    "label": "URL",
+    "kind": "url",
+    "required": true,
+    "secret": false,
+    "default": "https://www.morethantv.me"
+   },
+   {
+    "key": "api_key",
+    "label": "API key",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "categories",
+    "label": "Categories",
+    "kind": "categories",
+    "required": true,
+    "secret": false,
+    "default": [
+     2000,
+     5000
+    ]
+   },
+   {
+    "key": "priority",
+    "label": "Priority",
+    "kind": "number",
+    "required": true,
+    "secret": false,
+    "default": 25
+   }
+  ],
+  "categories": [
+   {
+    "id": 2000,
+    "name": "Movies"
+   },
+   {
+    "id": 2030,
+    "name": "Movies/SD"
+   },
+   {
+    "id": 2040,
+    "name": "Movies/HD"
+   },
+   {
+    "id": 2045,
+    "name": "Movies/UHD"
+   },
+   {
+    "id": 2050,
+    "name": "Movies/BluRay"
+   },
+   {
+    "id": 2060,
+    "name": "Movies/3D"
+   },
+   {
+    "id": 2070,
+    "name": "Movies/DVD"
+   },
+   {
+    "id": 2080,
+    "name": "Movies/WEB-DL"
+   },
+   {
+    "id": 5000,
+    "name": "TV"
+   },
+   {
+    "id": 5030,
+    "name": "TV/SD"
+   },
+   {
+    "id": 5040,
+    "name": "TV/HD"
+   },
+   {
+    "id": 5045,
+    "name": "TV/UHD"
+   },
+   {
+    "id": 5060,
+    "name": "TV/Sport"
+   },
+   {
+    "id": 5070,
+    "name": "TV/Anime"
+   },
+   {
+    "id": 5080,
+    "name": "TV/Documentary"
+   }
+  ]
+ },
+ {
+  "id": "privatehd",
+  "name": "PrivateHD",
+  "protocol": "torrent",
+  "fields": [
+   {
+    "key": "name",
+    "label": "Name",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "url",
+    "label": "URL",
+    "kind": "url",
+    "required": true,
+    "secret": false,
+    "default": "https://privatehd.to"
+   },
+   {
+    "key": "username",
+    "label": "Username",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "password",
+    "label": "Password",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "pid",
+    "label": "PID",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "categories",
+    "label": "Categories",
+    "kind": "categories",
+    "required": true,
+    "secret": false,
+    "default": [
+     2000,
+     5000
+    ]
+   },
+   {
+    "key": "priority",
+    "label": "Priority",
+    "kind": "number",
+    "required": true,
+    "secret": false,
+    "default": 25
+   }
+  ],
+  "categories": [
+   {
+    "id": 2000,
+    "name": "Movies"
+   },
+   {
+    "id": 5000,
+    "name": "TV"
+   }
+  ]
+ }
+]
