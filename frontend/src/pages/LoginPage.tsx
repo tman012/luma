@@ -6,13 +6,12 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { StartShell, Logo, LogoGap, Title, primaryBtn, fieldInput, fieldLabel, linkBtn, FONT } from '@/components/start/StartUI';
+import { StartShell, Logo, LogoGap, Title, primaryBtn, fieldInput, fieldLabel, FONT } from '@/components/start/StartUI';
 import { useNavigate, useLocation } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiFetch } from '../apiClient';
 
 type Flow = 'signin' | 'signup';
-type SignInStep = 'email' | 'pin';
 type SignUpStep = 'email' | 'pin' | 'confirm' | 'pending';
 
 export function LoginPage() {
@@ -26,7 +25,6 @@ export function LoginPage() {
   useEffect(() => {
     if (!loading && !signupOpen && flow === 'signup') setFlow('signin');
   }, [loading, signupOpen, flow]);
-  const [signinStep, setSigninStep] = useState<SignInStep>('email');
   const [signupStep, setSignupStep] = useState<SignUpStep>('email');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -57,37 +55,28 @@ export function LoginPage() {
 
   useEffect(() => {
     if (flow === 'signin') {
-      if (signinStep === 'email') setTimeout(() => emailRef.current?.focus(), 100);
-      if (signinStep === 'pin') setTimeout(() => pinRef.current?.focus(), 100);
+      setTimeout(() => emailRef.current?.focus(), 100);
     }
     if (flow === 'signup') {
       if (signupStep === 'email') setTimeout(() => regEmailRef.current?.focus(), 100);
       if (signupStep === 'pin') setTimeout(() => regPinRef.current?.focus(), 100);
       if (signupStep === 'confirm') setTimeout(() => confirmPinRef.current?.focus(), 100);
     }
-  }, [flow, signinStep, signupStep]);
+  }, [flow, signupStep]);
 
   function switchToSignUp() {
     setFlow('signup'); setSignupStep('email'); setEmail(''); setPin(''); setConfirmPin(''); setError(''); setBusy(false);
   }
   function switchToSignIn() {
-    setFlow('signin'); setSigninStep('email'); setName(''); setEmail(''); setPin(''); setError(''); setBusy(false);
+    setFlow('signin'); setName(''); setEmail(''); setPin(''); setError(''); setBusy(false);
   }
 
-  function handleSignInEmail(e: React.FormEvent) {
-    e.preventDefault();
-    const trimmed = email.trim();
-    if (!trimmed) return;
-    setError(''); setName(trimmed);
-    setPin(''); setSigninStep('pin');
-  }
-
-  async function handlePinSubmit(e?: React.FormEvent) {
+  async function handleSignIn(e?: React.FormEvent) {
     e?.preventDefault();
-    if (!pin) return;
+    if (!email.trim() || !pin) return;
     setBusy(true); setError('');
     const result = await login(email.trim(), pin);
-    if (!result.success) { setError(result.error || INVALID_LOGIN); setPin(''); setBusy(false); }
+    if (!result.success) { setError(result.error || INVALID_LOGIN); setPin(''); setBusy(false); setTimeout(() => pinRef.current?.focus(), 0); }
   }
 
   function handleRegEmailNext(e: React.FormEvent) {
@@ -137,51 +126,30 @@ export function LoginPage() {
         {/* SIGN IN */}
         {flow === 'signin' && (
           <>
-            {signinStep === 'email' && (
-              <form onSubmit={handleSignInEmail}>
-                <label style={labelStyle}>Email or username</label>
-                <input
-                  ref={emailRef} style={inputStyle} type="text" value={email}
-                  onChange={(e) => { setEmail(e.target.value); setError(''); }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
-                  autoComplete="username" autoCapitalize="off" spellCheck={false} disabled={busy}
-                />
-                {error && <p style={errorStyle}>{error}</p>}
-                <button type="submit" style={btnStyle(!email.trim() || busy)} disabled={busy || !email.trim()}>
-                  {busy ? 'Checking…' : 'Continue'}
-                </button>
-              </form>
-            )}
-            {signinStep === 'pin' && (
-              <form onSubmit={handlePinSubmit}>
-                <p style={{ margin: '0 0 20px', fontSize: 14, color: 'rgba(255,255,255,0.5)', textAlign: 'center' }}>
-                  Welcome back, <strong style={{ color: 'rgba(255,255,255,0.9)' }}>{name}</strong>
-                </p>
-                <input type="text" name="username" value={email} autoComplete="username" readOnly hidden />
-                <label style={labelStyle} htmlFor="login-password">Password</label>
-                <input
-                  id="login-password"
-                  ref={pinRef}
-                  style={inputStyle}
-                  type="password"
-                  value={pin}
-                  onChange={(e) => { setPin(e.target.value); setError(''); }}
-                  onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
-                  onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
-                  autoComplete="current-password"
-                  name="password"
-                  disabled={busy}
-                />
-                {error && <p style={errorStyle}>{error}</p>}
-                <button type="submit" style={btnStyle(!pin || busy)} disabled={busy || !pin}>
-                  {busy ? 'Signing in…' : 'Sign in'}
-                </button>
-                <button type="button" onClick={() => { setSigninStep('email'); setEmail(''); setPin(''); setError(''); }} style={linkBtnStyle}>
-                  Use a different account
-                </button>
-              </form>
-            )}
+            <form onSubmit={handleSignIn}>
+              <label style={labelStyle} htmlFor="login-username">Email or username</label>
+              <input
+                id="login-username" name="username"
+                ref={emailRef} style={inputStyle} type="text" value={email}
+                onChange={(e) => { setEmail(e.target.value); setError(''); }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
+                autoComplete="username" autoCapitalize="off" spellCheck={false} disabled={busy}
+              />
+              <label style={{ ...labelStyle, marginTop: 16 }} htmlFor="login-password">Password</label>
+              <input
+                id="login-password" name="password"
+                ref={pinRef} style={inputStyle} type="password" value={pin}
+                onChange={(e) => { setPin(e.target.value); setError(''); }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.14)'; }}
+                autoComplete="current-password" disabled={busy}
+              />
+              {error && <p style={errorStyle} role="alert">{error}</p>}
+              <button type="submit" style={btnStyle(!email.trim() || !pin || busy)} disabled={busy || !email.trim() || !pin}>
+                {busy ? 'Signing in…' : 'Sign in'}
+              </button>
+            </form>
             {signupOpen && (
               <>
                 <div style={dividerStyle}>
@@ -310,7 +278,6 @@ const errorStyle: React.CSSProperties = {
   margin: '10px 0 0',
 };
 
-const linkBtnStyle: React.CSSProperties = { ...linkBtn, display: 'block', width: '100%', textAlign: 'center', marginTop: 8 };
 
 const textLinkStyle: React.CSSProperties = {
   background: 'none',

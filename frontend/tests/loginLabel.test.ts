@@ -6,7 +6,7 @@ const src = readFileSync(resolve(__dirname, '../src/pages/LoginPage.tsx'), 'utf8
 
 describe('login sign-in field', () => {
   it('accepts an email or a username', () => {
-    const signin = src.split("signinStep === 'email' && (")[1]!.split('</form>')[0]!;
+    const signin = src.split('<form onSubmit={handleSignIn}>')[1]!.split('</form>')[0]!;
     expect(signin).toContain('Email or username');
     expect(signin).toContain('type="text"');
     expect(signin).toContain('autoComplete="username"');

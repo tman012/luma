@@ -29,7 +29,8 @@ describe('LoginPage', () => {
     expect(input.type).toBe('text');
     expect(input.style.borderRadius).toBe('12px');
     fireEvent.change(input, { target: { value: 'taylor' } });
-    const btn = screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement;
+    fireEvent.change(container.querySelector('input[type="password"]')!, { target: { value: 'x' } });
+    const btn = screen.getByRole('button', { name: 'Sign in' }) as HTMLButtonElement;
     expect(btn.style.background).toMatch(/rgb\(59, 130, 246\)|#3b82f6/);
     const shell = container.querySelector('[data-step="login"]') as HTMLElement;
     expect(shell.style.background).toContain('rgb(21, 16, 42)');
@@ -41,25 +42,29 @@ describe('LoginPage', () => {
     expect(src).not.toContain('Confirm Password');
   });
 
-  it('password step: real password field, username hint, readable disabled button, exact error', async () => {
+  it('one page: username and password together, one Sign in button, exact error', async () => {
     const { container } = render(<MemoryRouter><LoginPage /></MemoryRouter>);
     const user = container.querySelector('input[autocomplete="username"]') as HTMLInputElement;
-    const cont = screen.getByRole('button', { name: 'Continue' }) as HTMLButtonElement;
-    expect(cont.disabled).toBe(true);
-    expect(cont.style.opacity).toBe('');
-    expect(cont.style.color).toBe('rgb(199, 206, 219)');
-    fireEvent.change(user, { target: { value: 'taylor' } });
-    await act(async () => { fireEvent.submit(user.form!); });
     const pw = container.querySelector('input[type="password"]') as HTMLInputElement;
+    expect(user.form).toBe(pw.form);
     expect(pw.getAttribute('autocomplete')).toBe('current-password');
-    const hint = container.querySelector('input[hidden][autocomplete="username"]') as HTMLInputElement;
-    expect(hint.value).toBe('taylor');
+    expect(screen.getByLabelText('Email or username')).toBe(user);
+    expect(screen.getByLabelText('Password')).toBe(pw);
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+    expect(screen.queryByText(/Welcome back/)).toBeNull();
+    const submits = container.querySelectorAll('form button[type="submit"]');
+    expect(submits.length).toBe(1);
     const btn = screen.getByRole('button', { name: 'Sign in' }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.style.opacity).toBe('');
+    expect(btn.style.color).toBe('rgb(199, 206, 219)');
+    fireEvent.change(user, { target: { value: 'taylor' } });
     expect(btn.disabled).toBe(true);
     fireEvent.change(pw, { target: { value: ' secret ' } });
     expect(btn.disabled).toBe(false);
-    await act(async () => { fireEvent.click(btn); });
+    await act(async () => { fireEvent.submit(user.form!); });
     expect(login).toHaveBeenCalledWith('taylor', ' secret ');
     expect(await screen.findByText('Invalid email, username, or password')).toBeTruthy();
+    expect(user.value).toBe('taylor');
   });
 });
