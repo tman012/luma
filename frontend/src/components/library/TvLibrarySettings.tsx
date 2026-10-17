@@ -160,7 +160,7 @@ function ShowRow({ s, first, open, onOpen }: { s: Show; first: boolean; open: bo
         <span role="img" aria-label="Needs review" data-testid="tv-review-dot"
           style={{ width: 8, height: 8, borderRadius: 4, background: T.warning, flex: 'none' }} />
       )}
-      <span data-testid="tv-show-subtitle" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span data-testid="tv-show-subtitle" style={{ minWidth: 0 }}>
         {showSubtitle(s)}
       </span>
       {review && lines.length > 0 && (

@@ -184,6 +184,7 @@ describe('needs review, in words (Tester tv1-8646479 M7/M8)', () => {
     const toggle = within(rows[0]!).getByTestId('tv-review-toggle');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByTestId('tv-review-list')).toBeNull();
+    expect(within(rows[0]!).getByTestId('tv-show-subtitle').style.whiteSpace).toBe('');   // wraps on phones, never clipped
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     const items = Array.from(screen.getByTestId('tv-review-list').querySelectorAll('li')).map(li => li.textContent);
