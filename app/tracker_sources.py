@@ -95,7 +95,7 @@ def trackers_in_use() -> bool:
 
 def indexer_available(settings) -> bool:
     """True when Sources has anything to search: an enabled tracker, or a
-    Prowlarr/Torznab connection on installs that still have one."""
+    indexer connection (Settings > Indexer) on installs that still have one."""
     try:
         if trackers_in_use():
             return True
@@ -173,19 +173,14 @@ def _resolve(host: str):
     return sorted({i[4][0] for i in infos})
 
 
-def _host_ok(host: str, public_only: bool, resolver=None) -> bool:
+def _host_ok(host: str, resolver=None) -> bool:
+    """Every address *host* resolves to is public (the same rule tracker HTTP
+    applies to every hop)."""
+    from app.tracker_http import address_allowed
     addrs = (resolver or _resolve)(host)
     if not addrs:
         return False
-    for a in addrs:
-        if _blocked_address(a):
-            return False
-        if public_only:
-            ip = ipaddress.ip_address(a.split('%', 1)[0])
-            ip = getattr(ip, 'ipv4_mapped', None) or ip
-            if not ip.is_global:
-                return False
-    return True
+    return all(not _blocked_address(a) and address_allowed(a) for a in addrs)
 
 
 def _secret_values(cfg: Dict[str, Any]):
@@ -248,11 +243,11 @@ def fetch_release(token: Optional[str], resolver=None) -> Tuple[str, Any]:
         if o is None:
             raise GrabError('This download link isn’t valid.', 502)
         if o == base:
-            if not _host_ok(o[1], public_only=False, resolver=resolver):
+            if not _host_ok(o[1], resolver=resolver):
                 raise GrabError('This download link isn’t allowed.', 502)
             return dict(creds)
         # Another origin: never with a saved credential.
-        if any(s in url for s in secrets) or not _host_ok(o[1], public_only=True, resolver=resolver):
+        if any(s in url for s in secrets) or not _host_ok(o[1], resolver=resolver):
             raise GrabError('This download link points to another site and wasn’t fetched.', 502)
         return {}
 

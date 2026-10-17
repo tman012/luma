@@ -3,7 +3,7 @@ import { apiFetch } from '../apiClient';
 
 /**
  * Whether Sources has anything to search: Luma's own trackers (Settings >
- * Trackers) or, on installs that still have one, a Prowlarr/Torznab
+ * Trackers) or, on installs that still have one, an indexer
  * connection. Read from /api/sources/config each time a Sources sheet opens,
  * so a tracker added a moment ago counts.
  *

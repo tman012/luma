@@ -31,7 +31,7 @@ answer = { status: 200, body: { releases: [
     size: 4831838208, seeders: 1234, leechers: 56, quality: 'BLURAY-1080P', protocol: 'torrent',
     download_url: '/api/trackers/release/abcdefghijklmnopqrstuvwx', info_hash: '', pub_date: '',
     origin: 'indexer', rejected: false, rejection_reasons: [], tracker_type: 'iptorrents' },
-  { guid: 'g2', indexer: 'Prowlarr IPT', title: 'x', size: 1, seeders: 1 },
+  { guid: 'g2', indexer: 'My IPT', title: 'x', size: 1, seeders: 1 },
 ] } };
 fetchAllResults('The Nut Job', 'movie', 2014).then((rows) => console.log(JSON.stringify({ rows, calls })));
 """)

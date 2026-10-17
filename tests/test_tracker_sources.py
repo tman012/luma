@@ -1,6 +1,6 @@
 """PR3: Sources and grab from Luma's own trackers (Settings > Trackers).
 
-Mocked trackers and a mocked qBittorrent only. Prowlarr and Torznab clients
+Mocked trackers and a mocked qBittorrent only. The legacy indexer clients
 are rigged to fail, so every passing test proves the direct path."""
 
 import hashlib
@@ -207,7 +207,7 @@ def lan_anon(test_app, env):
 
 
 def torznab(store, host='t.example', **over):
-    body = {'type': 'torznab', 'name': 'Jack', 'url': f'https://{host}/api', 'api_key': APIKEY,
+    body = {'type': 'torznab', 'name': 'Indexer', 'url': f'https://{host}/api', 'api_key': APIKEY,
             'categories': [2000, 5000], 'priority': 25}
     body.update(over)
     rec, errors = store.create(body)
@@ -342,12 +342,25 @@ def test_link_local_metadata_and_private_other_hosts_are_never_fetched(signed_in
     assert len(env['mock'].calls) == 1 and env['qbit'].added == []
 
 
-def test_lan_torznab_tracker_may_serve_its_own_downloads(signed_in, env):
+def test_tracker_on_a_private_address_gets_no_download_request(signed_in, env):
     torznab(env['store'], host='lan.example')
     link = f'https://lan.example/dl/1?apikey={APIKEY}'
     env['mock'].set('lan.example', R(body=rss(('The Nut Job 2014 1080p WEB-DL', link))), R(body=torrent_bytes()))
     rel = _search(signed_in)[0]
+    calls = len(env['mock'].calls)
+    r = _grab(signed_in, rel['download_url'])
+    assert r.status_code == 502 and env['qbit'].added == []
+    assert len(env['mock'].calls) == calls
+
+
+def test_public_torznab_link_with_its_own_key_is_fetched(signed_in, env):
+    torznab(env['store'])
+    link = f'https://t.example/dl/1?apikey={APIKEY}'
+    env['mock'].set('t.example', R(body=rss(('The Nut Job 2014 1080p WEB-DL', link))), R(body=torrent_bytes()))
+    rel = _search(signed_in)[0]
+    assert APIKEY not in rel['download_url']
     assert _grab(signed_in, rel['download_url']).status_code == 200
+    assert len(env['qbit'].added) == 1
 
 
 def test_magnet_release_goes_to_qbittorrent_as_a_magnet(signed_in, env):
