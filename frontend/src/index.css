@@ -1347,6 +1347,15 @@ input[type="search"]::-webkit-search-cancel-button {
 html.luma-minimal [data-modal-actions] {
   display: none !important;
 }
+/* Sources (the Prowlarr port) stays in minimal builds: an action row that
+   holds the marked Sources button shows that button only. */
+html.luma-minimal [data-modal-actions]:has(> [data-modal-sources]) {
+  display: flex !important;
+  justify-content: center;
+}
+html.luma-minimal [data-modal-actions]:has(> [data-modal-sources]) > :not([data-modal-sources]) {
+  display: none !important;
+}
 
 /* LUMA_MINIMAL: the search layer covers the home header (no nav behind it). */
 html.luma-minimal .kiosk-search-dim { z-index: 60; }

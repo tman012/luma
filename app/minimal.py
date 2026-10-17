@@ -31,8 +31,14 @@ ALLOWED_PATHS = frozenset({
     # Search and the detail popup: TMDB images through prod's proxy (works when
     # the browser can't reach image.tmdb.org) and the read-only ownership check.
     '/api/img/tmdb', '/api/check-ownership-batch',
+    # Prowlarr port (#16, PR2, PR3): Settings > Trackers and the popup's
+    # Sources with grab. Tracker use needs a real sign-in (owner-only for
+    # Settings > Trackers); the routes check that themselves.
+    '/api/trackers', '/api/sources/all-results', '/api/sources/config',
+    '/api/downloads/add', '/api/tmdb/match-search', '/settings/trackers',
 })
-ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/', '/settings/')
+ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/', '/settings/',
+                    '/api/trackers/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).
 # GET only, sign-in required like everything else in minimal mode.
 DETAIL_READ_PREFIXES = (
