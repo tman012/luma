@@ -82,8 +82,9 @@ def test_errors(fake, caplog):
     fake.answers = [Resp(429, {}, {'Retry-After': '1'}), Resp(body={'results': []})]
     assert tv_tmdb.search('x') == []                  # one retry after a rate limit
     fake.answers = [Resp(429, {}), Resp(429, {})]
-    with pytest.raises(tv_tmdb.TmdbError):
+    with pytest.raises(tv_tmdb.TmdbError) as e:       # Tester tv1-8646479 M5
         tv_tmdb.search('x')
+    assert str(e.value) == tv_tmdb.BUSY == 'TMDB is busy. Try again later.'
     fake.answers = [Resp(401, {})]
     with pytest.raises(tv_tmdb.TmdbError, match='refused'):
         tv_tmdb.search('x')

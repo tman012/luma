@@ -35,6 +35,7 @@ class TmdbError(Exception):
 
 NO_KEY = 'Add a TMDB key in Connectors'
 UNREACHABLE = "Couldn't reach TMDB"
+BUSY = 'TMDB is busy. Try again later.'
 
 
 def init(*, get_key: Callable[[], str], session_factory: Callable = requests.Session) -> None:
@@ -82,6 +83,8 @@ def _get(path: str, params: Optional[Dict[str, Any]] = None) -> Optional[Dict[st
                     wait = 2
                 time.sleep(max(wait, 0))
                 continue
+            if r.status_code == 429:
+                raise TmdbError(BUSY)       # still rate limited after one wait
             if r.status_code == 404:
                 return None
             if r.status_code in (401, 403):

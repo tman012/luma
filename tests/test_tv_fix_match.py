@@ -131,3 +131,15 @@ def test_match_routes_owner_only(minimal_app, scanned):
     for m, u in (('get', '/api/settings/tv/search?q=x'), ('put', '/api/settings/tv/shows/1/match'),
                  ('post', '/api/settings/tv/unmatched/1/match')):
         assert getattr(other, m)(u, json={'tmdb_id': 1}, environ_base=REMOTE, headers=HDR).status_code == 403
+
+
+def test_tmdb_busy_reads_plainly(owner, fake_tmdb):  # noqa: F811
+    """Tester tv1-8646479 M5: a TMDB 429 (after the one retry) says so in the picker, the match and the scan."""
+    fake_tmdb.fail = tv_tmdb.BUSY
+    r = owner.get('/api/settings/tv/search?q=x', environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 502 and r.get_json()['error'] == 'TMDB is busy. Try again later.'
+    r = owner.post(f'/api/settings/tv/unmatched/{_uid("Mystery Show")}/match', json={'tmdb_id': 1001},
+                   environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 502 and r.get_json()['error'] == 'TMDB is busy. Try again later.'
+    tv_scan.run(now=5000.0)
+    assert tv_scan.status()['error'] == 'TMDB is busy. Try again later.'
