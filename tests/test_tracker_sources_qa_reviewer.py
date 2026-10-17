@@ -3,7 +3,8 @@
 1. A Torznab item's <guid>/<comments> carrying the tracker passkey must not
    reach the browser through /api/sources/all-results (owner or approved user).
 2. /api/downloads/add with a pasted absolute URL (127.x, 10.x, 169.254.169.254,
-   a LAN name) must never be fetched server-side, and a user who may not use
+   a LAN name) must never be fetched server-side (DNS is stubbed, so this
+   holds on any resolver), and a user who may not use
    trackers (signed in but not approved) must not push anything to qBittorrent.
 3. A grab whose tracker link redirects to the metadata address, or to another
    site with a saved secret in the URL, gets 502 and sends nothing there.
@@ -17,6 +18,7 @@
 Items 1 and 2 FAIL on 16a326a (they document the bugs); item 3 passes.
 """
 
+import ipaddress
 import json
 
 import pytest
@@ -26,7 +28,7 @@ import requests.sessions
 
 import app.main
 import app.user_auth
-from app import tracker_clients, tracker_http, tracker_search
+from app import outbound_guard, tracker_clients, tracker_http, tracker_search
 from tests.test_tracker_sources import (  # noqa: F401  (fixtures)
     ADDRS, APIKEY, DL, LAN, ORIGIN, PASSKEY, R, TMDB, _grab, _owner, _search, env, lan_anon, signed_in,
     torrent_bytes, torznab)
@@ -81,20 +83,71 @@ INTERNAL = ['http://127.0.0.1:9696/x.torrent', 'http://10.0.0.5/x.torrent', 'htt
             'http://192.168.1.20:8080/api/v2/app/preferences', 'http://[::1]:5001/x', 'http://lan.example/x.torrent']
 
 
+@pytest.fixture
+def pasted_dns(monkeypatch):
+    """Pasted links go through the real outbound_guard.check_url; only DNS
+    and the socket are faked. Names come from ADDRS (lan.example is a LAN
+    name: 192.168.1.50); any other name fails like NXDOMAIN, so the result
+    never depends on the machine's resolver (CI's answers NXDOMAIN for
+    lan.example; one that maps every name to a non-public address hid that).
+    Every connection attempt is recorded and refused, so nothing ever leaves
+    the test."""
+    opened = []
+
+    def resolve(host, port):
+        h = host.strip('[]')
+        try:
+            return [str(ipaddress.ip_address(h.split('%', 1)[0]))]
+        except ValueError:
+            pass
+        if h in ADDRS:
+            return list(ADDRS[h])
+        raise outbound_guard.FetchError(f'Could not resolve {host}')
+
+    def no_open(scheme, ip, port, host, target, *a, **kw):
+        opened.append((ip, host))
+        raise outbound_guard.FetchError('sockets are off in tests')
+
+    monkeypatch.setattr(outbound_guard, '_resolve', resolve)
+    monkeypatch.setattr(outbound_guard, '_open', no_open)
+    return opened
+
+
 @pytest.mark.parametrize('url', INTERNAL)
 @pytest.mark.parametrize('approved', [False, True])
-def test_pasted_internal_url_is_never_fetched_by_a_member(test_app, env, url, approved):
+def test_pasted_internal_url_is_never_fetched_by_a_member(test_app, env, pasted_dns, url, approved):
     c = _member(test_app, approved=approved)
     r = c.post('/api/downloads/add', headers=ORIGIN, content_type='application/json',
                data=json.dumps({'torrent_url': url, 'torrent_name': 'x'}))
     assert r.status_code in (400, 403), (r.status_code, r.get_data(as_text=True))
+    assert pasted_dns == []
     assert env['qbit'].fetched == [] and env['qbit'].added == []
 
 
 @pytest.mark.parametrize('url', INTERNAL)
-def test_pasted_internal_url_is_never_fetched_for_the_owner(signed_in, env, url):
+def test_pasted_internal_url_is_never_fetched_for_the_owner(signed_in, env, pasted_dns, url):
     r = _grab(signed_in, url)
     assert r.status_code == 400, (r.status_code, r.get_data(as_text=True))
+    assert r.get_json()['error'] == 'Link not allowed'
+    assert pasted_dns == []
+    assert env['qbit'].fetched == [] and env['qbit'].added == []
+
+
+def test_pasted_unresolvable_name_is_never_fetched_for_the_owner(signed_in, env, pasted_dns):
+    # No address, so nothing to connect to: the grab fails (502) before any
+    # socket is opened, and qBittorrent is never handed the link.
+    r = _grab(signed_in, 'http://nxdomain.example/x.torrent')
+    assert r.status_code == 502, (r.status_code, r.get_data(as_text=True))
+    assert pasted_dns == []
+    assert env['qbit'].fetched == [] and env['qbit'].added == []
+
+
+def test_pasted_public_name_is_pinned_to_its_checked_address(signed_in, env, pasted_dns):
+    # Proves the stub above is the one in use: a public name gets as far as
+    # the socket, pinned to the address that passed the check.
+    r = _grab(signed_in, 'http://t.example/x.torrent')
+    assert r.status_code == 502, (r.status_code, r.get_data(as_text=True))
+    assert pasted_dns == [('93.184.216.34', 't.example')]
     assert env['qbit'].fetched == [] and env['qbit'].added == []
 
 
