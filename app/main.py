@@ -11079,6 +11079,11 @@ def _build_hero_movies():
     boost = settings.get('ui.hero.boost_popular_titles', False)
     pop_source = settings.get('ui.hero.popularity_source', 'tmdb')
 
+    # Minimal mode, nothing picked: the movie library with the most items
+    # (Plex's "default" movie section can be a tiny one, e.g. '3D').
+    if not section_id and _minimal.enabled():
+        section_id = _largest_movie_section_id(plex)
+
     # If no section configured, use default movie section
     if not section_id:
         health = plex.health_check()
@@ -11258,6 +11263,36 @@ def _hero_movies_for_request(movies):
     return out
 
 
+_largest_section_cache: Dict[str, Any] = {}
+_LARGEST_SECTION_TTL = 600
+
+
+def _largest_movie_section_id(plex) -> int:
+    """The id of the movie library with the most items (0 if none answers).
+    Cached for 10 minutes per Plex server."""
+    key = getattr(plex, 'plex_url', '') or 'global'
+    hit = _largest_section_cache.get(key)
+    if hit and time.time() - hit['ts'] < _LARGEST_SECTION_TTL:
+        return hit['id']
+    from app import home_rails as _hr
+    best, best_n = 0, -1
+    try:
+        movie_secs = [sec for sec in (_hr._sections(plex) or []) if sec.get('type') == 'movie']
+    except Exception as e:
+        logger.warning(f"Hero: library list failed: {e}")
+        movie_secs = []
+    for sec in movie_secs:
+        try:
+            n = int((plex.get_all_movies(int(sec['id']), limit=1) or {}).get('total') or 0)
+        except Exception:
+            continue
+        if n > best_n:
+            best, best_n = int(sec['id']), n
+    if best:
+        _largest_section_cache[key] = {'id': best, 'ts': time.time()}
+    return best
+
+
 # Web kiosk library (Settings > Kiosk): which movie library the slideshow
 # uses. Stored in prod's own setting (ui.hero.library_section_id).
 @app.route('/api/home/kiosk', methods=['GET', 'PUT'])
@@ -11282,6 +11317,8 @@ def home_kiosk_library():
         settings.update({'ui': {'hero': {'library_section_id': int(sid)}}})
         _hero_result_cache.clear()
     current = settings.get('ui.hero.library_section_id', 0) or 0
+    if not current and libs and _minimal.enabled():
+        current = _largest_movie_section_id(plex)
     if not current and libs:
         try:
             current = (plex.health_check() or {}).get('default_movie_section_id') or 0

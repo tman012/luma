@@ -147,3 +147,63 @@ def test_minimal_kiosk_shows_newest_ten_regardless_of_age(test_app, monkeypatch,
     assert len(movies) == expected     # prod keeps its 30-day window
     if minimal:
         assert [m['title'] for m in movies] == [f'Old {i}' for i in range(10)]
+
+
+class _ThreeLibPlex:
+    """:5002: nothing picked, and Plex's default movie section is '3D' (2 movies)."""
+    plex_url = 'http://plex.three-libs'
+    is_configured = True
+    SIZES = {8: 2, 1: 900, 9: 300}
+
+    def __init__(self):
+        self.fetched = []
+
+    def health_check(self):
+        return {'default_movie_section_id': 8}
+
+    def get_all_movies(self, section_id, sort='addedAt:desc', limit=50, offset=0, genre=None, timeout=15):
+        if limit > 1:
+            self.fetched.append(section_id)
+        n = min(limit, self.SIZES[section_id])
+        movies = [{'rating_key': section_id * 1000 + i, 'title': f'S{section_id} {i}', 'type': 'movie',
+                   'added_at': 2_000_000_000 - i, 'artPath': f'/library/metadata/{section_id * 1000 + i}/art/1',
+                   'genres': []} for i in range(n)]
+        return {'movies': movies, 'total': self.SIZES[section_id]}
+
+    def get_recently_added(self, section_id=None, limit=10):
+        self.fetched.append(section_id)
+        n = min(limit, self.SIZES[section_id])
+        return [{'rating_key': section_id * 1000 + i, 'title': f'S{section_id} {i}', 'type': 'movie',
+                 'added_at': 2_000_000_000 - i, 'artPath': f'/library/metadata/{section_id * 1000 + i}/art/1',
+                 'genres': []} for i in range(n)]
+
+
+def _three_sections(_plex):
+    return [{'id': '8', 'title': '3D', 'type': 'movie'}, {'id': '1', 'title': 'Movies', 'type': 'movie'},
+            {'id': '9', 'title': '4K Movies', 'type': 'movie'}, {'id': '2', 'title': 'TV Shows', 'type': 'show'}]
+
+
+@pytest.mark.parametrize('minimal', [True, False])
+def test_unpicked_kiosk_defaults_to_the_largest_movie_library(test_app, minimal_on, monkeypatch, minimal):
+    from app import home_rails
+    if not minimal:
+        monkeypatch.delenv('LUMA_MINIMAL', raising=False)
+    plex = _ThreeLibPlex()
+    monkeypatch.setattr(app.main, 'get_plex_for_request', lambda: plex)
+    monkeypatch.setattr(home_rails, '_sections', _three_sections)
+    app.main.settings.update({'ui': {'hero': {'library_section_id': 0}}})
+    app.main._hero_result_cache.clear()
+    app.main._largest_section_cache.clear()
+    with test_app.test_request_context('/api/hero/content'):
+        movies, _ = app.main._build_hero_movies()
+    app.main._hero_result_cache.clear()
+    app.main._largest_section_cache.clear()
+    if minimal:
+        assert plex.fetched == [1]                       # 'Movies' (900), not '3D' (2)
+        assert len(movies) == 10
+        # The picker shows that library as selected.
+        r = _client(test_app).get('/api/home/kiosk', environ_base=REMOTE)
+        assert r.json['id'] == '1'
+        app.main._largest_section_cache.clear()
+    else:
+        assert plex.fetched == [8]                       # prod keeps Plex's default section
