@@ -14,17 +14,34 @@ const cache = new Map<string, Promise<UltraBlurColors | null>>();
 const has = (c: UltraBlurColors | null | undefined): c is UltraBlurColors =>
   !!c && !!(c.topLeft || c.topRight || c.bottomRight || c.bottomLeft);
 
+/** A definite "no palette" answer (HTTP error or an empty palette) is kept
+ *  this long, so one popup open asks once instead of once per caller; a
+ *  network failure isn't kept at all. */
+export const MISS_TTL_MS = 60_000;
+const missAt = new Map<string, number>();
+
 function cached(url: string): Promise<UltraBlurColors | null> {
   let p = cache.get(url);
+  const miss = missAt.get(url);
+  if (p && miss !== undefined && Date.now() - miss > MISS_TTL_MS) {
+    cache.delete(url); missAt.delete(url); p = undefined;
+  }
   if (!p) {
     p = apiFetch(url)
       .then(r => (r.ok ? (r.json() as Promise<UltraBlurColors>) : null))
-      .then(c => (has(c) ? c : null))
-      .catch(() => null);
+      .then(c => {
+        if (has(c)) return c;
+        missAt.set(url, Date.now()); // answered, but nothing to show
+        return null;
+      }, () => {
+        cache.delete(url); // offline / aborted: may work on the next try
+        return null;
+      });
     cache.set(url, p);
-    if (cache.size > MAX_ENTRIES) cache.delete(cache.keys().next().value as string);
-    // A miss (offline, no key) may work later: don't keep it.
-    p.then(c => { if (!c) cache.delete(url); });
+    if (cache.size > MAX_ENTRIES) {
+      const k = cache.keys().next().value as string;
+      cache.delete(k); missAt.delete(k);
+    }
   }
   return p;
 }
@@ -74,5 +91,6 @@ export function getSeedColors(kind: ColorKind, ratingKey?: number, tmdbId?: numb
 
 export function _resetModalColors(): void {
   cache.clear();
+  missAt.clear();
   seeds.clear();
 }
