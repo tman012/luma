@@ -7,6 +7,7 @@ import { getBadgeColor, buildQualityGroups, buildScopeOptions, filterByScope } f
 import { ManualMatchPicker } from '@/components/media/ManualMatchPicker';
 import { grabToLibrary } from '@/services/allSourcesApi';
 import { useIndexerConfigured } from '@/services/sourcesAvailability';
+import { START_GLOW } from '@/components/start/StartUI';
 import {
   SegmentRow,
   orderSourceTypes,
@@ -110,7 +111,7 @@ function SourcesScreen({ children, zIndex, onBack, headerText, large }: {
   return (
     <div
       style={{
-        position: 'fixed', inset: 0, background: '#000', zIndex,
+        position: 'fixed', inset: 0, backgroundColor: 'var(--color-kiosk-black)', backgroundImage: START_GLOW, zIndex,
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
         padding: '40px clamp(20px, 5vw, 60px)',
       }}
@@ -503,7 +504,7 @@ function ExpandedTvSourcesView({
               {confirmTarget.indexer}
             </span>
           </div>
-          <div style={{ background: '#222', borderRadius: '20px', padding: '36px', width: '520px', maxWidth: '90%', border: '1px solid rgba(255,255,255,0.1)' }}>
+          <div style={{ background: 'linear-gradient(rgba(255,255,255,0.06), rgba(255,255,255,0.06)), #15102a', borderRadius: '20px', padding: '36px', width: '520px', maxWidth: '90%', border: '1px solid rgba(255,255,255,0.08)' }}>
             <p style={{ margin: '0 0 16px', fontSize: '15px', fontWeight: 500, color: '#fff', lineHeight: 1.5, wordBreak: 'break-word', textAlign: 'center' }}>
               {confirmTarget.title}
             </p>
@@ -549,7 +550,7 @@ function ExpandedTvSourcesView({
                 type="button" onClick={handleConfirmDownload} disabled={confirmLoading || !!disabledReason}
                 style={{
                   padding: '16px 40px', borderRadius: '50px',
-                  border: '1px solid #999', background: '#555',
+                  border: '1px solid #3b82f6', background: '#3b82f6',
                   color: '#fff', fontSize: '18px', fontWeight: 600, minHeight: '56px',
                   cursor: (confirmLoading || disabledReason) ? 'default' : 'pointer', transition: 'background 0.2s ease, border-color 0.2s ease',
                   opacity: (confirmLoading || disabledReason) ? 0.5 : 1,
@@ -615,7 +616,7 @@ function ReleaseCard({
       role="button"
       onClick={() => onToggle(releaseKey(release))}
       style={{
-        background: expanded ? '#1a1a1c' : '#111112',
+        background: expanded ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)',
         borderRadius: '14px',
         padding: '14px 16px',
         marginBottom: '8px',

@@ -144,9 +144,11 @@ export function PinPad({ value, onChange, onComplete, shake, disabled, compact }
 
 /* ── Styles ─────────────────────────────────────────────────────────────── */
 
+export const START_GLOW = 'radial-gradient(ellipse at 50% 30%, #262a66 0%, #15102a 55%, #0a0818 100%)';
+
 const page: React.CSSProperties = {
   position: 'fixed', inset: 0, overflow: 'auto', zIndex: 100,
-  background: 'radial-gradient(ellipse at 50% 30%, #262a66 0%, #15102a 55%, #0a0818 100%)',
+  background: START_GLOW,
   color: '#fff', fontFamily: FONT, WebkitFontSmoothing: 'antialiased',
 };
 const center: React.CSSProperties = {

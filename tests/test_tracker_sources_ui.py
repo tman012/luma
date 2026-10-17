@@ -144,3 +144,20 @@ def test_zero_trackers_empty_state_is_clean():
         assert block.count('<span') == 1 and '<button' not in block, f   # title only: no helper, no action
         assert 'noSources && indexerConfigured === true' in src
 
+
+
+def test_sources_panels_use_the_kiosk_theme():
+    glow = _read('components/start/StartUI.tsx')
+    assert "export const START_GLOW = 'radial-gradient(" in glow
+    assert 'background: START_GLOW' in glow
+    for rel in ('components/media/MovieDetailModal/SourcesPanel.tsx',
+                'components/media/TvDetailModal/TvSourcesPanel.tsx'):
+        src = _read(rel)
+        assert "import { START_GLOW } from '@/components/start/StartUI';" in src
+        assert "backgroundColor: 'var(--color-kiosk-black)', backgroundImage: START_GLOW" in src
+        assert "linear-gradient(rgba(255,255,255,0.06), rgba(255,255,255,0.06)), #15102a" in src
+        assert "border: '1px solid rgba(255,255,255,0.08)'" in src
+        assert "expanded ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)'" in src
+        assert "background: '#3b82f6'" in src
+        for old in ("background: '#000'", "background: '#222'", "'#111112'", "'#1a1a1c'"):
+            assert old not in src, (rel, old)
