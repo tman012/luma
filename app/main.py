@@ -15852,6 +15852,25 @@ def _magnet_info_hash(magnet: str):
         return None
 
 
+def _fetch_pasted_torrent(url: str):
+    """Fetch a user-supplied .torrent link with the per-hop outbound guard.
+
+    The single swap point for the tracker stack's tracker_http."""
+    from app import outbound_guard
+    return outbound_guard.fetch(url)
+
+
+def _safe_magnet(uri: str) -> Optional[str]:
+    """A magnet URI that is one line, or None. qBittorrent splits its `urls`
+    field on newlines, so a second line would be fetched by qBit itself."""
+    uri = (uri or '').strip()
+    if not uri.lower().startswith('magnet:'):
+        return None
+    if any(c in uri for c in '\r\n\x00'):
+        return None
+    return uri
+
+
 @app.route('/api/downloads/add', methods=['POST'])
 def add_torrent_to_qbittorrent():
     """Add a torrent to qBittorrent and track it.
@@ -15868,18 +15887,25 @@ def add_torrent_to_qbittorrent():
     BEFORE lying about success and so qBit never has to reach the indexer), then
     upload the bytes, then poll qBit until the exact hash appears.
     """
+    denied = _require_admin()
+    if denied:
+        return denied
     try:
         from app.auto_rename import auto_renamer
+        from app.outbound_guard import BlockedURL
         import requests as req
         import time as _time
 
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         torrent_url = (data.get('torrent_url') or '').strip()
         tmdb_data = data.get('tmdb_data')
         torrent_name = data.get('torrent_name')
 
         if not torrent_url:
             return jsonify({'error': 'Missing torrent_url'}), 400
+        if torrent_url.lower().startswith('magnet:'):
+            if not _safe_magnet(torrent_url):
+                return jsonify({'error': 'Link not allowed'}), 400
 
         qbit_url = settings.get('qbittorrent.url')
         qbit_user = settings.get('qbittorrent.username')
@@ -15907,8 +15933,13 @@ def add_torrent_to_qbittorrent():
             # Fetch the .torrent ourselves. This is the crux of the fix: if the
             # indexer link is dead/expired/HTML we find out NOW and fail loudly,
             # instead of handing qBit a URL it silently fails to fetch.
+            # Every hop is checked and pinned (no private/metadata addresses,
+            # no automatic redirects) — see app/outbound_guard.py.
             try:
-                dl = session.get(torrent_url, timeout=30, allow_redirects=True)
+                dl = _fetch_pasted_torrent(torrent_url)
+            except BlockedURL as e:
+                logger.warning(f"Refused torrent link: {e}")
+                return jsonify({'error': 'Link not allowed'}), 400
             except Exception as e:
                 logger.error(f"Failed to fetch torrent from indexer: {e}")
                 return jsonify({'error': f'Could not fetch the torrent from the indexer: {e}'}), 502
@@ -15917,12 +15948,17 @@ def add_torrent_to_qbittorrent():
             body_head = dl.content[:8].lower() if dl.content else b''
 
             if final_url.startswith('magnet:'):
+                torrent_url = _safe_magnet(dl.url)
+                if not torrent_url:
+                    return jsonify({'error': 'Link not allowed'}), 400
                 is_magnet = True
-                torrent_url = dl.url
                 expected_hash = _magnet_info_hash(torrent_url)
             elif body_head.startswith(b'magnet:'):
+                lines = dl.content.decode('utf-8', 'ignore').strip().splitlines()
+                torrent_url = _safe_magnet(lines[0] if lines else '')
+                if not torrent_url:
+                    return jsonify({'error': 'Link not allowed'}), 400
                 is_magnet = True
-                torrent_url = dl.content.decode('utf-8', 'ignore').strip().splitlines()[0]
                 expected_hash = _magnet_info_hash(torrent_url)
             elif dl.status_code == 200 and dl.content[:1] == b'd':
                 torrent_bytes = dl.content
