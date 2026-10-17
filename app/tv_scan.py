@@ -47,6 +47,9 @@ MISSING = 'Folder not found'
 
 _scan_lock = threading.Lock()
 _state: Dict[str, Any] = {'running': False, 'error': None, 'summary': None}
+# Scheduled scans back off while TMDB fails: 10 min, 20, 40, ... up to the
+# rescan interval. Any scan that reaches TMDB resets it; a manual Scan ignores it.
+_backoff: Dict[str, float] = {'fails': 0, 'until': 0.0}
 
 
 # --------------------------------------------------------------------------- listing (read-only)
@@ -478,11 +481,16 @@ def run(retry_unmatched: bool = True, now: Optional[float] = None) -> bool:
     if not _scan_lock.acquire(blocking=False):
         return False
     _state.update(running=True, error=None)
+    started = time.time() if now is None else now
     try:
         _state['summary'] = scan_all(now, retry_unmatched)
+        _backoff.update(fails=0, until=0.0)
     except tv_tmdb.TmdbError as e:
         _state['error'] = str(e)
-        logger.warning('TV scan stopped: %s', e)
+        _backoff['fails'] += 1
+        _backoff['until'] = started + backoff_s(int(_backoff['fails']))
+        logger.warning('TV scan stopped: %s (next scheduled try in %d min)', e,
+                       backoff_s(int(_backoff['fails'])) // 60)
     except Exception as e:
         _state['error'] = 'Scan failed'
         logger.error('TV scan failed: %s', type(e).__name__, exc_info=True)
@@ -513,6 +521,14 @@ _sched_stop = threading.Event()
 _sched_thread: Optional[threading.Thread] = None
 
 
+def backoff_s(fails: int) -> int:
+    """Wait after *fails* TMDB failures in a row: 2 ticks, then doubling, at
+    most the rescan interval."""
+    from app import tv_settings
+    cap = int(tv_settings.load()['rescan_interval_h'] * 3600)
+    return min(TICK_S * 2 ** max(fails, 1), cap)
+
+
 def due(now: float) -> bool:
     """A scheduled scan is due: TV paths exist and the last scan is older
     than rescan_interval_h (or there never was one)."""
@@ -528,6 +544,8 @@ def tick(now: Optional[float] = None) -> bool:
     """One scheduler step: scan when due. Scheduled scans keep unmatched
     folders as they are (a manual Scan asks TMDB about them again)."""
     now = time.time() if now is None else now
+    if now < _backoff['until']:
+        return False                  # TMDB failed recently: wait (backoff_s)
     try:
         if not due(now):
             return False

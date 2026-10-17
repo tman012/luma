@@ -65,8 +65,9 @@ def test_a_tmdb_error_is_recorded_and_retried_next_tick(lib, fake_tmdb):  # noqa
     assert tv_scan.status()['error'] == "Couldn't reach TMDB"
     fake_tmdb.fail = None
     assert tv_scan.due(1e6 + 60)              # the failed scan didn't count
-    tv_scan.tick(1e6 + 60)
-    assert tv_scan.status()['error'] is None and tv_scan.last_scan() == 1e6 + 60
+    assert tv_scan.tick(1e6 + 60) is False    # ...but the scheduler backs off (Reviewer)
+    tv_scan.tick(1e6 + 600)
+    assert tv_scan.status()['error'] is None and tv_scan.last_scan() == 1e6 + 600
 
 
 def test_scheduler_thread_starts_once_and_stops(monkeypatch):
@@ -109,3 +110,37 @@ def test_one_readable_path_still_counts(lib, tmp_path):
     tv_settings.save(st)
     assert tv_scan.tick(3e6) is True
     assert tv_scan.status()['summary']['missing'] == ['t_0000bbbb'] and tv_scan.last_scan() == 3e6
+
+
+
+# Reviewer: the scheduled rescan backs off while TMDB fails.
+
+@pytest.fixture
+def fresh_backoff(monkeypatch):
+    monkeypatch.setattr(tv_scan, '_backoff', {'fails': 0, 'until': 0.0})
+
+
+def test_backoff_doubles_up_to_the_interval_and_resets(lib, fake_tmdb, fresh_backoff):  # noqa: F811
+    from app import tv_tmdb
+    assert [tv_scan.backoff_s(n) for n in (1, 2, 3, 4, 5, 6, 7, 8)] == \
+        [600, 1200, 2400, 4800, 9600, 19200, 21600, 21600]              # 6 h default interval
+    fake_tmdb.fail = tv_tmdb.BUSY
+    t, tries = 1e7, []
+    while t < 1e7 + 12 * H:
+        if tv_scan.tick(t):
+            tries.append(int(t - 1e7))
+        t += tv_scan.TICK_S
+    assert tries == [0, 600, 1800, 4200, 9000, 18600, 37800]
+    fake_tmdb.fail = None
+    t = 1e7 + 37800 + 21600
+    assert tv_scan.tick(t) is True and tv_scan.status()['error'] is None
+    assert tv_scan._backoff == {'fails': 0, 'until': 0.0}
+
+
+def test_a_manual_scan_ignores_the_backoff(lib, fake_tmdb, fresh_backoff):  # noqa: F811
+    from app import tv_tmdb
+    fake_tmdb.fail = tv_tmdb.UNREACHABLE
+    assert tv_scan.tick(2e7) is True and not tv_scan.tick(2e7 + 300)
+    fake_tmdb.fail = None
+    assert tv_scan.run(now=2e7 + 300) is True                           # the Scan button
+    assert tv_scan.status()['error'] is None and tv_scan.tick(2e7 + 600) is False   # scanned: not due

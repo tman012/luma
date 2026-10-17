@@ -21,6 +21,7 @@ def lib(tv_env, fake_tmdb, tmp_path):  # noqa: F811
     root = build(tv_env / 'TV', outside=tmp_path / 'outside')
     tv_settings.save({'paths': [{'id': PID, 'name': 'TV', 'path': str(root)}]})
     tv_scan._state.update(running=False, error=None, summary=None)
+    tv_scan._backoff.update(fails=0, until=0.0)
     return root
 
 
