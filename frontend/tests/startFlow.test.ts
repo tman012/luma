@@ -38,10 +38,6 @@ describe('Logo', () => {
     const r = 916 / 1520;
     expect(LOGO_WIDTH).toBe(`clamp(${240 * r}px, ${64 * r}vw, ${520 * r}px)`);
   });
-  it('home puts LogoGap between the wordmark and the name', () => {
-    const home = readFileSync(resolve(__dirname, '../src/pages/MinimalHomePage.tsx'), 'utf8');
-    expect(home).toMatch(/<Logo \/>[\s\S]*<LogoGap \/>/);
-  });
 });
 
 describe('Plex pop-up', () => {

@@ -29,6 +29,7 @@ import { apiFetch } from './apiClient';
 import { isMinimal } from './minimal';
 import { MinimalHomePage } from '@/pages/MinimalHomePage';
 import { SetupToast } from '@/components/start/SetupToast';
+import { LibrariesPage } from '@/pages/LibrariesPage';
 import { getUrlBase } from '@/urlHelpers';
 
 // Lazy-load non-home routes — keeps initial bundle small
@@ -234,6 +235,7 @@ function MinimalApp() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/start" element={<StartPage />} />
           <Route path="/unlock" element={<UnlockPage />} />
+          <Route path="/settings/libraries" element={<LibrariesPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         <SetupToast />
@@ -272,6 +274,8 @@ export default function App() {
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/start" element={<StartPage />} />
                     <Route path="/unlock" element={<UnlockPage />} />
+
+                    <Route path="/settings/libraries" element={<AuthGate><LibrariesPage /></AuthGate>} />
 
                     {/* Setup — requires auth */}
                     <Route
