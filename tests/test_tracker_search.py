@@ -394,161 +394,40 @@ def test_search_test_goes_through_the_guard(env):
     assert e.value.kind == 'rate' and env['mock'].calls == []
 
 
-# ------------------------------------------------------------------ release downloads (server-side)
+# ------------------------------------------------------------------ release links follow the tracker
 
-TORRENT = b'd8:announce30:https://t.example/announce/abc4:infod6:lengthi1e4:name1:aee'
-
-
-def _release(env, store_fn=torznab, host='t.example', body=None, **kw):
-    rec = store_fn(env['store'], **kw)
-    if store_fn is ipt:
-        env['mock'].set(host, R(body=IPT_HTML))
-    else:
-        env['mock'].set(host, R(body=body or rss(('Movie 2020 1080p WEB-DL', 3, 1000))))
+def _issued(env):
+    rec = torznab(env['store'])
+    env['mock'].set('t.example', R(body=rss(('Movie 2020 1080p WEB-DL', 3, 1000))))
     out = LumaTrackersClient(env['engine']).search_all('Movie', 'movie', 2020)
-    env['mock'].calls.clear()
-    return rec, out[0]['download_url']
+    return rec, out[0]['download_url'].rsplit('/', 1)[1]
 
 
-def test_release_token_parsing():
-    tok = 'A' * 32
-    assert tracker_search.release_token(f'/api/trackers/release/{tok}') == tok
-    assert tracker_search.release_token(f'/luma/api/trackers/release/{tok}') == tok
-    assert tracker_search.release_token(f'http://host:5002/api/trackers/release/{tok}') == tok
-    for bad in ('', None, 'magnet:?xt=urn:btih:abc', 'https://t.example/dl/x?passkey=1',
-                '/api/trackers/release/short', f'/api/trackers/release/{tok}/../x'):
-        assert tracker_search.release_token(bad) is None
-
-
-def test_fetch_release_returns_validated_torrent_bytes(env):
-    rec, link = _release(env)
-    env['mock'].set('t.example', R(body=TORRENT, headers={'Content-Type': 'application/x-bittorrent'}))
-    got = tracker_search.fetch_release(link)
-    assert got['torrent'] == TORRENT and got['tracker'] == 'Jack' and got['tracker_type'] == 'torznab'
-    assert got['tracker_id'] == rec['id']
-    call = env['mock'].calls[0]
-    assert call['url'] == f'https://t.example/dl/Movie.2020.1080p.WEB-DL?passkey={PASSKEY}'
-    assert 'Cookie' not in (call.get('headers') or {})
-
-
-def test_fetch_release_ipt_sends_cookie_only_to_its_own_host(env):
-    rec, link = _release(env, ipt, host='ipt.example')
-    env['mock'].set('ipt.example', R(302, headers={'Location': 'https://cdn.example/f/555.torrent'}))
-    env['mock'].set('cdn.example', R(body=TORRENT))
-    got = env['engine'].fetch_release(link)
-    assert got['torrent'] == TORRENT and got['tracker_type'] == 'iptorrents'
-    first, second = env['mock'].calls
-    assert first['url'] == 'https://ipt.example/download.php/555/The.Nut.Job.torrent'
-    assert first['headers']['Cookie'] == COOKIE
-    assert second['url'].startswith('https://cdn.example/') and 'Cookie' not in second['headers']
-
-
-def test_fetch_release_magnets(env):
-    rec, link = _release(env)
-    magnet = 'magnet:?xt=urn:btih:' + 'a' * 40 + '&tr=https%3A%2F%2Ft.example%2Fannounce'
-    env['mock'].set('t.example', R(302, headers={'Location': magnet}))
-    assert env['engine'].fetch_release(link)['magnet'] == magnet
-    env['mock'].set('t.example', R(body=magnet + '\n'))
-    assert env['engine'].fetch_release(link)['magnet'] == magnet
-    # A magnet straight from the tracker's results needs no request at all.
-    env['mock'].calls.clear()
-    tok = env['engine'].tokens.issue(rec['id'], magnet)
-    assert env['engine'].fetch_release(tracker_search.release_path(tok))['magnet'] == magnet
-    assert env['mock'].calls == []
-
-
-def test_fetch_release_unknown_deleted_or_disabled_is_expired(client, env):
-    with pytest.raises(tracker_search.ReleaseUnavailable) as e:
-        env['engine'].fetch_release('/api/trackers/release/' + 'B' * 32)
-    assert e.value.kind == 'expired' and e.value.message == 'Release link expired'
-    rec, link = _release(env)
-    env['store'].set_enabled(rec['id'], False)
-    with pytest.raises(tracker_search.ReleaseUnavailable) as e:
-        env['engine'].fetch_release(link)
-    assert e.value.kind == 'expired'
-    env['store'].set_enabled(rec['id'], True)
+def test_deleting_a_tracker_drops_its_release_links(client, env):
+    rec, tok = _issued(env)
+    other = env['engine'].tokens.issue(999, 'https://elsewhere.example/dl/1')
     assert client.delete(f"/api/trackers/{rec['id']}").status_code == 200
-    assert env['engine'].tokens.resolve(tracker_search.release_token(link)) is None
-    assert env['mock'].calls == []
+    assert env['engine'].tokens.resolve(tok) is None
+    assert env['engine'].tokens.resolve(other) == (999, 'https://elsewhere.example/dl/1')
+    again = ReleaseTokens(env['store'], env['tmp'] / 'tracker_releases.json')
+    assert again.resolve(tok) is None
 
 
 def test_changing_the_tracker_url_drops_its_release_links(client, env):
-    rec, link = _release(env)
+    rec, tok = _issued(env)
     r = client.put(f"/api/trackers/{rec['id']}", data=json.dumps({
         'type': 'torznab', 'name': 'Jack', 'url': 'https://other.example/api', 'api_key': APIKEY,
         'categories': [2000], 'priority': 25}), content_type='application/json')
     assert r.status_code == 200, r.get_json()
-    with pytest.raises(tracker_search.ReleaseUnavailable) as e:
-        env['engine'].fetch_release(link)
-    assert e.value.kind == 'expired' and env['mock'].calls == []
+    assert env['engine'].tokens.resolve(tok) is None
 
 
-def test_fetch_release_login_page_is_an_auth_backoff(env):
-    rec, link = _release(env, ipt, host='ipt.example')
-    env['mock'].set('ipt.example', R(body='<form action="login.php"><input name="password"></form>'))
-    with pytest.raises(tracker_search.ReleaseUnavailable) as e:
-        env['engine'].fetch_release(link)
-    assert e.value.kind == 'tracker' and e.value.tracker_error.kind == 'auth'
-    assert env['guard'].blocked(guard_key(rec))[1] == 'auth'
-    assert env['store'].get(rec['id'])['status']['state'] == 'error'
-    assert COOKIE not in e.value.message
-
-
-def test_fetch_release_429_backs_off_downloads_and_searches(env):
-    rec, link = _release(env)
-    env['mock'].set('t.example', R(429, headers={'Retry-After': '900'}))
-    with pytest.raises(tracker_search.ReleaseUnavailable) as e:
-        env['engine'].fetch_release(link)
-    assert e.value.tracker_error.kind == 'rate'
-    until, kind = env['guard'].blocked(guard_key(rec))
-    assert kind == 'rate' and until - time.time() > 890
-    n = len(env['mock'].calls)
-    with pytest.raises(tracker_search.ReleaseUnavailable) as e:
-        env['engine'].fetch_release(link)
-    assert e.value.kind == 'skipped'
-    with pytest.raises(TrackerSkipped):
-        env['engine'].search_one(env['store'].config(rec), 'new query', [2000], 10, True)
-    assert len(env['mock'].calls) == n
-
-
-def test_fetch_release_dead_link_does_not_pause_searches(env):
-    rec, link = _release(env)
-    env['mock'].set('t.example', R(404))
-    with pytest.raises(tracker_search.ReleaseUnavailable) as e:
-        env['engine'].fetch_release(link)
-    assert e.value.kind == 'tracker' and e.value.tracker_error.kind == 'http'
-    assert env['guard'].blocked(guard_key(rec)) is None
-    env['mock'].set('t.example', R(body='<html>Not found</html>'))
-    with pytest.raises(tracker_search.ReleaseUnavailable) as e:
-        env['engine'].fetch_release(link)
-    assert e.value.kind == 'invalid' and env['guard'].blocked(guard_key(rec)) is None
-
-
-def test_fetch_release_cross_host_redirect_is_network_checked(env):
-    """The second hop goes through the same request function (tracker_http
-    checks every target), and a second redirect is not followed."""
-    rec, link = _release(env)
-    env['mock'].set('t.example', R(302, headers={'Location': 'https://cdn.example/x'}))
-    env['mock'].set('cdn.example', R(302, headers={'Location': 'https://third.example/y'}))
-    with pytest.raises(tracker_search.ReleaseUnavailable) as e:
-        env['engine'].fetch_release(link)
-    assert e.value.tracker_error.kind == 'redirect'
-    assert [c['url'].split('/')[2] for c in env['mock'].calls] == ['t.example', 'cdn.example']
-    assert env['mock'].calls[1]['follow_redirects'] is False
-
-
-def test_fetch_release_to_a_blocked_address_is_refused(env, monkeypatch):
-    """Real tracker_http.request: a link pointing at the LAN never connects."""
-    rec = torznab(env['store'])
-    tok = env['engine'].tokens.issue(rec['id'], 'https://t.example/dl/1')
-    eng = TrackerSearch(store=env['store'], guard=env['guard'], tokens=env['engine'].tokens)
-    from app import tracker_http
-    monkeypatch.setattr(tracker_http, 'resolve', lambda host, port: ['192.168.1.10'])
-    sent = []
-    monkeypatch.setattr(tracker_http, '_pinned_session', lambda *a, **kw: sent.append(a) or None)
-    with pytest.raises(tracker_search.ReleaseUnavailable) as e:
-        eng.fetch_release(tracker_search.release_path(tok))
-    assert e.value.tracker_error.kind == 'blocked' and sent == []
+def test_renaming_a_tracker_keeps_its_release_links(client, env):
+    rec, tok = _issued(env)
+    r = client.put(f"/api/trackers/{rec['id']}", data=json.dumps({'name': 'Renamed'}),
+                   content_type='application/json')
+    assert r.status_code == 200, r.get_json()
+    assert env['engine'].tokens.resolve(tok)[0] == rec['id']
 
 
 def test_readded_tracker_search_keeps_the_site_backoff(client, env):
