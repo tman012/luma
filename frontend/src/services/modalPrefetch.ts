@@ -134,8 +134,19 @@ function pump(): void {
   }
 }
 
+/** Background prefetch is off when the user asked to save data or the link
+ *  is 2G (a tap still warms its own card). */
+export function canPrefetch(): boolean {
+  if (typeof navigator === 'undefined') return true;
+  const c = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  if (!c) return true;
+  if (c.saveData) return false;
+  return c.effectiveType !== '2g' && c.effectiveType !== 'slow-2g';
+}
+
 /** Queue a warm-up; returns a cancel that drops it if it hasn't started. */
 export function scheduleWarm(key: string, run: () => Promise<void>): () => void {
+  if (!canPrefetch()) return () => {};
   if (started.has(key) || queue.some((j) => j.key === key)) return () => {};
   const job = { key, run };
   queue.push(job);
