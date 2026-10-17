@@ -19068,6 +19068,9 @@ def set_default_target():
 @app.route('/api/rooms/<room_id>/devices/<device_id>/test', methods=['POST'])
 def test_device_connection(room_id, device_id):
     """Test ADB connectivity to a specific device."""
+    err = _require_admin()
+    if err:
+        return err
     from app.adb_utils import test_room_connection as _test_room
     try:
         device = settings.get_device(room_id, device_id)
@@ -19092,6 +19095,9 @@ def test_device_connection(room_id, device_id):
 @app.route('/api/rooms/<room_id>/devices/<device_id>/pair', methods=['POST'])
 def pair_device_endpoint(room_id, device_id):
     """Pair with a device, then connect."""
+    err = _require_admin()
+    if err:
+        return err
     from app.adb_utils import adb_pair, adb_connect
     try:
         device = settings.get_device(room_id, device_id)
@@ -19152,6 +19158,9 @@ def pair_device_endpoint(room_id, device_id):
 @app.route('/api/rooms/<room_id>/test', methods=['POST'])
 def test_room_connection_legacy(room_id):
     """Test ADB connectivity to first device in a room."""
+    err = _require_admin()
+    if err:
+        return err
     from app.adb_utils import test_room_connection as _test_room
     try:
         room = settings.get_room_by_id(room_id)
@@ -19181,6 +19190,9 @@ def test_room_connection_legacy(room_id):
 @app.route('/api/rooms/<room_id>/pair', methods=['POST'])
 def pair_room_legacy(room_id):
     """Pair with first device in a room (legacy compat)."""
+    err = _require_admin()
+    if err:
+        return err
     from app.adb_utils import adb_pair, adb_connect
     try:
         room = settings.get_room_by_id(room_id)
