@@ -14,6 +14,7 @@ import { useModalHost } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { posterUrl } from '@/utils/image';
 import { apiFetch } from '../../apiClient';
+import { T } from '@/theme/tokens';
 import { useLocation, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -59,6 +60,12 @@ interface ActiveDownload {
 // ---------------------------------------------------------------------------
 
 const THUMB_W = 78;
+/** Navy glass tokens (Designer): card, its border, the no-art tile, and the
+ * sign-in button (the storage sheet's button glass). */
+export const CARD_BG = T.glass;                         // rgba(255,255,255,0.06)
+export const CARD_BORDER = '1px solid rgba(255,255,255,0.08)';   // white 8% (--color-glass-8)
+export const NO_ART_BG = 'rgba(255,255,255,0.04)';
+export const SIGN_IN_BUTTON = { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' };
 const THUMB_H = 117;
 
 /**
@@ -149,7 +156,7 @@ function RowThumb({ posterPath, title, progress }: {
         position: 'relative', flexShrink: 0,
         width: THUMB_W, height: THUMB_H,
         borderRadius: 9, overflow: 'hidden',
-        background: 'rgba(255,255,255,0.06)',
+        background: src ? 'rgba(255,255,255,0.06)' : NO_ART_BG,
         boxShadow: '0 2px 10px rgba(0,0,0,0.5)',
       }}
     >
@@ -464,10 +471,10 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
               style={{
                 position: 'relative',
                 overflow: 'hidden',
-                background: '#111112',
+                background: CARD_BG,
                 borderRadius: '18px',
                 padding: '18px 20px',
-                border: `1px solid ${c ? c.border.replace('0.3)', '0.15)') : 'rgba(255,255,255,0.06)'}`,
+                border: CARD_BORDER,
                 borderLeft: `3px solid ${c ? c.fg : '#3b82f6'}`,
               }}
             >
@@ -539,8 +546,8 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                       type="button"
                       data-testid="activity-sign-in"
                       onClick={signIn}
-                      className="w-full rounded-lg px-3 py-2 text-left text-[12px] font-medium text-white/85 active:bg-white/10"
-                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                      className="w-full rounded-lg px-3 py-2 text-left text-[12px] font-medium text-white/90 active:bg-white/10"
+                      style={SIGN_IN_BUTTON}
                     >
                       {SIGN_IN_TO_DELETE}
                     </button>
@@ -670,10 +677,10 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
               style={{
                 position: 'relative',
                 overflow: 'hidden',
-                background: '#111112',
+                background: CARD_BG,
                 borderRadius: '18px',
                 padding: '18px 20px',
-                border: `1px solid ${c ? c.border.replace('0.3)', '0.15)') : 'rgba(255,255,255,0.06)'}`,
+                border: CARD_BORDER,
                 borderLeft: `3px solid ${c ? c.fg : 'rgba(255,255,255,0.18)'}`,
               }}
             >

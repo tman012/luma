@@ -3,12 +3,14 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'fs';
+import { resolve } from 'path';
 
 const auth = { implicit: false };
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => ({ openMovie: vi.fn(), openTv: vi.fn(), openPerson: vi.fn() }) }));
 
-import { ActivityFeed, SIGN_IN_TO_DELETE, removeDownload } from '@/components/activity/ActivityFeed';
+import { ActivityFeed, CARD_BG, CARD_BORDER, NO_ART_BG, SIGN_IN_BUTTON, SIGN_IN_TO_DELETE, removeDownload } from '@/components/activity/ActivityFeed';
 
 const H = 'a'.repeat(40);
 const QUEUE = { downloads: [{ name: 'Some.Show.S01.1080p.WEB-GRP', hash: H, progress: 0.5, status: 'downloading',
@@ -86,5 +88,30 @@ describe('Activity: delete torrent + files', () => {
     removeStatus = 401;
     expect(await removeDownload(H, true)).toEqual({ ok: false, signIn: true });
     expect((await removeDownload(H, false)).signIn).toBeUndefined();
+  });
+});
+
+describe('Activity card: navy glass tokens (Designer)', () => {
+  it('card, border, no-art tile and sign-in button use the tokens', async () => {
+    auth.implicit = true;
+    await openRow();
+    expect(CARD_BG).toBe('var(--color-glass-6)');
+    expect(CARD_BORDER).toBe('1px solid rgba(255,255,255,0.08)');
+    expect(NO_ART_BG).toBe('rgba(255,255,255,0.04)');
+    expect(SIGN_IN_BUTTON).toEqual({ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' });
+    const card = screen.getByText('Some.Show.S01.1080p.WEB-GRP').closest('[style*="border-radius: 18px"]') as HTMLElement;
+    expect(card.style.background).toBe('var(--color-glass-6)');
+    expect(card.style.borderTop).toBe('1px solid rgba(255, 255, 255, 0.08)');
+    const tile = screen.getByText('No art').parentElement as HTMLElement;
+    expect(tile.style.background).toBe('rgba(255, 255, 255, 0.04)');
+    const btn = screen.getByTestId('activity-sign-in');
+    expect(btn.style.background).toBe('rgba(255, 255, 255, 0.08)');
+  });
+
+  it('no near-black hex colors left in Activity', () => {
+    for (const f of ['ActivityFeed.tsx', 'ActivitySheet.tsx']) {
+      const src = readFileSync(resolve(__dirname, '../src/components/activity', f), 'utf8');
+      expect(src, f).not.toMatch(/#111|#1f1f|#222|#000(?![0-9a-f])/i);
+    }
   });
 });
