@@ -424,3 +424,127 @@ def test_hero_cache_plex_download_token_in_header_and_no_redirects(tmp_path, mon
     assert hc.download_image(url, 'p.jpg', headers=hc._plex_headers()) is None
     assert seen == [('http://plex.test/library/metadata/5/thumb/1', TOKEN)]
     assert not (tmp_path / 'p.jpg').exists()
+
+
+# --- plexapi clients/sessions/control -----------------------------------------
+
+def _fake_plexapi_server(client_title='Shield'):
+    log = []
+
+    class FakeClient:
+        title = client_title
+        machineIdentifier = 'abc'
+
+        def proxyThroughServer(self, value=True, server=None):
+            log.append(('proxy', value, server is not None))
+
+        def pause(self):
+            log.append(('pause',))
+
+    session = SimpleNamespace(
+        players=[], duration=1000, viewOffset=10, title='Heat', year=1995, type='movie',
+        thumb='/library/metadata/5/thumb/1700000000', art='/library/metadata/5/art/1700000000',
+        thumbUrl='http://plex.test/library/metadata/5/thumb/1?X-Plex-Token=' + TOKEN,
+        artUrl='http://plex.test/library/metadata/5/art/1?X-Plex-Token=' + TOKEN)
+    server = SimpleNamespace(clients=lambda: [FakeClient()], sessions=lambda: [session])
+    return server, log
+
+
+def test_plexapi_sessions_have_no_token(monkeypatch):
+    from app import plex_client_service as pcs
+    server, _ = _fake_plexapi_server()
+    monkeypatch.setattr(pcs, '_plex_server', lambda url, tok: server)
+    [s] = pcs.get_sessions('http://plex.test', TOKEN)
+    assert TOKEN not in json.dumps(s)
+    assert s['thumb'] == '/api/img/plex?url=/library/metadata/5/thumb/1700000000'
+    assert s['art'] == '/api/img/plex?url=/library/metadata/5/art/1700000000'
+
+
+@pytest.mark.parametrize('path', ['', None, 'http://evil.test/x.jpg', '/x?X-Plex-Token=1', 5])
+def test_plexapi_bad_image_paths_dropped(path):
+    from app import plex_client_service as pcs
+    assert pcs._proxied_image(path) == ''
+
+
+def test_plexapi_control_goes_through_server(monkeypatch):
+    from app import plex_client_service as pcs
+    server, log = _fake_plexapi_server()
+    monkeypatch.setattr(pcs, '_plex_server', lambda url, tok: server)
+    assert pcs.control_client('http://plex.test', TOKEN, 'shield', 'pause')['success'] is True
+    assert log == [('proxy', True, True), ('pause',)]
+    r = pcs.control_client('http://plex.test', TOKEN, 'shield', 'bogus')
+    assert r == {'success': False, 'error': 'Unknown action'}
+    assert pcs.control_client('http://plex.test', TOKEN, 'nope', 'pause')['error'] == 'Client not found'
+
+
+def test_plexapi_control_errors_are_fixed(monkeypatch):
+    from app import plex_client_service as pcs
+
+    def boom(url, tok):
+        raise RuntimeError('http://plex.test/?X-Plex-Token=' + TOKEN)
+    monkeypatch.setattr(pcs, '_plex_server', boom)
+    r = pcs.control_client('http://plex.test', TOKEN, 'shield', 'pause')
+    assert r == {'success': False, 'error': 'Client control failed'}
+
+
+@pytest.mark.parametrize('user, status', [(ADMIN, 200), (None, 403),
+                                          ({'id': 3, 'username': 'x', 'is_admin': False}, 403)])
+def test_plex_clients_route_roles(plex, monkeypatch, user, status):
+    from app import plex_client_service as pcs
+    client, calls, state = plex
+    state['user'] = user
+    server, _ = _fake_plexapi_server()
+    monkeypatch.setattr(pcs, '_plex_server', lambda url, tok: server)
+    r = client.get('/api/plex/clients', environ_base=LAN)
+    assert r.status_code == status
+    assert TOKEN not in r.get_data(as_text=True)
+
+
+def test_plex_clients_route_approved_user(plex, monkeypatch):
+    from app import plex_client_service as pcs, user_auth
+    client, calls, state = plex
+    state['user'] = MEMBER
+    monkeypatch.setattr(user_auth, 'is_plex_approved', lambda u: u is MEMBER)
+    server, _ = _fake_plexapi_server()
+    monkeypatch.setattr(pcs, '_plex_server', lambda url, tok: server)
+    r = client.get('/api/plex/clients', environ_base=LAN)
+    assert r.status_code == 200
+    assert r.get_json()['sessions'][0]['thumb'].startswith('/api/img/plex?url=')
+    assert TOKEN not in r.get_data(as_text=True)
+
+
+def test_plex_settings_change_clears_clients_cache(plex):
+    client, calls, state = plex
+    app.main._plex_clients_cache['entry'] = (('x', 'y'), 0, {('10.9.9.9', 1): 'z'})
+    r = client.put('/api/settings', data=json.dumps({'ui': {}}), content_type='application/json',
+                   environ_base=LAN)
+    assert r.status_code == 200 and 'entry' in app.main._plex_clients_cache
+    r = client.put('/api/settings', data=json.dumps({'plex': {'client_port': 32500}}),
+                   content_type='application/json', environ_base=LAN)
+    assert r.status_code == 200
+    assert app.main._plex_clients_cache == {}
+
+
+@pytest.mark.parametrize('host', ['10.0.0.5\n', '10.0.0.5 ', '१०.0.0.5', '10.0.0.5;id'])
+def test_shield_helper_host_must_fully_match(monkeypatch, host):
+    seen = []
+    monkeypatch.setattr(app.main.subprocess, 'run', lambda *a, **k: seen.append(a))
+    assert app.main._query_adb_activity({'host': host}) is None
+    assert seen == []
+
+
+def test_hero_rt_score_lookup_does_not_follow_redirects(monkeypatch):
+    import requests
+    from app.hero_cache import HeroCache
+    hc = HeroCache.__new__(HeroCache)
+    hc.plex_url, hc.plex_token = 'http://plex.test', TOKEN
+    hc.session = requests.Session()
+    seen = []
+
+    def fake_get(url, **k):
+        seen.append((url, k))
+        return _Resp(302, b'')
+    monkeypatch.setattr(hc.session, 'get', fake_get)
+    assert hc.get_rt_score_from_plex(5) is None
+    [(url, k)] = seen
+    assert TOKEN not in url and k['headers']['X-Plex-Token'] == TOKEN and k['allow_redirects'] is False

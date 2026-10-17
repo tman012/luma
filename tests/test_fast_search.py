@@ -1950,19 +1950,21 @@ class TestHeroCacheHealing(unittest.TestCase):
         ])
         calls = []
 
-        def fake_download(url, filename):
-            calls.append((url, filename))
+        def fake_download(url, filename, **kwargs):
+            calls.append((url, filename, kwargs.get('headers') or {}))
             (self.temp_cache_dir / filename).write_text('healed')
             return filename
 
         with patch.object(self.hero_cache, 'download_image', side_effect=fake_download):
             self.assertTrue(self.hero_cache.heal_missing_images())
-        by_name = {f: u for u, f in calls}
+        by_name = {f: u for u, f, _ in calls}
+        headers_by_name = {f: h for _, f, h in calls}
         self.assertEqual(set(by_name), {'movie_1_backdrop.jpg', 'movie_1_clearart.jpg',
                                         'movie_2_poster.jpg', 'movie_2_backdrop.jpg'})
-        # Plex poster gets the *current* token at download time only.
-        self.assertEqual(by_name['movie_2_poster.jpg'],
-                         'http://plex.invalid:32400/library/metadata/2/thumb?X-Plex-Token=SECRET-TOKEN')
+        # Plex poster gets the *current* token at download time only, as a header.
+        self.assertEqual(by_name['movie_2_poster.jpg'], 'http://plex.invalid:32400/library/metadata/2/thumb')
+        self.assertEqual(headers_by_name['movie_2_poster.jpg'].get('X-Plex-Token'), 'SECRET-TOKEN')
+        self.assertFalse(any('SECRET-TOKEN' in u for u, _, _ in calls))
         self.assertNotIn('SECRET-TOKEN', self.temp_json.read_text())
 
     def test_old_format_without_upstream_url_triggers_full_refresh(self):
@@ -2033,8 +2035,8 @@ class TestHeroCacheHealing(unittest.TestCase):
                  'user_clear_logo_url': '/library/metadata/123/clearLogo'}
         downloads = []
 
-        def fake_download(url, filename):
-            downloads.append(url)
+        def fake_download(url, filename, **kwargs):
+            downloads.append((url, kwargs.get('headers') or {}))
             return filename
 
         with patch.object(self.hero_cache, 'get_recently_released_movies', return_value=[movie]), \
@@ -2054,8 +2056,9 @@ class TestHeroCacheHealing(unittest.TestCase):
         self.assertEqual(stored['poster_upstream_url'], '/library/metadata/123/thumb')
         self.assertEqual(stored['poster_url'], 'movie_123_poster.jpg')
         self.assertEqual(stored['backdrop_url'], 'plex:/library/metadata/123/art')
-        self.assertTrue(any('X-Plex-Token=SECRET-TOKEN' in u for u in downloads),
-                        'token is added at download time')
+        self.assertTrue(any(h.get('X-Plex-Token') == 'SECRET-TOKEN' for _, h in downloads),
+                        'token is added at download time, as a header')
+        self.assertFalse(any('SECRET-TOKEN' in u for u, _ in downloads))
 
     def test_tokens_stripped_from_old_files_on_load(self):
         self._write_cache([{'rating_key': 1, 'title': 'Legacy',

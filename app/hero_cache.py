@@ -210,7 +210,7 @@ class HeroCache:
 
             url = f"{self.plex_url}/library/metadata/{rating_key}"
             headers = {'X-Plex-Token': self.plex_token}
-            response = self.session.get(url, headers=headers, timeout=10)
+            response = self.session.get(url, headers=headers, timeout=10, allow_redirects=False)
 
             if response.status_code != 200:
                 return None

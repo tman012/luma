@@ -13427,7 +13427,7 @@ def _query_adb_activity(device: dict) -> dict | None:
 
         # Validate device_ip to prevent command injection
         import re as _re_ip
-        if not _re_ip.match(r'^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$', device_ip):
+        if not isinstance(device_ip, str) or not _re_ip.fullmatch(r'[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}', device_ip):
             logger.warning(f"Invalid device_ip rejected: {device_ip!r}")
             return None
 
@@ -18065,7 +18065,9 @@ def get_tv_episode():
 
 @app.route('/api/plex/clients')
 def plex_clients():
-    """Get active Plex clients via Plex Server API."""
+    """Active Plex clients and sessions (admins and approved users, read-only)."""
+    if not user_auth.is_plex_approved(_get_current_user()):
+        return jsonify({'error': 'Not allowed'}), 403
     try:
         plex_url = settings.get('plex.url')
         plex_token = settings.get('plex.token')
@@ -18078,8 +18080,8 @@ def plex_clients():
         return jsonify({'clients': clients, 'sessions': sessions,
                         'count': len(clients), 'active_sessions': len(sessions)})
     except Exception as e:
-        logger.error(f"Error getting Plex clients: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting Plex clients: {type(e).__name__}")
+        return jsonify({'error': 'Plex clients unavailable'}), 500
 
 
 @app.route('/api/plex/client/control', methods=['POST'])
@@ -18749,6 +18751,8 @@ def update_settings():
         if 'hero' in ui_data:
             _hero_result_cache.clear()
             logger.info('Hero cache invalidated due to settings change')
+        if isinstance(data.get('plex'), dict):
+            _plex_clients_cache.clear()
 
         # Handle tunnel toggle on settings save
         network_data = data.get('network') if isinstance(data.get('network'), dict) else {}
