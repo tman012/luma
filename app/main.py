@@ -21028,6 +21028,10 @@ _connectors.init(settings=settings, owner_or_error=_start_flow._owner_or_error, 
                  on_trakt_change=_on_trakt_change)
 app.register_blueprint(_connectors.bp)
 
+from app import qbit_connector as _qbit_connector
+_qbit_connector.init(settings=settings, owner_or_error=_start_flow._owner_or_error)
+app.register_blueprint(_qbit_connector.bp)
+
 from app import home_rails as _home_rails
 _home_rails.init(get_plex=lambda: plex_service, get_current_user=_get_current_user,
                  trakt_connected=_connectors.trakt_connected, fetch_trakt=_fetch_trakt_rail)
