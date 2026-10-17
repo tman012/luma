@@ -386,6 +386,8 @@ def logout():
     
     response = make_response(redirect(login_url))
     response.delete_cookie(AUTH_COOKIE, path=url_base)
+    # The browser drops its HTTP cache for this site (signed-in images).
+    response.headers['Clear-Site-Data'] = '"cache"'
     
     return response
 

@@ -156,10 +156,10 @@ def img(test_app, monkeypatch):
     return test_app.test_client()
 
 
-def test_poster_replies_never_stored(img):
+def test_poster_replies_cached_privately(img):
     for url in ('/library/metadata/5/thumb', '/library/metadata/5/thumb/1700000000'):
         r = img.get('/api/img/plex?url=' + url + '&r=2', environ_base=LAN)
-        assert r.status_code == 200 and r.headers['Cache-Control'] == 'private, no-store'
+        assert r.status_code == 200 and r.headers['Cache-Control'] == 'private, max-age=86400'
         assert 'ETag' not in r.headers
 
 

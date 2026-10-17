@@ -19,7 +19,7 @@ import type {
 // Generic media item shape — any source's item should be mappable to this
 // ---------------------------------------------------------------------------
 
-interface ModalNavigableItem {
+export interface ModalNavigableItem {
   mediaType: 'movie' | 'tv' | 'episode';
   tmdbId?: number | null;
   ratingKey?: number | null;
@@ -47,7 +47,7 @@ interface ModalNavigableItem {
  * @param origin The ModalSource tag for instrumentation
  * @param extra  Optional extra fields to merge (e.g. onPersonSearch)
  */
-function buildModalOptions(
+export function buildModalOptions(
   item: ModalNavigableItem,
   origin: ModalSource,
   extra?: Omit<ModalOpenOptions, 'tmdbId' | 'ratingKey' | 'origin' | 'episodeContext'>,

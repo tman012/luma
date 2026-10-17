@@ -1,3 +1,7 @@
+import { sheetBase } from '@/utils/posterColors';
+import { CastPhoto } from '@/components/media/CastPhoto';
+import { REVEALED_EVENT } from '@/services/modalPrefetch';
+import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -186,6 +190,14 @@ export function CompactLayout(props: TvModalViewProps) {
     shuffleTarget,
     setShuffleTarget,
   } = props;
+  const titleState = useTitleReveal(logoInput(show), show?.title, show?.backdropUrl || show?.posterUrl);
+  // Phone: the sheet stays off-screen until it can show fully composed
+  // (details, backdrop, logo and colors, or the 600 ms cap), then slides in.
+  const composed = !!error || (!loading && !!show && titleState !== 'hold');
+  const sheetBg = sheetBase(ultraBlurColors) ?? '#15102a';
+  useEffect(() => {
+    if (composed) window.dispatchEvent(new Event(REVEALED_EVENT));
+  }, [composed]);
 
   // Determine if we're in active episode-mode display
   // isEpisodeIntent: episodeContext is set → hide show content immediately
@@ -413,19 +425,23 @@ export function CompactLayout(props: TvModalViewProps) {
 
   // Slide up from bottom on enter, slide back down on exit
   const ENTER_DURATION = 600;
+  const SHEET_FADE_MS = 200;
   const EXIT_DURATION = 400;
   const springBezier = 'cubic-bezier(0.22, 1, 0.36, 1)';
   // Use translate3d to force GPU compositing for smooth animations
   const cardTransform =
-    phase === 'entering'
+    phase === 'exiting'
       ? 'translate3d(0, 100%, 0)'
-      : phase === 'visible'
-        ? 'translate3d(0, 0, 0)'
-        : 'translate3d(0, 100%, 0)';
+      : phase === 'entering' || !composed
+        ? 'translate3d(0, 16px, 0)'
+        : 'translate3d(0, 0, 0)';
   const cardTransition =
     phase === 'exiting'
       ? `transform ${EXIT_DURATION}ms cubic-bezier(0.4, 0, 1, 1)`
-      : `transform ${ENTER_DURATION}ms ${springBezier}`;
+      : `transform ${ENTER_DURATION}ms ${springBezier}, opacity ${SHEET_FADE_MS}ms ease-out`;
+  // The sheet only ever shows composed: it fades in as one piece (no slide
+  // that would uncover an empty sheet first), and nothing in it fades alone.
+  const cardOpacity = phase === 'exiting' || (phase !== 'entering' && composed) ? 1 : 0;
 
   if (phase === 'gone') return null;
 
@@ -433,6 +449,7 @@ export function CompactLayout(props: TvModalViewProps) {
     <div
       data-modal="TvDetailModal"
       data-variant="mobile"
+      data-composed={composed ? "true" : "false"}
       style={{
         position: 'fixed',
         top: 0,
@@ -441,7 +458,7 @@ export function CompactLayout(props: TvModalViewProps) {
         bottom: 0,
         zIndex: 10000,
         backgroundColor: 'rgba(0,0,0,0.6)',
-        opacity: phase === 'entering' ? 0 : 1,
+        opacity: phase === 'entering' || !composed ? 0 : 1,
         transition: 'opacity 250ms ease-out',
       }}
     >
@@ -456,10 +473,11 @@ export function CompactLayout(props: TvModalViewProps) {
           borderTopLeftRadius: '14px',
           borderTopRightRadius: '14px',
           overflow: 'hidden',
-          backgroundColor: '#15102a',
+          backgroundColor: sheetBg,
           display: 'flex',
           flexDirection: 'column',
           transform: cardTransform,
+          opacity: cardOpacity,
           transition: cardTransition,
           willChange: 'transform',
           backfaceVisibility: 'hidden',
@@ -522,7 +540,7 @@ export function CompactLayout(props: TvModalViewProps) {
               }}
             >
               <p style={{ fontSize: '16px', color: 'rgba(255,255,255,0.8)' }}>
-                Could not load details
+                Couldn’t load details
               </p>
               <button
                 type="button"
@@ -531,7 +549,7 @@ export function CompactLayout(props: TvModalViewProps) {
                   padding: '10px 28px',
                   borderRadius: '8px',
                   border: 'none',
-                  background: 'rgba(255,255,255,0.1)',
+                  background: 'var(--color-accent)',
                   color: '#fff',
                   fontSize: '15px',
                   cursor: 'pointer',
@@ -552,16 +570,18 @@ export function CompactLayout(props: TvModalViewProps) {
                 effects={backdropEffects}
                 phase={phase}
                 containerRef={backdropRef}
+                hold={titleState === 'hold'} instant
               />
 
               {/* === CENTERED CONTENT AREA === */}
-              <div style={{
+              <div data-reveal={titleState !== 'hold' ? 'shown' : 'hold'} style={{
                 position: 'relative',
                 zIndex: 3,
                 textAlign: 'center',
                 marginTop: '-220px',
-                opacity: phase === 'visible' ? 1 : 0,
-                transition: 'opacity 1.2s ease-in-out 1.1s',
+                // One reveal for everything (backdrop, blur, title, text, buttons).
+                opacity: titleState === 'hold' ? 0 : 1,
+                transition: 'none', // the sheet itself fades in, composed
                 willChange: 'opacity',
               }}>
                 {/* UltraBlur — scrolls with content, slides up over backdrop */}
@@ -580,7 +600,7 @@ export function CompactLayout(props: TvModalViewProps) {
                       maskImage: 'linear-gradient(to bottom, transparent 0%, black 80px)',
                     }}
                   >
-                    <UltraBlurOverlay colors={ultraBlurColors} variant="mobile" animationDelay={300} />
+                    <UltraBlurOverlay hold={titleState === 'hold'} instant colors={ultraBlurColors} variant="mobile" animationDelay={300} />
                   </div>
                 )}
                 {/* Clearlogo / Title */}
@@ -596,7 +616,7 @@ export function CompactLayout(props: TvModalViewProps) {
                     overflow: 'visible',
                   }}
                 >
-                  {show.clearLogoUrl ? (
+                  {titleState === 'logo' && show.clearLogoUrl ? (
                     <img
                       src={show.clearLogoUrl ? withBase(show.clearLogoUrl) : undefined}
                       alt={show.title}
@@ -616,7 +636,7 @@ export function CompactLayout(props: TvModalViewProps) {
                   ) : null}
                   <h1
                     style={{
-                      display: show.clearLogoUrl ? 'none' : 'block',
+                      ...titleTextStyle(titleState),
                       fontSize: '28px',
                       fontWeight: 700,
                       color: '#fff',
@@ -1090,7 +1110,7 @@ export function CompactLayout(props: TvModalViewProps) {
                         padding: '0 16px',
                       }}
                     >
-                      Cast & Crew
+                      Cast &amp; crew
                     </h2>
                     <div
                       style={{
@@ -1121,10 +1141,11 @@ export function CompactLayout(props: TvModalViewProps) {
                               cursor: 'pointer',
                             }}
                           >
-                            <img
-                              src={imgUrl ?? PERSON_FALLBACK_SVG}
+                            <CastPhoto
+                              src={imgUrl}
                               alt={member.name}
-                              loading="lazy"
+                              ready={composed}
+                              fallback={PERSON_FALLBACK_SVG}
                               style={{
                                 width: '90px',
                                 height: '90px',
@@ -1132,9 +1153,6 @@ export function CompactLayout(props: TvModalViewProps) {
                                 objectFit: 'cover',
                                 background: 'rgba(255,255,255,0.1)',
                                 marginBottom: '8px',
-                              }}
-                              onError={(e) => {
-                                (e.currentTarget as HTMLImageElement).src = PERSON_FALLBACK_SVG;
                               }}
                             />
                             <p

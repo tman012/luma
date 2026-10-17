@@ -11,9 +11,12 @@ import {
   type SearchPerson,
   type SearchResults,
   type PersonCredit,
+  warmResult,
+  warmResults,
 } from '@/services/searchApi';
 import { mediaKey } from '@/services/ownership';
 import { withBase } from '@/urlHelpers';
+import { openWhenReady } from '@/services/modalPrefetch';
 const MAX_SUGGESTIONS = 5;
 
 /** Normalize title for dedup: lowercase, & → and, strip non-alphanum except spaces */
@@ -53,6 +56,12 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
   const abortRef = useRef<AbortController | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const didInitialSearch = useRef(false);
+
+  // Warm the rows on screen right away so a first open is like a second.
+  useEffect(() => {
+    if (!results) return;
+    return warmResults([...results.owned, ...results.unowned]);
+  }, [results]);
 
   // Paint html background for safe-area coverage
   useEffect(() => {
@@ -258,7 +267,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
   }
   const topSuggestions = suggestions.slice(0, MAX_SUGGESTIONS);
 
-  const handleMediaClick = (item: SearchMovie) => {
+  const handleMediaClick = (item: SearchMovie, el?: HTMLElement | null) => {
     const tmdbId = item.tmdb_id || item.id;
     const rk = item.rating_key;
     const opts = {
@@ -269,11 +278,12 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
       searchQuery: query.trim() || undefined,
     };
     if (!opts.ratingKey && !opts.tmdbId) return;
-    if (item.media_type === 'tv') {
-      openTv(opts);
-    } else {
-      openMovie(opts);
-    }
+    // The popup opens only once it can show fully composed (the tapped row
+    // shows a pressed state meanwhile, 600 ms cap).
+    const kind = item.media_type === 'tv' ? 'tv' : 'movie';
+    void openWhenReady(kind, opts.ratingKey ? Number(opts.ratingKey) : undefined,
+      opts.tmdbId ? Number(opts.tmdbId) : undefined, el ?? null,
+      () => (kind === 'tv' ? openTv(opts) : openMovie(opts)));
     // Don't close search — user may come back from modal
   };
 
@@ -414,14 +424,16 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                 <button
                   key={`suggestion-${i}`}
                   type="button"
-                  onClick={() => {
+                  onClick={(e) => {
                     if (isPerson) {
                       handlePersonClick(person!);
                     } else {
-                      handleMediaClick(media!);
+                      handleMediaClick(media!, e.currentTarget);
                     }
                   }}
-                  className="flex w-full items-center justify-between px-5 py-4 text-left active:bg-white/5"
+                  onTouchStart={() => { if (media) void warmResult(media); }}
+                  onFocus={() => { if (media) void warmResult(media); }}
+                  className="luma-pressable flex w-full items-center justify-between px-5 py-4 text-left active:bg-white/5"
                 >
                   <span className="truncate text-[17px] italic text-white">
                     {label}

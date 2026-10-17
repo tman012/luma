@@ -1438,7 +1438,7 @@ def _auth_guard():
         if not getattr(g, 'current_user', None) or getattr(g, 'implicit_user', False):
             # For API calls, return 401
             if request.path.startswith('/api/'):
-                return jsonify({"error": "Authentication required"}), 401
+                return jsonify({"error": "Authentication required"}), 401, {'Cache-Control': 'private, no-store'}
             # For HTML pages, redirect to login
             url_base = app.config.get('URL_BASE', '')
             from urllib.parse import quote
@@ -9204,8 +9204,8 @@ def auth_logout():
         if token:
             user_auth.delete_session(token)
         resp = make_response(jsonify({'success': True}))
-        
-        
+        # The browser drops its HTTP cache for this site (signed-in images).
+        resp.headers['Clear-Site-Data'] = '"cache"'
         clear_auth_cookie(resp)
         return resp
     except Exception as e:
@@ -12118,8 +12118,19 @@ _PLEX_IMG_PATH = re.compile(
     r'|/library/sections/[0-9]+/composite/[0-9]+',
     re.ASCII)
 _PLEX_NO_STORE = {'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'}
+# A served image may be kept by this browser for a day (never by a shared
+# cache); without it every detail modal re-downloads its backdrop and logo.
+# Errors and refusals above stay no-store.
+# Vary: Cookie so a browser cache never hands one account's image to another.
+_PLEX_IMG_CACHE = {'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff', 'Vary': 'Cookie'}
 _PLEX_IMG_TYPES = frozenset({'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'})
 _PLEX_IMG_MAX_BYTES = 20 * 1024 * 1024
+# Plex's own people photos (cast and crew): full-size originals on plex.tv.
+# Only this exact host and shape is accepted, and only as a small transcode by
+# the user's Plex server (the token goes to that server only, never to plex.tv).
+_PLEX_PEOPLE_URL = re.compile(
+    r'https://metadata-static\.plex\.tv/[0-9a-f]/people/[0-9a-f]{32}\.(?:jpe?g|png)', re.ASCII)
+_PLEX_PEOPLE_MAX = 400
 
 
 def _plex_image_path(raw: str):
@@ -12155,10 +12166,12 @@ def img_plex_proxy():
     if not plex_path:
         return Response('Missing url parameter', status=400, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
-    # Security: only Plex's own library image paths, never an outside URL.
-    plex_path = _plex_image_path(plex_path)
-    if not plex_path:
-        return Response('Not a Plex image path', status=400, mimetype='text/plain', headers=_PLEX_NO_STORE)
+    people = bool(_PLEX_PEOPLE_URL.fullmatch(plex_path))
+    if not people:
+        # Security: only Plex's own library image paths, never an outside URL.
+        plex_path = _plex_image_path(plex_path)
+        if not plex_path:
+            return Response('Not a Plex image path', status=400, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
     # Optional resize via Plex photo transcoder (clamped to sane bounds)
     def _clamp_dim(raw):
@@ -12170,6 +12183,12 @@ def img_plex_proxy():
 
     req_w = _clamp_dim(request.args.get('w'))
     req_h = _clamp_dim(request.args.get('h'))
+    if people:
+        # People photos only ever as a small transcode, never the original.
+        if not (req_w or req_h):
+            return Response('Size required', status=400, mimetype='text/plain', headers=_PLEX_NO_STORE)
+        req_w = min(req_w, _PLEX_PEOPLE_MAX) if req_w else None
+        req_h = min(req_h, _PLEX_PEOPLE_MAX) if req_h else None
 
     # Try user's Plex first, fall back to global
     _user_plex = get_plex_for_request()
@@ -12222,7 +12241,7 @@ def img_plex_proxy():
                 body += chunk
                 if len(body) > _PLEX_IMG_MAX_BYTES:
                     return too_big
-            return Response(bytes(body), content_type=ctype, headers=_PLEX_NO_STORE)
+            return Response(bytes(body), content_type=ctype, headers=_PLEX_IMG_CACHE)
         finally:
             resp.close()
     except requests.RequestException as e:

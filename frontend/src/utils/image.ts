@@ -33,7 +33,28 @@ export function backdropUrl(
   path: string | undefined | null,
   size: BackdropSize = 'original',
 ): string | null {
-  return resolveImageUrl(path, size);
+  // Phones: w780 instead of the multi-MB original, so the popup's backdrop
+  // decodes fast enough to reveal with everything else.
+  return resolveImageUrl(path, phoneScreen() && size === 'original' ? 'w780' : size);
+}
+
+/** Phone-width screen: the detail popup's compact layout (desktop keeps its sizes). */
+export function phoneScreen(): boolean {
+  return typeof window !== 'undefined' && window.innerWidth < 768;
+}
+
+/** Plex art for the popup backdrop: a 780x439 transcode on phones. */
+export function plexBackdrop(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return phoneScreen() ? sizedPlexImg(url, 780, 439) : url;
+}
+
+/** A clearlogo URL as the popup loads it: on phones, TMDb w300 or a
+ *  300px-wide Plex transcode (a logo is ~240 CSS px). */
+export function logoImg(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (!phoneScreen()) return url;
+  return sizedPlexImg(url.replace('/t/p/original/', '/t/p/w300/'), 300);
 }
 
 /**
@@ -68,4 +89,15 @@ export function formatRuntime(ms: number | undefined | null): string {
 export function formatSize(bytes: number): string {
   const gb = bytes / (1024 * 1024 * 1024);
   return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(gb * 1024).toFixed(0)} MB`;
+}
+
+/** Plex's own people photos (metadata-static.plex.tv) are multi-MB originals:
+ *  load them as a small transcode through the image proxy instead. */
+const PLEX_PEOPLE = /^https:\/\/metadata-static\.plex\.tv\/[0-9a-f]\/people\/[0-9a-f]{32}\.(?:jpe?g|png)$/;
+export const CAST_THUMB_W = 120;
+
+export function castThumb(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (PLEX_PEOPLE.test(url)) return withBase(`/api/img/plex?url=${encodeURIComponent(url)}&w=${CAST_THUMB_W}`);
+  return url.replace('/t/p/original/', '/t/p/w185/');
 }
