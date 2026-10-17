@@ -17,6 +17,8 @@ import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
 import type { BackdropEffects } from '@/hooks/useBackdropEffects';
 
 export interface BackdropHeroProps {
+  /** Keep the art hidden (navy) until the popup reveals it with the title. */
+  hold?: boolean;
   /** Primary backdrop image URL. */
   backdropUrl?: string | null;
   /** Fallback poster URL when no backdrop available. */
@@ -38,6 +40,7 @@ export function BackdropHero({
   phase,
   children,
   containerRef,
+  hold = false,
 }: BackdropHeroProps) {
   const containerStyle = useMemo<React.CSSProperties>(
     () => ({
@@ -62,11 +65,11 @@ export function BackdropHero({
   // the previous title's art, and nothing jumps while the new one decodes.
   const src = backdropUrl || posterUrl || null;
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
-  const loaded = !!src && loadedSrc === src;
+  const loaded = !!src && loadedSrc === src && !hold;
   const markLoaded = useCallback((el: HTMLImageElement | null) => {
     if (el && src && el.complete && el.naturalWidth > 0) setLoadedSrc(src);
   }, [src]);
-  const fade: React.CSSProperties = { transition: 'opacity 0.3s ease-out' };
+  const fade: React.CSSProperties = { transition: 'opacity 0.45s ease-out' };
 
   return (
     <div ref={containerRef} style={{ ...containerStyle, background: '#15102a' }} data-backdrop-loaded={loaded ? 'true' : 'false'}>

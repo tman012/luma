@@ -16,6 +16,8 @@ import {
 } from '@/services/sonarrApi';
 import { resolveOwnership, mediaKey } from '@/services/ownership';
 import { apiFetch } from '../apiClient';
+import { useModalColors } from './useModalColors';
+import { tmdbImg } from '@/utils/image';
 
 // ---------------------------------------------------------------------------
 // Return type
@@ -65,7 +67,6 @@ export function useTvDetail(
   const [trailerKey, setTrailerKey] = useState<string | null | undefined>(undefined);
 
   // UltraBlur
-  const [ultraBlurColors, setUltraBlurColors] = useState<UltraBlurColors | null>(null);
 
   // Resolved tmdbId (from props or from show data)
   const resolvedTmdbId = tmdbId ?? show?.tmdbId;
@@ -164,14 +165,16 @@ export function useTvDetail(
         const resp = await apiFetch(`/api/clearlogo/${id}?type=tv`, { signal });
         if (!resp.ok) return null;
         const data = (await resp.json()) as { clearlogo_url?: string };
-        return data.clearlogo_url ?? null;
+        return tmdbImg(data.clearlogo_url);
       } catch {
         return null;
       }
     }
 
     async function fetchDetail() {
+      // Another show opened: drop the old one so its backdrop never shows.
       setLoading(true);
+      setShow(null);
       setError(false);
 
       try {
@@ -384,42 +387,13 @@ export function useTvDetail(
   }, [tvdbId, resolvedTmdbId]);
 
   // -------------------------------------------------------------------------
-  // Fetch UltraBlurColors
+  // Color blur: cached per item, settled before the popup leaves its loading
+  // state. With only a rating key, wait for the show (its TMDb id) first so
+  // the palette is fetched once with the final ids.
   // -------------------------------------------------------------------------
-  useEffect(() => {
-    if (!ratingKey && !resolvedTmdbId) return;
-    const controller = new AbortController();
-    let cancelled = false;
-
-    async function fetchUltraBlur() {
-      try {
-        // Fire both sources in parallel, prefer TMDb
-        const tmdbPromise = resolvedTmdbId
-          ? apiFetch(`/api/tmdb/colors/${resolvedTmdbId}?type=tv`, { signal: controller.signal })
-              .then((r) => r.ok ? r.json() as Promise<UltraBlurColors> : null)
-              .catch(() => null)
-          : Promise.resolve(null);
-        const plexPromise = ratingKey
-          ? apiFetch(`/api/plex/ultrablur/${ratingKey}`, { signal: controller.signal })
-              .then((r) => r.ok ? r.json() as Promise<UltraBlurColors> : null)
-              .catch(() => null)
-          : Promise.resolve(null);
-
-        const [tmdbColors, plexColors] = await Promise.all([tmdbPromise, plexPromise]);
-
-        if (cancelled) return;
-        const pick = (tmdbColors && (tmdbColors.topLeft || tmdbColors.topRight)) ? tmdbColors
-          : (plexColors && (plexColors.topLeft || plexColors.topRight)) ? plexColors
-          : null;
-        if (pick) setUltraBlurColors(pick);
-      } catch {
-        // UltraBlurColors are non-critical
-      }
-    }
-
-    fetchUltraBlur();
-    return () => { cancelled = true; controller.abort(); };
-  }, [ratingKey, resolvedTmdbId]);
+  const colorsEnabled = !!tmdbId || (!loading && (!!show || error));
+  const { colors: ultraBlurColors, settled: colorsSettled } =
+    useModalColors('tv', ratingKey, resolvedTmdbId, colorsEnabled);
 
   return {
     show,
@@ -428,7 +402,7 @@ export function useTvDetail(
     ownership,
     showOwned,
     sonarrStatus,
-    loading,
+    loading: loading || (!colorsSettled && !error),
     error,
     seasonsLoading,
     trailerKey,

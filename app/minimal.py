@@ -28,6 +28,9 @@ ALLOWED_PATHS = frozenset({
     '/api/settings/connectors/tmdb/test',
     # Settings > Connectors: Trakt (its rails join Home's list once connected).
     '/api/settings/connectors/trakt', '/api/settings/connectors/trakt/test',
+    # Search and the detail popup: TMDB images through prod's proxy (works when
+    # the browser can't reach image.tmdb.org) and the read-only ownership check.
+    '/api/img/tmdb', '/api/check-ownership-batch',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/', '/settings/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).

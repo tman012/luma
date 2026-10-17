@@ -304,3 +304,102 @@ def test_api_library_search_the_nit_job(minimal, monkeypatch):
     movies = c.get('/api/library/search?q=the nit job', environ_base=REMOTE).get_json()['movies']
     assert movies[0]['title'] == 'The Nut Job'
     assert movies[0]['poster_url'] == '/api/img/plex?url=/library/metadata/7/thumb/1'
+
+
+# ------------------------------------------------- TMDB typo rescue (the nit job)
+
+BANK = {'id': 1, 'media_type': 'movie', 'title': 'The Bank Job', 'vote_count': 2000, 'popularity': 20}
+NUT = {'id': 2, 'media_type': 'movie', 'title': 'The Nut Job', 'vote_count': 900, 'popularity': 9}
+NUT2 = {'id': 3, 'media_type': 'movie', 'title': 'The Nut Job 2: Nutty by Nature', 'vote_count': 400}
+
+
+def _fake_tmdb(monkeypatch, rate_limited=False):
+    """TMDB's literal search: 'the nit job' finds only The Bank Job."""
+    def multi(q, *a, **k):
+        q = q.lower()
+        if q == 'the nut job':
+            return [dict(NUT), dict(NUT2)]
+        if 'job' in q:
+            return [dict(BANK)]
+        return []
+    def movies(q, *a, **k):
+        return [{k2: v for k2, v in it.items() if k2 != 'media_type'} for it in multi(q)]
+    monkeypatch.setattr(app.main.tmdb, 'search_multi', multi)
+    monkeypatch.setattr(app.main.tmdb, 'search_movies', movies)
+    monkeypatch.setattr(app.main.tmdb, 'search_tv', lambda *a, **k: [])
+    monkeypatch.setattr(app.main.tmdb, 'search_people', lambda *a, **k: [])
+    idx = FastSearchIndex()  # empty dictionary: The Nut Job isn't popular
+    monkeypatch.setattr(idx, '_is_tmdb_rate_limited', lambda: rate_limited)
+    monkeypatch.setattr(app.main, 'fast_search_index', idx)
+
+
+def test_tmdb_search_the_nit_job_ranks_the_nut_job_first(minimal, monkeypatch):
+    _fake_tmdb(monkeypatch)
+    c = _client(minimal)
+    data = c.get('/search?q=the nit job&type=all', environ_base=REMOTE).get_json()
+    titles = [m['title'] for m in sorted(data['movies'], key=lambda m: m['relevance_rank'])]
+    assert titles[0] == 'The Nut Job'
+    assert 'The Bank Job' in titles  # still listed, just after the correction
+    assert data['rate_limited'] is False
+
+
+def test_tmdb_search_keeps_direct_order_when_it_matches(minimal, monkeypatch):
+    _fake_tmdb(monkeypatch)
+    c = _client(minimal)
+    data = c.get('/search?q=the bank job&type=all', environ_base=REMOTE).get_json()
+    assert sorted(data['movies'], key=lambda m: m['relevance_rank'])[0]['title'] == 'The Bank Job'
+
+
+def test_tmdb_search_reports_rate_limit(minimal, monkeypatch):
+    _fake_tmdb(monkeypatch, rate_limited=True)
+    c = _client(minimal)
+    data = c.get('/search?q=the nit job&type=all', environ_base=REMOTE).get_json()
+    assert data['rate_limited'] is True
+
+
+def test_typo_variants_are_one_letter_same_first_letter():
+    from app import search_correct
+    vs = search_correct.query_variants('the nit job')
+    assert 'the nut job' in vs and len(vs) <= search_correct.MAX_VARIANTS
+    for v in vs:
+        a, b = v.split(), 'the nit job'.split()
+        diffs = [(x, y) for x, y in zip(a, b) if x != y]
+        assert len(diffs) == 1 and diffs[0][0][0] == diffs[0][1][0]
+        assert sum(p != q for p, q in zip(*diffs[0])) == 1
+
+
+@pytest.mark.parametrize('path,method', [('/api/img/tmdb', 'GET'), ('/api/check-ownership-batch', 'POST')])
+def test_tmdb_image_proxy_and_ownership_allowlisted(path, method):
+    from app import minimal
+    assert minimal.path_allowed(path, method)
+    assert path not in minimal.SIGNED_OUT_PATHS
+
+
+# ------------------------------------------- TMDB base URL override (Tester f)
+
+def test_tmdb_base_url_env_override_used_by_client_and_test(monkeypatch):
+    from app import connectors
+    seen = []
+
+    class R:
+        status_code = 200
+
+        def json(self):
+            return {'results': []}
+
+        def raise_for_status(self):
+            pass
+    monkeypatch.setenv('LUMA_TMDB_BASE_URL', 'http://tmdb-mock.test:9/3/')
+    monkeypatch.setattr('app.connectors.requests.get', lambda url, **k: seen.append(url) or R())
+    monkeypatch.setattr(app.main.requests, 'get', lambda url, **k: seen.append(url) or R())
+    assert connectors.test_tmdb_key(KEY) is None
+    app.main.TMDBClient(KEY).search_multi('dune')
+    assert seen[0] == 'http://tmdb-mock.test:9/3/configuration'
+    assert seen[1].startswith('http://tmdb-mock.test:9/3/search/multi')
+
+
+@pytest.mark.parametrize('value', ['', 'ftp://x', 'javascript:alert(1)', 'http://a b'])
+def test_tmdb_base_url_ignores_bad_values(monkeypatch, value):
+    from app import connectors
+    monkeypatch.setenv('LUMA_TMDB_BASE_URL', value)
+    assert connectors.tmdb_base_url() == 'https://api.themoviedb.org/3'

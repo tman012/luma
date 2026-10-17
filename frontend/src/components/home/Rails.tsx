@@ -1,6 +1,7 @@
 /** Phone-first rails on Luma's purple-navy glass. */
 import { img, type Card, type Rail } from './homeApi';
 import { FONT } from '@/components/start/StartUI';
+import { prefetchModalColors } from '@/services/modalColors';
 
 export const GLASS: React.CSSProperties = {
   background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
@@ -15,6 +16,13 @@ export function RailRow({ title, children, testId }: { title: string; children: 
   );
 }
 
+/** Warm the detail popup's color blur with the ids openDetail will use. */
+export function warmCard(c: Card): void {
+  if (c.tmdb_id) return prefetchModalColors(c.type === 'movie' ? 'movie' : 'tv', undefined, c.tmdb_id);
+  if (c.type === 'movie') return prefetchModalColors('movie', Number(c.key));
+  prefetchModalColors('tv', Number(c.show_key || c.key));
+}
+
 type OnOpen = ((card: Card) => void) | undefined;
 
 /** A card is a plain button when it can open the detail popup. */
@@ -22,6 +30,7 @@ function CardShell({ card, onOpen, style, children }: { card: Card; onOpen: OnOp
   if (!onOpen) return <div style={style}>{children}</div>;
   return (
     <button type="button" onClick={() => onOpen(card)} aria-label={card.title}
+      onPointerEnter={() => warmCard(card)} onPointerDown={() => warmCard(card)} onFocus={() => warmCard(card)}
       data-testid={`card-${card.key}`} style={{ ...cardButton, ...style }}>
       {children}
     </button>

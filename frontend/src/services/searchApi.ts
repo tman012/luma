@@ -75,21 +75,33 @@ export interface SearchResults {
   unowned: SearchMovie[];
   ownedPeople: SearchPerson[];
   unownedPeople: SearchPerson[];
+  /** TMDb answered 429 recently, so new titles may be missing. */
+  rateLimited?: boolean;
 }
+
+/** Shown instead of "No results" while TMDb is rate limiting us. */
+export const TMDB_BUSY_TEXT = 'TMDB is busy. Try again in a minute.';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-import { posterUrl as tmdbPosterUrl } from '@/utils/image';
+import { posterUrl as tmdbPosterUrl, tmdbImg } from '@/utils/image';
+import { prefetchModalColors } from '@/services/modalColors';
 
 function titleKey(title: string, year: number | string | null | undefined): string {
   return `${(title || '').toLowerCase()}_${year || ''}`;
 }
 
 function getPosterUrl(item: SearchMovie): string | null {
-  if (item.poster_url) return item.poster_url;
+  if (item.poster_url) return tmdbImg(item.poster_url);
   return tmdbPosterUrl(item.poster_path, 'w342');
+}
+
+/** A person's photo: Plex/TMDb URL, else their TMDb profile path. */
+function getProfileUrl(person: SearchPerson): string | null {
+  if (person.profile_url) return tmdbImg(person.profile_url);
+  return tmdbPosterUrl(person.profile_path, 'w185') || (person.thumb ? person.thumb : null);
 }
 
 function getTitle(item: SearchMovie): string {
@@ -172,7 +184,7 @@ export async function performSearch(
       return (b.popularity ?? 0) - (a.popularity ?? 0);
     });
 
-  return { owned, unowned, ownedPeople, unownedPeople };
+  return { owned, unowned, ownedPeople, unownedPeople, rateLimited: !!tmdbData.rate_limited };
 }
 
 // ---------------------------------------------------------------------------
@@ -229,4 +241,12 @@ export async function batchCheckOwnership(
 // Re-export helpers for use in components
 // ---------------------------------------------------------------------------
 
-export { getPosterUrl, getTitle, getYear, titleKey };
+/** Warm a result's detail popup colors (hover, focus, tap), with the same
+ *  ids the popup will be opened with. */
+function warmResult(item: SearchMovie): void {
+  const rk = item.isOwned && item.rating_key ? Number(item.rating_key) : undefined;
+  const tmdb = item.tmdb_id || item.id;
+  prefetchModalColors(item.media_type === 'tv' ? 'tv' : 'movie', rk, tmdb ? Number(tmdb) : undefined);
+}
+
+export { warmResult, getPosterUrl, getProfileUrl, getTitle, getYear, titleKey };

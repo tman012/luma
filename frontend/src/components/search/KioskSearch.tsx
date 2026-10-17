@@ -20,14 +20,17 @@ import {
   fetchPersonCredits,
   batchCheckOwnership,
   getPosterUrl,
+  getProfileUrl,
+  warmResult,
   getTitle,
   getYear,
+  TMDB_BUSY_TEXT,
   type SearchMovie,
   type SearchPerson,
   type PersonCredit,
   type SearchResults,
 } from '@/services/searchApi';
-import { posterUrl as tmdbPosterUrl, sizedPlexImg } from '@/utils/image';
+import { sizedPlexImg, tmdbImg } from '@/utils/image';
 import { mediaKey } from '@/services/ownership';
 
 // ---------------------------------------------------------------------------
@@ -52,11 +55,15 @@ function SearchResultCard({
   const title = getTitle(item);
   const year = getYear(item);
   const poster = sizedPlexImg(getPosterUrl(item), 400, 600);
+  const warm = () => warmResult(item);
 
   return (
     <button
       type="button"
       onClick={onClick}
+      onPointerEnter={warm}
+      onPointerDown={warm}
+      onFocus={warm}
       className="group flex flex-col items-center gap-2 rounded-2xl p-2 lg:p-3 transition-colors hover:bg-glass-10"
     >
       <div className="relative aspect-[2/3] w-full shrink-0 overflow-hidden rounded-xl lg:rounded-2xl bg-glass-5 shadow-lg">
@@ -94,10 +101,7 @@ function PersonCard({
 }) {
   const d = useUiDensity();
   const tk = uiDensityTokens(d);
-  const profileUrl =
-    person.profile_url ||
-    tmdbPosterUrl(person.profile_path, 'w185') ||
-    (person.thumb ? person.thumb : null);
+  const profileUrl = getProfileUrl(person);
 
   return (
     <button
@@ -831,14 +835,15 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                         handleResultClick(media!);
                       }
                     }}
+                    onPointerDown={() => { if (media) warmResult(media); }}
                     className="flex w-full items-center gap-4 px-4 py-3.5 text-left transition-colors hover:bg-white/[0.07]"
                   >
                     {/* Small poster thumbnail */}
                     <div className="w-[36px] h-[54px] shrink-0 overflow-hidden rounded-lg bg-glass-5">
                       {(() => {
                         const posterSrc = isPerson
-                          ? (person!.profile_url || (person!.profile_path ? `https://image.tmdb.org/t/p/w92${person!.profile_path}` : null))
-                          : sizedPlexImg(media?.poster_url || null, 120, 180);
+                          ? getProfileUrl(person!)
+                          : sizedPlexImg(getPosterUrl(media!), 120, 180);
                         return posterSrc ? (
                           <img src={posterSrc} alt="" className="h-full w-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                         ) : (
@@ -873,7 +878,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
           {/* All tab — no results (compact only) */}
           {d.mode === 'compact' && tabs.all && showResults && !loading && results && unifiedResults.length === 0 && (
             <div className="border-t border-white/10 py-8 text-center text-[16px] text-text-muted">
-              No results
+              {results?.rateLimited ? TMDB_BUSY_TEXT : 'No results'}
             </div>
           )}
         </div>
@@ -895,7 +900,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
           {personView?.profileUrl && (
             <div className="h-[100px] w-[100px] overflow-hidden rounded-full bg-glass-10 shadow-lg shadow-black/40">
               <img
-                src={personView.profileUrl}
+                src={tmdbImg(personView.profileUrl) ?? undefined}
                 alt={personView.name}
                 className="h-full w-full object-cover"
               />
@@ -939,7 +944,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
           {/* No results */}
           {!loading && results && ownedCount === 0 && unownedCount === 0 && (tabs.all ? unifiedResults.length === 0 : true) && !personView && !personLoading && (
             <p className="py-12 text-center text-[20px] text-text-muted">
-              No results
+              {results?.rateLimited ? TMDB_BUSY_TEXT : 'No results'}
             </p>
           )}
 

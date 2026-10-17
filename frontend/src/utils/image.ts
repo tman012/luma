@@ -1,4 +1,5 @@
 import { getUrlBase, withBase } from '@/urlHelpers';
+import { isMinimal } from '@/minimal';
 
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p';
 
@@ -17,9 +18,28 @@ function resolveImageUrl(
   if (!path) return null;
   // Already a proxy URL — keep it, under the URL base
   if (path.startsWith('/api/')) return withBase(path);
-  if (path.startsWith('http')) return path;
-  // TMDB path — prepend base
+  if (path.startsWith('http')) return tmdbImg(path);
+  // TMDB path — prepend base (through our proxy in minimal mode)
+  if (isMinimal() && path.startsWith('/')) return tmdbProxy(path, size);
   return `${TMDB_IMAGE_BASE}/${size}${path}`;
+}
+
+const TMDB_URL = /^https?:\/\/image\.tmdb\.org\/t\/p\/(w\d+|h\d+|original)(\/[^?#]+)$/;
+
+function tmdbProxy(path: string, size: string): string {
+  return withBase(`/api/img/tmdb?path=${encodeURIComponent(path)}&size=${encodeURIComponent(size)}`);
+}
+
+/**
+ * TMDb CDN images load through our /api/img/tmdb proxy in minimal mode, the
+ * way prod's Latest and Nova sheets do, so a browser or network that can't
+ * reach image.tmdb.org still gets posters. Anything else is returned as-is.
+ */
+export function tmdbImg(url: string | undefined | null): string | null {
+  if (!url) return null;
+  if (!isMinimal()) return url;
+  const m = TMDB_URL.exec(url);
+  return m ? tmdbProxy(m[2]!, m[1]!) : url;
 }
 
 export function posterUrl(

@@ -1,4 +1,4 @@
-import { useTitleReveal, titleTextStyle } from '@/hooks/useTitleReveal';
+import { useTitleReveal, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { formatRuntime } from '@/utils/image';
@@ -320,7 +320,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
     onWatchlistRemoved,
     onSourcesGrabbed,
   } = props;
-  const titleState = useTitleReveal(detail?.clearLogoUrl, detail?.title);
+  const titleState = useTitleReveal(detail?.clearLogoUrl, detail?.title, detail?.backdropUrl || detail?.posterUrl);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -720,9 +720,11 @@ export function ExpandedLayout(props: MovieModalViewProps) {
           >
             {detail.backdropUrl ? (
               <img
+                key={detail.backdropUrl}
                 src={detail.backdropUrl}
                 alt=""
                 style={{
+                  ...revealStyle(titleState),
                   width: '100%',
                   height: '100%',
                   objectFit: 'cover',
@@ -732,9 +734,10 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               />
             ) : detail.posterUrl ? (
               <img
+                key={detail.posterUrl}
                 src={detail.posterUrl}
                 alt=""
-                style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.6 }}
+                style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: titleState === 'hold' ? 0 : 0.6, transition: 'opacity 0.45s ease-out' }}
               />
             ) : null}
             {/* Vignette */}
@@ -756,7 +759,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               maskImage: t.ultraBlurMask,
             }}
           >
-            <UltraBlurOverlay colors={ultraBlurColors} variant={t.ultraBlurVariant} animationDelay={300} />
+            <UltraBlurOverlay hold={titleState === 'hold'} colors={ultraBlurColors} variant={t.ultraBlurVariant} animationDelay={300} />
           </div>
         )}
 

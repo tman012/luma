@@ -1,3 +1,4 @@
+import { isMinimal } from '@/minimal';
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { FixMatchResult } from './FixMatchSheet';
@@ -67,7 +68,8 @@ export function MovieDetailModal({
   // Check if movie is already in Radarr watchlist
   useEffect(() => {
     const id = resolvedTmdbId;
-    if (!id) return;
+    // Minimal mode has no Radarr (the route is off): skip the console 404.
+    if (!id || isMinimal()) return;
     let cancelled = false;
     apiFetch('/api/radarr/watchlist/tmdb-ids')
       .then((r) => (r.ok ? r.json() : null))

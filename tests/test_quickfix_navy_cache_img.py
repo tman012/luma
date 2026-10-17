@@ -48,7 +48,7 @@ def test_sw_and_index_are_never_cached(test_app):
         r = c.get(path, environ_base=LAN)
         assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-cache', path
     sw = (ROOT / 'static/sw.js').read_text()
-    assert "CACHE_VERSION = 'media-kiosk-v119'" in sw
+    assert "CACHE_VERSION = 'media-kiosk-v120'" in sw
     assert "fetch(event.request, { cache: 'no-store' })" in sw
     assert 'self.skipWaiting()' in sw and 'self.clients.claim()' in sw
 
@@ -119,7 +119,25 @@ def test_proxy_refuses_non_images(proxy, ctype):
     c, _, state = proxy
     state['ctype'] = ctype
     r = c.get('/api/img/plex', query_string={'url': '/library/metadata/5/thumb'}, environ_base=LAN)
-    assert r.status_code == 502 and r.headers['Cache-Control'].startswith('private')
+    assert r.status_code == 502 and r.headers['Cache-Control'] == 'no-store'
+
+
+@pytest.mark.parametrize('url', ['/library/metadata/5/art/1700000000', '/library/metadata/5/clearLogo/1700000000',
+                                 '/library/metadata/5/thumb/1700000000'])
+def test_proxy_caches_versioned_backdrops_and_logos_a_day(proxy, url):
+    c, _, _ = proxy
+    r = c.get('/api/img/plex', query_string={'url': url, 'w': 1280, 'h': 720}, environ_base=LAN)
+    assert r.status_code == 200 and r.headers['Cache-Control'] == 'private, max-age=86400'
+
+
+def test_proxy_errors_are_never_cached(proxy, monkeypatch):
+    c, _, _ = proxy
+
+    class Missing(_Resp):
+        status_code = 404
+    monkeypatch.setattr(app.main.requests, 'get', lambda url, **k: Missing())
+    r = c.get('/api/img/plex', query_string={'url': '/library/metadata/5/art/1700000000'}, environ_base=LAN)
+    assert r.status_code == 404 and r.headers['Cache-Control'] == 'no-store'
 
 
 # -- minimal mode: no sign-up ------------------------------------------------------

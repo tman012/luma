@@ -187,7 +187,7 @@ export function CompactLayout(props: TvModalViewProps) {
     shuffleTarget,
     setShuffleTarget,
   } = props;
-  const titleState = useTitleReveal(show?.clearLogoUrl, show?.title);
+  const titleState = useTitleReveal(show?.clearLogoUrl, show?.title, show?.backdropUrl || show?.posterUrl);
 
   // Determine if we're in active episode-mode display
   // isEpisodeIntent: episodeContext is set → hide show content immediately
@@ -554,6 +554,7 @@ export function CompactLayout(props: TvModalViewProps) {
                 effects={backdropEffects}
                 phase={phase}
                 containerRef={backdropRef}
+                hold={titleState === 'hold'}
               />
 
               {/* === CENTERED CONTENT AREA === */}
@@ -582,7 +583,7 @@ export function CompactLayout(props: TvModalViewProps) {
                       maskImage: 'linear-gradient(to bottom, transparent 0%, black 80px)',
                     }}
                   >
-                    <UltraBlurOverlay colors={ultraBlurColors} variant="mobile" animationDelay={300} />
+                    <UltraBlurOverlay hold={titleState === 'hold'} colors={ultraBlurColors} variant="mobile" animationDelay={300} />
                   </div>
                 )}
                 {/* Clearlogo / Title */}

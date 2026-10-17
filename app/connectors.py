@@ -18,6 +18,8 @@ import logging
 import time
 from typing import Callable, Dict, Optional
 
+import os
+
 import requests
 from flask import Blueprint, jsonify, request
 
@@ -27,7 +29,18 @@ bp = Blueprint('connectors', __name__)
 _cfg: Dict[str, Callable] = {}
 
 MASK = '********'
-TMDB_TEST_URL = 'https://api.themoviedb.org/3/configuration'
+TMDB_DEFAULT_BASE = 'https://api.themoviedb.org/3'
+TMDB_BASE_ENV = 'LUMA_TMDB_BASE_URL'
+
+
+def tmdb_base_url() -> str:
+    """TMDB API base: LUMA_TMDB_BASE_URL (an http(s) URL, e.g. a test mock)
+    or TMDB itself. Used by the search client and the Connectors Test, so
+    both talk to the same server."""
+    raw = (os.environ.get(TMDB_BASE_ENV) or '').strip().rstrip('/')
+    if raw.startswith(('http://', 'https://')) and ' ' not in raw:
+        return raw
+    return TMDB_DEFAULT_BASE
 TRAKT_TEST_URL = 'https://api.trakt.tv/shows/trending'
 KEY_MAX = 512
 _tests: Dict[int, list] = {}
@@ -82,7 +95,7 @@ def test_tmdb_key(key: str) -> Optional[str]:
     if key.startswith('eyJ'):
         return 'Use the API key, not the access token'
     try:
-        r = requests.get(TMDB_TEST_URL, params={'api_key': key}, timeout=8)
+        r = requests.get(f'{tmdb_base_url()}/configuration', params={'api_key': key}, timeout=8)
     except requests.exceptions.Timeout:
         return 'Timed out'
     except Exception:

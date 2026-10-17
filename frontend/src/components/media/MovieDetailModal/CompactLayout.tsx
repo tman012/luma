@@ -126,7 +126,7 @@ export function CompactLayout(props: MovieModalViewProps) {
     onUpgradeAdded,
     onWatchlistRemoved,
   } = props;
-  const titleState = useTitleReveal(detail?.clearLogoUrl, detail?.title);
+  const titleState = useTitleReveal(detail?.clearLogoUrl, detail?.title, detail?.backdropUrl || detail?.posterUrl);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const topScrimRef = useRef<HTMLDivElement>(null);
@@ -477,6 +477,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                 effects={backdropEffects}
                 phase={phase}
                 containerRef={backdropRef}
+                hold={titleState === 'hold'}
               />
 
               {/* === CENTERED CONTENT AREA === */}
@@ -505,7 +506,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                       maskImage: 'linear-gradient(to bottom, transparent 0%, black 80px)',
                     }}
                   >
-                    <UltraBlurOverlay colors={ultraBlurColors} variant="mobile" animationDelay={300} />
+                    <UltraBlurOverlay hold={titleState === 'hold'} colors={ultraBlurColors} variant="mobile" animationDelay={300} />
                   </div>
                 )}
 
@@ -1131,6 +1132,7 @@ export function CompactLayout(props: MovieModalViewProps) {
               effects={backdropEffects}
               phase={phase}
               containerRef={topBackdropRef}
+              hold={titleState === 'hold'}
             />
           )}
           {ultraBlurColors && (
@@ -1148,7 +1150,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                 willChange: 'transform',
               }}
             >
-              <UltraBlurOverlay colors={ultraBlurColors} variant="mobile" />
+              <UltraBlurOverlay hold={titleState === 'hold'} colors={ultraBlurColors} variant="mobile" />
             </div>
           )}
         </div>

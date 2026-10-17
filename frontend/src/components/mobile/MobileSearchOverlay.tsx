@@ -4,9 +4,12 @@ import {
   performSearch,
   fetchPersonCredits,
   batchCheckOwnership,
-
+  getPosterUrl,
+  getProfileUrl,
+  warmResult,
   getTitle,
   getYear,
+  TMDB_BUSY_TEXT,
   type SearchMovie,
   type SearchPerson,
   type SearchResults,
@@ -14,6 +17,7 @@ import {
 } from '@/services/searchApi';
 import { mediaKey } from '@/services/ownership';
 import { withBase } from '@/urlHelpers';
+import { sizedPlexImg, tmdbImg } from '@/utils/image';
 const MAX_SUGGESTIONS = 5;
 
 /** Normalize title for dedup: lowercase, & → and, strip non-alphanum except spaces */
@@ -333,7 +337,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
           </button>
           {personView?.profileUrl && (
             <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-full bg-white/10">
-              <img src={personView.profileUrl} alt="" className="h-full w-full object-cover" />
+              <img src={tmdbImg(personView.profileUrl) ?? undefined} alt="" className="h-full w-full object-cover" />
             </div>
           )}
           <p className="text-[18px] font-semibold text-white truncate">
@@ -391,7 +395,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
         {/* No results */}
         {!loading && !personLoading && !personView && results && topSuggestions.length === 0 && (
           <p className="py-16 text-center text-sm text-white/40">
-            No results
+            {results?.rateLimited ? TMDB_BUSY_TEXT : 'No results'}
           </p>
         )}
 
@@ -421,9 +425,12 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
                       handleMediaClick(media!);
                     }
                   }}
-                  className="flex w-full items-center justify-between px-5 py-4 text-left active:bg-white/5"
+                  onPointerDown={() => { if (media) warmResult(media); }}
+                  className="flex w-full items-center gap-3 px-5 py-2.5 text-left active:bg-white/5"
+                  data-testid="phone-search-row"
                 >
-                  <span className="truncate text-[16px] font-medium text-white">
+                  <RowThumb src={isPerson ? getProfileUrl(person!) : sizedPlexImg(getPosterUrl(media!), 120, 180)} round={isPerson} />
+                  <span className="min-w-0 flex-1 truncate text-[16px] font-medium text-white">
                     {label}
                   </span>
                   <span className="ml-4 shrink-0 text-[13px] text-white/40">
@@ -560,5 +567,23 @@ function CreditRow({ credit, onClick }: { credit: PersonCredit; onClick: () => v
         </p>
       </div>
     </button>
+  );
+}
+
+/** Phone result thumbnail: the same poster pipeline as desktop (Plex through
+ *  /api/img/plex, TMDb through the image proxy in minimal mode). A missing or
+ *  broken image leaves the navy glass placeholder. */
+function RowThumb({ src, round }: { src: string | null; round?: boolean }) {
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [src]);
+  return (
+    <span
+      aria-hidden="true"
+      className={`block shrink-0 overflow-hidden bg-glass-5 ${round ? 'h-[36px] w-[36px] rounded-full' : 'h-[54px] w-[36px] rounded-md'}`}
+    >
+      {src && !broken && (
+        <img src={src} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" onError={() => setBroken(true)} />
+      )}
+    </span>
   );
 }

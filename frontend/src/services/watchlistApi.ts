@@ -8,8 +8,11 @@
 
 import { fetchWithTimeout } from '@/utils/fetchWithTimeout';
 import { apiFetch } from '../apiClient';
+import { isMinimal } from '@/minimal';
 
 export async function fetchWatchlistTmdbIds(): Promise<Set<number>> {
+  // Minimal mode has no Radarr (the route is off): don't call it.
+  if (isMinimal()) return new Set();
   try {
     const resp = await fetchWithTimeout('/api/radarr/watchlist/tmdb-ids');
     if (!resp.ok) return new Set();

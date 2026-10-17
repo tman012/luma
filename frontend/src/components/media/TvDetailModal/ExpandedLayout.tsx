@@ -1,4 +1,4 @@
-import { useTitleReveal, titleTextStyle } from '@/hooks/useTitleReveal';
+import { useTitleReveal, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { isMinimal } from '@/minimal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -769,7 +769,7 @@ function SeasonDetailModal({
   onAddSeasonToWatchlist?: (season: number) => Promise<boolean> | void;
   onClose: () => void;
 }) {
-  const titleState = useTitleReveal(show?.clearLogoUrl, show?.title);
+  const titleState = useTitleReveal(show?.clearLogoUrl, show?.title, show?.backdropUrl || show?.posterUrl);
   const [showEpisodeGrid, setShowEpisodeGrid] = useState(false);
   const [showCastShelf, setShowCastShelf] = useState(false);
   // Optimistic: this season was just added to the watchlist this session.
@@ -901,7 +901,7 @@ function SeasonDetailModal({
             position: 'absolute', inset: 0, zIndex: 1, pointerEvents: 'none',
             WebkitMaskImage: t.ultraBlurMask, maskImage: t.ultraBlurMask,
           }}>
-            <UltraBlurOverlay colors={parentUltraBlurColors} variant={t.ultraBlurVariant} animationDelay={300} />
+            <UltraBlurOverlay hold={titleState === 'hold'} colors={parentUltraBlurColors} variant={t.ultraBlurVariant} animationDelay={300} />
           </div>
         )}
 
@@ -1200,7 +1200,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
     showFullShow,
     onEpisodeClick,
   } = props;
-  const titleState = useTitleReveal(show?.clearLogoUrl, show?.title);
+  const titleState = useTitleReveal(show?.clearLogoUrl, show?.title, show?.backdropUrl || show?.posterUrl);
 
   // Determine if we're in active episode-mode display
   const isEpisodeIntent = !showFullShow && !!episodeContext;
@@ -1426,11 +1426,13 @@ export function ExpandedLayout(props: TvModalViewProps) {
             >
               {show.backdropUrl ? (
                 <img
+                  key={show.backdropUrl}
                   src={perf.limitBackdropResolution && show.backdropUrl.includes('/t/p/original')
                     ? show.backdropUrl.replace('/t/p/original', '/t/p/w1280')
                     : show.backdropUrl}
                   alt=""
                   style={{
+                    ...revealStyle(titleState),
                     width: '100%',
                     height: '100%',
                     objectFit: 'cover',
@@ -1439,7 +1441,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                   }}
                 />
               ) : show.posterUrl ? (
-                <img src={show.posterUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.6 }} />
+                <img key={show.posterUrl} src={show.posterUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: titleState === 'hold' ? 0 : 0.6, transition: 'opacity 0.45s ease-out' }} />
               ) : null}
               {show.backdropUrl && (
                 <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 30%, transparent 40%, rgba(0,0,0,0.2) 100%)', pointerEvents: 'none' }} />
@@ -1454,7 +1456,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
               WebkitMaskImage: t.ultraBlurMask,
               maskImage: t.ultraBlurMask,
             }}>
-              <UltraBlurOverlay colors={ultraBlurColors} variant={t.ultraBlurVariant} animationDelay={300} />
+              <UltraBlurOverlay hold={titleState === 'hold'} colors={ultraBlurColors} variant={t.ultraBlurVariant} animationDelay={300} />
             </div>
           )}
 

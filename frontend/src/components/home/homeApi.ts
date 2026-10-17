@@ -1,4 +1,5 @@
 import { apiFetch } from '@/apiClient';
+import { tmdbImg } from '@/utils/image';
 import { mapHeroMovie } from '@/services/api';
 import type { HeroMovie, HeroContentResponse } from '@/services/types';
 
@@ -14,7 +15,7 @@ export interface HomeData { continue_watching: Card[]; rails: Rail[]; plex: bool
 export interface Library { id: string; title: string; type: string; enabled: boolean; source?: 'plex' | 'trakt' }
 
 /** Image URLs come from the server complete (URL base included): use as is. */
-export const img = (p: string | null | undefined) => p || null;
+export const img = (p: string | null | undefined) => tmdbImg(p);
 
 export async function fetchHome(): Promise<HomeData> {
   const res = await apiFetch('/api/home');

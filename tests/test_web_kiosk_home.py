@@ -22,7 +22,7 @@ def test_hero_content_is_the_only_new_kiosk_path():
     from app import minimal
     assert minimal.path_allowed('/api/hero/content', 'GET')
     assert '/api/hero/content' not in minimal.SIGNED_OUT_PATHS
-    for off in ('/api/kiosk/settings', '/api/library/recent', '/api/img/tmdb', '/api/notifications',
+    for off in ('/api/kiosk/settings', '/api/library/recent', '/api/notifications',
                 '/api/hero/refresh', '/api/screensaver/content', '/api/explore'):
         assert not minimal.path_allowed(off, 'GET'), off
 

@@ -41,6 +41,7 @@ if __name__ == '__main__':
     ensure_writable_or_exit()
 from app.explore_cache import explore_cache
 from app.fast_search import fast_search_index
+from app import search_correct
 
 
 from app.upgrade_finder import UpgradeFinder, BATCH_SIZE
@@ -1144,8 +1145,13 @@ def _tmdb_needs_spelling_correction(results, query_str):
 class TMDBClient:
     """Client for interacting with TMDB API."""
 
-    BASE_URL = "https://api.themoviedb.org/3"
     IMAGE_BASE_URL = "https://image.tmdb.org/t/p"
+
+    @property
+    def BASE_URL(self) -> str:  # noqa: N802 - kept for existing callers
+        # LUMA_TMDB_BASE_URL override, shared with the Connectors Test.
+        from app.connectors import tmdb_base_url
+        return tmdb_base_url()
 
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -4825,6 +4831,7 @@ def search():
     # Spelling correction fallback: retry only when results are weak
     # Skip correction retry if we're currently rate limited
     corrected_raw = {}
+    corrected = None
     if (len(query) > 3 and 
         not fast_search_index._is_tmdb_rate_limited() and 
         _tmdb_needs_spelling_correction(raw, query)):
@@ -4853,6 +4860,41 @@ def search():
                             corrected_raw[key] = []
         except Exception as e:
             logger.warning(f"Spelling correction failed: {e}")
+
+    # Typo rescue (search_correct): TMDb's literal search returns The Bank Job
+    # for 'the nit job', and The Nut Job isn't in the popular-titles
+    # dictionary. When neither the direct nor the dictionary-corrected results
+    # read like the query, try one-letter word variants and keep the one TMDb
+    # answers with a title that reads exactly like it.
+    direct_items = raw.get('multi', []) + raw.get('movies', []) + raw.get('tv_shows', [])
+    corrected_items = corrected_raw.get('multi', []) + corrected_raw.get('movies', []) + corrected_raw.get('tv_shows', [])
+    direct_strong = search_correct.strong(query, raw.get('people', [])) or \
+        search_correct.strong(query, raw.get('multi', [])) or \
+        search_correct.strong(query, raw.get('movies', [])) or search_correct.strong(query, raw.get('tv_shows', []))
+    prefer_corrected = False
+    if corrected_items and not direct_strong and search_correct.strong(corrected or '', corrected_items, top=5):
+        prefer_corrected = True
+    if (not direct_strong and not prefer_corrected and (want_movies or want_tv) and len(query) > 3
+            and not fast_search_index._is_tmdb_rate_limited()):
+        variants = search_correct.query_variants(query)
+        if variants:
+            found = {}
+            with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+                vf = {v: executor.submit(tmdb.search_multi, v) for v in variants}
+                for v, f in vf.items():
+                    try:
+                        found[v] = [it for it in (f.result(timeout=10) or []) if isinstance(it, dict)]
+                    except Exception as e:
+                        logger.warning(f"Typo-variant search failed: {type(e).__name__}")
+                        found[v] = []
+            hit = search_correct.pick(found)
+            if hit:
+                corrected, items = hit
+                logger.info("search: typo variant '%s' for '%s'", corrected, query)
+                for it in items:
+                    it['_corrected'] = True
+                corrected_raw = {'multi': items}
+                prefer_corrected = True
 
     ranked_movies, ranked_tv = [], []
     seen = {'movie': set(), 'tv': set()}
@@ -4905,12 +4947,9 @@ def search():
     direct_order = (per_type_direct + multi_direct) if search_year else (multi_direct + per_type_direct)
     corrected_order = (per_type_corrected + multi_corrected) if search_year else (multi_corrected + per_type_corrected)
     
-    # Process direct results first
-    for mt, item in direct_order:
-        _take(mt, item)
-    
-    # Then process corrected results (deduped by _take)
-    for mt, item in corrected_order:
+    # Direct results first, then corrected ones (deduped by _take), unless the
+    # direct results don't read like the query and the corrected ones do.
+    for mt, item in (corrected_order + direct_order) if prefer_corrected else (direct_order + corrected_order):
         _take(mt, item)
 
     results['movies'] = ranked_movies
@@ -4921,6 +4960,8 @@ def search():
         item.pop('_corrected', None)
     for item in results['tv_shows']:
         item.pop('_corrected', None)
+    # Lets the UI say TMDb is busy instead of showing nothing (Tester e).
+    results['rate_limited'] = bool(fast_search_index._is_tmdb_rate_limited())
 
     # Log search to history
     conn = None
@@ -10879,7 +10920,7 @@ def get_clearlogo(tmdb_id):
         if logo_path:
             clearlogo_url = f"https://image.tmdb.org/t/p/original{logo_path}"
             return jsonify({'clearlogo_url': clearlogo_url})
-        return jsonify({'clearlogo_url': None}), 404
+        return jsonify({'clearlogo_url': None})  # no logo isn't an error (no console 404)
     except Exception as e:
         logger.error(f"Error fetching clearlogo from TMDB: {e}")
         return jsonify({'clearlogo_url': None}), 500
@@ -12381,17 +12422,16 @@ def img_plex_proxy():
             resp = requests.get(original_url, headers={'X-Plex-Token': plex_token}, timeout=15, stream=True)
 
         if resp.status_code != 200:
-            # Negative-cache briefly so a grid of broken images doesn't hammer
-            # the proxy (each opening a 15s upstream request) on every re-render.
+            # Errors are never cached: a transient Plex miss must not stick a
+            # blank backdrop or logo in the browser (images cache a day).
             from flask import Response
-            return Response('Image not found', status=404,
-                            headers={'Cache-Control': 'private, max-age=60'})
+            return Response('Image not found', status=404, headers={'Cache-Control': 'no-store'})
 
         from flask import Response
         import re as _re, hashlib as _hl
         ctype = (resp.headers.get('Content-Type') or 'image/jpeg').split(';')[0].strip().lower()
         if not ctype.startswith('image/') or ctype == 'image/svg+xml':
-            return Response('Not an image', status=502, headers={'Cache-Control': 'private, max-age=30'})
+            return Response('Not an image', status=502, headers={'Cache-Control': 'no-store'})
         body = resp.content
         # Versioned Plex paths (/thumb/<updatedAt>) change URL when the art changes -> cache a day.
         # Unversioned ones (/library/metadata/<rk>/thumb) keep the same URL after a Fix Match or
@@ -12407,10 +12447,9 @@ def img_plex_proxy():
             else {'Cache-Control': 'private, no-cache', 'ETag': etag, 'X-Content-Type-Options': 'nosniff'},
         )
     except requests.RequestException as e:
-        logger.error(f"Plex image proxy error: {e}")
+        logger.error(f"Plex image proxy error: {_redact_secrets(e)}")
         from flask import Response
-        return Response('Error fetching image', status=502,
-                        headers={'Cache-Control': 'private, max-age=30'})
+        return Response('Error fetching image', status=502, headers={'Cache-Control': 'no-store'})
 
 @app.route('/api/img/tmdb')
 def img_tmdb_proxy():

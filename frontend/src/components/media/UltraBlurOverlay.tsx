@@ -18,6 +18,9 @@ import type { UltraBlurColors } from '@/utils/modalParsers';
 // ---------------------------------------------------------------------------
 
 interface UltraBlurOverlayProps {
+  /** Stays invisible while true, then fades in with the backdrop and title
+   *  (useTitleReveal). Replaces the delayed keyframe fade when set. */
+  hold?: boolean;
   colors: UltraBlurColors | null;
   variant: 'web' | 'mobile' | 'tablet';
   /** Delay before opacity fade-in animation (ms). 0 = no animation. */
@@ -186,6 +189,7 @@ export function UltraBlurOverlay({
   animationDelay = 0,
   borderRadius,
   lite = false,
+  hold,
 }: UltraBlurOverlayProps) {
   if (!colors) return null;
 
@@ -231,7 +235,7 @@ export function UltraBlurOverlay({
   const filterStr = filterParts.length > 0 ? filterParts.join(' ') : 'none';
 
   // Build animation style for delayed fade-in
-  const hasAnimation = animationDelay > 0;
+  const hasAnimation = animationDelay > 0 && hold === undefined;
   const animationName = 'ultraBlurFadeIn';
 
   return (
@@ -249,10 +253,13 @@ export function UltraBlurOverlay({
           maskImage: mask,
           borderRadius: resolvedRadius,
           backfaceVisibility: 'hidden',
+          ...(hold !== undefined ? { opacity: hold ? 0 : 1, transition: 'opacity 0.45s ease-out' } : {}),
           // Animation: start invisible if delayed, animate to visible
           ...(hasAnimation
             ? {
-                animation: `${animationName} 0.7s ease ${animationDelay}ms both`,
+                // Fades in with the backdrop (the palette is settled before the
+                // popup renders it), never after it.
+                animation: `${animationName} 0.45s ease-out both`,
               }
             : {}),
         }}
