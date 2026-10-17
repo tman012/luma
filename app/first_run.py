@@ -80,9 +80,12 @@ def export_settings_to_env() -> None:
         data = json.loads((data_dir() / 'settings.json').read_text())
     except (FileNotFoundError, ValueError):
         data = {}
+    from app import minimal
     for env, path in _SETTINGS_ENV.items():
         if os.environ.get(env):
             continue
+        if env == 'TMDB_API_KEY' and minimal.enabled():
+            continue   # minimal builds: only the Connectors key, read from settings
         cur = data
         for k in path:
             cur = cur.get(k) if isinstance(cur, dict) else None

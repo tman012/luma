@@ -21,6 +21,11 @@ ALLOWED_PATHS = frozenset({
     '/api/settings/plex', '/api/settings/plex/pin', '/api/settings/plex/server',
     # Web kiosk home (#12, >=1024px): prod's hero slideshow data. Sign-in required.
     '/api/hero/content', '/api/home/kiosk',
+    # Search (prod's typo-tolerant library + TMDB search). Sign-in required.
+    '/search', '/api/library/search',
+    # Settings > Connectors (owner only): the TMDB key.
+    '/settings/connectors', '/api/settings/connectors', '/api/settings/connectors/tmdb',
+    '/api/settings/connectors/tmdb/test',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).
@@ -29,6 +34,7 @@ DETAIL_READ_PREFIXES = (
     '/api/plex/movie/', '/api/plex/tv/', '/api/movie/', '/api/tv/',
     '/api/plex/ratings/', '/api/plex/ultrablur/', '/api/tmdb/colors/',
     '/api/clearlogo/', '/api/plex/lookup', '/api/plex/episode/',
+    '/api/tmdb/person_by_id/',
 )
 # Inside /static/, these belong to disabled features.
 BLOCKED_PREFIXES = ('/static/request/', '/static/hero_cache/')

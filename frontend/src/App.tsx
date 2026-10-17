@@ -9,6 +9,7 @@ import { KioskLayout } from '@/components/layout/KioskLayout';
 import { HomeKioskPage } from '@/pages/HomeKioskPage';
 import { TopBar } from '@/components/layout/TopBar';
 import { GlobalSearchHost } from '@/components/search/GlobalSearchHost';
+import { MinimalSearchHost } from '@/components/search/MinimalSearchHost';
 import { NotificationsProvider } from '@/contexts/NotificationsContext';
 import { useKioskMode, invalidateKioskMode } from '@/hooks/useKioskMode';
 import { PageModal } from '@/components/layout/PageModal';
@@ -235,6 +236,7 @@ function MinimalApp() {
         <LayoutModeProvider>
         <SpatialNavProvider>
         <AppModalHost>
+        <MinimalSearchHost />
         <Routes>
           <Route path="/" element={<MinimalHomePage />} />
           <Route path="/login" element={<LoginPage />} />

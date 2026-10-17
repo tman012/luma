@@ -515,6 +515,7 @@ def handle_405(e):
     return e
 
 # Configuration
+
 class Config:
     TMDB_API_KEY = os.environ.get('TMDB_API_KEY', '')
     OMDB_API_KEY = os.environ.get('OMDB_API_KEY', '')
@@ -529,6 +530,18 @@ class Config:
     # Radarr settings
     RADARR_URL = os.environ.get('RADARR_URL', '')
     RADARR_API_KEY = os.environ.get('RADARR_API_KEY', '')
+
+
+# Minimal builds: no env TMDB key. Only a key saved in Settings > Connectors
+# counts (settings.get gates it), so TMDB stays off on a fresh install.
+if _minimal.enabled():
+    Config.TMDB_API_KEY = settings.get('apis.tmdb.api_key') or ''
+    import app.config as _legacy_config
+    _legacy_config.Config.TMDB_API_KEY = Config.TMDB_API_KEY
+    if Config.TMDB_API_KEY:
+        os.environ['TMDB_API_KEY'] = Config.TMDB_API_KEY
+    else:
+        os.environ.pop('TMDB_API_KEY', None)
 
 config = Config()
 
@@ -570,9 +583,15 @@ def start_services(app_instance):
     except Exception as e:
         logger.warning(f"VAPID key setup skipped: {e}")
     
-    # LUMA_MINIMAL=1: no caches, automations, schedulers or tunnel.
+    # LUMA_MINIMAL=1: no caches, automations, schedulers or tunnel; only the
+    # library search index (it reads Plex, and TMDB only with a Connectors key).
     if _minimal.enabled():
-        logger.warning('LUMA_MINIMAL is set: background threads are NOT started')
+        logger.warning('LUMA_MINIMAL is set: background threads are NOT started (except the search index)')
+        if not skip_bg:
+            try:
+                fast_search_index.start()
+            except Exception as e:
+                logger.error(f"Failed to start fast search index: {e}")
         return
 
     # Initialize library caches
@@ -20512,6 +20531,25 @@ _start_flow.init(
     get_current_user=_get_current_user, secret=app.config['SECRET_KEY'],
 )
 app.register_blueprint(_start_flow.bp)
+
+def _on_tmdb_key(key: str) -> None:
+    """A Connectors save: the new key applies at once, no restart."""
+    tmdb.api_key = key or None
+    Config.TMDB_API_KEY = key
+    if key:
+        os.environ['TMDB_API_KEY'] = key
+    else:
+        os.environ.pop('TMDB_API_KEY', None)
+    try:
+        if key:
+            threading.Thread(target=fast_search_index._refresh_tmdb_titles, daemon=True).start()
+    except Exception:
+        pass
+
+
+from app import connectors as _connectors
+_connectors.init(settings=settings, owner_or_error=_start_flow._owner_or_error, on_tmdb_key=_on_tmdb_key)
+app.register_blueprint(_connectors.bp)
 
 from app import home_rails as _home_rails
 _home_rails.init(get_plex=lambda: plex_service, get_current_user=_get_current_user)

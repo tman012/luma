@@ -149,6 +149,7 @@ def _started(fakes):
 
 
 def test_minimal_mode_starts_no_background_threads(test_app, patched_start, minimal):
+    """Only the library search index starts (search works in minimal builds)."""
     from app.main import start_services
     test_app.config['START_BACKGROUND_THREADS'] = True
     start_services(test_app)
@@ -156,7 +157,8 @@ def test_minimal_mode_starts_no_background_threads(test_app, patched_start, mini
     p['init_db'].assert_called_once()
     p['ua_init'].assert_called_once()
     p['thread'].assert_not_called()
-    for k in ('search', 'hero', 'explore', 'tunnel'):
+    p['search'].assert_called_once()
+    for k in ('hero', 'explore', 'tunnel'):
         p[k].assert_not_called()
     assert _started(p['fakes']) == []
 

@@ -23,10 +23,12 @@ import { CheckIcon, ChevronIcon, ChevronLeftIcon, GripIcon, XIcon } from '@/comp
 import { UserMenu } from '@/components/nav/UserMenu';
 import { NoticeToast } from '@/components/start/SetupToast';
 import { PlexSettings, usePlexOwner } from '@/components/home/PlexSettings';
+import { ConnectorsSettings } from '@/components/home/ConnectorsSettings';
 
 export const SETTINGS_SECTIONS = [
   { slug: 'home-screen', label: 'Home screen' },
   { slug: 'plex', label: 'Plex' },   // owner only
+  { slug: 'connectors', label: 'Connectors' },   // owner only
 ] as const;
 const DEFAULT_SECTION = SETTINGS_SECTIONS[0].slug;
 export const SAVE_FAILED = "Couldn't save";
@@ -48,12 +50,15 @@ export function SettingsPage() {
   if (!authenticated) return <Navigate to="/login" replace />;
   const known = SETTINGS_SECTIONS.find(s => s.slug === section);
   if (section && !known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
-  if (known?.slug === 'plex' && owner === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
+  const ownerOnly = (slug: string) => slug === 'plex' || slug === 'connectors';
+  if (known && ownerOnly(known.slug) && owner === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   const admin = !!user?.is_admin;
-  const sections = SETTINGS_SECTIONS.filter(s => s.slug !== 'plex' || owner);
+  const sections = SETTINGS_SECTIONS.filter(s => !ownerOnly(s.slug) || owner);
   const content = (slug: string) => slug === 'plex'
     ? (owner ? <PlexSettings /> : null)
-    : <HomeScreenSection admin={admin} wide={wide} />;
+    : slug === 'connectors'
+      ? (owner ? <ConnectorsSettings /> : null)
+      : <HomeScreenSection admin={admin} wide={wide} />;
 
   if (wide) {
     if (!known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;

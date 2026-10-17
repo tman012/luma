@@ -112,6 +112,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "base_url":       {"type": "string", "default": "https://api.themoviedb.org/3", "sensitive": False, "description": "TMDb API base URL"},
             "image_base_url": {"type": "string", "default": "https://image.tmdb.org/t/p", "sensitive": False, "description": "TMDb image CDN base URL"},
             "region":         {"type": "string", "default": "US", "sensitive": False, "description": "TMDb region filter for releases"},
+            "connector_saved": {"type": "boolean", "default": False, "sensitive": False, "description": "Key saved in Settings > Connectors (minimal builds use only that key)"},
         },
         "omdb": {
             "_type": "object",
@@ -1488,6 +1489,11 @@ def _run_all_migrations(data: dict, data_dir=None, existing: bool = False) -> bo
 # SettingsManager
 # ---------------------------------------------------------------------------
 
+def _minimal_tmdb_locked(data: dict) -> bool:
+    from app import minimal
+    return minimal.enabled() and _get_nested(data, 'apis.tmdb.connector_saved', False) is not True
+
+
 class SettingsManager:
     """Thread-safe, file-backed settings store with schema validation.
 
@@ -1512,8 +1518,13 @@ class SettingsManager:
     # ------------------------------------------------------------------
 
     def get(self, dotted_path: str, default: Any = None) -> Any:
-        """Return a single settings value by dotted path (e.g. ``plex.url``)."""
+        """Return a single settings value by dotted path (e.g. ``plex.url``).
+
+        Minimal builds: the TMDB key counts only once the owner saved it in
+        Settings > Connectors (never a key bootstrapped from the env)."""
         with self._lock:
+            if dotted_path == 'apis.tmdb.api_key' and _minimal_tmdb_locked(self._settings):
+                return ''
             return _get_nested(self._settings, dotted_path, default)
 
     def get_all(self) -> Dict[str, Any]:
