@@ -280,12 +280,27 @@ def clear_avistaz_tokens() -> None:
         _avz_tokens.clear()
 
 
+# Pause between an AvistaZ sign-in and the request that follows it, so a
+# Test or search never sends two requests closer than the guard's spacing.
+AVZ_LOGIN_GAP_S = 2.0
+_sleep = time.sleep
+
+
 def _avz_token(cfg, request: Request, force: bool = False) -> str:
+    """A bearer token for these credentials: the cached one, or a fresh
+    sign-in followed by AVZ_LOGIN_GAP_S of quiet before the caller's next
+    request."""
     key, now = _avz_key(cfg), time.time()
     with _avz_lock:
         hit = _avz_tokens.get(key)
         if hit and not force and hit[1] > now + 60:
             return hit[0]
+    token = _avz_login(cfg, request, key, now)
+    _sleep(AVZ_LOGIN_GAP_S)
+    return token
+
+
+def _avz_login(cfg, request: Request, key: str, now: float) -> str:
     # '/api/v1/jackett/...' is the AvistaZ sites' own API path name; nothing
     # here talks to Jackett.
     resp = request('POST', f'{_base(cfg)}/api/v1/jackett/auth',
