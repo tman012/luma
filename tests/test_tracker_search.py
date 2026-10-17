@@ -120,9 +120,11 @@ def _settings_without_indexer(real_get):
 
 @pytest.fixture
 def client(test_app, env):
-    app.user_auth.create_user('owner', 'pin-1234567', is_admin=True)
+    owner = app.user_auth.create_user('owner', 'pin-1234567', is_admin=True)
     c = test_app.test_client()
     c.environ_base.update(LAN)
+    c.environ_base.update({'HTTP_ORIGIN': 'http://localhost', 'HTTP_HOST': 'localhost'})
+    c.set_cookie(app.main.AUTH_COOKIE, app.user_auth.create_session(owner['id']))
     return c
 
 
@@ -363,3 +365,30 @@ def test_engine_follows_a_swapped_store(tmp_path, env):
     other = TrackerStore(tmp_path / 'o.json', tmp_path / 'o.key')
     tracker_store.reset_store_for_tests(other)
     assert eng.store is other and eng.tokens._store is other
+
+
+def test_ban_is_persisted_and_search_skips_the_tracker_after_restart(env):
+    rec = torznab(env['store'])
+    good = torznab(env['store'], name='Up', host='up.example')
+    env['mock'].set('t.example', R(403, body='You are banned'))
+    env['mock'].set('up.example', R(body=rss(('The Nut Job 2014 1080p WEB-DL', 4, 1))))
+    out = LumaTrackersClient(env['engine']).search_all('The Nut Job', 'movie')
+    assert [o['indexer'] for o in out] == ['Up']
+    until, kind = env['guard'].blocked(rec['id'])
+    assert kind == 'banned' and until - time.time() > 23 * 3600
+    # Restart: a fresh guard reads the ban back; the banned tracker is not contacted.
+    fresh = TrackerGuard(env['tmp'] / 'tracker_guard.json')
+    eng = TrackerSearch(store=env['store'], guard=fresh, request=env['mock'],
+                        tokens=ReleaseTokens(env['store'], env['tmp'] / 'tracker_releases.json'))
+    n = len(env['mock'].hits('t.example'))
+    out = LumaTrackersClient(eng).search_all('Another title', 'movie')
+    assert len(env['mock'].hits('t.example')) == n
+    assert [o['indexer_id'] for o in out] == [good['id']]
+
+
+def test_search_test_goes_through_the_guard(env):
+    rec = torznab(env['store'])
+    env['guard'].failure(rec['id'], 'rate', 600)
+    with pytest.raises(TrackerError) as e:
+        env['engine'].test(env['store'].config(rec))
+    assert e.value.kind == 'rate' and env['mock'].calls == []

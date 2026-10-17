@@ -293,3 +293,59 @@ def reset_guard_for_tests(guard: Optional[TrackerGuard] = None) -> None:
     global _guard
     with _guard_lock:
         _guard = guard
+
+
+# ------------------------------------------------------------ keys and Test
+
+def host_key(url: str) -> int:
+    """Counter key for a site host (www. ignored), outside the tracker id range."""
+    import zlib
+    from urllib.parse import urlsplit
+    host = (urlsplit(str(url or '')).hostname or '').lower()
+    if host.startswith('www.'):
+        host = host[4:]
+    return 1_000_000_000 + zlib.crc32(host.encode('utf-8'))
+
+
+def guard_key(cfg: Dict) -> int:
+    """Guard counters key for a tracker config. Saved trackers count by id.
+    AvistaZ-family trackers, and anything without an id (an unsaved form,
+    or a form whose URL no longer matches the saved one), count by site host,
+    so deleting and re-adding a site can't reset its limits."""
+    from app import tracker_types as tt
+    if cfg.get('id') is None or tt.is_rate_strict(cfg.get('type')):
+        return host_key(cfg.get('url'))
+    return int(cfg['id'])
+
+
+def guarded_test(cfg: Dict, run, guard: Optional[TrackerGuard] = None) -> None:
+    """Run a connection test through the same limiter as searches.
+
+    A Test counts as a user request against the per-tracker hourly and daily
+    caps and the global hourly cap (AvistaZ family: the strict bucket). A
+    rate-limit or ban backoff, or a failed-closed guard, refuses the Test
+    without contacting the tracker; other backoffs (rejected credentials,
+    network) are cleared since the owner may just have fixed them. A 429 or
+    ban answer starts the persisted backoff, honoring Retry-After.
+    Raises TrackerError; returns None when the tracker answered correctly."""
+    from app import tracker_types as tt
+    from app.tracker_http import TrackerError
+    g = guard or get_guard()
+    gk = guard_key(cfg)
+    strict = tt.is_rate_strict(cfg.get('type'))
+    blocked = g.blocked(gk)
+    if blocked and blocked[1] in ('rate', 'banned', 'paused'):
+        raise TrackerError('banned' if blocked[1] == 'banned' else 'rate')
+    if blocked:
+        g.clear(gk)
+    if g.take(gk, True, strict):
+        raise TrackerError('rate')
+    with g.tracker_lock(gk):
+        g.wait_spacing(gk)
+        try:
+            run(cfg)
+        except TrackerError as e:
+            if e.kind in ('rate', 'banned'):
+                g.failure(gk, e.kind, e.retry_after)
+            raise
+    g.success(gk)

@@ -10,6 +10,13 @@ from app.tracker_http import Response, TrackerError
 from app.tracker_store import TrackerStore
 
 KEY = 'ak_0123456789abcdef0123456789abcdef'
+PUBLIC_IP = '93.184.215.14'
+
+
+@pytest.fixture(autouse=True)
+def _public_dns(monkeypatch):
+    """Tests have no DNS: every host name resolves to one public address."""
+    monkeypatch.setattr(tracker_http, 'resolve', lambda host, port: [PUBLIC_IP])
 
 
 class FakeTracker:

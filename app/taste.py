@@ -294,10 +294,10 @@ def recent_watches(account_id: int, hours: int = _DEFAULT_WINDOW_HOURS,
     cutoff = int(time.time()) - hours * 3600
     try:
         r = requests.get(f'{url}/status/sessions/history/all',
-                         params={'X-Plex-Token': token,
-                                 'accountID': int(account_id),
+                         params={'accountID': int(account_id),
                                  'viewedAt>': cutoff},
-                         headers={'Accept': 'application/json'}, timeout=60)
+                         headers={'Accept': 'application/json', 'X-Plex-Token': token},
+                         timeout=60, allow_redirects=False)
         r.raise_for_status()
         recs = r.json().get('MediaContainer', {}).get('Metadata', []) or []
     except Exception as e:
