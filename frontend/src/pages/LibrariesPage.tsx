@@ -104,7 +104,7 @@ export function SettingsPage() {
             : <span style={{ width: 48 }} />}
         </header>
         <div style={deskPage}>
-          <nav aria-label="Settings" data-testid="settings-nav" style={{ width: 220, flex: 'none' }}>
+          <nav aria-label="Settings" data-testid="settings-nav" style={{ width: NAV_W, flex: 'none' }}>
             <h1 style={navHeading}>Settings</h1>
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
               {sections.map(s => {
@@ -121,7 +121,7 @@ export function SettingsPage() {
               })}
             </ul>
           </nav>
-          <main style={{ flex: 1, minWidth: 0, maxWidth: 720 }}>
+          <main data-testid="settings-main" style={{ flex: 1, minWidth: 0, maxWidth: known.slug === 'tv' ? undefined : 720 }}>
             {!ownChrome && <h2 style={deskTitle}>{known.label}</h2>}
             {content(known.slug)}
           </main>
@@ -360,11 +360,19 @@ const css = `
 @keyframes luma-fade-in{from{opacity:0}to{opacity:1}}
 @media (prefers-reduced-motion: reduce){.luma-sheet,.luma-push{animation:luma-fade-in 200ms}}
 `;
+/** Desktop Settings (Designer): the 'Settings' heading and the nav column sit
+ * directly under the Luma logo, on its left edge and HEADING_GAP below its
+ * bottom; the content column follows at the same nav-to-content gap and takes
+ * the freed width (TV uses all of it). */
+export const LOGO_LEFT = 44;
+export const HEADING_GAP = 16;
+export const NAV_W = 220;
+export const NAV_GAP = 40;
 const deskHeader: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 60px 20px 44px',
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `20px 60px 0 ${LOGO_LEFT}px`,
 };
 const deskPage: React.CSSProperties = {
-  display: 'flex', gap: 40, maxWidth: 1100, margin: '0 auto', padding: '32px 60px', boxSizing: 'border-box',
+  display: 'flex', gap: NAV_GAP, padding: `${HEADING_GAP}px 60px 32px ${LOGO_LEFT}px`, boxSizing: 'border-box',
 };
 const navHeading: React.CSSProperties = {
   margin: '0 0 20px', fontSize: 24, fontWeight: 600, fontFamily: FONT, color: 'rgba(255,255,255,0.95)',
