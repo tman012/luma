@@ -25,12 +25,15 @@ import { NoticeToast } from '@/components/start/SetupToast';
 import { PlexSettings, usePlexOwner } from '@/components/home/PlexSettings';
 import { ConnectorsSettings } from '@/components/home/ConnectorsSettings';
 import { TrackersSettings, useTrackersAccess } from '@/components/trackers/TrackersSettings';
+import { LibraryPathsSettings } from '@/components/library/LibraryPathsSettings';
+import { isMinimal } from '@/minimal';
 
 export const SETTINGS_SECTIONS = [
   { slug: 'home-screen', label: 'Home screen' },
   { slug: 'plex', label: 'Plex' },   // owner only
   { slug: 'connectors', label: 'Connectors' },   // owner only
   { slug: 'trackers', label: 'Trackers' },   // owner with a session only
+  { slug: 'library-paths', label: 'Library paths' },   // owner only
 ] as const;
 const DEFAULT_SECTION = SETTINGS_SECTIONS[0].slug;
 export const SAVE_FAILED = "Couldn't save";
@@ -54,18 +57,23 @@ export function SettingsPage() {
   if (!authenticated) return <Navigate to="/login" replace />;
   const known = SETTINGS_SECTIONS.find(s => s.slug === section);
   if (section && !known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
-  const ownerOnly = (slug: string) => slug === 'plex' || slug === 'connectors';
+  const ownerOnly = (slug: string) => slug === 'plex' || slug === 'connectors' || slug === 'library-paths';
   if (known && ownerOnly(known.slug) && owner === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   if (known?.slug === 'trackers' && trackersOk === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
+  // Library paths: the API exists only on minimal (luma-test) builds.
+  if (known?.slug === 'library-paths' && !isMinimal()) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   const admin = !!user?.is_admin;
-  const sections = SETTINGS_SECTIONS.filter(s => (s.slug === 'trackers' ? trackersOk : !ownerOnly(s.slug) || owner));
+  const sections = SETTINGS_SECTIONS.filter(s => (s.slug === 'trackers' ? trackersOk
+    : s.slug === 'library-paths' ? owner && isMinimal() : !ownerOnly(s.slug) || owner));
   const content = (slug: string) => slug === 'plex'
     ? (owner ? <PlexSettings /> : null)
     : slug === 'connectors'
       ? (owner ? <ConnectorsSettings /> : null)
       : slug === 'trackers'
         ? (trackersOk ? <TrackersSettings wide={wide} onExit={() => navigate('/settings')} /> : null)
-        : <HomeScreenSection admin={admin} wide={wide} />;
+        : slug === 'library-paths'
+          ? (owner ? <LibraryPathsSettings wide={wide} /> : null)
+          : <HomeScreenSection admin={admin} wide={wide} />;
   // Trackers draws its own title row (desktop) and header (phone: Plus, pushed pages).
   const ownChrome = known?.slug === 'trackers';
 
