@@ -12514,11 +12514,10 @@ def _play_via_kodi(service, rating_key, resume_offset, room_name, device_ip, adb
         # Kodi not running — launch via ADB intent with file URL (straight to playback)
         if has_adb:
             logger.info("Kodi: not running, launching via ADB intent with file URL")
-            target = f"{device_ip}:{adb_port}"
-            launch = run_adb(["adb", "-s", target, "shell",
-                              "am", "start", "-a", "android.intent.action.VIEW",
-                              "-d", file_url, "-t", "video/*",
-                              "-n", "org.xbmc.kodi/.Splash"], timeout=5)
+            target = _adb_target(device_ip, adb_port)
+            if not target:
+                return jsonify({'success': False, 'message': 'Unknown device'}), 400
+            launch = run_adb(_kodi_launch_args(target, file_url), timeout=5)
             logger.info(f"Kodi ADB intent: ok={launch['ok']}, "
                         f"out={launch['stdout'].strip()}, err={launch['stderr'].strip()}")
 
@@ -12644,7 +12643,9 @@ def _play_via_plex(service, rating_key, resume_offset, room_name, device_ip, adb
     metadata = plex_service.get_metadata(play_rk)
     title = metadata.get('title', '?') if metadata else '?'
     offset_ms = int(resume_offset) if resume_offset else 0
-    target = f"{device_ip}:{adb_port}"
+    target = _adb_target(device_ip, adb_port)
+    if not target:
+        return jsonify({'success': False, 'message': 'Unknown device'}), 400
 
     logger.info(
         f"Plex play: '{title}' (rk={play_rk}, source_rk={rating_key}, pq={play_queue_id}) "
@@ -12825,9 +12826,7 @@ def _plex_play_deeplink(run_adb, target, device_ip, machine_id, rating_key, offs
     session = None
     used = None
     for label, uri, extra in _plex_deeplink_candidates(machine_id, start_rk, offset_ms, play_queue_id):
-        cmd = "am start " + ("--ez android.intent.extra.START_PLAYBACK true " if extra else "") + \
-              f"-a android.intent.action.VIEW -d '{uri}' com.plexapp.android"
-        result = run_adb(["adb", "-s", target, "shell", cmd], timeout=15)
+        result = run_adb(_plex_deeplink_args(target, uri, extra), timeout=15)
         out = ((result.get('stdout') or '') + (result.get('stderr') or '')).strip().replace('\n', ' | ')
         logger.info("Plex deep-link %s on %s: ok=%s %s", label, target, result.get('ok'), out[:200])
         if not result.get('ok') or 'Error:' in out:
@@ -18006,7 +18005,10 @@ def plex_clients():
 
 @app.route('/api/plex/client/control', methods=['POST'])
 def plex_client_control():
-    """Control a Plex client (play/pause/stop/seek/volume)."""
+    """Control a Plex client (play/pause/stop/seek/volume). Admin only."""
+    err = _require_admin()
+    if err:
+        return err
     try:
         data = request.json or {}
         client_name = data.get('client_name', '')
@@ -18022,10 +18024,13 @@ def plex_client_control():
         # For 'back' action, route to ADB (simpler, works regardless)
         if action == 'back':
             device_ip = data.get('device_ip', '')
-            adb_port = int(data.get('adb_port', 5555))
             if device_ip:
+                target = _adb_target(device_ip, data.get('adb_port', 5555))
+                if not target:
+                    return jsonify({'success': False, 'error': 'Unknown device'}), 400
                 from app.adb_utils import send_key_event
-                result = send_key_event(device_ip, adb_port, 'back')
+                host, _, port = target.rpartition(':')
+                result = send_key_event(host.strip('[]'), int(port), 'back')
                 return jsonify(result)
             return jsonify({'success': False, 'error': 'device_ip required for back action'}), 400
 
@@ -18044,11 +18049,6 @@ def plex_client_control():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-_ADB_HOSTNAME = re.compile(
-    r'(?=.{1,253}\Z)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*',
-    re.ASCII)
-
-
 def _configured_device_hosts() -> set:
     """Every device host the admin configured in rooms, lowercased."""
     hosts = set()
@@ -18065,37 +18065,35 @@ def _configured_device_hosts() -> set:
 
 
 def _adb_target(host, port):
-    """'host:port' for adb -s, or None. The host must be a plain IP address or
-    hostname that matches a configured device, and the port 1-65535."""
-    import ipaddress
-    if not isinstance(host, str) or not host or '%' in host:
-        return None
-    if isinstance(port, bool):
-        return None
-    try:
-        port = int(port)
-    except (TypeError, ValueError):
-        return None
-    if not 1 <= port <= 65535:
-        return None
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        ip = None
-        if not _ADB_HOSTNAME.fullmatch(host):
-            return None
-    if host.lower() not in _configured_device_hosts():
-        return None
-    return f'[{ip.compressed}]:{port}' if ip is not None and ip.version == 6 else f'{host.lower()}:{port}'
+    """'host:port' for adb -s for a configured device, or None (see adb_utils)."""
+    from app.adb_utils import adb_target
+    return adb_target(host, port, _configured_device_hosts())
+
+
+def _kodi_launch_args(target, file_url):
+    """adb argv that opens *file_url* in Kodi; the device command is one quoted arg."""
+    from app.adb_utils import shell_command
+    return ['adb', '-s', target, 'shell',
+            shell_command('am', 'start', '-a', 'android.intent.action.VIEW', '-d', file_url,
+                          '-t', 'video/*', '-n', 'org.xbmc.kodi/.Splash')]
+
+
+def _plex_deeplink_args(target, uri, start_playback=False):
+    """adb argv that opens a Plex deep link; the device command is one quoted arg."""
+    from app.adb_utils import shell_command
+    extra = ['--ez', 'android.intent.extra.START_PLAYBACK', 'true'] if start_playback else []
+    return ['adb', '-s', target, 'shell',
+            shell_command('am', 'start', *extra, '-a', 'android.intent.action.VIEW', '-d', uri,
+                          'com.plexapp.android')]
 
 
 @app.route('/api/activity')  # alfred asks here first, then falls back to the ADB path
 @app.route('/api/adb/shield_activity')
 def adb_shield_activity():
-    """Get current activity/media playing on a room device via ADB."""
-    err = _require_admin()
-    if err:
-        return err
+    """Get current activity/media playing on a room device via ADB (read-only:
+    admins and approved users, configured devices only)."""
+    if not user_auth.is_plex_approved(_get_current_user()):
+        return jsonify({'error': 'Not allowed'}), 403
     try:
         room_id = request.args.get('room_id')
         device_ip = request.args.get('device_ip')
@@ -18391,7 +18389,7 @@ def adb_control():
         }
 
         if command not in keycodes:
-            return jsonify({'error': f'Unknown command: {command}'}), 400
+            return jsonify({'error': 'Unknown command'}), 400
 
         keycode = keycodes[command]
 
