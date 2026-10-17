@@ -251,74 +251,111 @@ def _bhd_error(data: Dict[str, Any]) -> None:
     raise TrackerError('response')
 
 
+_TRAILING_YEAR_RE = re.compile(r'\s+(?:19|20)\d{2}$')
+
+
 def beyondhd_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id='',
                     media_type=''):
     """BHD's own API. With a TMDB id (and a known media type) the search is by
-    id: exact, and immune to punctuation or a year the release names don't
-    carry; for TV only the SxxEyy/Sxx part of the query is kept as text.
-    Pages are followed up to BHD_MAX_PAGES so a title with many Remux and
-    Encode uploads still gets its older WEB rows."""
+    id first: exact, and immune to punctuation or a year the release names
+    don't carry; for TV only the SxxEyy/Sxx part of the query is kept as
+    text. When the id search finds no rows (an upload without a TMDB id),
+    the punctuation-stripped text is searched instead: movies title + year,
+    then the title alone; TV title + SxxEyy/Sxx. All of it is one search to
+    the guard. Pages are followed up to BHD_MAX_PAGES so a title with many
+    Remux and Encode uploads still gets its older WEB rows."""
     q, imdb = _split_imdb(query, imdb_id)
-    body: Dict[str, Any] = {'action': 'search', 'rsskey': cfg.get('rss_key', '')}
     tmdb = str(tmdb_id or '').strip()
     by_id = bool(tmdb.isdigit() and int(tmdb) > 0 and media_type in ('movie', 'tv'))
+    acc: Dict[str, Any] = {'status': None, 'bytes': 0, 'rows': 0, 'pages': 0, 'kinds': {}, 'total': None,
+                           'by_id': by_id, 'fallback': ''}
+    out: List[Dict[str, Any]] = []
+
+    def stats():
+        _set_stats(status=acc['status'], bytes=acc['bytes'], rows=acc['rows'], kept=len(out),
+                   pages=acc['pages'], kinds=dict(acc['kinds']), by_id=by_id, total=acc['total'],
+                   fallback=acc['fallback'])
+
+    def run(body: Dict[str, Any]) -> int:
+        """All pages of one query; returns the raw rows it found."""
+        found = 0
+        sent = acc['pages']
+        for page in range(1, BHD_MAX_PAGES + 1):
+            if sent or page > 1:
+                _sleep(BHD_PAGE_GAP_S)
+            sent += 1
+            b = dict(body)
+            if page > 1:
+                b['page'] = page
+            # BeyondHD's API takes the key in the path; this URL is never logged.
+            resp = request('POST', f"{_base(cfg)}/api/torrents/{cfg.get('api_key', '')}", json=b,
+                           headers={'Accept': 'application/json'})
+            acc['status'], acc['pages'] = resp.status, acc['pages'] + 1
+            acc['bytes'] += len(resp.body or b'')
+            stats()
+            raise_for_status(resp)
+            data = _json(resp)
+            if not isinstance(data, dict):
+                raise TrackerError('response', resp.status)
+            if data.get('success') is False or _int(data.get('status_code', 1)) == 0:
+                _bhd_error(data)
+            rows = data.get('results') or []
+            if not isinstance(rows, list):
+                raise TrackerError('response', resp.status)
+            acc['total'] = _int(data.get('total_results'), 0) or None
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                found += 1
+                acc['rows'] += 1
+                k = release_kind(r.get('name'), r.get('type'))
+                acc['kinds'][k] = acc['kinds'].get(k, 0) + 1
+                if not r.get('name') or not r.get('download_url') or len(out) >= limit:
+                    continue
+                out.append(_result(
+                    r.get('name'), r.get('download_url'), r.get('size'), r.get('seeders'), r.get('leechers'),
+                    freeleech=_int(r.get('freeleech')) == 1 or str(r.get('promo100') or '') == '1',
+                    category=r.get('category'), guid=r.get('url') or r.get('id'), info_url=r.get('url') or '',
+                    pub_date=_iso_to_rfc822(r.get('created_at')), imdb_id=r.get('imdb_id'),
+                    info_hash=r.get('info_hash')))
+            stats()
+            if len(out) >= limit or page >= _int(data.get('total_pages'), 1) or not rows:
+                break
+        return found
+
+    base: Dict[str, Any] = {'action': 'search', 'rsskey': cfg.get('rss_key', '')}
+
+    def text_body(text: str, fallback: bool = False) -> Dict[str, Any]:
+        b = dict(base)
+        if text:
+            b['search'] = text
+        if imdb:
+            b['imdb_id'] = imdb
+        kind = media_type if fallback else media_kind(categories)
+        if kind != 'any':
+            b['categories'] = 'Movies' if kind == 'movie' else 'TV'
+        return b
+
+    text = bhd_query_text(q)
     if by_id:
-        body['tmdb_id'] = tmdb
-        body['categories'] = 'Movies' if media_type == 'movie' else 'TV'
+        b = dict(base, tmdb_id=tmdb, categories='Movies' if media_type == 'movie' else 'TV')
         ep = _BHD_ID_RE.search(q or '') if media_type == 'tv' else None
         if ep:
-            body['search'] = ep.group(0).upper()
-    else:
-        if q:
-            body['search'] = bhd_query_text(q)
-        if imdb:
-            body['imdb_id'] = imdb
-        kind = media_kind(categories)
-        if kind != 'any':
-            body['categories'] = 'Movies' if kind == 'movie' else 'TV'
-    out: List[Dict[str, Any]] = []
-    raw = 0
-    kinds: Dict[str, int] = {}
-    status, nbytes, pages, total = None, 0, 0, None
-    for page in range(1, BHD_MAX_PAGES + 1):
-        if page > 1:
-            _sleep(BHD_PAGE_GAP_S)
-            body['page'] = page
-        # BeyondHD's API takes the key in the path; this URL is never logged.
-        resp = request('POST', f"{_base(cfg)}/api/torrents/{cfg.get('api_key', '')}", json=dict(body),
-                       headers={'Accept': 'application/json'})
-        status, nbytes, pages = resp.status, nbytes + len(resp.body or b''), page
-        _set_stats(status=status, bytes=nbytes, rows=raw, kept=len(out), pages=pages, kinds=dict(kinds),
-                   by_id=by_id)
-        raise_for_status(resp)
-        data = _json(resp)
-        if not isinstance(data, dict):
-            raise TrackerError('response', resp.status)
-        if data.get('success') is False or _int(data.get('status_code', 1)) == 0:
-            _bhd_error(data)
-        rows = data.get('results') or []
-        if not isinstance(rows, list):
-            raise TrackerError('response', resp.status)
-        total = _int(data.get('total_results'), 0) or None
-        for r in rows:
-            if not isinstance(r, dict):
-                continue
-            raw += 1
-            k = release_kind(r.get('name'), r.get('type'))
-            kinds[k] = kinds.get(k, 0) + 1
-            if not r.get('name') or not r.get('download_url') or len(out) >= limit:
-                continue
-            out.append(_result(
-                r.get('name'), r.get('download_url'), r.get('size'), r.get('seeders'), r.get('leechers'),
-                freeleech=_int(r.get('freeleech')) == 1 or str(r.get('promo100') or '') == '1',
-                category=r.get('category'), guid=r.get('url') or r.get('id'), info_url=r.get('url') or '',
-                pub_date=_iso_to_rfc822(r.get('created_at')), imdb_id=r.get('imdb_id'),
-                info_hash=r.get('info_hash')))
-        _set_stats(status=status, bytes=nbytes, rows=raw, kept=len(out), pages=pages, kinds=dict(kinds),
-                   by_id=by_id, total=total)
-        last = _int(data.get('total_pages'), 1)
-        if len(out) >= limit or page >= last or not rows:
-            break
+            b['search'] = ep.group(0).upper()
+        if run(b) or not text:
+            stats()
+            return out
+        # No rows by id: the uploads may lack a TMDB id. Same search, by text.
+        acc['fallback'] = 'text'
+        found = run(text_body(text, True))
+        bare = _TRAILING_YEAR_RE.sub('', text) if media_type == 'movie' else text
+        if not found and bare and bare != text:
+            acc['fallback'] = 'text, no year'
+            run(text_body(bare, True))
+        stats()
+        return out
+    run(text_body(text))
+    stats()
     return out
 
 

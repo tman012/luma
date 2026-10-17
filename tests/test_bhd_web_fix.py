@@ -128,3 +128,63 @@ def test_rows_without_download_link_count_as_dropped(engine, caplog):
     out = LumaTrackersClient(eng).search_all('Dune Part Two', 'movie', 2024)
     assert len(out) == 3
     assert '4 rows parsed, 3 results, 1 dropped' in caplog.text
+
+
+EMPTY = {'status_code': 1, 'page': 1, 'results': [], 'total_pages': 1, 'total_results': 0, 'success': True}
+WEB_ONLY = dict(bhd_pages.page2(), page=1, total_pages=1)
+
+
+def test_id_with_rows_sends_no_text_search():
+    m = Mock(R(WEB_ONLY))
+    out = tc.search(cfg(), 'Dune: Part Two 2024', [2000, 5000], 500, m, tmdb_id='693134', media_type='movie')
+    assert len(out) == 4 and len(m.calls) == 1 and 'search' not in m.calls[0]['json']
+    assert tc.last_stats()['fallback'] == ''
+
+
+def test_id_with_no_rows_falls_back_to_text_with_the_year():
+    m = Mock(R(EMPTY), R(WEB_ONLY))
+    out = tc.search(cfg(), 'Dune: Part Two 2024', [2000, 5000], 500, m, tmdb_id='693134', media_type='movie')
+    assert len(out) == 4 and len(m.calls) == 2
+    assert m.calls[0]['json']['tmdb_id'] == '693134'
+    fb = m.calls[1]['json']
+    assert 'tmdb_id' not in fb and fb['search'] == 'Dune Part Two 2024' and fb['categories'] == 'Movies'
+    assert tc.last_stats()['fallback'] == 'text'
+
+
+def test_id_and_year_text_empty_then_title_only():
+    m = Mock(R(EMPTY), R(EMPTY), R(WEB_ONLY))
+    out = tc.search(cfg(), 'Dune: Part Two 2024', [2000, 5000], 500, m, tmdb_id='693134', media_type='movie')
+    assert len(out) == 4 and [c['json'].get('search') for c in m.calls] == [None, 'Dune Part Two 2024',
+                                                                            'Dune Part Two']
+    assert tc.last_stats()['fallback'] == 'text, no year'
+
+
+def test_tv_id_with_no_rows_falls_back_to_title_and_episode():
+    m = Mock(R(EMPTY), R(EMPTY))
+    tc.search(cfg(), "Grey's Anatomy S01E05", [5000], 500, m, tmdb_id='1416', media_type='tv')
+    assert len(m.calls) == 2
+    assert m.calls[0]['json']['search'] == 'S01E05' and m.calls[0]['json']['tmdb_id'] == '1416'
+    assert m.calls[1]['json']['search'] == 'Greys Anatomy S01E05' and m.calls[1]['json']['categories'] == 'TV'
+    assert 'tmdb_id' not in m.calls[1]['json']
+
+
+def test_fallback_is_one_budget_unit_and_not_asked_again(engine, caplog):
+    eng, mock = engine
+    mock.resps = [R(EMPTY), R(EMPTY), R(EMPTY), R(EMPTY)]
+    caplog.set_level(logging.INFO)
+    out = LumaTrackersClient(eng).search_all('Dune: Part Two', 'movie', 2024, tmdb_id=693134)
+    assert out == []
+    # id, text + year, text alone; the search_all year retry does not ask BHD again
+    assert [c['json'].get('search') for c in mock.calls] == [None, 'Dune Part Two 2024', 'Dune Part Two']
+    assert len(eng.guard.log.get('site:beyondhd', [])) == 1
+    assert 'by id yes, fallback text, no year' in caplog.text
+    assert KEY not in caplog.text and bhd_pages.RK not in caplog.text and 'Dune' not in caplog.text
+
+
+def test_fallback_hit_logged(engine, caplog):
+    eng, mock = engine
+    mock.resps = [R(EMPTY), R(WEB_ONLY)]
+    caplog.set_level(logging.INFO)
+    out = LumaTrackersClient(eng).search_all('Dune: Part Two', 'movie', 2024, tmdb_id=693134)
+    assert len(out) == 4 and len(eng.guard.log.get('site:beyondhd', [])) == 1
+    assert '4 rows parsed, 4 results, 0 dropped, pages 2, by id yes, fallback text,' in caplog.text

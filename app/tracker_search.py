@@ -325,7 +325,9 @@ class TrackerSearch:
                     'pages %s, by id %s, types %s',
                     cfg['name'], cfg['id'], st.get('status', '-'), st.get('bytes', '-'), st.get('rows', '-'),
                     len(items), (st['rows'] - len(items)) if isinstance(st.get('rows'), int) else '-',
-                    st.get('pages', '-'), 'yes' if st.get('by_id') else 'no',
+                    st.get('pages', '-'),
+                    ('yes, fallback ' + st['fallback']) if st.get('by_id') and st.get('fallback')
+                    else 'yes' if st.get('by_id') else 'no',
                     ', '.join(f'{k} {v}' for k, v in sorted(kinds.items())) or '-')
         if items:          # an empty answer is never cached
             with self._cache_lock:
@@ -480,11 +482,16 @@ class LumaTrackersClient:
         items, _, _ = self.engine.search(q, cats, 500, interactive=True, tmdb_id=tmdb, media_type=media_type)
         bare = (query or '').strip()
         if not items and bare and q != bare:
-            # Release names often leave the year out (TV above all): one retry without it.
-            logger.info('Tracker search_all media_type=%s: no results with the year, retrying without it',
-                        media_type)
-            items, _, _ = self.engine.search(bare, cats, 500, interactive=True, tmdb_id=tmdb,
-                                             media_type=media_type)
+            # Release names often leave the year out: one retry without it. Trackers that
+            # searched by TMDB id already fell back to text themselves (same budget unit),
+            # so they are not asked again.
+            again = [c['id'] for c in self.engine.store.enabled_configs()
+                     if not (tmdb and tt.searches_by_id(c.get('type')))]
+            if again:
+                logger.info('Tracker search_all media_type=%s: no results with the year, retrying without it',
+                            media_type)
+                items, _, _ = self.engine.search(bare, cats, 500, interactive=True, tracker_ids=again,
+                                                 tmdb_id=tmdb, media_type=media_type)
         out = []
         for it in items:
             parsed = _parse_title(it['title'])
