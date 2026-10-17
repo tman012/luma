@@ -1,4 +1,4 @@
-import { useTitleReveal, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
+import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { isMinimal } from '@/minimal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -769,7 +769,7 @@ function SeasonDetailModal({
   onAddSeasonToWatchlist?: (season: number) => Promise<boolean> | void;
   onClose: () => void;
 }) {
-  const titleState = useTitleReveal(show?.clearLogoUrl, show?.title, show?.backdropUrl || show?.posterUrl);
+  const titleState = useTitleReveal(logoInput(show), show?.title, show?.backdropUrl || show?.posterUrl);
   const [showEpisodeGrid, setShowEpisodeGrid] = useState(false);
   const [showCastShelf, setShowCastShelf] = useState(false);
   // Optimistic: this season was just added to the watchlist this session.
@@ -1201,7 +1201,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
     showFullShow,
     onEpisodeClick,
   } = props;
-  const titleState = useTitleReveal(show?.clearLogoUrl, show?.title, show?.backdropUrl || show?.posterUrl);
+  const titleState = useTitleReveal(logoInput(show), show?.title, show?.backdropUrl || show?.posterUrl);
 
   // Determine if we're in active episode-mode display
   const isEpisodeIntent = !showFullShow && !!episodeContext;

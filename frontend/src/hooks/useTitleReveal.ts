@@ -1,7 +1,7 @@
 /** Detail popup title: hold the title area (empty, its space kept) until the
  * clearlogo has loaded and decoded, then show the logo. Fall back to the text
- * title, faded in, when there's no logo, it fails, or nothing is ready within
- * LOGO_WAIT_MS. Once the text title shows it stays (no late jump to a logo). */
+ * title right away when the lookup settled with no logo (null), when the logo
+ * fails, or at REVEAL_CAP_MS. Once the text title shows it stays (no late jump to a logo). */
 import { useEffect, useState } from 'react';
 
 export type TitleState = 'hold' | 'logo' | 'text';
@@ -54,8 +54,10 @@ export function useTitleReveal(
 
   useEffect(() => {
     if (logo !== 'hold') return;
+    // null: the lookup finished with no logo, so the text title is final now.
+    if (logoUrl === null) { setLogo('text'); return; }
     if (!logoUrl) {
-      // The logo URL may still be on its way; give up after the wait.
+      // undefined: the logo URL may still be on its way; give up at the cap.
       if (timedOut) setLogo('text');
       return;
     }
@@ -80,6 +82,14 @@ export function useTitleReveal(
   useEffect(() => { if (now !== 'hold' && revealed === null) setRevealed(now); }, [now, revealed]);
   if (revealed !== null) return revealed === 'text' && now === 'logo' ? 'text' : revealed;
   return now;
+}
+
+/** The logo argument for useTitleReveal: the URL when there is one, null once
+ * the lookup settled with no logo, undefined while it's still pending. */
+export function logoInput(d: { clearLogoUrl?: string | null; logoSettled?: boolean } | null | undefined): string | null | undefined {
+  if (!d) return undefined;
+  if (d.clearLogoUrl) return d.clearLogoUrl;
+  return d.logoSettled ? null : undefined;
 }
 
 /** Opacity + fade for the backdrop and color blur, in step with the title. */

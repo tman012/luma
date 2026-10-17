@@ -199,7 +199,7 @@ export function useTvDetail(
             // Fire-and-forget clearlogo fetch (no longer blocks modal render)
             if (!parsed.clearLogoUrl) {
               fetchClearlogo(tmdbId, controller.signal).then((logo) => {
-                if (!cancelled && logo) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo } : prev);
+                if (!cancelled) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo ?? prev.clearLogoUrl, logoSettled: true } : prev);
               });
             }
           }
@@ -251,7 +251,7 @@ export function useTvDetail(
                 extractTrailerAndEnrich(tmdbData);
                 if (!parsed.clearLogoUrl) {
                   fetchClearlogo(plexTmdbId, controller.signal).then((logo) => {
-                    if (!cancelled && logo) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo } : prev);
+                    if (!cancelled) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo ?? prev.clearLogoUrl, logoSettled: true } : prev);
                   });
                 }
               }
@@ -264,7 +264,7 @@ export function useTvDetail(
               setTrailerKey(null);
               if (!parsed.clearLogoUrl && plexTmdbId) {
                 fetchClearlogo(plexTmdbId, controller.signal).then((logo) => {
-                  if (!cancelled && logo) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo } : prev);
+                  if (!cancelled) setShow((prev) => prev ? { ...prev, clearLogoUrl: logo ?? prev.clearLogoUrl, logoSettled: true } : prev);
                 });
               }
             }
@@ -272,6 +272,7 @@ export function useTvDetail(
             // No TMDb ID available, use Plex data directly
             const parsed = parsePlexTvResponse(plexData);
             parsed.ratingKey = ratingKey;
+            parsed.logoSettled = true; // no TMDb id: Plex's logo (or none) is final
             setShow(parsed);
             setTrailerKey(null); // No TMDb data, no trailer
 

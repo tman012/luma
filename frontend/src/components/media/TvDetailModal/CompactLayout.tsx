@@ -1,6 +1,6 @@
 import { sheetBase } from '@/utils/posterColors';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
-import { useTitleReveal, titleTextStyle } from '@/hooks/useTitleReveal';
+import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -189,7 +189,7 @@ export function CompactLayout(props: TvModalViewProps) {
     shuffleTarget,
     setShuffleTarget,
   } = props;
-  const titleState = useTitleReveal(show?.clearLogoUrl, show?.title, show?.backdropUrl || show?.posterUrl);
+  const titleState = useTitleReveal(logoInput(show), show?.title, show?.backdropUrl || show?.posterUrl);
   // Phone: the sheet stays off-screen until it can show fully composed
   // (details, backdrop, logo and colors, or the 600 ms cap), then slides in.
   const composed = !!error || (!loading && !!show && titleState !== 'hold');

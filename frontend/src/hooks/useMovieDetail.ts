@@ -330,15 +330,16 @@ export function useMovieDetail(
   useEffect(() => {
     if (!detail) return;
     const id = tmdbId ?? detail.tmdbId;
-    if (!id) return;
+    // Settled means a null logo is final ('no logo'), so the title shows as
+    // text right away instead of waiting out the reveal cap.
+    const settle = (url: string | null) => setDetail((prev) => prev
+      ? { ...prev, clearLogoUrl: url ?? prev.clearLogoUrl, logoSettled: true } : prev);
+    if (!id) { settle(null); return; }
     let cancelled = false;
     detailFetch(`/api/clearlogo/${id}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (cancelled || !data?.clearlogo_url) return;
-        setDetail((prev) => prev ? { ...prev, clearLogoUrl: logoImg(data.clearlogo_url) } : prev);
-      })
-      .catch(() => {});
+      .then((data) => { if (!cancelled) settle(logoImg(data?.clearlogo_url ?? null)); })
+      .catch(() => { if (!cancelled) settle(null); });
     return () => { cancelled = true; };
   }, [detail?.tmdbId, tmdbId, reloadNonce]);
 

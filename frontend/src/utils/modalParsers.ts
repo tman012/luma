@@ -4,7 +4,7 @@
 // data-fetching logic can be reused by Web and Mobile modals.
 // ---------------------------------------------------------------------------
 
-import { posterUrl as tmdbPoster, backdropUrl as tmdbBackdrop, plexBackdrop } from '@/utils/image';
+import { posterUrl as tmdbPoster, backdropUrl as tmdbBackdrop, plexBackdrop, logoImg } from '@/utils/image';
 import { apiUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
@@ -38,6 +38,9 @@ export interface MediaDetail {
   plexBackdropUrl?: string | null;
   posterUrl: string | null;
   clearLogoUrl: string | null;
+  /** True once the logo lookup has finished (a null clearLogoUrl then means
+   *  'no logo', not 'still loading'). */
+  logoSettled?: boolean;
   genres: string[];
   cast: CastMember[];
   directors: Director[];
@@ -62,6 +65,9 @@ export interface TvShowDetail {
   backdropUrl: string | null;
   posterUrl: string | null;
   clearLogoUrl: string | null;
+  /** True once the logo lookup has finished (a null clearLogoUrl then means
+   *  'no logo', not 'still loading'). */
+  logoSettled?: boolean;
   genres: string[];
   cast: CastMember[];
   creators: Director[];
@@ -229,7 +235,7 @@ export function parsePlexResponse(data: Record<string, unknown>): MediaDetail {
     backdropUrl: data.tmdb_id ? null : plexBackdrop((data.backdrop_url as string) ?? null),
     plexBackdropUrl: (data.backdrop_url as string) ?? null,
     posterUrl: (data.poster_url as string) ?? null,
-    clearLogoUrl: (data.clearlogo_url as string) ?? null,
+    clearLogoUrl: logoImg((data.clearlogo_url as string) ?? null),
     genres,
     cast,
     directors,
@@ -460,7 +466,7 @@ export function parsePlexTvResponse(data: Record<string, unknown>): TvShowDetail
       ? apiUrl(`/api/img/plex?url=${data.thumbPath as string}`)
       : (data.poster_url as string) ?? null,
     clearLogoUrl: (data.clearLogoPath as string)
-      ? apiUrl(`/api/img/plex?url=${data.clearLogoPath as string}`)
+      ? logoImg(apiUrl(`/api/img/plex?url=${data.clearLogoPath as string}`))
       : null,
     genres,
     cast,

@@ -69,12 +69,13 @@ export function plexBackdrop(url: string | null | undefined): string | null {
   return phoneMinimal() ? sizedPlexImg(url, 780, 439) : url;
 }
 
-/** A clearlogo URL as the popup loads it: w500 on phones (minimal), through
- *  the TMDb proxy in minimal mode. */
+/** A clearlogo URL as the popup loads it: w500 (TMDb or Plex) on phones
+ *  (minimal), through the TMDb proxy in minimal mode. */
 export function logoImg(url: string | null | undefined): string | null {
   if (!url) return null;
-  const sized = phoneMinimal() ? url.replace('/t/p/original/', '/t/p/w500/') : url;
-  return tmdbImg(sized);
+  if (!phoneMinimal()) return tmdbImg(url);
+  // Phones: TMDb w500, or a 500px-wide Plex transcode.
+  return sizedPlexImg(tmdbImg(url.replace('/t/p/original/', '/t/p/w500/')), 500);
 }
 
 /**

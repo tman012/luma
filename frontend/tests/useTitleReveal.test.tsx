@@ -50,15 +50,15 @@ describe('detail popup title reveal', () => {
     expect(result.current).toBe('text');
   });
 
-  it('with no logo it holds for the wait (a logo URL may still arrive), then shows text', async () => {
+  it('with the logo still pending (undefined) it holds for the wait (a logo URL may still arrive), then shows text', async () => {
     behavior = 'ok';
-    const { result, rerender } = renderHook(({ url }) => useTitleReveal(url, 'a'), { initialProps: { url: null as string | null } });
+    const { result, rerender } = renderHook(({ url }) => useTitleReveal(url, 'a'), { initialProps: { url: undefined as string | null | undefined } });
     await flush(500);
     expect(result.current).toBe('hold');
     rerender({ url: '/late-logo.png' });
     await flush(60);
     expect(result.current).toBe('logo');
-    const none = renderHook(() => useTitleReveal(null, 'b'));
+    const none = renderHook(() => useTitleReveal(undefined, 'b'));
     await flush(LOGO_WAIT_MS + 10);
     expect(none.result.current).toBe('text');
   });

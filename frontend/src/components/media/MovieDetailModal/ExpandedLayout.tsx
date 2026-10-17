@@ -1,4 +1,4 @@
-import { useTitleReveal, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
+import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { formatRuntime } from '@/utils/image';
@@ -320,7 +320,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
     onWatchlistRemoved,
     onSourcesGrabbed,
   } = props;
-  const titleState = useTitleReveal(detail?.clearLogoUrl, detail?.title, detail?.backdropUrl || detail?.posterUrl);
+  const titleState = useTitleReveal(logoInput(detail), detail?.title, detail?.backdropUrl || detail?.posterUrl);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
