@@ -36,6 +36,14 @@ def _format_time(ms: Optional[int]) -> str:
 # Client discovery
 # ---------------------------------------------------------------------------
 
+def _proxied_image(path) -> str:
+    """A Plex image path as a token-free /api/img/plex URL ('' if unusable)."""
+    if not isinstance(path, str) or not path.startswith('/') or 'token' in path.lower():
+        return ""
+    from urllib.parse import quote
+    return "/api/img/plex?url=" + quote(path, safe="/")
+
+
 def get_active_clients(plex_url: str, plex_token: str) -> list[dict]:
     """Discover active Plex clients via PlexServer.clients().
 
@@ -92,8 +100,9 @@ def get_sessions(plex_url: str, plex_token: str) -> list[dict]:
                 "media_duration_str": _format_time(duration),
                 "media_position_str": _format_time(view_offset),
                 "progress": progress,
-                "thumb": getattr(session, "thumbUrl", ""),
-                "art": getattr(session, "artUrl", ""),
+                # thumbUrl/artUrl carry X-Plex-Token; hand out proxy URLs instead.
+                "thumb": _proxied_image(getattr(session, "thumb", "")),
+                "art": _proxied_image(getattr(session, "art", "")),
             })
         return result
     except Exception as e:
@@ -121,7 +130,10 @@ def control_client(plex_url: str, plex_token: str,
                 client = c
                 break
         if client is None:
-            return {"success": False, "error": f"Client '{client_name}' not found"}
+            return {"success": False, "error": "Client not found"}
+        # Send commands through the Plex server (X-Plex-Target-Client-Identifier)
+        # so the owner token never goes to the player's own address.
+        client.proxyThroughServer(True, server)
 
         action_map = {
             "play": lambda: client.play(),
@@ -148,11 +160,11 @@ def control_client(plex_url: str, plex_token: str,
         elif action in action_map:
             action_map[action]()
         else:
-            return {"success": False, "error": f"Unknown action: {action}"}
+            return {"success": False, "error": "Unknown action"}
 
         return {"success": True, "action": action, "client": client_name}
     except NotFound:
-        return {"success": False, "error": f"Client '{client_name}' not found"}
+        return {"success": False, "error": "Client not found"}
     except Exception as e:
-        logger.error("control_client(%s, %s) failed: %s", client_name, action, e)
-        return {"success": False, "error": str(e)}
+        logger.error("control_client(%s) failed: %s", action, type(e).__name__)
+        return {"success": False, "error": "Client control failed"}
