@@ -1,23 +1,27 @@
-/** Settings (/settings/<section>). Web: a left nav beside the selected
- * section (Home screen by default). Phone: a section list that drills into a
- * section, with a back control. Home screen: which Plex libraries get a Home
- * rail and in what order, plus (owner/admin) the web kiosk's library. */
-import { useEffect, useRef, useState } from 'react';
-import { Link, Navigate, useParams } from 'react-router';
+/** Settings (/settings/<section>), docs/design/sidebar-nav-spec.md and
+ * docs/design/mobile-settings-spec.md. Desktop: the persistent sidebar and
+ * the section in the main pane. Phone: the 56px app header (hamburger,
+ * title, avatar) and the drawer. Home screen: Libraries (drag to reorder,
+ * switch on/off, instant save) and, on desktop for owner/admin, Kiosk >
+ * Backdrop library. */
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Navigate, useNavigate, useParams } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { FONT } from '@/components/start/StartUI';
 import { LUMA_BLUE } from '@/ui/lumaButton';
-import { railCss } from '@/components/home/Rails';
 import {
   fetchKioskLibrary, fetchLibraries, move, saveKioskLibrary, saveLibraries,
   type KioskLibraries, type Library,
 } from '@/components/home/homeApi';
-import { homeBar, homePage, iconBtn } from '@/pages/MinimalHomePage';
+import { AccountMenu, homePage, phoneBar } from '@/pages/MinimalHomePage';
 import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { useKioskWidth } from '@/components/home/KioskHome';
+import { CheckIcon, ChevronIcon, GripIcon, MenuButton, NavDrawer, SIDEBAR_W, Sidebar } from '@/components/nav/AppNav';
+import { NoticeToast } from '@/components/start/SetupToast';
 
 export const SETTINGS_SECTIONS = [{ slug: 'home-screen', label: 'Home screen' }] as const;
 const DEFAULT_SECTION = SETTINGS_SECTIONS[0].slug;
+export const SAVE_FAILED = "Couldn't save";
 
 /** /settings/libraries is now /settings/home-screen. */
 export function LibrariesRedirect() {
@@ -25,248 +29,275 @@ export function LibrariesRedirect() {
 }
 
 export function SettingsPage() {
-  const { authenticated, loading, user } = useAuth();
+  const { authenticated, loading, user, implicit, logout } = useAuth();
   const { section } = useParams();
   const wide = useKioskWidth();
+  const navigate = useNavigate();
+  const [drawer, setDrawer] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const closeDrawer = useCallback(() => setDrawer(false), []);
   useBodyScroll();
   if (loading) return null;
   if (!authenticated) return <Navigate to="/login" replace />;
   const known = SETTINGS_SECTIONS.find(s => s.slug === section);
-  if (section && !known) return <Navigate to="/settings" replace />;
-  // Web opens on Home screen; phones show the section list first.
-  if (!section && wide) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
+  if (!known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   const admin = !!user?.is_admin;
+  const signOut = async () => { setBusy(true); await logout(); navigate('/login', { replace: true }); };
+  const avatar = (size: number) => !implicit
+    ? <AccountMenu name={user?.name || ''} busy={busy} onSignOut={signOut} size={size} />
+    : <span style={{ width: size }} />;
+  const content = <HomeScreenSection admin={admin} wide={wide} />;
 
-  if (!wide) {
-    if (!known) {
-      return (
-        <Shell back="/" title="Settings">
-          <ul style={list} data-testid="settings-sections">
-            {SETTINGS_SECTIONS.map(s => (
-              <li key={s.slug}>
-                <Link to={`/settings/${s.slug}`} style={navRow}>
-                  <span style={name}>{s.label}</span>
-                  <Chevron />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </Shell>
-      );
-    }
+  if (wide) {
     return (
-      <Shell back="/settings" backLabel="Settings" title={known.label}>
-        <HomeScreenSection admin={admin} />
-      </Shell>
-    );
-  }
-
-  return (
-    <Shell back="/" title="Settings" wide>
-      <div style={{ display: 'flex', gap: 32, alignItems: 'flex-start' }}>
-        <nav aria-label="Settings" style={sideNav} data-testid="settings-nav">
-          {SETTINGS_SECTIONS.map(s => (
-            <Link key={s.slug} to={`/settings/${s.slug}`} aria-current={s.slug === known?.slug ? 'page' : undefined}
-              style={{ ...navItem, ...(s.slug === known?.slug ? navItemOn : null) }}>
-              {s.label}
-            </Link>
-          ))}
-        </nav>
-        <div style={{ flex: 1, minWidth: 0, maxWidth: 560 }}>
-          <HomeScreenSection admin={admin} />
+      <div style={homePage} data-step="settings" data-layout="sidebar">
+        <Sidebar />
+        <div style={{ marginLeft: SIDEBAR_W, minHeight: '100dvh' }}>
+          <header style={deskBar}>
+            <h1 style={pageTitle}>{known.label}</h1>
+            {avatar(48)}
+          </header>
+          <main style={{ padding: '8px 40px 48px', maxWidth: 720 }}>{content}</main>
         </div>
       </div>
-    </Shell>
-  );
-}
-
-function Shell({ back, backLabel = 'Back', title, wide, children }: {
-  back: string; backLabel?: string; title: string; wide?: boolean; children: React.ReactNode;
-}) {
+    );
+  }
   return (
-    <div style={homePage} data-step="settings">
-      <style>{railCss}</style>
-      <header style={homeBar}>
-        <Link to={back} aria-label={backLabel} style={iconBtn}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
-        </Link>
-        <h1 style={title_}>{title}</h1>
-        <span style={{ width: 40 }} />
+    <div style={homePage} data-step="settings" data-layout="phone">
+      <header style={phoneBar}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+          <MenuButton onClick={() => setDrawer(true)} />
+          <h1 style={pageTitle}>{known.label}</h1>
+        </div>
+        {avatar(40)}
       </header>
-      <main style={{ padding: '24px 20px calc(env(safe-area-inset-bottom) + 32px)', maxWidth: wide ? 880 : 560, margin: '0 auto' }}>
-        {children}
-      </main>
+      <NavDrawer open={drawer} onClose={closeDrawer} />
+      <main style={{ padding: '0 16px calc(env(safe-area-inset-bottom) + 24px)' }}>{content}</main>
     </div>
   );
 }
 
-function Chevron() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
-  );
-}
-
-function HomeScreenSection({ admin }: { admin: boolean }) {
+function HomeScreenSection({ admin, wide }: { admin: boolean; wide: boolean }) {
   return (
     <>
       <LibrariesEditor />
-      {admin && <KioskLibraryPicker />}
+      {admin && wide && <KioskLibraryPicker />}
     </>
   );
 }
 
-/** Owner/admin: the movie library the web kiosk slideshow shows. */
+/** Desktop, owner/admin: Kiosk > Backdrop library (the web slideshow's movie library). */
 export function KioskLibraryPicker() {
   const [data, setData] = useState<KioskLibraries | null>(null);
-  const [error, setError] = useState('');
+  const [open, setOpen] = useState(false);
+  const [toast, setToast] = useState(0);
   const seq = useRef(0);
-  useEffect(() => {
-    fetchKioskLibrary().then(setData).catch(() => setError("Couldn't load libraries"));
-  }, []);
+  useEffect(() => { fetchKioskLibrary().then(setData).catch(() => setData(null)); }, []);
+  if (!data || data.libraries.length === 0) return null;
+  const current = data.libraries.find(l => l.id === data.id);
   const choose = (id: string) => {
-    if (!data || id === data.id) return;
+    setOpen(false);
+    if (id === data.id) return;
     const before = data;
     setData({ ...data, id });
-    setError('');
     const n = ++seq.current;
     saveKioskLibrary(id)
       .then(d => { if (n === seq.current) setData(d); })
-      .catch(() => { if (n === seq.current) { setData(before); setError("Couldn't save"); } });
+      .catch(() => { if (n === seq.current) { setData(before); setToast(t => t + 1); } });
   };
-  if (!error && data && data.libraries.length === 0) return null;
   return (
-    <section style={{ marginTop: 32 }} data-testid="kiosk-library">
-      <h2 style={sectionTitle} id="kiosk-library-title">Kiosk</h2>
-      {error && <p role="alert" style={{ color: '#ff8a8a', fontSize: 14, margin: '0 0 12px' }}>{error}</p>}
-      {data === null ? (
-        !error && <div style={list}><div className="luma-shimmer" style={{ height: 60 }} /></div>
+    <section data-testid="kiosk-library">
+      {toast > 0 && <NoticeToast key={toast} text={SAVE_FAILED} onDone={() => setToast(0)} />}
+      <h2 style={sectionTitle}>Kiosk</h2>
+      <div style={card}>
+        <button type="button" style={pickerRow} aria-expanded={open} onClick={() => setOpen(o => !o)}>
+          <span style={{ ...nameStyle, flex: 1 }}>Backdrop library</span>
+          <span style={{ color: 'rgba(255,255,255,0.6)', fontSize: 15 }} data-testid="backdrop-value">{current?.title || ''}</span>
+          <span style={{ display: 'inline-flex', color: 'rgba(255,255,255,0.5)', transition: 'transform 150ms', transform: open ? 'rotate(90deg)' : 'none' }}>
+            <ChevronIcon />
+          </span>
+        </button>
+        {open && (
+          <div role="radiogroup" aria-label="Backdrop library">
+            {data.libraries.map(l => {
+              const on = l.id === data.id;
+              return (
+                <button key={l.id} type="button" role="radio" aria-checked={on} onClick={() => choose(l.id)}
+                  style={{ ...pickerRow, borderTop: '1px solid rgba(255,255,255,0.06)', paddingLeft: 28 }}>
+                  <span style={{ ...nameStyle, flex: 1 }}>{l.title}</span>
+                  <span style={{ display: 'inline-flex', color: LUMA_BLUE, width: 20 }}>{on && <CheckIcon />}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+const ROW_H = 56;
+
+export function LibrariesEditor() {
+  const [libs, setLibs] = useState<Library[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [toast, setToast] = useState(0);
+  const [drag, setDrag] = useState<{ id: string; from: number; startY: number; dy: number } | null>(null);
+  const seq = useRef(0);
+  const handles = useRef(new Map<string, HTMLButtonElement>());
+  const refocus = useRef<string | null>(null);
+
+  useEffect(() => {
+    fetchLibraries().then(setLibs).catch(() => setLoadFailed(true));
+  }, []);
+  useEffect(() => {
+    if (refocus.current) { handles.current.get(refocus.current)?.focus(); refocus.current = null; }
+  });
+
+  const commit = (next: Library[]) => {
+    const before = libs;
+    setLibs(next);
+    const n = ++seq.current;
+    saveLibraries(next)
+      .then(saved => { if (n === seq.current) setLibs(saved); })
+      .catch(() => { if (n === seq.current) { setLibs(before); setToast(t => t + 1); } });
+  };
+
+  const target = (d: NonNullable<typeof drag>, count: number) =>
+    Math.max(0, Math.min(count - 1, d.from + Math.round(d.dy / ROW_H)));
+
+  const shiftFor = (i: number, count: number) => {
+    if (!drag) return 0;
+    const t = target(drag, count);
+    if (drag.from < t && i > drag.from && i <= t) return -ROW_H;
+    if (drag.from > t && i >= t && i < drag.from) return ROW_H;
+    return 0;
+  };
+
+  return (
+    <section data-testid="home-screen-section">
+      {toast > 0 && <NoticeToast key={toast} text={SAVE_FAILED} onDone={() => setToast(0)} />}
+      <h2 style={sectionTitle}>Libraries</h2>
+      {libs === null ? (
+        loadFailed ? (
+          <div style={{ ...card, ...emptyRow }} role="alert"><span style={muted}>{"Couldn't load libraries"}</span></div>
+        ) : (
+          <div data-testid="libraries-skeleton" style={card}>
+            {[0, 1, 2].map(i => <div key={i} className="luma-shimmer" style={{ height: ROW_H }} />)}
+          </div>
+        )
+      ) : libs.length === 0 ? (
+        <div data-testid="libraries-empty" style={{ ...card, ...emptyRow }}><span style={muted}>No libraries</span></div>
       ) : (
-        <div role="radiogroup" aria-labelledby="kiosk-library-title" style={list}>
-          {data.libraries.map(l => {
-            const on = l.id === data.id;
+        <ul style={{ ...card, listStyle: 'none', margin: 0, padding: 0, position: 'relative' }} data-testid="libraries">
+          {libs.map((l, i) => {
+            const lifted = drag?.id === l.id;
+            const y = lifted ? drag!.dy : shiftFor(i, libs.length);
             return (
-              <button key={l.id} type="button" role="radio" aria-checked={on} onClick={() => choose(l.id)} style={pickRow}>
-                <span style={name}>{l.title}</span>
-                <span aria-hidden="true" style={{ ...radio, ...(on ? radioOn : null) }}>
-                  {on && <span style={radioDot} />}
-                </span>
-              </button>
+              <li key={l.id} data-testid="library-row" data-lifted={lifted ? 'true' : undefined}
+                style={{
+                  ...row,
+                  transform: `translateY(${y}px)${lifted ? ' scale(1.02)' : ''}`,
+                  transition: lifted ? 'none' : 'transform 150ms',
+                  ...(lifted ? liftedRow : null),
+                }}>
+                <button
+                  type="button" aria-label={`Reorder ${l.title}`} style={handle}
+                  ref={el => { if (el) handles.current.set(l.id, el); else handles.current.delete(l.id); }}
+                  onPointerDown={e => {
+                    e.currentTarget.setPointerCapture?.(e.pointerId);
+                    setDrag({ id: l.id, from: i, startY: e.clientY, dy: 0 });
+                    try { navigator.vibrate?.(10); } catch { /* unsupported */ }
+                  }}
+                  onPointerMove={e => { if (drag?.id === l.id) setDrag({ ...drag, dy: e.clientY - drag.startY }); }}
+                  onPointerUp={() => {
+                    if (drag?.id !== l.id) return;
+                    const t = target(drag, libs.length);
+                    setDrag(null);
+                    if (t !== drag.from) commit(move(libs, drag.from, t));
+                  }}
+                  onPointerCancel={() => setDrag(null)}
+                  onKeyDown={e => {
+                    const to = e.key === 'ArrowUp' ? i - 1 : e.key === 'ArrowDown' ? i + 1 : null;
+                    if (to === null) return;
+                    e.preventDefault();
+                    if (to < 0 || to >= libs.length) return;
+                    refocus.current = l.id;
+                    commit(move(libs, i, to));
+                  }}
+                >
+                  <GripIcon />
+                </button>
+                <div style={{ ...rowBody, borderBottom: i < libs.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none' }}>
+                  <span style={{ ...nameStyle, color: l.enabled ? 'rgba(255,255,255,0.95)' : 'rgba(255,255,255,0.5)' }}>{l.title}</span>
+                  <button
+                    type="button" role="switch" aria-checked={l.enabled} aria-label={l.title}
+                    onClick={() => commit(libs.map(x => (x.id === l.id ? { ...x, enabled: !x.enabled } : x)))}
+                    style={switchHit}
+                  >
+                    <span data-track style={{ ...track, background: l.enabled ? LUMA_BLUE : 'rgba(255,255,255,0.2)' }}>
+                      <span style={{ ...knob, transform: l.enabled ? 'translateX(20px)' : 'none' }} />
+                    </span>
+                  </button>
+                </div>
+              </li>
             );
           })}
-        </div>
+        </ul>
       )}
     </section>
   );
 }
 
-export function LibrariesEditor() {
-  const [libs, setLibs] = useState<Library[] | null>(null);
-  const [error, setError] = useState('');
-  const seq = useRef(0);
-
-  useEffect(() => {
-    fetchLibraries().then(setLibs).catch(() => setError("Couldn't load libraries"));
-  }, []);
-
-  const commit = (next: Library[]) => {
-    setLibs(next);
-    setError('');
-    const n = ++seq.current;
-    saveLibraries(next)
-      .then(saved => { if (n === seq.current) setLibs(saved); })
-      .catch(() => { if (n === seq.current) setError("Couldn't save"); });
-  };
-
-  return (
-    <section data-testid="home-screen-section">
-        <h2 style={sectionTitle}>Libraries</h2>
-        {error && <p role="alert" style={{ color: '#ff8a8a', fontSize: 14, margin: '0 0 12px' }}>{error}</p>}
-        {libs === null ? (
-          <div data-testid="libraries-skeleton" style={list}>
-            {[0, 1, 2].map(i => <div key={i} className="luma-shimmer" style={{ height: 60 }} />)}
-          </div>
-        ) : libs.length === 0 ? (
-          <div data-testid="libraries-empty" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 'calc(100dvh - 200px)' }}>
-            <p style={{ margin: 0, color: 'rgba(255,255,255,0.6)', fontSize: 15 }}>Nothing here yet</p>
-          </div>
-        ) : (
-          <ul style={list} data-testid="libraries">
-            {libs.map((l, i) => (
-              <li key={l.id} style={row}>
-                <div style={{ display: 'flex', gap: 4, flex: 'none' }}>
-                  <button type="button" aria-label={`Move ${l.title} up`} disabled={i === 0}
-                    onClick={() => commit(move(libs, i, i - 1))} style={arrow}>▲</button>
-                  <button type="button" aria-label={`Move ${l.title} down`} disabled={i === libs.length - 1}
-                    onClick={() => commit(move(libs, i, i + 1))} style={arrow}>▼</button>
-                </div>
-                <span style={name}>{l.title}</span>
-                <button
-                  type="button" role="switch" aria-checked={l.enabled} aria-label={l.title}
-                  onClick={() => commit(libs.map(x => (x.id === l.id ? { ...x, enabled: !x.enabled } : x)))}
-                  style={toggleHit}
-                >
-                  <span data-track style={{ ...toggle, background: l.enabled ? LUMA_BLUE : 'rgba(255,255,255,0.18)' }}>
-                    <span style={{ ...knob, transform: l.enabled ? 'translateX(20px)' : 'none' }} />
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-    </section>
-  );
-}
-
-const title_: React.CSSProperties = { margin: 0, fontSize: 17, fontWeight: 600, fontFamily: FONT };
-const list: React.CSSProperties = {
-  listStyle: 'none', margin: 0, padding: 0, borderRadius: 16, overflow: 'hidden',
-  background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
-  backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', display: 'flex', flexDirection: 'column', gap: 1,
+const deskBar: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 72, padding: '0 40px',
 };
-const row: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', minHeight: 60, boxSizing: 'border-box',
-  borderBottom: '1px solid rgba(255,255,255,0.06)',
-};
-const name: React.CSSProperties = { flex: 1, fontSize: 16, fontFamily: FONT, color: '#fff' };
-// Every control is at least 44 x 44 px to tap.
-const arrow: React.CSSProperties = {
-  width: 44, height: 44, border: 'none', borderRadius: 12, background: 'rgba(255,255,255,0.08)',
-  color: 'rgba(255,255,255,0.85)', fontSize: 12, cursor: 'pointer', padding: 0, flex: 'none',
-};
-const toggleHit: React.CSSProperties = {
-  width: 56, height: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-  border: 'none', background: 'none', cursor: 'pointer', padding: 0, flex: 'none',
-};
-const toggle: React.CSSProperties = {
-  position: 'relative', display: 'block', width: 46, height: 26, borderRadius: 13,
-  transition: 'background .2s', flex: 'none',
+const pageTitle: React.CSSProperties = {
+  margin: 0, fontSize: 17, fontWeight: 600, fontFamily: FONT, color: 'rgba(255,255,255,0.95)',
+  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
 };
 const sectionTitle: React.CSSProperties = {
-  margin: '0 4px 12px', fontSize: 13, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase',
-  color: 'rgba(255,255,255,0.6)', fontFamily: FONT,
+  margin: '24px 4px 8px', fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.5)', fontFamily: FONT,
 };
-const navRow: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px', minHeight: 56, color: '#fff', textDecoration: 'none',
+const card: React.CSSProperties = {
+  borderRadius: 16, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
+  overflow: 'hidden',
 };
-const sideNav: React.CSSProperties = { width: 220, flex: 'none', display: 'flex', flexDirection: 'column', gap: 4 };
-const navItem: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', minHeight: 44, padding: '0 14px', borderRadius: 12, fontSize: 15,
-  fontFamily: FONT, color: 'rgba(255,255,255,0.75)', textDecoration: 'none',
+const emptyRow: React.CSSProperties = { height: ROW_H, display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const muted: React.CSSProperties = { color: 'rgba(255,255,255,0.5)', fontSize: 15, fontFamily: FONT };
+const row: React.CSSProperties = {
+  position: 'relative', display: 'flex', alignItems: 'center', height: ROW_H, padding: '0 12px 0 4px',
+  boxSizing: 'border-box', background: 'transparent', touchAction: 'pan-y',
 };
-const navItemOn: React.CSSProperties = { background: 'rgba(255,255,255,0.10)', color: '#fff', fontWeight: 600 };
-const pickRow: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 12, width: '100%', minHeight: 56, padding: '0 16px', border: 'none',
-  borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'none', cursor: 'pointer', textAlign: 'left',
+const liftedRow: React.CSSProperties = {
+  background: 'rgba(59,130,246,0.14)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)', zIndex: 2, borderRadius: 12,
 };
-const radio: React.CSSProperties = {
-  width: 22, height: 22, borderRadius: 11, border: '2px solid rgba(255,255,255,0.35)', boxSizing: 'border-box',
-  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none',
+const rowBody: React.CSSProperties = {
+  flex: 1, minWidth: 0, height: '100%', display: 'flex', alignItems: 'center', gap: 12,
 };
-const radioOn: React.CSSProperties = { borderColor: LUMA_BLUE };
-const radioDot: React.CSSProperties = { width: 10, height: 10, borderRadius: 5, background: LUMA_BLUE };
+const nameStyle: React.CSSProperties = {
+  flex: 1, minWidth: 0, fontSize: 16, fontWeight: 500, fontFamily: FONT, color: 'rgba(255,255,255,0.95)',
+  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'left',
+};
+const handle: React.CSSProperties = {
+  width: 44, height: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none',
+  border: 'none', background: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'grab', padding: 0,
+  touchAction: 'none', borderRadius: 10,
+};
+const switchHit: React.CSSProperties = {
+  width: 59, height: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end',
+  border: 'none', background: 'none', cursor: 'pointer', padding: 0, flex: 'none',
+};
+const track: React.CSSProperties = {
+  position: 'relative', display: 'block', width: 51, height: 31, borderRadius: 16, transition: 'background .2s',
+};
 const knob: React.CSSProperties = {
-  position: 'absolute', top: 3, left: 3, width: 20, height: 20, borderRadius: 10, background: '#fff',
+  position: 'absolute', top: 2, left: 2, width: 27, height: 27, borderRadius: 14, background: '#fff',
   transition: 'transform .2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+};
+const pickerRow: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 12, width: '100%', height: ROW_H, padding: '0 16px', border: 'none',
+  background: 'none', cursor: 'pointer', fontFamily: FONT, boxSizing: 'border-box',
 };
 
 /** @deprecated name kept for imports: the page is Settings now. */

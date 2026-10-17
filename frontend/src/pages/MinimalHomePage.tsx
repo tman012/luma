@@ -1,6 +1,6 @@
 /** Main screen of a LUMA_MINIMAL build: the phone-first Home (#11). */
-import { useEffect, useRef, useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Navigate, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { FONT, LOGO_SRC, NAVY_BG } from '@/components/start/StartUI';
@@ -11,6 +11,7 @@ import type { Card } from '@/components/home/homeApi';
 import { LUMA_BLUE } from '@/ui/lumaButton';
 import { fetchHome, type HomeData } from '@/components/home/homeApi';
 import { KioskHome, useKioskWidth } from '@/components/home/KioskHome';
+import { MenuButton, NavDrawer } from '@/components/nav/AppNav';
 
 export function MinimalHomePage() {
   const { authenticated, loading, needsStart, startInProgress, pinUnlock, user, implicit, logout } = useAuth();
@@ -25,6 +26,8 @@ export function MinimalHomePage() {
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [slow, setSlow] = useState(false);
+  const [drawer, setDrawer] = useState(false);
+  const closeDrawer = useCallback(() => setDrawer(false), []);
   const modals = useModalHost();
   const openCard = (c: Card) => openDetail(modals, c);
 
@@ -52,18 +55,23 @@ export function MinimalHomePage() {
     navigate('/login', { replace: true });
   };
 
-  const menu = (user?.is_admin || !implicit) && (
-    <AccountMenu name={user?.name || ''} admin={!!user?.is_admin} canSignOut={!implicit} busy={busy} onSignOut={signOut} />
-  );
+  // The avatar menu holds Sign out only (Settings lives in the sidebar/drawer).
+  const menu = (size: number) => !implicit ? (
+    <AccountMenu name={user?.name || ''} busy={busy} onSignOut={signOut} size={size} />
+  ) : <span style={{ width: size }} />;
 
   if (kiosk) {
     return (
       <div data-step="home" data-layout="kiosk">
         <KioskHome />
         <header style={kioskBar} data-testid="kiosk-header">
-          <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="kiosk-logo" style={{ height: 42, width: 'auto' }} draggable={false} />
-          {menu}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <MenuButton onClick={() => setDrawer(true)} />
+            <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="kiosk-logo" style={{ height: 64, width: 'auto' }} draggable={false} />
+          </div>
+          {menu(48)}
         </header>
+        <NavDrawer open={drawer} onClose={closeDrawer} />
       </div>
     );
   }
@@ -71,10 +79,14 @@ export function MinimalHomePage() {
   return (
     <div style={page} data-step="home">
       <style>{railCss}</style>
-      <header style={bar}>
-        <img src={assetUrl(LOGO_SRC)} alt="Luma" style={{ height: 30, width: 'auto' }} draggable={false} />
-        {menu}
+      <header style={phoneBar}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <MenuButton onClick={() => setDrawer(true)} />
+          <img src={assetUrl(LOGO_SRC)} alt="Luma" style={{ height: 30, width: 'auto' }} draggable={false} />
+        </div>
+        {menu(40)}
       </header>
+      <NavDrawer open={drawer} onClose={closeDrawer} />
       <main style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
         {homeView(data, failed || slow, () => setAttempt(a => a + 1), openCard)}
       </main>
@@ -113,9 +125,9 @@ function homeView(data: HomeData | null, down: boolean, retry: () => void, onOpe
   return <SkeletonRails />;
 }
 
-/** Avatar button with a small menu: Settings (admins) and Sign out. */
-function AccountMenu({ name, admin, canSignOut, busy, onSignOut }: {
-  name: string; admin: boolean; canSignOut: boolean; busy: boolean; onSignOut: () => void;
+/** Avatar button with a small menu: Sign out. */
+export function AccountMenu({ name, busy, onSignOut, size = 40 }: {
+  name: string; busy: boolean; onSignOut: () => void; size?: number;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -132,17 +144,12 @@ function AccountMenu({ name, admin, canSignOut, busy, onSignOut }: {
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button type="button" aria-label="Account" aria-haspopup="menu" aria-expanded={open}
-        onClick={() => setOpen(o => !o)} style={iconBtn}>
-        {initial ? <span style={{ fontSize: 16, fontWeight: 600 }}>{initial}</span> : <PersonIcon />}
+        onClick={() => setOpen(o => !o)} style={{ ...iconBtn, width: size, height: size, borderRadius: size / 2 }}>
+        {initial ? <span style={{ fontSize: size >= 48 ? 19 : 16, fontWeight: 600 }}>{initial}</span> : <PersonIcon />}
       </button>
       {open && (
-        <div role="menu" style={menu}>
-          {admin && (
-            <Link role="menuitem" to="/settings" style={menuItem}><SettingsIcon /> Settings</Link>
-          )}
-          {canSignOut && (
-            <button role="menuitem" type="button" onClick={onSignOut} disabled={busy} style={menuItem}><SignOutIcon /> Sign out</button>
-          )}
+        <div role="menu" style={{ ...menu, top: size + 8 }}>
+          <button role="menuitem" type="button" onClick={onSignOut} disabled={busy} style={menuItem}><SignOutIcon /> Sign out</button>
         </div>
       )}
     </div>
@@ -178,14 +185,6 @@ const retryBtn: React.CSSProperties = {
   color: '#fff', font: 'inherit', fontWeight: 600, cursor: 'pointer',
 };
 
-function SettingsIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" />
-    </svg>
-  );
-}
 function SignOutIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -205,11 +204,15 @@ export const homeBar: React.CSSProperties = {
   background: 'rgba(21,16,42,0.55)', backdropFilter: 'blur(20px) saturate(160%)', WebkitBackdropFilter: 'blur(20px) saturate(160%)',
   borderBottom: '1px solid rgba(255,255,255,0.06)',
 };
-const bar = homeBar;
+/** Phone header: 56px + safe area; hamburger and logo left, avatar right. */
+export const phoneBar: React.CSSProperties = {
+  ...homeBar, height: 'calc(env(safe-area-inset-top) + 56px)', boxSizing: 'border-box',
+  padding: 'env(safe-area-inset-top) 12px 0 6px',
+};
 /** Web kiosk header: overlays the slideshow, top gradient, no glass. */
 export const kioskBar: React.CSSProperties = {
   position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50, display: 'flex', alignItems: 'center',
-  justifyContent: 'space-between', padding: '24px 60px',
+  justifyContent: 'space-between', padding: '20px 60px 20px 44px',
   background: 'linear-gradient(to bottom, rgba(0,0,0,0.8), transparent)',
 };
 export const iconBtn: React.CSSProperties = {

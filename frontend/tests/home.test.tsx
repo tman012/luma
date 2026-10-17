@@ -55,7 +55,7 @@ describe('Home', () => {
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Account' }));
     const items = screen.getAllByRole('menuitem').map(i => i.textContent?.trim());
-    expect(items).toEqual(['Settings', 'Sign out']);
+    expect(items).toEqual(['Sign out']);   // Settings lives in the drawer/sidebar
   });
 
   it('scrolls: the page unlocks html/body, rails scroll sideways', async () => {
@@ -137,10 +137,10 @@ describe('Libraries', () => {
   beforeEach(() => { vi.restoreAllMocks(); });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-  it('says Nothing here yet with no libraries', async () => {
+  it('says No libraries with no libraries', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ libraries: [] })));
     render(<MemoryRouter><LibrariesEditor /></MemoryRouter>);
-    expect((await screen.findByTestId('libraries-empty')).textContent).toBe('Nothing here yet');
+    expect((await screen.findByTestId('libraries-empty')).textContent).toBe('No libraries');
   });
 
   it('the Home screen libraries list has 44px controls', async () => {
@@ -149,7 +149,7 @@ describe('Libraries', () => {
     render(<MemoryRouter><LibrariesEditor /></MemoryRouter>);
     await waitFor(() => screen.getByTestId('libraries'));
     expect(screen.getByRole('heading', { level: 2 }).textContent).toBe('Libraries');
-    for (const b of [screen.getByLabelText('Move Movies down'), screen.getByLabelText('Move TV Shows up'), ...screen.getAllByRole('switch')]) {
+    for (const b of [screen.getByLabelText('Reorder Movies'), screen.getByLabelText('Reorder TV Shows'), ...screen.getAllByRole('switch')]) {
       expect(parseInt(b.style.width, 10)).toBeGreaterThanOrEqual(44);
       expect(parseInt(b.style.height, 10)).toBeGreaterThanOrEqual(44);
     }
@@ -190,9 +190,47 @@ describe('Libraries', () => {
     await waitFor(() => expect(screen.getAllByRole('switch')[0]!.getAttribute('aria-checked')).toBe('false'));
     let put = fetchMock.mock.calls.filter(c => c[1]?.method === 'PUT').pop()!;
     expect(JSON.parse(String(put[1]!.body))).toEqual({ libraries: [{ id: '1', enabled: false }, { id: '2', enabled: true }] });
-    fireEvent.click(screen.getByLabelText('Move TV Shows up'));
+    fireEvent.keyDown(screen.getByLabelText('Reorder TV Shows'), { key: 'ArrowUp' });
     await waitFor(() => expect(screen.getAllByRole('switch')[0]!.getAttribute('aria-label')).toBe('TV Shows'));
     put = fetchMock.mock.calls.filter(c => c[1]?.method === 'PUT').pop()!;
     expect(JSON.parse(String(put[1]!.body)).libraries.map((l: { id: string }) => l.id)).toEqual(['2', '1']);
+    await waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toBe('Reorder TV Shows'));
+  });
+
+  it('drag handle reorders by pointer: lift, shift others, drop', async () => {
+    const libs = [
+      { id: '1', title: 'Movies', type: 'movie', enabled: true },
+      { id: '2', title: 'TV Shows', type: 'show', enabled: false },
+      { id: '3', title: 'Kids', type: 'movie', enabled: true },
+    ];
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => init?.method === 'PUT'
+      ? json({ libraries: JSON.parse(String(init.body)).libraries.map((b: { id: string; enabled: boolean }) => ({ ...libs.find(l => l.id === b.id)!, enabled: b.enabled })) })
+      : json({ libraries: libs }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<MemoryRouter><LibrariesEditor /></MemoryRouter>);
+    await waitFor(() => screen.getByTestId('libraries'));
+    const h = screen.getByLabelText('Reorder Movies');
+    expect(h.style.touchAction).toBe('none');
+    fireEvent.pointerDown(h, { clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(h, { clientY: 100 + 2 * 56, pointerId: 1 });
+    const rows = screen.getAllByTestId('library-row');
+    expect(rows[0]!.getAttribute('data-lifted')).toBe('true');
+    expect(rows[0]!.style.transform).toContain('scale(1.02)');
+    expect(rows[1]!.style.transform).toBe('translateY(-56px)');
+    expect(rows[2]!.style.transform).toBe('translateY(-56px)');
+    fireEvent.pointerUp(h, { clientY: 212, pointerId: 1 });
+    await waitFor(() => expect(screen.getAllByRole('switch').map(s => s.getAttribute('aria-label'))).toEqual(['TV Shows', 'Kids', 'Movies']));
+    const put = fetchMock.mock.calls.filter(c => c[1]?.method === 'PUT').pop()!;
+    expect(JSON.parse(String(put[1]!.body)).libraries.map((l: { id: string }) => l.id)).toEqual(['2', '3', '1']);
+  });
+
+  it("a failed save reverts and says Couldn't save", async () => {
+    const libs = [{ id: '1', title: 'Movies', type: 'movie', enabled: true }];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => init?.method === 'PUT' ? json({}, false) : json({ libraries: libs })));
+    render(<MemoryRouter><LibrariesEditor /></MemoryRouter>);
+    await waitFor(() => screen.getByTestId('libraries'));
+    fireEvent.click(screen.getByRole('switch'));
+    await waitFor(() => expect(screen.getByTestId('notice-toast').textContent).toContain("Couldn't save"));
+    expect(screen.getByRole('switch').getAttribute('aria-checked')).toBe('true');
   });
 });

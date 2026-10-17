@@ -83,8 +83,9 @@ describe('web kiosk home (>=1024px)', () => {
     const header = screen.getByTestId('kiosk-header');
     expect(header.style.position).toBe('fixed');
     expect(header.style.background).toContain('rgba(0, 0, 0, 0.8)');
-    expect(header.style.padding).toBe('24px 60px');
-    expect((header.querySelector('img') as HTMLImageElement).style.height).toBe('42px');   // 1.5x the phone-era 28px
+    expect(header.style.padding).toBe('20px 60px 20px 44px');
+    expect((header.querySelector('img') as HTMLImageElement).style.height).toBe('64px');
+    expect(screen.getByRole('button', { name: 'Account' }).style.width).toBe('48px');
   });
 
   it('only the title (or logo art) and the avatar are interactive; the title opens the popup', async () => {
@@ -93,7 +94,7 @@ describe('web kiosk home (>=1024px)', () => {
     const { container } = renderHome();
     await waitFor(() => screen.getByText('Movie 0'));
     const focusable = container.querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"]), [role="button"], input, select, textarea');
-    expect([...focusable].map(e => e.getAttribute('aria-label') || e.textContent)).toEqual(['Movie 0', 'Account']);
+    expect([...focusable].map(e => e.getAttribute('aria-label') || e.textContent)).toEqual(['Movie 0', 'Menu', 'Account']);
     const hero = container.querySelector('[data-hero-display-only]') as HTMLElement;
     // The backdrop, plot and genres open nothing; a drag doesn't swipe.
     fireEvent.click(hero);
@@ -156,6 +157,22 @@ describe('web kiosk home (>=1024px)', () => {
     }
     // Only one hero fetch: the kiosk never remounted.
     expect((globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+  });
+
+  it('the menu icon opens the sidebar as an overlay drawer over the full-bleed slideshow', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ success: true, movies: TEN })));
+    renderHome();
+    await waitFor(() => screen.getByText('Movie 0'));
+    expect(screen.queryByTestId('app-sidebar')).toBeNull();            // collapsed: no persistent sidebar
+    expect(screen.getByTestId('kiosk-home').style.inset).toBe('0px');   // full-bleed
+    fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
+    const drawer = screen.getByTestId('nav-drawer');
+    expect(screen.getByTestId('nav-scrim')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Home' }).getAttribute('aria-current')).toBe('page');
+    expect(screen.getByRole('button', { name: 'Settings' })).toBeTruthy();
+    expect(drawer.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByTestId('nav-drawer')).toBeNull());
   });
 
   it('crossfades over 1.2 s, instantly under reduced motion', async () => {
