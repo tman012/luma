@@ -278,8 +278,8 @@ class FastSearchIndex:
         """Return [(section_id, title, media_type, plex_type)] for the sections to index."""
         try:
             resp = requests.get(f"{plex_url}/library/sections",
-                                params={'X-Plex-Token': plex_token},
-                                headers={'Accept': 'application/json'}, timeout=15)
+                                headers={'Accept': 'application/json', 'X-Plex-Token': plex_token},
+                                timeout=15, allow_redirects=False)
             resp.raise_for_status()
             dirs = resp.json().get('MediaContainer', {}).get('Directory', []) or []
         except Exception as e:

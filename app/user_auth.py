@@ -537,3 +537,19 @@ def save_user_settings(user_id: int, new_settings: Dict) -> None:
             """,
             (user_id, json.dumps(current)),
         )
+
+
+def is_plex_approved(user: Optional[Dict]) -> bool:
+    """Admins (including the LAN implicit owner and the service key), or an
+    active user whose shared Plex access was approved and not denied."""
+    if not user:
+        return False
+    if user.get("is_admin"):
+        return True
+    full = get_user_by_id(user["id"]) or {}
+    if full.get("status", "active") != "active":
+        return False
+    us = get_user_settings(user["id"]) or {}
+    if us.get("plex_access_status") == "denied":
+        return False
+    return us.get("use_shared_server") is True or us.get("plex_access_status") == "approved"

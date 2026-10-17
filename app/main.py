@@ -12343,18 +12343,28 @@ def plex_health():
 
 
 _PLEX_IMG_PATH = re.compile(
-    r'/library/(?:metadata|collections)/\d+/(?:thumb|art|clearLogo|banner|composite|poster)(?:/\d+)?'
-    r'|/library/sections/\d+/composite/\d+', re.ASCII)
+    r'/library/(?:metadata|collections)/[0-9]+/(?:thumb|art|clearLogo|banner|composite|poster)(?:/[0-9]+)?'
+    r'|/library/sections/[0-9]+/composite/[0-9]+',
+    re.ASCII)
+_PLEX_NO_STORE = {'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'}
+_PLEX_IMG_TYPES = frozenset({'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'})
+_PLEX_IMG_MAX_BYTES = 20 * 1024 * 1024
 
 
 def _plex_image_path(raw: str):
-    """The Plex library image path to fetch, or None. A photo-transcode URL is
-    accepted only when its inner url is itself a library image path."""
-    raw = (raw or '').strip()
+    """The Plex library image path to fetch, or None. Anything with '..', a
+    backslash or a leftover percent sign (encoded or double-encoded) is refused.
+    A photo-transcode URL is accepted only when its inner url is itself a
+    library image path."""
+    from urllib.parse import parse_qs, urlsplit
+    raw = raw or ''
     if raw.startswith('/photo/:/transcode?'):
-        from urllib.parse import parse_qs, urlsplit
-        inner = parse_qs(urlsplit(raw).query).get('url', [''])[0]
-        return inner if _PLEX_IMG_PATH.fullmatch(inner) else None
+        inner = parse_qs(urlsplit(raw).query).get('url', [''])
+        if len(inner) != 1:
+            return None
+        raw = inner[0]
+    if '..' in raw or '\\' in raw or '%' in raw:
+        return None
     return raw if _PLEX_IMG_PATH.fullmatch(raw) else None
 
 
@@ -12375,19 +12385,20 @@ def img_plex_proxy():
     Plex serves full-resolution originals (~1MB per poster) otherwise, which
     is wasteful for small thumbnails/grid cards — transcoded copies are ~15KB.
     """
+    from flask import Response
     plex_path = request.args.get('url', '')
 
     if not plex_path:
-        return 'Missing url parameter', 400
+        return Response('Missing url parameter', status=400, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
     people = bool(_PLEX_PEOPLE_URL.fullmatch(plex_path.strip()))
     if people:
         plex_path = plex_path.strip()
     else:
-        # Security: only Plex's own image paths, never an outside URL.
+        # Security: only Plex's own library image paths, never an outside URL.
         plex_path = _plex_image_path(plex_path)
         if not plex_path:
-            return 'Not a Plex image path', 400
+            return Response('Not a Plex image path', status=400, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
     # Optional resize via Plex photo transcoder (clamped to sane bounds)
     def _clamp_dim(raw):
@@ -12412,7 +12423,7 @@ def img_plex_proxy():
     plex_token = _user_plex.plex_token if _user_plex else settings.get('plex.token')
 
     if not plex_url or not plex_token:
-        return 'Plex not configured', 503
+        return Response('Plex not configured', status=503, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
     try:
         original_url = f"{plex_url}{plex_path}"
@@ -12433,40 +12444,44 @@ def img_plex_proxy():
             headers={'X-Plex-Token': plex_token},
             timeout=15,
             stream=True,
+            # Never follow a redirect: it would carry the Plex token to another host.
+            allow_redirects=False,
         )
         if resp.status_code != 200 and full_url != original_url and not people:
             # Transcoder refused: serve the original rather than no image.
-            resp = requests.get(original_url, headers={'X-Plex-Token': plex_token}, timeout=15, stream=True)
+            resp.close()
+            resp = requests.get(original_url, headers={'X-Plex-Token': plex_token}, timeout=15, stream=True,
+                                allow_redirects=False)
+        try:
+            if 300 <= resp.status_code < 400:
+                return Response('Redirect refused', status=502, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
-        if resp.status_code != 200:
-            # Errors are never cached: a transient Plex miss must not stick a
-            # blank backdrop or logo in the browser (images cache a day).
-            from flask import Response
-            return Response('Image not found', status=404, headers={'Cache-Control': 'no-store'})
+            if resp.status_code != 200:
+                # Never cached: the reply can depend on who is signed in.
+                return Response('Image not found', status=404, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
-        from flask import Response
-        import re as _re, hashlib as _hl
-        ctype = (resp.headers.get('Content-Type') or 'image/jpeg').split(';')[0].strip().lower()
-        if not ctype.startswith('image/') or ctype == 'image/svg+xml':
-            return Response('Not an image', status=502, headers={'Cache-Control': 'no-store'})
-        body = resp.content
-        # Versioned Plex paths (/thumb/<updatedAt>) change URL when the art changes -> cache a day.
-        # Unversioned ones (/library/metadata/<rk>/thumb) keep the same URL after a Fix Match or
-        # poster change, so make the browser revalidate (cheap 304 via ETag) instead of showing old art.
-        versioned = people or bool(_re.search(r'/(thumb|art|clearLogo|banner|theme)/\d+', plex_path))
-        etag = '"' + _hl.md5(body).hexdigest() + '"'
-        if not versioned and request.headers.get('If-None-Match') == etag:
-            return Response(status=304, headers={'ETag': etag, 'Cache-Control': 'private, no-cache'})
-        return Response(
-            body,
-            content_type=ctype,
-            headers={'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff'} if versioned
-            else {'Cache-Control': 'private, no-cache', 'ETag': etag, 'X-Content-Type-Options': 'nosniff'},
-        )
+            # Only ever answer with an image; anything else from upstream is refused.
+            ctype = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+            if ctype not in _PLEX_IMG_TYPES:
+                return Response('Not an image', status=502, mimetype='text/plain', headers=_PLEX_NO_STORE)
+
+            too_big = Response('Image too large', status=502, mimetype='text/plain', headers=_PLEX_NO_STORE)
+            try:
+                if int(resp.headers.get('Content-Length') or 0) > _PLEX_IMG_MAX_BYTES:
+                    return too_big
+            except ValueError:
+                pass
+            body = bytearray()
+            for chunk in resp.iter_content(chunk_size=65536):
+                body += chunk
+                if len(body) > _PLEX_IMG_MAX_BYTES:
+                    return too_big
+            return Response(bytes(body), content_type=ctype, headers=_PLEX_NO_STORE)
+        finally:
+            resp.close()
     except requests.RequestException as e:
-        logger.error(f"Plex image proxy error: {_redact_secrets(e)}")
-        from flask import Response
-        return Response('Error fetching image', status=502, headers={'Cache-Control': 'no-store'})
+        logger.error(f"Plex image proxy error: {e}")
+        return Response('Error fetching image', status=502, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
 @app.route('/api/img/tmdb')
 def img_tmdb_proxy():
@@ -12516,7 +12531,14 @@ def player_play():
 
     Resolves the target device + service from the v3 room hierarchy,
     wakes the device (ADB/WoL/Harmony), then plays via Kodi JSON-RPC.
+
+    Admins may target any configured device or a player Plex lists; approved
+    users only devices configured in Luma's rooms.
     """
+    user = _get_current_user()
+    if not user_auth.is_plex_approved(user):
+        return jsonify({'error': 'Not allowed'}), 403
+    is_admin = bool(user.get('is_admin'))
     try:
         data = request.get_json() or {}
         rating_key = data.get('rating_key')
@@ -12602,6 +12624,13 @@ def player_play():
 
         if not rating_key or not client_ip:
             return jsonify({'error': 'rating_key and client_ip/room_id are required'}), 400
+        if not is_admin:
+            # Approved users: only a device configured in Luma's rooms.
+            if _plex_norm_host(client_ip) not in {h for h, _ in _configured_plex_clients()}:
+                return jsonify({'error': 'Unknown client'}), 403
+        elif client_ip == data.get('client_ip') and not _plex_client_target(client_ip):
+            # The address came from the caller, not from a configured device.
+            return jsonify({'error': 'Unknown client'}), 400
 
         dev_name = device.get('name', '?') if device else 'none'
         dev_harmony = device.get('harmonyActivity', '') if device else ''
@@ -12750,11 +12779,10 @@ def _play_via_kodi(service, rating_key, resume_offset, room_name, device_ip, adb
         # Kodi not running — launch via ADB intent with file URL (straight to playback)
         if has_adb:
             logger.info("Kodi: not running, launching via ADB intent with file URL")
-            target = f"{device_ip}:{adb_port}"
-            launch = run_adb(["adb", "-s", target, "shell",
-                              "am", "start", "-a", "android.intent.action.VIEW",
-                              "-d", file_url, "-t", "video/*",
-                              "-n", "org.xbmc.kodi/.Splash"], timeout=5)
+            target = _adb_target(device_ip, adb_port)
+            if not target:
+                return jsonify({'success': False, 'message': 'Unknown device'}), 400
+            launch = run_adb(_kodi_launch_args(target, file_url), timeout=5)
             logger.info(f"Kodi ADB intent: ok={launch['ok']}, "
                         f"out={launch['stdout'].strip()}, err={launch['stderr'].strip()}")
 
@@ -12880,7 +12908,9 @@ def _play_via_plex(service, rating_key, resume_offset, room_name, device_ip, adb
     metadata = plex_service.get_metadata(play_rk)
     title = metadata.get('title', '?') if metadata else '?'
     offset_ms = int(resume_offset) if resume_offset else 0
-    target = f"{device_ip}:{adb_port}"
+    target = _adb_target(device_ip, adb_port)
+    if not target:
+        return jsonify({'success': False, 'message': 'Unknown device'}), 400
 
     logger.info(
         f"Plex play: '{title}' (rk={play_rk}, source_rk={rating_key}, pq={play_queue_id}) "
@@ -13061,9 +13091,7 @@ def _plex_play_deeplink(run_adb, target, device_ip, machine_id, rating_key, offs
     session = None
     used = None
     for label, uri, extra in _plex_deeplink_candidates(machine_id, start_rk, offset_ms, play_queue_id):
-        cmd = "am start " + ("--ez android.intent.extra.START_PLAYBACK true " if extra else "") + \
-              f"-a android.intent.action.VIEW -d '{uri}' com.plexapp.android"
-        result = run_adb(["adb", "-s", target, "shell", cmd], timeout=15)
+        result = run_adb(_plex_deeplink_args(target, uri, extra), timeout=15)
         out = ((result.get('stdout') or '') + (result.get('stderr') or '')).strip().replace('\n', ' | ')
         logger.info("Plex deep-link %s on %s: ok=%s %s", label, target, result.get('ok'), out[:200])
         if not result.get('ok') or 'Error:' in out:
@@ -13163,7 +13191,6 @@ def _plex_play_shield(run_adb, _t, target, device_ip, machine_id, rating_key, of
         f"&port={server_port}"
         f"&protocol={server_protocol}"
         f"&type=video"
-        f"&X-Plex-Token={plex_token}"
     )
     if container:
         url += f"&containerKey={container}"
@@ -13173,7 +13200,7 @@ def _plex_play_shield(run_adb, _t, target, device_ip, machine_id, rating_key, of
     max_attempts = 1 if play_queue_id else 3
     for attempt in range(max_attempts):
         try:
-            resp = requests.get(url, timeout=5)
+            resp = requests.get(url, headers={'X-Plex-Token': plex_token}, timeout=5, allow_redirects=False)
             logger.info(f"Plex playMedia: status={resp.status_code} pq={play_queue_id}")
             if resp.status_code == 200:
                 logger.info(f"Plex playMedia succeeded on attempt {attempt + 1}")
@@ -13227,8 +13254,9 @@ def _plex_status(rating_key, device_ip=None):
     try:
         resp = requests.get(
             f"{plex_url}/status/sessions",
-            params={'X-Plex-Token': plex_token},
-            timeout=5
+            headers={'X-Plex-Token': plex_token},
+            timeout=5,
+            allow_redirects=False,
         )
         if resp.status_code != 200:
             return stopped
@@ -13487,7 +13515,7 @@ def _lookup_kodi_artwork(title: str, year: int | None = None) -> dict:
                     import xml.etree.ElementTree as ET
                     meta_resp = requests.get(
                         f"{plex_url}/library/metadata/{matched_key}",
-                        params={'X-Plex-Token': plex_token}, timeout=3,
+                        headers={'X-Plex-Token': plex_token}, timeout=3, allow_redirects=False,
                     )
                     if meta_resp.status_code == 200:
                         root = ET.fromstring(meta_resp.content)
@@ -13653,7 +13681,7 @@ def _query_adb_activity(device: dict) -> dict | None:
 
         # Validate device_ip to prevent command injection
         import re as _re_ip
-        if not _re_ip.match(r'^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$', device_ip):
+        if not isinstance(device_ip, str) or not _re_ip.fullmatch(r'[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}', device_ip):
             logger.warning(f"Invalid device_ip rejected: {device_ip!r}")
             return None
 
@@ -13719,8 +13747,10 @@ def _query_adb_activity(device: dict) -> dict | None:
         # that have no matched Plex session, so there's no duplication.
 
         # Get media session info
-        media_cmd = f'adb -s {device_ip}:{adb_port} shell dumpsys media_session'
-        media_result = subprocess.run(media_cmd, shell=True, capture_output=True, text=True, timeout=5)
+        media_result = subprocess.run(
+            ['adb', '-s', f'{device_ip}:{adb_port}', 'shell', 'dumpsys', 'media_session'],
+            capture_output=True, text=True, timeout=5,
+        )
 
         state = 'stopped'
         title = None
@@ -13861,7 +13891,8 @@ def plex_active_sessions():
         if plex_url and plex_token:
             try:
                 sessions_url = f"{plex_url}/status/sessions"
-                response = requests.get(sessions_url, params={'X-Plex-Token': plex_token}, timeout=5)
+                response = requests.get(sessions_url, headers={'X-Plex-Token': plex_token}, timeout=5,
+                                        allow_redirects=False)
                 if response.status_code == 200:
                     import xml.etree.ElementTree as ET
                     root = ET.fromstring(response.content)
@@ -14007,119 +14038,275 @@ def plex_active_sessions():
 
 # Legacy image proxy — prefer /api/img/plex for new code
 # Playback Control Endpoints for Now Playing Modal
+_PLEX_CLIENT_ADDR = re.compile(
+    r'(?:\[([0-9A-Fa-f:.]+)\]|([A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?))(?::([0-9]{1,5}))?', re.ASCII)
+_PLEX_CLIENTS_TTL = 45  # seconds a Plex /clients answer is reused
+_plex_clients_cache: dict = {}
+
+
+def _plex_default_client_port() -> int:
+    try:
+        return int(settings.get('plex.client_port', 32500) or 32500)
+    except (TypeError, ValueError):
+        return 32500
+
+
+def _plex_norm_host(host):
+    """A comparable host: lowercase name, or a compressed IP (IPv6 without
+    brackets). None when it is not a usable host."""
+    import ipaddress
+    if not isinstance(host, str):
+        return None
+    h = host.strip()
+    bracketed = h.startswith('[') and h.endswith(']')
+    if bracketed:
+        h = h[1:-1]
+    try:
+        ip = ipaddress.ip_address(h)
+    except ValueError:
+        return None if bracketed or not h else h.lower()
+    if bracketed and ip.version != 6:
+        return None
+    return ip.compressed
+
+
+def _configured_plex_clients() -> set:
+    """(host, port) of every room device configured by the admin."""
+    default = _plex_default_client_port()
+    known = set()
+
+    def add(host, port=None):
+        h = _plex_norm_host(host)
+        if h:
+            try:
+                known.add((h, int(port or default)))
+            except (TypeError, ValueError):
+                pass
+
+    for room in settings.get('devices.rooms') or []:
+        if not isinstance(room, dict):
+            continue
+        add(room.get('host'))
+        add(room.get('ip'))
+        for dev in room.get('devices') or []:
+            if not isinstance(dev, dict):
+                continue
+            add(dev.get('host'))
+            for svc in dev.get('services') or []:
+                if isinstance(svc, dict) and svc.get('plex_client_port'):
+                    add(dev.get('host'), svc.get('plex_client_port'))
+    return known
+
+
+def _discovered_plex_clients() -> dict:
+    """{(host, port): machineIdentifier} of the players the Plex server lists
+    in /clients, reused for 45 seconds."""
+    plex_url = settings.get('plex.url')
+    plex_token = settings.get('plex.token')
+    if not plex_url or not plex_token:
+        return {}
+    now = time.time()
+    import hashlib
+    # Keyed on the server and token, so a Plex settings change is never served stale.
+    key = (plex_url, hashlib.sha256(plex_token.encode()).hexdigest())
+    cached = _plex_clients_cache.get('entry')
+    if cached and cached[0] == key and now - cached[1] < _PLEX_CLIENTS_TTL:
+        return cached[2]
+    known = {}
+    try:
+        resp = requests.get(f"{plex_url}/clients", headers={'X-Plex-Token': plex_token, 'Accept': 'application/xml'},
+                            timeout=3, allow_redirects=False)
+        if resp.status_code == 200:
+            import xml.etree.ElementTree as ET
+            for el in ET.fromstring(resp.content).iter('Server'):
+                host = _plex_norm_host(el.get('host') or el.get('address'))
+                try:
+                    port = int(el.get('port') or 0)
+                except ValueError:
+                    continue
+                if host and port:
+                    known[(host, port)] = el.get('machineIdentifier') or ''
+    except Exception as e:
+        logger.debug(f"Plex /clients lookup failed: {type(e).__name__}")
+    _plex_clients_cache['entry'] = (key, now, known)
+    return known
+
+
+def _plex_client_target(raw):
+    """The (host, port) of a known Plex player for a caller-supplied address,
+    or None. Only an exact host[:port] (IPv6 in brackets) that matches a
+    configured room device or a player the Plex server lists is accepted:
+    no paths, queries or userinfo."""
+    if not isinstance(raw, str) or any(c in raw for c in '?#/@\\'):
+        return None
+    m = _PLEX_CLIENT_ADDR.fullmatch(raw)
+    if not m:
+        return None
+    host = _plex_norm_host(f'[{m.group(1)}]' if m.group(1) is not None else m.group(2))
+    if not host:
+        return None
+    port = int(m.group(3)) if m.group(3) else _plex_default_client_port()
+    if not 1 <= port <= 65535:
+        return None
+    target = (host, port)
+    if target in _configured_plex_clients() or target in _discovered_plex_clients():
+        return target
+    return None
+
+
+def _plex_player_target_or_error(data):
+    """Admin check plus a known client for the playback endpoints."""
+    err = _require_admin()
+    if err:
+        return None, err
+    client_ip = data.get('client_ip')
+    if not client_ip:
+        return None, (jsonify({'error': 'client_ip is required'}), 400)
+    target = _plex_client_target(client_ip)
+    if not target:
+        return None, (jsonify({'error': 'Unknown client'}), 400)
+    return target, None
+
+
+def _send_plex_player_command(target, command, params=None):
+    """Send a /player/playback command to a known client. Only a room device
+    the admin configured gets the token (as a header, never in the URL); a
+    player known only from Plex /clients is addressed by its identifier.
+    Redirects are never followed."""
+    host, port = target
+    headers = {'X-Plex-Client-Identifier': 'luma'}
+    if target in _configured_plex_clients():
+        headers['X-Plex-Token'] = settings.get('plex.token') or ''
+    else:
+        machine_id = _discovered_plex_clients().get(target)
+        if machine_id:
+            headers['X-Plex-Target-Client-Identifier'] = machine_id
+    netloc = f'[{host}]' if ':' in host else host
+    return requests.get(
+        f"http://{netloc}:{port}/player/playback/{command}",
+        params=params,
+        headers=headers,
+        timeout=5,
+        allow_redirects=False,
+    )
+
+
+def _finite_number(value):
+    """A finite float from a JSON number or numeric string; None for bools,
+    NaN, infinity or anything else."""
+    import math
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        try:
+            value = float(value)
+        except ValueError:
+            return None
+    if not isinstance(value, (int, float)):
+        return None
+    try:
+        value = float(value)
+    except OverflowError:
+        return None
+    return value if math.isfinite(value) else None
+
+
+_SEEK_MAX_MS = 24 * 60 * 60 * 1000
+
+
 @app.route('/api/plex/playback/control', methods=['POST'])
 def plex_playback_control():
-    """Send play/pause command to Shield Plex client."""
+    """Send play/pause command to a Plex client."""
     try:
-        data = request.get_json() or {}
-        client_ip = data.get('client_ip')
+        data = request.get_json(silent=True) or {}
+        target, err = _plex_player_target_or_error(data)
+        if err:
+            return err
         command = data.get('command')  # 'play' or 'pause'
-
-        if not client_ip or not command:
+        if not command:
             return jsonify({'error': 'client_ip and command are required'}), 400
 
-        plex_token = settings.get('plex.token')
-        client_port = settings.get('plex.client_port', 32500)
-
-        # Map command to Plex endpoint
         endpoint = 'play' if command == 'play' else 'pause'
-        url = f"http://{client_ip}:{client_port}/player/playback/{endpoint}?X-Plex-Token={plex_token}"
-
-        response = requests.get(url, timeout=5)
-        logger.info(f"Playback control {command} sent to {client_ip}: {response.status_code}")
+        response = _send_plex_player_command(target, endpoint)
+        logger.info(f"Playback control {endpoint} sent to {target[0]}: {response.status_code}")
 
         return jsonify({'success': True, 'command': command})
 
     except Exception as e:
-        logger.error(f"Error sending playback control: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error sending playback control: {type(e).__name__}")
+        return jsonify({'error': 'Playback control failed'}), 500
 
 
 @app.route('/api/plex/playback/stop', methods=['POST'])
 def plex_playback_stop():
-    """Stop playback on Shield Plex client."""
+    """Stop playback on a Plex client."""
     try:
-        data = request.get_json() or {}
-        client_ip = data.get('client_ip')
+        data = request.get_json(silent=True) or {}
+        target, err = _plex_player_target_or_error(data)
+        if err:
+            return err
 
-        if not client_ip:
-            return jsonify({'error': 'client_ip is required'}), 400
-
-        plex_token = settings.get('plex.token')
-        client_port = settings.get('plex.client_port', 32500)
-
-        url = f"http://{client_ip}:{client_port}/player/playback/stop?X-Plex-Token={plex_token}"
-
-        response = requests.get(url, timeout=5)
-        logger.info(f"Playback stop sent to {client_ip}: {response.status_code}")
+        response = _send_plex_player_command(target, 'stop')
+        logger.info(f"Playback stop sent to {target[0]}: {response.status_code}")
 
         return jsonify({'success': True})
 
     except Exception as e:
-        logger.error(f"Error stopping playback: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error stopping playback: {type(e).__name__}")
+        return jsonify({'error': 'Playback stop failed'}), 500
 
 
 @app.route('/api/plex/playback/seek', methods=['POST'])
 def plex_playback_seek():
-    """Seek forward/backward by offset on Shield Plex client."""
+    """Step forward/backward on a Plex client."""
     try:
-        data = request.get_json() or {}
-        client_ip = data.get('client_ip')
-        offset_seconds = data.get('offset_seconds', 0)
+        data = request.get_json(silent=True) or {}
+        target, err = _plex_player_target_or_error(data)
+        if err:
+            return err
+        offset_seconds = _finite_number(data.get('offset_seconds', 0))
+        if offset_seconds is None or offset_seconds == 0:
+            return jsonify({'error': 'offset_seconds must be a non-zero number'}), 400
 
-        if not client_ip:
-            return jsonify({'error': 'client_ip is required'}), 400
+        response = _send_plex_player_command(target, 'stepForward' if offset_seconds > 0 else 'stepBack')
+        logger.info(f"Playback seek {offset_seconds}s sent to {target[0]}: {response.status_code}")
 
-        plex_token = settings.get('plex.token')
-        client_port = settings.get('plex.client_port', 32500)
-
-        # Use skipNext for forward, skipPrevious for backward (relative seek)
-        # For now, use stepForward/stepBack which is 30 seconds
-        if offset_seconds > 0:
-            url = f"http://{client_ip}:{client_port}/player/playback/stepForward?X-Plex-Token={plex_token}"
-        else:
-            url = f"http://{client_ip}:{client_port}/player/playback/stepBack?X-Plex-Token={plex_token}"
-
-        response = requests.get(url, timeout=5)
-        logger.info(f"Playback seek {offset_seconds}s sent to {client_ip}: {response.status_code}")
-
-        return jsonify({'success': True, 'offset': offset_seconds})
+        return jsonify({'success': True, 'offset': data.get('offset_seconds', 0)})
 
     except Exception as e:
-        logger.error(f"Error seeking playback: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error seeking playback: {type(e).__name__}")
+        return jsonify({'error': 'Playback seek failed'}), 500
 
 
 @app.route('/api/plex/playback/seekTo', methods=['POST'])
 def plex_playback_seek_to():
-    """Seek to specific position on Shield Plex client."""
+    """Seek to a specific position on a Plex client."""
     try:
-        data = request.get_json() or {}
-        client_ip = data.get('client_ip')
-        position_ms = data.get('position_ms', 0)
+        data = request.get_json(silent=True) or {}
+        target, err = _plex_player_target_or_error(data)
+        if err:
+            return err
+        position_ms = _finite_number(data.get('position_ms', 0))
+        if position_ms is None:
+            return jsonify({'error': 'position_ms must be a number'}), 400
+        position_ms = int(min(max(position_ms, 0), _SEEK_MAX_MS))
 
-        if not client_ip:
-            return jsonify({'error': 'client_ip is required'}), 400
-
-        plex_token = settings.get('plex.token')
-        client_port = settings.get('plex.client_port', 32500)
-
-        url = f"http://{client_ip}:{client_port}/player/playback/seekTo?offset={position_ms}&X-Plex-Token={plex_token}"
-
-        response = requests.get(url, timeout=5)
-        logger.info(f"Playback seekTo {position_ms}ms sent to {client_ip}: {response.status_code}")
+        response = _send_plex_player_command(target, 'seekTo', params={'offset': position_ms})
+        logger.info(f"Playback seekTo {position_ms}ms sent to {target[0]}: {response.status_code}")
 
         return jsonify({'success': True, 'position_ms': position_ms})
 
     except Exception as e:
-        logger.error(f"Error seeking to position: {e}")
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error seeking to position: {type(e).__name__}")
+        return jsonify({'error': 'Playback seek failed'}), 500
 
 
 @app.route('/api/plex/playback/subtitles', methods=['POST'])
 def plex_playback_subtitles():
     """Toggle subtitles using ADB KEYCODE_CAPTIONS."""
+    err = _require_admin()
+    if err:
+        return err
     try:
         data = request.get_json() or {}
         client_ip = data.get('client_ip')
@@ -14135,6 +14322,9 @@ def plex_playback_subtitles():
 
         if not client_ip:
             return jsonify({'error': 'client_ip or room_id is required'}), 400
+        target = _adb_target(client_ip, adb_port)
+        if not target:
+            return jsonify({'error': 'Unknown device'}), 400
 
         import subprocess
         import os
@@ -14142,9 +14332,9 @@ def plex_playback_subtitles():
         env = os.environ.copy()
         env['HOME'] = '/app/home'
 
-        subprocess.run(['adb', 'connect', f'{client_ip}:{adb_port}'], env=env, timeout=5)
+        subprocess.run(['adb', 'connect', target], env=env, capture_output=True, timeout=5)
         result = subprocess.run(
-            ['adb', '-s', f'{client_ip}:{adb_port}', 'shell', 'input', 'keyevent', '175'],
+            ['adb', '-s', target, 'shell', 'input', 'keyevent', '175'],
             env=env,
             capture_output=True,
             text=True,
@@ -18129,7 +18319,9 @@ def get_tv_episode():
 
 @app.route('/api/plex/clients')
 def plex_clients():
-    """Get active Plex clients via Plex Server API."""
+    """Active Plex clients and sessions (admins and approved users, read-only)."""
+    if not user_auth.is_plex_approved(_get_current_user()):
+        return jsonify({'error': 'Not allowed'}), 403
     try:
         plex_url = settings.get('plex.url')
         plex_token = settings.get('plex.token')
@@ -18142,13 +18334,16 @@ def plex_clients():
         return jsonify({'clients': clients, 'sessions': sessions,
                         'count': len(clients), 'active_sessions': len(sessions)})
     except Exception as e:
-        logger.error(f"Error getting Plex clients: {e}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting Plex clients: {type(e).__name__}")
+        return jsonify({'error': 'Plex clients unavailable'}), 500
 
 
 @app.route('/api/plex/client/control', methods=['POST'])
 def plex_client_control():
-    """Control a Plex client (play/pause/stop/seek/volume)."""
+    """Control a Plex client (play/pause/stop/seek/volume). Admin only."""
+    err = _require_admin()
+    if err:
+        return err
     try:
         data = request.json or {}
         client_name = data.get('client_name', '')
@@ -18164,10 +18359,13 @@ def plex_client_control():
         # For 'back' action, route to ADB (simpler, works regardless)
         if action == 'back':
             device_ip = data.get('device_ip', '')
-            adb_port = int(data.get('adb_port', 5555))
             if device_ip:
+                target = _adb_target(device_ip, data.get('adb_port', 5555))
+                if not target:
+                    return jsonify({'success': False, 'error': 'Unknown device'}), 400
                 from app.adb_utils import send_key_event
-                result = send_key_event(device_ip, adb_port, 'back')
+                host, _, port = target.rpartition(':')
+                result = send_key_event(host.strip('[]'), int(port), 'back')
                 return jsonify(result)
             return jsonify({'success': False, 'error': 'device_ip required for back action'}), 400
 
@@ -18186,10 +18384,51 @@ def plex_client_control():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _configured_device_hosts() -> set:
+    """Every device host the admin configured in rooms, lowercased."""
+    hosts = set()
+    for room in settings.get('devices.rooms') or []:
+        if not isinstance(room, dict):
+            continue
+        for h in (room.get('host'), room.get('ip')):
+            if isinstance(h, str) and h:
+                hosts.add(h.strip().lower())
+        for dev in room.get('devices') or []:
+            if isinstance(dev, dict) and isinstance(dev.get('host'), str) and dev['host']:
+                hosts.add(dev['host'].strip().lower())
+    return hosts
+
+
+def _adb_target(host, port):
+    """'host:port' for adb -s for a configured device, or None (see adb_utils)."""
+    from app.adb_utils import adb_target
+    return adb_target(host, port, _configured_device_hosts())
+
+
+def _kodi_launch_args(target, file_url):
+    """adb argv that opens *file_url* in Kodi; the device command is one quoted arg."""
+    from app.adb_utils import shell_command
+    return ['adb', '-s', target, 'shell',
+            shell_command('am', 'start', '-a', 'android.intent.action.VIEW', '-d', file_url,
+                          '-t', 'video/*', '-n', 'org.xbmc.kodi/.Splash')]
+
+
+def _plex_deeplink_args(target, uri, start_playback=False):
+    """adb argv that opens a Plex deep link; the device command is one quoted arg."""
+    from app.adb_utils import shell_command
+    extra = ['--ez', 'android.intent.extra.START_PLAYBACK', 'true'] if start_playback else []
+    return ['adb', '-s', target, 'shell',
+            shell_command('am', 'start', *extra, '-a', 'android.intent.action.VIEW', '-d', uri,
+                          'com.plexapp.android')]
+
+
 @app.route('/api/activity')  # alfred asks here first, then falls back to the ADB path
 @app.route('/api/adb/shield_activity')
 def adb_shield_activity():
-    """Get current activity/media playing on a room device via ADB."""
+    """Get current activity/media playing on a room device via ADB (read-only:
+    admins and approved users, configured devices only)."""
+    if not user_auth.is_plex_approved(_get_current_user()):
+        return jsonify({'error': 'Not allowed'}), 403
     try:
         room_id = request.args.get('room_id')
         device_ip = request.args.get('device_ip')
@@ -18202,22 +18441,23 @@ def adb_shield_activity():
                 adb_port = room.get('connectPort', adb_port)
         if not device_ip:
             device_ip = settings.get_default_device_ip()
+        target = _adb_target(device_ip, adb_port)
+        if not target:
+            return jsonify({'error': 'Unknown device'}), 400
 
         # Get current foreground app
-        app_cmd = f'adb -s {device_ip}:{adb_port} shell dumpsys window | grep -E "mCurrentFocus|mFocusedApp"'
         app_result = subprocess.run(
-            app_cmd,
-            shell=True,
+            ['adb', '-s', target, 'shell', 'dumpsys', 'window'],
             capture_output=True,
             text=True,
             timeout=5
         )
+        focus_lines = [ln for ln in (app_result.stdout or '').splitlines()
+                       if 'mCurrentFocus' in ln or 'mFocusedApp' in ln]
 
         # Get media session info (works for YouTube, Netflix, Plex, Spotify, etc.)
-        media_cmd = f'adb -s {device_ip}:{adb_port} shell dumpsys media_session'
         media_result = subprocess.run(
-            media_cmd,
-            shell=True,
+            ['adb', '-s', target, 'shell', 'dumpsys', 'media_session'],
             capture_output=True,
             text=True,
             timeout=5
@@ -18226,8 +18466,8 @@ def adb_shield_activity():
         # Parse current app
         current_app = 'Unknown'
         current_package = ''
-        if app_result.returncode == 0:
-            output = app_result.stdout
+        if app_result.returncode == 0 and focus_lines:
+            output = '\n'.join(focus_lines)
             # Extract package name from mCurrentFocus or mFocusedApp
             import re
             match = re.search(r'([a-z0-9\.]+)/([a-z0-9\.]+)', output)
@@ -18364,9 +18604,9 @@ def adb_shield_activity():
                 plex_token = settings.get('plex.token')
                 if plex_token:
                     # Get active Plex sessions
-                    sessions_url = f"{plex_url}/status/sessions?X-Plex-Token={plex_token}"
-                    headers = {'Accept': 'application/json'}
-                    plex_response = requests.get(sessions_url, headers=headers, timeout=3)
+                    sessions_url = f"{plex_url}/status/sessions"
+                    headers = {'Accept': 'application/json', 'X-Plex-Token': plex_token}
+                    plex_response = requests.get(sessions_url, headers=headers, timeout=3, allow_redirects=False)
                     if plex_response.status_code == 200:
                         sessions_data = plex_response.json()
                         metadata_list = sessions_data.get('MediaContainer', {}).get('Metadata', [])
@@ -18410,10 +18650,11 @@ def adb_shield_activity():
                                 # Get artwork URLs
                                 thumb = session.get('thumb', '')
                                 art = session.get('art', '') or session.get('grandparentArt', '')
+                                # Through the image proxy: the token never reaches the browser.
                                 if thumb:
-                                    media_info['artwork_url'] = f"{plex_url}{thumb}?X-Plex-Token={plex_token}"
+                                    media_info['artwork_url'] = f"/api/img/plex?url={urllib.parse.quote(thumb, safe='/')}"
                                 if art:
-                                    media_info['backdrop_url'] = f"{plex_url}{art}?X-Plex-Token={plex_token}"
+                                    media_info['backdrop_url'] = f"/api/img/plex?url={urllib.parse.quote(art, safe='/')}"
 
                                 # Get player info
                                 media_info['player_name'] = player.get('title', 'Unknown')
@@ -18439,6 +18680,9 @@ def adb_shield_activity():
 @app.route('/api/adb/control', methods=['POST'])
 def adb_control():
     """Send ADB commands to control playback on a room device."""
+    err = _require_admin()
+    if err:
+        return err
     try:
         data = request.get_json() or {}
         room_id = data.get('room_id')
@@ -18480,12 +18724,14 @@ def adb_control():
         }
 
         if command not in keycodes:
-            return jsonify({'error': f'Unknown command: {command}'}), 400
+            return jsonify({'error': 'Unknown command'}), 400
 
         keycode = keycodes[command]
 
         # Send ADB command
-        target = f'{device_ip}:{adb_port}'
+        target = _adb_target(device_ip, adb_port)
+        if not target:
+            return jsonify({'error': 'Unknown device'}), 400
         env = {**os.environ, 'HOME': '/app/home'}
         logger.info(f"Sending ADB keyevent {keycode} to {target}")
 
@@ -18759,6 +19005,8 @@ def update_settings():
         if 'hero' in ui_data:
             _hero_result_cache.clear()
             logger.info('Hero cache invalidated due to settings change')
+        if isinstance(data.get('plex'), dict):
+            _plex_clients_cache.clear()
 
         # Handle tunnel toggle on settings save
         network_data = data.get('network') if isinstance(data.get('network'), dict) else {}
@@ -20672,6 +20920,12 @@ from app import home_rails as _home_rails
 _home_rails.init(get_plex=lambda: plex_service, get_current_user=_get_current_user,
                  trakt_connected=_connectors.trakt_connected, fetch_trakt=_fetch_trakt_rail)
 app.register_blueprint(_home_rails.bp)
+
+
+from app import tracker_routes as _tracker_routes
+_tracker_routes.init(get_current_user=_get_current_user, get_owner=lambda: _access.owner(user_auth),
+                     is_implicit=lambda: bool(getattr(g, 'implicit_user', False)))
+app.register_blueprint(_tracker_routes.bp)
 
 
 if __name__ == '__main__':

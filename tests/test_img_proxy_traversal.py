@@ -21,6 +21,12 @@ def proxy(test_app, monkeypatch):
         content = b'img'
         headers = {'Content-Type': 'image/jpeg'}
 
+        def iter_content(self, chunk_size=1):
+            yield self.content
+
+        def close(self):
+            pass
+
     monkeypatch.setattr(app.main.requests, 'get', lambda url, **k: calls.append(url) or R())
     return test_app.test_client(), calls
 
@@ -84,6 +90,12 @@ def test_non_image_upstream_is_502(test_app, monkeypatch):
         status_code = 200
         content = b'<xml/>'
         headers = {'Content-Type': 'text/xml'}
+
+        def iter_content(self, chunk_size=1):
+            yield self.content
+
+        def close(self):
+            pass
 
     monkeypatch.setattr(app.main.requests, 'get', lambda url, **k: R())
     r = test_app.test_client().get('/api/img/plex?url=/library/metadata/1/thumb', environ_base=LAN)
