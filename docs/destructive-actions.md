@@ -20,8 +20,11 @@ with `state.signIn`.
   Downloads Guard card, "Clean up now (deletes for real)". Permanently deletes
   the oldest downloads. A dry run (`dry_run` true or absent) deletes nothing and
   keeps the access it had before.
+- `POST /api/storage/downloads/cleanup`: the storage sheet's "Free up …" delete.
+  Permanently deletes the oldest downloads until the target is freed. The route
+  carries `@_signed_in_owner_only` (as in cursor/owner-session-guard 09d32bd).
+  The storage sheet shows "Sign in to free up space" instead of the delete for
+  an implicit LAN owner, and after a 401.
 
-## Not yet on this branch
-
-- `POST /api/storage/downloads/cleanup` (storage sheet "free up space") gets the
-  same guard from cursor/owner-session-guard (09d32bd) when that branch is merged.
+From outside the LAN, a request with no session is stopped by the app-wide
+sign-in check first. It is still a 401, but its body is that check's own.
