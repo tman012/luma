@@ -46,6 +46,11 @@ RELEASE_FILENAME = 'tracker_releases.json'
 RELEASE_PATH = '/api/trackers/release/'
 
 
+
+# Failure kinds a Sources Retry clears for anyone allowed to search; 'auth' is
+# added only for the owner (see search_one). Rate limits and bans: never.
+RETRY_CLEARS = ('response', 'timeout', 'network', 'tls', 'http')
+
 class TrackerSkipped(Exception):
     """A request to a tracker was deliberately not sent (rate limit or backoff)."""
 
@@ -306,7 +311,7 @@ class TrackerSearch:
 
     def search_one(self, cfg: Dict[str, Any], query: str, categories: List[int], limit: int,
                    interactive: bool, imdb_id: str = '', tmdb_id: str = '', media_type: str = '',
-                   refresh: bool = False) -> List[Dict[str, Any]]:
+                   refresh: bool = False, owner_retry: bool = False) -> List[Dict[str, Any]]:
         """Guarded, cached search of one tracker; raw client results.
         Raises TrackerSkipped (guard) or TrackerError (the tracker failed).
 
@@ -326,8 +331,11 @@ class TrackerSearch:
         now = time.time()
         if refresh:
             # An explicit Retry clears this tracker's failure backoff, as Settings
-            # Test does (auth, timeouts, bad answers). Rate limits and bans stay.
-            self.guard.clear(gk)
+            # Test does (timeouts, bad answers). A sign-in (auth) backoff is
+            # cleared only for the owner (the Settings Test rule): an approved
+            # non-owner's Retry re-asks and skips caches, but sends nothing
+            # signed-out while backed off. Rate limits and bans always stay.
+            self.guard.clear(gk, kinds=RETRY_CLEARS + (('auth',) if owner_retry else ()))
         with self._cache_lock:
             neg = self._neg_store()
             if refresh:
@@ -472,7 +480,7 @@ class TrackerSearch:
     def search(self, query: str, categories: List[int], limit: int, interactive: bool,
                tracker_ids: Optional[List[int]] = None, imdb_id: str = '', tmdb_id: str = '',
                media_type: str = '', refresh: bool = False,
-               statuses: Optional[List[Dict[str, Any]]] = None,
+               statuses: Optional[List[Dict[str, Any]]] = None, owner_retry: bool = False,
                ) -> Tuple[List[Dict[str, Any]], List[int], List[int]]:
         """Fan out to enabled trackers (or *tracker_ids*). Returns
         (items in raw Prowlarr shape, ids searched, ids skipped). When
@@ -494,7 +502,7 @@ class TrackerSearch:
             c, cats = job
             try:
                 return c, self.search_one(c, query, cats, limit, interactive, imdb_id, tmdb_id, media_type,
-                                          refresh=refresh)
+                                          refresh=refresh, owner_retry=owner_retry)
             except TrackerSkipped as e:
                 skipped.append(c['id'])
                 if statuses is not None:
@@ -584,7 +592,7 @@ class LumaTrackersClient:
 
     def search_all(self, query: str, media_type: str, year: Optional[int] = None,
                    tmdb_id: Optional[int] = None, refresh: bool = False,
-                   statuses: Optional[List[Dict[str, Any]]] = None) -> List[Dict]:
+                   statuses: Optional[List[Dict[str, Any]]] = None, owner_retry: bool = False) -> List[Dict]:
         from app.indexer_api import (MOVIE_CATEGORIES_EXPANDED, TV_SPORTS_CATEGORIES,
                                      _build_search_query, _parse_title)
         # TV release names carry SxxEyy, not the first-air year: never add it for TV.
@@ -593,7 +601,7 @@ class LumaTrackersClient:
         tmdb = str(tmdb_id) if tmdb_id else ''
         st: List[Dict[str, Any]] = []
         items, _, _ = self.engine.search(q, cats, 500, interactive=True, tmdb_id=tmdb, media_type=media_type,
-                                         refresh=refresh, statuses=st)
+                                         refresh=refresh, statuses=st, owner_retry=owner_retry)
         bare = (query or '').strip()
         if not items and bare and q != bare:
             # Release names often leave the year out: one retry without it. BHD already
@@ -607,7 +615,7 @@ class LumaTrackersClient:
                 st2: List[Dict[str, Any]] = []
                 items, _, _ = self.engine.search(bare, cats, 500, interactive=True, tracker_ids=again,
                                                  tmdb_id=tmdb, media_type=media_type,
-                                                 refresh=refresh, statuses=st2)
+                                                 refresh=refresh, statuses=st2, owner_retry=owner_retry)
                 # Retried trackers report their second answer; BHD keeps its first.
                 st = [x for x in st if x['id'] not in set(again)] + st2
         if statuses is not None:

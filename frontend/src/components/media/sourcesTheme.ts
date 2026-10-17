@@ -15,6 +15,9 @@ export const srcPanel: React.CSSProperties = {
 /** Content that must sit above a dim or glow layer (text stays readable). */
 export const srcAbove: React.CSSProperties = { position: 'relative', zIndex: 1 };
 
+/** Amber status dot (a tracker failed while others answered), via the theme token. */
+export const SRC_WARN = 'var(--color-warning)';
+
 /** Empty, error and loading headings. */
 export const SRC_HEADING_COLOR = 'rgba(255,255,255,0.7)';
 

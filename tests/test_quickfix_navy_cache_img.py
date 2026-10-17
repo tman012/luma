@@ -9,6 +9,9 @@ from types import SimpleNamespace
 import pytest
 
 import app.main
+
+# Highest service-worker version that has shipped (:5002 runs v138).
+LAST_SHIPPED_SW_VERSION = 138
 from app import theme
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -48,7 +51,9 @@ def test_sw_and_index_are_never_cached(test_app):
         r = c.get(path, environ_base=LAN)
         assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-cache', path
     sw = (ROOT / 'static/sw.js').read_text()
-    assert "CACHE_VERSION = 'media-kiosk-v137'" in sw
+    # Above every version that has shipped, so installed clients pick up this build.
+    m = re.search(r"const CACHE_VERSION = 'media-kiosk-v(\d+)';", sw)
+    assert m and int(m.group(1)) > LAST_SHIPPED_SW_VERSION, m and m.group(0)
     assert "fetch(event.request, { cache: 'no-store' })" in sw
     assert 'self.skipWaiting()' in sw and 'self.clients.claim()' in sw
 

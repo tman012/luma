@@ -98,6 +98,16 @@ def _require_owner():
     return None
 
 
+def is_owner_request() -> bool:
+    """True when the signed-in user is the install owner (the Settings Test
+    rule). Used by Sources Retry to decide whether it may clear a sign-in
+    backoff; never an access check by itself."""
+    try:
+        return _require_owner() is None
+    except Exception:
+        return False
+
+
 @bp.before_request
 def _guard():
     return _require_owner()

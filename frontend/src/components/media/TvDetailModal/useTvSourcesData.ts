@@ -216,6 +216,8 @@ interface UseTvSourcesDataResult {
   trackers: TrackerStatus[];
   /** Search again, skipping the server's caches. */
   retry: () => void;
+  /** Retry is running while the rows of the last answer stay on screen. */
+  retrying: boolean;
 }
 
 export function useTvSourcesData({
@@ -240,6 +242,9 @@ export function useTvSourcesData({
   const [attempt, setAttempt] = useState(0);
   const lastAttempt = useRef(0);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  const [retrying, setRetrying] = useState(false);
+  const rowsRef = useRef(0);
+  rowsRef.current = releases.length;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -247,12 +252,18 @@ export function useTvSourcesData({
     const refresh = (lastQuery.current !== undefined && lastQuery.current !== (indexerQuery ?? null))
       || attempt !== lastAttempt.current;
     lastQuery.current = indexerQuery ?? null;
+    // A Retry with rows already on screen keeps them (no loading state): only
+    // the status line changes when the new answer lands.
+    const keepRows = attempt !== lastAttempt.current && rowsRef.current > 0;
     lastAttempt.current = attempt;
 
     async function fetchReleases() {
-      setLoading(true);
+      if (keepRows) setRetrying(true);
+      else {
+        setLoading(true);
+        setTrackers([]);
+      }
       setError(false);
-      setTrackers([]);
       try {
         let data: {
           success: boolean;
@@ -331,7 +342,10 @@ export function useTvSourcesData({
         const e = err as { name?: string };
         if (e?.name !== 'AbortError' && !cancelled) setError(true);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setRetrying(false);
+        }
       }
     }
 
@@ -359,5 +373,5 @@ export function useTvSourcesData({
     }
   };
 
-  return { loading, error, releases, downloadIds, handleGrab, trackers, retry };
+  return { loading, error, releases, downloadIds, handleGrab, trackers, retry, retrying };
 }

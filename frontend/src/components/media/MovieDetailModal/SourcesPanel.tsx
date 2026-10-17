@@ -426,9 +426,11 @@ function ExpandedSourcesView({
   isWeb,
   trackers = [],
   onRetry,
+  retrying = false,
 }: {
   trackers?: TrackerStatus[];
   onRetry?: () => void;
+  retrying?: boolean;
   releases: ProcessedRelease[];
   loading: boolean;
   error: boolean;
@@ -606,7 +608,7 @@ function ExpandedSourcesView({
             : <div data-sources-state="empty" style={{ color: SRC_HEADING_COLOR, fontSize: '22px', ...srcAbove }}>{NO_SOURCES}</div>
           )}
           {!loading && !error && releases.length > 0 && (
-            <TrackerStatusBar trackers={trackers} onRetry={onRetry} fontSize={18} />
+            <TrackerStatusBar trackers={trackers} onRetry={onRetry} retrying={retrying} />
           )}
           {!loading && !error && qualityGroups.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '560px', position: 'relative', zIndex: 1 }}>
@@ -968,9 +970,11 @@ function CompactSourcesView({
   onAddToWatchlist,
   trackers = [],
   onRetry,
+  retrying = false,
 }: {
   trackers?: TrackerStatus[];
   onRetry?: () => void;
+  retrying?: boolean;
   releases: ProcessedRelease[];
   loading: boolean;
   error: boolean;
@@ -1495,9 +1499,6 @@ function CompactSourcesView({
           </div>
         )}
 
-        {/* Some trackers failed while others returned rows */}
-        {!loading && !error && !noSources && <TrackerStatusBar trackers={trackers} onRetry={onRetry} />}
-
         {/* === STEP 1: Resolution === */}
         {!flatOverride && !loading && !error && visibleReleases.length > 0 && step === 'resolution' && (
           <div
@@ -1515,6 +1516,8 @@ function CompactSourcesView({
             <p style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 16px' }}>
               Select resolution
             </p>
+            {/* Some trackers failed while others returned rows: 12px above the first group */}
+            <TrackerStatusBar trackers={trackers} onRetry={onRetry} retrying={retrying} phone />
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {availableQualities.map(q => (
                 <SegmentRow
@@ -1550,6 +1553,8 @@ function CompactSourcesView({
             <p style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 20px' }}>
               Select type
             </p>
+            {/* Some trackers failed while others returned rows: 12px above the first group */}
+            <TrackerStatusBar trackers={trackers} onRetry={onRetry} retrying={retrying} phone />
             {grabErrorMsg && (
               <div style={{
                 background: 'rgba(239, 68, 68, 0.15)',
@@ -1822,7 +1827,7 @@ export function SourcesPanel({
   // All results are fetched up front (rejected + indexer rows included). We show
   // everything, segmented by resolution → type and sorted by seeders within each
   // segment — no filtering, no toggle.
-  const { loading, error, timedOut, slow, releases, movieId, trackers, retry } = useMovieSourcesData({
+  const { loading, error, timedOut, slow, releases, movieId, trackers, retry, retrying } = useMovieSourcesData({
     tmdbId,
     title,
     year,
@@ -1849,6 +1854,7 @@ export function SourcesPanel({
         onAddToWatchlist={onAddToWatchlist}
         trackers={trackers}
         onRetry={retry}
+        retrying={retrying}
       />
     );
   }
@@ -1877,6 +1883,7 @@ export function SourcesPanel({
       isWeb={isWeb}
       trackers={trackers}
       onRetry={retry}
+      retrying={retrying}
     />
   );
 }

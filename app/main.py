@@ -2364,7 +2364,11 @@ def sources_all_results():
         from app.tracker_search import LumaTrackersClient as _LTC
         statuses: list = []
         if isinstance(client, _LTC):
-            raw = client.search_all(title, media_type, year, tmdb_id=tmdb_id, refresh=refresh, statuses=statuses)
+            from app.tracker_routes import is_owner_request as _is_owner
+            # Only the owner's Retry may clear a sign-in backoff (Settings Test rule).
+            extra = {'owner_retry': True} if refresh and _is_owner() else {}
+            raw = client.search_all(title, media_type, year, tmdb_id=tmdb_id, refresh=refresh, statuses=statuses,
+                                    **extra)
         elif getattr(client, 'supports_ids', False):
             raw = client.search_all(title, media_type, year, tmdb_id=tmdb_id)
         else:

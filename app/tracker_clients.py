@@ -686,7 +686,15 @@ def _host_port(u) -> Tuple[str, Optional[int]]:
 
 
 def on_host(url: str, base: str) -> bool:
-    """True when *url* (already absolute) is http(s) on *base*'s host and port."""
+    """True when *url* (already absolute) is http(s) on *base*'s host and port.
+
+    Strict on purpose: the host must match exactly, so www.example.org and
+    example.org are different hosts (as are any other subdomains). A tracker
+    whose pages link to the other form must be saved with that form as its
+    URL; we never fold www, because a sibling host can be run by someone else
+    and must not receive the tracker's cookie. Scheme may differ (http/https),
+    and the port is compared with each scheme's default filled in; case and a
+    trailing dot are ignored."""
     try:
         u, b = urlsplit(url), urlsplit(base)
         return u.scheme in ('http', 'https') and bool(u.hostname) and _host_port(u) == _host_port(b)

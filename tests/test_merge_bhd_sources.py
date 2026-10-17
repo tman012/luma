@@ -143,8 +143,64 @@ def test_retry_clears_the_trackers_failure_backoff_like_test(engine):
     assert st and st[0]['status'] == 'auth' and not mock.calls       # backoff: nothing sent
     mock.resps = [R(WEB_ONLY)]
     st = []
-    out = LumaTrackersClient(eng).search_all('Dune', 'movie', None, refresh=True, statuses=st)
+    out = LumaTrackersClient(eng).search_all('Dune', 'movie', None, refresh=True, statuses=st, owner_retry=True)
     assert len(out) == 4 and not st and eng.guard.blocked('site:beyondhd') is None
+
+
+def test_non_owner_retry_keeps_the_auth_backoff_and_sends_nothing(engine):
+    """Reviewer (tracker_search.py:327-330): an approved non-owner's Retry re-runs
+    the search and skips caches, but a sign-in backoff stays (Settings Test rule)."""
+    eng, mock = engine
+    eng.guard.failure('site:beyondhd', 'auth')
+    mock.resps = [R(WEB_ONLY)]
+    st = []
+    out = LumaTrackersClient(eng).search_all('Dune', 'movie', None, refresh=True, statuses=st)
+    assert out == [] and not mock.calls                      # nothing signed-out was sent
+    assert [x['status'] for x in st] == ['auth']
+    assert eng.guard.blocked('site:beyondhd')[1] == 'auth'
+
+
+def test_non_owner_retry_still_clears_a_non_auth_backoff(engine):
+    eng, mock = engine
+    eng.guard.failure('site:beyondhd', 'http')
+    mock.resps = [R(WEB_ONLY)]
+    out = LumaTrackersClient(eng).search_all('Dune', 'movie', None, refresh=True)
+    assert len(out) == 4 and mock.calls and eng.guard.blocked('site:beyondhd') is None
+
+
+@pytest.mark.parametrize('owner,refresh,want', [(True, True, True), (False, True, False), (True, False, False)])
+def test_route_passes_owner_retry_only_for_the_owner(test_app, monkeypatch, owner, refresh, want):
+    import app.indexer_api as ia
+    import app.main
+    import app.tracker_routes as tr
+    seen = {}
+
+    class Fake(LumaTrackersClient):
+        def __init__(self):
+            pass
+
+        def search_all(self, q, mt, year=None, tmdb_id=None, refresh=False, statuses=None, **kw):
+            seen['owner_retry'] = kw.get('owner_retry', False)
+            return []
+    monkeypatch.setattr(ia, 'get_indexer_client', lambda s: Fake())
+    monkeypatch.setattr(app.main, '_indexer_viewer_denied', lambda: None)
+    monkeypatch.setattr(tr, 'is_owner_request', lambda: owner)
+    app.main._all_results_cache.clear()
+    test_app.test_client().get('/api/sources/all-results?title=Dune&media_type=movie' + ('&refresh=1' if refresh else ''))
+    assert seen['owner_retry'] is want
+
+
+def test_is_owner_request_follows_the_settings_test_rule(monkeypatch):
+    import app.tracker_routes as tr
+    owner = {'id': 1, 'is_admin': True}
+    for user, implicit, ok in ((owner, False, True), ({'id': 2, 'is_admin': True}, False, False),
+                               ({'id': 3, 'is_admin': False}, False, False), (owner, True, False), (None, False, False)):
+        monkeypatch.setitem(tr._cfg, 'get_current_user', lambda u=user: u)
+        monkeypatch.setitem(tr._cfg, 'get_owner', lambda: owner)
+        monkeypatch.setitem(tr._cfg, 'is_implicit', lambda i=implicit: i)
+        from flask import Flask
+        with Flask('t').test_request_context('/'):
+            assert tr.is_owner_request() is ok, (user, implicit)
 
 
 @pytest.mark.parametrize('kind', ['rate', 'banned'])

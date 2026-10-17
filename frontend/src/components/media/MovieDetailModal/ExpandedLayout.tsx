@@ -485,6 +485,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
     movieId: sourcesMovieId,
     trackers: sourcesTrackers,
     retry: sourcesRetry,
+    retrying: sourcesRetrying,
   } = useMovieSourcesData({
     tmdbId: detail?.tmdbId,
     title: detail?.title ?? '',
@@ -1432,9 +1433,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                   </div>
                 ))}
 
-                {!sourcesLoading && !sourcesError && sourcesReleases.length > 0 && (
-                  <TrackerStatusBar trackers={sourcesTrackers} onRetry={sourcesRetry} fontSize={24} />
-                )}
                 {/* Results — multi-level drill-down */}
                 {!sourcesLoading && !sourcesError && sourcesReleases.length > 0 && (() => {
                   // Level 4: Confirm download
@@ -1573,6 +1571,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                   return (
                     <>
                       <h2 style={{ fontSize: '30px', fontWeight: 600, color: '#fff', margin: '0 0 20px', textAlign: 'center', ...srcAbove }}>Sources</h2>
+                      {/* Some trackers failed while others returned rows: 12px above the first group */}
+                      <TrackerStatusBar trackers={sourcesTrackers} onRetry={sourcesRetry} retrying={sourcesRetrying} />
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%', maxWidth: '560px', margin: '0 auto' }}>
                         {srcQualityGroups.map(group => (
                           <SegmentRow

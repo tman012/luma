@@ -4,6 +4,7 @@ wall are never stored; sign-out clears the browser cache; the service worker
 never stores /api/ replies."""
 
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -136,8 +137,13 @@ def _sw(urls, spec):
     return json.loads(out.stdout)
 
 
+# Highest service-worker version that has shipped (:5002 runs v138).
+LAST_SHIPPED_SW_VERSION = 138
+
+
 def test_sw_version_bumped():
-    assert "const CACHE_VERSION = 'media-kiosk-v137';" in (ROOT / 'static/sw.js').read_text()
+    m = re.search(r"const CACHE_VERSION = 'media-kiosk-v(\d+)';", (ROOT / 'static/sw.js').read_text())
+    assert m and int(m.group(1)) > LAST_SHIPPED_SW_VERSION, m and m.group(0)
 
 
 @pytest.mark.skipif(NODE is None, reason='node is not installed')

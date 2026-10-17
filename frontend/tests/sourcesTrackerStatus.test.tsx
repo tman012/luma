@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fetchAllResults, trackerStatusText, type TrackerStatus } from '@/services/allSourcesApi';
 import { TrackerStatusNotice } from '@/components/media/sourcesTrackerStatus';
 import { useMovieSourcesData } from '@/components/media/MovieDetailModal/useMovieSourcesData';
+import { useTvSourcesData } from '@/components/media/TvDetailModal/useTvSourcesData';
 
 const read = (p: string) => readFileSync(resolve(__dirname, '../src', p), 'utf8');
 
@@ -92,8 +93,8 @@ describe('Tester 4049342: partial tracker failure and minimal mode', () => {
 
   it.each([
     ['components/media/MovieDetailModal/ExpandedLayout.tsx', 1],
-    ['components/media/MovieDetailModal/SourcesPanel.tsx', 2],
-    ['components/media/TvDetailModal/TvSourcesPanel.tsx', 2],
+    ['components/media/MovieDetailModal/SourcesPanel.tsx', 3],
+    ['components/media/TvDetailModal/TvSourcesPanel.tsx', 4],
   ])('%s shows it next to the rows', (p, n) => {
     expect(read(p).split('<TrackerStatusBar').length - 1).toBe(n);
   });
@@ -145,5 +146,105 @@ describe('Tester 4049342: partial tracker failure and minimal mode', () => {
     } finally {
       delete (window as unknown as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__;
     }
+  });
+});
+
+describe('Designer spec: partial-failure line (BHD failed, IPT has rows)', () => {
+  it('14px/500 white 70% text, amber dot from the theme, glass Retry pill on the same line', async () => {
+    const { TrackerStatusBar } = await import('@/components/media/sourcesTrackerStatus');
+    const { container } = render(<TrackerStatusBar trackers={[{ name: 'BHD', status: 'unavailable' }]} onRetry={() => {}} phone />);
+    const line = container.querySelector('[data-sources-state="trackers-partial"]') as HTMLElement;
+    expect(line.style.display).toBe('flex');
+    expect(line.style.marginBottom || line.style.margin).toContain('12px');
+    const text = container.querySelector('[data-tracker-status]') as HTMLElement;
+    expect(text.style.fontSize).toBe('14px');
+    expect(text.style.fontWeight).toBe('500');
+    expect(text.style.color).toBe('rgba(255, 255, 255, 0.7)');
+    const dot = container.querySelector('[data-status-dot]') as HTMLElement;
+    expect(dot.style.width).toBe('8px');
+    expect(dot.style.background).toBe('var(--color-warning)');
+    const btn = container.querySelector('[data-sources-retry]') as HTMLElement;
+    expect(btn.style.height).toBe('44px');
+    expect(btn.style.borderRadius).toBe('999px');
+    expect(btn.style.background).toBe('rgba(255, 255, 255, 0.08)');
+    // the text block grows, so Retry sits at the right end of the line
+    expect((line.firstElementChild as HTMLElement).style.flex).toBe('1 1 auto');
+    expect(line.lastElementChild).toBe(btn);
+    expect(container.textContent).not.toMatch(/HTTP|\d{3}/);
+  });
+
+  it('Retry is 32px on desktop and disabled while it runs', async () => {
+    const { TrackerStatusBar } = await import('@/components/media/sourcesTrackerStatus');
+    const { container } = render(<TrackerStatusBar trackers={[{ name: 'BHD', status: 'unavailable' }]} onRetry={() => {}} retrying />);
+    const btn = container.querySelector('[data-sources-retry]') as HTMLButtonElement;
+    expect(btn.style.height).toBe('32px');
+    expect(btn.disabled).toBe(true);
+  });
+
+  it('the theme has the amber token', () => {
+    expect(read('index.css')).toMatch(/--color-warning: #f59e0b;/);
+  });
+
+  it('phone panels use the 44px pill, desktop and TV panels 32px', () => {
+    for (const p of ['components/media/MovieDetailModal/SourcesPanel.tsx', 'components/media/TvDetailModal/TvSourcesPanel.tsx']) {
+      const src = read(p);
+      expect(src.match(/<TrackerStatusBar[^>]*\bphone\b/g)).toHaveLength(p.includes('Tv') ? 3 : 2);
+    }
+    expect(read('components/media/MovieDetailModal/ExpandedLayout.tsx')).not.toMatch(/<TrackerStatusBar[^>]*\bphone\b/);
+  });
+
+  it('a successful Retry keeps the rows on screen (no loading state) and only the line goes away', async () => {
+    let bhdOk = false;
+    const row = (t: string, ix: string, g: string) => ({ title: t, indexer: ix, indexer_id: 1, size: 1, seeders: 3, download_url: `/api/trackers/release/${g}`, guid: g });
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+      if (String(u).includes('/api/sources/all-results')) {
+        const rel = [row('Keep.Rows.2021.1080p.WEB-DL-GRP', 'IPTorrents', 'i1')];
+        if (bhdOk) rel.push(row('Keep.Rows.2021.2160p.Remux-GRP', 'BHD', 'b1'));
+        return new Response(JSON.stringify({ releases: rel, trackers: bhdOk ? [] : [{ name: 'BHD', status: 'unavailable' }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ releases: [] }), { status: 200 });
+    }));
+    const opts = { tmdbId: 21, title: 'Keep Rows', year: 2021 };
+    const { result } = renderHook(() => useMovieSourcesData(opts));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.releases).toHaveLength(1);
+    expect(result.current.trackers).toHaveLength(1);
+    bhdOk = true;
+    const seen: boolean[] = [];
+    act(() => result.current.retry());
+    seen.push(result.current.loading);
+    expect(result.current.retrying).toBe(true);
+    expect(result.current.releases).toHaveLength(1);       // the rows stay while Retry runs
+    await waitFor(() => expect(result.current.retrying).toBe(false));
+    expect(seen).toEqual([false]);
+    expect(result.current.loading).toBe(false);
+    expect(result.current.trackers).toEqual([]);
+    expect(result.current.releases).toHaveLength(2);
+  });
+});
+
+describe('TV: a successful Retry keeps the rows', () => {
+  it('no loading state while Retry runs; the status clears after', async () => {
+    let ok = false;
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => {
+      if (String(u).includes('/api/sources/all-results')) {
+        const rel = [{ title: 'Keep.Show.S01.1080p.WEB-DL-GRP', indexer: 'IPTorrents', indexer_id: 1, size: 1, seeders: 3, download_url: '/api/trackers/release/t1', guid: 't1' }];
+        return new Response(JSON.stringify({ releases: rel, trackers: ok ? [] : [{ name: 'BHD', status: 'unavailable' }] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ success: false, releases: [] }), { status: 200 });
+    }));
+    const opts = { target: { type: 'season' as const, season: 1 }, tvdbId: 0, tmdbId: 31, title: 'Keep Show' };
+    const { result } = renderHook(() => useTvSourcesData(opts));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() => expect(result.current.trackers).toHaveLength(1));
+    expect(result.current.releases).toHaveLength(1);
+    ok = true;
+    act(() => result.current.retry());
+    await waitFor(() => expect(result.current.retrying).toBe(true));
+    expect(result.current.loading).toBe(false);
+    expect(result.current.releases).toHaveLength(1);
+    await waitFor(() => expect(result.current.retrying).toBe(false));
+    expect(result.current.trackers).toEqual([]);
+    expect(result.current.loading).toBe(false);
   });
 });

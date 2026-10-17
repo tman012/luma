@@ -63,3 +63,14 @@ def test_path_parameters_do_not_hide_a_proxy(url):
 
 def test_plain_tracker_url_is_not_a_proxy():
     assert not is_proxy_url('https://tracker.example/api;jsessionid=1')
+
+
+def test_on_host_is_strict_about_www_and_subdomains():
+    from app.tracker_clients import on_host
+    base = 'https://iptorrents.com'
+    assert on_host('https://iptorrents.com/t/1', base)
+    assert on_host('http://IPTorrents.com./t/1', base)            # scheme, case, trailing dot
+    assert not on_host('https://www.iptorrents.com/t/1', base)    # www is another host
+    assert not on_host('https://iptorrents.com/t/1', 'https://www.iptorrents.com')
+    assert not on_host('https://cdn.iptorrents.com/t/1', base)
+    assert not on_host('https://iptorrents.com:8443/t/1', base)

@@ -66,6 +66,8 @@ interface UseMovieSourcesDataResult {
   trackers: TrackerStatus[];
   /** Search again, skipping the server's caches. */
   retry: () => void;
+  /** Retry is running while the rows of the last answer stay on screen. */
+  retrying: boolean;
 }
 
 interface SourcesResult {
@@ -266,7 +268,13 @@ export function useMovieSourcesData({
   // effect runs, which leaves one painted frame where the panel is enabled,
   // has no rows, and is not "loading" — long enough to flash "No sources
   // found" every time the shelf opens.
-  const loading = key !== null && settledKey !== key;
+  // A Retry of the same search that already has rows keeps them on screen (no
+  // loading state): only the status line changes when the new answer lands.
+  const keepRows = key !== null && settledKey !== key && base !== null
+    && settledKey !== null && settledKey.startsWith(`${base}#`) && releases.length > 0;
+  const loading = key !== null && settledKey !== key && !keepRows;
+  const keepRowsRef = useRef(false);
+  keepRowsRef.current = keepRows;
   // Override search / clear override is an explicit retry: skip server caches.
   const lastQuery = useRef<string | null | undefined>(undefined);
   const lastAttempt = useRef(0);
@@ -281,9 +289,11 @@ export function useMovieSourcesData({
     // Clear rows and the settled marker from any previous search, so a
     // re-search can never leave the panel showing results that no longer
     // belong to it (and so reopening the shelf reads as loading again).
-    setReleases([]);
-    setTrackers([]);
-    setSettledKey(null);
+    if (!keepRowsRef.current) {
+      setReleases([]);
+      setTrackers([]);
+      setSettledKey(null);
+    }
 
     const slowTimer = setTimeout(() => {
       if (!cancelled) setSlow(true);
@@ -316,5 +326,5 @@ export function useMovieSourcesData({
     };
   }, [key, tmdbId, title, year, indexerQuery, attempt]);
 
-  return { loading, error, timedOut, slow: loading && slow, releases, movieId, trackers, retry };
+  return { loading, error, timedOut, slow: loading && slow, releases, movieId, trackers, retry, retrying: keepRows };
 }

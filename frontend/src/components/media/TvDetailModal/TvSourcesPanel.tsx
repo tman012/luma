@@ -153,7 +153,7 @@ function ExpandedTvSourcesView({
   // All results are fetched up front (rejected + indexer rows included). We show
   // everything, segmented by resolution → type and sorted by seeders within each
   // segment — no filtering, no toggle.
-  const { loading, error, releases, handleGrab, trackers, retry } = useTvSourcesData({
+  const { loading, error, releases, handleGrab, trackers, retry, retrying } = useTvSourcesData({
     target, tvdbId, tmdbId, title, year, indexerQuery,
   });
 
@@ -301,7 +301,7 @@ function ExpandedTvSourcesView({
           </div>
         )}
         {!loading && !error && releases.length > 0 && (
-          <TrackerStatusBar trackers={trackers} onRetry={retry} fontSize={18} />
+          <TrackerStatusBar trackers={trackers} onRetry={retry} retrying={retrying} />
         )}
         {/* Scope rows — pick Full season vs an individual episode first. */}
         {!loading && !error && showScopeStep && (
@@ -784,7 +784,7 @@ function CompactTvSourcesView({
   onIndexerQueryClear,
   targetName = null,
 }: TvSourcesPanelProps) {
-  const { loading, error, releases, handleGrab, trackers, retry } = useTvSourcesData({
+  const { loading, error, releases, handleGrab, trackers, retry, retrying } = useTvSourcesData({
     target, tvdbId, tmdbId, title, year, indexerQuery,
   });
 
@@ -1310,9 +1310,6 @@ function CompactTvSourcesView({
           </div>
         )}
 
-        {/* Some trackers failed while others returned rows */}
-        {!loading && !error && !noSources && <TrackerStatusBar trackers={trackers} onRetry={retry} />}
-
         {/* === STEP 0: Scope (full season vs individual episode) === */}
         {!flatOverride && !loading && !error && visibleReleases.length > 0 && step === 'scope' && (
           <div
@@ -1330,6 +1327,8 @@ function CompactTvSourcesView({
             <p style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 16px' }}>
               Full season or episode
             </p>
+            {/* Some trackers failed while others returned rows: 12px above the first group */}
+            <TrackerStatusBar trackers={trackers} onRetry={retry} retrying={retrying} phone />
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {availableScopes.map(s => (
                 <SegmentRow
@@ -1377,6 +1376,8 @@ function CompactTvSourcesView({
               Select resolution
             </p>
             )}
+            {/* Some trackers failed while others returned rows: 12px above the first group */}
+            <TrackerStatusBar trackers={trackers} onRetry={retry} retrying={retrying} phone />
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {availableQualities.map(q => (
                 <SegmentRow
@@ -1413,6 +1414,8 @@ function CompactTvSourcesView({
             <p style={{ fontSize: '15px', fontWeight: 500, color: 'rgba(255,255,255,0.4)', textAlign: 'center', margin: '0 0 20px' }}>
               Select type
             </p>
+            {/* Some trackers failed while others returned rows: 12px above the first group */}
+            <TrackerStatusBar trackers={trackers} onRetry={retry} retrying={retrying} phone />
             {grabErrorMsg && (
               <div style={{
                 background: 'rgba(239, 68, 68, 0.15)',
