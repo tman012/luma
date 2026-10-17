@@ -313,7 +313,7 @@ function ConfirmPanel({ target, confirmLoading, onCancel, onDownload, zoneId, er
   });
   return (
     <>
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center', marginBottom: '16px' }}>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center', marginBottom: '16px', position: 'relative', zIndex: 1 }}>
         <span style={{
           display: 'inline-block', padding: '6px 18px', borderRadius: '12px', fontSize: '15px', fontWeight: 700,
           background: getBadgeColor(target.indexer).bg, color: getBadgeColor(target.indexer).fg,
@@ -326,6 +326,7 @@ function ConfirmPanel({ target, confirmLoading, onCancel, onDownload, zoneId, er
         style={{
           background: 'linear-gradient(rgba(255,255,255,0.06), rgba(255,255,255,0.06)), #15102a', borderRadius: '20px', padding: '36px',
           width: '520px', maxWidth: '90%', border: '1px solid rgba(255,255,255,0.08)',
+          position: 'relative', zIndex: 1,
         }}
       >
         <p style={{ margin: '0 0 16px', fontSize: '15px', fontWeight: 500, color: '#fff', lineHeight: 1.5, wordBreak: 'break-word', textAlign: 'center' }}>

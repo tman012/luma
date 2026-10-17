@@ -161,5 +161,8 @@ def test_sources_panels_use_the_kiosk_theme():
         assert "background: '#3b82f6'" in src
         assert ".rejected ? '#2a2520' : 'rgba(255,255,255,0.04)'" in src
         assert ']:hover { background: rgba(255,255,255,0.08) !important' in src
+        if 'MovieDetailModal' in rel:
+            # Above the web dimming layer (absolute, z-index 0) so the card is not greyed out.
+            assert "maxWidth: '90%', border: '1px solid rgba(255,255,255,0.08)',\n          position: 'relative', zIndex: 1," in src
         for old in ("background: '#000'", "background: '#222'", "'#111112'", "'#1a1a1c'", "'#333'", '#444 !important'):
             assert old not in src, (rel, old)
