@@ -131,13 +131,13 @@ export function LoginPage() {
           <>
             {signinStep === 'email' && (
               <form onSubmit={handleSignInEmail}>
-                <label style={labelStyle}>Email address</label>
+                <label style={labelStyle}>Email or username</label>
                 <input
-                  ref={emailRef} style={inputStyle} type="email" value={email}
+                  ref={emailRef} style={inputStyle} type="text" value={email}
                   onChange={(e) => { setEmail(e.target.value); setError(''); }}
                   onFocus={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.3)'; }}
                   onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)'; }}
-                  autoComplete="email" autoCapitalize="off" disabled={busy}
+                  autoComplete="username" autoCapitalize="off" spellCheck={false} disabled={busy}
                 />
                 {error && <p style={errorStyle}>{error}</p>}
                 <button type="submit" style={{ ...primaryBtnStyle, opacity: (!email.trim() || busy) ? 0.5 : 1, cursor: (!email.trim() || busy) ? 'not-allowed' : 'pointer' }} disabled={busy || !email.trim()}>
