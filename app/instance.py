@@ -83,7 +83,38 @@ class WritesBlocked(requests.RequestException):
 
 MARKER = '.luma-test-instance'
 TEST_PORT = '5002'
+TEST_PORT_N = 5002
 _TEST_ENVS = ('LUMA_TEST_QBIT_TAG', 'LUMA_TEST_TV_TAG', ALLOW_ENV)
+
+
+def _parsed_port(raw: Optional[str]) -> Optional[int]:
+    """The port the server would bind for *raw*, parsed the way it is (int(): '05002', '+5002', '5_002',
+    fullwidth or Arabic-Indic digits are all 5002); None when it isn't one (the server wouldn't start)."""
+    try:
+        return int(str(raw).strip()) if raw is not None and str(raw).strip() else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _port_sign() -> bool:
+    """v177 (Tester B1): port 5002 by value, not by spelling: server_config.get_port() (LUMA_PORT), PORT,
+    and LUMA_BIND's port ('host:port', '[::]:port' or a bare port)."""
+    port = TEST_PORT_N
+    try:
+        from app import server_config
+        if server_config.get_port() == port:
+            return True
+    except Exception:                                    # noqa: BLE001 - a junk LUMA_PORT: parsed below
+        pass
+    for k in ('LUMA_PORT', 'PORT'):
+        if _parsed_port(os.environ.get(k)) == port:
+            return True
+    bind = (os.environ.get('LUMA_BIND') or '').strip()
+    if bind:
+        tail = bind.rsplit(':', 1)[1] if ':' in bind and not bind.endswith(']') else (bind if ':' not in bind else '')
+        if _parsed_port(tail) == port:
+            return True
+    return False
 
 
 def test_signs() -> list:
@@ -91,9 +122,7 @@ def test_signs() -> list:
     out = []
     if any((os.environ.get(k) or '').strip() for k in _TEST_ENVS):
         out.append('a LUMA_TEST_* variable is set')
-    ports = [(os.environ.get(k) or '').strip() for k in ('LUMA_PORT', 'PORT')]
-    bind = (os.environ.get('LUMA_BIND') or '').strip()
-    if TEST_PORT in ports or bind.endswith(':' + TEST_PORT):
+    if _port_sign():
         out.append('port 5002')
     try:
         from app import paths
@@ -199,16 +228,21 @@ def log_blocked_once() -> None:
     conflict = prod_conflict()
     if conflict:
         logger.error('!!! LUMA_INSTANCE=prod but this host looks like the TEST install (%s): failing closed; '
-                     'every guarded job is OFF (no override). !!!', ', '.join(conflict))
+                     'every guarded job is OFF (no override), and %s opt-ins are ignored. !!!', ', '.join(conflict), ALLOW_ENV)
     elif unrecognized():
         logger.error('!!! LUMA_INSTANCE=%r is not recognized (only exactly \'prod\' or \'test\'): treating it as test; '
                      'grabs, deletes and every other gated write are OFF, and %s opt-ins are ignored. !!!',
                      _raw()[:40], ALLOW_ENV)
     if assumed_test():
-        logger.warning('!!! LUMA_INSTANCE is not set but this looks like the TEST install (%s): treating it as test; '
-                       'grabs, deletes and every other gated write are OFF%s. Set LUMA_INSTANCE=test (or =prod if this '
-                       'really is production). !!!', ', '.join(test_signs()),
-                       f' and {ALLOW_ENV} opt-ins are ignored' if requested() else '')
+        # v177 (Tester FF-17): an ERROR when opt-ins were asked for and are ignored, like the other two
+        (logger.error if requested() else logger.warning)(
+            '!!! LUMA_INSTANCE is not set but this looks like the TEST install (%s): treating it as test; '
+            'grabs, deletes and every other gated write are OFF%s. Set LUMA_INSTANCE=test (or =prod if this '
+            'really is production). !!!', ', '.join(test_signs()),
+            f', and {ALLOW_ENV} opt-ins are ignored' if requested() else '')
+    for j in sorted(allowed() & set(GATED)):             # v177 (Ops): each honored opt-in, stated once
+        if writes_allowed(j):
+            logger.info('%s is ON (test, opt-in)', j)
     for j, d in blocked_jobs().items():
         if opt_ins_honored():
             logger.info('Instance test: %s is OFF (%s); opt in with %s=%s', j, d, ALLOW_ENV, j)

@@ -93,7 +93,7 @@ def show_folders(root_real: str) -> List[str]:
     entries = []
     with os.scandir(root_real) as it:
         for e in it:
-            if e.name.startswith('.'):
+            if e.name.startswith('.') or _system_dir(e.name):     # v177: volume/NAS folders are never shows
                 continue
             try:
                 if not e.is_dir(follow_symlinks=True):
@@ -818,7 +818,17 @@ EMPTY = 'Folder is empty (not mounted?)'
 _empty_logged: Dict[str, str] = {}
 # v169 (Reviewer): folders a bare mount point or a NAS volume has with no shows on it. They don't make
 # a library path "not empty" (.Trash-* is hidden, so show_folders never lists it; it is named anyway).
-SYSTEM_DIRS = ('lost+found', '@eadir', '#recycle')
+# v177 (Reviewer, REQUIRED): the usual Windows, macOS and NAS (Synology, QNAP, NetApp, ZFS) volume folders
+# too, casefolded. Never a plain word a show could be named ('temp', 'snapshot', 'recycle'). Hidden
+# (dot) folders never count as shows either: show_folders skips them; the dotted names here are for
+# _system_dir callers that see raw names.
+SYSTEM_DIRS = frozenset((
+    'lost+found', '@eadir', '#recycle',
+    'system volume information', '$recycle.bin', 'recycler', '$recycler', 'found.000',
+    '#snapshot', '@recycle', '@recently-snapshot', '@sharebin', '@tmp', '@__thumb', '.@__thumb',
+    '.snapshot', '.snapshots', '.zfs', '.trashes', '.trash', '.appledouble', '.ds_store',
+    '.spotlight-v100', '.fseventsd', '.temporaryitems', '.recycle', '.@__qini',
+))
 MOUNT_META = 'tv_mount:'                     # + path id: the mount point the path was on at its last good scan
 SKIPPED_META = 'tv_skipped:'                 # + path id: v170, the last scan skipped it (empty or system folders only)
 ROOT_META = 'tv_root:'                       # + path id: v171, the folder its last good scan read ('-' once repointed)
@@ -833,8 +843,9 @@ COVERAGE_RELEASE_AGE_S = 86400
 
 
 def _system_dir(name: str) -> bool:
+    """A volume or OS folder, never a show: SYSTEM_DIRS (casefolded), .Trash-<uid> and any hidden folder."""
     n = name.casefold()
-    return n in SYSTEM_DIRS or n.startswith('.trash-')
+    return n in SYSTEM_DIRS or n.startswith('.')
 
 
 def _mount_of(path: str) -> str:
@@ -1140,7 +1151,7 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
         # M34 (v167): an empty library path that had shows is an unmounted share's mount point (or a
         # share that's still coming up), not a library whose every show was deleted: skip it like a
         # missing path, so every row stays as last seen until its folders are back. v169 (Reviewer):
-        # lost+found, @eaDir, #recycle and .Trash-* don't count as shows.
+        # lost+found, @eaDir, #recycle and .Trash-* don't count as shows (v177: nor any SYSTEM_DIRS folder).
         if _empty_logged.get(pid) != f'{root_real}|{why}':
             _empty_logged[pid] = f'{root_real}|{why}'
             gone = why != 'dropped mount' and _dropped_mount(pid, root_real)

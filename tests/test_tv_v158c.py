@@ -335,8 +335,14 @@ def test_popup_grab_goes_through_luma_with_the_tv_category(popup, qenv, owner): 
     assert json.loads(g['episode_ids']) == [eps(qenv, 2)[3]]
     with tv_store.write() as conn:
         conn.execute('DELETE FROM grabs')
-    r = _post(owner, {**BODY, 'episode': None, 'title': 'Severance.S02.1080p.WEB-DL-PACK'})
-    assert r.get_json()['ok'] is True                                        # a season: every episode of it
+    pack = {**BODY, 'episode': None, 'title': 'Severance.S02.1080p.WEB-DL-PACK'}
+    out = _post(owner, pack).get_json()                                       # v177: never over an episode with a file
+    assert out['ok'] is False and out['error'] == 'Not grabbed: already has a file' and rows('SELECT * FROM grabs') == []
+    with tv_store.write() as conn:
+        conn.execute('DELETE FROM episode_file_links WHERE episode_id IN (SELECT id FROM episodes WHERE series_id = ?'
+                     ' AND season_number = 2)', (qenv,))
+    r = _post(owner, pack)
+    assert r.get_json()['ok'] is True, r.get_json()                                        # a season: every episode of it
     g = rows('SELECT * FROM grabs')[0]
     assert sorted(json.loads(g['episode_ids'])) == sorted(eps(qenv, 2).values())
 

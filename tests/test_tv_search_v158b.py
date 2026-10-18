@@ -5,7 +5,7 @@ import json
 import pytest
 import requests
 
-from app import instance, library_mover as lm, tv_downloads, tv_grab, tv_search, tv_settings, tv_store
+from app import instance, library_mover as lm, tv_downloads, tv_grab, tv_safety, tv_search, tv_settings, tv_store
 from tests.test_file_management import HDR, minimal as minimal_app, store  # noqa: F401
 from tests.test_library_mover import Resp, Settings
 from tests.test_tv_calendar import aired, scanned  # noqa: F401
@@ -248,7 +248,9 @@ def test_feed_polls_an_uncapped_indexer_every_15_min_and_grabs_wanted(env, monke
     allow_grabs(monkeypatch)
     _auto(feed=True)
     env.results = [item('Severance.S02E04.1080p.WEB-DL-B'), item('Nobody.S01E01.1080p.WEB-DL-X')]
-    t0 = 2e9
+    # v177: inside the 24 h air-date floor (an hour after S02E04 aired; test_v177_tv_safety: never later)
+    e4 = rows('SELECT air_date, airstamp, runtime FROM episodes WHERE id = ?', env.e2[4])[0]
+    t0 = tv_safety.aired_start(e4) + 3600
     assert tv_search.feed(t0) == {'trackers': 1, 'grabbed': 1}
     assert env.sent[-1] == ('', 'feed', False)
     assert tv_search.feed(t0 + 14 * 60) == {'trackers': 0, 'grabbed': 0}                 # v158c: no cap -> 15 min

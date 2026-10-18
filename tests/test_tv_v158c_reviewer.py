@@ -131,6 +131,8 @@ def test_tv_grab_marks_its_own_auto_grabs_automatic(monkeypatch):
     monkeypatch.setattr(tv_grab, 'fetch_link', lambda u, automatic=False, **k: seen.append(automatic) or (_ for _ in ()).throw(
         tracker_sources.GrabError('stop', 502)))
     monkeypatch.setattr(tv_grab, 'allowed', lambda: True)
+    from app import tv_safety
+    monkeypatch.setattr(tv_safety, 'check', lambda *a, **k: None)             # the v177 rules have their own tests
     for origin in ('auto', 'manual'):
         tv_grab.grab({'title': 'x', 'downloadUrl': '/api/trackers/release/' + 'y' * 20}, 1, 1, [1], origin, 1000.0)
     assert seen == [True, False]

@@ -235,6 +235,11 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
     if not allowed():
         logger.info('TV grab: %s not sent (%s)', item.get('title'), OFF)
         return {'ok': False, 'error': OFF, 'blocked': True}
+    # v177 (Taylor): the one central safety check, before any link is fetched or anything is sent
+    from app import tv_safety
+    why = tv_safety.check(series_id, episode_ids, origin, now, title=item.get('title'))
+    if why:
+        return {'ok': False, 'error': f'Not grabbed: {why}', 'refused': why}
     try:
         kind, payload = (fetch or (lambda u: fetch_link(u, automatic=origin == 'auto', tokens_only=tokens_only)))(item.get('downloadUrl'))
     except tracker_sources.GrabError as e:

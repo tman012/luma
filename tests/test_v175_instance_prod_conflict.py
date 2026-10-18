@@ -185,7 +185,8 @@ def test_unset_keeps_detection_but_ignores_opt_ins(monkeypatch, caplog):
     assert instance.is_test() and instance.assumed_test() and _all_off()
     with caplog.at_level(logging.INFO, logger='app.instance'):
         instance.log_blocked_once()
-    warn = [r for r in caplog.records if r.levelno == logging.WARNING and 'looks like the TEST install' in r.getMessage()]
+    # v177 (Tester FF-17): an ERROR now that opt-ins were asked for and are ignored
+    warn = [r for r in caplog.records if r.levelno == logging.ERROR and 'looks like the TEST install' in r.getMessage()]
     assert len(warn) == 1 and 'LUMA_TEST_ALLOW opt-ins are ignored' in warn[0].getMessage()
 
 
