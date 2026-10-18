@@ -293,9 +293,12 @@ def tv_plex_clean():
             tv_plex._have.clear()
             tv_plex._shows.clear()
             tv_plex._new.clear()
-            tv_plex._state.update(built_at=0.0, down=False)
+            tv_plex._state.update(built_at=0.0, down=False, server=None)
+    cfg = dict(tv_plex._cfg)              # v173 (Tester FF-5): a test's FakePlex is unregistered after it
     clear()
     yield
+    tv_plex._cfg.clear()
+    tv_plex._cfg.update(cfg)
     clear()
 
 

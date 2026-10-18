@@ -746,10 +746,9 @@ export function VoiceAssistantSheet({ open, onClose }: VoiceAssistantSheetProps)
           {/* Listening indicator — only when no response text is showing */}
           {(isListening || pendingListen) && !responseVisible && (
             <p
-              className="text-center text-[20px] tracking-widest text-white/50 mt-4 uppercase"
+              className="text-center text-[20px] text-white/50 mt-4"
               style={{
                 fontWeight: 300,
-                letterSpacing: '0.2em',
                 animation: 'listeningPulse 2s ease-in-out infinite',
               }}
             >

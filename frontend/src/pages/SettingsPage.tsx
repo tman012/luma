@@ -328,7 +328,7 @@ function SettingsPageInner() {
         <nav className="flex-1 p-4 space-y-1">
           {sectionGroups.map((group, gi) => (
             <div key={group.section} className={gi > 0 ? 'mt-5' : ''}>
-              <p className="mb-2 px-3 text-[11px] font-bold uppercase tracking-[1.2px] text-white/25">
+              <p className="mb-2 px-3 text-[11px] font-bold text-white/25">
                 {group.section}
               </p>
               {group.tabs.map((tab) => (

@@ -307,6 +307,19 @@ class TrackerGuard:
             self._save()
             return None
 
+    def note_purpose(self, tid: str, purpose: str, now: Optional[float] = None) -> None:
+        """v173 (PM, Tester FF-6): count a request toward *purpose*'s tally without holding it to that
+        purpose's caps. A manual grab on a capped tracker counts toward the automation day (8/day),
+        so automation backs off; the manual grab itself is never refused by that cap (it went through
+        take() as interactive: rate limits and backoff still apply)."""
+        if not isinstance(purpose, str) or not _PURPOSE_RE.match(purpose):
+            return
+        now = time.time() if now is None else now
+        with self._lock:
+            self._load()
+            self.purposes.setdefault(tid, []).append([now, purpose])
+            self._save()
+
     def wait_spacing(self, tid: str) -> None:
         """Sleep so requests to one tracker are at least min_interval_s apart
         (call while holding tracker_lock(tid))."""

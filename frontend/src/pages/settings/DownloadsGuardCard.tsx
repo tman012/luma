@@ -163,8 +163,8 @@ function StatusPanel({ status }: { status: DownloadsGuardStatus | null }) {
           free of {formatBytes(ev.total_bytes)}
           <span className="ml-2 text-[11px] text-white/35">{ev.path}</span>
         </p>
-        <p className="shrink-0 text-[11px] uppercase tracking-wide text-white/35">
-          floor {formatBytes(ev.min_free_bytes)}
+        <p className="shrink-0 text-[11px] text-white/35">
+          Floor {formatBytes(ev.min_free_bytes)}
         </p>
       </div>
 
@@ -225,7 +225,7 @@ function EntryList({
   if (!entries.length) return null;
   return (
     <div className="col-span-full rounded-lg border border-white/8 bg-black/25 p-3">
-      <p className="mb-2 text-[11px] uppercase tracking-wide text-white/35">{title}</p>
+      <p className="mb-2 text-[11px] text-white/35">{title}</p>
       {note && <p className="mb-2 text-[12px] text-white/45">{note}</p>}
       <div className="flex flex-col gap-1">
         {entries.slice(0, 40).map((e) => (
@@ -409,8 +409,8 @@ export function DownloadsGuardCard() {
 
       {/* Last run — persisted server-side so it survives a restart. */}
       <div className="col-span-full rounded-lg border border-white/8 bg-black/20 px-3 py-2">
-        <p className="text-[11px] uppercase tracking-wide text-white/35">
-          Last acted: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'Never'}
+        <p className="text-[11px] text-white/35">
+          Last acted: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
         </p>
         {status?.last_result && (
           <p className={`mt-1 text-[12px] ${
@@ -439,7 +439,7 @@ export function DownloadsGuardCard() {
 
       {log.length > 0 && (
         <div className="col-span-full flex flex-col gap-1">
-          <p className="text-[11px] uppercase tracking-wide text-white/35">Recent activity</p>
+          <p className="text-[11px] text-white/35">Recent activity</p>
           {log.slice(0, 8).map((e, i) => (
             <div key={`${e.at}-${i}`} className="flex items-baseline justify-between gap-3 text-[12px]">
               <span className={`truncate ${OUTCOME_STYLES[e.outcome] || 'text-white/50'}`}>

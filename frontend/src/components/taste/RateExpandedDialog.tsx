@@ -119,7 +119,7 @@ export function RateExpandedDialog({
               />
             )}
             <div className="flex min-w-0 flex-1 flex-col pr-12 pt-3">
-              <p className="text-[13px] uppercase tracking-[0.2em] text-white/35">
+              <p className="text-[13px] text-white/35">
                 You watched
               </p>
               <h1 className="mt-3.5 text-[46px] font-semibold leading-[1.06] text-white/95">
@@ -169,7 +169,7 @@ export function RateExpandedDialog({
             <div className="shrink-0 px-12 pb-7 pt-12">
               {/* Eyebrow + title centred on the modal; the caption below stays
                   left-aligned with the poster grid it describes. */}
-              <p className="text-center text-[13px] uppercase tracking-[0.2em] text-white/35">
+              <p className="text-center text-[13px] text-white/35">
                 Because you liked
               </p>
               <h2 className="mt-3 text-center text-[38px] font-semibold leading-tight text-white/95">

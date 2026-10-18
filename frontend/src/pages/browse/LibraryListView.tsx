@@ -154,7 +154,7 @@ export function LibraryListView({ onSelectLibrary, isMobile }: LibraryListViewPr
     return (
       <div className="mb-8">
         <h2 className={cn(
-          'mb-4 font-semibold text-white/60 uppercase tracking-wider',
+          'mb-4 font-semibold text-white/60',
           isMobile ? 'text-[14px] px-1' : 'text-[15px]',
         )}>
           {title}
@@ -189,7 +189,7 @@ export function LibraryListView({ onSelectLibrary, isMobile }: LibraryListViewPr
   return (
     <div>
       {renderSection('Movies', movieLibraries, <MovieIcon />)}
-      {renderSection('TV Shows', tvLibraries, <TvIcon />)}
+      {renderSection('TV shows', tvLibraries, <TvIcon />)}
     </div>
   );
 }

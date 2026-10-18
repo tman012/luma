@@ -286,7 +286,7 @@ export function GenreRouletteCard() {
       {/* Preview output */}
       {preview && !preview.error && (
         <div className="col-span-full rounded-lg border border-white/8 bg-black/25 p-3">
-          <p className="mb-2 text-[11px] uppercase tracking-wide text-white/35">
+          <p className="mb-2 text-[11px] text-white/35">
             Tonight’s spin · {preview.genres?.join(' · ') || 'no genres'} ·{' '}
             {preview.candidates} unowned of {preview.considered} · {preview.year_from}–{preview.year_to}
           </p>
@@ -328,18 +328,18 @@ export function GenreRouletteCard() {
 
       {/* Last run — persisted server-side so it survives a restart. */}
       <div className="col-span-full rounded-lg border border-white/8 bg-black/20 px-3 py-2">
-        <p className="text-[11px] uppercase tracking-wide text-white/35">
-          Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'Never'}
+        <p className="text-[11px] text-white/35">
+          Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
         </p>
         {/* The time setting is the server's clock, so the naive ISO is parsed
             as local and shown as typed rather than shifted into the browser's
             timezone — and the zone is named, because "next run 22:30" with an
             unstated zone is how a schedule 4h off its intended hour hid. This
             line also distinguishes a spent slot from a dead scheduler. */}
-        <p className="text-[11px] uppercase tracking-wide text-white/35">
+        <p className="text-[11px] text-white/35">
           Next run: {status?.next_run
             ? `${new Date(status.next_run).toLocaleString()}${status.server_tz ? ` ${status.server_tz}` : ''}`
-            : 'Not scheduled'}
+            : 'not scheduled'}
         </p>
         {status?.last_result && (
           <p className={`mt-1 text-[12px] ${outcomeClass(status.last_result)}`}>
@@ -371,7 +371,7 @@ export function GenreRouletteCard() {
       {/* Run history — every night, not just the ones that grabbed something. */}
       {log.length > 0 && (
         <div className="col-span-full flex flex-col gap-1">
-          <p className="text-[11px] uppercase tracking-wide text-white/35">Recent nights</p>
+          <p className="text-[11px] text-white/35">Recent nights</p>
           {log.slice(0, 8).map((e, i) => (
             <div key={`${e.at}-${i}`} className="flex items-baseline justify-between gap-3 text-[12px]">
               <span className={`truncate ${OUTCOME_STYLES[e.outcome] || 'text-white/50'}`}>

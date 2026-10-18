@@ -168,7 +168,7 @@ export function MobilePosterCard({
       </div>
 
       {digitalReleaseLabel && !progressPercent && (
-        <p className="mt-1 text-center text-[9px] font-semibold uppercase tracking-wide text-white/70">
+        <p className="mt-1 text-center text-[9px] font-semibold text-white/70">
           {digitalReleaseLabel}
         </p>
       )}

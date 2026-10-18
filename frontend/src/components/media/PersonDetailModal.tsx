@@ -472,8 +472,6 @@ export function PersonDetailModal({
                   style={{
                     fontSize: isCompact ? '11px' : '12px',
                     fontWeight: 500,
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
                     color: 'rgba(255,255,255,0.35)',
                   }}
                 >

@@ -125,8 +125,6 @@ function Badge({ children, color }: { children: React.ReactNode; color: string }
         alignItems: 'center',
         fontSize: 10,
         fontWeight: 600,
-        letterSpacing: '0.5px',
-        textTransform: 'uppercase' as const,
         padding: '2px 8px',
         borderRadius: 6,
         backgroundColor: color,
@@ -162,7 +160,7 @@ function UserRow({ user }: { user: UserStatus }) {
           </span>
         )}
         {user.is_admin && <Badge color="rgba(168,85,247,0.25)">Admin</Badge>}
-        {user.use_shared_server && <Badge color="rgba(59,130,246,0.25)">Shared Server</Badge>}
+        {user.use_shared_server && <Badge color="rgba(59,130,246,0.25)">Shared server</Badge>}
       </div>
 
       {/* Service indicators */}

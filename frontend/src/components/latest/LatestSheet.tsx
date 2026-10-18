@@ -6,6 +6,7 @@ import { openModalForItem } from '@/utils/modalNavigation';
 import { cn } from '@/utils/cn';
 import { apiFetch } from '../../apiClient';
 import { apiUrl } from '@/urlHelpers';
+import { NEUTRAL_GLASS } from '@/components/media/chipGlass';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -298,15 +299,16 @@ function LatestRow({
           </>
         )}
 
-        {/* Tracker overlay — top-left, dark pill, small but legible */}
+        {/* Tracker overlay — top-left, neutral glass (v173, Designer), blurred for legibility */}
         {item.indexer && (
           <span
-            className="absolute left-1 top-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white/95"
+            className="absolute left-1 top-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold"
             style={{
-              background: 'rgba(0,0,0,0.72)',
-              backdropFilter: 'blur(4px)',
-              WebkitBackdropFilter: 'blur(4px)',
-              letterSpacing: '0.05em',
+              background: NEUTRAL_GLASS.bg,
+              color: NEUTRAL_GLASS.fg,
+              border: `1px solid ${NEUTRAL_GLASS.border}`,
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
             }}
           >
             {item.indexer}
@@ -667,7 +669,7 @@ export function LatestSheet({ open, onClose }: LatestSheetProps) {
               white menu in this dark UI (browsers ignore most <option> styles),
               so we use buttons instead. */}
           <div className="flex items-center gap-2">
-            <span className="text-[11px] uppercase tracking-wider font-semibold text-white/35 shrink-0">Sort</span>
+            <span className="text-[11px] font-semibold text-white/35 shrink-0">Sort</span>
             <div className="flex items-center gap-1.5 flex-1">
               {(Object.keys(SORT_LABEL) as SortMode[]).map(v => {
                 const active = sort === v;

@@ -167,7 +167,7 @@ export function UserSetupPage() {
 
         {/* Plex server choice */}
         <div style={{ marginBottom: 24 }}>
-          <p style={sectionLabelStyle}>Plex Server</p>
+          <p style={sectionLabelStyle}>Plex server</p>
 
           <OptionButton
             selected={mode === 'shared'}
@@ -338,8 +338,6 @@ const sectionLabelStyle: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 600,
   color: 'rgba(255,255,255,0.6)',
-  textTransform: 'uppercase',
-  letterSpacing: '0.05em',
 };
 
 const fieldLabelStyle: React.CSSProperties = {

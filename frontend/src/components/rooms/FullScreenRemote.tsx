@@ -606,7 +606,7 @@ export function FullScreenRemote({ room, deviceId, onClose }: FullScreenRemotePr
         <div className="flex items-center justify-center gap-4 shrink-0 pt-4 pb-4">
           {/* Volume rocker */}
           <div className="flex flex-col items-center gap-[3px]">
-            <span className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.15em]" style={{ color: 'rgba(255,255,255,0.25)' }}>
+            <span className="mb-1.5 text-[9px] font-semibold" style={{ color: 'rgba(255,255,255,0.25)' }}>
               Vol
             </span>
             <RockerButton label="Volume up" position="top" onFire={() => send('vol_up')}>
@@ -626,7 +626,7 @@ export function FullScreenRemote({ room, deviceId, onClose }: FullScreenRemotePr
 
           {/* Channel rocker */}
           <div className="flex flex-col items-center gap-[3px]">
-            <span className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.15em]" style={{ color: 'rgba(255,255,255,0.25)' }}>
+            <span className="mb-1.5 text-[9px] font-semibold" style={{ color: 'rgba(255,255,255,0.25)' }}>
               Ch
             </span>
             <RockerButton label="Channel up" position="top" onFire={() => send('channel_up')}>

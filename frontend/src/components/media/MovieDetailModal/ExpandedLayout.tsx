@@ -22,7 +22,7 @@ import {
   getBadgeColor,
 } from './sourcesUtils';
 import { useMovieSourcesData } from './useMovieSourcesData';
-import { SegmentRow, sortTrackerTopsFirst, needsLibraryGrab, grabDisabledReason, IndexerQueryOverride } from '@/components/media/sourcesShared';
+import { SegmentRow, sortTrackerTopsFirst, needsLibraryGrab, grabDisabledReason, IndexerQueryOverride, sourceTypeLabel } from '@/components/media/sourcesShared';
 import { fetchIndexerConfigured, useDownloadClientReady } from '@/services/sourcesAvailability';
 import { grabToLibrary } from '@/services/allSourcesApi';
 import { ManualMatchPicker } from '@/components/media/ManualMatchPicker';
@@ -1569,7 +1569,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                         {srcSelectedGroup.sourceTypes.map(st => (
                           <SegmentRow
                             key={st.type}
-                            label={st.type}
+                            label={sourceTypeLabel(st.type)}
                             count={st.items.length}
                             releases={st.items}
                             colorFor={getBadgeColor}

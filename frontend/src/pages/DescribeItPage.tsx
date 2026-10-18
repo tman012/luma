@@ -358,7 +358,7 @@ export function DescribeItPage() {
                         {rec.vibeItem.year && <span className="ml-2 font-normal text-white/40">({rec.vibeItem.year})</span>}
                       </p>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                        <span className={cn('rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase',
+                        <span className={cn('rounded px-1.5 py-0.5 text-[11px] font-semibold',
                           rec.vibeItem.type === 'tv' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400')}>
                           {rec.vibeItem.type === 'tv' ? 'TV' : 'Movie'}
                         </span>

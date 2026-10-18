@@ -84,7 +84,7 @@ export const EXPLORE_RAILS: readonly RailDefinition[] = [
   },
   {
     id: 'now_available',
-    title: 'Now Available',
+    title: 'Now available',
     source: 'indexer',
     endpoint: '/api/explore/cached',
     defaultParams: { limit: 40 },

@@ -149,8 +149,8 @@ def _blocked_address(addr: str) -> bool:
     a = getattr(a, 'ipv4_mapped', None) or a
     # Link-local covers 169.254.169.254 (cloud metadata); fd00:ec2::254 is
     # the IPv6 metadata address.
-    return bool(a.is_link_local or a.is_unspecified or a.is_multicast or a.is_reserved
-                or str(a) == 'fd00:ec2::254')
+    from app.metadata_addrs import is_metadata       # v173: the shared list (Alibaba too)
+    return bool(a.is_link_local or a.is_unspecified or a.is_multicast or a.is_reserved or is_metadata(a))
 
 
 def _literal(host: str):
@@ -276,10 +276,9 @@ def fetch_release(token: Optional[str], resolver=None, automatic: bool = False) 
             raise GrabError('This download link points to another site and wasn’t fetched.', status)
         return {}
 
-    purpose = None
-    if automatic:
-        from app import tv_budget
-        purpose = tv_budget.PURPOSE if tv_budget.capped(cfg) else None
+    from app import tv_budget
+    purpose = tv_budget.PURPOSE if tv_budget.capped(cfg) else None
+    counted = []
 
     def charge() -> None:
         if automatic:
@@ -289,6 +288,11 @@ def fetch_release(token: Optional[str], resolver=None, automatic: bool = False) 
         if reason:
             logger.info('Tracker %s (id %s) download not sent: %s', cfg['name'], cfg['id'], reason)
             raise GrabError('This tracker is rate limited right now. Try again later.', 429)
+        if not automatic and purpose and not counted:
+            # v173 (PM, Tester FF-6): a manual grab counts once toward the tracker's daily automation
+            # tally (8/day) so automation backs off; the daily cap never blocks the manual grab
+            engine.guard.note_purpose(gk, purpose)
+            counted.append(True)
         engine.guard.wait_spacing(gk)
 
     plan(target, 400)             # v169 (Tester): a target we'd refuse costs nothing: not charged, not fetched

@@ -10,7 +10,7 @@ const auth = { implicit: false };
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => ({ openMovie: vi.fn(), openTv: vi.fn(), openPerson: vi.fn() }) }));
 
-import { ActivityFeed, activeEdge, fmtCompleted, historyEdge, PATH_NOT_MAPPED, NO_WRITABLE_DEST, CARD_BG, CARD_BORDER, NO_ART_BG, SIGN_IN_BUTTON, SIGN_IN_TO_DELETE, removeDownload } from '@/components/activity/ActivityFeed';
+import { ActivityFeed, activeEdge, fmtCompleted, historyEdge, PATH_NOT_MAPPED, NO_WRITABLE_DEST, NO_DESTINATION, CARD_BG, CARD_BORDER, NO_ART_BG, SIGN_IN_BUTTON, SIGN_IN_TO_DELETE, removeDownload } from '@/components/activity/ActivityFeed';
 
 const H = 'a'.repeat(40);
 const QUEUE = { downloads: [{ name: 'Some.Show.S01.1080p.WEB-GRP', hash: H, progress: 0.5, status: 'downloading',
@@ -184,6 +184,19 @@ describe('Downloads polish (v170, Designer)', () => {
     expect(historyEdge({ imported: true, failed: false })).toBe('#22c55e');
   });
 
+  it("v173 (Designer): 'No destination' text and edge are amber #f59e0b, and a Genre Roulette origin is neutral glass", async () => {
+    queue([
+      { ...QUEUE.downloads[0], name: 'Lost.S01', hash: '9'.repeat(40), status: 'no_destination', progress: 1, size_remaining: 0, tracker: 'IPT' },
+    ]);
+    render(<MemoryRouter><ActivityFeed /></MemoryRouter>);
+    const el = await screen.findByText(NO_DESTINATION);
+    expect(el.style.color).toBe('rgb(245, 158, 11)');
+    expect(edge('Lost.S01')).toBe('3px solid rgb(245, 158, 11)');
+    const chip = within(el.closest('[style*="border-radius: 18px"]') as HTMLElement).getByText('IPT');
+    expect(chip.style.background).toBe('rgba(255, 255, 255, 0.08)');
+    expect(chip.style.color).toBe('rgba(255, 255, 255, 0.7)');
+  });
+
   it("'No writable destination' and 'Path not mapped' are 12px amber", async () => {
     queue([
       { ...QUEUE.downloads[0], name: 'A.S01', hash: 'e'.repeat(40), status: 'no_writable', progress: 1, size_remaining: 0 },
@@ -247,7 +260,8 @@ describe('Completed rows (v171, Designer)', () => {
     expect(trackers[0].getAttribute('style')).toBe(liveChip.getAttribute('style'));   // same tracker color
     const origins = screen.getAllByTestId('history-origin');
     expect(origins.map(o => o.textContent)).toEqual(['Manual', 'Manual']);
-    expect(origins[0].style.background).toBe('rgba(255, 255, 255, 0.06)');            // neutral
+    expect(origins[0].style.background).toBe('rgba(255, 255, 255, 0.08)');            // v173: neutral glass
+    expect(origins[0].style.color).toBe('rgba(255, 255, 255, 0.7)');
     for (const el of [...trackers, ...origins, ...screen.getAllByTestId('history-date')]) {
       expect(el.className).not.toMatch(/uppercase|tracking-wide/);
       expect(el.textContent).not.toBe(el.textContent!.toUpperCase());

@@ -400,7 +400,7 @@ function TrendingMovieWatchlistCard() {
       />
 
       <p className="col-span-full text-[11px] text-white/30">
-        Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'Never'}
+        Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
       </p>
     </SettingsCard>
   );
@@ -474,7 +474,7 @@ function NowAvailableMovieWatchlistCard() {
       />
 
       <p className="col-span-full text-[11px] text-white/30">
-        Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'Never'}
+        Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
       </p>
     </SettingsCard>
   );
@@ -575,7 +575,7 @@ function AnticipatedWatchlistCard() {
       />
 
       <p className="col-span-full text-[11px] text-white/30">
-        Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'Never'}
+        Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
       </p>
     </SettingsCard>
   );
@@ -648,7 +648,7 @@ function TrendingTvWatchlistCard() {
       />
 
       <p className="col-span-full text-[11px] text-white/30">
-        Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'Never'}
+        Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
       </p>
     </SettingsCard>
   );
@@ -719,7 +719,7 @@ function LatestAutoGrabCard() {
         hint="Skip releases below this seeder count (default 60)"
       />
       <FormField
-        label="Max Age (hours)"
+        label="Max age (hours)"
         path="automation.latest_auto_grab.max_age_hours"
         type="number"
         min={1}
@@ -736,7 +736,7 @@ function LatestAutoGrabCard() {
       />
 
       <p className="col-span-full text-[11px] text-white/30">
-        Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'Never'}
+        Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
         {lastResult && (
           <span className="text-white/45">
             {' '}— checked {lastResult.checked}, grabbed {lastResult.grabbed}
@@ -834,7 +834,7 @@ function Upgrade4kAutoGrabCard() {
         hint="Skip releases below this seeder count (default 100)"
       />
       <FormField
-        label="Max Age (hours)"
+        label="Max age (hours)"
         path="automation.upgrade_4k_auto_grab.max_age_hours"
         type="number"
         min={1}
@@ -850,7 +850,7 @@ function Upgrade4kAutoGrabCard() {
         hint="How often to scan the Latest feed (default 15)"
       />
       <p className="col-span-full text-[11px] text-white/30">
-        Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'Never'}
+        Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
         {lastResult && (
           <span className="text-white/45">
             {' '}— checked {lastResult.checked}, candidates {lastResult.candidates}, grabbed {lastResult.grabbed}

@@ -302,11 +302,15 @@ def import_preview():
     try:
         out = tracker_import.preview(_cfg['get_setting'], get_store())
     except RuntimeError as e:
-        msg = str(e) if str(e) in (tracker_import.NOT_CONFIGURED, tracker_import.UNREACHABLE) \
-            else tracker_import.UNREACHABLE
+        msg = str(e) if str(e) in (tracker_import.NOT_CONFIGURED, tracker_import.UNREACHABLE,
+                                   tracker_import.UNEXPECTED) else tracker_import.UNREACHABLE
         return _no_store(jsonify({'error': msg}), 409 if msg == tracker_import.NOT_CONFIGURED else 502)
     except CredentialsUnreadable:
         return _unreadable()
+    except Exception as e:                             # noqa: BLE001 - v173 (Tester FF-A): never a 500
+        import logging
+        logging.getLogger(__name__).info('Import from Prowlarr: preview failed (%s)', type(e).__name__)
+        return _no_store(jsonify({'error': tracker_import.UNEXPECTED}), 502)
     return _no_store(jsonify(out))
 
 

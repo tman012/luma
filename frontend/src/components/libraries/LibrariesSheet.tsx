@@ -543,7 +543,7 @@ export function LibrariesSheet({ open, onClose }: LibrariesSheetProps) {
               <div className="px-4">
                 {movieLibraries.length > 0 && (
                   <div className="mb-6">
-                    <h3 className="text-[13px] font-semibold text-white/40 uppercase tracking-wider mb-3 px-1">Movies</h3>
+                    <h3 className="text-[13px] font-semibold text-white/40 mb-3 px-1">Movies</h3>
                     <div className="rounded-2xl bg-white/5 overflow-hidden divide-y divide-white/5">
                       {movieLibraries.map(row => (
                         <button
@@ -568,7 +568,7 @@ export function LibrariesSheet({ open, onClose }: LibrariesSheetProps) {
                 )}
                 {tvLibraries.length > 0 && (
                   <div className="mb-6">
-                    <h3 className="text-[13px] font-semibold text-white/40 uppercase tracking-wider mb-3 px-1">TV Shows</h3>
+                    <h3 className="text-[13px] font-semibold text-white/40 mb-3 px-1">TV shows</h3>
                     <div className="rounded-2xl bg-white/5 overflow-hidden divide-y divide-white/5">
                       {tvLibraries.map(row => (
                         <button

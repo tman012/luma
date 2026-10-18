@@ -419,7 +419,7 @@ export function NowAvailablePage() {
       <div className="mx-auto max-w-[1600px] px-8 pb-20 pt-20">
         {/* Header */}
         <div className="mb-6">
-          <h1 className="text-[36px] font-bold text-text-primary">Now Available</h1>
+          <h1 className="text-[36px] font-bold text-text-primary">Now available</h1>
           {!loading && (
             <p className="mt-1 text-[15px] text-text-muted">
               {filteredMovies.length} movie{filteredMovies.length !== 1 ? 's' : ''}

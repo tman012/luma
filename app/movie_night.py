@@ -40,6 +40,10 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+# v173: the indexer name Radarr's history shows for a pushed release with no tracker name. Searches
+# run on Luma's own trackers now (v172), so not 'Prowlarr'.
+PUSH_INDEXER_FALLBACK = 'Luma'
+
 # Remuxes of older films are thinly seeded — a high floor rejects legitimate
 # releases far more often than it catches dead ones.
 _MIN_SEEDERS = 3
@@ -806,7 +810,7 @@ def _grab(film: Dict[str, Any], release: Dict[str, Any], settings) -> tuple:
             'downloadUrl': release.get('download_url') or '',
             'protocol': 'torrent',
             'publishDate': release.get('pub_date') or datetime.now(timezone.utc).isoformat(),
-            'indexer': release.get('tracker') or 'Prowlarr',
+            'indexer': release.get('tracker') or PUSH_INDEXER_FALLBACK,
         }
         if release.get('info_hash'):
             payload['infoHash'] = release['info_hash']

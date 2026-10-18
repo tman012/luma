@@ -104,6 +104,12 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
         "base_url":         {"type": "string",  "default": "",         "sensitive": False, "deprecated": True, "description": "Deprecated (v172): read only by Import from Prowlarr"},
         "torznab_url":      {"type": "string",  "default": "",         "sensitive": False, "deprecated": True, "description": "Deprecated (v172): no longer used"},
         "api_key":          {"type": "string",  "default": "",         "sensitive": True,  "deprecated": True, "description": "Deprecated (v172): read only by Import from Prowlarr"},
+    },
+    "tracker_search": {
+        # v173 (PM): Explore's four indexer settings, moved from indexer.* (no UI since v172) to
+        # Settings > Trackers as global search settings; values carried over by
+        # _migrate_tracker_search_settings
+        "_type": "object",
         "movie_categories": {"type": "string",  "default": "2000",     "sensitive": False, "description": "Movie category IDs (comma-separated)"},
         "max_age_days":     {"type": "integer", "default": 30,         "sensitive": False, "description": "Maximum age of results in days", "min": 1, "max": 365},
         "min_seeders":      {"type": "integer", "default": 1,          "sensitive": False, "description": "Minimum seeders to include", "min": 0},
@@ -1464,6 +1470,27 @@ def _migrate_legacy_qbit_category(data: dict, existing: bool) -> bool:
     return True
 
 
+TRACKER_SEARCH_KEYS = ('movie_categories', 'max_age_days', 'min_seeders', 'limit')
+
+
+def _migrate_tracker_search_settings(data: dict) -> bool:
+    """v173 (PM): indexer.{movie_categories,max_age_days,min_seeders,limit} move to tracker_search.*
+    (Settings > Trackers, global search settings). A saved value is carried over as is; a value
+    already under tracker_search wins. Returns True if migration occurred."""
+    old = data.get('indexer')
+    if not isinstance(old, dict) or not any(k in old for k in TRACKER_SEARCH_KEYS):
+        return False
+    new = data.get('tracker_search')
+    if not isinstance(new, dict):
+        new = data['tracker_search'] = {}
+    for k in TRACKER_SEARCH_KEYS:
+        if k in old:
+            v = old.pop(k)
+            new.setdefault(k, v)
+    logger.info("Migrated: indexer search settings -> tracker_search (Settings > Trackers)")
+    return True
+
+
 def _run_all_migrations(data: dict, data_dir=None, existing: bool = False) -> bool:
     """Run all migrations on *data* (mutated in place).
     *existing* is True when *data* came from a settings file on disk (an
@@ -1493,6 +1520,7 @@ def _run_all_migrations(data: dict, data_dir=None, existing: bool = False) -> bo
     changed |= _migrate_remove_remote_lock(data)
     changed |= _migrate_access_mode_to_auth_required(data)
     changed |= _migrate_seed_hostnames(data, data_dir)
+    changed |= _migrate_tracker_search_settings(data)
     return changed
 
 

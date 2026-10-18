@@ -955,7 +955,7 @@ function SeasonDetailModal({
                   letterSpacing: '-0.01em',
                 }}>
                   {seasonEyebrow(season.name, season.season_number) && (
-                    <span data-season-eyebrow style={{ display: 'block', fontSize: isTablet ? '14px' : '16px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.6)', marginBottom: '4px' }}>
+                    <span data-season-eyebrow style={{ display: 'block', fontSize: isTablet ? '14px' : '16px', fontWeight: 600, color: 'rgba(255,255,255,0.6)', marginBottom: '4px' }}>
                       {seasonEyebrow(season.name, season.season_number)}
                     </span>
                   )}

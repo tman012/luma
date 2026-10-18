@@ -18,7 +18,7 @@ Settings > Trackers (offered only while a Prowlarr connection is configured):
 
 v172 (tracker port step 4): this is the only request Luma makes to a LAN address, and it is scoped
 narrowly: owner-pressed only, GET only, exactly {base}/api/v1/indexer on the saved Prowlarr URL,
-no redirects, no environment proxy, 2 MB / 20 s caps, and never to a link-local / metadata,
+no redirects, no environment proxy, 2 MB and 20 s caps (v173: 20 s for the whole request), and never to a link-local / metadata,
 multicast, unspecified or reserved address (check_target, before anything is sent).
 
 Clean-room: Prowlarr's public API shape (indexer JSON with a fields list) is the only reference;
@@ -36,16 +36,20 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from app import tracker_types as tt
+from app.metadata_addrs import is_metadata
 
 logger = logging.getLogger(__name__)
 
 PREVIEW_TTL_S = 600
 MAX_BYTES = 2 * 1024 * 1024
-TIMEOUT_S = 20
+TIMEOUT_S = 20            # connect and each read
+TOTAL_S = 20              # v173 (Tester FF-B): the whole request, headers and body, so a Prowlarr that
+                          # sends one byte a second can't hold a worker past it
 
 READY, NEEDS_CREDENTIALS, EXISTS, UNSUPPORTED, INVALID = 'ready', 'needs_credentials', 'exists', 'unsupported', 'invalid'
 NOT_CONFIGURED = 'Prowlarr isn’t set up'
 UNREACHABLE = 'Couldn’t reach Prowlarr'
+UNEXPECTED = 'Prowlarr returned an unexpected response'     # v173 (Tester FF-A): never a 500
 EXPIRED = 'Preview expired. Start again.'
 
 # Prowlarr definition/implementation name (letters and digits only, lower case, a trailing 'api'
@@ -91,7 +95,7 @@ def _resolve(host: str) -> List[str]:
     return sorted({ai[4][0] for ai in socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)})
 
 
-def check_target(base: str) -> None:
+def check_target(base: str) -> str:
     """v172: the Prowlarr read may go to the LAN (that's where Prowlarr lives) or this host, but never
     to a link-local / cloud-metadata, multicast, unspecified or reserved address, whatever the name
     resolves to. Raises RuntimeError(UNREACHABLE) before anything is sent."""
@@ -108,52 +112,165 @@ def check_target(base: str) -> None:
             ip = ipaddress.ip_address(a.split('%')[0])
             if getattr(ip, 'ipv4_mapped', None):
                 ip = ip.ipv4_mapped
-            if ip.is_link_local or ip.is_multicast or ip.is_unspecified or ip.is_reserved:
-                raise ValueError('refused address')
+            if ip.is_link_local or ip.is_multicast or ip.is_unspecified or ip.is_reserved or is_metadata(ip):
+                raise ValueError('refused address')         # v173: + fd00:ec2::254, 100.100.100.200
     except Exception:                                  # noqa: BLE001 - never the URL in the log
         logger.info('Import from Prowlarr: the saved Prowlarr address is not allowed')
         raise RuntimeError(UNREACHABLE) from None
+    return addrs[0]                                    # v173 (Reviewer): the GET goes to this address
+
+
+class _DeadlineAdapter:
+    """Built on first use (requests imported lazily): an HTTPAdapter whose connections are tracked so
+    the deadline watchdog can shut their sockets, which ends any read, headers included."""
+    _cls = None
+
+    @classmethod
+    def make(cls, conns: list, expired: threading.Event, pinned: Optional[str] = None):
+        if cls._cls is None:
+            from requests.adapters import HTTPAdapter
+
+            class Adapter(HTTPAdapter):
+                def __init__(self, conns, expired, pinned):
+                    self._conns, self._expired, self._pinned = conns, expired, pinned
+                    super().__init__(max_retries=0)
+
+                def _track(self, pool):
+                    base = getattr(pool, 'ConnectionCls', None)
+                    if base is not None and not getattr(base, '_luma_tracked', False):
+                        conns, expired, pinned = self._conns, self._expired, self._pinned
+
+                        class Tracked(base):  # type: ignore[misc, valid-type]
+                            _luma_tracked = True
+
+                            def connect(self):
+                                conns.append(self)
+                                if pinned:
+                                    # v173 (Reviewer): connect to the address check_target vetted, so
+                                    # a second DNS answer can't move the GET; Host and TLS name stay
+                                    self._dns_host = pinned
+                                super().connect()
+                                # the socket itself: http.client drops conn.sock once the headers
+                                # are in on a closing response, while the body is still read from it
+                                conns.append(self.sock)
+                                if expired.is_set():
+                                    _kill(conns)
+                        pool.ConnectionCls = Tracked
+                    return pool
+
+                def get_connection(self, url, proxies=None):                      # requests < 2.32
+                    return self._track(super().get_connection(url, proxies))
+
+                def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
+                    return self._track(super().get_connection_with_tls_context(request, verify, proxies, cert))
+            cls._cls = Adapter
+        return cls._cls(conns, expired, pinned)
+
+
+def _kill(conns: list) -> None:
+    import socket
+    for c in list(conns):
+        sock = c if isinstance(c, socket.socket) else getattr(c, 'sock', None)
+        if isinstance(sock, socket.socket):
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+
+def _chunks(r):
+    """The body as it arrives. read1 returns whatever is there (one byte from a dribbling server), so
+    the deadline is checked between reads; iter_content would wait for a full chunk."""
+    raw = getattr(r, 'raw', None)
+    read1 = getattr(raw, 'read1', None)
+    if callable(read1) and hasattr(raw, 'release_conn'):
+        while True:
+            chunk = read1(65536, decode_content=True)
+            if not chunk:
+                return
+            yield chunk
+    else:
+        yield from r.iter_content(65536)
 
 
 def fetch_indexers(base: str, api_key: str, session_factory=None) -> List[Dict[str, Any]]:
-    """One GET of {base}/api/v1/indexer. Raises RuntimeError(UNREACHABLE) on any failure."""
+    """One GET of {base}/api/v1/indexer. Raises RuntimeError(UNREACHABLE) when Prowlarr can't be
+    read (refused, failing, too slow: TOTAL_S for the whole request) and RuntimeError(UNEXPECTED)
+    when it answers something that isn't an indexer list."""
+    import json
+
     import requests
-    check_target(base)
+    pinned = check_target(base)
+    deadline = time.monotonic() + TOTAL_S
     s = (session_factory or _session_factory or requests.Session)()
     s.trust_env = False
+    conns: list = []
+    expired = threading.Event()
+    if isinstance(s, requests.Session):
+        adapter = _DeadlineAdapter.make(conns, expired, pinned)
+        s.mount('http://', adapter)
+        s.mount('https://', adapter)
+
+    def expire():
+        expired.set()
+        _kill(conns)
+    timer = threading.Timer(TOTAL_S, expire)
+    timer.daemon = True
+    timer.start()
     try:
         r = s.get(f'{base}/api/v1/indexer', headers={'X-Api-Key': api_key, 'Accept': 'application/json'},
                   timeout=TIMEOUT_S, allow_redirects=False, stream=True)
         try:
+            if expired.is_set():
+                raise RuntimeError(UNREACHABLE)
             if r.status_code != 200:
                 raise RuntimeError(UNREACHABLE)
-            body = b''
-            for chunk in r.iter_content(65536):
+            body = bytearray()
+            for chunk in _chunks(r):
+                if expired.is_set() or time.monotonic() > deadline:
+                    raise RuntimeError(UNREACHABLE)
                 body += chunk
                 if len(body) > MAX_BYTES:
-                    raise RuntimeError(UNREACHABLE)
+                    raise RuntimeError(UNEXPECTED)
+            if expired.is_set() or time.monotonic() > deadline:
+                raise RuntimeError(UNREACHABLE)
         finally:
             r.close()
-        import json
-        data = json.loads(body.decode('utf-8'))
-    except RuntimeError:
+    except RuntimeError as e:
+        if str(e) == UNREACHABLE and expired.is_set():
+            logger.info('Import from Prowlarr: read took longer than %ds', TOTAL_S)
         raise
     except Exception as e:                             # noqa: BLE001 - never a URL, key or body in the log
-        logger.info('Import from Prowlarr: read failed (%s)', type(e).__name__)
+        logger.info('Import from Prowlarr: read failed (%s)%s', type(e).__name__,
+                    ' after the deadline' if expired.is_set() else '')
         raise RuntimeError(UNREACHABLE) from None
     finally:
+        timer.cancel()
         try:
             s.close()
         except Exception:                              # noqa: BLE001
             pass
+    try:
+        data = json.loads(bytes(body).decode('utf-8'))
+    except (ValueError, UnicodeError, RecursionError):
+        raise RuntimeError(UNEXPECTED) from None
     if not isinstance(data, list):
-        raise RuntimeError(UNREACHABLE)
+        raise RuntimeError(UNEXPECTED)
     return [ix for ix in data if isinstance(ix, dict)]
+
+
+def _as_list(v: Any) -> list:
+    """v173 (Tester FF-A): a list where Prowlarr should have sent one, else nothing."""
+    return v if isinstance(v, list) else []
+
+
+def _as_dict(v: Any) -> dict:
+    return v if isinstance(v, dict) else {}
 
 
 def _fields(ix: Dict[str, Any]) -> Dict[str, Any]:
     out = {}
-    for f in ix.get('fields') or []:
+    for f in _as_list(ix.get('fields')):
         if isinstance(f, dict) and isinstance(f.get('name'), str):
             out[f['name'].split('.')[-1].lower()] = f.get('value')
     return out
@@ -173,7 +290,8 @@ def _payload(ix: Dict[str, Any], type_id: str) -> Tuple[Dict[str, Any], List[str
     fields Prowlarr didn't hand over."""
     t = tt.get_type(type_id)
     f = _fields(ix)
-    url = str(f.get('baseurl') or '').strip() or (list(ix.get('indexerUrls') or []) or [''])[0]
+    urls = [u for u in _as_list(ix.get('indexerUrls')) if isinstance(u, str)]
+    url = str(f.get('baseurl') or '').strip() or (urls or [''])[0]
     default_url = next((x.get('default') for x in t['fields'] if x['key'] == 'url'), None)
     if tt.is_generic(type_id):
         path = str(f.get('apipath') or '/api').strip() or '/api'
@@ -186,7 +304,7 @@ def _payload(ix: Dict[str, Any], type_id: str) -> Tuple[Dict[str, Any], List[str
     if tt.validate_priority(pr) is not None:
         p['priority'] = tt.validate_priority(pr)
     cats = []
-    for c in ((ix.get('capabilities') or {}).get('categories') or []):
+    for c in _as_list(_as_dict(ix.get('capabilities')).get('categories')):
         cid = c.get('id') if isinstance(c, dict) else None
         if isinstance(cid, int) and not isinstance(cid, bool):
             cats.append(cid)
@@ -231,6 +349,25 @@ def preview(get_setting, store, session_factory=None) -> Dict[str, Any]:
         raise RuntimeError(NOT_CONFIGURED)
     raw = fetch_indexers(*conf, session_factory=session_factory)
     have = store.list()
+    try:
+        rows, keep = _rows(raw, store, have)
+    except RuntimeError:
+        raise
+    except Exception as e:                             # noqa: BLE001 - v173 (Tester FF-A): a 502, never a 500
+        logger.info('Import from Prowlarr: unexpected indexer shape (%s)', type(e).__name__)
+        raise RuntimeError(UNEXPECTED) from None
+    pid = secrets.token_urlsafe(18)
+    now = time.time()
+    with _lock:
+        for k in [k for k, (t, _) in _previews.items() if t < now]:
+            _previews.pop(k, None)
+        _previews.clear()                              # one preview at a time
+        _previews[pid] = (now + PREVIEW_TTL_S, keep)
+    logger.info('Import from Prowlarr: preview of %d indexer(s), %d importable', len(rows), len(keep))
+    return {'preview_id': pid, 'indexers': rows}
+
+
+def _rows(raw: List[Dict[str, Any]], store, have) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     rows, keep = [], []
     for ix in sorted(raw, key=lambda i: str(i.get('name') or '').lower()):
         pid = ix.get('id')
@@ -253,15 +390,7 @@ def preview(get_setting, store, session_factory=None) -> Dict[str, Any]:
                 if row['state'] != INVALID:
                     keep.append({'key': pid, 'payload': payload, 'type': type_id, 'prowlarr_id': pid})
         rows.append(row)
-    pid = secrets.token_urlsafe(18)
-    now = time.time()
-    with _lock:
-        for k in [k for k, (t, _) in _previews.items() if t < now]:
-            _previews.pop(k, None)
-        _previews.clear()                              # one preview at a time
-        _previews[pid] = (now + PREVIEW_TTL_S, keep)
-    logger.info('Import from Prowlarr: preview of %d indexer(s), %d importable', len(rows), len(keep))
-    return {'preview_id': pid, 'indexers': rows}
+    return rows, keep
 
 
 def _backup_guard(guard) -> None:

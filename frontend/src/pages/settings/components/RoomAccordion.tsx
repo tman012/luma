@@ -24,6 +24,7 @@ import {
   type DeviceData,
   type ServiceData,
 } from '@/services/settingsApi';
+import { sentenceCase } from '@/utils/sentenceCase';
 
 // ── Chevron icon ─────────────────────────────────────────────────
 
@@ -494,7 +495,7 @@ export function RoomAccordion() {
                             <span className="text-[13px] font-medium text-white/80">{device.name}</span>
                             <span className="ml-2 text-[11px] text-white/25">{platformLabel(device.platform)}</span>
                             {isDefault && (
-                              <span className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-accent hover:bg-accent-hover/15 text-emerald-400">
+                              <span className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-accent hover:bg-accent-hover/15 text-emerald-400">
                                 Default
                               </span>
                             )}
@@ -596,7 +597,7 @@ export function RoomAccordion() {
                         {devOpen && (
                           <div className="border-t border-white/[0.04] px-4 py-3">
                             <div className="mb-2 flex items-center justify-between">
-                              <span className="text-[11px] font-semibold uppercase text-white/25 tracking-wider">Services</span>
+                              <span className="text-[11px] font-semibold text-white/25">Services</span>
                               <button
                                 type="button"
                                 onClick={() => openServiceForm(room.id, device.id)}
@@ -610,8 +611,8 @@ export function RoomAccordion() {
                             )}
                             {device.services.map((svc) => (
                               <div key={svc.id} className="flex items-center gap-3 py-1.5">
-                                <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-indigo-500/15 text-indigo-400">
-                                  {svc.type}
+                                <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-indigo-500/15 text-indigo-400">
+                                  {sentenceCase(svc.type)}
                                 </span>
                                 {svc.type === 'kodi' && svc.kodi_host && (
                                   <span className="text-[12px] text-white/40">{svc.kodi_host}:{svc.kodi_port}</span>

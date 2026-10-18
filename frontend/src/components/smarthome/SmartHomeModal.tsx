@@ -1589,8 +1589,6 @@ const SMART_HOME_STYLES = `
   margin: 0;
   font-size: 13px;
   font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
   color: rgba(255, 255, 255, 0.5);
   text-align: center;
 }

@@ -195,7 +195,7 @@ const ActiveDownloadRow = memo(function ActiveDownloadRow({
         <div className="mt-1 flex items-center gap-2">
           <p className={`text-[13px] ${statusColor}`}>{statusText}</p>
           {dl.tracker && (
-            <span className="rounded px-1.5 py-0.5 text-[11px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/20">
+            <span className="rounded px-1.5 py-0.5 text-[11px] font-semibold bg-white/[0.08] text-white/70 border border-white/10">
               {dl.tracker}
             </span>
           )}
@@ -509,7 +509,7 @@ const WatchlistCard = memo(function WatchlistCard({
 
       <div className="mt-2 px-0.5">
         {movie.digitalReleaseLabel && (
-          <p className="mb-0.5 text-center text-[10px] font-semibold uppercase tracking-wide text-white/70 sm:text-[11px]">
+          <p className="mb-0.5 text-center text-[10px] font-semibold text-white/70 sm:text-[11px]">
             {movie.digitalReleaseLabel}
           </p>
         )}
@@ -580,7 +580,7 @@ const WatchlistRow = memo(function WatchlistRow({
       {/* Info */}
       <div className="min-w-0 flex-1">
         {movie.digitalReleaseLabel && (
-          <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/70">
+          <p className="mb-0.5 text-[10px] font-semibold text-white/70">
             {movie.digitalReleaseLabel}
           </p>
         )}
@@ -592,7 +592,7 @@ const WatchlistRow = memo(function WatchlistRow({
         </p>
         <div className="mt-1.5 flex items-center gap-3 text-[13px]">
           {movie.qualityProfileName && (
-            <span className="rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase bg-blue-500/20 text-blue-400">
+            <span className="rounded px-1.5 py-0.5 text-[11px] font-semibold bg-blue-500/20 text-blue-400">
               {movie.qualityProfileName}
             </span>
           )}
@@ -697,14 +697,14 @@ const HistoryRow = memo(function HistoryRow({
           )}
           {/* Media type badge */}
           <span className={cn(
-            'rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase',
+            'rounded px-1.5 py-0.5 text-[11px] font-semibold',
             item.mediaType === 'tv' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400',
           )}>
             {item.mediaType === 'tv' ? 'TV' : 'Movie'}
           </span>
           {/* Tracker badge */}
           {item.tracker && (
-            <span className="rounded px-1.5 py-0.5 text-[11px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/20">
+            <span className="rounded px-1.5 py-0.5 text-[11px] font-semibold bg-white/[0.08] text-white/70 border border-white/10">
               {item.tracker}
             </span>
           )}
@@ -783,13 +783,13 @@ const HistoryCard = memo(function HistoryCard({
         {/* Media type + tracker badges */}
         <div className="absolute right-2 top-2 flex flex-col items-end gap-1">
           <span className={cn(
-            'rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase backdrop-blur-sm',
+            'rounded px-1.5 py-0.5 text-[10px] font-semibold backdrop-blur-sm',
             item.mediaType === 'tv' ? 'bg-purple-500/30 text-purple-300' : 'bg-blue-500/30 text-blue-300',
           )}>
             {item.mediaType === 'tv' ? 'TV' : 'Movie'}
           </span>
           {item.tracker && (
-            <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-amber-500/25 text-amber-300 backdrop-blur-sm">
+            <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-white/[0.08] text-white/70 border border-white/10 backdrop-blur-sm">
               {item.tracker}
             </span>
           )}

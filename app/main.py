@@ -2735,14 +2735,14 @@ def indexer_latest():
             # parallel, dedups by (indexer, guid). Slower (5–10s) but
             # comprehensive for low-volume verticals like 2160p Remux.
             raw = client.sweep_movies(
-                categories=settings.get('indexer.movie_categories') or '2000',
+                categories=settings.get('tracker_search.movie_categories') or '2000',
                 queries=sweep_queries,
                 max_workers=3,
             )
         else:
             # search_movies issues a single empty browse per indexer — much
             # faster than sweep_movies, and Prowlarr orders newest-first.
-            raw = client.search_movies(categories=settings.get('indexer.movie_categories') or '2000', limit=300)
+            raw = client.search_movies(categories=settings.get('tracker_search.movie_categories') or '2000', limit=300)
 
         def _age_days(pub_date_str):
             if not pub_date_str:
@@ -7337,7 +7337,7 @@ def _update_explore_cache_inner():
         logger.warning("No trackers are on — explore cache update skipped")
         return
 
-    categories = settings.get('indexer.movie_categories') or '2000'
+    categories = settings.get('tracker_search.movie_categories') or '2000'
     try:
         movies = client.sweep_movies(categories=categories)
         logger.info(f"Indexer sweep: {len(movies)} movies")
@@ -12713,12 +12713,20 @@ def get_news():
         if cached and (now - cached['ts']) < _NEWS_CACHE_TTL:
             return jsonify(cached['data'])
 
-        import requests as _req
-
-        resp = _req.get(feed_url, timeout=10, headers={
-            'User-Agent': 'Mozilla/5.0 (compatible; LumaKiosk/1.0)',
-        })
-        resp.raise_for_status()
+        # v173 (Reviewer): through outbound_guard.fetch (public addresses only, every redirect
+        # checked, address pinned, 2 MB and 15 s overall), never a plain requests.get
+        from app import outbound_guard as _og
+        try:
+            resp = _og.fetch(feed_url, max_bytes=2 * 1024 * 1024, connect_timeout=5, read_timeout=10,
+                             total_timeout=15)
+        except _og.BlockedURL:
+            logger.info('News: the feed address is not allowed')
+            return jsonify({'enabled': True, 'error': 'Feed address not allowed', 'items': []}), 502
+        except _og.FetchError as e:
+            logger.info('News: feed unavailable (%s)', type(e).__name__)
+            return jsonify({'enabled': True, 'error': 'Feed unavailable', 'items': []}), 502
+        if resp.status_code != 200:
+            return jsonify({'enabled': True, 'error': 'Feed unavailable', 'items': []}), 502
 
         # v171+ (Reviewer): RSS 0.91 feeds carry a DOCTYPE; entities and external fetches stay refused
         root = _safe_xml.fromstring_news(resp.content)
@@ -19703,6 +19711,13 @@ def update_settings():
             logger.info('Hero cache invalidated due to settings change')
         if isinstance(data.get('plex'), dict):
             _plex_clients_cache.clear()
+            # v173 (Tester FF-5): the shared Plex client follows a disconnect or a new server now,
+            # and the TV Calendar drops its 'in Plex' index, without a restart
+            try:
+                plex_service.update_config(settings.get('plex.url', '') or '', settings.get('plex.token', '') or '')
+                _tv_plex_index_check()
+            except Exception as e:                     # noqa: BLE001
+                logger.warning('Plex settings change: refresh failed (%s)', type(e).__name__)
 
         # Handle tunnel toggle on settings save
         network_data = data.get('network') if isinstance(data.get('network'), dict) else {}
@@ -21658,6 +21673,15 @@ except Exception:                          # noqa: BLE001 - never a failed boot
 # New TV files get linked as they land: a boot pass, then a 60s folder poll (+ inotify where it works).
 from app import tv_watch as _tv_watch, tv_plex as _tv_plex  # noqa: E402
 _tv_plex.init(get_plex=lambda: plex_service)
+
+# v173 (Reviewer): own_addresses() adds the public app URL's host unless it's served through the tunnel
+from app import tracker_http as _tracker_http_own  # noqa: E402
+_tracker_http_own.public_behind_tunnel = lambda: bool(settings.get('network.tunnel.enabled', False)
+                                                       and settings.get('network.tunnel.token', ''))
+
+
+def _tv_plex_index_check() -> None:
+    _tv_plex._current()
 _tv_watch.start()
 try:
     from app import tv_downloads as _tv_downloads

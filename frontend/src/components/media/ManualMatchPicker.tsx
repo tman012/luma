@@ -224,7 +224,6 @@ export function ManualMatchPicker({
                         style={{
                           position: 'absolute', top: '8px', left: '8px',
                           padding: '3px 8px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
-                          textTransform: 'uppercase', letterSpacing: '0.03em',
                           background: r.media_type === 'tv' ? 'rgba(96,165,250,0.85)' : 'rgba(187,134,252,0.85)',
                           color: '#fff',
                         }}

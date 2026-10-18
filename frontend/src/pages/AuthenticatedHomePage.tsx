@@ -223,7 +223,7 @@ function PosterCard({ item, onClick, onLongPress }: {
       </div>
       <div style={{ marginTop: 6, width: POSTER_W }}>
         {item.digitalReleaseLabel && !(item.progressPercent != null && item.progressPercent > 0) && (
-          <p style={{ margin: '0 0 2px', fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)', textAlign: 'center', lineHeight: 1.2 }}>
+          <p style={{ margin: '0 0 2px', fontSize: 10, fontWeight: 600, color: 'rgba(255,255,255,0.7)', textAlign: 'center', lineHeight: 1.2 }}>
             {item.digitalReleaseLabel}
           </p>
         )}

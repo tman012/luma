@@ -221,7 +221,7 @@ export function MovieNightCard() {
               : null],
         ].map(([label, val, sub]) => (
           <div key={label as string} className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">
-            <p className="text-[11px] uppercase tracking-wide text-white/35">{label}</p>
+            <p className="text-[11px] text-white/35">{label}</p>
             <p className="mt-0.5 text-[18px] font-semibold text-white/90">{(val as number) ?? '—'}</p>
             {sub && <p className="text-[10px] text-white/25">{sub}</p>}
           </div>
@@ -261,7 +261,7 @@ export function MovieNightCard() {
       {/* Preview output */}
       {preview && !preview.error && (
         <div className="col-span-full rounded-lg border border-white/8 bg-black/25 p-3">
-          <p className="mb-2 text-[11px] uppercase tracking-wide text-white/35">
+          <p className="mb-2 text-[11px] text-white/35">
             Next run · {preview.candidates} eligible ·{' '}
             {preview.trackers?.join(', ') || 'no trackers'}
             {preview.skipped_imdb ? ` · ${preview.skipped_imdb} below IMDb floors` : ''}
@@ -288,8 +288,8 @@ export function MovieNightCard() {
       {/* Last run. Persisted server-side, so a weekly job still reports its
           outcome after a container restart. */}
       <div className="col-span-full rounded-lg border border-white/8 bg-black/20 px-3 py-2">
-        <p className="text-[11px] uppercase tracking-wide text-white/35">
-          Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'Never'}
+        <p className="text-[11px] text-white/35">
+          Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
         </p>
         {status?.last_result && (
           <p className={`mt-1 text-[12px] ${
@@ -321,7 +321,7 @@ export function MovieNightCard() {
       {/* Run history — every run, not just the ones that grabbed something. */}
       {log.length > 0 && (
         <div className="col-span-full flex flex-col gap-1">
-          <p className="text-[11px] uppercase tracking-wide text-white/35">Recent runs</p>
+          <p className="text-[11px] text-white/35">Recent runs</p>
           {log.slice(0, 6).map((e, i) => (
             <div key={`${e.at}-${i}`} className="flex items-baseline justify-between gap-3 text-[12px]">
               <span className={`truncate ${OUTCOME_STYLES[e.outcome] || 'text-white/50'}`}>

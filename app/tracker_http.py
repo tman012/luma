@@ -191,6 +191,30 @@ def interface_addresses() -> FrozenSet[str]:
     return frozenset(found)
 
 
+def public_hosts() -> FrozenSet[str]:
+    """v173: the host name of the configured public app URL (APP_URL), lower case; empty when unset."""
+    from urllib.parse import urlsplit
+    raw = (os.environ.get('APP_URL') or '').strip()
+    if not raw:
+        return frozenset()
+    try:
+        host = (urlsplit(raw if '://' in raw else f'https://{raw}').hostname or '').rstrip('.').lower()
+    except ValueError:
+        return frozenset()
+    return frozenset([host]) if host else frozenset()
+
+
+# main registers a check for 'the public URL is served through the Cloudflare tunnel'.
+public_behind_tunnel: Callable[[], bool] = lambda: False
+
+
+def _public_behind_tunnel() -> bool:
+    try:
+        return bool(public_behind_tunnel())
+    except Exception:                       # noqa: BLE001
+        return False
+
+
 def own_addresses() -> FrozenSet[str]:
     """This host's own addresses (cached 5 min): every interface address
     plus whatever the host name resolves to."""
@@ -200,8 +224,13 @@ def own_addresses() -> FrozenSet[str]:
         if time.time() - ts < 300:
             return addrs
         found = set(interface_addresses())
+        names = {socket.gethostname(), socket.getfqdn()}
+        if not _public_behind_tunnel():
+            # v173 (Reviewer): the configured public app URL's host (APP_URL). Skipped behind a
+            # Cloudflare tunnel: that name resolves to the tunnel's shared edge, not to this host.
+            names |= public_hosts()
         try:
-            for name in {socket.gethostname(), socket.getfqdn()}:
+            for name in names:
                 for info in socket.getaddrinfo(name, None):
                     found.add(str(ipaddress.ip_address(info[4][0].split('%')[0])))
         except (OSError, ValueError, UnicodeError):

@@ -491,8 +491,6 @@ function SlideLayout({
             fontSize: isMobile ? 20 : 28,
             fontWeight: 600,
             color: 'rgba(255,255,255,0.85)',
-            letterSpacing: '1.5px',
-            textTransform: 'uppercase',
             textAlign: 'center',
             cursor: onCategorySearch ? 'pointer' : undefined,
             transition: 'opacity 0.2s ease',

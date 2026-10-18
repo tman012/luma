@@ -188,18 +188,20 @@ def test_news_route_reads_an_rss091_feed(client, monkeypatch):  # noqa: F811
     app.main.settings.update({'ui': {'daily_kiosk': {'news': {'enabled': True, 'feed_url': 'https://news.example/rss',
                                                                'feed_name': 'Old news'}}}})
 
-    class Resp:
-        content = RSS091
-        status_code = 200
+    from app import outbound_guard
+    seen = []
 
-        def raise_for_status(self):
-            return None
-    monkeypatch.setattr(requests, 'get', lambda *a, **k: Resp())
+    def fetch(url, **k):                                  # v173: the feed goes through outbound_guard.fetch
+        seen.append(url)
+        return outbound_guard.Response(url, 200, {}, RSS091)
+    monkeypatch.setattr(outbound_guard, 'fetch', fetch)
+    monkeypatch.setattr(requests, 'get', lambda *a, **k: pytest.fail('news must not use requests.get'))
     c = _owner_client(client)
     r = c.get('/api/news', environ_base={'REMOTE_ADDR': '192.168.1.20'})
     assert r.status_code == 200, r.get_data(as_text=True)
     titles = [i.get('title') for i in (r.get_json().get('items') or r.get_json().get('headlines') or [])]
     assert titles[:2] == ['Headline one', 'Headline two']
+    assert seen == ['https://news.example/rss']
     app.main._news_cache.clear()
 
 

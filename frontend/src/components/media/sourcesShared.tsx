@@ -66,6 +66,13 @@ export function classifySourceType(text: string): string {
   return 'Other';
 }
 
+/** v173 (Designer): the bucket as shown, in sentence case ('Remux', 'Blu-ray'); WEB-DL is an acronym. */
+export function sourceTypeLabel(type: string | null | undefined): string {
+  if (type === 'REMUX') return 'Remux';
+  if (type === 'BLURAY') return 'Blu-ray';
+  return type || '';
+}
+
 /** Order the source types present, best→worst, appending anything unmapped. */
 export function orderSourceTypes(present: Iterable<string>): string[] {
   const set = new Set(present);
@@ -466,8 +473,8 @@ export function IndexerQueryOverride({
             textAlign: 'left',
           }}
         >
-          <span style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.02em', opacity: 0.85, flexShrink: 0 }}>
-            PLAIN TEXT
+          <span style={{ fontSize: '11px', fontWeight: 700, opacity: 0.85, flexShrink: 0 }}>
+            Plain text
           </span>
           <span style={{
             fontSize: '13px',

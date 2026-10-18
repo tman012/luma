@@ -160,8 +160,6 @@ function KioskModeToggle() {
         fontSize: 13,
         fontWeight: 600,
         color: 'rgba(255,255,255,0.85)',
-        letterSpacing: '0.05em',
-        textTransform: 'uppercase',
         userSelect: 'none',
       }}>
         {isDaily ? 'Daily' : 'Movie'}

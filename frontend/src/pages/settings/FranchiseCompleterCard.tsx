@@ -237,7 +237,7 @@ export function FranchiseCompleterCard() {
 
       {preview && !preview.error && (
         <div className="col-span-full rounded-lg border border-white/8 bg-black/25 p-3">
-          <p className="mb-2 text-[11px] uppercase tracking-wide text-white/35">
+          <p className="mb-2 text-[11px] text-white/35">
             Preview · {preview.candidates ?? 0} gaps · {preview.collections_eligible ?? 0} franchises
             {' '}≥ {Math.round(preview.min_fame || 0).toLocaleString()} fame · ≤{preview.max_missing_parts} missing
           </p>
@@ -262,13 +262,13 @@ export function FranchiseCompleterCard() {
       {msg && <p className="col-span-full text-[12px] text-white/50">{msg}</p>}
 
       <div className="col-span-full rounded-lg border border-white/8 bg-black/20 px-3 py-2">
-        <p className="text-[11px] uppercase tracking-wide text-white/35">
-          Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'Never'}
+        <p className="text-[11px] text-white/35">
+          Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
         </p>
-        <p className="text-[11px] uppercase tracking-wide text-white/35">
+        <p className="text-[11px] text-white/35">
           Next run: {status?.next_run
             ? `${new Date(status.next_run).toLocaleString()}${status.server_tz ? ` ${status.server_tz}` : ''}`
-            : 'Not scheduled'}
+            : 'not scheduled'}
         </p>
         {status?.last_result && (
           <p className={`mt-1 text-[12px] ${outcomeClass(status.last_result)}`}>
@@ -279,7 +279,7 @@ export function FranchiseCompleterCard() {
 
       {log.length > 0 && (
         <div className="col-span-full flex flex-col gap-1">
-          <p className="text-[11px] uppercase tracking-wide text-white/35">Recent nights</p>
+          <p className="text-[11px] text-white/35">Recent nights</p>
           {log.slice(0, 8).map((e, i) => (
             <div key={`${e.at}-${i}`} className="flex items-baseline justify-between gap-3 text-[12px]">
               <span className={`truncate ${OUTCOME_STYLES[e.outcome] || 'text-white/50'}`}>

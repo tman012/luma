@@ -278,8 +278,6 @@ export function KioskScreensaver({
               color: 'rgba(255,255,255,0.25)',
               marginTop: '10px',
               fontWeight: 300,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase' as const,
             }}
           >
             Tap to explore

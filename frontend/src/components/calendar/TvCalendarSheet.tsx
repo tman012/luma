@@ -159,7 +159,7 @@ const EpisodeRow = memo(function EpisodeRow({
           )}
           {ep.network && <span className="text-[12px] text-white/30">{ep.network}</span>}
           {ep.hasFile && (
-            <span className="rounded bg-green-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-green-400">
+            <span className="rounded bg-green-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-green-400">
               Downloaded
             </span>
           )}
@@ -438,7 +438,7 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
                     isSelected ? 'bg-white/15' : 'active:bg-white/5',
                   )}
                 >
-                  <span className={cn('text-[11px] font-semibold uppercase',
+                  <span className={cn('text-[11px] font-semibold',
                     isSelected ? 'text-white/70' : 'text-white/35')}>
                     {DAY_LETTERS[i]}
                   </span>

@@ -10,6 +10,7 @@
  */
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { getBadgeColor } from '@/components/media/TvDetailModal/tvSourcesUtils';
+import { NEUTRAL_GLASS } from '@/components/media/chipGlass';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { posterUrl } from '@/utils/image';
@@ -74,11 +75,14 @@ export const NO_DESTINATION = 'No destination';
 export const NO_ART_BG = 'rgba(255,255,255,0.04)';
 /** v170 (Designer): the row's left edge follows its state, never the tracker (the chip shows that). */
 export const EDGE_ATTENTION = '#fbbf24';
+/** v173 (Designer): 'No destination' reads amber, its text and its edge. */
+export const EDGE_NO_DESTINATION = '#f59e0b';
 export const EDGE_DOWNLOADING = '#3b82f6';
 export const EDGE_IMPORTED = '#22c55e';
 export const EDGE_NEUTRAL = 'rgba(255,255,255,0.18)';
 export function activeEdge(status: string): string {
-  if (status === 'stalled' || status === 'not_mapped' || status === 'no_writable' || status === 'no_destination') return EDGE_ATTENTION;
+  if (status === 'no_destination') return EDGE_NO_DESTINATION;
+  if (status === 'stalled' || status === 'not_mapped' || status === 'no_writable') return EDGE_ATTENTION;
   if (status === 'downloading') return EDGE_DOWNLOADING;
   return EDGE_NEUTRAL;            // copying/importing: done downloading, not in the library yet
 }
@@ -270,14 +274,11 @@ interface HistoryApiItem {
 }
 
 const NEUTRAL_CHIP: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.6)', border: '1px solid rgba(255,255,255,0.10)',
+  background: NEUTRAL_GLASS.bg, color: NEUTRAL_GLASS.fg, border: `1px solid ${NEUTRAL_GLASS.border}`,
 };
 
-/** Origin chip: one neutral gray pill (the tracker chip's shape); Genre Roulette gets a faint violet tint. */
-function originChipStyle(badge: string): React.CSSProperties {
-  if (badge === 'Genre Roulette') {
-    return { ...NEUTRAL_CHIP, background: 'rgba(167,139,250,0.12)', color: 'rgba(196,181,253,0.8)', border: '1px solid rgba(167,139,250,0.25)' };
-  }
+/** Origin chip: neutral glass, the tracker chip's look, for every origin (v173: Genre Roulette too). */
+function originChipStyle(_badge: string): React.CSSProperties {
   return NEUTRAL_CHIP;
 }
 
@@ -504,7 +505,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
           const stalled = dl.status === 'stalled' || notMapped || noWritable;
           const copying = dl.status === 'copying';
           const importing = dl.status === 'importing';
-          const accent = copying || importing ? '#4ade80' : stalled ? '#fbbf24' : '#60a5fa';
+          const accent = copying || importing ? '#4ade80' : noDest ? EDGE_NO_DESTINATION : stalled ? '#fbbf24' : '#60a5fa';
           const barColor = copying || importing ? '#22c55e' : stalled ? '#f59e0b' : '#3b82f6';
           const statusLabel = importing
             ? 'Processing…'

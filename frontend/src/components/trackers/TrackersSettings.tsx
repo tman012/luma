@@ -29,6 +29,7 @@ import {
 } from './trackersUi';
 import { SAVE_FAILED } from '@/utils/messages';
 import { IMPORT_TITLE, ProwlarrImport, StatusChip } from './ProwlarrImport';
+import { SearchSettings } from './SearchSettings';
 
 export const TRACKERS_BASE = '/settings/trackers';
 export const SAVED = 'Saved';
@@ -212,6 +213,7 @@ export function TrackersSettings({ wide, base = TRACKERS_BASE, onExit }: Tracker
       <TrackerList wide={wide} trackers={trackers} onAdd={openAdd} onOpen={t => navigate(`${base}/${t.id}`)}
         onToggle={toggle} onExit={onExit || (() => navigate('/settings'))}
         onImport={canImport ? () => setImporting(true) : null} />
+      <SearchSettings wide={wide} onSaved={show} />
       {view.kind === 'pick' && <TypePicker wide types={types} onPick={pick} onClose={toList} />}
       {importing && (
         <ProwlarrImport wide={wide} onClose={() => setImporting(false)} onSignIn={() => { setImporting(false); signIn(); }}

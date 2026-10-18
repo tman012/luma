@@ -159,11 +159,9 @@ export function OngoingShowPrompt({
               color: '#4ade80',
               fontSize: '12px',
               fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.6px',
             }}>
               <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#4ade80', boxShadow: '0 0 8px #4ade80' }} />
-              Currently Airing
+              Currently airing
             </span>
           </div>
 

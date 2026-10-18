@@ -6,6 +6,7 @@
  */
 
 import type { TvProcessedRelease } from './useTvSourcesData';
+import { NEUTRAL_GLASS, type ChipColor } from '@/components/media/chipGlass';
 import type { TvShowDetail } from '@/utils/modalParsers';
 import type { TvSeason, SonarrStatus } from '@/services/sonarrApi';
 import { SOURCE_TYPE_SEGMENT_ORDER, orderResolutions } from '@/components/media/sourcesShared';
@@ -97,53 +98,13 @@ export function formatAirDate(airDate: string | null | undefined): string | null
 }
 
 // ---------------------------------------------------------------------------
-// Badge palette for indexer colors
+// Tracker chips: neutral glass for every tracker (v173, Designer)
 // ---------------------------------------------------------------------------
 
-const BADGE_PALETTE = [
-  { bg: 'rgba(187,134,252,0.15)', fg: '#bb86fc', border: 'rgba(187,134,252,0.3)' },
-  { bg: 'rgba(96,165,250,0.15)',  fg: '#60a5fa', border: 'rgba(96,165,250,0.3)' },
-  { bg: 'rgba(52,211,153,0.15)',  fg: '#34d399', border: 'rgba(52,211,153,0.3)' },
-  { bg: 'rgba(251,191,36,0.15)',  fg: '#fbbf24', border: 'rgba(251,191,36,0.3)' },
-  { bg: 'rgba(248,113,113,0.15)', fg: '#f87171', border: 'rgba(248,113,113,0.3)' },
-  { bg: 'rgba(45,212,191,0.15)',  fg: '#2dd4bf', border: 'rgba(45,212,191,0.3)' },
-  { bg: 'rgba(244,114,182,0.15)', fg: '#f472b6', border: 'rgba(244,114,182,0.3)' },
-  { bg: 'rgba(163,230,53,0.15)',  fg: '#a3e635', border: 'rgba(163,230,53,0.3)' },
-];
+export type BadgeColor = ChipColor;
 
-export type BadgeColor = { bg: string; fg: string; border: string };
-
-// Explicit color mappings for known indexers (keep in sync with movie sourcesUtils).
-// Purple for PHD so Recommended can own green without colliding.
-const INDEXER_COLOR_MAP: Record<string, BadgeColor> = {
-  IPT:  { bg: 'rgba(96, 165, 250, 0.15)',  fg: '#60a5fa', border: 'rgba(96, 165, 250, 0.3)' },  // blue
-  PHD:  { bg: 'rgba(187, 134, 252, 0.15)', fg: '#bb86fc', border: 'rgba(187, 134, 252, 0.3)' },  // purple
-};
-
-const _badgeColorCache: Record<string, BadgeColor> = {};
-let _paletteCounter = 0;
-
-export function getBadgeColor(indexer: string): BadgeColor {
-  if (_badgeColorCache[indexer]) return _badgeColorCache[indexer];
-  const upper = indexer.toUpperCase();
-  for (const [key, color] of Object.entries(INDEXER_COLOR_MAP)) {
-    const re = new RegExp(`(^|[^A-Z])${key}($|[^A-Z])`);
-    if (re.test(upper)) {
-      _badgeColorCache[indexer] = color;
-      return color;
-    }
-  }
-  const explicitColors = new Set(Object.values(INDEXER_COLOR_MAP).map(c => c.fg));
-  let color = BADGE_PALETTE[_paletteCounter % BADGE_PALETTE.length]!;
-  let attempts = 0;
-  while (explicitColors.has(color.fg) && attempts < BADGE_PALETTE.length) {
-    _paletteCounter++;
-    color = BADGE_PALETTE[_paletteCounter % BADGE_PALETTE.length]!;
-    attempts++;
-  }
-  _badgeColorCache[indexer] = color;
-  _paletteCounter++;
-  return color;
+export function getBadgeColor(_indexer: string): BadgeColor {
+  return NEUTRAL_GLASS;
 }
 
 // ---------------------------------------------------------------------------

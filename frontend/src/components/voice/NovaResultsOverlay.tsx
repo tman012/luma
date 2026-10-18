@@ -137,7 +137,7 @@ export function NovaResultsOverlay({ open, title, items, onClose }: Props) {
           style={{ background: 'rgba(20, 20, 20, 0.95)' }}
         >
           <div className="min-w-0">
-            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-white/45">
+            <p className="text-[11px] font-medium text-white/45">
               Nova
             </p>
             <h2 className="mt-0.5 truncate text-lg font-semibold text-white md:text-xl">

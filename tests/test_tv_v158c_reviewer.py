@@ -39,7 +39,8 @@ def test_manual_grab_stays_interactive(signed_in, env):  # noqa: F811
     log0, pur0 = _entries(env['guard'], gk)
     tracker_sources.fetch_release(tok)
     log1, pur1 = _entries(env['guard'], gk)
-    assert [k for _, k in log1[len(log0):]] == ['i'] and pur1 == pur0
+    # v173 (PM, Tester FF-6): interactive, and counted once toward the automation tally
+    assert [k for _, k in log1[len(log0):]] == ['i'] and [p for _, p in pur1[len(pur0):]] == ['tv']
 
 
 def test_automatic_grab_on_an_uncapped_indexer_is_background_without_the_tv_purpose(signed_in, env):  # noqa: F811

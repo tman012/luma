@@ -823,6 +823,12 @@ MOUNT_META = 'tv_mount:'                     # + path id: the mount point the pa
 SKIPPED_META = 'tv_skipped:'                 # + path id: v170, the last scan skipped it (empty or system folders only)
 ROOT_META = 'tv_root:'                       # + path id: v171, the folder its last good scan read ('-' once repointed)
 REPOINTED = '-'
+COVERAGE_META = 'tv_coverage:'               # + path id: v173, the folder set the coverage guard keeps seeing
+# v173 (PM): the coverage guard releases once the same folder set (mount up) has been seen for
+# COVERAGE_RELEASE_SCANS scans spanning COVERAGE_RELEASE_SPAN_S, or for COVERAGE_RELEASE_AGE_S
+COVERAGE_RELEASE_SCANS = 3
+COVERAGE_RELEASE_SPAN_S = 3600
+COVERAGE_RELEASE_AGE_S = 86400
 
 
 def _system_dir(name: str) -> bool:
@@ -903,7 +909,7 @@ def _prior_folders(pid: str) -> set:
                 | {r['folder'] for r in conn.execute('SELECT folder FROM unmatched WHERE path_id = ?', (pid,))})
 
 
-def _unavailable(pid: str, root_real: str, shows: List[str]) -> Optional[str]:
+def _unavailable(pid: str, root_real: str, shows: List[str], now: Optional[float] = None) -> Optional[str]:
     """Why library path *pid* must be skipped as Unavailable (rows kept, nothing detached, nothing
     matched), or None to scan it.
 
@@ -931,8 +937,47 @@ def _unavailable(pid: str, root_real: str, shows: List[str]) -> Optional[str]:
     if last_root not in (None, root_real):
         return None
     if len(present) * 2 < len(prior):
-        return f'coverage {len(present)}/{len(prior)}'
+        why = f'coverage {len(present)}/{len(prior)}'
+        return None if _coverage_released(pid, shows, why, now) else why
     return None
+
+
+def _coverage_released(pid: str, shows: List[str], why: str, now: Optional[float]) -> bool:
+    """v173 (PM, Reviewer on 17ecf51): the coverage guard's exit. Folders deleted outside Luma (or a
+    single show renamed or replaced) would otherwise keep the path Unavailable forever. The same
+    folder set, seen with the mount up for 3 scans spanning an hour, or for 24 h, is the library now:
+    the guard lets that scan through (the gone shows detach, new ones are found). Any change in the
+    folder set starts the count again."""
+    import hashlib
+    now = time.time() if now is None else now
+    sig = hashlib.sha256('\x00'.join(sorted(shows)).encode('utf-8', 'surrogatepass')).hexdigest()[:32]
+    try:
+        st = json.loads(tv_store.get_meta(COVERAGE_META + pid) or '{}')
+    except Exception:                        # noqa: BLE001 - unreadable: start again
+        st = {}
+    if not isinstance(st, dict) or st.get('sig') != sig:
+        st = {'sig': sig, 'first': now, 'scans': 0}
+    st['scans'] = int(st.get('scans') or 0) + 1
+    first = float(st.get('first') or now)
+    if ((st['scans'] >= COVERAGE_RELEASE_SCANS and now - first >= COVERAGE_RELEASE_SPAN_S)
+            or now - first >= COVERAGE_RELEASE_AGE_S):
+        logger.warning('TV scan: library path %s: the same folders for %d scans over %.1f h (%s); '
+                       'accepting them, the missing shows detach', pid, st['scans'], (now - first) / 3600, why)
+        _clear_coverage(pid)
+        return True
+    try:
+        tv_store.set_meta(COVERAGE_META + pid, json.dumps(st))
+    except Exception:                        # noqa: BLE001 - only the release clock
+        pass
+    return False
+
+
+def _clear_coverage(pid: str) -> None:
+    try:
+        if tv_store.get_meta(COVERAGE_META + pid) is not None:
+            tv_store.set_meta(COVERAGE_META + pid, None)
+    except Exception:                        # noqa: BLE001
+        pass
 
 
 def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> Dict[str, int]:
@@ -946,7 +991,9 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
     # v170 (Reviewer): a mount the path was on that is gone now is not a skip on its own: with the
     # path's known show folders present the mount record was simply retired (re-recorded below and
     # scanned). v171: see _unavailable for when it is a skip.
-    why = _unavailable(pid, root_real, shows)
+    why = _unavailable(pid, root_real, shows, now)
+    if why is None or not why.startswith('coverage'):
+        _clear_coverage(pid)                 # v173: only consecutive coverage skips count toward release
     if why:
         # M34 (v167): an empty library path that had shows is an unmounted share's mount point (or a
         # share that's still coming up), not a library whose every show was deleted: skip it like a

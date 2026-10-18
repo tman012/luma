@@ -668,7 +668,7 @@ export function CompactLayout(props: TvModalViewProps) {
                 {activeSeasonData && !isEpisodeIntent && (
                   <div style={{ textAlign: 'center', marginTop: '6px', marginBottom: '2px' }}>
                     {seasonEyebrow(activeSeasonData.name, seasonDetailMode!) && (
-                      <p data-season-eyebrow style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.55)', margin: '0 0 3px', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
+                      <p data-season-eyebrow style={{ fontSize: '12px', fontWeight: 600, color: 'rgba(255,255,255,0.55)', margin: '0 0 3px', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>
                         {seasonEyebrow(activeSeasonData.name, seasonDetailMode!)}
                       </p>
                     )}

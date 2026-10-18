@@ -9,6 +9,7 @@ import { ListEditor } from './components/ListEditor';
 import { MobileCardNav, type CardItem } from './components/MobileCardNav';
 import { useSettings } from './useSettings';
 import { syncFromPlex } from '@/services/settingsApi';
+import { sentenceCase } from '@/utils/sentenceCase';
 
 // -- System Paths -------------------------------------------------
 
@@ -43,8 +44,8 @@ function MediaTypesEditor() {
             {(item.label as string) || 'Untitled'}
           </span>
           <div className="mt-0.5 flex items-center gap-2">
-            <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-blue-500/15 text-blue-400">
-              {(item.category as string) ?? 'movie'}
+            <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-blue-500/15 text-blue-400">
+              {sentenceCase((item.category as string) ?? 'movie')}
             </span>
             {item.description ? (
               <span className="text-[12px] text-white/30">
@@ -52,7 +53,7 @@ function MediaTypesEditor() {
               </span>
             ) : null}
             {item.is_default ? (
-              <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-emerald-500/15 text-emerald-400">
+              <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-500/15 text-emerald-400">
                 Default
               </span>
             ) : null}
@@ -188,7 +189,7 @@ function LibraryPathsEditor() {
           </span>
           <div className="mt-0.5 flex items-center gap-2 text-[12px] text-white/30">
             {item.type ? (
-              <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase bg-indigo-500/15 text-indigo-400">
+              <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-indigo-500/15 text-indigo-400">
                 {String(item.type)}
               </span>
             ) : null}

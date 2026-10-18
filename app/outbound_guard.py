@@ -125,6 +125,14 @@ def _own(addr: str) -> bool:
         return True
 
 
+def _own_name(host: str) -> bool:
+    try:
+        from app.tracker_http import public_hosts
+        return host.rstrip('.').lower() in public_hosts()
+    except Exception:                       # noqa: BLE001
+        return False
+
+
 def _resolve(host: str, port: int) -> List[str]:
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
@@ -161,6 +169,8 @@ def check_url(url: str) -> Tuple[str, str, int, str, str]:
     port = port or _DEFAULT_PORTS[scheme]
     if not 0 < port < 65536:
         raise BlockedURL('Invalid URL')
+    if _own_name(host):                          # v173: Luma's own public name, tunnel or not
+        raise BlockedURL('Address not allowed')
     addrs = _resolve(host, port)
     if any(is_blocked_ip(a) for a in addrs):
         raise BlockedURL('Address not allowed')

@@ -24,6 +24,7 @@ import {
   scrollChildIntoContainer,
   IndexerQueryOverride,
   type MediaGrabContext,
+  sourceTypeLabel,
 } from '@/components/media/sourcesShared';
 
 /**
@@ -387,7 +388,7 @@ function ExpandedTvSourcesView({
               return (
                 <div key={st.type}>
                   <SegmentRow
-                    label={st.type}
+                    label={sourceTypeLabel(st.type)}
                     count={st.items.length}
                     releases={st.items}
                     colorFor={getBadgeColor}
@@ -464,7 +465,7 @@ function ExpandedTvSourcesView({
           recommended,
         );
         return (
-          <SourcesScreen zIndex={10004} onBack={() => setSeeingAll(false)} headerText={`${displayResolution(selectedQuality)} · ${selectedSourceType}`}>
+          <SourcesScreen zIndex={10004} onBack={() => setSeeingAll(false)} headerText={`${displayResolution(selectedQuality)} · ${sourceTypeLabel(selectedSourceType)}`}>
             <div data-scroll-container className="luma-scroll-y" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y', width: '100%', maxWidth: '900px', paddingTop: '40px' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {rows.map((release) => {
@@ -656,8 +657,8 @@ function ReleaseCard({
         padding: '14px 16px',
         marginBottom: '8px',
         cursor: 'pointer',
-        border: `1px solid ${recommended ? 'rgba(74, 222, 128, 0.45)' : (expanded ? badge.border : badge.border.replace('0.3)', '0.15)'))}`,
-        borderLeft: `3px solid ${recommended ? '#4ade80' : badge.fg}`,
+        border: `1px solid ${recommended ? 'rgba(74, 222, 128, 0.45)' : (expanded ? badge.border : 'rgba(255,255,255,0.06)')}`,
+        borderLeft: `3px solid ${recommended ? '#4ade80' : 'rgba(255,255,255,0.18)'}`,
         transition: 'background 0.15s, border-color 0.15s',
         animation: `tvSrcCardEnter 250ms ease-out ${staggerDelay}ms both`,
       }}

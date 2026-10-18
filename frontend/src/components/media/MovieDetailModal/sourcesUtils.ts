@@ -7,56 +7,14 @@
  */
 
 import { classifySourceType, SOURCE_TYPE_SEGMENT_ORDER, orderResolutions } from '@/components/media/sourcesShared';
+import { NEUTRAL_GLASS, type ChipColor } from '@/components/media/chipGlass';
 
 // ---------------------------------------------------------------------------
-// Badge palette for indexer colors
+// Tracker chips: neutral glass for every tracker (v173, Designer)
 // ---------------------------------------------------------------------------
 
-const BADGE_PALETTE = [
-  { bg: 'rgba(187, 134, 252, 0.15)', fg: '#bb86fc', border: 'rgba(187, 134, 252, 0.3)' },
-  { bg: 'rgba(96, 165, 250, 0.15)',  fg: '#60a5fa', border: 'rgba(96, 165, 250, 0.3)' },
-  { bg: 'rgba(52, 211, 153, 0.15)',  fg: '#34d399', border: 'rgba(52, 211, 153, 0.3)' },
-  { bg: 'rgba(251, 191, 36, 0.15)',  fg: '#fbbf24', border: 'rgba(251, 191, 36, 0.3)' },
-  { bg: 'rgba(248, 113, 113, 0.15)', fg: '#f87171', border: 'rgba(248, 113, 113, 0.3)' },
-  { bg: 'rgba(45, 212, 191, 0.15)',  fg: '#2dd4bf', border: 'rgba(45, 212, 191, 0.3)' },
-  { bg: 'rgba(244, 114, 182, 0.15)', fg: '#f472b6', border: 'rgba(244, 114, 182, 0.3)' },
-  { bg: 'rgba(163, 230, 53, 0.15)',  fg: '#a3e635', border: 'rgba(163, 230, 53, 0.3)' },
-];
-
-// Explicit color mappings for known indexers
-const INDEXER_COLOR_MAP: Record<string, (typeof BADGE_PALETTE)[0]> = {
-  IPT:  { bg: 'rgba(96, 165, 250, 0.15)',  fg: '#60a5fa', border: 'rgba(96, 165, 250, 0.3)' },  // blue
-  PHD:  { bg: 'rgba(187, 134, 252, 0.15)', fg: '#bb86fc', border: 'rgba(187, 134, 252, 0.3)' },  // purple (green reserved for Recommended)
-};
-
-const _badgeColorCache: Record<string, (typeof BADGE_PALETTE)[0]> = {};
-let _paletteCounter = 0;
-
-export function getBadgeColor(indexer: string): (typeof BADGE_PALETTE)[0] {
-  if (_badgeColorCache[indexer]) return _badgeColorCache[indexer];
-  // Check explicit name mappings first (case-insensitive, word-boundary aware)
-  const upper = indexer.toUpperCase();
-  for (const [key, color] of Object.entries(INDEXER_COLOR_MAP)) {
-    // Use word boundary check: "BHD" should NOT match "PHD"
-    const re = new RegExp(`(^|[^A-Z])${key}($|[^A-Z])`);
-    if (re.test(upper)) {
-      _badgeColorCache[indexer] = color;
-      return color;
-    }
-  }
-  // Exclude explicitly-mapped palette colors from cycling to avoid duplicates
-  const explicitColors = new Set(Object.values(INDEXER_COLOR_MAP).map(c => c.fg));
-  let color = BADGE_PALETTE[_paletteCounter % BADGE_PALETTE.length]!;
-  // Skip palette entries that match an explicit mapping
-  let attempts = 0;
-  while (explicitColors.has(color.fg) && attempts < BADGE_PALETTE.length) {
-    _paletteCounter++;
-    color = BADGE_PALETTE[_paletteCounter % BADGE_PALETTE.length]!;
-    attempts++;
-  }
-  _badgeColorCache[indexer] = color;
-  _paletteCounter++;
-  return color;
+export function getBadgeColor(_indexer: string): ChipColor {
+  return NEUTRAL_GLASS;
 }
 
 // ---------------------------------------------------------------------------

@@ -153,7 +153,7 @@ export function RateCompactSheet({
                 className="mt-2 w-[196px] rounded-2xl object-cover shadow-2xl ring-1 ring-white/10"
               />
             )}
-            <p className="mt-6 text-[11px] uppercase tracking-[0.16em] text-white/35">
+            <p className="mt-6 text-[11px] text-white/35">
               You watched
             </p>
             <h1 className="mt-2 text-center text-[24px] font-semibold leading-tight text-white/95">
@@ -188,7 +188,7 @@ export function RateCompactSheet({
         ) : (
           <>
             <div className="shrink-0 px-5 pb-3">
-              <p className="text-[11px] uppercase tracking-[0.16em] text-white/35">
+              <p className="text-[11px] text-white/35">
                 Because you liked
               </p>
               <h2 className="mt-1 text-[19px] font-bold leading-tight text-white">

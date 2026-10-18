@@ -7,6 +7,10 @@ season and episode number. The set is built from Plex's TV sections (GETs
 only, through Luma's existing Plex client), kept in memory, rebuilt every
 FULL_TTL_S on a Calendar refresh, and topped up every minute from recently
 added. Plex not configured or unreachable: an empty set, never an error.
+
+v173 (Tester FF-5): Plex disconnected or removed (no configured Plex), or pointed at another server,
+drops the index at once, so the Calendar stops showing Downloaded from a Plex that's gone, without
+a restart.
 """
 from __future__ import annotations
 
@@ -26,7 +30,7 @@ Key = Tuple[str, int, int, int]          # ('tmdb'|'tvdb', show id, season, epis
 _cfg: Dict[str, Any] = {}
 _have: Set[Key] = set()
 _shows: Dict[str, Tuple[Optional[int], Optional[int]]] = {}   # Plex show ratingKey -> (tmdb, tvdb)
-_state: Dict[str, Any] = {'built_at': 0.0, 'down': False}
+_state: Dict[str, Any] = {'built_at': 0.0, 'down': False, 'server': None}
 _new: List[Key] = []          # recently added keys not yet looked at by tv_watch.plex_tick
 _lock = threading.Lock()
 
@@ -66,6 +70,34 @@ def _plex():
     return p if p is not None and getattr(p, 'is_configured', False) else None
 
 
+def _server(p) -> str:
+    return str(getattr(p, 'plex_url', '') or '').strip().rstrip('/').lower()
+
+
+def forget(reason: str = 'Plex is no longer connected') -> None:
+    """Drop the 'in Plex' index (v173). Safe to call any time; an in-flight rebuild for the old
+    server doesn't write its result back (it checks the server again before storing)."""
+    had = bool(_have or _shows or _new or _state.get('built_at'))
+    _have.clear()
+    _shows.clear()
+    _new.clear()
+    _state.update(built_at=0.0, down=False, server=None)
+    if had:
+        logger.info('TV Plex: index cleared (%s)', reason)
+
+
+def _current() -> Optional[Any]:
+    """The configured Plex, after dropping an index built from a Plex that's gone or changed."""
+    p = _plex()
+    if p is None:
+        if _have or _shows or _new or _state.get('built_at'):
+            forget()
+        return None
+    if _state.get('server') is not None and _server(p) != _state['server']:
+        forget('Plex server changed')
+    return p
+
+
 def _sections(p) -> list:
     root = p._get('/library/sections')
     if root is None:
@@ -95,7 +127,7 @@ def _keys_for(ep, shows) -> Set[Key]:
 
 def rebuild(force: bool = False) -> int:
     """Every episode in Plex's TV sections (paged). Returns the set size; -1 when skipped."""
-    p = _plex()
+    p = _current()
     if p is None:
         return -1
     if not force and time.time() - _state['built_at'] < FULL_TTL_S:
@@ -122,10 +154,15 @@ def rebuild(force: bool = False) -> int:
                 if len(eps) < PAGE:
                     break
                 start += PAGE
+        now = _plex()
+        if now is None or _server(now) != _server(p):    # disconnected or repointed meanwhile
+            forget('Plex changed during a rebuild')
+            return -1
         _have.clear(); _have.update(have)
         _shows.clear(); _shows.update(shows)
         _state['built_at'] = time.time()
         _state['down'] = False
+        _state['server'] = _server(p)
         logger.info("TV Plex: %d episode keys for %d shows in %.1fs", len(have), len(shows), time.monotonic() - t0)
         return len(have)
     except Exception as e:                    # noqa: BLE001 - Plex trouble never breaks the Calendar
@@ -150,7 +187,7 @@ def _learn(p, key: Optional[str]) -> None:
 
 def recent() -> int:
     """Top up from Plex's recently added TV episodes. Returns how many were new."""
-    p = _plex()
+    p = _current()
     if p is None or not _state['built_at']:
         return 0
     n = 0
@@ -176,7 +213,9 @@ def recent() -> int:
 
 
 def has(tmdb_id: Optional[int], tvdb_id: Optional[int], season: int, episode: int) -> bool:
-    if _state.get('down'):
+    if not _have:
+        return False
+    if _current() is None or _state.get('down'):
         return False
     return ((tmdb_id is not None and ('tmdb', int(tmdb_id), season, episode) in _have)
             or (tvdb_id is not None and ('tvdb', int(tvdb_id), season, episode) in _have))

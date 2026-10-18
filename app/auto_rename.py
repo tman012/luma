@@ -22,6 +22,7 @@ from app.movie_library import MovieLibrary  # Import MovieLibrary for real-time 
 # The paced copy moved to app/paced_copy.py unchanged; same names here.
 from app.paced_copy import COPY_CHUNK_BYTES, COPY_FLUSH_BYTES, _drop_cache, _paced_copy  # noqa: F401
 from app.qbit_owner import is_test_torrent
+from collections.abc import MutableSet
 
 logger = logging.getLogger('AutoRenamer')
 
@@ -82,6 +83,55 @@ class HistoryItem:
     def from_dict(cls, data: dict) -> 'HistoryItem':
         known = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in known})
+
+
+PROCESSED_CAP = 5000   # v173: was 500, trimmed in arbitrary set order (see ProcessedHashes)
+
+
+class ProcessedHashes(MutableSet):
+    """The Radarr hashes AutoRenamer is done with (a success or a give-up), oldest first.
+
+    v173 (PM, prod 'Atlantis: The Lost Empire' loop): the old store was a set trimmed to 500 by
+    ``set(list(s)[-500:])``. A set has no order, so past 500 entries the trim dropped arbitrary
+    hashes, often the one just given up on, and the 20-miss give-up started over (63 times in a
+    night). Now: insertion order, trimmed oldest first, never a hash still in the Radarr category
+    (``live``), and written atomically so a crash mid-write can't empty it."""
+
+    def __init__(self, items=()):
+        self._d: Dict[str, None] = {}
+        for h in items or ():
+            if isinstance(h, str) and h:
+                self._d[h] = None
+
+    def __contains__(self, h) -> bool:
+        return h in self._d
+
+    def __iter__(self):
+        return iter(list(self._d))
+
+    def __len__(self) -> int:
+        return len(self._d)
+
+    def add(self, h) -> None:
+        self._d.pop(h, None)
+        self._d[h] = None                     # newest last
+
+    def discard(self, h) -> None:
+        self._d.pop(h, None)
+
+    def trim(self, cap: int, live=frozenset()) -> int:
+        """Drop the oldest entries beyond *cap*, keeping any hash in *live*. Returns how many went."""
+        over = len(self._d) - cap
+        if over <= 0:
+            return 0
+        drop = [h for h in self._d if h.upper() not in live][:over]
+        for h in drop:
+            self._d.pop(h, None)
+        return len(drop)
+
+    def to_list(self) -> List[str]:
+        return list(self._d)
+
 
 class AutoRenamer:
     """Monitors qBittorrent and automatically renames/moves completed downloads"""
@@ -222,28 +272,36 @@ class AutoRenamer:
             logger.error(f"Error saving history: {e}")
 
     def load_radarr_processed(self):
-        """Load set of already-processed Radarr download hashes"""
-        self.radarr_processed = set()
+        """Load the already-processed Radarr download hashes (oldest first)"""
+        self.radarr_processed = ProcessedHashes()
         if os.path.exists(self.radarr_processed_file):
             try:
                 with open(self.radarr_processed_file, 'r') as f:
                     data = json.load(f)
-                    self.radarr_processed = set(data)
+                if not isinstance(data, list):
+                    raise ValueError('not a list')
+                self.radarr_processed = ProcessedHashes(data)
                 logger.info(f"📄 Loaded {len(self.radarr_processed)} processed Radarr downloads")
             except Exception as e:
                 logger.error(f"Error loading radarr processed data: {e}")
-                self.radarr_processed = set()
+                self.radarr_processed = ProcessedHashes()
 
     def save_radarr_processed(self):
-        """Save processed Radarr download hashes to file"""
+        """Save processed Radarr download hashes to file (atomically; v173: oldest trimmed first,
+        never one still in the Radarr category)"""
         try:
-            # Keep only last 500 hashes to prevent unbounded growth
-            if len(self.radarr_processed) > 500:
-                # Convert to list, keep last 500, convert back
-                self.radarr_processed = set(list(self.radarr_processed)[-500:])
-
-            with open(self.radarr_processed_file, 'w') as f:
-                json.dump(list(self.radarr_processed), f, indent=2)
+            if not isinstance(self.radarr_processed, ProcessedHashes):
+                self.radarr_processed = ProcessedHashes(sorted(self.radarr_processed))
+            live = getattr(self, '_radarr_live', None) or frozenset()
+            dropped = self.radarr_processed.trim(PROCESSED_CAP, live)
+            if dropped:
+                logger.info(f"Processed Radarr downloads: trimmed {dropped} oldest")
+            tmp = f"{self.radarr_processed_file}.tmp"
+            with open(tmp, 'w') as f:
+                json.dump(self.radarr_processed.to_list(), f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.radarr_processed_file)
         except Exception as e:
             logger.error(f"Error saving radarr processed data: {e}")
 
@@ -1613,6 +1671,8 @@ class AutoRenamer:
         radarr_torrents = self.get_radarr_category_torrents()
         if not radarr_torrents:
             return
+        # v173: hashes still in the category are never trimmed from the processed store
+        self._radarr_live = frozenset(str(t.get("hash") or "").upper() for t in radarr_torrents if t.get("hash"))
 
         # Filter to completed torrents only
         completed_states = ["completed", "pausedUP", "stalledUP", "uploading", "queuedUP"]

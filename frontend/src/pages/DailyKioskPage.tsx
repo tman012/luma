@@ -582,8 +582,6 @@ function SportsWidget({ data, textShadow: ts }: { data: SportsData; textShadow: 
                   fontWeight: 500,
                   color: '#4FC3F7',
                   textShadow: ts,
-                  letterSpacing: '1.4px',
-                  textTransform: 'uppercase',
                   lineHeight: 1.1,
                   marginBottom: 'clamp(2px, 0.4vh, 6px)',
                 }}>
@@ -597,8 +595,6 @@ function SportsWidget({ data, textShadow: ts }: { data: SportsData; textShadow: 
                   fontWeight: 500,
                   color: isLive ? '#4FC3F7' : 'rgba(255,255,255,0.72)',
                   textShadow: ts,
-                  letterSpacing: '1.2px',
-                  textTransform: 'uppercase',
                   lineHeight: 1.1,
                 }}>
                   {isLive
@@ -645,8 +641,6 @@ function SportsWidget({ data, textShadow: ts }: { data: SportsData; textShadow: 
               fontWeight: 500,
               color: 'rgba(255,255,255,0.62)',
               textShadow: ts,
-              letterSpacing: '0.24em',
-              textTransform: 'uppercase',
             }}>
               Outs
             </span>
@@ -1459,12 +1453,10 @@ function NowAvailableOverlay({
           <span style={{
             fontSize: 'clamp(14px, 1.6vw, 22px)',
             fontWeight: 500,
-            letterSpacing: '0.25em',
-            textTransform: 'uppercase',
             color: 'rgba(120, 200, 255, 0.9)',
             textShadow: ts,
           }}>
-            Now Available
+            Now available
           </span>
           {typeof data.rating === 'number' && data.rating > 0 && (
             <span style={{

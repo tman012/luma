@@ -149,8 +149,11 @@ def _parse_us_digital(payload: Optional[Dict[str, Any]]) -> Optional[str]:
     return min(dates)
 
 
+_MONTHS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')   # not locale-dependent
+
+
 def format_digital_label(iso_date: Optional[str]) -> Optional[str]:
-    """Compact label: uppercase 3-letter month + day, e.g. 'JAN 9'.
+    """Compact label: 3-letter month + day, e.g. 'Jan 9' (v173: sentence case, was 'JAN 9').
 
     No year and no 'Digital release' prefix — shown centered above the title under the poster (not as an on-poster overlay).
     """
@@ -160,7 +163,7 @@ def format_digital_label(iso_date: Optional[str]) -> Optional[str]:
         dt = datetime.strptime(iso_date[:10], "%Y-%m-%d")
     except ValueError:
         return None
-    return f"{dt.strftime('%b').upper()} {dt.day}"
+    return f"{_MONTHS[dt.month - 1]} {dt.day}"
 
 def _fetch_one(tmdb_id: int, api_key: str) -> Tuple[int, Optional[str]]:
     payload = _tmdb_release_dates(tmdb_id, api_key)

@@ -23,6 +23,7 @@ import {
   scrollChildIntoContainer,
   type MovieGrabContext,
   IndexerQueryOverride,
+  sourceTypeLabel,
 } from '@/components/media/sourcesShared';
 import {
   displayResolution,
@@ -219,7 +220,7 @@ function FocusableSourceTile({ st, onClick, tileStyle, isTablet, isWeb, zoneId }
   return (
     <button ref={ref} {...focusProps} type="button" onClick={onClick} style={tileStyle} data-source-tile>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-        <span style={{ fontSize: (isTablet || isWeb) ? '24px' : '20px', fontWeight: 700, whiteSpace: 'nowrap' }}>{st.type}</span>
+        <span style={{ fontSize: (isTablet || isWeb) ? '24px' : '20px', fontWeight: 700, whiteSpace: 'nowrap' }}>{sourceTypeLabel(st.type)}</span>
         <span style={{ fontSize: (isTablet || isWeb) ? '16px' : '14px', color: 'rgba(255,255,255,0.5)', whiteSpace: 'nowrap' }}>{sourcesCount(st.items.length)}</span>
       </div>
       <TrackerSeedPills releases={st.items} colorFor={getBadgeColor} max={6} />
@@ -707,7 +708,7 @@ function ExpandedSourcesView({
             <SourcesScreen zIndex={125} onBack={() => setSeeingAll(false)} backFocusKey="src-back-4" backZoneId="sources-level-4" isWeb={isWeb}>
               <div data-scroll-container className="luma-scroll-y" style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y', width: '100%', maxWidth: '900px', paddingTop: '40px', position: 'relative', zIndex: 1 }}>
                 <h2 style={{ fontSize: '22px', fontWeight: 600, color: 'rgba(255,255,255,0.85)', textAlign: 'center', margin: '0 0 16px' }}>
-                  {displayResolution(selectedQuality)} · {selectedSourceType}
+                  {displayResolution(selectedQuality)} · {sourceTypeLabel(selectedSourceType)}
                 </h2>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   {rows.map((release, i) => (
@@ -799,8 +800,8 @@ function ReleaseCard({
         padding: '14px 16px',
         marginBottom: '8px',
         cursor: 'pointer',
-        border: `1px solid ${recommended ? 'rgba(74, 222, 128, 0.45)' : (expanded ? badge.border : badge.border.replace('0.3)', '0.15)'))}`,
-        borderLeft: `3px solid ${recommended ? '#4ade80' : badge.fg}`,
+        border: `1px solid ${recommended ? 'rgba(74, 222, 128, 0.45)' : (expanded ? badge.border : 'rgba(255,255,255,0.06)')}`,
+        borderLeft: `3px solid ${recommended ? '#4ade80' : 'rgba(255,255,255,0.18)'}`,
         transition: 'background 0.15s, border-color 0.15s',
         animation: `srcCardEnter 250ms ease-out ${staggerDelay}ms both`,
       }}
