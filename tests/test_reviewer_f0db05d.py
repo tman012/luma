@@ -13,6 +13,13 @@ from tests.test_taylor_5002_config import CONFIG, MOVIES_ID, TV_ID
 from tests.test_home_rails import REMOTE
 
 FM = '/api/settings/library-paths'
+RULES = '/api/settings/library-rules'
+
+
+def _movies_rule(c, pid):
+    """Movies depend on the Library paths (a rule): only then is an implicit fallback "used by Movies" (PM, Oct 18)."""
+    r = {'enabled': True, 'path_id': pid, 'released_within': {'n': 1, 'unit': 'years'}, 'resolution': ['1080p'], 'source': []}
+    fm.save({**fm.load(), 'rules': [{**r, 'id': 'r_00000001'}]})
 ITEM = {'resolution': '1080p', 'source': 'web'}
 
 
@@ -23,6 +30,7 @@ def _dest():
 
 def test_f1_adding_a_path_pins_the_single_movies_path(owner, tv_env):  # noqa: F811
     movies = _add(owner, 'Movies', tv_env / 'Movies')
+    _movies_rule(owner, movies)
     assert fm.load()['fallback_path_id'] is None and _dest() == movies      # implicit
     _add(owner, 'TV', tv_env / 'TV')
     assert fm.load()['fallback_path_id'] == movies and _dest() == movies    # still Movies, now explicit
@@ -47,6 +55,7 @@ def test_f1_tv_select_pins_the_implicit_fallback(owner, tv_env):  # noqa: F811
                                     {'id': 'p_00000a02', 'name': 'TV', 'path': str(tv_env / 'TV')},
                                     {'id': 'p_00000a03', 'name': 'Anime', 'path': str(tv_env / 'Anime')}]})
     tv_settings.save({**tv_settings.load(), 'libraries': ['p_00000a02', 'p_00000a03']})
+    _movies_rule(owner, 'p_00000a01')
     assert fm.load()['fallback_path_id'] is None and _dest() == 'p_00000a01'
     assert _put(owner, ['p_00000a02']).status_code == 200                  # release Anime
     assert fm.load()['fallback_path_id'] == 'p_00000a01' and _dest() == 'p_00000a01'
@@ -56,6 +65,7 @@ def test_f1_tv_deselect_pins_the_implicit_fallback(owner, tv_env):  # noqa: F811
     fm.save({**fm.load(), 'paths': [{'id': 'p_00000a01', 'name': 'Movies', 'path': str(tv_env / 'Movies')},
                                     {'id': 'p_00000a02', 'name': 'TV', 'path': str(tv_env / 'TV')}]})
     tv_settings.save({**tv_settings.load(), 'libraries': ['p_00000a02']})
+    _movies_rule(owner, 'p_00000a01')
     assert _dest() == 'p_00000a01'
     assert _put(owner, []).status_code == 200
     # without the pin Movies would see two paths and no fallback: refused "no destination"
@@ -64,6 +74,7 @@ def test_f1_tv_deselect_pins_the_implicit_fallback(owner, tv_env):  # noqa: F811
 
 def test_f1_a_refused_selection_writes_nothing(owner, tv_env):  # noqa: F811
     only = _add(owner, 'Movies', tv_env / 'Movies')
+    _movies_rule(owner, only)
     before = fm.store_path().read_bytes()
     assert _put(owner, [only]).status_code == 409
     assert fm.store_path().read_bytes() == before
@@ -73,6 +84,8 @@ def test_f2_the_implicit_fallback_is_used_by_movies(owner, tv_env):  # noqa: F81
     fm.save({**fm.load(), 'paths': [{'id': 'p_00000a01', 'name': 'Movies', 'path': str(tv_env / 'Movies')},
                                     {'id': 'p_00000a02', 'name': 'TV', 'path': str(tv_env / 'TV')}]})
     tv_settings.save({**tv_settings.load(), 'libraries': ['p_00000a02']})
+    assert fm.movies_uses(fm.load()) == set()                 # no Movies rules: nothing depends on it
+    _movies_rule(owner, 'p_00000a01')
     assert fm.movies_uses(fm.load()) == {'p_00000a01'}
     r = _put(owner, ['p_00000a02', 'p_00000a01'])
     assert r.status_code == 409 and r.get_json()['errors']['selected'] == 'This path is used by Movies'
@@ -126,3 +139,17 @@ def test_taylor_config_stays_byte_identical_through_add_select_deselect(owner, t
     assert _put(owner, []).status_code == 200 and fm.store_path().read_bytes() == raw
     r = _put(owner, [TV_ID, MOVIES_ID])
     assert r.status_code == 409 and fm.store_path().read_bytes() == raw
+
+
+def test_f2_tv_only_the_lone_path_is_selectable_for_tv(owner, tv_env):  # noqa: F811
+    """PM, Oct 18 (M31): no Movies rules and no Movies fallback, so the only Library path can be TV's."""
+    only = _add(owner, 'TV', tv_env / 'TV')
+    assert _put(owner, [only]).status_code == 200
+    assert tv_settings.selected_ids() == [only] and fm.load()['fallback_path_id'] is None
+
+
+def test_f2_tv_only_a_second_path_doesnt_pin_the_fallback(owner, tv_env):  # noqa: F811
+    tv = _add(owner, 'TV', tv_env / 'TV')
+    _add(owner, 'Anime', tv_env / 'Anime')
+    assert fm.load()['fallback_path_id'] is None                 # never pinned to a TV path
+    assert _put(owner, [tv]).status_code == 200 and fm.load()['fallback_path_id'] is None
