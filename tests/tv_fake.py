@@ -58,6 +58,7 @@ class FakeTmdb:
                 'poster_path': f'/p{tid}.jpg', 'status': 'Returning Series', 'networks': [{'name': 'Net'}],
                 'external_ids': {'tvdb_id': s.get('tvdb'), 'imdb_id': s.get('imdb')},
                 'alternative_titles': {'results': []},
+                'number_of_seasons': len([n for n in s['seasons'] if n > 0]),
                 'seasons': [{'season_number': n, 'episode_count': c} for n, c in s['seasons'].items()]}
 
     def season(self, tid, n):
@@ -68,7 +69,8 @@ class FakeTmdb:
                                                          'air_date': d} for i, d in enumerate(s['daily'])]}
         titles = s.get('titles', {}).get(n, {})
         return {'name': f'Season {n}', 'episodes': [{'episode_number': e, 'id': tid * 1000 + n * 100 + e,
-                                                     'name': titles.get(e, f'Episode {e}'), 'air_date': '2022-01-01'}
+                                                     'name': titles.get(e, f'Episode {e}'),
+                                                     'air_date': s.get('air', {}).get((n, e), '2022-01-01')}
                                                     for e in range(1, s['seasons'][n] + 1)]}
 
 

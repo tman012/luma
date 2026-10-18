@@ -5,6 +5,10 @@ POST /api/settings/tv/import    start an import (202), 409 while one runs (/scan
 GET  /api/settings/tv/import    the small progress the Import card polls
 POST /api/settings/tv/import-all {items: [{id, tmdb_id}]}  review rows imported as the owner's picks
 GET  /api/settings/tv/search?q=&year=          TMDB shows for the picker (q may be tmdb:/tvdb:/imdb:<id>)
+GET  /api/settings/tv/calendar?start=YYYY-MM-DD&days=N   episodes by air date (tv_calendar)
+GET  /api/settings/tv/find?q=                   Search: library shows first, then TMDB
+GET  /api/settings/tv/shows/<id>                Show detail (seasons, episodes, linked files)
+POST /api/settings/tv/shows {tmdb_id, path_id?}  Add from Search (tv.db only; no folders, no files)
 PUT  /api/settings/tv/shows/<id>/match {tmdb_id}      "Wrong show?" (rematched)
 POST /api/settings/tv/unmatched/<id>/match {tmdb_id}  "Match" (matched, manual)
 
@@ -15,7 +19,7 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
 
-from app import tv_scan, tv_settings, tv_tmdb
+from app import tv_calendar, tv_scan, tv_settings, tv_tmdb
 
 bp = Blueprint('tv_library', __name__)
 SCAN_RUNNING = 'A scan is already running'
@@ -133,3 +137,63 @@ def tv_import_all():
     if not out['ok']:
         return _no_store(jsonify({'error': out['error']}), out.get('status', 409))
     return _no_store(jsonify({'imported': out['imported'], 'failed': out['failed'], **tv_scan.library_view()}))
+
+
+BAD_DATE = 'Pick a date'
+
+
+@bp.route('/api/settings/tv/calendar', methods=['GET'])
+def tv_calendar_get():
+    err = tv_settings._guard()
+    if err:
+        return err
+    start = tv_calendar.parse_day(request.args.get('start'))
+    days = request.args.get('days') or '7'
+    if start is None or not days.isdigit() or not 1 <= int(days) <= tv_calendar.MAX_DAYS:
+        return _no_store(jsonify({'error': BAD_DATE}), 400)
+    return _no_store(jsonify(tv_calendar.calendar(start, int(days))))
+
+
+@bp.route('/api/settings/tv/find', methods=['GET'])
+def tv_find():
+    err = tv_settings._guard()
+    if err:
+        return err
+    q = (request.args.get('q') or '').strip()
+    if len(q) < 2 or len(q) > MAX_Q:
+        return _no_store(jsonify({'error': BAD_QUERY}), 400)
+    try:
+        return _no_store(jsonify(tv_calendar.find(q)))
+    except tv_tmdb.TmdbError as e:
+        return _no_store(jsonify({'error': str(e)}), 502)
+
+
+@bp.route('/api/settings/tv/shows/<int:sid>', methods=['GET'])
+def tv_show_get(sid):
+    err = tv_settings._guard()
+    if err:
+        return err
+    d = tv_calendar.show_detail(sid)
+    if d is None:
+        return _no_store(jsonify({'error': tv_calendar.NOT_FOUND}), 404)
+    return _no_store(jsonify(d))
+
+
+@bp.route('/api/settings/tv/shows', methods=['POST'])
+def tv_show_add():
+    err = tv_settings._guard()
+    if err:
+        return err
+    body = request.get_json(silent=True)
+    tid = _tmdb_id(body)
+    pid = body.get('path_id') if isinstance(body, dict) else None
+    if tid is None or (pid is not None and (not isinstance(pid, str) or len(pid) > 64)):
+        return _no_store(jsonify({'error': BAD_SHOW}), 400)
+    try:
+        out = tv_calendar.add(tid, pid)
+    except tv_tmdb.TmdbError as e:
+        return _no_store(jsonify({'error': str(e)}), 502)
+    if not out['ok']:
+        extra = {'series_id': out['series_id']} if out.get('series_id') else {}
+        return _no_store(jsonify({'error': out['error'], **extra}), out.get('status', 400))
+    return _no_store(jsonify({'ok': True, 'series_id': out['series_id']}), 201)
