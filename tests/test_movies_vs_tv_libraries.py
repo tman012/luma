@@ -6,6 +6,7 @@ import logging
 import os
 
 import pytest
+from unittest import mock
 
 from app import file_management as fm, library_selection, tv_settings
 from tests.test_tv_libraries import _legacy, tv_env  # noqa: F401
@@ -160,3 +161,47 @@ def test_migration_checks_without_writing_and_logs(tv_env, caplog):
 def test_check_library_path_without_probe_never_writes(tv_env, monkeypatch):
     monkeypatch.setattr(fm, 'writable', lambda p: pytest.fail('probe'))
     assert fm.check_library_path(str(tv_env / 'TV'), [], probe=False) == (str(tv_env / 'TV'), None)
+
+
+def test_migration_pins_the_previous_fallback_before_adding_any_path(tv_env):
+    """Tester B1: the pin is in place before any path is added."""
+    movies = {'id': 'p_0000a001', 'name': 'Movies', 'path': str(tv_env / 'Movies')}
+    fm.save({**fm.load(), 'paths': [movies]})
+    seen = []
+    real = fm.check_library_path
+    def spy(raw, others, probe=True):
+        seen.append(fm_pin())          # the in-memory store at the first add
+        return real(raw, others, probe=probe)
+    lib_ref = {}
+    real_load = fm.load
+    def load():
+        lib_ref['lib'] = real_load()
+        return lib_ref['lib']
+    fm_pin = lambda: lib_ref['lib']['fallback_path_id']
+    _legacy(('t_0000000a', 'TV', tv_env / 'TV'), ('t_0000000b', 'Kids', tv_env / 'Kids TV'))
+    with mock.patch.object(fm, 'check_library_path', spy), mock.patch.object(fm, 'load', load):
+        tv_settings.migrate()
+    assert seen == ['p_0000a001', 'p_0000a001']
+    data = fm.load()
+    assert data['fallback_path_id'] == 'p_0000a001' and len(data['paths']) == 3
+    assert fm.pick_destination(data, INFO)['id'] == 'p_0000a001'
+
+
+def test_migration_never_pins_a_path_tv_takes(tv_env):
+    movies = {'id': 'p_0000a001', 'name': 'Movies', 'path': str(tv_env / 'Movies')}
+    fm.save({**fm.load(), 'paths': [movies]})
+    _legacy(('t_0000000a', 'Shared', tv_env / 'Movies'), ('t_0000000b', 'TV', tv_env / 'TV'))
+    tv_settings.migrate()
+    data = fm.load()
+    assert data['fallback_path_id'] is None and len(data['paths']) == 2
+    assert 'p_0000a001' in tv_settings.selected_ids()
+
+
+def test_migration_without_adds_does_not_pin_or_write(tv_env):
+    movies = {'id': 'p_0000a001', 'name': 'Movies', 'path': str(tv_env / 'Movies')}
+    fm.save({**fm.load(), 'paths': [movies]})
+    before = fm.store_path().read_bytes()
+    _legacy(('t_0000000a', 'Movies too', tv_env / 'Movies'))
+    tv_settings.migrate()
+    assert fm.load()['fallback_path_id'] is None
+    assert fm.store_path().read_bytes() == before

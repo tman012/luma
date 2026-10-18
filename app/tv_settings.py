@@ -326,6 +326,15 @@ def migrate() -> Dict[str, str]:
             return {}
         lib = fm.load()
         movies_before = list(fm.movies_only(lib)['paths'])
+        # Before adding any path, pin the fallback to the previous effective one
+        # (an implicit single-path fallback would otherwise vanish or move).
+        pinned = False
+        adds = [r for r in data['paths'] if not any(_same_folder(p['path'], r['path']) for p in lib['paths'])]
+        # (Not when TV takes that path itself: a path is Movies or TV, not both.)
+        if (adds and lib['fallback_path_id'] is None and len(movies_before) == 1
+                and not any(_same_folder(movies_before[0]['path'], r['path']) for r in data['paths'])):
+            lib['fallback_path_id'] = movies_before[0]['id']
+            pinned = True
         added, mapping = 0, {}
         for rec in data['paths']:
             hit = next((p for p in lib['paths'] if _same_folder(p['path'], rec['path'])), None)
@@ -338,11 +347,6 @@ def migrate() -> Dict[str, str]:
                 lib['paths'].append(hit)
                 added += 1
             mapping[rec['id']] = hit['id']
-        pinned = False
-        if (lib['fallback_path_id'] is None and len(movies_before) == 1
-                and movies_before[0]['id'] not in mapping.values()):
-            lib['fallback_path_id'] = movies_before[0]['id']   # the implicit fallback stays the fallback
-            pinned = True
         if added or pinned:
             fm.save(lib)                  # first: a rerun after a crash then matches these
         for old, new in mapping.items():
