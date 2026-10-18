@@ -4,7 +4,7 @@ import os
 FILES = {
     'Severance (2022)/Season 01/Severance - S01E01 - Good News About Hell.mkv': b'a' * 64,
     'Severance (2022)/Season 01/Severance.S01E02.1080p.WEB-DL-GRP.mkv': b'b' * 64,
-    'Severance (2022)/Season 01/Severance.S02E05.mkv': b'c' * 64,           # folder says 1: mismatch
+    'Severance (2022)/Season 01/Severance.S02E05.mkv': b'c' * 64,           # folder says 1: the file's S02E05 wins
     'Severance (2022)/Season 02/Severance.S02E01E02.2160p.mkv': b'd' * 64,
     'Severance (2022)/Season 02/Severance.S02E40.mkv': b'e' * 64,           # no such episode: mismatch
     'Severance (2022)/Extras/Behind the scenes.mkv': b'f' * 64,             # unrecognized

@@ -11,12 +11,19 @@ running a scan over a fixture tree and by reading this file's calls.
 * A top-level folder is a show candidate, whatever its naming
   (app/tv_match decides the show). Imported shows are not monitored.
 * Files: video files anywhere under the show folder; "Season NN" folders and
-  names are read with tv_release.parse_file. Each file is
-    linked        its season/episode exist for the show (TMDB) and agree
-                  with its Season folder,
-    mismatch      it names an episode, but the numbering doesn't fit
-                  (unknown episode, or the folder says another season),
+  names are read with tv_release.parse_file. The file's own S/E wins; the
+  folder only fills in a season the name lacks. Each file is
+    linked        at least one of its episodes exists for the show (TMDB's
+                  numbering, or the show's episode group when the files are
+                  numbered that way; Specials by title; absolute numbers by
+                  episode order),
+    mismatch      it names an episode, but the numbering doesn't fit,
     unrecognized  no episode could be read from it.
+  Files that don't fit are counted per show; they never block it.
+* Import: new folders are matched by 8 workers sharing TMDB's rate budget
+  (tv_tmdb.wait_turn); "id" and "high" tiers are imported, "likely" and
+  "none" wait in review with the best guess (tv_match). TMDB is read in the
+  workers, tv.db is written in folder order afterwards.
 * Two folders with the same show: the better one keeps it (folder_rank:
   exact title and year, then the most linked files, then naming); the other
   is unmatched ('duplicate') with the show's real TMDB title as its
@@ -33,7 +40,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from app import tv_match, tv_release, tv_store, tv_tmdb
 
@@ -45,8 +52,15 @@ REFRESH_EPISODES_S = 24 * 3600
 LAST_SCAN_KEY = 'last_scan'
 MISSING = 'Folder not found'
 
+WORKERS = 8
+GROUPS_TRIED = 3                 # episode groups fetched per show whose files don't fit TMDB's numbering
+
+_Thread = threading.Thread          # the import pool's threads (tests may stub threading.Thread for start())
 _scan_lock = threading.Lock()
 _state: Dict[str, Any] = {'running': False, 'error': None, 'summary': None}
+# What the Import progress card shows (status(), polled): folders decided so far.
+_progress: Dict[str, Any] = {'total': 0, 'done': 0, 'matched': 0, 'review': 0, 'none': 0, 'ready': True}
+_progress_lock = threading.Lock()
 # Scheduled scans back off while TMDB fails: 10 min, 20, 40, ... up to the
 # rescan interval. Any scan that reaches TMDB resets it; a manual Scan ignores it.
 _backoff: Dict[str, float] = {'fails': 0, 'until': 0.0}
@@ -146,24 +160,77 @@ def _series_row(conn, path_id: str, folder: str):
     return conn.execute('SELECT * FROM series WHERE path_id = ? AND folder = ?', (path_id, folder)).fetchone()
 
 
-def store_show(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str,
-               event: str = 'matched', series_id: Optional[int] = None) -> Optional[int]:
-    """Insert (or repoint *series_id* to) the show *tmdb_id* for a folder,
-    with its seasons and episodes. Returns the series id, or None when that
-    show already belongs to another folder."""
-    data = tv_tmdb.show(tmdb_id)
+def fetch_show(tmdb_id: int, details: Optional[Dict[str, Any]] = None, hints: Optional[tv_match.Hints] = None,
+               group_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """What storing a show needs from TMDB (reads only): its details (the
+    ones match() already fetched are reused), its seasons (up to 20 a call),
+    and the episode group the files are numbered by, if any."""
+    data = details if details and isinstance(details.get('seasons'), list) else tv_tmdb.show(tmdb_id)
     if not data:
         return None
-    fields, aliases = tv_match.show_fields(data)
-    seasons = {}
-    for n in tv_match.season_numbers(data):
-        seasons[n] = tv_tmdb.season(tmdb_id, n) or {}
+    seasons = tv_tmdb.seasons(tmdb_id, tv_match.season_numbers(data))
+    group = tv_tmdb.episode_group(group_id) if group_id else pick_group(tmdb_id, seasons, hints)
+    return {'details': data, 'seasons': seasons, 'group': group}
+
+
+def _group_map(group: Optional[Dict[str, Any]]) -> Dict[Tuple[int, int], int]:
+    """{(season, episode): TMDB episode id} in a group's numbering."""
+    out: Dict[Tuple[int, int], int] = {}
+    for g in (group or {}).get('groups') or []:
+        n = g.get('order') if isinstance(g, dict) else None
+        if not isinstance(n, int):
+            continue
+        for ep in g.get('episodes') or []:
+            if isinstance(ep, dict) and isinstance(ep.get('id'), int) and isinstance(ep.get('order'), int):
+                out[(n, ep['order'] + 1)] = ep['id']
+    return out
+
+
+def _fits(numbered: List[Tuple[int, List[int]]], have: set) -> int:
+    return sum(1 for s, eps in numbered if any((s, e) in have for e in eps))
+
+
+def pick_group(tmdb_id: int, seasons: Dict[int, Dict[str, Any]], hints: Optional[tv_match.Hints]) -> Optional[Dict[str, Any]]:
+    """The episode group (TVDB, aired, DVD order...) that links the most
+    files, when some files don't fit TMDB's own numbering and the group links
+    more of them. None otherwise."""
+    if not hints or not hints.numbered:
+        return None
+    default = {(n, ep.get('episode_number')) for n, se in seasons.items() for ep in (se or {}).get('episodes') or []
+               if isinstance(ep, dict)}
+    base = _fits(hints.numbered, default)
+    if base == len(hints.numbered):
+        return None
+    groups = tv_tmdb.episode_groups(tmdb_id)
+    pref = sorted(groups, key=lambda g: (0 if 'tvdb' in str(g.get('name', '')).lower() else 1,
+                                         {1: 0, 3: 1, 6: 2, 7: 3, 4: 4, 2: 5}.get(g.get('type'), 9)))
+    best, best_n = None, base
+    for g in pref[:GROUPS_TRIED]:
+        data = tv_tmdb.episode_group(g['id'])
+        n = _fits(hints.numbered, set(_group_map(data)))
+        if n > best_n:
+            best, best_n = data, n
+    return best
+
+
+def store_show(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str,
+               event: str = 'matched', series_id: Optional[int] = None, data: Optional[Dict[str, Any]] = None,
+               tier: Optional[str] = None) -> Optional[int]:
+    """Insert (or repoint *series_id* to) the show *tmdb_id* for a folder,
+    with its seasons and episodes (*data* from fetch_show, else fetched now).
+    Returns the series id, or None when that show already belongs to another
+    folder."""
+    data = data or fetch_show(tmdb_id)
+    if not data:
+        return None
+    fields, aliases = tv_match.show_fields(data['details'])
+    seasons = data['seasons']
     old = None
     with tv_store.write() as conn:
         other = conn.execute('SELECT id FROM series WHERE tmdb_id = ?', (tmdb_id,)).fetchone()
         if other and other['id'] != series_id:
             return None
-        cols = dict(fields, tmdb_id=tmdb_id, aliases=json.dumps(aliases), tmdb_refreshed_at=now)
+        cols = dict(fields, tmdb_id=tmdb_id, aliases=json.dumps(aliases), tmdb_refreshed_at=now, match_tier=tier or via)
         if series_id is None:
             cols.update(path_id=path_id, folder=folder, monitored=0, monitor_new_seasons=0, added_at=now)
             keys = ', '.join(cols)
@@ -177,6 +244,7 @@ def store_show(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str,
                          (*cols.values(), series_id))
             sid = series_id
         _store_episodes(conn, sid, seasons)
+        _store_group(conn, sid, data.get('group'))
         detail = {'via': via, 'folder': folder, 'path_id': path_id, 'tmdb_id': tmdb_id, 'title': fields['title']}
         if event == 'rematched' and old:
             detail.update(from_tmdb_id=old['tmdb_id'], from_title=old['title'])
@@ -184,6 +252,22 @@ def store_show(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str,
                      (now, sid, '[]', event, json.dumps(detail)))
         conn.execute('DELETE FROM unmatched WHERE path_id = ? AND folder = ?', (path_id, folder))
     return sid
+
+
+def _store_group(conn, sid: int, group: Optional[Dict[str, Any]]) -> None:
+    """The show's files follow *group*'s numbering (None: TMDB's own)."""
+    conn.execute('DELETE FROM episode_numbering WHERE series_id = ?', (sid,))
+    if not group:
+        conn.execute("UPDATE series SET episode_order = 'tmdb', episode_group_id = NULL WHERE id = ?", (sid,))
+        return
+    ids = {r['tmdb_episode_id']: r['id'] for r in conn.execute(
+        'SELECT id, tmdb_episode_id FROM episodes WHERE series_id = ? AND tmdb_episode_id IS NOT NULL', (sid,))}
+    for (n, e), tid in _group_map(group).items():
+        if tid in ids:
+            conn.execute('INSERT OR REPLACE INTO episode_numbering (series_id, season_number, episode_number, episode_id)'
+                         ' VALUES (?, ?, ?, ?)', (sid, n, e, ids[tid]))
+    conn.execute("UPDATE series SET episode_order = 'group', episode_group_id = ? WHERE id = ?",
+                 (str(group.get('id') or '')[:64] or None, sid))
 
 
 def _store_episodes(conn, sid: int, seasons: Dict[int, Dict[str, Any]]) -> None:
@@ -211,13 +295,17 @@ def _store_episodes(conn, sid: int, seasons: Dict[int, Dict[str, Any]]) -> None:
                  ep.get('runtime') if isinstance(ep.get('runtime'), int) else None))
 
 
-def refresh_episodes(sid: int, tmdb_id: int, now: float) -> None:
-    data = tv_tmdb.show(tmdb_id)
+def refresh_episodes(sid: int, tmdb_id: int, now: float, data: Optional[Dict[str, Any]] = None) -> None:
+    if data is None:
+        with tv_store.connect() as conn:
+            row = conn.execute('SELECT episode_group_id FROM series WHERE id = ?', (sid,)).fetchone()
+        data = fetch_show(tmdb_id, group_id=row['episode_group_id'] if row else None)
     if not data:
         return
-    seasons = {n: tv_tmdb.season(tmdb_id, n) or {} for n in tv_match.season_numbers(data)}
     with tv_store.write() as conn:
-        _store_episodes(conn, sid, seasons)
+        _store_episodes(conn, sid, data['seasons'])
+        if data.get('group') is not None:
+            _store_group(conn, sid, data['group'])
         conn.execute('UPDATE series SET tmdb_refreshed_at = ? WHERE id = ?', (now, sid))
 
 
@@ -228,33 +316,89 @@ def _store_unmatched(path_id: str, folder: str, m: Dict[str, Any], now: float, r
 
 def _store_unmatched_conn(conn, path_id: str, folder: str, m: Dict[str, Any], now: float,
                           reason: Optional[str] = None) -> None:
-    conn.execute('INSERT INTO unmatched (path_id, folder, guess_title, guess_year, candidates, reason, ts)'
-                 ' VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(path_id, folder) DO UPDATE SET'
+    reason = reason or m.get('reason') or 'not_exact'
+    cands = m.get('candidates') or []
+    if reason == 'duplicate':
+        tier, pick = 'duplicate', (cands[0]['tmdb_id'] if cands else None)
+    else:
+        tier = 'likely' if m.get('tier') == 'likely' and m.get('pick') else 'none'
+        pick = m.get('pick') if tier == 'likely' else None
+    conn.execute('INSERT INTO unmatched (path_id, folder, guess_title, guess_year, candidates, reason, ts, tier, pick)'
+                 ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(path_id, folder) DO UPDATE SET'
                  ' guess_title = excluded.guess_title, guess_year = excluded.guess_year,'
-                 ' candidates = excluded.candidates, reason = excluded.reason, ts = excluded.ts',
+                 ' candidates = excluded.candidates, reason = excluded.reason, ts = excluded.ts,'
+                 ' tier = excluded.tier, pick = excluded.pick',
                  (path_id, folder, m['guess']['title'], m['guess']['year'],
-                  json.dumps(m.get('candidates') or []), reason or m.get('reason') or 'not_exact', now))
+                  json.dumps(cands, separators=(',', ':')), reason, now, tier, pick))
 
 
 # --------------------------------------------------------------------------- files
 
+def _episode(conn, sid: int, season: int, episode: int, grouped: bool) -> Optional[int]:
+    if grouped:
+        row = conn.execute('SELECT episode_id FROM episode_numbering WHERE series_id = ? AND season_number = ?'
+                           ' AND episode_number = ?', (sid, season, episode)).fetchone()
+        if row:
+            return row['episode_id']
+    row = conn.execute('SELECT id FROM episodes WHERE series_id = ? AND season_number = ? AND episode_number = ?',
+                       (sid, season, episode)).fetchone()
+    return row['id'] if row else None
+
+
+def _special_by_title(conn, sid: int, name: str) -> Optional[int]:
+    """A Specials file whose number doesn't fit: the season-0 episode whose
+    title is in the file name (like Sonarr's special-title parse)."""
+    stem = tv_match.normalize(os.path.splitext(name)[0].rsplit(' - ', 1)[-1] if ' - ' in name
+                              else os.path.splitext(name)[0])
+    if len(stem) < 4:
+        return None
+    hits = [r['id'] for r in conn.execute('SELECT id, title FROM episodes WHERE series_id = ? AND season_number = 0',
+                                          (sid,))
+            if (t := tv_match.normalize(r['title'])) and len(t) >= 4 and (t == stem or t in stem or stem in t)]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _absolute(conn, sid: int, numbers: List[int]) -> List[int]:
+    """Episode ids for absolute numbers: the episodes' own absolute number,
+    else their order across the regular seasons."""
+    out = []
+    order = None
+    for a in numbers:
+        row = conn.execute('SELECT id FROM episodes WHERE series_id = ? AND absolute_number = ?', (sid, a)).fetchone()
+        if row:
+            out.append(row['id'])
+            continue
+        if order is None:
+            order = [r['id'] for r in conn.execute('SELECT id FROM episodes WHERE series_id = ? AND season_number > 0'
+                                                   ' AND season_number < 1000 ORDER BY season_number, episode_number',
+                                                   (sid,))]
+        if 0 < a <= len(order):
+            out.append(order[a - 1])
+    return out
+
+
 def classify(conn, sid: int, rel_in_show: str) -> Tuple[str, tv_release.Release, List[int]]:
-    """(state, parsed, episode ids) for one file of show *sid*."""
+    """(state, parsed, episode ids) for one file of show *sid*. The file's
+    own season and episode win over its Season folder."""
     name = rel_in_show.rsplit('/', 1)[-1]
     r = tv_release.parse_file(name, rel_in_show)
+    grouped = bool(conn.execute("SELECT 1 FROM series WHERE id = ? AND episode_order = 'group'", (sid,)).fetchone())
     if r.kind in ('episode', 'multi') and r.season is not None and r.episodes:
-        folder_season = tv_release.season_from_folder(rel_in_show)
-        ids = []
-        for e in r.episodes:
-            row = conn.execute('SELECT id FROM episodes WHERE series_id = ? AND season_number = ? AND episode_number = ?',
-                               (sid, r.season, e)).fetchone()
-            ids.append(row['id'] if row else None)
-        if (folder_season is not None and folder_season != r.season) or None in ids:
-            return 'mismatch', r, []
-        return 'linked', r, ids
+        ids = [i for i in (_episode(conn, sid, r.season, e, grouped) for e in r.episodes) if i is not None]
+        if not ids and r.season == 0:
+            sp = _special_by_title(conn, sid, name)
+            ids = [sp] if sp else []
+        return ('linked', r, ids) if ids else ('mismatch', r, [])
+    if r.kind == 'absolute' and r.absolute:
+        ids = _absolute(conn, sid, r.absolute)
+        return ('linked', r, ids) if ids else ('mismatch', r, [])
     if r.kind == 'daily' and r.air_date:
         row = conn.execute('SELECT id FROM episodes WHERE series_id = ? AND air_date = ?', (sid, r.air_date)).fetchone()
         return ('linked', r, [row['id']]) if row else ('mismatch', r, [])
+    if tv_release.season_from_folder(rel_in_show) == 0:
+        sp = _special_by_title(conn, sid, name)
+        if sp:
+            return 'linked', r, [sp]
     return 'unrecognized', r, []
 
 
@@ -441,6 +585,90 @@ def _path_of(path_id: str) -> Optional[str]:
 
 # --------------------------------------------------------------------------- scan
 
+def _hints(root_real: str, folder: str) -> tv_match.Hints:
+    return tv_match.file_hints(rel for rel, _ in video_files(os.path.join(root_real, folder), root_real))
+
+
+def _tick(tier: Optional[str]) -> None:
+    with _progress_lock:
+        _progress['done'] += 1
+        key = {'id': 'matched', 'high': 'matched', 'known': 'matched', 'likely': 'review',
+               'duplicate': 'review'}.get(tier or '', 'none')
+        _progress[key] += 1
+
+
+def _move(src: str, dst: str) -> None:
+    """A folder counted in one chip turned out another at commit (a duplicate)."""
+    with _progress_lock:
+        _progress[src] -= 1
+        _progress[dst] += 1
+
+
+def _work(job: Tuple[str, str, Optional[Dict[str, Any]]], root_real: str) -> Dict[str, Any]:
+    """One folder's TMDB reads (in a worker): match a new folder and fetch
+    the show it imports, or refresh a known show's episodes. Reads only."""
+    kind, folder, row = job
+    try:
+        if kind == 'match':
+            hints = _hints(root_real, folder)
+            m = tv_match.match(folder, hints)
+            data = None
+            if m['status'] == 'matched':
+                data = fetch_show(m['tmdb_id'], m.get('details'), hints)
+            _tick(m.get('tier') if m['status'] == 'matched' or m.get('tier') != 'none' else 'none')
+            return {'m': m, 'data': data}
+        if kind == 'refresh':
+            with tv_tmdb.fresh():          # the daily refresh never reads yesterday's answer back
+                data = fetch_show(row['tmdb_id'], None, _hints(root_real, folder), row.get('episode_group_id'))
+            _tick('known')
+            return {'data': data}
+        _tick('known' if kind == 'known' else 'none')
+        return {}
+    except tv_tmdb.TmdbError as e:
+        return {'error': e}
+
+
+def run_pool(jobs: List[Any], fn: Callable[[Any], Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """fn(job) for every job on WORKERS threads (TMDB's rate budget is shared
+    in tv_tmdb), results in job order. After a TmdbError the jobs not yet
+    started are skipped ({'skipped': True})."""
+    stop = threading.Event()
+
+    def one(job):
+        if stop.is_set():
+            return {'skipped': True}
+        out = fn(job)
+        if 'error' in out:
+            stop.set()
+        return out
+    if len(jobs) <= 1:
+        return [one(j) for j in jobs]
+    out: List[Optional[Dict[str, Any]]] = [None] * len(jobs)
+    nxt = iter(range(len(jobs)))
+    lock = threading.Lock()
+
+    def worker():
+        while True:
+            with lock:
+                i = next(nxt, None)
+            if i is None:
+                return
+            try:
+                out[i] = one(jobs[i])
+            except Exception as e:          # anything else: the scan fails, as a serial one would
+                out[i] = {'crash': e}
+                stop.set()
+    threads = [_Thread(target=worker, daemon=True, name=f'tv-import-{n}') for n in range(min(WORKERS, len(jobs)))]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    crash = next((r['crash'] for r in out if r and 'crash' in r), None)
+    if crash is not None:
+        raise crash
+    return [r if r is not None else {'skipped': True} for r in out]
+
+
 def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> Dict[str, int]:
     from app import file_management as fm
     root_real = os.path.realpath(rec['path'])
@@ -450,29 +678,47 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
     folders = show_folders(root_real)
     out = {'shows': 0, 'unmatched': 0, 'linked': 0, 'mismatch': 0, 'unrecognized': 0}
     with tv_store.connect() as conn:
-        known = {r['folder']: dict(r) for r in conn.execute('SELECT id, folder, tmdb_id, tmdb_refreshed_at FROM series'
-                                                              ' WHERE path_id = ?', (pid,))}
+        known = {r['folder']: dict(r) for r in conn.execute(
+            'SELECT id, folder, tmdb_id, tmdb_refreshed_at, episode_group_id FROM series WHERE path_id = ?', (pid,))}
         unmatched = {r['folder'] for r in conn.execute('SELECT folder FROM unmatched WHERE path_id = ?', (pid,))}
     with tv_store.write() as conn:            # folders that are gone: rows only, history kept
         for f in set(known) - set(folders):
             detach(conn, known[f]['id'], now, 'folder gone')
         for f in unmatched - set(folders):
             conn.execute('DELETE FROM unmatched WHERE path_id = ? AND folder = ?', (pid, f))
-    demoted, done = set(), set()
+    # Luma's own earlier mapping is never guessed again ("id"); a scheduled
+    # rescan leaves review rows alone.
+    jobs = []
     for folder in folders:
+        row = known.get(folder)
+        if row is not None:
+            stale = now - (row['tmdb_refreshed_at'] or 0) >= REFRESH_EPISODES_S
+            jobs.append(('refresh' if stale else 'known', folder, row))
+        elif folder in unmatched and not retry_unmatched:
+            jobs.append(('keep', folder, None))
+        else:
+            jobs.append(('match', folder, None))
+    with _progress_lock:
+        _progress['total'] += len(jobs)
+    results = run_pool(jobs, lambda j: _work(j, root_real))
+    error = next((r['error'] for r in results if 'error' in r), None)
+    demoted, done = set(), set()
+    for (kind, folder, row), res in zip(jobs, results):
+        if 'error' in res or res.get('skipped'):
+            continue
         done.add(folder)
         if folder in demoted:                 # lost its show to a better folder in this scan
             out['unmatched'] += 1
             continue
         with tv_store.connect() as conn:      # fresh: a duplicate may have moved a show this scan
-            r = conn.execute('SELECT id, folder, tmdb_id, tmdb_refreshed_at FROM series'
-                             ' WHERE path_id = ? AND folder = ?', (pid, folder)).fetchone()
-        row = dict(r) if r else None
-        if row is None:
-            if folder in unmatched and not retry_unmatched:
-                out['unmatched'] += 1
-                continue
-            m = tv_match.match(folder)
+            r = conn.execute('SELECT id, folder, tmdb_id FROM series WHERE path_id = ? AND folder = ?',
+                             (pid, folder)).fetchone()
+        cur = dict(r) if r else None
+        if kind == 'keep' or (cur is None and kind != 'match'):
+            out['unmatched'] += 1
+            continue
+        if cur is None:
+            m = res['m']
             sid = None
             if m['status'] == 'matched':
                 with tv_store.connect() as conn:
@@ -481,25 +727,30 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
                     sid = _resolve_duplicate(owner, pid, folder, root_real, now, via=m['via'])
                     if sid is not None and owner['path_id'] == pid:
                         demoted.add(owner['folder'])
+                        _move('matched', 'review')
                         if owner['folder'] in done:   # already counted as a show
                             out['shows'] -= 1
                             out['unmatched'] += 1
-                else:
-                    sid = store_show(pid, folder, m['tmdb_id'], now, via=m['via'])
-                    if sid is None:               # TMDB lost the show between the two reads
-                        _store_unmatched(pid, folder, dict(m, candidates=[]), now, reason='not_exact')
+                elif res.get('data'):
+                    sid = store_show(pid, folder, m['tmdb_id'], now, via=m['via'], data=res['data'], tier=m['tier'])
+                if sid is None and owner is None:     # TMDB lost the show between the two reads
+                    _store_unmatched(pid, folder, dict(m, candidates=[], tier='none'), now, reason='not_exact')
             else:
                 _store_unmatched(pid, folder, m, now)
             if sid is None:
+                if m['status'] == 'matched':
+                    _move('matched', 'review')
                 out['unmatched'] += 1
                 continue
         else:
-            sid = row['id']
-            if now - (row['tmdb_refreshed_at'] or 0) >= REFRESH_EPISODES_S:
-                refresh_episodes(sid, row['tmdb_id'], now)
+            sid = cur['id']
+            if kind == 'refresh' and res.get('data'):
+                refresh_episodes(sid, cur['tmdb_id'], now, res['data'])
         out['shows'] += 1
         for k, v in scan_files(sid, pid, folder, root_real, now).items():
             out[k] += v
+    if error is not None:
+        raise error
     return out
 
 
@@ -539,6 +790,9 @@ def run(retry_unmatched: bool = True, now: Optional[float] = None) -> bool:
     if not _scan_lock.acquire(blocking=False):
         return False
     _state.update(running=True, error=None)
+    with _progress_lock:
+        _progress.update(total=0, done=0, matched=0, review=0, none=0, ready=False)
+    tv_tmdb.prune_cache()
     started = time.time() if now is None else now
     try:
         _state['summary'] = scan_all(now, retry_unmatched)
@@ -554,6 +808,8 @@ def run(retry_unmatched: bool = True, now: Optional[float] = None) -> bool:
         logger.error('TV scan failed: %s', type(e).__name__, exc_info=True)
     finally:
         _state['running'] = False
+        with _progress_lock:
+            _progress['ready'] = True
         _scan_lock.release()
     return True
 
@@ -570,6 +826,16 @@ def start(retry_unmatched: bool = True) -> bool:
 def status() -> Dict[str, Any]:
     return {'running': bool(_state['running'] or _scan_lock.locked()), 'error': _state['error'],
             'last_scan': last_scan(), 'summary': _state['summary']}
+
+
+def progress() -> Dict[str, Any]:
+    """The small Import status the UI polls: {running, done, total, matched,
+    review, none, error, last_scan} (counts of folders decided so far)."""
+    with _progress_lock:
+        p = dict(_progress)
+    p.pop('ready', None)
+    return {'running': bool(_state['running'] or _scan_lock.locked()), 'error': _state['error'],
+            'last_scan': last_scan(), **p}
 
 
 # --------------------------------------------------------------------------- scheduled rescan
@@ -733,8 +999,8 @@ def _day(air_date: str) -> str:
 
 def review_lines(conn, sid: int) -> List[str]:
     """What needs review in a show, in words: one line per file whose numbering
-    doesn't fit ("S03E01 is in Season 2", "S02E40 isn't an episode of this
-    show"), then one line for files with no episode in the name."""
+    doesn't fit ("S02E40 isn't an episode of this show"), then one line for
+    files with no episode in the name."""
     lines: List[Tuple[Tuple, str]] = []
     unrecognized = 0
     for r in conn.execute("SELECT rel_path, state, parsed FROM episode_files WHERE series_id = ?"
@@ -748,11 +1014,8 @@ def review_lines(conn, sid: int) -> List[str]:
             p = {}
         season, eps = p.get('season'), [e for e in p.get('episodes') or [] if isinstance(e, int)]
         if isinstance(season, int) and eps:
-            rel_in_show = r['rel_path'].split('/', 1)[-1]
-            folder_season = tv_release.season_from_folder(rel_in_show)
-            code = _ep_code(season, eps)
-            text = (f'{code} is in Season {folder_season}' if folder_season is not None and folder_season != season
-                    else f"{code} isn't an episode of this show")
+            code = _ep_code(season, eps)            # the file's own S/E decides, never its folder
+            text = f"{code} isn't an episode of this show"
             lines.append(((0, season, eps[0], text), text))
         elif isinstance(p.get('air_date'), str):
             text = f"{_day(p['air_date'])} isn't an episode of this show"

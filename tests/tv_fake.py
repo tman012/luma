@@ -49,7 +49,7 @@ class FakeTmdb:
         key = 'tvdb' if source == 'tvdb_id' else 'imdb'
         return [brief(t) for t, s in SHOWS.items() if str(s.get(key)) == str(ext)]
 
-    def show(self, tid):
+    def show(self, tid, seasons=None):
         self._chk('show', tid)
         s = SHOWS.get(int(tid))
         if not s:
@@ -58,7 +58,7 @@ class FakeTmdb:
                 'poster_path': f'/p{tid}.jpg', 'status': 'Returning Series', 'networks': [{'name': 'Net'}],
                 'external_ids': {'tvdb_id': s.get('tvdb'), 'imdb_id': s.get('imdb')},
                 'alternative_titles': {'results': []},
-                'seasons': [{'season_number': n} for n in s['seasons']]}
+                'seasons': [{'season_number': n, 'episode_count': c} for n, c in s['seasons'].items()]}
 
     def season(self, tid, n):
         self._chk('season', tid, n)
@@ -66,14 +66,34 @@ class FakeTmdb:
         if s.get('daily'):
             return {'name': f'Season {n}', 'episodes': [{'episode_number': i + 1, 'id': i + 1, 'name': f'D{i}',
                                                          'air_date': d} for i, d in enumerate(s['daily'])]}
+        titles = s.get('titles', {}).get(n, {})
         return {'name': f'Season {n}', 'episodes': [{'episode_number': e, 'id': tid * 1000 + n * 100 + e,
-                                                     'name': f'Episode {e}', 'air_date': '2022-01-01'}
+                                                     'name': titles.get(e, f'Episode {e}'), 'air_date': '2022-01-01'}
                                                     for e in range(1, s['seasons'][n] + 1)]}
+
+
+    def seasons(self, tid, numbers):
+        return {n: self.season(tid, n) for n in numbers}
+
+    def episode_groups(self, tid):
+        self._chk('episode_groups', tid)
+        return [{'id': g, 'name': d['name'], 'type': d['type']} for g, d in SHOWS.get(int(tid), {}).get('groups', {}).items()]
+
+    def episode_group(self, gid):
+        self._chk('episode_group', gid)
+        for s in SHOWS.values():
+            if gid in s.get('groups', {}):
+                d = s['groups'][gid]
+                return {'id': gid, 'name': d['name'], 'type': d['type'],
+                        'groups': [{'name': f'Season {n}', 'order': n,
+                                    'episodes': [{'id': i, 'order': k} for k, i in enumerate(ids)]}
+                                   for n, ids in d['seasons'].items()]}
+        return None
 
 
 @pytest.fixture
 def fake_tmdb(monkeypatch):
     f = FakeTmdb()
-    for name in ('search', 'find', 'show', 'season'):
+    for name in ('search', 'find', 'show', 'season', 'seasons', 'episode_groups', 'episode_group'):
         monkeypatch.setattr(tv_tmdb, name, getattr(f, name))
     return f

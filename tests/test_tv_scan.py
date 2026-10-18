@@ -64,7 +64,7 @@ def test_file_states(lib):
     assert f[S + 'Season 01/Severance - S01E01 - Good News About Hell.mkv']['state'] == 'linked'
     assert f[S + 'Season 01/Severance.S01E02.1080p.WEB-DL-GRP.mkv']['state'] == 'linked'
     assert f[S + 'Season 01/Severance.S01E02.1080p.WEB-DL-GRP.mkv']['resolution'] == '1080p'
-    assert f[S + 'Season 01/Severance.S02E05.mkv']['state'] == 'mismatch'
+    assert f[S + 'Season 01/Severance.S02E05.mkv']['state'] == 'linked'          # its own S/E wins over the folder
     assert f[S + 'Season 02/Severance.S02E01E02.2160p.mkv']['state'] == 'linked'
     assert f[S + 'Season 02/Severance.S02E40.mkv']['state'] == 'mismatch'
     assert f[S + 'Extras/Behind the scenes.mkv']['state'] == 'unrecognized'
@@ -163,8 +163,8 @@ def test_scan_route_and_library_view(owner, lib, monkeypatch):
     body = owner.get('/api/settings/tv/library', environ_base=REMOTE, headers=HDR).get_json()
     sev = next(s for s in body['shows'] if s['folder'] == 'Severance (2022)')
     assert (sev['title'], sev['year'], sev['path_name'], sev['monitored']) == ('Severance', 2022, 'TV', False)
-    assert (sev['files'], sev['linked'], sev['mismatch'], sev['unrecognized']) == (6, 3, 2, 1)
-    assert sev['episodes'] == 4            # S01E01, S01E02, and S02E01E02 (one file, two episodes)
+    assert (sev['files'], sev['linked'], sev['mismatch'], sev['unrecognized']) == (6, 4, 1, 1)
+    assert sev['episodes'] == 5            # S01E01, S01E02, S02E05 (its own S/E wins), S02E01E02 (one file, two)
     assert {u['folder'] for u in body['unmatched']} == {'Mystery Show', 'Zzz Nothing', 'Empty Show (2020)'}
     assert body['scan']['running'] is False and body['scan']['error'] is None and body['scan']['last_scan']
 

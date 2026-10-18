@@ -13,8 +13,9 @@ def _show(title):
 def test_severance_lists_its_problems(lib):
     tv_scan.scan_all(now=1000.0)
     s = _show('Severance')
-    assert (s['mismatch'], s['unrecognized']) == (2, 1)
-    assert s['review'] == ['S02E05 is in Season 1', "S02E40 isn't an episode of this show", '1 file not recognized']
+    # the file's own S/E wins over its Season folder: S02E05 in Season 01 links (TV Import)
+    assert (s['mismatch'], s['unrecognized']) == (1, 1)
+    assert s['review'] == ["S02E40 isn't an episode of this show", '1 file not recognized']
 
 
 def test_multi_episode_and_season_folder(lib):
@@ -22,9 +23,9 @@ def test_multi_episode_and_season_folder(lib):
     (lib / 'Severance (2022)' / 'Season 01' / 'Severance.S02E09E10.mkv').write_bytes(b'x')
     (lib / 'Severance (2022)' / 'Extras' / 'Interview.mkv').write_bytes(b'x')
     tv_scan.scan_all(now=1000.0)
+    # S02E09E10 in Season 01 links by its own S/E; S03E01 isn't an episode at all
     assert _show('Severance')['review'] == [
-        'S02E05 is in Season 1', 'S02E09\u2013E10 is in Season 1', "S02E40 isn't an episode of this show",
-        'S03E01 is in Season 2', '2 files not recognized']
+        "S02E40 isn't an episode of this show", "S03E01 isn't an episode of this show", '2 files not recognized']
 
 
 def test_daily_show_date_reads_as_a_date(lib):
@@ -43,6 +44,7 @@ def test_long_lists_are_capped(lib, monkeypatch):
     tv_scan.scan_all(now=1000.0)
     (lib / 'Severance (2022)' / 'Season 02' / 'Severance.S02E41.mkv').write_bytes(b'x')
     (lib / 'Severance (2022)' / 'Season 02' / 'Severance.S02E42.mkv').write_bytes(b'x')
+    (lib / 'Severance (2022)' / 'Season 02' / 'Severance.S02E43.mkv').write_bytes(b'x')
     tv_scan.scan_all(now=2000.0)
-    assert _show('Severance')['review'] == ['S02E05 is in Season 1', "S02E40 isn't an episode of this show",
+    assert _show('Severance')['review'] == ["S02E40 isn't an episode of this show", "S02E41 isn't an episode of this show",
                                             '2 more files don\u2019t fit an episode', '1 file not recognized']
