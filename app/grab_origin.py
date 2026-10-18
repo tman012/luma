@@ -33,14 +33,14 @@ logger = logging.getLogger(__name__)
 
 LABELS = {
     'manual': 'Manual',
-    'genre_roulette': 'Genre Roulette',
-    'movie_night': 'Movie Night',
-    'latest_feed': 'Latest Feed',
+    'genre_roulette': 'Genre roulette',      # v175 (Designer): one name everywhere
+    'movie_night': 'Movie night',
+    'latest_feed': 'Latest feed',
     'upgrade_4k': '4K Remux',
-    'franchise': 'Franchise',
+    'franchise': 'Franchise completer',
     'trending': 'Trending',
     'trending_tv': 'Trending TV',
-    'now_available': 'Now Available',
+    'now_available': 'Now available',
     'anticipated': 'Anticipated',
     'requested': 'Requested',
     'upgrade': 'Upgrade',

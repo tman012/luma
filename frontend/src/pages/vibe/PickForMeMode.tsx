@@ -279,7 +279,7 @@ function MobileResults({ picks, noResults, loadError, onOpenModal, onStartOver, 
 
         {/* Watched badge */}
         {item.viewCount > 0 && (
-          <div className="absolute right-1.5 top-1.5 rounded-full bg-black/60 px-1.5 py-0.5 text-[9px] font-semibold text-green-400 backdrop-blur-sm">
+          <div className="absolute right-1.5 top-1.5 rounded-full bg-black/60 px-1.5 py-0.5 text-[12px] font-semibold text-green-400 backdrop-blur-sm">
             Watched
           </div>
         )}

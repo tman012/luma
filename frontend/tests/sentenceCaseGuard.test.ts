@@ -51,8 +51,8 @@ const ACRONYMS = new Set(['TV', 'PIN', 'URL', 'API', 'SSL', 'VPN', 'APK', 'SMB',
 // v174 (PM, Designer): no Title Case labels. Proper nouns, brand and feature names keep their capitals;
 // user data, example values, quoted OS strings and model/feed/team names are data, not labels.
 export const PROPER_PHRASES = ['Home Assistant', 'Plex Media Server', 'The Movie Database', 'Open Movie Database',
-  'Cloudflare Zero Trust', 'Cloudflare Tunnel', 'Zero Trust', 'Harmony Hub', 'Movie Night', 'Genre Roulette',
-  'Franchise Completer', 'Downloads Guard', 'Daily Kiosk', 'Luma AI', 'NVIDIA Shield', 'Android TV', 'Google TV',
+  'Cloudflare Zero Trust', 'Cloudflare Tunnel', 'Zero Trust', 'Harmony Hub',
+  'Daily Kiosk', 'Luma AI', 'NVIDIA Shield', 'Android TV', 'Google TV',
   'Silk Browser', 'Home Screen', 'Fire TV', 'Apple TV', 'Describe it', 'Now available',
   // TMDB genre names and tracker category names are data
   'Science Fiction', 'TV Movie', 'No Movies category'];
@@ -181,7 +181,8 @@ describe('neutral glass chips', () => {
     expect(titleCaseWords('Scan Interval (minutes)')).toEqual(['Interval']);
     expect(titleCaseWords('Quality profile')).toEqual([]);
     expect(titleCaseWords('Movie quality profile (Radarr)')).toEqual([]);
-    expect(titleCaseWords('Enable Movie Night')).toEqual([]);
+    expect(titleCaseWords('Enable Movie Night')).toEqual(['Movie', 'Night']);   // v175: feature names are sentence case too
+    expect(titleCaseWords('Genre roulette ran')).toEqual([]);
     expect(titleCaseWords('Plex server URL')).toEqual([]);
     expect(titleCaseWords('Import from Prowlarr')).toEqual([]);
     expect(titleCaseWords('4K Remux auto-grab')).toEqual([]);

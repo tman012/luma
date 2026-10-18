@@ -763,7 +763,7 @@ def _grab(film: Dict[str, Any], release: Dict[str, Any], settings) -> tuple:
 
     profile_id = _profile_id(settings)
     if not profile_id:
-        return False, 'Movie Night quality profile is not set'
+        return False, 'Movie night quality profile is not set'
 
     radarr = RadarrAPI(radarr_url, radarr_key)
     roots = radarr.get_root_folders()

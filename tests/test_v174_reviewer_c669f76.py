@@ -253,7 +253,7 @@ def test_a_saved_indexer_movie_categories_value_migrates(tmp_path):
 # Ops on c669f76: the migration line never reached docker logs or luma.log (it ran during app.main's
 # imports, before logging was configured). It logs once, at INFO, on logger app.settings_manager.
 
-MIG = 'Migrated: indexer.movie_categories -> tracker_search'
+MIG = 'Migrated tracker search settings'
 
 
 def _old_settings(tmp_path):

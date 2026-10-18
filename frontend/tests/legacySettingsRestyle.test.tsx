@@ -1,7 +1,7 @@
 /**
  * v174 (Designer, legacy-settings-modal-fix.md): the legacy Settings restyle is look only.
- * 'Run now (downloads for real)' is now a glass secondary 'Run now' whose behavior is exactly as
- * before (one POST with dry_run false, no prompt added or removed); Downloads guard's confirmation
+ * 'Run now (downloads for real)' is now a glass secondary 'Run now' (v175: it asks 'Start a real
+ * run?' first, see realRunConfirm.test.tsx); Downloads guard's confirmation
  * step still fires before anything is deleted. Navy surfaces, blue primary, no black, no helper text.
  */
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -54,16 +54,17 @@ describe('Run now: look changed, behavior exactly as before', () => {
     ['Movie night', <MovieNightCard />, '/api/movie-night/run'],
     ['Genre roulette', <GenreRouletteCard />, '/api/genre-roulette/run'],
     ['Franchise completer', <FranchiseCompleterCard />, '/api/franchise-completer/run'],
-  ])('%s: "Run now" is a glass secondary button and runs for real in one click, as before', async (_n, el, path) => {
+  ])('%s: "Run now" is a glass secondary button; the real run still sends one POST with dry_run false', async (_n, el, path) => {
     wrap(el);
     const btn = await screen.findByRole('button', { name: 'Run now' });
     expect(btn.className).toBe(SECONDARY_BTN);
     expect(btn.className).not.toMatch(/amber|emerald|green/);
     expect(document.body.textContent).not.toContain('downloads for real');
     fireEvent.click(btn);
+    fireEvent.click(await screen.findByRole('button', { name: 'Run' }));      // v175: confirmed first
     await waitFor(() => expect(posts.filter(p => p.url.includes(path))).toHaveLength(1));
     expect(posts.find(p => p.url.includes(path))!.body).toEqual({ dry_run: false });
-    expect(window.confirm).not.toHaveBeenCalled();          // there was no prompt before; none was added
+    expect(window.confirm).not.toHaveBeenCalled();          // the in-app dialog, never window.confirm
   });
 
   it('Downloads guard: the confirmation step still fires before anything is deleted', async () => {

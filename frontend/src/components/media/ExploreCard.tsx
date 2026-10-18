@@ -62,7 +62,7 @@ export function ExploreCard({ movie, className, onClick }: ExploreCardProps) {
           )}
         </div>
         {movie.tracker && (
-          <span className="mt-1.5 inline-block rounded bg-glass-10 px-2 py-0.5 text-[11px] text-text-faint">
+          <span className="mt-1.5 inline-block rounded bg-glass-10 px-2 py-0.5 text-[12px] text-text-faint">
             {movie.tracker}
           </span>
         )}

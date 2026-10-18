@@ -17,7 +17,6 @@ import { useLocation, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { SettingsCard } from './components/SettingsCard';
 import { FormField } from './components/FormField';
-import { ToggleSwitch } from './components/ToggleSwitch';
 import { useSettings } from './useSettings';
 import { formatBytes } from '@/services/storageApi';
 import {
@@ -356,6 +355,7 @@ export function DownloadsGuardCard() {
     <SettingsCard
       title="Downloads guard"
       paths={ALL_PATHS}
+      headerToggle="automation.downloads_guard.enabled"
       icon={
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <ellipse cx="12" cy="5" rx="9" ry="3" />
@@ -370,7 +370,6 @@ export function DownloadsGuardCard() {
         </button>
       }
     >
-      <ToggleSwitch label="Downloads guard" path="automation.downloads_guard.enabled" />
       <FormField label="Check every (minutes)" path="automation.downloads_guard.check_interval_minutes"
         type="number" min={1} max={1440} />
 

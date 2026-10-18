@@ -358,7 +358,7 @@ export function DescribeItPage() {
                         {rec.vibeItem.year && <span className="ml-2 font-normal text-white/40">({rec.vibeItem.year})</span>}
                       </p>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                        <span className={cn('rounded px-1.5 py-0.5 text-[11px] font-semibold',
+                        <span className={cn('rounded px-1.5 py-0.5 text-[12px] font-semibold',
                           rec.vibeItem.type === 'tv' ? 'bg-purple-500/20 text-purple-400' : 'bg-blue-500/20 text-blue-400')}>
                           {rec.vibeItem.type === 'tv' ? 'TV' : 'Movie'}
                         </span>
@@ -366,12 +366,12 @@ export function DescribeItPage() {
                           <span
                             role="button"
                             onClick={(e) => { e.stopPropagation(); handleCategorySearch(rec.aiCategory); }}
-                            className={cn('rounded-full border px-2 py-0.5 text-[11px] font-medium active:scale-95 transition-transform cursor-pointer', colors.bg, colors.text, colors.border)}>
+                            className={cn('rounded-full border px-2 py-0.5 text-[12px] font-medium active:scale-95 transition-transform cursor-pointer', colors.bg, colors.text, colors.border)}>
                             {rec.aiCategory}
                           </span>
                         )}
                         {rec.owned && (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/12 px-2 py-0.5 text-[12px] font-medium text-emerald-400">
                             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                             In Library
                           </span>

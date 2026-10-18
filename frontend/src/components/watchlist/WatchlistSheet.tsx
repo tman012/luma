@@ -193,7 +193,7 @@ const WlRow = memo(function WlRow({ movie, onClick }: { movie: WatchlistMovie; o
         </p>
         {movie.qualityProfileName && (
           <div className="mt-1.5">
-            <span className="rounded px-1.5 py-0.5 text-[11px] font-semibold bg-blue-500/20 text-blue-400">
+            <span className="rounded px-1.5 py-0.5 text-[12px] font-semibold bg-blue-500/20 text-blue-400">
               {movie.qualityProfileName}
             </span>
           </div>
@@ -237,12 +237,12 @@ const TvRow = memo(function TvRow({ series, onClick }: { series: WatchlistSeries
 
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           {countdown != null && countdown > 1 && (
-            <span className="rounded px-1.5 py-0.5 text-[11px] font-semibold bg-amber-500/15 text-amber-400">
+            <span className="rounded px-1.5 py-0.5 text-[12px] font-semibold bg-amber-500/15 text-amber-400">
               In {countdown} days
             </span>
           )}
           {series.qualityProfileName && (
-            <span className="rounded px-1.5 py-0.5 text-[11px] font-semibold bg-blue-500/20 text-blue-400">
+            <span className="rounded px-1.5 py-0.5 text-[12px] font-semibold bg-blue-500/20 text-blue-400">
               {series.qualityProfileName}
             </span>
           )}

@@ -1543,22 +1543,47 @@ def validate_tracker_search(patch: Any) -> Tuple[Dict[str, Any], Dict[str, str]]
     return clean, errors
 
 
+# v175 (Ops on c1f337b): every legacy search key, wherever an earlier build left it.
+LEGACY_INDEXER_SEARCH_KEYS = ('movie_categories', 'max_age_days', 'min_seeders', 'limit')   # 1b4ea74 and before
+REMOVED_TRACKER_SEARCH_KEYS = ('max_age_days', 'min_seeders', 'limit')                     # c669f76 (v173)
+
+
 def _migrate_tracker_search_settings(data: dict) -> bool:
     """v173 (PM): indexer.movie_categories moves to tracker_search.movie_categories (Settings >
-    Trackers > Search). A saved value is carried over as is; a value already under tracker_search
-    wins. v174 (PM): the unwired max_age_days, min_seeders and limit aren't migrated; wherever a
-    stale one is saved it's left alone and ignored. Returns True if migration occurred."""
+    Trackers > Search); a saved value is carried over as is and a value already under tracker_search
+    wins.
+
+    v175 (Ops on c1f337b): idempotent. It used to run only while indexer.movie_categories existed, so a
+    c669f76 file (the four keys already under tracker_search) kept max_age_days, min_seeders and limit
+    there on v174, with no backup and no log. Now it runs whenever ANY legacy key is present
+    (indexer.movie_categories/max_age_days/min_seeders/limit, or tracker_search.max_age_days/
+    min_seeders/limit): the caller backs settings.json up first (_load -> _backup_before_migration), the
+    unused keys are stripped, and one INFO line names what changed. A clean file is a no-op (False: no
+    backup, no save, no log). Returns True if anything changed."""
     old = data.get('indexer')
-    if not isinstance(old, dict) or not any(k in old for k in TRACKER_SEARCH_KEYS):
+    ts = data.get('tracker_search')
+    in_indexer = [k for k in LEGACY_INDEXER_SEARCH_KEYS if isinstance(old, dict) and k in old]
+    in_ts = [k for k in REMOVED_TRACKER_SEARCH_KEYS if isinstance(ts, dict) and k in ts]
+    if not in_indexer and not in_ts:
         return False
-    new = data.get('tracker_search')
-    if not isinstance(new, dict):
-        new = data['tracker_search'] = {}
-    for k in TRACKER_SEARCH_KEYS:
-        if k in old:
-            v = old.pop(k)
-            new.setdefault(k, v)
-    _log_migration("Migrated: indexer.movie_categories -> tracker_search (Settings > Trackers)")
+    moved = False
+    if 'movie_categories' in in_indexer:
+        v = old.pop('movie_categories')
+        if not isinstance(ts, dict):
+            ts = data['tracker_search'] = {}
+        if 'movie_categories' not in ts:
+            ts['movie_categories'] = v
+            moved = True
+    for k in in_indexer:
+        old.pop(k, None)
+    for k in in_ts:
+        ts.pop(k, None)
+    removed = [f'indexer.{k}' for k in in_indexer if k != 'movie_categories'] + [f'tracker_search.{k}' for k in in_ts]
+    if 'movie_categories' in in_indexer and not moved:
+        removed.insert(0, 'indexer.movie_categories (tracker_search already set)')
+    _log_migration('Migrated tracker search settings: %s; removed %s',
+                   'indexer.movie_categories -> tracker_search.movie_categories' if moved else 'nothing moved',
+                   ', '.join(removed) if removed else 'nothing')
     return True
 
 
@@ -1704,6 +1729,13 @@ class SettingsManager:
         The veto must not call back into this SettingsManager (the lock isn't
         reentrant).
         """
+        # v175 (Tester): an unknown top-level key (a typo, or a dotted path like a literal
+        # 'tracker_search.movie_categories') is refused, never stored next to the real settings.
+        if not isinstance(partial, dict):
+            return False, ['Settings must be an object']
+        unknown = [k for k in partial if not isinstance(k, str) or k not in SETTINGS_SCHEMA]
+        if unknown:
+            return False, [f'Unknown setting: {str(k)[:60]}' for k in unknown[:10]]
         cleaned = _strip_mask_values(partial, SETTINGS_SCHEMA)
         if not cleaned:
             return True, []

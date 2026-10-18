@@ -159,7 +159,7 @@ const EpisodeRow = memo(function EpisodeRow({
           )}
           {ep.network && <span className="text-[12px] text-white/30">{ep.network}</span>}
           {ep.hasFile && (
-            <span className="rounded bg-green-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-green-400">
+            <span className="rounded bg-green-500/15 px-1.5 py-0.5 text-[12px] font-semibold text-green-400">
               Downloaded
             </span>
           )}

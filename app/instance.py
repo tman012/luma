@@ -27,6 +27,9 @@ folder whose path names luma-test, or the marker file MARKER in the data folder.
 says it's production and turns this off.
 v174 (PM, Tester FF-10): exactly 'prod' or 'test' behave as before; any other non-empty LUMA_INSTANCE
 (typos, 'Prod', 'TEST', whitespace, 'Test-2') fails closed as test, with an ERROR line at boot.
+v175 (PM, Tester BLOCKER): LUMA_INSTANCE=prod on a host that shows any test sign fails closed: every
+gated job OFF (LUMA_TEST_ALLOW is ignored: no override) and one ERROR at boot naming the signs.
+LUMA_INSTANCE set but empty is unknown: fails closed as test with an ERROR. Unset keeps the detection.
 """
 from __future__ import annotations
 
@@ -109,28 +112,38 @@ def _raw() -> str:
     return os.environ.get(ENV) or ''
 
 
+def _is_set() -> bool:
+    return ENV in os.environ
+
+
 def unrecognized() -> bool:
     """v174 (PM, Tester FF-10): LUMA_INSTANCE is set to anything but exactly 'prod' or 'test' (typos,
-    case variants like 'Prod' or 'TEST', whitespace, 'Test-2'): fails closed as test, ERROR at boot."""
-    raw = _raw()
-    return bool(raw) and raw not in (PROD_VALUE, 'test')
+    case variants like 'Prod' or 'TEST', whitespace, 'Test-2'): fails closed as test, ERROR at boot.
+    v175 (PM): set but empty counts too (unknown, not unset)."""
+    return _is_set() and _raw() not in (PROD_VALUE, 'test')
+
+
+def prod_conflict() -> list:
+    """v175 (PM, Tester BLOCKER): LUMA_INSTANCE=prod but the host shows test signs; the signs (empty:
+    no conflict). Fails closed with every gated job OFF and no override."""
+    return test_signs() if _raw() == PROD_VALUE else []
 
 
 def name() -> str:
-    """'prod' or 'test'. v174 (PM, Tester FF-10): exactly 'prod' or 'test' behave as before; ANY other
-    non-empty value fails closed as test (all gated jobs off). Unset or empty keeps the v158c detection
-    (test if the install shows any test sign)."""
+    """'prod' or 'test'. v174 (PM, Tester FF-10): exactly 'test' is test; ANY other set value (v175:
+    empty included) fails closed as test. v175 (PM): exactly 'prod' is prod only with no test sign on the
+    host. Unset keeps the v158c detection (test if the install shows any test sign)."""
     raw = _raw()
     if raw == PROD_VALUE:
-        return 'prod'
-    if raw:
-        return 'test'                                   # 'test', or unrecognized: fail closed
+        return 'test' if test_signs() else 'prod'      # v175: prod on a test-like host fails closed
+    if _is_set():
+        return 'test'                                   # 'test', or unrecognized / empty: fail closed
     return 'test' if test_signs() else 'prod'          # fail closed: looks like test -> test
 
 
 def assumed_test() -> bool:
     """LUMA_INSTANCE unset but the install looks like test (so it's treated as test)."""
-    return not _raw() and bool(test_signs())
+    return not _is_set() and bool(test_signs())
 
 
 def is_test() -> bool:
@@ -145,6 +158,8 @@ def writes_allowed(job: str) -> bool:
     """True on prod; on test only for the mover/TV link or a job named in LUMA_TEST_ALLOW."""
     if not is_test():
         return True
+    if job.casefold() in GATED and prod_conflict():
+        return False                                    # v175: prod on a test-like host, no override
     j = job.casefold()
     return j in TEST_DEFAULT_ALLOWED or j in allowed()
 
@@ -166,7 +181,11 @@ def log_blocked_once() -> None:
     if _logged[0] or not is_test():
         return
     _logged[0] = True
-    if unrecognized():
+    conflict = prod_conflict()
+    if conflict:
+        logger.error('!!! LUMA_INSTANCE=prod but this host looks like the TEST install (%s): failing closed; '
+                     'every guarded job is OFF (no override). !!!', ', '.join(conflict))
+    elif unrecognized():
         logger.error('!!! LUMA_INSTANCE=%r is not recognized (only exactly \'prod\' or \'test\'): treating it as test; '
                        'grabs, deletes and every other gated write are OFF. !!!', _raw()[:40])
     if assumed_test():
@@ -174,7 +193,10 @@ def log_blocked_once() -> None:
                        'grabs, deletes and every other gated write are OFF. Set LUMA_INSTANCE=test (or =prod if this '
                        'really is production). !!!', ', '.join(test_signs()))
     for j, d in blocked_jobs().items():
-        logger.info('Instance test: %s is OFF (%s); opt in with %s=%s', j, d, ALLOW_ENV, j)
+        if conflict:                                     # v175: no override, so no opt-in hint
+            logger.info('Instance test: %s is OFF (%s)', j, d)
+        else:
+            logger.info('Instance test: %s is OFF (%s); opt in with %s=%s', j, d, ALLOW_ENV, j)
 
 
 # ----------------------------------------------------------------- the write-call gate

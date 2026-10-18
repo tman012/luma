@@ -499,7 +499,7 @@ def _grab(film: Dict[str, Any], settings) -> Dict[str, Any]:
 
     profile_id = _profile_id(settings) or int(settings.get('radarr.default_quality_profile_id') or 0)
     if not profile_id:
-        return {'ok': False, 'detail': 'Franchise Completer quality profile is not set'}
+        return {'ok': False, 'detail': 'Franchise completer quality profile is not set'}
 
     radarr = RadarrAPI(radarr_url, radarr_key)
     roots = radarr.get_root_folders()

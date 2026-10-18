@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { cn } from '@/utils/cn';
+import { couldntLoad } from '@/utils/messages';
 import { useSettings } from '../useSettings';
 import {
   fetchRooms,
@@ -127,8 +128,8 @@ export function RoomAccordion() {
       const data = await fetchRooms();
       setRooms(data.rooms);
       setDefaultTarget(data.defaultPlaybackTarget);
-    } catch (e) {
-      showToast(`Failed to load rooms: ${(e as Error).message}`, 'error');
+    } catch {
+      showToast(couldntLoad('rooms'), 'error');
     } finally {
       setLoading(false);
     }
@@ -446,7 +447,7 @@ export function RoomAccordion() {
       {/* Room list */}
       <div className="flex flex-col gap-2">
         {rooms.length === 0 && !roomForm && (
-          <p className="py-6 text-center text-[13px] text-white/25">No rooms configured</p>
+          <p className="py-6 text-center text-[13px] text-white/50">No rooms configured</p>
         )}
 
         {rooms.map((room) => {

@@ -279,7 +279,7 @@ function NovaResultCard({
         )}
 
         {item.seeders != null && (
-          <div className="absolute right-2 top-2 flex items-center gap-1 rounded-md bg-black/70 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur-sm">
+          <div className="absolute right-2 top-2 flex items-center gap-1 rounded-md bg-black/70 px-2 py-0.5 text-[12px] font-medium text-white backdrop-blur-sm">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4">
               <path d="M12 2v20M5 9l7-7 7 7" />
             </svg>

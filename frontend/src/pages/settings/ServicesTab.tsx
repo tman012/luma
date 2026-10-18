@@ -329,6 +329,7 @@ export function ServicesTab() {
         <SettingsCard
           title="Trakt"
           paths={['apis.trakt.enabled', 'apis.trakt.client_id', 'apis.trakt.client_secret']}
+          headerToggle="apis.trakt.enabled"
           testService="trakt"
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -336,9 +337,6 @@ export function ServicesTab() {
             </svg>
           }
         >
-          <div className="sm:col-span-2">
-            <ToggleSwitch label="Enable Trakt" path="apis.trakt.enabled" />
-          </div>
           <FormField label="Client ID" path="apis.trakt.client_id" type="password" placeholder="Trakt API client ID" />
           <FormField label="Client secret (optional)" path="apis.trakt.client_secret" type="password" placeholder="Trakt API client secret" />
         </SettingsCard>

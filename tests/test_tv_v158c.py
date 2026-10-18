@@ -485,5 +485,6 @@ def test_unset_instance_that_looks_like_test_is_treated_as_test(bare_env, monkey
     with caplog.at_level(logging.WARNING, logger='app.instance'):
         instance.log_blocked_once()
     assert any('LUMA_INSTANCE is not set but this looks like the TEST install' in r.getMessage() for r in caplog.records)
-    monkeypatch.setenv('LUMA_INSTANCE', 'prod')                       # an explicit prod turns it off
-    assert not instance.is_test() and not instance.assumed_test() and instance.writes_allowed('tv_grab')
+    monkeypatch.setenv('LUMA_INSTANCE', 'prod')                       # v175 (PM): prod on a test-like host fails closed
+    assert instance.is_test() and not instance.assumed_test() and instance.prod_conflict()
+    assert not any(instance.writes_allowed(j) for j in instance.GATED)

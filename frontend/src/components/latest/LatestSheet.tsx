@@ -302,7 +302,7 @@ function LatestRow({
         {/* Tracker overlay — top-left, neutral glass (v173, Designer), blurred for legibility */}
         {item.indexer && (
           <span
-            className="absolute left-1 top-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold"
+            className="absolute left-1 top-1 rounded-md px-1.5 py-0.5 text-[12px] font-bold"
             style={{
               background: NEUTRAL_GLASS.bg,
               color: NEUTRAL_GLASS.fg,
@@ -326,7 +326,7 @@ function LatestRow({
           {item.year ? <span className="text-white/45 font-normal"> ({item.year})</span> : null}
         </p>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12.5px] text-white/55">
-          <span className={cn('rounded-md border px-2 py-0.5 text-[11px] font-semibold whitespace-nowrap', badgeColor(item.quality))}>
+          <span className={cn('rounded-md border px-2 py-0.5 text-[12px] font-semibold whitespace-nowrap', badgeColor(item.quality))}>
             {item.quality}
           </span>
           {item.size_gb > 0 && <span>{fmtSize(item.size_gb)}</span>}

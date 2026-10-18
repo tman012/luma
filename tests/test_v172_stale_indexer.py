@@ -115,8 +115,12 @@ def test_a_settings_file_with_the_old_indexer_loads_and_saves_without_loss(tmp_p
     assert sm.get('indexer.api_key') == STALE['api_key']
     sm.update({'plex': {'url': 'http://plex2.test:32400'}})
     saved = json.loads(p.read_text())
-    moved = ('movie_categories',)   # v173: now tracker_search.*; v174: the unwired rest stays where saved, ignored
+    moved = ('movie_categories',)   # v173: now tracker_search.*
+    gone = ('max_age_days', 'min_seeders', 'limit')   # v175 (Ops): the unwired rest is stripped at load
     for k, v in STALE.items():
+        if k in gone:
+            assert k not in saved['indexer'] and k not in saved['tracker_search'], k
+            continue
         assert (saved['tracker_search'] if k in moved else saved['indexer'])[k] == v, k
     assert indexer_api.legacy_configured(sm) is True
 

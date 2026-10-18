@@ -44,6 +44,12 @@ class Net:
             self.opens.append((scheme, ip, port, host, target, headers['Host']))
             return self.routes.get((ip, host, target), (404, {}, b''))
 
+        # v175: warm this host's own-address cache with the real resolver first. It lives 5 minutes, so
+        # a cold or expired cache (a long gate, a busy box) used to be filled through the fake DNS
+        # (extra lookups, missing names) and failed these tests now and then.
+        from app import tracker_http
+        tracker_http.reset_own_addresses_cache()
+        tracker_http.own_addresses()
         monkeypatch.setattr(og.socket, 'getaddrinfo', getaddrinfo)
         monkeypatch.setattr(og, '_open', _open)
 

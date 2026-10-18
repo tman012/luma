@@ -439,6 +439,14 @@ def _repointed(pid: str) -> None:
 
 
 _fm.on_path_repointed(_repointed)
+
+
+def _resaved(pid: str) -> None:
+    from app import tv_scan
+    tv_scan.rebaseline(pid)
+
+
+_fm.on_path_resaved(_resaved)                # v175 (PM): same folder saved again: new baseline at the next scan
 library_selection.claim('tv', lambda: selected_ids(migrate_first=False))   # never Movie destinations
 
 

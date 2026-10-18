@@ -605,7 +605,7 @@ export interface LatestAutoGrabLogEntry {
 
 export async function fetchLatestAutoGrabStatus(): Promise<LatestAutoGrabStatus> {
   const resp = await apiFetch('/api/automation/latest-auto-grab/status');
-  if (!resp.ok) throw new Error(`Failed to fetch Latest auto-grab status (${resp.status})`);
+  if (!resp.ok) throw new Error(`Failed to fetch latest auto-grab status (${resp.status})`);
   return resp.json();
 }
 
@@ -803,7 +803,7 @@ export async function fetchMovieNightStatus(): Promise<{
   log: MovieNightLogEntry[];
 }> {
   const resp = await apiFetch('/api/movie-night/status');
-  if (!resp.ok) throw new Error(`Failed to fetch Movie Night status (${resp.status})`);
+  if (!resp.ok) throw new Error(`Failed to fetch movie night status (${resp.status})`);
   return resp.json();
 }
 
@@ -915,7 +915,7 @@ export async function fetchGenreRouletteStatus(): Promise<{
   log: GenreRouletteLogEntry[];
 }> {
   const resp = await apiFetch('/api/genre-roulette/status');
-  if (!resp.ok) throw new Error(`Failed to fetch Genre Roulette status (${resp.status})`);
+  if (!resp.ok) throw new Error(`Failed to fetch genre roulette status (${resp.status})`);
   return resp.json();
 }
 
@@ -988,7 +988,7 @@ export async function fetchFranchiseCompleterStatus(): Promise<{
   log: FranchiseCompleterLogEntry[];
 }> {
   const resp = await apiFetch('/api/franchise-completer/status');
-  if (!resp.ok) throw new Error(`Failed to fetch Franchise Completer status (${resp.status})`);
+  if (!resp.ok) throw new Error(`Failed to fetch franchise completer status (${resp.status})`);
   return resp.json();
 }
 
@@ -1056,7 +1056,7 @@ export async function fetchWatchlistDigitalDatesStatus(): Promise<{
   log: WatchlistDigitalDatesLogEntry[];
 }> {
   const resp = await apiFetch('/api/watchlist-digital-dates/status');
-  if (!resp.ok) throw new Error(`Failed to fetch Watchlist Digital Dates status (${resp.status})`);
+  if (!resp.ok) throw new Error(`Failed to fetch watchlist digital dates status (${resp.status})`);
   return resp.json();
 }
 
@@ -1197,7 +1197,7 @@ export async function fetchDownloadsGuardStatus(): Promise<{
   log: DownloadsGuardLogEntry[];
 }> {
   const resp = await apiFetch('/api/downloads-guard/status');
-  if (!resp.ok) throw new Error(`Failed to fetch Downloads Guard status (${resp.status})`);
+  if (!resp.ok) throw new Error(`Failed to fetch downloads guard status (${resp.status})`);
   return resp.json();
 }
 

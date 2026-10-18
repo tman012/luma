@@ -94,7 +94,7 @@ export function MobileDescribeResults({ recommendations, onClose: _onClose, onOp
                         onCategorySearch(rec.aiCategory);
                       } : undefined}
                       className={cn(
-                        'rounded-full border px-2 py-0.5 text-[11px] font-medium',
+                        'rounded-full border px-2 py-0.5 text-[12px] font-medium',
                         colors.bg, colors.text, colors.border,
                         onCategorySearch && 'active:scale-95 transition-transform cursor-pointer',
                       )}
@@ -113,7 +113,7 @@ export function MobileDescribeResults({ recommendations, onClose: _onClose, onOp
 
                 {/* Ownership badge */}
                 {rec.owned && (
-                  <span className="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-emerald-500/12 px-2 py-0.5 text-[11px] font-medium text-emerald-400">
+                  <span className="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-emerald-500/12 px-2 py-0.5 text-[12px] font-medium text-emerald-400">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                     In Library
                   </span>

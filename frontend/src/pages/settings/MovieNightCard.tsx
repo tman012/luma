@@ -12,10 +12,10 @@
  */
 
 import { SECONDARY_BTN } from './components/legacyTokens';
+import { RealRunConfirm } from './components/RealRunConfirm';
 import { useState, useEffect, useCallback } from 'react';
 import { SettingsCard } from './components/SettingsCard';
 import { FormField } from './components/FormField';
-import { ToggleSwitch } from './components/ToggleSwitch';
 import { ChipPicker } from './components/ChipPicker';
 import { useSettings } from './useSettings';
 import {
@@ -72,7 +72,7 @@ function RunTimeField() {
 
   return (
     <FormField
-      label="Run time (24h)"
+      label="Run time"
       path="automation.movie_night.hour"
       type="time"
       value={`${pad(hour)}:${pad(minute)}`}
@@ -104,6 +104,9 @@ export function MovieNightCard() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const running = Boolean(status?.running);
+  // v175 (PM): a real run asks first; Run sends the same single POST as before, Cancel sends nothing
+  const [confirmRun, setConfirmRun] = useState(false);
+  const cancelRun = useCallback(() => setConfirmRun(false), []);
 
   const refresh = useCallback(async () => {
     fetchCanonStats().then(setStats).catch(() => setStats(null));
@@ -187,6 +190,7 @@ export function MovieNightCard() {
     <SettingsCard
       title="Movie night"
       paths={ALL_PATHS}
+      headerToggle="automation.movie_night.enabled"
       icon={
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="2" y="2" width="20" height="20" rx="2.18" />
@@ -208,7 +212,7 @@ export function MovieNightCard() {
       {/* Coverage summary. "English gaps" is the number that matters — the
           Radarr profile only accepts English audio, so the foreign-language
           portion of the backlog is never a candidate. */}
-      <div className="col-span-full grid grid-cols-4 gap-2">
+      <div className="col-span-full grid grid-cols-2 min-[600px]:grid-cols-4 gap-2" data-testid="movie-night-stats">
         {[
           ['Great films', stats?.total, null],
           ['In Plex', stats?.owned, null],
@@ -219,14 +223,12 @@ export function MovieNightCard() {
               : null],
         ].map(([label, val, sub]) => (
           <div key={label as string} className="rounded-[12px] border border-white/[0.08] bg-white/[0.04] px-3 py-2">
-            <p className="text-[12px] text-white/35">{label}</p>
+            <p className="whitespace-nowrap text-[12px] text-white/35">{label}</p>
             <p className="mt-0.5 text-[18px] font-semibold text-white/90">{(val as number) ?? '—'}</p>
             {sub && <p className="text-[12px] text-white/25">{sub}</p>}
           </div>
         ))}
       </div>
-
-      <ToggleSwitch label="Movie night" path="automation.movie_night.enabled" />
       <FormField label="Quality profile (Radarr)" path="automation.movie_night.quality_profile_id"
         type="select" options={profileOptions} />
       <FormField label="Run day" path="automation.movie_night.weekday" type="select" options={WEEKDAYS} />
@@ -327,7 +329,7 @@ export function MovieNightCard() {
       )}
 
       <div className="col-span-full flex flex-wrap items-center gap-2">
-        <button type="button" onClick={handleRunNow} disabled={busy !== null || running}
+        <button type="button" onClick={() => setConfirmRun(true)} disabled={busy !== null || running}
           className={SECONDARY_BTN}>
           {running ? 'Running…' : 'Run now'}
         </button>
@@ -336,6 +338,7 @@ export function MovieNightCard() {
           {busy === 'build' ? 'Rebuilding…' : 'Rebuild film list'}
         </button>
       </div>
+      <RealRunConfirm open={confirmRun} onCancel={cancelRun} onRun={() => { setConfirmRun(false); handleRunNow(); }} />
     </SettingsCard>
   );
 }

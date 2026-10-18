@@ -360,6 +360,24 @@ def _path_repointed(pid: str) -> None:
             logger.warning('A section did not follow a repointed library path: %s', type(e).__name__)
 
 
+_resaved_hooks: List[Callable[[str], None]] = []
+
+
+def on_path_resaved(fn: Callable[[str], None]) -> None:
+    """v175 (PM): call *fn(path_id)* after the owner saves a Library path with the SAME folder (TV takes
+    the folder's current shows as its new baseline at the next scan)."""
+    if fn not in _resaved_hooks:
+        _resaved_hooks.append(fn)
+
+
+def _path_resaved(pid: str) -> None:
+    for fn in list(_resaved_hooks):
+        try:
+            fn(pid)
+        except Exception as e:
+            logger.warning('A section did not follow a re-saved library path: %s', type(e).__name__)
+
+
 def check_library_path(raw: Any, others: List[Dict[str, Any]], probe: bool = True,
                        write: bool = False) -> Tuple[Optional[str], Optional[str]]:
     """(path to store, None) or (None, error) for a library folder. *others*
@@ -929,10 +947,15 @@ def library_paths_edit(pid):
         if errors:
             return _no_store(jsonify({'errors': errors}), 400)
         moved = os.path.realpath(path) != os.path.realpath(rec['path'])
+        # v175 (PM): saved again with the same folder AND the same name clears the mount record (a
+        # rebaseline); a rename (name changed, same path) is only a rename and never clears it.
+        resaved = 'path' in body and not moved and name == rec['name']
         rec.update(name=name, path=path)
         save(data)
     if moved:
         _path_repointed(pid)
+    elif resaved:
+        _path_resaved(pid)
     return _no_store(jsonify(view(data)))
 
 

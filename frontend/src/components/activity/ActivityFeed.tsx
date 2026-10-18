@@ -30,7 +30,7 @@ interface ActivityEntry {
   mediaType: 'movie' | 'tv';
   ts: number;           // completion time (ms)
   tracker: string | null;
-  badge: string;        // server origin label: Manual | Genre Roulette | Requested | Auto | Upgrade | Other | automation name
+  badge: string;        // server origin label: Manual | Genre roulette | Requested | Auto | Upgrade | Other | automation name
   season: number | null;
   episode: number | null;
   episodeTitle: string | null;
@@ -567,7 +567,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                 })()}
                 {dl.tracker && (
                   <span style={{ background: c!.bg, color: c!.fg, border: `1px solid ${c!.border}` }}
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold">
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[12px] font-semibold">
                     {dl.tracker}
                   </span>
                 )}
@@ -652,11 +652,11 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                       style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.28)' }}
                     >
                       Delete torrent + files
-                      <span className="mt-0.5 block text-[10px] font-normal text-red-300/50">Removes transfer and deletes files</span>
+                      <span className="mt-0.5 block text-[12px] font-normal text-red-300/50">Removes transfer and deletes files</span>
                     </button>
                   )}
                   {actionError && confirmHash !== dl.hash ? (
-                    <p className="mt-1.5 text-[11px] text-red-400/90">{actionError}</p>
+                    <p className="mt-1.5 text-[12px] text-red-400/90">{actionError}</p>
                   ) : null}
                 </div>
               ) : null}
@@ -716,7 +716,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: '5px',
                   padding: '6px 12px', borderRadius: '10px',
-                  fontSize: '11px', fontWeight: 700,
+                  fontSize: '12px', fontWeight: 700,
                   background: c.bg, color: c.fg, border: `1px solid ${c.border}`,
                   lineHeight: 1.4,
                 }}
@@ -783,12 +783,12 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                 <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[12px] text-white/30">
                   {entry.tracker && (
                     <span data-testid="history-tracker" style={{ background: c!.bg, color: c!.fg, border: `1px solid ${c!.border}` }}
-                      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap">
+                      className="shrink-0 rounded px-1.5 py-0.5 text-[12px] font-semibold whitespace-nowrap">
                       {entry.tracker}
                     </span>
                   )}
                   <span data-testid="history-origin"
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap"
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[12px] font-semibold whitespace-nowrap"
                     style={originChipStyle(entry.badge)}>
                     {entry.badge}
                   </span>

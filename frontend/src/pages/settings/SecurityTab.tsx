@@ -7,6 +7,8 @@ import { useEffect, useState } from 'react';
 import { ACCESS_CHOICES, type AuthRequired } from '@/pages/StartPage';
 import { cn } from '@/utils/cn';
 import { apiFetch } from '../../apiClient';
+import { INPUT_CLASS, PRIMARY_BTN, SECONDARY_BTN } from './components/legacyTokens';
+import { couldntLoad } from '@/utils/messages';
 import {
   describeRequest, recentRequests, requestLink, requestTime, type RequestLogEntry,
 } from './requestPortalLog';
@@ -112,7 +114,7 @@ function RequestPortalCard() {
 
 
   return (
-    <section className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 space-y-5">
+    <section className="rounded-[16px] border border-white/[0.08] bg-white/[0.06] p-5 space-y-5">
       <div className="flex items-center justify-between gap-3">
         <h3 className="text-[15px] font-semibold text-white/90">Request portal</h3>
         <label className="relative inline-flex cursor-pointer items-center">
@@ -130,7 +132,7 @@ function RequestPortalCard() {
         <>
           <div className="grid gap-3 max-w-md">
             <div className="space-y-1.5">
-              <span className="block text-[12px] font-medium text-white/50">Link</span>
+              <span className="block text-[13px] font-medium text-white/70">Link</span>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -149,7 +151,7 @@ function RequestPortalCard() {
               </div>
             </div>
             <label className="space-y-1.5">
-              <span className="block text-[12px] font-medium text-white/50">Password</span>
+              <span className="block text-[13px] font-medium text-white/70">Password</span>
               <input
                 type="password"
                 value={password}
@@ -159,7 +161,7 @@ function RequestPortalCard() {
               />
             </label>
             <label className="space-y-1.5">
-              <span className="block text-[12px] font-medium text-white/50">Confirm password</span>
+              <span className="block text-[13px] font-medium text-white/70">Confirm password</span>
               <input
                 type="password"
                 value={confirmPassword}
@@ -169,7 +171,7 @@ function RequestPortalCard() {
               />
             </label>
             <label className="space-y-1.5">
-              <span className="block text-[12px] font-medium text-white/50">Hostname</span>
+              <span className="block text-[13px] font-medium text-white/70">Hostname</span>
               <input
                 type="text"
                 value={hostname}
@@ -180,7 +182,7 @@ function RequestPortalCard() {
               />
             </label>
             <label className="space-y-1.5">
-              <span className="block text-[12px] font-medium text-white/50">Movie profile</span>
+              <span className="block text-[13px] font-medium text-white/70">Movie profile</span>
               <input
                 type="text"
                 value={movieProfile}
@@ -191,7 +193,7 @@ function RequestPortalCard() {
               />
             </label>
             <label className="space-y-1.5">
-              <span className="block text-[12px] font-medium text-white/50">TV profile</span>
+              <span className="block text-[13px] font-medium text-white/70">TV profile</span>
               <input
                 type="text"
                 value={tvProfile}
@@ -202,7 +204,7 @@ function RequestPortalCard() {
               />
             </label>
             <label className="space-y-1.5">
-              <span className="block text-[12px] font-medium text-white/50">Exclude libraries</span>
+              <span className="block text-[13px] font-medium text-white/70">Exclude libraries</span>
               <input
                 type="text"
                 value={excludeLibraries}
@@ -221,7 +223,7 @@ function RequestPortalCard() {
           type="button"
           onClick={save}
           disabled={busy || !dirty}
-          className="rounded-full bg-white px-5 py-2 text-[14px] font-semibold text-[#15102a] disabled:opacity-40"
+          className={PRIMARY_BTN}
         >
           Save
         </button>
@@ -259,19 +261,41 @@ export function SecurityTab() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // v175 (Designer must-check): a failed load used to leave the whole tab blank (return null, the
+  // Request portal card included). Now the portal card always shows and the PIN card says it
+  // couldn't load, with Try again.
+  const [loadFailed, setLoadFailed] = useState(false);
   const load = async () => {
-    const res = await apiFetch('/api/security');
-    if (!res.ok) return;
-    const data: SecurityState = await res.json();
-    setState(data);
-    setMode(data.auth_required);
-    setProxies(data.trusted_proxies || '');
-    setHostnames(data.hostnames || '');
-    setSignup(!!data.allow_signup);
+    setLoadFailed(false);
+    try {
+      const res = await apiFetch('/api/security');
+      if (!res.ok) { setLoadFailed(true); return; }
+      const data: SecurityState = await res.json();
+      setState(data);
+      setMode(data.auth_required);
+      setProxies(data.trusted_proxies || '');
+      setHostnames(data.hostnames || '');
+      setSignup(!!data.allow_signup);
+    } catch {
+      setLoadFailed(true);
+    }
   };
   useEffect(() => { load(); }, []);
 
-  if (!state) return null;
+  if (!state) {
+    return (
+      <div className="space-y-5 p-4 md:p-6">
+        <RequestPortalCard />
+        {loadFailed && (
+          <section data-testid="security-load-error" className="rounded-[16px] border border-white/[0.08] bg-white/[0.06] p-5">
+            <h3 className="text-[15px] font-semibold text-white/95">Require PIN</h3>
+            <p className="mt-3 text-[13px] text-white/50">{couldntLoad('security settings')}</p>
+            <button type="button" className={`${SECONDARY_BTN} mt-4`} onClick={() => { void load(); }}>Try again</button>
+          </section>
+        )}
+      </div>
+    );
+  }
 
   const pinNeeded = !state.pin_set;
   const dirty = mode !== state.auth_required || pin !== '' || proxies !== (state.trusted_proxies || '')
@@ -306,7 +330,7 @@ export function SecurityTab() {
     <div className="space-y-5 p-4 md:p-6">
       <RequestPortalCard />
       
-      <section className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 space-y-5">
+      <section className="rounded-[16px] border border-white/[0.08] bg-white/[0.06] p-5 space-y-5">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-[15px] font-semibold text-white/90">Require PIN</h3>
           <span className={cn(
@@ -339,39 +363,39 @@ export function SecurityTab() {
         {(
           <div className="grid grid-cols-2 gap-3 max-w-sm">
             <label className="space-y-1.5">
-              <span className="block text-[12px] font-medium text-white/50">{state.pin_set ? 'New PIN' : 'PIN'}</span>
+              <span className="block text-[13px] font-medium text-white/70">{state.pin_set ? 'New PIN' : 'PIN'}</span>
               <input
                 type="password" inputMode="numeric" autoComplete="new-password" maxLength={4}
                 value={pin} onChange={e => setPin(digits(e.target.value))} placeholder="••••"
-                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[15px] tracking-[0.4em] text-white outline-none focus:border-white/30"
+                className={`${INPUT_CLASS} tracking-[0.4em]`}
               />
             </label>
             <label className="space-y-1.5">
-              <span className="block text-[12px] font-medium text-white/50">Confirm</span>
+              <span className="block text-[13px] font-medium text-white/70">Confirm</span>
               <input
                 type="password" inputMode="numeric" autoComplete="new-password" maxLength={4}
                 value={confirm} onChange={e => setConfirm(digits(e.target.value))} placeholder="••••"
-                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[15px] tracking-[0.4em] text-white outline-none focus:border-white/30"
+                className={`${INPUT_CLASS} tracking-[0.4em]`}
               />
             </label>
           </div>
         )}
 
         <label className="block space-y-1.5">
-          <span className="block text-[12px] font-medium text-white/50">Trusted proxies</span>
+          <span className="block text-[13px] font-medium text-white/70">Trusted proxies</span>
           <input
             type="text" value={proxies} onChange={e => setProxies(e.target.value)} placeholder="Addresses or ranges"
             spellCheck={false}
-            className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+            className={`${INPUT_CLASS} max-w-md`}
           />
         </label>
 
         <label className="block space-y-1.5">
-          <span className="block text-[12px] font-medium text-white/50">Host names</span>
+          <span className="block text-[13px] font-medium text-white/70">Host names</span>
           <input
             type="text" value={hostnames} onChange={e => setHostnames(e.target.value)} placeholder="Names"
             spellCheck={false} autoCapitalize="off"
-            className="w-full max-w-md rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+            className={`${INPUT_CLASS} max-w-md`}
           />
         </label>
 
@@ -395,7 +419,7 @@ export function SecurityTab() {
         <div className="flex items-center gap-3">
           <button
             type="button" onClick={save} disabled={busy || !dirty}
-            className="rounded-full bg-white px-5 py-2 text-[14px] font-semibold text-[#15102a] disabled:opacity-40"
+            className={PRIMARY_BTN}
           >
             Save
           </button>

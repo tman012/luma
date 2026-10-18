@@ -1,7 +1,7 @@
 """v174 (PM's rule for Tester FF-10, HIGH): LUMA_INSTANCE exactly 'prod' or 'test' behaves as before.
 ANY other non-empty value (typos, case variants, whitespace, 'Test-2') fails closed: all 21 gated jobs
-OFF, the write guard on, and an ERROR line at boot naming the value. Unset (or empty) keeps the v158c
-detection. Production's compose sets no LUMA_INSTANCE: unchanged."""
+OFF, the write guard on, and an ERROR line at boot naming the value. Unset keeps the v158c
+detection (v175: empty is unknown and fails closed). Production's compose sets no LUMA_INSTANCE: unchanged."""
 import logging
 
 import pytest
@@ -49,7 +49,7 @@ def test_exactly_test_is_test_without_the_error(monkeypatch, caplog):
     assert len([r for r in caplog.records if ' is OFF ' in r.getMessage()]) == 21
 
 
-@pytest.mark.parametrize('value', [None, '', 'prod'])
+@pytest.mark.parametrize('value', [None, 'prod'])        # v175: '' is unknown now (fails closed)
 def test_prod_is_unchanged(monkeypatch, value):
     if value is None:
         monkeypatch.delenv('LUMA_INSTANCE', raising=False)
@@ -60,7 +60,7 @@ def test_prod_is_unchanged(monkeypatch, value):
     assert instance.blocked_jobs() == {} and instance.install_write_guard() is False
 
 
-@pytest.mark.parametrize('value', [None, ''])
+@pytest.mark.parametrize('value', [None])                # v175: '' is unknown (test_v175_instance_prod_conflict)
 def test_unset_with_a_test_sign_is_still_test(monkeypatch, value):
     if value is None:
         monkeypatch.delenv('LUMA_INSTANCE', raising=False)
@@ -70,10 +70,11 @@ def test_unset_with_a_test_sign_is_still_test(monkeypatch, value):
     assert instance.is_test() and instance.assumed_test() and not instance.unrecognized()
 
 
-def test_exact_prod_beats_test_signs_as_before(monkeypatch):
+def test_exact_prod_no_longer_beats_test_signs(monkeypatch):
+    # v175 (PM, Tester BLOCKER): prod on a test-like host fails closed (test_v175_instance_prod_conflict)
     monkeypatch.setenv('LUMA_INSTANCE', 'prod')
     monkeypatch.setenv('PORT', '5002')
-    assert not instance.is_test()
+    assert instance.is_test() and instance.prod_conflict() == ['port 5002']
 
 
 @pytest.mark.parametrize('value', TYPOS + CASE_SPACE)

@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../../apiClient';
+import { couldntLoad } from '@/utils/messages';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -272,7 +273,7 @@ export function UsersStatusCard() {
           }}
         >
           <span style={{ fontSize: 13, color: 'rgba(248,113,113,0.9)' }}>
-            Failed to load users: {error}
+            {couldntLoad('users')}
           </span>
         </div>
       )}

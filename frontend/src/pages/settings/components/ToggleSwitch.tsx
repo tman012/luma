@@ -69,3 +69,33 @@ export function ToggleSwitch({
     </div>
   );
 }
+
+/** v175 (Designer): a card whose only toggle repeats its title shows just the switch, right-aligned in
+ * the card header (SettingsCard headerToggle); the duplicate label row is gone. Named by the title. */
+export function HeaderSwitch({ label, path, disabled }: { label: string; path: string; disabled?: boolean }) {
+  const { getByPath, setByPath } = useSettings();
+  const isOn = Boolean(getByPath(path));
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={isOn}
+      aria-label={label}
+      data-testid="card-header-switch"
+      onClick={() => { if (!disabled) setByPath(path, !isOn); }}
+      disabled={disabled}
+      className={cn(
+        'relative h-[28px] w-[50px] shrink-0 rounded-full transition-colors duration-200',
+        isOn ? 'bg-[#3b82f6]' : 'bg-white/20',
+        disabled && 'opacity-40 cursor-not-allowed',
+      )}
+    >
+      <span
+        className={cn(
+          'absolute top-[4px] left-[4px] h-[20px] w-[20px] rounded-full bg-white shadow-sm transition-transform duration-200',
+          isOn && 'translate-x-[22px]',
+        )}
+      />
+    </button>
+  );
+}

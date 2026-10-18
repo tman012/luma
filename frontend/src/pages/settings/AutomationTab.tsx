@@ -155,26 +155,25 @@ export function AutomationTab() {
 
 // -- Feature switch card -------------------------------------------
 
-/** The feature's main switch, labeled with the feature (v174, Designer: label only). */
-function FeatureToggle({ path, label }: { path: string; label: string }) {
-  return <ToggleSwitch label={label} path={path} />;
-}
-
 function FeatureSwitchCard({
   title,
   path,
   extraPaths = [],
+  inHeader = true,
   children,
 }: {
   title: string;
   path: string;
   extraPaths?: string[];
+  /** v175 (Designer): the switch sits in the header when it's the card's only toggle */
+  inHeader?: boolean;
   children?: ReactNode;
 }) {
   return (
     <SettingsCard
       title={title}
       paths={[path, ...extraPaths]}
+      headerToggle={inHeader ? path : undefined}
       icon={
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
@@ -182,7 +181,7 @@ function FeatureSwitchCard({
         </svg>
       }
     >
-      <FeatureToggle path={path} label={title} />
+      {!inHeader && <ToggleSwitch label={title} path={path} />}
       {children}
     </SettingsCard>
   );
@@ -222,6 +221,7 @@ function UpgradesFeature() {
     <div className="space-y-4 [&>*]:!mt-0">
       <FeatureSwitchCard
         title="4K & upgrades"
+        inHeader={false}
         path="automation.upgrades.enabled"
         extraPaths={['automation.upgrade_scheduler.enabled', 'automation.upgrade_scheduler.run_hour']}
       >
@@ -745,12 +745,9 @@ function Upgrade4kAutoGrabCard() {
           <path d="M3 17l9 4 9-4" />
         </svg>
       }
+      headerToggle="automation.upgrade_4k_auto_grab.enabled"
       headerRight={<RunNowButton onRun={handleRunNow} running={status?.running} />}
     >
-      <ToggleSwitch
-        label="Use 4K Remux auto-grab"
-        path="automation.upgrade_4k_auto_grab.enabled"
-      />
       <FormField
         label="Quality profile (4K)"
         path="automation.upgrade_4k_auto_grab.quality_profile_id"

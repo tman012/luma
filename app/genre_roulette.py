@@ -1823,7 +1823,7 @@ def run_cycle(dry_run: bool = False, settings=None,
             return {'error': 'Radarr not configured', 'started_at': started,
                     'dry_run': dry_run, 'genres': cand['genres']}
         if not profile_id:
-            return {'error': 'Genre Roulette quality profile is not set',
+            return {'error': 'Genre roulette quality profile is not set',
                     'started_at': started, 'dry_run': dry_run,
                     'genres': cand['genres']}
         radarr = RadarrAPI(radarr_url, radarr_key)

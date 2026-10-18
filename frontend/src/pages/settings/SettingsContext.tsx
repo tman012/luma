@@ -6,6 +6,7 @@
  * saveCard for persisting per-card changes, and testConnection.
  */
 
+import { SAVE_FAILED, couldntLoad } from '@/utils/messages';
 import {
   createContext,
   useState,
@@ -128,8 +129,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setSettings(s);
       setSavedSettings(structuredClone(s));
       setSchema(sc);
-    } catch (e) {
-      showToast(`Failed to load settings: ${(e as Error).message}`, 'error');
+    } catch {
+      showToast(couldntLoad('settings'), 'error');
     } finally {
       setLoading(false);
     }
@@ -205,11 +206,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           showToast('Settings saved', 'success');
           return true;
         } else {
-          showToast(result.errors?.join(', ') ?? 'Save failed', 'error');
+          showToast(result.errors?.join(', ') || SAVE_FAILED, 'error');
           return false;
         }
-      } catch (e) {
-        showToast(`Save failed: ${(e as Error).message}`, 'error');
+      } catch {
+        showToast(SAVE_FAILED, 'error');
         return false;
       }
     },

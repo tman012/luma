@@ -1,8 +1,8 @@
 """v173/v174 (PM): Explore's movie categories live in Settings > Trackers > Search
 (tracker_search.movie_categories), migrated from indexer.movie_categories with no loss. v174: the
 never-wired max age, minimum seeders and result limit are gone (UI, schema, migration); a stale saved
-value (under indexer or, from v173, under tracker_search) is tolerated and ignored, and Explore's
-results don't change."""
+value (under indexer or, from v173, under tracker_search) never changes Explore's results; v175 (Ops)
+strips it at load (see test_v175_settings_migration.py)."""
 import json
 
 from app.settings_manager import SETTINGS_SCHEMA, SettingsManager, _migrate_tracker_search_settings
@@ -54,11 +54,11 @@ def test_fresh_default(tmp_path):
     assert not any(k in (saved.get('tracker_search') or {}) for k in GONE)
 
 
-def test_migration_moves_only_categories_and_an_already_moved_value_wins():
+def test_migration_moves_categories_strips_the_rest_and_an_already_moved_value_wins():
     data = {'indexer': {'movie_categories': '5000', 'limit': 120}, 'tracker_search': {'movie_categories': '2000,2045'}}
     assert _migrate_tracker_search_settings(data) is True
     assert data['tracker_search'] == {'movie_categories': '2000,2045'}
-    assert data['indexer'] == {'limit': 120}                         # tolerated, left alone, ignored
+    assert data['indexer'] == {}                                     # v175 (Ops): stripped, not left behind
     assert _migrate_tracker_search_settings(data) is False
 
 

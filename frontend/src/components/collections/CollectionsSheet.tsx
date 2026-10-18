@@ -172,11 +172,11 @@ const CollectionRow = memo(function CollectionRow({
           {ownedLabel(item.owned_count, item.released_total || item.parts_total)}
         </p>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
-          <span className="rounded px-1.5 py-0.5 text-[11px] font-semibold bg-amber-500/20 text-amber-400">
+          <span className="rounded px-1.5 py-0.5 text-[12px] font-semibold bg-amber-500/20 text-amber-400">
             {item.missing_count} missing
           </span>
           {item.upcoming_count > 0 && (
-            <span className="rounded px-1.5 py-0.5 text-[11px] font-semibold bg-white/10 text-white/40">
+            <span className="rounded px-1.5 py-0.5 text-[12px] font-semibold bg-white/10 text-white/40">
               {item.upcoming_count} upcoming
             </span>
           )}

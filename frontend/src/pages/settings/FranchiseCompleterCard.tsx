@@ -7,10 +7,10 @@
  */
 
 import { SECONDARY_BTN } from './components/legacyTokens';
+import { RealRunConfirm } from './components/RealRunConfirm';
 import { useState, useEffect, useCallback } from 'react';
 import { SettingsCard } from './components/SettingsCard';
 import { FormField } from './components/FormField';
-import { ToggleSwitch } from './components/ToggleSwitch';
 import { useSettings } from './useSettings';
 import {
   fetchRadarrProfiles,
@@ -80,7 +80,7 @@ function RunTimeField() {
 
   return (
     <FormField
-      label="Run time (24h)"
+      label="Run time"
       path={HOUR_PATH}
       type="time"
       value={`${pad(hour)}:${pad(minute)}`}
@@ -103,6 +103,9 @@ export function FranchiseCompleterCard() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const running = Boolean(status?.running);
+  // v175 (PM): a real run asks first; Run sends the same single POST as before, Cancel sends nothing
+  const [confirmRun, setConfirmRun] = useState(false);
+  const cancelRun = useCallback(() => setConfirmRun(false), []);
 
   const refresh = useCallback(async () => {
     try {
@@ -168,6 +171,7 @@ export function FranchiseCompleterCard() {
     <SettingsCard
       title="Franchise completer"
       paths={ALL_PATHS}
+      headerToggle="automation.franchise_completer.enabled"
       icon={
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -186,10 +190,6 @@ export function FranchiseCompleterCard() {
         </button>
       }
     >
-      <ToggleSwitch
-        label="Franchise completer"
-        path="automation.franchise_completer.enabled"
-      />
       <FormField
         label="Quality profile (Radarr)"
         path="automation.franchise_completer.quality_profile_id"
@@ -288,13 +288,14 @@ export function FranchiseCompleterCard() {
       <div className="col-span-full flex flex-wrap items-center gap-2">
         <button
           type="button"
-          onClick={handleRunNow}
+          onClick={() => setConfirmRun(true)}
           disabled={busy !== null || running}
           className={SECONDARY_BTN}
         >
           {running ? 'Running…' : 'Run now'}
         </button>
       </div>
+      <RealRunConfirm open={confirmRun} onCancel={cancelRun} onRun={() => { setConfirmRun(false); handleRunNow(); }} />
     </SettingsCard>
   );
 }

@@ -45,7 +45,7 @@ const TILES: DiscoveryTile[] = [
   },
   {
     id: 'movie-night',
-    title: 'Movie Night picks',
+    title: 'Movie night picks',
     descriptor: 'Perfect for the whole group',
     accentHue: 220,
     mood: 'cool theater',

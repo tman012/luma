@@ -9,10 +9,10 @@
  */
 
 import { SECONDARY_BTN } from './components/legacyTokens';
+import { RealRunConfirm } from './components/RealRunConfirm';
 import { useState, useEffect, useCallback } from 'react';
 import { SettingsCard } from './components/SettingsCard';
 import { FormField } from './components/FormField';
-import { ToggleSwitch } from './components/ToggleSwitch';
 import { ChipPicker } from './components/ChipPicker';
 import { useSettings } from './useSettings';
 import {
@@ -112,7 +112,7 @@ function RunTimeField() {
 
   return (
     <FormField
-      label="Run time (24h)"
+      label="Run time"
       path={HOUR_PATH}
       type="time"
       value={`${pad(hour)}:${pad(minute)}`}
@@ -137,6 +137,9 @@ export function GenreRouletteCard() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const running = Boolean(status?.running);
+  // v175 (PM): a real run asks first; Run sends the same single POST as before, Cancel sends nothing
+  const [confirmRun, setConfirmRun] = useState(false);
+  const cancelRun = useCallback(() => setConfirmRun(false), []);
 
   const refresh = useCallback(async () => {
     try {
@@ -209,6 +212,7 @@ export function GenreRouletteCard() {
     <SettingsCard
       title="Genre roulette"
       paths={ALL_PATHS}
+      headerToggle="automation.genre_roulette.enabled"
       icon={
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <circle cx="12" cy="12" r="10" />
@@ -227,7 +231,6 @@ export function GenreRouletteCard() {
         </button>
       }
     >
-      <ToggleSwitch label="Genre roulette" path="automation.genre_roulette.enabled" />
       <FormField label="Quality profile (Radarr)" path="automation.genre_roulette.quality_profile_id"
         type="select" options={profileOptions} />
 
@@ -372,11 +375,12 @@ export function GenreRouletteCard() {
       )}
 
       <div className="col-span-full flex flex-wrap items-center gap-2">
-        <button type="button" onClick={handleRunNow} disabled={busy !== null || running}
+        <button type="button" onClick={() => setConfirmRun(true)} disabled={busy !== null || running}
           className={SECONDARY_BTN}>
           {running ? 'Running…' : 'Run now'}
         </button>
       </div>
+      <RealRunConfirm open={confirmRun} onCancel={cancelRun} onRun={() => { setConfirmRun(false); handleRunNow(); }} />
     </SettingsCard>
   );
 }

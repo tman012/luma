@@ -876,6 +876,24 @@ def forget_mount(pid: str) -> None:
         logger.warning('TV scan: mount record of %s not cleared (%s)', pid, type(e).__name__)
 
 
+def rebaseline(pid: str) -> None:
+    """v175 (PM): the owner saved library path *pid* again with the same folder. Its recorded mount,
+    device id and coverage streak are cleared and its rows marked as not yet seen in this folder, so the
+    next scan takes the folders there now as the baseline: the coverage and mount guards don't hold it
+    (an empty folder still does), shows that are gone detach (history kept), new ones are found, and the
+    mount and device are recorded again. Logged at INFO."""
+    try:
+        tv_store.set_meta(MOUNT_META + pid, None)
+        tv_store.set_meta(DEV_META + pid, None)
+        tv_store.set_meta(COVERAGE_META + pid, None)
+        tv_store.set_meta(ROOT_META + pid, REPOINTED)     # the next scan's folders are the baseline
+        _empty_logged.pop(pid, None)
+        logger.info('TV library path %s saved again with the same folder: recorded mount, device id and '
+                    'coverage streak cleared; the next scan takes its current folders as the baseline', pid)
+    except Exception as e:                   # noqa: BLE001 - only a signal
+        logger.warning('TV scan: library path %s not re-baselined (%s)', pid, type(e).__name__)
+
+
 def skipped(pid: str) -> bool:
     """v170 (PM): the last scan skipped library path *pid* as empty (Settings shows 'Unavailable')."""
     try:
@@ -943,8 +961,13 @@ def _unavailable(pid: str, root_real: str, shows: List[str], now: Optional[float
         # v174 (Reviewer on c669f76, REQUIRED): the exit is only for a mounted library. With the mount
         # dropped (or the recorded mount not mounted now) the streak resets and nothing is released.
         if _mount_down(pid, root_real):
-            _clear_coverage(pid)
-            return why
+            if not _live_on_new_device(pid, root_real):
+                _clear_coverage(pid)
+                return why
+            # v175 (PM): a live mount (mounted, not dropped) with real show folders whose device id
+            # changed (a remount, a replaced share) restarts the release streak on the new device rather
+            # than blocking forever. The bare mount point on its parent's device never counts.
+            _restart_on_new_device(pid, root_real)
         return None if _coverage_released(pid, shows, why, now) else why
     return None
 
@@ -962,7 +985,8 @@ def _mount_down(pid: str, root_real: str) -> bool:
     recorded mount point is not mounted now, or the path's folder is on another device (st_dev) than at
     that scan (e.g. retired from the NAS to the local disk at the same path). No record (a new path, or
     a path last scanned before v174 for the device id) is no signal; the next good scan records it.
-    Editing the path to another folder or removing it clears the records (forget_mount)."""
+    Editing the path to another folder or removing it clears the records (forget_mount).
+    v175 (PM): a device change on a live mount restarts the release streak (_live_on_new_device)."""
     if _dropped_mount(pid, root_real):
         return True
     try:
@@ -975,6 +999,44 @@ def _mount_down(pid: str, root_real: str) -> bool:
     if dev and str(_dev_of(root_real)) != str(dev):
         return True
     return False
+
+
+def _live_on_new_device(pid: str, root_real: str) -> bool:
+    """v175 (PM): the path is a live mount on a device other than its last good scan's: not dropped, its
+    recorded mount (if any) still mounted, the mount it is on now is a real mount point (not '/'), and
+    the folder is on another device than that mount point's parent (a bare mount point sits on its
+    parent's device: never live). Only then may a changed device id start a new release streak."""
+    if _dropped_mount(pid, root_real):
+        return False
+    try:
+        was = tv_store.get_meta(MOUNT_META + pid)
+        dev = tv_store.get_meta(DEV_META + pid)
+    except Exception:                        # noqa: BLE001 - no record: not this case
+        return False
+    if was and not os.path.ismount(was):
+        return False
+    now_dev = _dev_of(root_real)
+    if not dev or now_dev is None or str(now_dev) == str(dev):
+        return False
+    mount = _mount_of(root_real)
+    if mount == '/' or not os.path.ismount(mount):
+        return False
+    parent_dev = _dev_of(os.path.dirname(mount.rstrip('/')) or '/')
+    return parent_dev is not None and now_dev != parent_dev
+
+
+def _restart_on_new_device(pid: str, root_real: str) -> None:
+    """Record the new device id and start the coverage streak again from this scan (INFO, once per
+    device change: the next scan sees the recorded device and counts on as usual)."""
+    try:
+        old = tv_store.get_meta(DEV_META + pid)
+        new = _dev_of(root_real)
+        tv_store.set_meta(DEV_META + pid, str(new))
+        _clear_coverage(pid)
+        logger.info('TV scan: library path %s is a live mount on a new device (%s -> %s); '
+                    'the release streak starts again on the new device', pid, old, new)
+    except Exception as e:                   # noqa: BLE001 - only a signal
+        logger.warning('TV scan: library path %s new device not recorded (%s)', pid, type(e).__name__)
 
 
 def _coverage_released(pid: str, shows: List[str], why: str, now: Optional[float]) -> bool:
