@@ -63,6 +63,7 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
                     'SELECT e.id, e.series_id, e.season_number, e.episode_number, e.title, e.air_date, e.airstamp,'
                     ' COALESCE(e.air_runtime, e.runtime) AS minutes, e.still_path, e.tvdb_image, s.backdrop_path,'
                     ' s.title AS show, s.year, s.poster_path, s.tmdb_id AS show_tmdb, s.tvdb_id AS show_tvdb,'
+                    ' (s.monitored AND e.monitored) AS mon,'
                     # downloaded: a linked file for this exact episode row (one rule, no fallback)
                     ' EXISTS (SELECT 1 FROM episode_file_links l JOIN episode_files f ON f.id = l.file_id'
                     "         WHERE l.episode_id = e.id AND f.state = 'linked')"
@@ -71,7 +72,7 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
                     f' WHERE s.path_id IN ({_in(paths)}) AND e.air_date >= ? AND e.air_date < ?'
                     ' ORDER BY e.air_date, s.title COLLATE NOCASE, e.season_number, e.episode_number',
                     (*paths, start.isoformat(), end.isoformat())):
-                out.append({'episode_id': r['id'], 'series_id': r['series_id'], 'tmdb_id': r['show_tmdb'], 'show': r['show'], 'year': r['year'],
+                out.append({'episode_id': r['id'], 'series_id': r['series_id'], 'tmdb_id': r['show_tmdb'], 'monitored': bool(r['mon']), 'show': r['show'], 'year': r['year'],
                             'poster_path': r['poster_path'], 'season': r['season_number'],
                             'episode': r['episode_number'], 'title': r['title'] or '', 'air_date': r['air_date'],
                             'airstamp': r['airstamp'], 'runtime': r['minutes'],
@@ -160,7 +161,8 @@ def _aliases(raw) -> List[str]:
 
 
 @tv_scan._locked
-def add(tmdb_id: int, path_id: Optional[str], now: Optional[float] = None) -> Dict[str, Any]:
+def add(tmdb_id: int, path_id: Optional[str], now: Optional[float] = None, monitor: Optional[str] = None,
+        profile_id: Optional[int] = None) -> Dict[str, Any]:
     """Add from Search: the show goes into tv.db for *path_id* (one of the
     selected TV libraries; optional when there's only one) and onto the
     calendar. No folder or file is created and nothing is downloaded. A show
@@ -189,12 +191,17 @@ def add(tmdb_id: int, path_id: Optional[str], now: Optional[float] = None) -> Di
         with tv_store.write() as conn:
             conn.execute('UPDATE series SET path_id = ?, folder = NULL WHERE id = ?', (path_id, known['id']))
         tv_scan.refresh_episodes(known['id'], tmdb_id, now, data)
+        if monitor is not None or profile_id is not None:
+            from app import tv_monitor
+            tv_monitor.edit(known['id'], {**({'monitor': monitor} if monitor else {}),
+                                          **({'profile_id': profile_id} if profile_id is not None else {})})
         with tv_store.write() as conn:
             conn.execute('INSERT INTO history (ts, series_id, episode_ids, event, detail) VALUES (?, ?, ?, ?, ?)',
                          (now, known['id'], '[]', 'added', __import__('json').dumps(
                              {'via': 'search', 'path_id': path_id, 'tmdb_id': tmdb_id})))
         return {'ok': True, 'series_id': known['id']}
-    sid = tv_scan.store_show(path_id, None, tmdb_id, now, via='search', event='added', data=data)
+    sid = tv_scan.store_show(path_id, None, tmdb_id, now, via='search', event='added', data=data,
+                             monitor=monitor, profile_id=profile_id)
     if sid is None:
         return {'ok': False, 'error': ALREADY, 'status': 409}
     return {'ok': True, 'series_id': sid}

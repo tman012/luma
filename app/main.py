@@ -21635,6 +21635,8 @@ _tv_settings.migrate_on_start()   # TV paths of earlier builds become Library pa
 from app import tv_tmdb as _tv_tmdb, tv_library_routes as _tv_library_routes
 _tv_tmdb.init(get_key=lambda: settings.get('apis.tmdb.api_key') or os.environ.get('TMDB_API_KEY', ''), cache=True)
 app.register_blueprint(_tv_library_routes.bp)
+from app import tv_monitor_routes as _tv_monitor_routes  # noqa: E402
+app.register_blueprint(_tv_monitor_routes.bp)
 
 # tv.db: migrate once at boot (backs up the old file first); a failure is
 # logged and left to the lazy path, never a failed boot.
@@ -21651,6 +21653,11 @@ except Exception:                          # noqa: BLE001 - never a failed boot
 from app import tv_watch as _tv_watch, tv_plex as _tv_plex  # noqa: E402
 _tv_plex.init(get_plex=lambda: plex_service)
 _tv_watch.start()
+try:
+    from app import tv_downloads as _tv_downloads
+    _tv_downloads.start()      # 1-min TV download watch (luma-test-tv torrents only)
+except Exception as _e:  # noqa: BLE001
+    logger.error('TV download watch not started: %s', type(_e).__name__)
 from app import tv_scan as _tv_scan_boot  # noqa: E402
 _tv_scan_boot.auto_import_on_start()       # old review rows with a ranked pick import now (background)
 

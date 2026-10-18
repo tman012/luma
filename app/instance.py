@@ -12,7 +12,8 @@ default empty). Gated twice (defense in depth):
 The library mover is the one writer allowed on test by default: it acts only on
 torrents tagged luma-test (qbit_owner) and only hardlinks or copies (never
 moves, renames or deletes a source file). TV tv.db scan/link is DB-only and
-always allowed. Unset or 'prod': nothing changes.
+always allowed. The TV download watch (tv_import) likewise only ever acts on torrents
+tagged luma-test-tv, hardlinking or copying into the show's folder (never an overwrite). Unset or 'prod': nothing changes.
 """
 from __future__ import annotations
 
@@ -50,9 +51,10 @@ GATED: Dict[str, str] = {
     'arr': 'Radarr/Sonarr/Prowlarr write calls (add, delete, unmonitor, grab, command)',
     'qbit': 'qBittorrent write calls (add, delete, pause, category/tag change, move)',
     'storage_cleanup': 'Downloads cleanup (deletes files)',
+    'tv_delete_files': 'TV: Delete show folder (deletes files)',
 }
 # Allowed on test by default (scoped by their own rules, see the module doc).
-TEST_DEFAULT_ALLOWED: FrozenSet[str] = frozenset({'mover', 'tv_link'})
+TEST_DEFAULT_ALLOWED: FrozenSet[str] = frozenset({'mover', 'tv_link', 'tv_import'})
 
 
 class WritesBlocked(requests.RequestException):

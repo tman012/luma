@@ -32,7 +32,7 @@ def test_rematch_repoints_and_relinks(scanned):
     out = tv_scan.rematch(sid, 1001, now=2000.0)
     assert out == {'ok': True, 'series_id': sid}
     s = rows('SELECT * FROM series WHERE id = ?', sid)[0]
-    assert (s['tmdb_id'], s['title'], s['folder'], s['monitored']) == (1001, 'Mystery Show', 'Severance (2022)', 0)
+    assert (s['tmdb_id'], s['title'], s['folder'], s['monitored']) == (1001, 'Mystery Show', 'Severance (2022)', 1)
     f = {r['rel_path']: r['state'] for r in rows('SELECT rel_path, state FROM episode_files WHERE series_id = ?', sid)}
     assert f['Severance (2022)/Season 01/Severance.S01E02.1080p.WEB-DL-GRP.mkv'] == 'linked'
     assert f['Severance (2022)/Season 02/Severance.S02E01E02.2160p.mkv'] == 'mismatch'  # it has no season 2
@@ -68,7 +68,7 @@ def test_match_unmatched(scanned):
     assert out['ok']
     assert rows('SELECT id FROM unmatched WHERE id = ?', uid) == []
     s = rows('SELECT * FROM series WHERE id = ?', out['series_id'])[0]
-    assert (s['folder'], s['tmdb_id'], s['monitored']) == ('Mystery Show', 1002, 0)
+    assert (s['folder'], s['tmdb_id'], s['monitored']) == ('Mystery Show', 1002, 1)
     assert rows('SELECT state FROM episode_files WHERE series_id = ?', s['id']) == [{'state': 'linked'}]
     h = [json.loads(r['detail']) for r in rows("SELECT detail FROM history WHERE event = 'matched'"
                                                ' AND series_id = ?', s['id'])]

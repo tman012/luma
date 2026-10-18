@@ -186,8 +186,23 @@ SCHEMA_V6 = """
 ALTER TABLE series ADD COLUMN stills_at REAL;
 """
 
+# v158a monitoring: the series' Monitor option (all/future/missing/...), specials and
+# season folders, and the default TV quality profile. Existing shows become
+# Monitored with Future episodes (no back catalog) and new seasons on.
+SCHEMA_V7 = """
+ALTER TABLE series ADD COLUMN monitor TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE series ADD COLUMN monitor_specials INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE series ADD COLUMN season_folder INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE quality_profiles ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0;
+UPDATE series SET monitored = 1, monitor = 'future', monitor_new_seasons = 1;
+UPDATE episodes SET monitored = CASE WHEN season_number > 0 AND (air_date IS NULL OR air_date >= date('now', 'localtime'))
+  THEN 1 ELSE 0 END;
+UPDATE seasons SET monitored = CASE WHEN EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = seasons.series_id
+  AND e.season_number = seasons.season_number AND e.monitored = 1) THEN 1 ELSE 0 END;
+"""
+
 # MIGRATIONS[n] takes user_version n to n + 1.
-MIGRATIONS: List[str] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6]
+MIGRATIONS: List[str] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 

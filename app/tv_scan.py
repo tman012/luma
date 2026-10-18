@@ -219,7 +219,7 @@ def pick_group(tmdb_id: int, seasons: Dict[int, Dict[str, Any]], hints: Optional
 
 def store_show(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str,
                event: str = 'matched', series_id: Optional[int] = None, data: Optional[Dict[str, Any]] = None,
-               tier: Optional[str] = None) -> Optional[int]:
+               tier: Optional[str] = None, monitor: Optional[str] = None, profile_id: Optional[int] = None) -> Optional[int]:
     """Insert (or repoint *series_id* to) the show *tmdb_id* for a folder,
     with its seasons and episodes (*data* from fetch_show, else fetched now).
     Returns the series id, or None when that show already belongs to another
@@ -237,12 +237,15 @@ def store_show(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str,
         cols = dict(fields, tmdb_id=tmdb_id, aliases=json.dumps(aliases), tmdb_refreshed_at=now, stills_at=now,
                     match_tier=tier or via)
         if series_id is None:
-            cols.update(path_id=path_id, folder=folder, monitored=0, monitor_new_seasons=0, added_at=now)
+            # v158a: monitored by default (a library folder: Future episodes; Add from Search: the
+            # owner's pick, All episodes by default); new seasons on; the default quality profile
+            cols.update(path_id=path_id, folder=folder, monitored=0, monitor_new_seasons=1, added_at=now,
+                        profile_id=profile_id if profile_id is not None else _default_profile(conn))
             keys = ', '.join(cols)
             cur = conn.execute(f'INSERT INTO series ({keys}) VALUES ({", ".join("?" * len(cols))})', tuple(cols.values()))
             sid = int(cur.lastrowid)
         else:
-            old = conn.execute('SELECT tmdb_id, title FROM series WHERE id = ?', (series_id,)).fetchone()
+            old = conn.execute('SELECT tmdb_id, title, monitor FROM series WHERE id = ?', (series_id,)).fetchone()
             conn.execute('DELETE FROM episodes WHERE series_id = ?', (series_id,))
             conn.execute('DELETE FROM seasons WHERE series_id = ?', (series_id,))
             conn.execute(f'UPDATE series SET {", ".join(f"{k} = ?" for k in cols)} WHERE id = ?',
@@ -250,6 +253,11 @@ def store_show(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str,
             sid = series_id
         _store_episodes(conn, sid, seasons)
         _store_group(conn, sid, data.get('group'))
+        from app import tv_monitor
+        if series_id is None:
+            tv_monitor.apply(conn, sid, monitor or (tv_monitor.ADD_DEFAULT if event == 'added' else tv_monitor.IMPORT_DEFAULT))
+        else:                                   # a rematch: the new show's episodes follow the series' option
+            tv_monitor.apply(conn, sid, monitor or (old['monitor'] if old and old['monitor'] else tv_monitor.IMPORT_DEFAULT))
         detail = {'via': via, 'folder': folder, 'path_id': path_id, 'tmdb_id': tmdb_id, 'title': fields['title']}
         if event == 'rematched' and old:
             detail.update(from_tmdb_id=old['tmdb_id'], from_title=old['title'])
@@ -257,6 +265,11 @@ def store_show(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str,
                      (now, sid, '[]', event, json.dumps(detail)))
         conn.execute('DELETE FROM unmatched WHERE path_id = ? AND folder = ?', (path_id, folder))
     return sid
+
+
+def _default_profile(conn) -> Optional[int]:
+    r = conn.execute('SELECT id FROM quality_profiles WHERE is_default = 1').fetchone()
+    return r['id'] if r else None
 
 
 def _store_group(conn, sid: int, group: Optional[Dict[str, Any]]) -> None:
@@ -320,7 +333,10 @@ def refresh_episodes(sid: int, tmdb_id: int, now: float, data: Optional[Dict[str
         # for *tmdb_id* belong to that show only, so re-check id AND tmdb_id in this transaction
         if not conn.execute('SELECT 1 FROM series WHERE id = ? AND tmdb_id = ?', (sid, tmdb_id)).fetchone():
             return
+        from app import tv_monitor
+        before = tv_monitor.known(conn, sid)
         _store_episodes(conn, sid, data['seasons'])
+        tv_monitor.new_episodes(conn, sid, before)     # episodes TMDB added since inherit the series' rule
         if data.get('group') is not None:
             _store_group(conn, sid, data['group'])
         conn.execute('UPDATE series SET tmdb_refreshed_at = ?, stills_at = ? WHERE id = ?', (now, now, sid))

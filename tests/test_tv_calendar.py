@@ -62,7 +62,7 @@ def test_week_by_air_date_with_downloaded_flags(scanned):
         ('2026-10-17', 'Severance', 2, 6, False),
     ]
     e = out['episodes'][0]
-    assert set(e) == {'episode_id', 'series_id', 'tmdb_id', 'show', 'year', 'poster_path', 'season', 'episode', 'title',
+    assert set(e) == {'episode_id', 'series_id', 'tmdb_id', 'monitored', 'show', 'year', 'poster_path', 'season', 'episode', 'title',
                       'air_date', 'airstamp', 'runtime', 'tvdb_image', 'still_path', 'backdrop_path', 'downloaded'}
     assert e['poster_path'] == '/p95396.jpg' and e['title'] == 'Episode 1' and out['libraries'] == 1
     assert isinstance(e['tmdb_id'], int)                    # the card opens this show's detail
@@ -166,7 +166,7 @@ def test_add_with_one_library_puts_the_show_on_the_calendar_and_touches_no_files
     assert r.status_code == 201
     sid = r.get_json()['series_id']
     s = rows('SELECT path_id, folder, monitored FROM series WHERE id = ?', sid)[0]
-    assert (s['path_id'], s['folder'], s['monitored']) == (PID, None, 0)
+    assert (s['path_id'], s['folder'], s['monitored']) == (PID, None, 1)      # v158a: All episodes by default
     assert [(e['show'], e['air_date'], e['downloaded']) for e in tv_calendar.calendar(D(2026, 10, 11), 14)['episodes']
             if e['show'] == 'Severance Pay'] == [('Severance Pay', '2026-10-14', False), ('Severance Pay', '2026-10-21', False)]
     assert snapshot(tv_env) == before                                # no folders, no files

@@ -7,7 +7,8 @@ POST /api/settings/tv/import-all {items: [{id, tmdb_id}]}  review rows imported 
 GET  /api/settings/tv/search?q=&year=          TMDB shows for the picker (q may be tmdb:/tvdb:/imdb:<id>)
 GET  /api/settings/tv/calendar?start=YYYY-MM-DD&days=N   episodes by air date (tv_calendar)
 GET  /api/settings/tv/find?q=                   Search: library shows first, then TMDB
-POST /api/settings/tv/shows {tmdb_id, path_id?}  Add from Search (tv.db only; no folders, no files)
+POST /api/settings/tv/shows {tmdb_id, path_id?, monitor?, profile_id?}  Add from Search (tv.db only; no folders, no files;
+                                                 monitor defaults to All episodes)
 PUT  /api/settings/tv/shows/<id>/match {tmdb_id}      "Wrong show?" (rematched)
 POST /api/settings/tv/unmatched/<id>/match {tmdb_id}  "Match" (matched, manual)
 
@@ -183,8 +184,15 @@ def tv_show_add():
     pid = body.get('path_id') if isinstance(body, dict) else None
     if tid is None or (pid is not None and (not isinstance(pid, str) or len(pid) > 64)):
         return _no_store(jsonify({'error': BAD_SHOW}), 400)
+    from app import tv_monitor
+    monitor = body.get('monitor')
+    prof = body.get('profile_id')
+    if monitor is not None and monitor not in tv_monitor.OPTIONS:
+        return _no_store(jsonify({'error': 'Invalid', 'errors': {'monitor': 'Invalid'}}), 400)
+    if prof is not None and (not isinstance(prof, int) or isinstance(prof, bool) or tv_monitor.get_profile(prof) is None):
+        return _no_store(jsonify({'error': 'Invalid', 'errors': {'profile_id': 'Pick a profile'}}), 400)
     try:
-        out = tv_calendar.add(tid, pid)
+        out = tv_calendar.add(tid, pid, monitor=monitor, profile_id=prof)
     except tv_tmdb.TmdbError as e:
         return _no_store(jsonify({'error': str(e)}), 502)
     if not out['ok']:

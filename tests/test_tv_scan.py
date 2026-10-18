@@ -1,4 +1,4 @@
-"""Phase 1 scan: shows, unmatched with candidates, file states, monitored=0,
+"""Phase 1 scan: shows, unmatched with candidates, file states, monitored (v158a: Future),
 history, rows only for gone folders, Scan and library routes."""
 import json
 import os
@@ -58,7 +58,8 @@ def test_scan_matches_and_records(lib):
         'Taskmaster [imdbid-tt4934214]': 63770, 'The Daily Show': 4000, 'Mystery Show': 1001}
     assert shows['Mystery Show']['match_tier'] == 'auto'
     assert 'Escaped (2010)' not in shows and '.hidden' not in shows and 'readme.txt' not in shows
-    assert all(s['monitored'] == 0 and s['monitor_new_seasons'] == 0 for s in shows.values())
+    # v158a: a library folder imports Monitored with Future episodes and new seasons on
+    assert all(s['monitored'] == 1 and s['monitor_new_seasons'] == 1 and s['monitor'] == 'future' for s in shows.values())
     assert shows['Severance (2022)']['tvdb_id'] == 371980 and shows['Severance (2022)']['imdb_id'] == 'tt11280740'
     un = {r['folder']: r for r in rows('SELECT * FROM unmatched')}
     assert set(un) == {'Zzz Nothing', 'Empty Show (2020)'}
@@ -89,7 +90,9 @@ def test_file_states(lib):
     assert json.loads(multi['parsed'])['summary'] == 'multi S02E01E02'
     st = os.stat(lib / 'Severance (2022)' / 'Season 02' / 'Severance.S02E01E02.2160p.mkv')
     assert (multi['size'], multi['ino']) == (st.st_size, st.st_ino)
-    assert rows('SELECT COUNT(*) AS n FROM episodes WHERE monitored != 0')[0]['n'] == 0
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+    assert rows('SELECT COUNT(*) AS n FROM episodes WHERE monitored = 1 AND air_date < ?', today)[0]['n'] == 0   # Future only
 
 
 def test_history_records_matches(lib):
@@ -171,7 +174,7 @@ def test_scan_route_and_library_view(review_rule, owner, lib, monkeypatch):
     assert r.status_code == 202 and r.headers['Cache-Control'] == 'no-store' and started == [True]
     body = owner.get('/api/settings/tv/library', environ_base=REMOTE, headers=HDR).get_json()
     sev = next(s for s in body['shows'] if s['folder'] == 'Severance (2022)')
-    assert (sev['title'], sev['year'], sev['path_name'], sev['monitored']) == ('Severance', 2022, 'TV', False)
+    assert (sev['title'], sev['year'], sev['path_name'], sev['monitored']) == ('Severance', 2022, 'TV', True)
     assert (sev['files'], sev['linked'], sev['mismatch'], sev['unrecognized']) == (6, 4, 1, 1)
     assert sev['episodes'] == 5            # S01E01, S01E02, S02E05 (its own S/E wins), S02E01E02 (one file, two)
     assert {u['folder'] for u in body['unmatched']} == {'Mystery Show', 'Zzz Nothing', 'Empty Show (2020)'}
