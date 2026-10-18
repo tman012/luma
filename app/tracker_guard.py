@@ -23,6 +23,7 @@ Rules:
   429/rate limit: Retry-After, else 1 h (doubling, max 6 h);
   400 from a strict site (AvistaZ family, IPTorrents; tracker_types.STRICT_400_TYPES):
   the same as a rate limit (v169, ported from the Prowlarr path's strict 400 cooldown);
+  400 from any other tracker: 15 min (doubling, max 6 h), as on the Prowlarr path (v170);
   ban: 24 h; rejected credentials: 1 h (cleared when the credentials change);
   network/timeouts/5xx: 5 min (doubling, max 1 h); bad answers: 15 min.
 
@@ -60,6 +61,9 @@ LIMITS = {
     'auth_s': 3600, 'auth_max_s': 6 * 3600,
     'network_s': 300, 'network_max_s': 3600,
     'response_s': 900, 'response_max_s': 6 * 3600,
+    # v170 (PM): a 400 from a non-strict tracker backs off as on the Prowlarr path (GUARD_LIMITS
+    # cooldown_400_s / cooldown_max_s): 15 min doubling to 6 h, or the native http backoff if longer.
+    'http400_s': 900, 'http400_max_s': 6 * 3600,
 }
 # Per-purpose caps for background requests, on top of LIMITS. The TV caps are
 # fixed in code (app.tv_budget), not settings.
@@ -312,6 +316,43 @@ class TrackerGuard:
             time.sleep(wait)
         self.last_sent[tid] = time.time()
 
+    def fold(self, tid: str, log: List[list], bucket: Optional[List[float]], cooldown_until: float,
+             streak: int, now: Optional[float] = None) -> Dict[str, float]:
+        """v170 (Import from Prowlarr): fold the Prowlarr path's guard state for one indexer into *tid*,
+        taking the stricter value everywhere, so switching paths can't reset a budget:
+        sends are the union (deduplicated by time, so folding twice changes nothing), the bucket the
+        emptier one, the cooldown the later one, the streak the longer one. Returns what changed."""
+        now = time.time() if now is None else now
+        with self._lock:
+            self._load()
+            mine = self.log.setdefault(tid, [])
+            seen = {(round(float(t), 3), k) for t, k in mine}
+            added = 0
+            for t, k in log:
+                key = (round(float(t), 3), k if k in ('i', 'b') else 'b')
+                if t > now - 86400 and key not in seen:
+                    mine.append([float(t), key[1]])
+                    seen.add(key)
+                    added += 1
+            mine.sort(key=lambda e: e[0])
+            out = {'sends': added}
+            if bucket is not None:
+                theirs = min(float(LIMITS['burst']), float(bucket[0]) + max(0.0, now - float(bucket[1])) / LIMITS['refill_s'])
+                b = self._tokens(tid, now)
+                if theirs < b[0]:
+                    out['bucket'] = theirs
+                    b[0] = max(0.0, theirs)
+            if cooldown_until and cooldown_until > now:
+                cd = self.cooldown.get(tid)
+                if not cd or cd[0] < cooldown_until:
+                    self.cooldown[tid] = (min(float(cooldown_until), now + MAX_COOLDOWN_S), 'rate')
+                    out['cooldown'] = self.cooldown[tid][0]
+            if streak and streak > self.streak.get(tid, 0):
+                self.streak[tid] = int(streak)
+                out['streak'] = streak
+            self._save()
+            return out
+
     def success(self, tid: str) -> None:
         with self._lock:
             self._load()
@@ -321,7 +362,7 @@ class TrackerGuard:
                 self._save()
 
     def failure(self, tid: str, kind: str, retry_after: Optional[float] = None,
-                now: Optional[float] = None) -> float:
+                now: Optional[float] = None, status: Optional[int] = None) -> float:
         """Start a backoff for *tid* after a failed request; returns its end."""
         now = time.time() if now is None else now
         with self._lock:
@@ -336,6 +377,8 @@ class TrackerGuard:
                 secs = min(LIMITS['auth_s'] * 2 ** min(n, 16), LIMITS['auth_max_s'])
             elif kind in ('timeout', 'network', 'tls', 'http'):
                 secs = min(LIMITS['network_s'] * 2 ** min(n, 16), LIMITS['network_max_s'])
+                if kind == 'http' and status == 400:          # v170: the stricter value wins
+                    secs = max(secs, min(LIMITS['http400_s'] * 2 ** min(n, 16), LIMITS['http400_max_s']))
             else:
                 secs = min(LIMITS['response_s'] * 2 ** min(n, 16), LIMITS['response_max_s'])
             if retry_after and kind != 'banned':
@@ -474,7 +517,7 @@ def record_failure(g: TrackerGuard, gk: str, err, scope=None) -> float:
     from a strict site starts a rate backoff (1 h doubling to 6 h, or its
     Retry-After when longer), so the next request waits as on the Prowlarr path."""
     kind = 'rate' if strict_400(gk, err) else err.kind
-    until = g.failure(gk, kind, err.retry_after)
+    until = g.failure(gk, kind, err.retry_after, status=getattr(err, 'status', None))
     if scope is not None and getattr(scope, 'by_ip', False) and err.kind in _IP_KINDS:
         for a in scope.addresses:
             g.failure(ip_key(a), err.kind, err.retry_after)

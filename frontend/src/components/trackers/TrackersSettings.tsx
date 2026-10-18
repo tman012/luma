@@ -15,7 +15,7 @@ import type React from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import {
   createTracker, deleteTracker, fetchTrackers, fetchTypes, setTrackerEnabled, testSavedTracker, testTrackerForm,
-  updateTracker, needsSignIn, SECRET_MASK, SIGN_IN_TO_EDIT, UNREACHABLE, type Tracker, type TrackerField, type TrackerType,
+  updateTracker, fetchImportAvailable, needsSignIn, SECRET_MASK, SIGN_IN_TO_EDIT, UNREACHABLE, type Tracker, type TrackerField, type TrackerType,
 } from './trackersApi';
 import {
   initialForm, isDirty, keptSecrets, splitServerErrors, toPayload, validate, UNREADABLE,
@@ -28,6 +28,7 @@ import {
   dangerTextBtn,
 } from './trackersUi';
 import { SAVE_FAILED } from '@/utils/messages';
+import { IMPORT_TITLE, ProwlarrImport, StatusChip } from './ProwlarrImport';
 
 export const TRACKERS_BASE = '/settings/trackers';
 export const SAVED = 'Saved';
@@ -39,6 +40,8 @@ export const TEST_STATUS_MS = 4000;
 export const TEST_SPACING_MS = 3200;
 export const TEST_RATE_LIMITED = 'Too many tests. Try again in a few minutes.';
 export const CHIP_PHONE_H = 44;       // phone: every tap target is at least 44px
+export const TEST_REQUIRED = 'Test required';
+export const importedText = (n: number) => (n === 1 ? 'Added 1 tracker' : `Added ${n} trackers`);
 
 type Access = 'unknown' | 'owner' | 'denied' | 'signIn';
 
@@ -94,7 +97,14 @@ export function TrackersSettings({ wide, base = TRACKERS_BASE, onExit }: Tracker
   const [trackers, setTrackers] = useState<Tracker[] | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [toast, setToast] = useState<{ text: string; n: number } | null>(null);
+  const [canImport, setCanImport] = useState(false);
+  const [importing, setImporting] = useState(false);
   const seq = useRef(0);
+  useEffect(() => {
+    let alive = true;
+    fetchImportAvailable().then(r => { if (alive) setCanImport(r.ok && r.data.available === true); });
+    return () => { alive = false; };
+  }, []);
 
   const show = useCallback((text: string) => setToast(t => ({ text, n: (t?.n || 0) + 1 })), []);
 
@@ -134,6 +144,7 @@ export function TrackersSettings({ wide, base = TRACKERS_BASE, onExit }: Tracker
       setTrackers(list => list && list.map(x => (x.id === t.id ? { ...x, enabled: t.enabled } : x)));
       if (needsSignIn(r)) setAccess('signIn');
       else if (r.status === 404) loadTrackers();
+      else if (r.status === 409 && r.data.error === TEST_REQUIRED) show(TEST_REQUIRED);
       else show(SAVE_FAILED);
     }
   }, [loadTrackers, show]);
@@ -199,8 +210,21 @@ export function TrackersSettings({ wide, base = TRACKERS_BASE, onExit }: Tracker
   return shell(
     <>
       <TrackerList wide={wide} trackers={trackers} onAdd={openAdd} onOpen={t => navigate(`${base}/${t.id}`)}
-        onToggle={toggle} onExit={onExit || (() => navigate('/settings'))} />
+        onToggle={toggle} onExit={onExit || (() => navigate('/settings'))}
+        onImport={canImport ? () => setImporting(true) : null} />
       {view.kind === 'pick' && <TypePicker wide types={types} onPick={pick} onClose={toList} />}
+      {importing && (
+        <ProwlarrImport wide={wide} onClose={() => setImporting(false)} onSignIn={() => { setImporting(false); signIn(); }}
+          onImported={created => {
+            setImporting(false);
+            if (created.length) {
+              seq.current++;
+              setTrackers(list => list && [...list, ...created.filter(c => !list.some(x => x.id === c.id))]);
+              show(importedText(created.length));
+            }
+            loadTrackers();
+          }} />
+      )}
     </>,
   );
 }
@@ -228,10 +252,14 @@ function Redirect({ to }: { to: string }) {
 
 // ---------------------------------------------------------------- list
 
-function ListTitle({ onAdd }: { onAdd: (() => void) | null }) {
+function ListTitle({ onAdd, onImport = null }: { onAdd: (() => void) | null; onImport?: (() => void) | null }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, margin: '0 0 16px' }}>
-      <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, lineHeight: '40px', color: TEXT, fontFamily: FONT }}>Trackers</h2>
+      <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, lineHeight: '40px', color: TEXT, fontFamily: FONT, marginRight: 'auto' }}>Trackers</h2>
+      {onImport && (
+        <button type="button" className="lt-btn lt-ghost" style={{ ...secondaryBtn, height: 40, padding: '0 16px' }}
+          onClick={onImport} data-testid="tracker-import-open">{IMPORT_TITLE}</button>
+      )}
       {onAdd && (
         <button type="button" className="lt-btn lt-primary" style={{ ...primaryBtn, height: 40, padding: '0 16px 0 12px' }}
           onClick={onAdd} data-testid="tracker-add">
@@ -259,9 +287,9 @@ function emptyRow(): React.CSSProperties {
   return { height: 56, display: 'flex', alignItems: 'center', padding: '0 20px', boxSizing: 'border-box' };
 }
 
-function TrackerList({ wide, trackers, onAdd, onOpen, onToggle, onExit }: {
+function TrackerList({ wide, trackers, onAdd, onOpen, onToggle, onExit, onImport = null }: {
   wide: boolean; trackers: Tracker[]; onAdd: () => void; onOpen: (t: Tracker) => void;
-  onToggle: (t: Tracker, on: boolean) => void; onExit: () => void;
+  onToggle: (t: Tracker, on: boolean) => void; onExit: () => void; onImport?: (() => void) | null;
 }) {
   const rows = trackers.length === 0 ? (
     <div style={emptyRow()} data-testid="trackers-empty">
@@ -285,10 +313,11 @@ function TrackerList({ wide, trackers, onAdd, onOpen, onToggle, onExit }: {
                   color: t.enabled ? TEXT : TEXT_3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
                 <span data-testid="tracker-type" style={{ flex: 'none', fontSize: 13, color: TEXT_3 }}>{t.type_name}</span>
               </span>
+              {t.test_required && <StatusChip text={(t.missing || []).length ? 'Enter credentials' : TEST_REQUIRED} amber testId="tracker-test-required" />}
               {status && <span style={srOnly}>{status}</span>}
             </button>
             <span style={{ paddingRight: wide ? 20 : 20 - 4, display: 'inline-flex' }}>
-              <Switch small={wide} on={t.enabled} label={t.name} onChange={on => onToggle(t, on)} />
+              <Switch small={wide} on={t.enabled} label={t.name} lockOn={!!t.test_required && !t.enabled} onChange={on => onToggle(t, on)} />
             </span>
             {i < trackers.length - 1 && (
               <span aria-hidden="true" style={{ position: 'absolute', left: 20, right: wide ? 0 : 20, bottom: 0, height: 1,
@@ -302,7 +331,7 @@ function TrackerList({ wide, trackers, onAdd, onOpen, onToggle, onExit }: {
   if (wide) {
     return (
       <div data-testid="trackers-list-view">
-        <ListTitle onAdd={onAdd} />
+        <ListTitle onAdd={onAdd} onImport={onImport} />
         <div style={{ borderRadius: 16, background: GLASS, border: GLASS_BORDER, overflow: 'hidden' }} data-testid="trackers-card">
           {rows}
         </div>
@@ -313,6 +342,12 @@ function TrackerList({ wide, trackers, onAdd, onOpen, onToggle, onExit }: {
     <div data-testid="trackers-list-view">
       <PhoneHeader title="Trackers" onBack={onExit} action={{ label: 'Add tracker', icon: <PlusIcon size={18} />, onClick: onAdd }} />
       <div style={{ marginTop: 8 }}>{rows}</div>
+      {onImport && (
+        <div style={{ padding: '16px 20px' }}>
+          <button type="button" className="lt-btn lt-ghost" style={{ ...secondaryBtn, width: '100%' }} onClick={onImport}
+            data-testid="tracker-import-open">{IMPORT_TITLE}</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -524,7 +559,7 @@ function TrackerForm({ wide, type, tracker, onBack, onSaved, onDeleted, onGone, 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 44 }}>
         <span id="tracker-enabled-label" style={{ fontSize: wide ? 15 : 17, fontWeight: wide ? 500 : 400, color: TEXT }}>Enabled</span>
-        <Switch small={wide} on={form.enabled} label="Enabled" onChange={on => { setForm(f => ({ ...f, enabled: on })); setResult(r => (r && !r.ok ? null : r)); }} />
+        <Switch small={wide} on={form.enabled} label="Enabled" lockOn={!!tracker?.test_required && !form.enabled} onChange={on => { setForm(f => ({ ...f, enabled: on })); setResult(r => (r && !r.ok ? null : r)); }} />
       </div>
       {type.fields.map(f => (
         <Field key={f.key} wide={wide} field={f} type={type} form={form} error={shownError(f.key)}

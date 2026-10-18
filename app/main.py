@@ -15789,6 +15789,8 @@ def get_download_history():
                 'media_type': media_type,
                 'completed_timestamp': _completion_ts(t_hash),
                 'success': success,
+                # v170: the library mover handled it (Downloads paints the row green only then)
+                'imported': bool(renamer) and bool(success),
                 'error_message': error_msg,
                 'destination_path': dest,
                 'tracker': tracker_name,
@@ -15848,6 +15850,7 @@ def get_download_history():
             'media_type': h['media_type'],
             'completed_timestamp': h['completed_timestamp'],
             'success': h['success'],
+            'imported': bool(h.get('imported')),
             'error_message': h['error_message'],
             'destination_path': h['destination_path'],
             'poster_path': h['poster_path'],
@@ -21623,7 +21626,8 @@ _tracker_routes.init(get_current_user=_get_current_user, get_owner=lambda: _acce
                      is_implicit=lambda: bool(getattr(g, 'implicit_user', False)),
                      on_change=_tracker_search.on_tracker_changed,
                      on_delete=_on_tracker_deleted,
-                     on_list_change=_all_results_cache.clear)
+                     on_list_change=_all_results_cache.clear,
+                     get_setting=settings.get)   # v170: Import from Prowlarr reads the Indexer settings
 app.register_blueprint(_tracker_routes.bp)
 
 # TV (luma-test builds; owner only): per-section tracker lists and TV settings.

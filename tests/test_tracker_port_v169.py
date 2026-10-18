@@ -94,12 +94,30 @@ def test_a_strict_400_honors_a_longer_retry_after(tmp_path):
     assert g.cooldown['site:privatehd'][1] == 'rate' and until - time.time() == pytest.approx(9000, abs=5)
 
 
-def test_a_400_from_other_sites_keeps_the_native_http_backoff(tmp_path):
-    g = TrackerGuard(tmp_path / 'g.json')
+def test_a_400_from_other_sites_backs_off_as_on_the_prowlarr_path(tmp_path):
+    """v170 (PM): 15 min doubling to 6 h (indexer_api cooldown_400_s / cooldown_max_s), the stricter value
+    winning over the native http backoff (5 min doubling to 1 h)."""
     for gk in ('site:beyondhd', 'site:morethantv', 'host:t.example'):
+        g = TrackerGuard(tmp_path / f'{gk.replace(":", "_")}.json')
         assert not strict_400(gk, TrackerError('http', 400))
-        until = record_failure(g, gk, TrackerError('http', 400))
-        assert g.cooldown[gk][1] == 'http' and until - time.time() == pytest.approx(300, abs=5)
+        waits = []
+        for i in range(7):
+            now = T0 + i * 10 * DAY
+            g.cooldown.pop(gk, None)
+            orig = time.time
+            try:
+                time.time = lambda: now
+                until = record_failure(g, gk, TrackerError('http', 400))
+            finally:
+                time.time = orig
+            waits.append(until - now)
+            assert g.cooldown[gk][1] == 'http'
+        assert waits == [900, 1800, 3600, 7200, 14400, 21600, 21600]
+    assert (indexer_api.GUARD_LIMITS['cooldown_400_s'], indexer_api.GUARD_LIMITS['cooldown_max_s']) == (900, 6 * HOUR)
+    assert (tracker_guard.LIMITS['http400_s'], tracker_guard.LIMITS['http400_max_s']) == (900, 6 * HOUR)
+    g = TrackerGuard(tmp_path / 'other.json')              # other 5xx/4xx keep the native http backoff
+    until = record_failure(g, 'site:beyondhd', TrackerError('http', 500))
+    assert until - time.time() == pytest.approx(300, abs=5)
     assert not strict_400('site:iptorrents', TrackerError('http', 500))
     assert not strict_400('site:iptorrents', TrackerError('auth', 400))
 
@@ -214,7 +232,7 @@ def test_parity_numbers_are_the_shipped_ones():
     assert (G['interactive_per_hour'], G['background_burst'], G['background_refill_s'], G['per_day'],
             G['global_per_hour'], G['min_interval_s']) == (40, 5, 180.0, 300, 120, 2.0)
     assert (G['cooldown_429_s'], G['cooldown_400_strict_s'], G['cooldown_max_s']) == (3600, 3600, 6 * HOUR)
-    assert G['cooldown_400_s'] == 900
+    assert G['cooldown_400_s'] == 900 == L['http400_s'] and L['http400_max_s'] == G['cooldown_max_s']   # v170
     assert (tv_budget.AUTO_PER_TRACKER_DAILY, tv_budget.AUTO_PER_TRACKER_HOURLY, tv_budget.AUTO_ALL_TRACKERS_DAILY,
             tv_budget.AUTO_MIN_GAP_S, tv_budget.SLOT_S) == (8, 2, 40, 600, 3 * HOUR)
     assert tv_budget.GUARD_LIMITS == {'per_tracker_day': 8, 'per_tracker_hour': 2, 'all_trackers_day': 40,

@@ -15,6 +15,13 @@ Test of a form whose URL differs from the saved one never uses them.
 
 A fresh install has no trackers file and therefore zero trackers; nothing is
 seeded.
+
+v170 (tracker port step 2): a tracker made by the owner's Import from Prowlarr
+is created disabled with needs_test set. It can't be enabled (the enabled
+switch or an edit) until a Test of the saved tracker passes, which clears the
+flag. An imported tracker may lack credentials Prowlarr didn't hand over
+(they come back masked); it lists them in missing(), and its Test answers
+ENTER_CREDENTIALS without contacting the tracker.
 """
 
 from __future__ import annotations
@@ -39,6 +46,8 @@ KEY_FILENAME = 'tracker_secrets.key'
 STATUS_OK, STATUS_ERROR, STATUS_UNTESTED = 'ok', 'error', 'untested'
 STATUS_MESSAGE_MAX = 80
 MAX_TRACKERS = 100
+TEST_REQUIRED = 'Test required'
+ENTER_CREDENTIALS = 'Enter credentials'
 
 
 class CredentialsUnreadable(Exception):
@@ -248,6 +257,25 @@ class TrackerStore:
         st = rec.get('status') or {}
         out['status'] = {'state': st.get('state', STATUS_UNTESTED), 'message': st.get('message', ''),
                          'checked_at': st.get('checked_at')}
+        out['test_required'] = bool(rec.get('needs_test'))          # v170: imported, not tested yet
+        out['missing'] = TrackerStore.missing(rec)
+        out['imported'] = bool(rec.get('imported'))
+        return out
+
+    @staticmethod
+    def missing(rec: Dict[str, Any]) -> List[str]:
+        """Required fields with no value saved (v170: an import Prowlarr gave no credentials for)."""
+        t = tt.get_type(rec.get('type')) or {}
+        out = []
+        for f in t.get('fields') or []:
+            if not f.get('required') or f['key'] in ('name', 'url', 'categories', 'priority'):
+                continue
+            k = f['key']
+            if k in tt.secret_keys(rec['type']):
+                if not (rec.get('secrets') or {}).get(k):
+                    out.append(k)
+            elif not (rec.get('settings') or {}).get(k):
+                out.append(k)
         return out
 
     def list(self) -> List[Dict[str, Any]]:
@@ -411,7 +439,8 @@ class TrackerStore:
                 errors[k] = tt.INVALID
             else:
                 changes[k] = v
-        unknown = set(payload) - set(fields) - {'type', 'enabled', 'id', 'status', 'type_name', 'protocol'}
+        unknown = set(payload) - set(fields) - {'type', 'enabled', 'id', 'status', 'type_name', 'protocol',
+                                                'test_required', 'missing', 'imported'}   # v170: read-only views
         for k in unknown:
             errors[k] = tt.INVALID
         return rec, errors, changes
@@ -422,16 +451,26 @@ class TrackerStore:
 
     # ------------------------------------------------------------ CRUD
 
-    def create(self, payload: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], Dict[str, str]]:
+    def create(self, payload: Dict[str, Any], imported: Optional[Dict[str, Any]] = None
+               ) -> Tuple[Optional[Dict[str, Any]], Dict[str, str]]:
+        """Add a tracker. *imported* (v170, Import from Prowlarr only): created disabled with
+        needs_test, and required credentials may be missing (the owner enters them)."""
         blocked = _blocked_names(payload)          # DNS before the file lock
         with self._file_lock():
             self._reload()
             others = self._data['trackers']
             if len(others) >= MAX_TRACKERS:
                 return None, {'_': 'Too many trackers'}
+            if imported is not None:
+                payload = dict(payload, enabled=False)
             rec, errors, changes = self._build(payload, None, others, blocked)
+            if imported is not None:
+                creds = set(tt.secret_keys(rec.get('type', ''))) | set(tt.setting_keys(rec.get('type', '')))
+                errors = {k: v for k, v in errors.items() if not (k in creds and v == tt.REQUIRED)}
             if errors:
                 return None, errors
+            if imported is not None:
+                rec.update(enabled=False, needs_test=True, imported=dict(imported))
             secrets: Dict[str, str] = {}
             for k, v in changes.items():
                 if v is not None:
@@ -453,6 +492,8 @@ class TrackerStore:
             if cur is None:
                 return None, {'_': 'Not found'}
             rec, errors, changes = self._build(payload, cur, self._data['trackers'], blocked)
+            if cur.get('needs_test') and rec.get('enabled') and not cur.get('enabled'):
+                errors['enabled'] = TEST_REQUIRED                 # v170: a passing Test first
             if errors:
                 return None, errors
             secrets = {k: v for k, v in (cur.get('secrets') or {}).items() if k in tt.secret_keys(rec['type'])}
@@ -476,18 +517,33 @@ class TrackerStore:
                 status = {'state': STATUS_UNTESTED, 'message': '', 'checked_at': None}
             rec.update(id=cur['id'], secrets=secrets, created_at=cur.get('created_at'),
                        updated_at=time.time(), status=status)
+            for k in ('needs_test', 'imported'):
+                if cur.get(k):
+                    rec[k] = cur[k]
             idx = self._data['trackers'].index(cur)
             self._data['trackers'][idx] = rec
             self._save()
         logger.info('Tracker updated: %s (id %s)', rec['name'], rec['id'])
         return copy.deepcopy(rec), {}
 
+    def import_errors(self, payload: Dict[str, Any]) -> Dict[str, str]:
+        """v170: what create(payload, imported=...) would refuse (missing credentials are allowed)."""
+        blocked = _blocked_names(payload)          # DNS before the file lock
+        with self._file_lock():
+            self._reload()
+            rec, errors, _ = self._build(dict(payload, enabled=False), None, self._data['trackers'], blocked)
+        creds = set(tt.secret_keys(rec.get('type', ''))) | set(tt.setting_keys(rec.get('type', '')))
+        return {k: v for k, v in errors.items() if not (k in creds and v == tt.REQUIRED)}
+
     def set_enabled(self, tracker_id: int, enabled: bool) -> Optional[Dict[str, Any]]:
+        """Raises ValueError(TEST_REQUIRED) when enabling an imported tracker no Test has passed for."""
         with self._file_lock():
             self._reload()
             cur = next((t for t in self._data['trackers'] if t['id'] == tracker_id), None)
             if cur is None:
                 return None
+            if enabled and cur.get('needs_test'):
+                raise ValueError(TEST_REQUIRED)
             cur['enabled'] = bool(enabled)
             cur['updated_at'] = time.time()
             self._save()
@@ -517,9 +573,12 @@ class TrackerStore:
             new = {'state': state, 'message': str(message or '')[:STATUS_MESSAGE_MAX], 'checked_at': time.time()}
             old = cur.get('status') or {}
             if old.get('state') == new['state'] and old.get('message') == new['message'] \
-                    and (old.get('checked_at') or 0) > new['checked_at'] - 60:
+                    and (old.get('checked_at') or 0) > new['checked_at'] - 60 \
+                    and not (state == STATUS_OK and cur.get('needs_test')):
                 return          # no write per search while nothing changed
             cur['status'] = new
+            if state == STATUS_OK:
+                cur.pop('needs_test', None)                # v170: a passing Test unlocks enabling
             self._save()
 
     def candidate_config(self, payload: Dict[str, Any], tracker_id: Optional[int] = None

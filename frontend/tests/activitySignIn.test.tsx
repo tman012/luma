@@ -10,7 +10,7 @@ const auth = { implicit: false };
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => ({ openMovie: vi.fn(), openTv: vi.fn(), openPerson: vi.fn() }) }));
 
-import { ActivityFeed, PATH_NOT_MAPPED, NO_WRITABLE_DEST, CARD_BG, CARD_BORDER, NO_ART_BG, SIGN_IN_BUTTON, SIGN_IN_TO_DELETE, removeDownload } from '@/components/activity/ActivityFeed';
+import { ActivityFeed, activeEdge, historyEdge, PATH_NOT_MAPPED, NO_WRITABLE_DEST, CARD_BG, CARD_BORDER, NO_ART_BG, SIGN_IN_BUTTON, SIGN_IN_TO_DELETE, removeDownload } from '@/components/activity/ActivityFeed';
 
 const H = 'a'.repeat(40);
 const QUEUE = { downloads: [{ name: 'Some.Show.S01.1080p.WEB-GRP', hash: H, progress: 0.5, status: 'downloading',
@@ -102,7 +102,10 @@ describe('Activity card: navy glass tokens (Designer)', () => {
     const card = screen.getByText('Some.Show.S01.1080p.WEB-GRP').closest('[style*="border-radius: 18px"]') as HTMLElement;
     expect(card.style.background).toBe('var(--color-glass-6)');
     expect(card.style.borderTop).toBe('1px solid rgba(255, 255, 255, 0.08)');
-    const tile = screen.getByText('No art').parentElement as HTMLElement;
+    expect(screen.queryByText('No art')).toBeNull();                // v170: icon, no text
+    const tile = screen.getByTestId('no-art').parentElement as HTMLElement;
+    expect(screen.getByTestId('no-art').textContent).toBe('');
+    expect(screen.getByTestId('no-art-icon').getAttribute('stroke')).toBe('rgba(255,255,255,0.25)');
     expect(tile.style.background).toBe('rgba(255, 255, 255, 0.04)');
     const btn = screen.getByTestId('activity-sign-in');
     expect(btn.style.background).toBe('rgba(255, 255, 255, 0.08)');
@@ -145,5 +148,64 @@ describe('Activity: a grab with no writable destination (v169, Reviewer + PM)', 
     expect(label.textContent).toBe('No writable destination');           // the label alone: no helper text
     expect(label.style.color).toBe('rgb(251, 191, 36)');                  // #fbbf24, the stalled/not-mapped amber
     expect(screen.queryByText(/Settings|choose|writable folder|permission/i)).toBeNull();
+  });
+});
+
+
+describe('Downloads polish (v170, Designer)', () => {
+  const queue = (rows: Record<string, unknown>[]) => vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const u = String(url);
+    if (u.includes('/api/downloads/queue')) return res({ downloads: rows });
+    if (u.includes('/api/downloads/history')) return res({ history: [
+      { tmdb_title: 'Done Movie', torrent_name: 'Done.Movie.2024', completed_timestamp: 2, success: true, imported: true, tracker: 'IPT' },
+      { tmdb_title: 'Waiting Movie', torrent_name: 'Waiting.Movie.2024', completed_timestamp: 1, success: true, imported: false, tracker: 'IPT' },
+      { tmdb_title: 'Broken Movie', torrent_name: 'Broken.Movie.2024', completed_timestamp: 0, success: false, imported: false },
+    ] });
+    return res({});
+  }));
+  const edge = (text: string) => (screen.getByText(text).closest('[style*="border-radius: 18px"]') as HTMLElement).style.borderLeft;
+
+  it('the row edge follows the state, never the tracker', async () => {
+    queue([
+      { ...QUEUE.downloads[0], name: 'Going.S01', hash: 'b'.repeat(40), status: 'downloading', tracker: 'IPT' },
+      { ...QUEUE.downloads[0], name: 'Stuck.S01', hash: 'c'.repeat(40), status: 'stalled', tracker: 'IPT' },
+      { ...QUEUE.downloads[0], name: 'Nowhere.S01', hash: 'd'.repeat(40), status: 'no_writable', tracker: 'BHD' },
+    ]);
+    render(<MemoryRouter><ActivityFeed /></MemoryRouter>);
+    await screen.findByText('Going.S01');
+    expect(edge('Going.S01')).toBe('3px solid rgb(59, 130, 246)');
+    expect(edge('Stuck.S01')).toBe('3px solid rgb(251, 191, 36)');
+    expect(edge('Nowhere.S01')).toBe('3px solid rgb(251, 191, 36)');
+    await screen.findByText('Done Movie');
+    expect(edge('Done Movie')).toBe('3px solid rgb(34, 197, 94)');
+    expect(edge('Waiting Movie')).toBe('3px solid rgba(255, 255, 255, 0.18)');
+    expect(edge('Broken Movie')).toBe('3px solid rgb(251, 191, 36)');
+    expect(activeEdge('copying')).toBe('rgba(255,255,255,0.18)');     // green only once imported
+    expect(historyEdge({ imported: true, failed: false })).toBe('#22c55e');
+  });
+
+  it("'No writable destination' and 'Path not mapped' are 12px amber", async () => {
+    queue([
+      { ...QUEUE.downloads[0], name: 'A.S01', hash: 'e'.repeat(40), status: 'no_writable', progress: 1, size_remaining: 0 },
+      { ...QUEUE.downloads[0], name: 'B.S01', hash: 'f'.repeat(40), status: 'not_mapped', progress: 1, size_remaining: 0 },
+    ]);
+    render(<MemoryRouter><ActivityFeed /></MemoryRouter>);
+    for (const label of [NO_WRITABLE_DEST, PATH_NOT_MAPPED]) {
+      const el = await screen.findByText(label);
+      expect(el.className).toContain('text-[12px]');
+      expect(el.style.color).toBe('rgb(251, 191, 36)');
+    }
+  });
+
+  it('section headers are sentence case, not all caps', async () => {
+    queue([{ ...QUEUE.downloads[0], name: 'X.S01', hash: '1'.repeat(40) }]);
+    render(<MemoryRouter><ActivityFeed /></MemoryRouter>);
+    await screen.findByText('X.S01');
+    await screen.findByText('Done Movie');
+    const heads = screen.getAllByTestId('section-header');
+    expect(heads.map(h => h.textContent!.trim())).toEqual(['Downloading now (1)', 'Completed (3)']);
+    for (const h of heads) expect(h.className).not.toMatch(/uppercase/);
+    const src = readFileSync(resolve(__dirname, '../src/components/activity/ActivityFeed.tsx'), 'utf8');
+    expect(src).not.toMatch(/DOWNLOADING NOW|No art/);
   });
 });

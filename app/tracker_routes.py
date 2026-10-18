@@ -35,7 +35,8 @@ from flask import Blueprint, jsonify, request
 from app import tracker_clients
 from app.tracker_guard import guard_key, guarded_test, normalize_host
 from app.tracker_http import TrackerError
-from app.tracker_store import (STATUS_ERROR, STATUS_OK, CredentialsUnreadable, get_store)
+from app.tracker_store import (ENTER_CREDENTIALS, STATUS_ERROR, STATUS_OK, TEST_REQUIRED, CredentialsUnreadable,
+                               get_store)
 from app.tracker_types import public_types
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,8 @@ def init(*, get_current_user: Callable[[], Optional[dict]], get_owner: Callable[
          tester: Optional[Callable[[Dict[str, Any]], None]] = None,
          on_change: Optional[Callable[[Dict[str, Any]], None]] = None,
          on_delete: Optional[Callable[[Dict[str, Any]], None]] = None,
-         on_list_change: Optional[Callable[[], None]] = None) -> None:
+         on_list_change: Optional[Callable[[], None]] = None,
+         get_setting: Optional[Callable[[str], Any]] = None) -> None:
     """*is_implicit* tells whether the current user is the implicit LAN
     owner (no session). *tester* runs one connection test (raises
     TrackerError); defaults to tracker_clients.test. It always runs inside
@@ -69,7 +71,8 @@ def init(*, get_current_user: Callable[[], Optional[dict]], get_owner: Callable[
     _cfg.update(get_current_user=get_current_user, get_owner=get_owner, is_implicit=is_implicit,
                 tester=tester or (lambda cfg: tracker_clients.test(cfg)),
                 on_change=on_change or (lambda rec, **kw: None), on_delete=on_delete or (lambda rec: None),
-                on_list_change=on_list_change or (lambda: None))
+                on_list_change=on_list_change or (lambda: None),
+                get_setting=get_setting or (lambda key: None))
 
 
 def _list_changed() -> None:
@@ -226,7 +229,10 @@ def set_tracker_enabled(tracker_id: int):
     data = _body()
     if data is None or not isinstance(data.get('enabled'), bool):
         return _invalid({'enabled': 'Invalid'})
-    rec = get_store().set_enabled(tracker_id, data['enabled'])
+    try:
+        rec = get_store().set_enabled(tracker_id, data['enabled'])
+    except ValueError:                                  # v170: imported, no passing Test yet
+        return _no_store(jsonify({'error': TEST_REQUIRED, 'fields': {'enabled': TEST_REQUIRED}}), 409)
     if rec is None:
         return _not_found()
     _list_changed()
@@ -255,6 +261,8 @@ def test_saved_tracker(tracker_id: int):
     except CredentialsUnreadable:
         store.set_status(tracker_id, STATUS_ERROR, UNREADABLE)
         return _test_response(UNREADABLE)
+    if store.missing(rec):                              # v170: imported without credentials
+        return _test_response(ENTER_CREDENTIALS)        # nothing sent, nothing charged
     err = _run_test(cfg)
     if err != 'Rate limited':
         store.set_status(tracker_id, STATUS_OK if err is None else STATUS_ERROR, err or '')
@@ -277,3 +285,46 @@ def test_unsaved_tracker():
     if errors:
         return _invalid(errors)
     return _test_response(_run_test(cfg))
+
+
+# ------------------------------------------------------------ Import from Prowlarr (v170)
+
+@bp.route('/api/trackers/import/prowlarr', methods=['GET'])
+def import_available():
+    """Whether Import from Prowlarr can be offered (a Prowlarr connection is set up). No network."""
+    from app import tracker_import
+    return _no_store(jsonify({'available': tracker_import.prowlarr_settings(_cfg['get_setting']) is not None}))
+
+
+@bp.route('/api/trackers/import/prowlarr/preview', methods=['POST'])
+def import_preview():
+    from app import tracker_import
+    try:
+        out = tracker_import.preview(_cfg['get_setting'], get_store())
+    except RuntimeError as e:
+        msg = str(e) if str(e) in (tracker_import.NOT_CONFIGURED, tracker_import.UNREACHABLE) \
+            else tracker_import.UNREACHABLE
+        return _no_store(jsonify({'error': msg}), 409 if msg == tracker_import.NOT_CONFIGURED else 502)
+    except CredentialsUnreadable:
+        return _unreadable()
+    return _no_store(jsonify(out))
+
+
+@bp.route('/api/trackers/import/prowlarr', methods=['POST'])
+def import_create():
+    from app import tracker_import
+    data = _body()
+    if data is None or not isinstance(data.get('preview_id'), str) or not isinstance(data.get('keys'), list) \
+            or len(data['keys']) > 500:
+        return _invalid({'_': 'Invalid'})
+    try:
+        out = tracker_import.create(data['preview_id'], data['keys'], get_store())
+    except RuntimeError:
+        return _no_store(jsonify({'error': tracker_import.EXPIRED}), 410)
+    except CredentialsUnreadable:
+        return _unreadable()
+    if out['created']:
+        _list_changed()
+    store = get_store()
+    return _no_store(jsonify({'created': [store.public(r) for r in out['created']], 'skipped': out['skipped']}),
+                     201 if out['created'] else 200)

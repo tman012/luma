@@ -20,6 +20,11 @@ export interface Tracker {
   id: number; type: string; type_name: string; protocol: string; name: string; enabled: boolean;
   url: string; categories: number[]; priority: number;
   status: { state: TrackerState; message: string; checked_at: number | null };
+  /** v170: imported from Prowlarr and no Test has passed yet: it can't be enabled. */
+  test_required?: boolean;
+  /** Required credentials not saved yet (keys). */
+  missing?: string[];
+  imported?: boolean;
   [field: string]: unknown;
 }
 export type Payload = Record<string, unknown>;
@@ -59,3 +64,18 @@ export const setTrackerEnabled = (id: number, enabled: boolean) =>
 export const deleteTracker = (id: number) => send<{ ok: boolean }>(`${BASE_API}/${id}`, 'DELETE');
 export const testSavedTracker = (id: number) => send<TestBody>(`${BASE_API}/${id}/test`, 'POST');
 export const testTrackerForm = (p: Payload) => send<TestBody>(`${BASE_API}/test`, 'POST', p);
+
+// ---------------------------------------------------------------- Import from Prowlarr (v170)
+
+export const IMPORT_API = `${BASE_API}/import/prowlarr`;
+export type ImportState = 'ready' | 'needs_credentials' | 'exists' | 'unsupported' | 'invalid';
+export interface ImportRow {
+  key: number; name: string; type: string | null; type_name: string | null; state: ImportState; missing: string[];
+}
+export interface ImportPreview { preview_id: string; indexers: ImportRow[] }
+export interface ImportResult { created: Tracker[]; skipped: { key: number; reason: string }[] }
+
+export const fetchImportAvailable = () => call<{ available: boolean }>(IMPORT_API);
+export const previewImport = () => send<ImportPreview>(`${IMPORT_API}/preview`, 'POST', {});
+export const runImport = (previewId: string, keys: number[]) =>
+  send<ImportResult>(IMPORT_API, 'POST', { preview_id: previewId, keys });

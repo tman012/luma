@@ -35,6 +35,8 @@ interface ActivityEntry {
   episodeTitle: string | null;
   fileName: string | null;   // raw torrent/release file name
   posterPath: string | null; // TMDb poster path — thumb + row wash
+  imported: boolean;         // v170: the library mover handled it (green edge)
+  failed: boolean;           // v170: the import failed (amber edge)
 }
 
 /** A torrent currently downloading in qBittorrent (any origin, incl. manual). */
@@ -68,6 +70,30 @@ export const PATH_NOT_MAPPED = 'Path not mapped';
 /** v169 (Reviewer, PM): the only Movies destination is read-only; shown on the item, no helper text. */
 export const NO_WRITABLE_DEST = 'No writable destination';
 export const NO_ART_BG = 'rgba(255,255,255,0.04)';
+/** v170 (Designer): the row's left edge follows its state, never the tracker (the chip shows that). */
+export const EDGE_ATTENTION = '#fbbf24';
+export const EDGE_DOWNLOADING = '#3b82f6';
+export const EDGE_IMPORTED = '#22c55e';
+export const EDGE_NEUTRAL = 'rgba(255,255,255,0.18)';
+export function activeEdge(status: string): string {
+  if (status === 'stalled' || status === 'not_mapped' || status === 'no_writable') return EDGE_ATTENTION;
+  if (status === 'downloading') return EDGE_DOWNLOADING;
+  return EDGE_NEUTRAL;            // copying/importing: done downloading, not in the library yet
+}
+export function historyEdge(e: { imported: boolean; failed: boolean }): string {
+  if (e.failed) return EDGE_ATTENTION;
+  return e.imported ? EDGE_IMPORTED : EDGE_NEUTRAL;
+}
+/** v170: the no-art tile shows a muted film icon, no text. */
+function FilmIcon() {
+  return (
+    <svg data-testid="no-art-icon" aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none"
+      stroke="rgba(255,255,255,0.25)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M7 4v16M17 4v16M3 8h4M3 12h4M3 16h4M17 8h4M17 12h4M17 16h4" />
+    </svg>
+  );
+}
 export const SIGN_IN_BUTTON = { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' };
 const THUMB_H = 117;
 
@@ -198,12 +224,11 @@ function RowThumb({ posterPath, title, progress }: {
           )}
         </>
       ) : (
-        <div style={{
+        <div data-testid="no-art" aria-label={title || undefined} role={title ? 'img' : undefined} style={{
           width: '100%', height: '100%', display: 'flex',
           alignItems: 'center', justifyContent: 'center',
-          fontSize: 11, color: 'rgba(255,255,255,0.25)',
         }}>
-          No art
+          <FilmIcon />
         </div>
       )}
     </div>
@@ -224,6 +249,8 @@ function fmtSpeed(bps: number): string {
 }
 
 interface HistoryApiItem {
+  success?: boolean;
+  imported?: boolean;
   tmdb_title?: string;
   tmdb_year?: number | string;
   media_type?: string;
@@ -415,6 +442,8 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
             episodeTitle: d.episode_title ?? null,
             fileName: d.torrent_name ?? null,
             posterPath: d.poster_path ?? null,
+            imported: d.imported === true,
+            failed: d.success === false,
           };
         }).sort((a, b) => b.ts - a.ts);
         setEntries(list);
@@ -443,7 +472,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
     <div style={{ marginBottom: '26px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', paddingLeft: '2px' }}>
         <span className="animate-pulse" style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#3b82f6', boxShadow: '0 0 8px rgba(59,130,246,0.7)' }} />
-        <span className="text-[13px] font-semibold uppercase tracking-wide text-white/50">
+        <span className="text-[13px] font-semibold text-white/50" data-testid="section-header">
           Downloading now ({active.length})
         </span>
       </div>
@@ -482,7 +511,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                 borderRadius: '18px',
                 padding: '18px 20px',
                 border: CARD_BORDER,
-                borderLeft: `3px solid ${c ? c.fg : '#3b82f6'}`,
+                borderLeft: `3px solid ${activeEdge(dl.status)}`,
               }}
             >
               <RowWash posterPath={dl.posterPath} />
@@ -540,7 +569,8 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                   style={{ width: `${pct}%`, background: barColor }} />
               </div>
               <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-white/35">
-                <span className="min-w-0 truncate" data-testid="download-status" style={{ color: copying || importing || stalled ? accent : undefined }}>
+                <span className={`min-w-0 truncate${notMapped || noWritable ? ' text-[12px]' : ''}`} data-testid="download-status"
+                  style={{ color: copying || importing || stalled ? accent : undefined }}>
                   {statusLabel}{speedStr ? ` · ↓ ${speedStr}` : ''}
                 </span>
                 <span className="shrink-0 tabular-nums">{fmtGb(dl.sizeTotal - dl.sizeRemaining)} / {fmtGb(dl.sizeTotal)}</span>
@@ -644,7 +674,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
         }}
       >
         <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'rgba(74,222,128,0.85)', boxShadow: '0 0 8px rgba(74,222,128,0.45)' }} />
-        <span className="text-[13px] font-semibold uppercase tracking-wide text-white/50">
+        <span className="text-[13px] font-semibold text-white/50" data-testid="section-header">
           Completed ({entries.length})
         </span>
       </div>
@@ -688,7 +718,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                 borderRadius: '18px',
                 padding: '18px 20px',
                 border: CARD_BORDER,
-                borderLeft: `3px solid ${c ? c.fg : 'rgba(255,255,255,0.18)'}`,
+                borderLeft: `3px solid ${historyEdge(entry)}`,
               }}
             >
               <RowWash posterPath={entry.posterPath} />
