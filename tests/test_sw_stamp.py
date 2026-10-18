@@ -34,7 +34,7 @@ def test_v146_is_never_reused():
 
 
 def test_v147_stays_with_the_tv_import_build():
-    """4d22f6c (TV Import, v147) is with the gates: TV Calendar and Search is v148 or later."""
+    """4d22f6c (TV Import, v147) is with the gates: the Import fixes are v148 or later."""
     assert 147 in sw_stamp.TAKEN
     assert sw_stamp.version_number() >= 148
     with pytest.raises(SystemExit):
@@ -81,3 +81,9 @@ def test_bump_skips_versions_taken_elsewhere(tmp_path, monkeypatch):
     assert any('taken' in p for p in sw_stamp.check())
     with pytest.raises(SystemExit):
         sw_stamp.set_version(140)
+
+
+def test_v148_stays_with_the_import_fixes():
+    """4b82ab5 (Import fixes, v148) is handed off: TV Calendar is v149 or later."""
+    assert 148 in sw_stamp.TAKEN
+    assert sw_stamp.version_number() >= 149

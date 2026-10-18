@@ -17,11 +17,13 @@ from collections import Counter
 from typing import Any, Dict
 from unittest import mock
 
-from app import file_management as fm, tv_scan, tv_settings, tv_store, tv_tmdb
+from app import file_management as fm, tv_match, tv_scan, tv_settings, tv_store, tv_tmdb
 from tests import tv_import_mock as M
 
 EPISODE_SHOWS = ('SpongeBob SquarePants', 'Hard Knocks (2001)', 'Friends')
 PID = 'p_7a1b2c3d'
+# Every search auto-pick as the matcher made it (folder -> tmdb id), before duplicate resolution can hide one.
+AUTO: Dict[str, int] = {}
 
 
 def build_tree(root: str, cap_known: int = 3) -> int:
@@ -67,18 +69,20 @@ def evaluate() -> Dict[str, Any]:
                                    'group': s['episode_group_id']}
     tiers: Counter = Counter()
     wrong, ambiguous_auto, missed = [], [], []
+    # every auto-pick, checked as made (a duplicate folder's pick may be hidden afterwards)
+    picks = {**AUTO, **{k: s['tmdb_id'] for k, s in series.items() if k in truth}}
+    for folder, tid in sorted(picks.items()):
+        t = truth.get(folder, {})
+        if t.get('accept'):
+            ambiguous_auto.append((folder, tid))
+            if tid not in t['accept']:
+                wrong.append((folder, tid, t['accept']))
+        elif tid != t.get('id'):
+            wrong.append((folder, tid, t.get('id')))
     for folder in f['folders']:
         t = truth[folder]
         if folder in series:
-            s = series[folder]
-            tier = s['match_tier'] or 'id'
-            tiers[tier] += 1
-            if t.get('accept'):
-                ambiguous_auto.append((folder, s['tmdb_id']))
-                if s['tmdb_id'] not in t['accept']:
-                    wrong.append((folder, s['tmdb_id'], t['accept']))
-            elif s['tmdb_id'] != t['id']:
-                wrong.append((folder, s['tmdb_id'], t['id']))
+            tiers[series[folder]['match_tier'] or 'id'] += 1
         else:
             r = review.get(folder)
             tier = r['tier'] if r else 'missing'
@@ -114,6 +118,14 @@ def run(root: str, *, rate: float = 0.0, latency: float = 0.0, server_rate=None)
     """Import *root* (already built) as one TV library; the setup (stores in a
     temp dir) is the caller's. Returns timings and the TMDB call count."""
     m = M.MockTmdb(latency=latency, server_rate=server_rate)
+    AUTO.clear()
+    real_match = tv_match.match
+
+    def recording(folder, *a, **k):
+        out = real_match(folder, *a, **k)
+        if out.get('status') == 'matched':
+            AUTO[folder] = out['tmdb_id']
+        return out
     fm.save({**fm.load(), 'paths': [{'id': PID, 'name': 'TV', 'path': root}], 'fallback_path_id': None})
     tv_settings.save({**tv_settings.load(), 'libraries': [PID]})
     seen = {}
@@ -126,7 +138,7 @@ def run(root: str, *, rate: float = 0.0, latency: float = 0.0, server_rate=None)
             time.sleep(0.05)
     with mock.patch.dict(tv_tmdb._cfg, {'get_key': lambda: 'k', 'session_factory': m.session, 'cache': True}), \
             mock.patch.object(tv_tmdb, 'tmdb_base_url', lambda: 'https://mock.tmdb/3'), \
-            mock.patch.object(tv_tmdb, 'RATE_PER_S', rate):
+            mock.patch.object(tv_tmdb, 'RATE_PER_S', rate), mock.patch.object(tv_match, 'match', recording):
         import threading
         w = threading.Thread(target=watch, daemon=True)
         t0 = time.monotonic()

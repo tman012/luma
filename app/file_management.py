@@ -486,21 +486,28 @@ def check_rules(body: Dict[str, Any], data: Dict[str, Any]) -> Tuple[Optional[Di
 
 def movies_uses(data: Dict[str, Any], taken: Optional[set] = None) -> set:
     """Library path ids Movies file into: rule destinations and the fallback,
-    explicit or implicit (the single path Movies see; Reviewer F2, M31)."""
+    explicit or implicit (the single path Movies see; Reviewer F2, M31). The
+    implicit one counts only when Movies depend on it: there are Movies rules
+    (PM, Oct 18: a TV-only setup's lone path can be selected for TV)."""
     out = {r['path_id'] for r in data['rules']}
     if data.get('fallback_path_id'):
         out.add(data['fallback_path_id'])
-    fb = effective_fallback(data, taken)
+    fb = effective_fallback(data, taken) if movies_depend(data) else None
     if fb:
         out.add(fb['id'])
     return out
+
+
+def movies_depend(data: Dict[str, Any]) -> bool:
+    """Movies use the Library paths: there are Movies rules or a chosen fallback."""
+    return bool(data.get('rules')) or bool(data.get('fallback_path_id'))
 
 
 def pin_fallback(data: Dict[str, Any], taken: Optional[set] = None) -> bool:
     """Make an implicit fallback explicit before a change that would move or
     drop it (a path added, a TV selection changed), as the migration does
     (Reviewer F1). True when *data* changed."""
-    if data.get('fallback_path_id'):
+    if data.get('fallback_path_id') or not movies_depend(data):
         return False
     fb = effective_fallback(data, taken)
     if not fb:

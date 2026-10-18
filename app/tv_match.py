@@ -14,13 +14,15 @@ A top-level folder in a TV library path is one show, whatever its naming.
   ((US), (UK)...) against origin_country (+15 / -30), popularity (0..15) and
   TMDB's order (a small tie-break).
 * Tiers: "high" (imported without asking) when an exact title leads by 15 or
-  more with a score of 80 (70 when no year is known anywhere: the year can't
-  add its 25). Same-name rivals (another exact title the year and country
-  don't rule out) need the files on disk to separate them (coverage of the
-  parsed S/E files, the highest season, file years vs first air date), or a
-  clear popularity lead; and the pick must be the first exact title in TMDB's
-  own order. Two exact titles with the same year never auto-pick.
-  "likely": a best guess exists (pre-selected in review). "none": no results.
+  more with a score of HIGH (HIGH_NO_YEAR when no year is known anywhere: the
+  year can't add its 25). Same-name rivals (another exact title the year and
+  country don't rule out) auto-pick only when the files on disk positively fit
+  the pick (their S/E exist in its seasons, the highest season exists, file
+  years aren't before its first air date) AND contradict every rival; the pick
+  must also be the first exact title in TMDB's own order. Popularity never
+  decides (PM): it only ranks.
+  "likely": a best guess exists (pre-selected in review: the candidate the
+  files fit best, then the score). "none": no results.
 
 Pure logic plus TMDB reads: nothing here touches the file system (the
 caller passes file hints from its read-only listing).
@@ -45,9 +47,10 @@ W_EXACT, W_PREFIX, W_FUZZY = 60, 35, 25
 W_YEAR, W_YEAR_NEAR, W_YEAR_OFF = 25, 10, -40
 W_COUNTRY, W_COUNTRY_OFF = 15, -30
 W_POP = 15
-HIGH, HIGH_NO_YEAR, GAP = 80, 70, 15
+HIGH, GAP = 80, 15
+HIGH_NO_YEAR = 70               # PM: 70 holds while the adversarial set and the fixture give 0 wrong picks at 70
 FILE_COVERAGE = 0.9
-POP_LEAD, POP_MIN = 20, 200     # votes: a same-name rival is ruled out by popularity alone
+NEAR_VOTES = 2                  # a near name with at least half the best's votes is comparable
 
 _TAG_RE = re.compile(
     r'[\[{]\s*(tmdb|tmdbid|tvdb|tvdbid|imdb|imdbid)\s*[-=:]\s*(tt\d{5,10}|\d{1,10})\s*[\]}]', re.I)
@@ -247,7 +250,30 @@ def file_fit(h: Optional[Hints], details: Optional[Dict[str, Any]]) -> Optional[
     first = str(details.get('first_air_date') or '')[:4]
     year_ok = not (h.file_year and first.isdigit() and h.file_year < int(first) - 1)
     adjust = 30 * (cov if cov is not None else 0.5) - (0 if seasons_ok else 20) - (0 if year_ok else 40)
-    return {'coverage': cov, 'seasons_ok': seasons_ok, 'year_ok': year_ok, 'adjust': adjust}
+    # how many of the files' seasons end where the candidate's season ends (ranks pre-picks only)
+    last: Dict[int, int] = {}
+    for se, e in h.eps:
+        last[se] = max(last.get(se, 0), e)
+    tight = (sum(1 for se, e in last.items() if layout.get(se) == e) / len(last)) if last else 0.0
+    return {'coverage': cov, 'seasons_ok': seasons_ok, 'year_ok': year_ok, 'adjust': adjust, 'tight': tight}
+
+
+def fits(fit: Optional[Dict[str, Any]]) -> bool:
+    """The files positively fit: their S/E exist (FILE_COVERAGE), their highest season exists, no file year before it."""
+    return bool(fit) and fit['coverage'] is not None and fit['coverage'] >= FILE_COVERAGE and fit['seasons_ok'] and fit['year_ok']
+
+
+def contradicts(fit: Optional[Dict[str, Any]]) -> bool:
+    """The files rule the candidate out: S/E it doesn't have, a season past its last, or a file year before it.
+    Unknown (no details, nothing to compare) never contradicts."""
+    return bool(fit) and ((fit['coverage'] is not None and fit['coverage'] < FILE_COVERAGE)
+                          or not fit['seasons_ok'] or not fit['year_ok'])
+
+
+def _fit_key(fit: Optional[Dict[str, Any]]) -> Tuple[int, float, float]:
+    if not fit:
+        return (0, 0.0, 0.0)
+    return (1 if fits(fit) else -1 if contradicts(fit) else 0, fit['coverage'] or 0.0, fit['tight'])
 
 
 # --------------------------------------------------------------------------- match
@@ -318,6 +344,8 @@ def match(folder: str, hints: Optional[Hints] = None, *, search: Optional[Callab
     want = [r for r in rows[:DETAILS_FOR_TOP] if close or r['title'] < W_EXACT]
     if rows[0]['title'] >= W_EXACT:     # same-name rivals: their seasons decide against the files
         want += [r for r in rows[1:] if r['title'] >= W_EXACT and r not in want]
+        if hints is not None and hints.eps:   # ... and near names the files might fit as well (Cosmos)
+            want += [r for r in _near(rows) if r not in want]
     for r in want[:MAX_DETAILS]:
         d = show(r['c']['tmdb_id'])
         if d:
@@ -325,7 +353,9 @@ def match(folder: str, hints: Optional[Hints] = None, *, search: Optional[Callab
     if details:
         rows = score(results, q, details)
     tier, why = decide(rows, q, hints, details)
-    best = rows[0]['c']
+    best = rows[0]['c'] if tier == 'high' else prepick(rows, hints, details)['c']
+    # same-name shows the files don't single out: review pre-picks the best guess but leaves the row unchecked
+    unclear = tier != 'high' and why in SAME_NAME and not _sole_fit(rows, hints, details, best['tmdb_id'])
     if tier == 'high' and best['tmdb_id'] not in details:
         d = show(best['tmdb_id'])
         if d:
@@ -335,7 +365,7 @@ def match(folder: str, hints: Optional[Hints] = None, *, search: Optional[Callab
            'why': why, 'via': 'search' if tier == 'high' else None, 'tier': tier}
     if tier == 'high':
         return {**out, 'status': 'matched', 'tmdb_id': best['tmdb_id']}
-    return {**out, 'status': 'unmatched', 'reason': 'not_exact'}
+    return {**out, 'status': 'unmatched', 'reason': 'unclear' if unclear else 'not_exact'}
 
 
 def decide(rows: List[Dict[str, Any]], q: Dict[str, Any], hints: Optional[Hints],
@@ -353,6 +383,9 @@ def decide(rows: List[Dict[str, Any]], q: Dict[str, Any], hints: Optional[Hints]
     first_exact = exact_order[0]['c']['tmdb_id'] if exact_order else None
     gap = best['total'] - (rows[1]['total'] if len(rows) > 1 else 0)
     if not rivals:
+        # a near name ('Cosmos: A Spacetime Odyssey') with as many votes that the files fit too: review
+        if hints is not None and any(fits(file_fit(hints, details.get(r['c']['tmdb_id']))) for r in _near(rows)):
+            return 'likely', 'files fit another show'
         if best['total'] >= need and gap >= GAP:
             return 'high', 'clear'
         fit = file_fit(hints, details.get(best['c']['tmdb_id']))
@@ -361,20 +394,50 @@ def decide(rows: List[Dict[str, Any]], q: Dict[str, Any], hints: Optional[Hints]
         return 'likely', 'close'
     if best['c']['tmdb_id'] != first_exact:
         return 'likely', 'not first in TMDB order'
-    fits = {r['c']['tmdb_id']: file_fit(hints, details.get(r['c']['tmdb_id'])) for r in [best] + rivals}
-    mine = fits[best['c']['tmdb_id']]
-    if mine and mine['coverage'] is not None and mine['coverage'] >= FILE_COVERAGE and mine['year_ok']:
-        # a rival without details is taken to fit perfectly
-        lead = min(best['total'] + mine['adjust'] - r['total'] - (fits[r['c']['tmdb_id']] or {'adjust': 30})['adjust']
-                   for r in rivals)
-        if lead >= GAP:
-            return 'high', 'files'
+    # The files must fit the pick and rule out every rival (a rival without details can't be ruled out).
+    mine = file_fit(hints, details.get(best['c']['tmdb_id']))
+    if fits(mine) and all(contradicts(file_fit(hints, details.get(r['c']['tmdb_id']))) for r in rivals):
+        return 'high', 'files'
     if q.get('year') is not None and any(r['c'].get('year') == best['c'].get('year') for r in rivals):
         return 'likely', 'same title and year'      # the folder's year can't tell them apart: Cheat (2019)
-    votes = int(best['c'].get('vote_count') or 0)
-    if votes >= POP_MIN and all(votes >= POP_LEAD * max(int(r['c'].get('vote_count') or 0), 1) for r in rivals):
-        return 'high', 'popularity'
     return 'likely', 'same title'
+
+
+SAME_NAME = ('same title', 'same title and year', 'not first in TMDB order', 'files fit another show')
+
+
+def _sole_fit(rows, hints, details, tid) -> bool:
+    """*tid* is the only top result (with details) the files fit."""
+    if hints is None:
+        return False
+    fit = [r['c']['tmdb_id'] for r in rows[:TOP_N] if fits(file_fit(hints, details.get(r['c']['tmdb_id'])))]
+    return fit == [tid]
+
+
+def _votes(r: Dict[str, Any]) -> int:
+    return max(int(r['c'].get('vote_count') or 0), 0)
+
+
+def _near(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Top results with a partial title (prefix, main title, fuzzy) and comparable or more votes than the best:
+    votes can only send a folder to review here, never pick a show."""
+    best = rows[0]
+    if not _votes(best):                  # no vote counts: nothing says the near name is comparable
+        return []
+    return [r for r in rows[1:TOP_N] if 0 < r['title'] < W_EXACT and _votes(r) * NEAR_VOTES >= _votes(best)]
+
+
+def prepick(rows: List[Dict[str, Any]], hints: Optional[Hints], details: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
+    """Review's best guess: among the top results with the best title score that the year and country don't
+    rule out, the one the files fit best (fits, coverage, seasons that end where its seasons end); the score
+    breaks ties, so without files it's the top row."""
+    best = rows[0]
+    if hints is None or not details:
+        return best
+    pool = [r for r in rows[:TOP_N] if r['title'] >= best['title'] and r['year'] >= min(best['year'], 0)
+            and r['country'] >= min(best['country'], 0)]
+    keyed = [(_fit_key(file_fit(hints, details.get(r['c']['tmdb_id']))), -i, r) for i, r in enumerate(pool)]
+    return max(keyed, key=lambda k: (k[0], k[1]))[2] if keyed else best
 
 
 def show_fields(data: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
