@@ -345,7 +345,7 @@ export const tvCalendarCss = `
 .tvc-bm:hover{background:rgba(59,130,246,.35)!important}
 @media (hover:none){.tvc-card .tvc-bm{opacity:1}}
 @container tvcal (max-width: 999px){.tvc-card .tvc-bm{display:none!important}}
-@container tvcal (max-width: 999px){.tvc-card [data-testid=tv-card-show]{-webkit-line-clamp:2!important}.tvc-card [data-testid=tv-card-title]{-webkit-line-clamp:1!important}}
+@container tvcal (max-width: 599px){.tvc-card [data-testid=tv-card-show]{-webkit-line-clamp:2!important}.tvc-card [data-testid=tv-card-title]{-webkit-line-clamp:1!important}}
 `;
 
 const gridWrap: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 8 };
@@ -355,8 +355,9 @@ const gridHead: React.CSSProperties = { margin: 0, padding: '6px 8px', borderRad
 const CARD_TEXT_H = 69;
 const one: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 /** v158c: week-grid captions wrap instead of clipping: the show name up to NAME_LINES, the episode line
- * up to EP_LINES, then an ellipsis. Under 1000px (phone-narrow day columns) they stay at 2 and 1 lines
- * as in v162, so a name never breaks into one letter per line. */
+ * up to EP_LINES, then an ellipsis. On a phone (calendar under 600px: day columns ~55px) they stay at 2 and 1
+ * lines as in v162, so a name never breaks into one letter per line; from 600px (desktop 1100/1280, whose
+ * calendar is under 1000px) they wrap. v164: was 999px, which clipped episode lines at 1100 and 1280. */
 export const NAME_LINES = 5;
 export const EP_LINES = 3;
 /** At most 2 lines, then an ellipsis (week-grid show names). */
