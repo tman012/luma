@@ -812,9 +812,9 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
             ' AND folder IS NOT NULL', (pid,))}       # shows added from Search have no folder to lose
         unmatched = {r['folder'] for r in conn.execute('SELECT folder FROM unmatched WHERE path_id = ?', (pid,))}
     with tv_store.write() as conn:            # folders that are gone: rows only, history kept
-        for f in set(known) - set(folders):
+        for f in sorted(set(known) - set(folders)):          # v166: sorted, never hash order
             detach(conn, known[f]['id'], now, 'folder gone')
-        for f in unmatched - set(folders):
+        for f in sorted(unmatched - set(folders)):
             conn.execute('DELETE FROM unmatched WHERE path_id = ? AND folder = ?', (pid, f))
     # Luma's own earlier mapping is never guessed again ("id"); a scheduled
     # rescan leaves review rows alone.
@@ -1364,9 +1364,26 @@ def _import_rows(items: List[Tuple[int, int]], now: Optional[float], via: str, l
 # The marker (meta RERUN_META) records the rule and when it first ran here; rows written before
 # that are re-matched once, rows written after it were written by this rule. A run cut short
 # (TMDB down) leaves the unprocessed rows for the next boot.
+# v166: the rule is tv_match.RULE_VERSION plus a fingerprint of the matcher (tv_match's source and
+# the auto-pick reasons here), so a matcher change re-runs review rows on the next boot even if
+# nobody bumped the name. :5002 kept 'v161a' after the v165 similar-name rule, so X-Men never re-ran.
 RERUN_META = 'tv_import_rerun'
-RERUN_RULE = 'v161a'
 KEEP_REASONS = ('duplicate',)
+
+
+def _rule_id() -> str:
+    import hashlib
+    import inspect
+    try:
+        src = inspect.getsource(tv_match)
+    except (OSError, TypeError):                 # no source shipped: the name alone
+        return tv_match.RULE_VERSION
+    h = hashlib.sha256(src.encode('utf-8'))
+    h.update(repr(sorted(AUTO_REASONS)).encode('utf-8'))
+    return f'{tv_match.RULE_VERSION}+{h.hexdigest()[:10]}'
+
+
+RERUN_RULE = _rule_id()
 
 
 def _rerun_since(now: float) -> float:

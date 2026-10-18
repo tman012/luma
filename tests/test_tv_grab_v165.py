@@ -7,7 +7,7 @@ import pytest
 import requests
 
 from app import indexer_api, instance, tracker_sources, tv_grab
-from tests.test_tv_v158c import BODY, _post, popup, qenv  # noqa: F401
+from tests.test_tv_v158c import BODY, _post, known_token, popup, qenv  # noqa: F401
 from tests.test_file_management import HDR, minimal as minimal_app, store  # noqa: F401
 from tests.test_home_rails import REMOTE, _client
 from tests.test_tv_calendar import aired, scanned  # noqa: F401
@@ -74,7 +74,7 @@ def test_a_raw_url_or_magnet_is_a_400_and_nothing_is_fetched(qenv, owner, monkey
     assert r.status_code == 400 and r.get_json()['fallback'] is False
 
 
-def test_the_route_asks_for_tokens_only(qenv, owner, monkeypatch):  # noqa: F811
+def test_the_route_asks_for_tokens_only(qenv, owner, monkeypatch, known_token):  # noqa: F811
     seen = []
     monkeypatch.setattr(tv_grab, 'grab', lambda *a, **k: seen.append(k.get('tokens_only')) or {'ok': False, 'error': 'x'})
     _post(owner, BODY)
@@ -112,66 +112,92 @@ def test_tokens_only_takes_a_sources_link_to_a_magnet(no_outbound, sources):
     assert e.value.status == 410
 
 
-def test_tokens_only_refuses_a_sources_link_to_another_site(no_outbound, sources, monkeypatch):
-    monkeypatch.setattr(tv_grab, '_prowlarr', lambda: None)
-    sources['/src/t'] = PASSKEY_URL
-    with pytest.raises(tracker_sources.GrabError) as e:
-        tv_grab.fetch_link('/src/t', tokens_only=True)
-    assert e.value.status == 400
+class S(dict):
+    def get(self, k, d=None):
+        return dict.get(self, k, d)
 
 
-class FakeProwlarr:
-    def __init__(self, out=('torrent', b'd8:announce0:e')):
-        self.out, self.calls = out, []
-
-    def owns(self, url):
-        return url.startswith(PROWLARR + '/')
+@pytest.fixture
+def lan(monkeypatch):
+    """Prowlarr configured as the indexer; its download replaced by a recorder."""
+    from app import library_mover as mover
+    monkeypatch.setitem(mover._cfg, 'settings', S({'indexer.base_url': PROWLARR, 'indexer.api_key': 'k' * 32}))
+    rec = {'out': ('torrent', b'd8:announce0:e'), 'calls': []}
 
     def download(self, url, interactive=True):
-        self.calls.append((url, interactive))
-        if isinstance(self.out, Exception):
-            raise self.out
-        return self.out
+        rec['calls'].append((url, interactive))
+        if isinstance(rec['out'], Exception):
+            raise rec['out']
+        return rec['out']
+    monkeypatch.setattr(indexer_api.ProwlarrClient, 'download', download)
+    return rec
 
 
 @pytest.mark.parametrize('tokens_only', [True, False])
-def test_a_prowlarr_link_goes_through_lumas_prowlarr_client(no_outbound, sources, monkeypatch, tokens_only):
-    p = FakeProwlarr()
-    monkeypatch.setattr(tv_grab, '_prowlarr', lambda: p)
+def test_a_prowlarr_link_goes_through_lumas_prowlarr_client(no_outbound, sources, lan, tokens_only):
     sources['/src/p'] = PROWLARR + '/3/download?apikey=k&link=abc&file=x'
     assert tv_grab.fetch_link('/src/p', tokens_only=tokens_only) == ('torrent', b'd8:announce0:e')
     assert tv_grab.fetch_link('/src/p', automatic=True, tokens_only=tokens_only)[0] == 'torrent'
-    assert p.calls == [(sources['/src/p'], True), (sources['/src/p'], False)]     # manual: interactive
+    assert lan['calls'] == [(sources['/src/p'], True), (sources['/src/p'], False)]     # manual: interactive
 
 
-def test_a_prowlarr_budget_refusal_is_a_429_not_a_fallback_fetch(no_outbound, sources, monkeypatch):
-    p = FakeProwlarr(indexer_api.IndexerSkipped('guard'))
-    monkeypatch.setattr(tv_grab, '_prowlarr', lambda: p)
+def test_a_prowlarr_budget_refusal_is_a_429_not_a_fallback_fetch(no_outbound, sources, lan):
+    lan['out'] = indexer_api.IndexerSkipped('guard')
     sources['/src/p'] = PROWLARR + '/3/download?apikey=k&link=abc'
     with pytest.raises(tracker_sources.GrabError) as e:
         tv_grab.fetch_link('/src/p', tokens_only=True)
     assert e.value.status == 429
 
 
-def test_a_prowlarr_magnet_is_still_checked(no_outbound, sources, monkeypatch):
-    p = FakeProwlarr(('magnet', MAGNET + '\nhttp://evil/'))
-    monkeypatch.setattr(tv_grab, '_prowlarr', lambda: p)
+def test_a_prowlarr_magnet_is_still_checked(no_outbound, sources, lan):
+    lan['out'] = ('magnet', MAGNET + '\nhttp://evil/')
     sources['/src/p'] = PROWLARR + '/3/download?apikey=k&link=abc'
     with pytest.raises(tracker_sources.GrabError):
         tv_grab.fetch_link('/src/p', tokens_only=True)
 
 
-def test_prowlarr_client_comes_from_the_indexer_settings(monkeypatch):
-    from app import library_mover as mover
+@pytest.mark.parametrize('tokens_only', [True, False])
+@pytest.mark.parametrize('real', [
+    PASSKEY_URL,
+    'http://10.0.0.9:9696/3/download?apikey=k&link=abc',          # another LAN host
+    'http://192.168.1.5:9697/3/download?apikey=k&link=abc',       # the Prowlarr host, another port
+    'https://192.168.1.5:9696/3/download?apikey=k&link=abc',      # the Prowlarr host and port, another scheme
+    'http://192.168.1.50:9696/3/download?apikey=k&link=abc',      # a host that only starts the same
+    'http://192.168.1.5.evil:9696/3/download',
+    'http://user@192.168.1.5:9696/3/download',
+])
+def test_a_sources_link_to_anything_but_the_configured_prowlarr_is_refused_with_nothing_fetched(
+        sources, lan, monkeypatch, real, tokens_only):
+    """PM (v166): the LAN bridge reaches ONLY the Prowlarr in Settings > Indexer (exact scheme, host and
+    port). Popup grabs (tokens_only) refuse anything else outright; Luma's own grabs fall to
+    outbound_guard, which refuses every private address, so nothing on the LAN is fetched either way."""
+    from app import outbound_guard
+    tried = []
 
-    class S(dict):
-        def get(self, k, d=None):
-            return dict.get(self, k, d)
-    monkeypatch.setitem(mover._cfg, 'settings', S({'indexer.base_url': PROWLARR, 'indexer.api_key': 'k' * 32}))
-    c = tv_grab._prowlarr()
-    assert isinstance(c, indexer_api.ProwlarrClient) and c.owns(PROWLARR + '/1/download?x=1')
+    def guard(u, *a, **k):
+        tried.append(u)
+        raise outbound_guard.BlockedURL('private')
+    monkeypatch.setattr(outbound_guard, 'fetch', guard)
+    sources['/src/x'] = real
+    with pytest.raises(tracker_sources.GrabError) as e:
+        tv_grab.fetch_link('/src/x', tokens_only=tokens_only)
+    assert e.value.status == 400
+    assert lan['calls'] == []                                     # Prowlarr's client never asked
+    assert tried == ([] if tokens_only else [real])               # popup: nothing even tried
+
+
+def test_the_lan_prowlarr_path_is_one_function_and_off_without_prowlarr(monkeypatch, lan):
+    from app import library_mover as mover
+    u = PROWLARR + '/1/download?x=1'
+    assert tv_grab.lan_prowlarr_fetch(u, False) == ('torrent', b'd8:announce0:e')
+    assert tv_grab.lan_prowlarr_fetch(PASSKEY_URL, False) is None                 # another host: not this path
     monkeypatch.setitem(mover._cfg, 'settings', S({'indexer.provider': 'torznab', 'indexer.base_url': PROWLARR, 'indexer.api_key': 'k'}))
-    assert tv_grab._prowlarr() is None
+    assert tv_grab.lan_prowlarr_fetch(u, False) is None
+    monkeypatch.setitem(mover._cfg, 'settings', None)
+    assert tv_grab.lan_prowlarr_fetch(u, False) is None
+    import inspect
+    src = inspect.getsource(tv_grab.fetch_link)
+    assert src.count('lan_prowlarr_fetch(') == 1 and 'ProwlarrClient' not in src     # one call site, droppable
 
 
 # ------------------------------------------------------------------ (3) ProwlarrClient.download
@@ -204,11 +230,22 @@ def client(monkeypatch):
     return c
 
 
+class Sess:
+    def __init__(self, resps):
+        self.resps, self.sent, self.closed = list(resps), [], False
+
+    def get(self, url, **k):
+        self.sent.append((url, k))
+        return self.resps.pop(0)
+
+    def close(self):
+        self.closed = True
+
+
 def _serve(c, monkeypatch, *resps):
-    got = list(resps)
-    sent = []
-    monkeypatch.setattr(c.session, 'get', lambda url, **k: sent.append((url, k)) or got.pop(0))
-    return sent
+    s = Sess(resps)
+    monkeypatch.setattr(c, '_download_session', lambda: s)
+    return s.sent
 
 
 def test_owns_only_this_prowlarr():
@@ -258,10 +295,13 @@ def test_a_link_on_another_host_is_never_fetched(client, monkeypatch):
     assert sent == [] and client.charged == []
 
 
-def test_the_instance_write_guard_still_sees_prowlarr_requests(client, monkeypatch):
-    """The download goes through requests.Session (where the test write guard sits): a GET, so a read."""
+def test_the_download_session_ignores_the_environment_and_is_a_guarded_requests_session():
+    """trust_env off (no env proxy, no .netrc: v166 Reviewer); a requests.Session, where the test write
+    guard sits (a GET, so a read)."""
+    c = indexer_api.ProwlarrClient(PROWLARR, 'k' * 32)
+    s = c._download_session()
+    assert isinstance(s, requests.Session) and s.trust_env is False and s.headers['X-Api-Key'] == 'k' * 32
     assert instance.write_kind('GET', PROWLARR + '/7/download?link=z') is None
-    assert isinstance(client.session, requests.Session)
 
 
 # ------------------------------------------------------------------ (2) the scoped add allowlist
@@ -298,14 +338,15 @@ def test_the_allowlisted_add_fields_pass(monkeypatch):
 @pytest.mark.parametrize('extra', [{'downloadPath': '/x'}, {'useDownloadPath': 'true'}, {'savepath': ''}, {'savepath': '/x'},
                                    {'savePath': '/x'}, {'rename': 'x'}, {'contentLayout': 'NoSubfolder'}, {'root_folder': 'true'},
                                    {'firstLastPiecePrio': 'true'}, {'sequentialDownload': 'true'}, {'upLimit': '1'},
-                                   {'cookie': 'x'}, {'Category': NAME}, {'autoTMM': 'true'}])
+                                   {'cookie': 'x'}, {'Category': NAME}, {'autoTMM': 'true'},
+                                   {'autoTMM': 'False'}, {'autoTMM': ''}])
 def test_any_other_add_field_is_refused(monkeypatch, extra):
     sent = _guarded(monkeypatch)
     try:
         s = requests.Session()
         with instance.scoped_add('tv_grab', NAME):
             with pytest.raises(instance.WritesBlocked):
-                s.post(ADD, data={'urls': MAGNET, 'category': NAME, 'tags': NAME, **extra})
+                s.post(ADD, data={'urls': MAGNET, 'category': NAME, 'tags': NAME, 'autoTMM': 'false', **extra})
         assert sent == []
     finally:
         instance.uninstall_write_guard()
@@ -318,6 +359,7 @@ def test_any_other_add_field_is_refused(monkeypatch, extra):
     ({'category': NAME, 'tags': NAME}, {'urls': ('x.torrent', b'd')}),          # urls only as text
     ({'urls': MAGNET, 'category': NAME, 'tags': NAME}, {'torrents': (None, 'd4:infoe')}),   # torrents only as a file
     ({'category': NAME, 'tags': NAME, 'autoTMM': 'false'}, None),               # an add with nothing to add
+    ({'urls': MAGNET, 'category': NAME, 'tags': NAME}, None),                   # v166: autoTMM missing
 ])
 def test_create_category_and_add_shapes_outside_the_allowlist_are_refused(monkeypatch, data, files):
     sent = _guarded(monkeypatch)
@@ -330,3 +372,37 @@ def test_create_category_and_add_shapes_outside_the_allowlist_are_refused(monkey
         assert sent == []
     finally:
         instance.uninstall_write_guard()
+
+
+def test_every_add_luma_makes_sends_autotmm_false():
+    """TV grabs (tv_grab._fields) and Movies grabs (main._qbit_add_fields) both send autoTMM=false."""
+    import app.main
+    assert tv_grab._fields(NAME)['autoTMM'] == 'false'
+    assert app.main._qbit_add_fields()['autoTMM'] == 'false'
+
+
+# ------------------------------------------------------------------ v166 (Tester): junk tokens are a 400 too
+
+JUNK = ['/api/trackers/release/', '/api/trackers/release/!!garbage!!', '/api/trackers/release/short',
+        '/api/trackers/release/' + 'y' * 20, '/api/trackers/release/' + 'x' * 20 + '?a=1', '/api/trackers/release/' + 'x' * 20 + '#f',
+        '/api/trackers/release/../../api/downloads/add', '/api/trackers/release/https://evil/x',
+        '/api/sources/link/', '/api/sources/link/garbage', '/api/sources/link/' + 'a' * 32, '/api/sources/link/../x',
+        '/api/sources/link/' + 'a' * 32 + '?q=1', '../', '/../api/trackers/release/' + 'x' * 20]
+
+
+@pytest.mark.parametrize('url', JUNK)
+@pytest.mark.parametrize('grabs_on', [True, False])
+def test_a_junk_unknown_or_query_token_is_a_400_with_no_fallback(qenv, owner, monkeypatch, known_token, url, grabs_on):  # noqa: F811
+    if not grabs_on:
+        monkeypatch.delenv('LUMA_TEST_ALLOW')
+    monkeypatch.setattr(tv_grab, 'grab', lambda *a, **k: pytest.fail('grab reached'))
+    r = _post(owner, {**BODY, 'download_url': url})
+    assert r.status_code == 400
+    out = r.get_json()
+    assert out['ok'] is False and out['fallback'] is False and 'blocked' not in out
+
+
+def test_a_known_token_still_goes_through(qenv, owner, monkeypatch, known_token):  # noqa: F811
+    seen = []
+    monkeypatch.setattr(tv_grab, 'grab', lambda *a, **k: seen.append(a[0]['downloadUrl']) or {'ok': True})
+    assert _post(owner, BODY).status_code == 200 and seen == [BODY['download_url']]

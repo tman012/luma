@@ -103,7 +103,7 @@ def test_scoped_add_refuses_duplicated_keys_and_a_query_string(monkeypatch):
     try:
         s = requests.Session()
         add = 'http://qbit/api/v2/torrents/add'
-        ok = {'urls': 'magnet:?', 'category': 'luma-test-tv', 'tags': 'luma-test-tv'}
+        ok = {'urls': 'magnet:?', 'category': 'luma-test-tv', 'tags': 'luma-test-tv', 'autoTMM': 'false'}
         with instance.scoped_add('tv_grab', 'luma-test-tv'):
             s.post(add, data=ok)
             for bad in ([('urls', 'magnet:?'), ('category', 'luma-test-tv'), ('category', 'luma-tv'), ('tags', 'luma-test-tv')],

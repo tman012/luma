@@ -128,9 +128,9 @@ describe('Series rail pin', () => {
 
 
 describe('caption fit', () => {
-  it('13/17; then 12/16 on 2 lines, then 3, 4, 5, 6 lines at 12/16 (never below 12px); only then the ellipsis', async () => {
+  it('13/17; then 12/16 on 2 lines, then 3, then 4 lines at 12/16 (PM: never below 12px, at most 4 lines); only then the ellipsis', async () => {
     const { fitCaptions, CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR, CAPTION_MAX_LINES } = await import('@/components/library/TvSeries');
-    expect([CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR, CAPTION_MAX_LINES]).toEqual([{ size: 13, line: 17 }, { size: 12, line: 16 }, { size: 12, line: 16 }, 6]);
+    expect([CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR, CAPTION_MAX_LINES]).toEqual([{ size: 13, line: 17 }, { size: 12, line: 16 }, { size: 12, line: 16 }, 4]);
     const root = document.createElement('div');
     // lines[size] = lines the name needs at that size; the box shows line-clamp lines
     const mk = (lines: Record<string, number>) => {
@@ -144,12 +144,12 @@ describe('caption fit', () => {
     };
     const short = mk({});
     const need = (n: number) => mk({ '13px': n + 1, '12px': n });
-    const made = [short, need(2), need(3), need(4), need(5), need(6), need(7)];
+    const made = [short, need(2), need(3), need(4), need(5)];
     expect(fitCaptions(root)).toBe(1);
     const t = (n: HTMLElement) => [n.style.fontSize, n.style.lineHeight, n.style.getPropertyValue('-webkit-line-clamp'), n.dataset.ellipsis ?? null];
     expect(made.map(t)).toEqual([
       ['13px', '17px', '2', null], ['12px', '16px', '2', null], ['12px', '16px', '3', null], ['12px', '16px', '4', null],
-      ['12px', '16px', '5', null], ['12px', '16px', '6', null], ['12px', '16px', '6', 'true']]);
+      ['12px', '16px', '4', 'true']]);
     expect(made.every(n => parseFloat(n.style.fontSize) >= 12)).toBe(true);
     expect(fitCaptions(root)).toBe(1);                                   // idempotent (a resize re-runs it)
   });

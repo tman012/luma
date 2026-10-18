@@ -39,6 +39,12 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from app import tv_tmdb
 
+# The matcher rule's name. Convention: bump it with any change to how a folder is matched (v166a: the
+# similar-name rule, _could_be_short_for). It doesn't have to be bumped for Luma to notice, though:
+# tv_scan's boot re-run keys its marker on this name PLUS a fingerprint of this module's source, so any
+# edit here makes every unresolved review row eligible again on the next boot (X-Men on :5002, v166).
+RULE_VERSION = 'v166a'
+
 TOP_N = 5
 DETAILS_FOR_TOP = 2             # /tv/{id} (alternative titles, seasons) for the top 2 when close
 MAX_DETAILS = 6                 # ... and for same-name rivals, at most this many per folder
@@ -155,7 +161,7 @@ def _titles(c: Dict[str, Any], details: Optional[Dict[str, Any]]) -> List[str]:
     if details:
         alt = details.get('alternative_titles') if isinstance(details.get('alternative_titles'), dict) else {}
         out += [a.get('title') for a in alt.get('results') or [] if isinstance(a, dict)]
-    return [n for n in {normalize(t) for t in out if t} if n]
+    return sorted(n for n in {normalize(t) for t in out if t} if n)          # v166: no hash order, ever
 
 
 def _word_prefix(a: str, b: str) -> bool:

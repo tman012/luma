@@ -131,10 +131,20 @@ def register_link_resolver(fn: Callable[[str], Any]) -> None:
 RAW_LINK = 'Grab from a search result (a pasted link or magnet is not accepted here)'
 
 
-def _prowlarr():
-    """Luma's own Prowlarr client when Prowlarr is the configured indexer, else None."""
-    from app import library_mover as mover
-    from app.indexer_api import ProwlarrClient
+def lan_prowlarr_fetch(u: str, automatic: bool) -> Optional[Any]:
+    """The LAN Prowlarr download path (v165, Reviewer item 3), kept in this one function so it can be
+    dropped for the Sonarr fallback if PM rules against it.
+
+    TEMPORARY BRIDGE (PM, v166): this is removed together with the movie Prowlarr path when the native
+    tracker port lands. Until then it reaches ONLY the one Prowlarr configured in Settings > Indexer
+    (exact scheme, host and port: ProwlarrClient.owns) and every request of every grab is charged.
+
+    Returns None when *u* is not a link on the configured
+    Prowlarr (or Prowlarr isn't the indexer); else ('torrent', bytes) or ('magnet', uri), fetched with
+    Luma's own Prowlarr client (indexer_api.ProwlarrClient.download: its guard budget charged per
+    request, trust_env off, redirects only on Prowlarr or to a magnet). Raises GrabError."""
+    from app import library_mover as mover, tracker_sources as ts
+    from app.indexer_api import IndexerSkipped, ProwlarrClient
     s = mover._cfg.get('settings')
     try:
         if s is None or (s.get('indexer.provider') or 'prowlarr') != 'prowlarr':
@@ -142,12 +152,11 @@ def _prowlarr():
         base, key = s.get('indexer.base_url') or '', s.get('indexer.api_key') or ''
     except Exception:                                        # noqa: BLE001
         return None
-    return ProwlarrClient(base, key) if base and key else None
-
-
-def _via_prowlarr(client, u: str, automatic: bool) -> Any:
-    from app import tracker_sources as ts
-    from app.indexer_api import IndexerSkipped
+    if not base or not key:
+        return None
+    client = ProwlarrClient(base, key)
+    if not client.owns(u):
+        return None
     try:
         kind, got = client.download(u, interactive=not automatic)
     except IndexerSkipped:
@@ -197,9 +206,9 @@ def fetch_link(url: Any, automatic: bool = False, tokens_only: bool = False) -> 
         if not m:
             raise ts.GrabError('Link not allowed', 400)
         return 'magnet', m
-    client = _prowlarr()
-    if client is not None and client.owns(u):
-        return _via_prowlarr(client, u, automatic)
+    got = lan_prowlarr_fetch(u, automatic)
+    if got is not None:
+        return got
     if tokens_only:
         raise ts.GrabError('Link not allowed', 400)
     from app import outbound_guard

@@ -269,14 +269,14 @@ function Tile({ s, first, selecting, picked, onOpen }: { s: Show; first: boolean
 const CAPTION_MIN_H = 51 + 8;
 /** Caption type: 13/600, normal tracking, 17px lines; the count sits right under the name.
  * Steps (v166, Designer: never below 12px): a name that would need a 3rd line at 13 is set 12/16 on 2
- * lines; still over, 12/16 on 3, then 4, ... up to CAPTION_MAX_LINES; only then the ellipsis (full name
+ * lines; still over, 12/16 on 3, then 4 (CAPTION_MAX_LINES); only then the ellipsis (full name
  * in title and aria-label). The grid row stretches every tile to the row's height and the caption block
  * fills it, so all captions in a row share one height. */
 export const CAPTION_TYPE = { size: 13, line: 17 };
 export const CAPTION_FIT = { size: 12, line: 16 };
 /** The floor is the fit size: captions never go below 12px. */
 export const CAPTION_FLOOR = CAPTION_FIT;
-export const CAPTION_MAX_LINES = 6;
+export const CAPTION_MAX_LINES = 4;            // PM (v166): 12px minimum, up to 4 lines, never shrunk
 const caption: React.CSSProperties = {
   fontSize: CAPTION_TYPE.size, letterSpacing: 'normal', fontWeight: 600, lineHeight: `${CAPTION_TYPE.line}px`, color: W95, overflow: 'hidden', overflowWrap: 'anywhere',
   display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',

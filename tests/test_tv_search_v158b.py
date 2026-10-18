@@ -162,10 +162,14 @@ def test_write_guard_lets_only_the_scoped_tv_add_through(monkeypatch):
                 s.post(add, data={'urls': 'magnet:?', 'category': 'luma-test-tv', 'tags': 'luma-test-tv'})
         monkeypatch.setenv('LUMA_TEST_ALLOW', 'tv_grab')
         with instance.scoped_add('tv_grab', 'luma-test-tv'):
-            s.post(add, data={'urls': 'magnet:?', 'category': 'luma-test-tv', 'tags': 'luma-test-tv'})
-            s.post(add, files={'torrents': ('r.torrent', T)}, data={'category': 'luma-test-tv', 'tags': 'luma-test-tv'})
-            for bad in ({'category': 'luma-test-tv', 'tags': 'luma-test-tv,sonarr'}, {'category': 'tv', 'tags': 'luma-test-tv'},
-                        {'category': 'luma-test-tv', 'tags': 'luma-test-tv', 'savepath': '/x'}):
+            s.post(add, data={'urls': 'magnet:?', 'category': 'luma-test-tv', 'tags': 'luma-test-tv', 'autoTMM': 'false'})
+            s.post(add, files={'torrents': ('r.torrent', T)},
+                   data={'category': 'luma-test-tv', 'tags': 'luma-test-tv', 'autoTMM': 'false'})
+            for bad in ({'category': 'luma-test-tv', 'tags': 'luma-test-tv,sonarr', 'autoTMM': 'false'},
+                        {'category': 'tv', 'tags': 'luma-test-tv', 'autoTMM': 'false'},
+                        {'category': 'luma-test-tv', 'tags': 'luma-test-tv', 'autoTMM': 'false', 'savepath': '/x'},
+                        {'category': 'luma-test-tv', 'tags': 'luma-test-tv'},                 # v166: autoTMM missing
+                        {'category': 'luma-test-tv', 'tags': 'luma-test-tv', 'autoTMM': 'true'}):
                 with pytest.raises(instance.WritesBlocked):
                     s.post(add, data={'urls': 'magnet:?', **bad})
             with pytest.raises(instance.WritesBlocked):                              # any other write

@@ -249,7 +249,6 @@ def monitor_labels(conn: sqlite3.Connection, today: Optional[str] = None) -> int
     every other option turns the series switch on, so those episodes were picked one by one (e.g.
     the owner chose None and later switched one episode on). Calling that 'pilot' was wrong."""
     import datetime as _dt
-    from app import tv_monitor
     cols = _columns(conn, 'series')
     if 'monitor' not in cols:
         return 0
@@ -257,25 +256,66 @@ def monitor_labels(conn: sqlite3.Connection, today: Optional[str] = None) -> int
     ids = [r[0] for r in conn.execute(
         "SELECT s.id FROM series s WHERE s.monitor = 'none' AND s.monitored = 1")]
     for sid in ids:
-        eps = [dict(zip(('season_number', 'episode_number', 'air_date', 'monitored', 'has_file'), r)) for r in conn.execute(
-            f'SELECT e.season_number, e.episode_number, e.air_date, e.monitored, {tv_monitor._LINKED} FROM episodes e'
-            ' WHERE e.series_id = ? AND e.season_number > 0', (sid,))]
-        regular = sorted({e['season_number'] for e in eps})
-        first, last = (regular[0], regular[-1]) if regular else (1, 1)
-        best, best_d = 'all', None
-        for opt in LABEL_ORDER:
-            d = sum(1 for e in eps if bool(tv_monitor._wants(opt, e, today, first, last, bool(e['has_file']))) != bool(e['monitored']))
-            if best_d is None or d < best_d:
-                best, best_d = opt, d
-            if d == 0:
-                break
+        best = _best_label(conn, sid, today)
         conn.execute('UPDATE series SET monitor = ? WHERE id = ?', (best, sid))
     return len(ids)
 
 
+def _best_label(conn: sqlite3.Connection, sid: int, today: str) -> str:
+    """monitor_labels' pick for one show: the option closest to its monitored regular episodes."""
+    from app import tv_monitor
+    eps = [dict(zip(('season_number', 'episode_number', 'air_date', 'monitored', 'has_file'), r)) for r in conn.execute(
+        f'SELECT e.season_number, e.episode_number, e.air_date, e.monitored, {tv_monitor._LINKED} FROM episodes e'
+        ' WHERE e.series_id = ? AND e.season_number > 0', (sid,))]
+    regular = sorted({e['season_number'] for e in eps})
+    first, last = (regular[0], regular[-1]) if regular else (1, 1)
+    best, best_d = 'all', None
+    for opt in LABEL_ORDER:
+        d = sum(1 for e in eps if bool(tv_monitor._wants(opt, e, today, first, last, bool(e['has_file']))) != bool(e['monitored']))
+        if best_d is None or d < best_d:
+            best, best_d = opt, d
+        if d == 0:
+            break
+    return best
+
+
+# v166 (PM): v9 was corrected in place (v165), so a tv.db that reached v9 on an earlier build (:5002)
+# kept that build's labels: a show whose series switch is off but with episodes switched on (picked
+# one by one, e.g. None and then one episode) was labelled with the closest option ('pilot'). v10
+# applies the corrected rule to those shows: their label goes back to 'none'. Labels only: series,
+# season and episode switches, monitor_chosen and everything else stay as they are. A show is
+# relabelled only when its label is exactly what the old v9 would have given it, so an option the
+# owner picked that no longer matches its episodes is left alone. Safe to run again (a 'none' show is
+# never selected). The upgrade's verified backup (tv.db.bak-v9) is made first, as for every step.
+SCHEMA_V10 = "UPDATE series SET monitor = monitor WHERE 0;"
+
+
+def repair_v9_labels(conn: sqlite3.Connection, today: Optional[str] = None) -> int:
+    import datetime as _dt
+    cols = _columns(conn, 'series')
+    if 'monitor' not in cols:
+        return 0
+    today = today or _dt.date.today().isoformat()
+    marks = ','.join('?' * len(LABEL_ORDER))
+    ids = [r[0] for r in conn.execute(
+        f"SELECT s.id FROM series s WHERE s.monitored = 0 AND s.monitor IN ({marks})"
+        ' AND EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = s.id AND e.season_number > 0 AND e.monitored = 1)'
+        ' ORDER BY s.id', LABEL_ORDER)]
+    fixed = 0
+    for sid in ids:
+        cur = conn.execute('SELECT monitor FROM series WHERE id = ?', (sid,)).fetchone()[0]
+        if _best_label(conn, sid, today) == cur:
+            conn.execute("UPDATE series SET monitor = 'none' WHERE id = ?", (sid,))
+            fixed += 1
+    if fixed:
+        logger.info('tv.db v10: %d monitor label(s) from the old v9 set back to None (labels only)', fixed)
+    return fixed
+
+
 # MIGRATIONS[n] takes user_version n to n + 1.
 MIGRATIONS: List[Any] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6,
-                         (SCHEMA_V7, monitor_defaults), SCHEMA_V8, (SCHEMA_V9, monitor_labels)]
+                         (SCHEMA_V7, monitor_defaults), SCHEMA_V8, (SCHEMA_V9, monitor_labels),
+                         (SCHEMA_V10, repair_v9_labels)]
 # A step is SQL, or (SQL, fn(conn)) run in the same transaction after it.
 SCHEMA_VERSION = len(MIGRATIONS)
 

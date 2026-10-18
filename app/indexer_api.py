@@ -743,6 +743,21 @@ class ProwlarrClient:
         requests.RequestException."""
         if not self.owns(url):
             raise ValueError('not this Prowlarr')
+        sess = self._download_session()
+        try:
+            return self._download(sess, url, interactive)
+        finally:
+            sess.close()
+
+    def _download_session(self) -> requests.Session:
+        """A session for release downloads only: no environment proxy or .netrc (trust_env off, v166
+        Reviewer), the Prowlarr key as a header."""
+        s = requests.Session()
+        s.trust_env = False
+        s.headers.update({'X-Api-Key': self.api_key, 'Accept': '*/*'})
+        return s
+
+    def _download(self, sess: requests.Session, url: str, interactive: bool) -> tuple:
         ix = self._download_indexer(url)
         for hop in range(self.DOWNLOAD_MAX_HOPS + 1):
             if self._backed_off_until(ix) if ix != UNSCOPED else self._unscoped_blocked_until(time.time()):
@@ -758,8 +773,7 @@ class ProwlarrClient:
                 if wait > 0:
                     time.sleep(wait)
                 try:
-                    resp = self.session.get(url, timeout=60, allow_redirects=False, stream=True,
-                                            headers={'Accept': '*/*'})
+                    resp = sess.get(url, timeout=60, allow_redirects=False, stream=True)
                 finally:
                     _indexer_last_ts[ix] = time.time()
             try:

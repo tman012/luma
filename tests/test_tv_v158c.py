@@ -295,7 +295,21 @@ def test_failures_flag_only_no_space_rows_for_retry(qenv):
 # ------------------------------------------------------------------ ruling 3: the TV Sources popup grab
 
 @pytest.fixture
-def popup(qenv, monkeypatch):
+def known_token(monkeypatch):
+    """BODY's release token is one Luma's tracker search issued (v166: the route checks it's known)."""
+    from app import tracker_search
+
+    class Tokens:
+        def resolve(self, t):
+            return (1, 'https://tracker.example/dl/1') if t == 'x' * 20 else None
+
+    class Eng:
+        tokens = Tokens()
+    monkeypatch.setattr(tracker_search, 'get_search', lambda: Eng())
+
+
+@pytest.fixture
+def popup(qenv, monkeypatch, known_token):
     q = FakeQbit()
     real = tv_grab.grab
     monkeypatch.setattr(tv_grab, 'grab', lambda it, sid, season, ids, origin, now=None, **k:
@@ -334,7 +348,7 @@ def test_popup_grab_is_off_on_test_by_default_and_never_falls_back(popup, owner,
     assert popup.calls == []
 
 
-def test_popup_grab_link_failure_offers_the_sonarr_fallback(qenv, owner, monkeypatch):  # noqa: F811
+def test_popup_grab_link_failure_offers_the_sonarr_fallback(qenv, owner, monkeypatch, known_token):  # noqa: F811
     from app import tracker_sources
     real = tv_grab.grab
 
@@ -395,7 +409,7 @@ def test_v9_labels_kept_v6_choices_from_their_episodes_without_changing_them(tv_
         " (3, 1, 1, '2001-01-01', 0), (3, 1, 2, '2001-02-01', 1), (3, 2, 1, '2002-01-01', 0), (3, 2, 2, '2099-01-01', 1),"
         " (4, 1, 1, '2001-01-01', 0)"])
     before = {sid: _mon(sid) for sid in (1, 2, 3)} if False else None
-    assert tv_store.schema_version() == 9
+    assert tv_store.schema_version() == 10
     got = {r['id']: (r['monitored'], r['monitor']) for r in rows('SELECT id, monitored, monitor FROM series')}
     assert got[1] == (1, 'all') and got[2] == (1, 'future')
     assert got[3][0] == 1 and got[3][1] != 'none'                         # closest option, still not 'None'
@@ -421,7 +435,7 @@ def test_v9_keeps_none_when_the_owner_picked_episodes_by_hand(tv_env):  # noqa: 
         " (1, 1, 1, '2001-01-01', 1), (1, 1, 2, '2001-01-08', 0),"
         " (2, 1, 1, '2001-01-01', 0), (2, 2, 3, '2002-01-01', 1),"
         " (3, 1, 1, '2001-01-01', 1), (3, 1, 2, '2001-01-08', 0)"])
-    assert tv_store.schema_version() == 9
+    assert tv_store.schema_version() == 10
     got = {r['id']: (r['monitored'], r['monitor']) for r in rows('SELECT id, monitored, monitor FROM series')}
     assert got[1] == (0, 'none')                                          # matches 'pilot' exactly, still None
     assert got[2] == (0, 'none')

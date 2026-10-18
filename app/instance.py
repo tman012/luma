@@ -259,7 +259,9 @@ def _scoped_ok(request) -> bool:
         return True
     if exact.get('tags') != v[1] or not ('urls' in exact or 'torrents' in exact):
         return False
-    return exact.get('autoTMM', 'false') == 'false'      # automatic management would move it by category
+    # v166 (Reviewer): autoTMM must be sent, as 'false': qBittorrent's own default may be Automatic,
+    # which would move the torrent to the category's save path.
+    return exact.get('autoTMM') == 'false'
 
 
 _installed = {'on': False}

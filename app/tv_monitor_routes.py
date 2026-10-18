@@ -275,14 +275,29 @@ def _series_for_tmdb(tmdb_id: int, now: float):
     return None, out.get('error') or SHOW_NOT_ADDED
 
 
-def _grabbable_link(url: str) -> bool:
-    """A release token from Luma's trackers or one of main's Sources links (expired ones included:
-    tv_grab answers those with 410); never a raw URL or magnet."""
+BAD_LINK = 'This download link isn’t valid or has expired. Search again.'
+
+
+def _link_problem(url: str):
+    """None for a grabbable link: a release token Luma's tracker search issued and still holds, or one of
+    main's Sources links that still resolves. Else the 400 message: a raw URL or magnet (v165), or (v166,
+    Tester) a release/Sources prefix with a garbage, unknown, expired or query-string token, or '../'."""
     from app import tracker_sources, tv_grab
     u = url.strip()
-    if tracker_sources.release_token(u) is not None:
-        return True
-    return any(fn(u)[0] for fn in tv_grab._link_resolvers)
+    tok = tracker_sources.release_token(u)
+    if tok is not None:
+        if not tok:
+            return BAD_LINK
+        try:
+            from app.tracker_search import get_search
+            return None if get_search().tokens.resolve(tok) else BAD_LINK
+        except Exception:                                    # noqa: BLE001 - no tracker search: not grabbable
+            return BAD_LINK
+    for fn in tv_grab._link_resolvers:
+        is_link, real = fn(u)
+        if is_link:
+            return None if real else BAD_LINK
+    return tv_grab.RAW_LINK
 
 
 @bp.route('/api/settings/tv/grab', methods=['POST'])
@@ -304,8 +319,9 @@ def popup_grab():
             or not isinstance(url, str) or not url.strip() or len(url) > 8192 or not isinstance(title, str) or len(title) > 1000:
         return _out({'error': 'Invalid'}, 400)
     from app import tv_grab
-    if not _grabbable_link(url):                      # v165 (Reviewer): no raw URL or magnet, ever
-        return _out({'ok': False, 'error': tv_grab.RAW_LINK, 'fallback': False}, 400)
+    bad = _link_problem(url)                          # v165 (Reviewer): no raw URL or magnet, ever
+    if bad:                                           # v166 (Tester): nor a junk, unknown or expired token
+        return _out({'ok': False, 'error': bad, 'fallback': False}, 400)
     if not tv_grab.allowed():
         return _out({'ok': False, 'error': tv_grab.OFF, 'blocked': True, 'fallback': False})
     now = _time.time()
