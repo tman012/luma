@@ -376,7 +376,12 @@ def match(folder: str, hints: Optional[Hints] = None, *, search: Optional[Callab
     # Luma decides (Taylor, Oct 18): review pre-checks every guess except a true tie: a partial-title guess
     # the files don't back, with another top result of the same title, year and country scores that the
     # files fit just as well. An exact title is a decision (TMDB's order breaks a same-name tie).
-    unclear = tier != 'high' and not backed(rows, hints, details, best['tmdb_id']) and tie(rows, hints, details, best['tmdb_id'])
+    # A partial-title guess the folder's files don't fit is no decision either (PM: WWE Raw -> Raw Classics,
+    # WWE WrestleMania -> Road to WrestleMania): unchecked.
+    fit = file_fit(hints, details.get(best['tmdb_id'])) if hints is not None else None
+    misfit = fit is not None and rows[0]['title'] < W_EXACT and not (fits(fit) and fit['tight'] >= 1.0)
+    unclear = tier != 'high' and not backed(rows, hints, details, best['tmdb_id']) and (
+        misfit or tie(rows, hints, details, best['tmdb_id']))
     if tier == 'high' and best['tmdb_id'] not in details:
         d = show(best['tmdb_id'])
         if d:

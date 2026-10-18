@@ -34,20 +34,20 @@ ROAD_TO_WM = {'id': 203, 'name': 'Road to WrestleMania', 'year': 2015, 'seasons'
 COSMOS_2014 = {'id': 204, 'name': 'Cosmos: A Spacetime Odyssey', 'year': 2014, 'seasons': [13, 13, 13]}
 
 
-@pytest.mark.parametrize('folder,show,eps', [
-    ('WWE Raw', RAW_CLASSICS, None),
-    ('WWE Raw', RAW_CLASSICS, {2024: 150}),          # files that don't fit it
-    ('True Story', SMACKDOWN, None),
-    ('WrestleMania', ROAD_TO_WM, None),
-    ('WrestleMania', ROAD_TO_WM, {38: 3}),            # files from a season it doesn't have
-    ('WrestleMania', ROAD_TO_WM, {1: 3}),             # 3 episodes of season 1 fit nearly anything: not enough
+@pytest.mark.parametrize('folder,show,eps,reason', [
+    ('WWE Raw', RAW_CLASSICS, None, 'not_exact'),           # no files: Luma's guess, checked
+    ('WWE Raw', RAW_CLASSICS, {2024: 150}, 'unclear'),      # files that don't fit it (PM): unchecked
+    ('True Story', SMACKDOWN, None, 'not_exact'),
+    ('WrestleMania', ROAD_TO_WM, None, 'not_exact'),
+    ('WrestleMania', ROAD_TO_WM, {38: 3}, 'unclear'),       # files from a season it doesn't have
+    ('WrestleMania', ROAD_TO_WM, {1: 3}, 'unclear'),        # its seasons don't end where the files do
 ])
-def test_unbacked_guesses_start_checked(folder, show, eps):
+def test_partial_guesses_start_checked_unless_the_files_disagree(folder, show, eps, reason):
     search, sh = tmdb(show)
     hints = files(folder, eps) if eps else None
     m = tv_match.match(folder, hints, search=search, show=sh)
     assert m['status'] == 'unmatched' and m['tier'] == 'likely' and m['pick'] == show['id']
-    assert m['reason'] == 'not_exact'                 # pre-checked with the guess
+    assert m['reason'] == reason
 
 
 def test_files_that_fit_back_a_partial_title():
