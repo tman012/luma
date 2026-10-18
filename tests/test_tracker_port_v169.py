@@ -15,7 +15,7 @@ import time
 
 import pytest
 
-from app import indexer_api, safe_xml, tracker_guard, tracker_types as tt, tv_budget
+from app import safe_xml, tracker_guard, tracker_types as tt, tv_budget
 from app.tracker_guard import TrackerGuard, guard_key, record_failure, strict_400
 from app.tracker_http import Response, TrackerError, raise_for_status
 from tests.test_tracker_search import R, env, ipt, rss, torznab  # noqa: F401
@@ -23,6 +23,15 @@ from tests.test_tracker_search import R, env, ipt, rss, torznab  # noqa: F401
 HOUR, DAY = 3600, 86400
 T0 = 1_800_000_000.0
 APP = pathlib.Path(__file__).resolve().parent.parent / 'app'
+
+# v172 (tracker port step 4): the Prowlarr path (indexer_api.GUARD_LIMITS) is gone. These are the
+# numbers it shipped with, frozen here so the native limits stay pinned to them (never raised).
+PROWLARR_PATH_LIMITS = {
+    'interactive_per_hour': 40, 'background_burst': 5, 'background_refill_s': 180.0, 'per_day': 300,
+    'global_per_hour': 120, 'min_interval_s': 2.0, 'cooldown_429_s': 3600, 'cooldown_400_s': 900,
+    'cooldown_400_strict_s': 3600, 'cooldown_max_s': 6 * 3600,
+    'strict_400_definitions': ('avistaz', 'privatehd', 'pixelhd', 'cinemaz', 'exoticaz', 'iptorrents'),
+}
 
 
 def site(t):
@@ -51,7 +60,7 @@ def test_pixelhd_is_not_preconfigured(env):
 # ------------------------------------------------------------------ strict 400 cooldown
 
 def test_strict_400_types_match_the_prowlarr_paths_list():
-    assert set(tt.STRICT_400_TYPES) == set(indexer_api.GUARD_LIMITS['strict_400_definitions'])
+    assert set(tt.STRICT_400_TYPES) == set(PROWLARR_PATH_LIMITS['strict_400_definitions'])
     assert set(tt.STRICT_400_TYPES) == {'avistaz', 'cinemaz', 'exoticaz', 'iptorrents', 'pixelhd', 'privatehd'}
     for t in tt.STRICT_400_TYPES:
         assert tt.get_type(t) is not None, t
@@ -78,8 +87,8 @@ def test_a_400_from_a_strict_site_backs_off_1h_doubling_to_6h(tmp_path, t):
         assert g.take(gk, interactive=True, strict=True, now=now + 1) == 'backoff (rate)'
     # the Prowlarr path: cooldown_400_strict_s 3600, doubled per consecutive 400, cooldown_max_s 6 h
     assert waits == [3600, 7200, 14400, 21600, 21600, 21600]
-    assert indexer_api.GUARD_LIMITS['cooldown_400_strict_s'] == 3600
-    assert indexer_api.GUARD_LIMITS['cooldown_max_s'] == 6 * HOUR
+    assert PROWLARR_PATH_LIMITS['cooldown_400_strict_s'] == 3600
+    assert PROWLARR_PATH_LIMITS['cooldown_max_s'] == 6 * HOUR
 
 
 def test_a_strict_400_honors_a_longer_retry_after(tmp_path):
@@ -113,7 +122,7 @@ def test_a_400_from_other_sites_backs_off_as_on_the_prowlarr_path(tmp_path):
             waits.append(until - now)
             assert g.cooldown[gk][1] == 'http'
         assert waits == [900, 1800, 3600, 7200, 14400, 21600, 21600]
-    assert (indexer_api.GUARD_LIMITS['cooldown_400_s'], indexer_api.GUARD_LIMITS['cooldown_max_s']) == (900, 6 * HOUR)
+    assert (PROWLARR_PATH_LIMITS['cooldown_400_s'], PROWLARR_PATH_LIMITS['cooldown_max_s']) == (900, 6 * HOUR)
     assert (tracker_guard.LIMITS['http400_s'], tracker_guard.LIMITS['http400_max_s']) == (900, 6 * HOUR)
     g = TrackerGuard(tmp_path / 'other.json')              # other 5xx/4xx keep the native http backoff
     until = record_failure(g, 'site:beyondhd', TrackerError('http', 500))
@@ -203,11 +212,6 @@ def test_a_normal_feed_still_parses(env):
     assert len(env['engine'].search_one(cfg, 'The Nut Job', [2000], 10, interactive=True)) == 1
 
 
-def test_the_prowlarr_torznab_path_refuses_bombs_too():
-    c = indexer_api.TorznabClient('https://t.example/api', 'k')
-    assert c._parse_rss(BOMB, 10) == [] and c._parse_rss(XXE, 10) == []
-
-
 def test_no_tracker_module_parses_xml_with_the_stdlib():
     mods = sorted(APP.glob('tracker_*.py')) + [APP / 'indexer_api.py', APP / 'tracker_search.py']
     bad = []
@@ -228,7 +232,7 @@ def test_parity_numbers_are_the_shipped_ones():
     assert (L['rate_s'], L['rate_max_s'], L['banned_s'], L['auth_s'], L['auth_max_s'], L['network_s'],
             L['network_max_s'], L['response_s'], L['response_max_s']) == (
         3600, 6 * HOUR, DAY, 3600, 6 * HOUR, 300, HOUR, 900, 6 * HOUR)
-    G = indexer_api.GUARD_LIMITS          # the Prowlarr path: the same numbers where both have one
+    G = PROWLARR_PATH_LIMITS          # the Prowlarr path: the same numbers where both have one
     assert (G['interactive_per_hour'], G['background_burst'], G['background_refill_s'], G['per_day'],
             G['global_per_hour'], G['min_interval_s']) == (40, 5, 180.0, 300, 120, 2.0)
     assert (G['cooldown_429_s'], G['cooldown_400_strict_s'], G['cooldown_max_s']) == (3600, 3600, 6 * HOUR)

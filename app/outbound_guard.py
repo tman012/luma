@@ -115,6 +115,16 @@ def is_blocked_ip(value) -> bool:
     return any(ip.version == n.version and ip in n for n in _EXTRA_BLOCKED)
 
 
+def _own(addr: str) -> bool:
+    """One of this host's own addresses (any interface, or what its name resolves to): a pasted link
+    to Luma's own public address must not reach this machine's services (v172, PM's no-LAN rule)."""
+    try:
+        from app.tracker_http import own_addresses
+        return str(ipaddress.ip_address(str(addr).split('%', 1)[0])) in own_addresses()
+    except Exception:                       # noqa: BLE001 - can't tell: refuse
+        return True
+
+
 def _resolve(host: str, port: int) -> List[str]:
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
@@ -153,6 +163,8 @@ def check_url(url: str) -> Tuple[str, str, int, str, str]:
         raise BlockedURL('Invalid URL')
     addrs = _resolve(host, port)
     if any(is_blocked_ip(a) for a in addrs):
+        raise BlockedURL('Address not allowed')
+    if any(_own(a) for a in addrs):              # v172: this host's own public addresses too
         raise BlockedURL('Address not allowed')
     target = parts.path or '/'
     if parts.query:

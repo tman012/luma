@@ -162,9 +162,9 @@ def env(tmp_path, monkeypatch):
 
     def no_prowlarr(*a, **kw):
         raise AssertionError('Prowlarr must not be contacted')
-    for name in ('search_all', '_search_single', 'search_movies', 'sweep_movies', 'get_indexers', 'test_connection'):
-        monkeypatch.setattr(indexer_api.ProwlarrClient, name, no_prowlarr)
-        monkeypatch.setattr(indexer_api.TorznabClient, name, no_prowlarr, raising=False)
+    # v172: the Prowlarr/Torznab clients are gone; the one Prowlarr read left (Import) must not run either
+    from app import tracker_import
+    monkeypatch.setattr(tracker_import, 'fetch_indexers', no_prowlarr)
 
     qbit = FakeQbit()
     import requests

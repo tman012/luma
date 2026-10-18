@@ -477,7 +477,7 @@ export function LatestSheet({ open, onClose }: LatestSheetProps) {
     // without paginating. Backend caches for 5min so repeated opens are free.
     apiFetch('/api/indexer/latest?limit=300')
       .then(r => {
-        if (!r.ok) throw new Error(r.status === 503 ? 'No indexer configured.' : 'Failed to load releases.');
+        if (!r.ok) throw new Error(r.status === 503 ? 'No trackers are on.' : 'Failed to load releases.');
         return r.json();
       })
       .then(data => {

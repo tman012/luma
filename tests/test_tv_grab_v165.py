@@ -1,8 +1,8 @@
 """Reviewer on 006b4a6 (v165, security): (1) the TV Sources popup grab takes only a release token
 or one of main's Sources links: a raw URL or magnet is a 400 and never reaches safe_magnet or
 outbound_guard (a pasted passkey link can't get around the tracker budget); signed-in owner only.
-(2) the scoped qBittorrent add allowlists its fields. (3) a Sources link on the LAN Prowlarr is
-fetched with Luma's own Prowlarr client, charged to its guard budget, never via outbound_guard."""
+(2) the scoped qBittorrent add allowlists its fields. (3) v172: the LAN Prowlarr bridge is
+gone (tracker port step 4): no Sources link is fetched from the LAN."""
 import pytest
 import requests
 
@@ -118,59 +118,29 @@ class S(dict):
 
 
 @pytest.fixture
-def lan(monkeypatch):
-    """Prowlarr configured as the indexer; its download replaced by a recorder."""
+def stale_prowlarr(monkeypatch):
+    """v172: an install that still has its old Prowlarr saved (the bridge is gone; it must be ignored)."""
     from app import library_mover as mover
-    monkeypatch.setitem(mover._cfg, 'settings', S({'indexer.base_url': PROWLARR, 'indexer.api_key': 'k' * 32}))
-    rec = {'out': ('torrent', b'd8:announce0:e'), 'calls': []}
-
-    def download(self, url, interactive=True):
-        rec['calls'].append((url, interactive))
-        if isinstance(rec['out'], Exception):
-            raise rec['out']
-        return rec['out']
-    monkeypatch.setattr(indexer_api.ProwlarrClient, 'download', download)
-    return rec
-
-
-@pytest.mark.parametrize('tokens_only', [True, False])
-def test_a_prowlarr_link_goes_through_lumas_prowlarr_client(no_outbound, sources, lan, tokens_only):
-    sources['/src/p'] = PROWLARR + '/3/download?apikey=k&link=abc&file=x'
-    assert tv_grab.fetch_link('/src/p', tokens_only=tokens_only) == ('torrent', b'd8:announce0:e')
-    assert tv_grab.fetch_link('/src/p', automatic=True, tokens_only=tokens_only)[0] == 'torrent'
-    assert lan['calls'] == [(sources['/src/p'], True), (sources['/src/p'], False)]     # manual: interactive
-
-
-def test_a_prowlarr_budget_refusal_is_a_429_not_a_fallback_fetch(no_outbound, sources, lan):
-    lan['out'] = indexer_api.IndexerSkipped('guard')
-    sources['/src/p'] = PROWLARR + '/3/download?apikey=k&link=abc'
-    with pytest.raises(tracker_sources.GrabError) as e:
-        tv_grab.fetch_link('/src/p', tokens_only=True)
-    assert e.value.status == 429
-
-
-def test_a_prowlarr_magnet_is_still_checked(no_outbound, sources, lan):
-    lan['out'] = ('magnet', MAGNET + '\nhttp://evil/')
-    sources['/src/p'] = PROWLARR + '/3/download?apikey=k&link=abc'
-    with pytest.raises(tracker_sources.GrabError):
-        tv_grab.fetch_link('/src/p', tokens_only=True)
+    monkeypatch.setitem(mover._cfg, 'settings', S({'indexer.provider': 'prowlarr', 'indexer.base_url': PROWLARR,
+                                                   'indexer.api_key': 'k' * 32}))
 
 
 @pytest.mark.parametrize('tokens_only', [True, False])
 @pytest.mark.parametrize('real', [
+    PROWLARR + '/3/download?apikey=k&link=abc&file=x',            # the saved Prowlarr itself (v172: no bridge)
     PASSKEY_URL,
     'http://10.0.0.9:9696/3/download?apikey=k&link=abc',          # another LAN host
-    'http://192.168.1.5:9697/3/download?apikey=k&link=abc',       # the Prowlarr host, another port
-    'https://192.168.1.5:9696/3/download?apikey=k&link=abc',      # the Prowlarr host and port, another scheme
-    'http://192.168.1.50:9696/3/download?apikey=k&link=abc',      # a host that only starts the same
+    'http://192.168.1.5:9697/3/download?apikey=k&link=abc',
+    'https://192.168.1.5:9696/3/download?apikey=k&link=abc',
+    'http://192.168.1.50:9696/3/download?apikey=k&link=abc',
     'http://192.168.1.5.evil:9696/3/download',
     'http://user@192.168.1.5:9696/3/download',
 ])
-def test_a_sources_link_to_anything_but_the_configured_prowlarr_is_refused_with_nothing_fetched(
-        sources, lan, monkeypatch, real, tokens_only):
-    """PM (v166): the LAN bridge reaches ONLY the Prowlarr in Settings > Indexer (exact scheme, host and
-    port). Popup grabs (tokens_only) refuse anything else outright; Luma's own grabs fall to
-    outbound_guard, which refuses every private address, so nothing on the LAN is fetched either way."""
+def test_a_sources_link_is_never_fetched_from_the_lan_even_with_prowlarr_saved(
+        sources, stale_prowlarr, monkeypatch, real, tokens_only):
+    """v172 (tracker port step 4): the LAN Prowlarr bridge is gone. Popup grabs (tokens_only) refuse a
+    non-magnet Sources link outright; Luma's own grabs go to outbound_guard, which refuses every private
+    address, so nothing on the LAN is fetched either way, the saved Prowlarr included."""
     from app import outbound_guard
     tried = []
 
@@ -182,126 +152,16 @@ def test_a_sources_link_to_anything_but_the_configured_prowlarr_is_refused_with_
     with pytest.raises(tracker_sources.GrabError) as e:
         tv_grab.fetch_link('/src/x', tokens_only=tokens_only)
     assert e.value.status == 400
-    assert lan['calls'] == []                                     # Prowlarr's client never asked
     assert tried == ([] if tokens_only else [real])               # popup: nothing even tried
 
 
-def test_the_lan_prowlarr_path_is_one_function_and_off_without_prowlarr(monkeypatch, lan):
-    from app import library_mover as mover
-    u = PROWLARR + '/1/download?x=1'
-    assert tv_grab.lan_prowlarr_fetch(u, False) == ('torrent', b'd8:announce0:e')
-    assert tv_grab.lan_prowlarr_fetch(PASSKEY_URL, False) is None                 # another host: not this path
-    monkeypatch.setitem(mover._cfg, 'settings', S({'indexer.provider': 'torznab', 'indexer.base_url': PROWLARR, 'indexer.api_key': 'k'}))
-    assert tv_grab.lan_prowlarr_fetch(u, False) is None
-    monkeypatch.setitem(mover._cfg, 'settings', None)
-    assert tv_grab.lan_prowlarr_fetch(u, False) is None
+def test_the_lan_bridge_is_gone():
+    assert not hasattr(tv_grab, 'lan_prowlarr_fetch')
+    assert not hasattr(indexer_api, 'ProwlarrClient') and not hasattr(indexer_api, 'TorznabClient')
+    import ast
     import inspect
-    src = inspect.getsource(tv_grab.fetch_link)
-    assert src.count('lan_prowlarr_fetch(') == 1 and 'ProwlarrClient' not in src     # one call site, droppable
-
-
-# ------------------------------------------------------------------ (3) ProwlarrClient.download
-
-class Resp:
-    def __init__(self, status=200, body=b'', headers=None):
-        self.status_code, self._body, self.headers = status, body, headers or {}
-
-    def iter_content(self, n):
-        yield self._body
-
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise requests.HTTPError(str(self.status_code))
-
-    def close(self):
-        pass
-
-
-@pytest.fixture
-def client(monkeypatch):
-    c = indexer_api.ProwlarrClient(PROWLARR, 'k' * 32)
-    charged = []
-    monkeypatch.setattr(indexer_api, '_guard_decide', lambda ix, interactive, now: charged.append((ix, interactive)))
-    monkeypatch.setattr(indexer_api.ProwlarrClient, '_backed_off_until', lambda self, ix: None)
-    monkeypatch.setattr(indexer_api.ProwlarrClient, '_unscoped_blocked_until', lambda self, now: None)
-    monkeypatch.setattr(indexer_api.ProwlarrClient, '_indexer_name', lambda self, ix: f'ix{ix}')
-    monkeypatch.setitem(indexer_api.GUARD_LIMITS, 'min_interval_s', 0)
-    c.charged = charged
-    return c
-
-
-class Sess:
-    def __init__(self, resps):
-        self.resps, self.sent, self.closed = list(resps), [], False
-
-    def get(self, url, **k):
-        self.sent.append((url, k))
-        return self.resps.pop(0)
-
-    def close(self):
-        self.closed = True
-
-
-def _serve(c, monkeypatch, *resps):
-    s = Sess(resps)
-    monkeypatch.setattr(c, '_download_session', lambda: s)
-    return s.sent
-
-
-def test_owns_only_this_prowlarr():
-    c = indexer_api.ProwlarrClient(PROWLARR + '/prowlarr', 'k')
-    assert c.owns(PROWLARR + '/prowlarr/2/download?x')
-    for u in (PROWLARR + '/other/2/download', 'http://192.168.1.5:9697/prowlarr/2/download', 'https://192.168.1.5:9696/prowlarr/x',
-              'http://u:p@192.168.1.5:9696/prowlarr/x', PASSKEY_URL, MAGNET, ''):
-        assert not c.owns(u), u
-
-
-def test_download_charges_the_indexer_and_never_follows_redirects_itself(client, monkeypatch):
-    sent = _serve(client, monkeypatch, Resp(200, b'd4:infoe'))
-    assert client.download(PROWLARR + '/7/download?apikey=k&link=z') == ('torrent', b'd4:infoe')
-    assert client.charged == [(7, True)]
-    assert sent[0][1]['allow_redirects'] is False
-
-
-def test_every_hop_is_charged_and_a_redirect_off_prowlarr_is_refused(client, monkeypatch):
-    _serve(client, monkeypatch, Resp(302, headers={'Location': '/7/download?again=1'}), Resp(302, headers={'Location': MAGNET}))
-    assert client.download(PROWLARR + '/7/download?link=z', interactive=False) == ('magnet', MAGNET)
-    assert client.charged == [(7, False), (7, False)]
-    _serve(client, monkeypatch, Resp(302, headers={'Location': PASSKEY_URL}))
-    with pytest.raises(ValueError):
-        client.download(PROWLARR + '/7/download?link=z')
-
-
-def test_a_refused_budget_sends_nothing(client, monkeypatch):
-    monkeypatch.setattr(indexer_api, '_guard_decide', lambda ix, interactive, now: 'daily cap 300')
-    sent = _serve(client, monkeypatch, Resp(200, b'd4:infoe'))
-    with pytest.raises(indexer_api.IndexerSkipped):
-        client.download(PROWLARR + '/7/download?link=z')
-    assert sent == []
-
-
-def test_a_backed_off_indexer_sends_nothing(client, monkeypatch):
-    monkeypatch.setattr(indexer_api.ProwlarrClient, '_backed_off_until', lambda self, ix: 9e12)
-    sent = _serve(client, monkeypatch, Resp(200, b'd4:infoe'))
-    with pytest.raises(indexer_api.IndexerSkipped):
-        client.download(PROWLARR + '/7/download?link=z')
-    assert sent == [] and client.charged == []
-
-
-def test_a_link_on_another_host_is_never_fetched(client, monkeypatch):
-    sent = _serve(client, monkeypatch)
-    with pytest.raises(ValueError):
-        client.download(PASSKEY_URL)
-    assert sent == [] and client.charged == []
-
-
-def test_the_download_session_ignores_the_environment_and_is_a_guarded_requests_session():
-    """trust_env off (no env proxy, no .netrc: v166 Reviewer); a requests.Session, where the test write
-    guard sits (a GET, so a read)."""
-    c = indexer_api.ProwlarrClient(PROWLARR, 'k' * 32)
-    s = c._download_session()
-    assert isinstance(s, requests.Session) and s.trust_env is False and s.headers['X-Api-Key'] == 'k' * 32
-    assert instance.write_kind('GET', PROWLARR + '/7/download?link=z') is None
+    code = ast.unparse(ast.parse(inspect.getsource(tv_grab.fetch_link)).body[0].body[1:])   # no docstring
+    assert 'prowlarr' not in code.lower() and 'indexer.' not in code
 
 
 # ------------------------------------------------------------------ (2) the scoped add allowlist

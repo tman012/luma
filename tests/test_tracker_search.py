@@ -99,9 +99,9 @@ def env(tmp_path, monkeypatch):
 
     def no_prowlarr(*a, **kw):
         raise AssertionError('Prowlarr must not be contacted')
-    for name in ('search_all', '_search_single', 'search_movies', 'sweep_movies', 'get_indexers', 'test_connection'):
-        monkeypatch.setattr(indexer_api.ProwlarrClient, name, no_prowlarr)
-        monkeypatch.setattr(indexer_api.TorznabClient, name, no_prowlarr, raising=False)
+    # v172: the Prowlarr/Torznab clients are gone; the one Prowlarr read left (Import) must not run either
+    from app import tracker_import
+    monkeypatch.setattr(tracker_import, 'fetch_indexers', no_prowlarr)
     yield {'store': store, 'guard': guard, 'mock': mock, 'engine': engine, 'tmp': tmp_path}
     tracker_search.reset_search_for_tests(None)
     tracker_guard.reset_guard_for_tests(None)
@@ -179,10 +179,10 @@ def test_disabled_tracker_is_not_searched(client, env):
 # ------------------------------------------------------------------ direct search
 
 def test_enabled_tracker_replaces_prowlarr_even_when_prowlarr_is_set(env, monkeypatch):
+    stale = {'indexer.provider': 'prowlarr', 'indexer.api_key': 'x' * 32, 'indexer.base_url': 'http://prowlarr.invalid'}
+    monkeypatch.setattr(app.main.settings, 'get', lambda k, *a, **kw: stale.get(k, ''))
+    assert indexer_api.get_indexer_client(app.main.settings) is None          # v172: a saved Prowlarr is never a client
     torznab(env['store'])
-    monkeypatch.setattr(app.main.settings, 'get', lambda k, *a, **kw: {
-        'indexer.provider': 'prowlarr', 'indexer.api_key': 'x' * 32,
-        'indexer.base_url': 'http://prowlarr.invalid'}.get(k, ''))
     assert isinstance(indexer_api.get_indexer_client(app.main.settings), LumaTrackersClient)
 
 

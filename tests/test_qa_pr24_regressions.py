@@ -120,6 +120,7 @@ def _allow_loopback(monkeypatch, names):
         return real(host, port, *a, **k)
     monkeypatch.setattr(og.socket, 'getaddrinfo', gai)
     monkeypatch.setattr(og, 'is_blocked_ip', lambda ip: False)
+    monkeypatch.setattr(og, '_own', lambda ip: False)          # v172: this host's addresses are refused too
 
 
 # ── (4) trickle-feeding upstream ─────────────────────────────────────────

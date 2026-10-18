@@ -75,7 +75,7 @@ const TABS: TabDef[] = [
   {
     id: 'services',
     label: 'Services',
-    subtitle: 'Plex \u00b7 Sonarr \u00b7 Radarr \u00b7 Indexer',
+    subtitle: 'Plex \u00b7 Sonarr \u00b7 Radarr \u00b7 qBittorrent',
     section: 'Services',
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">

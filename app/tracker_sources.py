@@ -95,13 +95,10 @@ def trackers_in_use() -> bool:
 
 
 def indexer_available(settings) -> bool:
-    """True when Sources has anything to search: an enabled tracker, or a
-    indexer connection (Settings > Indexer) on installs that still have one."""
+    """True when Sources has anything to search: an enabled tracker (v172: the only source; a saved
+    Prowlarr/Torznab setup no longer counts)."""
     try:
-        if trackers_in_use():
-            return True
-        from app.indexer_api import get_indexer_client
-        return get_indexer_client(settings) is not None
+        return trackers_in_use()
     except Exception:
         return False
 

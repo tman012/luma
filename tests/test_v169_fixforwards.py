@@ -15,7 +15,7 @@ import pathlib
 import pytest
 
 from app import file_management as fm
-from app import indexer_api, library_mover as lm, tv_match, tv_scan
+from app import library_mover as lm, tv_match, tv_scan
 from tests.test_file_management import store  # noqa: F401
 from tests.test_library_mover import H1, TMDB, add_path, env, job, movie_file, torrent  # noqa: F401
 from tests.test_tv_libraries import tv_env  # noqa: F401
@@ -27,68 +27,8 @@ APP = pathlib.Path(__file__).resolve().parent.parent / 'app'
 NOT_ROOT = pytest.mark.skipif(os.geteuid() == 0, reason='root ignores the read-only bit')
 
 
-# ------------------------------------------------------------------ 1) trust_env everywhere
-
-def test_every_indexer_session_ignores_the_environment():
-    p = indexer_api.ProwlarrClient('http://10.0.0.5:9696', 'k')
-    t = indexer_api.TorznabClient('https://t.example/api', 'k')
-    assert p.session.trust_env is False
-    assert p._download_session().trust_env is False
-    assert t.session.trust_env is False
-
-
-def test_no_indexer_session_is_made_without_trust_env_off():
-    src = (APP / 'indexer_api.py').read_text()
-    made = [m.start() for m in re.finditer(r'requests\.Session\(\)', src)]
-    assert len(made) >= 3
-    for at in made:
-        assert 'trust_env = False' in src[at:at + 400], src[at - 80:at + 200]
-
-
-def test_a_proxy_in_the_environment_is_not_used(monkeypatch):
-    monkeypatch.setenv('HTTP_PROXY', 'http://10.9.9.9:3128')
-    monkeypatch.setenv('HTTPS_PROXY', 'http://10.9.9.9:3128')
-    p = indexer_api.ProwlarrClient('http://10.0.0.5:9696', 'k')
-    settings = p.session.merge_environment_settings('http://10.0.0.5:9696/api/v1/search', {}, None, None, None)
-    assert not settings.get('proxies')
-
-
-# ------------------------------------------------------------------ 4) owns() and dot segments
-
-@pytest.mark.parametrize('url', [
-    'http://10.0.0.5:9696/prowlarr/../admin',
-    'http://10.0.0.5:9696/prowlarr/%2e%2e/admin',
-    'http://10.0.0.5:9696/prowlarr/%2E%2E/admin',
-    'http://10.0.0.5:9696/prowlarr/%252e%252e/admin',
-    'http://10.0.0.5:9696/prowlarr/..%2fadmin',
-    'http://10.0.0.5:9696/prowlarr/x%5c..%5cadmin',
-    'http://10.0.0.5:9696/prowlarr/./1/download',
-    'http://10.0.0.5:9696/prowlarr/1/..',
-    'http://10.0.0.5:9696/prowlarrx/1/download',
-    'http://10.0.0.5:9697/prowlarr/1/download',
-    'https://10.0.0.5:9696/prowlarr/1/download',
-])
-def test_owns_refuses_dot_segments_and_other_origins(url):
-    assert indexer_api.ProwlarrClient('http://10.0.0.5:9696/prowlarr', 'k').owns(url) is False
-
-
-def test_owns_refuses_dot_segments_with_no_url_base_too():
-    c = indexer_api.ProwlarrClient('http://10.0.0.5:9696', 'k')
-    assert c.owns('http://10.0.0.5:9696/../etc/passwd') is False
-    assert c.owns('http://10.0.0.5:9696/api/v1/indexer/3/download?link=x') is True
-
-
-def test_owns_still_takes_real_links():
-    c = indexer_api.ProwlarrClient('http://10.0.0.5:9696/prowlarr', 'k')
-    assert c.owns('http://10.0.0.5:9696/prowlarr/3/download?apikey=k&link=abc')
-    assert c.owns('http://10.0.0.5:9696/prowlarr/3/download/Some..Release.torrent')
-
-
-def test_a_dot_segment_link_is_refused_with_nothing_fetched(monkeypatch):
-    c = indexer_api.ProwlarrClient('http://10.0.0.5:9696/prowlarr', 'k')
-    monkeypatch.setattr(c, '_download_session', lambda: (_ for _ in ()).throw(AssertionError('fetched')))
-    with pytest.raises(ValueError):
-        c.download('http://10.0.0.5:9696/prowlarr/../api/v1/system/backup')
+# ------------------------------------------------------------------ 1) and 4): v172, the Prowlarr/Torznab
+# clients they covered are gone (tracker port step 4); see tests/test_no_lan_v172.py.
 
 
 # ------------------------------------------------------------------ 5) _rule_id never raises
@@ -279,9 +219,6 @@ def test_a_last_sent_time_in_the_future_waits_at_most_the_spacing(monkeypatch, t
     import time as _t
     from app import tracker_guard
     now = _t.time()
-    assert indexer_api._spacing_wait(now + 86400 * 90) == indexer_api.GUARD_LIMITS['min_interval_s'] == 2.0
-    assert 1.9 < indexer_api._spacing_wait(now) <= 2.0
-    assert indexer_api._spacing_wait(now - 10) < 0
     g = tracker_guard.TrackerGuard(tmp_path / 'g.json')
     g.last_sent['site:pixelhd'] = now + 86400 * 90
     slept = []

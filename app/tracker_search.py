@@ -1,10 +1,10 @@
 """Direct search across the owner's enabled trackers (no Prowlarr, no Jackett).
 
-LumaTrackersClient has the same public interface as indexer_api's
-ProwlarrClient (get_indexers, _search_single, search_movies, sweep_movies,
-search_all), so the Explore, Sources, Latest, Movie Night, Genre Roulette and
-upgrade code paths use it unchanged. get_indexer_client() returns it as soon
-as at least one tracker is enabled.
+LumaTrackersClient (get_indexers, _search_single, search_movies, sweep_movies,
+search_all) serves the Explore, Sources, Latest, Movie Night, Genre Roulette and
+upgrade code paths. get_indexer_client() returns it as soon as at least one
+tracker is enabled; v172: it is the only search client (the Prowlarr and
+Torznab-proxy clients are gone).
 
 Every request goes through app.tracker_guard (rate limits, backoff on 429,
 bans, rejected credentials and failures) and a query cache (15 min for user
@@ -444,7 +444,7 @@ class TrackerSearch:
     # -- results -----------------------------------------------------------
 
     def to_item(self, cfg: Dict[str, Any], r: Dict[str, Any], secret_values: List[str]) -> Optional[Dict[str, Any]]:
-        """A client result in ProwlarrClient's raw item shape, secrets removed."""
+        """A client result in the shared raw item shape (indexer_api.parse_items), secrets removed."""
         link = r.get('download_url') or ''
         magnet = r.get('magnet_url') or ''
         target = link or magnet
@@ -527,7 +527,7 @@ class TrackerSearch:
 
 
 class LumaTrackersClient:
-    """Drop-in for indexer_api.ProwlarrClient backed by Luma's own trackers."""
+    """The search client: Luma's own trackers (the only one since v172)."""
 
     def __init__(self, search: Optional[TrackerSearch] = None):
         self.engine = search or get_search()
@@ -551,8 +551,8 @@ class LumaTrackersClient:
 
     @staticmethod
     def _parse_items(raw_items: list) -> List[Dict]:
-        from app.indexer_api import ProwlarrClient
-        return ProwlarrClient._parse_items(raw_items)
+        from app.indexer_api import parse_items
+        return parse_items(raw_items)
 
     def search_movies(self, categories: str = '2000', limit: int = 300) -> List[Dict]:
         try:

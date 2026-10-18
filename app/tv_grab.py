@@ -14,9 +14,8 @@ The release comes from one of the owner's own trackers, through the release toke
 issued (tracker_sources.fetch_release: guarded, never follows a link to another site with a
 saved credential). Recorded in tv.db grabs (state 'downloading'); the watch takes it from there.
 
-v158c: the TV Sources popup grabs here too (fetch_link: a release token, a Sources link from
-an indexer connection such as Prowlarr, a magnet, or a .torrent link fetched through the
-outbound guard). Sonarr is only the popup's fallback when it is configured.
+v158c: the TV Sources popup grabs here too (fetch_link: a release token, a Sources link, a
+magnet, or a .torrent link fetched through the outbound guard; v172: no Prowlarr bridge). Sonarr is only the popup's fallback when it is configured.
 
 The category (v158c, PM): before the first add, qBittorrent's categories are read and this
 instance's TV category is created when it's missing (torrents/createCategory, no save path; on
@@ -123,59 +122,14 @@ def register_link_resolver(fn: Callable[[str], Any]) -> None:
 RAW_LINK = 'Grab from a search result (a pasted link or magnet is not accepted here)'
 
 
-def lan_prowlarr_fetch(u: str, automatic: bool) -> Optional[Any]:
-    """The LAN Prowlarr download path (v165, Reviewer item 3), kept in this one function so it can be
-    dropped for the Sonarr fallback if PM rules against it.
-
-    TEMPORARY BRIDGE (PM, v166): this is removed together with the movie Prowlarr path when the native
-    tracker port lands. Until then it reaches ONLY the one Prowlarr configured in Settings > Indexer
-    (exact scheme, host and port: ProwlarrClient.owns) and every request of every grab is charged.
-
-    Returns None when *u* is not a link on the configured
-    Prowlarr (or Prowlarr isn't the indexer); else ('torrent', bytes) or ('magnet', uri), fetched with
-    Luma's own Prowlarr client (indexer_api.ProwlarrClient.download: its guard budget charged per
-    request, trust_env off, redirects only on Prowlarr or to a magnet). Raises GrabError."""
-    from app import library_mover as mover, tracker_sources as ts
-    from app.indexer_api import IndexerSkipped, ProwlarrClient
-    s = mover._cfg.get('settings')
-    try:
-        if s is None or (s.get('indexer.provider') or 'prowlarr') != 'prowlarr':
-            return None
-        base, key = s.get('indexer.base_url') or '', s.get('indexer.api_key') or ''
-    except Exception:                                        # noqa: BLE001
-        return None
-    if not base or not key:
-        return None
-    client = ProwlarrClient(base, key)
-    if not client.owns(u):
-        return None
-    try:
-        kind, got = client.download(u, interactive=not automatic)
-    except IndexerSkipped:
-        raise ts.GrabError('This indexer is rate limited right now. Try again later.', 429)
-    except ValueError:
-        raise ts.GrabError('Link not allowed', 400)
-    except Exception as e:                                    # noqa: BLE001
-        logger.warning('TV grab: Prowlarr download failed (%s)', type(e).__name__)
-        raise ts.GrabError("Couldn't get the torrent from that link", 502)
-    if kind == 'magnet':
-        m = ts.safe_magnet(got)
-        if not m:
-            raise ts.GrabError('Link not allowed', 400)
-        return 'magnet', m
-    if got[:1] == b'd':
-        return 'torrent', got
-    raise ts.GrabError(NOT_A_TORRENT, 502)
-
-
 def fetch_link(url: Any, automatic: bool = False, tokens_only: bool = False) -> Any:
     """('torrent', bytes) or ('magnet', uri) for a Sources download link. Raises GrabError.
     *automatic*: a grab Luma made on its own (tracker_sources.fetch_release charges it as one).
     *tokens_only* (v165, Reviewer; the Sources popup): only a release token or one of main's Sources
     links; a raw URL or magnet is refused (400) and never reaches safe_magnet or outbound_guard, so a
-    pasted tracker link with a passkey can't get around the tracker budget. A link on the configured
-    LAN Prowlarr is fetched with Luma's own Prowlarr client (its guard budget charged), never through
-    outbound_guard; in tokens_only mode any other http link is refused too."""
+    pasted tracker link with a passkey can't get around the tracker budget. v172 (tracker port step 4):
+    the LAN Prowlarr bridge is gone; any other link goes through outbound_guard (public addresses only,
+    every hop checked and pinned), and in tokens_only mode nothing but a token or a Sources magnet does."""
     from app import tracker_sources as ts
     u = str(url or '').strip()
     if not u:
@@ -198,9 +152,6 @@ def fetch_link(url: Any, automatic: bool = False, tokens_only: bool = False) -> 
         if not m:
             raise ts.GrabError('Link not allowed', 400)
         return 'magnet', m
-    got = lan_prowlarr_fetch(u, automatic)
-    if got is not None:
-        return got
     if tokens_only:
         raise ts.GrabError('Link not allowed', 400)
     from app import outbound_guard

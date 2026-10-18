@@ -95,11 +95,15 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
         },
     },
     "indexer": {
+        # v172 (tracker port step 4): searching and grabbing use Settings > Trackers only. The old
+        # Prowlarr/Torznab connection is kept as saved (deprecated, never used to search or grab, no
+        # UI) so an upgrade loses nothing: api_key stays sensitive (masked, in secrets), and
+        # Import from Prowlarr reads base_url/api_key when the owner asks for it.
         "_type": "object",
-        "provider":         {"type": "string",  "default": "prowlarr", "sensitive": False, "description": "Indexer provider type", "enum": ["prowlarr", "torznab"]},
-        "base_url":         {"type": "string",  "default": "",         "sensitive": False, "description": "Prowlarr base URL (e.g. http://localhost:9696)"},
-        "torznab_url":      {"type": "string",  "default": "",         "sensitive": False, "description": "Torznab endpoint URL (when provider=torznab)"},
-        "api_key":          {"type": "string",  "default": "",         "sensitive": True,  "description": "Indexer API key"},
+        "provider":         {"type": "string",  "default": "prowlarr", "sensitive": False, "deprecated": True, "description": "Deprecated (v172): no longer used", "enum": ["prowlarr", "torznab"]},
+        "base_url":         {"type": "string",  "default": "",         "sensitive": False, "deprecated": True, "description": "Deprecated (v172): read only by Import from Prowlarr"},
+        "torznab_url":      {"type": "string",  "default": "",         "sensitive": False, "deprecated": True, "description": "Deprecated (v172): no longer used"},
+        "api_key":          {"type": "string",  "default": "",         "sensitive": True,  "deprecated": True, "description": "Deprecated (v172): read only by Import from Prowlarr"},
         "movie_categories": {"type": "string",  "default": "2000",     "sensitive": False, "description": "Movie category IDs (comma-separated)"},
         "max_age_days":     {"type": "integer", "default": 30,         "sensitive": False, "description": "Maximum age of results in days", "min": 1, "max": 365},
         "min_seeders":      {"type": "integer", "default": 1,          "sensitive": False, "description": "Minimum seeders to include", "min": 0},

@@ -11,7 +11,6 @@ import pytest
 
 import app.main
 import app.user_auth
-from app import indexer_api as ia
 from app import tracker_guard, tracker_import, tracker_routes, tracker_store
 from app.tracker_guard import TrackerGuard
 from app.tracker_store import SECRET_MASK, TrackerStore
@@ -99,8 +98,8 @@ def env(tmp_path, monkeypatch):
     tracker_store.reset_store_for_tests(s)
     g = TrackerGuard(tmp_path / 'tracker_guard.json')
     tracker_guard.reset_guard_for_tests(g)
-    ia._guard_reset_memory()
     tracker_import.reset_for_tests()
+    monkeypatch.setattr(tracker_import, '_resolve', lambda host: ['192.168.1.30'])   # v172: the fake LAN Prowlarr
     fake = FakeProwlarr()
     monkeypatch.setattr(tracker_import, '_session_factory', fake)
     settings = {'indexer.provider': 'prowlarr', 'indexer.base_url': BASE, 'indexer.api_key': PKEY}
@@ -114,7 +113,6 @@ def env(tmp_path, monkeypatch):
     yield {'store': s, 'guard': g, 'fake': fake, 'settings': settings, 'tested': tested, 'dir': tmp_path}
     tracker_guard.reset_guard_for_tests(None)
     tracker_store.reset_store_for_tests(None)
-    ia._guard_reset_memory()
     tracker_import.reset_for_tests()
 
 
@@ -330,14 +328,20 @@ def test_bad_bodies(owner, env):
 
 # ------------------------------------------------------------------ guard counters folded, stricter wins
 
+def _legacy_file():
+    from app.first_run import data_dir
+    return data_dir() / tracker_import.LEGACY_GUARD_FILE
+
+
+def _write_legacy(state):
+    _legacy_file().write_text(json.dumps(state))
+
+
 def _seed_prowlarr_guard(ix, now, sends=6, tokens=0.5, cooldown=None, streak=2):
-    with ia._budget_state_guard:
-        ia._guard_load()
-        ia._guard_log[ix] = [[now - 60 * i, 'b'] for i in range(sends)]
-        ia._guard_buckets[ix] = [tokens, now]
-        if cooldown:
-            ia._guard_cooldown[ix] = cooldown
-        ia._guard_streak[ix] = streak
+    """v172: the old guard module is gone; its file (indexer_guard.json) is what an upgrade has."""
+    st = {'log': {str(ix): [[now - 60 * i, 'b'] for i in range(sends)]}, 'buckets': {str(ix): [tokens, now]},
+          'cooldown': {str(ix): cooldown} if cooldown else {}, 'streak': {str(ix): streak}}
+    _write_legacy(st)
 
 
 def test_guard_state_is_folded_taking_the_stricter_value(owner, env):
@@ -378,9 +382,7 @@ def test_fold_keeps_native_when_it_is_stricter_and_is_idempotent(env):
 
 def test_prowlarr_wide_pause_carries_over(owner, env):
     now = time.time()
-    with ia._budget_state_guard:
-        ia._guard_load()
-        ia._guard_cooldown[ia.FAIL_CLOSED] = now + 1800
+    _write_legacy({'log': {}, 'buckets': {}, 'cooldown': {'-2': now + 1800}, 'streak': {}})
     p = _preview(owner)
     _post(owner, '/api/trackers/import/prowlarr', {'preview_id': p['preview_id'], 'keys': [5]})
     assert env['guard'].cooldown['site:beyondhd'][0] == pytest.approx(now + 1800, abs=1)
@@ -390,3 +392,46 @@ def test_fold_never_raises_a_cap(env):
     before = dict(tracker_guard.LIMITS)
     env['guard'].fold('site:iptorrents', [], None, 0, 0)
     assert tracker_guard.LIMITS == before
+
+
+# ------------------------------------------------------------------ v172: the legacy guard file, read-only
+
+def test_the_legacy_guard_file_is_read_never_written(owner, env):
+    now = time.time()
+    _seed_prowlarr_guard(5, now, sends=3, cooldown=now + 600)
+    f = _legacy_file()
+    before, mtime = f.read_bytes(), f.stat().st_mtime_ns
+    p = _preview(owner)
+    _post(owner, '/api/trackers/import/prowlarr', {'preview_id': p['preview_id'], 'keys': [5]})
+    assert f.read_bytes() == before and f.stat().st_mtime_ns == mtime     # untouched (kept for rollback)
+    assert env['guard'].cooldown['site:beyondhd'][0] == pytest.approx(now + 600, abs=1)
+
+
+@pytest.mark.parametrize('content', ['{not json', '[]', '{"log": []}'])
+def test_an_unreadable_legacy_guard_file_folds_a_fail_closed_hour_and_stays_put(owner, env, content):
+    f = _legacy_file()
+    f.write_text(content)
+    now = time.time()
+    p = _preview(owner)
+    _post(owner, '/api/trackers/import/prowlarr', {'preview_id': p['preview_id'], 'keys': [5]})
+    assert env['guard'].cooldown['site:beyondhd'][0] == pytest.approx(now + 3600, abs=5)
+    assert f.read_text() == content and not list(f.parent.glob(f.name + '.bad*'))
+
+
+def test_no_legacy_guard_file_folds_nothing(env):
+    assert not _legacy_file().exists()
+    assert tracker_import.legacy_guard_state(5) == {'log': [], 'bucket': None, 'cooldown': 0.0, 'streak': 0}
+
+
+@pytest.mark.parametrize('addr', ['169.254.169.254', 'fe80::1', '0.0.0.0', '224.0.0.1', '240.0.0.1'])
+def test_the_import_never_reads_a_metadata_or_odd_address(owner, env, monkeypatch, addr):
+    monkeypatch.setattr(tracker_import, '_resolve', lambda host: [addr])
+    r = _post(owner, '/api/trackers/import/prowlarr/preview', {})
+    assert r.status_code >= 400
+    assert env['fake'].calls == [] and env['fake'].sessions == []          # nothing sent, no session opened
+
+
+def test_the_import_reads_only_the_indexer_list_on_the_saved_host(owner, env):
+    _preview(owner)
+    assert [(m, u, kw.get('allow_redirects'), te) for m, u, kw, te in env['fake'].calls] == [
+        ('GET', BASE + '/api/v1/indexer', False, False)]                   # one GET, no redirects, no env proxy

@@ -14,6 +14,12 @@ Settings > Trackers (offered only while a Prowlarr connection is configured):
    Torznab/Newznab) is skipped. Then the Prowlarr path's guard state for those indexers
    (indexer_guard.json: sends, bucket, cooldowns, streak) is folded into the native guard under the
    site key, the stricter value winning (tracker_guard.fold), after a backup of tracker_guard.json.
+   v172: indexer_guard.json is read with legacy_guard_state (read-only; the old module is gone).
+
+v172 (tracker port step 4): this is the only request Luma makes to a LAN address, and it is scoped
+narrowly: owner-pressed only, GET only, exactly {base}/api/v1/indexer on the saved Prowlarr URL,
+no redirects, no environment proxy, 2 MB / 20 s caps, and never to a link-local / metadata,
+multicast, unspecified or reserved address (check_target, before anything is sent).
 
 Clean-room: Prowlarr's public API shape (indexer JSON with a fields list) is the only reference;
 no Prowlarr code or definitions are used. Mapping is by definition/implementation name.
@@ -80,9 +86,39 @@ def prowlarr_settings(get_setting: Callable[[str], Any]) -> Optional[Tuple[str, 
     return base.rstrip('/'), key
 
 
+def _resolve(host: str) -> List[str]:
+    import socket
+    return sorted({ai[4][0] for ai in socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)})
+
+
+def check_target(base: str) -> None:
+    """v172: the Prowlarr read may go to the LAN (that's where Prowlarr lives) or this host, but never
+    to a link-local / cloud-metadata, multicast, unspecified or reserved address, whatever the name
+    resolves to. Raises RuntimeError(UNREACHABLE) before anything is sent."""
+    import ipaddress
+    try:
+        host = urlsplit(base).hostname or ''
+        try:
+            addrs = [str(ipaddress.ip_address(host.strip('[]')))]
+        except ValueError:
+            addrs = _resolve(host)
+        if not addrs:
+            raise ValueError('no address')
+        for a in addrs:
+            ip = ipaddress.ip_address(a.split('%')[0])
+            if getattr(ip, 'ipv4_mapped', None):
+                ip = ip.ipv4_mapped
+            if ip.is_link_local or ip.is_multicast or ip.is_unspecified or ip.is_reserved:
+                raise ValueError('refused address')
+    except Exception:                                  # noqa: BLE001 - never the URL in the log
+        logger.info('Import from Prowlarr: the saved Prowlarr address is not allowed')
+        raise RuntimeError(UNREACHABLE) from None
+
+
 def fetch_indexers(base: str, api_key: str, session_factory=None) -> List[Dict[str, Any]]:
     """One GET of {base}/api/v1/indexer. Raises RuntimeError(UNREACHABLE) on any failure."""
     import requests
+    check_target(base)
     s = (session_factory or _session_factory or requests.Session)()
     s.trust_env = False
     try:
@@ -235,17 +271,71 @@ def _backup_guard(guard) -> None:
         shutil.copy2(src, dst)
 
 
+LEGACY_GUARD_FILE = 'indexer_guard.json'   # the Prowlarr path's guard (v172: module gone, file kept)
+LEGACY_FAIL_CLOSED_S = 3600
+LEGACY_COOLDOWN_MAX_S = 24 * 3600
+
+
+def _ts(v) -> Optional[float]:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    v = float(v)
+    return v if v == v and 0 < v < 1e11 else None
+
+
+def legacy_guard_state(prowlarr_id: int, now: Optional[float] = None, path=None) -> Dict[str, Any]:
+    """v172: the old Prowlarr guard's state for one indexer, read-only from indexer_guard.json (the
+    module that wrote it is gone; the file stays on disk for one release, never written or moved).
+    Missing file: nothing to fold. Unreadable or wrongly shaped: fail closed (a 1 h cooldown), like
+    the old guard did, so an import can never start a tracker with less than it had."""
+    import json
+    now = time.time() if now is None else now
+    out = {'log': [], 'bucket': None, 'cooldown': 0.0, 'streak': 0}
+    if path is None:
+        from app.first_run import data_dir
+        path = data_dir() / LEGACY_GUARD_FILE
+    try:
+        with open(path, encoding='utf-8') as fh:
+            raw = json.load(fh)
+    except FileNotFoundError:
+        return out
+    except (OSError, ValueError, UnicodeDecodeError):
+        out['cooldown'] = now + LEGACY_FAIL_CLOSED_S
+        return out
+    secs = ('log', 'buckets', 'cooldown', 'streak')
+    if not isinstance(raw, dict) or any(not isinstance(raw.get(k, {}), dict) for k in secs):
+        out['cooldown'] = now + LEGACY_FAIL_CLOSED_S
+        return out
+    key = str(int(prowlarr_id))
+    for e in raw['log'].get(key, []) if isinstance(raw.get('log', {}).get(key), list) else []:
+        if isinstance(e, list) and len(e) == 2 and e[1] in ('i', 'b'):
+            ts, kind = _ts(e[0]), e[1]
+        else:
+            ts, kind = _ts(e), 'b'
+        if ts is not None and ts > now - 86400:
+            out['log'].append([ts, kind])
+    b = raw.get('buckets', {}).get(key)
+    if isinstance(b, list) and len(b) == 2 and not isinstance(b[0], bool) and isinstance(b[0], (int, float)) \
+            and 0 <= b[0] <= 5 and _ts(b[1]) is not None:
+        out['bucket'] = [float(b[0]), _ts(b[1])]
+    elif b is not None:
+        out['bucket'] = [0.0, now]                      # unknown: empty, not full
+    cds = []
+    for k, cap in ((key, LEGACY_COOLDOWN_MAX_S), ('-1', LEGACY_COOLDOWN_MAX_S), ('-2', LEGACY_FAIL_CLOSED_S)):
+        t = _ts(raw.get('cooldown', {}).get(k))
+        if t is not None:
+            cds.append(min(t, now + cap))
+    out['cooldown'] = max(cds or [0.0])
+    st = raw.get('streak', {}).get(key)
+    if isinstance(st, int) and not isinstance(st, bool) and 0 <= st <= 64:
+        out['streak'] = st
+    return out
+
+
 def _fold(guard, gk: str, prowlarr_id: int) -> Dict[str, Any]:
-    from app import indexer_api as ia
     now = time.time()
-    with ia._budget_state_guard:
-        ia._guard_load()
-        log = [list(e) for e in ia._guard_log.get(prowlarr_id, [])]
-        bucket = list(ia._guard_buckets[prowlarr_id]) if prowlarr_id in ia._guard_buckets else None
-        cds = [ia._guard_cooldown.get(prowlarr_id, 0.0), ia._guard_cooldown.get(ia.UNSCOPED, 0.0),
-               ia._guard_cooldown.get(ia.FAIL_CLOSED, 0.0)]
-        streak = ia._guard_streak.get(prowlarr_id, 0)
-    return guard.fold(gk, log, bucket, max(cds), streak, now)
+    st = legacy_guard_state(prowlarr_id, now)
+    return guard.fold(gk, st['log'], st['bucket'], st['cooldown'], st['streak'], now)
 
 
 def create(preview_id: str, keys: List[int], store, guard=None) -> Dict[str, Any]:

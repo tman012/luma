@@ -2094,7 +2094,7 @@ def indexer_browse():
 
         client = get_indexer_client(settings)
         if not client:
-            return jsonify({'error': 'No indexer configured. Set up Prowlarr or Torznab in settings.'}), 503
+            return jsonify({'error': 'No trackers are on. Turn one on in Settings > Trackers.'}), 503
 
         quality_filter = request.args.get('quality', '').strip()
         sort_by = request.args.get('sort', 'seeders').strip().lower()
@@ -2728,7 +2728,7 @@ def indexer_latest():
 
         client = get_indexer_client(settings)
         if not client:
-            return jsonify({'error': 'No indexer configured. Set up Prowlarr or Torznab in settings.'}), 503
+            return jsonify({'error': 'No trackers are on. Turn one on in Settings > Trackers.'}), 503
 
         if sweep_queries:
             # Targeted Prowlarr sweep — runs the configured queries in
@@ -7321,7 +7321,7 @@ import threading as _threading
 _explore_lock = _threading.Lock()
 
 def update_explore_cache():
-    """Populate explore cache via generic indexer (Prowlarr or Torznab)."""
+    """Populate the explore cache from the owner's trackers (Settings > Trackers)."""
     if not _explore_lock.acquire(blocking=False):
         logger.debug("Explore cache update skipped (already running)")
         return
@@ -7331,10 +7331,10 @@ def update_explore_cache():
         _explore_lock.release()
 
 def _update_explore_cache_inner():
-    # Prowlarr/Torznab sweep — all indexers (PHD, BHD, IPT, etc.) via single Prowlarr instance
+    # Tracker sweep: the owner's enabled trackers (v172: never Prowlarr/Torznab)
     client = get_indexer_client(settings)
     if client is None:
-        logger.warning("No indexer configured — explore cache update skipped")
+        logger.warning("No trackers are on — explore cache update skipped")
         return
 
     categories = settings.get('indexer.movie_categories') or '2000'
@@ -20902,42 +20902,13 @@ def test_tmdb_connection():
 
 @app.route('/api/settings/test/indexer', methods=['POST'])
 def test_indexer_connection():
-    """Test connectivity to the configured indexer (Prowlarr or Torznab)."""
+    """v172 (tracker port step 4): Prowlarr/Torznab connections are gone; nothing is contacted.
+    Kept as a route so an older cached UI gets a clear answer instead of a 404."""
     err = _require_admin()
     if err:
         return err
-    try:
-        body = request.get_json(silent=True) or {}
-        cfg = _test_settings('indexer', body)
-        provider = cfg.get('provider', 'prowlarr')
-        api_key = cfg.get('api_key', '')
-        if not api_key or api_key == SECRET_MASK:
-            api_key = settings.get('indexer.api_key', '')
-        if not api_key:
-            return jsonify({'success': False, 'message': 'Indexer API key is required'}), 400
-
-        if provider == 'torznab':
-            torznab_url = cfg.get('torznab_url', '')
-            if not torznab_url:
-                return jsonify({'success': False, 'message': 'Torznab URL is required'}), 400
-            from app.indexer_api import TorznabClient
-            client = TorznabClient(torznab_url, api_key)
-        else:
-            base_url = cfg.get('base_url', '')
-            if not base_url:
-                return jsonify({'success': False, 'message': 'Prowlarr URL is required'}), 400
-            from app.indexer_api import ProwlarrClient
-            client = ProwlarrClient(base_url, api_key)
-
-        if client.test_connection():
-            return jsonify({'success': True, 'message': f'{provider.title()} connection successful', 'details': {}})
-        return jsonify({'success': False, 'message': f'{provider.title()} connection failed'}), 200
-    except requests.exceptions.Timeout:
-        return jsonify({'success': False, 'message': 'Connection timed out (10s)'}), 200
-    except requests.exceptions.ConnectionError:
-        return jsonify({'success': False, 'message': 'Could not connect to indexer'}), 200
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 200
+    return jsonify({'success': False, 'gone': True,
+                    'message': 'Indexer connections are no longer used. Trackers live in Settings > Trackers.'}), 410
 
 
 @app.route('/api/settings/test/shield-adb', methods=['POST'])
@@ -21524,7 +21495,7 @@ def integrations_status():
         'radarr': _set('radarr.url', 'radarr.api_key'),
         'sonarr': _set('sonarr.url', 'sonarr.api_key'),
         'qbittorrent': _set('qbittorrent.url'),
-        'indexer': _set('indexer.base_url', 'indexer.api_key'),
+        'indexer': _tracker_sources_mod().trackers_in_use(),      # v172: searching means a tracker is on
         'home_assistant': _set('homeassistant.url', 'homeassistant.access_token'),
         'rooms': len(settings.get('devices.rooms') or []),
     })
