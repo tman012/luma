@@ -114,5 +114,6 @@ export function startingPick(u: Unmatched): Candidate | null {
   return u.candidates.find(c => c.tmdb_id === id) || u.candidates[0] || null;
 }
 
-/** Likely rows start checked; none and duplicate rows don't. */
-export const startsChecked = (u: Unmatched) => reviewTier(u) === 'likely' && !!startingPick(u);
+/** Likely rows start checked; none and duplicate rows don't, and neither do same-name rows the files
+ * don't single out (reason "unclear": pre-picked, unchecked). */
+export const startsChecked = (u: Unmatched) => reviewTier(u) === 'likely' && u.reason !== 'unclear' && !!startingPick(u);

@@ -314,6 +314,10 @@ describe('review state', () => {
     expect(s2.picks[1]!.tmdb_id).toBe(9000005);
     expect(startingPick(DUP)!.tmdb_id).toBe(122196);
     expect(startsChecked(DUP)).toBe(false);
+    // same-name shows the files don't single out: pre-picked, unchecked (PM, Oct 18)
+    expect(startsChecked({ ...LOVE, reason: 'unclear' })).toBe(false);
+    expect(startingPick({ ...LOVE, reason: 'unclear' })!.tmdb_id).toBe(startingPick(LOVE)!.tmdb_id);
+    expect(startsChecked(LOVE)).toBe(true);
     expect(sortReview([LONG, LOVE, DUP, NONE]).map(u => u.id)).toEqual([2, 3, 4, 1]);
   });
 });

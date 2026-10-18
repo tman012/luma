@@ -33,6 +33,14 @@ def test_v146_is_never_reused():
         sw_stamp.set_version(146)
 
 
+def test_v147_stays_with_the_tv_import_build():
+    """4d22f6c (TV Import, v147) is with the gates: the Import fixes are v148 or later."""
+    assert 147 in sw_stamp.TAKEN
+    assert sw_stamp.version_number() >= 148
+    with pytest.raises(SystemExit):
+        sw_stamp.set_version(147)
+
+
 def _fake(tmp_path, monkeypatch, version, last):
     for rel in ('static', 'frontend/src'):
         (tmp_path / rel).mkdir(parents=True)
