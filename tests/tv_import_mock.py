@@ -103,7 +103,7 @@ class MockTmdb:
         needle = f' {q} '
         more = [sid for sid, name, alts in self._index
                 if sid not in ids and (needle in name or any(needle in a for a in alts))]
-        more.sort(key=lambda sid: (-self.shows[sid]['vote_count'], int(sid)))
+        more.sort(key=int)
         out = [sid for sid in ids + more if sid in self.shows]
         if year:
             out = [sid for sid in out if self.shows[sid]['first_air_date'][:4] == str(year)]

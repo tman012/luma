@@ -11,8 +11,8 @@ Nothing here calls TMDB. What is synthesized (no recording exists):
 * tmdb ids for the 562 matched shows (800000 + n; a recorded id when the same
   title and year was among the 125's results), and two non-exact distractors
   per show ('<title>: Unscripted', '<first word> Nights').
-* vote_count: approximate real-world magnitudes for the shows below (TRUTH
-  and REMAKES, from general knowledge), else small numbers by TMDB rank.
+* vote_count: none. The recording has no vote counts, so every show has 0
+  (popularity is neutral here; the matcher never decides by it anyway).
 * origin_country for the few candidates where a country tag decides.
 * season layouts (episode counts) and Taylor's files: the true show's layout
   in full; folders with no certain answer get only S01E01-E03.
@@ -48,66 +48,62 @@ def h(*parts):
     return int(hashlib.sha256('|'.join(map(str, parts)).encode()).hexdigest()[:8], 16)
 
 
-# The 125 unmatched folders: the true show (tmdb id) and approximate votes.
+# The 125 unmatched folders: the true show (tmdb id).
 # 'accept': several plausible answers (any auto-pick outside is wrong; review is right).
 # None: no such show on TMDB (stays "None").
 TRUTH = {
-    '24': (1973, 2500), '48 Hours': (3719, 60), 'Addiction Unplugged': None, 'All or Nothing': (66943, 150),
-    'Alone': (63726, 300), 'American Sports Story': (131141, 80), 'Ballers': (62704, 1200),
-    'Band of Brothers': (4613, 6000), 'Below': {'accept': [285322, 207783]}, 'Boy Meets World': (1777, 1500),
+    '24': 1973, '48 Hours': 3719, 'Addiction Unplugged': None, 'All or Nothing': 66943,
+    'Alone': 63726, 'American Sports Story': 131141, 'Ballers': 62704,
+    'Band of Brothers': 4613, 'Below': {'accept': [285322, 207783]}, 'Boy Meets World': 1777,
     'Brothers': {'accept': [250203, 66515, 12635]}, 'Cheat (2019)': {'accept': [87356, 94828]},
-    'Cheers': (141, 900), 'Chernobyl': (87108, 7000), 'Dancing with the Stars': (1508, 300),
-    'Daredevil - Born Again': (202555, 1000), 'Dateline NBC': (78, 100),
+    'Cheers': 141, 'Chernobyl': 87108, 'Dancing with the Stars': 1508,
+    'Daredevil - Born Again': 202555, 'Dateline NBC': 78,
     'Dateline Secrets Uncovered': {'duplicate': 74284}, 'Diagnosis': {'accept': [73932, 91701]},
-    'Disappeared': (26728, 40), 'Disclaimer': (147050, 400),
-    "Don't Fk with Cats- Hunting an Internet Killer": (96129, 900),
-    'East of Eden': {'accept': [258165, 27291]}, 'Echo': (122226, 800), 'Echoes': (129612, 500),
-    'Entourage': (1940, 1300), 'Euphoria (US)': (85552, 10000), 'Fallout': (106379, 5000),
-    'Goliath': (67384, 900), 'Gomorra': (61068, 1300), 'Gossip Girl': (1395, 4000), 'Homeland': (1407, 3500),
-    'House of Cards (US)': (1425, 2500), 'House of Lies': (39702, 500), 'How I Met Your Mother': (1100, 5000),
-    'How to Get Rich': {'accept': [222839, 236340]}, 'Humans': (62822, 900), 'Impractical Jokers': (59186, 500),
-    'Into the Dark': {'accept': [152478, 335646]}, 'Jury Duty': (222023, 700), 'Killing Eve': (72750, 2500),
-    'Laguna Beach - The Real Orange County': (3605, 60), 'Last Chance U': (67027, 150),
+    'Disappeared': 26728, 'Disclaimer': 147050,
+    "Don't Fk with Cats- Hunting an Internet Killer": 96129,
+    'East of Eden': {'accept': [258165, 27291]}, 'Echo': 122226, 'Echoes': 129612,
+    'Entourage': 1940, 'Euphoria (US)': 85552, 'Fallout': 106379,
+    'Goliath': 67384, 'Gomorra': 61068, 'Gossip Girl': 1395, 'Homeland': 1407,
+    'House of Cards (US)': 1425, 'House of Lies': 39702, 'How I Met Your Mother': 1100,
+    'How to Get Rich': {'accept': [222839, 236340]}, 'Humans': 62822, 'Impractical Jokers': 59186,
+    'Into the Dark': {'accept': [152478, 335646]}, 'Jury Duty': 222023, 'Killing Eve': 72750,
+    'Laguna Beach - The Real Orange County': 3605, 'Last Chance U': 67027,
     'License To Kill': {'accept': [90626, 96018]},
-    'Life, Larry and the Pursuit of Unhappiness': (295780, 20), 'Little House on the Prairie': (1781, 900),
-    'Little Miss Innocent- Passioni Poison Prison': None, 'Lonesome Dove': (41692, 300), 'Lost': (4607, 4000),
-    'Love': (9000001, 700), 'Love Is Blind': (99353, 400), 'Love on the Spectrum (US)': (200731, 100),
-    'Malcolm in the Middle': (2004, 2300), 'Man v. Food': (8519, 100), 'Maniac (US)': (9000002, 1300),
-    'Medal of Honor': (83109, 60), 'Modern Family': (1421, 3800), 'NFL Films Presents': None, 'Oz': (3322, 900),
-    'Painkiller': (158083, 300), 'Pennyworth': (79588, 400), 'Peppa Pig': (12225, 400),
-    'Planet Earth': (1044, 2500), 'Press': (82143, 60), 'Reno 911!': (2187, 300), 'Requiem': (76819, 200),
-    'Saturday Night at the Movies': {'accept': [128175, 11807]}, 'Saturday Night Live': (1667, 900),
-    'Scrubs': (4556, 3000), 'Shameless (US)': (34307, 2500), 'Shark Tank': (30703, 300), 'Silo': (125988, 2000),
-    'Sister Wives': (34045, 60), 'Snoopy in Space': (91249, 30), 'So You Think You Can Dance': (3976, 100),
-    'Spider-Man - The Animated Series': (888, 700), 'Spider-Man- The Animated Series': (888, 700),
-    'Star Trek': (253, 1500), 'Step by Step': (2617, 300), 'Super Pumped': (126301, 200),
-    'Survivor': (14658, 700), 'Taxi': (2251, 500), 'Teen Mom Girls’ Night In': {'duplicate': 153525},
-    'The Affair': (61463, 900), 'The Bachelorette': (1562, 200), 'The Boys': (76479, 10000),
-    'The Comedy Store': (109332, 40), 'The Crown': (65494, 2500), 'The Curse': (114655, 300),
-    'The Hawk': {'accept': [254528, 109734, 169597]}, 'The IT Crowd': (2490, 2000),
-    'The Jinx - The Life and Deaths of Robert Durst': (61929, 300), 'The Keepers': (26101, 200),
-    'The Leftovers': (54344, 2000), 'The Morning Show': (90282, 1000), 'The Night Manager': (61859, 1200),
-    'The Office': {'accept': [2316, 2996]}, 'The Office (US)': (2316, 3500), 'The Perfect Couple': (220564, 500),
-    'The Reagans': (110334, 30), 'The Rehearsal': (204284, 500), 'The Sinner': (39852, 1500),
-    'The Son': (67232, 200), 'The Staircase': {'accept': [122196, 21421]}, 'The Studio': (247767, 500),
-    'The Twilight Zone': (6357, 1500), 'The Wonder Years': (4500, 900),
-    'The Zen Diaries of Gary Shandling': None, 'This Is Us': (67136, 3000),
-    'Tiger King- Murder, Mayhem and Madness': (100698, 1000), 'Top Chef': (41822, 300),
-    'Truth Be Told': (80054, 300), 'Unbelievable': (91275, 2500), 'Unexpected': (75035, 20),
+    'Life, Larry and the Pursuit of Unhappiness': 295780, 'Little House on the Prairie': 1781,
+    'Little Miss Innocent- Passioni Poison Prison': None, 'Lonesome Dove': 41692, 'Lost': 4607,
+    'Love': 9000001, 'Love Is Blind': 99353, 'Love on the Spectrum (US)': 200731,
+    'Malcolm in the Middle': 2004, 'Man v. Food': 8519, 'Maniac (US)': 9000002,
+    'Medal of Honor': 83109, 'Modern Family': 1421, 'NFL Films Presents': None, 'Oz': 3322,
+    'Painkiller': 158083, 'Pennyworth': 79588, 'Peppa Pig': 12225,
+    'Planet Earth': 1044, 'Press': 82143, 'Reno 911!': 2187, 'Requiem': 76819,
+    'Saturday Night at the Movies': {'accept': [128175, 11807]}, 'Saturday Night Live': 1667,
+    'Scrubs': 4556, 'Shameless (US)': 34307, 'Shark Tank': 30703, 'Silo': 125988,
+    'Sister Wives': 34045, 'Snoopy in Space': 91249, 'So You Think You Can Dance': 3976,
+    'Spider-Man - The Animated Series': 888, 'Spider-Man- The Animated Series': 888,
+    'Star Trek': 253, 'Step by Step': 2617, 'Super Pumped': 126301,
+    'Survivor': 14658, 'Taxi': 2251, 'Teen Mom Girls’ Night In': {'duplicate': 153525},
+    'The Affair': 61463, 'The Bachelorette': 1562, 'The Boys': 76479,
+    'The Comedy Store': 109332, 'The Crown': 65494, 'The Curse': 114655,
+    'The Hawk': {'accept': [254528, 109734, 169597]}, 'The IT Crowd': 2490,
+    'The Jinx - The Life and Deaths of Robert Durst': 61929, 'The Keepers': 26101,
+    'The Leftovers': 54344, 'The Morning Show': 90282, 'The Night Manager': 61859,
+    'The Office': {'accept': [2316, 2996]}, 'The Office (US)': 2316, 'The Perfect Couple': 220564,
+    'The Reagans': 110334, 'The Rehearsal': 204284, 'The Sinner': 39852,
+    'The Son': 67232, 'The Staircase': {'accept': [122196, 21421]}, 'The Studio': 247767,
+    'The Twilight Zone': 6357, 'The Wonder Years': 4500,
+    'The Zen Diaries of Gary Shandling': None, 'This Is Us': 67136,
+    'Tiger King- Murder, Mayhem and Madness': 100698, 'Top Chef': 41822,
+    'Truth Be Told': 80054, 'Unbelievable': 91275, 'Unexpected': 75035,
     'Unsolved Mysteries': {'accept': [126, 105177]}, 'Wasteland': {'accept': [13927, 68406, 158507]},
-    'What If…': (91363, 3000), 'What on Earth': {'accept': [70189, 37253, 44902, 127275]},
-    'Will & Grace': (4454, 900), 'WWE - The True Story of the Royal Rumble': None, 'WWE Raw': (4656, 200),
-    'WWE WrestleMania': None, 'X-Men- The Animated Series': (4574, 800), 'You': (78191, 5000),
-    'Your Honor (US)': (86430, 1000),
+    'What If…': 91363, 'What on Earth': {'accept': [70189, 37253, 44902, 127275]},
+    'Will & Grace': 4454, 'WWE - The True Story of the Royal Rumble': None, 'WWE Raw': 4656,
+    'WWE WrestleMania': None, 'X-Men- The Animated Series': 4574, 'You': 78191,
+    'Your Honor (US)': 86430,
 }
-# Known same-name remakes and their rough votes (real ones are similar in size order).
-REMAKES = {95249: 800, 126164: 200, 74321: 300, 105177: 800, 83135: 600, 1918: 300, 2996: 2000, 256480: 50,
-           90762: 20, 128822: 30, 295778: 80, 279471: 100, 3740: 50, 5311: 20, 40859: 3, 293772: 2,
-           1664: 150, 289698: 10, 337371: 5, 294969: 5, 236340: 5}
 # Shows the 125's recorded top 5 didn't include (TMDB lists them lower).
 EXTRA = {9000001: {'name': 'Love', 'year': 2016, 'country': ['US'], 'seasons': {1: 10, 2: 12, 3: 12}},
          9000002: {'name': 'Maniac', 'year': 2018, 'country': ['US'], 'seasons': {1: 10}},
-         9000003: {'name': 'Maniac', 'year': 2014, 'country': ['NO'], 'seasons': {1: 6}, 'votes': 40}}
+         9000003: {'name': 'Maniac', 'year': 2014, 'country': ['NO'], 'seasons': {1: 6}}}
 COUNTRY = {2316: ['US'], 2996: ['GB'], 256480: ['AU'], 90762: ['IN'], 128822: ['PL'], 1425: ['US'],
            85552: ['US'], 34307: ['US'], 86430: ['US'], 200731: ['US']}
 ALIASES = {3605: ['Laguna Beach: The Real Orange County'], 61929: ['The Jinx: The Life and Deaths of Robert Durst'],
@@ -151,10 +147,10 @@ def main(src):
     dump = json.load(open(os.path.join(src, 'tvdb_dump2.json'), encoding='utf-8-sig'))
     shows, searches, truth, files = {}, {}, {}, {}
 
-    def put(tid, name, year, votes, orig=None, country=None, seasons=None):
+    def put(tid, name, year, orig=None, country=None, seasons=None):
         s = shows.setdefault(str(tid), {'name': name, 'original_name': orig or name,
                                         'first_air_date': f'{year}-01-15' if year else '',
-                                        'origin_country': country or [], 'vote_count': votes,
+                                        'origin_country': country or [], 'vote_count': 0,
                                         'aliases': ALIASES.get(tid, [])})
         if seasons:
             s['seasons'] = seasons
@@ -166,28 +162,23 @@ def main(src):
     for u in dump['unmatched']:
         cands = json.loads(u['candidates'] or '[]')
         searches[norm(u['guess_title'])] = [c['tmdb_id'] for c in cands]
-        for rank, c in enumerate(cands, 1):
-            t = TRUTH.get(u['folder'])
-            votes = REMAKES.get(c['tmdb_id'], max(2, 40 // rank))
-            if isinstance(t, tuple) and t[0] == c['tmdb_id']:
-                votes = t[1]
-            s = put(c['tmdb_id'], c['title'], c['year'], votes, c.get('original_title'), COUNTRY.get(c['tmdb_id']))
-            s['vote_count'] = max(s['vote_count'], votes)
+        for c in cands:
+            put(c['tmdb_id'], c['title'], c['year'], c.get('original_title'), COUNTRY.get(c['tmdb_id']))
             by_title.setdefault((norm(c['title']), c['year']), c['tmdb_id'])
     for tid, e in EXTRA.items():
-        put(tid, e['name'], e['year'], e.get('votes', TRUTH['Love'][1] if tid == 9000001 else 1300), None, e['country'],
+        if norm(e['name']) in searches:          # listed right after the recorded top 5
+            searches[norm(e['name'])].append(tid)
+        put(tid, e['name'], e['year'], None, e['country'],
             {str(k): v for k, v in e['seasons'].items()})
     # the 562 matched: the show, plus two non-exact distractors
     matched = {}
     for n, r in enumerate(dump['folder_title_vs_show']):
         tid = by_title.get((norm(r['title']), r['year'])) or 800000 + n
-        votes = 50 + h('v', r['title']) % 3000
-        put(tid, r['title'], r['year'], max(votes, shows.get(str(tid), {}).get('vote_count', 0)))
-        shows[str(tid)]['vote_count'] = max(shows[str(tid)]['vote_count'], votes)
+        put(tid, r['title'], r['year'])
         matched[r['folder']] = tid
-        put(700000 + n, f"{r['title']}: Unscripted", (r['year'] or 2000) + 5, 3)
+        put(700000 + n, f"{r['title']}: Unscripted", (r['year'] or 2000) + 5)
         first = r['title'].split()[0] if r['title'].split() else 'Show'
-        put(750000 + n, f'{first} Nights', 2011 + n % 12, 5)
+        put(750000 + n, f'{first} Nights', 2011 + n % 12)
     # season layouts for every show (synthesized unless LAYOUT knows it)
     for sid, s in shows.items():
         if 'seasons' in s:
@@ -217,9 +208,9 @@ def main(src):
             if t is None:
                 truth[f] = {'id': None}
                 tid = None
-            elif isinstance(t, tuple):
-                truth[f] = {'id': t[0]}
-                tid = t[0]
+            elif isinstance(t, int):
+                truth[f] = {'id': t}
+                tid = t
             elif 'duplicate' in t:
                 truth[f] = {'id': t['duplicate'], 'duplicate': True}
                 tid = t['duplicate']
