@@ -1,5 +1,5 @@
-/** Settings > TV: the Libraries selector (Library paths picked as TV libraries), Scan, shows with "Wrong show?", unmatched
- * folders with "Match", and Upgrades (Replace / Keep both). */
+/** Settings > TV: the Libraries selector (Library paths picked as TV libraries), Import, Review, shows with
+ * "Wrong show?", and Upgrades (Replace / Keep both). The Import card and Review in detail: tvImport.test.tsx. */
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
@@ -16,11 +16,11 @@ const ANIME = { id: 'p_0000bbbb', name: 'Anime', path: '/media/Anime', status: '
 let selected: string[];
 const SEV = { id: 1, tmdb_id: 95396, title: 'Severance', year: 2022, path_id: PATH.id, path_name: 'TV', folder: 'Severance (2022)',
   poster_path: null, monitored: false, files: 6, episodes: 4, linked: 3, mismatch: 2, unrecognized: 1,
-  review: ['S03E01 is in Season 2', "S02E40 isn't an episode of this show", '1 file not recognized'] };
+  review: ["S02E40 isn't an episode of this show", "S03E01 isn't an episode of this show", '1 file not recognized'] };
 const DARK = { ...SEV, id: 3, tmdb_id: 70523, title: 'Dark', year: 2017, folder: 'Dark', files: 1, episodes: 1, linked: 1, mismatch: 0, unrecognized: 0 };
 const MYS = { id: 7, path_id: PATH.id, path_name: 'TV', folder: 'Mystery Show', guess_title: 'Mystery Show', guess_year: null,
   candidates: [{ tmdb_id: 1001, title: 'Mystery Show', year: 2015 }, { tmdb_id: 1002, title: 'Mystery Show', year: 2019 }],
-  reason: 'not_exact' };
+  reason: 'not_exact', tier: 'likely', pick: 1002 };
 let settings: Record<string, unknown>;
 let library: Record<string, unknown>;
 const calls: { url: string; method: string; body: unknown }[] = [];
@@ -42,9 +42,18 @@ beforeEach(() => {
       return res({ selected, libraries: [PATH, ANIME].map(l => ({ ...l, selected: selected.includes(l.id) })) });
     }
     if (url === '/api/settings/tv/library') return res(library);
-    if (url === '/api/settings/tv/scan') {
-      library = { ...library, scan: { running: false, error: null, last_scan: 1_760_000_000 } };
+    if (url === '/api/settings/tv/import' && method === 'POST') {
+      const { error } = library.scan as { error: string | null };
+      library = { ...library, scan: { running: false, error, last_scan: error ? null : 1_760_000_000 } };
       return res({ scan: { running: true, error: null, last_scan: null } }, 202);
+    }
+    if (url === '/api/settings/tv/import') {
+      return res({ running: false, error: (library.scan as { error: string | null }).error, last_scan: 1_760_000_000,
+        total: 3, done: 3, matched: 2, review: 1, none: 0 });
+    }
+    if (url === '/api/settings/tv/import-all') {
+      library = { ...library, unmatched: [], shows: [SEV, DARK, { ...SEV, id: 2, tmdb_id: body.items[0].tmdb_id, title: 'Mystery Show', year: 2019, folder: 'Mystery Show' }] };
+      return res({ imported: [7], failed: [], ...library });
     }
     if (url.startsWith('/api/settings/tv/search')) return res({ results: [{ tmdb_id: 2316, title: 'The Office', year: 2005 }, { tmdb_id: 95396, title: 'Severance', year: 2022 }] });
     if (url === '/api/settings/tv/unmatched/7/match') {
@@ -62,7 +71,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('Settings > TV', () => {
-  it('lists the paths, the shows with their files, the unmatched folders and Upgrades', async () => {
+  it('lists the paths, the shows with their files, the review rows and Upgrades', async () => {
     render(<TvLibrarySettings wide />);
     await screen.findByText('Severance (2022)');
     await screen.findAllByTestId('lib-select-row');
@@ -74,8 +83,8 @@ describe('Settings > TV', () => {
     expect(within(rows[1]!).getByTestId('tv-show-subtitle').textContent).toBe('1 episode');
     expect(within(rows[1]!).queryByTestId('tv-review-dot')).toBeNull();
     expect(screen.queryByText(/linked|mismatch|unrecognized/)).toBeNull();
-    expect(within(screen.getByTestId('tv-unmatched')).getByText('Mystery Show')).toBeTruthy();
-    expect(screen.getByTestId('tv-scan-status').textContent).toBe('Not scanned yet');
+    expect(within(screen.getByTestId('tv-review')).getByText('Mystery Show')).toBeTruthy();
+    expect(screen.queryByTestId('tv-last-import')).toBeNull();          // nothing before the first import
     expect(screen.getByTestId('tv-upgrades-keep_both').getAttribute('aria-checked')).toBe('true');
     expect(screen.getByTestId('tv-upgrades-replace_verified').getAttribute('aria-checked')).toBe('false');
   });
@@ -94,52 +103,58 @@ describe('Settings > TV', () => {
     await waitFor(() => expect(calls.filter(c => c.url === '/api/settings/tv/library').length).toBe(n + 1));
   });
 
-  it('Scan hides when no library is selected and shows once one is', async () => {
+  it('Import hides when no library is selected and shows once one is', async () => {
     selected = [];
     settings = { ...settings, paths: [] };
     render(<TvLibrarySettings wide />);
     const rows = await screen.findAllByTestId('lib-select-row');
-    expect(screen.queryByTestId('tv-scan')).toBeNull();
+    expect(screen.queryByTestId('tv-import-start')).toBeNull();
     fireEvent.click(rows[0]!);
-    await screen.findByTestId('tv-scan');
+    await screen.findByTestId('tv-import-start');
   });
 
-  it('Scan starts a scan and shows the last scan', async () => {
+  it('Import starts an import, shows its progress, then the last import', async () => {
     render(<TvLibrarySettings wide />);
-    fireEvent.click(await screen.findByTestId('tv-scan'));
-    await waitFor(() => expect(screen.getByTestId('tv-scan-status').textContent).toMatch(/^Last scan /));
-    expect(calls.some(c => c.url === '/api/settings/tv/scan' && c.method === 'POST')).toBe(true);
+    fireEvent.click(await screen.findByTestId('tv-import-start'));
+    await waitFor(() => expect(screen.getByTestId('tv-last-import').textContent).toMatch(/^Last import /));
+    expect(calls.some(c => c.url === '/api/settings/tv/import' && c.method === 'POST')).toBe(true);
+    expect(calls.some(c => c.url === '/api/settings/tv/import' && c.method === 'GET')).toBe(true);
   });
 
-  it('a scan error shows instead of the time', async () => {
+  it('an import error shows Import failed with Retry', async () => {
     library = { ...library, scan: { running: false, error: 'Add a TMDB key in Connectors', last_scan: null } };
     render(<TvLibrarySettings wide />);
-    await waitFor(() => expect(screen.getByTestId('tv-scan-status').textContent).toBe('Add a TMDB key in Connectors'));
+    fireEvent.click(await screen.findByTestId('tv-import-start'));
+    const err = await screen.findByTestId('tv-import-error');
+    expect(err.textContent).toBe('Import failed' + 'Retry');
+    library = { ...library, scan: { running: false, error: null, last_scan: null } };
+    fireEvent.click(within(err).getByTestId('tv-import-retry'));
+    await screen.findByTestId('tv-last-import');
   });
 
-  it('Match offers the candidates and matches the folder', async () => {
+  it('Import all imports the checked rows with their picks', async () => {
     render(<TvLibrarySettings wide />);
-    fireEvent.click(await screen.findByTestId('tv-match'));
-    const picker = screen.getByTestId('tv-picker');
-    expect(within(picker).getAllByTestId('tv-candidate').map(b => b.textContent)).toEqual(['Mystery Show (2015)', 'Mystery Show (2019)']);
-    expect(calls.some(c => c.url.startsWith('/api/settings/tv/search'))).toBe(false);   // candidates first
-    await act(async () => fireEvent.click(within(picker).getByText('Mystery Show (2019)')));
-    await waitFor(() => expect(screen.queryByTestId('tv-unmatched')).toBeNull());
-    expect(calls.find(c => c.url === '/api/settings/tv/unmatched/7/match')?.body).toEqual({ tmdb_id: 1002 });
+    fireEvent.click(await screen.findByTestId('tv-import-all'));
+    await waitFor(() => expect(screen.queryByTestId('tv-review')).toBeNull());
+    expect(calls.find(c => c.url === '/api/settings/tv/import-all')?.body).toEqual({ items: [{ id: 7, tmdb_id: 1002 }] });
     expect(screen.getAllByTestId('tv-show')).toHaveLength(3);
+    expect(screen.getByTestId('notice-toast').textContent).toContain('Imported 1 show');
   });
 
-  it('Wrong show? searches and rematches, without offering the current show', async () => {
+  it('Wrong show? opens the picker, searches and rematches; the current show has the check', async () => {
     render(<TvLibrarySettings wide />);
     fireEvent.click((await screen.findAllByTestId('tv-wrong-show'))[0]!);
-    await waitFor(() => expect(screen.getAllByTestId('tv-candidate').map(b => b.textContent)).toEqual(['The Office (2005)']));
+    await waitFor(() => expect(screen.getAllByTestId('tv-picker-option').map(b => b.textContent)).toEqual(['The Office2005', 'Severance2022']));
     expect(calls.find(c => c.url.startsWith('/api/settings/tv/search'))?.url).toBe('/api/settings/tv/search?q=Severance');
-    fireEvent.change(screen.getByTestId('tv-search'), { target: { value: 'office' } });
-    fireEvent.click(screen.getByTestId('tv-search-go'));
+    const opts = screen.getAllByTestId('tv-picker-option');
+    expect(opts.map(o => o.getAttribute('aria-selected'))).toEqual(['false', 'true']);
+    fireEvent.change(screen.getByTestId('tv-picker-search'), { target: { value: 'office' } });
+    fireEvent.keyDown(screen.getByTestId('tv-picker-search'), { key: 'Enter' });
     await waitFor(() => expect(calls.some(c => c.url === '/api/settings/tv/search?q=office')).toBe(true));
-    await act(async () => fireEvent.click(screen.getByText('The Office (2005)')));
+    await act(async () => fireEvent.click(screen.getAllByTestId('tv-picker-option')[0]!));
     await screen.findByText('The Office (2005)', { selector: 'span' });
     expect(calls.find(c => c.url === '/api/settings/tv/shows/1/match')?.body).toEqual({ tmdb_id: 2316 });
+    expect(screen.queryByTestId('tv-picker')).toBeNull();
   });
 
   it('Upgrades saves Replace and Keep both', async () => {
@@ -150,7 +165,7 @@ describe('Settings > TV', () => {
     expect(UPGRADE_OPTIONS.map(o => o.label)).toEqual(['Replace', 'Keep both']);
   });
 
-  it('the review dot is 8px amber, and Scan is its own section with the section gap', async () => {
+  it('the review dot is 8px amber; Libraries, Import, Review, Shows in that order with the section gap', async () => {
     render(<TvLibrarySettings wide />);
     const dot = await screen.findByTestId('tv-review-dot');
     await screen.findAllByTestId('lib-select-row');
@@ -158,16 +173,18 @@ describe('Settings > TV', () => {
     const section = screen.getByTestId('tv-section');
     expect(section.style.gap).toBe(`${SECTION_GAP}px`);
     const kids = Array.from(section.children).map(c => c.getAttribute('data-testid')).filter(Boolean);
-    expect(kids.slice(0, 4)).toEqual(['tv-paths', 'tv-scan-row', 'tv-unmatched', 'tv-shows']);
-    expect(screen.getByTestId('tv-scan-row').style.marginTop).toBe('');
+    expect(kids.slice(0, 5)).toEqual(['tv-paths', 'tv-import', 'tv-review', 'tv-shows', 'tv-upgrades']);
+    expect(screen.getByTestId('tv-import').style.marginTop).toBe('');
   });
 
   it('no helper text, sentence case', () => {
-    const src = readFileSync(resolve(__dirname, '../src/components/library/TvLibrarySettings.tsx'), 'utf8');
+    const src = ['TvLibrarySettings.tsx', 'TvImport.tsx']
+      .map(f => readFileSync(resolve(__dirname, '../src/components/library/' + f), 'utf8')).join('\n');
     expect(src).not.toMatch(/hint=|note=|helper/i);
-    for (const label of ['Libraries', 'Unmatched', 'Shows', 'Upgrades', 'Wrong show?', 'Match', 'Scan', 'Keep both'])
+    for (const label of ['Libraries', 'Review', 'Shows', 'Upgrades', 'Wrong show?', 'Import', 'Import all', 'Importing',
+      'Import failed', 'Retry', 'Choose show', 'Duplicate', 'Matched', 'No match', 'Keep both', '"Search"'])
       expect(src).toContain(label);
-    expect(src).not.toMatch(/Add path|PathForm|FolderBrowser|addTvPath/);
+    expect(src).not.toMatch(/Add path|PathForm|FolderBrowser|addTvPath|Unmatched<|>Scan<|Scanning/);
   });
 });
 
@@ -215,7 +232,7 @@ describe('needs review, in words (Tester tv1-8646479 M7/M8)', () => {
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     const items = Array.from(screen.getByTestId('tv-review-list').querySelectorAll('li')).map(li => li.textContent);
-    expect(items).toEqual(['S03E01 is in Season 2', "S02E40 isn't an episode of this show", '1 file not recognized']);
+    expect(items).toEqual(["S02E40 isn't an episode of this show", "S03E01 isn't an episode of this show", '1 file not recognized']);
     expect(screen.queryByText(/linked|mismatch|unrecognized/)).toBeNull();
     fireEvent.click(toggle);
     expect(screen.queryByTestId('tv-review-list')).toBeNull();

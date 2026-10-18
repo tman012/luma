@@ -1,7 +1,7 @@
 /** Settings > TV (owner only, luma-test builds): which Library paths are TV
- * libraries (LibrarySelector; folders are added in Library paths only), Scan,
- * the matched shows ("Wrong show?"), unmatched folders ("Match"), and
- * Upgrades. Scanning only reads the library folders; everything goes to tv.db. */
+ * libraries (LibrarySelector; folders are added in Library paths only), Import
+ * (TvImport: progress, then Review with Import all), the shows ("Wrong show?"),
+ * and Upgrades. Importing only reads the library folders; everything goes to tv.db. */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { T } from '@/theme/tokens';
 import { FONT } from '@/components/start/StartUI';
@@ -9,32 +9,46 @@ import { NoticeToast } from '@/components/start/SetupToast';
 import { ChevronIcon } from '@/components/nav/AppNav';
 import { trackersCss } from '@/components/trackers/trackersUi';
 import {
-  Field, WideCtx, card, formBox, ghostBtn, libraryPathsCss, muted, pad, primary, rowBtn,
-  sectionLabel, segBtn, segOn, segment, subText, titleText, topBorder,
+  WideCtx, card, libraryPathsCss, muted, pad, rowBtn, sectionLabel, segBtn, segOn, segment, subText, titleText, topBorder,
 } from './LibraryPathsSettings';
+import { ImportSection, ReviewSection, ShowPicker, FADE_MS, importCss, initialReview, type ReviewState } from './TvImport';
 import { LibrarySelector } from './LibrarySelector';
 import type { SelectableLibrary } from './librarySelectionApi';
 import { SAVE_FAILED } from './libraryPathsApi';
+import type { Candidate } from './tvLibraryApi';
 import {
-  TV_LIBRARIES_URL, showSubtitle, lastScanText, loadTv, loadTvLibrary, matchFolder, needsReview, rematchShow,
-  saveUpgrades, searchShows, showLabel, startScan,
-  type Candidate, type Show, type TvLibrary, type TvSettingsView, type Unmatched, type UpgradeMode,
+  TV_LIBRARIES_URL, importAll, importedText, showSubtitle, loadTv, loadTvLibrary, needsReview, rematchShow,
+  saveUpgrades, showLabel, startImport,
+  type ImportProgress, type Show, type TvLibrary, type TvSettingsView, type UpgradeMode,
 } from './tvLibraryApi';
 
-export const POLL_MS = 2000;
-/** Space between sections (Libraries, Scan, Unmatched, Shows, Upgrades), as on Library paths. */
+/** Space between sections (Libraries, Import, Review, Shows, Upgrades), as on Library paths. */
 export const SECTION_GAP = 28;
-type Editing = { kind: 'show'; id: number } | { kind: 'folder'; id: number } | null;
 
 export function TvLibrarySettings({ wide }: { wide: boolean }) {
   const [view, setView] = useState<TvSettingsView | null>(null);
   const [lib, setLib] = useState<TvLibrary | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [toast, setToast] = useState('');
-  const [editing, setEditing] = useState<Editing>(null);
+  const [editing, setEditing] = useState<number | null>(null);     // the show whose "Wrong show?" picker is open
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [review, setReview] = useState<ReviewState>({ checked: {}, picks: {} });
+  const [importingAll, setImportingAll] = useState(false);
+  const [fading, setFading] = useState<Set<number>>(new Set());
   const seq = useRef(0);
 
-  const refreshLib = useCallback(() => loadTvLibrary().then(r => { if (r.ok) setLib(r.data); return r; }), []);
+  const takeLib = useCallback((data: TvLibrary) => {
+    setLib(data);
+    setReview(prev => initialReview(data.unmatched, prev));
+  }, []);
+  const refreshLib = useCallback(() => loadTvLibrary().then(r => {
+    if (r.ok) {
+      takeLib(r.data);
+      if (r.data.scan.running) setImporting(true);
+    }
+    return r;
+  }), [takeLib]);
   const picked = useRef<string | null>(null);
   const onLibraries = useCallback((sel: SelectableLibrary[]) => {
     const key = sel.map(l => l.id).join(',');
@@ -46,79 +60,71 @@ export function TvLibrarySettings({ wide }: { wide: boolean }) {
     loadTv().then(r => (r.ok ? setView(r.data) : setLoadFailed(true)));
     refreshLib();
   }, [refreshLib]);
-
-  const running = !!lib?.scan.running;
-  useEffect(() => {          // follow a running scan
-    if (!running) return undefined;
-    const t = setInterval(refreshLib, POLL_MS);
-    return () => clearInterval(t);
-  }, [running, refreshLib]);
+  const onFinish = useCallback((p: ImportProgress) => {
+    setImportError(p.error);
+    void refreshLib().then(() => setImporting(false));
+  }, [refreshLib]);
 
   if (!view) {
     return loadFailed ? <div role="alert" style={{ ...pad(wide), ...muted }}>{"Couldn't load TV settings"}</div> : null;
   }
   const say = (msg: string) => { seq.current += 1; setToast(msg); };
-  const doneMatch = (r: { ok: true; data: TvLibrary } | { ok: false; error: string }) => {
-    if (r.ok) { setLib(r.data); setEditing(null); say('Matched'); } else say(r.error || SAVE_FAILED);
+  const start = () => {
+    setImportError(null);
+    setImporting(true);
+    void startImport().then(r => { if (!r.ok) { setImporting(false); setImportError(r.error); } });
   };
+  const runImportAll = async () => {
+    if (!lib) return;
+    const items = lib.unmatched.filter(u => review.checked[u.id] && review.picks[u.id])
+      .map(u => ({ id: u.id, tmdb_id: review.picks[u.id]!.tmdb_id }));
+    if (!items.length) return;
+    setImportingAll(true);
+    const r = await importAll(items);
+    if (!r.ok) { setImportingAll(false); say(r.error); return; }
+    const done = new Set(r.data.imported);
+    setFading(done);                                     // imported rows fade out, then Shows updates in place
+    await new Promise(res => window.setTimeout(res, FADE_MS));
+    takeLib(r.data);
+    setFading(new Set());
+    setImportingAll(false);
+    say(r.data.imported.length ? importedText(r.data.imported.length) : (r.data.failed[0]?.error || SAVE_FAILED));
+  };
+  const reviewRows = lib?.unmatched || [];
 
   return (
     <WideCtx.Provider value={wide}>
     <section data-testid="tv-section" style={{ ...pad(wide), display: 'flex', flexDirection: 'column', gap: SECTION_GAP, fontFamily: FONT }}>
       <style>{libraryPathsCss}</style>
       <style>{trackersCss}</style>
+      <style>{importCss}</style>
       {toast && <NoticeToast key={toast + seq.current} text={toast} onDone={() => setToast('')} />}
 
       <LibrarySelector url={TV_LIBRARIES_URL} label="Libraries" testId="tv-paths" onChange={onLibraries} />
 
       {view.paths.length > 0 && (
-        <div data-testid="tv-scan-row" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <button type="button" className="lp-focus" data-testid="tv-scan" disabled={running}
-            onClick={() => startScan().then(r => {
-              if (r.ok) setLib(l => (l ? { ...l, scan: r.data.scan } : l)); else say(r.error);
-              refreshLib();
-            })}
-            style={{ ...primary, opacity: running ? 0.5 : 1, cursor: running ? 'default' : 'pointer' }}>
-            {running ? 'Scanning…' : 'Scan'}
-          </button>
-          <span data-testid="tv-scan-status" role="status"
-            style={{ fontSize: 14, color: lib?.scan.error ? T.dangerText : 'rgba(255,255,255,0.55)' }}>
-            {lib?.scan.error || (lib ? lastScanText(lib.scan.last_scan) : '')}
-          </span>
-        </div>
+        <ImportSection wide={wide} running={importing} error={importError} lastImport={lib?.scan.last_scan ?? null}
+          onStart={start} onFinish={onFinish} />
       )}
 
-      {lib && lib.unmatched.length > 0 && (
-        <div data-testid="tv-unmatched">
-          <h3 style={sectionLabel}>Unmatched</h3>
-          <div style={card}>
-            {lib.unmatched.map((u, i) => (
-              <div key={u.id}>
-                <UnmatchedRow u={u} first={i === 0} open={editing?.kind === 'folder' && editing.id === u.id}
-                  onOpen={() => setEditing(editing?.kind === 'folder' && editing.id === u.id ? null : { kind: 'folder', id: u.id })} />
-                {editing?.kind === 'folder' && editing.id === u.id && (
-                  <MatchPicker initial={u.guess_title || u.folder} year={u.guess_year} suggestions={u.candidates}
-                    onCancel={() => setEditing(null)} onPick={c => matchFolder(u.id, c.tmdb_id).then(doneMatch)} />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+      {!importing && reviewRows.length > 0 && (
+        <ReviewSection wide={wide} rows={reviewRows} state={review} setState={setReview} busy={importingAll}
+          fading={fading} onImportAll={() => void runImportAll()} />
       )}
 
       {lib && lib.shows.length > 0 && (
         <div data-testid="tv-shows">
           <h3 style={sectionLabel}>Shows</h3>
-          <div style={card}>
+          <div style={{ ...card, overflow: 'visible' }}>
             {lib.shows.map((s, i) => (
-              <div key={s.id}>
-                <ShowRow s={s} first={i === 0} open={editing?.kind === 'show' && editing.id === s.id}
-                  onOpen={() => setEditing(editing?.kind === 'show' && editing.id === s.id ? null : { kind: 'show', id: s.id })} />
-                {editing?.kind === 'show' && editing.id === s.id && (
-                  <MatchPicker initial={s.title} year={null} suggestions={[]} exclude={s.tmdb_id}
-                    onCancel={() => setEditing(null)} onPick={c => rematchShow(s.id, c.tmdb_id).then(doneMatch)} />
-                )}
-              </div>
+              <ShowRow key={s.id} s={s} first={i === 0} wide={wide} open={editing === s.id}
+                onOpen={() => setEditing(editing === s.id ? null : s.id)} onClose={() => setEditing(null)}
+                onPick={c => {
+                  if (c.tmdb_id === s.tmdb_id) { setEditing(null); return; }
+                  void rematchShow(s.id, c.tmdb_id).then(r => {
+                    if (r.ok) { takeLib(r.data); setEditing(null); say('Matched'); } else say(r.error || SAVE_FAILED);
+                  });
+                }} />
             ))}
           </div>
         </div>
@@ -139,8 +145,11 @@ export function TvLibrarySettings({ wide }: { wide: boolean }) {
 
 // ---------------------------------------------------------------- rows
 
-function ShowRow({ s, first, open, onOpen }: { s: Show; first: boolean; open: boolean; onOpen: () => void }) {
+function ShowRow({ s, first, wide, open, onOpen, onClose, onPick }: {
+  s: Show; first: boolean; wide: boolean; open: boolean; onOpen: () => void; onClose: () => void; onPick: (c: Candidate) => void;
+}) {
   const [details, setDetails] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
   const review = needsReview(s);
   const lines = s.review || [];
   const subtitle = (
@@ -165,7 +174,7 @@ function ShowRow({ s, first, open, onOpen }: { s: Show; first: boolean; open: bo
     whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip',
   };
   return (
-    <div style={first ? undefined : topBorder}>
+    <div style={{ position: 'relative', ...(first ? null : topBorder) }}>
       <div data-testid="tv-show" style={{ ...rowBtn, cursor: 'default' }}>
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span style={titleText(true)}>{showLabel(s)}</span>
@@ -179,9 +188,13 @@ function ShowRow({ s, first, open, onOpen }: { s: Show; first: boolean; open: bo
             <span style={subStyle} title={`${s.path_name} · ${s.folder}`}>{subtitle}</span>
           )}
         </span>
-        <button type="button" className="lp-focus" data-testid="tv-wrong-show" aria-expanded={open} onClick={onOpen}
-          style={linkBtn}>Wrong show?</button>
+        <button ref={anchor} type="button" className="lp-focus" data-testid="tv-wrong-show" aria-haspopup="dialog" aria-expanded={open}
+          onClick={onOpen} style={linkBtn}>Wrong show?</button>
       </div>
+      {open && (
+        <ShowPicker wide={wide} anchor={anchor} initial={s.title} year={null} current={s.tmdb_id}
+          suggestions={[]} onPick={onPick} onClose={onClose} />
+      )}
       {details && lines.length > 0 && (
         <ul data-testid="tv-review-list" style={reviewList}>
           {lines.map(l => <li key={l} style={{ listStyle: 'none' }}>{l}</li>)}
@@ -195,69 +208,6 @@ const reviewList: React.CSSProperties = {
   margin: '-4px 0 0', padding: '0 16px 12px', display: 'flex', flexDirection: 'column', gap: 4,
   fontSize: 13, lineHeight: '18px', color: T.text2,
 };
-
-function UnmatchedRow({ u, first, open, onOpen }: { u: Unmatched; first: boolean; open: boolean; onOpen: () => void }) {
-  return (
-    <div data-testid="tv-unmatched-row" style={{ ...rowBtn, cursor: 'default', ...(first ? null : topBorder) }}>
-      <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: T.warning, flex: 'none' }} />
-      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={titleText(true)} title={u.folder}>{u.folder}</span>
-        <span style={subText(true)}>{u.path_name}</span>
-      </span>
-      <button type="button" className="lp-focus" data-testid="tv-match" aria-expanded={open} onClick={onOpen}
-        style={linkBtn}>Match</button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- fix-match picker
-
-export function MatchPicker({ initial, year, suggestions, exclude, onPick, onCancel }: {
-  initial: string; year: number | null; suggestions: Candidate[]; exclude?: number;
-  onPick: (c: Candidate) => Promise<unknown>; onCancel: () => void;
-}) {
-  const [q, setQ] = useState(initial);
-  const [results, setResults] = useState<Candidate[]>(suggestions);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const search = async (text: string, y: number | null) => {
-    if (!text.trim()) return;
-    setBusy(true);
-    const r = await searchShows(text.trim(), y);
-    setBusy(false);
-    if (r.ok) { setResults(r.data.results); setError(''); } else setError(r.error);
-  };
-  useEffect(() => {
-    if (!suggestions.length) void search(initial, year);
-    // first open only
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const shown = results.filter(c => c.tmdb_id !== exclude);
-  return (
-    <form data-testid="tv-picker" style={{ ...formBox, ...topBorder }}
-      onSubmit={e => { e.preventDefault(); void search(q, null); }}>
-      <Field id="tv-search" label="Show" value={q} onChange={setQ} error={error} autoFocus />
-      <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 12, overflow: 'hidden', background: 'rgba(255,255,255,0.03)' }}>
-        {shown.map((c, i) => (
-          <button key={c.tmdb_id} type="button" className="lp-row" data-testid="tv-candidate" disabled={busy}
-            onClick={async () => { setBusy(true); await onPick(c); setBusy(false); }}
-            style={{ ...rowBtn, minHeight: 52, ...(i === 0 ? null : topBorder) }}>
-            <span style={{ ...titleText(true), flex: 1 }}>{showLabel(c)}</span>
-            <span style={{ display: 'inline-flex', color: T.text4, flex: 'none' }}><ChevronIcon /></span>
-          </button>
-        ))}
-        {!shown.length && !busy && !error && (
-          <span data-testid="tv-no-results" style={{ ...rowBtn, minHeight: 52, cursor: 'default', color: 'rgba(255,255,255,0.55)' }}>No shows found</span>
-        )}
-      </div>
-      <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-        <button type="button" onClick={onCancel} style={ghostBtn} className="lp-focus" data-testid="tv-picker-cancel">Cancel</button>
-        <button type="submit" disabled={busy || !q.trim()} style={{ ...primary, opacity: busy || !q.trim() ? 0.5 : 1 }}
-          className="lp-focus" data-testid="tv-search-go">Search</button>
-      </div>
-    </form>
-  );
-}
 
 // ---------------------------------------------------------------- upgrades
 
