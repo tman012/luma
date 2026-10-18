@@ -78,9 +78,11 @@ NAMING_FIELDS = {
 INT_FIELDS = {'season', 'episode', 'year', 'tmdb_id'}
 REQUIRED_FIELDS = {'series_folder': {'title'}, 'season_folder': set(),
                    'episode': {'season', 'episode'}, 'daily': {'air_date'}, 'specials_folder': set()}
-AUTOMATION_FLAGS = ('enabled', 'feed_enabled', 'backlog_enabled', 'upgrades_enabled')
+# import_enabled: the TV download watch on prod (off by default; on test it follows the instance's
+# tv_import job, see tv_downloads.watch_enabled).
+AUTOMATION_FLAGS = ('enabled', 'feed_enabled', 'backlog_enabled', 'upgrades_enabled', 'import_enabled')
 DEFAULT_AUTOMATION = {'enabled': False, 'feed_enabled': False, 'backlog_enabled': False,
-                      'upgrades_enabled': False, 'first_search_delay_h': 4}
+                      'upgrades_enabled': False, 'import_enabled': False, 'first_search_delay_h': 4}
 TEMPLATE_MAX = 120
 INVALID = 'Invalid'
 _CTRL_RE = re.compile(r'[\x00-\x1f\x7f/\\]')

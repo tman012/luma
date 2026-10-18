@@ -1089,6 +1089,26 @@ def _requeue(j: Dict[str, Any]) -> None:
 _space_check = {'at': None}
 
 
+def space_retry_due(j: Dict[str, Any], now: float) -> Optional[int]:
+    """The no-space retry rule (the mover's jobs and the TV download watch share it): a record
+    {state 'failed', error INSUFFICIENT_SPACE, space {path, need, free at the failure}, finished}
+    gets its ONE automatic retry when the free space reported on its destination has grown by
+    >= need and SPACE_RETRY_S have passed since the failure, unless it already had it
+    (auto_retried; the owner's Retry clears that). Returns the growth when due, else None."""
+    sp = j.get('space') if isinstance(j.get('space'), dict) else None
+    if j.get('state') != 'failed' or j.get('error') != INSUFFICIENT_SPACE or not sp or j.get('auto_retried'):
+        return None
+    at_fail, need = sp.get('free'), int(sp.get('need') or 0)
+    if not isinstance(at_fail, (int, float)) or need <= 0:
+        return None                           # no baseline: only the Retry button
+    if now - float(j.get('finished') or 0) < SPACE_RETRY_S:
+        return None
+    free = _free_or_none(str(sp.get('path') or ''))
+    if free is not None and free - at_fail >= need:
+        return int(free - at_fail)
+    return None
+
+
 def requeue_for_space(now: Optional[float] = None) -> int:
     """The one automatic retry of a no-space failure: free space reported on its destination
     has grown by >= the file size since the failure, SPACE_RETRY_S have passed since it, and the
@@ -1103,21 +1123,13 @@ def requeue_for_space(now: Optional[float] = None) -> int:
     def apply(data):
         n = 0
         for j in data['jobs'].values():
-            sp = j.get('space') if isinstance(j.get('space'), dict) else None
-            if j.get('state') != 'failed' or j.get('error') != INSUFFICIENT_SPACE or not sp or j.get('auto_retried'):
-                continue
-            at_fail, need = sp.get('free'), int(sp.get('need') or 0)
-            if not isinstance(at_fail, (int, float)) or need <= 0:
-                continue                      # no baseline: only the Retry button
-            if now - float(j.get('finished') or 0) < SPACE_RETRY_S:
-                continue
-            free = _free_or_none(str(sp.get('path') or ''))
-            if free is not None and free - at_fail >= need:
+            grew = space_retry_due(j, now)
+            if grew is not None:
                 _requeue(j)
                 j['auto_retried'] = True
                 n += 1
                 logger.info('Library mover: %s back to waiting (free space grew by %d bytes; the one automatic retry)',
-                            j.get('title'), free - at_fail)
+                            j.get('title'), grew)
         return n
     return fm.update(apply)
 

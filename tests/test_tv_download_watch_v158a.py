@@ -44,6 +44,8 @@ def dl(scanned, tmp_path, monkeypatch):  # noqa: F811
     monkeypatch.setattr(lm, 'STABLE_WAIT_S', 0)
     monkeypatch.setattr(lm, 'MIN_VIDEO_BYTES', 10)
     monkeypatch.delenv('LUMA_TEST_TV_TAG', raising=False)
+    monkeypatch.delenv('LUMA_TV_CATEGORY', raising=False)
+    monkeypatch.setenv('LUMA_INSTANCE', 'test')              # v158b: on prod the watch is a setting (off)
     lm.init(settings=Settings())
     root = tmp_path / 'downloads'
     (root / 'incomplete').mkdir(parents=True)
@@ -88,7 +90,8 @@ def test_imports_only_the_tv_tag_and_links_the_card_on_the_same_pass(dl):
     assert {p: p.stat().st_mtime_ns for d in (src, other, prod) for p in d.iterdir()} == before_src   # sources untouched
     assert not (dl.lib / 'Severance (2022)' / 'Season 02' / 'Severance.S02E04.1080p.WEB-DL-GRP.mkv').exists()
     assert all(m == 'GET' or u.endswith('/api/v2/auth/login') for m, u, _ in dl.q.calls)    # reads only (+ sign-in)
-    assert [c[2] for c in dl.q.calls if c[1].endswith('/torrents/info')] == [{'tag': 'luma-test-tv', 'filter': 'completed'}]
+    assert [c[2] for c in dl.q.calls if c[1].endswith('/torrents/info')] == [{'category': 'luma-test-tv', 'filter': 'completed'},
+                                                                          {'tag': 'luma-test-tv', 'filter': 'completed'}]
     st = tv_downloads.status(H1)
     assert st['state'] == 'imported' and st['files'][0]['linked'] is True
     assert tv_downloads.status(H2) is None and tv_downloads.status(H3) is None
@@ -125,8 +128,81 @@ def test_off_on_test_unless_allowed_by_default_and_unknown_shows_wait(dl, monkey
 
 
 def test_the_tv_tag_can_never_be_the_movie_tag_or_an_app_category(monkeypatch):
+    monkeypatch.setenv('LUMA_INSTANCE', 'test')
     for bad in ('luma-test', 'sonarr', 'tv', 'bad,tag', ''):
         monkeypatch.setenv('LUMA_TEST_TV_TAG', bad)
         assert tv_downloads.tag_name() == 'luma-test-tv'
     monkeypatch.setenv('LUMA_TEST_TV_TAG', 'my-tv')
     assert tv_downloads.tag_name() == 'my-tv'
+
+
+# ------------------------------------------------------------------ v158b (PM rulings 2 and 4, Reviewer M2)
+
+def test_v158b_category_comes_from_the_instance_and_never_takes_the_others(monkeypatch):
+    monkeypatch.delenv('LUMA_TEST_TV_TAG', raising=False)
+    monkeypatch.delenv('LUMA_TV_CATEGORY', raising=False)
+    monkeypatch.setenv('LUMA_INSTANCE', 'test')
+    assert (tv_downloads.category(), tv_downloads.other_category()) == ('luma-test-tv', 'luma-tv')
+    mine = {'category': 'luma-test-tv', 'tags': ''}
+    assert tv_downloads.is_mine(mine) and tv_downloads.is_mine({'category': '', 'tags': 'luma-test-tv'})
+    assert not tv_downloads.is_mine({'category': 'luma-tv', 'tags': 'luma-test-tv'})       # carries prod's
+    assert not tv_downloads.is_mine({'category': 'luma-test-tv', 'tags': 'luma-tv'})
+    assert not tv_downloads.is_mine({'category': 'tv', 'tags': 'sonarr'})
+    monkeypatch.setenv('LUMA_INSTANCE', 'prod')
+    assert (tv_downloads.category(), tv_downloads.other_category()) == ('luma-tv', 'luma-test-tv')
+    assert not tv_downloads.is_mine(mine) and tv_downloads.is_mine({'category': 'luma-tv', 'tags': ''})
+    monkeypatch.setenv('LUMA_TV_CATEGORY', 'luma-test-tv')                                 # may never be test's
+    assert tv_downloads.category() == 'luma-tv'
+    monkeypatch.setenv('LUMA_TV_CATEGORY', 'house-tv')
+    assert tv_downloads.category() == 'house-tv'
+
+
+def test_v158b_prod_watch_is_off_unless_the_setting_is_on(dl, monkeypatch):
+    from app import tv_settings
+    monkeypatch.setenv('LUMA_INSTANCE', 'prod')
+    grab(dl, H1, 'Severance.S02E03.1080p.WEB-DL-GRP', ['Severance.S02E03.1080p.WEB-DL-GRP.mkv'], tags='luma-tv')
+    assert not tv_downloads.watch_enabled()
+    assert dl.tick() == {'checked': 0, 'imported': 0} and dl.q.calls == []
+    assert tv_downloads.start() is False
+    st = tv_settings.load()
+    st['automation']['import_enabled'] = True
+    tv_settings.save(st)
+    assert tv_downloads.watch_enabled()
+    assert dl.tick() == {'checked': 1, 'imported': 1}
+    assert {c[2].get('category') or c[2].get('tag') for c in dl.q.calls if c[0] == 'GET' and 'info' in c[1]} == {'luma-tv'}
+
+
+def test_v158b_no_space_uses_the_movers_rule_once_then_retry(dl, monkeypatch):
+    free = {'v': 100}
+    monkeypatch.setattr(lm, '_free_or_none', lambda p: free['v'])
+    need = {'n': 0}
+
+    def no_room(path, size):
+        need['n'] += 1
+        raise lm.InsufficientSpace(lm.INSUFFICIENT_SPACE, path, 50)
+    monkeypatch.setattr(lm, '_check_space', no_room)
+    lib_ = dl.lib
+    (lib_ / 'x').mkdir(exist_ok=True)
+    monkeypatch.setattr(tv_downloads.fm, 'load', (lambda real: (lambda: {**real(), 'transfer': 'copy'}))(tv_downloads.fm.load))
+    grab(dl, H1, 'Severance.S02E03.1080p.WEB-DL-GRP', ['Severance.S02E03.1080p.WEB-DL-GRP.mkv'])
+    t0 = 10_000.0
+    dl.tick(now=t0)
+    st = tv_downloads.status(H1)
+    assert st['state'] == 'failed' and st['space'] == {'path': st['space']['path'], 'need': 50, 'free': 100}
+    for dt_, f in ((60, 100), (120, 1000), (lm.SPACE_RETRY_S - 1, 1000)):       # no per-minute retries
+        free['v'] = f
+        dl.tick(now=t0 + dt_)
+    assert need['n'] == 1
+    free['v'] = 149                                                                 # grew by less than the size
+    dl.tick(now=t0 + lm.SPACE_RETRY_S + 1)
+    assert need['n'] == 1
+    free['v'] = 150                                                                 # grew by the size, 15 min on
+    dl.tick(now=t0 + lm.SPACE_RETRY_S + 2)
+    assert need['n'] == 2 and tv_downloads.status(H1)['auto_retried'] is True
+    free['v'] = 10_000
+    dl.tick(now=t0 + 5 * lm.SPACE_RETRY_S)                                          # the one auto retry is spent
+    assert need['n'] == 2
+    assert [f['hash'] for f in tv_downloads.failures()] == [H1]
+    assert tv_downloads.retry(H1) and 'auto_retried' not in tv_downloads.status(H1)
+    dl.tick(now=t0 + 6 * lm.SPACE_RETRY_S)
+    assert need['n'] == 3

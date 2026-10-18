@@ -187,22 +187,56 @@ ALTER TABLE series ADD COLUMN stills_at REAL;
 """
 
 # v158a monitoring: the series' Monitor option (all/future/missing/...), specials and
-# season folders, and the default TV quality profile. Existing shows become
-# Monitored with Future episodes (no back catalog) and new seasons on.
+# season folders, and the default TV quality profile. Shows with no monitoring choice of their
+# own become Monitored with Future episodes (no back catalog) and new seasons on; a show that
+# already had one (monitored, new seasons on, or any monitored season or episode) keeps it
+# (PM, v158b). monitor_defaults() is that step: idempotent, never resets a choice.
 SCHEMA_V7 = """
 ALTER TABLE series ADD COLUMN monitor TEXT NOT NULL DEFAULT 'none';
 ALTER TABLE series ADD COLUMN monitor_specials INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE series ADD COLUMN season_folder INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE quality_profiles ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0;
-UPDATE series SET monitored = 1, monitor = 'future', monitor_new_seasons = 1;
-UPDATE episodes SET monitored = CASE WHEN season_number > 0 AND (air_date IS NULL OR air_date >= date('now', 'localtime'))
-  THEN 1 ELSE 0 END;
-UPDATE seasons SET monitored = CASE WHEN EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = seasons.series_id
-  AND e.season_number = seasons.season_number AND e.monitored = 1) THEN 1 ELSE 0 END;
 """
 
+# v158b: monitor_chosen marks a show whose monitoring was set (an Add, an import, an Edit, a
+# toggle, or the v7 defaults). Every show that reached v7 has been through one of those, so all
+# existing rows are chosen.
+SCHEMA_V8 = """
+ALTER TABLE series ADD COLUMN monitor_chosen INTEGER NOT NULL DEFAULT 0;
+UPDATE series SET monitor_chosen = 1;
+"""
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set:
+    return {r[1] for r in conn.execute(f'PRAGMA table_info({table})')}
+
+
+def monitor_defaults(conn: sqlite3.Connection) -> int:
+    """Future (episodes airing from today, new seasons on) for each show with no monitoring
+    choice; returns how many. Safe to run again: a show with any choice is never touched."""
+    cols = _columns(conn, 'series')
+    if 'monitor' not in cols:
+        return 0
+    chosen = ' AND s.monitor_chosen = 0' if 'monitor_chosen' in cols else ''
+    ids = [r[0] for r in conn.execute(
+        "SELECT s.id FROM series s WHERE s.monitored = 0 AND s.monitor = 'none' AND s.monitor_new_seasons = 0"
+        ' AND NOT EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = s.id AND e.monitored = 1)'
+        ' AND NOT EXISTS (SELECT 1 FROM seasons x WHERE x.series_id = s.id AND x.monitored = 1)' + chosen)]
+    for sid in ids:
+        conn.execute("UPDATE series SET monitored = 1, monitor = 'future', monitor_new_seasons = 1"
+                     + (', monitor_chosen = 1' if chosen else '') + ' WHERE id = ?', (sid,))
+        conn.execute("UPDATE episodes SET monitored = CASE WHEN season_number > 0 AND (air_date IS NULL"
+                     " OR air_date >= date('now', 'localtime')) THEN 1 ELSE 0 END WHERE series_id = ?", (sid,))
+        conn.execute('UPDATE seasons SET monitored = CASE WHEN EXISTS (SELECT 1 FROM episodes e'
+                     ' WHERE e.series_id = seasons.series_id AND e.season_number = seasons.season_number'
+                     ' AND e.monitored = 1) THEN 1 ELSE 0 END WHERE series_id = ?', (sid,))
+    return len(ids)
+
+
 # MIGRATIONS[n] takes user_version n to n + 1.
-MIGRATIONS: List[str] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7]
+MIGRATIONS: List[Any] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6,
+                         (SCHEMA_V7, monitor_defaults), SCHEMA_V8]
+# A step is SQL, or (SQL, fn(conn)) run in the same transaction after it.
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
@@ -371,8 +405,12 @@ def _migrate(conn: sqlite3.Connection, p: Optional[Path] = None) -> None:
     while version < SCHEMA_VERSION:
         conn.execute('BEGIN IMMEDIATE')
         try:
-            for stmt in _statements(MIGRATIONS[version]):
+            step = MIGRATIONS[version]
+            sql, fn = step if isinstance(step, tuple) else (step, None)
+            for stmt in _statements(sql):
                 conn.execute(stmt)
+            if fn is not None:
+                fn(conn)
             conn.execute(f'PRAGMA user_version = {version + 1}')
             conn.execute('COMMIT')
         except BaseException:

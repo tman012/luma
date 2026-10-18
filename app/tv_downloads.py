@@ -1,14 +1,20 @@
-"""TV download watch (v158a): every minute, completed qBittorrent torrents tagged
-luma-test-tv (LUMA_TEST_TV_TAG) are imported into their show through the library
-mover's transfer (hardlink, else copy; never a move, never an overwrite, never a
-delete), then linked in tv.db at once (tv_watch.episode_imported), so the card turns
-downloaded on this same pass.
+"""TV download watch (v158a, v158b): every minute, completed qBittorrent torrents of THIS
+instance's TV category are imported into their show through the library mover's transfer
+(hardlink, else copy; never a move, never an overwrite, never a delete), then linked in tv.db at
+once (tv_watch.episode_imported), so the card turns downloaded on this same pass.
 
-Only torrents carrying the TV tag are ever looked at (asked for by tag AND re-checked on
-each torrent); everything else in a shared qBittorrent is invisible here. Reads only from
-qBittorrent (torrents/info, torrents/files). The destination is the show's folder in its
-TV library (Season NN when season folders are on); the library must be writable and have
-room, else the torrent waits (failed with the reason when it can't fit, retried when it can).
+The name comes from the instance (category()): luma-test-tv on LUMA_INSTANCE=test
+(LUMA_TEST_TV_TAG), luma-tv on prod (LUMA_TV_CATEGORY). Luma's TV grabs set it as both the
+qBittorrent category and tag. A torrent is this instance's when its category or a tag is that
+name and it carries nothing of the other instance's name; everything else in a shared
+qBittorrent is invisible here, so neither instance ever acts on the other's torrents.
+
+On: test, while the instance allows tv_import (the default there); prod, only when TV settings'
+automation.import_enabled is on (off by default). Reads only from qBittorrent (torrents/info,
+torrents/files). The destination is the show's folder in its TV library (Season NN when season
+folders are on); the library must be writable and have room. No room: failed with the reason,
+then the mover's rule (library_mover.space_retry_due): one automatic retry once the free space
+grew by the files' size and 15 min passed, else the Retry button (retry()).
 Each file must parse to an episode the show has; anything else is left alone.
 
 State per torrent hash is in tv.db meta ('tvdl:<hash>'): {state, at, completed, files, error}.
@@ -32,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 TAG_ENV = 'LUMA_TEST_TV_TAG'
 DEFAULT_TAG = 'luma-test-tv'
+PROD_ENV = 'LUMA_TV_CATEGORY'
+PROD_DEFAULT = 'luma-tv'
 INTERVAL_S = 60
 JOB = 'tv_import'
 NOT_WRITABLE = 'library folder not writable'
@@ -40,12 +48,53 @@ _DONE = ('imported', 'refused')
 _lock = threading.Lock()
 
 
-def tag_name() -> str:
-    raw = (os.environ.get(TAG_ENV) or '').strip()
-    if qbit_owner.TAG_RE.match(raw) and raw.casefold() not in qbit_owner._reserved() \
-            and raw.casefold() != qbit_owner.tag_name().casefold():
-        return raw
-    return DEFAULT_TAG
+def _valid(raw: str, other: str) -> bool:
+    return bool(qbit_owner.TAG_RE.match(raw)) and raw.casefold() not in qbit_owner._reserved() \
+        and raw.casefold() != qbit_owner.tag_name().casefold() and raw.casefold() != other.casefold()
+
+
+def _names() -> Tuple[str, str]:
+    """(test's name, prod's name), never equal."""
+    raw_t = (os.environ.get(TAG_ENV) or '').strip()
+    raw_p = (os.environ.get(PROD_ENV) or '').strip()
+    test = raw_t if raw_t and _valid(raw_t, PROD_DEFAULT if not raw_p else raw_p) else DEFAULT_TAG
+    prod = raw_p if raw_p and _valid(raw_p, test) else PROD_DEFAULT
+    if prod.casefold() == test.casefold():
+        test, prod = DEFAULT_TAG, PROD_DEFAULT
+    return test, prod
+
+
+def category() -> str:
+    """This instance's TV category and tag: luma-test-tv on test, luma-tv on prod."""
+    test, prod = _names()
+    return test if instance.is_test() else prod
+
+
+def other_category() -> str:
+    test, prod = _names()
+    return prod if instance.is_test() else test
+
+
+def tag_name() -> str:                    # the v158a name, kept for callers
+    return category()
+
+
+def is_mine(t: Dict[str, Any]) -> bool:
+    """This instance's TV torrent: category or a tag is ours, nothing is the other instance's."""
+    mine, other = category().casefold(), other_category().casefold()
+    cat = str(t.get('category') or '').strip().casefold()
+    tags = {x.casefold() for x in qbit_owner.torrent_tags(t)}
+    if cat == other or other in tags:
+        return False
+    return cat == mine or mine in tags
+
+
+def watch_enabled() -> bool:
+    if not instance.writes_allowed(JOB):
+        return False
+    if instance.is_test():
+        return True
+    return bool(tv_settings.load()['automation'].get('import_enabled'))
 
 
 def _key(h: str) -> str:
@@ -192,7 +241,7 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
     """One pass. Never contacts qBittorrent without a TV library or a downloads folder."""
     now = time.time() if now is None else now
     out = {'checked': 0, 'imported': 0}
-    if not instance.writes_allowed(JOB) or not tv_settings.libraries():
+    if not watch_enabled() or not tv_settings.libraries():
         return out
     try:
         mover._downloads_root()
@@ -205,20 +254,25 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
         if not sess:
             return out
         try:
-            tag = tag_name()
-            try:
-                r = sess.get(f'{url}/api/v2/torrents/info', params={'tag': tag, 'filter': 'completed'},
-                             timeout=10, allow_redirects=False)
-                torrents = r.json() if r.status_code == 200 else None
-            except (requests.RequestException, ValueError):
-                torrents = None
-            if not isinstance(torrents, list):
-                return out
+            name = category()
+            torrents, seen = [], set()
+            for params in ({'category': name, 'filter': 'completed'}, {'tag': name, 'filter': 'completed'}):
+                try:
+                    r = sess.get(f'{url}/api/v2/torrents/info', params=params, timeout=10, allow_redirects=False)
+                    got = r.json() if r.status_code == 200 else None
+                except (requests.RequestException, ValueError):
+                    got = None
+                if not isinstance(got, list):
+                    return out
+                for t in got:
+                    if isinstance(t, dict) and str(t.get('hash') or '').lower() not in seen:
+                        seen.add(str(t.get('hash') or '').lower())
+                        torrents.append(t)
             data = fm.load()
             list_files = mover._files_of(sess, url)
             for t in torrents:
-                if not isinstance(t, dict) or not qbit_owner.is_test_torrent(t, tag) or not _complete(t):
-                    continue                                  # only this install's TV grabs, never others
+                if not is_mine(t) or not _complete(t):
+                    continue                                  # only this instance's TV torrents, never others
                 h = str(t.get('hash') or '').lower()
                 if not mover._HASH_RE.match(h):
                     continue
@@ -226,9 +280,11 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
                 if st.get('state') in _DONE:
                     continue
                 if st.get('state') == 'failed' and st.get('error') == mover.INSUFFICIENT_SPACE:
-                    free = mover._free_or_none(st.get('space', {}).get('path') or '')
-                    if free is None or free < int(st.get('space', {}).get('need') or 0):
-                        continue                              # no timer retry: only when it fits
+                    grew = mover.space_retry_due(st, now)     # the mover's rule: once, or Retry
+                    if grew is None:
+                        continue
+                    _save(h, auto_retried=True)
+                    logger.info('TV import: %s retried once (free space grew by %d bytes)', t.get('name'), grew)
                 out['checked'] += 1
                 try:
                     res = import_torrent(t, data, now, list_files)
@@ -236,8 +292,8 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
                     out['imported'] += 1
                     logger.info('TV import: %s -> %d file(s)', t.get('name'), len(res['files']))
                 except mover.InsufficientSpace as e:
-                    _save(h, state='failed', error=mover.INSUFFICIENT_SPACE, at=now, name=t.get('name'),
-                          space={'path': e.path, 'need': e.need})
+                    _save(h, state='failed', error=mover.INSUFFICIENT_SPACE, at=now, finished=now, name=t.get('name'),
+                          space={'path': e.path, 'need': e.need, 'free': mover._free_or_none(e.path)})
                 except mover.Refused as e:
                     _save(h, state='refused', error=str(e), at=now, name=t.get('name'))
                 except mover.Pending as e:
@@ -252,11 +308,40 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
     return out
 
 
+def retry(h: str) -> bool:
+    """The Retry button: a failed or refused torrent is looked at again on the next pass, and a later
+    no-space failure gets its one automatic retry again. False when there's nothing to retry."""
+    h = (h or '').lower()
+    st = status(h)
+    if not st or st.get('state') not in ('failed', 'refused', 'waiting'):
+        return False
+    st.update(state='waiting', error=None)
+    for k in ('auto_retried', 'space', 'finished'):
+        st.pop(k, None)
+    tv_store.set_meta(_key(h), json.dumps(st))
+    return True
+
+
+def failures() -> List[Dict[str, Any]]:
+    """Torrents the watch couldn't import: {hash, name, state, error, at}."""
+    out = []
+    with tv_store.connect() as conn:
+        for r in conn.execute("SELECT key, value FROM meta WHERE key LIKE 'tvdl:%'"):
+            try:
+                v = json.loads(r['value'])
+            except ValueError:
+                continue
+            if v.get('state') in ('failed', 'refused'):
+                out.append({'hash': r['key'][5:], 'name': v.get('name'), 'state': v['state'], 'error': v.get('error'),
+                            'at': v.get('at')})
+    return sorted(out, key=lambda x: -(x['at'] or 0))
+
+
 _started = {'on': False}
 
 
 def start() -> bool:
-    if _started['on'] or os.environ.get('LUMA_SKIP_BACKGROUND_THREADS') or not instance.writes_allowed(JOB):
+    if _started['on'] or os.environ.get('LUMA_SKIP_BACKGROUND_THREADS') or not watch_enabled():
         return False
     _started['on'] = True
 
@@ -268,5 +353,5 @@ def start() -> bool:
             except Exception as e:                            # never let one pass end the thread
                 logger.error('TV import pass failed: %s', type(e).__name__)
     threading.Thread(target=loop, name='tv-download-watch', daemon=True).start()
-    logger.info('TV download watch started (tag %s, every %ds)', tag_name(), INTERVAL_S)
+    logger.info('TV download watch started (category %s, every %ds)', category(), INTERVAL_S)
     return True

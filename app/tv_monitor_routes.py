@@ -61,7 +61,7 @@ def show_by_tmdb(tmdb_id):
 
 @bp.route('/api/settings/tv/shows/<int:sid>', methods=['PUT'])
 def show_put(sid):
-    err = tv_settings._guard()
+    err = tv_settings._guard() or tv_settings._signed_in_owner()     # an Edit (path, monitoring): the signed-in owner
     if err:
         return err
     body = request.get_json(silent=True)

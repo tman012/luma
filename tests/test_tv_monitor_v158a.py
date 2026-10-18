@@ -237,7 +237,7 @@ def test_v7_migration_marks_existing_shows_monitored_future_with_a_verified_back
     c.execute('PRAGMA user_version = 6')
     c.commit()
     c.close()
-    assert tv_store.schema_version() == 7
+    assert tv_store.schema_version() == 8
     bak = p.with_name(p.name + '.bak-v6')
     assert bak.exists()
     b = sqlite3.connect(str(bak))
@@ -247,3 +247,56 @@ def test_v7_migration_marks_existing_shows_monitored_future_with_a_verified_back
     assert (s['monitored'], s['monitor'], s['monitor_new_seasons']) == (1, 'future', 1)
     assert _mon(1) == {(0, 1): 0, (1, 1): 0, (2, 1): 1}
     assert {r['season_number']: r['monitored'] for r in rows('SELECT season_number, monitored FROM seasons')} == {0: 0, 1: 0, 2: 1}
+
+
+def _v6_db(rows_sql):
+    p = tv_store.db_path()
+    if p.exists():
+        p.unlink()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tv_store._ready.clear()
+    c = sqlite3.connect(str(p))
+    for script in tv_store.MIGRATIONS[:6]:
+        for stmt in tv_store._statements(script):
+            c.execute(stmt)
+    for sql in rows_sql:
+        c.execute(sql)
+    c.execute('PRAGMA user_version = 6')
+    c.commit()
+    c.close()
+
+
+def test_v158b_v7_migration_keeps_an_existing_monitoring_choice_and_reruns_never_reset(tv_env):  # noqa: F811
+    _v6_db([
+        "INSERT INTO series (id, tmdb_id, title, added_at) VALUES (1, 1, 'No choice', 0)",
+        "INSERT INTO series (id, tmdb_id, title, added_at, monitored) VALUES (2, 2, 'Monitored', 0, 1)",
+        "INSERT INTO series (id, tmdb_id, title, added_at, monitor_new_seasons) VALUES (3, 3, 'New seasons', 0, 1)",
+        "INSERT INTO series (id, tmdb_id, title, added_at) VALUES (4, 4, 'One episode on', 0)",
+        'INSERT INTO seasons (series_id, season_number) VALUES (1, 1), (2, 1), (4, 1)',
+        "INSERT INTO episodes (series_id, season_number, episode_number, air_date, monitored) VALUES"
+        " (1, 1, 1, '2001-01-01', 0), (1, 1, 2, '2099-01-01', 0), (2, 1, 1, '2001-01-01', 1),"
+        " (4, 1, 1, '2001-01-01', 1), (4, 1, 2, '2099-01-01', 0)"])
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 8
+    got = {r['id']: (r['monitored'], r['monitor'], r['monitor_new_seasons'], r['monitor_chosen'])
+           for r in rows('SELECT id, monitored, monitor, monitor_new_seasons, monitor_chosen FROM series')}
+    assert got[1] == (1, 'future', 1, 1)                                  # no choice: Future
+    assert got[2][:3] == (1, 'none', 0) and got[3][:3] == (0, 'none', 1) and got[4][:3] == (0, 'none', 0)
+    assert _mon(2) == {(1, 1): 1} and _mon(4) == {(1, 1): 1, (1, 2): 0}  # flags kept as they were
+    assert _mon(1) == {(1, 1): 0, (1, 2): 1}
+    # the owner turns a show off entirely (an explicit "none"); a re-run never resets it
+    tv_monitor.edit(1, {'monitor': 'none', 'monitored': False})
+    before = rows('SELECT * FROM series ORDER BY id'), rows('SELECT * FROM episodes ORDER BY id')
+    with tv_store.write() as conn:
+        assert tv_store.monitor_defaults(conn) == 0
+    assert (rows('SELECT * FROM series ORDER BY id'), rows('SELECT * FROM episodes ORDER BY id')) == before
+
+
+def test_v158b_show_edit_needs_the_signed_in_owner(scanned, owner, monkeypatch):  # noqa: F811
+    from flask import jsonify
+    sid = _sid('Dark')
+    monkeypatch.setitem(tv_settings._cfg, 'signed_in_owner', lambda: (None, (jsonify({'error': 'Sign in', 'sign_in': True}), 401)))
+    before = rows('SELECT * FROM series WHERE id = ?', sid)
+    assert _req(owner, 'put', f'/api/settings/tv/shows/{sid}', {'monitored': False}).status_code == 401
+    assert rows('SELECT * FROM series WHERE id = ?', sid) == before
+    monkeypatch.setitem(tv_settings._cfg, 'signed_in_owner', lambda: (object(), None))
+    assert _req(owner, 'put', f'/api/settings/tv/shows/{sid}', {'monitored': False}).status_code == 200

@@ -109,6 +109,15 @@ def _new_mismatch(sid: int, now: float) -> bool:
                             (sid, now)).fetchone() is not None
 
 
+def _still_owns(s: Dict[str, object]) -> bool:
+    """Under the lock: the show still holds this folder with the same TMDB show (a 'Wrong show?',
+    Match or delete during the unlocked walk wins; the next pass links the folder's new owner)."""
+    with tv_store.connect() as conn:
+        row = conn.execute('SELECT path_id, folder, tmdb_id FROM series WHERE id = ?', (int(s['id']),)).fetchone()
+    return bool(row) and (row['path_id'], row['folder']) == (s['path_id'], s['folder']) \
+        and (not s.get('tmdb_id') or row['tmdb_id'] == s['tmdb_id'])
+
+
 def _link_shows(shows: List[Dict[str, object]], now: float, wait: Optional[float] = None) -> Optional[int]:
     """Link *shows*. The folder walks and any TMDB re-read run without tv_scan._scan_lock; the lock is
     taken only around the tv.db writes (Reviewer on v158a). *wait*: None tries once (a busy lock
@@ -128,6 +137,8 @@ def _link_shows(shows: List[Dict[str, object]], now: float, wait: Optional[float
         for s, found in walked:
             try:
                 sid = int(s['id'])
+                if not _still_owns(s):
+                    continue
                 tv_scan.scan_files(sid, str(s['path_id']), str(s['folder']), str(s['root']), now, found)
                 if s.get('tmdb_id') and _new_mismatch(sid, now):
                     late.append(s)
@@ -147,6 +158,8 @@ def _link_shows(shows: List[Dict[str, object]], now: float, wait: Optional[float
             if not tv_scan._scan_lock.acquire(timeout=5):
                 continue                          # the next pass (or the scan) catches it
             try:
+                if not _still_owns(s):
+                    continue
                 tv_scan.refresh_episodes(sid, int(s['tmdb_id']), now, data=data)
                 tv_scan.scan_files(sid, str(s['path_id']), str(s['folder']), str(s['root']), now, found)
             finally:

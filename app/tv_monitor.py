@@ -85,7 +85,7 @@ def apply(conn, sid: int, option: str, specials: Optional[bool] = None, today: O
             want = want and sp and option not in ('pilot', 'first_season', 'last_season')
         conn.execute('UPDATE episodes SET monitored = ? WHERE id = ?', (int(want), e['id']))
         on += int(want)
-    conn.execute('UPDATE series SET monitor = ?, monitored = ?, monitor_specials = ? WHERE id = ?',
+    conn.execute('UPDATE series SET monitor = ?, monitored = ?, monitor_specials = ?, monitor_chosen = 1 WHERE id = ?',
                  (option, int(option != 'none'), int(sp), sid))
     sync_seasons(conn, sid)
     return on
@@ -139,23 +139,21 @@ def set_episodes(conn, sid: int, ids: Iterable[int], on: bool) -> int:
         return 0
     n = conn.execute(f'UPDATE episodes SET monitored = ? WHERE series_id = ? AND id IN ({",".join("?" * len(ids))})',
                      (int(on), sid, *ids)).rowcount
-    if on:
-        conn.execute('UPDATE series SET monitored = 1 WHERE id = ?', (sid,))
+    conn.execute('UPDATE series SET monitor_chosen = 1' + (', monitored = 1' if on else '') + ' WHERE id = ?', (sid,))
     sync_seasons(conn, sid)
     return n
 
 
 def set_season(conn, sid: int, season: int, on: bool) -> int:
     n = conn.execute('UPDATE episodes SET monitored = ? WHERE series_id = ? AND season_number = ?', (int(on), sid, season)).rowcount
-    if on:
-        conn.execute('UPDATE series SET monitored = 1 WHERE id = ?', (sid,))
+    conn.execute('UPDATE series SET monitor_chosen = 1' + (', monitored = 1' if on else '') + ' WHERE id = ?', (sid,))
     sync_seasons(conn, sid)
     return n
 
 
 def set_series(conn, sid: int, on: bool) -> None:
     """The series switch: off stops everything (episodes keep their flags for when it's back on)."""
-    conn.execute('UPDATE series SET monitored = ? WHERE id = ?', (int(on), sid))
+    conn.execute('UPDATE series SET monitored = ?, monitor_chosen = 1 WHERE id = ?', (int(on), sid))
 
 
 def wanted(conn, today: Optional[str] = None) -> List[int]:
@@ -264,6 +262,8 @@ def edit(sid: int, body: Dict[str, Any], today: Optional[str] = None) -> Dict[st
                                  (upd['path_id'], upd['folder'], sid)).fetchone()
             if clash:
                 raise Invalid({'path': 'Another show uses this folder'})
+        if 'monitored' in upd or 'monitor_new_seasons' in upd:
+            upd['monitor_chosen'] = 1
         if upd:
             conn.execute(f'UPDATE series SET {", ".join(f"{k} = ?" for k in upd)} WHERE id = ?', (*upd.values(), sid))
         if specials is not None:
