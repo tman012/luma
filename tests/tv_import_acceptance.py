@@ -116,6 +116,10 @@ def evaluate() -> Dict[str, Any]:
             'wrong': wrong, 'ambiguous_auto': ambiguous_auto, 'missed': missed, 'leftovers': leftovers,
             'likely_with_right_guess': f'{likely_right} of {len(likely)}',
             'prechecked': f'{len(prechecked)} of {len(likely)}', 'prechecked_wrong': prechecked_wrong,
+            # every review row that starts unchecked, and why: no TMDB result (none), another folder has the
+            # show (duplicate), or a true tie between two guesses (unclear)
+            'unchecked': sorted((folder, r['tier'] if r['tier'] != 'likely' else r['reason'])
+                                for folder, r in review.items() if r['pick'] is None or r['tier'] != 'likely'),
             'same_name': {k: _where(k, series, review) for k in ('Cheers', 'The Office (US)', 'Love', 'Cheat (2019)')}}
 
 

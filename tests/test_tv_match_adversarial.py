@@ -86,9 +86,8 @@ def test_adversarial_same_name(monkeypatch, high_no_year, year_filter, folder, s
         assert m['tier'] == 'likely' and m['pick'] == (right or shows[0]['id']), (folder, m['pick'])
     if not auto_ok:
         assert m['status'] == 'unmatched'
-    if m['status'] == 'unmatched':      # unchecked unless the files fit the pre-pick alone
-        sole = [s['id'] for s in shows if tv_match.fits(tv_match.file_fit(files(folder.split(' (')[0], eps), show(s['id'])))]
-        assert (m['reason'] == 'unclear') == (m['why'] in tv_match.SAME_NAME and sole != [m['pick']]), (folder, m['reason'])
+    if m['status'] == 'unmatched':      # Luma decides: a same-name guess is pre-checked (Taylor, Oct 18)
+        assert m['reason'] != 'unclear', (folder, m['reason'])
 
 
 def test_popularity_never_decides():

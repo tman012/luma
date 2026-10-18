@@ -84,7 +84,7 @@ def test_f2_the_implicit_fallback_is_used_by_movies(owner, tv_env):  # noqa: F81
     fm.save({**fm.load(), 'paths': [{'id': 'p_00000a01', 'name': 'Movies', 'path': str(tv_env / 'Movies')},
                                     {'id': 'p_00000a02', 'name': 'TV', 'path': str(tv_env / 'TV')}]})
     tv_settings.save({**tv_settings.load(), 'libraries': ['p_00000a02']})
-    assert fm.movies_uses(fm.load()) == set()                 # no Movies rules: nothing depends on it
+    assert fm.movies_uses(fm.load()) == {'p_00000a01'}       # the single path Movies see, rules or not
     _movies_rule(owner, 'p_00000a01')
     assert fm.movies_uses(fm.load()) == {'p_00000a01'}
     r = _put(owner, ['p_00000a02', 'p_00000a01'])
@@ -150,6 +150,47 @@ def test_f2_tv_only_the_lone_path_is_selectable_for_tv(owner, tv_env):  # noqa: 
 
 def test_f2_tv_only_a_second_path_doesnt_pin_the_fallback(owner, tv_env):  # noqa: F811
     tv = _add(owner, 'TV', tv_env / 'TV')
+    assert _put(owner, [tv]).status_code == 200                  # the lone path is TV's
     _add(owner, 'Anime', tv_env / 'Anime')
     assert fm.load()['fallback_path_id'] is None                 # never pinned to a TV path
     assert _put(owner, [tv]).status_code == 200 and fm.load()['fallback_path_id'] is None
+
+
+# Reviewer on a201cfa: rules can't exist without a fallback, so a pin gated on Movies rules never ran.
+# The implicit fallback is pinned on add, select and release whether or not there are rules.
+
+def test_pin_repro_a_adding_a_path_keeps_the_movies_destination(owner, tv_env):  # noqa: F811
+    movies = _add(owner, 'Movies', tv_env / 'Movies')            # one Movies path, no rules
+    assert _dest() == movies
+    _add(owner, 'TV', tv_env / 'TV')
+    assert fm.load()['fallback_path_id'] == movies and _dest() == movies
+
+
+def test_pin_repro_b_selecting_the_movies_path_too_is_refused(owner, tv_env):  # noqa: F811
+    fm.save({**fm.load(), 'paths': [{'id': 'p_00000a01', 'name': 'Movies', 'path': str(tv_env / 'Movies')},
+                                    {'id': 'p_00000a02', 'name': 'TV', 'path': str(tv_env / 'TV')}]})
+    tv_settings.save({**tv_settings.load(), 'libraries': ['p_00000a02']})
+    assert fm.load()['rules'] == [] and _dest() == 'p_00000a01'   # implicit, no rules
+    before = fm.store_path().read_bytes()
+    r = _put(owner, ['p_00000a02', 'p_00000a01'])
+    assert r.status_code == 409 and r.get_json()['errors']['selected'] == 'This path is used by Movies'
+    assert tv_settings.selected_ids() == ['p_00000a02'] and _dest() == 'p_00000a01'
+    assert fm.store_path().read_bytes() == before
+
+
+def test_pin_repro_c_deselecting_keeps_the_movies_destination(owner, tv_env):  # noqa: F811
+    fm.save({**fm.load(), 'paths': [{'id': 'p_00000a01', 'name': 'Movies', 'path': str(tv_env / 'Movies')},
+                                    {'id': 'p_00000a02', 'name': 'TV', 'path': str(tv_env / 'TV')}]})
+    tv_settings.save({**tv_settings.load(), 'libraries': ['p_00000a02']})
+    assert fm.load()['rules'] == [] and _dest() == 'p_00000a01'
+    assert _put(owner, []).status_code == 200
+    assert fm.load()['fallback_path_id'] == 'p_00000a01' and _dest() == 'p_00000a01'
+
+
+def test_pin_a_selection_change_pins_without_rules(owner, tv_env):  # noqa: F811
+    fm.save({**fm.load(), 'paths': [{'id': 'p_00000a01', 'name': 'Movies', 'path': str(tv_env / 'Movies')},
+                                    {'id': 'p_00000a02', 'name': 'TV', 'path': str(tv_env / 'TV')},
+                                    {'id': 'p_00000a03', 'name': 'Anime', 'path': str(tv_env / 'Anime')}]})
+    tv_settings.save({**tv_settings.load(), 'libraries': ['p_00000a02', 'p_00000a03']})
+    assert _put(owner, ['p_00000a02']).status_code == 200                  # release Anime
+    assert fm.load()['fallback_path_id'] == 'p_00000a01' and _dest() == 'p_00000a01'

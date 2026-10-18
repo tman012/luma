@@ -29,7 +29,10 @@ def test_687_folders(fresh):
     # zero wrong auto-picks, every pick checked as the matcher made it (before duplicate resolution can
     # hide one: The Staircase), and no accept-list folder auto-picked at all
     assert ev['wrong'] == [] and ev['ambiguous_auto'] == []
-    assert ev['prechecked_wrong'] == []     # review pre-checks only backed picks (Tester on 4d22f6c)
+    # Luma decides (Taylor, Oct 18): every guess is pre-checked except a true tie; unchecked are only no TMDB
+    # result (4), another folder has the show (4) and two ties. Pre-checked guesses can be wrong (reported).
+    from collections import Counter
+    assert Counter(why for _, why in ev['unchecked']) == {'none': 4, 'duplicate': 4, 'unclear': 2}, ev['unchecked']
     # PM: at least 96.5% of decidable folders import automatically (measured 96.69%, 642 of 664; raw 93.74%).
     # Popularity never decides: a same-name rival auto-picks only when the files fit it (3+ episodes) and rule
     # out every rival (a season it lacks, a later first air, or 25 points less coverage: Tester's rule).

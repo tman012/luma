@@ -370,10 +370,13 @@ def match(folder: str, hints: Optional[Hints] = None, *, search: Optional[Callab
         rows = score(results, q, details)
     tier, why = decide(rows, q, hints, details)
     best = rows[0]['c'] if tier == 'high' else prepick(rows, hints, details)['c']
-    # same-name shows the files don't single out: review pre-picks the best guess but leaves the row unchecked
-    unclear = tier != 'high' and why in SAME_NAME and not _sole_fit(rows, hints, details, best['tmdb_id'])
-    # ... and so does a pick nothing backs: neither an exact title nor files that fit it (WWE Raw -> Raw Classics)
-    unclear = unclear or (tier != 'high' and not backed(rows, hints, details, best['tmdb_id']))
+    # Luma decides (Taylor, Oct 18): review pre-checks its best guess, so one Import all imports everything.
+    # Only a true tie stays unchecked: nothing backs the guess and a rival is indistinguishable from it
+    # (same title, year and country scores, and the files fit both equally).
+    # Luma decides (Taylor, Oct 18): review pre-checks every guess except a true tie: a partial-title guess
+    # the files don't back, with another top result of the same title, year and country scores that the
+    # files fit just as well. An exact title is a decision (TMDB's order breaks a same-name tie).
+    unclear = tier != 'high' and not backed(rows, hints, details, best['tmdb_id']) and tie(rows, hints, details, best['tmdb_id'])
     if tier == 'high' and best['tmdb_id'] not in details:
         d = show(best['tmdb_id'])
         if d:
@@ -436,6 +439,17 @@ def backed(rows, hints, details, tid) -> bool:
         return False
     fit = file_fit(hints, details.get(tid))
     return fits(fit) and fit['tight'] >= 1.0 and _sole_fit(rows, hints, details, tid)
+
+
+def tie(rows, hints, details, tid) -> bool:
+    """Another top result is as good a guess as *tid*: the same title, year and country scores and the
+    same file fit (no files: nothing tells them apart)."""
+    p = next((r for r in rows if r['c']['tmdb_id'] == tid), None)
+    if p is None:
+        return False
+    key = _fit_key(file_fit(hints, details.get(tid)))
+    return any(r is not p and (r['title'], r['year'], r['country']) == (p['title'], p['year'], p['country'])
+               and _fit_key(file_fit(hints, details.get(r['c']['tmdb_id']))) == key for r in rows[:TOP_N])
 
 
 def _sole_fit(rows, hints, details, tid) -> bool:

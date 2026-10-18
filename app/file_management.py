@@ -487,27 +487,29 @@ def check_rules(body: Dict[str, Any], data: Dict[str, Any]) -> Tuple[Optional[Di
 def movies_uses(data: Dict[str, Any], taken: Optional[set] = None) -> set:
     """Library path ids Movies file into: rule destinations and the fallback,
     explicit or implicit (the single path Movies see; Reviewer F2, M31). The
-    implicit one counts only when Movies depend on it: there are Movies rules
-    (PM, Oct 18: a TV-only setup's lone path can be selected for TV)."""
+    one exception: an implicit fallback that is the only Library path at all
+    can be selected for TV (PM, Oct 18: a TV-only setup's lone path)."""
     out = {r['path_id'] for r in data['rules']}
     if data.get('fallback_path_id'):
         out.add(data['fallback_path_id'])
-    fb = effective_fallback(data, taken) if movies_depend(data) else None
+    fb = None if lone_path(data) else effective_fallback(data, taken)
     if fb:
         out.add(fb['id'])
     return out
 
 
-def movies_depend(data: Dict[str, Any]) -> bool:
-    """Movies use the Library paths: there are Movies rules or a chosen fallback."""
-    return bool(data.get('rules')) or bool(data.get('fallback_path_id'))
+def lone_path(data: Dict[str, Any]) -> bool:
+    """One Library path and no chosen fallback: it may be TV's (F2)."""
+    return len(data['paths']) == 1 and not data.get('fallback_path_id')
 
 
-def pin_fallback(data: Dict[str, Any], taken: Optional[set] = None) -> bool:
+def pin_fallback(data: Dict[str, Any], taken: Optional[set] = None, *, adding: bool = False) -> bool:
     """Make an implicit fallback explicit before a change that would move or
     drop it (a path added, a TV selection changed), as the migration does
-    (Reviewer F1). True when *data* changed."""
-    if data.get('fallback_path_id') or not movies_depend(data):
+    (Reviewer F1). Always, except a selection change while the implicit
+    fallback is the only Library path (F2: the lone path can be TV's; there is
+    nothing for it to move to). True when *data* changed."""
+    if data.get('fallback_path_id') or (lone_path(data) and not adding):
         return False
     fb = effective_fallback(data, taken)
     if not fb:
@@ -817,7 +819,7 @@ def library_paths_add():
         if errors:
             return None, errors
         rec = {'id': _new_id('p', {p['id'] for p in data['paths']}), 'name': name, 'path': path}
-        pin_fallback(data)              # the single Movies path stays the fallback (F1)
+        pin_fallback(data, adding=True)  # the single Movies path stays the fallback (F1)
         data['paths'].append(rec)
         return rec, {}
 
