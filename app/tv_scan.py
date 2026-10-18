@@ -1001,6 +1001,8 @@ def import_all(items: List[Tuple[int, int]], now: Optional[float] = None) -> Dic
             failed.append({'id': uid, 'error': NOT_FOUND})
         elif tid in seen:
             failed.append({'id': uid, 'error': TAKEN})
+        elif _owned_elsewhere(row, tid, now):
+            failed.append({'id': uid, 'error': TAKEN})          # another folder has it: a duplicate, unchecked
         else:
             seen.add(tid)
             jobs.append((row, tid))
@@ -1027,6 +1029,20 @@ def import_all(items: List[Tuple[int, int]], now: Optional[float] = None) -> Dic
         else:
             failed.append({'id': row['id'], 'error': out['error']})
     return {'ok': True, 'imported': imported, 'failed': failed}
+
+
+def _owned_elsewhere(row: Dict[str, Any], tid: int, now: float) -> bool:
+    """Import all never moves a show another folder already has (The Office (US),
+    SmackDown): the row becomes a duplicate in review, its candidate that show."""
+    with tv_store.connect() as conn:
+        owner = conn.execute('SELECT * FROM series WHERE tmdb_id = ? AND path_id IS NOT NULL AND folder IS NOT NULL'
+                             ' AND NOT (path_id = ? AND folder = ?)', (tid, row['path_id'], row['folder'])).fetchone()
+    if owner is None:
+        return False
+    g = tv_match.parse_folder(row['folder'])
+    _store_unmatched(row['path_id'], row['folder'], {'guess': {'title': g['title'], 'year': g['year']},
+                                                     'candidates': [_show_brief(owner)]}, now, reason='duplicate')
+    return True
 
 
 def lookup(q: str) -> Optional[List[Dict[str, Any]]]:

@@ -81,3 +81,9 @@ def test_bump_skips_versions_taken_elsewhere(tmp_path, monkeypatch):
     assert any('taken' in p for p in sw_stamp.check())
     with pytest.raises(SystemExit):
         sw_stamp.set_version(140)
+
+
+def test_v148_stays_with_the_bundled_import_fixes():
+    """4b82ab5 (Import fixes, v148) was bundled: later builds are v149 or later."""
+    assert 148 in sw_stamp.TAKEN
+    assert sw_stamp.version_number() >= 149

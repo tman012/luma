@@ -121,3 +121,21 @@ def test_import_routes_owner_only(minimal_app, lib):  # noqa: F811
                  ('post', '/api/settings/tv/import-all')):
         assert getattr(other, m)(u, environ_base=REMOTE, headers=HDR).status_code == 403
         assert getattr(minimal_app.test_client(), m)(u, environ_base=REMOTE, headers=HDR).status_code == 401
+
+
+def test_import_all_never_takes_a_show_another_folder_has(scanned):
+    """Tester on 4d22f6c: Import all moved The Office (US) and SmackDown off their folders. It never
+    assigns a show another folder has; the row becomes a duplicate in review (unchecked) instead."""
+    sev = rows("SELECT id, folder, path_id FROM series WHERE tmdb_id = 95396")[0]
+    un = {u['folder']: u for u in _get(scanned, '/api/settings/tv/library').get_json()['unmatched']}
+    a = un['Mystery Show']['id']
+    before = rows('SELECT COUNT(*) AS n FROM history')[0]['n']
+    body = _post(scanned, '/api/settings/tv/import-all', {'items': [{'id': a, 'tmdb_id': 95396}]}).get_json()
+    assert body['imported'] == [] and body['failed'] == [{'id': a, 'error': tv_scan.TAKEN}]
+    assert rows("SELECT id, folder, path_id FROM series WHERE tmdb_id = 95396")[0] == sev       # stays where it is
+    dup = next(u for u in body['unmatched'] if u['folder'] == 'Mystery Show')
+    assert (dup['tier'], dup['pick'], dup['reason']) == ('duplicate', 95396, 'duplicate')
+    assert [c['tmdb_id'] for c in dup['candidates']] == [95396]
+    assert rows('SELECT COUNT(*) AS n FROM history')[0]['n'] == before                         # nothing moved
+    tv_scan.run(now=999999.0)                                  # a rescan doesn't move it either
+    assert rows("SELECT id, folder FROM series WHERE tmdb_id = 95396")[0]['folder'] == sev['folder']
