@@ -9,7 +9,7 @@ from tests.tv_fake import fake_tmdb  # noqa: F401
     ('Severance (2022)', 'Severance', 2022, {}),
     ('Severance', 'Severance', None, {}),
     ('Severance.2022', 'Severance', 2022, {}),
-    ('The Office (US) {tvdb-73244}', 'The Office (US)', None, {'tvdb': 73244}),
+    ('The Office (US) {tvdb-73244}', 'The Office', None, {'tvdb': 73244}),
     ('Dark (2017) [tmdbid-70523]', 'Dark', 2017, {'tmdb': 70523}),
     ('Dark {tmdb-70523}', 'Dark', None, {'tmdb': 70523}),
     ('Taskmaster [imdbid-tt4934214]', 'Taskmaster', None, {'imdb': 'tt4934214'}),
@@ -18,7 +18,8 @@ from tests.tv_fake import fake_tmdb  # noqa: F401
     ('2001', '2001', None, {}),
 ])
 def test_parse_folder(name, title, year, ids):
-    assert tv_match.parse_folder(name) == {'title': title, 'year': year, 'ids': ids}
+    g = tv_match.parse_folder(name)
+    assert (g['title'], g['year'], g['ids']) == (title, year, ids)
 
 
 @pytest.mark.parametrize('a,b', [('Marvel’s Agents of S.H.I.E.L.D.', "marvels agents of s h i e l d"),
@@ -72,8 +73,8 @@ def test_partial_title_is_not_exact(fake_tmdb):
 
 def test_no_results(fake_tmdb):
     m = tv_match.match('Zzz Nothing')
-    assert m == {'status': 'unmatched', 'candidates': [], 'reason': 'no_results',
-                 'guess': {'title': 'Zzz Nothing', 'year': None}}
+    assert (m['status'], m['tier'], m['candidates'], m['reason'], m['pick']) == ('unmatched', 'none', [], 'no_results', None)
+    assert m['guess'] == {'title': 'Zzz Nothing', 'year': None, 'country': None}
 
 
 def test_top_five_only(fake_tmdb, monkeypatch):
