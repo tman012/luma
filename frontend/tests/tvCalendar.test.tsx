@@ -133,27 +133,21 @@ describe('week math', () => {
 // ---------------------------------------------------------------- calendar
 
 describe('Calendar', () => {
-  it('opens by default: this week as an agenda, 720px and centered, with states and air dates', async () => {
+  it('opens by default: this week as a 7-column grid, Sunday first, with states and air dates; no Today on this week', async () => {
     page(true);
     const rows = await screen.findAllByTestId('tv-agenda-row');
     expect(screen.getByTestId('tv-tab-calendar').getAttribute('aria-selected')).toBe('true');
     expect(calCalls()).toEqual(['start=2026-10-11&days=7']);
-    const cal = screen.getByTestId('tv-calendar');
-    expect([cal.style.maxWidth, cal.style.margin]).toEqual([`${CAL_MAX_W}px`, '0px auto']);
-    expect(CAL_MAX_W).toBe(720);
     expect(screen.getByTestId('tv-cal-label').textContent).toBe('Oct 11 \u2013 17');
-    expect(screen.getByTestId('tv-cal-today')).toBeTruthy();
-    expect(screen.getAllByTestId('tv-agenda-day').map(d => d.firstElementChild!.textContent)).toEqual(['Mon, Oct 12', 'Fri, Oct 16', 'Today']);
+    expect(screen.queryByTestId('tv-cal-today')).toBeNull();
+    expect(screen.getAllByTestId('tv-grid-day').map(d => d.firstElementChild!.textContent)).toEqual(
+      ['Sun 10/11', 'Mon 10/12', 'Tue 10/13', 'Wed 10/14', 'Thu 10/15', 'Fri 10/16', 'Sat 10/17']);
     expect(rows.map(r => r.getAttribute('aria-label'))).toEqual([
       'Downloaded: Severance S02E01', 'Missing: Severance S02E02', 'Upcoming: Severance S02E03']);
-    expect(rows.map(r => r.style.height)).toEqual(['72px', '72px', '72px']);
-    expect(rows.map(r => within(r).getByTestId('tv-state-word').textContent)).toEqual(['Downloaded', 'Missing', 'Upcoming']);
     expect(rows.map(r => within(r).getByTestId('tv-stripe').style.background)).toEqual(['rgb(34, 197, 94)', 'rgb(239, 68, 68)', 'rgb(59, 130, 246)']);
-    expect(rows.map(r => within(r).getByTestId('tv-stripe').style.width)).toEqual(['3px', '3px', '3px']);
     expect(within(rows[0]!).getByTestId('tv-check')).toBeTruthy();
     expect(within(rows[1]!).queryByTestId('tv-check')).toBeNull();
-    expect(rows[0]!.textContent).toContain('S02E01 \u00b7 Episode 1');
-    expect(within(rows[0]!).getByTestId('tv-air').textContent).toBe('Oct 12');
+    expect(rows[0]!.textContent).toContain('Episode 1');
     // rows aren't clickable
     expect(rows.every(r => r.tagName === 'DIV' && !r.querySelector('button, a'))).toBe(true);
   });

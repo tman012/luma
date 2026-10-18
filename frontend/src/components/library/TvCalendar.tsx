@@ -35,8 +35,8 @@ export function TvCalendar({ today, week, onWeek, reload = 0 }: {
   const eps = data?.key === key ? data.cal.episodes.filter(e => e.air_date >= week && e.air_date < end) : [];
 
   return (
-    <div data-testid="tv-calendar" style={{ fontFamily: FONT, width: '100%', maxWidth: CAL_MAX_W, margin: '0 auto' }}>
-      <Toolbar label={weekLabel(week)}
+    <div data-testid="tv-calendar" style={{ fontFamily: FONT, width: '100%' }}>
+      <Toolbar label={weekLabel(week)} showToday={week !== weekStart(today)}
         onPrev={() => onWeek(addDays(week, -7))} onNext={() => onWeek(addDays(week, 7))} onToday={() => onWeek(weekStart(today))} />
       <div style={{ marginTop: 16 }}>
         {failed === key ? (
@@ -46,14 +46,16 @@ export function TvCalendar({ today, week, onWeek, reload = 0 }: {
         ) : !eps.length ? (
           <div data-testid="tv-cal-empty" style={emptyCard}>No episodes this week</div>
         ) : (
-          <Agenda eps={eps} today={today} />
+          <WeekGrid eps={eps} week={week} today={today} />
         )}
       </div>
     </div>
   );
 }
 
-function Toolbar({ label, onPrev, onNext, onToday }: { label: string; onPrev: () => void; onNext: () => void; onToday: () => void }) {
+function Toolbar({ label, showToday, onPrev, onNext, onToday }: {
+  label: string; showToday: boolean; onPrev: () => void; onNext: () => void; onToday: () => void;
+}) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
       <button type="button" aria-label="Previous week" data-testid="tv-cal-prev" className="lp-focus tvc-glass" onClick={onPrev} style={iconBtn}>
@@ -65,7 +67,57 @@ function Toolbar({ label, onPrev, onNext, onToday }: { label: string; onPrev: ()
       <button type="button" aria-label="Next week" data-testid="tv-cal-next" className="lp-focus tvc-glass" onClick={onNext} style={iconBtn}>
         <ChevronIcon size={18} />
       </button>
-      <button type="button" data-testid="tv-cal-today" className="lp-focus tvc-glass" onClick={onToday} style={pill}>Today</button>
+      {showToday
+        ? <button type="button" data-testid="tv-cal-today" className="lp-focus tvc-glass" onClick={onToday} style={pill}>Today</button>
+        : <span aria-hidden="true" style={{ width: 70, flex: 'none' }} />}
+    </div>
+  );
+}
+
+/** The week grid (default): 7 columns, Sunday first, one glass card per episode with a 3px state bar. */
+export function WeekGrid({ eps, week, today }: { eps: CalEpisode[]; week: Day; today: Day }) {
+  const days = Array.from({ length: 7 }, (_, i) => addDays(week, i));
+  return (
+    <div data-testid="tv-cal-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 8 }}>
+      {days.map(d => {
+        const list = eps.filter(e => e.air_date === d);
+        const isToday = d === today;
+        return (
+          <section key={d} data-testid="tv-grid-day" data-day={d} style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+            <h4 style={{ margin: 0, padding: '6px 8px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+              background: isToday ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.04)', color: isToday ? '#3b82f6' : W50 }}>
+              {dayHeader(d)}
+            </h4>
+            {list.map(e => <GridCard key={e.episode_id} e={e} today={today} />)}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dayHeader = (d: Day) => {
+  const [y = 1970, m = 1, dd = 1] = d.split('-').map(Number);
+  return `${DOW[new Date(y, m - 1, dd).getDay()]} ${m}/${dd}`;
+};
+
+function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
+  const st = episodeState(e, today);
+  return (
+    <div data-testid="tv-agenda-row" data-state={st} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`}
+      style={{ position: 'relative', padding: '8px 8px 8px 11px', borderRadius: 8, background: 'rgba(255,255,255,0.06)',
+        border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Stripe color={STATE_COLOR[st]} />
+      <span style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+        <span style={{ ...one, flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
+        <span style={{ flex: 'none', fontSize: 11, color: W50 }}>{code(e.season, e.episode)}</span>
+      </span>
+      {e.title && <span style={{ ...one, fontSize: 12, color: W70 }}>{e.title}</span>}
+      <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: W50 }}>
+        {st === 'downloaded' && <Check />}
+        {e.air_time || shortDate(e.air_date)}
+      </span>
     </div>
   );
 }
