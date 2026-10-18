@@ -205,11 +205,11 @@ describe('Calendar', () => {
     expect([title.style.whiteSpace, title.style.textOverflow, title.style.fontSize, title.style.color])
       .toEqual(['nowrap', 'ellipsis', '12px', 'rgba(255, 255, 255, 0.7)']);
     expect(title.nextElementSibling!.getAttribute('data-testid')).toBe('tv-air');   // line 3: the time
-    // toolbar: ‹ › on the left, the range centered
-    const nav = screen.getByTestId('tv-cal-nav');
-    expect(nav.contains(screen.getByTestId('tv-cal-prev')) && nav.contains(screen.getByTestId('tv-cal-next'))).toBe(true);
-    expect(screen.getByTestId('tv-cal-toolbar').style.gridTemplateColumns).toBe('1fr auto 1fr');
-    expect(screen.getByTestId('tv-cal-label').style.textAlign).toBe('center');
+    // the top row: ‹ range › together in the true center (a 1fr auto 1fr grid), no separate toolbar
+    const center = screen.getByTestId('tv-cal-center');
+    expect(center.contains(screen.getByTestId('tv-cal-prev')) && center.contains(screen.getByTestId('tv-cal-next'))).toBe(true);
+    expect(screen.getByTestId('tv-top-row').style.gridTemplateColumns).toBe('1fr auto 1fr');
+    expect(screen.queryByTestId('tv-cal-toolbar')).toBeNull();
     // rows aren't clickable
     expect(rows.every(r => r.tagName === 'DIV' && !r.querySelector('button, a'))).toBe(true);
   });
@@ -279,8 +279,18 @@ describe('Search', () => {
     const field = screen.getByTestId('tv-search') as HTMLInputElement;
     expect([field.placeholder, field.style.height]).toEqual(['Search shows', '36px']);
     expect(screen.getByTestId('tv-search-box').style.width).toBe('320px');                        // compact, in the top row
-    expect(screen.getByTestId('tv-top-row').lastElementChild).toBe(screen.getByTestId('tv-search-box'));  // right-aligned
-    expect(within(screen.getByTestId('tv-top-row')).getByTestId('tv-cal-prev')).toBeTruthy();      // the week controls share the row
+    // the top row: a 3-column grid (1fr auto 1fr); search far left, ‹ range › in the true center, tabs right
+    const row = screen.getByTestId('tv-top-row');
+    expect([row.style.display, row.style.gridTemplateColumns]).toEqual(['grid', '1fr auto 1fr']);
+    expect(screen.getByTestId('tv-top-left').contains(screen.getByTestId('tv-search-box'))).toBe(true);
+    expect(screen.getByTestId('tv-top-left').style.justifySelf).toBe('start');
+    const center = screen.getByTestId('tv-top-center');
+    expect(center.style.justifySelf).toBe('center');
+    expect([...within(center).getByTestId('tv-cal-center').children].map(c => c.getAttribute('data-testid')))
+      .toEqual(['tv-cal-prev', 'tv-cal-label', 'tv-cal-next']);
+    expect(screen.getByTestId('tv-top-right').style.justifySelf).toBe('end');
+    expect(screen.getByTestId('tv-top-right').contains(screen.getByTestId('tv-tabs'))).toBe(true);
+    expect(screen.queryByTestId('tv-title')).toBeNull();                                           // no 'TV' heading
     type('S');
     expect(screen.getByTestId('tv-section').getAttribute('data-view')).toBe('calendar');
     type('Se'); type('Sev');
@@ -290,8 +300,8 @@ describe('Search', () => {
     expect(rows.map(r => r.textContent)).toEqual(['Severance (2022)2 seasonsIn library', 'Severance Pay (2026)1 seasonAdd']);
     expect(rows[0]!.getAttribute('data-in-library')).toBe('true');
     expect(rows[0]!.querySelector('button, a')).toBeNull();
-    const drop = screen.getByTestId('tv-search-drop');                       // a 480px glass dropdown on the field's right edge
-    expect([drop.style.width, drop.style.right, drop.style.position, drop.style.borderRadius, drop.style.background, drop.style.backdropFilter])
+    const drop = screen.getByTestId('tv-search-drop');                       // a 480px glass dropdown on the field's left edge
+    expect([drop.style.width, drop.style.left, drop.style.position, drop.style.borderRadius, drop.style.background, drop.style.backdropFilter])
       .toEqual(['480px', '0px', 'absolute', '12px', 'rgba(255, 255, 255, 0.06)', 'blur(16px)']);
     expect(rows[1]!.firstElementChild!.getAttribute('style')).toContain('height: 72px');            // the same 72px rows
     expect(screen.getAllByTestId('tv-agenda-row').length).toBeGreaterThan(0);                     // the view stays under it
@@ -394,7 +404,7 @@ describe('tabs', () => {
     unmatched = [{ id: 7, path_id: TV.id, path_name: 'TV', folder: 'Mystery', guess_title: null, guess_year: null, candidates: [], reason: null, tier: 'none' }];
     page(true);
     await screen.findAllByTestId('tv-agenda-row');
-    expect(screen.getByTestId('tv-title').textContent).toBe('TV');
+    expect(screen.queryByTestId('tv-title')).toBeNull();
     expect(screen.getAllByRole('tab').slice(0, 5).map(t => t.textContent)).toEqual(['Series', 'Calendar', 'Import', 'Libraries', 'Options']);
     expect(screen.getByTestId('tv-tab-calendar').getAttribute('aria-selected')).toBe('true');
     expect(screen.queryByTestId('tv-import-badge')).toBeNull();

@@ -63,6 +63,29 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true }: 
   );
 }
 
+/** The page's top row center: ‹ range › (prev, the week, next). */
+export function WeekCenter({ week, onWeek }: { week: Day; onWeek: (start: Day) => void }) {
+  return (
+    <div data-testid="tv-cal-center" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <button type="button" aria-label="Previous week" data-testid="tv-cal-prev" className="lp-focus tvc-glass" onClick={() => onWeek(addDays(week, -7))} style={iconBtn}>
+        <ChevronLeftIcon size={18} />
+      </button>
+      <span data-testid="tv-cal-label" aria-live="polite" style={{ textAlign: 'center', fontSize: 15, fontWeight: 600, color: W95, whiteSpace: 'nowrap' }}>
+        {weekLabel(week)}
+      </span>
+      <button type="button" aria-label="Next week" data-testid="tv-cal-next" className="lp-focus tvc-glass" onClick={() => onWeek(addDays(week, 7))} style={iconBtn}>
+        <ChevronIcon size={18} />
+      </button>
+    </div>
+  );
+}
+
+/** Today, when another week is shown (the top row's right side). */
+export function TodayButton({ today, week, onWeek }: { today: Day; week: Day; onWeek: (start: Day) => void }) {
+  if (week === weekStart(today)) return null;
+  return <button type="button" data-testid="tv-cal-today" className="lp-focus tvc-glass" onClick={() => onWeek(weekStart(today))} style={pill}>Today</button>;
+}
+
 /** ‹ › (and Today) on the left, the week range centered. */
 export function WeekControls({ today, week, onWeek }: { today: Day; week: Day; onWeek: (start: Day) => void }) {
   return (

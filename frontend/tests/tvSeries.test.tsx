@@ -49,7 +49,14 @@ describe('Series grid', () => {
     expect([bar.style.height, bar.style.background]).toEqual(['4px', 'rgba(255, 255, 255, 0.08)']);
     expect((bar.firstElementChild as HTMLElement).style.width).toBe('80%');
     const rail = screen.getByTestId('tv-series-rail');
-    expect(rail.style.width).toBe('28px');
+    // the rail: 32px wide, letters 13/600 spread evenly over the full available height, 24px targets, hover pill
+    expect([rail.style.width, rail.style.justifyContent, rail.style.flexDirection]).toEqual(['32px', 'space-between', 'column']);
+    expect(parseInt(rail.style.height, 10)).toBeGreaterThanOrEqual(27 * 24);
+    const w = screen.getByTestId('tv-rail-W');
+    expect([w.style.width, w.style.height, w.style.fontSize, w.style.fontWeight]).toEqual(['24px', '24px', '13px', '600']);
+    expect(w.className).toContain('lp-focus');
+    expect(w.className).toContain('tvs-rail-btn');
+    expect(document.head.textContent + document.body.innerHTML).toContain('.tvs-rail-btn[aria-disabled=false]:hover');
     expect(rail.getAttribute('data-pin')).toBe('top');                              // pinned (fixed) only once scrolled past
     // captions: 13/600, 17px lines, 2 lines max with an ellipsis, always 34px tall; the full name in title + aria-label
     const name = within(tiles[2]!).getByTestId('tv-series-name');

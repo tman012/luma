@@ -16,7 +16,7 @@ import {
   WideCtx, card, libraryPathsCss, muted, pad, primary, rowBtn, sectionLabel, segBtn, segOn, segment, subText, titleText, topBorder,
 } from './LibraryPathsSettings';
 import { ImportSection, ReviewSection, ShowPicker, FADE_MS, importCss, initialReview, type ReviewState } from './TvImport';
-import { TvCalendar, WeekControls, tvCalendarCss } from './TvCalendar';
+import { TodayButton, TvCalendar, WeekCenter, tvCalendarCss } from './TvCalendar';
 import { TvSeries } from './TvSeries';
 import { SEARCH_LIST_ID, SEARCH_MIN, TvSearch, searchRowId, tvSearchCss, type SearchKeys } from './TvSearch';
 import { LibrarySelector } from './LibrarySelector';
@@ -208,12 +208,15 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
       {toast && <NoticeToast key={toast + seq.current} text={toast} onDone={() => setToast('')} />}
 
       {wide ? (
-        // one row, like Sonarr's toolbar: title, the week controls (Calendar), the tabs, the compact search on the right
-        <div data-testid="tv-top-row" style={{ display: 'flex', alignItems: 'center', gap: 16, minHeight: 40, flexWrap: 'wrap' }}>
-          <h2 data-testid="tv-title" style={{ margin: 0, flex: 'none', fontSize: 18, fontWeight: 600, color: 'rgba(255,255,255,0.95)' }}>TV</h2>
-          <div style={{ flex: 1, minWidth: 0 }}>{calendarTop && <WeekControls today={today} week={week} onWeek={onWeek} />}</div>
-          {control}
-          {search}
+        // one row, 3 columns (1fr auto 1fr): the search at the far left, ‹ range › in the true center of the
+        // row, Today and the view tabs on the right
+        <div data-testid="tv-top-row" style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 16, minHeight: 40 }}>
+          <div data-testid="tv-top-left" style={{ justifySelf: 'start', minWidth: 0 }}>{search}</div>
+          <div data-testid="tv-top-center" style={{ justifySelf: 'center' }}>{calendarTop && <WeekCenter week={week} onWeek={onWeek} />}</div>
+          <div data-testid="tv-top-right" style={{ justifySelf: 'end', display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+            {calendarTop && <TodayButton today={today} week={week} onWeek={onWeek} />}
+            {control}
+          </div>
         </div>
       ) : (
         <>
@@ -318,7 +321,7 @@ function SearchBox({ wide, value, onChange, results }: {
       )}
       {shown && (
         <div data-testid="tv-search-drop"
-          style={{ position: 'absolute', zIndex: 60, top: 'calc(100% + 6px)', right: 0, width: SEARCH_DROP_W, maxWidth: 'calc(100vw - 32px)',
+          style={{ position: 'absolute', zIndex: 60, top: 'calc(100% + 6px)', left: 0, width: SEARCH_DROP_W, maxWidth: 'calc(100vw - 32px)',
             maxHeight: 'min(70vh, 560px)', overflowY: 'auto', boxSizing: 'border-box', borderRadius: 12,
             background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
             backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', boxShadow: '0 16px 48px rgba(0,0,0,0.45)' }}>

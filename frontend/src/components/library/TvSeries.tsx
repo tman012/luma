@@ -11,6 +11,15 @@ const W50 = 'rgba(255,255,255,0.5)';
 const W95 = 'rgba(255,255,255,0.95)';
 const ACCENT = '#3b82f6';
 const RAIL_TOP = 24;
+/** The A–Z rail: 13/600 letters spread evenly down the full available height (from under the header to the
+ * viewport bottom), 24px targets, a glass pill on hover, the focus ring on keyboard focus. */
+export const RAIL = { width: 32, target: 24, font: 13, bottom: 16 };
+const RAIL_MIN_H = 27 * RAIL.target;               // # + A–Z
+const railHeight = (top: number) => Math.max(RAIL_MIN_H, Math.round(window.innerHeight - Math.max(top, RAIL_TOP) - RAIL.bottom));
+export const tvSeriesCss = `
+.tvs-rail-btn{border-radius:999px;transition:background-color .12s,color .12s}
+.tvs-rail-btn[aria-disabled=false]:hover{color:rgba(255,255,255,.95)!important;background:rgba(255,255,255,.10)!important}
+`;
 export const LETTERS = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
 
 /** The sort key (mirrors tv_scan.sort_title): accents folded, lower case, periods and
@@ -47,7 +56,7 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
     return m;
   }, [sorted]);
   const [current, setCurrent] = useState<string | null>(null);
-  const pinned = useRef<{ mode: string; left: number }>({ mode: '', left: -1 });
+  const pinned = useRef<{ mode: string; left: number; height?: number }>({ mode: '', left: -1 });
   const col = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLElement>(null);
@@ -73,13 +82,15 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
       const nav = railRef.current;
       const box = root.current?.getBoundingClientRect();
       if (!nav || !box) return;
-      const h = nav.offsetHeight;
+      const h = railHeight(RAIL_TOP);
       const left = Math.round(col.current?.getBoundingClientRect().left || 0);
       const mode = box.top >= RAIL_TOP || box.height <= h ? 'top' : box.bottom - h < RAIL_TOP ? 'bottom' : 'fixed';
+      const height = mode === 'top' ? railHeight(box.top) : h;
       const p = pinned.current;
-      if (p.mode === mode && (mode !== 'fixed' || p.left === left)) return;
-      pinned.current = { mode, left };
+      if (p.mode === mode && p.height === height && (mode !== 'fixed' || p.left === left)) return;
+      pinned.current = { mode, left, height };
       nav.dataset.pin = mode;
+      nav.style.height = `${height}px`;
       Object.assign(nav.style, mode === 'fixed'
         ? { position: 'fixed', top: `${RAIL_TOP}px`, bottom: '', left: `${left}px` }
         : mode === 'bottom' ? { position: 'absolute', top: '', bottom: '0px', left: '0px' }
@@ -105,7 +116,7 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
 
   if (shows === null) {
     return (
-      <div data-testid="tv-series-loading" aria-busy="true" style={{ ...grid, paddingRight: 28 }}>
+      <div data-testid="tv-series-loading" aria-busy="true" style={{ ...grid, paddingRight: RAIL.width }}>
         {Array.from({ length: 12 }, (_, i) => (
           <span key={i} style={{ display: 'block', aspectRatio: '2 / 3', borderRadius: 8, background: 'rgba(255,255,255,0.04)' }} />
         ))}
@@ -127,18 +138,20 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
       <div style={{ ...grid, flex: 1, minWidth: 0 }}>
         {sorted.map(s => <Tile key={s.id} s={s} first={firsts.get(letterOf(s.title)) === s.id} />)}
       </div>
-      <div ref={col} style={{ width: 28, flex: 'none', alignSelf: 'stretch', position: 'relative' }}>
+      <style>{tvSeriesCss}</style>
+      <div ref={col} style={{ width: RAIL.width, flex: 'none', alignSelf: 'stretch', position: 'relative' }}>
       {/* position, top/bottom/left and data-pin are set by pin() (not by React, so a re-render never undoes them) */}
       <nav ref={railRef} aria-label="Jump to letter" data-testid="tv-series-rail"
-        style={{ width: 28, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+        style={{ width: RAIL.width, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between',
+          boxSizing: 'border-box' }}>
         {LETTERS.map(l => {
           const has = firsts.has(l);
           const on = has && l === current;
           return (
             <button key={l} type="button" data-testid={`tv-rail-${l}`} aria-disabled={!has} tabIndex={has ? 0 : -1}
-              onClick={() => has && jump(l)} className={has ? 'lp-focus' : undefined}
-              style={{ width: 20, height: 20, padding: 0, border: 'none', background: 'none', fontFamily: FONT, fontSize: 11, fontWeight: 600,
-                lineHeight: '20px', textAlign: 'center', cursor: has ? 'pointer' : 'default', pointerEvents: has ? 'auto' : 'none',
+              onClick={() => has && jump(l)} className={has ? 'lp-focus tvs-rail-btn' : 'tvs-rail-btn'}
+              style={{ width: RAIL.target, height: RAIL.target, flex: 'none', padding: 0, border: 'none', background: 'none', fontFamily: FONT,
+                fontSize: RAIL.font, fontWeight: 600, lineHeight: `${RAIL.target}px`, textAlign: 'center', cursor: has ? 'pointer' : 'default', pointerEvents: has ? 'auto' : 'none',
                 color: on ? ACCENT : has ? W50 : 'rgba(255,255,255,0.2)' }}>
               {l}
             </button>
