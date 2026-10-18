@@ -541,11 +541,8 @@ def pin_fallback(data: Dict[str, Any], taken: Optional[set] = None, *, adding: b
     fb = effective_fallback(data, taken)
     if not fb:
         return False
-    try:                                  # v167: a read-only Library path is never made a write destination
-        if os.path.isdir(fb['path']) and not os.access(os.path.realpath(fb['path']), os.W_OK | os.X_OK):
-            return False
-    except OSError:
-        pass
+    if read_only(fb):                     # v167: a read-only Library path is never made a write destination
+        return False
     data['fallback_path_id'] = fb['id']
     return True
 
@@ -571,14 +568,25 @@ def movies_only(data: Dict[str, Any], taken: Optional[set] = None) -> Dict[str, 
     return out
 
 
+def read_only(path: Dict[str, Any]) -> bool:
+    """A Library path that is there and can't be written (v169). A folder that isn't there right
+    now is not read-only (the mover waits for it)."""
+    try:
+        real = os.path.realpath(path['path'])
+        return os.path.isdir(real) and not os.access(real, os.W_OK | os.X_OK)
+    except (OSError, KeyError, TypeError):
+        return False
+
+
 def effective_fallback(data: Dict[str, Any], taken: Optional[set] = None) -> Optional[Dict[str, Any]]:
     """The fallback path; with exactly one Movies path and none chosen, that
-    one. Paths a section (TV) selected are never it."""
+    one, unless it is read-only (v169, Reviewer: a read-only Library path is
+    never the implicit fallback). Paths a section (TV) selected are never it."""
     data = movies_only(data, taken)
     by_id = {p['id']: p for p in data['paths']}
     if data.get('fallback_path_id') in by_id:
         return by_id[data['fallback_path_id']]
-    if len(data['paths']) == 1:
+    if len(data['paths']) == 1 and not read_only(data['paths'][0]):
         return data['paths'][0]
     return None
 
@@ -616,6 +624,13 @@ def pick_destination(data: Dict[str, Any], info: Dict[str, Any],
         if r.get('enabled') and r.get('path_id') in by_id and rule_matches(r, info, today):
             return by_id[r['path_id']]
     return effective_fallback(data, taken)
+
+
+def no_writable_destination(data: Dict[str, Any], taken: Optional[set] = None) -> bool:
+    """pick_destination found nothing because the Movies paths there are read-only (v169): the
+    mover flags the item 'No writable destination' instead of skipping it as 'no destination'."""
+    paths = movies_only(data, taken)['paths']
+    return bool(paths) and any(read_only(p) for p in paths)
 
 
 def needs_release_date(data: Dict[str, Any]) -> bool:

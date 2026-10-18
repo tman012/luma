@@ -295,7 +295,7 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
     try:
         kind, payload = (fetch or (lambda u: fetch_link(u, automatic=origin == 'auto', tokens_only=tokens_only)))(item.get('downloadUrl'))
     except tracker_sources.GrabError as e:
-        return {'ok': False, 'error': str(e), 'link': True}
+        return {'ok': False, 'error': str(e), 'link': True, 'status': getattr(e, 'status', 502)}
     h = info_hash(kind, payload)
     if not h:
         return {'ok': False, 'error': 'This release has no info hash'}

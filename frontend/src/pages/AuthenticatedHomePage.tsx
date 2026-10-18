@@ -363,6 +363,8 @@ function NavPills({ onRoomsOpen, onUpgradesOpen, onWatchlistOpen, onCollectionsO
         <button
           key={pill.id}
           type="button"
+          data-testid={`home-nav-${pill.id}`}
+          data-nav="home"
           onClick={() => pill.path ? navigate(pill.path) : pill.id === 'luma-ai' ? onLumaOpen() : pill.id === 'tv-calendar' ? onTvCalendarOpen() : pill.id === 'rooms' ? onRoomsOpen() : pill.id === 'upgrades' ? onUpgradesOpen() : pill.id === 'latest' ? onLatestOpen() : pill.id === 'activity' ? onActivityOpen() : pill.id === 'watchlist' ? onWatchlistOpen() : pill.id === 'collections' ? onCollectionsOpen() : pill.id === 'library' ? onLibrariesOpen() : undefined}
           onTouchStart={() => setPressed(pill.id)}
           onTouchEnd={() => setPressed(null)}

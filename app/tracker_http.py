@@ -124,6 +124,8 @@ def raise_for_status(resp: Response) -> None:
         raise TrackerError('rate', s, retry_after_seconds(resp.headers.get('Retry-After')))
     if s == 503 and resp.headers.get('Retry-After'):
         raise TrackerError('rate', s, retry_after_seconds(resp.headers.get('Retry-After')))
+    if s == 400:                    # v169: a strict site's 400 is a rate backoff; honor its Retry-After
+        raise TrackerError('http', s, retry_after_seconds(resp.headers.get('Retry-After')))
     raise TrackerError('http', s)
 
 

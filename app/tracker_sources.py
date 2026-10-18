@@ -31,7 +31,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import urljoin, urlsplit
 
 from app import tracker_types as tt
-from app.tracker_guard import address_scope, record_failure
+from app.tracker_guard import address_scope, record_failure, strict_400
 from app.tracker_http import TrackerError, looks_banned, raise_for_status
 
 logger = logging.getLogger(__name__)
@@ -216,10 +216,10 @@ def safe_magnet(uri: Any) -> Optional[str]:
     return s
 
 
-def _magnet_or_refuse(uri: Any) -> Tuple[str, str]:
+def _magnet_or_refuse(uri: Any, status: int = 502) -> Tuple[str, str]:
     m = safe_magnet(uri)
     if not m:
-        raise GrabError('This download link isn’t allowed.', 502)
+        raise GrabError('This download link isn’t allowed.', status)
     return 'magnet', m
 
 
@@ -253,7 +253,7 @@ def fetch_release(token: Optional[str], resolver=None, automatic: bool = False) 
         raise GrabError('This tracker’s saved sign-in can’t be read. Edit it in Settings.', 409) from None
 
     if target.lower().startswith('magnet:'):
-        return _magnet_or_refuse(target)
+        return _magnet_or_refuse(target, 400)        # v169 (Tester): the token's own target refused: a 400
 
     base = _origin(str(cfg.get('url') or ''))
     if base is None:
@@ -263,18 +263,20 @@ def fetch_release(token: Optional[str], resolver=None, automatic: bool = False) 
     strict = tt.is_rate_strict(cfg['type'])
     gk = guard_key(cfg)
 
-    def plan(url: str) -> Dict[str, str]:
-        """Headers for *url*, or GrabError when it may not be fetched."""
+    def plan(url: str, status: int = 502) -> Dict[str, str]:
+        """Headers for *url*, or GrabError when it may not be fetched. v169 (Tester): *status* 400
+        for the token's own target (the link itself is bad: no fallback), 502 for a hop the tracker
+        redirected to."""
         o = _origin(url)
         if o is None:
-            raise GrabError('This download link isn’t valid.', 502)
+            raise GrabError('This download link isn’t valid.', status)
         if o == base:
             if not _host_ok(o[1], o[2], resolver=resolver):
-                raise GrabError('This download link isn’t allowed.', 502)
+                raise GrabError('This download link isn’t allowed.', status)
             return dict(creds)
         # Another origin: never with a saved credential.
         if any(s in url for s in secrets) or not _host_ok(o[1], o[2], resolver=resolver):
-            raise GrabError('This download link points to another site and wasn’t fetched.', 502)
+            raise GrabError('This download link points to another site and wasn’t fetched.', status)
         return {}
 
     purpose = None
@@ -292,6 +294,7 @@ def fetch_release(token: Optional[str], resolver=None, automatic: bool = False) 
             raise GrabError('This tracker is rate limited right now. Try again later.', 429)
         engine.guard.wait_spacing(gk)
 
+    plan(target, 400)             # v169 (Tester): a target we'd refuse costs nothing: not charged, not fetched
     with engine.guard.tracker_lock(gk):
         charge()
         url = target
@@ -320,7 +323,7 @@ def fetch_release(token: Optional[str], resolver=None, automatic: bool = False) 
                 else:
                     raise TrackerError('redirect')
         except TrackerError as e:
-            if e.kind in ('rate', 'banned', 'auth'):
+            if e.kind in ('rate', 'banned', 'auth') or strict_400(gk, e):    # v169: strict 400 = rate
                 record_failure(engine.guard, gk, e, scope)
             logger.info('Tracker %s (id %s) download failed: %s', cfg['name'], cfg['id'], e.kind)
             if e.kind == 'rate':

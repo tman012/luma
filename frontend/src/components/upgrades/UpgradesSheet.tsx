@@ -560,7 +560,7 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
       });
       if (resp.ok) {
         setUpgradedIds(prev => new Set(prev).add(tmdbId));
-        setToast(`${item.title} added to Watchlist`);
+        setToast(`${item.title} added to watchlist`);   // v169 (Tester): sentence case
         setTimeout(() => setToast(null), 2500);
         apiFetch('/api/upgrades/mark-grabbed', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },

@@ -4820,15 +4820,17 @@ def _mark_not_mapped(downloads, torrents, meta_by_hash, seen_hashes):
         jobs = _fm.load().get('jobs') or {}
     except Exception:
         return
+    status_of = {_lm.PATH_NOT_MAPPED: 'not_mapped', _lm.NO_WRITABLE_DEST: 'no_writable'}   # v169: no_writable
     flagged = {h.lower(): j for h, j in jobs.items()
-               if isinstance(j, dict) and j.get('state') == 'waiting' and j.get('status') == _lm.PATH_NOT_MAPPED}
+               if isinstance(j, dict) and j.get('state') == 'waiting' and j.get('status') in status_of}
     if not flagged:
         return
     rows = {d.get('hash'): d for d in downloads if d.get('hash')}
     by_hash = {(t.get('hash') or '').lower(): t for t in torrents}
     for h, job in flagged.items():
+        st = status_of[job.get('status')]
         if h in rows:
-            rows[h].update(status='not_mapped', state='not_mapped')
+            rows[h].update(status=st, state=st)
             continue
         t = by_hash.get(h) or {}
         meta = meta_by_hash.get(h, {})
@@ -4845,8 +4847,8 @@ def _mark_not_mapped(downloads, torrents, meta_by_hash, seen_hashes):
             'size_remaining': 0,
             'speed': 0,
             'eta': None,
-            'status': 'not_mapped',
-            'state': 'not_mapped',
+            'status': st,
+            'state': st,
             'tracker': _normalize_tracker_url(t.get('tracker', '')) if t else None,
             'queue_id': meta.get('queue_id'),
         })

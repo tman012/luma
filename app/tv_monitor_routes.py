@@ -342,5 +342,7 @@ def popup_grab():
     g = tv_grab.grab(item, sid, season, ids, 'manual', now, tokens_only=True)
     if g.get('ok'):
         return _out({'ok': True, 'series_id': sid, 'existing': bool(g.get('existing'))})
+    if g.get('link') and g.get('status') == 400:      # v169 (Tester): a refused target (internal or metadata IP,
+        return _out({'ok': False, 'error': g.get('error'), 'fallback': False}, 400)   # file:, another site): no fallback
     return _out({'ok': False, 'error': g.get('error'), 'blocked': bool(g.get('blocked')),
                  'fallback': bool(g.get('link') or g.get('client'))})

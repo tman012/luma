@@ -15,12 +15,14 @@ Rules:
 
 * user (interactive) searches and Tests: 40 per tracker per hour;
 * background searches: token bucket, burst 5, one token per 180 s (20/h);
-* AvistaZ family (AvistaZ, PrivateHD, CinemaZ, ExoticaZ): every request,
+* AvistaZ family (AvistaZ, PrivateHD, PixelHD, CinemaZ, ExoticaZ): every request,
   user or background, goes through the bucket, so 20/h with a burst of 5;
 * 300 per tracker per rolling 24 h, 120 per hour across all trackers;
 * at least 2 s between requests to one tracker;
 * backoff after a failure, longer on each consecutive failure:
   429/rate limit: Retry-After, else 1 h (doubling, max 6 h);
+  400 from a strict site (AvistaZ family, IPTorrents; tracker_types.STRICT_400_TYPES):
+  the same as a rate limit (v169, ported from the Prowlarr path's strict 400 cooldown);
   ban: 24 h; rejected credentials: 1 h (cleared when the credentials change);
   network/timeouts/5xx: 5 min (doubling, max 1 h); bad answers: 15 min.
 
@@ -304,7 +306,8 @@ class TrackerGuard:
     def wait_spacing(self, tid: str) -> None:
         """Sleep so requests to one tracker are at least min_interval_s apart
         (call while holding tracker_lock(tid))."""
-        wait = LIMITS['min_interval_s'] - (time.time() - self.last_sent.get(tid, 0.0))
+        wait = min(LIMITS['min_interval_s'],             # v169: a clock step back never parks it longer
+                   LIMITS['min_interval_s'] - (time.time() - self.last_sent.get(tid, 0.0)))
         if wait > 0:
             time.sleep(wait)
         self.last_sent[tid] = time.time()
@@ -458,10 +461,20 @@ def address_scope(cfg: Dict, guard: Optional[TrackerGuard] = None):
     return scope
 
 
+def strict_400(gk: str, err) -> bool:
+    """A 400 answer from a strict site (AvistaZ family, IPTorrents): backed off as a rate limit."""
+    from app import tracker_types as tt
+    return (getattr(err, 'status', None) == 400 and getattr(err, 'kind', '') == 'http'
+            and gk.startswith('site:') and tt.is_strict_400(gk[5:]))
+
+
 def record_failure(g: TrackerGuard, gk: str, err, scope=None) -> float:
     """Start the site's backoff after *err*; a rate limit or ban on a
-    Torznab/Newznab server also covers the addresses it was reached at."""
-    until = g.failure(gk, err.kind, err.retry_after)
+    Torznab/Newznab server also covers the addresses it was reached at. A 400
+    from a strict site starts a rate backoff (1 h doubling to 6 h, or its
+    Retry-After when longer), so the next request waits as on the Prowlarr path."""
+    kind = 'rate' if strict_400(gk, err) else err.kind
+    until = g.failure(gk, kind, err.retry_after)
     if scope is not None and getattr(scope, 'by_ip', False) and err.kind in _IP_KINDS:
         for a in scope.addresses:
             g.failure(ip_key(a), err.kind, err.retry_after)
@@ -497,7 +510,7 @@ def guarded_test(cfg: Dict, run, guard: Optional[TrackerGuard] = None) -> None:
             with scope:
                 run(cfg)
         except TrackerError as e:
-            if e.kind in ('rate', 'banned'):
+            if e.kind in ('rate', 'banned') or strict_400(gk, e):
                 record_failure(g, gk, e, scope)
             raise
     g.success(gk)

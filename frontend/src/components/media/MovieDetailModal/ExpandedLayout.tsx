@@ -1422,6 +1422,29 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                     <span style={{ fontSize: '28px', color: SRC_HEADING_COLOR }}>{NO_SOURCES}</span>
                   </div>
                 ))}
+                {/* v169 (Tester): No sources: Add to watchlist, the #3b82f6 primary, as on the phone sheet */}
+                {!sourcesLoading && !sourcesError && sourcesReleases.length === 0 && !inWatchlist && (
+                  <div style={{ display: 'flex', justifyContent: 'center', marginTop: '28px' }}>
+                    <button
+                      type="button"
+                      data-testid="sources-add-watchlist-desktop"
+                      onClick={handleUpgradeOpen}
+                      style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px',
+                        height: '64px', padding: '0 36px', borderRadius: '16px', border: 'none', cursor: 'pointer',
+                        fontSize: '22px', fontWeight: 600,
+                        background: '#3b82f6',
+                        color: '#ffffff',
+                      }}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                      </svg>
+                      Add to watchlist
+                    </button>
+                  </div>
+                )}
 
                 {/* Results — multi-level drill-down */}
                 {!sourcesLoading && !sourcesError && sourcesReleases.length > 0 && (() => {

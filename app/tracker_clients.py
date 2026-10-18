@@ -25,6 +25,7 @@ from html.parser import HTMLParser
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlencode, urljoin, urlsplit
 
+from app import safe_xml
 from app import tracker_types as tt
 from app.tracker_http import Response, TrackerError, looks_banned, raise_for_status
 from app.tracker_http import request as http_request
@@ -135,7 +136,7 @@ def _parse_xml(resp: Response) -> ET.Element:
     if resp.status >= 300:
         raise TrackerError('redirect', resp.status)
     try:
-        root = ET.fromstring(resp.body)
+        root = safe_xml.fromstring(resp.body)      # v169: defusedxml, never the stdlib parser
     except ET.ParseError:
         raise TrackerError('response', resp.status) from None
     _newznab_error(root)

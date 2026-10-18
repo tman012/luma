@@ -704,6 +704,82 @@
   ]
  },
  {
+  "id": "pixelhd",
+  "name": "PixelHD",
+  "protocol": "torrent",
+  "fields": [
+   {
+    "key": "name",
+    "label": "Name",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "url",
+    "label": "URL",
+    "kind": "url",
+    "required": true,
+    "secret": false,
+    "default": "https://pixelhd.me"
+   },
+   {
+    "key": "username",
+    "label": "Username",
+    "kind": "text",
+    "required": true,
+    "secret": false,
+    "default": null
+   },
+   {
+    "key": "password",
+    "label": "Password",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "pid",
+    "label": "PID",
+    "kind": "secret",
+    "required": true,
+    "secret": true,
+    "default": null
+   },
+   {
+    "key": "categories",
+    "label": "Categories",
+    "kind": "categories",
+    "required": true,
+    "secret": false,
+    "default": [
+     2000,
+     5000
+    ]
+   },
+   {
+    "key": "priority",
+    "label": "Priority",
+    "kind": "number",
+    "required": true,
+    "secret": false,
+    "default": 25
+   }
+  ],
+  "categories": [
+   {
+    "id": 2000,
+    "name": "Movies"
+   },
+   {
+    "id": 5000,
+    "name": "TV"
+   }
+  ]
+ },
+ {
   "id": "privatehd",
   "name": "PrivateHD",
   "protocol": "torrent",

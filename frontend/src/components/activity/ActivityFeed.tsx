@@ -45,7 +45,7 @@ interface ActiveDownload {
   mediaType: 'movie' | 'tv';
   progress: number;      // 0..1
   eta: string | null;
-  status: string;        // 'downloading' | 'stalled' | 'copying' | 'importing' | 'not_mapped'
+  status: string;        // 'downloading' | 'stalled' | 'copying' | 'importing' | 'not_mapped' | 'no_writable'
   tracker: string | null;
   name: string;
   hash: string;          // qBittorrent info-hash (for remove / delete+files)
@@ -65,6 +65,8 @@ const THUMB_W = 78;
 export const CARD_BG = T.glass;                         // rgba(255,255,255,0.06)
 export const CARD_BORDER = '1px solid rgba(255,255,255,0.08)';   // white 8% (--color-glass-8)
 export const PATH_NOT_MAPPED = 'Path not mapped';
+/** v169 (Reviewer, PM): the only Movies destination is read-only; shown on the item, no helper text. */
+export const NO_WRITABLE_DEST = 'No writable destination';
 export const NO_ART_BG = 'rgba(255,255,255,0.04)';
 export const SIGN_IN_BUTTON = { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' };
 const THUMB_H = 117;
@@ -450,7 +452,8 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
           const c = dl.tracker ? getBadgeColor(dl.tracker) : null;
           const pct = Math.round(dl.progress * 100);
           const notMapped = dl.status === 'not_mapped';
-          const stalled = dl.status === 'stalled' || notMapped;
+          const noWritable = dl.status === 'no_writable';
+          const stalled = dl.status === 'stalled' || notMapped || noWritable;
           const copying = dl.status === 'copying';
           const importing = dl.status === 'importing';
           const accent = copying || importing ? '#4ade80' : stalled ? '#fbbf24' : '#60a5fa';
@@ -459,6 +462,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
             ? 'Processing…'
             : copying ? `Copying to library… ${pct}%`
             : notMapped ? PATH_NOT_MAPPED
+            : noWritable ? NO_WRITABLE_DEST
             : stalled ? 'Stalled'
             : dl.eta ? `${dl.eta} left` : 'Downloading…';
           const speedStr = dl.status === 'downloading' && dl.speed > 0 ? fmtSpeed(dl.speed) : null;
@@ -536,7 +540,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                   style={{ width: `${pct}%`, background: barColor }} />
               </div>
               <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-white/35">
-                <span className="min-w-0 truncate" style={{ color: copying || importing || stalled ? accent : undefined }}>
+                <span className="min-w-0 truncate" data-testid="download-status" style={{ color: copying || importing || stalled ? accent : undefined }}>
                   {statusLabel}{speedStr ? ` · ↓ ${speedStr}` : ''}
                 </span>
                 <span className="shrink-0 tabular-nums">{fmtGb(dl.sizeTotal - dl.sizeRemaining)} / {fmtGb(dl.sizeTotal)}</span>

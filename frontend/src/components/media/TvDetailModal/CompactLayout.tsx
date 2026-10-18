@@ -1433,7 +1433,7 @@ export function CompactLayout(props: TvModalViewProps) {
             animation: 'mobileToastEnter 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         >
-          Added to Watchlist!
+          Added to watchlist
         </div>
       )}
 

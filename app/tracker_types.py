@@ -101,6 +101,7 @@ TRACKER_TYPES: Dict[str, Dict[str, Any]] = {
         'fields': _common('https://www.morethantv.me') + [_f('api_key', 'API key', SECRET, True)] + _tail(),
         'categories': NEWZNAB_CATEGORIES,
     },
+    'pixelhd': _avistaz_family('PixelHD', 'https://pixelhd.me'),            # v169: AvistaZ network
     'privatehd': _avistaz_family('PrivateHD', 'https://privatehd.to'),
 }
 
@@ -156,6 +157,18 @@ def searches_by_id(type_id: str) -> bool:
 
 def is_rate_strict(type_id: str) -> bool:
     return (get_type(type_id) or {}).get('family') == 'avistaz'
+
+
+# v169 (tracker port step 1): the strict 400 cooldown, ported from indexer_api's
+# GUARD_LIMITS['strict_400_definitions'] (AvistaZ, PrivateHD, PixelHD, CinemaZ,
+# ExoticaZ, IPTorrents). A 400 from one of these is treated as the site
+# throttling us: a rate backoff (1 h, doubling, max 6 h), as the Prowlarr path does.
+STRICT_400_TYPES = ('avistaz', 'cinemaz', 'exoticaz', 'iptorrents', 'pixelhd', 'privatehd')
+
+
+def is_strict_400(type_id: str) -> bool:
+    t = str(type_id or '').strip().lower()
+    return t in STRICT_400_TYPES and get_type(t) is not None
 
 
 # ---------------------------------------------------------------- validation

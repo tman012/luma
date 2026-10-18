@@ -15,6 +15,8 @@ from typing import Dict, List, Optional, Any
 
 import requests
 
+from app import safe_xml
+
 logger = logging.getLogger(__name__)
 
 # Newznab standard movie subcategories.  Prowlarr browse mode does NOT expand
@@ -71,6 +73,13 @@ GUARD_LIMITS = {
     'strict_400_hosts': ('avistaz.to', 'privatehd.to', 'pixelhd.me', 'cinemaz.to', 'exoticaz.to',
                          'iptorrents.com', 'iptorrents.me'),
 }
+def _spacing_wait(last: float) -> float:
+    """Seconds to wait so requests to one indexer stay min_interval_s apart. v169: never more than
+    min_interval_s, so a clock that stepped back (or a last-sent time from the future) can't park a
+    search or a download for hours; the spacing itself is unchanged."""
+    return min(GUARD_LIMITS['min_interval_s'], GUARD_LIMITS['min_interval_s'] - (time.time() - last))
+
+
 LOADED_COOLDOWN_MAX_S = 24 * 3600    # a saved cooldown never reaches further than this
 LOG_BODY_MAX = 300                   # characters of a 400 body written to the log
 _INDEXER_STATUS_TTL = 60             # seconds to cache /api/v1/indexerstatus
@@ -471,6 +480,7 @@ class ProwlarrClient:
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.session = requests.Session()
+        self.session.trust_env = False      # v169 (Reviewer): no env proxy or .netrc on the search session either
         self.session.headers.update({
             'X-Api-Key': api_key,
             'Accept': 'application/json',
@@ -679,7 +689,7 @@ class ProwlarrClient:
                 if hit:
                     return hit[1]
                 raise IndexerSkipped(f'indexer {ix} guard: {reason}')
-            wait = GUARD_LIMITS['min_interval_s'] - (time.time() - _indexer_last_ts.get(ix, 0.0))
+            wait = _spacing_wait(_indexer_last_ts.get(ix, 0.0))
             if wait > 0:
                 time.sleep(wait)
             try:
@@ -720,14 +730,33 @@ class ProwlarrClient:
         except ValueError:
             return None
 
+    _DOT_SEG = re.compile(r'(^|/)\.{1,2}(/|$)')
+
     def owns(self, url: str) -> bool:
-        """*url* is on this Prowlarr (same scheme, host and port, under its URL base)."""
-        from urllib.parse import urlsplit
+        """*url* is on this Prowlarr (same scheme, host and port, under its URL base). v169
+        (Reviewer): a path with a '.' or '..' segment, raw or percent-encoded (or behind a
+        backslash), is refused outright, so '/prowlarr/../admin' never passes as under '/prowlarr'."""
+        from urllib.parse import unquote, urlsplit
         mine, theirs = self._origin(self.base_url), self._origin(url)
         if mine is None or theirs != mine:
             return False
+        try:
+            path = urlsplit(str(url).strip()).path
+        except ValueError:
+            return False
+        decoded = path
+        for _ in range(3):                   # %252e%252e: decode until stable
+            nxt = unquote(decoded)
+            if nxt == decoded:
+                break
+            decoded = nxt
+        if '%' in decoded and unquote(decoded) != decoded:
+            return False
+        for p in (path, decoded, decoded.replace('\\', '/')):
+            if self._DOT_SEG.search(p):
+                return False
         base_path = urlsplit(self.base_url).path.rstrip('/')
-        return not base_path or (urlsplit(url).path + '/').startswith(base_path + '/')
+        return not base_path or (path + '/').startswith(base_path + '/')
 
     def _download_indexer(self, url: str) -> int:
         from urllib.parse import urlsplit
@@ -769,7 +798,7 @@ class ProwlarrClient:
                 if reason:
                     logger.info('%s (id %s) download not sent: %s', self._indexer_name(ix), ix, reason)
                     raise IndexerSkipped(f'indexer {ix} guard: {reason}')
-                wait = GUARD_LIMITS['min_interval_s'] - (time.time() - _indexer_last_ts.get(ix, 0.0))
+                wait = _spacing_wait(_indexer_last_ts.get(ix, 0.0))
                 if wait > 0:
                     time.sleep(wait)
                 try:
@@ -1125,6 +1154,7 @@ class TorznabClient:
         self.torznab_url = torznab_url.rstrip('/')
         self.api_key = api_key
         self.session = requests.Session()
+        self.session.trust_env = False      # v169 (Reviewer): every indexer session, no env proxy or .netrc
 
     def test_connection(self) -> bool:
         """Test connectivity by requesting caps."""
@@ -1185,7 +1215,7 @@ class TorznabClient:
         """Parse Torznab RSS XML into normalised movie dicts."""
         movies: List[Dict] = []
         try:
-            root = ET.fromstring(xml_text)
+            root = safe_xml.fromstring(xml_text)      # v169: defusedxml, never the stdlib parser
         except ET.ParseError as e:
             logger.error(f'Torznab XML parse error: {e}')
             return movies
@@ -1306,7 +1336,7 @@ class TorznabClient:
 
         results: List[Dict] = []
         try:
-            root = ET.fromstring(xml_text)
+            root = safe_xml.fromstring(xml_text)      # v169: defusedxml, never the stdlib parser
         except ET.ParseError as e:
             logger.error(f'Torznab search_all XML parse error: {e}')
             return results

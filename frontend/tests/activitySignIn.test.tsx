@@ -10,7 +10,7 @@ const auth = { implicit: false };
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => ({ openMovie: vi.fn(), openTv: vi.fn(), openPerson: vi.fn() }) }));
 
-import { ActivityFeed, PATH_NOT_MAPPED, CARD_BG, CARD_BORDER, NO_ART_BG, SIGN_IN_BUTTON, SIGN_IN_TO_DELETE, removeDownload } from '@/components/activity/ActivityFeed';
+import { ActivityFeed, PATH_NOT_MAPPED, NO_WRITABLE_DEST, CARD_BG, CARD_BORDER, NO_ART_BG, SIGN_IN_BUTTON, SIGN_IN_TO_DELETE, removeDownload } from '@/components/activity/ActivityFeed';
 
 const H = 'a'.repeat(40);
 const QUEUE = { downloads: [{ name: 'Some.Show.S01.1080p.WEB-GRP', hash: H, progress: 0.5, status: 'downloading',
@@ -127,5 +127,23 @@ describe('Activity: a grab whose path is not mapped', () => {
     render(<MemoryRouter><ActivityFeed /></MemoryRouter>);
     expect(await screen.findByText(PATH_NOT_MAPPED)).toBeTruthy();
     expect(PATH_NOT_MAPPED).toBe('Path not mapped');
+  });
+});
+
+describe('Activity: a grab with no writable destination (v169, Reviewer + PM)', () => {
+  it("shows 'No writable destination' on the item itself, amber, with no helper text", async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes('/api/downloads/queue')) return res({ downloads: [{ ...QUEUE.downloads[0], progress: 1, status: 'no_writable', size_remaining: 0 }] });
+      if (u.includes('/api/downloads/history')) return res({ entries: [] });
+      return res({});
+    }));
+    render(<MemoryRouter><ActivityFeed /></MemoryRouter>);
+    const label = await screen.findByText(NO_WRITABLE_DEST);
+    expect(NO_WRITABLE_DEST).toBe('No writable destination');
+    expect(label.getAttribute('data-testid')).toBe('download-status');
+    expect(label.textContent).toBe('No writable destination');           // the label alone: no helper text
+    expect(label.style.color).toBe('rgb(251, 191, 36)');                  // #fbbf24, the stalled/not-mapped amber
+    expect(screen.queryByText(/Settings|choose|writable folder|permission/i)).toBeNull();
   });
 });

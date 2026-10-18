@@ -76,6 +76,7 @@ TERMINAL = ('done', 'exists', 'failed', 'skipped')
 
 
 NOT_WRITABLE = 'library folder not writable'
+NO_WRITABLE_DEST = 'no writable destination'   # v169: flagged on the Downloads item right away
 
 
 class Pending(Exception):
@@ -923,6 +924,8 @@ def process(job: Dict[str, Any], torrent: Dict[str, Any], data: Dict[str, Any], 
             info['release_date'] = date.fromisoformat(job['release_date'])
     dest = fm.pick_destination(data, info)
     if not dest:
+        if fm.no_writable_destination(data):      # v169: read-only paths only: say so, wait for a fix
+            raise Pending(NO_WRITABLE_DEST)
         raise Refused('no destination')
     lib_root = os.path.realpath(dest['path'])
     if fm.blocked(lib_root) or not os.path.isdir(lib_root) or fm.overlaps_downloads(lib_root):
@@ -996,6 +999,13 @@ def _files_of(sess, url: str) -> Callable[[str], Optional[List[Dict[str, Any]]]]
 def _note_pending(h: str, job: Dict[str, Any], reason: str, now: float) -> None:
     """Remember since when a grab's files can't be found; flag it after
     NOT_FOUND_AFTER_S so Settings can show it."""
+    if reason in (NOT_WRITABLE, NO_WRITABLE_DEST):
+        # v169 (Reviewer, PM): a destination Luma can't write is never a silent wait: the Downloads
+        # item says 'No writable destination' at once, and files as soon as a writable one exists.
+        if job.get('status') != NO_WRITABLE_DEST:
+            logger.warning('Library mover: no writable destination for %s (%s)', job.get('title'), reason)
+            _set_job(h, pending_since=job.get('pending_since') or now, status=NO_WRITABLE_DEST)
+        return
     if reason not in NOT_FOUND_REASONS:
         if job.get('pending_since') or job.get('status'):
             _set_job(h, pending_since=None, status='')
@@ -1009,7 +1019,7 @@ def _note_pending(h: str, job: Dict[str, Any], reason: str, now: float) -> None:
                            job.get('title'), fm.downloads_root())
             _set_job(h, pending_since=since if since is not None else now, status=PATH_NOT_MAPPED)
         return
-    if job.get('status') == PATH_NOT_MAPPED:
+    if job.get('status') in (PATH_NOT_MAPPED, NO_WRITABLE_DEST):
         _set_job(h, pending_since=now, status='')
         return
     if since is None:

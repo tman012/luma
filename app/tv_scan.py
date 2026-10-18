@@ -816,6 +816,42 @@ def run_pool(jobs: List[Any], fn: Callable[[Any], Dict[str, Any]]) -> List[Dict[
 
 EMPTY = 'Folder is empty (not mounted?)'
 _empty_logged: Dict[str, str] = {}
+# v169 (Reviewer): folders a bare mount point or a NAS volume has with no shows on it. They don't make
+# a library path "not empty" (.Trash-* is hidden, so show_folders never lists it; it is named anyway).
+SYSTEM_DIRS = ('lost+found', '@eadir', '#recycle')
+MOUNT_META = 'tv_mount:'                     # + path id: the mount point the path was on at its last good scan
+
+
+def _system_dir(name: str) -> bool:
+    n = name.casefold()
+    return n in SYSTEM_DIRS or n.startswith('.trash-')
+
+
+def _mount_of(path: str) -> str:
+    """The mount point *path* is on (itself when it is one)."""
+    p = os.path.realpath(path)
+    while not os.path.ismount(p):
+        up = os.path.dirname(p)
+        if up == p:
+            break
+        p = up
+    return p
+
+
+def _dropped_mount(pid: str, root_real: str) -> bool:
+    """The library path was on a mount between it and '/' at its last good scan, and that mount is
+    gone now (os.path.ismount says so): a dropped NAS mount, whatever the bare folder underneath holds."""
+    try:
+        was = tv_store.get_meta(MOUNT_META + pid)
+    except Exception:                        # noqa: BLE001 - no record: no signal
+        return False
+    if not was:
+        return False
+    now = _mount_of(root_real)
+    if was == now:
+        return False
+    under = root_real == was or root_real.startswith(was.rstrip('/') + '/')
+    return under and (now == '/' or was.startswith(now.rstrip('/') + '/')) and not os.path.ismount(was)
 
 
 class EmptyRoot(FileNotFoundError):
@@ -836,16 +872,26 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
         raise FileNotFoundError(MISSING)
     pid = rec['id']
     folders = show_folders(root_real)
-    if not folders and _has_rows(pid):
+    shows = [f for f in folders if not _system_dir(f)]
+    if (not shows or _dropped_mount(pid, root_real)) and _has_rows(pid):
         # M34 (v167): an empty library path that had shows is an unmounted share's mount point (or a
         # share that's still coming up), not a library whose every show was deleted: skip it like a
-        # missing path, so every row stays as last seen until its folders are back.
+        # missing path, so every row stays as last seen until its folders are back. v169 (Reviewer):
+        # lost+found, @eaDir, #recycle and .Trash-* don't count as shows, and a mount the path was on
+        # at its last good scan that is gone now (os.path.ismount) counts as empty too.
         if _empty_logged.get(pid) != root_real:
             _empty_logged[pid] = root_real
             logger.warning('TV scan: library path %s is empty but had shows; skipped (not mounted?), shows kept',
                            pid)
         raise EmptyRoot(EMPTY)
     _empty_logged.pop(pid, None)
+    if shows:
+        try:
+            mount = _mount_of(root_real)
+            if tv_store.get_meta(MOUNT_META + pid) != mount:
+                tv_store.set_meta(MOUNT_META + pid, mount)
+        except Exception:                    # noqa: BLE001 - only a signal; never stops a scan
+            pass
     _scan_seq[0] += 1
     _path_scans[pid] = (_scan_seq[0], root_real)
     out = {'shows': 0, 'unmatched': 0, 'linked': 0, 'mismatch': 0, 'unrecognized': 0}
@@ -1417,13 +1463,13 @@ KEEP_REASONS = ('duplicate',)
 def _rule_id() -> str:
     import hashlib
     import inspect
-    try:
+    try:                                         # v169 (Reviewer): import time, so never raise
         src = inspect.getsource(tv_match)
-    except (OSError, TypeError):                 # no source shipped: the name alone
+        h = hashlib.sha256(src.encode('utf-8'))
+        h.update(repr(sorted(AUTO_REASONS)).encode('utf-8'))
+        return f'{tv_match.RULE_VERSION}+{h.hexdigest()[:10]}'
+    except Exception:                            # noqa: BLE001 - no source shipped, odd loader: the name alone
         return tv_match.RULE_VERSION
-    h = hashlib.sha256(src.encode('utf-8'))
-    h.update(repr(sorted(AUTO_REASONS)).encode('utf-8'))
-    return f'{tv_match.RULE_VERSION}+{h.hexdigest()[:10]}'
 
 
 RERUN_RULE = _rule_id()

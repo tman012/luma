@@ -331,7 +331,7 @@ def test_link_to_another_site_carrying_a_saved_secret_is_refused(signed_in, env)
     env['mock'].set('cdn.example', R(body=torrent_bytes()))
     rel = _search(signed_in)[0]
     r = _grab(signed_in, rel['download_url'])
-    assert r.status_code == 502
+    assert r.status_code == 400          # v169 (Tester): the token's own target refused: a 400
     assert env['mock'].hits('cdn.example') == [] and env['qbit'].added == []
     assert APIKEY not in r.get_data(as_text=True)
 
@@ -343,7 +343,7 @@ def test_link_local_metadata_and_private_other_hosts_are_never_fetched(signed_in
     env['mock'].set('t.example', R(body=rss(('The Nut Job 2014 1080p WEB-DL', link))))
     rel = _search(signed_in)[0]
     r = _grab(signed_in, rel['download_url'])
-    assert r.status_code == 502
+    assert r.status_code == 400          # v169 (Tester): the token's own target refused: a 400
     assert len(env['mock'].calls) == 1 and env['qbit'].added == []
 
 
@@ -354,7 +354,7 @@ def test_tracker_on_a_private_address_gets_no_download_request(signed_in, env):
     rel = _search(signed_in)[0]
     calls = len(env['mock'].calls)
     r = _grab(signed_in, rel['download_url'])
-    assert r.status_code == 502 and env['qbit'].added == []
+    assert r.status_code == 400 and env['qbit'].added == []
     assert len(env['mock'].calls) == calls
 
 

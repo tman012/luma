@@ -198,7 +198,7 @@ describe('Add tracker: type picker', () => {
     expect(dlg.style.maxWidth).toBe('480px');
     expect(dlg.style.borderRadius).toBe('20px');
     const names = within(dlg).getAllByTestId('tracker-type').map(b => b.textContent);
-    expect(names).toEqual(['Torznab', 'Newznab', 'AvistaZ', 'BeyondHD', 'CinemaZ', 'ExoticaZ', 'IPTorrents', 'MoreThanTV', 'PrivateHD']);
+    expect(names).toEqual(['Torznab', 'Newznab', 'AvistaZ', 'BeyondHD', 'CinemaZ', 'ExoticaZ', 'IPTorrents', 'MoreThanTV', 'PixelHD', 'PrivateHD']);
     expect(names.join(' ')).not.toMatch(/jackett|prowlarr/i);
     const search = within(dlg).getByRole('searchbox', { name: 'Search' }) as HTMLInputElement;
     expect(search.placeholder).toBe('Search');
