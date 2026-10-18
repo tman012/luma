@@ -59,6 +59,18 @@ DETAIL_READ_PREFIXES = (
     '/api/clearlogo/', '/api/plex/lookup', '/api/plex/episode/',
     '/api/tmdb/person_by_id/',
 )
+# v180: prod's library ownership (Plex match) on test. These are the routes the
+# owned Play/Watch and Home's owned orbs read; every one was already on above
+# (no new allowance). All are reads: GET, plus the batch check's POST body query.
+# tests/test_v180_ownership_routes.py keeps them reads and off the gated list.
+OWNERSHIP_READ = (
+    ('GET', '/api/plex/lookup'),
+    ('POST', '/api/check-ownership-batch'),
+    ('GET', '/api/plex/movie/<int:rating_key>'),
+    ('GET', '/api/plex/tv/<int:rating_key>'),
+    ('GET', '/api/plex/tv/<int:rating_key>/seasons'),
+    ('GET', '/api/tv/ownership/<int:tvdb_id>/cached'),
+)
 # Inside /static/, these belong to disabled features.
 BLOCKED_PREFIXES = ('/static/request/', '/static/hero_cache/')
 # Under /api/auth/, these belong to disabled features (no self sign-up).

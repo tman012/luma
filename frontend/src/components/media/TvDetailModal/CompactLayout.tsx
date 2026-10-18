@@ -793,6 +793,8 @@ export function CompactLayout(props: TvModalViewProps) {
                       /* Watch button — full-width white pill */
                       <button
                         type="button"
+                        data-modal-keep=""
+                        data-owned-watch=""
                         onClick={() => {
                           if (activeSeasonData && activeSeasonPlexData?.ratingKey) {
                             onPlayEpisode?.(activeSeasonPlexData.ratingKey, `${show?.title ?? 'TV show'} – ${activeSeasonData.name || `Season ${seasonDetailMode}`}`);

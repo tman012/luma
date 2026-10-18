@@ -3,6 +3,7 @@ import { img, type Card, type Rail } from './homeApi';
 import { FONT } from '@/components/start/StartUI';
 import { useEffect, useRef } from 'react';
 import { scheduleWarm, warmDetail } from '@/services/modalPrefetch';
+import { OwnedOrb, useRailOwnership, type CardOwnership } from './railOwnership';
 
 export const GLASS: React.CSSProperties = {
   background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
@@ -70,12 +71,13 @@ function CardShell({ card, onOpen, style, children }: { card: Card; onOpen: OnOp
   );
 }
 
-export function PosterCard({ card, onOpen }: { card: Card; onOpen?: OnOpen }) {
+export function PosterCard({ card, onOpen, own }: { card: Card; onOpen?: OnOpen; own?: CardOwnership }) {
   const src = img(card.poster);
   return (
     <CardShell card={card} onOpen={onOpen} style={posterCard}>
       <div style={{ ...posterImg, ...GLASS }}>
         {src && <img src={src} alt="" loading="lazy" style={fill} draggable={false} />}
+        <OwnedOrb own={own} />
       </div>
       <div style={cardTitle}>{card.title}</div>
       {card.subtitle && <div style={cardSub}>{card.subtitle}</div>}
@@ -83,7 +85,7 @@ export function PosterCard({ card, onOpen }: { card: Card; onOpen?: OnOpen }) {
   );
 }
 
-export function WideCard({ card, onOpen }: { card: Card; onOpen?: OnOpen }) {
+export function WideCard({ card, onOpen, own }: { card: Card; onOpen?: OnOpen; own?: CardOwnership }) {
   const src = img(card.art || card.poster);
   const pct = Math.max(0, Math.min(1, card.progress || 0));
   return (
@@ -93,6 +95,7 @@ export function WideCard({ card, onOpen }: { card: Card; onOpen?: OnOpen }) {
         {pct > 0 && (
           <div style={barTrack}><div data-testid="progress" style={{ ...barFill, width: `${pct * 100}%` }} /></div>
         )}
+        <OwnedOrb own={own} />
       </div>
       <div style={cardTitle}>{card.title}</div>
       {card.subtitle && <div style={cardSub}>{card.subtitle}</div>}
@@ -120,16 +123,17 @@ export function SkeletonRails({ rails = 3 }: { rails?: number }) {
 }
 
 export function HomeRails({ cw, rails, onOpen }: { cw: Card[]; rails: Rail[]; onOpen?: (card: Card, el?: HTMLElement | null) => void }) {
+  const own = useRailOwnership([...cw, ...rails.flatMap(r => r.items)]);
   return (
     <div data-testid="home-rails" className="luma-rails-in">
       {cw.length > 0 && (
         <RailRow title="Continue watching" testId="rail-continue">
-          {cw.map(c => <WideCard key={c.key} card={c} onOpen={onOpen} />)}
+          {cw.map(c => <WideCard key={c.key} card={c} onOpen={onOpen} own={own[c.key]} />)}
         </RailRow>
       )}
       {rails.filter(r => r.items.length > 0).map(r => (
         <RailRow key={r.id} title={r.title} testId={`rail-${r.id}`}>
-          {r.items.map(c => <PosterCard key={c.key} card={c} onOpen={onOpen} />)}
+          {r.items.map(c => <PosterCard key={c.key} card={c} onOpen={onOpen} own={own[c.key]} />)}
         </RailRow>
       ))}
     </div>

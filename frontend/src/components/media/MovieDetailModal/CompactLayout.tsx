@@ -644,6 +644,8 @@ export function CompactLayout(props: MovieModalViewProps) {
                     /* Watch button — full-width white pill */
                     <button
                       type="button"
+                      data-modal-keep=""
+                      data-owned-watch=""
                       onClick={() => setShowPlayback(true)}
                       style={{
                         width: 'calc(100% - 32px)',

@@ -1036,6 +1036,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                   }}
                 >
                   {isOwned ? (
+                    <span data-modal-keep="" data-owned-watch="" style={{ display: 'contents' }}>
                     <PillButton
                       focusKey="mm-info-watch"
                       zoneId="movie-detail-modal"
@@ -1050,6 +1051,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                       label="Play"
                       onClick={() => props.setShowPlayback(true)}
                     />
+                    </span>
                   ) : (
                     <PillButton
                       focusKey="mm-info-watchlist"

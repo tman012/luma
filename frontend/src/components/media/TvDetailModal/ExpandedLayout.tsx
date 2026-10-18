@@ -1662,6 +1662,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                         }}>
                           {/* Primary action: Watch or Watchlist */}
                           {showOwned ? (
+                            <span data-modal-keep="" data-owned-watch="" style={{ display: 'contents' }}>
                             <PillButton
                               focusKey="tm-watch"
                               zoneId="tv-detail-modal"
@@ -1680,6 +1681,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                                 }
                               }}
                             />
+                            </span>
                           ) : sonarrStatus?.exists ? (
                             <PillButton
                               focusKey="tm-sonarr-status"
