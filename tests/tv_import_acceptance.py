@@ -87,10 +87,17 @@ def evaluate() -> Dict[str, Any]:
                 missed.append((folder, tier, r and r['pick'], t['id']))
     n = len(f['folders'])
     auto = sum(v for k, v in tiers.items() if k in ('id', 'high'))
+    # Decidable: the right show is known from the folder and exists once. Not decidable: accept-list
+    # folders (the right show can't be known), a second folder for a show (duplicate), no TMDB answer.
+    undecidable = {k for k in f['folders'] if truth[k].get('accept') or truth[k].get('duplicate') or not truth[k].get('id')}
+    decidable = n - len(undecidable)
+    auto_decidable = sum(1 for k in f['folders'] if k not in undecidable and k in series)
     likely_right = sum(1 for folder, r in review.items() if r['tier'] == 'likely'
                        and r['pick'] == truth.get(folder, {}).get('id'))
     likely = [folder for folder, r in review.items() if r['tier'] == 'likely']
     return {'folders': n, 'tiers': dict(tiers), 'auto': auto, 'auto_pct': round(100 * auto / n, 2),
+            'decidable': decidable, 'auto_decidable': auto_decidable,
+            'decidable_pct': round(100 * auto_decidable / max(decidable, 1), 2),
             'wrong': wrong, 'ambiguous_auto': ambiguous_auto, 'missed': missed, 'leftovers': leftovers,
             'likely_with_right_guess': f'{likely_right} of {len(likely)}',
             'same_name': {k: _where(k, series, review) for k in ('Cheers', 'The Office (US)', 'Love', 'Cheat (2019)')}}

@@ -27,6 +27,9 @@ def test_687_folders(fresh):
     ev = A.evaluate()
     assert ev['folders'] == 687
     assert ev['wrong'] == [] and ev['ambiguous_auto'] == []          # zero wrong auto-picks
+    # PM: at least 97% of decidable folders import automatically, with zero wrong auto-picks;
+    # same-name rivals are never auto-picked by popularity alone
+    assert ev['decidable_pct'] >= 97.0, ev['decidable_pct']
     assert ev['auto_pct'] >= 95.0
     assert ev['same_name']['Cheers'] == {'auto': 141, 'year': 1982}
     assert ev['same_name']['The Office (US)'] == {'auto': 2316, 'year': 2005}
