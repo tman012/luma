@@ -57,7 +57,9 @@ def test_review_rows_have_tier_pick_and_order(scanned):
     assert tiers == sorted(tiers, key={'none': 0, 'duplicate': 1, 'likely': 2}.get)
     by = {u['folder']: u for u in un}
     assert by['Zzz Nothing']['tier'] == 'none' and by['Zzz Nothing']['pick'] is None
-    assert by['Mystery Show']['tier'] == 'likely' and by['Mystery Show']['pick'] in (1001, 1002)
+    # two shows of the same name, no files: a guess only, nothing pre-checked (Tester on 4d22f6c)
+    assert by['Mystery Show']['tier'] == 'likely' and by['Mystery Show']['reason'] == 'unclear'
+    assert by['Mystery Show']['pick'] is None and by['Mystery Show']['guess_pick'] in (1001, 1002)
 
 
 def test_import_all_imports_picks_and_they_survive_rescans(scanned):

@@ -270,6 +270,22 @@ def contradicts(fit: Optional[Dict[str, Any]]) -> bool:
                           or not fit['seasons_ok'] or not fit['year_ok'])
 
 
+MIN_FILE_EPS = 3          # a same-name auto-pick needs at least this many parsed episodes
+RIVAL_GAP = 0.25          # ... and each rival's coverage this much below the pick's (TMDB counts drift)
+
+
+def rules_out(mine: Optional[Dict[str, Any]], theirs: Optional[Dict[str, Any]]) -> bool:
+    """The files rule a same-name rival out against the pick: it lacks their highest season, it first
+    aired after their years, or far fewer of their S/E exist on it (RIVAL_GAP). A few missing episodes
+    don't (The Night Manager 2016 vs 2023, The Curse, The Studio); a rival without details never is."""
+    if not theirs or not mine:
+        return False
+    if not theirs['seasons_ok'] or not theirs['year_ok']:
+        return True
+    return (theirs['coverage'] is not None and mine['coverage'] is not None
+            and theirs['coverage'] <= mine['coverage'] - RIVAL_GAP)
+
+
 def _fit_key(fit: Optional[Dict[str, Any]]) -> Tuple[int, float, float]:
     if not fit:
         return (0, 0.0, 0.0)
@@ -398,7 +414,8 @@ def decide(rows: List[Dict[str, Any]], q: Dict[str, Any], hints: Optional[Hints]
         return 'likely', 'not first in TMDB order'
     # The files must fit the pick and rule out every rival (a rival without details can't be ruled out).
     mine = file_fit(hints, details.get(best['c']['tmdb_id']))
-    if fits(mine) and all(contradicts(file_fit(hints, details.get(r['c']['tmdb_id']))) for r in rivals):
+    if (fits(mine) and hints is not None and len(hints.eps) >= MIN_FILE_EPS
+            and all(rules_out(mine, file_fit(hints, details.get(r['c']['tmdb_id']))) for r in rivals)):
         return 'high', 'files'
     if q.get('year') is not None and any(r['c'].get('year') == best['c'].get('year') for r in rivals):
         return 'likely', 'same title and year'      # the folder's year can't tell them apart: Cheat (2019)

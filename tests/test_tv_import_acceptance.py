@@ -30,10 +30,11 @@ def test_687_folders(fresh):
     # hide one: The Staircase), and no accept-list folder auto-picked at all
     assert ev['wrong'] == [] and ev['ambiguous_auto'] == []
     assert ev['prechecked_wrong'] == []     # review pre-checks only backed picks (Tester on 4d22f6c)
-    # PM: at least 96.5% of decidable folders import automatically (measured 97.29%, 646 of 664; raw 94.32%).
-    # Popularity never decides: a same-name rival auto-picks only when the files fit it and rule out every rival.
+    # PM: at least 96.5% of decidable folders import automatically (measured 96.69%, 642 of 664; raw 93.74%).
+    # Popularity never decides: a same-name rival auto-picks only when the files fit it (3+ episodes) and rule
+    # out every rival (a season it lacks, a later first air, or 25 points less coverage: Tester's rule).
     assert ev['decidable_pct'] >= 96.5, ev['decidable_pct']
-    assert ev['auto_pct'] >= 94.0, ev['auto_pct']
+    assert ev['auto_pct'] >= 93.5, ev['auto_pct']
     assert ev['same_name']['Cheers'] == {'auto': 141, 'year': 1982}
     assert ev['same_name']['The Office (US)'] == {'auto': 2316, 'year': 2005}
     assert ev['same_name']['Love'] == {'review': 'likely', 'pick': 9000001}     # 2016, never #Love (2026)
