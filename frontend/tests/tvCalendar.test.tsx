@@ -198,18 +198,18 @@ describe('Calendar', () => {
     expect(rows.some(r => /Downloaded|Missing|Unaired/.test(r.textContent || ''))).toBe(false);   // nothing on screen
     expect(rows[0]!.textContent).toContain('Episode 1');
     const name = within(rows[0]!).getByTestId('tv-card-show');                     // up to 2 lines, 13/600
-    expect([name.style.webkitLineClamp, name.style.display, name.style.fontSize, name.style.fontWeight]).toEqual(['2', '-webkit-box', '13px', '600']);
+    expect([name.style.webkitLineClamp, name.style.display, name.style.fontSize, name.style.fontWeight]).toEqual(['5', '-webkit-box', '13px', '600']);   // v158c: wraps
     expect(name.getAttribute('title')).toBe(name.textContent);                     // line 1: the show name only, full width
     const title = within(rows[0]!).getByTestId('tv-card-title');                   // line 2: SxxEyy · title, 12px, 70%, 1 line
     expect(name.nextElementSibling).toBe(title);
     expect(title.textContent).toMatch(/^S\d\dE\d\d \u00b7 /);
-    expect([title.style.whiteSpace, title.style.textOverflow, title.style.fontSize, title.style.color])
-      .toEqual(['nowrap', 'ellipsis', '12px', 'rgba(255, 255, 255, 0.7)']);
+    expect([title.style.webkitLineClamp, title.style.display, title.style.fontSize, title.style.color])
+      .toEqual(['3', '-webkit-box', '12px', 'rgba(255, 255, 255, 0.7)']);                        // v158c: wraps, up to 3 lines
     expect(title.nextElementSibling!.getAttribute('data-testid')).toBe('tv-air');   // line 3: the time
     // the top row: ‹ range › together in the true center (a 1fr auto 1fr grid), no separate toolbar
     const center = screen.getByTestId('tv-cal-center');
     expect(center.contains(screen.getByTestId('tv-cal-prev')) && center.contains(screen.getByTestId('tv-cal-next'))).toBe(true);
-    expect(screen.getByTestId('tv-top-row').style.gridTemplateColumns).toBe('1fr auto 1fr');
+    expect(screen.getByTestId('tv-top-row').className).toBe('tvt-top');                 // v158c: minmax(200px, 320px) 1fr auto
     expect(screen.queryByTestId('tv-cal-toolbar')).toBeNull();
     // the only control on a card is the hover bookmark (v158a); no links
     expect(rows.every(r => r.tagName === 'DIV' && !r.querySelector('a')
@@ -301,17 +301,17 @@ describe('Search', () => {
     await screen.findAllByTestId('tv-agenda-row');
     const field = screen.getByTestId('tv-search') as HTMLInputElement;
     expect([field.placeholder, field.style.height]).toEqual(['Search shows', '36px']);
-    expect(screen.getByTestId('tv-search-box').style.width).toBe('320px');                        // compact, in the top row
-    // the top row: a 3-column grid (1fr auto 1fr); search far left, ‹ range › in the true center, tabs right
+    expect([screen.getByTestId('tv-search-box').style.width, screen.getByTestId('tv-search-box').style.maxWidth]).toEqual(['100%', '320px']);
+    // the top row (v158c): a 3-column grid (minmax(200px, 320px) 1fr auto); search left, ‹ range › centered, tabs right
     const row = screen.getByTestId('tv-top-row');
-    expect([row.style.display, row.style.gridTemplateColumns]).toEqual(['grid', '1fr auto 1fr']);
+    expect(row.className).toBe('tvt-top');
+    expect(screen.getByTestId('tv-top-left').className).toBe('tvt-top-search');
     expect(screen.getByTestId('tv-top-left').contains(screen.getByTestId('tv-search-box'))).toBe(true);
-    expect(screen.getByTestId('tv-top-left').style.justifySelf).toBe('start');
     const center = screen.getByTestId('tv-top-center');
-    expect(center.style.justifySelf).toBe('center');
+    expect(center.className).toBe('tvt-top-week');
     expect([...within(center).getByTestId('tv-cal-center').children].map(c => c.getAttribute('data-testid')))
       .toEqual(['tv-cal-prev', 'tv-cal-label', 'tv-cal-next']);
-    expect(screen.getByTestId('tv-top-right').style.justifySelf).toBe('end');
+    expect(screen.getByTestId('tv-top-right').className).toBe('tvt-top-tabs');
     expect(screen.getByTestId('tv-top-right').contains(screen.getByTestId('tv-tabs'))).toBe(true);
     expect(screen.queryByTestId('tv-title')).toBeNull();                                           // no 'TV' heading
     type('S');

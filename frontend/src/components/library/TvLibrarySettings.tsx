@@ -202,7 +202,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
   return (
     <WideCtx.Provider value={wide}>
     <section data-testid="tv-section" data-view={view} data-searching={searching || undefined}
-      style={{ ...pad(wide), display: 'flex', flexDirection: 'column', fontFamily: FONT }}>
+      style={{ ...pad(wide), display: 'flex', flexDirection: 'column', fontFamily: FONT, containerType: 'inline-size', containerName: 'tvtop' }}>
       <style>{libraryPathsCss}</style>
       <style>{trackersCss}</style>
       <style>{importCss}</style>
@@ -210,15 +210,16 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
       {toast && <NoticeToast key={toast + seq.current} text={toast} onDone={() => setToast('')} />}
 
       {wide ? (
-        // one row, 3 columns (1fr auto 1fr): the search at the far left, ‹ range › in the true center of the
-        // row, Today and the view tabs on the right
-        <div data-testid="tv-top-row" style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 16, minHeight: 40 }}>
-          <div data-testid="tv-top-left" style={{ justifySelf: 'start', minWidth: 0 }}>{search}</div>
-          <div data-testid="tv-top-center" style={{ justifySelf: 'center' }}>{calendarTop && <WeekCenter week={week} onWeek={onWeek} />}</div>
-          <div data-testid="tv-top-right" style={{ justifySelf: 'end', display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+        // v158c (Designer): a 3-column grid, minmax(200px, 320px) 1fr auto: search left, the week controls
+        // centered in the middle column, the tabs right. Under 1000px of content (container query): the tabs
+        // on their own row above, right-aligned, 12px gap; search and the week controls on the row below.
+        <div data-testid="tv-top-row" className="tvt-top">
+          <div data-testid="tv-top-left" className="tvt-top-search">{search}</div>
+          <div data-testid="tv-top-center" className="tvt-top-week">
+            {calendarTop && <WeekCenter week={week} onWeek={onWeek} />}
             {calendarTop && <TodayButton today={today} week={week} onWeek={onWeek} />}
-            {control}
           </div>
+          <div data-testid="tv-top-right" className="tvt-top-tabs">{control}</div>
         </div>
       ) : (
         <>
@@ -298,7 +299,7 @@ function SearchBox({ wide, value, onChange, results }: {
   }, [active]);
   return (
     <div ref={box} data-testid="tv-search-box"
-      style={{ position: 'relative', flex: wide ? `0 1 ${SEARCH_W}px` : undefined, width: wide ? SEARCH_W : '100%', minWidth: 0 }}>
+      style={{ position: 'relative', width: '100%', maxWidth: wide ? SEARCH_W : undefined, minWidth: 0 }}>
       <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2"
         strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: 12, top: 10, pointerEvents: 'none' }}>
         <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
@@ -333,7 +334,16 @@ function SearchBox({ wide, value, onChange, results }: {
   );
 }
 
-const tabsCss = `
+/** The top row (v158c, Designer). Exported for tests. */
+export const TOP_COLUMNS = 'minmax(200px, 320px) 1fr auto';
+export const topRowCss = `
+.tvt-top{display:grid;grid-template-columns:${TOP_COLUMNS};grid-template-areas:"search week tabs";align-items:center;column-gap:16px;row-gap:12px;min-height:40px}
+.tvt-top-search{grid-area:search;min-width:0}
+.tvt-top-week{grid-area:week;justify-self:center;display:flex;align-items:center;gap:12px;min-width:0}
+.tvt-top-tabs{grid-area:tabs;justify-self:end;min-width:0}
+@container tvtop (max-width: 999px){.tvt-top{grid-template-columns:minmax(200px, 320px) 1fr;grid-template-areas:"tabs tabs" "search week"}}
+`;
+const tabsCss = topRowCss + `
 .tvt-scroll{scrollbar-width:none}.tvt-scroll::-webkit-scrollbar{display:none}
 .tvt-search::-webkit-search-cancel-button{display:none}
 .tvt-search:focus{border-color:#3b82f6!important;box-shadow:0 0 0 3px rgba(59,130,246,.25)}

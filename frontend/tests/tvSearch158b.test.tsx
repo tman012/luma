@@ -6,19 +6,23 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EpisodeMark, LumaMonitorContext, MonitorMark, SearchMark } from '@/components/library/tvMonitor';
-import { searchOutcome, type SeriesView } from '@/components/library/tvCalendarApi';
+import { resetGrabsAllowed, searchOutcome, type SeriesView } from '@/components/library/tvCalendarApi';
 import { MODAL_SURFACE } from '@/components/library/TvEdit';
 
 const res = (body: unknown, status = 200) => ({ ok: status < 300, status, json: async () => body }) as Response;
 const calls: { url: string; method: string; body: unknown }[] = [];
 let handler: (url: string, method: string, body: unknown) => Response | null;
+let grabs = true;
 beforeEach(() => {
   calls.length = 0;
+  grabs = true;
+  resetGrabsAllowed();
   handler = () => null;
   vi.stubGlobal('fetch', vi.fn(async (u: string, init?: RequestInit) => {
     const url = String(u); const method = init?.method || 'GET';
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ url, method, body });
+    if (url === '/api/settings/tv/search/status') return res({ grabs_allowed: grabs });
     return handler(url, method, body) ?? res({ error: 'Not found' }, 404);
   }));
 });
@@ -37,23 +41,35 @@ const src = (p: string) => readFileSync(resolve(__dirname, '../src', p), 'utf8')
 
 describe('manual search', () => {
   it('the episode chip searches that episode and shows the outcome as a status', async () => {
-    handler = (url, method) => (method === 'POST' && url === '/api/settings/tv/shows/7/search' ? res(RESULT) : null);
+    handler = (url, method) => (method === 'POST' && url === '/api/settings/tv/shows/7/search'
+      ? res({ ...RESULT, grabs_allowed: true, picks: [{ ...RESULT.picks[0], grabbed: true, error: null }] }) : null);
     render(<LumaMonitorContext.Provider value={ctx}><div style={{ position: 'relative' }}><EpisodeMark season={2} episode={3} /></div></LumaMonitorContext.Provider>);
-    const chip = screen.getByTestId('tv-search-episode');
+    const chip = await screen.findByTestId('tv-search-episode');
     expect(chip.getAttribute('aria-label')).toBe('Search: S02E03');
     const bare = chip.cloneNode(true) as HTMLElement; bare.querySelectorAll('style').forEach(n => n.remove());
     expect(bare.textContent).toBe('');                                                      // icon only
     fireEvent.click(chip);
-    await waitFor(() => expect(screen.getByTestId('tv-search-note').textContent).toBe('Grabs are off on the test instance'));
-    expect(calls).toEqual([{ url: '/api/settings/tv/shows/7/search', method: 'POST', body: { episode_id: 23 } }]);
+    await waitFor(() => expect(screen.getByTestId('tv-search-note').textContent).toBe('Grabbed 1 release'));
+    expect(calls.filter(c => c.method === 'POST')).toEqual([{ url: '/api/settings/tv/shows/7/search', method: 'POST', body: { episode_id: 23 } }]);
   });
 
   it('the season chip searches the season', async () => {
     handler = () => res({ ...RESULT, picks: [{ ...RESULT.picks[0], grabbed: true, error: null }] });
     render(<LumaMonitorContext.Provider value={ctx}><SearchMark season={2} /></LumaMonitorContext.Provider>);
-    fireEvent.click(screen.getByTestId('tv-search-season'));
+    fireEvent.click(await screen.findByTestId('tv-search-season'));
     await waitFor(() => expect(screen.getByTestId('tv-search-note').textContent).toBe('Grabbed 1 release'));
-    expect(calls[0]!.body).toEqual({ season: 2 });
+    expect(calls.find(c => c.method === 'POST')!.body).toEqual({ season: 2 });
+  });
+
+  it('v158c: no search chips at all while grabs are off (no "Grabs are off" note either)', async () => {
+    grabs = false;
+    render(<LumaMonitorContext.Provider value={ctx}><div style={{ position: 'relative' }}><EpisodeMark season={2} episode={3} /><SearchMark season={2} /></div></LumaMonitorContext.Provider>);
+    await waitFor(() => expect(calls.some(c => c.url === '/api/settings/tv/search/status')).toBe(true));
+    await new Promise(r => setTimeout(r, 20));
+    expect(screen.queryByTestId('tv-search-episode')).toBeNull();
+    expect(screen.queryByTestId('tv-search-season')).toBeNull();
+    expect(screen.queryByText('Grabs are off on the test instance')).toBeNull();
+    expect(calls.filter(c => c.url === '/api/settings/tv/search/status')).toHaveLength(1);    // asked once
   });
 
   it('outcome lines are sentence case', () => {

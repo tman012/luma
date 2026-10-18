@@ -81,6 +81,16 @@ export const searchShow = (seriesId: number, target: { season: number } | { epis
   call<SearchResult>(`${TV_URL}/shows/${seriesId}/search`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(target),
   }, d => Array.isArray(d.picks));
+/** v158c: whether grabs can go out on this instance (the search chips show only then). One ask per page load. */
+let grabsAsk: Promise<boolean> | null = null;
+export const grabsAllowed = (): Promise<boolean> => {
+  if (!grabsAsk) {
+    grabsAsk = call<{ grabs_allowed: boolean }>(`${TV_URL}/search/status`, undefined, d => typeof d.grabs_allowed === 'boolean')
+      .then(r => (r.ok ? r.data.grabs_allowed : false));
+  }
+  return grabsAsk;
+};
+export const resetGrabsAllowed = () => { grabsAsk = null; };
 /** One short line for a search's outcome (status, not helper text). */
 export function searchOutcome(r: { ok: true; data: SearchResult } | { ok: false; status: number; error: string }): string {
   if (!r.ok) return r.error;

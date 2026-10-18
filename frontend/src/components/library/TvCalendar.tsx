@@ -228,8 +228,8 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
       <div data-testid="tv-card-body" style={{ opacity: mon ? 1 : DIM, transition: 'opacity 150ms' }}>
         <Still e={e} />
         <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span data-testid="tv-card-show" title={e.show} style={{ ...clamp2, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
-          <span data-testid="tv-card-title" title={epLine(e)} style={{ ...one, fontSize: 12, color: W70 }}>{epLine(e)}</span>
+          <span data-testid="tv-card-show" title={e.show} style={{ ...clamp2, WebkitLineClamp: NAME_LINES, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
+          <span data-testid="tv-card-title" title={epLine(e)} style={{ ...clamp2, WebkitLineClamp: EP_LINES, lineHeight: '16px', fontSize: 12, color: W70 }}>{epLine(e)}</span>
           <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: W50 }}>
             {timeRange(e.airstamp, e.runtime) || e.air_time || shortDate(e.air_date)}
           </span>
@@ -353,6 +353,10 @@ const gridHead: React.CSSProperties = { margin: 0, padding: '6px 8px', borderRad
 /** A card's text block: 8 + name 17 + 2 + episode 16 + 2 + time 16 + 8 (one-line name). */
 const CARD_TEXT_H = 69;
 const one: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+/** v158c: week-grid captions wrap instead of clipping: the show name up to NAME_LINES, the episode line
+ * up to EP_LINES, then an ellipsis. */
+export const NAME_LINES = 5;
+export const EP_LINES = 3;
 /** At most 2 lines, then an ellipsis (week-grid show names). */
 const clamp2: React.CSSProperties = {
   display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere', lineHeight: '17px',

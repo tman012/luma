@@ -3,7 +3,7 @@
  * no labels or helper text, aria only. */
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { isMinimal } from '@/minimal';
-import { getSeriesByTmdb, searchOutcome, searchShow, setEpisodeMonitored, setSeasonMonitored, setSeriesMonitored, type SeriesView } from './tvCalendarApi';
+import { getSeriesByTmdb, grabsAllowed, searchOutcome, searchShow, setEpisodeMonitored, setSeasonMonitored, setSeriesMonitored, type SeriesView } from './tvCalendarApi';
 
 export interface LumaMonitor {
   view: SeriesView;
@@ -99,13 +99,19 @@ export function SearchMark({ season, episode, size = 30 }: { season: number; epi
   const m = useContext(LumaMonitorContext);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [allowed, setAllowed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    void grabsAllowed().then(a => { if (live) setAllowed(a); });
+    return () => { live = false; };
+  }, []);
   useEffect(() => {
     if (!note) return undefined;
     const t = setTimeout(() => setNote(null), 4000);
     return () => clearTimeout(t);
   }, [note]);
   const ep = episode == null ? null : m?.view.episodes.find(x => x.season === season && x.episode === episode);
-  if (!m || (episode != null && !ep)) return null;
+  if (!m || !allowed || (episode != null && !ep)) return null;          // v158c: no chips while grabs are off
   const label = episode == null ? `Search: season ${season}` : `Search: S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
   const go = (e: React.SyntheticEvent) => {
     e.stopPropagation(); e.preventDefault();
