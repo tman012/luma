@@ -128,3 +128,31 @@ def test_adversarial_set_reviewer_runner():
         r = subprocess.run([sys.executable, here, '--repo', repo, '--mode', 'both', '--high-no-year', n],
                            capture_output=True, text=True, timeout=600)
         assert r.returncode == 0, r.stdout[-3000:]
+
+
+# Tester on 4d22f6c (fastgate checker): same-name auto-picks a few missing episodes don't rule the rival out of
+NIGHT_UK_3 = {'id': 161, 'name': 'The Night Manager', 'year': 2016, 'country': ['GB'], 'votes': 0, 'seasons': [6, 6, 6]}
+NIGHT_IN_3 = {'id': 162, 'name': 'The Night Manager', 'year': 2023, 'country': ['IN'], 'votes': 0, 'seasons': [7, 5, 4]}
+CURSE_23 = {'id': 171, 'name': 'The Curse', 'year': 2023, 'country': ['US'], 'votes': 0, 'seasons': [10, 16]}
+CURSE_22 = {'id': 172, 'name': 'The Curse', 'year': 2022, 'country': ['US'], 'votes': 0, 'seasons': [10, 13]}
+
+
+@pytest.mark.parametrize('folder,shows,eps', [
+    ('The Night Manager', (NIGHT_UK_3, NIGHT_IN_3), {1: 6, 2: 6, 3: 6}),
+    ('The Curse', (CURSE_23, CURSE_22), {1: 10, 2: 16}),
+])
+def test_a_rival_missing_a_few_episodes_isnt_ruled_out(folder, shows, eps):
+    search, show = tmdb(*shows)
+    m = tv_match.match(folder, files(folder, eps), search=search, show=show)
+    assert m['status'] == 'unmatched' and m['tier'] == 'likely' and m['pick'] == shows[0]['id']
+    mine = tv_match.file_fit(files(folder, eps), show(shows[0]['id']))
+    theirs = tv_match.file_fit(files(folder, eps), show(shows[1]['id']))
+    assert tv_match.fits(mine) and not tv_match.fits(theirs) and not tv_match.rules_out(mine, theirs)
+
+
+def test_two_episodes_never_auto_pick_a_same_name_show():
+    search, show = tmdb(TOP_GEAR_UK, TOP_GEAR_US)
+    m = tv_match.match('Top Gear', files('Top Gear', {20: 2}), search=search, show=show)
+    assert m['status'] == 'unmatched'
+    m = tv_match.match('Top Gear', files('Top Gear', {20: 3}), search=search, show=show)
+    assert m['status'] == 'matched' and m['tmdb_id'] == 101

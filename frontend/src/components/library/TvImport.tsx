@@ -152,17 +152,25 @@ function Chip({ color, label, n, testId }: { color: string; label: string; n: nu
 
 // ---------------------------------------------------------------- Review
 
-export interface ReviewState { checked: Record<number, boolean>; picks: Record<number, Candidate | null> }
+export interface ReviewState {
+  checked: Record<number, boolean>; picks: Record<number, Candidate | null>;
+  /** Each row's tier when its state was set: a row that changes tier (Import all found its show in another
+   * folder: now a duplicate) starts over, unchecked. */
+  tiers?: Record<number, string>;
+}
 
 export function initialReview(rows: Unmatched[], prev?: ReviewState): ReviewState {
   const checked: Record<number, boolean> = {};
   const picks: Record<number, Candidate | null> = {};
+  const tiers: Record<number, string> = {};
   for (const u of rows) {
-    const had = prev && u.id in prev.picks;
+    const tier = reviewTier(u);
+    const had = prev && u.id in prev.picks && (!prev.tiers || prev.tiers[u.id] === undefined || prev.tiers[u.id] === tier);
     picks[u.id] = had ? prev!.picks[u.id]! : startingPick(u);
     checked[u.id] = had ? !!prev!.checked[u.id] : startsChecked(u);
+    tiers[u.id] = tier;
   }
-  return { checked, picks };
+  return { checked, picks, tiers };
 }
 
 export function ReviewSection({ wide, rows, state, setState, busy, fading, onImportAll }: {

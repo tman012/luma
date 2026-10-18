@@ -318,6 +318,14 @@ describe('review state', () => {
     expect(startsChecked({ ...LOVE, reason: 'unclear' })).toBe(false);
     expect(startingPick({ ...LOVE, reason: 'unclear' })!.tmdb_id).toBe(startingPick(LOVE)!.tmdb_id);
     expect(startsChecked(LOVE)).toBe(true);
+    // Import all found Love's pick in another folder: the row is a duplicate now and starts over, unchecked
+    const s3 = initialReview([LOVE]);
+    expect(s3.checked[1]).toBe(true);
+    const nowDup = { ...LOVE, reason: 'duplicate', tier: 'duplicate' as const, pick: null, candidates: [c(9000005, '#Love', 2026)] };
+    const s4 = initialReview([nowDup as Unmatched], s3);
+    expect(s4.checked[1]).toBe(false);
+    expect(s4.picks[1]!.tmdb_id).toBe(9000005);
+    expect(initialReview([nowDup as Unmatched], { ...s4, checked: { 1: true } }).checked[1]).toBe(true);   // the owner's own check stays
     expect(sortReview([LONG, LOVE, DUP, NONE]).map(u => u.id)).toEqual([2, 3, 4, 1]);
   });
 });

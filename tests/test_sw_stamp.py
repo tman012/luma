@@ -83,7 +83,13 @@ def test_bump_skips_versions_taken_elsewhere(tmp_path, monkeypatch):
         sw_stamp.set_version(140)
 
 
-def test_v148_stays_with_the_import_fixes():
-    """4b82ab5 (Import fixes, v148) is handed off: TV Calendar is v149 or later."""
+def test_v148_stays_with_the_bundled_import_fixes():
+    """4b82ab5 (Import fixes, v148) was bundled: later builds are v149 or later."""
     assert 148 in sw_stamp.TAKEN
     assert sw_stamp.version_number() >= 149
+
+
+def test_v149_stays_with_testers_import_fixes():
+    """a201cfa (Tester's Import fixes, v149): TV Calendar is v150 or later."""
+    assert 149 in sw_stamp.TAKEN
+    assert sw_stamp.version_number() >= 150

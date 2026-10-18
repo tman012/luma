@@ -324,6 +324,10 @@ def _store_unmatched_conn(conn, path_id: str, folder: str, m: Dict[str, Any], no
     else:
         tier = 'likely' if m.get('tier') == 'likely' and m.get('pick') else 'none'
         pick = m.get('pick') if tier == 'likely' else None
+        if tier == 'likely' and reason == 'unclear':
+            # nothing backs the guess: no pick (Import all can't import it unseen); it leads the candidates
+            cands = sorted(cands, key=lambda c: c.get('tmdb_id') != pick)
+            pick = None
     conn.execute('INSERT INTO unmatched (path_id, folder, guess_title, guess_year, candidates, reason, ts, tier, pick)'
                  ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(path_id, folder) DO UPDATE SET'
                  ' guess_title = excluded.guess_title, guess_year = excluded.guess_year,'
@@ -1063,6 +1067,8 @@ def import_all(items: List[Tuple[int, int]], now: Optional[float] = None) -> Dic
             failed.append({'id': uid, 'error': NOT_FOUND})
         elif tid in seen:
             failed.append({'id': uid, 'error': TAKEN})
+        elif _owned_elsewhere(row, tid, now):
+            failed.append({'id': uid, 'error': TAKEN})          # another folder has it: a duplicate, unchecked
         else:
             seen.add(tid)
             jobs.append((row, tid))
@@ -1089,6 +1095,20 @@ def import_all(items: List[Tuple[int, int]], now: Optional[float] = None) -> Dic
         else:
             failed.append({'id': row['id'], 'error': out['error']})
     return {'ok': True, 'imported': imported, 'failed': failed}
+
+
+def _owned_elsewhere(row: Dict[str, Any], tid: int, now: float) -> bool:
+    """Import all never moves a show another folder already has (The Office (US),
+    SmackDown): the row becomes a duplicate in review, its candidate that show."""
+    with tv_store.connect() as conn:
+        owner = conn.execute('SELECT * FROM series WHERE tmdb_id = ? AND path_id IS NOT NULL AND folder IS NOT NULL'
+                             ' AND NOT (path_id = ? AND folder = ?)', (tid, row['path_id'], row['folder'])).fetchone()
+    if owner is None:
+        return False
+    g = tv_match.parse_folder(row['folder'])
+    _store_unmatched(row['path_id'], row['folder'], {'guess': {'title': g['title'], 'year': g['year']},
+                                                     'candidates': [_show_brief(owner)]}, now, reason='duplicate')
+    return True
 
 
 def lookup(q: str) -> Optional[List[Dict[str, Any]]]:
@@ -1195,10 +1215,13 @@ def library_view() -> Dict[str, Any]:
                 cands = []
             tier = 'duplicate' if r['reason'] == 'duplicate' else (r['tier'] or 'none')
             pick = r['pick'] if tier == 'likely' else (cands[0]['tmdb_id'] if tier == 'duplicate' and cands else None)
+            # 'pick' is what Import all would import as it stands (pre-checked); a guess nothing backs
+            # (reason 'unclear') is only 'guess_pick', shown first in an unchecked row
+            guess = pick if pick is not None else (cands[0]['tmdb_id'] if tier == 'likely' and cands else None)
             unmatched.append({'id': r['id'], 'path_id': r['path_id'], 'path_name': names.get(r['path_id'], ''),
                               'folder': r['folder'], 'guess_title': r['guess_title'], 'guess_year': r['guess_year'],
                               'candidates': cands[:tv_match.TOP_N], 'reason': r['reason'], 'tier': tier,
-                              'pick': pick})
+                              'pick': pick, 'guess_pick': guess})
     # Review order: no match, then duplicates, then likely (best guess picked)
     unmatched.sort(key=lambda u: ({'none': 0, 'duplicate': 1, 'likely': 2}.get(u['tier'], 0), u['folder'].lower()))
     return {'shows': shows, 'unmatched': unmatched, 'scan': status()}

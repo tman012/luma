@@ -14,7 +14,7 @@ login-error-states, v145 this branch's 01abfd9, which Ops is shipping).
 v143 was this branch's and never shipped; v146 went out in the f0db05d bundle
 (the TV libraries selector), so it's taken too (Tester M38: never reuse it);
 TV Import carries v147 and is with the gates (4d22f6c), so it's taken too;
-TV Import fixes (Reviewer, Oct 18, 4b82ab5) carry v148, so it's taken; TV Calendar carries v149.
+TV Import fixes (Reviewer, Oct 18) carried v148 (4b82ab5, bundled), so it's taken; Tester's fixes carry v149 (a201cfa), so it's taken; TV Calendar carries v150.
 A version above LAST_SHIPPED that isn't TAKEN hasn't
 shipped yet, so further frontend changes on the same branch may restamp it
 (--restamp) instead of bumping again; once it ships, raise LAST_SHIPPED and
@@ -40,7 +40,7 @@ SOURCES = ('frontend/src', 'frontend/public', 'frontend/index.html', 'frontend/p
            'frontend/package-lock.json', 'frontend/vite.config.ts', 'frontend/tsconfig.json',
            'frontend/tsconfig.app.json')
 LAST_SHIPPED = 141                   # :5002 runs ab1c841 (v141)
-TAKEN = frozenset({142, 144, 145, 146, 147, 148})   # sources-followup v142, login-error-states v144, 01abfd9 v145 (Ops), f0db05d v146, 4d22f6c v147 (TV Import, gated), 4b82ab5 v148 (Import fixes)
+TAKEN = frozenset({142, 144, 145, 146, 147, 148, 149})   # sources-followup v142, login-error-states v144, 01abfd9 v145 (Ops), f0db05d v146, 4d22f6c v147 (TV Import, gated), 4b82ab5 v148 (Import fixes, bundled), a201cfa v149 (Tester's Import fixes)
 VERSION_RE = re.compile(r"const CACHE_VERSION = '([a-z-]+)-v(\d+)';")
 
 

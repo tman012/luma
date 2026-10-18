@@ -19,6 +19,8 @@ export interface Unmatched {
   candidates: Candidate[]; reason: string | null;
   /** likely: best guess picked; none: no match; duplicate: another folder has the show. */
   tier?: ReviewTier; pick?: number | null;
+  /** The best guess when nothing backs it (reason "unclear"): shown first, never pre-checked. */
+  guess_pick?: number | null;
 }
 export interface ImportProgress {
   running: boolean; error: string | null; last_scan: number | null;
@@ -110,10 +112,10 @@ export const sortReview = (rows: Unmatched[]) =>
 export function startingPick(u: Unmatched): Candidate | null {
   const t = reviewTier(u);
   if (t === 'none') return null;
-  const id = u.pick ?? u.candidates[0]?.tmdb_id;
+  const id = u.pick ?? u.guess_pick ?? u.candidates[0]?.tmdb_id;
   return u.candidates.find(c => c.tmdb_id === id) || u.candidates[0] || null;
 }
 
 /** Likely rows start checked; none and duplicate rows don't, and neither do same-name rows the files
  * don't single out (reason "unclear": pre-picked, unchecked). */
-export const startsChecked = (u: Unmatched) => reviewTier(u) === 'likely' && u.reason !== 'unclear' && !!startingPick(u);
+export const startsChecked = (u: Unmatched) => reviewTier(u) === 'likely' && u.reason !== 'unclear' && u.pick != null && !!startingPick(u);
