@@ -194,6 +194,7 @@ describe('Downloads polish (v170, Designer)', () => {
       const el = await screen.findByText(label);
       expect(el.className).toContain('text-[12px]');
       expect(el.style.color).toBe('rgb(251, 191, 36)');
+      expect(el.className).not.toContain('truncate');                 // never clipped
     }
   });
 

@@ -569,11 +569,16 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                   style={{ width: `${pct}%`, background: barColor }} />
               </div>
               <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-white/35">
-                <span className={`min-w-0 truncate${notMapped || noWritable ? ' text-[12px]' : ''}`} data-testid="download-status"
+                <span className={`min-w-0 ${notMapped || noWritable ? 'text-[12px] leading-tight' : 'truncate'}`} data-testid="download-status"
                   style={{ color: copying || importing || stalled ? accent : undefined }}>
                   {statusLabel}{speedStr ? ` · ↓ ${speedStr}` : ''}
                 </span>
-                <span className="shrink-0 tabular-nums">{fmtGb(dl.sizeTotal - dl.sizeRemaining)} / {fmtGb(dl.sizeTotal)}</span>
+                <span className="shrink-0 tabular-nums">
+                  {/* Done downloading: one size, so the 12px path states fit a 390px row unclipped. */}
+                  {dl.sizeRemaining === 0 && dl.sizeTotal > 0
+                    ? fmtGb(dl.sizeTotal)
+                    : `${fmtGb(dl.sizeTotal - dl.sizeRemaining)} / ${fmtGb(dl.sizeTotal)}`}
+                </span>
               </div>
               {/* Remove actions — only inside the expanded filename panel (tap name to open). */}
               {dl.hash && nameOpen ? (
