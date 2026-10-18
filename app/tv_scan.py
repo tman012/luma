@@ -551,7 +551,8 @@ def _resolve_duplicate(owner, pid: str, folder: str, root_real: str, now: float,
     A show whose library is no longer selected (or no longer a Library path)
     moves here outright, keeping its tv.db row; its file rows from that
     library are dropped (rows only)."""
-    if owner['path_id'] is None or _path_of(owner['path_id']) is None:
+    if owner['path_id'] is None or owner['folder'] is None or _path_of(owner['path_id']) is None:
+        # hidden, added from Search (no folder yet), or its library is gone: the folder takes it
         sid = take_over(owner['id'], pid, folder, now, via=via, event='matched')
         with tv_store.write() as conn:
             conn.execute('DELETE FROM episode_files WHERE series_id = ? AND path_id IS NOT ?', (sid, pid))
@@ -680,7 +681,8 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
     out = {'shows': 0, 'unmatched': 0, 'linked': 0, 'mismatch': 0, 'unrecognized': 0}
     with tv_store.connect() as conn:
         known = {r['folder']: dict(r) for r in conn.execute(
-            'SELECT id, folder, tmdb_id, tmdb_refreshed_at, episode_group_id FROM series WHERE path_id = ?', (pid,))}
+            'SELECT id, folder, tmdb_id, tmdb_refreshed_at, episode_group_id FROM series WHERE path_id = ?'
+            ' AND folder IS NOT NULL', (pid,))}       # shows added from Search have no folder to lose
         unmatched = {r['folder'] for r in conn.execute('SELECT folder FROM unmatched WHERE path_id = ?', (pid,))}
     with tv_store.write() as conn:            # folders that are gone: rows only, history kept
         for f in set(known) - set(folders):
@@ -770,11 +772,42 @@ def scan_all(now: Optional[float] = None, retry_unmatched: bool = True) -> Dict[
         total['paths'] += 1
         for k, v in counts.items():
             total[k] += v
+    total['refreshed'] = refresh_added(now)
     if total['paths']:
         tv_store.set_meta(LAST_SCAN_KEY, repr(now))
     # else every path was missing or unreadable (an unmounted share): no
     # last-scan time, so the next scheduler tick tries again.
     return total
+
+
+def refresh_added(now: Optional[float] = None) -> int:
+    """Shows added from Search (a library, no folder) keep their episodes
+    current like folder shows: once REFRESH_EPISODES_S has passed, on the next
+    scan (scheduled or Import). TMDB reads on the workers; a TMDB error leaves
+    the rest for the next scan. Returns how many were refreshed."""
+    from app import tv_settings
+    now = time.time() if now is None else now
+    pids = [p['id'] for p in tv_settings.libraries()]
+    if not pids:
+        return 0
+    with tv_store.connect() as conn:
+        rows = [dict(r) for r in conn.execute(
+            'SELECT id, tmdb_id, episode_group_id, tmdb_refreshed_at FROM series WHERE folder IS NULL AND path_id IN'
+            f' ({",".join("?" * len(pids))})', pids)
+            if now - (r['tmdb_refreshed_at'] or 0) >= REFRESH_EPISODES_S]
+
+    def work(r):
+        try:
+            with tv_tmdb.fresh():
+                return {'data': fetch_show(r['tmdb_id'], None, None, r['episode_group_id'])}
+        except tv_tmdb.TmdbError as e:
+            return {'error': e}
+    n = 0
+    for r, res in zip(rows, run_pool(rows, work)):
+        if res.get('data'):
+            refresh_episodes(r['id'], r['tmdb_id'], now, res['data'])
+            n += 1
+    return n
 
 
 def last_scan() -> Optional[float]:
@@ -928,19 +961,19 @@ def _apply(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str, eve
         # it here and the other folder becomes the unmatched duplicate.
         sid = take_over(other['id'], path_id, folder, now, via=via, event=event, drop_series_id=series_id)
         root = _root_for(path_id)
-        if root is not None:
+        if root is not None and folder:
             scan_files(sid, path_id, folder, root, now)
         return {'ok': True, 'series_id': sid}
     if data is None:                           # one details call, the group picked from the folder's files
         root = _root_for(path_id)
-        data = fetch_show(tmdb_id, None, _hints(root, folder) if root else None)
+        data = fetch_show(tmdb_id, None, _hints(root, folder) if root and folder else None)
     if not data:
         return {'ok': False, 'error': SHOW_NOT_FOUND, 'status': 404}
     sid = store_show(path_id, folder, tmdb_id, now, via=via, event=event, series_id=series_id, data=data)
     if sid is None:
         return {'ok': False, 'error': TAKEN, 'status': 409}
     root = _root_for(path_id)
-    if root is not None:
+    if root is not None and folder:
         scan_files(sid, path_id, folder, root, now)
     return {'ok': True, 'series_id': sid}
 
