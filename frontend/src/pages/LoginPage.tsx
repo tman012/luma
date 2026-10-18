@@ -16,7 +16,7 @@ type Flow = 'signin' | 'signup';
 type SignUpStep = 'email' | 'pin' | 'confirm' | 'pending';
 
 export function LoginPage() {
-  const { login, authenticated, loading, needsStart, pinUnlock, signupOpen, implicit } = useAuth();
+  const { login, authenticated, loading, needsStart, pinUnlock, signupOpen } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   // Sent here by a "Sign in to …" button (an implicit LAN session, or a
