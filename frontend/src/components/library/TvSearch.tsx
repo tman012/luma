@@ -7,7 +7,8 @@ import { FONT } from '@/components/start/StartUI';
 import { Poster } from './TvImport';
 import type { LibPath } from './libraryPathsApi';
 import { showLabel } from './tvLibraryApi';
-import { addShow, findShows, seasonsText, type FindResult } from './tvCalendarApi';
+import { ADD_MONITOR, addShow, findShows, loadProfiles, seasonsText, type FindResult, type MonitorOption, type Profile } from './tvCalendarApi';
+import { Select } from './TvEdit';
 
 /** Designer: the search dropdown and the Add path picker share one surface. */
 export const TV_POPOVER_SURFACE: React.CSSProperties = {
@@ -50,17 +51,17 @@ export function TvSearch({ q, paths, onAdded, active = -1, keys }: {
     return () => { live = false; window.clearTimeout(t); };
   }, [text]);
 
-  const add = async (r: FindResult, pathId?: string) => {
+  const last = useRef<Record<number, [string | undefined, AddOpts]>>({});
+  const add = async (r: FindResult, pathId?: string, opts: AddOpts = {}) => {
+    last.current[r.tmdb_id] = [pathId, opts];
     setPicking(null);
     setAdds(a => ({ ...a, [r.tmdb_id]: { busy: true } }));
-    const out = await addShow(r.tmdb_id, pathId);
+    const out = await addShow(r.tmdb_id, pathId, opts);
     if (out.ok) { setAdds(a => ({ ...a, [r.tmdb_id]: { series_id: out.data.series_id } })); onAdded(); return; }
     setAdds(a => ({ ...a, [r.tmdb_id]: { error: true } }));
   };
-  const startAdd = (r: FindResult) => {
-    if (paths.length >= 2) setPicking(r.tmdb_id);
-    else void add(r);
-  };
+  // v158a: Add always opens the picker (Monitor and Quality profile), even with one library
+  const startAdd = (r: FindResult) => setPicking(r.tmdb_id);
 
   const ready = res?.q === text;
   const list = ready && failed !== text ? res.results : [];
@@ -94,8 +95,8 @@ export function TvSearch({ q, paths, onAdded, active = -1, keys }: {
           <>
             <Poster path={r.poster_path} w={40} h={60} tmdbLogo />
             <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ ...one, fontSize: 14, fontWeight: 600, color: W95 }}>{showLabel(r)}</span>
-              {r.seasons != null && <span style={{ ...one, fontSize: 13, color: W50 }}>{seasonsText(r.seasons)}</span>}
+              <span style={{ ...oneLine, fontSize: 14, fontWeight: 600, color: W95 }}>{showLabel(r)}</span>
+              {r.seasons != null && <span style={{ ...oneLine, fontSize: 13, color: W50 }}>{seasonsText(r.seasons)}</span>}
             </span>
           </>
         );
@@ -116,8 +117,8 @@ export function TvSearch({ q, paths, onAdded, active = -1, keys }: {
                     <span className="tvi-spin" aria-hidden="true" />
                   </span>
                 ) : (
-                  <button type="button" className="lp-focus tvs-add" data-testid="tv-add" aria-haspopup={paths.length >= 2 ? 'dialog' : undefined}
-                    aria-expanded={paths.length >= 2 ? picking === r.tmdb_id : undefined}
+                  <button type="button" className="lp-focus tvs-add" data-testid="tv-add" aria-haspopup="dialog"
+                    aria-expanded={picking === r.tmdb_id}
                     onClick={() => startAdd(r)} style={addBtn}>Add</button>
                 )}
               </div>
@@ -126,11 +127,14 @@ export function TvSearch({ q, paths, onAdded, active = -1, keys }: {
               <div role="alert" data-testid="tv-add-error"
                 style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '0 12px 12px 64px', fontSize: 13, color: '#ef4444' }}>
                 {ADD_FAILED}
-                <button type="button" className="lp-focus" data-testid="tv-add-retry" onClick={() => startAdd(r)} style={retryPill}>Retry</button>
+                <button type="button" className="lp-focus" data-testid="tv-add-retry" onClick={() => {
+                  const l = last.current[r.tmdb_id];
+                  if (l) void add(r, l[0], l[1]); else startAdd(r);
+                }} style={retryPill}>Retry</button>
               </div>
             )}
             {picking === r.tmdb_id && (
-              <PathPicker inline paths={paths} onCancel={() => setPicking(null)} onAdd={p => void add(r, p)} />
+              <PathPicker inline paths={paths} onCancel={() => setPicking(null)} onAdd={(p, o) => void add(r, paths.length >= 2 ? p : undefined, o)} />
             )}
           </div>
         );
@@ -149,13 +153,29 @@ export const InLibrary = () => (
   </span>
 );
 
-/** "Add to": the selected TV libraries, nothing preselected (a popover under the row). */
+type AddOpts = { monitor?: MonitorOption; profile_id?: number | null };
+
+/** "Add to" (v158a: 360px): Monitor (All episodes by default) and Quality profile (the default one), then the
+ * selected TV libraries (radios with 2+, nothing preselected; the path line alone with one). */
 export function PathPicker({ paths, onCancel, onAdd, inline = false }: {
-  paths: LibPath[]; onCancel: () => void; onAdd: (pathId: string) => void;
+  paths: LibPath[]; onCancel: () => void; onAdd: (pathId: string, opts: AddOpts) => void;
   /** in the search dropdown (a scroll box): in the flow under the row, not a popover */
   inline?: boolean;
 }) {
-  const [pick, setPick] = useState<string | null>(null);
+  const one = paths.length === 1 ? paths[0] : null;
+  const [pick, setPick] = useState<string | null>(one ? one.id : null);
+  const [monitor, setMonitor] = useState<MonitorOption>('all');
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [profile, setProfile] = useState<number | null>(null);
+  useEffect(() => {
+    let live = true;
+    void loadProfiles().then(r => {
+      if (!live || !r.ok) return;
+      setProfiles(r.data.profiles);
+      setProfile(p => p ?? r.data.profiles.find(x => x.default)?.id ?? null);
+    });
+    return () => { live = false; };
+  }, []);
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onCancel(); } };
@@ -170,7 +190,24 @@ export function PathPicker({ paths, onCancel, onAdd, inline = false }: {
   }, [onCancel]);
   const body = (
     <>
-      <div id="tv-add-to" style={{ fontSize: 13, fontWeight: 600, color: W50, padding: '0 4px' }}>Add to</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <span id="tv-add-monitor-label" style={pickLabel}>Monitor</span>
+        <Select id="tv-add-monitor" value={monitor} options={ADD_MONITOR} onChange={setMonitor} />
+      </div>
+      {profiles.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <span id="tv-add-profile-label" style={pickLabel}>Quality profile</span>
+          <Select id="tv-add-profile" value={profile} options={profiles.map(p => ({ id: p.id, label: p.name }))} onChange={setProfile} />
+        </div>
+      )}
+      {one ? (
+        <div data-testid="tv-add-path-line" style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '0 4px' }}>
+          <span id="tv-add-to" style={pickLabel}>Add to</span>
+          <span style={{ fontSize: 14, fontWeight: 500, color: W95 }}>{one.name}</span>
+          <span style={{ fontSize: 12, color: W50, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{one.path}</span>
+        </div>
+      ) : (<>
+      <div id="tv-add-to" style={{ ...pickLabel, padding: '0 4px' }}>Add to</div>
       <div role="radiogroup" aria-labelledby="tv-add-to" style={{ display: 'flex', flexDirection: 'column' }}>
         {paths.map(p => {
           const on = pick === p.id;
@@ -184,17 +221,18 @@ export function PathPicker({ paths, onCancel, onAdd, inline = false }: {
                 border: on ? '6px solid #3b82f6' : '2px solid rgba(255,255,255,0.35)', background: on ? '#fff' : 'none',
               }} />
               <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ ...one, fontSize: 14, fontWeight: 500, color: W95 }}>{p.name}</span>
-                <span style={{ ...one, fontSize: 12, color: W50 }}>{p.path}</span>
+                <span style={{ ...oneLine, fontSize: 14, fontWeight: 500, color: W95 }}>{p.name}</span>
+                <span style={{ ...oneLine, fontSize: 12, color: W50 }}>{p.path}</span>
               </span>
             </button>
           );
         })}
       </div>
+      </>)}
       <div style={{ display: 'flex', justifyContent: 'center', gap: 12 }}>
         <button type="button" className="lp-focus" data-testid="tv-add-cancel" onClick={onCancel} style={sheetBtn(false)}>Cancel</button>
         <button type="button" className="lp-focus" data-testid="tv-add-confirm" disabled={!pick}
-          onClick={() => pick && onAdd(pick)} style={{ ...sheetBtn(true), opacity: pick ? 1 : 0.4, cursor: pick ? 'pointer' : 'default' }}>Add</button>
+          onClick={() => pick && onAdd(pick, { monitor, profile_id: profile })} style={{ ...sheetBtn(true), opacity: pick ? 1 : 0.4, cursor: pick ? 'pointer' : 'default' }}>Add</button>
       </div>
     </>
   );
@@ -205,7 +243,7 @@ export function PathPicker({ paths, onCancel, onAdd, inline = false }: {
     <div ref={panel} role="dialog" aria-label="Add to" data-testid="tv-add-picker"
       style={inline
         ? { ...surface, margin: '0 12px 12px', padding: 12, borderRadius: 14 }
-        : { ...surface, position: 'absolute', zIndex: 50, right: 12, top: 'calc(100% - 8px)', width: 320, maxWidth: 'calc(100vw - 32px)',
+        : { ...surface, position: 'absolute', zIndex: 50, right: 12, top: 'calc(100% - 8px)', width: 360, maxWidth: 'calc(100vw - 32px)',
           padding: 12, borderRadius: 14, boxShadow: '0 16px 48px rgba(0,0,0,0.5)' }}>
       {body}
     </div>
@@ -216,8 +254,9 @@ export const tvSearchCss = `
 .tvs-add:hover{background:#60a5fa!important}
 `;
 
-const one: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+const oneLine: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 const divider = '1px solid rgba(255,255,255,0.06)';
+const pickLabel: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: W50 };
 const rowBox: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 12, height: 72, padding: '0 12px', boxSizing: 'border-box' };
 const centered: React.CSSProperties = {
   minHeight: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 500, color: W70,

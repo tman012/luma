@@ -211,8 +211,9 @@ describe('Calendar', () => {
     expect(center.contains(screen.getByTestId('tv-cal-prev')) && center.contains(screen.getByTestId('tv-cal-next'))).toBe(true);
     expect(screen.getByTestId('tv-top-row').style.gridTemplateColumns).toBe('1fr auto 1fr');
     expect(screen.queryByTestId('tv-cal-toolbar')).toBeNull();
-    // rows aren't clickable
-    expect(rows.every(r => r.tagName === 'DIV' && !r.querySelector('button, a'))).toBe(true);
+    // the only control on a card is the hover bookmark (v158a); no links
+    expect(rows.every(r => r.tagName === 'DIV' && !r.querySelector('a')
+      && [...r.querySelectorAll('button')].every(b => b.getAttribute('data-testid') === 'tv-card-bookmark'))).toBe(true);
   });
 
   it('asks again quietly on window focus and every 60s while visible (no placeholder)', async () => {
@@ -353,8 +354,9 @@ describe('Search', () => {
     expect(screen.getAllByTestId('tv-search-row')[0]!.getAttribute('aria-selected')).toBe('true');
     fireEvent.keyDown(field, { key: 'ArrowUp' });                            // and back round to the last
     expect(screen.getAllByTestId('tv-search-row')[1]!.getAttribute('aria-selected')).toBe('true');
-    fireEvent.keyDown(field, { key: 'Enter' });
-    await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => c.body)).toEqual([{ tmdb_id: 6001 }]));
+    fireEvent.keyDown(field, { key: 'Enter' });                              // v158a: opens the Add picker
+    fireEvent.click(screen.getByTestId('tv-add-confirm'));
+    await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => c.body)).toEqual([{ tmdb_id: 6001, monitor: 'all' }]));
     fireEvent.pointerDown(document.body);
     expect(screen.queryByTestId('tv-search-drop')).toBeNull();
     fireEvent.focus(field);                                                  // focus opens it again
@@ -371,13 +373,23 @@ describe('Search', () => {
     await screen.findAllByTestId('tv-agenda-row');
   });
 
-  it('Add with one library adds at once, then shows In library', async () => {
+  it('Add with one library opens Monitor (All episodes) plus the path line, then shows In library', async () => {
     page(true);
     await screen.findByTestId('tv-search');
     type('Severance');
     fireEvent.click(await screen.findByTestId('tv-add'));
+    const picker = screen.getByTestId('tv-add-picker');
+    expect(within(picker).queryAllByTestId('tv-add-path')).toHaveLength(0);             // no radio with one library
+    expect(within(picker).getByTestId('tv-add-path-line').textContent).toContain('TV');
+    const mon = within(picker).getByTestId('tv-add-monitor-select');
+    expect(mon.textContent).toBe('All episodes');
+    fireEvent.click(mon);
+    expect(within(picker).getAllByRole('option').map(o => o.textContent))
+      .toEqual(['All episodes', 'Future episodes', 'Missing episodes', 'First season', 'Latest season', 'None']);
+    fireEvent.click(within(picker).getByRole('option', { name: 'Future episodes' }));
+    fireEvent.click(within(picker).getByTestId('tv-add-confirm'));
     await waitFor(() => expect(screen.getAllByTestId('tv-in-library')).toHaveLength(2));
-    expect(calls.filter(c => c.method === 'POST').map(c => [c.url, c.body])).toEqual([['/api/settings/tv/shows', { tmdb_id: 6001 }]]);
+    expect(calls.filter(c => c.method === 'POST').map(c => [c.url, c.body])).toEqual([['/api/settings/tv/shows', { tmdb_id: 6001, monitor: 'future' }]]);
     expect(screen.queryByTestId('tv-add-picker')).toBeNull();
   });
 
@@ -403,7 +415,7 @@ describe('Search', () => {
     expect([add.disabled, add.style.opacity]).toEqual([false, '1']);
     fireEvent.click(add);
     await waitFor(() => expect(screen.getAllByTestId('tv-in-library')).toHaveLength(2));
-    expect(calls.find(c => c.method === 'POST')?.body).toEqual({ tmdb_id: 6001, path_id: ANIME.id });
+    expect(calls.find(c => c.method === 'POST')?.body).toEqual({ tmdb_id: 6001, path_id: ANIME.id, monitor: 'all' });
   });
 
   it("a failed Add says Couldn't add show with Retry", async () => {
@@ -412,6 +424,7 @@ describe('Search', () => {
     await screen.findByTestId('tv-search');
     type('Severance');
     fireEvent.click(await screen.findByTestId('tv-add'));
+    fireEvent.click(screen.getByTestId('tv-add-confirm'));
     const err = await screen.findByTestId('tv-add-error');
     expect(err.textContent).toBe("Couldn't add show" + 'Retry');
     expect(err.style.color).toBe('rgb(239, 68, 68)');

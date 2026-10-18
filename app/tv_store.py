@@ -360,9 +360,14 @@ def _migrate(conn: sqlite3.Connection, p: Optional[Path] = None) -> None:
         try:
             _backup(conn, p, version)
         except BackupFailed as e:
-            # never migrate without a verified copy: stay at the old schema, keep serving, retry next open
+            # Never migrate without a verified copy. Raising leaves the file untouched at its old
+            # version; _ready stays unset, so this connect() fails (tv.db reads/writes error out
+            # while the rest of Luma serves) and the next connect() tries the backup again.
             logger.error('tv.db not upgraded from version %d: no verified backup (%s)', version, e)
             raise
+    # One backup (of the starting version) covers the whole chain. Each step commits on its own, so a
+    # step that fails rolls back only itself: the file stays at the last step that completed (a
+    # valid, older schema) and the next open resumes from there.
     while version < SCHEMA_VERSION:
         conn.execute('BEGIN IMMEDIATE')
         try:

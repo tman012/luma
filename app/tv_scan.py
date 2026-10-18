@@ -321,11 +321,16 @@ def _image_path(v: Any) -> Optional[str]:
     return None
 
 
+def fetch_for_refresh(sid: int, tmdb_id: int) -> Optional[Dict[str, Any]]:
+    """The TMDB half of refresh_episodes (network, no tv.db writes): run it before taking _scan_lock."""
+    with tv_store.connect() as conn:
+        row = conn.execute('SELECT episode_group_id FROM series WHERE id = ?', (sid,)).fetchone()
+    return fetch_show(tmdb_id, group_id=row['episode_group_id'] if row else None)
+
+
 def refresh_episodes(sid: int, tmdb_id: int, now: float, data: Optional[Dict[str, Any]] = None) -> None:
     if data is None:
-        with tv_store.connect() as conn:
-            row = conn.execute('SELECT episode_group_id FROM series WHERE id = ?', (sid,)).fetchone()
-        data = fetch_show(tmdb_id, group_id=row['episode_group_id'] if row else None)
+        data = fetch_for_refresh(sid, tmdb_id)
     if not data:
         return
     with tv_store.write() as conn:
@@ -454,9 +459,17 @@ def classify(conn, sid: int, rel_in_show: str) -> Tuple[str, tv_release.Release,
     return 'unrecognized', r, []
 
 
-def scan_files(sid: int, path_id: str, folder: str, root_real: str, now: float) -> Dict[str, int]:
-    show_dir = os.path.join(root_real, folder)
-    found = list(video_files(show_dir, root_real))
+def list_files(folder: str, root_real: str) -> List[Tuple[str, os.stat_result]]:
+    """The walk half of scan_files (filesystem only, no tv.db): run it before taking _scan_lock."""
+    return list(video_files(os.path.join(root_real, folder), root_real))
+
+
+def scan_files(sid: int, path_id: str, folder: str, root_real: str, now: float,
+               found: Optional[List[Tuple[str, os.stat_result]]] = None) -> Dict[str, int]:
+    """Link one show's files. *found* is a list_files() walk done earlier (outside the scan lock);
+    without it the folder is walked here."""
+    if found is None:
+        found = list_files(folder, root_real)
     counts = {'linked': 0, 'mismatch': 0, 'unrecognized': 0}
     with tv_store.write() as conn:
         keep = set()
@@ -1151,7 +1164,8 @@ def _root_for(path_id: str) -> Optional[str]:
 
 
 def _apply(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str, event: str,
-           series_id: Optional[int], data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+           series_id: Optional[int], data: Optional[Dict[str, Any]] = None,
+           found: Optional[List[Tuple[str, os.stat_result]]] = None) -> Dict[str, Any]:
     with tv_store.connect() as conn:
         other = conn.execute('SELECT id FROM series WHERE tmdb_id = ?', (tmdb_id,)).fetchone()
     if other and other['id'] != series_id:
@@ -1160,7 +1174,7 @@ def _apply(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str, eve
         sid = take_over(other['id'], path_id, folder, now, via=via, event=event, drop_series_id=series_id)
         root = _root_for(path_id)
         if root is not None and folder:
-            scan_files(sid, path_id, folder, root, now)
+            scan_files(sid, path_id, folder, root, now, found)
         return {'ok': True, 'series_id': sid}
     if data is None:                           # one details call, the group picked from the folder's files
         root = _root_for(path_id)
@@ -1172,7 +1186,7 @@ def _apply(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str, eve
         return {'ok': False, 'error': TAKEN, 'status': 409}
     root = _root_for(path_id)
     if root is not None and folder:
-        scan_files(sid, path_id, folder, root, now)
+        scan_files(sid, path_id, folder, root, now, found)
     return {'ok': True, 'series_id': sid}
 
 
@@ -1225,19 +1239,28 @@ def import_all(items: List[Tuple[int, int]], now: Optional[float] = None) -> Dic
     return _import_rows(items, now, via='manual')
 
 
-def _import_rows(items: List[Tuple[int, int]], now: Optional[float], via: str) -> Dict[str, Any]:
+def _owner_elsewhere(row: Dict[str, Any], tid: int):
+    with tv_store.connect() as conn:
+        return conn.execute('SELECT * FROM series WHERE tmdb_id = ? AND path_id IS NOT NULL AND folder IS NOT NULL'
+                            ' AND NOT (path_id = ? AND folder = ?)', (tid, row['path_id'], row['folder'])).fetchone()
+
+
+def _import_rows(items: List[Tuple[int, int]], now: Optional[float], via: str, lock: bool = False) -> Dict[str, Any]:
+    """Reads, the folder walks and the TMDB fetches run first; then the rows are stored one by one.
+    With *lock* (the boot re-run, which isn't @_locked) _scan_lock is taken only around those writes,
+    never across the walk or the fetch (Reviewer on v158a)."""
     now = time.time() if now is None else now
     with tv_store.connect() as conn:
         rows = {r['id']: dict(r) for r in conn.execute('SELECT id, path_id, folder FROM unmatched')}
-    jobs, failed, seen = [], [], set()
+    jobs, owned, failed, seen = [], [], [], set()
     for uid, tid in items:
         row = rows.get(uid)
         if row is None:
             failed.append({'id': uid, 'error': NOT_FOUND})
         elif tid in seen:
             failed.append({'id': uid, 'error': TAKEN})
-        elif _owned_elsewhere(row, tid, now):
-            failed.append({'id': uid, 'error': TAKEN})          # another folder has it: a duplicate, unchecked
+        elif _owner_elsewhere(row, tid) is not None:
+            owned.append((row, tid))                             # another folder has it: a duplicate, unchecked
         else:
             seen.add(tid)
             jobs.append((row, tid))
@@ -1246,31 +1269,47 @@ def _import_rows(items: List[Tuple[int, int]], now: Optional[float], via: str) -
         row, tid = job
         root = _root_for(row['path_id'])
         try:
-            return {'data': fetch_show(tid, None, _hints(root, row['folder']) if root else None)}
+            return {'data': fetch_show(tid, None, _hints(root, row['folder']) if root else None),
+                    'found': list_files(row['folder'], root) if root and row['folder'] else None}
         except tv_tmdb.TmdbError as e:
             return {'error': e}
-    imported = []
-    for (row, tid), res in zip(jobs, run_pool(jobs, fetch)):
-        if 'error' in res or res.get('skipped'):
-            failed.append({'id': row['id'], 'error': str(res.get('error') or tv_tmdb.BUSY)})
-            continue
-        if not res.get('data'):
-            failed.append({'id': row['id'], 'error': SHOW_NOT_FOUND})
-            continue
-        out = _apply(row['path_id'], row['folder'], tid, now, via=via, event='matched', series_id=None,
-                     data=res['data'])
-        if out['ok']:
-            imported.append(row['id'])
-        else:
-            failed.append({'id': row['id'], 'error': out['error']})
+    fetched = list(zip(jobs, run_pool(jobs, fetch)))
+    if lock and not _scan_lock.acquire(timeout=LOCK_WAIT_S):
+        return {'ok': False, 'error': BUSY, 'status': 409, 'imported': [], 'failed': failed}
+    try:
+        imported = []
+        for row, tid in owned:
+            if _owned_elsewhere(row, tid, now):                  # re-checked under the lock, then stored
+                failed.append({'id': row['id'], 'error': TAKEN})
+        if lock:                                                 # a scan may have run while we fetched
+            with tv_store.connect() as conn:
+                live = {(r['id'], r['path_id'], r['folder']) for r in conn.execute('SELECT id, path_id, folder FROM unmatched')}
+        for (row, tid), res in fetched:
+            if lock and (row['id'], row['path_id'], row['folder']) not in live:
+                continue                                         # gone or changed: nothing to import
+            if 'error' in res or res.get('skipped'):
+                failed.append({'id': row['id'], 'error': str(res.get('error') or tv_tmdb.BUSY)})
+                continue
+            if not res.get('data'):
+                failed.append({'id': row['id'], 'error': SHOW_NOT_FOUND})
+                continue
+            out = _apply(row['path_id'], row['folder'], tid, now, via=via, event='matched', series_id=None,
+                         data=res['data'], found=res.get('found'))
+            if out['ok']:
+                imported.append(row['id'])
+            else:
+                failed.append({'id': row['id'], 'error': out['error']})
+    finally:
+        if lock:
+            _scan_lock.release()
     return {'ok': True, 'imported': imported, 'failed': failed}
 
 
-@_locked
 def auto_import_pending(now: Optional[float] = None) -> Dict[str, Any]:
     """Boot (v157): review rows left by the old rule that carry Luma's ranked pick import it now, as a
     scan would (via auto); no rescan. Duplicates, no-result and 'unclear' rows (no pick) stay; shows
-    already imported are never touched. tv.db only. {'ok', 'imported', 'failed', 'kept'}."""
+    already imported are never touched. tv.db only. {'ok', 'imported', 'failed', 'kept'}.
+    The scan lock is held only while storing (not across the TMDB fetch or the folder walk)."""
     if not AUTO_IMPORT:
         return {'ok': True, 'imported': [], 'failed': [], 'kept': 0}
     with tv_store.connect() as conn:
@@ -1280,7 +1319,10 @@ def auto_import_pending(now: Optional[float] = None) -> Dict[str, Any]:
     if not items:
         return {'ok': True, 'imported': [], 'failed': [], 'kept': len(rows)}
     with tv_tmdb.background():
-        out = _import_rows(items, now, via='auto')
+        out = _import_rows(items, now, via='auto', lock=True)
+    if not out['ok']:
+        logger.info('TV import: boot re-run skipped (%s)', out['error'])
+        return out
     out['kept'] = len(rows) - len(out['imported'])
     out['duplicates'] = [f['id'] for f in out['failed'] if f['error'] == TAKEN]      # now duplicates, in review
     out['failed'] = [f for f in out['failed'] if f['error'] != TAKEN]
@@ -1307,9 +1349,7 @@ def auto_import_on_start() -> bool:
 def _owned_elsewhere(row: Dict[str, Any], tid: int, now: float) -> bool:
     """Import all never moves a show another folder already has (The Office (US),
     SmackDown): the row becomes a duplicate in review, its candidate that show."""
-    with tv_store.connect() as conn:
-        owner = conn.execute('SELECT * FROM series WHERE tmdb_id = ? AND path_id IS NOT NULL AND folder IS NOT NULL'
-                             ' AND NOT (path_id = ? AND folder = ?)', (tid, row['path_id'], row['folder'])).fetchone()
+    owner = _owner_elsewhere(row, tid)
     if owner is None:
         return False
     g = tv_match.parse_folder(row['folder'])

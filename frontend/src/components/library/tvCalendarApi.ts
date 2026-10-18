@@ -15,6 +15,8 @@ export interface CalEpisode {
   airstamp?: string | null; runtime?: number | null;
   /** Card still sources: TheTVDB episode image (with a key), TMDB still, show backdrop. */
   tvdb_image?: string | null; still_path?: string | null; backdrop_path?: string | null;
+  /** v158a: the series and this episode are monitored (unmonitored cards render dimmed). */
+  monitored?: boolean;
 }
 
 /** '9:00 – 9:42 PM' (or '11:30 PM – 12:10 AM') in the viewer's zone (*timeZone* for tests); null without an airstamp. */
@@ -59,11 +61,67 @@ export const loadCalendar = (start: string, days: number) =>
   call<CalendarData>(`${TV_URL}/calendar?start=${start}&days=${days}`, undefined, d => Array.isArray(d.episodes));
 export const findShows = (q: string) =>
   call<{ results: FindResult[] }>(`${TV_URL}/find?q=${encodeURIComponent(q)}`, undefined, d => Array.isArray(d.results));
-export const addShow = (tmdb_id: number, path_id?: string) =>
+/** Monitor options on Add (Designer: All episodes is the default). */
+export type MonitorOption = 'all' | 'future' | 'missing' | 'existing' | 'recent' | 'pilot' | 'first_season' | 'last_season' | 'none';
+export const ADD_MONITOR: { id: MonitorOption; label: string }[] = [
+  { id: 'all', label: 'All episodes' }, { id: 'future', label: 'Future episodes' }, { id: 'missing', label: 'Missing episodes' },
+  { id: 'first_season', label: 'First season' }, { id: 'last_season', label: 'Latest season' }, { id: 'none', label: 'None' },
+];
+export const addShow = (tmdb_id: number, path_id?: string, opts: { monitor?: MonitorOption; profile_id?: number | null } = {}) =>
   call<{ ok: true; series_id: number }>(`${TV_URL}/shows`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(path_id ? { tmdb_id, path_id } : { tmdb_id }),
+    body: JSON.stringify({ tmdb_id, ...(path_id ? { path_id } : {}), ...(opts.monitor ? { monitor: opts.monitor } : {}),
+      ...(opts.profile_id != null ? { profile_id: opts.profile_id } : {}) }),
   }, d => typeof d.series_id === 'number');
+const put = (body: unknown): RequestInit => ({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+/** The calendar bookmark: that episode only. */
+export const setEpisodeMonitored = (episodeId: number, monitored: boolean) =>
+  call<SeriesView>(`${TV_URL}/episodes/${episodeId}/monitored`, put({ monitored }), d => typeof d.id === 'number');
+export const setSeasonMonitored = (seriesId: number, season: number, monitored: boolean) =>
+  call<SeriesView>(`${TV_URL}/shows/${seriesId}/seasons/${season}/monitored`, put({ monitored }), d => typeof d.id === 'number');
+export const setSeriesMonitored = (seriesId: number, monitored: boolean) =>
+  call<SeriesView>(`${TV_URL}/shows/${seriesId}/monitored`, put({ monitored }), d => typeof d.id === 'number');
+
+// ---------------------------------------------------------------- series edit + profiles (v158a)
+
+export type SeriesType = 'standard' | 'daily' | 'anime';
+export interface SeriesView {
+  id: number; title: string; year: number | null; tmdb_id: number; monitored: boolean; monitor: MonitorOption;
+  monitor_new_seasons: 'all' | 'none'; monitor_specials: boolean; season_folder: boolean; series_type: SeriesType;
+  profile_id: number | null; path_id: string | null; folder: string | null; path: string | null;
+  seasons: { season: number; monitored: boolean }[];
+  episodes: { id: number; season: number; episode: number; monitored: boolean }[];
+}
+export type SeriesEdit = Partial<Pick<SeriesView, 'monitored' | 'monitor_new_seasons' | 'monitor_specials' | 'season_folder' | 'series_type' | 'profile_id' | 'path'>>;
+export const getSeries = (id: number) => call<SeriesView>(`${TV_URL}/shows/${id}`, undefined, d => typeof d.id === 'number');
+export const getSeriesByTmdb = (tmdbId: number) =>
+  call<SeriesView>(`${TV_URL}/shows/by-tmdb/${tmdbId}`, undefined, d => typeof d.id === 'number');
+export const saveSeries = (id: number, body: SeriesEdit) => call<SeriesView>(`${TV_URL}/shows/${id}`, put(body), d => typeof d.id === 'number');
+export const deleteSeries = (id: number, deleteFiles: boolean) =>
+  call<{ ok: true }>(`${TV_URL}/shows/${id}${deleteFiles ? '?delete_files=1' : ''}`, { method: 'DELETE' }, d => d.ok === true);
+export const monitorMissing = (ids: number[]) =>
+  call<{ ok: true; updated: number }>(`${TV_URL}/shows/monitor-missing`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+  }, d => d.ok === true);
+
+export interface Quality { id: string; name: string; resolution: string; source: string }
+export interface QualityItem { id: string; allowed: boolean }
+export interface Profile { id: number; name: string; items: QualityItem[]; cutoff: string | null; upgrades: boolean; default: boolean; in_use?: boolean }
+export type ProfileDraft = { name: string; items: QualityItem[]; cutoff: string | null; upgrades: boolean; default: boolean };
+export const loadProfiles = () =>
+  call<{ profiles: Profile[]; qualities: Quality[] }>(`${TV_URL}/profiles`, undefined, d => Array.isArray(d.profiles) && Array.isArray(d.qualities));
+export const saveProfile = (draft: ProfileDraft, id?: number) =>
+  call<Profile>(id == null ? `${TV_URL}/profiles` : `${TV_URL}/profiles/${id}`,
+    { method: id == null ? 'POST' : 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft) },
+    d => typeof d.id === 'number');
+export const deleteProfile = (id: number) =>
+  call<{ ok: true }>(`${TV_URL}/profiles/${id}`, { method: 'DELETE' }, d => d.ok === true);
+/** "Up to 1080p" from a cutoff id like '1080p-web' (SD for 'sd'). */
+export const cutoffLabel = (cutoff: string | null): string => {
+  if (!cutoff) return '';
+  const res = cutoff.split('-')[0];
+  return `Up to ${res === 'sd' ? 'SD' : res}`;
+};
 
 // ---------------------------------------------------------------- dates
 

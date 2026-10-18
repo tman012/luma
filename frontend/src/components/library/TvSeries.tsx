@@ -1,7 +1,10 @@
 /** Settings > TV > Series (desktop web): every library show as a 2:3 poster,
  * A–Z ignoring punctuation and a leading The/A/An, with a downloaded-share bar and "N of M
- * episodes", and a sticky # – Z rail. Posters aren't clickable (no show detail yet). */
+ * episodes", and a sticky # – Z rail. A poster opens Edit series (v158a); Select picks shows
+ * for the bulk Missing episodes opt-in. */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { EditSeriesModal } from './TvEdit';
+import { monitorMissing } from './tvCalendarApi';
 import { FONT } from '@/components/start/StartUI';
 import { posterUrl } from '@/utils/image';
 import { RATING_ICONS } from '@/utils/ratingIcons';
@@ -19,6 +22,8 @@ const railHeight = (top: number) => Math.max(RAIL_MIN_H, Math.round(window.inner
 export const tvSeriesCss = `
 .tvs-rail-btn{border-radius:999px;transition:background-color .12s,color .12s}
 .tvs-rail-btn[aria-disabled=false]:hover{color:rgba(255,255,255,.95)!important;background:rgba(255,255,255,.10)!important}
+.tvs-glass:hover{background:rgba(255,255,255,.10)!important}
+.tvs-poster:hover img{filter:brightness(1.08)}
 `;
 export const LETTERS = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
 
@@ -48,8 +53,22 @@ export function progress(s: Show): { fill: number; color: string; state: 'missin
 }
 export const episodesText = (s: Show) => `${Math.min(s.have ?? 0, s.aired ?? 0)} of ${s.aired ?? 0} episodes`;
 
-export function TvSeries({ shows }: { shows: Show[] | null }) {
+export function TvSeries({ shows, onChanged }: { shows: Show[] | null; onChanged?: () => void }) {
   const sorted = useMemo(() => (shows ? sortShows(shows) : []), [shows]);
+  const [editing, setEditing] = useState<Show | null>(null);
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [bulk, setBulk] = useState<'' | 'busy' | 'error'>('');
+  const toggle = (id: number) => setPicked(p => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const stopSelecting = () => { setSelecting(false); setPicked(new Set()); setBulk(''); };
+  const runMissing = async () => {
+    if (!picked.size) return;
+    setBulk('busy');
+    const r = await monitorMissing([...picked]);
+    if (!r.ok) { setBulk('error'); return; }
+    stopSelecting();
+    onChanged?.();
+  };
   const firsts = useMemo(() => {
     const m = new Map<string, number>();
     sorted.forEach(s => { const l = letterOf(s.title); if (!m.has(l)) m.set(l, s.id); });
@@ -62,7 +81,7 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
   const railRef = useRef<HTMLElement>(null);
   const jumped = useRef<string | null>(null);         // a rail click wins while its show is on screen (the page end)
 
-  // a name that needs a 3rd line at 13 is set 12/16 (CAPTION_FIT); still over: the 2-line ellipsis
+  // a name that needs a 3rd line at 13: 12/16, then 3 lines at 12/16, then 11.5/15 (fitCaptions)
   useLayoutEffect(() => {
     if (!sorted.length) return;
     let frame = 0;
@@ -145,9 +164,26 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
     setCurrent(l);
   };
   return (
+    <div data-testid="tv-series-wrap" style={{ display: 'flex', flexDirection: 'column', gap: 12, fontFamily: FONT }}>
+    <div data-testid="tv-series-bar-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, minHeight: 36, paddingRight: RAIL.width }}>
+      {selecting ? (
+        <>
+          <span data-testid="tv-series-picked" style={{ fontSize: 13, fontWeight: 600, color: W50, marginRight: 'auto' }}>{`${picked.size} selected`}</span>
+          {bulk === 'error' && <span role="alert" style={{ fontSize: 13, color: '#ef4444' }}>{"Couldn't save"}</span>}
+          <button type="button" className="lp-focus tvs-glass" data-testid="tv-series-cancel" onClick={stopSelecting} style={barBtn(false)}>Cancel</button>
+          <button type="button" className="lp-focus" data-testid="tv-series-missing" disabled={!picked.size || bulk === 'busy'} onClick={() => void runMissing()}
+            style={{ ...barBtn(true), opacity: picked.size && bulk !== 'busy' ? 1 : 0.4, cursor: picked.size ? 'pointer' : 'default' }}>Monitor missing</button>
+        </>
+      ) : (
+        <button type="button" className="lp-focus tvs-glass" data-testid="tv-series-select" onClick={() => setSelecting(true)} style={barBtn(false)}>Select</button>
+      )}
+    </div>
     <div ref={root} data-testid="tv-series" style={{ display: 'flex', alignItems: 'flex-start', fontFamily: FONT }}>
       <div style={{ ...grid, flex: 1, minWidth: 0 }}>
-        {sorted.map(s => <Tile key={s.id} s={s} first={firsts.get(letterOf(s.title)) === s.id} />)}
+        {sorted.map(s => (
+          <Tile key={s.id} s={s} first={firsts.get(letterOf(s.title)) === s.id} selecting={selecting} picked={picked.has(s.id)}
+            onOpen={() => (selecting ? toggle(s.id) : setEditing(s))} />
+        ))}
       </div>
       <style>{tvSeriesCss}</style>
       <div ref={col} style={{ width: RAIL.width, flex: 'none', alignSelf: 'stretch', position: 'relative' }}>
@@ -171,17 +207,38 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
       </nav>
       </div>
     </div>
+    {editing && (
+      <EditSeriesModal seriesId={editing.id} title={editing.title} onClose={() => setEditing(null)}
+        onSaved={() => onChanged?.()} onDeleted={() => onChanged?.()} />
+    )}
+    </div>
   );
 }
 
-function Tile({ s, first }: { s: Show; first: boolean }) {
+const barBtn = (primary: boolean): React.CSSProperties => ({
+  height: 36, padding: '0 14px', borderRadius: 10, fontSize: 13, fontWeight: 600, fontFamily: FONT, cursor: 'pointer', color: '#fff',
+  border: primary ? 'none' : '1px solid rgba(255,255,255,0.08)', background: primary ? ACCENT : 'rgba(255,255,255,0.06)',
+});
+
+function Tile({ s, first, selecting, picked, onOpen }: { s: Show; first: boolean; selecting: boolean; picked: boolean; onOpen: () => void }) {
   const p = progress(s);
   const src = posterUrl(s.poster_path, 'w342');
   const [broken, setBroken] = useState(false);
   return (
     <div data-testid="tv-series-tile" data-show-id={s.id} data-letter={first ? letterOf(s.title) : undefined}
-      data-state={p.state} style={{ minWidth: 0, scrollMarginTop: 24 }}>
-      <div style={{ position: 'relative', aspectRatio: '2 / 3', borderRadius: '8px 8px 0 0', overflow: 'hidden', background: 'rgba(255,255,255,0.06)' }}>
+      data-state={p.state} data-monitored={s.monitored ? 'true' : 'false'} style={{ minWidth: 0, scrollMarginTop: 24, display: 'flex', flexDirection: 'column' }}>
+      <button type="button" className="lp-focus tvs-poster" data-testid="tv-series-open"
+        aria-label={selecting ? s.title : `Edit ${s.title}`} aria-pressed={selecting ? picked : undefined} onClick={onOpen}
+        style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left' }}>
+      <div style={{ position: 'relative', aspectRatio: '2 / 3', borderRadius: '8px 8px 0 0', overflow: 'hidden', background: 'rgba(255,255,255,0.06)',
+        outline: picked ? `2px solid ${ACCENT}` : undefined, outlineOffset: -2 }}>
+        {selecting && (
+          <span data-testid="tv-series-check" aria-hidden="true" style={{ position: 'absolute', top: 8, left: 8, zIndex: 1, width: 20, height: 20, borderRadius: 6,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: picked ? ACCENT : 'rgba(21,16,42,.6)',
+            border: picked ? 'none' : '1.5px solid rgba(255,255,255,0.6)' }}>
+            {picked && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>}
+          </span>
+        )}
         {src && !broken ? (
           <img src={src} alt={s.title} loading="lazy" onError={() => setBroken(true)}
             style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -192,13 +249,14 @@ function Tile({ s, first }: { s: Show; first: boolean }) {
           </span>
         )}
       </div>
+      </button>
       <div data-testid="tv-series-bar" role="progressbar" aria-label={`${s.title}: ${episodesText(s)}`}
         aria-valuemin={0} aria-valuemax={s.aired ?? 0} aria-valuenow={Math.min(s.have ?? 0, s.aired ?? 0)}
         style={{ height: 4, background: 'rgba(255,255,255,0.08)' }}>
         <span style={{ display: 'block', height: 4, width: `${Math.round(p.fill * 1000) / 10}%`, background: p.color }} />
       </div>
       <div data-testid="tv-series-caption" style={{ paddingTop: 8, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', gap: 2,
-        minHeight: CAPTION_MIN_H, boxSizing: 'border-box' }}>
+        minHeight: CAPTION_MIN_H, flex: 1, boxSizing: 'border-box' }}>
         <span data-testid="tv-series-name" title={s.title} aria-label={s.title} style={caption}>{s.title}</span>
         <span data-testid="tv-series-count" style={{ fontSize: 12, color: W50, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{episodesText(s)}</span>
       </div>
@@ -209,23 +267,34 @@ function Tile({ s, first }: { s: Show; first: boolean }) {
 /** The caption block (name + count) is at least this tall, so posters and bars line up row to row and any
  * space falls below the count (8 top + 2 x 17 + 2 + 15 = 59 with padding; 51 without it). */
 const CAPTION_MIN_H = 51 + 8;
-/** Caption type (Designer): 13/600, normal tracking, 17px lines, at most 2 lines; the count sits right under it.
- * ONE step: a name that would need a third line at 13 is set 12/16. Still over at 12: the 2-line clamp's
- * ellipsis (the full name is in title and aria-label). */
+/** Caption type: 13/600, normal tracking, 17px lines; the count sits right under the name.
+ * Steps (PM over Designer, Taylor wants full names): a name that would need a 3rd line at 13 is set 12/16
+ * on 2 lines; still over, 12/16 on 3 lines; still over, 11.5/15 on 3 lines (the floor); only then the
+ * ellipsis (full name in title and aria-label). The grid row stretches every tile to the row's height and
+ * the caption block fills it, so all captions in a row share one height. */
 export const CAPTION_TYPE = { size: 13, line: 17 };
 export const CAPTION_FIT = { size: 12, line: 16 };
+export const CAPTION_FLOOR = { size: 11.5, line: 15 };
 const caption: React.CSSProperties = {
   fontSize: CAPTION_TYPE.size, letterSpacing: 'normal', fontWeight: 600, lineHeight: `${CAPTION_TYPE.line}px`, color: W95, overflow: 'hidden', overflowWrap: 'anywhere',
   display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
 };
 const over = (n: HTMLElement) => n.scrollHeight > n.clientHeight + 1;
-/** Batched: reset and read every name, then write the one step to those that overflow; returns how many stay ellipsized. */
+const setType = (n: HTMLElement, t: { size: number; line: number }, lines: number) => {
+  n.style.fontSize = `${t.size}px`; n.style.lineHeight = `${t.line}px`;
+  n.style.setProperty('-webkit-line-clamp', String(lines)); n.style.maxHeight = `${t.line * lines}px`;
+};
+/** Batched per step (reset and read all, then write the next step to those still over); returns how many stay ellipsized. */
 export function fitCaptions(root: HTMLElement | null): number {
   const names = [...(root?.querySelectorAll<HTMLElement>('[data-testid=tv-series-name]') || [])];
-  for (const n of names) { n.style.fontSize = `${CAPTION_TYPE.size}px`; n.style.lineHeight = `${CAPTION_TYPE.line}px`; delete n.dataset.fit; }
-  const long = names.filter(over);
-  for (const n of long) { n.style.fontSize = `${CAPTION_FIT.size}px`; n.style.lineHeight = `${CAPTION_FIT.line}px`; n.dataset.fit = String(CAPTION_FIT.size); }
-  const left = long.filter(over);
+  for (const n of names) { setType(n, CAPTION_TYPE, 2); delete n.dataset.fit; delete n.dataset.lines; delete n.dataset.ellipsis; }
+  let left = names.filter(over);
+  const steps: [{ size: number; line: number }, number][] = [[CAPTION_FIT, 2], [CAPTION_FIT, 3], [CAPTION_FLOOR, 3]];
+  for (const [t, lines] of steps) {
+    if (!left.length) break;
+    for (const n of left) { setType(n, t, lines); n.dataset.fit = String(t.size); n.dataset.lines = String(lines); }
+    left = left.filter(over);
+  }
   for (const n of left) n.dataset.ellipsis = 'true';
   return left.length;
 }

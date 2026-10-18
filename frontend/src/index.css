@@ -1357,13 +1357,14 @@ html.luma-minimal [data-modal-actions] {
 }
 /* Sources (the Prowlarr port) stays in minimal builds: an action row that
    holds the marked Sources button shows that button only. */
-html.luma-minimal [data-modal-actions]:has(> [data-modal-sources]) {
+html.luma-minimal [data-modal-actions]:has(> [data-modal-sources], > [data-modal-keep]) {
   display: flex !important;
   justify-content: center;
 }
-html.luma-minimal [data-modal-actions]:has(> [data-modal-sources]) > :not([data-modal-sources]) {
+html.luma-minimal [data-modal-actions]:has(> [data-modal-sources], > [data-modal-keep]) > :not([data-modal-sources]):not([data-modal-keep]) {
   display: none !important;
 }
+/* v158a: Luma TV's monitor toggle and the Seasons pill (to the season/episode toggles) stay, marked data-modal-keep. */
 
 /* LUMA_MINIMAL: the search layer covers the home header (no nav behind it). */
 html.luma-minimal .kiosk-search-dim { z-index: 60; }

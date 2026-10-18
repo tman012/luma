@@ -190,7 +190,7 @@ export function AddToSonarrModal({ tvdbId, title, seasons, onClose, onAdded }: A
       <FocusZone zoneId="add-to-sonarr-modal" orientation="vertical" trapFocus onEscape={onClose}>
         <div style={{ background: 'var(--color-kiosk-black)', borderRadius: '20px', padding: '30px 28px', maxWidth: '420px', width: '100%' }} onClick={(e) => e.stopPropagation()}>
           <h2 style={{ marginBottom: '24px', fontSize: '22px', fontWeight: 700, textAlign: 'center', color: 'white' }}>
-            Add to Watchlist
+            Add to watchlist
           </h2>
 
           {/* Quality profile — single select */}
@@ -275,7 +275,7 @@ export function AddToSonarrModal({ tvdbId, title, seasons, onClose, onAdded }: A
           >
             {added ? 'Added!' : adding ? 'Adding...' : error ? 'Failed - Try Again'
               : chosenSeasons.length === 0 && allSeasonNumbers.length > 0 ? 'Select a Season'
-              : 'Add to Watchlist'}
+              : 'Add to watchlist'}
           </button>
         </div>
       </FocusZone>

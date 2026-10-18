@@ -234,3 +234,39 @@ def test_boot_rerun_imports_old_pending_rows_and_touches_nothing_else(lib, monke
     assert all(after[i] == r for i, r in before.items())                          # imported shows untouched
     assert {r['folder'] for r in rows('SELECT folder FROM unmatched')} == {'Zzz Nothing', 'Empty Show (2020)'}
     assert tv_scan.auto_import_pending(now=3000.0)['imported'] == []              # idempotent
+
+
+def test_v158a_boot_rerun_fetches_and_walks_without_the_scan_lock(lib, monkeypatch, fake_tmdb):
+    """Reviewer on v158a: auto_import_pending takes _scan_lock only around the writes."""
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', False)
+    tv_scan.scan_all(now=1000.0)
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', True)
+    held = {'fetch': [], 'walk': [], 'store': []}
+    real_fetch, real_list, real_store = tv_scan.fetch_show, tv_scan.list_files, tv_scan.store_show
+    monkeypatch.setattr(tv_scan, 'fetch_show', lambda *a, **k: (held['fetch'].append(tv_scan._scan_lock.locked()), real_fetch(*a, **k))[1])
+    monkeypatch.setattr(tv_scan, 'list_files', lambda *a: (held['walk'].append(tv_scan._scan_lock.locked()), real_list(*a))[1])
+    monkeypatch.setattr(tv_scan, 'store_show', lambda *a, **k: (held['store'].append(tv_scan._scan_lock.locked()), real_store(*a, **k))[1])
+    out = tv_scan.auto_import_pending(now=2000.0)
+    assert out['ok'] and len(out['imported']) == 1
+    assert held == {'fetch': [False], 'walk': [False], 'store': [True]}
+    assert not tv_scan._scan_lock.locked()
+
+
+def test_v158a_boot_rerun_waits_for_a_running_scan_then_skips_rows_it_changed(lib, monkeypatch, fake_tmdb):
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', False)
+    tv_scan.scan_all(now=1000.0)
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', True)
+    monkeypatch.setattr(tv_scan, 'LOCK_WAIT_S', 0.05)
+    with tv_scan._scan_lock:
+        out = tv_scan.auto_import_pending(now=2000.0)
+    assert out['ok'] is False and out['error'] == tv_scan.BUSY and out['imported'] == []
+    real_fetch = tv_scan.fetch_show
+
+    def fetch_then_gone(*a, **k):                    # a scan drops the row while the show is fetched
+        with tv_store.write() as conn:
+            conn.execute("DELETE FROM unmatched WHERE folder = 'Mystery Show'")
+        return real_fetch(*a, **k)
+    monkeypatch.setattr(tv_scan, 'fetch_show', fetch_then_gone)
+    out = tv_scan.auto_import_pending(now=2000.0)
+    assert out['ok'] and out['imported'] == [] and out['failed'] == []
+    assert not rows("SELECT 1 FROM series WHERE folder = 'Mystery Show'")

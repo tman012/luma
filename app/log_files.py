@@ -5,7 +5,12 @@ the WHOLE formatted record, message, exception text and traceback included (cred
 X-Api-Key / Authorization / X-Plex-Token style headers, "password"/"token"/"api_key" style key-value
 pairs, Bearer tokens). Log files are created 0600 and stay 0600 through rotation (opened with mode
 0600 under a 077 umask, then chmod'ed; rotated files chmod'ed in doRollover). At boot, existing
-luma.log* files are rewritten redacted (0600, atomic replace) before the handler attaches.
+luma.log* files are rewritten redacted (0600, atomic replace, invalid bytes kept as they were via
+surrogateescape) before the handler attaches.
+
+v158a (Reviewer): install() makes logging.Handler.format redact too, so handlers added after import
+(gunicorn.error / gunicorn.access, a library's own StreamHandler, a reopened log) are covered even
+with a plain Formatter; gunicorn.conf.py also gives the gunicorn handlers RedactingFormatter.
 """
 from __future__ import annotations
 
@@ -25,7 +30,7 @@ FILE_MODE = 0o600
 MASK = '***'
 
 _KEYS = (r'api[_-]?key|apikey|access[_-]?token|refresh[_-]?token|auth[_-]?token|token|passkey|password|passwd|pwd'
-         r'|secret|client[_-]?secret|session[_-]?id|sid|x[_-]?plex[_-]?token|plex[_-]?token|rsskey|authkey|torrent_pass')
+         r'|pin|secret|client[_-]?secret|session[_-]?id|sid|x[_-]?plex[_-]?token|plex[_-]?token|rsskey|authkey|torrent_pass')
 _PATTERNS = (
     # query/form params: ?api_key=..., &token=..., X-Plex-Token=...
     re.compile(r'(?i)((?<![A-Za-z0-9_])(?:' + _KEYS + r')=)[^&\s\'",;)]+'),
@@ -105,7 +110,7 @@ def scrub(directory: Optional[str] = None) -> int:
         if os.path.islink(path) or not os.path.isfile(path):
             continue
         try:
-            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            with open(path, 'r', encoding='utf-8', errors='surrogateescape', newline='') as f:
                 text = f.read()
             clean = redact(text)
             if clean != text:
@@ -115,7 +120,7 @@ def scrub(directory: Optional[str] = None) -> int:
                     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0), FILE_MODE)
                 finally:
                     os.umask(old)
-                with os.fdopen(fd, 'w', encoding='utf-8') as out:
+                with os.fdopen(fd, 'w', encoding='utf-8', errors='surrogateescape', newline='') as out:
                     out.write(clean)
                     out.flush()
                     os.fsync(out.fileno())
@@ -135,6 +140,32 @@ def redact_handlers(root: Optional[logging.Logger] = None) -> None:
             fmt = h.formatter._fmt if h.formatter is not None else FORMAT    # noqa: SLF001
             datefmt = h.formatter.datefmt if h.formatter is not None else None
             h.setFormatter(RedactingFormatter(fmt, datefmt))
+
+
+GUNICORN_LOGGERS = ('gunicorn.error', 'gunicorn.access')
+_orig_handler_format = None
+
+
+def install() -> None:
+    """Once per process: every logging.Handler redacts what it formats, whatever its formatter and
+    whenever it was added (after-import handlers included). Idempotent; redaction is idempotent too."""
+    global _orig_handler_format
+    current = logging.Handler.format
+    if getattr(current, '__luma_redacting__', False):
+        return
+    _orig_handler_format = current
+
+    def format(self, record):                  # noqa: A001 - the logging.Handler method
+        return redact(current(self, record))
+    format.__luma_redacting__ = True
+    logging.Handler.format = format
+
+
+def redact_gunicorn() -> None:
+    """gunicorn.error and gunicorn.access keep their own handlers (propagate off): RedactingFormatter there too."""
+    install()
+    for name in GUNICORN_LOGGERS:
+        redact_handlers(logging.getLogger(name))
 
 
 def attach(filters: Iterable[logging.Filter] = (), root: Optional[logging.Logger] = None) -> Optional[RotatingFileHandler]:

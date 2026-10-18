@@ -215,3 +215,38 @@ def test_plex_down_falls_back_to_linked_files_never_a_5xx(owner, scanned):  # no
     assert _card(owner, 'Severance', 2, 3)['downloaded'] is False                    # Plex-only: not claimed while down
     assert _card(owner, 'Severance', 2, 1)['downloaded'] is True                     # linked files still answer
     tv_plex._state['down'] = False
+
+
+def test_v158a_the_poll_walks_and_fetches_without_the_scan_lock(owner, scanned, monkeypatch):  # noqa: F811
+    """Reviewer on v158a: _scan_lock is held only around the tv.db writes, never across the walk or a TMDB read."""
+    tv_watch.poll(prime=True)
+    held = {'walk': [], 'fetch': [], 'store': []}
+    real_list, real_fetch, real_scan = tv_scan.list_files, tv_scan.fetch_for_refresh, tv_scan.scan_files
+    monkeypatch.setattr(tv_scan, 'list_files', lambda *a: (held['walk'].append(tv_scan._scan_lock.locked()), real_list(*a))[1])
+    monkeypatch.setattr(tv_scan, 'fetch_for_refresh', lambda *a: (held['fetch'].append(tv_scan._scan_lock.locked()), real_fetch(*a))[1])
+    monkeypatch.setattr(tv_scan, 'scan_files', lambda *a: (held['store'].append(tv_scan._scan_lock.locked()), real_scan(*a))[1])
+    _drop(scanned, 'Severance (2022)/Season 03/Severance.S03E01.mkv')                # unknown to TMDB: a re-read
+    assert tv_watch.poll() == 1
+    assert held['walk'] == [False, False] and held['fetch'] == [False] and held['store'] == [True, True]
+    held = {k: [] for k in held}
+    _drop(scanned, 'Severance (2022)/Season 02/Severance.S02E04.mkv')
+    assert tv_watch.link_path(str(scanned / 'Severance (2022)/Season 02/Severance.S02E04.mkv')) is True
+    assert held['walk'][0] is False and held['store'][0] is True
+
+
+def test_v158a_a_poll_skipped_by_a_busy_lock_links_on_the_next_pass(scanned, monkeypatch):  # noqa: F811
+    tv_watch.poll(prime=True)
+    _drop(scanned, 'Severance (2022)/Season 02/Severance.S02E03.mkv')
+    real_list = tv_scan.list_files
+
+    def walk_then_busy(*a):                         # an import takes the lock while the poll walks
+        out = real_list(*a)
+        tv_scan._scan_lock.acquire()
+        return out
+    monkeypatch.setattr(tv_scan, 'list_files', walk_then_busy)
+    try:
+        assert tv_watch.poll() is None
+    finally:
+        tv_scan._scan_lock.release()
+    monkeypatch.setattr(tv_scan, 'list_files', real_list)
+    assert tv_watch.poll() == 1                                                      # not lost

@@ -38,6 +38,7 @@ import {
   useSonarrStatusData, sonarrEpisode, sonarrSeason, seasonInFlight, isInFlight, orbWithSonarr,
 } from './SonarrStatus';
 import { apiUrl, withBase } from '@/urlHelpers';
+import { seasonsLabel } from '@/utils/seasonsLabel';
 
 function resolveEpisodeThumbnail(ep: TvEpisode): string | null {
   if (ep.still_path) {
@@ -403,7 +404,7 @@ export function CompactLayout(props: TvModalViewProps) {
       ];
 
   const seasonsCountDisplay = show?.numberOfSeasons
-    ? `${show.numberOfSeasons} Season${show.numberOfSeasons !== 1 ? 's' : ''}`
+    ? seasonsLabel(show.numberOfSeasons)
     : seasons.length > 0
       ? `${seasons.length} Season${seasons.length !== 1 ? 's' : ''}`
       : '';
@@ -870,12 +871,13 @@ export function CompactLayout(props: TvModalViewProps) {
                         In Watchlist
                       </div>
                     ) : (
-                      /* Add to Watchlist — full-width white pill.
+                      /* Add to watchlist: full-width #3b82f6 primary button (v158a; was the white pill).
                          Show-level add needs a resolved tvdbId (both the
                          AddToSonarr modal and the fast-add path are keyed on it),
                          so disable it until tvdbId lands to avoid a no-op tap. */
                       <button
                         type="button"
+                        data-testid="tv-add-watchlist"
                         disabled={!activeSeasonData && !tvdbId}
                         onClick={() => {
                           if (activeSeasonData) {
@@ -888,9 +890,9 @@ export function CompactLayout(props: TvModalViewProps) {
                           width: 'calc(100% - 32px)',
                           margin: '20px 16px 0',
                           padding: '14px 20px',
-                          background: '#ffffff',
-                          color: '#000000',
-                          borderRadius: '50px',
+                          background: '#3b82f6',
+                          color: '#ffffff',
+                          borderRadius: '12px',
                           border: 'none',
                           fontSize: '16px',
                           fontWeight: 600,
@@ -915,7 +917,7 @@ export function CompactLayout(props: TvModalViewProps) {
                           <line x1="12" y1="5" x2="12" y2="19" />
                           <line x1="5" y1="12" x2="19" y2="12" />
                         </svg>
-                        {activeSeasonData ? 'Add Season to Watchlist' : 'Add to Watchlist'}
+                        {activeSeasonData ? 'Add season to watchlist' : 'Add to watchlist'}
                       </button>
                     )}
                     </div>{/* end action stagger wrapper */}

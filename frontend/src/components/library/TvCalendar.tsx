@@ -8,7 +8,7 @@ import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
 import { Poster } from './TvImport';
 import { posterUrl, tvdbImg } from '@/utils/image';
 import {
-  STATE_COLOR, STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, shortDate, timeRange, weekLabel, weekStart,
+  STATE_COLOR, STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, setEpisodeMonitored, shortDate, timeRange, weekLabel, weekStart,
   type CalEpisode, type CalendarData, type Day,
 } from './tvCalendarApi';
 
@@ -182,21 +182,58 @@ function useOpenEpisode(e: CalEpisode) {
   };
 }
 
+/** v158a: the card's own monitored state (the bookmark flips it at once; the server answer wins). */
+function useMonitored(e: CalEpisode): [boolean, (on: boolean) => void] {
+  const [mon, setMon] = useState(e.monitored !== false);
+  useEffect(() => { setMon(e.monitored !== false); }, [e.monitored, e.episode_id]);
+  const flip = (on: boolean) => {
+    setMon(on);
+    void setEpisodeMonitored(e.episode_id, on).then(r => { if (!r.ok) setMon(!on); });
+  };
+  return [mon, flip];
+}
+
+/** Hover bookmark (filled = monitored): toggles this episode only; never opens the detail. No label; aria only. */
+export function Bookmark({ e, on, onToggle }: { e: CalEpisode; on: boolean; onToggle: (on: boolean) => void }) {
+  const stop = (k: React.SyntheticEvent) => { k.stopPropagation(); };
+  return (
+    <button type="button" data-testid="tv-card-bookmark" className="tvc-bm lp-focus" aria-pressed={on}
+      aria-label={`Monitored: ${e.show} ${code(e.season, e.episode)}`}
+      onClick={k => { k.stopPropagation(); k.preventDefault(); onToggle(!on); }}
+      onKeyDown={k => { if (k.key === 'Enter' || k.key === ' ') stop(k); }}
+      style={{ position: 'absolute', top: 6, right: 6, zIndex: 2, width: 28, height: 28, padding: 0, borderRadius: 8, display: 'inline-flex',
+        alignItems: 'center', justifyContent: 'center', background: 'rgba(21,16,42,.72)', border: '1px solid rgba(255,255,255,0.12)',
+        backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', color: W95, cursor: 'pointer' }}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill={on ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+        <path d="M6 3h12v18l-6-4.5L6 21z" />
+      </svg>
+    </button>
+  );
+}
+
+/** Unmonitored cards render at ~0.5 opacity; the state edge stays full strength. */
+export const DIM = 0.5;
+
 function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
   const st = episodeState(e, today);
   const open = useOpenEpisode(e);
+  const [mon, flip] = useMonitored(e);
   return (
-    <div data-testid="tv-agenda-row" data-state={st} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
+    <div data-testid="tv-agenda-row" data-state={st} data-monitored={mon ? 'true' : 'false'} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
+      className={`tvc-card ${open.className || ''}`.trim()}
       style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', paddingLeft: EDGE_W, borderRadius: 8, background: 'rgba(255,255,255,0.06)',
         border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
       <Stripe color={STATE_COLOR[st]} w={EDGE_W} />
-      <Still e={e} />
-      <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span data-testid="tv-card-show" title={e.show} style={{ ...clamp2, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
-        <span data-testid="tv-card-title" title={epLine(e)} style={{ ...one, fontSize: 12, color: W70 }}>{epLine(e)}</span>
-        <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: W50 }}>
-          {timeRange(e.airstamp, e.runtime) || e.air_time || shortDate(e.air_date)}
-        </span>
+      <Bookmark e={e} on={mon} onToggle={flip} />
+      <div data-testid="tv-card-body" style={{ opacity: mon ? 1 : DIM, transition: 'opacity 150ms' }}>
+        <Still e={e} />
+        <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span data-testid="tv-card-show" title={e.show} style={{ ...clamp2, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
+          <span data-testid="tv-card-title" title={epLine(e)} style={{ ...one, fontSize: 12, color: W70 }}>{epLine(e)}</span>
+          <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: W50 }}>
+            {timeRange(e.airstamp, e.runtime) || e.air_time || shortDate(e.air_date)}
+          </span>
+        </div>
       </div>
     </div>
   );
@@ -242,13 +279,14 @@ export function Agenda({ eps, today }: { eps: CalEpisode[]; today: Day }) {
 function AgendaRow({ e, today, first }: { e: CalEpisode; today: Day; first: boolean }) {
   const st = episodeState(e, today);
   const open = useOpenEpisode(e);
+  const [mon] = useMonitored(e);
   return (
-    <div data-testid="tv-agenda-row" data-state={st} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
+    <div data-testid="tv-agenda-row" data-state={st} data-monitored={mon ? 'true' : 'false'} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
       style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', display: 'flex', alignItems: 'center', height: 72, padding: '0 16px 0 15px', gap: 12, boxSizing: 'border-box',
         borderTop: first ? 'none' : '1px solid rgba(255,255,255,0.06)' }}>
       <Stripe color={STATE_COLOR[st]} />
-      <Poster path={e.poster_path} w={32} h={48} tmdbLogo />
-      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <span style={{ display: 'inline-flex', opacity: mon ? 1 : DIM }}><Poster path={e.poster_path} w={32} h={48} tmdbLogo /></span>
+      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, opacity: mon ? 1 : DIM }}>
         <span style={{ ...one, fontSize: 14, fontWeight: 600, color: W95 }}>{e.show}</span>
         <span style={{ ...one, fontSize: 13, color: W70 }}>{epLine(e)}</span>
       </span>
@@ -302,6 +340,10 @@ export const tvCalendarCss = `
 :root{--tv-state-downloaded:#22c55e;--tv-state-missing:#ef4444;--tv-state-unaired:#3b82f6}
 .tvc-row:hover{background:rgba(255,255,255,.04)!important}
 .tvc-glass:hover{background:rgba(255,255,255,.10)!important}
+.tvc-card .tvc-bm{opacity:0;transition:opacity 120ms}
+.tvc-card:hover .tvc-bm,.tvc-card:focus-within .tvc-bm,.tvc-bm:focus-visible{opacity:1}
+.tvc-bm:hover{background:rgba(59,130,246,.35)!important}
+@media (hover:none){.tvc-card .tvc-bm{opacity:1}}
 `;
 
 const gridWrap: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 8 };

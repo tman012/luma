@@ -36,6 +36,8 @@ import { useModalHost } from '@/contexts/ModalHostContext';
 import type { TvModalViewProps } from './types';
 import { useFocusable } from '@/hooks/useFocusable';
 import { apiUrl } from '@/urlHelpers';
+import { seasonsLabel } from '@/utils/seasonsLabel';
+import { EpisodeMark, LumaMonitorContext, SeasonMark, SeriesMark, useLumaSeries } from '@/components/library/tvMonitor';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -376,6 +378,11 @@ function EpisodeGridModal({
           </div>
         )}
         {isSingleSeason && <div style={{ marginBottom: '24px' }} />}
+        {activeSeason && (
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: -12, marginBottom: 20 }}>
+            <SeasonMark season={activeSeason.season_number} />
+          </div>
+        )}
 
         {/* Episode grid */}
         <div style={{
@@ -428,6 +435,7 @@ function EpisodeGridModal({
                       Episode {ep.episode_number}
                     </div>
                   )}
+                  <EpisodeMark season={activeSeason!.season_number} episode={ep.episode_number} />
                   {/* Play overlay for owned */}
                   {epOwned && epRatingKey && (
                     <div
@@ -1018,7 +1026,7 @@ function SeasonDetailModal({
                     focusKey="sd-watchlist" zoneId="season-detail-modal"
                     primary padding={t.pill.padding} fontSize={t.pill.fontSize}
                     icon={<svg width={t.pill.iconSize} height={t.pill.iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>}
-                    label={addInFlight ? 'Adding…' : addFailed ? 'Retry — Add Failed' : 'Add Season to Watchlist'}
+                    label={addInFlight ? 'Adding…' : addFailed ? 'Retry — Add Failed' : 'Add season to watchlist'}
                     onClick={async () => {
                       if (addInFlight) return;              // guard rapid double-clicks
                       setAddFailed(false);
@@ -1122,6 +1130,7 @@ function SeasonDetailModal({
 
 export function ExpandedLayout(props: TvModalViewProps) {
   const { user } = useAuth();
+  const lumaMon = useLumaSeries(props.resolvedTmdbId);
   const isOwner = !!user?.is_admin;
   const {
     show,
@@ -1187,7 +1196,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
     : (show?.cast?.slice(0, 30) ?? []);
   const creatorsForDisplay = show?.creators ?? [];
   const seasonsCountDisplay = show?.numberOfSeasons
-    ? `${show.numberOfSeasons} Season${show.numberOfSeasons !== 1 ? 's' : ''}`
+    ? seasonsLabel(show.numberOfSeasons)
     : seasons.length > 0
       ? `${seasons.length} Season${seasons.length !== 1 ? 's' : ''}`
       : '';
@@ -1289,6 +1298,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
   if (phase === 'gone') return null;
 
   return (
+    <LumaMonitorContext.Provider value={lumaMon}>
     <>
     {createPortal(
       <div
@@ -1691,9 +1701,15 @@ export function ExpandedLayout(props: TvModalViewProps) {
                             />
                           )}
 
+                          {/* v158a: the Luma TV monitor toggle. data-modal-keep keeps it (and the
+                              Seasons pill, the way to the season/episode toggles) in minimal builds,
+                              whose popup otherwise hides its actions. Only for a show in Luma TV. */}
+                          {lumaMon && <span data-modal-keep="" style={{ display: 'contents' }}><SeriesMark /></span>}
+
                           {/* Seasons — available as soon as show meta or light
                               season summary is known; do not wait on full grid. */}
                           {(seasons.length > 0 || (show?.numberOfSeasons ?? 0) > 0) && (
+                            <span {...(lumaMon ? { 'data-modal-keep': '' } : {})} style={{ display: 'contents' }}>
                             <PillButton
                               focusKey="tm-seasons"
                               zoneId="tv-detail-modal"
@@ -1709,6 +1725,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                               label="Seasons"
                               onClick={handleSeasonsOpen}
                             />
+                            </span>
                           )}
 
                           {/* Sources (owner) */}
@@ -1954,6 +1971,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
       />
     )}
     </>
+    </LumaMonitorContext.Provider>
   );
 }
 

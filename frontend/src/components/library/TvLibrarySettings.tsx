@@ -18,6 +18,7 @@ import {
 import { ImportSection, ReviewSection, ShowPicker, FADE_MS, importCss, initialReview, type ReviewState } from './TvImport';
 import { TodayButton, TvCalendar, WeekCenter, tvCalendarCss } from './TvCalendar';
 import { TvSeries } from './TvSeries';
+import { QualityProfiles } from './TvEdit';
 import { SEARCH_LIST_ID, SEARCH_MIN, TV_POPOVER_SURFACE, TvSearch, searchRowId, tvSearchCss, type SearchKeys } from './TvSearch';
 import { LibrarySelector } from './LibrarySelector';
 import type { SelectableLibrary } from './librarySelectionApi';
@@ -148,7 +149,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
       <TvCalendar today={today} week={week} reload={reload} toolbar={!calendarTop} onWeek={onWeek} />
     );
   } else if (view === 'series') {
-    body = noLibraries ? noLibs : <TvSeries shows={lib ? lib.shows : null} />;
+    body = noLibraries ? noLibs : <TvSeries shows={lib ? lib.shows : null} onChanged={() => setReload(n => n + 1)} />;
   } else if (view === 'import') {
     body = (
       <div style={{ display: 'flex', flexDirection: 'column', gap: SECTION_GAP }}>
@@ -190,6 +191,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
             saveUpgrades(mode).then(r => { if (r.ok) setSettingsView(r.data); else { setSettingsView(before); say(r.error); } });
           }} />
         </div>
+        <QualityProfiles />
         {options}
       </div>
     );

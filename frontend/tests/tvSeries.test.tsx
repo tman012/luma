@@ -43,7 +43,7 @@ describe('Series grid', () => {
     expect(tiles[0]!.querySelector('[data-testid="tv-series-tile-tmdb"]')).toBeTruthy();         // no poster: the TMDB tile
     const grid = tiles[0]!.parentElement!;
     expect([grid.style.gridTemplateColumns, grid.style.gap]).toEqual(['repeat(auto-fill, minmax(128px, 1fr))', '16px']);
-    const poster = tiles[1]!.firstElementChild as HTMLElement;
+    const poster = within(tiles[1]!).getByTestId('tv-series-open').firstElementChild as HTMLElement;
     expect([poster.style.aspectRatio, poster.style.borderRadius]).toEqual(['2 / 3', '8px 8px 0 0']);
     const bar = tiles[1]!.querySelector('[data-testid="tv-series-bar"]') as HTMLElement;
     expect([bar.style.height, bar.style.background]).toEqual(['4px', 'rgba(255, 255, 255, 0.08)']);
@@ -75,7 +75,10 @@ describe('Series grid', () => {
     fireEvent.click(screen.getByTestId('tv-rail-W'));
     expect(scroll).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('tv-rail-W').style.color).toBe('rgb(59, 130, 246)');
-    expect(tiles.every(t => !t.querySelector('a, button') && t.tagName === 'DIV')).toBe(true);    // not clickable
+    // v158a: the poster is one button that opens Edit series; no links
+    expect(tiles.every(t => !t.querySelector('a') && t.querySelectorAll('button').length === 1)).toBe(true);
+    expect(within(tiles[2]!).getByTestId('tv-series-open').getAttribute('aria-label')).toBe('Edit The Wire');
+    expect([tiles[2]!.style.display, tiles[2]!.style.flexDirection, cap.style.flex]).toEqual(['flex', 'column', '1 1 0%']);   // row-equal captions
   });
 
   it('a poster that fails to load becomes the TMDB tile', () => {
@@ -125,23 +128,29 @@ describe('Series rail pin', () => {
 
 
 describe('caption fit', () => {
-  it('13/17 normal tracking; ONE step to 12/16 when 13 needs a 3rd line; still over at 12 is the 2-line ellipsis', async () => {
-    const { fitCaptions, CAPTION_TYPE, CAPTION_FIT } = await import('@/components/library/TvSeries');
-    expect([CAPTION_TYPE, CAPTION_FIT]).toEqual([{ size: 13, line: 17 }, { size: 12, line: 16 }]);
+  it('13/17; then 12/16 on 2 lines; then 12/16 on 3 lines; then the 11.5/15 floor on 3; only then the ellipsis', async () => {
+    const { fitCaptions, CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR } = await import('@/components/library/TvSeries');
+    expect([CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR]).toEqual([{ size: 13, line: 17 }, { size: 12, line: 16 }, { size: 11.5, line: 15 }]);
     const root = document.createElement('div');
+    // lines[size] = lines the name needs at that size; the box shows line-clamp lines
     const mk = (lines: Record<string, number>) => {
       const n = document.createElement('span');
       n.setAttribute('data-testid', 'tv-series-name');
       const lh = () => parseFloat(n.style.lineHeight) || 17;
-      Object.defineProperty(n, 'clientHeight', { get: () => 2 * lh() });
+      const clamp = () => Number(n.style.getPropertyValue('-webkit-line-clamp')) || 2;
+      Object.defineProperty(n, 'clientHeight', { get: () => clamp() * lh() });
       Object.defineProperty(n, 'scrollHeight', { get: () => lh() * (lines[n.style.fontSize] ?? 2) });
       root.appendChild(n); return n;
     };
     const short = mk({});
-    const fits12 = mk({ '13px': 3, '12px': 2 });
-    const never = mk({ '13px': 4, '12px': 3 });
+    const two12 = mk({ '13px': 3, '12px': 2 });
+    const three12 = mk({ '13px': 4, '12px': 3 });
+    const floor = mk({ '13px': 5, '12px': 4, '11.5px': 3 });
+    const never = mk({ '13px': 6, '12px': 5, '11.5px': 4 });
     expect(fitCaptions(root)).toBe(1);
-    expect([short, fits12, never].map(n => [n.style.fontSize, n.style.lineHeight])).toEqual([['13px', '17px'], ['12px', '16px'], ['12px', '16px']]);
-    expect([short.dataset.fit, never.dataset.ellipsis, fits12.dataset.ellipsis]).toEqual([undefined, 'true', undefined]);
+    const t = (n: HTMLElement) => [n.style.fontSize, n.style.lineHeight, n.style.getPropertyValue('-webkit-line-clamp'), n.dataset.ellipsis ?? null];
+    expect([short, two12, three12, floor, never].map(t)).toEqual([
+      ['13px', '17px', '2', null], ['12px', '16px', '2', null], ['12px', '16px', '3', null], ['11.5px', '15px', '3', null], ['11.5px', '15px', '3', 'true']]);
+    expect(fitCaptions(root)).toBe(1);                                   // idempotent (a resize re-runs it)
   });
 });

@@ -109,20 +109,50 @@ def _new_mismatch(sid: int, now: float) -> bool:
                             (sid, now)).fetchone() is not None
 
 
-def _link_shows(shows: List[Dict[str, object]], now: float) -> int:
-    n = 0
+def _link_shows(shows: List[Dict[str, object]], now: float, wait: Optional[float] = None) -> Optional[int]:
+    """Link *shows*. The folder walks and any TMDB re-read run without tv_scan._scan_lock; the lock is
+    taken only around the tv.db writes (Reviewer on v158a). *wait*: None tries once (a busy lock
+    returns None, nothing written), else seconds to wait for it."""
+    walked = []
     for s in shows:
         try:
-            sid = int(s['id'])
-            tv_scan.scan_files(sid, str(s['path_id']), str(s['folder']), str(s['root']), now)
-            if s.get('tmdb_id') and _new_mismatch(sid, now):
-                # read the show again (fresh, background budget) and link once more: a late-listed episode
-                with tv_tmdb.fresh(), tv_tmdb.background():
-                    tv_scan.refresh_episodes(sid, int(s['tmdb_id']), now)
-                tv_scan.scan_files(sid, str(s['path_id']), str(s['folder']), str(s['root']), now)
-                logger.info('TV link: %s re-read for a new episode', s['folder'])
-            n += 1
+            walked.append((s, tv_scan.list_files(str(s['folder']), str(s['root']))))
         except Exception:                         # noqa: BLE001 - one show's trouble doesn't stop the rest
+            logger.exception('TV link failed for one show')
+    if not walked:
+        return 0
+    if not (tv_scan._scan_lock.acquire(blocking=False) if wait is None else tv_scan._scan_lock.acquire(timeout=wait)):
+        return None
+    n, late = 0, []
+    try:
+        for s, found in walked:
+            try:
+                sid = int(s['id'])
+                tv_scan.scan_files(sid, str(s['path_id']), str(s['folder']), str(s['root']), now, found)
+                if s.get('tmdb_id') and _new_mismatch(sid, now):
+                    late.append(s)
+                n += 1
+            except Exception:                     # noqa: BLE001
+                logger.exception('TV link failed for one show')
+    finally:
+        tv_scan._scan_lock.release()
+    for s in late:
+        # a file for an episode tv.db doesn't know yet: read the show again (fresh, background
+        # budget, unlocked), walk again, then store and link once more under the lock
+        try:
+            sid = int(s['id'])
+            with tv_tmdb.fresh(), tv_tmdb.background():
+                data = tv_scan.fetch_for_refresh(sid, int(s['tmdb_id']))
+            found = tv_scan.list_files(str(s['folder']), str(s['root']))
+            if not tv_scan._scan_lock.acquire(timeout=5):
+                continue                          # the next pass (or the scan) catches it
+            try:
+                tv_scan.refresh_episodes(sid, int(s['tmdb_id']), now, data=data)
+                tv_scan.scan_files(sid, str(s['path_id']), str(s['folder']), str(s['root']), now, found)
+            finally:
+                tv_scan._scan_lock.release()
+            logger.info('TV link: %s re-read for a new episode', s['folder'])
+        except Exception:                         # noqa: BLE001
             logger.exception('TV link failed for one show')
     return n
 
@@ -148,19 +178,24 @@ def changed_shows(prime: bool = False) -> List[Dict[str, object]]:
 
 
 def poll(now: Optional[float] = None, prime: bool = False) -> Optional[int]:
-    """One pass: link the shows whose folders changed. None when skipped (the scan lock is busy)."""
-    if not tv_scan._scan_lock.acquire(blocking=False):
-        return None
-    try:
+    """One pass: link the shows whose folders changed. None when skipped (the scan lock is busy);
+    the folder signatures of a skipped pass are forgotten so the next pass links those shows."""
+    t0 = time.monotonic()
+    with _lock:                                   # guards _sigs only; never the scan lock across the walk
+        if tv_scan._scan_lock.locked():
+            return None
+        shows = changed_shows(prime=prime)
+    if not shows:
+        return 0
+    n = _link_shows(shows, time.time() if now is None else now)
+    if n is None:
         with _lock:
-            t0 = time.monotonic()
-            shows = changed_shows(prime=prime)
-            n = _link_shows(shows, time.time() if now is None else now)
-        if n:
-            logger.info('TV link: %d show(s) with new or changed files linked in %.2fs', n, time.monotonic() - t0)
-        return n
-    finally:
-        tv_scan._scan_lock.release()
+            for s in shows:
+                _sigs.pop((str(s['path_id']), str(s['folder'])), None)
+        return None
+    if n:
+        logger.info('TV link: %d show(s) with new or changed files linked in %.2fs', n, time.monotonic() - t0)
+    return n
 
 
 OPEN_DEBOUNCE_S = 15.0
@@ -188,19 +223,16 @@ def link_path(path: str, now: Optional[float] = None) -> bool:
             inside = False
         if not inside:
             continue
-        if not tv_scan._scan_lock.acquire(timeout=5):
+        ok = _link_shows([s], time.time() if now is None else now, wait=5) == 1
+        if not ok:
             return False
-        try:
-            with _lock:
-                ok = _link_shows([s], time.time() if now is None else now) == 1
-                _sigs.pop((str(s['path_id']), str(s['folder'])), None)
-                sig = _dirs(show_dir, None)
-                if sig is not None:
-                    _sigs[(str(s['path_id']), str(s['folder']))] = sig
-            logger.info('TV link: a new file in %s linked (mover)', s['folder'])
-            return ok
-        finally:
-            tv_scan._scan_lock.release()
+        sig = _dirs(show_dir, None)
+        with _lock:
+            _sigs.pop((str(s['path_id']), str(s['folder'])), None)
+            if sig is not None:
+                _sigs[(str(s['path_id']), str(s['folder']))] = sig
+        logger.info('TV link: a new file in %s linked (mover)', s['folder'])
+        return True
     return False
 
 
@@ -292,23 +324,20 @@ def _inotify_loop(stop: threading.Event) -> None:
             for k in due:
                 pending.pop(k, None)
             shows = [s for s in _shows() if (str(s['path_id']), str(s['folder'])) in due]
-            if shows and tv_scan._scan_lock.acquire(blocking=False):
-                try:
-                    with _lock:
-                        n = _link_shows(shows, time.time())
-                        for s in shows:
-                            key = (str(s['path_id']), str(s['folder']))
-                            sig = _dirs(os.path.join(str(s['root']), str(s['folder'])), None)
-                            if sig is not None:
-                                for d in set(sig) - set(_sigs.get(key, {})):   # a new season folder: watch it too
-                                    try:
-                                        ino.add(d, key)
-                                    except OSError:
-                                        pass
-                                _sigs[key] = sig
-                    logger.info('TV link: %d show(s) linked (inotify)', n)
-                finally:
-                    tv_scan._scan_lock.release()
+            n = _link_shows(shows, time.time()) if shows else None
+            if n is not None:
+                with _lock:
+                    for s in shows:
+                        key = (str(s['path_id']), str(s['folder']))
+                        sig = _dirs(os.path.join(str(s['root']), str(s['folder'])), None)
+                        if sig is not None:
+                            for d in set(sig) - set(_sigs.get(key, {})):   # a new season folder: watch it too
+                                try:
+                                    ino.add(d, key)
+                                except OSError:
+                                    pass
+                            _sigs[key] = sig
+                logger.info('TV link: %d show(s) linked (inotify)', n)
             elif shows:
                 for k in due:
                     pending[k] = now                     # busy: try again shortly

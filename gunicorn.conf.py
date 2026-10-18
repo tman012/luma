@@ -13,6 +13,9 @@ import logging
 from app.paths import ensure_writable_or_exit
 ensure_writable_or_exit()
 
+from app import log_files as _log_files  # noqa: E402
+_log_files.install()             # every handler redacts, gunicorn's and any added later
+
 from app import server_config  # noqa: E402
 from app.settings_manager import SettingsManager  # noqa: E402
 
@@ -54,7 +57,12 @@ certfile, keyfile = _tls(_settings)
 
 def on_starting(server):
     """The startup check already ran when this file was loaded (top of file)."""
+    _log_files.redact_gunicorn()
     server.log.info('[gunicorn] Startup check passed: data and cache folders are writable')
+
+
+def post_fork(server, worker):
+    _log_files.redact_gunicorn()
 
 
 def post_worker_init(worker):
@@ -63,6 +71,7 @@ def post_worker_init(worker):
     This ensures database, caches, and background threads are initialized
     AFTER the fork, so they work correctly under gunicorn.
     """
+    _log_files.redact_gunicorn()   # the worker's gunicorn.error / gunicorn.access handlers
     logger.info(f"[gunicorn] Initializing worker {worker.pid}")
     
     # Import and call start_services
