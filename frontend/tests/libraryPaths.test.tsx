@@ -253,6 +253,28 @@ describe('Settings > Library paths', () => {
     expect(within(screen.getByTestId('lp-fallback')).queryByRole('alert')).toBeNull();
   });
 
+  it('M22: a path TV took meanwhile is refused as the fallback with the short message under the picker', async () => {
+    answer = c => (c.url.endsWith('/library-rules') && c.body!.fallback_path_id === 'p_4kmovie1'
+      ? res({ errors: { fallback_path_id: 'This path is used by TV' } }, 400) : null);
+    render(<LibraryPathsSettings wide />);
+    await screen.findByTestId('lp-fallback-toggle');
+    fireEvent.click(screen.getByTestId('lp-fallback-toggle'));
+    fireEvent.click(within(screen.getByTestId('lp-fallback')).getByRole('radio', { name: /4K Movies/ }));
+    expect(await within(screen.getByTestId('lp-fallback')).findByText('This path is used by TV')).toBeTruthy();
+    expect(screen.getByTestId('lp-fallback-value').textContent).toBe('Movies');
+  });
+
+  it('M22: a rule destination TV took meanwhile shows the message in the rule form', async () => {
+    answer = c => (c.url.endsWith('/library-rules') && (c.body!.rules as Rule[]).length === 3
+      ? res({ errors: { 'rules.2.path_id': 'This path is used by TV' } }, 400) : null);
+    render(<LibraryPathsSettings wide />);
+    fireEvent.click(await screen.findByTestId('lp-add-rule'));
+    fireEvent.click(screen.getByTestId('lp-dest'));
+    fireEvent.click(within(screen.getByTestId('lp-dest').parentElement!).getByRole('radio', { name: 'Old drive' }));
+    fireEvent.click(screen.getByTestId('lp-save'));
+    expect(await within(screen.getByTestId('lp-rule-form')).findByText('This path is used by TV')).toBeTruthy();
+  });
+
   it('paths TV selected are never offered as Movies rule destinations or the fallback', async () => {
     const tv = { id: 'p_tvshows1', name: 'TV', path: '/media/TV', status: 'ok' as const, used_by: ['tv'] };
     const anime = { id: 'p_anime001', name: 'Anime', path: '/media/Anime', status: 'ok' as const, used_by: ['tv'] };

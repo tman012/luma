@@ -112,7 +112,11 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
               <Picker label="Fallback" options={movies.map(p => ({ id: p.id, label: p.name }))} value={fb} error={fbError}
                 onChoose={id => {
                   setFbError('');
-                  saveRules(view.rules, id).then(r => { if (r.ok) setView(r.view); else setToast(r.error); });
+                  saveRules(view.rules, id).then(r => {
+                    if (r.ok) { setView(r.view); return; }
+                    if (r.errors.fallback_path_id) setFbError(r.errors.fallback_path_id);   // e.g. "This path is used by TV"
+                    else setToast(r.error);
+                  });
                 }} />
             </div>
           )}

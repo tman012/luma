@@ -125,6 +125,16 @@ describe('LibrarySelector', () => {
     await screen.findByText('Not a library path');
   });
 
+  it('M22: a path Movies uses is refused with the short message; the row stays unticked', async () => {
+    putReply = res({ errors: { selected: 'This path is used by Movies' } }, 409);
+    mount();
+    const row = (await screen.findAllByTestId('lib-select-row'))[2]!;
+    const was = row.getAttribute('aria-checked');
+    fireEvent.click(row);
+    await screen.findByText('This path is used by Movies');
+    expect((await screen.findAllByTestId('lib-select-row'))[2]!.getAttribute('aria-checked')).toBe(was);
+  });
+
   it('no helper text; sentence case, American English', () => {
     const src = readFileSync(resolve(__dirname, '../src/components/library/LibrarySelector.tsx'), 'utf8');
     expect(src).not.toMatch(/hint=|note=|helper=|colour|Library Paths|Sign In/);

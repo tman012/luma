@@ -153,13 +153,14 @@ def test_selecting_writes_nothing_in_the_folder(owner, tv_env):
     assert (sorted(os.listdir(tv_env / 'TV')), os.stat(tv_env / 'TV').st_mtime_ns) == before
 
 
-def test_movies_and_tv_may_share_library_paths(owner, tv_env):
-    """No cross-store overlap any more: TV only points at Library paths."""
+def test_movies_and_tv_never_share_a_library_path(owner, tv_env):
+    """PM (M22): a path is Movies or TV. Choosing a TV path for Movies is refused."""
     tv = _add(owner, 'TV', tv_env / 'TV')
     _put(owner, [tv])
     _add(owner, 'Anime', tv_env / 'Anime')
     r = owner.put('/api/settings/library-rules', json={'rules': [], 'fallback_path_id': tv}, environ_base=REMOTE, headers=HDR)
-    assert r.status_code == 200 and tv_settings.load()['libraries'] == [tv]
+    assert r.status_code == 400 and r.get_json()['errors'] == {'fallback_path_id': 'This path is used by TV'}
+    assert tv_settings.load()['libraries'] == [tv]
 
 
 # ---------------------------------------------------------------- removed later

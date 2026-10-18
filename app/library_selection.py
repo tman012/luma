@@ -59,6 +59,7 @@ def claimed_ids() -> set:
     return set(claimed())
 INVALID = 'Invalid'
 NOT_A_LIBRARY = 'Not a library path'
+USED_BY_MOVIES = 'This path is used by Movies'
 TOO_MANY = 'Too many'
 
 
@@ -128,6 +129,10 @@ def register(bp: Blueprint, url: str, *, endpoint: str,
             if e:
                 return _no_store(jsonify({'errors': {'selected': e}}), 400)
             before = get_ids()
+            # A path is Movies or TV, never both (PM, M22): a newly selected
+            # path can't be a Movies rule destination or the chosen fallback.
+            if set(ids) - set(before) & fm.movies_uses(fm.load()):
+                return _no_store(jsonify({'errors': {'selected': USED_BY_MOVIES}}), 409)
             set_ids(ids)
         if on_change and before != ids:
             on_change(before, ids)

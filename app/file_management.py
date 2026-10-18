@@ -46,6 +46,7 @@ bp = Blueprint('file_management', __name__)
 _cfg: Dict[str, Any] = {}
 
 STORE_NAME = 'file_management.json'
+USED_BY_TV = 'This path is used by TV'
 MAX_PATHS = 50
 MAX_RULES = 50
 MAX_MAPS = 20
@@ -467,9 +468,28 @@ def check_rules(body: Dict[str, Any], data: Dict[str, Any]) -> Tuple[Optional[Di
             errors['fallback_path_id'] = REQUIRED
     elif fb not in ids:
         errors['fallback_path_id'] = INVALID
+    # A path is Movies or TV, never both (PM, M22): a rule destination or a
+    # fallback newly pointed at a TV-selected path is refused. One that was
+    # already there (before this rule) is left for the owner to change.
+    tv = section_ids()
+    if tv:
+        was = {r['id']: r['path_id'] for r in data['rules']}
+        for i, r in enumerate(out):
+            if r['path_id'] in tv and was.get(r['id']) != r['path_id'] and f'rules.{i}.path_id' not in errors:
+                errors[f'rules.{i}.path_id'] = USED_BY_TV
+        if fb in tv and fb != data['fallback_path_id'] and 'fallback_path_id' not in errors:
+            errors['fallback_path_id'] = USED_BY_TV
     if errors:
         return None, errors
     return {'rules': out, 'fallback_path_id': fb}, {}
+
+
+def movies_uses(data: Dict[str, Any]) -> set:
+    """Library path ids Movies chose: rule destinations and the explicit fallback."""
+    out = {r['path_id'] for r in data['rules']}
+    if data.get('fallback_path_id'):
+        out.add(data['fallback_path_id'])
+    return out
 
 
 def section_ids() -> set:
