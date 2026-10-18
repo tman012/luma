@@ -12,6 +12,7 @@ import {
 } from '@/utils/modalParsers';
 import { TrailerModal } from '@/components/media/TrailerModal';
 import { UltraBlurOverlay } from '@/components/media/UltraBlurOverlay';
+import { mergeRatings } from './effectiveRatings';
 import { RatingsBar } from '@/components/media/RatingsBar';
 import { PlaybackModal } from '@/components/media/PlaybackModal';
 import { FullPlotModal } from './FullPlotModal';
@@ -381,28 +382,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   const reviewsQuery = useReviews(reviewsRequested ? (detail?.title ?? '') : '', detail?.year ?? null);
   const reviewData = reviewsQuery.data;
 
-  // Effective ratings: Plex ratings augmented with RT scores from reviews
-  const effectiveRatings = useMemo<Ratings | null>(() => {
-    const rtCritic = ratings?.rotten_tomatoes_critic?.score != null
-      ? ratings.rotten_tomatoes_critic
-      : reviewData?.critic_score != null
-        ? { score: reviewData.critic_score }
-        : null;
-    const rtAudience = ratings?.rotten_tomatoes_audience?.score != null
-      ? ratings.rotten_tomatoes_audience
-      : reviewData?.audience_score != null
-        ? { score: reviewData.audience_score }
-        : null;
-    const imdb = ratings?.imdb ?? null;
-    const metacritic = ratings?.metacritic ?? null;
-
-    const tmdb = ratings?.tmdb ?? null;
-
-    if (!imdb?.score && !rtCritic?.score && !rtAudience?.score && !metacritic?.score && !tmdb?.score) {
-      return null;
-    }
-    return { imdb, rotten_tomatoes_critic: rtCritic, rotten_tomatoes_audience: rtAudience, metacritic, tmdb };
-  }, [ratings, reviewData]);
+  // Effective ratings: Plex ratings augmented with RT scores from reviews (shared with the phone layout)
+  const effectiveRatings = useMemo<Ratings | null>(() => mergeRatings(ratings, reviewData), [ratings, reviewData]);
 
 
   // ---------------------------------------------------------------------------

@@ -17,6 +17,7 @@ import { MobileUpgradeSheet } from './MobileUpgradeSheet';
 import { UltraBlurOverlay } from '@/components/media/UltraBlurOverlay';
 import { SimilarPanel } from './SimilarPanel';
 import { CollectionsSheet } from '@/components/collections/CollectionsSheet';
+import { useEffectiveRatings } from './effectiveRatings';
 import { RatingsBar, RATINGS_SLOT_SM } from '@/components/media/RatingsBar';
 import { buildRatingItems } from '@/utils/ratingIcons';
 import { BackdropHero } from '@/components/media/BackdropHero';
@@ -141,7 +142,9 @@ export function CompactLayout(props: MovieModalViewProps) {
   }, [composed]);
   // Ratings arrive after the details: if the sheet shows before them, keep
   // their row reserved (and never collapse it) so nothing below moves.
-  const hasRatings = !!ratings && buildRatingItems(ratings).length > 0;
+  // Phone parity with web: RT from the reviews endpoint when the ratings lack it (mergeRatings).
+  const shownRatings = useEffectiveRatings(ratings, detail?.title, detail?.year);
+  const hasRatings = !!shownRatings && buildRatingItems(shownRatings).length > 0;
   const [reserveRatings, setReserveRatings] = useState(false);
   useEffect(() => { setReserveRatings(false); }, [detail?.title]);
   useEffect(() => {
@@ -632,7 +635,7 @@ export function CompactLayout(props: MovieModalViewProps) {
 
                   {/* Ratings bar — centered icons */}
                   <div data-ratings-slot style={{ minHeight: reserveRatings ? `${RATINGS_SLOT_SM}px` : 0 }}>
-                    {ratings && <RatingsBar ratings={ratings} size="sm" />}
+                    {shownRatings && <RatingsBar ratings={shownRatings} size="sm" />}
                   </div>
 
                   {/* Primary action area */}
