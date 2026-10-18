@@ -496,9 +496,14 @@ def _avz_login(cfg, request: Request, key: str, now: float) -> str:
 
 # v170 (PM): an AvistaZ-family id search answered 400 with a body that clearly says the id is invalid.
 # Only these words, next to the id's name, count; any other 400 keeps the strict backoff.
+# v171 (Reviewer): never a match when the body talks about rates, limits, throttling, attempts or the
+# sign-in (token, session, login, auth): those are account trouble, so the strict backoff stands.
+AVZ_ID_NOT_ID_WORDS = (r'\brate', 'limit', r'too\s+many', 'throttl', r'slow\s+down', 'attempt', 'token', 'session',
+                       'login', r'\bauth')
 AVZ_ID_REJECTED_RE = re.compile(
+    r'\A(?![\s\S]*?(?:' + '|'.join(AVZ_ID_NOT_ID_WORDS) + r'))[\s\S]*?(?:'
     r'\b(tmdb|imdb)(_?id)?\b.{0,40}\b(invalid|not valid|not found|rejected|unknown|malformed)\b'
-    r'|\b(invalid|not valid|rejected|unknown|malformed)\b.{0,40}\b(tmdb|imdb)(_?id)?\b', re.I | re.S)
+    r'|\b(invalid|not valid|rejected|unknown|malformed)\b.{0,40}\b(tmdb|imdb)(_?id)?\b)', re.I | re.S)
 AVZ_REJECTED_TTL_S = 7 * 86400
 _avz_rejected: Dict[Tuple[str, str, str, str], float] = {}   # (site host, 'imdb'|'tmdb', id, title) -> when
 

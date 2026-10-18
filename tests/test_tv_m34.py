@@ -53,19 +53,28 @@ def test_an_unmounted_path_keeps_every_show(lib, tmp_path):  # noqa: F811
     assert _state()[0] == before[0]
 
 
-def test_one_folder_back_is_a_real_scan_again(lib, tmp_path):  # noqa: F811
-    """Content returns (even partly): normal rules, so a folder that is really gone loses its rows."""
+def test_one_folder_back_is_still_unavailable_half_back_is_a_real_scan(lib, tmp_path):  # noqa: F811
+    """v171 (PM coverage guard): under half of the known folders back is Unavailable, nothing detached;
+    once at least half are back, normal rules again, so a folder that is really gone loses its rows."""
     tv_scan.scan_all(now=1000.0)
+    before = _state()
+    known = sorted({r['folder'] for r in rows('SELECT folder FROM series WHERE path_id = ? AND folder IS NOT NULL', PID)}
+                   | {r['folder'] for r in rows('SELECT folder FROM unmatched WHERE path_id = ?', PID)})
     keep = 'Severance (2022)'
-    folders = sorted(r['folder'] for r in rows('SELECT folder FROM series WHERE path_id = ?', PID))
     away = tmp_path / 'away'
     away.mkdir()
     for f in os.listdir(lib):
         if f != keep:
             shutil.move(str(lib / f), str(away / f))
-    tv_scan.scan_all(now=2000.0)
-    left = sorted(r['folder'] for r in rows('SELECT folder FROM series WHERE path_id = ?', PID))
-    assert left == [keep] and len(folders) > 1
+    out = tv_scan.scan_all(now=2000.0)
+    assert out['missing'] == [PID] and _state() == before and tv_scan.skipped(PID)
+    back = [f for f in known if f != keep][: (len(known) + 1) // 2 - 1]          # now exactly half present
+    for f in back:
+        shutil.move(str(away / f), str(lib / f))
+    out = tv_scan.scan_all(now=3000.0)
+    assert out['missing'] == [] and not tv_scan.skipped(PID)
+    left = sorted(r['folder'] for r in rows('SELECT folder FROM series WHERE path_id = ? AND folder IS NOT NULL', PID))
+    assert set(left) <= set(back) | {keep} and keep in left and len(left) < len(before[0])
 
 
 def test_a_library_that_never_had_shows_scans_normally(tv_env):  # noqa: F811

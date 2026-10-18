@@ -821,6 +821,8 @@ _empty_logged: Dict[str, str] = {}
 SYSTEM_DIRS = ('lost+found', '@eadir', '#recycle')
 MOUNT_META = 'tv_mount:'                     # + path id: the mount point the path was on at its last good scan
 SKIPPED_META = 'tv_skipped:'                 # + path id: v170, the last scan skipped it (empty or system folders only)
+ROOT_META = 'tv_root:'                       # + path id: v171, the folder its last good scan read ('-' once repointed)
+REPOINTED = '-'
 
 
 def _system_dir(name: str) -> bool:
@@ -861,6 +863,7 @@ def forget_mount(pid: str) -> None:
     try:
         tv_store.set_meta(MOUNT_META + pid, None)
         tv_store.set_meta(SKIPPED_META + pid, None)
+        tv_store.set_meta(ROOT_META + pid, REPOINTED)      # its rows are the old folder's: no coverage guard
     except Exception as e:                   # noqa: BLE001 - only a signal
         logger.warning('TV scan: mount record of %s not cleared (%s)', pid, type(e).__name__)
 
@@ -892,6 +895,46 @@ def _has_rows(pid: str) -> bool:
                     or conn.execute('SELECT 1 FROM unmatched WHERE path_id = ? LIMIT 1', (pid,)).fetchone())
 
 
+def _prior_folders(pid: str) -> set:
+    """Folders under library path *pid* that tv.db has series or review (unmatched) rows for."""
+    with tv_store.connect() as conn:
+        return ({r['folder'] for r in conn.execute(
+                    'SELECT folder FROM series WHERE path_id = ? AND folder IS NOT NULL', (pid,))}
+                | {r['folder'] for r in conn.execute('SELECT folder FROM unmatched WHERE path_id = ?', (pid,))})
+
+
+def _unavailable(pid: str, root_real: str, shows: List[str]) -> Optional[str]:
+    """Why library path *pid* must be skipped as Unavailable (rows kept, nothing detached, nothing
+    matched), or None to scan it.
+
+    * no show folders where tv.db has rows: an unmounted share's bare mount point (M34, v167);
+    * v171 (Reviewer): the mount the path was on is gone and none of the folders tv.db knows are
+      there: a stray folder on the bare mount point (a 'Leftover Show (2001)') is no reason to scan,
+      or it would detach the library and take the stray in;
+    * v171 (PM coverage guard): fewer than half of the folders tv.db knows are present: a half-synced
+      or wrong share, never a mass detach.
+    """
+    prior = _prior_folders(pid)
+    if not prior:
+        return None                                   # a new path: nothing to lose
+    if not shows:
+        return 'empty'
+    present = prior & set(shows)
+    if not present and _dropped_mount(pid, root_real):
+        return 'dropped mount'
+    try:
+        last_root = tv_store.get_meta(ROOT_META + pid)
+    except Exception:                        # noqa: BLE001 - no record: guard on
+        last_root = None
+    # The rows are another folder's (the path was edited to point elsewhere): the repoint's own detach
+    # handles them, so coverage says nothing. No record yet (an upgrade) keeps the guard on.
+    if last_root not in (None, root_real):
+        return None
+    if len(present) * 2 < len(prior):
+        return f'coverage {len(present)}/{len(prior)}'
+    return None
+
+
 def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> Dict[str, int]:
     from app import file_management as fm
     root_real = os.path.realpath(rec['path'])
@@ -900,19 +943,24 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
     pid = rec['id']
     folders = show_folders(root_real)
     shows = [f for f in folders if not _system_dir(f)]
-    # v170 (Reviewer): only a path with no show folders counts as dropped. A mount the path was on
-    # that is gone now is no longer a skip on its own: with show folders present the mount record
-    # was simply retired (re-recorded below and scanned), or the scan would skip forever.
-    if not shows and _has_rows(pid):
+    # v170 (Reviewer): a mount the path was on that is gone now is not a skip on its own: with the
+    # path's known show folders present the mount record was simply retired (re-recorded below and
+    # scanned). v171: see _unavailable for when it is a skip.
+    why = _unavailable(pid, root_real, shows)
+    if why:
         # M34 (v167): an empty library path that had shows is an unmounted share's mount point (or a
         # share that's still coming up), not a library whose every show was deleted: skip it like a
         # missing path, so every row stays as last seen until its folders are back. v169 (Reviewer):
-        # lost+found, @eaDir, #recycle and .Trash-* don't count as shows, and a mount the path was on
-        # at its last good scan that is gone now (os.path.ismount) counts as empty too.
-        if _empty_logged.get(pid) != root_real:
-            _empty_logged[pid] = root_real
-            logger.warning('TV scan: library path %s is empty but had shows; skipped (%s), shows kept',
-                           pid, 'its mount is gone' if _dropped_mount(pid, root_real) else 'not mounted?')
+        # lost+found, @eaDir, #recycle and .Trash-* don't count as shows.
+        if _empty_logged.get(pid) != f'{root_real}|{why}':
+            _empty_logged[pid] = f'{root_real}|{why}'
+            gone = why != 'dropped mount' and _dropped_mount(pid, root_real)
+            if why == 'empty':
+                logger.warning('TV scan: library path %s is empty but had shows; skipped (%s), shows kept',
+                               pid, 'its mount is gone' if gone else 'not mounted?')
+            else:
+                logger.warning('TV scan: library path %s skipped as unavailable (%s%s); shows kept, nothing detached',
+                               pid, why, ', its mount is gone' if gone else '')
         _set_skipped(pid, True)
         raise EmptyRoot(EMPTY)
     _empty_logged.pop(pid, None)
@@ -922,6 +970,8 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
             mount = _mount_of(root_real)
             if tv_store.get_meta(MOUNT_META + pid) != mount:
                 tv_store.set_meta(MOUNT_META + pid, mount)
+            if tv_store.get_meta(ROOT_META + pid) != root_real:
+                tv_store.set_meta(ROOT_META + pid, root_real)
         except Exception:                    # noqa: BLE001 - only a signal; never stops a scan
             pass
     _scan_seq[0] += 1

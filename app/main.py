@@ -9590,6 +9590,10 @@ def _public_app_url() -> str:
     return ''
 
 
+MOVIE_GRAB_JOB = 'movie_grab'          # v171+: instance job for a movie add on the test instance
+MOVIE_GRAB_OFF = 'Grabs are off on the test instance'
+
+
 def _qbit_app_category() -> str:
     """qBittorrent category for downloads started from Luma (Settings → qBittorrent)."""
     return (settings.get('qbittorrent.app_category') or 'luma').strip() or 'luma'
@@ -12710,14 +12714,14 @@ def get_news():
             return jsonify(cached['data'])
 
         import requests as _req
-        import xml.etree.ElementTree as ET
 
         resp = _req.get(feed_url, timeout=10, headers={
             'User-Agent': 'Mozilla/5.0 (compatible; LumaKiosk/1.0)',
         })
         resp.raise_for_status()
 
-        root = _safe_xml.fromstring(resp.content)
+        # v171+ (Reviewer): RSS 0.91 feeds carry a DOCTYPE; entities and external fetches stay refused
+        root = _safe_xml.fromstring_news(resp.content)
         ns = {'media': 'http://search.yahoo.com/mrss/'}
 
         items = []
@@ -16614,21 +16618,9 @@ def _torrent_info_hash(data: bytes):
 
 
 def _magnet_info_hash(magnet: str):
-    """Extract a lowercase v1 hex info-hash from a magnet link, or None."""
-    try:
-        import re
-        m = re.search(r'xt=urn:btih:([a-zA-Z0-9]+)', magnet or '')
-        if not m:
-            return None
-        h = m.group(1)
-        if len(h) == 40:
-            return h.lower() if re.fullmatch(r'[0-9a-fA-F]{40}', h) else None   # v171: hex only
-        if len(h) == 32:                # base32-encoded hash
-            import base64
-            return base64.b32decode(h.upper()).hex().lower()
-        return None
-    except Exception:
-        return None
+    """v171+ (Reviewer): the shared parser (app.magnet.btih), the same one TV grabs use."""
+    from app.magnet import btih
+    return btih(magnet)
 
 
 def _fetch_pasted_torrent(url: str):
@@ -16689,6 +16681,18 @@ def add_torrent_to_qbittorrent():
 
         if not torrent_url:
             return jsonify({'error': 'Missing torrent_url'}), 400
+        # v171+ (Reviewer, test must not steal from prod): on the test instance a movie add is the
+        # 'movie_grab' job and goes through instance.scoped_add with the test tag as category and
+        # tag, like TV grabs, so it can only ever create a luma-test torrent. Prod: unchanged.
+        # Refused before any link is fetched or qBit is contacted.
+        test_tag = None
+        if _instance.is_test():
+            if not _instance.writes_allowed(MOVIE_GRAB_JOB):
+                return jsonify({'error': MOVIE_GRAB_OFF}), 403
+            from app.qbit_owner import tag_name
+            test_tag = tag_name()
+        add_category = test_tag or _qbit_app_category()
+
         is_src_link, real_url = _resolve_source_link(torrent_url)
         if is_src_link:
             if not real_url:
@@ -16816,7 +16820,7 @@ def add_torrent_to_qbittorrent():
             try:
                 tr = session.get(
                     f"{qbit_url}/api/v2/torrents/info",
-                    params={'category': _qbit_app_category()},
+                    params={'category': add_category},
                     timeout=10,
                 )
                 return tr.json() if tr.status_code == 200 else []
@@ -16842,25 +16846,33 @@ def add_torrent_to_qbittorrent():
         # Add to qBit — upload the validated bytes when we have them, otherwise
         # hand over the magnet URI (qBit resolves magnets via DHT itself).
         add_fields = _qbit_add_fields()
-        if _minimal.enabled():
+        if test_tag:
+            add_fields.update(category=test_tag, tags=test_tag)
+        elif _minimal.enabled():
             # The test install's own torrents carry its tag (shared qBittorrent,
             # see app/qbit_owner): it moves only those; prod skips them.
             from app.qbit_owner import tag_name
             add_fields['tags'] = tag_name()
+        import contextlib as _ctx
+        scope = _instance.scoped_add(MOVIE_GRAB_JOB, test_tag) if test_tag else _ctx.nullcontext()
         try:
-            if torrent_bytes is not None:
-                add_response = session.post(
-                    f"{qbit_url}/api/v2/torrents/add",
-                    files={'torrents': ('release.torrent', torrent_bytes, 'application/x-bittorrent')},
-                    data=add_fields,
-                    timeout=30,
-                )
-            else:
-                add_response = session.post(
-                    f"{qbit_url}/api/v2/torrents/add",
-                    data={'urls': add_url, **add_fields},
-                    timeout=30,
-                )
+            with scope:
+                if torrent_bytes is not None:
+                    add_response = session.post(
+                        f"{qbit_url}/api/v2/torrents/add",
+                        files={'torrents': ('release.torrent', torrent_bytes, 'application/x-bittorrent')},
+                        data=add_fields,
+                        timeout=30,
+                    )
+                else:
+                    add_response = session.post(
+                        f"{qbit_url}/api/v2/torrents/add",
+                        data={'urls': add_url, **add_fields},
+                        timeout=30,
+                    )
+        except _instance.WritesBlocked:
+            logger.info('Instance test: movie add refused by the write guard')
+            return jsonify({'error': MOVIE_GRAB_OFF}), 403
         except Exception as e:
             logger.error(f"qBittorrent add request failed: {type(e).__name__}")
             return _download_client_unavailable()

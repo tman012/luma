@@ -30,7 +30,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -51,7 +50,6 @@ JOB_KEY = 'tvgrab:'
 _have_category: set = set()                # (qBittorrent URL, name) already checked this run
 _link_resolvers: List[Callable[[str], Any]] = []   # main's Sources links: url -> (is_link, real_url)
 ORIGINS = ('auto', 'manual', 'upgrade')
-_BTIH_RE = re.compile(r'xt=urn:btih:([0-9a-fA-F]{40}|[A-Z2-7]{32})(?=&|$)', re.I)   # v171: the whole value, not a prefix
 
 
 class GrabFailed(Exception):
@@ -101,17 +99,8 @@ def info_hash(kind: str, payload: Any) -> Optional[str]:
     if kind == 'torrent':
         span = _bdecode_info_span(payload)
         return hashlib.sha1(span).hexdigest() if span else None
-    m = _BTIH_RE.search(str(payload or ''))
-    if not m:
-        return None
-    h = m.group(1)
-    if len(h) == 32:
-        import base64
-        try:
-            h = base64.b32decode(h.upper()).hex()
-        except ValueError:
-            return None
-    return h.lower()
+    from app.magnet import btih            # v171+ (Reviewer): one parser for TV and movie
+    return btih(payload)
 
 
 def _fields(name: str) -> Dict[str, str]:

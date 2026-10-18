@@ -77,8 +77,13 @@ def test_minimal_grab_is_tagged_and_goes_to_the_library_mover(env, monkeypatch):
 def test_minimal_tag_follows_the_environment(env, monkeypatch):
     monkeypatch.setenv('LUMA_MINIMAL', '1')
     monkeypatch.setenv('LUMA_TEST_QBIT_TAG', 'qa-box')
+    # v171+ (Reviewer): a LUMA_TEST_* variable makes this the test instance (fail closed), where a
+    # movie add is the movie_grab job (off by default) and is scoped to the test tag, category too.
+    assert _grab(_client(env.app)).status_code == 403
+    assert env.added == []
+    monkeypatch.setenv('LUMA_TEST_ALLOW', 'movie_grab')
     assert _grab(_client(env.app)).status_code == 200
-    assert env.added[0]['tags'] == 'qa-box'
+    assert env.added[0]['tags'] == 'qa-box' and env.added[0]['category'] == 'qa-box'
 
 
 def test_minimal_regrab_of_an_existing_torrent_is_tracked_not_retagged(env, monkeypatch):

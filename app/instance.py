@@ -15,6 +15,11 @@ moves, renames or deletes a source file). TV tv.db scan/link is DB-only and
 always allowed. The TV download watch (tv_import) likewise only ever acts on torrents
 tagged luma-test-tv, hardlinking or copying into the show's folder (never an overwrite). Unset or 'prod': nothing changes.
 
+v171+ (Reviewer, test must not steal from prod): a movie add (/api/downloads/add) on test is the job
+'movie_grab' (off unless opted in) and is sent inside scoped_add('movie_grab', <test tag>), with the
+test tag (qbit_owner.tag_name(), default luma-test) as both category and tag, like TV grabs. Opting
+in 'qbit' doesn't change that: a test movie add never lands in production's category untagged.
+
 Fail closed (v158c, Tester): with LUMA_INSTANCE unset, an install that looks like the test one is
 treated as test (grabs, deletes and every other gated write off) and a loud warning is logged at
 boot. Signs (test_signs()): a LUMA_TEST_* variable, port 5002 (LUMA_PORT, PORT, LUMA_BIND), a data
@@ -59,6 +64,7 @@ GATED: Dict[str, str] = {
     'storage_cleanup': 'Downloads cleanup (deletes files)',
     'tv_delete_files': 'TV: Delete show folder (deletes files)',
     'tv_grab': 'TV grabs (adds torrents to qBittorrent, only with the TV category and tag)',
+    'movie_grab': 'Movie grabs (adds torrents to qBittorrent, only with the luma-test category and tag)',
 }
 # Allowed on test by default (scoped by their own rules, see the module doc).
 TEST_DEFAULT_ALLOWED: FrozenSet[str] = frozenset({'mover', 'tv_link', 'tv_import'})
@@ -315,7 +321,8 @@ ENDPOINTS = (
     ('/api/radarr/movie/grab', 'arr'), ('/api/sonarr/add', 'arr'), ('/api/sonarr/monitor/', 'arr'),
     ('/api/sonarr/episode/download', 'arr'), ('/api/sonarr/search/', 'arr'),
     ('/api/watchlist', 'arr'), ('/api/tv/watchlist', 'arr'),
-    ('/api/downloads/add', 'qbit'), ('/api/downloads/remove/', 'qbit'),
+    # v171+ (Reviewer): a movie add on test is its own job, and goes through scoped_add like TV
+    ('/api/downloads/add', 'movie_grab'), ('/api/downloads/remove/', 'qbit'),
 )
 
 

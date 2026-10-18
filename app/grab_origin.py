@@ -105,8 +105,8 @@ def _norm_hash(h) -> str:
 
 
 def _btih(url: str) -> str:
-    m = re.search(r'btih:([0-9a-fA-F]{40})', url or '')
-    return m.group(1).lower() if m else ''
+    from app.magnet import btih            # v171+: the shared magnet parser
+    return btih(url) or ''
 
 
 def record(origin: str, *, info_hash: str = '', guid: str = '', download_url: str = '',

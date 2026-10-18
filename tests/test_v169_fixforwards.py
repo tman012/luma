@@ -190,17 +190,19 @@ def test_editing_or_removing_a_path_clears_its_mount_record(lib):  # noqa: F811
 
 def test_a_path_that_was_never_on_its_own_mount_scans_normally(lib, tmp_path):  # noqa: F811
     tv_scan.scan_all(now=1000.0)
-    keep = 'Severance (2022)'
+    known = sorted({r['folder'] for r in rows('SELECT folder FROM series WHERE path_id = ? AND folder IS NOT NULL', PID)}
+                   | {r['folder'] for r in rows('SELECT folder FROM unmatched WHERE path_id = ?', PID)})
+    keep = known[: (len(known) + 1) // 2]                    # v171: at least half stay (PM coverage guard)
     away = tmp_path / 'away'
     away.mkdir()
     for f in os.listdir(lib):
-        if f != keep:
+        if f not in keep:
             shutil.move(str(lib / f), str(away / f))
     (lib / 'lost+found').mkdir()
     out = tv_scan.scan_all(now=2000.0)
     assert out['missing'] == []
-    left = sorted(r['folder'] for r in rows('SELECT folder FROM series WHERE path_id = ?', PID))
-    assert left == [keep]                                     # real shows left: normal rules
+    left = {r['folder'] for r in rows('SELECT folder FROM series WHERE path_id = ? AND folder IS NOT NULL', PID)}
+    assert left and left <= set(keep)                         # real shows left: normal rules
 
 
 # ------------------------------------------------------------------ 3) read-only Movies paths
