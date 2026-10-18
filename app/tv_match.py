@@ -356,6 +356,8 @@ def match(folder: str, hints: Optional[Hints] = None, *, search: Optional[Callab
     best = rows[0]['c'] if tier == 'high' else prepick(rows, hints, details)['c']
     # same-name shows the files don't single out: review pre-picks the best guess but leaves the row unchecked
     unclear = tier != 'high' and why in SAME_NAME and not _sole_fit(rows, hints, details, best['tmdb_id'])
+    # ... and so does a pick nothing backs: neither an exact title nor files that fit it (WWE Raw -> Raw Classics)
+    unclear = unclear or (tier != 'high' and not backed(rows, hints, details, best['tmdb_id']))
     if tier == 'high' and best['tmdb_id'] not in details:
         d = show(best['tmdb_id'])
         if d:
@@ -404,6 +406,19 @@ def decide(rows: List[Dict[str, Any]], q: Dict[str, Any], hints: Optional[Hints]
 
 
 SAME_NAME = ('same title', 'same title and year', 'not first in TMDB order', 'files fit another show')
+
+
+def backed(rows, hints, details, tid) -> bool:
+    """Review may pre-check pick *tid* only when its title is exact or the files back it: they fit it
+    and no other top result, and its seasons end where the files do (a few episodes of season 1 fit
+    nearly anything: WWE WrestleMania -> Road to WrestleMania)."""
+    row = next((r for r in rows if r['c']['tmdb_id'] == tid), None)
+    if row is not None and row['title'] >= W_EXACT:
+        return True
+    if hints is None:
+        return False
+    fit = file_fit(hints, details.get(tid))
+    return fits(fit) and fit['tight'] >= 1.0 and _sole_fit(rows, hints, details, tid)
 
 
 def _sole_fit(rows, hints, details, tid) -> bool:

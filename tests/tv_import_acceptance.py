@@ -99,11 +99,17 @@ def evaluate() -> Dict[str, Any]:
     likely_right = sum(1 for folder, r in review.items() if r['tier'] == 'likely'
                        and r['pick'] == truth.get(folder, {}).get('id'))
     likely = [folder for folder, r in review.items() if r['tier'] == 'likely']
+    # pre-checked review rows (likely, backed: not 'unclear') whose pick isn't the right show
+    prechecked = [folder for folder in likely if review[folder]['reason'] != 'unclear']
+    t_ok = lambda folder, tid: tid in (truth.get(folder, {}).get('accept') or [truth.get(folder, {}).get('id')])  # noqa: E731
+    prechecked_wrong = [(folder, review[folder]['pick'], truth.get(folder, {}).get('id')) for folder in prechecked
+                        if not t_ok(folder, review[folder]['pick'])]
     return {'folders': n, 'tiers': dict(tiers), 'auto': auto, 'auto_pct': round(100 * auto / n, 2),
             'decidable': decidable, 'auto_decidable': auto_decidable,
             'decidable_pct': round(100 * auto_decidable / max(decidable, 1), 2),
             'wrong': wrong, 'ambiguous_auto': ambiguous_auto, 'missed': missed, 'leftovers': leftovers,
             'likely_with_right_guess': f'{likely_right} of {len(likely)}',
+            'prechecked': f'{len(prechecked)} of {len(likely)}', 'prechecked_wrong': prechecked_wrong,
             'same_name': {k: _where(k, series, review) for k in ('Cheers', 'The Office (US)', 'Love', 'Cheat (2019)')}}
 
 

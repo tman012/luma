@@ -29,6 +29,7 @@ def test_687_folders(fresh):
     # zero wrong auto-picks, every pick checked as the matcher made it (before duplicate resolution can
     # hide one: The Staircase), and no accept-list folder auto-picked at all
     assert ev['wrong'] == [] and ev['ambiguous_auto'] == []
+    assert ev['prechecked_wrong'] == []     # review pre-checks only backed picks (Tester on 4d22f6c)
     # PM: at least 96.5% of decidable folders import automatically (measured 97.29%, 646 of 664; raw 94.32%).
     # Popularity never decides: a same-name rival auto-picks only when the files fit it and rule out every rival.
     assert ev['decidable_pct'] >= 96.5, ev['decidable_pct']
