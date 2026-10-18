@@ -1,5 +1,6 @@
 """TV Import speed: a 24 h answer cache in tv.db, the daily refresh that
 skips it, seasons batched 20 a call, and one budget shared by all workers."""
+import json
 import threading
 import time
 
@@ -139,3 +140,59 @@ def test_the_calendar_open_refresh_runs_in_the_background_budget(monkeypatch):
     monkeypatch.setattr(tv_airtimes, 'refresh', lambda **k: 0)
     assert tv_scan.refresh_on_open() is True
     assert seen.get('background') is True and seen.get('folders') is True
+
+
+# ------------------------------------------------------------ the cache's size (v157: tv.db 18.6 -> 123.8 MB)
+
+def _season(n_eps=20, cast=60):
+    person = {'name': 'Someone Famous', 'character': 'A Role', 'profile_path': '/p.jpg', 'credit_id': 'x' * 24, 'id': 1}
+    return {'name': 'Season 1', 'poster_path': '/s.jpg', 'season_number': 1, 'episodes': [
+        {'episode_number': e, 'id': e, 'name': f'E{e}', 'overview': 'o' * 300, 'air_date': '2026-10-18', 'runtime': 44,
+         'still_path': f'/st{e}.jpg', 'crew': [person] * cast, 'guest_stars': [person] * cast, 'vote_average': 7.1}
+        for e in range(1, n_eps + 1)]}
+
+
+def test_the_cache_stores_only_what_tv_reads(mt):
+    import json as _json
+    from app import tv_store
+    big = _season()
+    tv_tmdb._cache_put('season|1|1', big)
+    with tv_store.connect() as c:
+        body = c.execute("SELECT body FROM tmdb_cache WHERE key = 'season|1|1'").fetchone()['body']
+    kept = _json.loads(body)
+    assert len(body) < len(_json.dumps(big)) / 5                              # cast and crew were most of it
+    ep = kept['episodes'][0]
+    assert set(ep) == {'episode_number', 'id', 'name', 'overview', 'air_date', 'runtime', 'still_path'}
+    assert tv_tmdb.season(1, 1) == kept                                       # answered from the trimmed copy
+
+
+def test_the_cache_has_a_ttl_and_a_size_cap(mt, monkeypatch):
+    from app import tv_store
+    for i in range(30):
+        tv_tmdb._cache_put(f'season|{i}|1', _season(5, 0))
+    with tv_store.write() as c:
+        c.execute("UPDATE tmdb_cache SET ts = ? WHERE key = 'season|0|1'", (time.time() - tv_tmdb.CACHE_TTL_S - 1,))
+        c.execute("UPDATE tmdb_cache SET ts = ts - 100 WHERE key IN ('season|1|1', 'season|2|1')")    # the oldest
+    one = len(json.dumps(tv_tmdb.slim(_season(5, 0)), separators=(',', ':')))
+    monkeypatch.setattr(tv_tmdb, 'CACHE_MAX_BYTES', one * 27)
+    assert tv_tmdb.prune_cache() == 3                                          # 1 expired + the 2 oldest over the cap
+    with tv_store.connect() as c:
+        keys = {r['key'] for r in c.execute('SELECT key FROM tmdb_cache')}
+        total = c.execute('SELECT SUM(length(body)) AS n FROM tmdb_cache').fetchone()['n']
+    assert {'season|0|1', 'season|1|1', 'season|2|1'}.isdisjoint(keys) and len(keys) == 27 and total <= one * 27
+
+
+def test_boot_compaction_gives_freed_space_back_once(mt, monkeypatch):
+    import os as _os
+    from app import tv_store
+    monkeypatch.setattr(tv_tmdb, 'CACHE_MAX_BYTES', 10 ** 12)
+    with tv_store.write() as c:
+        c.executemany('INSERT INTO tmdb_cache (key, ts, body) VALUES (?, ?, ?)',
+                      [(f'k{i}', 0.0, 'x' * 200_000) for i in range(250)])                 # ~50 MB of stale answers
+    tv_tmdb.prune_cache()
+    before = _os.path.getsize(tv_store.db_path())
+    monkeypatch.setattr(tv_store, 'VACUUM_FREE_MIN', 1024 * 1024)
+    got = tv_store.compact_on_start()
+    assert got is not None and got[1] < before / 4
+    assert tv_store.compact_on_start() is None                                  # nothing left to give back
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION

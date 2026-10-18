@@ -102,12 +102,19 @@ def _clean(raw) -> Optional[str]:
     return key
 
 
+def _test_get(url: str, **kw):
+    """A key test's one GET: no proxy env, no redirects (a 3xx is 'Unexpected response', never followed)."""
+    with requests.Session() as sess:
+        sess.trust_env = False
+        return sess.get(url, timeout=8, allow_redirects=False, **kw)
+
+
 def test_tmdb_key(key: str) -> Optional[str]:
     """None when TMDB accepts *key*, else a short error."""
     if key.startswith('eyJ'):
         return 'Use the API key, not the access token'
     try:
-        r = requests.get(f'{tmdb_base_url()}/configuration', params={'api_key': key}, timeout=8)
+        r = _test_get(f'{tmdb_base_url()}/configuration', params={'api_key': key})
     except requests.exceptions.Timeout:
         return 'Timed out'
     except Exception:
@@ -124,7 +131,7 @@ def test_tmdb_key(key: str) -> Optional[str]:
 def test_trakt_client_id(client_id: str) -> Optional[str]:
     """None when Trakt accepts *client_id* (prod's check), else a short error."""
     try:
-        r = requests.get(TRAKT_TEST_URL, params={'limit': 1}, timeout=8, headers={
+        r = _test_get(TRAKT_TEST_URL, params={'limit': 1}, headers={
             'Content-Type': 'application/json', 'trakt-api-version': '2', 'trakt-api-key': client_id})
     except requests.exceptions.Timeout:
         return 'Timed out'

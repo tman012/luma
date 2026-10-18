@@ -153,3 +153,11 @@ def test_tmdb_busy_reads_plainly(owner, fake_tmdb):  # noqa: F811
     assert r.status_code == 502 and r.get_json()['error'] == 'TMDB is busy. Try again later.'
     tv_scan.run(now=5000.0)
     assert tv_scan.status()['error'] == 'TMDB is busy. Try again later.'
+
+
+@pytest.fixture(autouse=True)
+def _review_rows_stay(monkeypatch):
+    """These tests drive the review flows (or count review rows): keep the pre-v157 rule so the small tree
+    still has same-name rows in review. v157's auto-import is covered in test_tv_scan and the 687 fixture."""
+    from app import tv_scan as _ts
+    monkeypatch.setattr(_ts, 'AUTO_IMPORT', False)

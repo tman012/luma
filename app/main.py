@@ -116,11 +116,20 @@ class _RedactSecretsFilter(logging.Filter):
 for _h in logging.getLogger().handlers:
     _h.addFilter(_RedactSecretsFilter())
 
+# Persist logs under /app/data/logs (10 MB x 5) as well as stdout; never fatal.
+from app import log_files as _log_files  # noqa: E402
+_log_files.attach(filters=[_RedactSecretsFilter()])
+
 # Flask app setup
 static_folder = os.environ.get('FLASK_STATIC_FOLDER') or '/app/static'
 # static_url_path is pinned: Flask otherwise derives it from the folder's
 # basename, so FLASK_STATIC_FOLDER=/x/assets would move /static/* to /assets/*.
 app = Flask(__name__, static_folder=static_folder, static_url_path='/static')
+
+# LUMA_INSTANCE=test: writer jobs off by default; the write-call gate and the
+# manual-endpoint gate (app/instance.py). Prod: no-op.
+from app import instance as _instance  # noqa: E402
+_instance.init_app(app)
 
 
 def _resolve_spa_dir(static_dir: str, image_spa_dir: str = '/app/spa') -> str:
@@ -726,127 +735,143 @@ def start_services(app_instance):
         except Exception as e:
             logger.error(f"❌ Failed to start hero cache scheduler: {e}")
     
-    # Automations and scheduled jobs
+    # Automations and scheduled jobs (LUMA_INSTANCE=test: writers off unless opted in)
+    _instance.log_blocked_once()
     if _AUTOMATIONS_DISABLED:
         logger.warning('LUMA_DISABLE_AUTOMATIONS is set: auto-rename, watchlist/auto-grab automations, schedulers, Downloads Guard and tunnel auto-start are NOT started')
     elif not skip_bg:
         # Auto-rename monitor
         try:
             from app.auto_rename import start_monitor_thread
-            start_monitor_thread()
-            logger.info("✅ Auto-rename monitor started")
+            if _instance.writes_allowed('auto_rename'):
+                start_monitor_thread()
+                logger.info("✅ Auto-rename monitor started")
         except Exception as e:
             logger.error(f"❌ Failed to start auto-rename monitor: {e}")
         
         # Trending watchlist automation
         try:
             from app.trending_watchlist import start_trending_watchlist_thread
-            start_trending_watchlist_thread()
-            logger.info("✅ Trending watchlist automation started")
+            if _instance.writes_allowed('trending_watchlist'):
+                start_trending_watchlist_thread()
+                logger.info("✅ Trending watchlist automation started")
         except Exception as e:
             logger.error(f"❌ Failed to start trending watchlist automation: {e}")
         
         # Trending TV watchlist automation
         try:
             from app.trending_tv_watchlist import start_trending_tv_watchlist_thread
-            start_trending_tv_watchlist_thread()
-            logger.info("✅ Trending TV watchlist automation started")
+            if _instance.writes_allowed('trending_tv_watchlist'):
+                start_trending_tv_watchlist_thread()
+                logger.info("✅ Trending TV watchlist automation started")
         except Exception as e:
             logger.error(f"❌ Failed to start trending TV watchlist automation: {e}")
         
         # Now available watchlist automation
         try:
             from app.now_available_watchlist import start_now_available_watchlist_thread
-            start_now_available_watchlist_thread()
-            logger.info("✅ Now available watchlist automation started")
+            if _instance.writes_allowed('now_available_watchlist'):
+                start_now_available_watchlist_thread()
+                logger.info("✅ Now available watchlist automation started")
         except Exception as e:
             logger.error(f"❌ Failed to start now available watchlist automation: {e}")
         
         # Anticipated watchlist automation
         try:
             from app.anticipated_watchlist import start_anticipated_watchlist_thread
-            start_anticipated_watchlist_thread()
-            logger.info("✅ Anticipated watchlist automation started")
+            if _instance.writes_allowed('anticipated_watchlist'):
+                start_anticipated_watchlist_thread()
+                logger.info("✅ Anticipated watchlist automation started")
         except Exception as e:
             logger.error(f"❌ Failed to start anticipated watchlist automation: {e}")
         
         # Latest auto-grab automation
         try:
             from app.latest_auto_grab import start_latest_auto_grab_thread
-            start_latest_auto_grab_thread()
-            logger.info("✅ Latest auto-grab automation started")
+            if _instance.writes_allowed('latest_auto_grab'):
+                start_latest_auto_grab_thread()
+                logger.info("✅ Latest auto-grab automation started")
         except Exception as e:
             logger.error(f"❌ Failed to start Latest auto-grab automation: {e}")
         
         # 4K Remux auto-grab automation
         try:
             from app.upgrade_4k_auto_grab import start_upgrade_4k_auto_grab_thread
-            start_upgrade_4k_auto_grab_thread()
-            logger.info("✅ 4K Remux auto-grab automation started")
+            if _instance.writes_allowed('upgrade_4k'):
+                start_upgrade_4k_auto_grab_thread()
+                logger.info("✅ 4K Remux auto-grab automation started")
         except Exception as e:
             logger.error(f"❌ Failed to start 4K Remux auto-grab automation: {e}")
         
         # Daily upgrade scheduler
         try:
             from app.upgrade_scheduler import start_upgrade_scheduler_thread
-            start_upgrade_scheduler_thread()
-            logger.info("✅ Daily upgrade scheduler started")
+            if _instance.writes_allowed('upgrade_scheduler'):
+                start_upgrade_scheduler_thread()
+                logger.info("✅ Daily upgrade scheduler started")
         except Exception as e:
             logger.error(f"❌ Failed to start upgrade scheduler: {e}")
         
         # Movie Night weekly canon scheduler
         try:
             from app.movie_night import start_movie_night_thread
-            start_movie_night_thread()
-            logger.info("✅ Movie Night scheduler started")
+            if _instance.writes_allowed('movie_night'):
+                start_movie_night_thread()
+                logger.info("✅ Movie Night scheduler started")
         except Exception as e:
             logger.error(f"❌ Failed to start Movie Night scheduler: {e}")
         
         # Genre Roulette nightly scheduler
         try:
             from app.genre_roulette import start_genre_roulette_thread
-            start_genre_roulette_thread()
-            logger.info("✅ Genre Roulette scheduler started")
+            if _instance.writes_allowed('roulette'):
+                start_genre_roulette_thread()
+                logger.info("✅ Genre Roulette scheduler started")
         except Exception as e:
             logger.error(f"❌ Failed to start Genre Roulette scheduler: {e}")
         
         # Franchise Completer nightly scheduler
         try:
             from app.franchise_completer import start_franchise_completer_thread
-            start_franchise_completer_thread()
-            logger.info("✅ Franchise Completer scheduler started")
+            if _instance.writes_allowed('franchise_completer'):
+                start_franchise_completer_thread()
+                logger.info("✅ Franchise Completer scheduler started")
         except Exception as e:
             logger.error(f"❌ Failed to start Franchise Completer scheduler: {e}")
         
         # Watchlist digital dates scheduler
         try:
             from app.watchlist_digital_dates import start_watchlist_digital_dates_thread
-            start_watchlist_digital_dates_thread()
-            logger.info("✅ Watchlist Digital Dates scheduler started")
+            if _instance.writes_allowed('watchlist_digital_dates'):
+                start_watchlist_digital_dates_thread()
+                logger.info("✅ Watchlist Digital Dates scheduler started")
         except Exception as e:
             logger.error(f"❌ Failed to start Watchlist Digital Dates scheduler: {e}")
         
         # What You're Missing pool refresher
         try:
             from app.daily_missing import start_daily_missing_thread
-            start_daily_missing_thread()
-            logger.info("✅ What You're Missing pool refresher started")
+            if _instance.writes_allowed('daily_missing'):
+                start_daily_missing_thread()
+                logger.info("✅ What You're Missing pool refresher started")
         except Exception as e:
             logger.error(f"❌ Failed to start What You're Missing refresher: {e}")
         
         # Movie Collections refresher
         try:
             from app.movie_collections import start_movie_collections_thread
-            start_movie_collections_thread()
-            logger.info("✅ Movie Collections refresher started")
+            if _instance.writes_allowed('movie_collections'):
+                start_movie_collections_thread()
+                logger.info("✅ Movie Collections refresher started")
         except Exception as e:
             logger.error(f"❌ Failed to start Movie Collections refresher: {e}")
         
         # Downloads Guard
         try:
             from app.downloads_guard import start_downloads_guard_thread
-            start_downloads_guard_thread()
-            logger.info("✅ Downloads Guard started")
+            if _instance.writes_allowed('downloads_guard'):
+                start_downloads_guard_thread()
+                logger.info("✅ Downloads Guard started")
         except Exception as e:
             logger.error(f"❌ Failed to start Downloads Guard: {e}")
         
@@ -12904,27 +12929,63 @@ def img_plex_proxy():
         return Response('Error fetching image', status=502, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
 _TVDB_ART = 'https://artworks.thetvdb.com'
+IMG_PROXY_MAX_BYTES = 10 * 1024 * 1024          # one image through /api/img/tmdb, at most
+
+
+class _ImgTooLarge(Exception):
+    pass
+
+
+def _img_fetch(url: str):
+    """(status, content type, body) for one upstream image: no proxy env, no redirects, streamed and
+    capped at IMG_PROXY_MAX_BYTES (a bigger Content-Length is refused before reading; a body that runs
+    past the cap is cut off). Raises _ImgTooLarge or requests.RequestException."""
+    with requests.Session() as sess:
+        sess.trust_env = False
+        resp = sess.get(url, timeout=15, allow_redirects=False, stream=True)
+        try:
+            ctype = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+            if resp.status_code != 200 or not ctype.startswith('image/'):
+                return resp.status_code, ctype, b''
+            try:
+                if int(resp.headers.get('Content-Length') or 0) > IMG_PROXY_MAX_BYTES:
+                    raise _ImgTooLarge()
+            except ValueError:
+                pass
+            buf, n = [], 0
+            for chunk in resp.iter_content(chunk_size=65536):
+                n += len(chunk)
+                if n > IMG_PROXY_MAX_BYTES:
+                    raise _ImgTooLarge()
+                buf.append(chunk)
+            return 200, ctype, b''.join(buf)
+        finally:
+            resp.close()
+
+
+def _img_response(url: str, label: str):
+    from flask import Response
+    try:
+        status, ctype, body = _img_fetch(url)
+    except _ImgTooLarge:
+        logger.warning('%s image proxy: upstream image over %d bytes refused', label, IMG_PROXY_MAX_BYTES)
+        return 'Image too large', 502
+    except requests.RequestException as e:
+        logger.error('%s image proxy error: %s', label, type(e).__name__)
+        return 'Error fetching image', 502
+    if status != 200 or not body:
+        return 'Image not found', 404
+    return Response(body, content_type=ctype, headers={'Cache-Control': 'public, max-age=604800'})
 
 
 def _img_tvdb(path: str):
     """One TheTVDB artwork image through the proxy: the host is fixed, the
     path is a plain image path (no '..', '//', query or odd characters), a
     redirect is not followed and only an image answer is passed on."""
-    from flask import Response
     if ('..' in path or '//' in path or len(path) > 300
             or not re.fullmatch(r'/[A-Za-z0-9/_\-.]+', path)):
         return 'Invalid path', 400
-    try:
-        with requests.Session() as sess:
-            sess.trust_env = False
-            resp = sess.get(_TVDB_ART + path, timeout=15, allow_redirects=False)
-        ctype = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
-        if resp.status_code != 200 or not ctype.startswith('image/'):
-            return 'Image not found', 404
-        return Response(resp.content, content_type=ctype, headers={'Cache-Control': 'public, max-age=604800'})
-    except requests.RequestException as e:
-        logger.error('TheTVDB image proxy error: %s', type(e).__name__)
-        return 'Error fetching image', 502
+    return _img_response(_TVDB_ART + path, 'TheTVDB')
 
 
 @app.route('/api/img/tmdb')
@@ -12953,24 +13014,9 @@ def img_tmdb_proxy():
     if size not in valid_sizes:
         size = 'w500'
 
-    try:
-        full_url = f"https://image.tmdb.org/t/p/{size}{tmdb_path}"
-        resp = requests.get(full_url, timeout=15, stream=True)
-
-        if resp.status_code != 200:
-            return 'Image not found', 404
-
-        from flask import Response
-        return Response(
-            resp.content,
-            content_type=resp.headers.get('Content-Type', 'image/jpeg'),
-            headers={
-                'Cache-Control': 'public, max-age=604800',  # 7-day cache
-            },
-        )
-    except requests.RequestException as e:
-        logger.error(f"TMDb image proxy error: {e}")
-        return 'Error fetching image', 502
+    if '..' in tmdb_path or '//' in tmdb_path or len(tmdb_path) > 300:
+        return 'Invalid path', 400
+    return _img_response(f"https://image.tmdb.org/t/p/{size}{tmdb_path}", 'TMDb')
 
 
 # Playback Endpoints
@@ -21592,6 +21638,19 @@ app.register_blueprint(_tv_library_routes.bp)
 # logged and left to the lazy path, never a failed boot.
 from app import tv_store as _tv_store_boot
 _tv_store_boot.migrate_on_start()
+try:                                       # the TMDB cache: TTL + size cap, then give freed space back once
+    from app import tv_tmdb as _tv_tmdb_boot  # noqa: E402
+    _tv_tmdb_boot._cfg.setdefault('cache', True)
+    _tv_tmdb_boot.prune_cache()
+    _tv_store_boot.compact_on_start()
+except Exception:                          # noqa: BLE001 - never a failed boot
+    logger.exception('tv.db housekeeping at boot failed')
+# New TV files get linked as they land: a boot pass, then a 60s folder poll (+ inotify where it works).
+from app import tv_watch as _tv_watch, tv_plex as _tv_plex  # noqa: E402
+_tv_plex.init(get_plex=lambda: plex_service)
+_tv_watch.start()
+from app import tv_scan as _tv_scan_boot  # noqa: E402
+_tv_scan_boot.auto_import_on_start()       # old review rows with a ranked pick import now (background)
 
 
 if __name__ == '__main__':

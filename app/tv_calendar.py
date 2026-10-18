@@ -14,7 +14,7 @@ import datetime as dt
 import time
 from typing import Any, Dict, List, Optional
 
-from app import tv_match, tv_scan, tv_store, tv_tmdb
+from app import tv_match, tv_plex, tv_scan, tv_store, tv_tmdb
 
 MAX_DAYS = 62
 FIND_LIBRARY_MAX = 10
@@ -43,6 +43,13 @@ def parse_day(s: Any) -> Optional[dt.date]:
         return None
 
 
+def _in_plex(r) -> bool:
+    try:
+        return tv_plex.has(r['show_tmdb'], r['show_tvdb'], r['season_number'], r['episode_number'])
+    except Exception:                     # noqa: BLE001 - Plex trouble: linked files still answer
+        return False
+
+
 def calendar(start: dt.date, days: int) -> Dict[str, Any]:
     """Episodes of the shows in the selected TV libraries airing on
     [start, start + days), by air date then show."""
@@ -55,7 +62,7 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
             for r in conn.execute(
                     'SELECT e.id, e.series_id, e.season_number, e.episode_number, e.title, e.air_date, e.airstamp,'
                     ' COALESCE(e.air_runtime, e.runtime) AS minutes, e.still_path, e.tvdb_image, s.backdrop_path,'
-                    ' s.title AS show, s.year, s.poster_path,'
+                    ' s.title AS show, s.year, s.poster_path, s.tmdb_id AS show_tmdb, s.tvdb_id AS show_tvdb,'
                     # downloaded: a linked file for this exact episode row (one rule, no fallback)
                     ' EXISTS (SELECT 1 FROM episode_file_links l JOIN episode_files f ON f.id = l.file_id'
                     "         WHERE l.episode_id = e.id AND f.state = 'linked')"
@@ -64,12 +71,13 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
                     f' WHERE s.path_id IN ({_in(paths)}) AND e.air_date >= ? AND e.air_date < ?'
                     ' ORDER BY e.air_date, s.title COLLATE NOCASE, e.season_number, e.episode_number',
                     (*paths, start.isoformat(), end.isoformat())):
-                out.append({'episode_id': r['id'], 'series_id': r['series_id'], 'show': r['show'], 'year': r['year'],
+                out.append({'episode_id': r['id'], 'series_id': r['series_id'], 'tmdb_id': r['show_tmdb'], 'show': r['show'], 'year': r['year'],
                             'poster_path': r['poster_path'], 'season': r['season_number'],
                             'episode': r['episode_number'], 'title': r['title'] or '', 'air_date': r['air_date'],
                             'airstamp': r['airstamp'], 'runtime': r['minutes'],
                             'tvdb_image': r['tvdb_image'], 'still_path': r['still_path'], 'backdrop_path': r['backdrop_path'],
-                            'downloaded': bool(r['downloaded'])})
+                            # or Plex has it (tv_plex: read-only, cached; empty when Plex is down)
+                            'downloaded': bool(r['downloaded']) or _in_plex(r)})
     out.sort(key=lambda e: (e['air_date'], tv_scan.sort_title(e['show']), e['season'] or 0, e['episode'] or 0))
     return {'start': start.isoformat(), 'days': days, 'episodes': out, 'libraries': len(paths),
             'refreshed_at': _last_refresh()}

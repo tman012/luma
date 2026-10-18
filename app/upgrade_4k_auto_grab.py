@@ -163,6 +163,9 @@ def trigger_manual_run() -> None:
 
 
 def start_upgrade_4k_auto_grab_thread() -> None:
+    from app import instance as _instance
+    if not _instance.writes_allowed('upgrade_4k'):   # LUMA_INSTANCE=test: off unless opted in
+        return None
     t = threading.Thread(target=_update_loop, daemon=True, name='upgrade-4k-auto-grab')
     t.start()
     logger.info('4K Remux auto-grab automation started')

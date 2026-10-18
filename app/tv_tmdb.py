@@ -30,6 +30,12 @@ BURST = 4                   # requests that may go at once after a quiet spell
 MAX_RETRY_AFTER_S = 10
 ATTEMPTS = 3                # a 429 waits Retry-After (the whole pool waits) and tries again
 CACHE_TTL_S = 24 * 3600
+CACHE_MAX_BYTES = 16 * 1024 * 1024    # the cache's answers in tv.db, at most (oldest go first)
+# what TV never reads: cast and crew are most of a season's size
+_SLIM_SHOW = ('credits', 'aggregate_credits', 'images', 'videos', 'production_companies', 'production_countries',
+              'spoken_languages', 'created_by', 'keywords', 'recommendations', 'similar', 'content_ratings')
+_SLIM_EP = ('crew', 'guest_stars', 'production_code', 'vote_average', 'vote_count')
+_puts = [0]
 SEASONS_PER_CALL = 20       # TMDB's append_to_response limit
 _pace_lock = threading.Lock()
 _bucket = {'tokens': float(BURST), 'ts': 0.0, 'pause_until': 0.0}
@@ -191,9 +197,24 @@ def _cache_get(key: str) -> Any:
         return None
 
 
+def slim(value: Any) -> Any:
+    """Only what TV reads: no cast, crew, images or videos (a season drops ~90% of its size)."""
+    if not isinstance(value, dict):
+        return value
+    out = {k: v for k, v in value.items() if k not in _SLIM_SHOW}
+    for k in ('last_episode_to_air', 'next_episode_to_air'):
+        if isinstance(out.get(k), dict):
+            out[k] = {a: b for a, b in out[k].items() if a not in _SLIM_EP}
+    if isinstance(out.get('episodes'), list):
+        out['episodes'] = [{a: b for a, b in e.items() if a not in _SLIM_EP} if isinstance(e, dict) else e
+                           for e in out['episodes']]
+    return out
+
+
 def _cache_put(key: str, value: Any) -> None:
     if not _cfg.get('cache') or value is None:
         return
+    value = slim(value)
     from app import tv_store
     try:
         with tv_store.write() as conn:
@@ -201,6 +222,9 @@ def _cache_put(key: str, value: Any) -> None:
                          (key, time.time(), json.dumps(value, separators=(',', ':'))))
     except Exception as e:          # a cache that can't write is just slower
         logger.debug('TMDB cache not written: %s', type(e).__name__)
+    _puts[0] += 1
+    if _puts[0] % 200 == 0:
+        prune_cache()
 
 
 @contextlib.contextmanager
@@ -214,16 +238,23 @@ def fresh():
         _local.fresh = False
 
 
-def prune_cache() -> None:
-    """Drop answers older than CACHE_TTL_S."""
+def prune_cache() -> int:
+    """Drop answers older than CACHE_TTL_S, then the oldest beyond CACHE_MAX_BYTES. Returns rows dropped."""
     if not _cfg.get('cache'):
-        return
+        return 0
     from app import tv_store
     try:
         with tv_store.write() as conn:
-            conn.execute('DELETE FROM tmdb_cache WHERE ts < ?', (time.time() - CACHE_TTL_S,))
+            n = conn.execute('DELETE FROM tmdb_cache WHERE ts < ?', (time.time() - CACHE_TTL_S,)).rowcount
+            n += conn.execute(
+                'DELETE FROM tmdb_cache WHERE key IN (SELECT key FROM (SELECT key, SUM(length(body))'
+                ' OVER (ORDER BY ts DESC, key) AS run FROM tmdb_cache) WHERE run > ?)', (CACHE_MAX_BYTES,)).rowcount
+        if n:
+            logger.info('TMDB cache: %d old answer(s) dropped', n)
+        return n
     except Exception as e:
         logger.debug('TMDB cache not pruned: %s', type(e).__name__)
+        return 0
 
 
 def _cached(key: str, fetch: Callable[[], Any]) -> Any:

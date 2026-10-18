@@ -9,10 +9,11 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
 import { SEARCH_DEBOUNCE_MS } from '@/components/library/TvSearch';
-import { CAL_MAX_W, Still, stillChain } from '@/components/library/TvCalendar';
+import { CAL_MAX_W, POLL_MS, Still, WeekGrid, keepIfSame, stillChain } from '@/components/library/TvCalendar';
+import { ModalHostContext, type ModalHostContextValue } from '@/contexts/ModalHostContext';
 import {
   addDays, agendaLabel, byDay, episodeState, isDay, localDay, seasonsText, shortDate, weekDays, weekLabel, weekStart, type CalEpisode,
-  timeRange,
+  timeRange, sortDay,
 } from '@/components/library/tvCalendarApi';
 
 const res = (body: unknown, status = 200) => ({ ok: status < 300, status, json: async () => body }) as Response;
@@ -212,6 +213,27 @@ describe('Calendar', () => {
     expect(screen.queryByTestId('tv-cal-toolbar')).toBeNull();
     // rows aren't clickable
     expect(rows.every(r => r.tagName === 'DIV' && !r.querySelector('button, a'))).toBe(true);
+  });
+
+  it('asks again quietly on window focus and every 60s while visible (no placeholder)', async () => {
+    const ivals: [() => void, number][] = [];
+    const real = window.setInterval;
+    vi.spyOn(window, 'setInterval').mockImplementation(((fn: () => void, ms: number) => { ivals.push([fn, ms]); return real(() => {}, 1e9); }) as typeof window.setInterval);
+    page(true);
+    await screen.findAllByTestId('tv-agenda-row');
+    expect(calCalls()).toEqual(['start=2026-10-11&days=7']);
+    window.dispatchEvent(new Event('focus'));
+    await waitFor(() => expect(calCalls()).toHaveLength(2));
+    expect(screen.queryByTestId('tv-cal-loading')).toBeNull();                       // quiet: the grid stays
+    const poll = ivals.find(([, ms]) => ms === POLL_MS)!;
+    expect(POLL_MS).toBe(60_000);
+    poll[0]();
+    await waitFor(() => expect(calCalls()).toHaveLength(3));
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    poll[0]();
+    window.dispatchEvent(new Event('focus'));
+    await new Promise(r => setTimeout(r, 20));
+    expect(calCalls()).toHaveLength(3);                                               // hidden: no polling
   });
 
   it('week navigation, Today, and an empty week; the week sits in the URL', async () => {
@@ -457,5 +479,62 @@ describe('tabs', () => {
     for (const label of ['Search shows', 'No episodes this week', 'Unaired', 'Downloaded', 'Missing', 'In library', 'Add to',
       "Couldn't add show", 'No results', 'Wrong show?', 'No TV libraries', 'Choose libraries', 'Today', 'Tomorrow'])
       expect(src).toContain(label);
+  });
+});
+
+
+describe('quiet re-asks', () => {
+  it('keep the same object (no re-render) unless an episode changed', () => {
+    const ep = { episode_id: 1, series_id: 1, show: 'S', year: 2020, poster_path: null, season: 1, episode: 1, title: 't',
+      air_date: '2026-10-18', downloaded: false } as never;
+    const cal = (eps: unknown[]) => ({ start: '2026-10-18', days: 7, episodes: eps, libraries: 1, refreshed_at: null }) as never;
+    const prev = { key: 'k', cal: cal([ep]) };
+    expect(keepIfSame(prev, 'k', cal([{ ...(ep as object) }]))).toBe(prev);
+    const next = keepIfSame(prev, 'k', cal([{ ...(ep as object), downloaded: true }]));
+    expect(next).not.toBe(prev);
+    expect(keepIfSame(prev, 'other', cal([ep]))).not.toBe(prev);
+  });
+});
+
+describe('per-day air-time order', () => {
+  const at = (id: number, show: string, airstamp: string | null, season = 1, episode = 1): CalEpisode =>
+    ({ ...ep(id, '2026-10-17', false, show, season, episode), airstamp });
+  it('by the local air time, a late-night show whose UTC stamp is the next day last among the timed; ties by name, season, episode; untimed last', () => {
+    const list = [
+      at(1, 'Zed Late Show', '2026-10-18T03:35:00Z'),            // Sat 11:35 PM ET (Sun in UTC)
+      at(2, 'No Time Show', null),
+      at(3, 'Mid Show', '2026-10-18T00:00:00Z'),                 // Sat 8:00 PM ET
+      at(4, 'The Abbott', '2026-10-18T00:00:00Z', 2, 3),         // 8:00 PM tie: name (leading The ignored)
+      at(5, 'Early Bird', '2026-10-17T13:00:00Z'),               // Sat 9:00 AM ET (string sort on the UTC clock would put it last)
+      at(6, 'Abbott', '2026-10-18T00:00:00Z', 2, 1),             // same name: season, then episode
+      at(7, 'Another Untimed', null),
+    ];
+    expect(sortDay(list).map(e => e.episode_id)).toEqual([5, 6, 4, 3, 1, 7, 2]);
+    expect(byDay(list)[0]![1].map(e => e.episode_id)).toEqual([5, 6, 4, 3, 1, 7, 2]);
+  });
+  it('the week grid renders each day in that order', () => {
+    render(<WeekGrid week="2026-10-11" today="2026-10-17" eps={[at(1, 'Late', '2026-10-18T03:30:00Z'), at(2, 'Untimed', null), at(3, 'Early', '2026-10-17T22:00:00Z')]} />);
+    const sat = screen.getAllByTestId('tv-grid-day')[6]!;
+    expect(within(sat).getAllByTestId('tv-card-show').map(n => n.textContent)).toEqual(['Early', 'Late', 'Untimed']);
+  });
+});
+
+describe('clickable cards', () => {
+  it('a click (thumbnail or text) or Enter opens the show detail at that season and episode', () => {
+    const openTv = vi.fn();
+    const host = { openTv, openMovie: vi.fn() } as unknown as ModalHostContextValue;
+    const e = { ...ep(9, '2026-10-15', true, 'Severance', 2, 7), tmdb_id: 95396 };
+    render(<ModalHostContext.Provider value={host}><WeekGrid week="2026-10-11" today="2026-10-17" eps={[e]} /></ModalHostContext.Provider>);
+    const card = screen.getByTestId('tv-agenda-row');
+    expect([card.getAttribute('role'), card.getAttribute('tabindex')]).toEqual(['button', '0']);
+    fireEvent.click(within(card).getByTestId('tv-card-show'));
+    fireEvent.keyDown(card, { key: 'Enter' });
+    expect(openTv).toHaveBeenCalledTimes(2);
+    expect(openTv.mock.calls[0]![0]).toEqual({ tmdbId: 95396, origin: 'tv_calendar', episodeContext: { seasonNumber: 2, episodeNumber: 7 } });
+  });
+  it('no TMDB id: not clickable', () => {
+    const host = { openTv: vi.fn(), openMovie: vi.fn() } as unknown as ModalHostContextValue;
+    render(<ModalHostContext.Provider value={host}><WeekGrid week="2026-10-11" today="2026-10-17" eps={[ep(9, '2026-10-15', true)]} /></ModalHostContext.Provider>);
+    expect(screen.getByTestId('tv-agenda-row').getAttribute('role')).toBeNull();
   });
 });

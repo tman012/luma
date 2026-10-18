@@ -1,7 +1,7 @@
 /** Settings > TV > Series (desktop web): every library show as a 2:3 poster,
  * A–Z ignoring punctuation and a leading The/A/An, with a downloaded-share bar and "N of M
  * episodes", and a sticky # – Z rail. Posters aren't clickable (no show detail yet). */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { posterUrl } from '@/utils/image';
 import { RATING_ICONS } from '@/utils/ratingIcons';
@@ -61,6 +61,17 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
   const root = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLElement>(null);
   const jumped = useRef<string | null>(null);         // a rail click wins while its show is on screen (the page end)
+
+  // a long name steps down (CAPTION_FIT) until it fits its 2 lines; an ellipsis only past the last step
+  useLayoutEffect(() => {
+    if (!sorted.length) return;
+    let frame = 0;
+    const fit = () => fitCaptions(root.current);
+    fit();
+    const onResize = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(fit); };
+    window.addEventListener('resize', onResize);
+    return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', onResize); };
+  }, [sorted]);
 
   useEffect(() => {
     if (!sorted.length) return;
@@ -198,11 +209,28 @@ function Tile({ s, first }: { s: Show; first: boolean }) {
 /** The caption block (name + count) is at least this tall, so posters and bars line up row to row and any
  * space falls below the count (8 top + 2 x 17 + 2 + 15 = 59 with padding; 51 without it). */
 const CAPTION_MIN_H = 51 + 8;
-/** 13/600, 17px lines, at most 2 then an ellipsis; the count sits right under it (no blank line). */
+/** Caption type: 12.5/600, -0.2px tracking, 17px lines, at most 2 lines; the count sits right under it.
+ * A name that still needs a third line steps down to 12, then 11.5, then 11 (same tracking); only past 11
+ * does the 2-line clamp's ellipsis show (the full name is in title and aria-label). */
+export const CAPTION_TYPE = { size: 12.5, tracking: -0.2, line: 17 };
+/** Step-down for long names: [size px, tracking px]; past the last step, an ellipsis (full name in title/aria-label). */
+export const CAPTION_FIT: [number, number][] = [[12, -0.2], [11.5, -0.2], [11, -0.2], [10.5, -0.3], [10, -0.4]];
 const caption: React.CSSProperties = {
-  fontSize: 13, fontWeight: 600, lineHeight: '17px', color: W95, overflow: 'hidden', overflowWrap: 'anywhere',
+  fontSize: CAPTION_TYPE.size, letterSpacing: `${CAPTION_TYPE.tracking}px`, fontWeight: 600, lineHeight: `${CAPTION_TYPE.line}px`, color: W95, overflow: 'hidden', overflowWrap: 'anywhere',
   display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
 };
+/** Batched: read every name, then write the ones that overflow, one step at a time (no read/write interleave). */
+export function fitCaptions(root: HTMLElement | null): number {
+  const names = [...(root?.querySelectorAll<HTMLElement>('[data-testid=tv-series-name]') || [])];
+  for (const n of names) { n.style.fontSize = `${CAPTION_TYPE.size}px`; n.style.letterSpacing = `${CAPTION_TYPE.tracking}px`; delete n.dataset.fit; }
+  let over = names.filter(n => n.scrollHeight > n.clientHeight + 1);
+  for (const [size, tracking] of CAPTION_FIT) {
+    if (!over.length) break;
+    for (const n of over) { n.style.fontSize = `${size}px`; n.style.letterSpacing = `${tracking}px`; n.dataset.fit = String(size); }
+    over = over.filter(n => n.scrollHeight > n.clientHeight + 1);
+  }
+  return over.length;
+}
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(128px, 1fr))', gap: 16 };
 const emptyCard: React.CSSProperties = {
   borderRadius: 16, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', height: 160,

@@ -584,6 +584,9 @@ def _guarded(dry_run: bool, scheduled: bool = False) -> None:
 
 
 def start_watchlist_digital_dates_thread() -> None:
+    from app import instance as _instance
+    if not _instance.writes_allowed('watchlist_digital_dates'):   # LUMA_INSTANCE=test: off unless opted in
+        return None
     _hydrate_status()
     t = threading.Thread(
         target=_scheduler_loop, daemon=True, name="watchlist-digital-dates"

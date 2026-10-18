@@ -58,10 +58,10 @@ describe('Series grid', () => {
     expect(w.className).toContain('tvs-rail-btn');
     expect(document.head.textContent + document.body.innerHTML).toContain('.tvs-rail-btn[aria-disabled=false]:hover');
     expect(rail.getAttribute('data-pin')).toBe('top');                              // pinned (fixed) only once scrolled past
-    // captions: 13/600, 17px lines, 2 lines max with an ellipsis, always 34px tall; the full name in title + aria-label
+    // captions: 12.5/600, -0.2px tracking, 17px lines, 2 lines max (long names step down, then the ellipsis)
     const name = within(tiles[2]!).getByTestId('tv-series-name');
-    expect([name.style.fontSize, name.style.fontWeight, name.style.lineHeight, name.style.minHeight, name.style.webkitLineClamp, name.style.display])
-      .toEqual(['13px', '600', '17px', '', '2', '-webkit-box']);
+    expect([name.style.fontSize, name.style.fontWeight, name.style.letterSpacing, name.style.lineHeight, name.style.webkitLineClamp, name.style.display])
+      .toEqual(['12.5px', '600', '-0.2px', '17px', '2', '-webkit-box']);
     const cap = within(tiles[2]!).getByTestId('tv-series-caption');                 // the count right under the name; spare room at the bottom
     expect([cap.style.minHeight, cap.style.paddingTop, cap.style.justifyContent]).toEqual(['59px', '8px', 'flex-start']);   // 51 + 8
     expect(name.nextElementSibling!.getAttribute('data-testid')).toBe('tv-series-count');
@@ -120,5 +120,30 @@ describe('Series rail pin', () => {
     fireEvent.scroll(window);
     expect([rail.getAttribute('data-pin'), rail.style.position, rail.style.top]).toEqual(['top', 'absolute', '0px']);
     expect(raf).toHaveBeenCalled();                                                 // the letter still waits for a frame
+  });
+});
+
+
+describe('caption fit', () => {
+  it('steps an overflowing name down 12 -> 11.5 -> 11 -> 10.5 -> 10 (tighter tracking), then leaves it to the ellipsis', async () => {
+    const { fitCaptions } = await import('@/components/library/TvSeries');
+    const root = document.createElement('div');
+    const mk = (lines: Record<string, number>) => {
+      const n = document.createElement('span'); n.dataset.testid = 'tv-series-name';
+      n.setAttribute('data-testid', 'tv-series-name');
+      Object.defineProperty(n, 'clientHeight', { get: () => 34 });
+      Object.defineProperty(n, 'scrollHeight', { get: () => 17 * (lines[n.style.fontSize] ?? 2) });
+      root.appendChild(n); return n;
+    };
+    const short = mk({});
+    const fits12 = mk({ '12.5px': 3, '12px': 2 });
+    const fits11 = mk({ '12.5px': 3, '12px': 3, '11.5px': 3, '11px': 2 });
+    const fits10 = mk({ '12.5px': 4, '12px': 4, '11.5px': 3, '11px': 3, '10.5px': 3, '10px': 2 });
+    const never = mk({ '12.5px': 4, '12px': 4, '11.5px': 3, '11px': 3, '10.5px': 3, '10px': 3 });
+    expect(fitCaptions(root)).toBe(1);
+    expect([short.style.fontSize, fits12.style.fontSize, fits11.style.fontSize, fits10.style.fontSize, never.style.fontSize])
+      .toEqual(['12.5px', '12px', '11px', '10px', '10px']);
+    expect([short.style.letterSpacing, fits10.style.letterSpacing]).toEqual(['-0.2px', '-0.4px']);
+    expect(short.dataset.fit).toBeUndefined();
   });
 });

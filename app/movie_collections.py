@@ -913,6 +913,9 @@ def ensure_warm() -> None:
 
 
 def start_movie_collections_thread() -> None:
+    from app import instance as _instance
+    if not _instance.writes_allowed('movie_collections'):   # LUMA_INSTANCE=test: off unless opted in
+        return None
     global _thread_started
     if _thread_started:
         return

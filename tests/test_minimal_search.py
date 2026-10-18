@@ -410,3 +410,11 @@ def test_tmdb_base_url_ignores_bad_values(monkeypatch, value):
     from app import connectors
     monkeypatch.setenv('LUMA_TMDB_BASE_URL', value)
     assert connectors.tmdb_base_url() == 'https://api.themoviedb.org/3'
+
+
+@pytest.fixture(autouse=True)
+def _key_tests_via_requests_get(monkeypatch):
+    """These tests fake requests.get; the key test's own session (no proxy env, no redirects) is covered in
+    tests/test_tv_v157b_net.py."""
+    from app import connectors as _c
+    monkeypatch.setattr(_c, '_test_get', lambda url, **kw: _c.requests.get(url, timeout=8, allow_redirects=False, **kw))

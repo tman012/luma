@@ -1,18 +1,20 @@
 /** Settings > TV > Calendar (v1, desktop web): the week's episodes by TMDB air
  * date as an agenda (day headers, 72px rows), capped at 720px and centered.
- * Rows aren't clickable. The week toolbar: ‹ › (and Today) on the left, the range centered. */
-import { useEffect, useState } from 'react';
+ * A card opens the show's detail at that episode. The week toolbar: ‹ › (and Today) on the left, the range centered. */
+import { useContext, useEffect, useState } from 'react';
+import { ModalHostContext } from '@/contexts/ModalHostContext';
 import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
 import { Poster } from './TvImport';
 import { posterUrl, tvdbImg } from '@/utils/image';
 import {
-  STATE_COLOR, STATE_WORD, addDays, agendaLabel, byDay, code, episodeState, loadCalendar, shortDate, timeRange, weekLabel, weekStart,
+  STATE_COLOR, STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, shortDate, timeRange, weekLabel, weekStart,
   type CalEpisode, type CalendarData, type Day,
 } from './tvCalendarApi';
 
 export const CAL_MAX_W = 720;
 export const REFRESH_RELOAD_MS = 6000;
+export const POLL_MS = 60_000;
 const W50 = 'rgba(255,255,255,0.5)';
 const W70 = 'rgba(255,255,255,0.7)';
 const W95 = 'rgba(255,255,255,0.95)';
@@ -35,11 +37,30 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true }: 
       // episode images / air times are being fetched for this week: ask once more, quietly
       if (r.ok && r.data.refreshing) {
         timer = window.setTimeout(() => {
-          void loadCalendar(week, 7).then(r2 => { if (live && r2.ok) setData({ key, cal: r2.data }); });
+          void loadCalendar(week, 7).then(r2 => { if (live && r2.ok) setData(prev => keepIfSame(prev, key, r2.data)); });
         }, REFRESH_RELOAD_MS);
       }
     });
     return () => { live = false; window.clearTimeout(timer); };
+  }, [week, key]);
+  // a file that lands shows as downloaded without a reload: ask again quietly on window focus and every
+  // POLL_MS while the page is visible (the server links new files within about a minute)
+  useEffect(() => {
+    let live = true;
+    let busy = false;
+    const quiet = () => {
+      if (busy || document.visibilityState !== 'visible') return;
+      busy = true;
+      void loadCalendar(week, 7).then(r => { busy = false; if (live && r.ok) setData(prev => keepIfSame(prev, key, r.data)); });
+    };
+    const onVis = () => { if (document.visibilityState === 'visible') quiet(); };
+    const id = window.setInterval(quiet, POLL_MS);
+    window.addEventListener('focus', quiet);
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      live = false; window.clearInterval(id);
+      window.removeEventListener('focus', quiet); document.removeEventListener('visibilitychange', onVis);
+    };
   }, [week, key]);
   const loading = data?.key !== key && failed !== key;
   const end = addDays(week, 7);
@@ -86,6 +107,12 @@ export function TodayButton({ today, week, onWeek }: { today: Day; week: Day; on
   return <button type="button" data-testid="tv-cal-today" className="lp-focus tvc-glass" onClick={() => onWeek(weekStart(today))} style={pill}>Today</button>;
 }
 
+/** A quiet re-ask changes nothing on screen unless an episode changed (no idle re-render). */
+export function keepIfSame<T extends { key: string; cal: CalendarData }>(prev: T | null, key: string, cal: CalendarData): T | { key: string; cal: CalendarData } {
+  if (prev && prev.key === key && JSON.stringify(prev.cal.episodes) === JSON.stringify(cal.episodes)) return prev;
+  return { key, cal };
+}
+
 /** ‹ › (and Today) on the left, the week range centered. */
 export function WeekControls({ today, week, onWeek }: { today: Day; week: Day; onWeek: (start: Day) => void }) {
   return (
@@ -122,7 +149,7 @@ export function WeekGrid({ eps, week, today }: { eps: CalEpisode[]; week: Day; t
   return (
     <div data-testid="tv-cal-grid" style={gridWrap}>
       {days.map(d => {
-        const list = eps.filter(e => e.air_date === d);
+        const list = sortDay(eps.filter(e => e.air_date === d));
         const isToday = d === today;
         return (
           <section key={d} data-testid="tv-grid-day" data-day={d} style={gridCol}>
@@ -143,11 +170,24 @@ const dayHeader = (d: Day) => {
   return `${DOW[new Date(y, m - 1, dd).getDay()]} ${m}/${dd}`;
 };
 
+/** Click or Enter/Space: the show's detail, at that season and episode (no-op without a TMDB id or a modal host). */
+function useOpenEpisode(e: CalEpisode) {
+  const host = useContext(ModalHostContext);
+  if (!host || !e.tmdb_id) return {};
+  const open = () => host.openTv({ tmdbId: e.tmdb_id as number, origin: 'tv_calendar',
+    episodeContext: { seasonNumber: e.season, episodeNumber: e.episode } });
+  return {
+    role: 'button' as const, tabIndex: 0, 'data-clickable': 'true', className: 'lp-focus', onClick: open,
+    onKeyDown: (k: React.KeyboardEvent) => { if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); open(); } },
+  };
+}
+
 function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
   const st = episodeState(e, today);
+  const open = useOpenEpisode(e);
   return (
-    <div data-testid="tv-agenda-row" data-state={st} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`}
-      style={{ position: 'relative', paddingLeft: EDGE_W, borderRadius: 8, background: 'rgba(255,255,255,0.06)',
+    <div data-testid="tv-agenda-row" data-state={st} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
+      style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', paddingLeft: EDGE_W, borderRadius: 8, background: 'rgba(255,255,255,0.06)',
         border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
       <Stripe color={STATE_COLOR[st]} w={EDGE_W} />
       <Still e={e} />
@@ -201,9 +241,10 @@ export function Agenda({ eps, today }: { eps: CalEpisode[]; today: Day }) {
 
 function AgendaRow({ e, today, first }: { e: CalEpisode; today: Day; first: boolean }) {
   const st = episodeState(e, today);
+  const open = useOpenEpisode(e);
   return (
-    <div data-testid="tv-agenda-row" data-state={st} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`}
-      style={{ position: 'relative', display: 'flex', alignItems: 'center', height: 72, padding: '0 16px 0 15px', gap: 12, boxSizing: 'border-box',
+    <div data-testid="tv-agenda-row" data-state={st} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
+      style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', display: 'flex', alignItems: 'center', height: 72, padding: '0 16px 0 15px', gap: 12, boxSizing: 'border-box',
         borderTop: first ? 'none' : '1px solid rgba(255,255,255,0.06)' }}>
       <Stripe color={STATE_COLOR[st]} />
       <Poster path={e.poster_path} w={32} h={48} tmdbLogo />

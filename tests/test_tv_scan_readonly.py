@@ -197,3 +197,11 @@ def test_scan_reads_no_file_contents(lib, monkeypatch):
     tv_scan.scan_all(now=1000.0)
     assert not [p for p in opened if p.startswith(str(lib))]
     assert stat.S_ISDIR(os.stat(lib).st_mode)
+
+
+@pytest.fixture(autouse=True)
+def _review_rows_stay(monkeypatch):
+    """These tests drive the review flows (or count review rows): keep the pre-v157 rule so the small tree
+    still has same-name rows in review. v157's auto-import is covered in test_tv_scan and the 687 fixture."""
+    from app import tv_scan as _ts
+    monkeypatch.setattr(_ts, 'AUTO_IMPORT', False)

@@ -196,6 +196,9 @@ def trigger_manual_run() -> None:
 
 
 def start_latest_auto_grab_thread() -> None:
+    from app import instance as _instance
+    if not _instance.writes_allowed('latest_auto_grab'):   # LUMA_INSTANCE=test: off unless opted in
+        return None
     t = threading.Thread(target=_update_loop, daemon=True, name='latest-auto-grab')
     t.start()
     logger.info('Latest auto-grab automation started')

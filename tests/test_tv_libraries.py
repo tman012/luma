@@ -366,3 +366,11 @@ def test_a_removed_library_added_back_keeps_its_shows(owner, fake_tmdb, tv_env, 
     view = tv_scan.library_view()
     assert len(view['shows']) == len(before)
     assert not [u for u in view['unmatched'] if u['reason'] == 'duplicate']
+
+
+@pytest.fixture(autouse=True)
+def _review_rows_stay(monkeypatch):
+    """These tests drive the review flows (or count review rows): keep the pre-v157 rule so the small tree
+    still has same-name rows in review. v157's auto-import is covered in test_tv_scan and the 687 fixture."""
+    from app import tv_scan as _ts
+    monkeypatch.setattr(_ts, 'AUTO_IMPORT', False)

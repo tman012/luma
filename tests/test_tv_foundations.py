@@ -579,3 +579,59 @@ def test_a_failed_boot_migration_is_logged_and_retried_lazily(db, monkeypatch, c
     assert 'will retry on first use' in caplog.text
     monkeypatch.setattr(tv_store, '_migrate', real)
     assert tv_store.schema_version() == tv_store.SCHEMA_VERSION   # the lazy path migrates it
+
+
+# ------------------------------------------------ verified atomic backup (Tester/Reviewer, v157)
+
+def test_a_full_disk_during_the_backup_never_migrates_and_leaves_no_partial_file(db, monkeypatch, caplog):
+    import errno
+    _v1_file(db)
+
+    def full(conn, out):
+        out.execute('CREATE TABLE half (x)')                     # some bytes went out, then the disk filled up
+        out.commit()
+        raise OSError(errno.ENOSPC, 'No space left on device')
+    monkeypatch.setattr(tv_store, '_copy', full)
+    with caplog.at_level('ERROR', logger='app.tv_store'):
+        assert tv_store.migrate_on_start() is False             # boot goes on
+    assert 'no verified backup' in caplog.text
+    left = sorted(f.name for f in db.parent.iterdir())
+    assert not any('.bak-' in f for f in left), left             # no backup, no temp, no -journal
+    c = sqlite3.connect(str(db))
+    assert c.execute('PRAGMA user_version').fetchone()[0] == 1  # still the old schema
+    c.close()
+    monkeypatch.undo()
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION  # space back: the next open backs up, then migrates
+    assert (db.parent / 'tv.db.bak-v1').exists()
+
+
+def test_a_bad_existing_backup_is_made_again_and_a_good_one_kept(db):
+    _v1_file(db)
+    bak = db.parent / 'tv.db.bak-v1'
+    bak.write_bytes(b'')                                         # empty: not a backup
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION
+    c = sqlite3.connect(str(bak))
+    assert c.execute('PRAGMA user_version').fetchone()[0] == 1 and c.execute('PRAGMA quick_check').fetchone()[0] == 'ok'
+    c.close()
+    assert stat.S_IMODE(os.stat(bak).st_mode) == 0o600
+    assert not [f for f in db.parent.iterdir() if '.tmp' in f.name]
+
+
+@pytest.mark.parametrize('bad', ['garbage', 'wrong_version'])
+def test_backup_check_rejects_garbage_and_the_wrong_version(tmp_path, bad):
+    p = tmp_path / 'x.db'
+    if bad == 'garbage':
+        p.write_bytes(b'not sqlite' * 100)
+    else:
+        c = sqlite3.connect(str(p)); c.execute('CREATE TABLE t (x)'); c.execute('PRAGMA user_version = 3'); c.commit(); c.close()
+    assert tv_store._verified(str(p), 1) is False
+
+
+def test_a_good_backup_is_kept_not_overwritten(db):
+    _v1_file(db)
+    bak = db.parent / 'tv.db.bak-v1'
+    c = sqlite3.connect(str(bak)); c.execute('CREATE TABLE marker (x)'); c.execute('PRAGMA user_version = 1'); c.commit(); c.close()
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION
+    c = sqlite3.connect(str(bak))
+    assert c.execute("SELECT 1 FROM sqlite_master WHERE name = 'marker'").fetchone()   # the older copy stays
+    c.close()

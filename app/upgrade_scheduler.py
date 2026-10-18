@@ -125,6 +125,9 @@ def trigger_manual_run() -> None:
 
 
 def start_upgrade_scheduler_thread() -> None:
+    from app import instance as _instance
+    if not _instance.writes_allowed('upgrade_scheduler'):   # LUMA_INSTANCE=test: off unless opted in
+        return None
     t = threading.Thread(target=_scheduler_loop, daemon=True, name='upgrade-scheduler')
     t.start()
     logger.info('Daily upgrade scheduler started')

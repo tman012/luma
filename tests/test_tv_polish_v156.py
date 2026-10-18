@@ -30,8 +30,18 @@ def test_tester_punctuation_cases_sort_by_words():
 
 
 class _Resp:
-    def __init__(self, status=200, ctype='image/jpeg', body=b'\xff\xd8img'):
+    def __init__(self, status=200, ctype='image/jpeg', body=b'\xff\xd8img', length=None):
         self.status_code, self.headers, self.content = status, {'Content-Type': ctype}, body
+        if length is not None:
+            self.headers['Content-Length'] = str(length)
+        self.closed = False
+
+    def iter_content(self, chunk_size=65536):
+        for i in range(0, len(self.content), chunk_size):
+            yield self.content[i:i + chunk_size]
+
+    def close(self):
+        self.closed = True
 
 
 class _Sess:

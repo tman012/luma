@@ -661,6 +661,9 @@ def get_log() -> List[Dict[str, Any]]:
 # ── Scheduler ─────────────────────────────────────────────────────────────
 
 def start_downloads_guard_thread() -> None:
+    from app import instance as _instance
+    if not _instance.writes_allowed('downloads_guard'):   # LUMA_INSTANCE=test: off unless opted in
+        return None
     _hydrate_status()
     t = threading.Thread(target=_scheduler_loop, daemon=True,
                          name='downloads-guard')

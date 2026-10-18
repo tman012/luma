@@ -854,6 +854,9 @@ def _guarded(dry_run: bool, scheduled: bool = False) -> None:
 # ── Scheduler ─────────────────────────────────────────────────────────────
 
 def start_franchise_completer_thread() -> None:
+    from app import instance as _instance
+    if not _instance.writes_allowed('franchise_completer'):   # LUMA_INSTANCE=test: off unless opted in
+        return None
     _hydrate_status()
     t = threading.Thread(target=_scheduler_loop, daemon=True,
                          name='franchise-completer')

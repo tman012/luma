@@ -1,3 +1,4 @@
+import pytest
 """Tester tv1-8646479 M1/M2: two folders with the same show. The candidate shown
 is the show's real TMDB title; the better folder keeps the show (exact title and
 year, then most linked files, then naming); Match / Wrong show? never dead-end."""
@@ -98,3 +99,11 @@ def test_rank():
     assert r('Severance', show, 3) > r('Severance', show, 2)
     assert r('Severance', show, 2) > r('Severance [tvdb-371980]', show, 2)
     assert r('Severance (2019)', show, 5)[0] == 0                                    # wrong year: no quality
+
+
+@pytest.fixture(autouse=True)
+def _review_rows_stay(monkeypatch):
+    """These tests drive the review flows (or count review rows): keep the pre-v157 rule so the small tree
+    still has same-name rows in review. v157's auto-import is covered in test_tv_scan and the 687 fixture."""
+    from app import tv_scan as _ts
+    monkeypatch.setattr(_ts, 'AUTO_IMPORT', False)

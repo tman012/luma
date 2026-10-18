@@ -789,6 +789,8 @@ def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root:
     library folder *dfd* (path *folder*) as *name*. Never overwrites, never
     moves, never follows a symlink on either side, and reads only the file
     the scan saw (*expect*)."""
+    if mode not in ('hardlink', 'copy'):   # never a move (LUMA_INSTANCE=test asserts it; prod has no other mode)
+        raise Refused('transfer must be copy or hardlink')
     if _lexists_at(dfd, name):
         return 'exists'
     sfd, st = _open_source(src, root, expect)

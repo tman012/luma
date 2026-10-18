@@ -626,10 +626,28 @@ def _hints(root_real: str, folder: str) -> tv_match.Hints:
     return tv_match.file_hints(rel for rel, _ in video_files(os.path.join(root_real, folder), root_real))
 
 
+# Taylor via PM (v157): Luma imports its top TMDB candidate for every folder with any result; only
+# no-result folders and duplicates (the show is another folder's) stay in review.
+AUTO_IMPORT = True
+AUTO_REASONS = ('not_exact',)          # 'unclear' (a true tie, or a partial title the files don't back) stays in review
+
+
+def auto_pick(m: Dict[str, Any]) -> Dict[str, Any]:
+    """An unmatched result with a top candidate becomes an import of it (tier 'auto')."""
+    if not AUTO_IMPORT or m.get('status') != 'unmatched' or m.get('reason') not in AUTO_REASONS:
+        return m
+    pick = m.get('pick')                      # Luma's ranked pick (prepick / brand), never TMDB's raw first
+    if not pick:
+        return m
+    details = m.get('details') if m.get('pick') == pick else None
+    return {**m, 'status': 'matched', 'tmdb_id': pick, 'pick': pick, 'details': details, 'tier': 'auto',
+            'via': 'auto', 'auto_reason': m.get('reason')}
+
+
 def _tick(tier: Optional[str]) -> None:
     with _progress_lock:
         _progress['done'] += 1
-        key = {'id': 'matched', 'high': 'matched', 'known': 'matched', 'likely': 'review',
+        key = {'id': 'matched', 'high': 'matched', 'known': 'matched', 'auto': 'matched', 'likely': 'review',
                'duplicate': 'review'}.get(tier or '', 'none')
         _progress[key] += 1
 
@@ -648,7 +666,7 @@ def _work(job: Tuple[str, str, Optional[Dict[str, Any]]], root_real: str) -> Dic
     try:
         if kind == 'match':
             hints = _hints(root_real, folder)
-            m = tv_match.match(folder, hints)
+            m = auto_pick(tv_match.match(folder, hints))
             data = None
             if m['status'] == 'matched':
                 data = fetch_show(m['tmdb_id'], m.get('details'), hints)
@@ -757,11 +775,17 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
             continue
         if cur is None:
             m = res['m']
-            sid = None
+            sid, dup = None, False
             if m['status'] == 'matched':
                 with tv_store.connect() as conn:
                     owner = conn.execute('SELECT * FROM series WHERE tmdb_id = ?', (m['tmdb_id'],)).fetchone()
-                if owner is not None:
+                if owner is not None and m.get('tier') == 'auto':
+                    # a guess never takes a show from the folder that has it: a duplicate, in review
+                    _store_unmatched(pid, folder, {'guess': m['guess'], 'candidates': [_show_brief(owner)]},
+                                     now, reason='duplicate')
+                    owner = None
+                    dup = True
+                elif owner is not None:
                     sid = _resolve_duplicate(owner, pid, folder, root_real, now, via=m['via'])
                     if sid is not None and owner['path_id'] == pid:
                         demoted.add(owner['folder'])
@@ -771,7 +795,7 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
                             out['unmatched'] += 1
                 elif res.get('data'):
                     sid = store_show(pid, folder, m['tmdb_id'], now, via=m['via'], data=res['data'], tier=m['tier'])
-                if sid is None and owner is None:     # TMDB lost the show between the two reads
+                if sid is None and owner is None and not dup:     # TMDB lost the show between the two reads
                     _store_unmatched(pid, folder, dict(m, candidates=[], tier='none'), now, reason='not_exact')
             else:
                 _store_unmatched(pid, folder, m, now)
@@ -939,6 +963,12 @@ def refresh_on_open(first: Optional[set] = None, start: Optional[dt.date] = None
     if _refresh_lock.acquire(blocking=False):
         def work():
             try:
+                try:
+                    from app import tv_plex, tv_watch  # files that landed since the last poll, and Plex, first
+                    tv_watch.poll_soon()
+                    tv_plex.rebuild()
+                except Exception:                  # noqa: BLE001
+                    logger.exception('TV link on open failed')
                 if first:
                     _refresh_pass(first, first, repair)       # this week first, before the rest
                 _refresh_pass(None, first, repair - first)    # the rest (this week's are fresh now)
@@ -1176,6 +1206,10 @@ def import_all(items: List[Tuple[int, int]], now: Optional[float] = None) -> Dic
     the owner's picks (via manual). Shows are fetched on the workers, then
     stored one by one. A show picked twice goes to the first row only.
     {'ok': True, 'imported': [ids], 'failed': [{id, error}]}."""
+    return _import_rows(items, now, via='manual')
+
+
+def _import_rows(items: List[Tuple[int, int]], now: Optional[float], via: str) -> Dict[str, Any]:
     now = time.time() if now is None else now
     with tv_store.connect() as conn:
         rows = {r['id']: dict(r) for r in conn.execute('SELECT id, path_id, folder FROM unmatched')}
@@ -1207,13 +1241,51 @@ def import_all(items: List[Tuple[int, int]], now: Optional[float] = None) -> Dic
         if not res.get('data'):
             failed.append({'id': row['id'], 'error': SHOW_NOT_FOUND})
             continue
-        out = _apply(row['path_id'], row['folder'], tid, now, via='manual', event='matched', series_id=None,
+        out = _apply(row['path_id'], row['folder'], tid, now, via=via, event='matched', series_id=None,
                      data=res['data'])
         if out['ok']:
             imported.append(row['id'])
         else:
             failed.append({'id': row['id'], 'error': out['error']})
     return {'ok': True, 'imported': imported, 'failed': failed}
+
+
+@_locked
+def auto_import_pending(now: Optional[float] = None) -> Dict[str, Any]:
+    """Boot (v157): review rows left by the old rule that carry Luma's ranked pick import it now, as a
+    scan would (via auto); no rescan. Duplicates, no-result and 'unclear' rows (no pick) stay; shows
+    already imported are never touched. tv.db only. {'ok', 'imported', 'failed', 'kept'}."""
+    if not AUTO_IMPORT:
+        return {'ok': True, 'imported': [], 'failed': [], 'kept': 0}
+    with tv_store.connect() as conn:
+        rows = [dict(r) for r in conn.execute('SELECT id, reason, tier, pick FROM unmatched ORDER BY id')]
+    items = [(r['id'], int(r['pick'])) for r in rows
+             if r['pick'] and r['tier'] == 'likely' and r['reason'] in AUTO_REASONS]
+    if not items:
+        return {'ok': True, 'imported': [], 'failed': [], 'kept': len(rows)}
+    with tv_tmdb.background():
+        out = _import_rows(items, now, via='auto')
+    out['kept'] = len(rows) - len(out['imported'])
+    out['duplicates'] = [f['id'] for f in out['failed'] if f['error'] == TAKEN]      # now duplicates, in review
+    out['failed'] = [f for f in out['failed'] if f['error'] != TAKEN]
+    logger.info('TV import: %d pending row(s) imported at boot, %d kept in review, %d failed',
+                len(out['imported']), out['kept'], len(out['failed']))
+    return out
+
+
+def auto_import_on_start() -> bool:
+    """A background thread at boot (after the migration); never fails boot."""
+    import os as _os
+    if _os.environ.get('LUMA_SKIP_BACKGROUND_THREADS'):
+        return False
+
+    def run():
+        try:
+            auto_import_pending()
+        except Exception:                    # noqa: BLE001
+            logger.exception('TV import: boot re-run of pending rows failed')
+    _Thread(target=run, daemon=True, name='tv-auto-import').start()
+    return True
 
 
 def _owned_elsewhere(row: Dict[str, Any], tid: int, now: float) -> bool:

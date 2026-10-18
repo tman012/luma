@@ -135,6 +135,9 @@ def trigger_manual_run() -> None:
 
 def start_trending_watchlist_thread() -> None:
     """Start the daemon loop thread."""
+    from app import instance as _instance
+    if not _instance.writes_allowed('trending_watchlist'):   # LUMA_INSTANCE=test: off unless opted in
+        return None
     t = threading.Thread(target=_update_loop, daemon=True, name='trending-watchlist')
     t.start()
     logger.info('Trending watchlist automation started')

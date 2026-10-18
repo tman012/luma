@@ -137,6 +137,9 @@ def trigger_manual_run() -> None:
 
 def start_now_available_watchlist_thread() -> None:
     """Start the daemon loop thread."""
+    from app import instance as _instance
+    if not _instance.writes_allowed('now_available_watchlist'):   # LUMA_INSTANCE=test: off unless opted in
+        return None
     t = threading.Thread(target=_update_loop, daemon=True, name='now-available-watchlist')
     t.start()
     logger.info('Now available watchlist automation started')

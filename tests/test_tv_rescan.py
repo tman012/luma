@@ -142,3 +142,11 @@ def test_a_manual_scan_ignores_the_backoff(lib, fake_tmdb, fresh_backoff):  # no
     fake_tmdb.fail = None
     assert tv_scan.run(now=2e7 + 300) is True                           # the Scan button
     assert tv_scan.status()['error'] is None and tv_scan.tick(2e7 + 600) is False   # scanned: not due
+
+
+@pytest.fixture(autouse=True)
+def _review_rows_stay(monkeypatch):
+    """These tests drive the review flows (or count review rows): keep the pre-v157 rule so the small tree
+    still has same-name rows in review. v157's auto-import is covered in test_tv_scan and the 687 fixture."""
+    from app import tv_scan as _ts
+    monkeypatch.setattr(_ts, 'AUTO_IMPORT', False)

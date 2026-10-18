@@ -26,30 +26,29 @@ def test_687_folders(fresh):
     assert out['error'] is None
     ev = A.evaluate()
     assert ev['folders'] == 687
-    # zero wrong auto-picks, every pick checked as the matcher made it (before duplicate resolution can
-    # hide one: The Staircase), and no accept-list folder auto-picked at all
-    assert ev['wrong'] == [] and ev['ambiguous_auto'] == []
-    # Luma decides (Taylor, Oct 18): every guess is pre-checked except a true tie; unchecked are only no TMDB
-    # result (4), another folder has the show (4) and two ties. Pre-checked guesses can be wrong (reported).
+    # v157 (Taylor via PM): Luma imports its ranked pick for every folder with a TMDB result. Review keeps only
+    # no TMDB result (4), duplicates (another folder has the show: 6) and 'unclear' (a true tie, or a partial
+    # title the files don't back: 3). Accept-list folders may now auto-pick; they're reported, not failed.
     from collections import Counter
-    assert Counter(why for _, why in ev['unchecked']) == {'none': 4, 'duplicate': 4, 'unclear': 3}, ev['unchecked']
-    assert ev['review_picks'] == {'The Office': 2996, 'The Staircase': 21421, 'WWE Raw': 4656}   # Tester on 0a022bf
-    assert ev['prechecked_wrong'] == []     # PM: no WWE row pre-checked with a wrong guess
-    # PM: at least 96.5% of decidable folders import automatically (measured 96.69%, 642 of 664; raw 93.74%).
-    # Popularity never decides: a same-name rival auto-picks only when the files fit it (3+ episodes) and rule
-    # out every rival (a season it lacks, a later first air, or 25 points less coverage: Tester's rule).
-    assert ev['decidable_pct'] >= 96.5, ev['decidable_pct']
-    assert ev['auto_pct'] >= 93.5, ev['auto_pct']
+    assert ev['wrong'] == [], ev['wrong']
+    print('\nambiguous auto-picks (reported):', ev['ambiguous_auto'])
+    assert all(tid for _, tid in ev['ambiguous_auto'])
+    assert Counter(why for _, why in ev['unchecked']) == {'none': 4, 'duplicate': 6, 'unclear': 3}, ev['unchecked']
+    assert ev['tiers'] == {'high': 642, 'auto': 32, 'likely': 3, 'duplicate': 6, 'none': 4}, ev['tiers']
+    assert ev['prechecked_wrong'] == []
+    assert ev['decidable_pct'] >= 99.0, ev['decidable_pct']
     assert ev['same_name']['Cheers'] == {'auto': 141, 'year': 1982}
     assert ev['same_name']['The Office (US)'] == {'auto': 2316, 'year': 2005}
-    assert ev['same_name']['Love'] == {'review': 'likely', 'pick': 9000001}     # 2016, never #Love (2026)
-    assert ev['same_name']['Cheat (2019)']['review'] in ('likely', 'none')
+    assert ev['same_name']['Love'] == {'auto': 9000001, 'year': 2016}            # 2016, never The Love Boat or #Love
+    assert ev['same_name']['Cheat (2019)'] == {'auto': 87356, 'year': 2019}
+    with tv_scan.tv_store.connect() as conn:                                      # WWE Raw -> Raw, never Raw Classics
+        assert conn.execute("SELECT tmdb_id FROM series WHERE folder = 'WWE Raw'").fetchone()['tmdb_id'] == 4656
     for name, left in ev['leftovers'].items():
         assert left['pct'] < 1.0, name
         assert left['group'], name                                    # numbered by the TVDB-order group
     assert sum(ev['tiers'].values()) == 687
     p = tv_scan.progress()
-    assert (p['done'], p['total']) == (687, 687) and p['matched'] == ev['auto']
+    assert (p['done'], p['total']) == (687, 687) and p['matched'] == ev['tiers']['high'] + ev['tiers']['auto']
 
 
 def test_rescan_is_cheap_and_stable(fresh):
@@ -79,3 +78,26 @@ def test_rate_cap_holds_with_eight_workers(fresh):
     assert out['error'] is None and out['throttled_429'] == 0
     assert out['tmdb_calls'] / took <= tv_tmdb.RATE_PER_S + tv_tmdb.BURST
     assert tv_scan.WORKERS == 8
+
+
+def test_687_old_review_rows_import_at_boot(fresh, monkeypatch):
+    """Taylor's rows left in review by the old rule: the boot re-run imports the ones with a ranked pick."""
+    root = fresh / 'TV'
+    A.build_tree(str(root))
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', False)
+    A.run(str(root))
+    old = A.evaluate()
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', True)
+    from unittest import mock
+    m = M.MockTmdb()
+    with mock.patch.dict(tv_tmdb._cfg, {'get_key': lambda: 'k', 'session_factory': m.session, 'cache': True}), \
+            mock.patch.object(tv_tmdb, 'tmdb_base_url', lambda: 'https://mock.tmdb/3'), \
+            mock.patch.object(tv_tmdb, 'RATE_PER_S', 0.0):
+        out = tv_scan.auto_import_pending()
+    ev = A.evaluate()
+    print('\nboot re-run:', len(out['imported']), 'imported,', out['kept'], 'kept,', len(out['duplicates']), 'now duplicates;', 'tiers before', dict(old['tiers']),
+          'after', dict(ev['tiers']))
+    assert ev['wrong'] == [] and out['failed'] == []
+    assert ev['same_name']['Love'] == {'auto': 9000001, 'year': 2016}
+    from collections import Counter
+    assert set(Counter(why for _, why in ev['unchecked'])) <= {'none', 'duplicate', 'unclear'}

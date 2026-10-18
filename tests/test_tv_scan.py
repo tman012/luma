@@ -35,6 +35,13 @@ def lib(tv_env, fake_tmdb, tmp_path):  # noqa: F811
     return root
 
 
+@pytest.fixture
+def review_rule(monkeypatch):
+    """The review flows (rows, picks, Import all) on the small tree: the pre-v157 rule leaves Mystery
+    Show in review. The v157 auto-import rule is covered in test_scan_matches_and_records and the 687."""
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', False)
+
+
 def rows(sql, *a):
     with tv_store.connect() as conn:
         return [dict(r) for r in conn.execute(sql, a)]
@@ -42,17 +49,19 @@ def rows(sql, *a):
 
 def test_scan_matches_and_records(lib):
     out = tv_scan.scan_all(now=1000.0)
-    assert out['paths'] == 1 and out['shows'] == 5 and out['unmatched'] == 3
+    # v157: a folder with any TMDB result imports Luma's ranked pick (Mystery Show: TMDB's order breaks the
+    # same-name tie); only no-result folders (and duplicates) stay in review
+    assert out['paths'] == 1 and out['shows'] == 6 and out['unmatched'] == 2
     shows = {r['folder']: r for r in rows('SELECT * FROM series')}
     assert {f: s['tmdb_id'] for f, s in shows.items()} == {
         'Severance (2022)': 95396, 'The Office (US) {tvdb-73244}': 2316, 'Dark [tmdbid-70523]': 70523,
-        'Taskmaster [imdbid-tt4934214]': 63770, 'The Daily Show': 4000}
+        'Taskmaster [imdbid-tt4934214]': 63770, 'The Daily Show': 4000, 'Mystery Show': 1001}
+    assert shows['Mystery Show']['match_tier'] == 'auto'
     assert 'Escaped (2010)' not in shows and '.hidden' not in shows and 'readme.txt' not in shows
     assert all(s['monitored'] == 0 and s['monitor_new_seasons'] == 0 for s in shows.values())
     assert shows['Severance (2022)']['tvdb_id'] == 371980 and shows['Severance (2022)']['imdb_id'] == 'tt11280740'
     un = {r['folder']: r for r in rows('SELECT * FROM unmatched')}
-    assert set(un) == {'Mystery Show', 'Zzz Nothing', 'Empty Show (2020)'}
-    assert sorted(c['tmdb_id'] for c in json.loads(un['Mystery Show']['candidates'])) == [1001, 1002]
+    assert set(un) == {'Zzz Nothing', 'Empty Show (2020)'}
     assert un['Zzz Nothing']['reason'] == 'no_results'
     assert tv_scan.last_scan() == 1000.0
 
@@ -87,7 +96,7 @@ def test_history_records_matches(lib):
     tv_scan.scan_all(now=1000.0)
     h = rows("SELECT event, detail FROM history WHERE event = 'matched'")
     vias = sorted(json.loads(r['detail'])['via'] for r in h)
-    assert vias == ['imdb', 'search', 'search', 'tmdb', 'tvdb']
+    assert vias == ['auto', 'imdb', 'search', 'search', 'tmdb', 'tvdb']
 
 
 def test_rescan_is_stable_and_drops_gone_rows_only(lib):
@@ -113,7 +122,7 @@ def test_missing_library_path_keeps_its_rows(lib):
     assert out['missing'] == [PID] and len(rows('SELECT id FROM series')) == before
 
 
-def test_scheduled_style_scan_keeps_unmatched_without_asking_tmdb(lib, fake_tmdb):  # noqa: F811
+def test_scheduled_style_scan_keeps_unmatched_without_asking_tmdb(review_rule, lib, fake_tmdb):  # noqa: F811
     tv_scan.scan_all(now=1000.0)
     fake_tmdb.calls.clear()
     tv_scan.scan_all(now=2000.0, retry_unmatched=False)
@@ -154,7 +163,7 @@ def owner(minimal_app, lib):
     return _client(minimal_app)
 
 
-def test_scan_route_and_library_view(owner, lib, monkeypatch):
+def test_scan_route_and_library_view(review_rule, owner, lib, monkeypatch):
     started = []
     monkeypatch.setattr(tv_scan.threading, 'Thread',
                         lambda target, kwargs, **k: type('T', (), {'start': lambda self: started.append(target(**kwargs))})())
@@ -184,3 +193,41 @@ def test_routes_owner_only(minimal_app, lib):
     for m, u in (('get', '/api/settings/tv/library'), ('post', '/api/settings/tv/scan')):
         assert getattr(other, m)(u, environ_base=REMOTE, headers=HDR).status_code == 403
         assert getattr(minimal_app.test_client(), m)(u, environ_base=REMOTE, headers=HDR).status_code == 401
+
+
+def test_auto_import_never_takes_a_show_another_folder_has(lib):
+    """v157: the second folder whose ranked pick is already owned stays in review as a duplicate."""
+    (lib / 'Mystery  Show').mkdir()
+    tv_scan.scan_all(now=1000.0)
+    owners = [r['folder'] for r in rows('SELECT folder FROM series WHERE tmdb_id = 1001')]
+    assert len(owners) == 1
+    dup = {r['folder']: r for r in rows('SELECT * FROM unmatched')}
+    other = ({'Mystery Show', 'Mystery  Show'} - set(owners)).pop()
+    assert dup[other]['reason'] == 'duplicate' and dup[other]['tier'] == 'duplicate'
+
+
+def test_auto_pick_is_lumas_ranked_pick_and_unclear_stays():
+    m = {'status': 'unmatched', 'reason': 'not_exact', 'pick': 7, 'candidates': [{'tmdb_id': 9}, {'tmdb_id': 7}],
+         'details': None, 'tier': 'likely'}
+    assert tv_scan.auto_pick(m)['tmdb_id'] == 7 and tv_scan.auto_pick(m)['tier'] == 'auto'   # never TMDB's first (9)
+    assert tv_scan.auto_pick({**m, 'reason': 'unclear'})['status'] == 'unmatched'
+    assert tv_scan.auto_pick({**m, 'pick': None})['status'] == 'unmatched'
+    assert tv_scan.auto_pick({**m, 'reason': 'no_results', 'pick': None})['status'] == 'unmatched'
+
+
+def test_boot_rerun_imports_old_pending_rows_and_touches_nothing_else(lib, monkeypatch, fake_tmdb):
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', False)                 # rows left by the old rule
+    tv_scan.scan_all(now=1000.0)
+    before = {r['id']: dict(r) for r in rows('SELECT * FROM series')}
+    assert 'Mystery Show' in {r['folder'] for r in rows('SELECT folder FROM unmatched')}
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', True)
+    fake_tmdb.calls.clear()
+    out = tv_scan.auto_import_pending(now=2000.0)
+    assert out['ok'] and len(out['imported']) == 1 and out['failed'] == [] and out['kept'] == 2
+    s = rows("SELECT tmdb_id, match_tier FROM series WHERE folder = 'Mystery Show'")[0]
+    assert s['tmdb_id'] == 1001
+    assert not [c for c in fake_tmdb.calls if c[0] == 'search']                    # no rescan, no new guesses
+    after = {r['id']: dict(r) for r in rows('SELECT * FROM series')}
+    assert all(after[i] == r for i, r in before.items())                          # imported shows untouched
+    assert {r['folder'] for r in rows('SELECT folder FROM unmatched')} == {'Zzz Nothing', 'Empty Show (2020)'}
+    assert tv_scan.auto_import_pending(now=3000.0)['imported'] == []              # idempotent

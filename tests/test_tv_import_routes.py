@@ -156,3 +156,11 @@ def test_shows_carry_series_grid_progress(scanned):
         aired = conn.execute("SELECT COUNT(*) AS n FROM episodes WHERE series_id = ? AND season_number > 0 AND air_date <= date('now')",
                              (sid,)).fetchone()['n']
     assert abs(shows['Severance']['aired'] - aired) <= 1          # aired, not specials (local vs UTC day)
+
+
+@pytest.fixture(autouse=True)
+def _review_rows_stay(monkeypatch):
+    """These tests drive the review flows (or count review rows): keep the pre-v157 rule so the small tree
+    still has same-name rows in review. v157's auto-import is covered in test_tv_scan and the 687 fixture."""
+    from app import tv_scan as _ts
+    monkeypatch.setattr(_ts, 'AUTO_IMPORT', False)

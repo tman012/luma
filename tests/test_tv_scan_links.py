@@ -1,3 +1,4 @@
+import pytest
 """Reviewer: symlinks never make the TV scan count a show folder or a file twice
 (a link to a sibling show folder, a loop back up, a hard link)."""
 import os
@@ -33,3 +34,11 @@ def test_loop_links_inside_a_show_count_each_file_once(lib):
     sid = rows('SELECT id FROM series WHERE tmdb_id = 95396')[0]['id']
     assert len(rows('SELECT id FROM episode_files WHERE series_id = ?', sid)) == 6
     assert snapshot(lib) == before
+
+
+@pytest.fixture(autouse=True)
+def _review_rows_stay(monkeypatch):
+    """These tests drive the review flows (or count review rows): keep the pre-v157 rule so the small tree
+    still has same-name rows in review. v157's auto-import is covered in test_tv_scan and the 687 fixture."""
+    from app import tv_scan as _ts
+    monkeypatch.setattr(_ts, 'AUTO_IMPORT', False)

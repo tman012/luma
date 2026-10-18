@@ -62,9 +62,10 @@ def test_week_by_air_date_with_downloaded_flags(scanned):
         ('2026-10-17', 'Severance', 2, 6, False),
     ]
     e = out['episodes'][0]
-    assert set(e) == {'episode_id', 'series_id', 'show', 'year', 'poster_path', 'season', 'episode', 'title',
+    assert set(e) == {'episode_id', 'series_id', 'tmdb_id', 'show', 'year', 'poster_path', 'season', 'episode', 'title',
                       'air_date', 'airstamp', 'runtime', 'tvdb_image', 'still_path', 'backdrop_path', 'downloaded'}
     assert e['poster_path'] == '/p95396.jpg' and e['title'] == 'Episode 1' and out['libraries'] == 1
+    assert isinstance(e['tmdb_id'], int)                    # the card opens this show's detail
 
 
 def test_range_is_half_open_and_capped(scanned):
@@ -298,7 +299,7 @@ def test_a_rematch_during_a_refresh_never_gets_the_old_shows_episodes(scanned, m
         data = real(tid, *a, **k)
         if tid == 95396 and not done:
             # the owner's "Wrong show?" lands while the TMDB answer is in flight (another thread, real lock)
-            t = threading.Thread(target=lambda: done.setdefault('r', tv_scan.rematch(sid, 1001, now=7000.0)))
+            t = threading.Thread(target=lambda: done.setdefault('r', tv_scan.rematch(sid, 1002, now=7000.0)))
             t.start(); t.join()
         return data
     monkeypatch.setattr(tv_scan, 'fetch_show', fetch)
@@ -306,9 +307,9 @@ def test_a_rematch_during_a_refresh_never_gets_the_old_shows_episodes(scanned, m
     assert done['r']['ok'], done
     r = rows('SELECT tmdb_id, tmdb_refreshed_at FROM series WHERE id = ?', sid)[0]
     nid = rows("SELECT id FROM series WHERE folder = 'Severance (2022)'")[0]['id']
-    assert rows('SELECT tmdb_id FROM series WHERE id = ?', nid)[0]['tmdb_id'] == 1001
+    assert rows('SELECT tmdb_id FROM series WHERE id = ?', nid)[0]['tmdb_id'] == 1002
     after = _ep_rows(nid)
-    # only Dark's numbering (S1 x10) remains; no Severance season 2 rows
+    # only the new show's numbering (S1 x3) remains (1002: Mystery Show 1001 is another folder's since v157); no Severance season 2 rows
     assert {s for s, _, _ in after} <= {1}, after
     assert len(after) == 3 and r['tmdb_refreshed_at'] != 1000000.0, after
 

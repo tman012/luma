@@ -1217,6 +1217,7 @@ class AutoRenamer:
                     logger.info(f"✅ Successfully copied: {os.path.basename(destination)}")
                     if torrent_hash:
                         self.clear_copy_progress(torrent_hash)
+                    _link_tv_file(destination)
                     return True
                 else:
                     logger.error(f"❌ Size mismatch after copy: {source_size} != {dest_size}")
@@ -1820,6 +1821,24 @@ auto_renamer = AutoRenamer()
 
 def start_monitor_thread():
     """Start the monitoring thread"""
+    from app import instance as _instance
+    if not _instance.writes_allowed('auto_rename'):   # LUMA_INSTANCE=test: off unless opted in
+        return None
     monitor_thread = threading.Thread(target=auto_renamer.monitor_loop, daemon=True)
     monitor_thread.start()
     logger.info("Auto-rename monitor thread started")
+
+
+def _link_tv_file(path: str) -> None:
+    """A file just landed: if it is in a TV library show's folder, link it in tv.db
+    now (background; read-only on files) so the Calendar shows it as downloaded."""
+    def run():
+        try:
+            from app import tv_watch
+            tv_watch.episode_imported(path)
+        except Exception:                     # noqa: BLE001 - the 60s poll catches it
+            logger.debug('TV link after copy skipped', exc_info=True)
+    try:
+        threading.Thread(target=run, daemon=True, name='tv-link-mover').start()
+    except RuntimeError:
+        pass

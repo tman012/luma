@@ -214,3 +214,11 @@ def test_trakt_failure_never_breaks_home(minimal, trakt_ok, monkeypatch):
     assert home['plex'] is True
     assert {r['id']: r['items'] for r in home['rails']}['trakt_movies'] == []
     assert {r['id']: len(r['items']) for r in home['rails']}['1'] == 1
+
+
+@pytest.fixture(autouse=True)
+def _key_tests_via_requests_get(monkeypatch):
+    """These tests fake requests.get; the key test's own session (no proxy env, no redirects) is covered in
+    tests/test_tv_v157b_net.py."""
+    from app import connectors as _c
+    monkeypatch.setattr(_c, '_test_get', lambda url, **kw: _c.requests.get(url, timeout=8, allow_redirects=False, **kw))

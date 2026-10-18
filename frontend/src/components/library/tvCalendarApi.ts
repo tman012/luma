@@ -7,7 +7,7 @@ import { SAVE_FAILED, UNREACHABLE } from './libraryPathsApi';
 import { TV_URL } from './tvLibraryApi';
 
 export interface CalEpisode {
-  episode_id: number; series_id: number; show: string; year: number | null; poster_path: string | null;
+  episode_id: number; series_id: number; tmdb_id?: number | null; show: string; year: number | null; poster_path: string | null;
   season: number; episode: number; title: string; air_date: string; downloaded: boolean;
   /** "9:00 PM" when known (TMDB has none today). */
   air_time?: string | null;
@@ -119,10 +119,31 @@ export const STATE_COLOR: Record<EpisodeState, string> = {
 /** "S02E05". */
 export const code = (s: number, e: number) => `S${pad2(s)}E${pad2(e)}`;
 
-/** Episodes by day (only days that have one), in day order. */
-export function byDay<E extends { air_date: string }>(eps: E[]): [Day, E[]][] {
+type Sortable = { air_date: string; airstamp?: string | null; show: string; season: number; episode: number };
+/** The instant an episode airs (ms), from its UTC airstamp; null when untimed. Compared as instants, so an
+ * 11:30 PM ET show (airstamp 03:30Z the next UTC day) sorts after an 8 PM one, as it does on the viewer's clock. */
+export const airMs = (e: { airstamp?: string | null }): number | null => {
+  if (!e.airstamp) return null;
+  const t = new Date(e.airstamp).getTime();
+  return Number.isNaN(t) ? null : t;
+};
+const nameKey = (s: string) => s.toLowerCase().replace(/^(the|a|an)\s+/, '').replace(/[^a-z0-9 ]+/g, '');
+/** Within a day: by air time, then name, season, episode; untimed episodes last. */
+export function byAirTime(a: Sortable, b: Sortable): number {
+  const ta = airMs(a); const tb = airMs(b);
+  if (ta != null && tb != null && ta !== tb) return ta - tb;
+  if ((ta == null) !== (tb == null)) return ta == null ? 1 : -1;
+  const na = nameKey(a.show); const nb = nameKey(b.show);
+  if (na !== nb) return na < nb ? -1 : 1;
+  return (a.season - b.season) || (a.episode - b.episode);
+}
+/** One day's episodes in air-time order. */
+export const sortDay = <E extends Sortable>(list: E[]): E[] => [...list].sort(byAirTime);
+
+/** Episodes by day (only days that have one), in day order, each day in air-time order. */
+export function byDay<E extends Sortable>(eps: E[]): [Day, E[]][] {
   const m = new Map<Day, E[]>();
-  for (const e of [...eps].sort((a, b) => (a.air_date < b.air_date ? -1 : a.air_date > b.air_date ? 1 : 0))) {
+  for (const e of [...eps].sort((a, b) => (a.air_date < b.air_date ? -1 : a.air_date > b.air_date ? 1 : byAirTime(a, b)))) {
     const l = m.get(e.air_date); if (l) l.push(e); else m.set(e.air_date, [e]);
   }
   return [...m.entries()];

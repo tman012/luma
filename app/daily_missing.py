@@ -1053,6 +1053,9 @@ def verify_day_rotation() -> Dict[str, Any]:
 
 
 def start_daily_missing_thread() -> None:
+    from app import instance as _instance
+    if not _instance.writes_allowed('daily_missing'):   # LUMA_INSTANCE=test: off unless opted in
+        return None
     global _thread_started
     if _thread_started:
         return

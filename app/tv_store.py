@@ -25,7 +25,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from app import paths as _paths
 
@@ -253,25 +253,88 @@ def _open(p: Path) -> sqlite3.Connection:
     return conn
 
 
-def _backup(conn: sqlite3.Connection, p: Path, version: int) -> None:
-    """Before an upgrade: tv.db (its -wal checkpointed first) copied to tv.db.bak-v{version}, 0600.
-    An existing backup of that version is kept (it is the older copy)."""
-    dst = Path(f'{p}.bak-v{version}')
-    if dst.exists():
-        return
-    conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
-    fd = os.open(str(dst), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, 'O_CLOEXEC', 0), 0o600)
-    os.close(fd)
-    out = sqlite3.connect(str(dst))
+class BackupFailed(RuntimeError):
+    """No verified pre-upgrade copy: tv.db is not migrated (it stays at its old schema)."""
+
+
+def _copy(conn: sqlite3.Connection, out: sqlite3.Connection) -> None:
+    conn.backup(out)
+
+
+def _verified(path: str, version: int) -> bool:
+    """A usable backup: non-empty, passes quick_check, and is at *version*."""
     try:
-        conn.backup(out)
-    finally:
-        out.close()
-    for f in (str(dst) + '-wal', str(dst) + '-shm'):
-        if os.path.exists(f):
-            os.chmod(f, 0o600)
-    os.chmod(str(dst), 0o600)
-    logger.info('tv.db backed up before upgrading from version %d', version)
+        if os.path.getsize(path) <= 0:
+            return False
+        c = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+        try:
+            return (c.execute('PRAGMA quick_check').fetchone()[0] == 'ok'
+                    and c.execute('PRAGMA user_version').fetchone()[0] == version)
+        finally:
+            c.close()
+    except (OSError, sqlite3.DatabaseError):
+        return False
+
+
+def _remove(*paths: str) -> None:
+    for f in paths:
+        for g in (f, f + '-journal', f + '-wal', f + '-shm'):
+            try:
+                os.unlink(g)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                logger.warning('Could not remove %s', os.path.basename(g))
+
+
+def _backup(conn: sqlite3.Connection, p: Path, version: int) -> None:
+    """Before an upgrade: tv.db (its -wal checkpointed first) copied to a temp
+    file, checked (non-empty, quick_check, user_version == *version*), then
+    os.replace'd to tv.db.bak-v{version}, 0600. An existing backup that checks
+    out is kept (the older copy); a bad one is redone. Any failure (a full disk
+    included) removes the partial temp file and raises BackupFailed."""
+    dst = f'{p}.bak-v{version}'
+    if os.path.exists(dst):
+        if _verified(dst, version):
+            return
+        logger.warning('tv.db backup %s failed its check; making it again', os.path.basename(dst))
+        _remove(dst)
+    tmp = f'{dst}.tmp-{os.getpid()}'                    # per process: two workers never share one
+    _remove(tmp)
+    try:
+        conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, 'O_CLOEXEC', 0), 0o600)
+        os.close(fd)
+        out = sqlite3.connect(tmp)
+        try:
+            _copy(conn, out)
+            out.execute('PRAGMA journal_mode = DELETE')
+        finally:
+            out.close()
+        fd = os.open(tmp, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        if not _verified(tmp, version):
+            raise BackupFailed('the copy failed its check')
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, dst)
+        try:
+            dfd = os.open(os.path.dirname(dst) or '.', os.O_RDONLY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except OSError:
+            pass
+    except BackupFailed:
+        _remove(tmp)
+        raise
+    except (OSError, sqlite3.Error) as e:
+        _remove(tmp)
+        raise BackupFailed(f'{type(e).__name__}: {getattr(e, "strerror", None) or e}') from e
+    logger.info('tv.db backed up (verified) before upgrading from version %d', version)
 
 
 def _migrate(conn: sqlite3.Connection, p: Optional[Path] = None) -> None:
@@ -279,7 +342,12 @@ def _migrate(conn: sqlite3.Connection, p: Optional[Path] = None) -> None:
     if version > SCHEMA_VERSION:
         raise RuntimeError(f'tv.db is from a newer Luma (schema {version} > {SCHEMA_VERSION})')
     if p is not None and 0 < version < SCHEMA_VERSION:      # an upgrade, not a fresh create
-        _backup(conn, p, version)
+        try:
+            _backup(conn, p, version)
+        except BackupFailed as e:
+            # never migrate without a verified copy: stay at the old schema, keep serving, retry next open
+            logger.error('tv.db not upgraded from version %d: no verified backup (%s)', version, e)
+            raise
     while version < SCHEMA_VERSION:
         conn.execute('BEGIN IMMEDIATE')
         try:
@@ -344,6 +412,39 @@ def _prepare(p: Path) -> None:
             if conn is not None:
                 conn.close()
     _ready[str(p)] = True
+
+
+VACUUM_FREE_MIN = 32 * 1024 * 1024      # free pages worth giving back to the disk at boot
+
+
+def compact_on_start() -> Optional[Tuple[int, int]]:
+    """Boot, after the migration: when most of tv.db is free pages (an old, larger
+    TMDB cache), VACUUM once to give the space back. (before, after) bytes, or
+    None when not needed or it failed (logged; tv.db is unchanged then)."""
+    p = db_path()
+    try:
+        with connect() as conn:
+            size_page = conn.execute('PRAGMA page_size').fetchone()[0]
+            free = conn.execute('PRAGMA freelist_count').fetchone()[0] * size_page
+            total = conn.execute('PRAGMA page_count').fetchone()[0] * size_page
+        if free < VACUUM_FREE_MIN or free * 2 < total:
+            return None
+        before = os.path.getsize(p)
+        with _lock:
+            conn = _open(p)
+            try:
+                conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+                conn.execute('VACUUM')
+                conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+            finally:
+                conn.close()
+        after = os.path.getsize(p)
+        _private(p)
+        logger.info('tv.db compacted: %.1f MB -> %.1f MB', before / 1e6, after / 1e6)
+        return before, after
+    except Exception as e:                # noqa: BLE001 - a full disk or a busy file: it stays as it is
+        logger.warning('tv.db not compacted (%s)', type(e).__name__)
+        return None
 
 
 def migrate_on_start() -> bool:

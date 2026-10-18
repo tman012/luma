@@ -15,6 +15,12 @@ from tests.tv_fake import fake_tmdb  # noqa: F401
 from tests.tv_tree import snapshot
 
 
+@pytest.fixture(autouse=True)
+def review_rule(monkeypatch):
+    """These pin the review flow (manual match, repointing); v157's auto-import is tested in test_tv_scan."""
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', False)
+
+
 def _sid(folder):
     return rows('SELECT id FROM series WHERE folder = ?', folder)[0]['id']
 
