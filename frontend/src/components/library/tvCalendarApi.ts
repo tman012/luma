@@ -11,6 +11,25 @@ export interface CalEpisode {
   season: number; episode: number; title: string; air_date: string; downloaded: boolean;
   /** "9:00 PM" when known (TMDB has none today). */
   air_time?: string | null;
+  /** UTC air time (TVDB, else TVmaze) and minutes; null: the date only. */
+  airstamp?: string | null; runtime?: number | null;
+}
+
+/** '9:00 – 9:42 PM' (or '11:30 PM – 12:10 AM') in the viewer's zone (*timeZone* for tests); null without an airstamp. */
+export function timeRange(airstamp: string | null | undefined, runtime: number | null | undefined, timeZone?: string): string | null {
+  if (!airstamp) return null;
+  const start = new Date(airstamp);
+  if (Number.isNaN(start.getTime())) return null;
+  const fmt = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone });
+  const parts = (d: Date) => {
+    const p = fmt.formatToParts(d);
+    const get = (t: string) => p.find(x => x.type === t)?.value ?? '';
+    return { hm: `${get('hour')}:${get('minute')}`, ap: get('dayPeriod').toUpperCase() };
+  };
+  const a = parts(start);
+  if (!runtime || runtime <= 0) return `${a.hm} ${a.ap}`;
+  const b = parts(new Date(start.getTime() + runtime * 60000));
+  return a.ap === b.ap ? `${a.hm} \u2013 ${b.hm} ${b.ap}` : `${a.hm} ${a.ap} \u2013 ${b.hm} ${b.ap}`;
 }
 export interface CalendarData { start: string; days: number; episodes: CalEpisode[]; libraries: number; refreshed_at: number | null }
 export interface FindResult {

@@ -6,7 +6,7 @@ import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
 import { Poster } from './TvImport';
 import {
-  STATE_COLOR, STATE_WORD, addDays, agendaLabel, byDay, code, episodeState, loadCalendar, shortDate, weekLabel, weekStart,
+  STATE_COLOR, STATE_WORD, addDays, agendaLabel, byDay, code, episodeState, loadCalendar, shortDate, timeRange, weekLabel, weekStart,
   type CalEpisode, type CalendarData, type Day,
 } from './tvCalendarApi';
 
@@ -116,7 +116,7 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
       {e.title && <span style={{ ...one, fontSize: 12, color: W70 }}>{e.title}</span>}
       <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: W50 }}>
         {st === 'downloaded' && <Check />}
-        {e.air_time || shortDate(e.air_date)}
+        {timeRange(e.airstamp, e.runtime) || e.air_time || shortDate(e.air_date)}
       </span>
     </div>
   );

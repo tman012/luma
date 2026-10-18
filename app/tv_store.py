@@ -165,8 +165,17 @@ CREATE TABLE episode_numbering (
 CREATE TABLE tmdb_cache (key TEXT PRIMARY KEY, ts REAL NOT NULL, body TEXT NOT NULL);
 """
 
+# Air times (TVmaze, no key): an episode's UTC airstamp and runtime, and the
+# show's TVmaze id with when it was last asked.
+SCHEMA_V4 = """
+ALTER TABLE episodes ADD COLUMN airstamp TEXT;
+ALTER TABLE episodes ADD COLUMN air_runtime INTEGER;
+ALTER TABLE series ADD COLUMN tvmaze_id INTEGER;
+ALTER TABLE series ADD COLUMN tvmaze_checked_at REAL;
+"""
+
 # MIGRATIONS[n] takes user_version n to n + 1.
-MIGRATIONS: List[str] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3]
+MIGRATIONS: List[str] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 

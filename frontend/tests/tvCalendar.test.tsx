@@ -12,6 +12,7 @@ import { SEARCH_DEBOUNCE_MS } from '@/components/library/TvSearch';
 import { CAL_MAX_W } from '@/components/library/TvCalendar';
 import {
   addDays, agendaLabel, byDay, episodeState, isDay, localDay, seasonsText, shortDate, weekDays, weekLabel, weekStart, type CalEpisode,
+  timeRange,
 } from '@/components/library/tvCalendarApi';
 
 const res = (body: unknown, status = 200) => ({ ok: status < 300, status, json: async () => body }) as Response;
@@ -75,6 +76,18 @@ const page = (wide: boolean, at = '/settings/tv') => render(
 const calCalls = () => calls.filter(c => c.url.startsWith('/api/settings/tv/calendar')).map(c => c.url.replace('/api/settings/tv/calendar?', ''));
 
 // ---------------------------------------------------------------- dates
+
+describe('air times', () => {
+  it('a range in the viewer zone, across DST and the meridiem; no airstamp is no time', () => {
+    expect(timeRange('2026-10-19T01:00:00Z', 42, 'America/New_York')).toBe('9:00 \u2013 9:42 PM');      // EDT
+    expect(timeRange('2026-11-03T02:00:00Z', 42, 'America/New_York')).toBe('9:00 \u2013 9:42 PM');      // EST after Nov 1
+    expect(timeRange('2026-10-19T03:30:00Z', 40, 'America/New_York')).toBe('11:30 PM \u2013 12:10 AM');
+    expect(timeRange('2026-10-18T20:00:00Z', 60, 'Europe/London')).toBe('9:00 \u2013 10:00 PM');        // BST, a UK network
+    expect(timeRange('2026-10-19T01:00:00Z', null, 'America/New_York')).toBe('9:00 PM');
+    expect(timeRange(null, 42)).toBeNull();
+    expect(timeRange('garbage', 42)).toBeNull();
+  });
+});
 
 describe('week math', () => {
   it('weeks start on Sunday; labels within and across months and years', () => {

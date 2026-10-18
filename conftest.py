@@ -288,3 +288,12 @@ def tracker_test_env(monkeypatch):
     from app import tracker_clients, tracker_http
     monkeypatch.setattr(tracker_http, 'resolve', lambda host, port: ['93.184.215.14'])
     monkeypatch.setattr(tracker_clients, '_sleep', lambda s: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_tvmaze():
+    """TVmaze (Calendar air times) is never asked for real in tests: no match, no wait."""
+    from app import tv_airtimes
+    tv_airtimes.configure(get=lambda path, params: None, sleep=lambda s: None)
+    yield
+    tv_airtimes.configure()

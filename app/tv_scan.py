@@ -304,6 +304,10 @@ def refresh_episodes(sid: int, tmdb_id: int, now: float, data: Optional[Dict[str
     if not data:
         return
     with tv_store.write() as conn:
+        # a rematch mid-refresh may have given this row another show (or removed it): the episodes read
+        # for *tmdb_id* belong to that show only, so re-check id AND tmdb_id in this transaction
+        if not conn.execute('SELECT 1 FROM series WHERE id = ? AND tmdb_id = ?', (sid, tmdb_id)).fetchone():
+            return
         _store_episodes(conn, sid, data['seasons'])
         if data.get('group') is not None:
             _store_group(conn, sid, data['group'])
@@ -833,6 +837,11 @@ def refresh_on_open() -> bool:
             refresh_added(folders=True)
         except Exception:                  # noqa: BLE001 - a failed refresh waits for the next open
             logger.exception('TV calendar refresh failed')
+        try:
+            from app import tv_airtimes      # air times from TVmaze (no key), paced, after TMDB
+            tv_airtimes.refresh()
+        except Exception:                  # noqa: BLE001
+            logger.exception('TV air times refresh failed')
         finally:
             _refresh_lock.release()
     try:

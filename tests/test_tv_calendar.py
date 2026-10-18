@@ -62,7 +62,7 @@ def test_week_by_air_date_with_downloaded_flags(scanned):
     ]
     e = out['episodes'][0]
     assert set(e) == {'episode_id', 'series_id', 'show', 'year', 'poster_path', 'season', 'episode', 'title',
-                      'air_date', 'downloaded'}
+                      'air_date', 'airstamp', 'runtime', 'downloaded'}
     assert e['poster_path'] == '/p95396.jpg' and e['title'] == 'Episode 1' and out['libraries'] == 1
 
 
