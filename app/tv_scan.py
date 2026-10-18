@@ -332,21 +332,38 @@ def _demote(conn, row, now: float) -> None:
                           now, 'duplicate')
 
 
+def detach(conn, sid: int, now: float, reason: str) -> None:
+    """Take show *sid* off its folder without losing it: the series row, its
+    episodes, settings and history stay in tv.db, hidden (no folder). Its file
+    rows go (rows only). A folder that matches the show later takes it back,
+    history and all (_resolve_duplicate, _apply)."""
+    row = conn.execute('SELECT path_id, folder FROM series WHERE id = ?', (sid,)).fetchone()
+    if row is None or row['path_id'] is None:
+        return
+    conn.execute('UPDATE series SET path_id = NULL, folder = NULL WHERE id = ?', (sid,))
+    conn.execute('DELETE FROM episode_files WHERE series_id = ?', (sid,))
+    conn.execute('INSERT INTO history (ts, series_id, episode_ids, event, detail) VALUES (?, ?, ?, ?, ?)',
+                 (now, sid, '[]', 'detached', json.dumps({'reason': reason, 'from_folder': row['folder'],
+                                                          'from_path_id': row['path_id']})))
+
+
 def take_over(owner_id: int, path_id: str, folder: str, now: float, *, via: str, event: str,
               drop_series_id: Optional[int] = None) -> int:
     """Move show *owner_id* (its episodes, settings and history) to *folder*;
     its old folder becomes an unmatched duplicate. *drop_series_id* is the
-    folder's own series row (Wrong show?), replaced by the show. Rows only."""
+    folder's own series row (Wrong show?): it is detached, never deleted, so
+    its history stays. Rows only."""
     with tv_store.write() as conn:
         old = conn.execute('SELECT * FROM series WHERE id = ?', (owner_id,)).fetchone()
         if drop_series_id is not None and drop_series_id != owner_id:
             prev = conn.execute('SELECT tmdb_id, title FROM series WHERE id = ?', (drop_series_id,)).fetchone()
-            conn.execute('DELETE FROM series WHERE id = ?', (drop_series_id,))
+            detach(conn, drop_series_id, now, 'rematched')
         else:
             prev = None
         conn.execute('UPDATE series SET path_id = ?, folder = ? WHERE id = ?', (path_id, folder, owner_id))
         conn.execute('DELETE FROM unmatched WHERE path_id = ? AND folder = ?', (path_id, folder))
-        _demote(conn, old, now)
+        if old['path_id'] is not None and old['folder'] is not None:
+            _demote(conn, old, now)
         detail = {'via': via, 'folder': folder, 'path_id': path_id, 'tmdb_id': old['tmdb_id'], 'title': old['title'],
                   'from_folder': old['folder'], 'from_path_id': old['path_id']}
         if prev is not None:
@@ -363,7 +380,7 @@ def _resolve_duplicate(owner, pid: str, folder: str, root_real: str, now: float,
     A show whose library is no longer selected (or no longer a Library path)
     moves here outright, keeping its tv.db row; its file rows from that
     library are dropped (rows only)."""
-    if _path_of(owner['path_id']) is None:
+    if owner['path_id'] is None or _path_of(owner['path_id']) is None:
         sid = take_over(owner['id'], pid, folder, now, via=via, event='matched')
         with tv_store.write() as conn:
             conn.execute('DELETE FROM episode_files WHERE series_id = ? AND path_id IS NOT ?', (sid, pid))

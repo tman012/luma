@@ -49,7 +49,8 @@ def test_rematch_to_a_show_owned_by_another_folder(scanned):
     out = tv_scan.rematch(_sid('Severance (2022)'), 70523, now=2000.0)
     assert out == {'ok': True, 'series_id': dark}
     assert rows('SELECT id, tmdb_id FROM series WHERE folder = ?', 'Severance (2022)') == [{'id': dark, 'tmdb_id': 70523}]
-    assert rows('SELECT id FROM series WHERE tmdb_id = 95396') == []
+    # Tester dcb9cc1 M17: the folder's own show (Severance) is hidden, not deleted
+    assert rows('SELECT path_id, folder FROM series WHERE tmdb_id = 95396') == [{'path_id': None, 'folder': None}]
     un = rows('SELECT * FROM unmatched WHERE folder = ?', 'Dark [tmdbid-70523]')[0]
     assert un['reason'] == 'duplicate' and [(c['tmdb_id'], c['title']) for c in json.loads(un['candidates'])] == [(70523, 'Dark')]
     h = json.loads(rows("SELECT detail FROM history WHERE event = 'rematched' AND series_id = ?", dark)[-1]['detail'])
