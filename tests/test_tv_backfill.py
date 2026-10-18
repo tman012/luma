@@ -136,15 +136,16 @@ def test_an_episode_airing_today_with_its_file_is_downloaded(owner, scanned, fak
     assert card['downloaded'] is True
 
 
-def test_a_linked_file_whose_link_row_is_gone_still_counts(owner, scanned, fake_tmdb, monkeypatch):  # noqa: F811
-    """The file is 'linked' and named for SxxEyy, but its link row points nowhere (the episode row was
-    replaced, or the file sits on another row of the same TMDB show): still downloaded."""
+def test_downloaded_is_only_a_link_row_to_this_exact_episode(owner, scanned, fake_tmdb, monkeypatch):  # noqa: F811
+    """One strict rule (PM, v157a): a linked file whose link row points at this episode. A file that
+    merely names the same SxxEyy with no link row doesn't count (the v156 fallback is gone)."""
     monkeypatch.setattr(tv_scan, 'refresh_on_open', lambda *a, **k: False)
     e = _linked_episode()
     write("UPDATE episodes SET air_date = '2026-10-18' WHERE id = ?", e['id'])
-    write('DELETE FROM episode_file_links WHERE episode_id = ?', e['id'])
-    card = _card(owner, '2026-10-18')[(e['title'], e['season_number'], e['episode_number'])]
-    assert card['downloaded'] is True
+    key = (e['title'], e['season_number'], e['episode_number'])
+    assert _card(owner, '2026-10-18')[key]['downloaded'] is True
     write("UPDATE episode_files SET state = 'mismatch' WHERE series_id = ?", e['series_id'])
-    card = _card(owner, '2026-10-18')[(e['title'], e['season_number'], e['episode_number'])]
-    assert card['downloaded'] is False                          # only linked files count
+    assert _card(owner, '2026-10-18')[key]['downloaded'] is False                 # only linked files count
+    write("UPDATE episode_files SET state = 'linked' WHERE series_id = ?", e['series_id'])
+    write('DELETE FROM episode_file_links WHERE episode_id = ?', e['id'])
+    assert _card(owner, '2026-10-18')[key]['downloaded'] is False                 # no link row: not downloaded

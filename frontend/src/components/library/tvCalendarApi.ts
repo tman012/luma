@@ -40,7 +40,8 @@ export interface FindResult {
   tmdb_id: number; title: string; year: number | null; poster_path: string | null; seasons: number | null;
   in_library: boolean; series_id: number | null;
 }
-export type EpisodeState = 'downloaded' | 'missing' | 'upcoming';
+/** downloaded (a file or Plex has it), missing (aired, no file), unaired (not aired yet; airing now folds in). */
+export type EpisodeState = 'downloaded' | 'missing' | 'unaired';
 
 type R<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
 async function call<T>(url: string, init: RequestInit | undefined, valid: (d: Record<string, unknown>) => boolean): Promise<R<T>> {
@@ -101,10 +102,19 @@ export const shortDate = (d: Day) => { const p = parts(d); return `${MON[p.m]} $
 /** Downloaded: a file is linked. Missing: aired before today, no file. Upcoming: today or later. */
 export function episodeState(e: { downloaded: boolean; air_date: string | null }, today: Day): EpisodeState {
   if (e.downloaded) return 'downloaded';
-  return e.air_date && e.air_date < today ? 'missing' : 'upcoming';
+  return e.air_date && e.air_date < today ? 'missing' : 'unaired';
 }
-export const STATE_WORD: Record<EpisodeState, string> = { downloaded: 'Downloaded', missing: 'Missing', upcoming: 'Upcoming' };
-export const STATE_COLOR: Record<EpisodeState, string> = { downloaded: '#22c55e', missing: '#ef4444', upcoming: '#3b82f6' };
+export const STATE_WORD: Record<EpisodeState, string> = { downloaded: 'Downloaded', missing: 'Missing', unaired: 'Unaired' };
+/** The card edge colors, as CSS vars (Designer tunes them in one place; tvCalendarCss sets the defaults). */
+export const STATE_VAR: Record<EpisodeState, string> = {
+  downloaded: '--tv-state-downloaded', missing: '--tv-state-missing', unaired: '--tv-state-unaired',
+};
+export const STATE_HEX: Record<EpisodeState, string> = { downloaded: '#22c55e', missing: '#ef4444', unaired: '#3b82f6' };
+export const STATE_COLOR: Record<EpisodeState, string> = {
+  downloaded: `var(${STATE_VAR.downloaded}, ${STATE_HEX.downloaded})`,
+  missing: `var(${STATE_VAR.missing}, ${STATE_HEX.missing})`,
+  unaired: `var(${STATE_VAR.unaired}, ${STATE_HEX.unaired})`,
+};
 
 /** "S02E05". */
 export const code = (s: number, e: number) => `S${pad2(s)}E${pad2(e)}`;

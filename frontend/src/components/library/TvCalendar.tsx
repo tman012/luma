@@ -17,8 +17,10 @@ const W50 = 'rgba(255,255,255,0.5)';
 const W70 = 'rgba(255,255,255,0.7)';
 const W95 = 'rgba(255,255,255,0.95)';
 
-export function TvCalendar({ today, week, onWeek, reload = 0 }: {
+export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true }: {
   today: Day; week: Day; onWeek: (start: Day) => void; reload?: number;
+  /** false: the page shows WeekControls in its top row instead */
+  toolbar?: boolean;
 }) {
   const [data, setData] = useState<{ key: string; cal: CalendarData } | null>(null);
   const [failed, setFailed] = useState('');
@@ -45,9 +47,8 @@ export function TvCalendar({ today, week, onWeek, reload = 0 }: {
 
   return (
     <div data-testid="tv-calendar" style={{ fontFamily: FONT, width: '100%' }}>
-      <Toolbar label={weekLabel(week)} showToday={week !== weekStart(today)}
-        onPrev={() => onWeek(addDays(week, -7))} onNext={() => onWeek(addDays(week, 7))} onToday={() => onWeek(weekStart(today))} />
-      <div style={{ marginTop: 16 }}>
+      {toolbar && <WeekControls today={today} week={week} onWeek={onWeek} />}
+      <div style={{ marginTop: toolbar ? 16 : 0 }}>
         {failed === key ? (
           <div role="alert" style={emptyCard}>{"Couldn't load calendar"}</div>
         ) : loading ? (
@@ -59,6 +60,14 @@ export function TvCalendar({ today, week, onWeek, reload = 0 }: {
         )}
       </div>
     </div>
+  );
+}
+
+/** ‹ › (and Today) on the left, the week range centered. */
+export function WeekControls({ today, week, onWeek }: { today: Day; week: Day; onWeek: (start: Day) => void }) {
+  return (
+    <Toolbar label={weekLabel(week)} showToday={week !== weekStart(today)}
+      onPrev={() => onWeek(addDays(week, -7))} onNext={() => onWeek(addDays(week, 7))} onToday={() => onWeek(weekStart(today))} />
   );
 }
 
@@ -115,15 +124,14 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
   const st = episodeState(e, today);
   return (
     <div data-testid="tv-agenda-row" data-state={st} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`}
-      style={{ position: 'relative', paddingLeft: 3, borderRadius: 8, background: 'rgba(255,255,255,0.06)',
+      style={{ position: 'relative', paddingLeft: EDGE_W, borderRadius: 8, background: 'rgba(255,255,255,0.06)',
         border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-      <Stripe color={STATE_COLOR[st]} />
+      <Stripe color={STATE_COLOR[st]} w={EDGE_W} />
       <Still e={e} />
       <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <span data-testid="tv-card-show" title={e.show} style={{ ...clamp2, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
         <span data-testid="tv-card-title" title={epLine(e)} style={{ ...one, fontSize: 12, color: W70 }}>{epLine(e)}</span>
         <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: W50 }}>
-          {st === 'downloaded' && <Check />}
           {timeRange(e.airstamp, e.runtime) || e.air_time || shortDate(e.air_date)}
         </span>
       </div>
@@ -193,9 +201,11 @@ function AgendaRow({ e, today, first }: { e: CalEpisode; today: Day; first: bool
 
 const epLine = (e: CalEpisode) => (e.title ? `${code(e.season, e.episode)} \u00b7 ${e.title}` : code(e.season, e.episode));
 
-export const Stripe = ({ color }: { color: string }) => (
-  <span aria-hidden="true" data-testid="tv-stripe" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: color }} />
+export const Stripe = ({ color, w = 3 }: { color: string; w?: number }) => (
+  <span aria-hidden="true" data-testid="tv-stripe" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: w, background: color, zIndex: 1 }} />
 );
+/** The week-grid card's state edge: full card height, beside the still and the text. */
+const EDGE_W = 4;
 const Check = () => (
   <svg data-testid="tv-check" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" style={{ flex: 'none' }}>
     <path d="M2.5 6.2l2.3 2.3 4.7-5" fill="none" stroke="#22c55e" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -225,6 +235,7 @@ function Placeholder() {
 }
 
 export const tvCalendarCss = `
+:root{--tv-state-downloaded:#22c55e;--tv-state-missing:#ef4444;--tv-state-unaired:#3b82f6}
 .tvc-row:hover{background:rgba(255,255,255,.04)!important}
 .tvc-glass:hover{background:rgba(255,255,255,.10)!important}
 `;

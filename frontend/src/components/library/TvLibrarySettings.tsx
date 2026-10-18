@@ -16,9 +16,9 @@ import {
   WideCtx, card, libraryPathsCss, muted, pad, primary, rowBtn, sectionLabel, segBtn, segOn, segment, subText, titleText, topBorder,
 } from './LibraryPathsSettings';
 import { ImportSection, ReviewSection, ShowPicker, FADE_MS, importCss, initialReview, type ReviewState } from './TvImport';
-import { TvCalendar, tvCalendarCss } from './TvCalendar';
+import { TvCalendar, WeekControls, tvCalendarCss } from './TvCalendar';
 import { TvSeries } from './TvSeries';
-import { SEARCH_MIN, TvSearch, tvSearchCss } from './TvSearch';
+import { SEARCH_LIST_ID, SEARCH_MIN, TvSearch, searchRowId, tvSearchCss, type SearchKeys } from './TvSearch';
 import { LibrarySelector } from './LibrarySelector';
 import type { SelectableLibrary } from './librarySelectionApi';
 import { SAVE_FAILED } from './libraryPathsApi';
@@ -121,6 +121,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
   const reviewRows = lib?.unmatched || [];
   const noLibraries = settingsView.paths.length === 0;
   const searching = q.trim().length >= SEARCH_MIN;
+  const calendarTop = wide && view === 'calendar' && !noLibraries;    // the week controls sit in the top row
   const control = (
     <Segmented value={view} wide={wide} onPick={pickView} />
   );
@@ -133,15 +134,18 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
     </div>
   );
 
+  const onWeek = (w: string) => go({ week: w === weekStart(today) ? null : w }, false);
+  const search = (
+    <SearchBox wide={wide} value={q} onChange={setQ}
+      results={noLibraries ? noLibs : (keys, active) => (
+        <TvSearch q={q} paths={settingsView.paths} onAdded={() => setReload(n => n + 1)} keys={keys} active={active} />
+      )} />
+  );
+
   let body: ReactNode;
-  if (searching) {
+  if (view === 'calendar') {
     body = noLibraries ? noLibs : (
-      <TvSearch q={q} paths={settingsView.paths} onAdded={() => setReload(n => n + 1)} />
-    );
-  } else if (view === 'calendar') {
-    body = noLibraries ? noLibs : (
-      <TvCalendar today={today} week={week} reload={reload}
-        onWeek={w => go({ week: w === weekStart(today) ? null : w }, false)} />
+      <TvCalendar today={today} week={week} reload={reload} toolbar={!calendarTop} onWeek={onWeek} />
     );
   } else if (view === 'series') {
     body = noLibraries ? noLibs : <TvSeries shows={lib ? lib.shows : null} />;
@@ -195,7 +199,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
 
   return (
     <WideCtx.Provider value={wide}>
-    <section data-testid="tv-section" data-view={searching ? 'search' : view}
+    <section data-testid="tv-section" data-view={view} data-searching={searching || undefined}
       style={{ ...pad(wide), display: 'flex', flexDirection: 'column', fontFamily: FONT }}>
       <style>{libraryPathsCss}</style>
       <style>{trackersCss}</style>
@@ -203,16 +207,22 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
       <style>{tvCalendarCss + tvSearchCss + tabsCss}</style>
       {toast && <NoticeToast key={toast + seq.current} text={toast} onDone={() => setToast('')} />}
 
-      {wide && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, minHeight: 40 }}>
-          <h2 data-testid="tv-title" style={{ margin: 0, flex: 1, fontSize: 18, fontWeight: 600, color: 'rgba(255,255,255,0.95)' }}>TV</h2>
+      {wide ? (
+        // one row, like Sonarr's toolbar: title, the week controls (Calendar), the tabs, the compact search on the right
+        <div data-testid="tv-top-row" style={{ display: 'flex', alignItems: 'center', gap: 16, minHeight: 40, flexWrap: 'wrap' }}>
+          <h2 data-testid="tv-title" style={{ margin: 0, flex: 'none', fontSize: 18, fontWeight: 600, color: 'rgba(255,255,255,0.95)' }}>TV</h2>
+          <div style={{ flex: 1, minWidth: 0 }}>{calendarTop && <WeekControls today={today} week={week} onWeek={onWeek} />}</div>
           {control}
+          {search}
         </div>
+      ) : (
+        <>
+          {search}
+          <div style={{ marginTop: 12 }}>{control}</div>
+        </>
       )}
-      <SearchField wide={wide} value={q} onChange={setQ} />
-      {!wide && <div style={{ marginTop: 12 }}>{control}</div>}
       {/* The Libraries view stays mounted so the selection (and the paths Add offers) is always current. */}
-      <div style={{ marginTop: 20, display: view === 'libraries' && !searching ? undefined : 'none' }}>
+      <div style={{ marginTop: 20, display: view === 'libraries' ? undefined : 'none' }}>
         <LibrarySelector url={TV_LIBRARIES_URL} label="Libraries" testId="tv-paths" onChange={onLibraries} />
       </div>
       {body && <div data-testid="tv-view" style={{ marginTop: 20 }}>{body}</div>}
@@ -244,28 +254,76 @@ function Segmented({ value, wide, onPick }: { value: TvView; wide: boolean; onPi
   );
 }
 
-function SearchField({ wide, value, onChange }: { wide: boolean; value: string; onChange: (v: string) => void }) {
+export const SEARCH_W = 320;
+export const SEARCH_DROP_W = 480;
+
+/** The compact search (320px, right of the tabs) with its results in a 480px glass dropdown anchored to the
+ * field's right edge. ↑/↓ move through the rows, Enter adds the highlighted show, Esc or a click outside closes. */
+function SearchBox({ wide, value, onChange, results }: {
+  wide: boolean; value: string; onChange: (v: string) => void;
+  results: ReactNode | ((keys: React.MutableRefObject<SearchKeys | null>, active: number) => ReactNode);
+}) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const keys = useRef<SearchKeys | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const shown = open && value.trim().length >= SEARCH_MIN;
+  useEffect(() => { setActive(-1); }, [value]);
+  useEffect(() => {
+    if (!shown) return undefined;
+    const down = (e: PointerEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('pointerdown', down, true);
+    return () => document.removeEventListener('pointerdown', down, true);
+  }, [shown]);
+  const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    const n = keys.current?.count ?? 0;
+    if (e.key === 'Escape') {
+      if (shown) { e.preventDefault(); e.stopPropagation(); setOpen(false); return; }
+      if (value) { e.preventDefault(); e.stopPropagation(); onChange(''); }
+    } else if (e.key === 'ArrowDown' && n) {
+      e.preventDefault(); setOpen(true); setActive(a => (a + 1) % n);
+    } else if (e.key === 'ArrowUp' && n) {
+      e.preventDefault(); setOpen(true); setActive(a => (a <= 0 ? n - 1 : a - 1));
+    } else if (e.key === 'Enter' && shown && active >= 0) {
+      e.preventDefault(); keys.current?.enter(active);
+    }
+  };
+  useEffect(() => {
+    if (active >= 0) document.getElementById(searchRowId(active))?.scrollIntoView?.({ block: 'nearest' });
+  }, [active]);
   return (
-    <div style={{ position: 'relative', marginTop: wide ? 12 : 0 }}>
-      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2"
-        strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: 14, top: 13, pointerEvents: 'none' }}>
+    <div ref={box} data-testid="tv-search-box"
+      style={{ position: 'relative', flex: wide ? `0 1 ${SEARCH_W}px` : undefined, width: wide ? SEARCH_W : '100%', minWidth: 0 }}>
+      <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2"
+        strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: 12, top: 10, pointerEvents: 'none' }}>
         <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
       </svg>
       <input type="search" data-testid="tv-search" aria-label="Search shows" placeholder="Search shows" value={value}
-        className="tvt-search"
-        onChange={e => onChange(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Escape' && value) { e.preventDefault(); e.stopPropagation(); onChange(''); } }}
+        className="tvt-search" role="combobox" aria-expanded={shown} aria-controls={SEARCH_LIST_ID} aria-autocomplete="list"
+        aria-activedescendant={shown && active >= 0 ? searchRowId(active) : undefined}
+        onChange={e => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={onKey}
         style={{
-          width: '100%', height: 44, boxSizing: 'border-box', padding: '0 44px 0 42px', borderRadius: 12, outline: 'none',
-          background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', fontSize: 15,
+          width: '100%', height: 36, boxSizing: 'border-box', padding: '0 36px 0 36px', borderRadius: 10, outline: 'none',
+          background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: '#fff', fontSize: 14,
           fontFamily: FONT, colorScheme: 'dark',
         }} />
       {value && (
-        <button type="button" aria-label="Clear" data-testid="tv-search-clear" className="lp-focus" onClick={() => onChange('')}
-          style={{ position: 'absolute', right: 0, top: 0, width: 44, height: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            border: 'none', background: 'none', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', borderRadius: 12 }}>
-          <XIcon size={16} />
+        <button type="button" aria-label="Clear" data-testid="tv-search-clear" className="lp-focus" onClick={() => { onChange(''); setOpen(false); }}
+          style={{ position: 'absolute', right: 0, top: 0, width: 36, height: 36, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            border: 'none', background: 'none', color: 'rgba(255,255,255,0.6)', cursor: 'pointer', borderRadius: 10 }}>
+          <XIcon size={14} />
         </button>
+      )}
+      {shown && (
+        <div data-testid="tv-search-drop"
+          style={{ position: 'absolute', zIndex: 60, top: 'calc(100% + 6px)', right: 0, width: SEARCH_DROP_W, maxWidth: 'calc(100vw - 32px)',
+            maxHeight: 'min(70vh, 560px)', overflowY: 'auto', boxSizing: 'border-box', borderRadius: 12,
+            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
+            backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', boxShadow: '0 16px 48px rgba(0,0,0,0.45)' }}>
+          {typeof results === 'function' ? results(keys, active) : results}
+        </div>
       )}
     </div>
   );

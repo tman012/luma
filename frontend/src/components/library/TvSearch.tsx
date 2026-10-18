@@ -2,11 +2,10 @@
  * first ("In library", not clickable), then TMDB shows with Add. Add saves the show to
  * tv.db in one of the selected TV libraries (picked when there are 2+); it
  * creates no folders or files and downloads nothing. */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { NAVY_GLASS_BORDER, NAVY_GLASS_POPOVER } from '@/theme/tokens';
 import { Poster } from './TvImport';
-import { CAL_MAX_W, glassCard } from './TvCalendar';
 import type { LibPath } from './libraryPathsApi';
 import { showLabel } from './tvLibraryApi';
 import { addShow, findShows, seasonsText, type FindResult } from './tvCalendarApi';
@@ -19,8 +18,16 @@ const W70 = 'rgba(255,255,255,0.7)';
 const W95 = 'rgba(255,255,255,0.95)';
 
 type AddState = { busy?: boolean; error?: boolean; series_id?: number };
+/** What the search box drives by keyboard: how many rows there are, and Enter on row *i*. */
+export type SearchKeys = { count: number; enter: (i: number) => void };
+export const SEARCH_LIST_ID = 'tv-search-list';
+export const searchRowId = (i: number) => `tv-search-row-${i}`;
 
-export function TvSearch({ q, paths, onAdded }: { q: string; paths: LibPath[]; onAdded: () => void }) {
+export function TvSearch({ q, paths, onAdded, active = -1, keys }: {
+  q: string; paths: LibPath[]; onAdded: () => void;
+  /** the keyboard-highlighted row (the box's ↑/↓), -1 for none */
+  active?: number; keys?: MutableRefObject<SearchKeys | null>;
+}) {
   const [res, setRes] = useState<{ q: string; results: FindResult[] } | null>(null);
   const [failed, setFailed] = useState('');
   const [adds, setAdds] = useState<Record<number, AddState>>({});
@@ -51,10 +58,19 @@ export function TvSearch({ q, paths, onAdded }: { q: string; paths: LibPath[]; o
   };
 
   const ready = res?.q === text;
-  const list = ready ? res.results : [];
+  const list = ready && failed !== text ? res.results : [];
+  if (keys) {
+    keys.current = {
+      count: list.length,
+      enter: i => {
+        const r = list[i];
+        if (r && !r.in_library && adds[r.tmdb_id]?.series_id == null && !adds[r.tmdb_id]?.busy) startAdd(r);
+      },
+    };
+  }
   return (
-    <div data-testid="tv-search-results"
-      style={{ ...glassCard, overflow: 'visible', fontFamily: FONT, width: '100%', maxWidth: CAL_MAX_W, margin: '0 auto', boxSizing: 'border-box' }}>
+    <div data-testid="tv-search-results" id={SEARCH_LIST_ID} role="listbox" aria-label="Search results"
+      style={{ fontFamily: FONT, width: '100%', boxSizing: 'border-box' }}>
       {failed === text ? (
         <div role="alert" style={centered}>{"Couldn't search"}</div>
       ) : !ready ? (
@@ -80,7 +96,8 @@ export function TvSearch({ q, paths, onAdded }: { q: string; paths: LibPath[]; o
         );
         return (
           <div key={`${r.in_library ? 'l' : 't'}${r.tmdb_id}`} data-testid="tv-search-row" data-in-library={inLib || undefined}
-            style={{ position: 'relative', borderTop: i ? divider : 'none' }}>
+            id={searchRowId(i)} role="option" aria-selected={i === active} data-active={i === active || undefined}
+            style={{ position: 'relative', borderTop: i ? divider : 'none', background: i === active ? 'rgba(255,255,255,0.06)' : undefined }}>
             {inLib ? (
               <div style={rowBox}>
                 {body}
@@ -108,7 +125,7 @@ export function TvSearch({ q, paths, onAdded }: { q: string; paths: LibPath[]; o
               </div>
             )}
             {picking === r.tmdb_id && (
-              <PathPicker paths={paths} onCancel={() => setPicking(null)} onAdd={p => void add(r, p)} />
+              <PathPicker inline paths={paths} onCancel={() => setPicking(null)} onAdd={p => void add(r, p)} />
             )}
           </div>
         );
@@ -128,8 +145,10 @@ export const InLibrary = () => (
 );
 
 /** "Add to": the selected TV libraries, nothing preselected (a popover under the row). */
-export function PathPicker({ paths, onCancel, onAdd }: {
+export function PathPicker({ paths, onCancel, onAdd, inline = false }: {
   paths: LibPath[]; onCancel: () => void; onAdd: (pathId: string) => void;
+  /** in the search dropdown (a scroll box): in the flow under the row, not a popover */
+  inline?: boolean;
 }) {
   const [pick, setPick] = useState<string | null>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -180,8 +199,10 @@ export function PathPicker({ paths, onCancel, onAdd }: {
   };
   return (
     <div ref={panel} role="dialog" aria-label="Add to" data-testid="tv-add-picker"
-      style={{ ...surface, position: 'absolute', zIndex: 50, right: 12, top: 'calc(100% - 8px)', width: 320, maxWidth: 'calc(100vw - 32px)',
-        padding: 12, borderRadius: 14, boxShadow: '0 16px 48px rgba(0,0,0,0.5)' }}>
+      style={inline
+        ? { ...surface, margin: '0 12px 12px', padding: 12, borderRadius: 14 }
+        : { ...surface, position: 'absolute', zIndex: 50, right: 12, top: 'calc(100% - 8px)', width: 320, maxWidth: 'calc(100vw - 32px)',
+          padding: 12, borderRadius: 14, boxShadow: '0 16px 48px rgba(0,0,0,0.5)' }}>
       {body}
     </div>
   );

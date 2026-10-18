@@ -54,7 +54,10 @@ describe('Series grid', () => {
     // captions: 13/600, 17px lines, 2 lines max with an ellipsis, always 34px tall; the full name in title + aria-label
     const name = within(tiles[2]!).getByTestId('tv-series-name');
     expect([name.style.fontSize, name.style.fontWeight, name.style.lineHeight, name.style.minHeight, name.style.webkitLineClamp, name.style.display])
-      .toEqual(['13px', '600', '17px', '34px', '2', '-webkit-box']);
+      .toEqual(['13px', '600', '17px', '', '2', '-webkit-box']);
+    const cap = within(tiles[2]!).getByTestId('tv-series-caption');                 // the count right under the name; spare room at the bottom
+    expect([cap.style.minHeight, cap.style.paddingTop, cap.style.justifyContent]).toEqual(['59px', '8px', 'flex-start']);   // 51 + 8
+    expect(name.nextElementSibling!.getAttribute('data-testid')).toBe('tv-series-count');
     expect([name.getAttribute('title'), name.getAttribute('aria-label')]).toEqual(['The Wire', 'The Wire']);
     const count = within(tiles[2]!).getByTestId('tv-series-count');
     expect([count.style.whiteSpace, count.style.textOverflow]).toEqual(['nowrap', 'ellipsis']);

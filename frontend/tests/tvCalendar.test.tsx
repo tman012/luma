@@ -155,12 +155,12 @@ describe('week math', () => {
     expect(isDay('x')).toBe(false);
   });
 
-  it('states: downloaded with a file; missing before today; upcoming from today', () => {
+  it('states: downloaded with a file; missing before today; unaired from today', () => {
     const t = '2026-10-17';
     expect(episodeState({ downloaded: true, air_date: '2026-10-20' }, t)).toBe('downloaded');
     expect(episodeState({ downloaded: false, air_date: '2026-10-16' }, t)).toBe('missing');
-    expect(episodeState({ downloaded: false, air_date: '2026-10-17' }, t)).toBe('upcoming');
-    expect(episodeState({ downloaded: false, air_date: null }, t)).toBe('upcoming');
+    expect(episodeState({ downloaded: false, air_date: '2026-10-17' }, t)).toBe('unaired');   // airing today folds into unaired
+    expect(episodeState({ downloaded: false, air_date: null }, t)).toBe('unaired');
   });
 
   it('agenda labels and grouping', () => {
@@ -187,10 +187,14 @@ describe('Calendar', () => {
     expect(screen.getAllByTestId('tv-grid-day').map(d => d.firstElementChild!.textContent)).toEqual(
       ['Sun 10/11', 'Mon 10/12', 'Tue 10/13', 'Wed 10/14', 'Thu 10/15', 'Fri 10/16', 'Sat 10/17']);
     expect(rows.map(r => r.getAttribute('aria-label'))).toEqual([
-      'Downloaded: Severance S02E01', 'Missing: Severance S02E02', 'Upcoming: Severance S02E03']);
-    expect(rows.map(r => within(r).getByTestId('tv-stripe').style.background)).toEqual(['rgb(34, 197, 94)', 'rgb(239, 68, 68)', 'rgb(59, 130, 246)']);
-    expect(within(rows[0]!).getByTestId('tv-check')).toBeTruthy();
-    expect(within(rows[1]!).queryByTestId('tv-check')).toBeNull();
+      'Downloaded: Severance S02E01', 'Missing: Severance S02E02', 'Unaired: Severance S02E03']);
+    // the edge: 4px, full card height, colors from CSS vars (Designer's defaults); the state is in aria-label only
+    const edges = rows.map(r => within(r).getByTestId('tv-stripe'));
+    expect(edges.map(e => e.style.background)).toEqual([
+      'var(--tv-state-downloaded, #22c55e)', 'var(--tv-state-missing, #ef4444)', 'var(--tv-state-unaired, #3b82f6)']);
+    expect([edges[0]!.style.width, edges[0]!.style.top, edges[0]!.style.bottom, rows[0]!.style.paddingLeft]).toEqual(['4px', '0px', '0px', '4px']);
+    expect(rows.some(r => within(r).queryByTestId('tv-check'))).toBe(false);          // no check: the time line stays put
+    expect(rows.some(r => /Downloaded|Missing|Unaired/.test(r.textContent || ''))).toBe(false);   // nothing on screen
     expect(rows[0]!.textContent).toContain('Episode 1');
     const name = within(rows[0]!).getByTestId('tv-card-show');                     // up to 2 lines, 13/600
     expect([name.style.webkitLineClamp, name.style.display, name.style.fontSize, name.style.fontWeight]).toEqual(['2', '-webkit-box', '13px', '600']);
@@ -269,11 +273,14 @@ describe('Calendar', () => {
 describe('Search', () => {
   const type = (v: string) => fireEvent.change(screen.getByTestId('tv-search'), { target: { value: v } });
 
-  it('a 44px field; waits 250ms and 2 characters; library first with In library (not clickable), then TMDB with Add', async () => {
+  it('a compact 36px field; waits 250ms and 2 characters; library first with In library (not clickable), then TMDB with Add', async () => {
     page(true);
     await screen.findAllByTestId('tv-agenda-row');
     const field = screen.getByTestId('tv-search') as HTMLInputElement;
-    expect([field.placeholder, field.style.height]).toEqual(['Search shows', '44px']);
+    expect([field.placeholder, field.style.height]).toEqual(['Search shows', '36px']);
+    expect(screen.getByTestId('tv-search-box').style.width).toBe('320px');                        // compact, in the top row
+    expect(screen.getByTestId('tv-top-row').lastElementChild).toBe(screen.getByTestId('tv-search-box'));  // right-aligned
+    expect(within(screen.getByTestId('tv-top-row')).getByTestId('tv-cal-prev')).toBeTruthy();      // the week controls share the row
     type('S');
     expect(screen.getByTestId('tv-section').getAttribute('data-view')).toBe('calendar');
     type('Se'); type('Sev');
@@ -283,9 +290,42 @@ describe('Search', () => {
     expect(rows.map(r => r.textContent)).toEqual(['Severance (2022)2 seasonsIn library', 'Severance Pay (2026)1 seasonAdd']);
     expect(rows[0]!.getAttribute('data-in-library')).toBe('true');
     expect(rows[0]!.querySelector('button, a')).toBeNull();
-    expect(screen.getByTestId('tv-search-results').style.maxWidth).toBe('720px');
+    const drop = screen.getByTestId('tv-search-drop');                       // a 480px glass dropdown on the field's right edge
+    expect([drop.style.width, drop.style.right, drop.style.position, drop.style.borderRadius, drop.style.background, drop.style.backdropFilter])
+      .toEqual(['480px', '0px', 'absolute', '12px', 'rgba(255, 255, 255, 0.06)', 'blur(16px)']);
+    expect(rows[1]!.firstElementChild!.getAttribute('style')).toContain('height: 72px');            // the same 72px rows
+    expect(screen.getAllByTestId('tv-agenda-row').length).toBeGreaterThan(0);                     // the view stays under it
     fireEvent.keyDown(screen.getByTestId('tv-search'), { key: 'Escape' });
-    await screen.findAllByTestId('tv-agenda-row');                          // back to the view it replaced
+    expect(screen.queryByTestId('tv-search-drop')).toBeNull();               // Esc closes
+    expect(field.value).toBe('Sev');
+    fireEvent.keyDown(screen.getByTestId('tv-search'), { key: 'Escape' });
+    expect(field.value).toBe('');                                            // a second Esc clears
+  });
+
+  it('keyboard: ↓/↑ highlight rows (wrapping), Enter adds the highlighted show; a click outside closes', async () => {
+    page(true);
+    await screen.findAllByTestId('tv-agenda-row');
+    type('Severance');
+    const rows = await screen.findAllByTestId('tv-search-row');
+    const field = screen.getByTestId('tv-search');
+    expect(field.getAttribute('role')).toBe('combobox');
+    expect(field.getAttribute('aria-expanded')).toBe('true');
+    fireEvent.keyDown(field, { key: 'ArrowDown' });
+    expect(rows[0]!.getAttribute('aria-selected')).toBe('true');
+    expect(field.getAttribute('aria-activedescendant')).toBe(rows[0]!.id);
+    fireEvent.keyDown(field, { key: 'Enter' });                              // In library: nothing to add
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
+    fireEvent.keyDown(field, { key: 'ArrowDown' });
+    fireEvent.keyDown(field, { key: 'ArrowDown' });                          // wraps to the first
+    expect(screen.getAllByTestId('tv-search-row')[0]!.getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(field, { key: 'ArrowUp' });                            // and back round to the last
+    expect(screen.getAllByTestId('tv-search-row')[1]!.getAttribute('aria-selected')).toBe('true');
+    fireEvent.keyDown(field, { key: 'Enter' });
+    await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => c.body)).toEqual([{ tmdb_id: 6001 }]));
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByTestId('tv-search-drop')).toBeNull();
+    fireEvent.focus(field);                                                  // focus opens it again
+    expect(screen.getByTestId('tv-search-drop')).toBeTruthy();
   });
 
   it('no results says No results; the x clears', async () => {
@@ -319,7 +359,7 @@ describe('Search', () => {
     expect(calls.some(c => c.method === 'POST')).toBe(false);
     fireEvent.click(screen.getByTestId('tv-add'));
     const picker = screen.getByTestId('tv-add-picker');
-    expect(picker.style.width).toBe('320px');
+    expect(picker.style.position).toBe('');                                 // in the dropdown's flow, under the row
     expect(within(picker).getAllByTestId('tv-add-path').map(r => [r.textContent, r.getAttribute('aria-checked')]))
       .toEqual([['TV/media/TV', 'false'], ['Anime/media/Anime', 'false']]);
     const add = within(picker).getByTestId('tv-add-confirm') as HTMLButtonElement;
@@ -392,8 +432,9 @@ describe('tabs', () => {
     expect((await screen.findByTestId('tv-no-libraries')).textContent).toBe('No TV libraries' + 'Choose libraries');
     expect(calCalls()).toEqual([]);
     fireEvent.change(screen.getByTestId('tv-search'), { target: { value: 'Severance' } });
-    expect(screen.getByTestId('tv-no-libraries')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('tv-choose-libraries'));
+    const drop = screen.getByTestId('tv-search-drop');
+    expect(within(drop).getByTestId('tv-no-libraries')).toBeTruthy();
+    fireEvent.click(within(drop).getByTestId('tv-choose-libraries'));
     expect(loc).toBe('/settings/tv?view=libraries');
     expect((screen.getByTestId('tv-search') as HTMLInputElement).value).toBe('');
   });
@@ -403,7 +444,7 @@ describe('tabs', () => {
       .map(f => readFileSync(resolve(__dirname, '../src/components/library/' + f), 'utf8')).join('\n');
     expect(src).not.toMatch(/hint=|note=|helper=/i);
     expect(src).not.toMatch(/colour|favourite|catalogue|cancelled/i);
-    for (const label of ['Search shows', 'No episodes this week', 'Upcoming', 'Downloaded', 'Missing', 'In library', 'Add to',
+    for (const label of ['Search shows', 'No episodes this week', 'Unaired', 'Downloaded', 'Missing', 'In library', 'Add to',
       "Couldn't add show", 'No results', 'Wrong show?', 'No TV libraries', 'Choose libraries', 'Today', 'Tomorrow'])
       expect(src).toContain(label);
   });

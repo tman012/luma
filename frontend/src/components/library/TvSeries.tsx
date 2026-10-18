@@ -173,7 +173,8 @@ function Tile({ s, first }: { s: Show; first: boolean }) {
         style={{ height: 4, background: 'rgba(255,255,255,0.08)' }}>
         <span style={{ display: 'block', height: 4, width: `${Math.round(p.fill * 1000) / 10}%`, background: p.color }} />
       </div>
-      <div style={{ paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <div data-testid="tv-series-caption" style={{ paddingTop: 8, display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', gap: 2,
+        minHeight: CAPTION_MIN_H, boxSizing: 'border-box' }}>
         <span data-testid="tv-series-name" title={s.title} aria-label={s.title} style={caption}>{s.title}</span>
         <span data-testid="tv-series-count" style={{ fontSize: 12, color: W50, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{episodesText(s)}</span>
       </div>
@@ -181,9 +182,12 @@ function Tile({ s, first }: { s: Show; first: boolean }) {
   );
 }
 
-/** 13/600, 17px lines, at most 2 then an ellipsis; always 2 lines tall so posters and bars line up row to row. */
+/** The caption block (name + count) is at least this tall, so posters and bars line up row to row and any
+ * space falls below the count (8 top + 2 x 17 + 2 + 15 = 59 with padding; 51 without it). */
+const CAPTION_MIN_H = 51 + 8;
+/** 13/600, 17px lines, at most 2 then an ellipsis; the count sits right under it (no blank line). */
 const caption: React.CSSProperties = {
-  fontSize: 13, fontWeight: 600, lineHeight: '17px', minHeight: 34, color: W95, overflow: 'hidden', overflowWrap: 'anywhere',
+  fontSize: 13, fontWeight: 600, lineHeight: '17px', color: W95, overflow: 'hidden', overflowWrap: 'anywhere',
   display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
 };
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(128px, 1fr))', gap: 16 };

@@ -56,14 +56,9 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
                     'SELECT e.id, e.series_id, e.season_number, e.episode_number, e.title, e.air_date, e.airstamp,'
                     ' COALESCE(e.air_runtime, e.runtime) AS minutes, e.still_path, e.tvdb_image, s.backdrop_path,'
                     ' s.title AS show, s.year, s.poster_path,'
-                    # downloaded: a linked file for this episode row; or (a link row lost, or another row of the
-                    # same TMDB show holds the file) a linked file of that show whose own SxxEyy is this episode
-                    ' (EXISTS (SELECT 1 FROM episode_file_links l JOIN episode_files f ON f.id = l.file_id'
-                    "          WHERE l.episode_id = e.id AND f.state = 'linked')"
-                    '  OR EXISTS (SELECT 1 FROM episode_files f JOIN series fs ON fs.id = f.series_id'
-                    "          WHERE fs.tmdb_id = s.tmdb_id AND f.state = 'linked' AND COALESCE(fs.episode_order, 'tmdb') = 'tmdb'"
-                    "          AND json_valid(f.parsed) AND json_extract(f.parsed, '$.season') = e.season_number"
-                    "          AND EXISTS (SELECT 1 FROM json_each(f.parsed, '$.episodes') j WHERE j.value = e.episode_number)))"
+                    # downloaded: a linked file for this exact episode row (one rule, no fallback)
+                    ' EXISTS (SELECT 1 FROM episode_file_links l JOIN episode_files f ON f.id = l.file_id'
+                    "         WHERE l.episode_id = e.id AND f.state = 'linked')"
                     ' AS downloaded'
                     ' FROM episodes e JOIN series s ON s.id = e.series_id'
                     f' WHERE s.path_id IN ({_in(paths)}) AND e.air_date >= ? AND e.air_date < ?'
