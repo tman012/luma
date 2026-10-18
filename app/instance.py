@@ -222,10 +222,17 @@ def _form(request) -> Dict[str, str]:
     return {k: v for k, v in (_fields(request) or []) if v is not None}
 
 
+# v165 (Reviewer): the only form fields the scoped writes may carry (exact case, each once). Anything
+# else (downloadPath, useDownloadPath, savepath, rename, contentLayout, firstLastPiecePrio, ...) is refused.
+ADD_FIELDS = frozenset(('urls', 'torrents', 'category', 'tags', 'autoTMM', 'paused', 'stopped'))
+CATEGORY_FIELDS = frozenset(('category',))
+
+
 def _scoped_ok(request) -> bool:
     """The scoped add/createCategory exemption (see the module docs). Refused (v158c, Reviewer):
-    any query string, a category, tags or save-path key given twice (in any case, file parts too),
-    and a body that isn't a form."""
+    any query string, any field given twice (in any case, file parts too), and a body that isn't
+    a form. v165 (Reviewer): only allowlisted fields (ADD_FIELDS / CATEGORY_FIELDS), exact case;
+    'torrents' only as a file part, every other field only as text; no save or download path."""
     v = getattr(_scope, 'v', None)
     if not v or not writes_allowed(v[0]):
         return False
@@ -238,16 +245,21 @@ def _scoped_ok(request) -> bool:
     fields = _fields(request)
     if fields is None:
         return False
+    allowed_fields = ADD_FIELDS if m.group(1) == 'add' else CATEGORY_FIELDS
     names = [k.casefold() for k, _ in fields]
-    if any(names.count(k) > 1 for k in ('category', 'tags', 'savepath')):
+    if len(set(names)) != len(names):
         return False
-    f = {k.casefold(): val for k, val in fields}
-    if 'savepath' in f and (m.group(1) == 'createCategory' or f['savepath'] is None or f['savepath']):
-        return False
+    for k, val in fields:
+        if k not in allowed_fields or ((val is None) != (k == 'torrents')):
+            return False
     exact = dict(fields)                                 # qBittorrent reads these exact names
     if exact.get('category') != v[1]:
         return False
-    return m.group(1) == 'createCategory' or exact.get('tags') == v[1]
+    if m.group(1) == 'createCategory':
+        return True
+    if exact.get('tags') != v[1] or not ('urls' in exact or 'torrents' in exact):
+        return False
+    return exact.get('autoTMM', 'false') == 'false'      # automatic management would move it by category
 
 
 _installed = {'on': False}

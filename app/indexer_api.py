@@ -703,6 +703,92 @@ class ProwlarrClient:
                     _query_cache.pop(k, None)
         return items
 
+    # ---------------------------------------------------------------- release downloads (v165)
+
+    DOWNLOAD_MAX_BYTES = 10 * 1024 * 1024
+    DOWNLOAD_MAX_HOPS = 3
+    _DL_PATH = re.compile(r'/(?:api/v1/indexer/)?(\d+)/download/?$')
+
+    @staticmethod
+    def _origin(url: str) -> Optional[tuple]:
+        from urllib.parse import urlsplit
+        try:
+            u = urlsplit(str(url or '').strip())
+            if u.scheme not in ('http', 'https') or not u.hostname or u.username or u.password:
+                return None
+            return (u.scheme, u.hostname.lower().rstrip('.'), u.port or (443 if u.scheme == 'https' else 80))
+        except ValueError:
+            return None
+
+    def owns(self, url: str) -> bool:
+        """*url* is on this Prowlarr (same scheme, host and port, under its URL base)."""
+        from urllib.parse import urlsplit
+        mine, theirs = self._origin(self.base_url), self._origin(url)
+        if mine is None or theirs != mine:
+            return False
+        base_path = urlsplit(self.base_url).path.rstrip('/')
+        return not base_path or (urlsplit(url).path + '/').startswith(base_path + '/')
+
+    def _download_indexer(self, url: str) -> int:
+        from urllib.parse import urlsplit
+        m = self._DL_PATH.search(urlsplit(url).path or '')
+        return int(m.group(1)) if m else UNSCOPED
+
+    def download(self, url: str, interactive: bool = True) -> tuple:
+        """('torrent', bytes) or ('magnet', uri) for a release link on this Prowlarr, fetched with
+        Luma's own Prowlarr session (never through a third-party app). Every request is charged
+        to the indexer's guard budget like a search (GUARD_LIMITS; Prowlarr and Luma backoffs
+        skip it); redirects are followed only on this Prowlarr or to a magnet. Raises
+        IndexerSkipped (budget or backoff), ValueError (a link we won't fetch) or
+        requests.RequestException."""
+        if not self.owns(url):
+            raise ValueError('not this Prowlarr')
+        ix = self._download_indexer(url)
+        for hop in range(self.DOWNLOAD_MAX_HOPS + 1):
+            if self._backed_off_until(ix) if ix != UNSCOPED else self._unscoped_blocked_until(time.time()):
+                raise IndexerSkipped(f'indexer {ix} backed off')
+            with _indexer_lock(ix):
+                now = time.time()
+                with _budget_state_guard:
+                    reason = _guard_decide(ix, interactive, now)
+                if reason:
+                    logger.info('%s (id %s) download not sent: %s', self._indexer_name(ix), ix, reason)
+                    raise IndexerSkipped(f'indexer {ix} guard: {reason}')
+                wait = GUARD_LIMITS['min_interval_s'] - (time.time() - _indexer_last_ts.get(ix, 0.0))
+                if wait > 0:
+                    time.sleep(wait)
+                try:
+                    resp = self.session.get(url, timeout=60, allow_redirects=False, stream=True,
+                                            headers={'Accept': '*/*'})
+                finally:
+                    _indexer_last_ts[ix] = time.time()
+            try:
+                if resp.status_code in (301, 302, 303, 307, 308):
+                    loc = (resp.headers.get('Location') or '').strip()
+                    if loc.lower().startswith('magnet:'):
+                        return 'magnet', loc
+                    from urllib.parse import urljoin
+                    nxt = urljoin(url, loc) if loc else ''
+                    if not nxt or not self.owns(nxt):
+                        raise ValueError('redirect off this Prowlarr')
+                    url = nxt
+                    continue
+                if resp.status_code in (400, 429):
+                    self._invalidate_backoffs()
+                    self._start_cooldown(ix, resp)
+                resp.raise_for_status()
+                body = b''
+                for chunk in resp.iter_content(65536):
+                    body += chunk
+                    if len(body) > self.DOWNLOAD_MAX_BYTES:
+                        raise ValueError('too large')
+            finally:
+                resp.close()
+            if body[:7].lower() == b'magnet:':
+                return 'magnet', body.decode('utf-8', 'ignore').strip().splitlines()[0]
+            return 'torrent', body
+        raise ValueError('too many redirects')
+
     def _unscoped_blocked_until(self, now: float) -> Optional[float]:
         """Until when an unscoped search must not be sent: its own cooldown,
         the fail-closed window, or the latest backoff of any indexer."""

@@ -275,6 +275,16 @@ def _series_for_tmdb(tmdb_id: int, now: float):
     return None, out.get('error') or SHOW_NOT_ADDED
 
 
+def _grabbable_link(url: str) -> bool:
+    """A release token from Luma's trackers or one of main's Sources links (expired ones included:
+    tv_grab answers those with 410); never a raw URL or magnet."""
+    from app import tracker_sources, tv_grab
+    u = url.strip()
+    if tracker_sources.release_token(u) is not None:
+        return True
+    return any(fn(u)[0] for fn in tv_grab._link_resolvers)
+
+
 @bp.route('/api/settings/tv/grab', methods=['POST'])
 def popup_grab():
     """Grab one release from the TV Sources popup through Luma's own path (tv_grab: the TV category
@@ -294,6 +304,8 @@ def popup_grab():
             or not isinstance(url, str) or not url.strip() or len(url) > 8192 or not isinstance(title, str) or len(title) > 1000:
         return _out({'error': 'Invalid'}, 400)
     from app import tv_grab
+    if not _grabbable_link(url):                      # v165 (Reviewer): no raw URL or magnet, ever
+        return _out({'ok': False, 'error': tv_grab.RAW_LINK, 'fallback': False}, 400)
     if not tv_grab.allowed():
         return _out({'ok': False, 'error': tv_grab.OFF, 'blocked': True, 'fallback': False})
     now = _time.time()
@@ -311,7 +323,7 @@ def popup_grab():
     item = {'title': title, 'downloadUrl': url, 'indexer': str(body.get('indexer') or '')[:200] or None,
             'quality': str(body.get('quality') or '')[:100] or None,
             'size': size if ok_int(size) else 0, 'indexerId': None}
-    g = tv_grab.grab(item, sid, season, ids, 'manual', now)
+    g = tv_grab.grab(item, sid, season, ids, 'manual', now, tokens_only=True)
     if g.get('ok'):
         return _out({'ok': True, 'series_id': sid, 'existing': bool(g.get('existing'))})
     return _out({'ok': False, 'error': g.get('error'), 'blocked': bool(g.get('blocked')),

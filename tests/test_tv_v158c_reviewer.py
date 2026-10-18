@@ -127,7 +127,7 @@ def test_scoped_add_refuses_duplicated_keys_and_a_query_string(monkeypatch):
 def test_tv_grab_marks_its_own_auto_grabs_automatic(monkeypatch):
     from app import tv_grab
     seen = []
-    monkeypatch.setattr(tv_grab, 'fetch_link', lambda u, automatic=False: seen.append(automatic) or (_ for _ in ()).throw(
+    monkeypatch.setattr(tv_grab, 'fetch_link', lambda u, automatic=False, **k: seen.append(automatic) or (_ for _ in ()).throw(
         tracker_sources.GrabError('stop', 502)))
     monkeypatch.setattr(tv_grab, 'allowed', lambda: True)
     for origin in ('auto', 'manual'):

@@ -128,9 +128,53 @@ def register_link_resolver(fn: Callable[[str], Any]) -> None:
         _link_resolvers.append(fn)
 
 
-def fetch_link(url: Any, automatic: bool = False) -> Any:
+RAW_LINK = 'Grab from a search result (a pasted link or magnet is not accepted here)'
+
+
+def _prowlarr():
+    """Luma's own Prowlarr client when Prowlarr is the configured indexer, else None."""
+    from app import library_mover as mover
+    from app.indexer_api import ProwlarrClient
+    s = mover._cfg.get('settings')
+    try:
+        if s is None or (s.get('indexer.provider') or 'prowlarr') != 'prowlarr':
+            return None
+        base, key = s.get('indexer.base_url') or '', s.get('indexer.api_key') or ''
+    except Exception:                                        # noqa: BLE001
+        return None
+    return ProwlarrClient(base, key) if base and key else None
+
+
+def _via_prowlarr(client, u: str, automatic: bool) -> Any:
+    from app import tracker_sources as ts
+    from app.indexer_api import IndexerSkipped
+    try:
+        kind, got = client.download(u, interactive=not automatic)
+    except IndexerSkipped:
+        raise ts.GrabError('This indexer is rate limited right now. Try again later.', 429)
+    except ValueError:
+        raise ts.GrabError('Link not allowed', 400)
+    except Exception as e:                                    # noqa: BLE001
+        logger.warning('TV grab: Prowlarr download failed (%s)', type(e).__name__)
+        raise ts.GrabError("Couldn't get the torrent from that link", 502)
+    if kind == 'magnet':
+        m = ts.safe_magnet(got)
+        if not m:
+            raise ts.GrabError('Link not allowed', 400)
+        return 'magnet', m
+    if got[:1] == b'd':
+        return 'torrent', got
+    raise ts.GrabError(NOT_A_TORRENT, 502)
+
+
+def fetch_link(url: Any, automatic: bool = False, tokens_only: bool = False) -> Any:
     """('torrent', bytes) or ('magnet', uri) for a Sources download link. Raises GrabError.
-    *automatic*: a grab Luma made on its own (tracker_sources.fetch_release charges it as one)."""
+    *automatic*: a grab Luma made on its own (tracker_sources.fetch_release charges it as one).
+    *tokens_only* (v165, Reviewer; the Sources popup): only a release token or one of main's Sources
+    links; a raw URL or magnet is refused (400) and never reaches safe_magnet or outbound_guard, so a
+    pasted tracker link with a passkey can't get around the tracker budget. A link on the configured
+    LAN Prowlarr is fetched with Luma's own Prowlarr client (its guard budget charged), never through
+    outbound_guard; in tokens_only mode any other http link is refused too."""
     from app import tracker_sources as ts
     u = str(url or '').strip()
     if not u:
@@ -138,18 +182,26 @@ def fetch_link(url: Any, automatic: bool = False) -> Any:
     tok = ts.release_token(u)
     if tok is not None:
         return ts.fetch_release(tok, automatic=automatic)
+    source = False
     for fn in _link_resolvers:
         is_link, real = fn(u)
         if is_link:
             if not real:
                 raise ts.GrabError(LINK_EXPIRED, 410)
-            u = real
+            u, source = real, True
             break
+    if tokens_only and not source:
+        raise ts.GrabError(RAW_LINK, 400)
     if u.lower().startswith('magnet:'):
         m = ts.safe_magnet(u)
         if not m:
             raise ts.GrabError('Link not allowed', 400)
         return 'magnet', m
+    client = _prowlarr()
+    if client is not None and client.owns(u):
+        return _via_prowlarr(client, u, automatic)
+    if tokens_only:
+        raise ts.GrabError('Link not allowed', 400)
     from app import outbound_guard
     try:
         dl = outbound_guard.fetch(u)
@@ -221,7 +273,7 @@ def _job_clear(h: str) -> None:
 
 def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_ids: List[int], origin: str,
          now: Optional[float] = None, session_factory: Callable = requests.Session,
-         fetch: Optional[Callable] = None) -> Dict[str, Any]:
+         fetch: Optional[Callable] = None, tokens_only: bool = False) -> Dict[str, Any]:
     """Send *item* (a search result: title, downloadUrl, indexerId, size, quality) to qBittorrent.
     {'ok': True, 'hash'} or {'ok': False, 'error'}. Never raises for an expected failure."""
     from app import library_mover as mover, tracker_sources
@@ -232,7 +284,7 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
         logger.info('TV grab: %s not sent (%s)', item.get('title'), OFF)
         return {'ok': False, 'error': OFF, 'blocked': True}
     try:
-        kind, payload = (fetch or (lambda u: fetch_link(u, automatic=origin == 'auto')))(item.get('downloadUrl'))
+        kind, payload = (fetch or (lambda u: fetch_link(u, automatic=origin == 'auto', tokens_only=tokens_only)))(item.get('downloadUrl'))
     except tracker_sources.GrabError as e:
         return {'ok': False, 'error': str(e), 'link': True}
     h = info_hash(kind, payload)
