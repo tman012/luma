@@ -357,9 +357,10 @@ const one: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', tex
 /** v158c: week-grid captions wrap instead of clipping: the show name up to NAME_LINES, the episode line
  * up to EP_LINES, then an ellipsis. On a phone (calendar under 600px: day columns ~55px) they stay at 2 and 1
  * lines as in v162, so a name never breaks into one letter per line; from 600px (desktop 1100/1280, whose
- * calendar is under 1000px) they wrap. v164: was 999px, which clipped episode lines at 1100 and 1280. */
-export const NAME_LINES = 5;
-export const EP_LINES = 3;
+ * calendar is under 1000px) they wrap. v164: was 999px, which clipped episode lines at 1100 and 1280; and 8/6 lines (was 5/3) so
+ * the longest fixture titles fit the ~76px day columns at 1100. */
+export const NAME_LINES = 8;
+export const EP_LINES = 6;
 /** At most 2 lines, then an ellipsis (week-grid show names). */
 const clamp2: React.CSSProperties = {
   display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere', lineHeight: '17px',

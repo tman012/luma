@@ -198,13 +198,13 @@ describe('Calendar', () => {
     expect(rows.some(r => /Downloaded|Missing|Unaired/.test(r.textContent || ''))).toBe(false);   // nothing on screen
     expect(rows[0]!.textContent).toContain('Episode 1');
     const name = within(rows[0]!).getByTestId('tv-card-show');                     // up to 2 lines, 13/600
-    expect([name.style.webkitLineClamp, name.style.display, name.style.fontSize, name.style.fontWeight]).toEqual(['5', '-webkit-box', '13px', '600']);   // v158c: wraps
+    expect([name.style.webkitLineClamp, name.style.display, name.style.fontSize, name.style.fontWeight]).toEqual(['8', '-webkit-box', '13px', '600']);   // v158c: wraps (v164: up to 8)
     expect(name.getAttribute('title')).toBe(name.textContent);                     // line 1: the show name only, full width
     const title = within(rows[0]!).getByTestId('tv-card-title');                   // line 2: SxxEyy · title, 12px, 70%, 1 line
     expect(name.nextElementSibling).toBe(title);
     expect(title.textContent).toMatch(/^S\d\dE\d\d \u00b7 /);
     expect([title.style.webkitLineClamp, title.style.display, title.style.fontSize, title.style.color])
-      .toEqual(['3', '-webkit-box', '12px', 'rgba(255, 255, 255, 0.7)']);                        // v158c: wraps, up to 3 lines
+      .toEqual(['6', '-webkit-box', '12px', 'rgba(255, 255, 255, 0.7)']);                        // v158c: wraps (v164: up to 6 lines)
     expect(title.nextElementSibling!.getAttribute('data-testid')).toBe('tv-air');   // line 3: the time
     // the top row: ‹ range › together in the true center (a 1fr auto 1fr grid), no separate toolbar
     const center = screen.getByTestId('tv-cal-center');

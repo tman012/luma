@@ -35,8 +35,8 @@ describe('TV top row', () => {
     expect(s.slice(s.indexOf('data-testid="tv-top-right"'), s.indexOf('data-testid="tv-top-right"') + 120)).not.toContain('TodayButton');
   });
 
-  it('week-grid captions wrap (name up to 5 lines, episode line up to 3), no one-line clip', () => {
-    expect([NAME_LINES, EP_LINES]).toEqual([5, 3]);
+  it('week-grid captions wrap (name up to 8 lines, episode line up to 6), no one-line clip', () => {
+    expect([NAME_LINES, EP_LINES]).toEqual([8, 6]);
     const s = src('components/library/TvCalendar.tsx');
     // only a phone-narrow calendar (under 600px) keeps 2 and 1 lines, as in v162; desktop 1100/1280 wraps
     expect(s).not.toContain('@container tvcal (max-width: 999px){.tvc-card [data-testid=tv-card-show]');
