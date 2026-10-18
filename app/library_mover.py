@@ -85,9 +85,11 @@ class Refused(Exception):
 
 class InsufficientSpace(Exception):
     """The library folder can't hold the copy (ENOSPC or the pre-check). The job
-    fails with INSUFFICIENT_SPACE and is never auto-retried on a timer: only a
-    manual Retry, or free space on that destination growing enough to fit, puts it
-    back to waiting (requeue_for_space)."""
+    fails with INSUFFICIENT_SPACE. Free space as reported is never trusted on its own
+    (Unraid's shares report pool/disk space that the target disk may not have): a
+    manual Retry puts it back, or requeue_for_space() at most ONCE, after the reported
+    free space has grown by at least the file size since the failure, no sooner than
+    SPACE_RETRY_S after it, checked no more often than every SPACE_RETRY_S."""
 
     def __init__(self, msg: str = '', path: str = '', need: int = 0):
         super().__init__(msg)
@@ -96,6 +98,7 @@ class InsufficientSpace(Exception):
 
 INSUFFICIENT_SPACE = 'insufficient space'
 SPACE_MARGIN_BYTES = 64 * 1024 * 1024
+SPACE_RETRY_S = 15 * 60          # the one automatic retry: not sooner, and checks no more often
 
 
 def free_bytes(path: str) -> int:
@@ -1083,19 +1086,38 @@ def _requeue(j: Dict[str, Any]) -> None:
         j.pop(k, None)
 
 
-def requeue_for_space() -> int:
-    """Jobs that failed for space go back to waiting once their destination has room
-    (need + SPACE_MARGIN_BYTES free). Never on a timer alone: nothing changes, nothing retries."""
+_space_check = {'at': None}
+
+
+def requeue_for_space(now: Optional[float] = None) -> int:
+    """The one automatic retry of a no-space failure: free space reported on its destination
+    has grown by >= the file size since the failure, SPACE_RETRY_S have passed since it, and the
+    job hasn't had its automatic retry yet (auto_retried survives the requeue; a second failure
+    then waits for a manual Retry). Checked no more often than every SPACE_RETRY_S."""
+    now = time.time() if now is None else now
+    last = _space_check['at']
+    if last is not None and now - last < SPACE_RETRY_S:
+        return 0
+    _space_check['at'] = now
+
     def apply(data):
         n = 0
         for j in data['jobs'].values():
             sp = j.get('space') if isinstance(j.get('space'), dict) else None
-            if j.get('state') != 'failed' or j.get('error') != INSUFFICIENT_SPACE or not sp:
+            if j.get('state') != 'failed' or j.get('error') != INSUFFICIENT_SPACE or not sp or j.get('auto_retried'):
+                continue
+            at_fail, need = sp.get('free'), int(sp.get('need') or 0)
+            if not isinstance(at_fail, (int, float)) or need <= 0:
+                continue                      # no baseline: only the Retry button
+            if now - float(j.get('finished') or 0) < SPACE_RETRY_S:
                 continue
             free = _free_or_none(str(sp.get('path') or ''))
-            if free is not None and free >= int(sp.get('need') or 0) + SPACE_MARGIN_BYTES:
+            if free is not None and free - at_fail >= need:
                 _requeue(j)
+                j['auto_retried'] = True
                 n += 1
+                logger.info('Library mover: %s back to waiting (free space grew by %d bytes; the one automatic retry)',
+                            j.get('title'), free - at_fail)
         return n
     return fm.update(apply)
 
@@ -1109,6 +1131,7 @@ def retry(h: str) -> bool:
         if not j or j.get('state') not in ('failed', 'skipped'):
             return False
         _requeue(j)
+        j.pop('auto_retried', None)           # the owner's Retry: a later no-space failure gets its one auto retry again
         return True
     return fm.update(apply)
 
@@ -1121,7 +1144,7 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
     summary = {'checked': 0, 'filed': 0, 'dropped': 0}
     data = fm.load()
     if any(j.get('state') == 'failed' and j.get('error') == INSUFFICIENT_SPACE for j in data['jobs'].values()):
-        if requeue_for_space():
+        if requeue_for_space(now):
             data = fm.load()
     if not data['paths']:
         return summary

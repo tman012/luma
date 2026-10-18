@@ -543,25 +543,78 @@ def test_disk_full_mid_copy_is_insufficient_space(env, monkeypatch):
     assert not any(n.startswith('.') for n in os.listdir(env.media / 'Movies'))   # no partial left behind
 
 
-def test_no_space_never_retries_on_a_timer_only_when_the_destination_has_room(env, monkeypatch):
+@pytest.fixture
+def space_clock(monkeypatch):
+    monkeypatch.setitem(lm._space_check, 'at', None)
+
+
+def test_no_space_never_requeues_on_reported_free_space_alone(env, monkeypatch, space_clock):
+    """Unraid is per disk: 'free' as reported doesn't mean the target disk has room. Room that
+    was already reported at the failure never requeues, however long it's been."""
+    add_path('Movies', env.media / 'Movies')
+    movie_file(env, 'Heat.1995.mkv')
+    free = {'n': lm.SPACE_MARGIN_BYTES * 100}            # plenty reported...
+    monkeypatch.setattr(lm, 'free_bytes', lambda p: free['n'])
+    lm.track(H1, TMDB, 'Heat.1995')
+    torrent(env, H1, 'Heat.1995.mkv')
+    real = lm.transfer
+
+    def full(*a, **k):                                    # ...but the disk itself is full
+        raise lm.InsufficientSpace(lm.INSUFFICIENT_SPACE, str(env.media / 'Movies'), 110)
+    monkeypatch.setattr(lm, 'transfer', full)
+    t0 = 1_000_000.0
+    env.tick(now=t0)
+    assert job(H1)['state'] == 'failed' and job(H1)['space']['free'] == free['n']
+    for k in range(1, 6):                                 # hours go by, the same free space: never retried
+        env.q.calls.clear()
+        env.tick(now=t0 + k * 3600)
+        assert job(H1)['state'] == 'failed' and env.q.calls == []
+    monkeypatch.setattr(lm, 'transfer', real)
+
+
+def test_one_auto_retry_after_free_space_grows_by_the_file_size_never_sooner_than_15_min(env, monkeypatch, space_clock):
+    add_path('Movies', env.media / 'Movies')
+    src = movie_file(env, 'Heat.1995.mkv')
+    size = src.stat().st_size
+    free = {'n': 1024}
+    monkeypatch.setattr(lm, 'free_bytes', lambda p: free['n'])
+    lm.track(H1, TMDB, 'Heat.1995')
+    torrent(env, H1, 'Heat.1995.mkv')
+    t0 = 1_000_000.0
+    env.tick(now=t0)
+    assert job(H1)['state'] == 'failed' and job(H1)['space']['free'] == 1024
+    free['n'] = 1024 + size - 1                            # grew, but by less than the file
+    env.tick(now=t0 + lm.SPACE_RETRY_S + 1)
+    assert job(H1)['state'] == 'failed'
+    free['n'] = 1024 + size                                # grew by the file size...
+    env.tick(now=t0 + lm.SPACE_RETRY_S + 60)               # ...but the last check was < 15 min ago
+    assert job(H1)['state'] == 'failed'
+    # it fails again (the margin isn't there): its one automatic retry is spent
+    env.tick(now=t0 + 2 * lm.SPACE_RETRY_S + 2)
+    j = job(H1)
+    assert j['state'] == 'failed' and j['auto_retried'] is True
+    free['n'] = lm.SPACE_MARGIN_BYTES * 1000               # however much more room is reported now
+    for k in range(3, 8):
+        env.tick(now=t0 + k * lm.SPACE_RETRY_S + 5)
+        assert job(H1)['state'] == 'failed'                # only the Retry button now
+    assert lm.retry(H1) is True and 'auto_retried' not in job(H1)
+    assert env.tick(now=t0 + 9 * lm.SPACE_RETRY_S)['filed'] == 1
+    assert job(H1)['state'] == 'done' and 'space' not in job(H1)
+
+
+def test_the_auto_retry_waits_15_min_after_the_failure(env, monkeypatch, space_clock):
     add_path('Movies', env.media / 'Movies')
     src = movie_file(env, 'Heat.1995.mkv')
     free = {'n': 1024}
     monkeypatch.setattr(lm, 'free_bytes', lambda p: free['n'])
     lm.track(H1, TMDB, 'Heat.1995')
     torrent(env, H1, 'Heat.1995.mkv')
-    env.tick()
-    assert job(H1)['state'] == 'failed'
-    for _ in range(3):                                       # passes go by, space unchanged: still failed, nothing asked
-        env.q.calls.clear()
-        env.tick()
-        assert job(H1)['state'] == 'failed' and env.q.calls == []
-    free['n'] = lm.SPACE_MARGIN_BYTES + src.stat().st_size - 1      # grew, but not enough
-    env.tick()
-    assert job(H1)['state'] == 'failed'
-    free['n'] = lm.SPACE_MARGIN_BYTES + src.stat().st_size + 1      # now it fits: back to waiting and filed
-    assert env.tick()['filed'] == 1
-    assert job(H1)['state'] == 'done' and 'space' not in job(H1)
+    t0 = 1_000_000.0
+    env.tick(now=t0)
+    free['n'] = lm.SPACE_MARGIN_BYTES * 10 + src.stat().st_size
+    env.tick(now=t0 + 60)
+    assert job(H1)['state'] == 'failed'                    # too soon after the failure
+    assert env.tick(now=t0 + lm.SPACE_RETRY_S + 120)['filed'] == 1
 
 
 def test_manual_retry_puts_a_failed_job_back_to_waiting(env, monkeypatch):

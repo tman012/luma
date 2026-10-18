@@ -116,8 +116,10 @@ class _RedactSecretsFilter(logging.Filter):
 for _h in logging.getLogger().handlers:
     _h.addFilter(_RedactSecretsFilter())
 
-# Persist logs under /app/data/logs (10 MB x 5) as well as stdout; never fatal.
+# Persist logs under /app/data/logs (10 MB x 5, 0600, old files scrubbed) as well as stdout; never fatal.
+# Every handler redacts the whole formatted record, traceback included.
 from app import log_files as _log_files  # noqa: E402
+_log_files.redact_handlers()
 _log_files.attach(filters=[_RedactSecretsFilter()])
 
 # Flask app setup
