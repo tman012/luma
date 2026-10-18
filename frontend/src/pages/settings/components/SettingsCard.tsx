@@ -29,6 +29,10 @@ interface SettingsCardProps {
   /** v175 (Designer): the card's on/off path when its only toggle would repeat the title: the switch
    * sits right-aligned in the header (after headerRight), named by the title. */
   headerToggle?: string;
+  /** v176 (Designer): a second action (e.g. Run now). Shown only on a phone (under 600px), where the card
+   * puts it in the footer: one row of two equal-width glass buttons (headerRight, then this), with Reset
+   * and Save right-aligned on the row below. On desktop the card renders it where it always did. */
+  phoneFooterAction?: ReactNode;
   /** Footer note */
   note?: string;
   children: ReactNode;
@@ -45,6 +49,7 @@ export function SettingsCard({
   testLabel,
   headerRight,
   headerToggle,
+  phoneFooterAction,
   note,
   children,
   className,
@@ -67,6 +72,7 @@ export function SettingsCard({
 
   void subtitle; void note;            // v174 (Designer): no helper text
   const phone = useMediaQuery(PHONE_CARD_QUERY);
+  const twoActions = phone && !!headerRight && !!phoneFooterAction;
   // v175 (Designer): on a phone the action sits left of Reset and Save, or full width above them when
   // the row can't hold all three (its natural width is remembered while it isn't stretched).
   const actionsRef = useRef<HTMLDivElement>(null);
@@ -74,7 +80,7 @@ export function SettingsCard({
   const natural = useRef(0);
   const [actionFull, setActionFull] = useState(false);
   useLayoutEffect(() => {
-    if (!phone || !headerRight) return;
+    if (!phone || !headerRight || twoActions) return;
     const row = actionsRef.current;
     const act = actionRef.current;
     if (!row || !act) return;
@@ -90,7 +96,7 @@ export function SettingsCard({
     const ro = new ResizeObserver(measure);
     ro.observe(row);
     return () => ro.disconnect();
-  }, [phone, headerRight]);
+  }, [phone, headerRight, twoActions]);
   return (
     <div
       data-testid="settings-card"
@@ -121,11 +127,18 @@ export function SettingsCard({
       </div>
 
       {/* Actions: right-aligned at the end of the content, not pinned */}
-      <div ref={actionsRef} className="mt-5 flex flex-wrap items-center justify-end gap-2.5" data-testid="settings-card-actions">
+      {twoActions && (
+        <div className="mt-5 grid grid-cols-2 gap-2.5 [&>div>button]:w-full" data-testid="settings-card-footer-actions">
+          <div>{headerRight}</div>
+          <div>{phoneFooterAction}</div>
+        </div>
+      )}
+      <div ref={actionsRef} className={cn(twoActions ? 'mt-2.5' : 'mt-5', 'flex flex-wrap items-center justify-end gap-2.5')}
+        data-testid="settings-card-actions">
         {(testService || onTest) && (
           <div className="mr-auto"><TestButton label={testLabel} onTest={handleTest} /></div>
         )}
-        {phone && headerRight && (
+        {phone && headerRight && !twoActions && (
           <div ref={actionRef} data-testid="settings-card-footer-action"
             className={cn('mr-auto', actionFull && 'basis-full [&>button]:w-full')}>
             {headerRight}

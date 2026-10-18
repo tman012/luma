@@ -82,6 +82,10 @@ def test_minimal_tag_follows_the_environment(env, monkeypatch):
     assert _grab(_client(env.app)).status_code == 403
     assert env.added == []
     monkeypatch.setenv('LUMA_TEST_ALLOW', 'movie_grab')
+    # v176 (PM): opt-ins count only when LUMA_INSTANCE is exactly 'test'; an assumed test instance ignores them
+    assert _grab(_client(env.app)).status_code == 403
+    assert env.added == []
+    monkeypatch.setenv('LUMA_INSTANCE', 'test')
     assert _grab(_client(env.app)).status_code == 200
     assert env.added[0]['tags'] == 'qa-box' and env.added[0]['category'] == 'qa-box'
 

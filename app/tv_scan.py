@@ -876,13 +876,50 @@ def forget_mount(pid: str) -> None:
         logger.warning('TV scan: mount record of %s not cleared (%s)', pid, type(e).__name__)
 
 
-def rebaseline(pid: str) -> None:
+def _path_of(pid: str) -> Optional[str]:
+    try:
+        from app import file_management as fm
+        rec = next((p for p in fm.load().get('paths', []) if p.get('id') == pid), None)
+        return rec.get('path') if rec else None
+    except Exception:                        # noqa: BLE001 - unknown path: no folder to check
+        return None
+
+
+def rebaseline(pid: str) -> bool:
     """v175 (PM): the owner saved library path *pid* again with the same folder. Its recorded mount,
     device id and coverage streak are cleared and its rows marked as not yet seen in this folder, so the
     next scan takes the folders there now as the baseline: the coverage and mount guards don't hold it
     (an empty folder still does), shows that are gone detach (history kept), new ones are found, and the
-    mount and device are recorded again. Logged at INFO."""
+    mount and device are recorded again. Logged at INFO.
+
+    v176 (Reviewer, REQUIRED): the edit form always sends the path, so Save on an Unavailable path came
+    here too and cleared the records of a mount that is DOWN, letting the next scan take a stray folder on
+    the bare mount point as the library. Now, when the recorded mount is down (_mount_down, which includes
+    _dropped_mount), the records are kept and nothing is re-baselined: the save itself still succeeds and
+    the path stays Unavailable until it really remounts. PM refinement: it also needs real show folders
+    there at save time (an empty or bare mount point keeps the guard). Returns True if it re-baselined."""
     try:
+        path = _path_of(pid)
+        root_real = os.path.realpath(path) if path else None
+        # v176 (PM): only when the path passes the mount-up check at save time (a live mount or the
+        # expected device) AND real show folders are there. A down mount or a bare mount point keeps
+        # the guard: nothing is cleared and the path stays Unavailable.
+        why = None
+        if not root_real or not os.path.isdir(root_real):
+            why = 'its folder is missing'
+        elif _dropped_mount(pid, root_real) or _mount_down(pid, root_real):
+            why = 'its recorded mount is down'
+        else:
+            try:
+                shows = [f for f in show_folders(root_real) if not _system_dir(f)]
+            except OSError:
+                shows = []
+            if not shows:
+                why = 'it has no show folders (a bare mount point?)'
+        if why:
+            logger.info('TV library path %s saved again with the same folder but %s: mount and device records '
+                        'kept, no new baseline; it stays Unavailable until it really remounts', pid, why)
+            return False
         tv_store.set_meta(MOUNT_META + pid, None)
         tv_store.set_meta(DEV_META + pid, None)
         tv_store.set_meta(COVERAGE_META + pid, None)
@@ -890,8 +927,10 @@ def rebaseline(pid: str) -> None:
         _empty_logged.pop(pid, None)
         logger.info('TV library path %s saved again with the same folder: recorded mount, device id and '
                     'coverage streak cleared; the next scan takes its current folders as the baseline', pid)
+        return True
     except Exception as e:                   # noqa: BLE001 - only a signal
         logger.warning('TV scan: library path %s not re-baselined (%s)', pid, type(e).__name__)
+        return False
 
 
 def skipped(pid: str) -> bool:

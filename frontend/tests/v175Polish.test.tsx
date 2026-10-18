@@ -158,7 +158,7 @@ describe('v175 phone card headers (Designer, under 600px)', () => {
     ['Movie night', () => <MovieNightCard />, 'Preview pick'],
     ['Genre roulette', () => <GenreRouletteCard />, 'Preview spin'],
     ['Franchise completer', () => <FranchiseCompleterCard />, 'Preview gaps'],
-  ] as const)('%s: title left, switch right, no icon; the action sits in the footer left of Reset and Save', async (title, el, action) => {
+  ] as const)('%s: title left, switch right, no icon; the action sits in the footer above Reset and Save', async (title, el, action) => {
     stub('ok'); media(true);
     wrap(el());
     const header = await screen.findByTestId('settings-card-header');
@@ -167,10 +167,12 @@ describe('v175 phone card headers (Designer, under 600px)', () => {
     expect(header.textContent).toBe(title);                                // just the title (and the switch)
     const sw = within(header).getByRole('switch', { name: title });
     expect(within(header).getByRole('heading', { name: title }).compareDocumentPosition(sw) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // v176: these cards have two actions, so the action and Run now share a row above Reset and Save
+    const row = screen.getByTestId('settings-card-footer-actions');
+    expect(within(row).getAllByRole('button').map(b => b.textContent)).toEqual([action, 'Run now']);
+    expect(within(row).getByRole('button', { name: action }).className).toContain('bg-white/[0.08]');   // glass secondary
     const footer = screen.getByTestId('settings-card-actions');
-    const btns = within(footer).getAllByRole('button').map(b => b.textContent);
-    expect(btns).toEqual([action, 'Reset', 'Save']);
-    expect(within(footer).getByRole('button', { name: action }).className).toContain('bg-white/[0.08]');   // glass secondary
+    expect(within(footer).getAllByRole('button').map(b => b.textContent)).toEqual(['Reset', 'Save']);
   });
 
   it('desktop is unchanged: icon and action in the header', async () => {

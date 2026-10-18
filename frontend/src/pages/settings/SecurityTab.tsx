@@ -9,6 +9,7 @@ import { cn } from '@/utils/cn';
 import { apiFetch } from '../../apiClient';
 import { INPUT_CLASS, PRIMARY_BTN, SECONDARY_BTN } from './components/legacyTokens';
 import { couldntLoad } from '@/utils/messages';
+import { fetchRadarrProfiles, fetchSonarrProfiles, type QualityProfile } from '@/services/settingsApi';
 import {
   describeRequest, recentRequests, requestLink, requestTime, type RequestLogEntry,
 } from './requestPortalLog';
@@ -27,6 +28,33 @@ interface SecurityState {
 
 const digits = (v: string) => v.replace(/\D/g, '').slice(0, 4);
 
+/** Profile names from Radarr or Sonarr; [] when it's unreachable or answers something unexpected. */
+async function loadProfileNames(fetcher: () => Promise<QualityProfile[]>): Promise<string[]> {
+  try {
+    const list = await fetcher();
+    if (!Array.isArray(list)) return [];
+    return [...new Set(list.map(p => (p && typeof p.name === 'string' ? p.name : '')).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
+/** A quality profile picked by name. The saved value stays selectable when Radarr/Sonarr doesn't list it
+ * (or can't be reached); '' is the app's default. */
+export function ProfileSelect({ value, profiles, onChange, label }: {
+  value: string; profiles: string[] | null; onChange: (v: string) => void; label: string;
+}) {
+  const names = profiles ?? [];
+  const options = value && !names.includes(value) ? [value, ...names] : names;
+  return (
+    <select aria-label={label} value={value} onChange={e => onChange(e.target.value)}
+      className={cn(INPUT_CLASS, 'cursor-pointer')}>
+      <option value="" className="bg-kiosk-black text-white">Default</option>
+      {options.map(n => <option key={n} value={n} className="bg-kiosk-black text-white">{n}</option>)}
+    </select>
+  );
+}
+
 function RequestPortalCard() {
   const [enabled, setEnabled] = useState(false);
   const [password, setPassword] = useState('');
@@ -35,6 +63,9 @@ function RequestPortalCard() {
   const [movieProfile, setMovieProfile] = useState('');
   const [tvProfile, setTvProfile] = useState('');
   const [excludeLibraries, setExcludeLibraries] = useState('');
+  // v176 (Designer): the profiles come from Radarr and Sonarr (names, as saved); null while unknown
+  const [radarrProfiles, setRadarrProfiles] = useState<string[] | null>(null);
+  const [sonarrProfiles, setSonarrProfiles] = useState<string[] | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -55,6 +86,8 @@ function RequestPortalCard() {
         setExcludeLibraries(libs.join(', '));
       })
       .catch(() => {});
+    loadProfileNames(fetchRadarrProfiles).then(setRadarrProfiles);
+    loadProfileNames(fetchSonarrProfiles).then(setSonarrProfiles);
     apiFetch('/api/request/admin/log')
       .then(r => (r.ok ? r.json() : []))
       .then(data => setLog(recentRequests(data)))
@@ -156,8 +189,7 @@ function RequestPortalCard() {
                 type="password"
                 value={password}
                 onChange={e => { setPassword(e.target.value); setDirty(true); }}
-                placeholder="Leave blank to keep current"
-                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+                className={INPUT_CLASS}
               />
             </label>
             <label className="space-y-1.5">
@@ -166,8 +198,7 @@ function RequestPortalCard() {
                 type="password"
                 value={confirmPassword}
                 onChange={e => { setConfirmPassword(e.target.value); setDirty(true); }}
-                placeholder="Confirm new password"
-                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+                className={INPUT_CLASS}
               />
             </label>
             <label className="space-y-1.5">
@@ -178,30 +209,18 @@ function RequestPortalCard() {
                 onChange={e => { setHostname(e.target.value); setDirty(true); }}
                 placeholder="requests.example.com"
                 spellCheck={false}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+                className={INPUT_CLASS}
               />
             </label>
             <label className="space-y-1.5">
               <span className="block text-[13px] font-medium text-white/70">Movie profile</span>
-              <input
-                type="text"
-                value={movieProfile}
-                onChange={e => { setMovieProfile(e.target.value); setDirty(true); }}
-                placeholder="Radarr quality profile name"
-                spellCheck={false}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
-              />
+              <ProfileSelect value={movieProfile} profiles={radarrProfiles} label="Movie profile"
+                onChange={v => { setMovieProfile(v); setDirty(true); }} />
             </label>
             <label className="space-y-1.5">
               <span className="block text-[13px] font-medium text-white/70">TV profile</span>
-              <input
-                type="text"
-                value={tvProfile}
-                onChange={e => { setTvProfile(e.target.value); setDirty(true); }}
-                placeholder="Sonarr quality profile name"
-                spellCheck={false}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
-              />
+              <ProfileSelect value={tvProfile} profiles={sonarrProfiles} label="TV profile"
+                onChange={v => { setTvProfile(v); setDirty(true); }} />
             </label>
             <label className="space-y-1.5">
               <span className="block text-[13px] font-medium text-white/70">Exclude libraries</span>
@@ -209,9 +228,8 @@ function RequestPortalCard() {
                 type="text"
                 value={excludeLibraries}
                 onChange={e => { setExcludeLibraries(e.target.value); setDirty(true); }}
-                placeholder="Library names, comma separated"
                 spellCheck={false}
-                className="w-full rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2 text-[14px] text-white outline-none focus:border-white/30"
+                className={INPUT_CLASS}
               />
             </label>
           </div>
@@ -284,7 +302,10 @@ export function SecurityTab() {
 
   if (!state) {
     return (
-      <div className="space-y-5 p-4 md:p-6">
+      <div className="space-y-6" data-testid="security-tab">
+      <div className="settings-tab-header">
+        <h2 className="text-xl font-semibold text-white/90">Security</h2>
+      </div>
         <RequestPortalCard />
         {loadFailed && (
           <section data-testid="security-load-error" className="rounded-[16px] border border-white/[0.08] bg-white/[0.06] p-5">
@@ -327,7 +348,10 @@ export function SecurityTab() {
   };
 
   return (
-    <div className="space-y-5 p-4 md:p-6">
+    <div className="space-y-6" data-testid="security-tab">
+      <div className="settings-tab-header">
+        <h2 className="text-xl font-semibold text-white/90">Security</h2>
+      </div>
       <RequestPortalCard />
       
       <section className="rounded-[16px] border border-white/[0.08] bg-white/[0.06] p-5 space-y-5">

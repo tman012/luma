@@ -112,12 +112,12 @@ def test_empty_is_unknown_and_fails_closed_with_an_error(monkeypatch, tmp_path, 
     if sign:
         _sign(sign, monkeypatch, tmp_path, prod_shape)
     assert instance.is_test() and instance.unrecognized() and not instance.assumed_test()
-    if sign != 'LUMA_TEST_ALLOW':
-        assert _all_off()
+    assert _all_off()                                   # v176: LUMA_TEST_ALLOW is ignored here too
     with caplog.at_level(logging.INFO, logger='app.instance'):
         instance.log_blocked_once()
     errs = _errors(caplog)
     assert len(errs) == 1 and "LUMA_INSTANCE=''" in errs[0].getMessage()
+    assert 'LUMA_TEST_ALLOW opt-ins are ignored' in errs[0].getMessage()
 
 
 def _boot(tmp_path, data, env_extra):
@@ -146,3 +146,59 @@ def test_a_real_boot_of_prod_on_5002_is_all_off_with_one_error(tmp_path, prod_sh
     assert set(blocked) == set(instance.GATED)
     lines = [ln for ln in text.splitlines() if 'LUMA_INSTANCE=prod but this host looks like the TEST install' in ln]
     assert len(lines) == 1 and ' - ERROR - ' in lines[0] and 'port 5002' in lines[0]
+
+
+
+# ------------------------------------------------------------------ v176 (PM): opt-ins only on exactly 'test'
+
+ALL_JOBS = ','.join(sorted(instance.GATED))
+
+
+@pytest.mark.parametrize('value', ['', 'Test', 'TEST', ' test', 'test ', 'tset', 'Test-2', 'staging', '   '])
+def test_unknown_or_empty_ignores_every_opt_in(monkeypatch, caplog, value):
+    monkeypatch.setenv('LUMA_INSTANCE', value)
+    monkeypatch.setenv('LUMA_TEST_ALLOW', ALL_JOBS)
+    assert instance.is_test() and instance.allowed() == frozenset() and _all_off()
+    assert instance.install_write_guard() is True
+    with caplog.at_level(logging.INFO, logger='app.instance'):
+        instance.log_blocked_once()
+    errs = _errors(caplog)
+    assert len(errs) == 1 and 'LUMA_TEST_ALLOW opt-ins are ignored' in errs[0].getMessage()
+    assert not any('opt in with' in r.getMessage() for r in caplog.records)
+
+
+def test_exactly_test_still_honors_opt_ins(monkeypatch, caplog):
+    monkeypatch.setenv('LUMA_INSTANCE', 'test')
+    monkeypatch.setenv('LUMA_TEST_ALLOW', 'tv_grab, qbit')
+    assert instance.is_test() and instance.allowed() == {'tv_grab', 'qbit'}
+    assert instance.writes_allowed('tv_grab') and instance.writes_allowed('qbit')
+    assert not instance.writes_allowed('downloads_guard') and not instance.writes_allowed('arr')
+    with caplog.at_level(logging.INFO, logger='app.instance'):
+        instance.log_blocked_once()
+    assert _errors(caplog) == []
+    hints = [r.getMessage() for r in caplog.records if 'opt in with LUMA_TEST_ALLOW=' in r.getMessage()]
+    assert len(hints) == len(instance.GATED) - 2
+
+
+def test_unset_keeps_detection_but_ignores_opt_ins(monkeypatch, caplog):
+    monkeypatch.setenv('LUMA_TEST_ALLOW', ALL_JOBS)            # itself a test sign
+    assert instance.is_test() and instance.assumed_test() and _all_off()
+    with caplog.at_level(logging.INFO, logger='app.instance'):
+        instance.log_blocked_once()
+    warn = [r for r in caplog.records if r.levelno == logging.WARNING and 'looks like the TEST install' in r.getMessage()]
+    assert len(warn) == 1 and 'LUMA_TEST_ALLOW opt-ins are ignored' in warn[0].getMessage()
+
+
+def test_mover_and_tv_link_stay_on_for_test(monkeypatch):
+    for v in ('test', '', 'bogus'):
+        monkeypatch.setenv('LUMA_INSTANCE', v)
+        for j in instance.TEST_DEFAULT_ALLOWED:
+            assert instance.writes_allowed(j)
+
+
+def test_a_real_boot_with_an_unknown_value_and_opt_ins_is_all_off(tmp_path, prod_shape):
+    for value in ('', 'Test'):
+        text, blocked = _boot(tmp_path, prod_shape, {'PORT': '5001', 'LUMA_INSTANCE': value, 'LUMA_TEST_ALLOW': ALL_JOBS})
+        assert set(blocked) == set(instance.GATED), value
+        errs = [ln for ln in text.splitlines() if ' - ERROR - ' in ln and 'LUMA_INSTANCE=' in ln]
+        assert len(errs) == 1 and 'opt-ins are ignored' in errs[0]

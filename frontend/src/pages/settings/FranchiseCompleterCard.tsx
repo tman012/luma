@@ -10,6 +10,7 @@ import { SECONDARY_BTN } from './components/legacyTokens';
 import { RealRunConfirm } from './components/RealRunConfirm';
 import { useState, useEffect, useCallback } from 'react';
 import { SettingsCard } from './components/SettingsCard';
+import { PHONE_CARD_QUERY, useMediaQuery } from './components/useMediaQuery';
 import { FormField } from './components/FormField';
 import { useSettings } from './useSettings';
 import {
@@ -167,9 +168,19 @@ export function FranchiseCompleterCard() {
     return 'Run started. Result appears below.';
   });
 
+  // v176 (Designer): on a phone, Run now joins the preview in the footer (two equal-width buttons).
+  const phone = useMediaQuery(PHONE_CARD_QUERY);
+  const runNowButton = (
+    <button type="button" onClick={() => setConfirmRun(true)} disabled={busy !== null || running}
+      className={SECONDARY_BTN}>
+      {running ? 'Running…' : 'Run now'}
+    </button>
+  );
+
   return (
     <SettingsCard
       title="Franchise completer"
+      phoneFooterAction={runNowButton}
       paths={ALL_PATHS}
       headerToggle="automation.franchise_completer.enabled"
       icon={
@@ -285,16 +296,11 @@ export function FranchiseCompleterCard() {
         </div>
       )}
 
-      <div className="col-span-full flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setConfirmRun(true)}
-          disabled={busy !== null || running}
-          className={SECONDARY_BTN}
-        >
-          {running ? 'Running…' : 'Run now'}
-        </button>
-      </div>
+      {!phone && (
+        <div className="col-span-full flex flex-wrap items-center gap-2">
+          {runNowButton}
+        </div>
+      )}
       <RealRunConfirm open={confirmRun} onCancel={cancelRun} onRun={() => { setConfirmRun(false); handleRunNow(); }} />
     </SettingsCard>
   );

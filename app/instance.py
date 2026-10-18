@@ -30,6 +30,8 @@ v174 (PM, Tester FF-10): exactly 'prod' or 'test' behave as before; any other no
 v175 (PM, Tester BLOCKER): LUMA_INSTANCE=prod on a host that shows any test sign fails closed: every
 gated job OFF (LUMA_TEST_ALLOW is ignored: no override) and one ERROR at boot naming the signs.
 LUMA_INSTANCE set but empty is unknown: fails closed as test with an ERROR. Unset keeps the detection.
+v176 (PM): LUMA_TEST_ALLOW opt-ins work only when LUMA_INSTANCE is exactly 'test'; unset, '', unknown
+values (and prod on a test-like host) ignore every opt-in, and the boot ERROR says so.
 """
 from __future__ import annotations
 
@@ -150,12 +152,25 @@ def is_test() -> bool:
     return name() == 'test'
 
 
-def allowed() -> FrozenSet[str]:
+def requested() -> FrozenSet[str]:
+    """The jobs LUMA_TEST_ALLOW names, honored or not."""
     return frozenset(x.strip().casefold() for x in (os.environ.get(ALLOW_ENV) or '').split(',') if x.strip())
 
 
+def opt_ins_honored() -> bool:
+    """v176 (PM): LUMA_TEST_ALLOW opt-ins work only when LUMA_INSTANCE is exactly 'test'. Unset (even when
+    detected as test), '', unknown values and prod on a test-like host ignore every opt-in."""
+    return _raw() == 'test'
+
+
+def allowed() -> FrozenSet[str]:
+    """The honored opt-ins (empty unless LUMA_INSTANCE is exactly 'test')."""
+    return requested() if opt_ins_honored() else frozenset()
+
+
 def writes_allowed(job: str) -> bool:
-    """True on prod; on test only for the mover/TV link or a job named in LUMA_TEST_ALLOW."""
+    """True on prod; on test only for the mover/TV link or, with LUMA_INSTANCE exactly 'test', a job named in
+    LUMA_TEST_ALLOW (v176)."""
     if not is_test():
         return True
     if job.casefold() in GATED and prod_conflict():
@@ -187,16 +202,18 @@ def log_blocked_once() -> None:
                      'every guarded job is OFF (no override). !!!', ', '.join(conflict))
     elif unrecognized():
         logger.error('!!! LUMA_INSTANCE=%r is not recognized (only exactly \'prod\' or \'test\'): treating it as test; '
-                       'grabs, deletes and every other gated write are OFF. !!!', _raw()[:40])
+                     'grabs, deletes and every other gated write are OFF, and %s opt-ins are ignored. !!!',
+                     _raw()[:40], ALLOW_ENV)
     if assumed_test():
         logger.warning('!!! LUMA_INSTANCE is not set but this looks like the TEST install (%s): treating it as test; '
-                       'grabs, deletes and every other gated write are OFF. Set LUMA_INSTANCE=test (or =prod if this '
-                       'really is production). !!!', ', '.join(test_signs()))
+                       'grabs, deletes and every other gated write are OFF%s. Set LUMA_INSTANCE=test (or =prod if this '
+                       'really is production). !!!', ', '.join(test_signs()),
+                       f' and {ALLOW_ENV} opt-ins are ignored' if requested() else '')
     for j, d in blocked_jobs().items():
-        if conflict:                                     # v175: no override, so no opt-in hint
-            logger.info('Instance test: %s is OFF (%s)', j, d)
-        else:
+        if opt_ins_honored():
             logger.info('Instance test: %s is OFF (%s); opt in with %s=%s', j, d, ALLOW_ENV, j)
+        else:                                            # v176: no opt-in works here, so no hint
+            logger.info('Instance test: %s is OFF (%s)', j, d)
 
 
 # ----------------------------------------------------------------- the write-call gate
