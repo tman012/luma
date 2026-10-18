@@ -396,6 +396,16 @@ def _guard():
 
 
 _fm.on_path_removed(lambda pid: _drop_library(pid))
+
+
+def _repointed(pid: str) -> None:
+    from app import tv_scan
+    n = tv_scan.detach_path(pid)
+    if n:
+        logger.info('Library path %s repointed: %d TV shows hidden until a scan finds them (history kept)', pid, n)
+
+
+_fm.on_path_repointed(_repointed)
 library_selection.claim('tv', lambda: selected_ids(migrate_first=False))   # never Movie destinations
 
 

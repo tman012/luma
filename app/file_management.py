@@ -340,6 +340,24 @@ def _path_removed(pid: str) -> None:
             logger.warning('A section did not drop a removed library path: %s', type(e).__name__)
 
 
+_repointed_hooks: List[Callable[[str], None]] = []
+
+
+def on_path_repointed(fn: Callable[[str], None]) -> None:
+    """Call *fn(path_id)* after a Library path is pointed at another folder
+    (TV hides what it found in the old one, keeping its history)."""
+    if fn not in _repointed_hooks:
+        _repointed_hooks.append(fn)
+
+
+def _path_repointed(pid: str) -> None:
+    for fn in list(_repointed_hooks):
+        try:
+            fn(pid)
+        except Exception as e:
+            logger.warning('A section did not follow a repointed library path: %s', type(e).__name__)
+
+
 def check_library_path(raw: Any, others: List[Dict[str, Any]], probe: bool = True) -> Tuple[Optional[str], Optional[str]]:
     """(path to store, None) or (None, error) for a library folder. *others*
     are this store's other paths (TV selects from these, it has none of its own).
@@ -803,9 +821,12 @@ def library_paths_edit(pid):
                 errors['path'] = e
         if errors:
             return _no_store(jsonify({'errors': errors}), 400)
+        moved = os.path.realpath(path) != os.path.realpath(rec['path'])
         rec.update(name=name, path=path)
         save(data)
-        return _no_store(jsonify(view(data)))
+    if moved:
+        _path_repointed(pid)
+    return _no_store(jsonify(view(data)))
 
 
 @bp.route('/api/settings/library-paths/<pid>', methods=['DELETE'])

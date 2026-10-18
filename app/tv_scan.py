@@ -347,6 +347,19 @@ def detach(conn, sid: int, now: float, reason: str) -> None:
                                                           'from_path_id': row['path_id']})))
 
 
+def detach_path(path_id: str, now: Optional[float] = None) -> int:
+    """A Library path now points at another folder: its shows are hidden with
+    their history kept (detach), its unmatched rows go. The next scan matches
+    the new folder's shows, taking back any it already knew."""
+    now = time.time() if now is None else now
+    with tv_store.write() as conn:
+        ids = [r['id'] for r in conn.execute('SELECT id FROM series WHERE path_id = ?', (path_id,))]
+        for sid in ids:
+            detach(conn, sid, now, 'repointed')
+        conn.execute('DELETE FROM unmatched WHERE path_id = ?', (path_id,))
+    return len(ids)
+
+
 def _manual_here(conn, owner) -> bool:
     """The owner put this show in its current folder by hand (Match or Wrong
     show?): scans leave it there."""
@@ -440,9 +453,9 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
         known = {r['folder']: dict(r) for r in conn.execute('SELECT id, folder, tmdb_id, tmdb_refreshed_at FROM series'
                                                               ' WHERE path_id = ?', (pid,))}
         unmatched = {r['folder'] for r in conn.execute('SELECT folder FROM unmatched WHERE path_id = ?', (pid,))}
-    with tv_store.write() as conn:            # folders that are gone: rows only
+    with tv_store.write() as conn:            # folders that are gone: rows only, history kept
         for f in set(known) - set(folders):
-            conn.execute('DELETE FROM series WHERE path_id = ? AND folder = ?', (pid, f))
+            detach(conn, known[f]['id'], now, 'folder gone')
         for f in unmatched - set(folders):
             conn.execute('DELETE FROM unmatched WHERE path_id = ? AND folder = ?', (pid, f))
     demoted, done = set(), set()
