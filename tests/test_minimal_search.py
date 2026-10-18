@@ -58,7 +58,14 @@ def no_tmdb_network(monkeypatch):
         calls.append(url)
         return R()
     monkeypatch.setattr('app.connectors.requests.get', fake_get)
-    return calls
+    import threading
+    before = set(threading.enumerate())
+    yield calls
+    # A key save warms TMDB titles on a thread; let it finish against the fake, not
+    # in the next test (it showed up there as TMDB calls under load).
+    for t in set(threading.enumerate()) - before:
+        if '_refresh_tmdb_titles' in t.name:
+            t.join(timeout=10)
 
 
 # ------------------------------------------------------------------ allowlist
