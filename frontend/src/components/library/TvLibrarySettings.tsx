@@ -149,7 +149,7 @@ function ShowRow({ s, first, open, onOpen }: { s: Show; first: boolean; open: bo
         <span role="img" aria-label="Needs review" data-testid="tv-review-dot"
           style={{ width: 8, height: 8, borderRadius: 4, background: T.warning, flex: 'none' }} />
       )}
-      <span data-testid="tv-show-subtitle" style={{ minWidth: 0 }}>
+      <span data-testid="tv-show-subtitle" style={{ minWidth: 0, whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
         {showSubtitle(s)}
       </span>
       {review && lines.length > 0 && (
@@ -159,7 +159,11 @@ function ShowRow({ s, first, open, onOpen }: { s: Show; first: boolean; open: bo
       )}
     </>
   );
-  const subStyle: React.CSSProperties = { ...subText(true), display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 };
+  // Wraps at 390 instead of clipping (Tester M23); the dot and chevron stay beside it.
+  const subStyle: React.CSSProperties = {
+    ...subText(true), display: 'flex', alignItems: 'center', gap: 6, minWidth: 0,
+    whiteSpace: 'normal', overflow: 'visible', textOverflow: 'clip',
+  };
   return (
     <div style={first ? undefined : topBorder}>
       <div data-testid="tv-show" style={{ ...rowBtn, cursor: 'default' }}>

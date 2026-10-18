@@ -203,7 +203,12 @@ describe('needs review, in words (Tester tv1-8646479 M7/M8)', () => {
     const toggle = within(rows[0]!).getByTestId('tv-review-toggle');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByTestId('tv-review-list')).toBeNull();
-    expect(within(rows[0]!).getByTestId('tv-show-subtitle').style.whiteSpace).toBe('');   // wraps on phones, never clipped
+    // M23: wraps on phones, never clipped (neither the text nor the row it sits in)
+    const sub = within(rows[0]!).getByTestId('tv-show-subtitle');
+    expect(sub.style.whiteSpace).toBe('normal');
+    expect([toggle.style.whiteSpace, toggle.style.overflow, toggle.style.textOverflow]).toEqual(['normal', 'visible', 'clip']);
+    const plain = within(rows[1]!).getByTestId('tv-show-subtitle').parentElement!;
+    expect([plain.style.whiteSpace, plain.style.overflow]).toEqual(['normal', 'visible']);
     fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     const items = Array.from(screen.getByTestId('tv-review-list').querySelectorAll('li')).map(li => li.textContent);
