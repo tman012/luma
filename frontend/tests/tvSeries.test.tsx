@@ -58,7 +58,7 @@ describe('Series grid', () => {
     expect(w.className).toContain('tvs-rail-btn');
     expect(document.head.textContent + document.body.innerHTML).toContain('.tvs-rail-btn[aria-disabled=false]:hover');
     expect(rail.getAttribute('data-pin')).toBe('top');                              // pinned (fixed) only once scrolled past
-    // captions: 13/600, normal tracking, 17px lines, 2 lines max (one step to 12/16, then the ellipsis)
+    // captions: 13/600, normal tracking, 17px lines, 2 lines (then 12/16, then every line it needs: v168)
     const name = within(tiles[2]!).getByTestId('tv-series-name');
     expect([name.style.fontSize, name.style.fontWeight, name.style.letterSpacing, name.style.lineHeight, name.style.webkitLineClamp, name.style.display])
       .toEqual(['13px', '600', 'normal', '17px', '2', '-webkit-box']);
@@ -128,33 +128,39 @@ describe('Series rail pin', () => {
 
 
 describe('caption fit', () => {
-  it('13/17; then 12/16 on 2 lines, then 3, then 4 lines at 12/16 (PM: never below 12px, at most 4 lines); only then the ellipsis', async () => {
-    const { fitCaptions, CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR, CAPTION_MAX_LINES } = await import('@/components/library/TvSeries');
-    expect([CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR, CAPTION_MAX_LINES]).toEqual([{ size: 13, line: 17 }, { size: 12, line: 16 }, { size: 12, line: 16 }, 4]);
+  it('13/17; then 12/16 on 2 lines; still over, 12/16 on every line it needs (v168: no cap, no ellipsis, never below 12px)', async () => {
+    const mod = await import('@/components/library/TvSeries');
+    const { fitCaptions, CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR } = mod;
+    expect([CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR]).toEqual([{ size: 13, line: 17 }, { size: 12, line: 16 }, { size: 12, line: 16 }]);
+    expect('CAPTION_MAX_LINES' in mod).toBe(false);
     const root = document.createElement('div');
-    // lines[size] = lines the name needs at that size; the box shows line-clamp lines
+    // lines[size] = lines the name needs at that size; a clamped box shows line-clamp lines, an unclamped one all of them
     const mk = (lines: Record<string, number>) => {
       const n = document.createElement('span');
       n.setAttribute('data-testid', 'tv-series-name');
       const lh = () => parseFloat(n.style.lineHeight) || 17;
       const clamp = () => Number(n.style.getPropertyValue('-webkit-line-clamp')) || 2;
-      Object.defineProperty(n, 'clientHeight', { get: () => clamp() * lh() });
-      Object.defineProperty(n, 'scrollHeight', { get: () => lh() * (lines[n.style.fontSize] ?? 2) });
+      const need = () => lh() * (lines[n.style.fontSize] ?? 2);
+      Object.defineProperty(n, 'clientHeight', { get: () => (n.style.display === 'block' ? need() : clamp() * lh()) });
+      Object.defineProperty(n, 'scrollHeight', { get: need });
       root.appendChild(n); return n;
     };
     const short = mk({});
     const need = (n: number) => mk({ '13px': n + 1, '12px': n });
-    const made = [short, need(2), need(3), need(4), need(5)];
-    expect(fitCaptions(root)).toBe(1);
-    const t = (n: HTMLElement) => [n.style.fontSize, n.style.lineHeight, n.style.getPropertyValue('-webkit-line-clamp'), n.dataset.ellipsis ?? null];
+    const made = [short, need(2), need(3), need(4), need(5), need(7)];
+    expect(fitCaptions(root)).toBe(0);                                   // nothing cut, ever
+    const t = (n: HTMLElement) => [n.style.fontSize, n.style.lineHeight, n.style.getPropertyValue('-webkit-line-clamp') || 'none', n.dataset.lines ?? null];
     expect(made.map(t)).toEqual([
-      ['13px', '17px', '2', null], ['12px', '16px', '2', null], ['12px', '16px', '3', null], ['12px', '16px', '4', null],
-      ['12px', '16px', '4', 'true']]);
+      ['13px', '17px', '2', null], ['12px', '16px', '2', '2'], ['12px', '16px', 'none', '3'], ['12px', '16px', 'none', '4'],
+      ['12px', '16px', 'none', '5'], ['12px', '16px', 'none', '7']]);
     expect(made.every(n => parseFloat(n.style.fontSize) >= 12)).toBe(true);
-    expect(fitCaptions(root)).toBe(1);                                   // idempotent (a resize re-runs it)
+    expect(made.every(n => n.dataset.ellipsis === undefined && n.style.textOverflow !== 'ellipsis')).toBe(true);
+    expect(made.slice(2).every(n => n.style.maxHeight === 'none' && n.style.overflow === 'visible')).toBe(true);
+    expect(fitCaptions(root)).toBe(0);                                   // idempotent (a resize re-runs it)
+    expect(made.map(t)[5]).toEqual(['12px', '16px', 'none', '7']);
   });
 
-  it('PM (v167): a name still over at 12px on 4 lines ends the 4th line in an ellipsis (line-clamp, not a hard clip); the full name is the card\'s accessible name and title', async () => {
+  it('v168: the longest name is shown in full at 12px; the full name stays the card\'s title and accessible name', async () => {
     const { fitCaptions } = await import('@/components/library/TvSeries');
     const long = 'Life, Larry and the Pursuit of Unhappiness: An Almost History of America';
     render(<TvSeries shows={[show(1, long), show(2, 'Andor')]} />);
@@ -164,19 +170,11 @@ describe('caption fit', () => {
     expect(tile.getAttribute('title')).toBe(long);
     expect(open.getAttribute('title')).toBe(long);
     expect(screen.getByRole('button', { name: `Edit ${long}` })).toBe(open);
-    expect(name.getAttribute('title')).toBe(long);
-    expect(name.getAttribute('aria-label')).toBe(long);
-    expect(name.textContent).toBe(long);                                    // the whole name is there; CSS ellipsizes
-    // too long at every step: 4 lines at 12/16, then the ellipsis
-    Object.defineProperty(name, 'clientHeight', { configurable: true, get: () => parseFloat(name.style.maxHeight) || 34 });
-    Object.defineProperty(name, 'scrollHeight', { configurable: true, get: () => 999 });
-    fitCaptions(tile.parentElement);
-    expect(name.dataset.ellipsis).toBe('true');
-    expect([name.style.fontSize, name.style.getPropertyValue('-webkit-line-clamp'), name.style.maxHeight]).toEqual(['12px', '4', '64px']);
-    // an ellipsis, not a hard clip: a vertical -webkit-box with line-clamp and text-overflow ellipsis
-    expect(name.style.display).toBe('-webkit-box');
-    expect(name.style.getPropertyValue('-webkit-box-orient') || (name.style as unknown as Record<string, string>).webkitBoxOrient).toBe('vertical');
-    expect(name.style.textOverflow).toBe('ellipsis');
-    expect(name.style.overflow).toBe('hidden');
+    expect([name.getAttribute('title'), name.getAttribute('aria-label'), name.textContent]).toEqual([long, long, long]);
+    Object.defineProperty(name, 'clientHeight', { configurable: true, get: () => (name.style.display === 'block' ? 80 : parseFloat(name.style.maxHeight) || 34) });
+    Object.defineProperty(name, 'scrollHeight', { configurable: true, get: () => 80 });       // 5 lines at 16px
+    expect(fitCaptions(tile.parentElement)).toBe(0);
+    expect([name.style.fontSize, name.style.display, name.style.maxHeight, name.dataset.lines, name.dataset.ellipsis]).toEqual(['12px', 'block', 'none', '5', undefined]);
+    expect(name.style.getPropertyValue('-webkit-line-clamp')).toBe('');
   });
 });

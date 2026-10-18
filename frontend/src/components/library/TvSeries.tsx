@@ -268,40 +268,41 @@ function Tile({ s, first, selecting, picked, onOpen }: { s: Show; first: boolean
  * space falls below the count (8 top + 2 x 17 + 2 + 15 = 59 with padding; 51 without it). */
 const CAPTION_MIN_H = 51 + 8;
 /** Caption type: 13/600, normal tracking, 17px lines; the count sits right under the name.
- * Steps (v166, Designer: never below 12px): a name that would need a 3rd line at 13 is set 12/16 on 2
- * lines; still over, 12/16 on 3, then 4 (CAPTION_MAX_LINES); only then the ellipsis (full name
- * in title and aria-label). The grid row stretches every tile to the row's height and the caption block
- * fills it, so all captions in a row share one height. */
+ * Steps: a name that would need a 3rd line at 13 is set 12/16 on 2 lines; still over, it is set 12/16 on
+ * as many lines as it needs (v168: PM defers to Designer: no line cap, no ellipsis, never below 12px). The
+ * full name is also the card's title and accessible name. The grid row stretches every tile to the row's
+ * height and the caption block fills it, so all captions in a row share one height. */
 export const CAPTION_TYPE = { size: 13, line: 17 };
 export const CAPTION_FIT = { size: 12, line: 16 };
 /** The floor is the fit size: captions never go below 12px. */
 export const CAPTION_FLOOR = CAPTION_FIT;
-export const CAPTION_MAX_LINES = 4;            // PM (v166): 12px minimum, up to 4 lines, never shrunk
 const caption: React.CSSProperties = {
   fontSize: CAPTION_TYPE.size, letterSpacing: 'normal', fontWeight: 600, lineHeight: `${CAPTION_TYPE.line}px`, color: W95, overflow: 'hidden', overflowWrap: 'anywhere',
-  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', textOverflow: 'ellipsis',
+  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
 };
 const over = (n: HTMLElement) => n.scrollHeight > n.clientHeight + 1;
 const setType = (n: HTMLElement, t: { size: number; line: number }, lines: number) => {
+  n.style.display = '-webkit-box'; n.style.overflow = 'hidden';
   n.style.fontSize = `${t.size}px`; n.style.lineHeight = `${t.line}px`;
   n.style.setProperty('-webkit-line-clamp', String(lines)); n.style.maxHeight = `${t.line * lines}px`;
 };
-/** Batched per step (reset and read all, then write the next step to those still over); returns how many stay ellipsized. */
+/** No clamp at all: 12/16 on every line the name needs (nothing hidden, so nothing to ellipsize). */
+const setFull = (n: HTMLElement) => {
+  n.style.display = 'block'; n.style.overflow = 'visible';
+  n.style.fontSize = `${CAPTION_FIT.size}px`; n.style.lineHeight = `${CAPTION_FIT.line}px`;
+  n.style.removeProperty('-webkit-line-clamp'); n.style.maxHeight = 'none';
+};
+/** Batched (reset and read all, then write the next step to those still over); returns how many are
+ * still cut (0: every name is shown in full). */
 export function fitCaptions(root: HTMLElement | null): number {
   const names = [...(root?.querySelectorAll<HTMLElement>('[data-testid=tv-series-name]') || [])];
-  for (const n of names) { setType(n, CAPTION_TYPE, 2); delete n.dataset.fit; delete n.dataset.lines; delete n.dataset.ellipsis; }
+  for (const n of names) { setType(n, CAPTION_TYPE, 2); delete n.dataset.fit; delete n.dataset.lines; }
   let left = names.filter(over);
-  const steps: [{ size: number; line: number }, number][] = [];
-  for (let lines = 2; lines <= CAPTION_MAX_LINES; lines++) steps.push([CAPTION_FIT, lines]);
-  for (const [t, lines] of steps) {
-    if (!left.length) break;
-    for (const n of left) { setType(n, t, lines); n.dataset.fit = String(t.size); n.dataset.lines = String(lines); }
-    left = left.filter(over);
-  }
-  // PM (v167): still over at 12px on 4 lines -> the 4th line ends in an ellipsis (line-clamp), never a hard
-  // clip; the full name stays in the card's accessible name and title (tile, poster button, name).
-  for (const n of left) n.dataset.ellipsis = 'true';
-  return left.length;
+  for (const n of left) { setType(n, CAPTION_FIT, 2); n.dataset.fit = String(CAPTION_FIT.size); n.dataset.lines = '2'; }
+  left = left.filter(over);
+  for (const n of left) setFull(n);
+  for (const n of left) n.dataset.lines = String(Math.max(3, Math.round(n.scrollHeight / CAPTION_FIT.line)));
+  return names.filter(n => n.style.display !== 'block' && over(n)).length;
 }
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(128px, 1fr))', gap: 16 };
 const emptyCard: React.CSSProperties = {
