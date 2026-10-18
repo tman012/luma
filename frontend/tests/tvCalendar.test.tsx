@@ -327,13 +327,17 @@ describe('Search', () => {
 // ---------------------------------------------------------------- frame
 
 describe('tabs', () => {
-  it('Calendar | Import | Libraries | Options in the URL, so Back works; Options holds Upgrades; no Import badge', async () => {
+  it('Series | Calendar | Import | Libraries | Options in the URL (Calendar the default), so Back works; Options holds Upgrades; no Import badge', async () => {
     unmatched = [{ id: 7, path_id: TV.id, path_name: 'TV', folder: 'Mystery', guess_title: null, guess_year: null, candidates: [], reason: null, tier: 'none' }];
     page(true);
     await screen.findAllByTestId('tv-agenda-row');
     expect(screen.getByTestId('tv-title').textContent).toBe('TV');
-    expect(screen.getAllByRole('tab').slice(0, 4).map(t => t.textContent)).toEqual(['Calendar', 'Import', 'Libraries', 'Options']);
+    expect(screen.getAllByRole('tab').slice(0, 5).map(t => t.textContent)).toEqual(['Series', 'Calendar', 'Import', 'Libraries', 'Options']);
+    expect(screen.getByTestId('tv-tab-calendar').getAttribute('aria-selected')).toBe('true');
     expect(screen.queryByTestId('tv-import-badge')).toBeNull();
+    fireEvent.click(screen.getByTestId('tv-tab-series'));
+    expect(await screen.findByTestId(/^tv-series(-empty)?$/)).toBeTruthy();
+    expect(screen.getByTestId('tv-section').getAttribute('data-view')).toBe('series');
     fireEvent.click(screen.getByTestId('tv-tab-options'));
     await screen.findByTestId('tv-upgrades');
     expect(loc).toBe('/settings/tv?view=options');

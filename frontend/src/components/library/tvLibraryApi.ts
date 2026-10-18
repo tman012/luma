@@ -12,6 +12,8 @@ export interface Show {
   poster_path: string | null; monitored: boolean; files: number; episodes: number; linked: number; mismatch: number; unrecognized: number;
   /** What needs review, in words ("S02E40 isn't an episode of this show", "1 file not recognized"). */
   review?: string[];
+  /** Series grid: aired episodes (no specials), those with a file, and whether TMDB says it continues. */
+  aired?: number; have?: number; status?: string | null; continuing?: boolean; added_at?: number | null;
 }
 export type ReviewTier = 'likely' | 'none' | 'duplicate';
 export interface Unmatched {

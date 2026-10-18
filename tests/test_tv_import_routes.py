@@ -142,3 +142,17 @@ def test_import_all_never_takes_a_show_another_folder_has(scanned):
     assert rows('SELECT COUNT(*) AS n FROM history')[0]['n'] == before                         # nothing moved
     tv_scan.run(now=999999.0)                                  # a rescan doesn't move it either
     assert rows("SELECT id, folder FROM series WHERE tmdb_id = 95396")[0]['folder'] == sev['folder']
+
+
+def test_shows_carry_series_grid_progress(scanned):
+    from app import tv_store
+    shows = {s['title']: s for s in _get(scanned, '/api/settings/tv/library').get_json()['shows']}
+    s = next(iter(shows.values()))
+    assert {'aired', 'have', 'status', 'continuing', 'added_at'} <= set(s)
+    for s in shows.values():
+        assert 0 <= s['have'] <= s['aired'] and isinstance(s['continuing'], bool)
+    with tv_store.connect() as conn:
+        sid = shows['Severance']['id']
+        aired = conn.execute("SELECT COUNT(*) AS n FROM episodes WHERE series_id = ? AND season_number > 0 AND air_date <= date('now')",
+                             (sid,)).fetchone()['n']
+    assert abs(shows['Severance']['aired'] - aired) <= 1          # aired, not specials (local vs UTC day)

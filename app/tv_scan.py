@@ -35,6 +35,7 @@ running a scan over a fixture tree and by reading this file's calls.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import os
@@ -1217,6 +1218,9 @@ def review_lines(conn, sid: int) -> List[str]:
     return out
 
 
+CONTINUING = ('Returning Series', 'In Production', 'Planned', 'Pilot')
+
+
 def library_view() -> Dict[str, Any]:
     from app import tv_settings
     # Only the selected libraries' shows; a deselected or removed one's rows
@@ -1225,13 +1229,21 @@ def library_view() -> Dict[str, Any]:
     with tv_store.connect() as conn:
         shows = []
         for r in conn.execute(
-                'SELECT s.id, s.tmdb_id, s.title, s.year, s.path_id, s.folder, s.poster_path, s.monitored,'
+                'SELECT s.id, s.tmdb_id, s.title, s.year, s.path_id, s.folder, s.poster_path, s.monitored, s.status,'
+                ' s.added_at,'
+                # Series grid: aired episodes (not specials) and those with a linked file
+                ' (SELECT COUNT(*) FROM episodes e WHERE e.series_id = s.id AND e.season_number > 0'
+                '  AND e.air_date IS NOT NULL AND e.air_date <= :today) AS aired,'
+                ' (SELECT COUNT(DISTINCT l.episode_id) FROM episode_file_links l JOIN episode_files lf ON lf.id = l.file_id'
+                "  JOIN episodes e ON e.id = l.episode_id WHERE lf.series_id = s.id AND lf.state = 'linked'"
+                '  AND e.season_number > 0 AND e.air_date IS NOT NULL AND e.air_date <= :today) AS have,'
                 " SUM(f.state = 'linked') AS linked, SUM(f.state = 'mismatch') AS mismatch,"
                 " SUM(f.state = 'unrecognized') AS unrecognized, COUNT(f.id) AS files,"
                 ' (SELECT COUNT(DISTINCT l.episode_id) FROM episode_file_links l'
                 '  JOIN episode_files lf ON lf.id = l.file_id WHERE lf.series_id = s.id) AS episodes'
                 ' FROM series s LEFT JOIN episode_files f ON f.series_id = s.id'
-                ' WHERE s.path_id IS NOT NULL GROUP BY s.id ORDER BY s.title COLLATE NOCASE'):
+                ' WHERE s.path_id IS NOT NULL GROUP BY s.id ORDER BY s.title COLLATE NOCASE',
+                {'today': dt.date.today().isoformat()}):
             if r['path_id'] not in names:
                 continue
             shows.append({'id': r['id'], 'tmdb_id': r['tmdb_id'], 'title': r['title'], 'year': r['year'],
@@ -1240,6 +1252,8 @@ def library_view() -> Dict[str, Any]:
                           'files': r['files'] or 0, 'episodes': r['episodes'] or 0,
                           'linked': r['linked'] or 0, 'mismatch': r['mismatch'] or 0,
                           'unrecognized': r['unrecognized'] or 0,
+                          'aired': r['aired'] or 0, 'have': r['have'] or 0, 'status': r['status'],
+                          'continuing': (r['status'] or '') in CONTINUING, 'added_at': r['added_at'],
                           'review': review_lines(conn, r['id']) if (r['mismatch'] or r['unrecognized']) else []})
         unmatched = []
         owned = {r['tmdb_id'] for r in conn.execute('SELECT tmdb_id FROM series WHERE tmdb_id IS NOT NULL')}

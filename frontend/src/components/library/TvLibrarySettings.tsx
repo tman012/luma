@@ -1,5 +1,5 @@
 /** Settings > TV (owner only, luma-test builds), docs/design/tv.md: the "TV"
- * title row with Calendar | Import | Libraries | Options (in the URL as ?view=,
+ * title row with Series | Calendar | Import | Libraries | Options (in the URL as ?view=,
  * so Back works), Search under it, and the view. Calendar (the default) shows
  * the week's episodes by air date; Search finds library shows and TMDB shows
  * (Add); Import is the Import card, Review and the shows; Libraries is the TV
@@ -17,6 +17,7 @@ import {
 } from './LibraryPathsSettings';
 import { ImportSection, ReviewSection, ShowPicker, FADE_MS, importCss, initialReview, type ReviewState } from './TvImport';
 import { TvCalendar, tvCalendarCss } from './TvCalendar';
+import { TvSeries } from './TvSeries';
 import { SEARCH_MIN, TvSearch, tvSearchCss } from './TvSearch';
 import { LibrarySelector } from './LibrarySelector';
 import type { SelectableLibrary } from './librarySelectionApi';
@@ -32,7 +33,7 @@ import { isDay, localDay, weekStart } from './tvCalendarApi';
 /** Space between sections (Import, Review, Shows; Upgrades, Trackers), as on Library paths. */
 export const SECTION_GAP = 28;
 export const TV_VIEWS = [
-  { id: 'calendar', label: 'Calendar' }, { id: 'import', label: 'Import' },
+  { id: 'series', label: 'Series' }, { id: 'calendar', label: 'Calendar' }, { id: 'import', label: 'Import' },
   { id: 'libraries', label: 'Libraries' }, { id: 'options', label: 'Options' },
 ] as const;
 export type TvView = typeof TV_VIEWS[number]['id'];
@@ -142,6 +143,8 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
       <TvCalendar today={today} week={week} reload={reload}
         onWeek={w => go({ week: w === weekStart(today) ? null : w }, false)} />
     );
+  } else if (view === 'series') {
+    body = noLibraries ? noLibs : <TvSeries shows={lib ? lib.shows : null} />;
   } else if (view === 'import') {
     body = (
       <div style={{ display: 'flex', flexDirection: 'column', gap: SECTION_GAP }}>
