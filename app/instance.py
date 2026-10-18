@@ -52,6 +52,7 @@ GATED: Dict[str, str] = {
     'qbit': 'qBittorrent write calls (add, delete, pause, category/tag change, move)',
     'storage_cleanup': 'Downloads cleanup (deletes files)',
     'tv_delete_files': 'TV: Delete show folder (deletes files)',
+    'tv_grab': 'TV grabs (adds torrents to qBittorrent, only with the TV category and tag)',
 }
 # Allowed on test by default (scoped by their own rules, see the module doc).
 TEST_DEFAULT_ALLOWED: FrozenSet[str] = frozenset({'mover', 'tv_link', 'tv_import'})
@@ -125,6 +126,59 @@ def write_kind(method: str, url: str) -> Optional[str]:
     return None
 
 
+# A scoped exemption (v158b TV grabs): inside scoped_add(job, name) on this thread, ONE kind of
+# qBittorrent write may pass even with 'qbit' off: torrents/add whose category and tags are
+# exactly *name*, and only while *job* itself is allowed. Every other write stays blocked.
+_scope = threading.local()
+
+
+class scoped_add:
+    def __init__(self, job: str, name: str):
+        self.job, self.name = job, name
+
+    def __enter__(self):
+        self.prev = getattr(_scope, 'v', None)
+        _scope.v = (self.job, self.name)
+        return self
+
+    def __exit__(self, *exc):
+        _scope.v = self.prev
+        return False
+
+
+def _form(request) -> Dict[str, str]:
+    """A prepared request's form fields (urlencoded or multipart; files are not fields)."""
+    body = request.body or b''
+    if isinstance(body, str):
+        body = body.encode('utf-8', 'surrogateescape')
+    ctype = (request.headers.get('Content-Type') or '').lower()
+    out: Dict[str, str] = {}
+    if ctype.startswith('application/x-www-form-urlencoded'):
+        from urllib.parse import parse_qs
+        for k, v in parse_qs(body.decode('utf-8', 'replace'), keep_blank_values=True).items():
+            out[k] = v[-1]
+        return out
+    m = re.search(r'boundary=("?)([^";]+)\1', ctype, re.I)
+    if ctype.startswith('multipart/form-data') and m:
+        for part in body.split(b'--' + m.group(2).encode()):
+            head, _, val = part.partition(b'\r\n\r\n')
+            n = re.search(rb'name="([^"]+)"', head)
+            if n and b'filename=' not in head:
+                out[n.group(1).decode('utf-8', 'replace')] = val.rstrip(b'\r\n').decode('utf-8', 'replace')
+    return out
+
+
+def _scoped_ok(request) -> bool:
+    v = getattr(_scope, 'v', None)
+    if not v or not writes_allowed(v[0]):
+        return False
+    m = _QBIT.search(urlsplit(request.url or '').path or '')
+    if not m or m.group(1) != 'add' or (request.method or '').upper() != 'POST':
+        return False
+    f = _form(request)
+    return f.get('category') == v[1] and f.get('tags') == v[1] and not f.get('savepath')
+
+
 _installed = {'on': False}
 _ilock = threading.Lock()
 
@@ -140,7 +194,7 @@ def install_write_guard() -> bool:
 
         def send(self, request, **kw):
             kind = write_kind(request.method, request.url)
-            if kind and not writes_allowed(kind):
+            if kind and not writes_allowed(kind) and not (kind == 'qbit' and _scoped_ok(request)):
                 logger.warning('Instance test: blocked %s %s (%s write)', request.method, urlsplit(request.url).path, kind)
                 raise WritesBlocked(f'{kind} writes are off on the test instance')
             return orig(self, request, **kw)

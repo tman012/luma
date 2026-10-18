@@ -198,3 +198,55 @@ def profile_delete(pid):
     except KeyError:
         return _missing()
     return _out({'ok': True})
+
+
+# ------------------------------------------------------------------ v158b search and downloads
+
+@bp.route('/api/settings/tv/shows/<int:sid>/search', methods=['POST'])
+def show_search(sid):
+    """Search for an episode ({episode_id}) or a season ({season}); grabs what it picks (when grabs
+    are allowed on this instance). Interactive tracker budget."""
+    err = tv_settings._guard() or tv_settings._signed_in_owner()
+    if err:
+        return err
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return _out({'error': 'Invalid'}, 400)
+    season, eid = body.get('season'), body.get('episode_id')
+    ok_int = lambda v: isinstance(v, int) and not isinstance(v, bool) and v >= 0  # noqa: E731
+    if (season is None) == (eid is None) or (season is not None and not ok_int(season)) or (eid is not None and not ok_int(eid)):
+        return _out({'error': 'Invalid'}, 400)
+    from app import tv_search
+    out = tv_search.manual(sid, season=season, episode_id=eid)
+    if out.get('error') == 'Not found':
+        return _missing()
+    return _out(out)
+
+
+@bp.route('/api/settings/tv/search/status', methods=['GET'])
+def search_status():
+    err = tv_settings._guard()
+    if err:
+        return err
+    from app import tv_search
+    return _out(tv_search.status())
+
+
+@bp.route('/api/settings/tv/downloads', methods=['GET'])
+def downloads_get():
+    err = tv_settings._guard()
+    if err:
+        return err
+    from app import tv_downloads
+    return _out({'failed': tv_downloads.failures(), 'category': tv_downloads.category()})
+
+
+@bp.route('/api/settings/tv/downloads/<h>/retry', methods=['POST'])
+def downloads_retry(h):
+    err = tv_settings._guard() or tv_settings._signed_in_owner()
+    if err:
+        return err
+    from app import tv_downloads
+    if not tv_downloads.retry(h):
+        return _missing()
+    return _out({'ok': True})

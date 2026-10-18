@@ -37,7 +37,7 @@ import type { TvModalViewProps } from './types';
 import { useFocusable } from '@/hooks/useFocusable';
 import { apiUrl } from '@/urlHelpers';
 import { seasonsLabel } from '@/utils/seasonsLabel';
-import { EpisodeMark, LumaMonitorContext, SeasonMark, SeriesMark, useLumaSeries } from '@/components/library/tvMonitor';
+import { EpisodeMark, LumaMonitorContext, SearchMark, SeasonMark, SeriesMark, useLumaSeries } from '@/components/library/tvMonitor';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,11 +96,15 @@ function PillButton({
   fontSize = '15px',
   focusKey,
   zoneId,
+  tone,
+  testid,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
   primary?: boolean;
+  tone?: 'blue';
+  testid?: string;
   padding?: string;
   fontSize?: string;
   focusKey: string;
@@ -114,6 +118,7 @@ function PillButton({
       ref={ref}
       {...focusProps}
       type="button"
+      data-testid={testid}
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -123,11 +128,13 @@ function PillButton({
         gap: '8px',
         padding,
         borderRadius: '28px',
-        background: primary
+        background: tone === 'blue'
+          ? (hovered ? '#60a5fa' : '#3b82f6')
+          : primary
           ? (hovered ? 'rgba(255,255,255,0.88)' : '#fff')
           : (hovered ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.08)'),
-        border: primary ? 'none' : '1px solid rgba(255,255,255,0.15)',
-        color: primary ? '#111' : '#fff',
+        border: primary || tone ? 'none' : '1px solid rgba(255,255,255,0.15)',
+        color: tone === 'blue' ? '#fff' : primary ? '#15102a' : '#fff',
         fontSize,
         fontWeight: 600,
         cursor: 'pointer',
@@ -306,7 +313,7 @@ function EpisodeGridModal({
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 200,
-        background: 'rgba(0,0,0,0.88)',
+        background: OVERLAY_SURFACE,
         display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
         overflowY: 'auto',
         animation: 'tvSeasonGridFadeIn 0.25s ease',
@@ -379,8 +386,9 @@ function EpisodeGridModal({
         )}
         {isSingleSeason && <div style={{ marginBottom: '24px' }} />}
         {activeSeason && (
-          <div style={{ display: 'flex', justifyContent: 'center', marginTop: -12, marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: -12, marginBottom: 20 }}>
             <SeasonMark season={activeSeason.season_number} />
+            <SearchMark season={activeSeason.season_number} size={36} />
           </div>
         )}
 
@@ -407,16 +415,16 @@ function EpisodeGridModal({
               <div
                 key={key}
                 onClick={(e) => { e.stopPropagation(); onEpisodeClick(activeSeason!.season_number, ep.episode_number); }}
-                style={{ cursor: 'pointer', transition: 'transform 0.2s ease' }}
+                data-tv-card="episode"
+                style={{ ...CARD_GLASS, cursor: 'pointer', transition: 'transform 0.2s ease' }}
                 onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.03)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
               >
                 {/* Thumbnail — 16:9 */}
                 <div style={{
                   width: '100%', aspectRatio: '16 / 9',
-                  borderRadius: '12px', overflow: 'hidden',
-                  background: '#252525', position: 'relative',
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                  borderRadius: '10px', overflow: 'hidden',
+                  background: thumbUrl ? 'transparent' : PLACEHOLDER_GLASS, position: 'relative',
                 }}>
                   {thumbUrl ? (
                     <img
@@ -427,8 +435,8 @@ function EpisodeGridModal({
                       onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
                     />
                   ) : (
-                    <div style={{
-                      width: '100%', height: '100%',
+                    <div data-tv-placeholder="" style={{
+                      width: '100%', height: '100%', background: PLACEHOLDER_GLASS,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       color: 'rgba(255,255,255,0.2)', fontSize: '18px', fontWeight: 600,
                     }}>
@@ -457,7 +465,7 @@ function EpisodeGridModal({
                         background: 'rgba(255,255,255,0.95)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="#111">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="#15102a">
                           <polygon points="8,4 20,12 8,20" />
                         </svg>
                       </div>
@@ -470,9 +478,9 @@ function EpisodeGridModal({
                     background: orbColor, boxShadow: `0 0 5px ${orbColor}60`,
                   }} />
                   {/* Episode number badge */}
-                  <div style={{
-                    position: 'absolute', bottom: '10px', left: '10px',
-                    background: 'rgba(0,0,0,0.75)', borderRadius: '8px',
+                  <div data-tv-ep-badge="" style={{
+                    ...CHIP_GLASS,
+                    position: 'absolute', bottom: '10px', left: '10px', borderRadius: '8px',
                     padding: '4px 12px', fontSize: isTablet ? '14px' : '16px', fontWeight: 700,
                     color: 'rgba(255,255,255,0.9)',
                   }}>
@@ -562,7 +570,7 @@ function SeasonGridModal({
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 200,
-        background: 'rgba(0,0,0,0.88)',
+        background: OVERLAY_SURFACE,
         display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
         animation: 'tvSeasonGridFadeIn 0.25s ease',
         overflowY: 'auto',
@@ -609,8 +617,10 @@ function SeasonGridModal({
               <div
                 key={season.season_number}
                 onClick={() => onSelectSeason(season.season_number)}
+                data-tv-card="season"
                 style={{
-                  width: `${posterW}px`, cursor: 'pointer',
+                  ...CARD_GLASS,
+                  width: `${posterW + 20}px`, boxSizing: 'border-box', cursor: 'pointer',
                   transition: 'transform 0.2s ease',
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.05)'; }}
@@ -619,8 +629,7 @@ function SeasonGridModal({
                 <div style={{
                   width: `${posterW}px`, height: `${posterH}px`,
                   borderRadius: '10px', overflow: 'hidden',
-                  background: 'rgba(255,255,255,0.06)', position: 'relative',
-                  boxShadow: '0 6px 20px rgba(0,0,0,0.4)',
+                  background: seasonPosterSrc ? 'transparent' : PLACEHOLDER_GLASS, position: 'relative',
                 }}>
                   {seasonPosterSrc ? (
                     <img
@@ -629,8 +638,8 @@ function SeasonGridModal({
                       loading="lazy"
                     />
                   ) : (
-                    <div style={{
-                      width: '100%', height: '100%',
+                    <div data-tv-placeholder="" style={{
+                      width: '100%', height: '100%', background: PLACEHOLDER_GLASS,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       color: 'rgba(255,255,255,0.25)', fontSize: '14px', fontWeight: 600,
                     }}>
@@ -648,6 +657,9 @@ function SeasonGridModal({
                     }} />
                     {totalCount > 0 && <div style={GRID_PILL}>{ownedCount}/{totalCount}</div>}
                   </div>
+                  <span style={{ position: 'absolute', top: '8px', right: '8px', zIndex: 2 }}>
+                    <SearchMark season={season.season_number} />
+                  </span>
                   {/* Season number badge — same style as the episode "E1" badge */}
                   <div data-season-badge style={{ ...GRID_PILL, position: 'absolute', left: '8px', bottom: '8px' }}>
                     {seasonShortLabel(season.season_number)}
@@ -1684,21 +1696,25 @@ export function ExpandedLayout(props: TvModalViewProps) {
                               onClick={() => {}}
                             />
                           ) : (
+                            /* v158b: the blue Add to watchlist with a + (the phone's button, on desktop) */
+                            <span data-modal-keep="" style={{ display: 'contents' }}>
                             <PillButton
                               focusKey="tm-watchlist"
                               zoneId="tv-detail-modal"
-                              primary
+                              tone="blue"
+                              testid="tv-add-watchlist-desktop"
                               padding={t.pill.padding}
                               fontSize={t.pill.fontSize}
                               icon={
-                                <svg width={t.pill.iconSize} height={t.pill.iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <svg width={t.pill.iconSize} height={t.pill.iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                                   <line x1="12" y1="5" x2="12" y2="19" />
                                   <line x1="5" y1="12" x2="19" y2="12" />
                                 </svg>
                               }
-                              label="Watchlist"
+                              label="Add to watchlist"
                               onClick={() => setShowAddToSonarr(true)}
                             />
+                            </span>
                           )}
 
                           {/* v158a: the Luma TV monitor toggle. data-modal-keep keeps it (and the
@@ -1975,9 +1991,20 @@ export function ExpandedLayout(props: TvModalViewProps) {
   );
 }
 
-/** Small dark label on artwork — matches the episode "E1" badge. */
+/** v158b (Designer): the Episodes/Seasons overlays are opaque (nothing of the detail page shows
+ * through); cards are glass .06 with a .08 border; missing stills glass .04; chips glass .10. */
+const OVERLAY_SURFACE = '#15102a';
+const CARD_GLASS: React.CSSProperties = {
+  background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '14px', padding: '10px',
+};
+const PLACEHOLDER_GLASS = 'rgba(255,255,255,0.04)';
+const CHIP_GLASS: React.CSSProperties = {
+  background: 'rgba(255,255,255,0.10)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+};
+
+/** Small label on artwork — matches the episode "E1" badge (glass .10). */
 const GRID_PILL: React.CSSProperties = {
-  background: 'rgba(0,0,0,0.75)',
+  ...CHIP_GLASS,
   borderRadius: '6px',
   padding: '3px 8px',
   fontSize: '12px',

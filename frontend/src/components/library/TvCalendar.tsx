@@ -67,7 +67,7 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true }: 
   const eps = data?.key === key ? data.cal.episodes.filter(e => e.air_date >= week && e.air_date < end) : [];
 
   return (
-    <div data-testid="tv-calendar" style={{ fontFamily: FONT, width: '100%' }}>
+    <div data-testid="tv-calendar" style={{ fontFamily: FONT, width: '100%', containerType: 'inline-size', containerName: 'tvcal' }}>
       {toolbar && <WeekControls today={today} week={week} onWeek={onWeek} />}
       <div style={{ marginTop: toolbar ? 16 : 0 }}>
         {failed === key ? (
@@ -344,6 +344,7 @@ export const tvCalendarCss = `
 .tvc-card:hover .tvc-bm,.tvc-card:focus-within .tvc-bm,.tvc-bm:focus-visible{opacity:1}
 .tvc-bm:hover{background:rgba(59,130,246,.35)!important}
 @media (hover:none){.tvc-card .tvc-bm{opacity:1}}
+@container tvcal (max-width: 999px){.tvc-card .tvc-bm{display:none!important}}
 `;
 
 const gridWrap: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 8 };

@@ -588,10 +588,10 @@ const guard = {
   onTouchStart: stop, onTouchEnd: stop, onPointerDown: stop, onPointerUp: stop, onMouseDown: stop,
 };
 
-/** On artwork: darker glass so the badge reads over any poster. */
+/** On artwork: glass .10 (v158b Designer), blurred so it reads over any still or poster. */
 const OVERLAY: React.CSSProperties = {
-  background: 'rgba(10,14,28,0.62)', border: '1px solid rgba(255,255,255,0.18)',
-  backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+  background: 'rgba(255,255,255,0.10)', border: '1px solid rgba(255,255,255,0.08)',
+  backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
 };
 
 function badgeStyle(size: number, extra?: React.CSSProperties): React.CSSProperties {

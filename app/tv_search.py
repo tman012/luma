@@ -1,0 +1,540 @@
+"""TV searching (v158b): the recent-releases feed, searches after an episode airs, on Add,
+manual episode/season searches, and the 12-hour series refresh.
+
+Trackers: only the owner's own, the ones on for TV in Settings > TV > Trackers
+(section_trackers.ordered_ids('tv')). Nothing is preconfigured; with none on, nothing is searched.
+
+Budget: every automatic request is purpose 'tv' and held to tv_budget's caps (8/day and 2/h per
+tracker, 600 s apart, 40/day in all) on top of the tracker guard's own limits. The feed's 15-minute
+tick visits each tracker at most FEED_PER_TRACKER_DAILY times a day (every 6 h per tracker), leaving
+the rest of the 8 for episode searches. Manual searches are interactive: the guard's interactive
+budget, never the TV one.
+
+Automatic searching runs only when TV settings' automation is on (enabled; the feed also needs
+feed_enabled, old missing episodes backlog_enabled), and only where a grab could follow
+(tv_grab.allowed(): on test the 'tv_grab' job, off by default), so the shared tracker accounts
+aren't spent on answers nobody can use. Manual searches always search and show what they'd pick;
+the grab itself is refused while grabs are off.
+
+Which episodes: monitored show, monitored episode, aired, no linked file, not already grabbed
+(grabs downloading/importing/imported). A release must name the show (title or alias, year when
+it has one), cover wanted episodes (episode, multi-episode, a season pack when it covers every
+wanted episode of that season and at least two, or a daily date), and pass the show's quality
+profile (allowed qualities in the owner's order, must/must-not words, seeders, MB per minute).
+Blocklisted releases never.
+"""
+from __future__ import annotations
+
+import datetime as dt
+import json
+import logging
+import os
+import threading
+import time
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from app import tv_grab, tv_match, tv_monitor, tv_release, tv_settings, tv_store
+
+logger = logging.getLogger(__name__)
+
+TV_CATEGORIES = [5000, 5030, 5040, 5045, 5060]
+TICK_S = 60
+FEED_S = 15 * 60
+FEED_PER_TRACKER_DAILY = 4
+REFRESH_S = 12 * 3600
+RECENT_S = 14 * 86400                    # aired within this: an after-air search; older: backlog
+BACKOFF_H = (3, 6, 12, 24, 48, 96, 168)
+MAX_QUERIES = 4                          # per show per search
+LIMIT = 100
+DEFAULT_RUNTIME = 45
+ACTIVE_GRABS = ('downloading', 'importing', 'imported')
+FALLBACK_ORDER = ('1080p-web', '1080p-bluray', '720p-web', '1080p-hdtv', '720p-bluray', '720p-hdtv',
+                  '2160p-web', '2160p-bluray', 'sd-web', 'sd-bluray', 'sd-hdtv')
+NO_TRACKERS = 'No TV trackers are on'
+
+_lock = threading.Lock()
+
+
+# ------------------------------------------------------------------ trackers
+
+def trackers() -> List[Dict[str, Any]]:
+    """The owner's trackers that are on for TV, in the TV order (never any other)."""
+    from app import section_trackers
+    from app.tracker_search import get_search
+    ids = section_trackers.ordered_ids('tv')
+    if not ids:
+        return []
+    by_id = {c['id']: c for c in get_search().store.enabled_configs()}
+    return [by_id[i] for i in ids if i in by_id]
+
+
+def _log(cfg, purpose: str, sid: Optional[int], query: str, n: int, outcome: str, now: float) -> None:
+    from app.tracker_guard import guard_key
+    with tv_store.write() as conn:
+        conn.execute('INSERT INTO search_log (ts, section, tracker_key, purpose, series_id, query, results, outcome)'
+                     " VALUES (?, 'tv', ?, ?, ?, ?, ?, ?)", (now, guard_key(cfg), purpose, sid, query, n, outcome))
+
+
+def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bool, now: float,
+                   cfgs: Optional[List[Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Search each TV tracker once; (items, statuses). Items are search results with a release
+    link (tracker_search.to_item). Automatic searches are charged to the TV budget."""
+    from app.tracker_search import TrackerError, TrackerSkipped, _match_categories, _secret_values, get_search, search_status
+    engine = get_search()
+    items: List[Dict[str, Any]] = []
+    statuses: List[Dict[str, Any]] = []
+    for cfg in trackers() if cfgs is None else cfgs:
+        cats = _match_categories(cfg, TV_CATEGORIES)
+        if not cats:
+            continue
+        try:
+            raw = engine.search_one(cfg, query, cats, LIMIT, interactive, purpose=None if interactive else 'tv')
+        except TrackerSkipped as e:
+            statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
+            _log(cfg, purpose, sid, query, 0, 'skipped', now)
+            continue
+        except TrackerError as e:
+            statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
+            _log(cfg, purpose, sid, query, 0, 'failed', now)
+            continue
+        sv = _secret_values(cfg)
+        got = [it for it in (engine.to_item(cfg, r, sv) for r in raw) if it]
+        items += got
+        statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': 'ok'})
+        _log(cfg, purpose, sid, query, len(got), 'ok', now)
+    engine.tokens.flush()
+    return items, statuses
+
+
+# ------------------------------------------------------------------ what is wanted
+
+def _show(conn, sid: int) -> Optional[Dict[str, Any]]:
+    r = conn.execute('SELECT id, title, year, aliases, series_type, profile_id, monitored FROM series WHERE id = ?',
+                     (sid,)).fetchone()
+    if not r:
+        return None
+    s = dict(r)
+    names = {tv_match.normalize(s['title'])}
+    try:
+        names |= {tv_match.normalize(a) for a in json.loads(s['aliases'] or '[]') if isinstance(a, str)}
+    except ValueError:
+        pass
+    s['names'] = {n for n in names if n}
+    pid = s['profile_id'] or tv_monitor.default_profile_id()
+    p = conn.execute('SELECT * FROM quality_profiles WHERE id = ?', (pid,)).fetchone() if pid else None
+    s['profile'] = dict(p) if p else None
+    return s
+
+
+def _grabbed(conn, sid: int) -> set:
+    out = set()
+    for r in conn.execute(f'SELECT episode_ids FROM grabs WHERE series_id = ? AND state IN ({",".join("?" * len(ACTIVE_GRABS))})',
+                          (sid, *ACTIVE_GRABS)):
+        try:
+            out |= {int(x) for x in json.loads(r['episode_ids'] or '[]')}
+        except (ValueError, TypeError):
+            pass
+    return out
+
+
+def wanted(conn, sid: int, today: Optional[str] = None, ids: Optional[Iterable[int]] = None) -> List[Dict[str, Any]]:
+    """Monitored, aired, no linked file, not already grabbed (optionally only *ids*)."""
+    today = today or dt.date.today().isoformat()
+    rows = [dict(r) for r in conn.execute(
+        'SELECT e.id, e.season_number, e.episode_number, e.air_date, e.airstamp, e.runtime, e.search_attempts'
+        ' FROM episodes e JOIN series s ON s.id = e.series_id'
+        ' WHERE s.id = ? AND s.monitored = 1 AND e.monitored = 1 AND e.air_date IS NOT NULL AND e.air_date <= ?'
+        f' AND NOT {tv_monitor._LINKED}', (sid, today))]
+    got = _grabbed(conn, sid)
+    keep = None if ids is None else {int(i) for i in ids}
+    return [e for e in rows if e['id'] not in got and (keep is None or e['id'] in keep)]
+
+
+def aired_at(e: Dict[str, Any]) -> Optional[float]:
+    if e.get('airstamp'):
+        try:
+            return dt.datetime.fromisoformat(str(e['airstamp']).replace('Z', '+00:00')).timestamp() \
+                + 60 * int(e.get('runtime') or 0)
+        except ValueError:
+            pass
+    if e.get('air_date'):
+        try:
+            d = dt.date.fromisoformat(str(e['air_date'])) + dt.timedelta(days=1)    # its local day is over
+            return dt.datetime(d.year, d.month, d.day).timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+# ------------------------------------------------------------------ choosing a release
+
+def _words(raw: Any) -> List[str]:
+    try:
+        v = json.loads(raw) if isinstance(raw, str) else raw
+    except ValueError:
+        return []
+    return [str(w).casefold() for w in v or [] if str(w).strip()]
+
+
+def _rank(profile: Optional[Dict[str, Any]], q: Optional[str]) -> Optional[int]:
+    """Lower is better; None: the profile doesn't allow it."""
+    if not profile:                                  # no profile at all: sensible TV sizes first, never remux
+        return FALLBACK_ORDER.index(q) if q in FALLBACK_ORDER else None
+    try:
+        items = json.loads(profile['items'] or '[]')
+    except ValueError:
+        items = []
+    allowed = [i['id'] for i in items if isinstance(i, dict) and i.get('allowed')]
+    if q in allowed:
+        return allowed.index(q)
+    return None
+
+
+def candidates(items: List[Dict[str, Any]], show: Dict[str, Any], want: List[Dict[str, Any]],
+               blocked: Optional[set] = None) -> List[Dict[str, Any]]:
+    """Releases for *show* covering *want*, each {item, covers (episode ids), rank, why}."""
+    by_se = {(e['season_number'], e['episode_number']): e for e in want}
+    by_date = {e['air_date']: e for e in want if e.get('air_date')}
+    seasons: Dict[int, List[int]] = {}
+    for e in want:
+        seasons.setdefault(e['season_number'], []).append(e['id'])
+    p = show.get('profile')
+    must, never = (_words(p['must_contain']), _words(p['must_not_contain'])) if p else ([], [])
+    min_seeders = int(p['min_seeders']) if p else 1
+    prefer_packs = bool(p['prefer_season_packs']) if p else True
+    out = []
+    for it in items:
+        title = str(it.get('title') or '')
+        if not title or title in (blocked or set()):
+            continue
+        rel = tv_release.parse(title)
+        if tv_match.normalize(rel.title or '') not in show['names']:
+            continue
+        if rel.year and show.get('year') and rel.year != show['year']:
+            continue
+        covers: List[int] = []
+        if rel.kind in ('episode', 'multi') and rel.season is not None:
+            covers = [by_se[(rel.season, n)]['id'] for n in rel.episodes if (rel.season, n) in by_se]
+        elif rel.kind == 'season' and rel.season in seasons and len(seasons[rel.season]) >= 2:
+            covers = list(seasons[rel.season])
+        elif rel.kind == 'daily' and rel.air_date in by_date:
+            covers = [by_date[rel.air_date]['id']]
+        if not covers:
+            continue
+        low = title.casefold()
+        if any(w not in low for w in must) or any(w in low for w in never):
+            continue
+        if int(it.get('seeders') or 0) < min_seeders:
+            continue
+        q = tv_monitor.quality_of(title)
+        rank = _rank(p, q)
+        if rank is None:
+            continue
+        if p and (p['min_mb_per_min'] or p['max_mb_per_min']):
+            mins = sum(int(next((e['runtime'] for e in want if e['id'] == i), 0) or DEFAULT_RUNTIME) for i in covers)
+            mb = (int(it.get('size') or 0) / 1048576) / max(1, mins)
+            if (p['min_mb_per_min'] and mb < p['min_mb_per_min']) or (p['max_mb_per_min'] and mb > p['max_mb_per_min']):
+                continue
+        out.append({'item': {**it, 'quality': q}, 'covers': covers, 'rank': rank, 'proper': rel.proper,
+                    'pack': rel.kind == 'season', 'prefer_packs': prefer_packs})
+    return out
+
+
+def choose(cands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The fewest best releases covering the most wanted episodes: quality first (profile order),
+    then a season pack when the profile prefers them, PROPER/REPACK, freeleech, seeders."""
+    def key(c):
+        it = c['item']
+        return (c['rank'], -(len(c['covers']) if c['prefer_packs'] else 0), -c['proper'],
+                -int(bool(it.get('freeleech'))), -int(it.get('seeders') or 0))
+    left = sorted(cands, key=key)
+    picked, done = [], set()
+    for c in left:
+        if set(c['covers']) & done:
+            continue
+        picked.append(c)
+        done |= set(c['covers'])
+    return picked
+
+
+def _queries(show: Dict[str, Any], want: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
+    """(purpose, query) for the wanted episodes: a season query when a season has 2+ wanted,
+    else one per episode (daily shows by date). At most MAX_QUERIES."""
+    title = show['title']
+    out: List[Tuple[str, str]] = []
+    by_season: Dict[int, List[Dict[str, Any]]] = {}
+    for e in sorted(want, key=lambda e: (e['season_number'], e['episode_number'])):
+        by_season.setdefault(e['season_number'], []).append(e)
+    for s, eps in by_season.items():
+        if show.get('series_type') == 'daily':
+            out += [('episode', f"{title} {str(e['air_date']).replace('-', '.')}") for e in eps]
+        elif len(eps) >= 2:
+            out.append(('season', f'{title} S{s:02d}'))
+        else:
+            out.append(('episode', f"{title} S{s:02d}E{eps[0]['episode_number']:02d}"))
+    return out[:MAX_QUERIES]
+
+
+# ------------------------------------------------------------------ one search
+
+def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin: str = 'auto',
+                purpose: Optional[str] = None, interactive: bool = False, now: Optional[float] = None,
+                do_grab: bool = True) -> Dict[str, Any]:
+    """Search the show's wanted episodes (or *episode_ids* of them); grab the picks when allowed.
+    {'ok', 'searched', 'results', 'picks': [{title, quality, episodes, grabbed, error}], 'statuses', 'error'}."""
+    now = time.time() if now is None else now
+    with tv_store.connect() as conn:
+        show = _show(conn, sid)
+        if show is None:
+            return {'ok': False, 'error': 'Not found'}
+        want = wanted(conn, sid, ids=episode_ids)
+        blocked = {r['release_title'] for r in conn.execute('SELECT release_title FROM blocklist WHERE series_id = ?', (sid,))}
+    out: Dict[str, Any] = {'ok': True, 'searched': 0, 'results': 0, 'picks': [], 'statuses': [], 'error': None,
+                           'wanted': len(want)}
+    if not want:
+        return out
+    cfgs = trackers()
+    if not cfgs:
+        out.update(ok=False, error=NO_TRACKERS)
+        return out
+    items: List[Dict[str, Any]] = []
+    answered = False
+    for p, q in _queries(show, want):
+        got, st = query_trackers(q, purpose or p, sid, interactive, now, cfgs)
+        out['searched'] += 1
+        out['statuses'] += st
+        answered |= any(s['status'] == 'ok' for s in st)
+        items += got
+    out['results'] = len(items)
+    out['answered'] = answered
+    picks = choose(candidates(items, show, want, blocked))
+    for c in picks:
+        it = c['item']
+        row = {'title': it['title'], 'quality': it.get('quality'), 'episodes': sorted(c['covers']),
+               'tracker': it.get('indexer'), 'size': it.get('size'), 'grabbed': False, 'error': None}
+        if do_grab:
+            season = next((e['season_number'] for e in want if e['id'] == c['covers'][0]), None)
+            g = tv_grab.grab(it, sid, season, c['covers'], origin, now)
+            row['grabbed'], row['error'] = bool(g.get('ok')), g.get('error')
+        out['picks'].append(row)
+    _after(sid, want, out, now, automatic=not interactive)
+    return out
+
+
+def _after(sid: int, want: List[Dict[str, Any]], out: Dict[str, Any], now: float, automatic: bool) -> None:
+    """Episode search state: grabbed ones stop; the rest back off (only when a tracker answered)."""
+    grabbed = {i for p in out['picks'] if p['grabbed'] for i in p['episodes']}
+    with tv_store.write() as conn:
+        for e in want:
+            if e['id'] in grabbed:
+                conn.execute('UPDATE episodes SET last_search_at = ?, next_search_at = NULL WHERE id = ?', (now, e['id']))
+            elif out.get('answered'):
+                n = int(e['search_attempts'] or 0)
+                nxt = now + 3600 * BACKOFF_H[min(n, len(BACKOFF_H) - 1)] if automatic else None
+                conn.execute('UPDATE episodes SET last_search_at = ?, search_attempts = search_attempts + 1,'
+                             ' next_search_at = COALESCE(?, next_search_at) WHERE id = ?', (now, nxt, e['id']))
+
+
+def manual(sid: int, season: Optional[int] = None, episode_id: Optional[int] = None,
+           now: Optional[float] = None) -> Dict[str, Any]:
+    """The owner's Search for an episode or a season (interactive budget); grabs what it picks."""
+    with tv_store.connect() as conn:
+        if season is not None:
+            ids = [r['id'] for r in conn.execute('SELECT id FROM episodes WHERE series_id = ? AND season_number = ?',
+                                                 (sid, season))]
+        else:
+            ids = [r['id'] for r in conn.execute('SELECT id FROM episodes WHERE series_id = ? AND id = ?', (sid, episode_id))]
+    if not ids:
+        return {'ok': False, 'error': 'Not found'}
+    out = search_show(sid, ids, origin='manual', purpose='manual', interactive=True, now=now)
+    out['grabs_allowed'] = tv_grab.allowed()
+    return out
+
+
+# ------------------------------------------------------------------ automatic
+
+def automation() -> Dict[str, Any]:
+    return tv_settings.load()['automation']
+
+
+def auto_on() -> bool:
+    return bool(automation().get('enabled')) and tv_grab.allowed()
+
+
+def on_added(sid: int, now: Optional[float] = None) -> int:
+    """A show added from Search: its wanted episodes (from its Monitor option) are searched on the
+    next pass. Returns how many were queued."""
+    now = time.time() if now is None else now
+    if not auto_on():
+        return 0
+    with tv_store.write() as conn:
+        ids = [e['id'] for e in wanted(conn, sid)]
+        for i in ids:
+            conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (now, i))
+    if ids:
+        logger.info('TV search: %d episode(s) of a new show queued', len(ids))
+    return len(ids)
+
+
+def schedule(now: float) -> int:
+    """After an episode airs: its search is set for first_search_delay_h after it aired (older
+    missing episodes only with backlog_enabled). Episodes already scheduled or searched are kept."""
+    auto = automation()
+    delay = 3600 * int(auto.get('first_search_delay_h') or 0)
+    n = 0
+    with tv_store.write() as conn:
+        rows = [dict(r) for r in conn.execute(
+            'SELECT e.id, e.air_date, e.airstamp, e.runtime FROM episodes e JOIN series s ON s.id = e.series_id'
+            ' WHERE s.monitored = 1 AND e.monitored = 1 AND e.next_search_at IS NULL AND e.last_search_at IS NULL'
+            f' AND e.air_date IS NOT NULL AND NOT {tv_monitor._LINKED}')]
+        for e in rows:
+            at = aired_at(e)
+            if at is None:
+                continue
+            if at >= now - RECENT_S:
+                conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (at + delay, e['id']))
+                n += 1
+            elif auto.get('backlog_enabled'):
+                conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (now, e['id']))
+                n += 1
+    return n
+
+
+def run_due(now: float, max_shows: int = 3) -> Dict[str, int]:
+    """Search the shows with episodes due (next_search_at passed), a few per pass."""
+    with tv_store.connect() as conn:
+        rows = [dict(r) for r in conn.execute(
+            'SELECT e.series_id AS sid, e.id, e.air_date FROM episodes e WHERE e.next_search_at IS NOT NULL'
+            ' AND e.next_search_at <= ? ORDER BY e.next_search_at', (now,))]
+    by: Dict[int, List[int]] = {}
+    for r in rows:
+        by.setdefault(r['sid'], []).append(r['id'])
+    out = {'shows': 0, 'grabbed': 0}
+    for sid, ids in list(by.items())[:max_shows]:
+        res = search_show(sid, ids, origin='auto', now=now)
+        out['shows'] += 1
+        out['grabbed'] += sum(1 for p in res.get('picks', []) if p['grabbed'])
+        if res.get('error') == NO_TRACKERS:
+            break
+    return out
+
+
+def feed(now: float) -> Dict[str, int]:
+    """The recent-releases feed: each TV tracker's newest TV releases, at most
+    FEED_PER_TRACKER_DAILY times a day per tracker; picks for any wanted episode are grabbed."""
+    from app import tv_budget
+    out = {'trackers': 0, 'grabbed': 0}
+    every = 86400 / FEED_PER_TRACKER_DAILY
+    for cfg in trackers():
+        key = f"tv_feed:{cfg['id']}"
+        last = float(tv_store.get_meta(key) or 0)
+        if now - last < every:
+            continue
+        if tv_budget.usage(cfg, now)['used'] >= tv_budget.AUTO_PER_TRACKER_DAILY:
+            continue
+        items, st = query_trackers('', 'feed', None, False, now, [cfg])
+        if not st or st[0]['status'] != 'ok':
+            continue
+        tv_store.set_meta(key, str(now))
+        out['trackers'] += 1
+        if not items:
+            continue
+        with tv_store.connect() as conn:
+            sids = [r['id'] for r in conn.execute('SELECT id FROM series WHERE monitored = 1')]
+            shows = {sid: _show(conn, sid) for sid in sids}
+        names: Dict[str, List[int]] = {}
+        for sid, s in shows.items():
+            for n in s['names']:
+                names.setdefault(n, []).append(sid)
+        hits: Dict[int, List[Dict[str, Any]]] = {}
+        for it in items:
+            t = tv_match.normalize(tv_release.parse(str(it.get('title') or '')).title or '')
+            for sid in names.get(t, []):
+                hits.setdefault(sid, []).append(it)
+        for sid, its in hits.items():
+            with tv_store.connect() as conn:
+                want = wanted(conn, sid)
+                blocked = {r['release_title'] for r in conn.execute('SELECT release_title FROM blocklist WHERE series_id = ?', (sid,))}
+            for c in choose(candidates(its, shows[sid], want, blocked)):
+                season = next((e['season_number'] for e in want if e['id'] == c['covers'][0]), None)
+                g = tv_grab.grab(c['item'], sid, season, c['covers'], 'auto', now)
+                if g.get('ok'):
+                    out['grabbed'] += 1
+                    with tv_store.write() as conn:
+                        conn.executemany('UPDATE episodes SET next_search_at = NULL, last_search_at = ? WHERE id = ?',
+                                         [(now, i) for i in c['covers']])
+    return out
+
+
+def refresh(now: float) -> int:
+    """Every REFRESH_S: every library show's episodes read again from TMDB (new episodes, dates)."""
+    from app import tv_scan
+    last = float(tv_store.get_meta('tv_series_refresh_at') or 0)
+    if now - last < REFRESH_S:
+        return 0
+    if not tv_scan._refresh_lock.acquire(blocking=False):
+        return 0                                     # a Calendar-open refresh is running: next pass
+    try:
+        tv_store.set_meta('tv_series_refresh_at', str(now))
+        n = tv_scan.refresh_added(now, folders=True, background=True, stale_s=REFRESH_S)
+    finally:
+        tv_scan._refresh_lock.release()
+    logger.info('TV series refresh: %d show(s) read again', n)
+    return n
+
+
+def tick(now: Optional[float] = None) -> Dict[str, Any]:
+    """One pass: the 12 h refresh, then (automation on and grabs allowed) scheduling, the feed
+    every FEED_S, and the due searches."""
+    now = time.time() if now is None else now
+    out: Dict[str, Any] = {'refreshed': 0, 'scheduled': 0, 'feed': None, 'due': None}
+    if not _lock.acquire(blocking=False):
+        return out
+    try:
+        try:
+            out['refreshed'] = refresh(now)
+        except Exception as e:                       # noqa: BLE001 - TMDB trouble never stops searching
+            logger.warning('TV series refresh failed: %s', type(e).__name__)
+        if not auto_on():
+            return out
+        out['scheduled'] = schedule(now)
+        if automation().get('feed_enabled') and now - float(tv_store.get_meta('tv_feed_at') or 0) >= FEED_S:
+            tv_store.set_meta('tv_feed_at', str(now))
+            out['feed'] = feed(now)
+        out['due'] = run_due(now)
+    finally:
+        _lock.release()
+    return out
+
+
+def status(now: Optional[float] = None) -> Dict[str, Any]:
+    from app import tv_budget
+    now = time.time() if now is None else now
+    auto = automation()
+    return {'automation': bool(auto.get('enabled')), 'feed': bool(auto.get('feed_enabled')),
+            'grabs_allowed': tv_grab.allowed(),
+            'trackers': [{'id': c['id'], 'name': c['name'], **tv_budget.usage(c, now)} for c in trackers()],
+            'feed_every_s': FEED_S, 'feed_per_tracker_daily': FEED_PER_TRACKER_DAILY, 'refresh_every_s': REFRESH_S}
+
+
+_started = {'on': False}
+
+
+def start() -> bool:
+    if _started['on'] or os.environ.get('LUMA_SKIP_BACKGROUND_THREADS'):
+        return False
+    _started['on'] = True
+
+    def loop():
+        while True:
+            time.sleep(TICK_S)
+            try:
+                tick()
+            except Exception as e:                   # noqa: BLE001 - never let one pass end the thread
+                logger.error('TV search pass failed: %s', type(e).__name__)
+    threading.Thread(target=loop, name='tv-search', daemon=True).start()
+    a = automation()
+    logger.info('TV search started (automation %s, feed %s, grabs %s, %d TV tracker(s))',
+                'on' if a.get('enabled') else 'off', 'on' if a.get('feed_enabled') else 'off',
+                'allowed' if tv_grab.allowed() else 'off', len(trackers()))
+    return True

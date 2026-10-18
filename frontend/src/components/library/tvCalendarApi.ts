@@ -73,6 +73,25 @@ export const addShow = (tmdb_id: number, path_id?: string, opts: { monitor?: Mon
     body: JSON.stringify({ tmdb_id, ...(path_id ? { path_id } : {}), ...(opts.monitor ? { monitor: opts.monitor } : {}),
       ...(opts.profile_id != null ? { profile_id: opts.profile_id } : {}) }),
   }, d => typeof d.series_id === 'number');
+/** v158b: Search for an episode or a season (grabs what it picks when grabs are allowed). */
+export interface SearchPick { title: string; quality: string | null; episodes: number[]; grabbed: boolean; error: string | null }
+export interface SearchResult { ok: boolean; wanted: number; searched: number; results: number; picks: SearchPick[];
+  grabs_allowed: boolean; error: string | null }
+export const searchShow = (seriesId: number, target: { season: number } | { episode_id: number }) =>
+  call<SearchResult>(`${TV_URL}/shows/${seriesId}/search`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(target),
+  }, d => Array.isArray(d.picks));
+/** One short line for a search's outcome (status, not helper text). */
+export function searchOutcome(r: { ok: true; data: SearchResult } | { ok: false; status: number; error: string }): string {
+  if (!r.ok) return r.error;
+  const d = r.data;
+  if (d.error) return d.error;
+  if (!d.wanted) return 'Nothing missing';
+  const grabbed = d.picks.filter(p => p.grabbed).length;
+  if (grabbed) return grabbed === 1 ? 'Grabbed 1 release' : `Grabbed ${grabbed} releases`;
+  if (d.picks.length) return d.picks[0]?.error || 'Not grabbed';
+  return 'No releases found';
+}
 const put = (body: unknown): RequestInit => ({ method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 /** The calendar bookmark: that episode only. */
 export const setEpisodeMonitored = (episodeId: number, monitored: boolean) =>

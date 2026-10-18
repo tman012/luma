@@ -556,17 +556,34 @@ def detach(conn, sid: int, now: float, reason: str) -> None:
                                                           'from_path_id': row['path_id']})))
 
 
-def detach_path(path_id: str, now: Optional[float] = None) -> int:
+def detach_path(path_id: str, now: Optional[float] = None, wait: Optional[float] = None) -> int:
     """A Library path now points at another folder: its shows are hidden with
     their history kept (detach), its unmatched rows go. The next scan matches
-    the new folder's shows, taking back any it already knew."""
+    the new folder's shows, taking back any it already knew. Under _scan_lock (Reviewer on
+    49cb7f2): a scan, link or boot re-run never writes rows of the old folder meanwhile. A busy
+    lock (*wait*, default LOCK_WAIT_S) hands the detach to a thread that waits its turn; returns
+    -1 then."""
     now = time.time() if now is None else now
-    with tv_store.write() as conn:
-        ids = [r['id'] for r in conn.execute('SELECT id FROM series WHERE path_id = ?', (path_id,))]
-        for sid in ids:
-            detach(conn, sid, now, 'repointed')
-        conn.execute('DELETE FROM unmatched WHERE path_id = ?', (path_id,))
-    return len(ids)
+
+    def run() -> int:
+        with tv_store.write() as conn:
+            ids = [r['id'] for r in conn.execute('SELECT id FROM series WHERE path_id = ?', (path_id,))]
+            for sid in ids:
+                detach(conn, sid, now, 'repointed')
+            conn.execute('DELETE FROM unmatched WHERE path_id = ?', (path_id,))
+        return len(ids)
+    if _scan_lock.acquire(timeout=LOCK_WAIT_S if wait is None else wait):
+        try:
+            return run()
+        finally:
+            _scan_lock.release()
+
+    def later():
+        with _scan_lock:
+            n = run()
+        logger.info('Library path %s repointed: %d TV shows hidden (after the running scan)', path_id, n)
+    _Thread(target=later, daemon=True, name='tv-detach').start()
+    return -1
 
 
 def _manual_here(conn, owner) -> bool:
@@ -902,7 +919,8 @@ def still_gaps(start: Optional[dt.date] = None, end: Optional[dt.date] = None, n
 
 
 def refresh_added(now: Optional[float] = None, folders: bool = False, first: Optional[set] = None,
-                  background: bool = False, repair: Optional[set] = None, only: Optional[set] = None) -> int:
+                  background: bool = False, repair: Optional[set] = None, only: Optional[set] = None,
+                  stale_s: Optional[float] = None) -> int:
     """Shows added from Search (a library, no folder) keep their episodes
     current like folder shows: once REFRESH_EPISODES_S has passed, on the next
     scan (Import) or Calendar open (folders=True: every show of the selected
@@ -923,7 +941,8 @@ def refresh_added(now: Optional[float] = None, folders: bool = False, first: Opt
             f' ({",".join("?" * len(pids))})', pids)
             # stale (24h), its stills never read (backfill now, whatever its age), or an aired episode
             # still has no image (repair)
-            if now - (r['tmdb_refreshed_at'] or 0) >= REFRESH_EPISODES_S or (folders and r['stills_at'] is None)
+            if now - (r['tmdb_refreshed_at'] or 0) >= (REFRESH_EPISODES_S if stale_s is None else stale_s)
+            or (folders and r['stills_at'] is None)
             or r['id'] in (repair or ())]
     if only is not None:
         rows = [r for r in rows if r['id'] in only]
@@ -1412,7 +1431,19 @@ def auto_import_pending(now: Optional[float] = None) -> Dict[str, Any]:
     since = _rerun_since(now) if rows else now
     open_rows = [r for r in rows if r['reason'] not in KEEP_REASONS and r['tier'] != 'duplicate']
     out['skipped'] = len(rows) - len(open_rows)
-    direct = [r for r in open_rows if r['pick'] and r['tier'] == 'likely' and r['reason'] in AUTO_REASONS]
+    direct, bad = [], []
+    for r in open_rows:
+        if r['pick'] and r['tier'] == 'likely' and r['reason'] in AUTO_REASONS:
+            try:
+                r['pick'] = int(r['pick'])
+                direct.append(r)
+            except (TypeError, ValueError):
+                bad.append(r)                    # one bad row never stops the run (Reviewer on 49cb7f2)
+    if bad:
+        logger.warning('TV import: boot re-run skipped %d review row(s) with an unreadable pick (ids %s)',
+                       len(bad), ', '.join(str(r['id']) for r in bad[:20]))
+    bad_ids = {r['id'] for r in bad}
+    open_rows = [r for r in open_rows if r['id'] not in bad_ids]
     ids = {r['id'] for r in direct}
     again = [r for r in open_rows if r['id'] not in ids and (r['ts'] is None or r['ts'] < since)]
     out.update(direct=len(direct), rematched=len(again), eligible=len(direct) + len(again))

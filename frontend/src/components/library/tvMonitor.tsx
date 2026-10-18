@@ -3,7 +3,7 @@
  * no labels or helper text, aria only. */
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { isMinimal } from '@/minimal';
-import { getSeriesByTmdb, setEpisodeMonitored, setSeasonMonitored, setSeriesMonitored, type SeriesView } from './tvCalendarApi';
+import { getSeriesByTmdb, searchOutcome, searchShow, setEpisodeMonitored, setSeasonMonitored, setSeriesMonitored, type SeriesView } from './tvCalendarApi';
 
 export interface LumaMonitor {
   view: SeriesView;
@@ -55,7 +55,7 @@ export function MonitorMark({ on, onToggle, label, size = 32, testid }: {
       onClick={e => { e.stopPropagation(); e.preventDefault(); onToggle(!on); }}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation(); }}
       style={{ width: size, height: size, padding: 0, borderRadius: size / 4, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        background: on ? 'rgba(59,130,246,0.9)' : 'rgba(21,16,42,0.6)', border: '1px solid rgba(255,255,255,0.14)',
+        background: on ? '#3b82f6' : 'rgba(255,255,255,0.10)', border: on ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.08)',
         backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', color: '#fff', cursor: 'pointer' }}>
       <svg width={size * 0.45} height={size * 0.45} viewBox="0 0 24 24" fill={on ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
         <path d="M6 3h12v18l-6-4.5L6 21z" />
@@ -85,9 +85,53 @@ export function EpisodeMark({ season, episode }: { season: number; episode: numb
   const e = m?.view.episodes.find(x => x.season === season && x.episode === episode);
   if (!m || !e) return null;
   return (
-    <span style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}>
+    <span style={{ position: 'absolute', top: 8, right: 8, zIndex: 2, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <SearchMark season={season} episode={episode} />
       <MonitorMark testid="tv-mon-episode" on={e.monitored} onToggle={on => m.episode(season, episode, on)}
         label={`Monitored: S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`} size={30} />
+    </span>
+  );
+}
+
+/** v158b: Search for this episode or season (magnifier chip, glass .10). The outcome shows as a short
+ * status next to it for a few seconds; aria-live for screen readers. */
+export function SearchMark({ season, episode, size = 30 }: { season: number; episode?: number; size?: number }) {
+  const m = useContext(LumaMonitorContext);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!note) return undefined;
+    const t = setTimeout(() => setNote(null), 4000);
+    return () => clearTimeout(t);
+  }, [note]);
+  const ep = episode == null ? null : m?.view.episodes.find(x => x.season === season && x.episode === episode);
+  if (!m || (episode != null && !ep)) return null;
+  const label = episode == null ? `Search: season ${season}` : `Search: S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
+  const go = (e: React.SyntheticEvent) => {
+    e.stopPropagation(); e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    void searchShow(m.view.id, ep ? { episode_id: ep.id } : { season })
+      .then(r => setNote(searchOutcome(r))).finally(() => setBusy(false));
+  };
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      {note && <span role="status" data-testid="tv-search-note" style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.9)',
+        background: 'rgba(255,255,255,0.10)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+        border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8, padding: '4px 8px', whiteSpace: 'nowrap' }}>{note}</span>}
+      <button type="button" data-testid={episode == null ? 'tv-search-season' : 'tv-search-episode'} aria-label={label} aria-busy={busy}
+        className="lp-focus" onClick={go} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation(); }}
+        style={{ width: size, height: size, padding: 0, borderRadius: size / 4, flex: 'none', display: 'inline-flex', alignItems: 'center',
+          justifyContent: 'center', background: 'rgba(255,255,255,0.10)', border: '1px solid rgba(255,255,255,0.08)',
+          backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', color: '#fff', cursor: busy ? 'default' : 'pointer',
+          opacity: busy ? 0.6 : 1 }}>
+        <svg width={size * 0.45} height={size * 0.45} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"
+          strokeLinecap="round" aria-hidden="true"
+          style={busy ? { animation: 'tvSearchPulse 0.9s ease-in-out infinite alternate' } : undefined}>
+          <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />
+        </svg>
+        <style>{'@keyframes tvSearchPulse{from{opacity:1}to{opacity:.35}}'}</style>
+      </button>
     </span>
   );
 }

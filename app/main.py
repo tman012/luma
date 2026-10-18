@@ -21657,9 +21657,14 @@ _tv_plex.init(get_plex=lambda: plex_service)
 _tv_watch.start()
 try:
     from app import tv_downloads as _tv_downloads
-    _tv_downloads.start()      # 1-min TV download watch (luma-test-tv torrents only)
+    _tv_downloads.start()      # 1-min TV download watch (this instance's TV category only)
 except Exception as _e:  # noqa: BLE001
     logger.error('TV download watch not started: %s', type(_e).__name__)
+try:
+    from app import tv_search as _tv_search
+    _tv_search.start()         # feed (15 min tick), after-air and on-add searches, 12 h series refresh
+except Exception as _e:  # noqa: BLE001
+    logger.error('TV search not started: %s', type(_e).__name__)
 from app import tv_scan as _tv_scan_boot  # noqa: E402
 _tv_scan_boot.auto_import_on_start()       # old review rows with a ranked pick import now (background)
 

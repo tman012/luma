@@ -358,3 +358,32 @@ def test_v161a_boot_rerun_always_logs_a_summary(lib, monkeypatch, caplog):
     assert any('0 review row(s), 0 eligible' in m for m in msgs)
     assert any('auto import off' in m for m in msgs)
     assert any('LUMA_SKIP_BACKGROUND_THREADS' in m for m in msgs)
+
+
+def test_v158b_boot_rerun_skips_a_row_with_an_unreadable_pick(lib, monkeypatch, fake_tmdb, caplog):
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', True)
+    _old_rows(lib)
+    with tv_store.write() as conn:
+        conn.execute("UPDATE unmatched SET tier = 'likely', reason = 'not_exact', pick = 'abc' WHERE folder = 'Taskmaster'")
+    caplog.set_level('INFO', logger='app.tv_scan')
+    out = tv_scan.auto_import_pending(now=2000.0)
+    assert out['ok'] and 'unreadable pick' in caplog.text
+    assert rows("SELECT pick FROM unmatched WHERE folder = 'Taskmaster'")[0]['pick'] == 'abc'      # left as it was
+    assert 5000 in {r['tmdb_id'] for r in rows('SELECT tmdb_id FROM series')}                      # the rest ran
+    assert any('boot re-run (rule' in r.getMessage() for r in caplog.records)
+
+
+def test_v158b_detach_path_takes_the_scan_lock(lib, monkeypatch, fake_tmdb):
+    import threading
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', True)
+    _old_rows(lib)
+    assert rows('SELECT 1 FROM unmatched WHERE path_id = ?', PID)
+    with tv_scan._scan_lock:
+        assert tv_scan.detach_path(PID, now=10.0, wait=0.05) == -1              # busy: waits its turn
+        assert rows('SELECT 1 FROM unmatched WHERE path_id = ?', PID)           # nothing deleted under a scan
+    for t in threading.enumerate():
+        if t.name == 'tv-detach':
+            t.join(5)
+    assert not rows('SELECT 1 FROM unmatched WHERE path_id = ?', PID)
+    _old_rows_again = rows('SELECT 1 FROM series WHERE path_id = ?', PID)
+    assert tv_scan.detach_path(PID, now=11.0) == len(_old_rows_again)          # free lock: at once

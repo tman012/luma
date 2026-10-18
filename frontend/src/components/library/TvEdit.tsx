@@ -18,6 +18,8 @@ const ACCENT = '#3b82f6';
 const RED = '#ef4444';
 export const SAVE_ERROR = "Couldn't save";
 
+/** v158b (Designer): the Edit and profile modals sit on Luma's surface, not a see-through tint of the poster. */
+export const MODAL_SURFACE = 'rgba(21,16,42,0.92)';
 export const tvEditCss = `
 .tve-in:focus,.tve-in:focus-visible,.tve-sel:focus-visible{outline:none;border-color:${ACCENT}!important;box-shadow:0 0 0 3px rgba(59,130,246,.25)}
 .tve-opt:hover{background:rgba(255,255,255,.06)}
@@ -44,7 +46,7 @@ export function Modal({ title, onClose, children, footer, testid }: {
       <style>{tvEditCss}</style>
       <div role="dialog" aria-modal="true" aria-label={title} data-testid={testid}
         style={{ width: 560, maxWidth: 'calc(100vw - 32px)', maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', boxSizing: 'border-box', padding: 24,
-          borderRadius: 16, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: 16, background: MODAL_SURFACE, border: '1px solid rgba(255,255,255,0.08)',
           backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)', boxShadow: '0 24px 64px rgba(0,0,0,.5)', color: W95 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 20 }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, lineHeight: '24px', color: W95, minWidth: 0, overflowWrap: 'anywhere' }}>{title}</h2>

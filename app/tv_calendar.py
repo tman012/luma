@@ -11,10 +11,13 @@ that; the server says only whether a file is linked ("downloaded").
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import time
 from typing import Any, Dict, List, Optional
 
 from app import tv_match, tv_plex, tv_scan, tv_store, tv_tmdb
+
+logger = logging.getLogger(__name__)
 
 MAX_DAYS = 62
 FIND_LIBRARY_MAX = 10
@@ -199,9 +202,20 @@ def add(tmdb_id: int, path_id: Optional[str], now: Optional[float] = None, monit
             conn.execute('INSERT INTO history (ts, series_id, episode_ids, event, detail) VALUES (?, ?, ?, ?, ?)',
                          (now, known['id'], '[]', 'added', __import__('json').dumps(
                              {'via': 'search', 'path_id': path_id, 'tmdb_id': tmdb_id})))
+        _search_on_add(known['id'], now)
         return {'ok': True, 'series_id': known['id']}
     sid = tv_scan.store_show(path_id, None, tmdb_id, now, via='search', event='added', data=data,
                              monitor=monitor, profile_id=profile_id)
     if sid is None:
         return {'ok': False, 'error': ALREADY, 'status': 409}
+    _search_on_add(sid, now)
     return {'ok': True, 'series_id': sid}
+
+
+def _search_on_add(sid: int, now: float) -> None:
+    """v158b: the new show's wanted episodes (its Monitor option) are searched on the next pass."""
+    try:
+        from app import tv_search
+        tv_search.on_added(sid, now)
+    except Exception:                     # noqa: BLE001 - an Add never fails over its search
+        logger.exception('TV search on add failed')
