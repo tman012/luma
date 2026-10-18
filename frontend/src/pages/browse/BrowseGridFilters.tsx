@@ -134,7 +134,7 @@ export function BrowseGridFilters({
   };
 
   const genreOptions = [
-    { value: '', label: 'All Genres' },
+    { value: '', label: 'All genres' },
     ...genres.map((g) => ({ value: g, label: g })),
   ];
 

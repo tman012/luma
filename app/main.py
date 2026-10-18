@@ -124,6 +124,9 @@ _log_files.install()
 _log_files.redact_handlers()
 _log_files.redact_gunicorn()
 _log_files.attach(filters=[_RedactSecretsFilter()])
+# v174 (Ops): settings migrations that ran during the imports above log now, at INFO, once.
+from app.settings_manager import flush_migration_logs as _flush_migration_logs  # noqa: E402
+_flush_migration_logs()
 
 # Flask app setup
 static_folder = os.environ.get('FLASK_STATIC_FOLDER') or '/app/static'
@@ -19684,6 +19687,20 @@ def update_settings():
             return jsonify({'success': False, 'errors': ['Request body must be a JSON object']}), 400
 
         _unbind_qbit_password_on_new_url(data)
+        if 'tracker_search' in data:
+            # v174 (Tester FF-8): Trackers > Search is the owner's, like the Trackers page: other admins
+            # get 403 (the implicit LAN owner and the service key 401); the value is validated.
+            _u, ts_err = _start_flow.require_signed_in_owner()
+            if ts_err is not None:
+                resp, status = ts_err
+                resp.headers['Cache-Control'] = 'no-store'
+                return resp, status
+            from app.settings_manager import validate_tracker_search as _validate_ts
+            clean, ts_errors = _validate_ts(data['tracker_search'])
+            if ts_errors:
+                return jsonify({'success': False, 'errors': [f'tracker_search.{k}: {v}' for k, v in ts_errors.items()],
+                                'fields': ts_errors}), 400
+            data['tracker_search'] = clean
         # PM ruling: turning on or widening automatic deletion (Downloads
         # Guard, or any folder it or the cleanup deletes from) needs the owner
         # signed in with a session; turning it off or tightening it stays
@@ -21640,7 +21657,8 @@ _tracker_routes.init(get_current_user=_get_current_user, get_owner=lambda: _acce
                      on_change=_tracker_search.on_tracker_changed,
                      on_delete=_on_tracker_deleted,
                      on_list_change=_all_results_cache.clear,
-                     get_setting=settings.get)   # v170: Import from Prowlarr reads the Indexer settings
+                     get_setting=settings.get,   # v170: Import from Prowlarr reads the Indexer settings
+                     update_settings=settings.update)   # v174: Trackers > Search (owner only, validated)
 app.register_blueprint(_tracker_routes.bp)
 
 # TV (luma-test builds; owner only): per-section tracker lists and TV settings.

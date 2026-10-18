@@ -189,7 +189,7 @@ export function MobileUpgradeSheet({
           textAlign: 'center',
           margin: '0 0 16px',
         }}>
-          {isOwned ? 'Upgrade Quality' : 'Select Quality'}
+          {isOwned ? 'Upgrade quality' : 'Select quality'}
         </p>
 
         {/* Quality options */}

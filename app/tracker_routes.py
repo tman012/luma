@@ -59,7 +59,8 @@ def init(*, get_current_user: Callable[[], Optional[dict]], get_owner: Callable[
          on_change: Optional[Callable[[Dict[str, Any]], None]] = None,
          on_delete: Optional[Callable[[Dict[str, Any]], None]] = None,
          on_list_change: Optional[Callable[[], None]] = None,
-         get_setting: Optional[Callable[[str], Any]] = None) -> None:
+         get_setting: Optional[Callable[[str], Any]] = None,
+         update_settings: Optional[Callable[[Dict[str, Any]], Any]] = None) -> None:
     """*is_implicit* tells whether the current user is the implicit LAN
     owner (no session). *tester* runs one connection test (raises
     TrackerError); defaults to tracker_clients.test. It always runs inside
@@ -72,7 +73,8 @@ def init(*, get_current_user: Callable[[], Optional[dict]], get_owner: Callable[
                 tester=tester or (lambda cfg: tracker_clients.test(cfg)),
                 on_change=on_change or (lambda rec, **kw: None), on_delete=on_delete or (lambda rec: None),
                 on_list_change=on_list_change or (lambda: None),
-                get_setting=get_setting or (lambda key: None))
+                get_setting=get_setting or (lambda key: None),
+                update_settings=update_settings)
 
 
 def _list_changed() -> None:
@@ -332,3 +334,36 @@ def import_create():
     store = get_store()
     return _no_store(jsonify({'created': [store.public(r) for r in out['created']], 'skipped': out['skipped']}),
                      201 if out['created'] else 200)
+
+
+# ------------------------------------------------- v174: Trackers > Search (Tester FF-8)
+# The luma-test (minimal) build serves no /api/settings, so the Search card reads and writes here:
+# owner only (the blueprint's guard: other admins 403), validated (settings_manager.validate_tracker_search).
+
+def _search_view() -> Dict[str, Any]:
+    from app.settings_manager import KNOWN_MOVIE_CATEGORIES
+    v = _cfg['get_setting']('tracker_search.movie_categories')
+    return {'movie_categories': v if isinstance(v, str) else '2000', 'known_categories': list(KNOWN_MOVIE_CATEGORIES)}
+
+
+@bp.route('/api/trackers/search-settings', methods=['GET'])
+def search_settings_get():
+    return _no_store(jsonify(_search_view()))
+
+
+@bp.route('/api/trackers/search-settings', methods=['PUT'])
+def search_settings_put():
+    from app.settings_manager import validate_tracker_search
+    body = _body()
+    if body is None:
+        return _invalid({'_': 'Request body must be a JSON object'})
+    clean, errors = validate_tracker_search(body)
+    if errors or not clean:
+        return _invalid(errors or {'movie_categories': 'Required'})
+    update = _cfg.get('update_settings')
+    if update is None:
+        return _no_store(jsonify({'error': 'Settings unavailable'}), 503)
+    ok, errs = update({'tracker_search': clean})
+    if not ok:
+        return _no_store(jsonify({'error': 'Invalid', 'fields': {'movie_categories': '; '.join(map(str, errs))[:200]}}), 400)
+    return _no_store(jsonify(_search_view()))

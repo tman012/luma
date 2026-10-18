@@ -767,10 +767,10 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
 
   // Dynamic spinner text based on media type selection
   const spinnerText = answers.type === 'movie'
-    ? 'Finding You a Movie to Watch'
+    ? 'Finding you a movie to watch'
     : answers.type === 'tv'
-      ? 'Finding You a Show to Watch'
-      : 'Finding You Something to Watch';
+      ? 'Finding you a show to watch'
+      : 'Finding you something to watch';
 
   // --- Render ---
 
@@ -861,8 +861,8 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
                 <div className="flex w-full max-w-[340px] flex-col gap-3 sm:max-w-none sm:flex-row sm:flex-wrap sm:justify-center sm:gap-5">
                   {([
                     { value: 'movie' as const, icon: '\u{1F3AC}', label: 'Movie', desc: 'Feature films' },
-                    { value: 'tv' as const, icon: '\u{1F4FA}', label: 'TV Shows', desc: 'Series & shows' },
-                    { value: 'both' as const, icon: '\u{1F3B2}', label: 'Surprise Me', desc: 'Either one' },
+                    { value: 'tv' as const, icon: '\u{1F4FA}', label: 'TV shows', desc: 'Series & shows' },
+                    { value: 'both' as const, icon: '\u{1F3B2}', label: 'Surprise me', desc: 'Either one' },
                   ]).map((opt) => (
                     <button
                       key={opt.value}
@@ -904,8 +904,8 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
                 </p>
                 <div className="flex w-full max-w-[340px] flex-col gap-3 sm:max-w-none sm:flex-row sm:flex-wrap sm:justify-center sm:gap-5">
                   {([
-                    { value: 'library' as const, icon: '\u{1F4DA}', label: 'In Your Library', desc: 'From your collection' },
-                    { value: 'discover' as const, icon: '\u{2728}', label: 'Something New', desc: "Titles you don't own" },
+                    { value: 'library' as const, icon: '\u{1F4DA}', label: 'In your library', desc: 'From your collection' },
+                    { value: 'discover' as const, icon: '\u{2728}', label: 'Something new', desc: "Titles you don't own" },
                   ]).map((opt) => (
                     <button
                       key={opt.value}
@@ -1017,9 +1017,9 @@ export function PickForMeMode({ library, onOpenModal, vibeSettings, loadLibrary 
                 </p>
                 <div className="flex w-full max-w-[340px] flex-col gap-3 sm:max-w-none sm:flex-row sm:flex-wrap sm:justify-center sm:gap-5">
                   {([
-                    { value: 'newer' as const, icon: '\u{1F525}', label: 'A Recent Release', desc: 'From the last few years' },
-                    { value: 'older' as const, icon: '\u{1F4FD}\u{FE0F}', label: 'An Older Favorite', desc: 'A tried and true classic' },
-                    { value: 'any' as const, icon: '\u{1F30D}', label: "Doesn\u{2019}t Matter", desc: 'Any decade works' },
+                    { value: 'newer' as const, icon: '\u{1F525}', label: 'A recent release', desc: 'From the last few years' },
+                    { value: 'older' as const, icon: '\u{1F4FD}\u{FE0F}', label: 'An older favorite', desc: 'A tried and true classic' },
+                    { value: 'any' as const, icon: '\u{1F30D}', label: "Doesn\u{2019}t matter", desc: 'Any decade works' },
                   ]).map((opt) => (
                     <button
                       key={opt.value}

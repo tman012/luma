@@ -70,7 +70,7 @@ function TunnelStatusBadge() {
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${color}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium ${color}`}
       title={status.last_error || undefined}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${
@@ -110,7 +110,7 @@ function TunnelSetupGuide() {
           <li>Name your tunnel (e.g. "luma")</li>
           <li>Copy the tunnel token from the install command</li>
           <li>Paste it above, enable the toggle, and save</li>
-          <li>Back in Cloudflare, add a <span className="text-white/70">Public Hostname</span> pointing to <code className="text-white/60 bg-white/5 px-1 rounded">http://localhost:5001</code></li>
+          <li>Back in Cloudflare, add a <span className="text-white/70">Public hostname</span> pointing to <code className="text-white/60 bg-white/5 px-1 rounded">http://localhost:5001</code></li>
           <li>Access your app at the public hostname from anywhere</li>
         </ol>
       )}
@@ -124,7 +124,6 @@ export function NetworkTab() {
   const items: CardItem[] = [
     {
       title: 'Server',
-      subtitle: 'Flask application network settings',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
@@ -136,7 +135,6 @@ export function NetworkTab() {
       content: (
         <SettingsCard
           title="Server"
-          subtitle="Flask application network settings"
           paths={SERVER_PATHS}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -148,7 +146,7 @@ export function NetworkTab() {
           }
         >
           <FormField
-            label="Flask Port"
+            label="Flask port"
             path="network.flask_port"
             type="number"
             placeholder="5001"
@@ -156,14 +154,14 @@ export function NetworkTab() {
             max={65535}
           />
           <FormField
-            label="Flask Secret Key"
+            label="Flask secret key"
             path="network.flask_secret_key"
             type="password"
             placeholder="Secret key"
           />
           <div className="sm:col-span-2">
             <ToggleSwitch
-              label="Docker Mode"
+              label="Docker mode"
               path="network.is_docker"
             />
           </div>
@@ -172,7 +170,6 @@ export function NetworkTab() {
     },
     {
       title: 'Cloudflare Tunnel',
-      subtitle: 'Secure remote access without opening ports',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
@@ -181,7 +178,6 @@ export function NetworkTab() {
       content: (
         <SettingsCard
           title="Cloudflare Tunnel"
-          subtitle="Secure remote access without opening router ports"
           paths={TUNNEL_PATHS}
           testService="tunnel"
           testLabel="Check Binary"
@@ -191,17 +187,16 @@ export function NetworkTab() {
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
             </svg>
           }
-          note="Tunnel runs inside the Docker container. No extra services or open ports needed."
         >
           <div className="sm:col-span-2">
             <ToggleSwitch
-              label="Enable Remote Access"
+              label="Enable remote access"
               path="network.tunnel.enabled"
             />
           </div>
           <div className="sm:col-span-2">
             <FormField
-              label="Tunnel Token"
+              label="Tunnel token"
               path="network.tunnel.token"
               type="password"
               placeholder="Paste token from Cloudflare Zero Trust dashboard"
@@ -217,9 +212,6 @@ export function NetworkTab() {
     <div className="space-y-6">
       <div className="settings-tab-header">
         <h2 className="text-xl font-semibold text-white/90">Network</h2>
-        <p className="mt-1 text-[13px] text-white/40">
-          Flask server and network configuration.
-        </p>
       </div>
 
       <MobileCardNav items={items} />

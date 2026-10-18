@@ -40,7 +40,7 @@ export interface HomeRailDefinition {
 export const HOME_RAILS: readonly HomeRailDefinition[] = [
   {
     id: 'continue_watching',
-    title: 'Continue Watching',
+    title: 'Continue watching',
     endpoint: '/api/plex/continue_watching/cached',
     defaultParams: { limit: 25 },
     conditional: false,
@@ -49,7 +49,7 @@ export const HOME_RAILS: readonly HomeRailDefinition[] = [
   {
     // Daily popular blind spots — TOP discovery rail.
     id: 'what_youre_missing',
-    title: "What You're Missing",
+    title: "What you're missing",
     endpoint: '/api/rails/what-youre-missing',
     defaultParams: { limit: 20 },
     conditional: true, // hide entirely when the pool is thin
@@ -75,7 +75,7 @@ export const HOME_RAILS: readonly HomeRailDefinition[] = [
   },
   {
     id: 'recent_movies',
-    title: 'Recently Added Movies',
+    title: 'Recently added movies',
     endpoint: '/api/library/recent/cached',
     defaultParams: { type: 'movie', limit: 25 },
     conditional: false,
@@ -83,7 +83,7 @@ export const HOME_RAILS: readonly HomeRailDefinition[] = [
   },
   {
     id: 'recent_tv',
-    title: 'Recently Added TV',
+    title: 'Recently added TV',
     endpoint: '/api/library/episodes/cached',
     defaultParams: { limit: 20 },
     conditional: false,
@@ -93,7 +93,7 @@ export const HOME_RAILS: readonly HomeRailDefinition[] = [
     // Conditional: a fresh server with no watch history should show nothing
     // here rather than a skeleton that never fills in.
     id: 'recently_watched',
-    title: 'Recently Watched',
+    title: 'Recently watched',
     endpoint: '/api/plex/recently_watched',
     defaultParams: { limit: 25 },
     conditional: true,

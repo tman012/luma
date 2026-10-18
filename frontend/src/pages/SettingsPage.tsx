@@ -22,6 +22,7 @@ import { NetworkTab } from './settings/NetworkTab';
 import { AutomationTab } from './settings/AutomationTab';
 import { SecurityTab } from './settings/SecurityTab';
 import { AiTab } from './settings/AiTab';
+import { LEGACY } from './settings/components/legacyTokens';
 import { cn } from '@/utils/cn';
 
 // ── Error boundary to catch and display render crashes ──────────
@@ -66,7 +67,6 @@ type TabId = 'services' | 'ai' | 'rooms' | 'ui' | 'media' | 'network' | 'securit
 interface TabDef {
   id: TabId;
   label: string;
-  subtitle: string;
   section: string;
   icon: React.ReactNode;
 }
@@ -75,7 +75,6 @@ const TABS: TabDef[] = [
   {
     id: 'services',
     label: 'Services',
-    subtitle: 'Plex \u00b7 Sonarr \u00b7 Radarr \u00b7 qBittorrent',
     section: 'Services',
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -86,7 +85,6 @@ const TABS: TabDef[] = [
   {
     id: 'ai',
     label: 'AI',
-    subtitle: 'OpenAI \u00b7 Content preferences',
     section: 'Services',
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -98,8 +96,7 @@ const TABS: TabDef[] = [
   },
   {
     id: 'rooms',
-    label: 'Rooms & Devices',
-    subtitle: 'Shield \u00b7 Android TV \u00b7 Chromecast',
+    label: 'Rooms & devices',
     section: 'Hardware',
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -109,8 +106,7 @@ const TABS: TabDef[] = [
   },
   {
     id: 'ui',
-    label: 'UI & Kiosk',
-    subtitle: 'App name \u00b7 Screensaver \u00b7 Hero display',
+    label: 'UI & kiosk',
     section: 'Application',
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -120,8 +116,7 @@ const TABS: TabDef[] = [
   },
   {
     id: 'media',
-    label: 'Media Paths',
-    subtitle: 'System paths \u00b7 Library configuration',
+    label: 'Media paths',
     section: 'Application',
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -132,7 +127,6 @@ const TABS: TabDef[] = [
   {
     id: 'network',
     label: 'Network',
-    subtitle: 'Flask port \u00b7 Cloudflare tunnel',
     section: 'Application',
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -145,7 +139,6 @@ const TABS: TabDef[] = [
   {
     id: 'security',
     label: 'Security',
-    subtitle: 'Require PIN \u00b7 Trusted proxies',
     section: 'Application',
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -156,7 +149,6 @@ const TABS: TabDef[] = [
   {
     id: 'automation',
     label: 'Automation',
-    subtitle: 'Trending watchlists \u00b7 Scheduling',
     section: 'Application',
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -291,8 +283,7 @@ function SettingsPageInner() {
                 >
                   <span className="text-white/50 shrink-0">{tab.icon}</span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[16px] font-medium text-white/90 leading-snug">{tab.label}</p>
-                    <p className="text-[13px] text-white/40 mt-0.5 leading-snug">{tab.subtitle}</p>
+                    <p className="text-[16px] font-medium text-white/95 leading-snug">{tab.label}</p>
                   </div>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/20 shrink-0">
                     <polyline points="9 18 15 12 9 6" />
@@ -311,54 +302,53 @@ function SettingsPageInner() {
   // ── Desktop / Tablet layout ──────────────────────────────────
 
   const desktopTab = activeTab ?? 'services';
-
+  // v174 (Designer): the page sits in PageModal's settings shell (navy glass, scrim behind it); the
+  // nav is transparent over the shell with a 6% divider; the active item is blue 16%, its icon blue.
   return (
-    <div className="flex h-dvh bg-kiosk-black text-white">
+    <div className="flex h-dvh max-h-full bg-transparent text-white" data-testid="legacy-settings">
       {/* Sidebar */}
-      <aside data-scroll-container className="luma-scroll-y sticky top-0 flex h-dvh w-[260px] shrink-0 flex-col border-r border-white/[0.06] bg-white/[0.02]">
-        {/* Title */}
-        <div className="flex items-center gap-2 border-b border-white/[0.06] px-5 py-4">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-white/30">
-            <circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-          <span className="text-[16px] font-semibold text-white/85">Settings</span>
+      <aside data-scroll-container className="luma-scroll-y sticky top-0 flex h-dvh max-h-full w-[260px] shrink-0 flex-col border-r bg-transparent"
+        style={{ borderColor: LEGACY.navDivider }}>
+        <div className="flex items-center gap-2 px-5 py-4">
+          <span className="text-[16px] font-semibold text-white/95">Settings</span>
         </div>
-
-        {/* Tab list */}
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 px-4 pb-4 space-y-1">
           {sectionGroups.map((group, gi) => (
             <div key={group.section} className={gi > 0 ? 'mt-5' : ''}>
-              <p className="mb-2 px-3 text-[11px] font-bold text-white/25">
-                {group.section}
-              </p>
-              {group.tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={cn(
-                    'flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition-all mb-0.5',
-                    desktopTab === tab.id
-                      ? 'bg-emerald-500/8 text-emerald-400 border border-emerald-500/15'
-                      : 'text-white/50 border border-transparent hover:bg-white/5 hover:text-white/75',
-                  )}
-                >
-                  <span className="w-5 text-center">{tab.icon}</span>
-                  {tab.label}
-                </button>
-              ))}
+              {group.tabs[0]?.label !== group.section && (
+                <p className="mb-2 px-3 text-[12px] font-medium text-white/50" data-testid="settings-nav-group">
+                  {group.section}
+                </p>
+              )}
+              {group.tabs.map((tab) => {
+                const active = desktopTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    aria-current={active ? 'page' : undefined}
+                    className={cn(
+                      'flex w-full items-center gap-3 rounded-[10px] px-3 py-2.5 text-[14px] font-medium transition-colors mb-0.5',
+                      active ? 'text-white/95' : 'text-white/60 hover:bg-white/[0.06] hover:text-white/85',
+                    )}
+                    style={active ? { background: LEGACY.activeNav } : undefined}
+                  >
+                    <span className="w-5 text-center" style={{ color: active ? LEGACY.primary : undefined }}>{tab.icon}</span>
+                    {tab.label}
+                  </button>
+                );
+              })}
             </div>
           ))}
         </nav>
       </aside>
-
       {/* Content area */}
       <main data-scroll-container className="luma-scroll-y flex-1 px-6 py-8 sm:px-10 lg:px-12">
         <div className="mx-auto max-w-[900px]">
           {TAB_CONTENT[desktopTab]}
         </div>
       </main>
-
       <ToastContainer />
     </div>
   );

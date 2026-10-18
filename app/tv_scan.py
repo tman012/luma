@@ -823,6 +823,7 @@ MOUNT_META = 'tv_mount:'                     # + path id: the mount point the pa
 SKIPPED_META = 'tv_skipped:'                 # + path id: v170, the last scan skipped it (empty or system folders only)
 ROOT_META = 'tv_root:'                       # + path id: v171, the folder its last good scan read ('-' once repointed)
 REPOINTED = '-'
+DEV_META = 'tv_dev:'                         # + path id: v174, the device id (st_dev) of its folder at its last good scan
 COVERAGE_META = 'tv_coverage:'               # + path id: v173, the folder set the coverage guard keeps seeing
 # v173 (PM): the coverage guard releases once the same folder set (mount up) has been seen for
 # COVERAGE_RELEASE_SCANS scans spanning COVERAGE_RELEASE_SPAN_S, or for COVERAGE_RELEASE_AGE_S
@@ -868,6 +869,7 @@ def forget_mount(pid: str) -> None:
     removed), so an old mount can never make its next folder look dropped."""
     try:
         tv_store.set_meta(MOUNT_META + pid, None)
+        tv_store.set_meta(DEV_META + pid, None)          # v174: and its device id
         tv_store.set_meta(SKIPPED_META + pid, None)
         tv_store.set_meta(ROOT_META + pid, REPOINTED)      # its rows are the old folder's: no coverage guard
     except Exception as e:                   # noqa: BLE001 - only a signal
@@ -938,8 +940,41 @@ def _unavailable(pid: str, root_real: str, shows: List[str], now: Optional[float
         return None
     if len(present) * 2 < len(prior):
         why = f'coverage {len(present)}/{len(prior)}'
+        # v174 (Reviewer on c669f76, REQUIRED): the exit is only for a mounted library. With the mount
+        # dropped (or the recorded mount not mounted now) the streak resets and nothing is released.
+        if _mount_down(pid, root_real):
+            _clear_coverage(pid)
+            return why
         return None if _coverage_released(pid, shows, why, now) else why
     return None
+
+
+def _dev_of(path: str) -> Optional[int]:
+    try:
+        return os.stat(path).st_dev
+    except OSError:
+        return None
+
+
+def _mount_down(pid: str, root_real: str) -> bool:
+    """v174 (PM's device-id rule; Reviewer and Tester FF-9 on c669f76): the mount is up only when it is
+    the same mount the path's last good scan saw. Down when the mount is dropped (_dropped_mount), the
+    recorded mount point is not mounted now, or the path's folder is on another device (st_dev) than at
+    that scan (e.g. retired from the NAS to the local disk at the same path). No record (a new path, or
+    a path last scanned before v174 for the device id) is no signal; the next good scan records it.
+    Editing the path to another folder or removing it clears the records (forget_mount)."""
+    if _dropped_mount(pid, root_real):
+        return True
+    try:
+        was = tv_store.get_meta(MOUNT_META + pid)
+        dev = tv_store.get_meta(DEV_META + pid)
+    except Exception:                        # noqa: BLE001 - no record: no signal
+        return False
+    if was and not os.path.ismount(was):
+        return True
+    if dev and str(_dev_of(root_real)) != str(dev):
+        return True
+    return False
 
 
 def _coverage_released(pid: str, shows: List[str], why: str, now: Optional[float]) -> bool:
@@ -956,6 +991,12 @@ def _coverage_released(pid: str, shows: List[str], why: str, now: Optional[float
     except Exception:                        # noqa: BLE001 - unreadable: start again
         st = {}
     if not isinstance(st, dict) or st.get('sig') != sig:
+        st = {'sig': sig, 'first': now, 'scans': 0}
+    try:
+        bad = isinstance(st.get('first'), bool) or not float(st.get('first')) <= now
+    except (TypeError, ValueError):
+        bad = True
+    if bad:                                  # v174 (Reviewer): first in the future (a clock step back) or unreadable: start now
         st = {'sig': sig, 'first': now, 'scans': 0}
     st['scans'] = int(st.get('scans') or 0) + 1
     first = float(st.get('first') or now)
@@ -1019,6 +1060,9 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
                 tv_store.set_meta(MOUNT_META + pid, mount)
             if tv_store.get_meta(ROOT_META + pid) != root_real:
                 tv_store.set_meta(ROOT_META + pid, root_real)
+            dev = _dev_of(root_real)
+            if dev is not None and tv_store.get_meta(DEV_META + pid) != str(dev):
+                tv_store.set_meta(DEV_META + pid, str(dev))
         except Exception:                    # noqa: BLE001 - only a signal; never stops a scan
             pass
     _scan_seq[0] += 1

@@ -13,7 +13,7 @@ The library mover is the one writer allowed on test by default: it acts only on
 torrents tagged luma-test (qbit_owner) and only hardlinks or copies (never
 moves, renames or deletes a source file). TV tv.db scan/link is DB-only and
 always allowed. The TV download watch (tv_import) likewise only ever acts on torrents
-tagged luma-test-tv, hardlinking or copying into the show's folder (never an overwrite). Unset or 'prod': nothing changes.
+tagged luma-test-tv, hardlinking or copying into the show's folder (never an overwrite). Unset (no test sign) or exactly 'prod': nothing changes.
 
 v171+ (Reviewer, test must not steal from prod): a movie add (/api/downloads/add) on test is the job
 'movie_grab' (off unless opted in) and is sent inside scoped_add('movie_grab', <test tag>), with the
@@ -25,6 +25,8 @@ treated as test (grabs, deletes and every other gated write off) and a loud warn
 boot. Signs (test_signs()): a LUMA_TEST_* variable, port 5002 (LUMA_PORT, PORT, LUMA_BIND), a data
 folder whose path names luma-test, or the marker file MARKER in the data folder. LUMA_INSTANCE=prod
 says it's production and turns this off.
+v174 (PM, Tester FF-10): exactly 'prod' or 'test' behave as before; any other non-empty LUMA_INSTANCE
+(typos, 'Prod', 'TEST', whitespace, 'Test-2') fails closed as test, with an ERROR line at boot.
 """
 from __future__ import annotations
 
@@ -100,16 +102,35 @@ def test_signs() -> list:
     return out
 
 
+PROD_VALUE = 'prod'
+
+
+def _raw() -> str:
+    return os.environ.get(ENV) or ''
+
+
+def unrecognized() -> bool:
+    """v174 (PM, Tester FF-10): LUMA_INSTANCE is set to anything but exactly 'prod' or 'test' (typos,
+    case variants like 'Prod' or 'TEST', whitespace, 'Test-2'): fails closed as test, ERROR at boot."""
+    raw = _raw()
+    return bool(raw) and raw not in (PROD_VALUE, 'test')
+
+
 def name() -> str:
-    raw = (os.environ.get(ENV) or '').strip().casefold()
+    """'prod' or 'test'. v174 (PM, Tester FF-10): exactly 'prod' or 'test' behave as before; ANY other
+    non-empty value fails closed as test (all gated jobs off). Unset or empty keeps the v158c detection
+    (test if the install shows any test sign)."""
+    raw = _raw()
+    if raw == PROD_VALUE:
+        return 'prod'
     if raw:
-        return raw
+        return 'test'                                   # 'test', or unrecognized: fail closed
     return 'test' if test_signs() else 'prod'          # fail closed: looks like test -> test
 
 
 def assumed_test() -> bool:
     """LUMA_INSTANCE unset but the install looks like test (so it's treated as test)."""
-    return not (os.environ.get(ENV) or '').strip() and bool(test_signs())
+    return not _raw() and bool(test_signs())
 
 
 def is_test() -> bool:
@@ -145,6 +166,9 @@ def log_blocked_once() -> None:
     if _logged[0] or not is_test():
         return
     _logged[0] = True
+    if unrecognized():
+        logger.error('!!! LUMA_INSTANCE=%r is not recognized (only exactly \'prod\' or \'test\'): treating it as test; '
+                       'grabs, deletes and every other gated write are OFF. !!!', _raw()[:40])
     if assumed_test():
         logger.warning('!!! LUMA_INSTANCE is not set but this looks like the TEST install (%s): treating it as test; '
                        'grabs, deletes and every other gated write are OFF. Set LUMA_INSTANCE=test (or =prod if this '

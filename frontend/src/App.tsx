@@ -369,7 +369,7 @@ function AppRoutes() {
           <Route path="describe-it" element={isExpanded ? <PageModal><DescribeItPage /></PageModal> : <DescribeItPage />} />
           <Route path="browse" element={isExpanded ? <PageModal><BrowseLibraryPage /></PageModal> : <BrowseLibraryPage />} />
           <Route path="upgrades" element={<Navigate to="/" replace />} />
-          <Route path="settings" element={isExpanded ? <PageModal><AdminGate><SettingsPage /></AdminGate></PageModal> : <AdminGate><SettingsPage /></AdminGate>} />
+          <Route path="settings" element={isExpanded ? <PageModal variant="settings"><AdminGate><SettingsPage /></AdminGate></PageModal> : <AdminGate><SettingsPage /></AdminGate>} />
           <Route path="my-settings" element={isExpanded ? <PageModal><MySettingsPage /></PageModal> : <MySettingsPage />} />
           {/* Rate — the deep-link target of the "rate this" push notification.
               Wrapped in PageModal on desktop for consistency, but it is designed

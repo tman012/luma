@@ -729,7 +729,7 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
                 {scanning && (
                   <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-white/15 border-t-white/60 inline-block" />
                 )}
-                {scanning ? 'Scanning...' : 'Scan Now'}
+                {scanning ? 'Scanning...' : 'Scan now'}
               </span>
             </button>
           </div>
@@ -754,7 +754,7 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
                   className="flex-1 rounded-lg bg-white/8 border border-white/8 px-3 py-2 text-[13px] font-medium text-white/80 appearance-none cursor-pointer"
                   style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'12\' height=\'12\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'rgba(255,255,255,0.4)\' stroke-width=\'3\'%3E%3Cpath d=\'M6 9l6 6 6-6\'/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center', paddingRight: '28px' }}
                 >
-                  <option value="">All Quality</option>
+                  <option value="">All quality</option>
                   {availableQualities.map(q => (
                     <option key={q} value={q}>{q}</option>
                   ))}
@@ -806,8 +806,8 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
             <div className="flex flex-col items-center justify-center py-20 text-white/30">
               <p className="text-[14px]">
                 {tab === 'all'
-                  ? 'No upgrades found yet. Tap "Scan Now" to search your library.'
-                  : 'No 4K remux upgrades in the last 7 days. Tap "Scan Now" to check.'}
+                  ? 'No upgrades found yet. Tap "Scan now" to search your library.'
+                  : 'No 4K remux upgrades in the last 7 days. Tap "Scan now" to check.'}
               </p>
             </div>
           )}

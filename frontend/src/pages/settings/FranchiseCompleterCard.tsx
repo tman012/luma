@@ -6,6 +6,7 @@
  * profile, fame gate, caps, last run, preview + run now.
  */
 
+import { SECONDARY_BTN } from './components/legacyTokens';
 import { useState, useEffect, useCallback } from 'react';
 import { SettingsCard } from './components/SettingsCard';
 import { FormField } from './components/FormField';
@@ -89,7 +90,6 @@ function RunTimeField() {
         setByPath(HOUR_PATH, Number(h));
         setByPath(MINUTE_PATH, Number(m));
       }}
-      hint="Earliest time the nightly run may start, on the server's clock (default 23:30)"
     />
   );
 }
@@ -166,8 +166,7 @@ export function FranchiseCompleterCard() {
 
   return (
     <SettingsCard
-      title="Franchise Completer"
-      subtitle="Fill 1–2 missing parts of super-popular almost-complete franchises"
+      title="Franchise completer"
       paths={ALL_PATHS}
       icon={
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -176,29 +175,26 @@ export function FranchiseCompleterCard() {
           <path d="M8 7h8M8 11h6" />
         </svg>
       }
-      note="Uses the incomplete TMDb collections cache. Only franchises above the fame floor (IMDb votes on the biggest part) with at most N released gaps qualify; unreleased parts are skipped. Adds on the standard profile, searches, then unmonitors so automation grabs never appear on the intentional Watchlist."
       headerRight={
         <button
           type="button"
           onClick={handlePreview}
           disabled={busy !== null || running}
-          className="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-[12px] font-semibold text-white/80 disabled:opacity-40"
+          className={SECONDARY_BTN}
         >
           {busy === 'preview' ? 'Checking…' : 'Preview gaps'}
         </button>
       }
     >
       <ToggleSwitch
-        label="Enable Franchise Completer"
+        label="Franchise completer"
         path="automation.franchise_completer.enabled"
-        hint="Nothing runs until this is on"
       />
       <FormField
         label="Quality profile (Radarr)"
         path="automation.franchise_completer.quality_profile_id"
         type="select"
         options={profileOptions}
-        hint="Standard profile — 720p/1080p Bluray+WEB only"
       />
       <RunTimeField />
       <FormField
@@ -208,7 +204,6 @@ export function FranchiseCompleterCard() {
         min={0}
         max={5000000}
         step={50000}
-        hint="Collection fame_score floor — max IMDb votes across released parts (default 500,000)"
       />
       <FormField
         label="Max missing parts"
@@ -216,7 +211,6 @@ export function FranchiseCompleterCard() {
         type="number"
         min={1}
         max={10}
-        hint="Only almost-complete franchises (default 1)"
       />
       <FormField
         label="Movies per night"
@@ -224,7 +218,6 @@ export function FranchiseCompleterCard() {
         type="number"
         min={1}
         max={10}
-        hint="Cap grabs per run (default 1)"
       />
       <FormField
         label="Oldest year to consider"
@@ -232,12 +225,11 @@ export function FranchiseCompleterCard() {
         type="number"
         min={0}
         max={2100}
-        hint="0 = no floor"
       />
 
       {preview && !preview.error && (
-        <div className="col-span-full rounded-lg border border-white/8 bg-black/25 p-3">
-          <p className="mb-2 text-[11px] text-white/35">
+        <div className="col-span-full rounded-[12px] border border-white/[0.08] bg-white/[0.04] p-3">
+          <p className="mb-2 text-[12px] text-white/35">
             Preview · {preview.candidates ?? 0} gaps · {preview.collections_eligible ?? 0} franchises
             {' '}≥ {Math.round(preview.min_fame || 0).toLocaleString()} fame · ≤{preview.max_missing_parts} missing
           </p>
@@ -261,11 +253,11 @@ export function FranchiseCompleterCard() {
 
       {msg && <p className="col-span-full text-[12px] text-white/50">{msg}</p>}
 
-      <div className="col-span-full rounded-lg border border-white/8 bg-black/20 px-3 py-2">
-        <p className="text-[11px] text-white/35">
+      <div className="col-span-full rounded-[12px] border border-white/[0.08] bg-white/[0.04] px-3 py-2">
+        <p className="text-[12px] text-white/35">
           Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
         </p>
-        <p className="text-[11px] text-white/35">
+        <p className="text-[12px] text-white/35">
           Next run: {status?.next_run
             ? `${new Date(status.next_run).toLocaleString()}${status.server_tz ? ` ${status.server_tz}` : ''}`
             : 'not scheduled'}
@@ -279,13 +271,13 @@ export function FranchiseCompleterCard() {
 
       {log.length > 0 && (
         <div className="col-span-full flex flex-col gap-1">
-          <p className="text-[11px] text-white/35">Recent nights</p>
+          <p className="text-[12px] text-white/35">Recent nights</p>
           {log.slice(0, 8).map((e, i) => (
             <div key={`${e.at}-${i}`} className="flex items-baseline justify-between gap-3 text-[12px]">
               <span className={`truncate ${OUTCOME_STYLES[e.outcome] || 'text-white/50'}`}>
                 {e.summary}
               </span>
-              <span className="shrink-0 text-[11px] text-white/25">
+              <span className="shrink-0 text-[12px] text-white/25">
                 {new Date(e.at).toLocaleDateString()}
               </span>
             </div>
@@ -298,13 +290,10 @@ export function FranchiseCompleterCard() {
           type="button"
           onClick={handleRunNow}
           disabled={busy !== null || running}
-          className="rounded-lg border border-amber-500/25 bg-amber-500/12 px-3 py-2 text-[12px] font-semibold text-amber-300 disabled:opacity-40"
+          className={SECONDARY_BTN}
         >
-          {running ? 'Running…' : 'Run now (downloads for real)'}
+          {running ? 'Running…' : 'Run now'}
         </button>
-        <span className="text-[11px] text-white/30">
-          Preview is always safe — lists gaps without grabbing.
-        </span>
       </div>
     </SettingsCard>
   );

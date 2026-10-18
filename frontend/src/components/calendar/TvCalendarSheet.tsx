@@ -380,7 +380,7 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
         <div className="shrink-0 px-4 pb-3">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <h2 className="text-[18px] font-bold text-white">TV Calendar</h2>
+              <h2 className="text-[18px] font-bold text-white">TV calendar</h2>
               <p className="mt-0.5 text-[12px] text-white/35">
                 {weekRangeLabel(weekStart)}
                 {!loading && ` · ${weekTotal} episode${weekTotal === 1 ? '' : 's'}`}

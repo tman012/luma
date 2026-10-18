@@ -1023,14 +1023,14 @@ function SeasonDetailModal({
                     primary padding={t.pill.padding} fontSize={t.pill.fontSize}
                     icon={<svg width={t.pill.iconSize} height={t.pill.iconSize} viewBox="0 0 24 24" fill="currentColor"><polygon points="6,3 20,12 6,21" /></svg>}
                     label="Watch"
-                    onClick={() => { if (show.ratingKey) onPlayEpisode?.(show.ratingKey, show.title ?? 'TV Show', season.season_number, 1); }}
+                    onClick={() => { if (show.ratingKey) onPlayEpisode?.(show.ratingKey, show.title ?? 'TV show', season.season_number, 1); }}
                   />
                 ) : seasonMonitored ? (
                   <PillButton
                     focusKey="sd-sonarr" zoneId="season-detail-modal"
                     primary padding={t.pill.padding} fontSize={t.pill.fontSize}
                     icon={<svg width={t.pill.iconSize} height={t.pill.iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
-                    label="Monitoring Season"
+                    label="Monitoring season"
                     onClick={() => {}}
                   />
                 ) : (
@@ -1038,7 +1038,7 @@ function SeasonDetailModal({
                     focusKey="sd-watchlist" zoneId="season-detail-modal" tone="blue" testid="tv-add-season-watchlist-desktop"
                     padding={t.pill.padding} fontSize={t.pill.fontSize}
                     icon={<svg width={t.pill.iconSize} height={t.pill.iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>}
-                    label={addInFlight ? 'Adding…' : addFailed ? 'Retry — Add Failed' : 'Add season to watchlist'}
+                    label={addInFlight ? 'Adding…' : addFailed ? 'Retry — add failed' : 'Add season to watchlist'}
                     onClick={async () => {
                       if (addInFlight) return;              // guard rapid double-clicks
                       setAddFailed(false);
@@ -1676,7 +1676,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                               label="Watch"
                               onClick={() => {
                                 if (show?.ratingKey) {
-                                  props.onPlayEpisode?.(show.ratingKey, show.title ?? 'TV Show');
+                                  props.onPlayEpisode?.(show.ratingKey, show.title ?? 'TV show');
                                 }
                               }}
                             />
@@ -1954,7 +1954,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
           onPersonSearch={onPersonSearch}
           onPlayEpisode={(rk, title, s, e) => {
             setSeasonDetailTarget(null);
-            props.onPlayEpisode?.(rk, `${show.title ?? 'TV Show'} - S${s}E${e} - ${title}`);
+            props.onPlayEpisode?.(rk, `${show.title ?? 'TV show'} - S${s}E${e} - ${title}`);
           }}
           onShowSources={isOwner ? (target) => {
             setSeasonDetailTarget(null);
@@ -1981,7 +1981,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
         onClose={() => setShowEpisodeGrid(false)}
         onPlayEpisode={(rk, title, s, e) => {
           setShowEpisodeGrid(false);
-          props.onPlayEpisode?.(rk, `${show?.title ?? 'TV Show'} - S${s}E${e} - ${title}`);
+          props.onPlayEpisode?.(rk, `${show?.title ?? 'TV show'} - S${s}E${e} - ${title}`);
         }}
         onEpisodeSources={isOwner ? (s, e) => setShowSources({ type: 'episode', season: s, episode: e }) : undefined}
       />

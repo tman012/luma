@@ -5,6 +5,7 @@
 
 import { useState, useCallback } from 'react';
 import { cn } from '@/utils/cn';
+import { SECONDARY_BTN } from './legacyTokens';
 
 interface TestButtonProps {
   label?: string;
@@ -13,7 +14,7 @@ interface TestButtonProps {
 
 type Status = 'idle' | 'testing' | 'success' | 'error';
 
-export function TestButton({ label = 'Test Connection', onTest }: TestButtonProps) {
+export function TestButton({ label = 'Test connection', onTest }: TestButtonProps) {
   const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState('');
 
@@ -37,8 +38,7 @@ export function TestButton({ label = 'Test Connection', onTest }: TestButtonProp
         onClick={handleTest}
         disabled={status === 'testing'}
         className={cn(
-          'inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-[13px] font-semibold transition-colors min-h-[44px]',
-          'bg-indigo-500/12 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20',
+          SECONDARY_BTN,
           status === 'testing' && 'opacity-60 cursor-wait',
         )}
       >
@@ -57,7 +57,7 @@ export function TestButton({ label = 'Test Connection', onTest }: TestButtonProp
       {status !== 'idle' && status !== 'testing' && message && (
         <span
           className={cn(
-            'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium',
+            'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12px] font-medium',
             status === 'success' && 'bg-green-500/10 text-green-400',
             status === 'error' && 'bg-red-500/10 text-red-400',
           )}

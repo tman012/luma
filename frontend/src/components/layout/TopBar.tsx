@@ -421,7 +421,7 @@ function RoomRow({
               </div>
             </>
           ) : (
-            <p className="mt-1 text-[15px] text-white/30">Nothing Playing</p>
+            <p className="mt-1 text-[15px] text-white/30">Nothing playing</p>
           )}
           {hasPlayback && (
             <>

@@ -56,7 +56,7 @@ export function AdminPage() {
     <div className="admin-page">
       <div className="admin-header">
         <button className="admin-back-btn" onClick={() => navigate('/')}>← Home</button>
-        <h1 className="admin-title">User Management</h1>
+        <h1 className="admin-title">User management</h1>
         <button
           className="admin-add-btn"
           onClick={() => setModal({ type: 'create' })}
@@ -185,7 +185,7 @@ function AdminModal({
       <div className="admin-modal" onClick={e => e.stopPropagation()}>
         {modal.type === 'create' && (
           <>
-            <h2 className="admin-modal-title">Add User</h2>
+            <h2 className="admin-modal-title">Add user</h2>
             <label className="admin-modal-label">Name</label>
             <input
               className="admin-modal-input"
@@ -211,7 +211,7 @@ function AdminModal({
             <div className="admin-modal-actions">
               <button className="admin-modal-cancel" onClick={onClose}>Cancel</button>
               <button className="admin-modal-confirm" onClick={handleCreate} disabled={busy}>
-                {busy ? 'Creating…' : 'Create User'}
+                {busy ? 'Creating…' : 'Create user'}
               </button>
             </div>
           </>

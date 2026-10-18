@@ -4,7 +4,7 @@ import { primaryButtonColors, LUMA_BLUE } from '@/ui/lumaButton';
  * MySettingsPage — Personal settings for non-admin users.
  *
  * Stacked cards for Plex, Radarr, and Sonarr connections.
- * Each card has its own Save + Test Connection buttons.
+ * Each card has its own Save + Test connection buttons.
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router';
@@ -162,7 +162,7 @@ export function MySettingsPage() {
                 style={inputStyle}
               />
 
-              <label style={fieldLabelStyle}>Access Token</label>
+              <label style={fieldLabelStyle}>Access token</label>
               <input
                 type="password"
                 placeholder="Your Plex authentication token"
@@ -187,7 +187,7 @@ export function MySettingsPage() {
                 disabled={plexTest.status === 'testing'}
                 style={testBtnStyle}
               >
-                {plexTest.status === 'testing' ? 'Testing...' : 'Test Connection'}
+                {plexTest.status === 'testing' ? 'Testing...' : 'Test connection'}
               </button>
             )}
             <button
@@ -222,7 +222,7 @@ export function MySettingsPage() {
             style={inputStyle}
           />
 
-          <label style={fieldLabelStyle}>API Key</label>
+          <label style={fieldLabelStyle}>API key</label>
           <input
             type="password"
             placeholder="Radarr API key"
@@ -244,7 +244,7 @@ export function MySettingsPage() {
               disabled={radarrTest.status === 'testing'}
               style={testBtnStyle}
             >
-              {radarrTest.status === 'testing' ? 'Testing...' : 'Test Connection'}
+              {radarrTest.status === 'testing' ? 'Testing...' : 'Test connection'}
             </button>
             <button
               type="button"
@@ -266,7 +266,7 @@ export function MySettingsPage() {
           <h2 style={cardTitleStyle}>
             <ArrIcon color="#35c5f4" />
             Sonarr
-            <span style={cardSubtitleStyle}>TV Shows</span>
+            <span style={cardSubtitleStyle}>TV shows</span>
           </h2>
 
           <label style={fieldLabelStyle}>Server URL</label>
@@ -278,7 +278,7 @@ export function MySettingsPage() {
             style={inputStyle}
           />
 
-          <label style={fieldLabelStyle}>API Key</label>
+          <label style={fieldLabelStyle}>API key</label>
           <input
             type="password"
             placeholder="Sonarr API key"
@@ -300,7 +300,7 @@ export function MySettingsPage() {
               disabled={sonarrTest.status === 'testing'}
               style={testBtnStyle}
             >
-              {sonarrTest.status === 'testing' ? 'Testing...' : 'Test Connection'}
+              {sonarrTest.status === 'testing' ? 'Testing...' : 'Test connection'}
             </button>
             <button
               type="button"

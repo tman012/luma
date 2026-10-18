@@ -2,7 +2,7 @@
  * BrowseGridView — paginated poster grid for a selected library.
  *
  * Fetches items from /api/library/browse with sort, direction, genre params.
- * "Load More" button appends next batch. AlphabetSidebar visible only when
+ * "Load more" button appends next batch. AlphabetSidebar visible only when
  * sort === 'title'. Card clicks open MediaDetailModal or TvDetailModal
  * based on library type.
  */
@@ -193,7 +193,7 @@ export function BrowseGridView({ libraryName, mediaType, isMobile }: BrowseGridV
             ))}
           </div>
 
-          {/* Load More */}
+          {/* Load more */}
           {hasMore && (
             <div className="mt-8 flex justify-center">
               <button
@@ -206,7 +206,7 @@ export function BrowseGridView({ libraryName, mediaType, isMobile }: BrowseGridV
                   loadingMore && 'opacity-50 cursor-not-allowed',
                 )}
               >
-                {loadingMore ? 'Loading...' : 'Load More'}
+                {loadingMore ? 'Loading...' : 'Load more'}
               </button>
             </div>
           )}

@@ -81,9 +81,6 @@ export function MobileCardNav({ items }: MobileCardNavProps) {
           )}
           <div className="flex-1 min-w-0">
             <p className="text-[16px] font-medium text-white/90 leading-snug">{item.title}</p>
-            {item.subtitle && (
-              <p className="text-[13px] text-white/40 mt-0.5 leading-snug">{item.subtitle}</p>
-            )}
           </div>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-white/20 shrink-0">
             <polyline points="9 18 15 12 9 6" />

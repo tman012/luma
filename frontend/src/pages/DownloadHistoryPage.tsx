@@ -21,7 +21,7 @@ const MODE_CARDS = [
   {
     id: 'feel',
     emoji: '\u{1F3AD}',
-    title: 'Feel Something',
+    title: 'Feel something',
     subtitle: 'Browse by mood',
     gradient: 'from-purple-600/40 to-indigo-900/40',
     border: 'border-purple-500/30',
@@ -29,7 +29,7 @@ const MODE_CARDS = [
   {
     id: 'pick',
     emoji: '\u{1F3B2}',
-    title: 'Pick For Me',
+    title: 'Pick for me',
     subtitle: 'Spin the roulette',
     gradient: 'from-amber-600/40 to-red-900/40',
     border: 'border-amber-500/30',
@@ -37,7 +37,7 @@ const MODE_CARDS = [
   {
     id: 'describe',
     emoji: '\u{2728}',
-    title: 'Describe It',
+    title: 'Describe it',
     subtitle: 'Tell me what you want',
     gradient: 'from-rose-600/40 to-pink-900/40',
     border: 'border-rose-500/30',
@@ -45,7 +45,7 @@ const MODE_CARDS = [
   {
     id: 'explore',
     emoji: '\u{1FAE7}',
-    title: 'Explore Visually',
+    title: 'Explore visually',
     subtitle: 'Floating posters',
     gradient: 'from-cyan-600/40 to-teal-900/40',
     border: 'border-cyan-500/30',

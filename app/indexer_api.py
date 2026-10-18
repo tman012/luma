@@ -71,7 +71,7 @@ def _expand_movie_categories(categories_str: str) -> List[int]:
     cats = set()
     for part in categories_str.split(','):
         part = part.strip()
-        if part.isdigit():
+        if part.isascii() and part.isdigit() and len(part) <= 6:   # v174 (FF-8): never int() a huge string
             cats.add(int(part))
     if 2000 in cats:
         cats.update(MOVIE_CATEGORIES_EXPANDED)

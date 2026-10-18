@@ -29,7 +29,6 @@ function SonarrCard() {
   return (
     <SettingsCard
       title="Sonarr"
-      subtitle="TV show management and monitoring"
       paths={['sonarr.url', 'sonarr.api_key', 'sonarr.default_quality_profile_id']}
       testService="sonarr"
       icon={
@@ -39,9 +38,9 @@ function SonarrCard() {
       }
     >
       <FormField label="URL" path="sonarr.url" placeholder="http://localhost:8989" />
-      <FormField label="API Key" path="sonarr.api_key" type="password" placeholder="Sonarr API key" />
+      <FormField label="API key" path="sonarr.api_key" type="password" placeholder="Sonarr API key" />
       <FormField
-        label="Quality Profile"
+        label="Quality profile"
         path="sonarr.default_quality_profile_id"
         type="select"
         options={profileOptions}
@@ -84,7 +83,6 @@ function RadarrCard() {
   return (
     <SettingsCard
       title="Radarr"
-      subtitle="Movie search, quality filtering, and downloads"
       paths={[
         'radarr.url',
         'radarr.api_key',
@@ -95,7 +93,6 @@ function RadarrCard() {
       ]}
       testService="radarr"
       onTest={handleTest}
-      note="Indexers are managed in Radarr / Prowlarr. Movie sources use Radarr's interactive search."
       icon={
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
@@ -106,29 +103,29 @@ function RadarrCard() {
       }
     >
       <FormField label="URL" path="radarr.url" placeholder="http://localhost:7878" />
-      <FormField label="API Key" path="radarr.api_key" type="password" placeholder="Radarr API key" />
+      <FormField label="API key" path="radarr.api_key" type="password" placeholder="Radarr API key" />
       <FormField
-        label="Quality Profile"
+        label="Quality profile"
         path="radarr.default_quality_profile_id"
         type="select"
         options={profileOptions}
       />
       <FormField
-        label="Minimum Availability"
+        label="Minimum availability"
         path="radarr.minimum_availability"
         type="select"
         options={[
           { value: 'announced', label: 'Announced' },
-          { value: 'inCinemas', label: 'In Cinemas' },
+          { value: 'inCinemas', label: 'In cinemas' },
           { value: 'released', label: 'Released' },
         ]}
       />
       <div className="sm:col-span-2">
-        <ToggleSwitch label="Monitoring Enabled" path="radarr.monitoring_enabled" />
+        <ToggleSwitch label="Monitoring enabled" path="radarr.monitoring_enabled" />
       </div>
       {profiles.length > 0 && (
         <div className="sm:col-span-2 flex flex-col gap-1.5">
-          <label className="text-[13px] font-medium text-white/60">Upgrade/Watchlist Profiles</label>
+          <label className="text-[13px] font-medium text-white/70">Upgrade/watchlist profiles</label>
           <div className="flex flex-wrap gap-2 rounded-lg border border-white/10 bg-white/[0.03] p-3 min-h-[42px]">
             {profiles.map((p) => (
               <button
@@ -137,7 +134,7 @@ function RadarrCard() {
                 onClick={() => toggleUpgradeProfile(p.id)}
                 className={`rounded-lg px-3 py-1.5 text-[12px] font-medium transition-colors ${
                   upgradeProfiles.includes(p.id)
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    ? 'bg-[#3b82f6]/[0.16] border border-[#3b82f6]/40 text-white/95'
                     : 'bg-white/5 text-white/40 border border-white/8 hover:bg-white/8'
                 }`}
               >
@@ -145,9 +142,6 @@ function RadarrCard() {
               </button>
             ))}
           </div>
-          <span className="text-[11px] text-white/30">
-            Profiles shown in the upgrade/watchlist quality picker. Leave empty to show all.
-          </span>
         </div>
       )}
     </SettingsCard>
@@ -163,7 +157,6 @@ export function ServicesTab() {
   const items: CardItem[] = [
     {
       title: 'Users',
-      subtitle: 'Manage registered users',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -176,7 +169,6 @@ export function ServicesTab() {
     },
     {
       title: 'Plex Media Server',
-      subtitle: 'Media streaming and library management',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <polygon points="5 3 19 12 5 21 5 3" />
@@ -185,7 +177,6 @@ export function ServicesTab() {
       content: (
         <SettingsCard
           title="Plex Media Server"
-          subtitle="Media streaming and library management"
           paths={['plex.url', 'plex.token', 'plex.client_port']}
           testService="plex"
           icon={
@@ -196,13 +187,12 @@ export function ServicesTab() {
         >
           <FormField label="Server URL" path="plex.url" placeholder="http://localhost:32400" />
           <FormField label="Token" path="plex.token" type="password" placeholder="Plex authentication token" />
-          <FormField label="Client Port" path="plex.client_port" type="number" placeholder="32500" min={1} max={65535} />
+          <FormField label="Client port" path="plex.client_port" type="number" placeholder="32500" min={1} max={65535} />
         </SettingsCard>
       ),
     },
     {
       title: 'Sonarr',
-      subtitle: 'TV show management and monitoring',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="2" y="7" width="20" height="15" rx="2" ry="2" /><polyline points="17 2 12 7 7 2" />
@@ -212,7 +202,6 @@ export function ServicesTab() {
     },
     {
       title: 'Radarr',
-      subtitle: 'Movie search, quality filtering, and downloads',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
@@ -225,7 +214,6 @@ export function ServicesTab() {
     },
     {
       title: 'qBittorrent',
-      subtitle: 'Download client for torrents',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -235,7 +223,6 @@ export function ServicesTab() {
       content: (
         <SettingsCard
           title="qBittorrent"
-          subtitle="Download client for torrents"
           paths={[
             'qbittorrent.url',
             'qbittorrent.username',
@@ -254,14 +241,13 @@ export function ServicesTab() {
           <FormField label="URL" path="qbittorrent.url" placeholder="http://localhost:8080" />
           <FormField label="Username" path="qbittorrent.username" placeholder="Username" />
           <FormField label="Password" path="qbittorrent.password" type="password" placeholder="Password" />
-          <FormField label="App Category" path="qbittorrent.app_category" placeholder="luma" />
-          <FormField label="Radarr Category" path="qbittorrent.radarr_category" placeholder="radarr" />
+          <FormField label="App category" path="qbittorrent.app_category" placeholder="luma" />
+          <FormField label="Radarr category" path="qbittorrent.radarr_category" placeholder="radarr" />
         </SettingsCard>
       ),
     },
     {
       title: 'TMDb',
-      subtitle: 'The Movie Database -- metadata and posters',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
@@ -271,7 +257,6 @@ export function ServicesTab() {
       content: (
         <SettingsCard
           title="TMDb"
-          subtitle="The Movie Database -- metadata and posters"
           paths={['apis.tmdb.api_key', 'apis.tmdb.region', 'apis.tmdb.base_url', 'apis.tmdb.image_base_url']}
           testService="tmdb"
           testLabel="Test API Key"
@@ -282,16 +267,15 @@ export function ServicesTab() {
             </svg>
           }
         >
-          <FormField label="API Key" path="apis.tmdb.api_key" type="password" placeholder="TMDb API key" />
+          <FormField label="API key" path="apis.tmdb.api_key" type="password" placeholder="TMDb API key" />
           <FormField label="Region" path="apis.tmdb.region" placeholder="US" />
           <FormField label="Base URL" path="apis.tmdb.base_url" placeholder="https://api.themoviedb.org/3" />
-          <FormField label="Image Base URL" path="apis.tmdb.image_base_url" placeholder="https://image.tmdb.org/t/p" />
+          <FormField label="Image base URL" path="apis.tmdb.image_base_url" placeholder="https://image.tmdb.org/t/p" />
         </SettingsCard>
       ),
     },
     {
       title: 'OMDb',
-      subtitle: 'Open Movie Database -- IMDb ratings and votes',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
@@ -300,7 +284,6 @@ export function ServicesTab() {
       content: (
         <SettingsCard
           title="OMDb"
-          subtitle="Open Movie Database -- IMDb ratings and votes"
           paths={['apis.omdb.api_key']}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -308,13 +291,12 @@ export function ServicesTab() {
             </svg>
           }
         >
-          <FormField label="API Key" path="apis.omdb.api_key" type="password" placeholder="OMDb API key" />
+          <FormField label="API key" path="apis.omdb.api_key" type="password" placeholder="OMDb API key" />
         </SettingsCard>
       ),
     },
     {
       title: 'Fanart.tv',
-      subtitle: 'Clear logos, backgrounds, and artwork',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
@@ -324,7 +306,6 @@ export function ServicesTab() {
       content: (
         <SettingsCard
           title="Fanart.tv"
-          subtitle="Clear logos, backgrounds, and artwork"
           paths={['apis.fanart.api_key']}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -333,13 +314,12 @@ export function ServicesTab() {
             </svg>
           }
         >
-          <FormField label="API Key" path="apis.fanart.api_key" type="password" placeholder="Fanart.tv API key" />
+          <FormField label="API key" path="apis.fanart.api_key" type="password" placeholder="Fanart.tv API key" />
         </SettingsCard>
       ),
     },
     {
       title: 'Trakt',
-      subtitle: 'Trending shows and movies on the Explore page',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
@@ -348,7 +328,6 @@ export function ServicesTab() {
       content: (
         <SettingsCard
           title="Trakt"
-          subtitle="Trending shows and movies on the Explore page"
           paths={['apis.trakt.enabled', 'apis.trakt.client_id', 'apis.trakt.client_secret']}
           testService="trakt"
           icon={
@@ -361,13 +340,12 @@ export function ServicesTab() {
             <ToggleSwitch label="Enable Trakt" path="apis.trakt.enabled" />
           </div>
           <FormField label="Client ID" path="apis.trakt.client_id" type="password" placeholder="Trakt API client ID" />
-          <FormField label="Client Secret (optional)" path="apis.trakt.client_secret" type="password" placeholder="Trakt API client secret" />
+          <FormField label="Client secret (optional)" path="apis.trakt.client_secret" type="password" placeholder="Trakt API client secret" />
         </SettingsCard>
       ),
     },
     {
       title: 'Home Assistant',
-      subtitle: 'TV power control via HA scenes and entities',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
@@ -377,7 +355,6 @@ export function ServicesTab() {
       content: (
         <SettingsCard
           title="Home Assistant"
-          subtitle="TV power control via HA scenes and entities"
           paths={['homeassistant.url', 'homeassistant.access_token']}
           testService="homeassistant"
           icon={
@@ -388,13 +365,12 @@ export function ServicesTab() {
           }
         >
           <FormField label="URL" path="homeassistant.url" placeholder="http://homeassistant.local:8123" />
-          <FormField label="Access Token" path="homeassistant.access_token" type="password" placeholder="Long-lived access token" />
+          <FormField label="Access token" path="homeassistant.access_token" type="password" placeholder="Long-lived access token" />
         </SettingsCard>
       ),
     },
     {
-      title: 'Web Push Notifications',
-      subtitle: 'Lockscreen notifications for new media',
+      title: 'Web push notifications',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -403,8 +379,7 @@ export function ServicesTab() {
       ),
       content: (
         <SettingsCard
-          title="Web Push Notifications"
-          subtitle="Lockscreen notifications when movies and TV shows are added"
+          title="Web push notifications"
           paths={['notifications.web_push.enabled', 'notifications.web_push.vapid_email']}
           testService="webpush"
           testLabel="Send Test"
@@ -417,16 +392,14 @@ export function ServicesTab() {
         >
           <div className="sm:col-span-2">
             <ToggleSwitch
-              label="Enable Push Sending"
+              label="Enable push sending"
               path="notifications.web_push.enabled"
-              hint="When off, subscriptions are still stored but notifications are not sent"
             />
           </div>
           <FormField
-            label="Contact Email"
+            label="Contact email"
             path="notifications.web_push.vapid_email"
             placeholder="mailto:you@example.com"
-            hint="Required by the push protocol. Not shared publicly."
           />
           {/* -- Setup Guides -- */}
           <div className="sm:col-span-2 mt-2 space-y-2">
@@ -445,7 +418,7 @@ export function ServicesTab() {
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/90 text-xs font-bold flex items-center justify-center">1</span>
-                    <p className="text-white/90 font-medium">Install the SSL Certificate</p>
+                    <p className="text-white/90 font-medium">Install the SSL certificate</p>
                   </div>
                   <ol className="list-decimal list-outside pl-4 space-y-1.5">
                     <li>Open <strong className="text-white/80">Safari</strong> and go to: <br />
@@ -457,7 +430,6 @@ export function ServicesTab() {
                     <li>Now go to <strong className="text-white/80">Settings &rarr; General &rarr; About &rarr; Certificate Trust Settings</strong></li>
                     <li>Toggle <strong className="text-white/80">full trust ON</strong> for "Caddy Local Authority"</li>
                   </ol>
-                  <p className="mt-2 text-amber-400/70 text-xs">Both steps 4 and 6 are required. Without enabling full trust, Safari still won't trust the connection.</p>
                 </div>
 
                 <div>
@@ -477,14 +449,14 @@ export function ServicesTab() {
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/90 text-xs font-bold flex items-center justify-center">3</span>
-                    <p className="text-white/90 font-medium">Enable Notifications</p>
+                    <p className="text-white/90 font-medium">Enable notifications</p>
                   </div>
                   <ol className="list-decimal list-outside pl-4 space-y-1.5">
                     <li>Open the app from the <strong className="text-white/80">Home Screen icon</strong> (not Safari)</li>
                     <li>A blue banner will appear: "Get notified when new movies and shows are added"</li>
                     <li>Tap <strong className="text-white/80">Enable</strong></li>
                     <li>iOS will prompt — tap <strong className="text-white/80">Allow</strong></li>
-                    <li>Come back to this page and tap <strong className="text-white/80">Send Test</strong> above to verify</li>
+                    <li>Come back to this page and tap <strong className="text-white/80">Send test</strong> above to verify</li>
                   </ol>
                 </div>
 
@@ -513,7 +485,7 @@ export function ServicesTab() {
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/90 text-xs font-bold flex items-center justify-center">1</span>
-                    <p className="text-white/90 font-medium">Install the SSL Certificate</p>
+                    <p className="text-white/90 font-medium">Install the SSL certificate</p>
                   </div>
                   <ol className="list-decimal list-outside pl-4 space-y-1.5">
                     <li>Open <strong className="text-white/80">Chrome</strong> and go to: <br />
@@ -541,13 +513,13 @@ export function ServicesTab() {
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/90 text-xs font-bold flex items-center justify-center">3</span>
-                    <p className="text-white/90 font-medium">Enable Notifications</p>
+                    <p className="text-white/90 font-medium">Enable notifications</p>
                   </div>
                   <ol className="list-decimal list-outside pl-4 space-y-1.5">
                     <li>Open the app from the <strong className="text-white/80">Home Screen icon</strong> (not Chrome)</li>
                     <li>A banner will appear: "Get notified when new movies and shows are added"</li>
                     <li>Tap <strong className="text-white/80">Enable</strong>, then <strong className="text-white/80">Allow</strong></li>
-                    <li>Come back to this page and tap <strong className="text-white/80">Send Test</strong> above to verify</li>
+                    <li>Come back to this page and tap <strong className="text-white/80">Send test</strong> above to verify</li>
                   </ol>
                 </div>
 
@@ -575,7 +547,7 @@ export function ServicesTab() {
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/90 text-xs font-bold flex items-center justify-center">1</span>
-                    <p className="text-white/90 font-medium">Enable Sideloading</p>
+                    <p className="text-white/90 font-medium">Enable sideloading</p>
                   </div>
                   <ol className="list-decimal list-outside pl-4 space-y-1.5">
                     <li>On the Fire tablet, go to <strong className="text-white/80">Settings &rarr; Security & Privacy</strong></li>
@@ -587,7 +559,7 @@ export function ServicesTab() {
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/90 text-xs font-bold flex items-center justify-center">2</span>
-                    <p className="text-white/90 font-medium">Install the SSL Certificate</p>
+                    <p className="text-white/90 font-medium">Install the SSL certificate</p>
                   </div>
                   <ol className="list-decimal list-outside pl-4 space-y-1.5">
                     <li>Open <strong className="text-white/80">Silk Browser</strong> and go to: <br />
@@ -603,12 +575,12 @@ export function ServicesTab() {
                 <div>
                   <div className="flex items-center gap-2 mb-2">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white/10 text-white/90 text-xs font-bold flex items-center justify-center">3</span>
-                    <p className="text-white/90 font-medium">Open & Enable Notifications</p>
+                    <p className="text-white/90 font-medium">Open & enable notifications</p>
                   </div>
                   <ol className="list-decimal list-outside pl-4 space-y-1.5">
                     <li>Open <strong className="text-white/80">Luma</strong> in Silk Browser (or from the home screen if you added it there)</li>
                     <li>The notification banner will appear — tap <strong className="text-white/80">Enable</strong>, then <strong className="text-white/80">Allow</strong></li>
-                    <li>Come back to this page and tap <strong className="text-white/80">Send Test</strong> above to verify</li>
+                    <li>Come back to this page and tap <strong className="text-white/80">Send test</strong> above to verify</li>
                   </ol>
                 </div>
 
@@ -633,9 +605,6 @@ export function ServicesTab() {
     <div className="space-y-6">
       <div className="settings-tab-header">
         <h2 className="text-xl font-semibold text-white/90">Services</h2>
-        <p className="mt-1 text-[13px] text-white/40">
-          External services, APIs, and integrations.
-        </p>
       </div>
 
       <MobileCardNav items={items} />

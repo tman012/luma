@@ -66,7 +66,7 @@ function InlineInput({
   onChange,
   type = 'text',
   placeholder,
-  hint,
+  hint: _hint,
 }: {
   label: string;
   value: string | number;
@@ -77,7 +77,7 @@ function InlineInput({
 }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <label className="text-[13px] font-medium text-white/60">{label}</label>
+      <label className="text-[13px] font-medium text-white/70">{label}</label>
       <input
         type={type}
         value={value}
@@ -85,7 +85,6 @@ function InlineInput({
         placeholder={placeholder}
         className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-[14px] text-white placeholder:text-white/25 outline-none focus:border-white/20"
       />
-      {hint && <span className="text-[11px] text-white/30">{hint}</span>}
     </div>
   );
 }
@@ -169,7 +168,7 @@ export function RoomAccordion() {
         setRoomForm(null);
         setRoomEditId(null);
         await loadRooms();
-        // Expand the new room and open the Add Device form immediately
+        // Expand the new room and open the Add device form immediately
         setExpandedRooms((prev) => new Set(prev).add(room.id));
         openDeviceForm(room.id);
       }
@@ -429,8 +428,7 @@ export function RoomAccordion() {
             </svg>
           </div>
           <div>
-            <h3 className="text-[15px] font-semibold text-white/90">Playback Rooms</h3>
-            <p className="mt-0.5 text-[12px] text-white/35">Multi-room playback and ADB control</p>
+            <h3 className="text-[15px] font-semibold text-white/90">Playback rooms</h3>
           </div>
         </div>
         <button
@@ -441,7 +439,7 @@ export function RoomAccordion() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
             <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
           </svg>
-          Add Room
+          Add room
         </button>
       </div>
 
@@ -462,7 +460,7 @@ export function RoomAccordion() {
                 </button>
                 <div className="flex-1 min-w-0">
                   <span className="text-[14px] font-semibold text-white/85">{room.name}</span>
-                  <span className="ml-2 text-[11px] text-white/30">{room.devices.length} device{room.devices.length !== 1 ? 's' : ''}</span>
+                  <span className="ml-2 text-[12px] text-white/30">{room.devices.length} device{room.devices.length !== 1 ? 's' : ''}</span>
                 </div>
                 <div className="flex gap-1.5">
                   <button type="button" onClick={() => openRoomForm(room)} className="rounded-lg p-2 text-white/25 hover:text-white/60 hover:bg-white/5" aria-label="Edit room">
@@ -493,16 +491,16 @@ export function RoomAccordion() {
                           </button>
                           <div className="flex-1 min-w-0">
                             <span className="text-[13px] font-medium text-white/80">{device.name}</span>
-                            <span className="ml-2 text-[11px] text-white/25">{platformLabel(device.platform)}</span>
+                            <span className="ml-2 text-[12px] text-white/25">{platformLabel(device.platform)}</span>
                             {isDefault && (
-                              <span className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-semibold bg-accent hover:bg-accent-hover/15 text-emerald-400">
+                              <span className="ml-2 rounded px-1.5 py-0.5 text-[12px] font-semibold bg-white/[0.08] text-white/70">
                                 Default
                               </span>
                             )}
                           </div>
                           <div className="flex gap-1">
                             {device.platform !== 'network' && (
-                              <button type="button" onClick={() => handleTestDevice(room.id, device.id)} className="rounded-lg px-2 py-1.5 text-[11px] text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20">
+                              <button type="button" onClick={() => handleTestDevice(room.id, device.id)} className="rounded-lg px-2 py-1.5 text-[12px] text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20">
                                 Test
                               </button>
                             )}
@@ -517,7 +515,7 @@ export function RoomAccordion() {
                                     pairCode: '',
                                   })
                                 }
-                                className="rounded-lg px-2 py-1.5 text-[11px] text-amber-300 bg-amber-500/10 hover:bg-amber-500/20"
+                                className="rounded-lg px-2 py-1.5 text-[12px] text-white/90 bg-white/[0.08] border border-white/[0.12] hover:bg-white/[0.12]"
                               >
                                 Pair
                               </button>
@@ -526,7 +524,7 @@ export function RoomAccordion() {
                               <button
                                 type="button"
                                 onClick={() => setDefault(room.id, device.id, device.services[0]?.id ?? '')}
-                                className="rounded-lg px-2 py-1.5 text-[11px] text-white/40 hover:text-emerald-400 hover:bg-accent hover:bg-accent-hover/10"
+                                className="rounded-lg px-2 py-1.5 text-[12px] text-white/40 hover:text-white/90 hover:bg-white/[0.08]"
                               >
                                 Set Default
                               </button>
@@ -542,7 +540,7 @@ export function RoomAccordion() {
 
                         {/* Test status */}
                         {ts && (
-                          <div className={cn('px-4 py-2 text-[11px]', ts.ok ? 'text-green-400' : 'text-red-400')}>
+                          <div className={cn('px-4 py-2 text-[12px]', ts.ok ? 'text-green-400' : 'text-red-400')}>
                             {ts.msg}
                           </div>
                         )}
@@ -551,10 +549,10 @@ export function RoomAccordion() {
                         {pairForm && pairForm.deviceId === device.id && (
                           <div
                             ref={(el) => { el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }}
-                            className="mx-3 mb-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2"
+                            className="mx-3 mb-3 rounded-lg border border-white/[0.08] bg-white/[0.04] p-3 space-y-2"
                           >
-                            <p className="text-[12px] font-semibold text-amber-200/90">Wireless debugging pair</p>
-                            <p className="text-[11px] text-white/45">
+                            <p className="text-[13px] font-semibold text-white/90">Wireless debugging pair</p>
+                            <p className="text-[12px] text-white/45">
                               On the TV: Developer options → Wireless debugging → Pair device with pairing code.
                               Enter the <span className="text-white/70">pairing port</span> and <span className="text-white/70">6-digit code</span> shown there.
                               Connect port stays <span className="text-white/70">{device.connectPort || '—'}</span>.
@@ -578,7 +576,7 @@ export function RoomAccordion() {
                               <button
                                 type="button"
                                 onClick={handlePairDevice}
-                                className="rounded-lg bg-amber-500 px-3 py-1.5 text-[12px] font-semibold text-black hover:bg-amber-400"
+                                className="rounded-[10px] bg-[#3b82f6] px-3 py-1.5 text-[12px] font-semibold text-white hover:bg-[#60a5fa]"
                               >
                                 Pair &amp; Connect
                               </button>
@@ -597,11 +595,11 @@ export function RoomAccordion() {
                         {devOpen && (
                           <div className="border-t border-white/[0.04] px-4 py-3">
                             <div className="mb-2 flex items-center justify-between">
-                              <span className="text-[11px] font-semibold text-white/25">Services</span>
+                              <span className="text-[12px] font-semibold text-white/25">Services</span>
                               <button
                                 type="button"
                                 onClick={() => openServiceForm(room.id, device.id)}
-                                className="rounded-lg px-2 py-1 text-[11px] text-emerald-400 bg-accent hover:bg-accent-hover/10 hover:bg-accent hover:bg-accent-hover/20"
+                                className="rounded-lg px-2 py-1 text-[12px] text-white/90 bg-white/[0.08] hover:bg-white/[0.12]"
                               >
                                 + Add
                               </button>
@@ -611,7 +609,7 @@ export function RoomAccordion() {
                             )}
                             {device.services.map((svc) => (
                               <div key={svc.id} className="flex items-center gap-3 py-1.5">
-                                <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-indigo-500/15 text-indigo-400">
+                                <span className="rounded px-1.5 py-0.5 text-[12px] font-semibold bg-indigo-500/15 text-indigo-400">
                                   {sentenceCase(svc.type)}
                                 </span>
                                 {svc.type === 'kodi' && svc.kodi_host && (
@@ -630,10 +628,10 @@ export function RoomAccordion() {
                             {/* Inline service form */}
                             {serviceForm && serviceRoomId === room.id && serviceDeviceId === device.id && (
                               <div className="mt-2 rounded-lg border border-dashed border-white/10 bg-white/[0.02] p-4">
-                                <p className="mb-3 text-[13px] font-semibold text-white/50">{serviceEditId ? 'Edit Service' : 'Add Service'}</p>
+                                <p className="mb-3 text-[13px] font-semibold text-white/50">{serviceEditId ? 'Edit service' : 'Add service'}</p>
                                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                   <div className="flex flex-col gap-1.5">
-                                    <label className="text-[13px] font-medium text-white/60">Type</label>
+                                    <label className="text-[13px] font-medium text-white/70">Type</label>
                                     <select
                                       value={serviceForm.type ?? 'kodi'}
                                       onChange={(e) => setServiceForm((p) => ({ ...p, type: e.target.value as 'kodi' | 'plex' }))}
@@ -645,8 +643,8 @@ export function RoomAccordion() {
                                   </div>
                                   {serviceForm.type === 'kodi' && (
                                     <>
-                                      <InlineInput label="Kodi Host" value={serviceForm.kodi_host ?? ''} onChange={(v) => setServiceForm((p) => ({ ...p, kodi_host: v }))} placeholder="e.g. 192.0.2.20" hint="Leave blank to use device IP" />
-                                      <InlineInput label="Kodi Port" value={String(serviceForm.kodi_port ?? 8080)} onChange={(v) => setServiceForm((p) => ({ ...p, kodi_port: Number(v) }))} type="number" placeholder="8080" />
+                                      <InlineInput label="Kodi host" value={serviceForm.kodi_host ?? ''} onChange={(v) => setServiceForm((p) => ({ ...p, kodi_host: v }))} placeholder="e.g. 192.0.2.20" />
+                                      <InlineInput label="Kodi port" value={String(serviceForm.kodi_port ?? 8080)} onChange={(v) => setServiceForm((p) => ({ ...p, kodi_port: Number(v) }))} type="number" placeholder="8080" />
                                       <InlineInput label="Username" value={serviceForm.kodi_username ?? ''} onChange={(v) => setServiceForm((p) => ({ ...p, kodi_username: v }))} placeholder="Optional" />
                                       <InlineInput label="Password" value={serviceForm.kodi_password ?? ''} onChange={(v) => setServiceForm((p) => ({ ...p, kodi_password: v }))} placeholder="Optional" />
                                     </>
@@ -674,30 +672,23 @@ export function RoomAccordion() {
                   <button
                     type="button"
                     onClick={() => openDeviceForm(room.id)}
-                    className="w-full rounded-lg border border-dashed border-emerald-500/25 py-2.5 text-[12px] font-medium text-emerald-400/80 hover:text-emerald-300 hover:border-emerald-500/40 hover:bg-accent hover:bg-accent-hover/5 transition-colors"
+                    className="w-full rounded-lg border border-dashed border-white/[0.12] py-2.5 text-[13px] font-medium text-white/70 hover:text-white/90 hover:border-white/20 hover:bg-accent hover:bg-accent-hover/5 transition-colors"
                   >
-                    + Add Device
+                    + Add device
                   </button>
 
                   {/* Inline device form */}
                   {deviceForm && deviceRoomId === room.id && (
                     <div
                       ref={(el) => { el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }}
-                      className="rounded-lg border border-dashed border-emerald-500/30 bg-white/[0.02] p-4"
+                      className="rounded-lg border border-white/[0.08] bg-white/[0.04] p-4"
                     >
-                      <p className="mb-1 text-[13px] font-semibold text-white/50">{deviceEditId ? 'Edit Device' : 'Add Device'}</p>
-                      {!deviceEditId && deviceForm.platform === 'chromecast_gtv' && (
-                        <p className="mb-3 text-[11px] text-amber-300/80">
-                          Google TV uses a dynamic Wireless debugging port from the TV screen — do not use 5555 unless the TV shows it.
-                        </p>
-                      )}
-                      {!(!deviceEditId && deviceForm.platform === 'chromecast_gtv') && (
-                        <div className="mb-3" />
-                      )}
+                      <p className="mb-1 text-[13px] font-semibold text-white/50">{deviceEditId ? 'Edit device' : 'Add device'}</p>
+                      <div className="mb-3" />
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <InlineInput label="Name" value={deviceForm.name ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, name: v }))} placeholder="e.g. TV box" />
                         <div className="flex flex-col gap-1.5">
-                          <label className="text-[13px] font-medium text-white/60">Platform</label>
+                          <label className="text-[13px] font-medium text-white/70">Platform</label>
                           <select
                             value={deviceForm.platform ?? 'android_tv'}
                             onChange={(e) => setDeviceForm((p) => ({ ...p, platform: e.target.value as DeviceData['platform'] }))}
@@ -713,26 +704,14 @@ export function RoomAccordion() {
                           value={deviceForm.host ?? ''}
                           onChange={(v) => setDeviceForm((p) => ({ ...p, host: v }))}
                           placeholder="e.g. 192.0.2.20"
-                          hint={
-                            deviceForm.platform === 'chromecast_gtv'
-                              ? 'Settings → System → Developer options → Wireless debugging'
-                              : deviceForm.platform === 'android_tv'
-                                ? 'Shield / Android TV ADB IP (often :5555)'
-                                : 'Network player IP (no ADB)'
-                          }
                         />
                         {deviceForm.platform !== 'network' && (
                           <InlineInput
-                            label={deviceForm.platform === 'chromecast_gtv' ? 'Wireless debugging port' : 'Connect Port'}
+                            label={deviceForm.platform === 'chromecast_gtv' ? 'Wireless debugging port' : 'Connect port'}
                             value={deviceForm.connectPort != null && !Number.isNaN(Number(deviceForm.connectPort)) ? String(deviceForm.connectPort) : ''}
                             onChange={(v) => setDeviceForm((p) => ({ ...p, connectPort: v === '' ? undefined : Number(v) }))}
                             type="number"
                             placeholder={deviceForm.platform === 'chromecast_gtv' ? 'e.g. 37411 (from TV screen)' : '5555'}
-                            hint={
-                              deviceForm.platform === 'chromecast_gtv'
-                                ? 'Not 5555 — copy the IP & port shown under Wireless debugging on the TV'
-                                : 'Shields usually use 5555'
-                            }
                           />
                         )}
                         {deviceForm.platform === 'chromecast_gtv' && (
@@ -742,13 +721,12 @@ export function RoomAccordion() {
                             onChange={(v) => setDeviceForm((p) => ({ ...p, pairPort: v === '' ? null : Number(v) }))}
                             type="number"
                             placeholder="Shown when you tap Pair on the TV"
-                            hint="Only needed once: Wireless debugging → Pair device with pairing code"
                           />
                         )}
-                        <InlineInput label="MAC Address" value={deviceForm.macAddress ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, macAddress: v }))} placeholder="AA:BB:CC:DD:EE:FF" hint="For Wake-on-LAN" />
+                        <InlineInput label="MAC address" value={deviceForm.macAddress ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, macAddress: v }))} placeholder="AA:BB:CC:DD:EE:FF" />
                         {deviceForm.platform !== 'network' && (
                           <div className="flex flex-col gap-1.5">
-                            <label className="text-[13px] font-medium text-white/60">Power Method</label>
+                            <label className="text-[13px] font-medium text-white/70">Power method</label>
                             <select
                               value={deviceForm.powerMethod ?? 'adb'}
                               onChange={(e) => setDeviceForm((p) => ({ ...p, powerMethod: e.target.value as 'adb' | 'homeassistant' }))}
@@ -757,17 +735,16 @@ export function RoomAccordion() {
                               <option value="adb">ADB</option>
                               <option value="homeassistant">Home Assistant</option>
                             </select>
-                            <span className="text-[11px] text-white/30">How to wake / power-toggle the device</span>
                           </div>
                         )}
                         {deviceForm.platform !== 'network' && deviceForm.powerMethod === 'homeassistant' && (
-                          <InlineInput label="HA Power Entity" value={deviceForm.haPowerEntity ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, haPowerEntity: v }))} placeholder="e.g. scene.tv_power" hint="Home Assistant entity to fire for power" />
+                          <InlineInput label="HA power entity" value={deviceForm.haPowerEntity ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, haPowerEntity: v }))} placeholder="e.g. scene.tv_power" />
                         )}
                         {room.useHarmonyHub && (
-                          <InlineInput label="Harmony Activity" value={deviceForm.harmonyActivity ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, harmonyActivity: v }))} placeholder="Watch Shield" hint="Harmony activity name for power on" />
+                          <InlineInput label="Harmony activity" value={deviceForm.harmonyActivity ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, harmonyActivity: v }))} placeholder="Watch Shield" />
                         )}
                         {room.useHarmonyHub && (
-                          <InlineInput label="Harmony Nav Device" value={deviceForm.harmonyNavigationDevice ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, harmonyNavigationDevice: v }))} placeholder="NVIDIA Shield" hint="Harmony device name for d-pad/nav" />
+                          <InlineInput label="Harmony nav device" value={deviceForm.harmonyNavigationDevice ?? ''} onChange={(v) => setDeviceForm((p) => ({ ...p, harmonyNavigationDevice: v }))} placeholder="NVIDIA Shield" />
                         )}
                       </div>
                       <div className="mt-3 flex gap-2">
@@ -787,20 +764,15 @@ export function RoomAccordion() {
       {roomForm && (
         <div
           ref={(el) => { el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }}
-          className="mt-3 rounded-xl border border-dashed border-emerald-500/30 bg-white/[0.02] p-5"
+          className="mt-3 rounded-xl border border-white/[0.08] bg-white/[0.04] p-5"
         >
           <p className="mb-1 text-[14px] font-semibold text-white/60">
-            {roomEditId ? 'Edit Room' : 'Add Room'}
+            {roomEditId ? 'Edit room' : 'Add room'}
           </p>
-          {!roomEditId && (
-            <p className="mb-4 text-[12px] text-white/35">
-              Rooms are just locations. You&apos;ll add the TV/Shield as a device next — nothing is auto-created.
-            </p>
-          )}
-          {roomEditId && <div className="mb-4" />}
+          <div className="mb-4" />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <InlineInput
-              label="Room Name"
+              label="Room name"
               value={roomForm.name ?? ''}
               onChange={(v) => setRoomForm((p) => ({ ...p, name: v }))}
               placeholder="e.g. Living Room"
@@ -824,12 +796,12 @@ export function RoomAccordion() {
           {roomForm.useHarmonyHub && (
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <InlineInput label="Harmony Hub IP" value={roomForm.harmonyHubIp ?? ''} onChange={(v) => setRoomForm((p) => ({ ...p, harmonyHubIp: v }))} placeholder="e.g. 192.0.2.30" />
-              <InlineInput label="Volume Device" value={roomForm.harmonyVolumeDevice ?? ''} onChange={(v) => setRoomForm((p) => ({ ...p, harmonyVolumeDevice: v }))} placeholder="e.g. AV Receiver" />
+              <InlineInput label="Volume device" value={roomForm.harmonyVolumeDevice ?? ''} onChange={(v) => setRoomForm((p) => ({ ...p, harmonyVolumeDevice: v }))} placeholder="e.g. AV Receiver" />
             </div>
           )}
           <div className="mt-4 flex gap-2.5">
             <button type="button" onClick={saveRoomForm} className="rounded-lg bg-accent hover:bg-accent-hover px-3.5 py-2 text-[12px] font-semibold text-white  min-h-[36px]">
-              {roomEditId ? 'Update Room' : 'Save Room'}
+              {roomEditId ? 'Update room' : 'Save room'}
             </button>
             <button type="button" onClick={() => { setRoomForm(null); setRoomEditId(null); }} className="rounded-lg border border-white/10 bg-white/[0.06] px-3.5 py-2 text-[12px] text-white/60 hover:bg-white/10 min-h-[36px]">
               Cancel

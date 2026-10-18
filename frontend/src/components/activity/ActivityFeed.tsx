@@ -589,7 +589,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                 <div className="h-full rounded-full transition-[width] duration-500"
                   style={{ width: `${pct}%`, background: barColor }} />
               </div>
-              <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-white/35">
+              <div data-testid="download-progress-line" className="mt-2 flex items-center justify-between gap-3 text-[12px] text-white/35">
                 <span className={`min-w-0 ${notMapped || noWritable ? 'text-[12px] leading-tight' : 'truncate'}`} data-testid="download-status"
                   style={{ color: copying || importing || stalled ? accent : undefined }}>
                   {statusLabel}{speedStr ? ` · ↓ ${speedStr}` : ''}

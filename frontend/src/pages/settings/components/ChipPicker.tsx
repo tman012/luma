@@ -19,17 +19,15 @@ interface ChipPickerProps {
   path: string;
   chips: Chip[];
   /** Shown when nothing is selected. Should make "empty means all" explicit. */
-  emptyHint: string;
+  emptyHint?: string;
   /** Given the selected count, describes the active restriction. */
-  selectedHint: (count: number) => string;
+  selectedHint?: (count: number) => string;
 }
 
 export function ChipPicker({
   label,
   path,
   chips,
-  emptyHint,
-  selectedHint,
 }: ChipPickerProps) {
   const { getByPath, setByPath } = useSettings();
   const raw = getByPath(path);
@@ -45,12 +43,12 @@ export function ChipPicker({
   return (
     <div className="col-span-full flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-2">
-        <label className="text-[14px] font-medium text-white/60">{label}</label>
+        <label className="text-[13px] font-medium text-white/70">{label}</label>
         {selected.length > 0 && (
           <button
             type="button"
             onClick={() => setByPath(path, [])}
-            className="text-[11px] font-semibold text-white/40 hover:text-white/70"
+            className="text-[12px] font-semibold text-white/50 hover:text-white/80"
           >
             Clear
           </button>
@@ -66,21 +64,18 @@ export function ChipPicker({
               onClick={() => toggle(c.name)}
               className={`min-h-[40px] rounded-lg border px-3 py-2 text-[13px] font-medium transition-colors ${
                 on
-                  ? 'border-emerald-400/30 bg-emerald-400/15 text-emerald-200'
-                  : 'border-white/10 bg-white/5 text-white/45'
+                  ? 'border-[#3b82f6]/40 bg-[#3b82f6]/[0.18] text-[#60a5fa]'
+                  : 'border-white/[0.12] bg-white/[0.06] text-white/60'
               } ${c.enabled === false ? 'opacity-40' : ''}`}
             >
               {c.name}
               {c.enabled === false && (
-                <span className="ml-1 text-[10px] text-white/30">off</span>
+                <span className="ml-1 text-[12px] text-white/40">off</span>
               )}
             </button>
           );
         })}
       </div>
-      <p className="text-[12px] text-white/35">
-        {selected.length === 0 ? emptyHint : selectedHint(selected.length)}
-      </p>
     </div>
   );
 }

@@ -65,6 +65,13 @@ export const deleteTracker = (id: number) => send<{ ok: boolean }>(`${BASE_API}/
 export const testSavedTracker = (id: number) => send<TestBody>(`${BASE_API}/${id}/test`, 'POST');
 export const testTrackerForm = (p: Payload) => send<TestBody>(`${BASE_API}/test`, 'POST', p);
 
+// ---------------------------------------------------------------- Trackers > Search (v174)
+// Owner only and validated on the server; the luma-test build has no /api/settings.
+export const SEARCH_SETTINGS_API = `${BASE_API}/search-settings`;
+export interface SearchSettingsBody { movie_categories: string; known_categories: number[] }
+export const fetchSearchSettings = () => call<SearchSettingsBody>(SEARCH_SETTINGS_API);
+export const saveSearchSettings = (p: { movie_categories: string }) => send<SearchSettingsBody>(SEARCH_SETTINGS_API, 'PUT', p);
+
 // ---------------------------------------------------------------- Import from Prowlarr (v170)
 
 export const IMPORT_API = `${BASE_API}/import/prowlarr`;

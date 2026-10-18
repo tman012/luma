@@ -332,7 +332,7 @@ export function DescribeItPage() {
           {recommendations.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-white/30">
               <p className="text-[14px]">No matches found</p>
-              <button type="button" onClick={handleSearchAgain} className="mt-4 rounded-full bg-white/10 px-6 py-2.5 text-[14px] font-medium text-white/70 active:scale-95">Try Again</button>
+              <button type="button" onClick={handleSearchAgain} className="mt-4 rounded-full bg-white/10 px-6 py-2.5 text-[14px] font-medium text-white/70 active:scale-95">Try again</button>
             </div>
           ) : (
             <div className="divide-y divide-white/5">
@@ -349,7 +349,7 @@ export function DescribeItPage() {
                       {rec.vibeItem.posterUrl ? (
                         <img src={rec.vibeItem.posterUrl} alt="" loading={idx < 6 ? 'eager' : 'lazy'} draggable={false} className="h-full w-full object-cover" />
                       ) : (
-                        <div className="flex h-full w-full items-center justify-center text-white/20 text-[11px]">No Poster</div>
+                        <div className="flex h-full w-full items-center justify-center text-white/20 text-[11px]">No poster</div>
                       )}
                     </div>
                     <div className="min-w-0 flex-1">

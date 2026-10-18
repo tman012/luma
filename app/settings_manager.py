@@ -19,6 +19,44 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# v174 (Ops on c669f76): settings load (and migrate) while app.main is still importing, before its
+# logging.basicConfig and luma.log handler exist; an INFO line logged then reaches no handler (Python's
+# last-resort handler shows WARNING and up only). Migration lines logged before logging is configured
+# wait here and app.main flushes them, once, right after its handlers are attached.
+_pending_migration_logs: List[Tuple[str, tuple]] = []
+_pending_lock = threading.Lock()
+
+
+def _logging_configured() -> bool:
+    lg: Optional[logging.Logger] = logger
+    while lg is not None:
+        if lg.handlers:
+            return True
+        if not lg.propagate:
+            break
+        lg = lg.parent
+    return False
+
+
+def _log_migration(msg: str, *args) -> None:
+    """INFO line for a settings migration: now if logging is set up, else after app.main sets it up."""
+    if _logging_configured():
+        logger.info(msg, *args)
+        return
+    with _pending_lock:
+        if (msg, args) not in _pending_migration_logs:
+            _pending_migration_logs.append((msg, args))
+
+
+def flush_migration_logs() -> int:
+    """Log the migration lines that ran before logging was configured (each once). Returns how many."""
+    with _pending_lock:
+        pending = list(_pending_migration_logs)
+        _pending_migration_logs.clear()
+    for msg, args in pending:
+        logger.info(msg, *args)
+    return len(pending)
+
 # ---------------------------------------------------------------------------
 # Mask sentinel -- when a GET returns this value the real secret is hidden
 # ---------------------------------------------------------------------------
@@ -106,14 +144,12 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
         "api_key":          {"type": "string",  "default": "",         "sensitive": True,  "deprecated": True, "description": "Deprecated (v172): read only by Import from Prowlarr"},
     },
     "tracker_search": {
-        # v173 (PM): Explore's four indexer settings, moved from indexer.* (no UI since v172) to
-        # Settings > Trackers as global search settings; values carried over by
-        # _migrate_tracker_search_settings
+        # v173 (PM): Explore's movie categories, moved from indexer.movie_categories (no UI since v172)
+        # to Settings > Trackers > Search; the value is carried over by _migrate_tracker_search_settings.
+        # v174 (PM): only the wired setting stays. indexer/tracker_search max_age_days, min_seeders
+        # and limit were never used by any search; a stale saved value is tolerated and ignored.
         "_type": "object",
         "movie_categories": {"type": "string",  "default": "2000",     "sensitive": False, "description": "Movie category IDs (comma-separated)"},
-        "max_age_days":     {"type": "integer", "default": 30,         "sensitive": False, "description": "Maximum age of results in days", "min": 1, "max": 365},
-        "min_seeders":      {"type": "integer", "default": 1,          "sensitive": False, "description": "Minimum seeders to include", "min": 0},
-        "limit":            {"type": "integer", "default": 100,        "sensitive": False, "description": "Maximum number of results to fetch", "min": 10, "max": 500},
     },
     "apis": {
         "_type": "object",
@@ -884,7 +920,7 @@ def _migrate_harmony_direct(data: dict) -> bool:
                     changed = True
 
     if changed:
-        logger.info("Migrated HA -> direct Harmony Hub (harmonyHubIp)")
+        _log_migration("Migrated HA -> direct Harmony Hub (harmonyHubIp)")
     return changed
 
 
@@ -940,7 +976,7 @@ def _migrate_devices(data: dict) -> bool:
             r.setdefault("type", "shield")
 
     devices["rooms"] = rooms
-    logger.info("Migrated devices.shield -> rooms list")
+    _log_migration("Migrated devices.shield -> rooms list")
     return True
 
 
@@ -1004,7 +1040,7 @@ def _migrate_media_paths(data: dict) -> bool:
             paths.append({"name": name, "path": old_val, "type": ptype})
 
     media["paths"] = paths
-    logger.info("Migrated media individual path fields -> paths list")
+    _log_migration("Migrated media individual path fields -> paths list")
     return True
 
 
@@ -1023,7 +1059,7 @@ def _migrate_remove_trackers(data: dict) -> bool:
         sources["movie_provider"] = "radarr"
         changed = True
     if changed:
-        logger.info("Migrated: removed legacy trackers/jackett, set sources.movie_provider=radarr")
+        _log_migration("Migrated: removed legacy trackers/jackett, set sources.movie_provider=radarr")
     return changed
 
 
@@ -1045,7 +1081,7 @@ def _migrate_room_ids(data: dict) -> bool:
             r["id"] = uuid.uuid4().hex[:8]
             changed = True
     if changed:
-        logger.info("Migrated room IDs: assigned stable IDs to rooms missing them")
+        _log_migration("Migrated room IDs: assigned stable IDs to rooms missing them")
     return changed
 
 
@@ -1084,7 +1120,7 @@ def _migrate_media_paths_v2(data: dict) -> bool:
             changed = True
 
     if changed:
-        logger.info("Migrated media.paths to V2 shape (kodi_path, plex_section_id, plex_locations)")
+        _log_migration("Migrated media.paths to V2 shape (kodi_path, plex_section_id, plex_locations)")
     return changed
 
 
@@ -1147,7 +1183,7 @@ def _migrate_media_types_from_paths(data: dict) -> bool:
         })
 
     media["types"] = types_list
-    logger.info("Migrated %d media types from existing paths", len(types_list))
+    _log_migration("Migrated %d media types from existing paths", len(types_list))
     return True
 
 
@@ -1196,7 +1232,7 @@ def _migrate_plex_services_to_kodi(data: dict) -> bool:
                 changed = True
 
     if changed:
-        logger.info("Migrated plex services -> kodi services")
+        _log_migration("Migrated plex services -> kodi services")
     return changed
 
 
@@ -1349,7 +1385,7 @@ def _migrate_access_mode_to_auth_required(data: dict) -> bool:
         new_mode = {'pin': 'enabled', 'pin_remote': 'disabled_local',
                     'open': 'disabled_local'}.get(old_mode, 'enabled')
         security['auth_required'] = new_mode
-        logger.info("Migrated access_mode '%s' -> auth_required '%s'", old_mode, new_mode)
+        _log_migration("Migrated access_mode '%s' -> auth_required '%s'", old_mode, new_mode)
     else:
         logger.info("Removed security.access_mode")
     return True
@@ -1470,13 +1506,48 @@ def _migrate_legacy_qbit_category(data: dict, existing: bool) -> bool:
     return True
 
 
-TRACKER_SEARCH_KEYS = ('movie_categories', 'max_age_days', 'min_seeders', 'limit')
+TRACKER_SEARCH_KEYS = ('movie_categories',)
+# v174 (Tester FF-8): the Newznab movie categories a saved value may name (2000 = all movies, which the
+# search expands to the sub-categories). Anything else, junk or a huge string is refused with a 400.
+KNOWN_MOVIE_CATEGORIES = (2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060, 2070, 2080)
+MOVIE_CATEGORIES_MAX_CHARS = 80
+
+
+def validate_tracker_search(patch: Any) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    """(clean patch, field errors) for a tracker_search write. Only movie_categories is known: a string of
+    comma-separated known category numbers (spaces allowed, duplicates dropped, order kept), capped in
+    length. Unknown keys, other types, junk and huge strings are errors."""
+    if not isinstance(patch, dict):
+        return {}, {'tracker_search': 'Must be an object'}
+    errors: Dict[str, str] = {}
+    clean: Dict[str, Any] = {}
+    for k in patch:
+        if k not in TRACKER_SEARCH_KEYS:
+            errors[str(k)[:40]] = 'Unknown setting'
+    if 'movie_categories' in patch:
+        v = patch['movie_categories']
+        msg = 'Enter movie category numbers separated by commas'
+        if not isinstance(v, str) or not v.strip() or len(v) > MOVIE_CATEGORIES_MAX_CHARS:
+            errors['movie_categories'] = msg
+        else:
+            out: List[int] = []
+            for part in v.split(','):
+                part = part.strip()
+                if not (part.isascii() and part.isdigit() and len(part) <= 6) or int(part) not in KNOWN_MOVIE_CATEGORIES:
+                    errors['movie_categories'] = msg
+                    break
+                if int(part) not in out:
+                    out.append(int(part))
+            if 'movie_categories' not in errors:
+                clean['movie_categories'] = ','.join(str(c) for c in out)
+    return clean, errors
 
 
 def _migrate_tracker_search_settings(data: dict) -> bool:
-    """v173 (PM): indexer.{movie_categories,max_age_days,min_seeders,limit} move to tracker_search.*
-    (Settings > Trackers, global search settings). A saved value is carried over as is; a value
-    already under tracker_search wins. Returns True if migration occurred."""
+    """v173 (PM): indexer.movie_categories moves to tracker_search.movie_categories (Settings >
+    Trackers > Search). A saved value is carried over as is; a value already under tracker_search
+    wins. v174 (PM): the unwired max_age_days, min_seeders and limit aren't migrated; wherever a
+    stale one is saved it's left alone and ignored. Returns True if migration occurred."""
     old = data.get('indexer')
     if not isinstance(old, dict) or not any(k in old for k in TRACKER_SEARCH_KEYS):
         return False
@@ -1487,7 +1558,7 @@ def _migrate_tracker_search_settings(data: dict) -> bool:
         if k in old:
             v = old.pop(k)
             new.setdefault(k, v)
-    logger.info("Migrated: indexer search settings -> tracker_search (Settings > Trackers)")
+    _log_migration("Migrated: indexer.movie_categories -> tracker_search (Settings > Trackers)")
     return True
 
 
@@ -1999,6 +2070,7 @@ class SettingsManager:
                 # Only save when migrations actually changed data — avoids
                 # race conditions when multiple SettingsManager instances
                 # load/save concurrently (e.g. auto_rename, device_wake).
+                self._backup_before_migration()
                 self._save()
                 logger.info("Phase 2.5 migrations applied and saved")
 
@@ -2140,6 +2212,34 @@ class SettingsManager:
                 partial.setdefault("media", {})[field] = value
 
         return partial
+
+    MIGRATION_BACKUPS = 5
+
+    def _backup_before_migration(self) -> Optional[Path]:
+        """v174 (Tester FF-8e): copy settings.json as it was on disk to settings.json.bak-<UTC time>
+        (0600, newest MIGRATION_BACKUPS kept) before a migration rewrites it, so a rollback can
+        restore the old shape. Never fatal. Must be called while holding ``self._lock``."""
+        try:
+            if not self._path.is_file() or self._path.stat().st_size == 0:
+                return None
+            stamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S-%f')
+            dst = self._path.with_name(f'{self._path.name}.bak-{stamp}')
+            fd = os.open(str(dst), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, 'wb') as out, open(self._path, 'rb') as src:
+                out.write(src.read())
+                out.flush()
+                os.fsync(out.fileno())
+            olds = sorted(self._path.parent.glob(f'{self._path.name}.bak-*'))
+            for old in olds[:-self.MIGRATION_BACKUPS]:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+            _log_migration('settings.json backed up to %s before a migration', dst.name)
+            return dst
+        except Exception as e:                       # noqa: BLE001 - a backup never blocks the upgrade
+            logger.warning('settings.json not backed up before a migration (%s)', type(e).__name__)
+            return None
 
     def _save(self) -> None:
         """Write current settings to disk with restricted permissions.

@@ -15,14 +15,14 @@ import { posterUrl, backdropUrl } from '@/utils/image';
 export const VIBE_DEFINITIONS: VibeDefinition[] = [
   {
     id: 'cozy-comfort',
-    name: 'Cozy Comfort',
+    name: 'Cozy comfort',
     emoji: '\u{1F9F8}',
     description: 'Warm, feel-good stories',
     color: '#f59e0b',
   },
   {
     id: 'dark-moody',
-    name: 'Dark & Moody',
+    name: 'Dark & moody',
     emoji: '\u{1F311}',
     description: 'Atmospheric and intense',
     color: '#6366f1',
@@ -36,21 +36,21 @@ export const VIBE_DEFINITIONS: VibeDefinition[] = [
   },
   {
     id: 'big-adventure',
-    name: 'Big Adventure',
+    name: 'Big adventure',
     emoji: '\u{1F5FA}',
     description: 'Epic journeys and grand scale',
     color: '#22c55e',
   },
   {
     id: 'laugh-out-loud',
-    name: 'Laugh Out Loud',
+    name: 'Laugh out loud',
     emoji: '\u{1F602}',
     description: 'Pure comedy gold',
     color: '#f97316',
   },
   {
     id: 'classic-throwback',
-    name: 'Classic Throwback',
+    name: 'Classic throwback',
     emoji: '\u{1F4FD}',
     description: 'Timeless cinema',
     color: '#eab308',
@@ -64,7 +64,7 @@ export const VIBE_DEFINITIONS: VibeDefinition[] = [
   },
   {
     id: 'easy-background',
-    name: 'Easy Background',
+    name: 'Easy background',
     emoji: '\u{1FAE7}',
     description: 'Light and easy watching',
     color: '#06b6d4',

@@ -45,7 +45,7 @@ def test_instance(monkeypatch):
 
 
 def test_prod_is_unchanged(monkeypatch):
-    for v in (None, '', 'prod', 'PROD'):
+    for v in (None, '', 'prod'):           # v174: 'PROD' or '  ' is no longer prod (FF-10, fail closed)
         if v is None:
             monkeypatch.delenv('LUMA_INSTANCE', raising=False)
         else:

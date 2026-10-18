@@ -39,7 +39,7 @@ export interface RailDefinition {
 export const EXPLORE_RAILS: readonly RailDefinition[] = [
   {
     id: 'trakt_movies',
-    title: 'Trending Movies',
+    title: 'Trending movies',
     source: 'trakt',
     endpoint: '/api/trakt/movies/trending',
     defaultParams: { limit: 20 },
@@ -48,7 +48,7 @@ export const EXPLORE_RAILS: readonly RailDefinition[] = [
   },
   {
     id: 'trakt_shows',
-    title: 'Trending Shows',
+    title: 'Trending shows',
     source: 'trakt',
     endpoint: '/api/trakt/shows/trending',
     defaultParams: { limit: 20 },
@@ -57,7 +57,7 @@ export const EXPLORE_RAILS: readonly RailDefinition[] = [
   },
   {
     id: 'trakt_anticipated_movies',
-    title: 'Anticipated Movies',
+    title: 'Anticipated movies',
     source: 'trakt',
     endpoint: '/api/trakt/movies/anticipated',
     defaultParams: { limit: 20 },
@@ -66,7 +66,7 @@ export const EXPLORE_RAILS: readonly RailDefinition[] = [
   },
   {
     id: 'trakt_anticipated_shows',
-    title: 'Anticipated Shows',
+    title: 'Anticipated shows',
     source: 'trakt',
     endpoint: '/api/trakt/shows/anticipated',
     defaultParams: { limit: 20 },
@@ -75,7 +75,7 @@ export const EXPLORE_RAILS: readonly RailDefinition[] = [
   },
   {
     id: 'in_theaters',
-    title: 'In Theaters',
+    title: 'In theaters',
     source: 'tmdb',
     endpoint: '/api/in-theaters',
     defaultParams: {},

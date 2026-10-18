@@ -84,7 +84,7 @@ export function MobileDescribeResults({ recommendations, onClose: _onClose, onOp
                 {/* Type + AI category */}
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-[12px] capitalize text-white/30">
-                    {rec.vibeItem.type === 'tv' ? 'TV Show' : 'Movie'}
+                    {rec.vibeItem.type === 'tv' ? 'TV show' : 'Movie'}
                   </span>
                   {rec.aiCategory && (
                     <span

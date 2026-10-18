@@ -129,11 +129,11 @@ function ElevenLabsVoiceSelect() {
 
   return (
     <div className="sm:col-span-2 flex flex-col gap-1.5">
-      <label className="text-[13px] font-medium text-white/60">Voice</label>
+      <label className="text-[13px] font-medium text-white/70">Voice</label>
       <select
         value={currentId}
         onChange={e => setByPath('apis.elevenlabs.voice_id', e.target.value)}
-        className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5 text-[14px] text-white/90 focus:border-emerald-500/40 focus:outline-none"
+        className="w-full rounded-lg border border-white/[0.12] bg-white/[0.06] px-3 py-2.5 text-[14px] text-white/95 outline-none focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.25)]"
       >
         <option value="">Select a voice...</option>
         {voices.map(v => (
@@ -157,7 +157,6 @@ export function AiTab() {
   const items: CardItem[] = [
     {
       title: 'Connection',
-      subtitle: 'OpenAI API for Describe It search',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M12 2a4 4 0 0 1 4 4v1a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4Z" />
@@ -168,7 +167,6 @@ export function AiTab() {
       content: (
         <SettingsCard
           title="Connection"
-          subtitle="OpenAI API for Describe It search in Luma AI"
           paths={['apis.openai.enabled', 'apis.openai.api_key', 'apis.openai.model', 'apis.openai.voice_enabled', 'apis.openai.wake_word']}
           testService="openai"
           icon={
@@ -180,30 +178,28 @@ export function AiTab() {
           }
         >
           <div className="sm:col-span-2">
-            <ToggleSwitch label="Enable AI Search" path="apis.openai.enabled" />
+            <ToggleSwitch label="Enable AI search" path="apis.openai.enabled" />
           </div>
           <div className="sm:col-span-2">
             <ToggleSwitch
-              label="Voice Assistant"
-              hint="Enable voice commands for search and playback control"
+              label="Voice assistant"
               path="apis.openai.voice_enabled"
             />
           </div>
           <FormField
-            label="Wake Word"
+            label="Wake word"
             path="apis.openai.wake_word"
             type="text"
             placeholder="alfred"
-            hint="The word that activates voice listening (e.g. alfred, jarvis, luma, friday)"
           />
-          <FormField label="API Key" path="apis.openai.api_key" type="password" placeholder="sk-..." />
+          <FormField label="API key" path="apis.openai.api_key" type="password" placeholder="sk-..." />
           <FormField
             label="Model"
             path="apis.openai.model"
             type="select"
             options={[
               { value: 'gpt-4.1', label: 'GPT-4.1 (Recommended)' },
-              { value: 'gpt-5', label: 'GPT-5 (Best accuracy, slower)' },
+              { value: 'gpt-5', label: 'GPT-5 (best accuracy, slower)' },
               { value: 'gpt-4o', label: 'GPT-4o' },
               { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
               { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
@@ -214,7 +210,6 @@ export function AiTab() {
     },
     {
       title: 'Voice',
-      subtitle: 'Choose the voice for spoken responses',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
@@ -225,7 +220,6 @@ export function AiTab() {
       content: (
         <SettingsCard
           title="Voice"
-          subtitle="Choose the TTS provider and voice for spoken responses"
           paths={['apis.openai.tts_provider', 'apis.openai.tts_voice', 'apis.elevenlabs.api_key', 'apis.elevenlabs.voice_id', 'apis.elevenlabs.model_id']}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -236,7 +230,7 @@ export function AiTab() {
           }
         >
           <FormField
-            label="TTS Provider"
+            label="TTS provider"
             path="apis.openai.tts_provider"
             type="select"
             options={[
@@ -259,37 +253,30 @@ export function AiTab() {
                   { value: 'echo', label: 'Echo — deeper male' },
                   { value: 'onyx', label: 'Onyx — deep, authoritative' },
                 ]}
-                hint="Save first, then preview to hear the difference"
               />
               <div className="flex items-center gap-3">
                 <VoicePreviewButton voice={currentVoice} />
-                <span className="text-[12px] text-white/30">
-                  Plays a sample with the selected voice
-                </span>
               </div>
             </>
           )}
 
           {ttsProvider === 'elevenlabs' && (
             <>
-              <FormField label="API Key" path="apis.elevenlabs.api_key" type="password" placeholder="xi-..." />
+              <FormField label="API key" path="apis.elevenlabs.api_key" type="password" placeholder="xi-..." />
               <ElevenLabsVoiceSelect />
               <FormField
                 label="Model"
                 path="apis.elevenlabs.model_id"
                 type="select"
                 options={[
-                  { value: 'eleven_multilingual_v2', label: 'Multilingual v2 (Best quality)' },
-                  { value: 'eleven_turbo_v2_5', label: 'Turbo v2.5 (Faster)' },
+                  { value: 'eleven_multilingual_v2', label: 'Multilingual v2 (best quality)' },
+                  { value: 'eleven_turbo_v2_5', label: 'Turbo v2.5 (faster)' },
                   { value: 'eleven_turbo_v2', label: 'Turbo v2' },
                   { value: 'eleven_monolingual_v1', label: 'English v1' },
                 ]}
               />
               <div className="flex items-center gap-3">
                 <VoicePreviewButton voice="elevenlabs" elevenlabsVoiceId={currentElVoiceId} />
-                <span className="text-[12px] text-white/30">
-                  Preview with your selected ElevenLabs voice
-                </span>
               </div>
             </>
           )}
@@ -297,8 +284,7 @@ export function AiTab() {
       ),
     },
     {
-      title: 'Content Preferences',
-      subtitle: 'Tell the AI what to include or exclude',
+      title: 'Content preferences',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -307,8 +293,7 @@ export function AiTab() {
       ),
       content: (
         <SettingsCard
-          title="Content Preferences"
-          subtitle="Tell the AI what to include or exclude from recommendations"
+          title="Content preferences"
           paths={['apis.openai.custom_instructions']}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -318,7 +303,7 @@ export function AiTab() {
           }
         >
           <div className="sm:col-span-2 flex flex-col gap-1.5">
-            <label className="text-[13px] font-medium text-white/60">Custom Instructions</label>
+            <label className="text-[13px] font-medium text-white/70">Custom instructions</label>
             <textarea
               value={customInstructions}
               onChange={(e) => {
@@ -328,13 +313,10 @@ export function AiTab() {
               placeholder="e.g. Only suggest English-language films. Do not include horror movies."
               rows={4}
               maxLength={500}
-              className="w-full rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5 text-[14px] text-white/90 placeholder:text-white/25 focus:border-emerald-500/40 focus:outline-none resize-none"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2.5 text-[14px] text-white/90 placeholder:text-white/30 outline-none focus:border-[#3b82f6] focus:shadow-[0_0_0_3px_rgba(59,130,246,0.25)] resize-none"
             />
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-white/30">
-                These instructions are appended to the AI prompt for Describe It searches.
-              </span>
-              <span className="text-[11px] text-white/30">
+              <span className="text-[12px] text-white/30">
                 {customInstructions.length}/500
               </span>
             </div>
@@ -343,8 +325,7 @@ export function AiTab() {
       ),
     },
     {
-      title: 'Model Parameters',
-      subtitle: 'Fine-tune AI response behavior',
+      title: 'Model parameters',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" />
@@ -355,8 +336,7 @@ export function AiTab() {
       ),
       content: (
         <SettingsCard
-          title="Model Parameters"
-          subtitle="Fine-tune AI response behavior"
+          title="Model parameters"
           paths={['apis.openai.temperature', 'apis.openai.max_tokens']}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -375,17 +355,15 @@ export function AiTab() {
             min={0}
             max={1}
             step={0.1}
-            hint="Lower = more predictable, higher = more creative"
           />
           <FormField
-            label="Response Length"
+            label="Response length"
             path="apis.openai.max_tokens"
             type="number"
             placeholder="1500"
             min={500}
             max={8000}
             step={100}
-            hint="How much the AI can write back (500 = short, 1500 = normal, 4000+ = detailed)"
           />
         </SettingsCard>
       ),
@@ -396,9 +374,6 @@ export function AiTab() {
     <div className="space-y-6">
       <div className="settings-tab-header">
         <h2 className="text-xl font-semibold text-white/90">AI</h2>
-        <p className="mt-1 text-[13px] text-white/40">
-          AI-powered search, content preferences, and model configuration.
-        </p>
       </div>
 
       <MobileCardNav items={items} />

@@ -304,7 +304,7 @@ export function SimilarPanel({ tmdbId, ratingKey, title, onClose }: SimilarPanel
       {!loading && !error && hasAny && (
         <>
           <SimilarSection
-            heading="In Library"
+            heading="In library"
             count={owned.length}
             dotColor="#4ade80"
             items={owned}

@@ -194,7 +194,7 @@ function RoomCard({
               </div>
             </>
           ) : (
-            <p className="mt-1 text-[14px] text-white/30">Nothing Playing</p>
+            <p className="mt-1 text-[14px] text-white/30">Nothing playing</p>
           )}
           {hasPlayback && (
             <>
@@ -558,7 +558,7 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
 
             {unmatchedSessions.length > 0 && (
               <div className="mt-6">
-                <h2 className="text-[18px] font-bold mb-3 text-white/60">Friends & Family</h2>
+                <h2 className="text-[18px] font-bold mb-3 text-white/60">Friends & family</h2>
                 <div className="flex flex-col gap-3">
                   {unmatchedSessions.map((session) => (
                     <UnmatchedSessionCard key={session.ratingKey} session={session} />

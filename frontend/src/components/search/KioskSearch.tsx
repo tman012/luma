@@ -821,7 +821,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                 const typeLabel = isPerson
                   ? 'Person'
                   : media?.media_type === 'tv'
-                    ? 'TV Show'
+                    ? 'TV show'
                     : 'Movie';
 
                 return (

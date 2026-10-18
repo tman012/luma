@@ -11,6 +11,7 @@
  * building once, and again if the seed list itself changes.
  */
 
+import { SECONDARY_BTN } from './components/legacyTokens';
 import { useState, useEffect, useCallback } from 'react';
 import { SettingsCard } from './components/SettingsCard';
 import { FormField } from './components/FormField';
@@ -81,7 +82,6 @@ function RunTimeField() {
         setByPath('automation.movie_night.hour', Number(h));
         setByPath('automation.movie_night.minute', Number(m));
       }}
-      hint="Earliest time the weekly run may start, on the server's clock"
     />
   );
 }
@@ -185,8 +185,7 @@ export function MovieNightCard() {
 
   return (
     <SettingsCard
-      title="Movie Night"
-      subtitle="One great film a week, in 2160p Remux"
+      title="Movie night"
       paths={ALL_PATHS}
       icon={
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -195,13 +194,12 @@ export function MovieNightCard() {
           <line x1="2" y1="12" x2="22" y2="12" />
         </svg>
       }
-      note="Once a week, walks a ranked list of great films, skips everything already in Plex, and downloads the highest-ranked one that has a 2160p Remux available on the selected trackers. English-language films only, and only English-audio releases — the Radarr profile rejects anything else, so foreign-language titles are never attempted. Nothing lower than 2160p Remux is ever grabbed; films without one are re-checked in 90 days, and changing the tracker selection clears those verdicts so a re-added tracker takes effect immediately. An IMDb vote+rating floor sits in front of the search so obscure mid-tier titles never win a 60–80GB remux just because one appeared."
       headerRight={
         <button
           type="button"
           onClick={handlePreview}
           disabled={busy !== null || running}
-          className="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-[12px] font-semibold text-white/80 disabled:opacity-40"
+          className={SECONDARY_BTN}
         >
           {busy === 'preview' ? 'Checking…' : 'Preview pick'}
         </button>
@@ -220,29 +218,25 @@ export function MovieNightCard() {
               ? `${stats.missing - stats.missing_english} foreign, skipped`
               : null],
         ].map(([label, val, sub]) => (
-          <div key={label as string} className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">
-            <p className="text-[11px] text-white/35">{label}</p>
+          <div key={label as string} className="rounded-[12px] border border-white/[0.08] bg-white/[0.04] px-3 py-2">
+            <p className="text-[12px] text-white/35">{label}</p>
             <p className="mt-0.5 text-[18px] font-semibold text-white/90">{(val as number) ?? '—'}</p>
-            {sub && <p className="text-[10px] text-white/25">{sub}</p>}
+            {sub && <p className="text-[12px] text-white/25">{sub}</p>}
           </div>
         ))}
       </div>
 
-      <ToggleSwitch label="Enable Movie Night" path="automation.movie_night.enabled"
-        hint="Nothing runs until this is on" />
+      <ToggleSwitch label="Movie night" path="automation.movie_night.enabled" />
       <FormField label="Quality profile (Radarr)" path="automation.movie_night.quality_profile_id"
-        type="select" options={profileOptions} hint="Must permit 2160p Remux" />
+        type="select" options={profileOptions} />
       <FormField label="Run day" path="automation.movie_night.weekday" type="select" options={WEEKDAYS} />
       <RunTimeField />
       <FormField label="Oldest year to consider" path="automation.movie_night.min_year"
-        type="number" min={0} max={2100}
-        hint="Films released before this are skipped. 0 or blank = no limit." />
+        type="number" min={0} max={2100} />
       <FormField label="IMDb minimum votes" path="automation.movie_night.imdb_min_votes"
-        type="number" min={0} max={2000000} step={5000}
-        hint="Fame floor — both this and rating must clear (default 200,000)" />
+        type="number" min={0} max={2000000} step={5000} />
       <FormField label="IMDb minimum rating" path="automation.movie_night.imdb_min_rating"
-        type="number" min={0} max={10} step={0.1}
-        hint="Quality floor — both this and votes must clear (default 7.0)" />
+        type="number" min={0} max={10} step={0.1} />
       {/* The list only ever contains the movie trackers (MOVIE_TRACKERS in
           app/movie_night.py), so selecting none means all of *those* — never
           every indexer in Prowlarr. Selected names become indexer ids at search
@@ -252,16 +246,13 @@ export function MovieNightCard() {
           label="Trackers"
           path={TRACKERS_PATH}
           chips={trackers.map((t) => ({ name: t.name, enabled: t.enabled }))}
-          emptyHint={`None selected — all ${trackers.length} get searched. Tick some to spare the rest.`}
-          selectedHint={(n) =>
-            `Only ${n === 1 ? 'this tracker' : `these ${n}`} will be searched each week.`}
         />
       )}
 
       {/* Preview output */}
       {preview && !preview.error && (
-        <div className="col-span-full rounded-lg border border-white/8 bg-black/25 p-3">
-          <p className="mb-2 text-[11px] text-white/35">
+        <div className="col-span-full rounded-[12px] border border-white/[0.08] bg-white/[0.04] p-3">
+          <p className="mb-2 text-[12px] text-white/35">
             Next run · {preview.candidates} eligible ·{' '}
             {preview.trackers?.join(', ') || 'no trackers'}
             {preview.skipped_imdb ? ` · ${preview.skipped_imdb} below IMDb floors` : ''}
@@ -270,12 +261,12 @@ export function MovieNightCard() {
             <>
               <p className="text-[14px] font-medium text-white/90">
                 {preview.pick.title} <span className="text-white/40">({preview.pick.year})</span>
-                <span className="ml-2 text-[11px] text-white/35">#{preview.pick.rank}</span>
+                <span className="ml-2 text-[12px] text-white/35">#{preview.pick.rank}</span>
               </p>
               <p className="text-[12px] text-white/45">
                 {preview.pick.quality} · {preview.pick.size_gb}GB · {preview.pick.seeders} seeders · {preview.pick.tracker}
               </p>
-              <p className="truncate text-[11px] text-white/25">{preview.pick.torrent_name}</p>
+              <p className="truncate text-[12px] text-white/25">{preview.pick.torrent_name}</p>
             </>
           ) : (
             <p className="text-[13px] text-white/35">{preview.reason || 'No 2160p Remux available'}</p>
@@ -287,8 +278,8 @@ export function MovieNightCard() {
 
       {/* Last run. Persisted server-side, so a weekly job still reports its
           outcome after a container restart. */}
-      <div className="col-span-full rounded-lg border border-white/8 bg-black/20 px-3 py-2">
-        <p className="text-[11px] text-white/35">
+      <div className="col-span-full rounded-[12px] border border-white/[0.08] bg-white/[0.04] px-3 py-2">
+        <p className="text-[12px] text-white/35">
           Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
         </p>
         {status?.last_result && (
@@ -306,7 +297,7 @@ export function MovieNightCard() {
           </p>
         )}
         {status?.last_result && !status.last_result.error && (
-          <p className="mt-0.5 text-[11px] text-white/25">
+          <p className="mt-0.5 text-[12px] text-white/25">
             Searched {status.last_result.searched} of {status.last_result.candidates} eligible candidates
             {status.last_result.skipped_foreign
               ? ` · ${status.last_result.skipped_foreign} non-English skipped`
@@ -321,13 +312,13 @@ export function MovieNightCard() {
       {/* Run history — every run, not just the ones that grabbed something. */}
       {log.length > 0 && (
         <div className="col-span-full flex flex-col gap-1">
-          <p className="text-[11px] text-white/35">Recent runs</p>
+          <p className="text-[12px] text-white/35">Recent runs</p>
           {log.slice(0, 6).map((e, i) => (
             <div key={`${e.at}-${i}`} className="flex items-baseline justify-between gap-3 text-[12px]">
               <span className={`truncate ${OUTCOME_STYLES[e.outcome] || 'text-white/50'}`}>
                 {e.summary}
               </span>
-              <span className="shrink-0 text-[11px] text-white/25">
+              <span className="shrink-0 text-[12px] text-white/25">
                 {new Date(e.at).toLocaleDateString()}
               </span>
             </div>
@@ -337,14 +328,13 @@ export function MovieNightCard() {
 
       <div className="col-span-full flex flex-wrap items-center gap-2">
         <button type="button" onClick={handleRunNow} disabled={busy !== null || running}
-          className="rounded-lg border border-amber-500/25 bg-amber-500/12 px-3 py-2 text-[12px] font-semibold text-amber-300 disabled:opacity-40">
-          {running ? 'Running…' : 'Run now (downloads for real)'}
+          className={SECONDARY_BTN}>
+          {running ? 'Running…' : 'Run now'}
         </button>
         <button type="button" onClick={handleRebuild} disabled={busy !== null}
-          className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[12px] font-semibold text-white/55 disabled:opacity-40">
+          className={SECONDARY_BTN}>
           {busy === 'build' ? 'Rebuilding…' : 'Rebuild film list'}
         </button>
-        <span className="text-[11px] text-white/30">Preview is always safe. Rebuild re-queries TMDb; only needed once.</span>
       </div>
     </SettingsCard>
   );

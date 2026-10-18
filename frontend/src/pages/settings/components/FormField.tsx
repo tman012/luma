@@ -2,10 +2,11 @@
  * FormField — input/select/password field bound to a settings dot-path.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useId } from 'react';
 import { useSettings } from '../useSettings';
 import { cn } from '@/utils/cn';
 import { isMasked } from '@/services/settingsApi';
+import { INPUT_CLASS } from './legacyTokens';
 
 interface Option {
   value: string | number;
@@ -30,15 +31,14 @@ interface FormFieldProps {
   onChange?: (value: string | number) => void;
 }
 
-const inputClass =
-  'w-full min-h-[44px] rounded-lg border border-white/10 bg-white/5 px-3 py-3 text-[15px] text-white placeholder:text-white/25 outline-none transition-colors focus:border-white/20 focus:bg-white/8 disabled:opacity-40';
+const inputClass = INPUT_CLASS;
 
 export function FormField({
   label,
   path,
   type = 'text',
   placeholder,
-  hint,
+  hint: _hint,
   options,
   min,
   max,
@@ -50,6 +50,7 @@ export function FormField({
   onChange: externalOnChange,
 }: FormFieldProps) {
   const { getByPath, setByPath } = useSettings();
+  const id = useId();
 
   const isExternal = externalValue !== undefined;
   const rawValue = isExternal ? externalValue : getByPath(path);
@@ -72,9 +73,10 @@ export function FormField({
 
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
-      <label className="text-[14px] font-medium text-white/60">{label}</label>
+      <label htmlFor={id} className="text-[13px] font-medium text-white/70">{label}</label>
       {type === 'select' ? (
         <select
+          id={id}
           value={String(displayValue)}
           onChange={handleChange}
           disabled={disabled}
@@ -88,6 +90,7 @@ export function FormField({
         </select>
       ) : (
         <input
+          id={id}
           type={
             type === 'password' ? 'password'
               : type === 'number' ? 'number'
@@ -102,11 +105,8 @@ export function FormField({
           max={max}
           step={step}
           maxLength={maxLength}
-          className={cn(inputClass, (type === 'number' || type === 'time') && 'font-mono')}
+          className={cn(inputClass, false)}
         />
-      )}
-      {hint && (
-        <span className="text-[11px] text-white/30">{hint}</span>
       )}
     </div>
   );

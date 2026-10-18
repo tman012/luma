@@ -114,7 +114,7 @@ function RequestPortalCard() {
   return (
     <section className="rounded-2xl border border-white/[0.06] bg-white/[0.03] p-5 space-y-5">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-[15px] font-semibold text-white/90">Request Portal</h3>
+        <h3 className="text-[15px] font-semibold text-white/90">Request portal</h3>
         <label className="relative inline-flex cursor-pointer items-center">
           <input
             type="checkbox"
@@ -122,7 +122,7 @@ function RequestPortalCard() {
             onChange={e => { setEnabled(e.target.checked); setDirty(true); }}
             className="peer sr-only"
           />
-          <div className="peer h-6 w-11 rounded-full bg-white/10 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-emerald-500 peer-checked:after:translate-x-5" />
+          <div className="peer h-6 w-11 rounded-full bg-white/10 after:absolute after:left-[2px] after:top-[2px] after:h-5 after:w-5 after:rounded-full after:bg-white after:transition-all peer-checked:bg-[#3b82f6] peer-checked:after:translate-x-5" />
         </label>
       </div>
 
@@ -230,7 +230,7 @@ function RequestPortalCard() {
 
       {log.length > 0 && (
         <div className="space-y-2">
-          <h4 className="text-[13px] font-semibold text-white/70">Recent Requests</h4>
+          <h4 className="text-[13px] font-semibold text-white/70">Recent requests</h4>
           <div className="divide-y divide-white/[0.06]">
             {log.map(e => (
               <div key={e.id} className="flex items-center justify-between gap-3 py-2.5">
@@ -310,7 +310,7 @@ export function SecurityTab() {
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-[15px] font-semibold text-white/90">Require PIN</h3>
           <span className={cn(
-            'rounded-full px-2.5 py-0.5 text-[11px] font-semibold',
+            'rounded-full px-2.5 py-0.5 text-[12px] font-semibold',
             state.local_request ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300',
           )}>
             This device: {state.local_request ? 'Local' : 'Remote'}
@@ -382,7 +382,7 @@ export function SecurityTab() {
             onClick={() => { setSignup(v => !v); setMsg(null); }}
             className={cn(
               'relative h-[28px] w-[50px] shrink-0 rounded-full transition-colors duration-200',
-              signup ? 'bg-emerald-500' : 'bg-white/15',
+              signup ? 'bg-[#3b82f6]' : 'bg-white/20',
             )}
           >
             <span className={cn(

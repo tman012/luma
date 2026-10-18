@@ -126,7 +126,7 @@ export function UserMenu() {
             <>
               {/* Unauthenticated menu items */}
               <MenuItem label="Login" onClick={() => handleNavigate('/login')} />
-              <MenuItem label="Sign Up" onClick={() => handleNavigate('/login')} />
+              <MenuItem label="Sign up" onClick={() => handleNavigate('/login')} />
             </>
           )}
         </div>

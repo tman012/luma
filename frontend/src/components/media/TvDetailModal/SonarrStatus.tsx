@@ -181,7 +181,7 @@ export function useSonarrSeriesStatus(
     if (!resp.ok) throw new Error(String(resp.status));
     const j = (await resp.json().catch(() => ({}))) as { searching?: boolean };
     if (monitored) {
-      showSonarrToast(j.searching === false ? 'Monitoring' : 'Monitoring \u00b7 Searching');
+      showSonarrToast(j.searching === false ? 'Monitoring' : 'Monitoring \u00b7 searching');
       refresh(j.searching === false ? 0 : SEARCH_BOOST);
     }
     return j;

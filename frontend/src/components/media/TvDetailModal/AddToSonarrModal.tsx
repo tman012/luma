@@ -142,7 +142,7 @@ export function AddToSonarrModal({ tvdbId, title, seasons, onClose, onAdded }: A
     );
   const toggleAll = () => setChosenSeasons(allSelected ? [] : [...allSeasonNumbers]);
 
-  const seasonSummary = allSelected ? 'All Seasons'
+  const seasonSummary = allSelected ? 'All seasons'
     : chosenSeasons.length === 0 ? 'Select seasons'
     : chosenSeasons.length === 1
       ? (pickableSeasons.find((s) => s.season_number === chosenSeasons[0])?.name || `Season ${chosenSeasons[0]}`)
@@ -195,7 +195,7 @@ export function AddToSonarrModal({ tvdbId, title, seasons, onClose, onAdded }: A
 
           {/* Quality profile — single select */}
           <div style={{ marginBottom: '18px', position: 'relative' }}>
-            <label style={fieldLabelStyle}>Quality Profile</label>
+            <label style={fieldLabelStyle}>Quality profile</label>
             <DropdownTrigger
               focusKey="sonarr-profile-trigger"
               value={profileName}
@@ -231,7 +231,7 @@ export function AddToSonarrModal({ tvdbId, title, seasons, onClose, onAdded }: A
                 {allSeasonNumbers.length > 0 && (
                   <DropdownOption
                     focusKey="sonarr-season-all"
-                    label="All Seasons"
+                    label="All seasons"
                     checkbox
                     active={allSelected}
                     onSelect={toggleAll}
@@ -273,8 +273,8 @@ export function AddToSonarrModal({ tvdbId, title, seasons, onClose, onAdded }: A
               opacity: adding || !canAdd ? 0.6 : 1,
             }}
           >
-            {added ? 'Added!' : adding ? 'Adding...' : error ? 'Failed - Try Again'
-              : chosenSeasons.length === 0 && allSeasonNumbers.length > 0 ? 'Select a Season'
+            {added ? 'Added!' : adding ? 'Adding...' : error ? 'Failed - try again'
+              : chosenSeasons.length === 0 && allSeasonNumbers.length > 0 ? 'Select a season'
               : 'Add to watchlist'}
           </button>
         </div>

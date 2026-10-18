@@ -11,6 +11,7 @@
  * cleanup of everything else, and the sizes are what warn of it in advance.
  */
 
+import { SECONDARY_BTN } from './components/legacyTokens';
 import { useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
@@ -93,10 +94,10 @@ function TrackerPicker({ summary }: { summary: DownloadsGuardTrackerSummary | nu
   return (
     <div className="col-span-full flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-2">
-        <label className="text-[14px] font-medium text-white/60">Delete from these trackers first</label>
+        <label className="text-[13px] font-medium text-white/70">Delete from these trackers first</label>
         {selected.length > 0 && (
           <button type="button" onClick={() => setByPath(TRACKERS_PATH, [])}
-            className="text-[11px] font-semibold text-white/40 hover:text-white/70">
+            className="text-[12px] font-semibold text-white/40 hover:text-white/70">
             Clear
           </button>
         )}
@@ -115,11 +116,11 @@ function TrackerPicker({ summary }: { summary: DownloadsGuardTrackerSummary | nu
             <button key={t.key} type="button" onClick={() => toggle(t.key)}
               className={`rounded-lg border px-2.5 py-1.5 text-left text-[12px] transition ${
                 on
-                  ? 'border-emerald-400/30 bg-emerald-400/12 text-emerald-200'
+                  ? 'border-[#3b82f6]/40 bg-[#3b82f6]/[0.18] text-[#60a5fa]'
                   : 'border-white/10 bg-white/5 text-white/50 hover:text-white/80'
               }`}>
               <span className="font-semibold">{t.label}</span>
-              <span className={`ml-1.5 ${on ? 'text-emerald-200/60' : 'text-white/30'}`}>
+              <span className={`ml-1.5 ${on ? 'text-[#60a5fa]/70' : 'text-white/40'}`}>
                 {t.count > 0 ? `${t.count} · ${formatBytes(t.size_bytes)}` : 'nothing here'}
               </span>
             </button>
@@ -129,7 +130,7 @@ function TrackerPicker({ summary }: { summary: DownloadsGuardTrackerSummary | nu
 
 
       {summary && summary.unclassified_count > 0 && (
-        <p className="text-[11px] text-white/30">
+        <p className="text-[12px] text-white/30">
           {summary.unclassified_count} torrents ({formatBytes(summary.unclassified_bytes)}) couldn’t
           be matched to a tracker
           {summary.unknown_hosts.length > 0 &&
@@ -154,16 +155,16 @@ function StatusPanel({ status }: { status: DownloadsGuardStatus | null }) {
   const pending = ev.pending_bytes ?? 0;
 
   return (
-    <div className="col-span-full rounded-lg border border-white/8 bg-black/25 p-3">
+    <div className="col-span-full rounded-[12px] border border-white/[0.08] bg-white/[0.04] p-3">
       <div className="mb-2 flex items-baseline justify-between gap-3">
         <p className="text-[13px] text-white/70">
           <span className={breached ? 'font-semibold text-amber-300' : 'font-semibold text-white/90'}>
             {formatBytes(ev.free_bytes)}
           </span>{' '}
           free of {formatBytes(ev.total_bytes)}
-          <span className="ml-2 text-[11px] text-white/35">{ev.path}</span>
+          <span className="ml-2 text-[12px] text-white/35">{ev.path}</span>
         </p>
-        <p className="shrink-0 text-[11px] text-white/35">
+        <p className="shrink-0 text-[12px] text-white/35">
           Floor {formatBytes(ev.min_free_bytes)}
         </p>
       </div>
@@ -198,13 +199,13 @@ function StatusPanel({ status }: { status: DownloadsGuardStatus | null }) {
       </p>
 
       {status?.last_check && (
-        <p className="mt-0.5 text-[11px] text-white/25">
+        <p className="mt-0.5 text-[12px] text-white/25">
           Last checked {new Date(status.last_check).toLocaleString()}
           {status.server_tz ? ` ${status.server_tz}` : ''}
         </p>
       )}
       {ev.daily_cap_bytes > 0 && ev.freed_today_bytes > 0 && (
-        <p className="mt-0.5 text-[11px] text-white/25">
+        <p className="mt-0.5 text-[12px] text-white/25">
           Deleted today: {formatBytes(ev.freed_today_bytes)} of {formatBytes(ev.daily_cap_bytes)} allowed
         </p>
       )}
@@ -216,22 +217,22 @@ function StatusPanel({ status }: { status: DownloadsGuardStatus | null }) {
 function EntryList({
   title,
   entries,
-  note,
+  summary,
 }: {
   title: string;
   entries: { name: string; size_bytes: number; mtime?: number; tracker_label?: string | null; phase?: string }[];
-  note?: string;
+  summary?: string;
 }) {
   if (!entries.length) return null;
   return (
-    <div className="col-span-full rounded-lg border border-white/8 bg-black/25 p-3">
-      <p className="mb-2 text-[11px] text-white/35">{title}</p>
-      {note && <p className="mb-2 text-[12px] text-white/45">{note}</p>}
+    <div className="col-span-full rounded-[12px] border border-white/[0.08] bg-white/[0.04] p-3">
+      <p className="mb-2 text-[12px] text-white/35">{title}</p>
+      {summary && <p className="mb-2 text-[12px] text-white/45">{summary}</p>}
       <div className="flex flex-col gap-1">
         {entries.slice(0, 40).map((e) => (
           <div key={e.name} className="flex items-baseline justify-between gap-3 text-[12px]">
             <span className="truncate text-white/70">{e.name}</span>
-            <span className="shrink-0 text-[11px] text-white/35">
+            <span className="shrink-0 text-[12px] text-white/35">
               {/* The tracker is on every row on purpose: it is the one field
                   that says whether the preference is still holding. */}
               <span className={e.phase === 'fallback' ? 'text-amber-300/60' : 'text-white/40'}>
@@ -244,7 +245,7 @@ function EntryList({
           </div>
         ))}
         {entries.length > 40 && (
-          <p className="text-[11px] text-white/25">…and {entries.length - 40} more</p>
+          <p className="text-[12px] text-white/25">…and {entries.length - 40} more</p>
         )}
       </div>
     </div>
@@ -353,8 +354,7 @@ export function DownloadsGuardCard() {
 
   return (
     <SettingsCard
-      title="Downloads Guard"
-      subtitle="Keeps free space above a floor by deleting the oldest downloads"
+      title="Downloads guard"
       paths={ALL_PATHS}
       icon={
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -365,12 +365,12 @@ export function DownloadsGuardCard() {
       }
       headerRight={
         <button type="button" onClick={handlePreview} disabled={busy !== null || running}
-          className="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-[12px] font-semibold text-white/80 disabled:opacity-40">
+          className={SECONDARY_BTN}>
           {busy === 'preview' ? 'Checking…' : 'Preview'}
         </button>
       }
     >
-      <ToggleSwitch label="Enable Downloads Guard" path="automation.downloads_guard.enabled" />
+      <ToggleSwitch label="Downloads guard" path="automation.downloads_guard.enabled" />
       <FormField label="Check every (minutes)" path="automation.downloads_guard.check_interval_minutes"
         type="number" min={1} max={1440} />
 
@@ -391,7 +391,7 @@ export function DownloadsGuardCard() {
           title={`Would delete now · ${formatBytes(preview.planned_bytes)} of a ${formatBytes(
             preview.target_bytes,
           )} target`}
-          note={[
+          summary={[
             `${preview.preferred_available} eligible in your chosen trackers, ${preview.eligible_count} in the folder overall.`,
             preview.fallback_bytes
               ? `Chosen trackers covered ${formatBytes(preview.preferred_bytes)}; the remaining ${formatBytes(preview.fallback_bytes)} came from other trackers.`
@@ -408,8 +408,8 @@ export function DownloadsGuardCard() {
       {msg && <p className="col-span-full text-[12px] text-white/50">{msg}</p>}
 
       {/* Last run — persisted server-side so it survives a restart. */}
-      <div className="col-span-full rounded-lg border border-white/8 bg-black/20 px-3 py-2">
-        <p className="text-[11px] text-white/35">
+      <div className="col-span-full rounded-[12px] border border-white/[0.08] bg-white/[0.04] px-3 py-2">
+        <p className="text-[12px] text-white/35">
           Last acted: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
         </p>
         {status?.last_result && (
@@ -426,7 +426,7 @@ export function DownloadsGuardCard() {
           </p>
         )}
         {status?.last_result?.failed?.length ? (
-          <p className="mt-0.5 text-[11px] text-amber-300/50">
+          <p className="mt-0.5 text-[12px] text-amber-300/50">
             Could not delete: {status.last_result.failed.slice(0, 5).join(', ')}
           </p>
         ) : null}
@@ -439,13 +439,13 @@ export function DownloadsGuardCard() {
 
       {log.length > 0 && (
         <div className="col-span-full flex flex-col gap-1">
-          <p className="text-[11px] text-white/35">Recent activity</p>
+          <p className="text-[12px] text-white/35">Recent activity</p>
           {log.slice(0, 8).map((e, i) => (
             <div key={`${e.at}-${i}`} className="flex items-baseline justify-between gap-3 text-[12px]">
               <span className={`truncate ${OUTCOME_STYLES[e.outcome] || 'text-white/50'}`}>
                 {e.summary}
               </span>
-              <span className="shrink-0 text-[11px] text-white/25">
+              <span className="shrink-0 text-[12px] text-white/25">
                 {new Date(e.at).toLocaleString()}
               </span>
             </div>
@@ -456,7 +456,7 @@ export function DownloadsGuardCard() {
       <div className="col-span-full flex flex-wrap items-center gap-2">
         {showSignIn ? (
           <button type="button" onClick={signIn} data-testid="guard-sign-in"
-            className="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-[12px] font-semibold text-white/90">
+            className={SECONDARY_BTN}>
             {SIGN_IN_TO_CLEAN}
           </button>
         ) : confirming ? (
@@ -466,17 +466,17 @@ export function DownloadsGuardCard() {
               {running ? 'Deleting…' : 'Yes — delete permanently'}
             </button>
             <button type="button" onClick={() => setConfirming(false)}
-              className="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-[12px] font-semibold text-white/70">
+              className={SECONDARY_BTN}>
               Cancel
             </button>
-            <span className="text-[11px] text-rose-200/60">
+            <span className="text-[12px] text-rose-200/60">
               This cannot be undone.
             </span>
           </>
         ) : (
           <>
             <button type="button" onClick={() => setConfirming(true)} disabled={busy !== null || running}
-              className="rounded-lg border border-amber-500/25 bg-amber-500/12 px-3 py-2 text-[12px] font-semibold text-amber-300 disabled:opacity-40">
+              className={SECONDARY_BTN}>
               {running ? 'Running…' : 'Clean up now'}
             </button>
           </>

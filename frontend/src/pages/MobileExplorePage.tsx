@@ -63,7 +63,7 @@ function matchesQuality(m: NormalizedMediaItem, q: QualityFilter): boolean {
 }
 
 const QUALITY_OPTIONS: { value: QualityFilter; label: string }[] = [
-  { value: 'all', label: 'All Quality' },
+  { value: 'all', label: 'All quality' },
   { value: '4k_remux', label: '4K Remux' },
   { value: '4k_web', label: '4K WEB-DL' },
   { value: '1080_remux', label: '1080p Remux' },
@@ -364,8 +364,8 @@ export function MobileExplorePage() {
       {/* paddingTop = measured header height + 20px buffer — guaranteed to clear the fixed header */}
       <div className="pb-8 px-4" style={{ paddingTop: headerHeight + 20 }}>
         {/* Anticipated rails (Trakt — hidden when disabled/empty) */}
-        <MobilePosterRail title="Anticipated Movies" items={anticipatedMovies?.items} onCardClick={handleCardClick} />
-        <MobilePosterRail title="Anticipated Shows" items={anticipatedShows?.items} onCardClick={handleCardClick} />
+        <MobilePosterRail title="Anticipated movies" items={anticipatedMovies?.items} onCardClick={handleCardClick} />
+        <MobilePosterRail title="Anticipated shows" items={anticipatedShows?.items} onCardClick={handleCardClick} />
 
         {/* Filter bar */}
         <div className="relative z-[60] mb-4 flex flex-col gap-2">
@@ -375,7 +375,7 @@ export function MobileExplorePage() {
               value={sort}
               options={[
                 { value: 'seeders', label: 'Seeders' },
-                { value: 'newest', label: 'Date Added' },
+                { value: 'newest', label: 'Date added' },
               ]}
               onChange={(v) => setSort(v as SortKey)}
             />

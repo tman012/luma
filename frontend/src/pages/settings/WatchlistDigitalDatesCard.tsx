@@ -5,6 +5,7 @@
  * newly-dated finds, and browsable recent-run history.
  */
 
+import { SECONDARY_BTN } from './components/legacyTokens';
 import { useState, useEffect, useCallback } from 'react';
 import { SettingsCard } from './components/SettingsCard';
 import { FormField } from './components/FormField';
@@ -68,7 +69,6 @@ function RunTimeField() {
         setByPath(HOUR_PATH, Number(h));
         setByPath(MINUTE_PATH, Number(m));
       }}
-      hint="Morning digital-date refresh (default 06:00 ET)"
     />
   );
 }
@@ -137,8 +137,7 @@ export function WatchlistDigitalDatesCard() {
 
   return (
     <SettingsCard
-      title="Watchlist Digital Dates"
-      subtitle="Morning check: newly dated watchlist movies (US digital)"
+      title="Watchlist digital dates"
       paths={ALL_PATHS}
       icon={
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -149,22 +148,20 @@ export function WatchlistDigitalDatesCard() {
           <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" />
         </svg>
       }
-      note="Every morning (~6:00 AM ET by default) refreshes US digital (TMDb type-4) dates for your movie watchlist, compares to the previous snapshot, and sends a Luma push when a title newly gains a date or its date changes. TV is out of scope."
     >
       <ToggleSwitch
         label="Enable morning digital-date check"
         path="automation.watchlist_digital_dates.enabled"
-        hint="Default on — turn off to pause the 6 AM job"
       />
       <RunTimeField />
 
       {msg && <p className="col-span-full text-[12px] text-white/50">{msg}</p>}
 
-      <div className="col-span-full rounded-lg border border-white/8 bg-black/20 px-3 py-2">
-        <p className="text-[11px] text-white/35">
+      <div className="col-span-full rounded-[12px] border border-white/[0.08] bg-white/[0.04] px-3 py-2">
+        <p className="text-[12px] text-white/35">
           Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
         </p>
-        <p className="text-[11px] text-white/35">
+        <p className="text-[12px] text-white/35">
           Next run: {status?.next_run
             ? `${new Date(status.next_run).toLocaleString()} ET`
             : 'not scheduled'}
@@ -194,11 +191,11 @@ export function WatchlistDigitalDatesCard() {
 
       {log.length > 0 && (
         <div className="col-span-full flex flex-col gap-1">
-          <p className="text-[11px] text-white/35">Recent runs</p>
+          <p className="text-[12px] text-white/35">Recent runs</p>
           {log.slice(0, 20).map((e, i) => {
             const open = expandedAt === e.at;
             return (
-              <div key={`${e.at}-${i}`} className="rounded-md border border-white/5 bg-black/15 px-2 py-1.5">
+              <div key={`${e.at}-${i}`} className="rounded-md border border-white/5 bg-white/[0.04] px-2 py-1.5">
                 <button
                   type="button"
                   className="flex w-full items-baseline justify-between gap-3 text-left text-[12px]"
@@ -207,12 +204,12 @@ export function WatchlistDigitalDatesCard() {
                   <span className={`truncate ${OUTCOME_STYLES[e.outcome] || 'text-white/50'}`}>
                     {e.summary}
                   </span>
-                  <span className="shrink-0 text-[11px] text-white/25">
+                  <span className="shrink-0 text-[12px] text-white/25">
                     {new Date(e.at).toLocaleString()}
                   </span>
                 </button>
                 {open && (
-                  <div className="mt-1.5 border-t border-white/5 pt-1.5 text-[11px] text-white/45">
+                  <div className="mt-1.5 border-t border-white/5 pt-1.5 text-[12px] text-white/45">
                     <p>
                       Checked {e.checked ?? '—'} · with date {e.with_date ?? '—'} ·
                       without {e.without_date ?? '—'} · notified {e.notified ?? 0}
@@ -242,13 +239,10 @@ export function WatchlistDigitalDatesCard() {
           type="button"
           onClick={handleRunNow}
           disabled={busy !== null || running}
-          className="rounded-lg border border-amber-500/25 bg-amber-500/12 px-3 py-2 text-[12px] font-semibold text-amber-300 disabled:opacity-40"
+          className={SECONDARY_BTN}
         >
           {running || busy === 'run' ? 'Running…' : 'Run now'}
         </button>
-        <span className="text-[11px] text-white/30">
-          Refreshes digital dates, diffs the snapshot, and pushes on new/changed dates.
-        </span>
       </div>
     </SettingsCard>
   );

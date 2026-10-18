@@ -99,7 +99,7 @@ function matchesQuality(m: NowAvailableMovie, q: QualityFilter): boolean {
 }
 
 const QUALITY_OPTIONS: { value: QualityFilter; label: string }[] = [
-  { value: 'all', label: 'All Quality' },
+  { value: 'all', label: 'All quality' },
   { value: '4k_remux', label: '4K Remux' },
   { value: '4k_web', label: '4K WEB-DL' },
   { value: '1080_remux', label: '1080p Remux' },
@@ -434,7 +434,7 @@ export function NowAvailablePage() {
             value={sort}
             options={[
               { value: 'seeders', label: 'Seeders' },
-              { value: 'newest', label: 'Date Added' },
+              { value: 'newest', label: 'Date added' },
             ]}
             onChange={(v) => setSort(v as SortKey)}
           />

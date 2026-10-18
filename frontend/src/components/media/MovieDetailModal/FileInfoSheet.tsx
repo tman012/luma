@@ -403,7 +403,7 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
       <div style={{ fontSize: isCompact ? 18 : 20, fontWeight: 700, color: '#fff', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {data?.title || title}
       </div>
-      <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>File Info</div>
+      <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', marginTop: 2 }}>File info</div>
       {/* Phone closes by swipe/scrim tap — no ✕ there. */}
       {!isCompact && (
       <button
@@ -462,7 +462,7 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
         <path d="M21 12a9 9 0 1 1-2.64-6.36" />
         <polyline points="21 4 21 10 15 10" />
       </svg>
-      <span style={{ flex: 1 }}>Fix Match</span>
+      <span style={{ flex: 1 }}>Fix match</span>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <polyline points="9 18 15 12 9 6" />
       </svg>
@@ -548,9 +548,9 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
                   <PathCard path={part.path} />
                 </>
               )}
-              <StreamSection heading="Video Streams" streams={part.video_streams} />
-              <StreamSection heading="Audio Streams" streams={part.audio_streams} checkSelected fallbackDefault />
-              <StreamSection heading="Subtitle Streams" streams={part.subtitle_streams} checkSelected />
+              <StreamSection heading="Video streams" streams={part.video_streams} />
+              <StreamSection heading="Audio streams" streams={part.audio_streams} checkSelected fallbackDefault />
+              <StreamSection heading="Subtitle streams" streams={part.subtitle_streams} checkSelected />
             </div>
           ))}
         </>

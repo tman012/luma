@@ -2,7 +2,7 @@
  * TopReviews — Plex-style "Ratings & Reviews" row + full-review sheet.
  *
  * Data: GET /api/reviews/top?title=&year= (app/rt_top_reviews.py) — Rotten
- * Tomatoes critic reviews (Top Critics first), falling back to RT audience
+ * Tomatoes critic reviews (Top critics first), falling back to RT audience
  * reviews (verified first) when a title has no critic reviews. Cached
  * server-side. Ratings arrive normalised to 0-10 → 5 stars with halves
  * (critic "3/4" = 7.5 → 3.5★); critics without a score show Fresh/Rotten.
@@ -150,8 +150,8 @@ function Avatar({ review, size }: { review: TopReview; size: number }) {
 
 /** Line under the name: publication for critics, audience type otherwise. */
 function subtitle(r: TopReview): string {
-  if (r.kind === 'critic') return [r.publication, r.top_critic ? 'Top Critic' : null].filter(Boolean).join(' · ');
-  return r.verified ? 'Verified Audience' : 'Audience Review';
+  if (r.kind === 'critic') return [r.publication, r.top_critic ? 'Top critic' : null].filter(Boolean).join(' · ');
+  return r.verified ? 'Verified audience' : 'Audience review';
 }
 
 function ReviewHeader({ review, avatar, nameSize }: { review: TopReview; avatar: number; nameSize: number }) {
@@ -449,7 +449,7 @@ export function ReviewSheet({ review, variant, onClose }: { review: TopReview; v
             </a>
           )}
           <div style={{ marginTop: 18, fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>
-            Review from Rotten Tomatoes · {review.kind === 'critic' ? (review.top_critic ? 'Top Critic' : 'Critic') : review.verified ? 'Verified Audience' : 'Audience'}
+            Review from Rotten Tomatoes · {review.kind === 'critic' ? (review.top_critic ? 'Top critic' : 'Critic') : review.verified ? 'Verified audience' : 'Audience'}
           </div>
           <div style={{ height: isCompact ? 'calc(env(safe-area-inset-bottom, 0px) + 20px)' : 26 }} />
         </div>

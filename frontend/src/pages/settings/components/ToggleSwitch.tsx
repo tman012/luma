@@ -19,7 +19,7 @@ interface ToggleSwitchProps {
 export function ToggleSwitch({
   label,
   path,
-  hint,
+  hint: _hint,
   disabled,
   value: externalValue,
   onChange: externalOnChange,
@@ -38,21 +38,24 @@ export function ToggleSwitch({
     }
   }, [disabled, isExternal, isOn, externalOnChange, path, setByPath]);
 
+  // v174 (Designer): the label only, the switch on the right; on is blue, off white 20%
   return (
     <div
-      className="flex items-center gap-3 min-h-[44px] py-1 cursor-pointer"
+      className="flex items-center justify-between gap-3 min-h-[44px] py-1 cursor-pointer"
       onClick={toggle}
       role="presentation"
     >
+      <span className="text-[13px] font-medium text-white/70 select-none leading-snug">{label}</span>
       <button
         type="button"
         role="switch"
         aria-checked={isOn}
+        aria-label={label}
         onClick={(e) => { e.stopPropagation(); toggle(); }}
         disabled={disabled}
         className={cn(
           'relative h-[28px] w-[50px] shrink-0 rounded-full transition-colors duration-200',
-          isOn ? 'bg-emerald-500' : 'bg-white/15',
+          isOn ? 'bg-[#3b82f6]' : 'bg-white/20',
           disabled && 'opacity-40 cursor-not-allowed',
         )}
       >
@@ -63,14 +66,6 @@ export function ToggleSwitch({
           )}
         />
       </button>
-      <div className="flex flex-col flex-1">
-        <span className="text-[14px] font-medium text-white/70 select-none leading-snug">
-          {label}
-        </span>
-        {hint && (
-          <span className="text-[11px] text-white/30 mt-0.5">{hint}</span>
-        )}
-      </div>
     </div>
   );
 }

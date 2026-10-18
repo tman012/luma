@@ -176,7 +176,7 @@ const WlRow = memo(function WlRow({ movie, onClick }: { movie: WatchlistMovie; o
             onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }}
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-white/20 text-[11px]">No Poster</div>
+          <div className="flex h-full w-full items-center justify-center text-white/20 text-[11px]">No poster</div>
         )}
         <span className="absolute left-1.5 top-1.5 block h-2.5 w-2.5 rounded-full bg-blue-400"
           style={{ boxShadow: '0 0 6px rgba(96,165,250,0.6)' }} />
@@ -223,7 +223,7 @@ const TvRow = memo(function TvRow({ series, onClick }: { series: WatchlistSeries
             onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }}
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-white/20 text-[11px]">No Poster</div>
+          <div className="flex h-full w-full items-center justify-center text-white/20 text-[11px]">No poster</div>
         )}
         {/* Same blue "on the watchlist" orb the movie rows use */}
         <span className="absolute left-1.5 top-1.5 block h-2.5 w-2.5 rounded-full bg-blue-400"

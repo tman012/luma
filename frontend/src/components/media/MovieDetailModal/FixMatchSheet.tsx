@@ -230,7 +230,7 @@ export function FixMatchSheet({ ratingKey, title, year, variant, onClose, onMatc
 
   const header = (
     <div data-sheet-handle style={{ flexShrink: 0, padding: isCompact ? '0 16px 12px' : '20px 24px 14px', zoom, touchAction: 'none' }}>
-      <div style={{ textAlign: 'center', fontSize: 17, fontWeight: 700, color: '#fff', marginBottom: 14 }}>Fix Match</div>
+      <div style={{ textAlign: 'center', fontSize: 17, fontWeight: 700, color: '#fff', marginBottom: 14 }}>Fix match</div>
       <form
         onSubmit={(e) => { e.preventDefault(); (document.activeElement as HTMLElement | null)?.blur(); runSearch(qTitle, qYear); }}
         style={{ display: 'flex', gap: 8 }}
@@ -374,7 +374,7 @@ export function FixMatchSheet({ ratingKey, title, year, variant, onClose, onMatc
       data-fix-match-sheet
       role="dialog"
       aria-modal="true"
-      aria-label="Fix Match"
+      aria-label="Fix match"
       onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
       style={{
         position: 'fixed', inset: 0, zIndex: 10070, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
@@ -407,7 +407,7 @@ export function FixMatchSheet({ ratingKey, title, year, variant, onClose, onMatc
       data-fix-match-sheet
       role="dialog"
       aria-modal="true"
-      aria-label="Fix Match"
+      aria-label="Fix match"
       onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
       style={{
         position: 'fixed', inset: 0, zIndex: 10070, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,

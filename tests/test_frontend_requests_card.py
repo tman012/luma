@@ -38,7 +38,7 @@ console.log(JSON.stringify({ n: list.length, first: list[0].title, bad: recentRe
 def test_card_wires_log_link_and_api_client():
     src = (FRONTEND / 'src' / 'pages' / 'settings' / 'SecurityTab.tsx').read_text()
     assert "apiFetch('/api/request/admin/log')" in src
-    assert 'Recent Requests' in src and 'navigator.clipboard.writeText(link)' in src
+    assert 'Recent requests' in src  # v174 sentence case and 'navigator.clipboard.writeText(link)' in src
     # Editing a field other than the password must keep Save enabled.
     assert "setDirty(password !== '' || confirmPassword !== '')" not in src
 

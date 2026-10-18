@@ -919,7 +919,7 @@ def get_rail(limit: int = RAIL_SIZE, refresh_owned: bool = True) -> Dict[str, An
             logger.error('daily_missing: lazy build failed: %s', e)
             return {
                 'rail_id': RAIL_ID,
-                'title': "What You're Missing",
+                'title': "What you're missing",
                 'day': day,
                 'movies': [],
                 'enabled': True,
@@ -992,7 +992,7 @@ def get_rail(limit: int = RAIL_SIZE, refresh_owned: bool = True) -> Dict[str, An
 
     return {
         'rail_id': RAIL_ID,
-        'title': "What You're Missing",
+        'title': "What you're missing",
         'subtitle': f"Popular blind spots · refreshes {day}",
         'day': day,
         'movies': movies,

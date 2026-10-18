@@ -49,7 +49,7 @@ describe('guard card helper text', () => {
   it('no card note, no field hints, no picker sublabel', async () => {
     render(<MemoryRouter><AuthProvider><SettingsProvider><DownloadsGuardCard /></SettingsProvider></AuthProvider></MemoryRouter>);
     await screen.findByText('Delete from these trackers first');
-    await waitFor(() => expect(document.body.textContent).toContain('Enable Downloads Guard'));
+    await waitFor(() => expect(document.body.textContent).toContain('Downloads guard'));
     const text = document.body.textContent || '';
     for (const helper of ['Watches free space', 'Nothing is deleted until this is on', 'How often to look',
       'Deleting starts below', 'How much to free', 'backstop', 'No preference', 'Spends the oldest',
@@ -74,7 +74,7 @@ describe('navy glass surfaces', () => {
   it('the Settings popup (PageModal) and the Notifications popover use them', () => {
     const modal = src('components/layout/PageModal.tsx');
     expect(modal).not.toContain('#141414');
-    expect(modal).toContain('background: NAVY_GLASS_PANEL');
+    expect(modal).toContain('NAVY_GLASS_PANEL');
     const bar = src('components/layout/TopBar.tsx');
     expect(bar).toContain('background: NAVY_GLASS_POPOVER');
     expect(bar).not.toContain('bg-black/95');

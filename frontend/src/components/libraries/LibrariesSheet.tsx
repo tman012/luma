@@ -63,7 +63,7 @@ const PosterCard = memo(function PosterCard({ item, onClick, revealed, onImgRead
             onError={onImgReady}
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-white/20 text-[10px]">No Poster</div>
+          <div className="flex h-full w-full items-center justify-center text-white/20 text-[10px]">No poster</div>
         )}
       </div>
       <div className={cn('transition-opacity duration-300', revealed ? 'opacity-100' : 'opacity-0')}>
@@ -81,7 +81,7 @@ const PosterCard = memo(function PosterCard({ item, onClick, revealed, onImgRead
 type SortKey = 'added_date' | 'title' | 'year' | 'rating';
 
 const SORT_OPTIONS: { key: SortKey; label: string; dir: 'desc' | 'asc' }[] = [
-  { key: 'added_date', label: 'Date Added', dir: 'desc' },
+  { key: 'added_date', label: 'Date added', dir: 'desc' },
   { key: 'title', label: 'A-Z', dir: 'asc' },
   { key: 'year', label: 'Year', dir: 'desc' },
   { key: 'rating', label: 'Rating', dir: 'desc' },
@@ -624,7 +624,7 @@ export function LibrariesSheet({ open, onClose }: LibrariesSheetProps) {
                         loadingMore && 'opacity-50',
                       )}
                     >
-                      {loadingMore ? 'Loading...' : 'Load More'}
+                      {loadingMore ? 'Loading...' : 'Load more'}
                     </button>
                   </div>
                 )}

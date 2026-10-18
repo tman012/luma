@@ -3,7 +3,7 @@
 //
 // Dark theme, fit-to-viewport layout (no page scroll). Profile + name at top,
 // collapsible bio, filter pills + sort dropdown, filmography grid fills
-// remaining space with "Show More" expand.
+// remaining space with "Show more" expand.
 // ---------------------------------------------------------------------------
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -205,7 +205,7 @@ export function PersonDetailModal({
   // suppress the list — otherwise we'd flash credits the user actually owns.
   const unownedPending = unownedOnly && !ownershipLoaded;
 
-  // Compact uses a list view (10 rows initial, then "Show More" reveals the rest).
+  // Compact uses a list view (10 rows initial, then "Show more" reveals the rest).
   // Expanded shows the full grid and scrolls.
   const initialItemLimit = 10;
   const renderableCredits = unownedPending ? [] : filteredCredits;
@@ -236,7 +236,7 @@ export function PersonDetailModal({
 
   const tabLabels: Record<FilterTab, string> = {
     movies: 'Movies',
-    tv: 'TV Shows',
+    tv: 'TV shows',
     director: 'Director',
   };
 
@@ -735,7 +735,7 @@ export function PersonDetailModal({
 
             </div>
 
-            {/* Show More — minimal, no container */}
+            {/* Show more — minimal, no container */}
             {hasMore && (
               <button
                 type="button"
@@ -757,7 +757,7 @@ export function PersonDetailModal({
                   transition: 'color 0.15s',
                 }}
               >
-                {showAll ? 'Show Less' : 'Show More'}
+                {showAll ? 'Show less' : 'Show more'}
                 <svg
                   width="20" height="20" viewBox="0 0 24 24"
                   fill="none" stroke="currentColor" strokeWidth="2"

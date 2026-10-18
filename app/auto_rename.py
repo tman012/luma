@@ -296,12 +296,24 @@ class AutoRenamer:
             dropped = self.radarr_processed.trim(PROCESSED_CAP, live)
             if dropped:
                 logger.info(f"Processed Radarr downloads: trimmed {dropped} oldest")
-            tmp = f"{self.radarr_processed_file}.tmp"
-            with open(tmp, 'w') as f:
-                json.dump(self.radarr_processed.to_list(), f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, self.radarr_processed_file)
+            # v174 (Reviewer): a unique temp file next to the store (two savers never share one), then
+            # an atomic replace; the temp file is removed if anything fails.
+            import tempfile
+            target = self.radarr_processed_file
+            fd, tmp = tempfile.mkstemp(prefix='.radarr_processed.', suffix='.tmp',
+                                       dir=os.path.dirname(os.path.abspath(target)))
+            try:
+                with os.fdopen(fd, 'w') as f:
+                    json.dump(self.radarr_processed.to_list(), f, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, target)
+            except BaseException:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
         except Exception as e:
             logger.error(f"Error saving radarr processed data: {e}")
 

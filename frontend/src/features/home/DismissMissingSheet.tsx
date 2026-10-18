@@ -43,7 +43,7 @@ export function DismissMissingSheet({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Remove from What You're Missing"
+      aria-label="Remove from what you're missing"
       style={{
         position: 'fixed',
         inset: 0,

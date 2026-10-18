@@ -10,11 +10,20 @@ import { NAVY_GLASS_BORDER, NAVY_GLASS_PANEL } from '@/theme/tokens';
 
 interface Props {
   children: ReactNode;
+  /** v174 (Designer, legacy-settings-modal-fix.md): the legacy Settings shell. A navy scrim
+   * rgba(21,16,42,.72) with an 8px blur; the shell rgba(21,16,42,.92) with a 40px blur, a 1px white
+   * 8% border and a 20px radius. No black. */
+  variant?: 'default' | 'settings';
 }
+
+export const SETTINGS_SCRIM = 'rgba(21,16,42,0.72)';
+export const SETTINGS_SHELL = 'rgba(21,16,42,0.92)';
+export const SETTINGS_SHELL_BORDER = '1px solid rgba(255,255,255,0.08)';
 
 type Phase = 'entering' | 'visible' | 'exiting' | 'gone';
 
-export function PageModal({ children }: Props) {
+export function PageModal({ children, variant = 'default' }: Props) {
+  const settings = variant === 'settings';
   const [phase, setPhase] = useState<Phase>('entering');
   const overlayRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -71,7 +80,8 @@ export function PageModal({ children }: Props) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'rgba(0,0,0,0.7)',
+        background: settings ? SETTINGS_SCRIM : 'rgba(0,0,0,0.7)',
+        ...(settings ? { backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' } : null),
         opacity: overlayOpacity,
         transition: 'opacity 0.3s ease',
         padding: '20px',
@@ -80,6 +90,7 @@ export function PageModal({ children }: Props) {
       {/* Card — same dimensions as MovieDetailModal */}
       <div
         data-testid="page-modal-card"
+        data-variant={variant}
         style={{
           position: 'relative',
           width: '100%',
@@ -87,9 +98,10 @@ export function PageModal({ children }: Props) {
           height: '90vh',
           borderRadius: '20px',
           overflow: 'hidden',
-          background: NAVY_GLASS_PANEL,
-          border: NAVY_GLASS_BORDER,
-          boxShadow: '0 32px 100px rgba(0,0,0,0.8)',
+          background: settings ? SETTINGS_SHELL : NAVY_GLASS_PANEL,
+          border: settings ? SETTINGS_SHELL_BORDER : NAVY_GLASS_BORDER,
+          boxShadow: settings ? '0 32px 100px rgba(21,16,42,0.6)' : '0 32px 100px rgba(0,0,0,0.8)',
+          ...(settings ? { backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)' } : null),
           transform: cardScale,
           opacity: cardOpacity,
           transition:

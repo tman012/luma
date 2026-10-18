@@ -179,7 +179,7 @@ function PosterRail({
                 <path d="M5 12h14" />
                 <path d="m12 5 7 7-7 7" />
               </svg>
-              <span className="text-[15px] font-medium text-text-muted group-hover:text-text-primary transition-colors">See More</span>
+              <span className="text-[15px] font-medium text-text-muted group-hover:text-text-primary transition-colors">See more</span>
             </div>
           </button>
         )}
@@ -324,7 +324,7 @@ function ScrollRail({
                 <path d="M5 12h14" />
                 <path d="m12 5 7 7-7 7" />
               </svg>
-              <span className="text-lg font-medium text-text-muted group-hover:text-text-primary transition-colors">See More</span>
+              <span className="text-lg font-medium text-text-muted group-hover:text-text-primary transition-colors">See more</span>
             </div>
           </button>
         )}

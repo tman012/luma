@@ -229,12 +229,16 @@ def own_addresses() -> FrozenSet[str]:
             # v173 (Reviewer): the configured public app URL's host (APP_URL). Skipped behind a
             # Cloudflare tunnel: that name resolves to the tunnel's shared edge, not to this host.
             names |= public_hosts()
-        try:
-            for name in names:
-                for info in socket.getaddrinfo(name, None):
+        for name in names:                  # v174 (Reviewer): one name failing never drops the rest
+            try:
+                infos = socket.getaddrinfo(name, None)
+            except (OSError, ValueError, UnicodeError):
+                continue
+            for info in infos:
+                try:
                     found.add(str(ipaddress.ip_address(info[4][0].split('%')[0])))
-        except (OSError, ValueError, UnicodeError):
-            pass
+                except (ValueError, IndexError, TypeError):
+                    continue
         _own_cache = (time.time(), frozenset(found))
         return _own_cache[1]
 

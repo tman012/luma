@@ -194,7 +194,7 @@ export function UserSetupPage() {
         {/* Custom Plex fields */}
         {(mode === 'own' || mode === 'both') && (
           <div style={{ marginBottom: 24 }}>
-            <label style={fieldLabelStyle}>Plex Server URL</label>
+            <label style={fieldLabelStyle}>Plex server URL</label>
             <input
               type="url"
               placeholder="http://localhost:32400"
@@ -203,7 +203,7 @@ export function UserSetupPage() {
               style={inputStyle}
             />
 
-            <label style={fieldLabelStyle}>Plex Token</label>
+            <label style={fieldLabelStyle}>Plex token</label>
             <input
               type="password"
               placeholder="Your Plex authentication token"
@@ -243,10 +243,10 @@ export function UserSetupPage() {
           {busy
             ? 'Submitting...'
             : mode === 'shared'
-              ? 'Request Access'
+              ? 'Request access'
               : mode === 'both'
-                ? 'Save & Request Access'
-                : 'Save & Continue'}
+                ? 'Save & request access'
+                : 'Save & continue'}
         </button>
       </div>
     </div>

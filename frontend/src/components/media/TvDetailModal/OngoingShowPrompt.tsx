@@ -88,14 +88,14 @@ export function OngoingShowPrompt({
   });
 
   const buttonLabel = added
-    ? 'Added & Monitoring!'
+    ? 'Added & monitoring!'
     : adding
       ? 'Adding…'
       : error
-        ? 'Failed — Try Again'
+        ? 'Failed — try again'
         : airedCount > 0
           ? `Monitor and Fetch ${airedCount} latest Episode${airedCount === 1 ? '' : 's'}`
-          : 'Monitor & Fetch Latest Episodes';
+          : 'Monitor & fetch latest episodes';
 
   return (
     <div

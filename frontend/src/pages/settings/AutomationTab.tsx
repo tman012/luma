@@ -6,10 +6,10 @@
  */
 
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
+import { SECONDARY_BTN } from './components/legacyTokens';
 import { SettingsCard } from './components/SettingsCard';
 import { FormField } from './components/FormField';
 import { ToggleSwitch } from './components/ToggleSwitch';
-import { useSettings } from './useSettings';
 import { MobileCardNav, type CardItem } from './components/MobileCardNav';
 import {
   fetchRadarrProfiles,
@@ -47,7 +47,6 @@ export function AutomationTab() {
   const items: CardItem[] = [
     {
       title: 'Auto-grab',
-      subtitle: 'Add new titles from Latest, Trending, Anticipated & Now Available',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M12 2v4" />
@@ -60,8 +59,7 @@ export function AutomationTab() {
       content: <AutoGrabFeature />,
     },
     {
-      title: '4K & Upgrades',
-      subtitle: 'Daily upgrade scan and 4K Remux auto-grab',
+      title: '4K & upgrades',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M3 7l9-4 9 4-9 4-9-4z" />
@@ -72,8 +70,7 @@ export function AutomationTab() {
       content: <UpgradesFeature />,
     },
     {
-      title: 'Genre Roulette',
-      subtitle: 'Nightly: random genres, films you don’t own',
+      title: 'Genre roulette',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <circle cx="12" cy="12" r="10" />
@@ -84,8 +81,7 @@ export function AutomationTab() {
       content: <GenreRouletteCard />,
     },
     {
-      title: 'Movie Night',
-      subtitle: 'Weekly: the best canon film you don’t own, in 4K Remux',
+      title: 'Movie night',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
@@ -97,8 +93,7 @@ export function AutomationTab() {
       content: <MovieNightCard />,
     },
     {
-      title: 'Franchise Completer',
-      subtitle: 'Fill gaps in popular, almost-complete franchises',
+      title: 'Franchise completer',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
@@ -109,8 +104,7 @@ export function AutomationTab() {
       content: <FranchiseCompleterCard />,
     },
     {
-      title: 'Watchlist Release Dates',
-      subtitle: 'Morning alert when a watchlist movie gets a digital date',
+      title: 'Watchlist release dates',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="3" y="4" width="18" height="18" rx="2" />
@@ -124,8 +118,7 @@ export function AutomationTab() {
     {
       // The only automation that deletes — kept apart from the acquisition
       // features rather than filed among them.
-      title: 'Downloads Guard',
-      subtitle: 'Free space floor: delete oldest downloads to stay above it',
+      title: 'Downloads guard',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <ellipse cx="12" cy="5" rx="9" ry="3" />
@@ -136,8 +129,7 @@ export function AutomationTab() {
       content: <DownloadsGuardCard />,
     },
     {
-      title: 'Activity Log',
-      subtitle: 'Media added by automations',
+      title: 'Activity log',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -153,10 +145,7 @@ export function AutomationTab() {
   return (
     <div className="space-y-6">
       <div className="settings-tab-header">
-        <h2 className="text-xl font-semibold text-white/90">Automation</h2>
-        <p className="mt-1 text-[13px] text-white/40">
-          Each feature has its own switch. Everything is off until you turn it on.
-        </p>
+        <h2 className="text-xl font-semibold text-white/95">Automation</h2>
       </div>
 
       <MobileCardNav items={items} />
@@ -166,35 +155,26 @@ export function AutomationTab() {
 
 // -- Feature switch card -------------------------------------------
 
-/** The feature's main switch; its label follows the saved state. */
-function FeatureToggle({ path, hint }: { path: string; hint: string }) {
-  const { getByPath } = useSettings();
-  return <ToggleSwitch label={getByPath(path) ? 'On' : 'Off'} path={path} hint={hint} />;
+/** The feature's main switch, labeled with the feature (v174, Designer: label only). */
+function FeatureToggle({ path, label }: { path: string; label: string }) {
+  return <ToggleSwitch label={label} path={path} />;
 }
 
 function FeatureSwitchCard({
   title,
-  subtitle,
   path,
-  hint,
-  note,
   extraPaths = [],
   children,
 }: {
   title: string;
-  subtitle: string;
   path: string;
-  hint: string;
-  note?: string;
   extraPaths?: string[];
   children?: ReactNode;
 }) {
   return (
     <SettingsCard
       title={title}
-      subtitle={subtitle}
       paths={[path, ...extraPaths]}
-      note={note}
       icon={
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
@@ -202,7 +182,7 @@ function FeatureSwitchCard({
         </svg>
       }
     >
-      <FeatureToggle path={path} hint={hint} />
+      <FeatureToggle path={path} label={title} />
       {children}
     </SettingsCard>
   );
@@ -215,19 +195,15 @@ function AutoGrabFeature() {
     <div className="space-y-4 [&>*]:!mt-0">
       <FeatureSwitchCard
         title="Auto-grab"
-        subtitle="One switch for every new-release source below"
         path="automation.auto_grab.enabled"
-        hint="When off, none of the sources below run"
-        note="Turn on the feature, then pick the sources to use. Titles you already have in Plex, Radarr or Sonarr are always skipped."
         extraPaths={['automation.interval_hours']}
       >
         <FormField
-          label="Check Interval (hours)"
+          label="Check interval (hours)"
           path="automation.interval_hours"
           type="number"
           min={1}
           max={24}
-          hint="How often Trending, Anticipated and Now Available run (1-24 hours)"
         />
       </FeatureSwitchCard>
       <LatestAutoGrabCard />
@@ -245,17 +221,13 @@ function UpgradesFeature() {
   return (
     <div className="space-y-4 [&>*]:!mt-0">
       <FeatureSwitchCard
-        title="4K & Upgrades"
-        subtitle="Daily upgrade scan and 4K Remux auto-grab"
+        title="4K & upgrades"
         path="automation.upgrades.enabled"
-        hint="When off, neither job below runs"
-        note="The daily scan finds better releases for movies you own (sync Plex, search indexers, add ratings). 4K Remux auto-grab grabs 2160p Remux releases for movies missing from your 4K library."
         extraPaths={['automation.upgrade_scheduler.enabled', 'automation.upgrade_scheduler.run_hour']}
       >
         <ToggleSwitch
           label="Daily upgrade scan"
           path="automation.upgrade_scheduler.enabled"
-          hint="Runs once a day at the hour below"
         />
         <FormField
           label="Scan hour (0-23)"
@@ -263,7 +235,6 @@ function UpgradesFeature() {
           type="number"
           min={0}
           max={23}
-          hint="Server time (default 3)"
         />
       </FeatureSwitchCard>
       <Upgrade4kAutoGrabCard />
@@ -297,9 +268,10 @@ function RunNowButton({ onRun, running }: { onRun: () => void; running?: boolean
     <button
       onClick={handleClick}
       disabled={busy || running}
-      className="px-4 py-2.5 text-[12px] font-medium rounded-lg bg-white/10 hover:bg-white/15 text-white/70 hover:text-white/90 transition-all disabled:opacity-40 disabled:cursor-not-allowed min-h-[36px]"
+      type="button"
+      className={SECONDARY_BTN}
     >
-      {busy || running ? 'Running...' : 'Run Now'}
+      {busy || running ? 'Running…' : 'Run now'}
     </button>
   );
 }
@@ -351,8 +323,7 @@ function TrendingMovieWatchlistCard() {
 
   return (
     <SettingsCard
-      title="Source: Trending movies"
-      subtitle="Auto-add trending Trakt movies to Radarr"
+      title="Trending movies"
       paths={[
         'automation.trending_watchlist.enabled',
         'automation.trending_watchlist.quality_profile_id',
@@ -372,34 +343,30 @@ function TrendingMovieWatchlistCard() {
         </svg>
       }
       headerRight={<RunNowButton onRun={handleRunNow} running={status?.running} />}
-      note="Fetches trending movies from Trakt. Movies already in Plex or Radarr are skipped."
     >
       <ToggleSwitch
         label="Use this source"
         path="automation.trending_watchlist.enabled"
-        hint="Add trending movies to Radarr (needs Auto-grab on)"
       />
       <ToggleSwitch
-        label="Search on Add"
+        label="Search on add"
         path="automation.trending_watchlist.search_on_add"
-        hint="Trigger Radarr search when adding a movie"
       />
       <FormField
-        label="Quality Profile"
+        label="Quality profile"
         path="automation.trending_watchlist.quality_profile_id"
         type="select"
         options={profileOptions}
       />
       <FormField
-        label="Movies per Cycle"
+        label="Movies per cycle"
         path="automation.trending_watchlist.limit"
         type="number"
         min={1}
         max={40}
-        hint="Number of trending movies to check (1-40)"
       />
 
-      <p className="col-span-full text-[11px] text-white/30">
+      <p className="col-span-full text-[12px] text-white/50">
         Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
       </p>
     </SettingsCard>
@@ -430,8 +397,7 @@ function NowAvailableMovieWatchlistCard() {
 
   return (
     <SettingsCard
-      title="Source: Now Available"
-      subtitle="Auto-add top available indexer movies to Radarr"
+      title="Now available"
       paths={[
         'automation.now_available_watchlist.enabled',
         'automation.now_available_watchlist.quality_profile_id',
@@ -446,34 +412,30 @@ function NowAvailableMovieWatchlistCard() {
         </svg>
       }
       headerRight={<RunNowButton onRun={handleRunNow} running={status?.running} />}
-      note="Fetches top available movies from your indexers. Movies already in Plex or Radarr are skipped."
     >
       <ToggleSwitch
         label="Use this source"
         path="automation.now_available_watchlist.enabled"
-        hint="Add top available movies to Radarr (needs Auto-grab on)"
       />
       <ToggleSwitch
-        label="Search on Add"
+        label="Search on add"
         path="automation.now_available_watchlist.search_on_add"
-        hint="Trigger Radarr search when adding a movie"
       />
       <FormField
-        label="Quality Profile"
+        label="Quality profile"
         path="automation.now_available_watchlist.quality_profile_id"
         type="select"
         options={profileOptions}
       />
       <FormField
-        label="Movies per Cycle"
+        label="Movies per cycle"
         path="automation.now_available_watchlist.limit"
         type="number"
         min={1}
         max={100}
-        hint="Number of available movies to check (1-100)"
       />
 
-      <p className="col-span-full text-[11px] text-white/30">
+      <p className="col-span-full text-[12px] text-white/50">
         Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
       </p>
     </SettingsCard>
@@ -510,8 +472,7 @@ function AnticipatedWatchlistCard() {
 
   return (
     <SettingsCard
-      title="Source: Anticipated"
-      subtitle="Pre-order anticipated titles to Radarr/Sonarr"
+      title="Anticipated"
       paths={[
         'automation.anticipated_watchlist.enabled',
         'automation.anticipated_watchlist.movies_enabled',
@@ -531,50 +492,44 @@ function AnticipatedWatchlistCard() {
         </svg>
       }
       headerRight={<RunNowButton onRun={handleRunNow} running={status?.running} />}
-      note="Fetches Trakt's most anticipated (unreleased) movies and shows and adds them monitored, so they auto-download the moment they release. Titles already in Plex, Radarr, or Sonarr are skipped."
     >
       <ToggleSwitch
         label="Use this source"
         path="automation.anticipated_watchlist.enabled"
-        hint="Pre-order anticipated titles so they download on release (needs Auto-grab on)"
       />
       <ToggleSwitch
-        label="Search on Add"
+        label="Search on add"
         path="automation.anticipated_watchlist.search_on_add"
-        hint="Trigger a search on add (harmless for unreleased; catches any already-available)"
       />
       <ToggleSwitch
-        label="Include Movies"
+        label="Include movies"
         path="automation.anticipated_watchlist.movies_enabled"
-        hint="Add anticipated movies to Radarr"
       />
       <ToggleSwitch
-        label="Include Shows"
+        label="Include shows"
         path="automation.anticipated_watchlist.shows_enabled"
-        hint="Add anticipated shows to Sonarr"
       />
       <FormField
-        label="Movie Quality Profile (Radarr)"
+        label="Movie quality profile (Radarr)"
         path="automation.anticipated_watchlist.movie_quality_profile_id"
         type="select"
         options={radarrOptions}
       />
       <FormField
-        label="TV Quality Profile (Sonarr)"
+        label="TV quality profile (Sonarr)"
         path="automation.anticipated_watchlist.tv_quality_profile_id"
         type="select"
         options={sonarrOptions}
       />
       <FormField
-        label="Titles per Cycle"
+        label="Titles per cycle"
         path="automation.anticipated_watchlist.limit"
         type="number"
         min={1}
         max={40}
-        hint="Anticipated titles to check per media type (1-40)"
       />
 
-      <p className="col-span-full text-[11px] text-white/30">
+      <p className="col-span-full text-[12px] text-white/50">
         Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
       </p>
     </SettingsCard>
@@ -605,8 +560,7 @@ function TrendingTvWatchlistCard() {
 
   return (
     <SettingsCard
-      title="Source: Trending TV"
-      subtitle="Auto-add trending first-season Trakt shows to Sonarr"
+      title="Trending TV"
       paths={[
         'automation.trending_tv_watchlist.enabled',
         'automation.trending_tv_watchlist.quality_profile_id',
@@ -620,34 +574,30 @@ function TrendingTvWatchlistCard() {
         </svg>
       }
       headerRight={<RunNowButton onRun={handleRunNow} running={status?.running} />}
-      note="Fetches trending TV shows from Trakt, filters to first-season-only via TMDb. Shows in Plex or Sonarr are skipped."
     >
       <ToggleSwitch
         label="Use this source"
         path="automation.trending_tv_watchlist.enabled"
-        hint="Add trending first-season shows to Sonarr (needs Auto-grab on)"
       />
       <ToggleSwitch
-        label="Search on Add"
+        label="Search on add"
         path="automation.trending_tv_watchlist.search_on_add"
-        hint="Trigger Sonarr search when adding a show"
       />
       <FormField
-        label="Quality Profile"
+        label="Quality profile"
         path="automation.trending_tv_watchlist.quality_profile_id"
         type="select"
         options={profileOptions}
       />
       <FormField
-        label="Shows per Cycle"
+        label="Shows per cycle"
         path="automation.trending_tv_watchlist.limit"
         type="number"
         min={1}
         max={40}
-        hint="Number of trending shows to check (1-40)"
       />
 
-      <p className="col-span-full text-[11px] text-white/30">
+      <p className="col-span-full text-[12px] text-white/50">
         Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
       </p>
     </SettingsCard>
@@ -680,8 +630,7 @@ function LatestAutoGrabCard() {
 
   return (
     <SettingsCard
-      title="Source: Latest feed"
-      subtitle="Grab high-seeder releases the moment they trend"
+      title="Latest feed"
       paths={[
         'automation.latest_auto_grab.enabled',
         'automation.latest_auto_grab.min_seeders',
@@ -696,27 +645,23 @@ function LatestAutoGrabCard() {
         </svg>
       }
       headerRight={<RunNowButton onRun={handleRunNow} running={status?.running} />}
-      note="Scans the Latest feed (browse + 2160p Remux sweep). Grabs any release ≥ seeder threshold inside the age window. Ownership uses Plex: movies in any non-4K movie library are skipped; movies only in your 4K library still get a standard-profile grab."
     >
       <ToggleSwitch
         label="Use this source"
         path="automation.latest_auto_grab.enabled"
-        hint="Grab matching releases on every scan (needs Auto-grab on)"
       />
       <FormField
-        label="Quality Profile"
+        label="Quality profile"
         path="automation.latest_auto_grab.quality_profile_id"
         type="select"
         options={profileOptions}
-        hint="Radarr profile to use for grabs (should not include 2160p Remux — that's the 4K auto-grab's job)"
       />
       <FormField
-        label="Minimum Seeders"
+        label="Minimum seeders"
         path="automation.latest_auto_grab.min_seeders"
         type="number"
         min={1}
         max={5000}
-        hint="Skip releases below this seeder count (default 60)"
       />
       <FormField
         label="Max age (hours)"
@@ -724,18 +669,16 @@ function LatestAutoGrabCard() {
         type="number"
         min={1}
         max={168}
-        hint="Only consider releases newer than this (default 24)"
       />
       <FormField
-        label="Scan Interval (minutes)"
+        label="Scan interval (minutes)"
         path="automation.latest_auto_grab.scan_interval_minutes"
         type="number"
         min={5}
         max={120}
-        hint="How often to scan the Latest feed (default 15)"
       />
 
-      <p className="col-span-full text-[11px] text-white/30">
+      <p className="col-span-full text-[12px] text-white/50">
         Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
         {lastResult && (
           <span className="text-white/45">
@@ -786,8 +729,7 @@ function Upgrade4kAutoGrabCard() {
 
   return (
     <SettingsCard
-      title="4K Remux Auto-Grab"
-      subtitle="Upgrade your library to 2160p Remux automatically"
+      title="4K Remux auto-grab"
       paths={[
         'automation.upgrade_4k_auto_grab.enabled',
         'automation.upgrade_4k_auto_grab.min_seeders',
@@ -804,34 +746,29 @@ function Upgrade4kAutoGrabCard() {
         </svg>
       }
       headerRight={<RunNowButton onRun={handleRunNow} running={status?.running} />}
-      note="Watches the Latest feed for 2160p Remux releases. Auto-grabs them for any movie not already in your 4K Plex library — even if the movie exists in other libraries. The Radarr quality profile must accept 2160p Remux."
     >
       <ToggleSwitch
         label="Use 4K Remux auto-grab"
         path="automation.upgrade_4k_auto_grab.enabled"
-        hint="Grab matching 2160p Remux releases (needs 4K & Upgrades on)"
       />
       <FormField
-        label="Quality Profile (4K)"
+        label="Quality profile (4K)"
         path="automation.upgrade_4k_auto_grab.quality_profile_id"
         type="select"
         options={profileOptions}
-        hint="Movies will be set to this Radarr profile before grabbing"
       />
       <FormField
-        label="4K Plex Library"
+        label="4K Plex library"
         path="automation.upgrade_4k_auto_grab.plex_4k_section_id"
         type="select"
         options={sectionOptions}
-        hint="Movies already in this Plex section are skipped"
       />
       <FormField
-        label="Minimum Seeders"
+        label="Minimum seeders"
         path="automation.upgrade_4k_auto_grab.min_seeders"
         type="number"
         min={1}
         max={5000}
-        hint="Skip releases below this seeder count (default 100)"
       />
       <FormField
         label="Max age (hours)"
@@ -839,17 +776,15 @@ function Upgrade4kAutoGrabCard() {
         type="number"
         min={1}
         max={168}
-        hint="Only consider releases newer than this (default 24)"
       />
       <FormField
-        label="Scan Interval (minutes)"
+        label="Scan interval (minutes)"
         path="automation.upgrade_4k_auto_grab.scan_interval_minutes"
         type="number"
         min={5}
         max={120}
-        hint="How often to scan the Latest feed (default 15)"
       />
-      <p className="col-span-full text-[11px] text-white/30">
+      <p className="col-span-full text-[12px] text-white/50">
         Last ran: {status?.last_run ? new Date(status.last_run).toLocaleString() : 'never'}
         {lastResult && (
           <span className="text-white/45">
@@ -868,9 +803,9 @@ function Upgrade4kAutoGrabCard() {
 
 function UnifiedActivityLog() {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-6">
+    <div className="rounded-[16px] border border-white/[0.08] bg-white/[0.06] p-5">
       <div className="flex items-center gap-3 mb-4">
-        <div className="flex h-[42px] w-[42px] items-center justify-center rounded-[10px] bg-white/5 text-white/50 shrink-0">
+        <div className="flex h-[36px] w-[36px] items-center justify-center rounded-[10px] bg-white/[0.06] text-white/60 shrink-0">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <polyline points="14 2 14 8 20 8" />
@@ -878,10 +813,7 @@ function UnifiedActivityLog() {
             <line x1="16" y1="17" x2="8" y2="17" />
           </svg>
         </div>
-        <div>
-          <h3 className="text-[15px] font-semibold text-white/90">Activity Log</h3>
-          <p className="mt-0.5 text-[12px] text-white/35">Last 30 downloads across all sources</p>
-        </div>
+        <h3 className="text-[15px] font-semibold text-white/95">Activity log</h3>
       </div>
       <ActivityFeed />
     </div>

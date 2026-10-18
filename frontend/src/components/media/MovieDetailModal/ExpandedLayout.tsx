@@ -1182,7 +1182,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                           <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                         </svg>
                       }
-                      label={topReviews.length > 0 ? 'Cast & Reviews' : 'Cast'}
+                      label={topReviews.length > 0 ? 'Cast & reviews' : 'Cast'}
                       onClick={handleCastOpen}
                     />
                   )}
@@ -1244,7 +1244,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               {/* Quality options — horizontal row */}
               <div style={{ position: 'relative' }}>
                 <h2 style={{ fontSize: t.upgrade.headingFontSize, fontWeight: 600, color: '#fff', margin: t.upgrade.headingMargin, textShadow: '0 2px 8px rgba(0,0,0,0.7)', textAlign: 'center' }}>
-                  {isOwned ? 'Upgrade Quality' : 'Select Quality'}
+                  {isOwned ? 'Upgrade quality' : 'Select quality'}
                 </h2>
                 <div
                   style={{

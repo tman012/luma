@@ -48,7 +48,7 @@ export function buildRatingItems(ratings: Ratings): RatingItem[] {
     const score = Number(ratings.rotten_tomatoes_critic.score);
     items.push({
       icon: score >= RT_FRESH_THRESHOLD ? RATING_ICONS.rtCriticFresh : RATING_ICONS.rtCriticRotten,
-      label: 'RT Critic',
+      label: 'RT critic',
       value: `${score}%`,
     });
   }
@@ -56,7 +56,7 @@ export function buildRatingItems(ratings: Ratings): RatingItem[] {
     const score = Number(ratings.rotten_tomatoes_audience.score);
     items.push({
       icon: score >= RT_FRESH_THRESHOLD ? RATING_ICONS.rtAudienceGood : RATING_ICONS.rtAudienceBad,
-      label: 'RT Audience',
+      label: 'RT audience',
       value: `${score}%`,
     });
   }

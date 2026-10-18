@@ -178,7 +178,7 @@ export function ListEditor({
       {formOpen && (
         <div className="mt-3 rounded-xl border border-dashed border-white/12 bg-white/[0.02] p-5">
           <p className="mb-4 text-[14px] font-semibold text-white/60">
-            {editIndex >= 0 ? 'Edit Item' : 'Add Item'}
+            {editIndex >= 0 ? 'Edit item' : 'Add item'}
           </p>
           {renderForm(draft, setDraft)}
           <div className="mt-4 flex gap-2.5">

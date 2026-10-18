@@ -168,8 +168,7 @@ export function UiKioskTab() {
   const items: CardItem[] = [
     // Kiosk Mode selector — always first
     {
-      title: 'Kiosk Mode',
-      subtitle: 'Choose your home screen experience',
+      title: 'Kiosk mode',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" />
@@ -177,8 +176,7 @@ export function UiKioskTab() {
       ),
       content: (
         <SettingsCard
-          title="Kiosk Mode"
-          subtitle="Choose your home screen experience"
+          title="Kiosk mode"
           paths={KIOSK_MODE_PATHS}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -193,7 +191,7 @@ export function UiKioskTab() {
                 onClick={() => setByPath('ui.kiosk_mode', 'movie')}
                 className={`flex-1 flex flex-col items-center gap-2 rounded-lg px-4 py-3 transition-all min-h-[80px] ${
                   !isDailyMode
-                    ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400'
+                    ? 'bg-[#3b82f6]/[0.16] border border-[#3b82f6]/40 text-white/95'
                     : 'bg-white/[0.03] border border-white/[0.06] text-white/50 hover:bg-white/[0.06]'
                 }`}
               >
@@ -201,15 +199,15 @@ export function UiKioskTab() {
                   <path d="M4 8V4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v4" /><rect x="2" y="8" width="20" height="14" rx="2" />
                   <path d="M12 12l-3 2v-4l3 2z" fill="currentColor" />
                 </svg>
-                <span className="text-[13px] font-semibold">Movie Kiosk</span>
-                <span className="text-[11px] opacity-60">Hero + Explore</span>
+                <span className="text-[13px] font-semibold">Movie kiosk</span>
+                <span className="text-[12px] opacity-60">Hero + Explore</span>
               </button>
               <button
                 type="button"
                 onClick={() => setByPath('ui.kiosk_mode', 'daily')}
                 className={`flex-1 flex flex-col items-center gap-2 rounded-lg px-4 py-3 transition-all min-h-[80px] ${
                   isDailyMode
-                    ? 'bg-emerald-500/15 border border-emerald-500/30 text-emerald-400'
+                    ? 'bg-[#3b82f6]/[0.16] border border-[#3b82f6]/40 text-white/95'
                     : 'bg-white/[0.03] border border-white/[0.06] text-white/50 hover:bg-white/[0.06]'
                 }`}
               >
@@ -221,7 +219,7 @@ export function UiKioskTab() {
                   <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
                 </svg>
                 <span className="text-[13px] font-semibold">Daily Kiosk</span>
-                <span className="text-[11px] opacity-60">Weather + Info</span>
+                <span className="text-[12px] opacity-60">Weather + info</span>
               </button>
             </div>
           </div>
@@ -230,8 +228,7 @@ export function UiKioskTab() {
     },
     // Smart Home — device's default HA area (shown in all modes)
     {
-      title: 'Smart Home',
-      subtitle: 'Which room this device lives in',
+      title: 'Smart home',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M3 12l9-9 9 9" /><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10" />
@@ -239,20 +236,16 @@ export function UiKioskTab() {
       ),
       content: (
         <SettingsCard
-          title="Smart Home"
-          subtitle="Which Home Assistant area this device controls by default"
+          title="Smart home"
           paths={SMART_HOME_PATHS}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="M3 12l9-9 9 9" /><path d="M5 10v10a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10" />
             </svg>
           }
-          note={haEnabled
-            ? 'Tapping the kiosk background opens the smart-home panel to this area. Other areas are always reachable from the panel header.'
-            : 'Configure Home Assistant (URL + access token) in the Connections tab to enable room selection.'}
         >
           <div className="sm:col-span-2 flex flex-col gap-1.5">
-            <label className="text-[14px] font-medium text-white/60">This Device's Room</label>
+            <label className="text-[13px] font-medium text-white/70">This device's room</label>
             <select
               value={String(getByPath('ui.kiosk.home_area_id') ?? '')}
               onChange={(e) => setByPath('ui.kiosk.home_area_id', e.target.value)}
@@ -266,11 +259,6 @@ export function UiKioskTab() {
                 </option>
               ))}
             </select>
-            <span className="text-[11px] text-white/30">
-              {haEnabled
-                ? 'Pulled from Home Assistant. Examples: Living Room, Office, Bedroom.'
-                : 'Home Assistant not connected.'}
-            </span>
           </div>
         </SettingsCard>
       ),
@@ -280,7 +268,6 @@ export function UiKioskTab() {
       ? [
           {
             title: 'Display',
-            subtitle: 'Widget rotation timing',
             icon: (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
@@ -289,14 +276,12 @@ export function UiKioskTab() {
             content: (
               <SettingsCard
                 title="Display"
-                subtitle="How the rotating widgets behave"
                 paths={['ui.daily_kiosk.widget_seconds']}
                 icon={
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
                   </svg>
                 }
-                note="How long each widget (weather, sports, news, etc.) stays on screen before fading to the next."
               >
                 <FormField
                   label="Widget display time (seconds)"
@@ -305,14 +290,12 @@ export function UiKioskTab() {
                   min={3}
                   max={60}
                   placeholder="8"
-                  hint="Between 3 and 60 seconds. Default is 8."
                 />
               </SettingsCard>
             ),
           } as CardItem,
           {
             title: 'Weather',
-            subtitle: 'Weather widget configuration',
             icon: (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
@@ -321,39 +304,33 @@ export function UiKioskTab() {
             content: (
               <SettingsCard
                 title="Weather"
-                subtitle="OpenWeatherMap widget configuration"
                 paths={WEATHER_PATHS}
                 icon={
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
                   </svg>
                 }
-                note="Get a free API key from openweathermap.org"
               >
                 <FormField
-                  label="API Key"
+                  label="API key"
                   path="ui.daily_kiosk.weather.api_key"
                   type="password"
                   placeholder="Enter OpenWeatherMap API key"
-                  hint="Free tier supports 1,000 calls/day"
                 />
                 <FormField
-                  label="ZIP Code"
+                  label="ZIP code"
                   path="ui.daily_kiosk.weather.zip_code"
                   placeholder="90210"
-                  hint="ZIP or postal code for your location"
                 />
                 <FormField
-                  label="Country Code"
+                  label="Country code"
                   path="ui.daily_kiosk.weather.country_code"
                   placeholder="US"
-                  hint="ISO 3166 country code"
                 />
                 <FormField
-                  label="State / Region"
+                  label="State / region"
                   path="ui.daily_kiosk.weather.state"
                   placeholder="MD"
-                  hint="Shown after city name (e.g. MD, CA)"
                 />
                 <FormField
                   label="Units"
@@ -370,7 +347,6 @@ export function UiKioskTab() {
           } as CardItem,
           {
             title: 'Sports',
-            subtitle: 'MLB team scores & schedule',
             icon: (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <circle cx="12" cy="12" r="10" /><path d="M4.93 4.93c4.08 2.38 8.6 7.9 14.14 14.14" /><path d="M19.07 4.93c-4.08 2.38-8.6 7.9-14.14 14.14" />
@@ -379,20 +355,18 @@ export function UiKioskTab() {
             content: (
               <SettingsCard
                 title="Sports"
-                subtitle="MLB team scores & schedule on Daily Kiosk"
                 paths={SPORTS_PATHS}
                 icon={
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <circle cx="12" cy="12" r="10" /><path d="M4.93 4.93c4.08 2.38 8.6 7.9 14.14 14.14" /><path d="M19.07 4.93c-4.08 2.38-8.6 7.9-14.14 14.14" />
                   </svg>
                 }
-                note="Uses free MLB Stats API — no API key needed"
               >
                 <div className="sm:col-span-2">
                   <ToggleSwitch label="Enabled" path="ui.daily_kiosk.sports.enabled" />
                 </div>
                 <div className="sm:col-span-2 flex flex-col gap-1.5">
-                  <label className="text-[14px] font-medium text-white/60">Team</label>
+                  <label className="text-[13px] font-medium text-white/70">Team</label>
                   <select
                     value={String(getByPath('ui.daily_kiosk.sports.team_id') ?? 0)}
                     onChange={(e) => {
@@ -410,14 +384,12 @@ export function UiKioskTab() {
                       </option>
                     ))}
                   </select>
-                  <span className="text-[11px] text-white/30">Select your favorite MLB team</span>
                 </div>
               </SettingsCard>
             ),
           } as CardItem,
           {
             title: 'News',
-            subtitle: 'News headlines widget',
             icon: (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2" />
@@ -427,7 +399,6 @@ export function UiKioskTab() {
             content: (
               <SettingsCard
                 title="News"
-                subtitle="RSS news headlines on Daily Kiosk"
                 paths={NEWS_PATHS}
                 icon={
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -440,7 +411,7 @@ export function UiKioskTab() {
                   <ToggleSwitch label="Enabled" path="ui.daily_kiosk.news.enabled" />
                 </div>
                 <div className="sm:col-span-2 flex flex-col gap-1.5">
-                  <label className="text-[14px] font-medium text-white/60">Feed</label>
+                  <label className="text-[13px] font-medium text-white/70">Feed</label>
                   <select
                     value={String(getByPath('ui.daily_kiosk.news.feed_url') ?? '')}
                     onChange={(e) => {
@@ -466,13 +437,11 @@ export function UiKioskTab() {
                       </option>
                     ))}
                   </select>
-                  <span className="text-[11px] text-white/30">Select news source</span>
                 </div>
                 <FormField
-                  label="Display Name"
+                  label="Display name"
                   path="ui.daily_kiosk.news.feed_name"
                   placeholder="BBC News"
-                  hint="Label shown on the widget"
                 />
               </SettingsCard>
             ),
@@ -481,7 +450,6 @@ export function UiKioskTab() {
       : []),
     {
       title: 'Screensaver',
-      subtitle: 'Screensaver settings for kiosk mode',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
@@ -490,7 +458,6 @@ export function UiKioskTab() {
       content: (
         <SettingsCard
           title="Screensaver"
-          subtitle="Screensaver settings for kiosk mode"
           paths={SCREENSAVER_PATHS}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -507,23 +474,21 @@ export function UiKioskTab() {
             type="select"
             options={[
               { value: 'orb', label: 'Orb' },
-              { value: 'trivia', label: 'Movie Trivia' },
-              { value: 'kiosk', label: 'Kiosk Discovery' },
+              { value: 'trivia', label: 'Movie trivia' },
+              { value: 'kiosk', label: 'Kiosk discovery' },
             ]}
-            hint="Visual style of the screensaver"
           />
           <FormField
-            label="Idle Timeout (ms)"
+            label="Idle timeout (ms)"
             path="ui.screensaver.idle_timeout_ms"
             type="number"
             placeholder="10000"
             min={5000}
             max={600000}
             step={1000}
-            hint="5,000 to 600,000 ms"
           />
           <FormField
-            label="Orb Count"
+            label="Orb count"
             path="ui.screensaver.orb_count"
             type="number"
             placeholder="9"
@@ -539,7 +504,7 @@ export function UiKioskTab() {
             max={7200}
           />
           <FormField
-            label="Library Name"
+            label="Library name"
             path="ui.screensaver.library_name"
             placeholder="Recently Released"
           />
@@ -548,16 +513,15 @@ export function UiKioskTab() {
             path="ui.screensaver.source"
             type="select"
             options={[
-              { value: 'plex_library', label: 'Plex Library' },
-              { value: 'hero', label: 'Hero Section' },
+              { value: 'plex_library', label: 'Plex library' },
+              { value: 'hero', label: 'Hero section' },
             ]}
           />
         </SettingsCard>
       ),
     },
     {
-      title: 'Hero Display',
-      subtitle: 'Featured content hero section on the Hub',
+      title: 'Hero display',
       icon: (
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="2" y="4" width="20" height="16" rx="2" /><path d="M2 8h20" />
@@ -565,8 +529,7 @@ export function UiKioskTab() {
       ),
       content: (
         <SettingsCard
-          title="Hero Display"
-          subtitle="Featured content hero section on the Hub"
+          title="Hero display"
           paths={HERO_PATHS}
           icon={
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -575,67 +538,60 @@ export function UiKioskTab() {
           }
         >
           <FormField
-            label="Plex Library"
+            label="Plex library"
             path="ui.hero.library_section_id"
             type="select"
             options={[
               { value: 0, label: 'Default (first movie library)' },
               ...movieLibraries.map((l) => ({ value: l.id, label: l.title })),
             ]}
-            hint="Which Plex library to pull hero movies from"
           />
           <FormField
-            label="Number of Movies"
+            label="Number of movies"
             path="ui.hero.limit"
             type="number"
             placeholder="10"
             min={1}
             max={50}
-            hint="Movies in hero rotation"
           />
           <FormField
-            label="Added Within (days)"
+            label="Added within (days)"
             path="ui.hero.max_age_days"
             type="number"
             placeholder="30"
             min={1}
             max={365}
-            hint="Only show movies added in the last N days"
           />
           <FormField
-            label="Excluded Genres"
+            label="Excluded genres"
             path="ui.hero.excluded_genres"
             placeholder="Sport, Sports"
-            hint="Comma-separated genres to skip"
             value={String(genresValue)}
             onChange={handleGenresChange}
           />
           <FormField
-            label="Backdrop Source"
+            label="Backdrop source"
             path="ui.hero.backdrop_source"
             type="select"
             options={[
               { value: 'plex', label: 'Plex' },
               { value: 'tmdb', label: 'TMDb' },
             ]}
-            hint="Where hero backdrop images come from"
           />
           <div className="sm:col-span-2">
             <ToggleSwitch
-              label="Boost Popular Titles"
+              label="Boost popular titles"
               path="ui.hero.boost_popular_titles"
-              hint="Sort by popularity instead of date added"
             />
           </div>
           <FormField
-            label="Popularity Source"
+            label="Popularity source"
             path="ui.hero.popularity_source"
             type="select"
             options={[
               { value: 'tmdb', label: 'TMDb' },
               { value: 'imdb', label: 'IMDb' },
             ]}
-            hint="Used when Boost is enabled"
           />
         </SettingsCard>
       ),
@@ -645,10 +601,7 @@ export function UiKioskTab() {
   return (
     <div className="space-y-6">
       <div className="settings-tab-header">
-        <h2 className="text-xl font-semibold text-white/90">UI / Kiosk</h2>
-        <p className="mt-1 text-[13px] text-white/40">
-          Appearance, screensaver, and hero display configuration.
-        </p>
+        <h2 className="text-xl font-semibold text-white/90">UI / kiosk</h2>
       </div>
 
       <MobileCardNav items={items} />

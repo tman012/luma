@@ -795,9 +795,9 @@ export function CompactLayout(props: TvModalViewProps) {
                         type="button"
                         onClick={() => {
                           if (activeSeasonData && activeSeasonPlexData?.ratingKey) {
-                            onPlayEpisode?.(activeSeasonPlexData.ratingKey, `${show?.title ?? 'TV Show'} – ${activeSeasonData.name || `Season ${seasonDetailMode}`}`);
+                            onPlayEpisode?.(activeSeasonPlexData.ratingKey, `${show?.title ?? 'TV show'} – ${activeSeasonData.name || `Season ${seasonDetailMode}`}`);
                           } else if (show?.ratingKey) {
-                            onPlayEpisode?.(show.ratingKey, show?.title ?? 'TV Show');
+                            onPlayEpisode?.(show.ratingKey, show?.title ?? 'TV show');
                           }
                         }}
                         style={{
@@ -1598,7 +1598,7 @@ function SeasonActionSheet({
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
         </svg>
       ),
-      label: 'Auto Search',
+      label: 'Auto search',
       shortLabel: 'Search',
       disabled: !sonarrEnabled || autoSearchLoading,
       onClick: onAutoSearch,
@@ -1611,7 +1611,7 @@ function SeasonActionSheet({
           <line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" />
         </svg>
       ),
-      label: 'Browse Sources',
+      label: 'Browse sources',
       shortLabel: 'Sources',
       disabled: !sonarrEnabled,
       onClick: () => onBrowseSources?.(),
