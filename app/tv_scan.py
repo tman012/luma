@@ -347,6 +347,19 @@ def detach(conn, sid: int, now: float, reason: str) -> None:
                                                           'from_path_id': row['path_id']})))
 
 
+def _manual_here(conn, owner) -> bool:
+    """The owner put this show in its current folder by hand (Match or Wrong
+    show?): scans leave it there."""
+    for r in conn.execute("SELECT detail FROM history WHERE series_id = ? AND event IN ('matched', 'rematched')"
+                          ' ORDER BY ts DESC, id DESC LIMIT 1', (owner['id'],)):
+        try:
+            d = json.loads(r['detail'] or '{}')
+        except ValueError:
+            return False
+        return d.get('via') == 'manual' and d.get('folder') == owner['folder'] and d.get('path_id') == owner['path_id']
+    return False
+
+
 def take_over(owner_id: int, path_id: str, folder: str, now: float, *, via: str, event: str,
               drop_series_id: Optional[int] = None) -> int:
     """Move show *owner_id* (its episodes, settings and history) to *folder*;
@@ -385,6 +398,13 @@ def _resolve_duplicate(owner, pid: str, folder: str, root_real: str, now: float,
         with tv_store.write() as conn:
             conn.execute('DELETE FROM episode_files WHERE series_id = ? AND path_id IS NOT ?', (sid, pid))
         return sid
+    with tv_store.connect() as conn:
+        manual = _manual_here(conn, owner)
+    if manual:                                 # the owner's pick stays (Tester M18)
+        g = tv_match.parse_folder(folder)
+        _store_unmatched(pid, folder, {'guess': {'title': g['title'], 'year': g['year']},
+                                       'candidates': [_show_brief(owner)]}, now, reason='duplicate')
+        return None
     owner_root = os.path.realpath(_path_of(owner['path_id']) or '')
     with tv_store.connect() as conn:
         mine = folder_rank(folder, owner, _linkable(conn, owner['id'], folder, root_real))
