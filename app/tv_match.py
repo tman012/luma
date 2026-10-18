@@ -432,7 +432,8 @@ def decide(rows: List[Dict[str, Any]], q: Dict[str, Any], hints: Optional[Hints]
     gap = best['total'] - (rows[1]['total'] if len(rows) > 1 else 0)
     if not rivals:
         # a near name ('Cosmos: A Spacetime Odyssey') with as many votes that the files fit too: review
-        if hints is not None and any(fits(file_fit(hints, details.get(r['c']['tmdb_id']))) for r in _near(rows)):
+        if hints is not None and any(fits(file_fit(hints, details.get(r['c']['tmdb_id']))) for r in _near(rows)
+                                     if _could_be_short_for(q.get('title'), r['c'], details.get(r['c']['tmdb_id']))):
             return 'likely', 'files fit another show'
         if best['total'] >= need and gap >= GAP:
             return 'high', 'clear'
@@ -489,6 +490,21 @@ def _sole_fit(rows, hints, details, tid) -> bool:
 
 def _votes(r: Dict[str, Any]) -> int:
     return max(int(r['c'].get('vote_count') or 0), 0)
+
+
+_FILLER = frozenset(('the', 'a', 'an', 'and', 'of'))
+
+
+def _could_be_short_for(folder_title: Any, c: Dict[str, Any], details: Optional[Dict[str, Any]] = None) -> bool:
+    """The folder's name could be a shortened form of candidate *c*: every word of it (minus the, a, an,
+    and, of) is in one of c's titles or aliases ('Cosmos' -> 'Cosmos: A Spacetime Odyssey'). A name that says
+    more than the candidate ('X-Men: The Animated Series' vs "X-Men '97") is not short for it. Unknown
+    folder words (empty) count as could-be, so this only ever narrows the near-name review rule."""
+    words = set(normalize(folder_title).split()) - _FILLER
+    if not words:
+        return True
+    names = _titles(c, details) + [normalize(a) for a in (details or {}).get('aliases') or [] if a]
+    return any(words <= set(n.split()) for n in names)
 
 
 def _near(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

@@ -128,7 +128,7 @@ describe('Series rail pin', () => {
 
 
 describe('caption fit', () => {
-  it('13/17; then 12/16 on 2 lines; then 12/16 on 3 lines; then the 11.5/15 floor on 3; only then the ellipsis', async () => {
+  it('13/17; then 12/16 on 2 lines; then 12/16 on 3 lines; then the 11.5/15 floor on 3, then on 4; only then the ellipsis', async () => {
     const { fitCaptions, CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR } = await import('@/components/library/TvSeries');
     expect([CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR]).toEqual([{ size: 13, line: 17 }, { size: 12, line: 16 }, { size: 11.5, line: 15 }]);
     const root = document.createElement('div');
@@ -146,11 +146,13 @@ describe('caption fit', () => {
     const two12 = mk({ '13px': 3, '12px': 2 });
     const three12 = mk({ '13px': 4, '12px': 3 });
     const floor = mk({ '13px': 5, '12px': 4, '11.5px': 3 });
-    const never = mk({ '13px': 6, '12px': 5, '11.5px': 4 });
+    const four = mk({ '13px': 6, '12px': 5, '11.5px': 4 });
+    const never = mk({ '13px': 7, '12px': 6, '11.5px': 5 });
     expect(fitCaptions(root)).toBe(1);
     const t = (n: HTMLElement) => [n.style.fontSize, n.style.lineHeight, n.style.getPropertyValue('-webkit-line-clamp'), n.dataset.ellipsis ?? null];
-    expect([short, two12, three12, floor, never].map(t)).toEqual([
-      ['13px', '17px', '2', null], ['12px', '16px', '2', null], ['12px', '16px', '3', null], ['11.5px', '15px', '3', null], ['11.5px', '15px', '3', 'true']]);
+    expect([short, two12, three12, floor, four, never].map(t)).toEqual([
+      ['13px', '17px', '2', null], ['12px', '16px', '2', null], ['12px', '16px', '3', null], ['11.5px', '15px', '3', null],
+      ['11.5px', '15px', '4', null], ['11.5px', '15px', '4', 'true']]);
     expect(fitCaptions(root)).toBe(1);                                   // idempotent (a resize re-runs it)
   });
 });

@@ -269,8 +269,8 @@ function Tile({ s, first, selecting, picked, onOpen }: { s: Show; first: boolean
 const CAPTION_MIN_H = 51 + 8;
 /** Caption type: 13/600, normal tracking, 17px lines; the count sits right under the name.
  * Steps (PM over Designer, Taylor wants full names): a name that would need a 3rd line at 13 is set 12/16
- * on 2 lines; still over, 12/16 on 3 lines; still over, 11.5/15 on 3 lines (the floor); only then the
- * ellipsis (full name in title and aria-label). The grid row stretches every tile to the row's height and
+ * on 2 lines; still over, 12/16 on 3 lines; still over, 11.5/15 on 3 lines (the floor), then on 4 (v165, PM:
+ * 'Life, Larry and the Pursuit of Unhappiness…' at 1100-1440); only then the ellipsis (full name in title and aria-label). The grid row stretches every tile to the row's height and
  * the caption block fills it, so all captions in a row share one height. */
 export const CAPTION_TYPE = { size: 13, line: 17 };
 export const CAPTION_FIT = { size: 12, line: 16 };
@@ -289,7 +289,7 @@ export function fitCaptions(root: HTMLElement | null): number {
   const names = [...(root?.querySelectorAll<HTMLElement>('[data-testid=tv-series-name]') || [])];
   for (const n of names) { setType(n, CAPTION_TYPE, 2); delete n.dataset.fit; delete n.dataset.lines; delete n.dataset.ellipsis; }
   let left = names.filter(over);
-  const steps: [{ size: number; line: number }, number][] = [[CAPTION_FIT, 2], [CAPTION_FIT, 3], [CAPTION_FLOOR, 3]];
+  const steps: [{ size: number; line: number }, number][] = [[CAPTION_FIT, 2], [CAPTION_FIT, 3], [CAPTION_FLOOR, 3], [CAPTION_FLOOR, 4]];
   for (const [t, lines] of steps) {
     if (!left.length) break;
     for (const n of left) { setType(n, t, lines); n.dataset.fit = String(t.size); n.dataset.lines = String(lines); }

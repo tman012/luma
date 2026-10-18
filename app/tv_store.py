@@ -241,9 +241,13 @@ LABEL_ORDER = ('all', 'future', 'missing', 'existing', 'recent', 'first_season',
 
 
 def monitor_labels(conn: sqlite3.Connection, today: Optional[str] = None) -> int:
-    """The Monitor option for each show labelled 'none' that is monitored (series switch or any
-    episode): the first option in LABEL_ORDER whose episodes are exactly the monitored regular
-    episodes, else the closest one (fewest differences). Labels only; returns how many."""
+    """The Monitor option for each show labelled 'none' whose series switch is on: the first
+    option in LABEL_ORDER whose episodes are exactly the monitored regular episodes, else the
+    closest one (fewest differences). Labels only; returns how many.
+
+    A show whose series switch is off keeps 'none' even with episodes switched on (v165, Tester):
+    every other option turns the series switch on, so those episodes were picked one by one (e.g.
+    the owner chose None and later switched one episode on). Calling that 'pilot' was wrong."""
     import datetime as _dt
     from app import tv_monitor
     cols = _columns(conn, 'series')
@@ -251,8 +255,7 @@ def monitor_labels(conn: sqlite3.Connection, today: Optional[str] = None) -> int
         return 0
     today = today or _dt.date.today().isoformat()
     ids = [r[0] for r in conn.execute(
-        "SELECT s.id FROM series s WHERE s.monitor = 'none' AND (s.monitored = 1"
-        ' OR EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = s.id AND e.monitored = 1))')]
+        "SELECT s.id FROM series s WHERE s.monitor = 'none' AND s.monitored = 1")]
     for sid in ids:
         eps = [dict(zip(('season_number', 'episode_number', 'air_date', 'monitored', 'has_file'), r)) for r in conn.execute(
             f'SELECT e.season_number, e.episode_number, e.air_date, e.monitored, {tv_monitor._LINKED} FROM episodes e'

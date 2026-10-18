@@ -281,7 +281,8 @@ def test_v158b_v7_migration_keeps_an_existing_monitoring_choice_and_reruns_never
            for r in rows('SELECT id, monitored, monitor, monitor_new_seasons, monitor_chosen FROM series')}
     assert got[1] == (1, 'future', 1, 1)                                  # no choice: Future
     # v158c (v9): the kept choices get the label that matches their episodes; nothing else changes
-    assert got[2][:3] == (1, 'all', 0) and got[3][:3] == (0, 'none', 1) and got[4][:3] == (0, 'pilot', 0)
+    assert got[2][:3] == (1, 'all', 0) and got[3][:3] == (0, 'none', 1)
+    assert got[4][:3] == (0, 'none', 0)                                   # v165: series off -> picked by hand, not 'pilot'
     assert _mon(2) == {(1, 1): 1} and _mon(4) == {(1, 1): 1, (1, 2): 0}  # flags kept as they were
     assert _mon(1) == {(1, 1): 0, (1, 2): 1}
     # the owner turns a show off entirely (an explicit "none"); a re-run never resets it

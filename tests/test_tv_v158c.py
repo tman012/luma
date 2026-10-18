@@ -408,6 +408,33 @@ def test_v9_labels_kept_v6_choices_from_their_episodes_without_changing_them(tv_
     del before, sqlite3
 
 
+
+def test_v9_keeps_none_when_the_owner_picked_episodes_by_hand(tv_env):  # noqa: F811
+    """Tester (v165): None chosen, then one episode switched on by hand -> still 'none', not 'pilot'."""
+    from tests.test_tv_monitor_v158a import _mon, _v6_db
+    _v6_db([
+        "INSERT INTO series (id, tmdb_id, title, added_at, monitored) VALUES (1, 1, 'Picked by hand', 0, 0)",
+        "INSERT INTO series (id, tmdb_id, title, added_at, monitored) VALUES (2, 2, 'Odd one', 0, 0)",
+        "INSERT INTO series (id, tmdb_id, title, added_at, monitored) VALUES (3, 3, 'Pilot, switch on', 0, 1)",
+        'INSERT INTO seasons (series_id, season_number) VALUES (1, 1), (2, 1), (2, 2), (3, 1)',
+        "INSERT INTO episodes (series_id, season_number, episode_number, air_date, monitored) VALUES"
+        " (1, 1, 1, '2001-01-01', 1), (1, 1, 2, '2001-01-08', 0),"
+        " (2, 1, 1, '2001-01-01', 0), (2, 2, 3, '2002-01-01', 1),"
+        " (3, 1, 1, '2001-01-01', 1), (3, 1, 2, '2001-01-08', 0)"])
+    assert tv_store.schema_version() == 9
+    got = {r['id']: (r['monitored'], r['monitor']) for r in rows('SELECT id, monitored, monitor FROM series')}
+    assert got[1] == (0, 'none')                                          # matches 'pilot' exactly, still None
+    assert got[2] == (0, 'none')
+    assert got[3] == (1, 'pilot')                                         # series switch on: a real Pilot choice
+    assert _mon(1) == {(1, 1): 1, (1, 2): 0}                              # episodes untouched
+    assert _mon(2) == {(1, 1): 0, (2, 3): 1}
+    with tv_store.write() as conn:
+        conn.execute("UPDATE series SET monitor = 'none', monitored = 0 WHERE id = 3")
+        conn.execute('UPDATE episodes SET monitored = 0 WHERE series_id = 3')
+        conn.execute('UPDATE episodes SET monitored = 1 WHERE series_id = 3 AND episode_number = 1')
+        assert tv_store.monitor_labels(conn) == 0                         # explicit None + one episode later
+    assert rows('SELECT monitor FROM series WHERE id = 3')[0]['monitor'] == 'none'
+
 # ------------------------------------------------------------------ PM 7: fail closed
 
 @pytest.fixture
