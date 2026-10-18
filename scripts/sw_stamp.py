@@ -11,8 +11,9 @@ LAST_SHIPPED is the newest SW version any deployed build carries (v141:
 :5002 runs ab1c841, cursor/owner-session-guard); TAKEN lists versions other
 branches or builds hold above it (v142 cursor/sources-followup, v144
 login-error-states, v145 this branch's 01abfd9, which Ops is shipping).
-v143 was this branch's and never shipped; the TV libraries selector carries
-v146.
+v143 was this branch's and never shipped; v146 went out in the f0db05d bundle
+(the TV libraries selector), so it's taken too (Tester M38: never reuse it);
+TV Import carries v147.
 A version above LAST_SHIPPED that isn't TAKEN hasn't
 shipped yet, so further frontend changes on the same branch may restamp it
 (--restamp) instead of bumping again; once it ships, raise LAST_SHIPPED and
@@ -38,7 +39,7 @@ SOURCES = ('frontend/src', 'frontend/public', 'frontend/index.html', 'frontend/p
            'frontend/package-lock.json', 'frontend/vite.config.ts', 'frontend/tsconfig.json',
            'frontend/tsconfig.app.json')
 LAST_SHIPPED = 141                   # :5002 runs ab1c841 (v141)
-TAKEN = frozenset({142, 144, 145})   # sources-followup v142, login-error-states v144, 01abfd9 v145 (Ops)
+TAKEN = frozenset({142, 144, 145, 146})   # sources-followup v142, login-error-states v144, 01abfd9 v145 (Ops), f0db05d v146
 VERSION_RE = re.compile(r"const CACHE_VERSION = '([a-z-]+)-v(\d+)';")
 
 

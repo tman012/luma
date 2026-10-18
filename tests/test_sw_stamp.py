@@ -25,6 +25,14 @@ def test_v145_is_taken_by_the_build_ops_is_shipping():
     assert sw_stamp.version_number() >= 146
 
 
+def test_v146_is_never_reused():
+    """Tester M38: v146 went out in the f0db05d bundle; TV Import is v147."""
+    assert 146 in sw_stamp.TAKEN
+    assert sw_stamp.version_number() >= 147
+    with pytest.raises(SystemExit):
+        sw_stamp.set_version(146)
+
+
 def _fake(tmp_path, monkeypatch, version, last):
     for rel in ('static', 'frontend/src'):
         (tmp_path / rel).mkdir(parents=True)
