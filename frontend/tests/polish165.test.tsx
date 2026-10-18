@@ -19,7 +19,7 @@ describe('calendar time line', () => {
     expect(timeRange(null, 30)).toBeNull();
   });
 
-  it('v166: 12px at every width, never shrunk; each time is its own nowrap span, so a range wraps only at the dash', () => {
+  it('v166: 12px at every width, never shrunk; v179: the card shows the start time only, one nowrap line', () => {
     expect(AIR_SIZE).toBe(12);
     expect(tvCalendarCss).not.toMatch(/cqi|tv-air|tvcard/);                 // no shrinking, no ellipsis rule
     expect(timeRangeParts('2026-10-16T03:00:00Z', 58, 'America/New_York')).toEqual(['11:00 \u2013', '11:58 PM']);
@@ -27,8 +27,8 @@ describe('calendar time line', () => {
     expect(timeRangeParts('2026-10-16T03:00:00Z', null, 'America/New_York')).toEqual(['11:00 PM']);
     expect(timeRangeParts(null, 30)).toBeNull();
     const card = readFileSync(resolve(__dirname, '../src/components/library/TvCalendar.tsx'), 'utf8');
-    expect(card).toContain('data-testid="tv-air-part" style={{ whiteSpace: \'nowrap\' }}');
-    expect(card).toMatch(/data-testid="tv-air" style=\{\{ display: 'block', fontSize: AIR_SIZE/);
+    expect(card).toMatch(/data-testid="tv-air" style=\{\{ display: 'block', fontSize: AIR_SIZE, lineHeight: '16px', color: W50, whiteSpace: 'nowrap' \}\}/);
+    expect(card).not.toContain('tv-air-part');                              // v179: no range on the card, so nothing to split
   });
 });
 

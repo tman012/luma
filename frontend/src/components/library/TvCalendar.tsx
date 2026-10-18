@@ -1,7 +1,7 @@
 /** Settings > TV > Calendar (v1, desktop web): the week's episodes by TMDB air
  * date as an agenda (day headers, 72px rows), capped at 720px and centered.
  * A card opens the show's detail at that episode. The week toolbar: ‹ › (and Today) on the left, the range centered. */
-import { Fragment, useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { ModalHostContext } from '@/contexts/ModalHostContext';
 import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
@@ -217,10 +217,13 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
   const st = episodeState(e, today);
   const open = useOpenEpisode(e);
   const [mon, flip] = useMonitored(e);
+  // v179 (Designer): the bottom line is the start time in the viewer's local time ('9:00 PM') for every
+  // state, never the date again (the column header has it); no air time known: no line
+  const air = airLine(e);
   return (
     <div data-testid="tv-agenda-row" data-state={st} data-monitored={mon ? 'true' : 'false'} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
       className={`tvc-card ${open.className || ''}`.trim()}
-      style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', paddingLeft: EDGE_W, borderRadius: 8, background: 'rgba(255,255,255,0.06)',
+      style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', flex: 'none', paddingLeft: EDGE_W, borderRadius: 8, background: 'rgba(255,255,255,0.06)',
         border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
       <Stripe color={STATE_COLOR[st]} w={EDGE_W} />
       <Bookmark e={e} on={mon} onToggle={flip} />
@@ -228,11 +231,9 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
         <div className="tvc-text" style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 1 }}>
           <span data-testid="tv-card-show" title={e.show} style={{ ...clamp2, WebkitLineClamp: NAME_LINES, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
           <span data-testid="tv-card-title" title={epLine(e)} style={{ ...clamp2, WebkitLineClamp: EP_LINES, lineHeight: '16px', fontSize: 12, color: W70 }}>{epLine(e)}</span>
-          <span data-testid="tv-air" style={{ display: 'block', fontSize: AIR_SIZE, lineHeight: '16px', color: W50 }}>
-            {(timeRangeParts(e.airstamp, e.runtime) || [e.air_time || shortDate(e.air_date)]).map((t, i) => (
-              <Fragment key={i}>{i > 0 && ' '}<span data-testid="tv-air-part" style={{ whiteSpace: 'nowrap' }}>{t}</span></Fragment>
-            ))}
-          </span>
+          {air && (
+            <span data-testid="tv-air" style={{ display: 'block', fontSize: AIR_SIZE, lineHeight: '16px', color: W50, whiteSpace: 'nowrap' }}>{air}</span>
+          )}
         </div>
       </div>
     </div>
@@ -280,6 +281,9 @@ function AgendaRow({ e, today, first }: { e: CalEpisode; today: Day; first: bool
   );
 }
 
+/** The week-grid card's bottom line: the start time in the viewer's zone ('9:00 PM'), or null (no line). */
+export const airLine = (e: Pick<CalEpisode, 'airstamp'>, timeZone?: string): string | null => timeRangeParts(e.airstamp, null, timeZone)?.[0] ?? null;
+
 const epLine = (e: CalEpisode) => (e.title ? `${code(e.season, e.episode)} \u00b7 ${e.title}` : code(e.season, e.episode));
 
 export const Stripe = ({ color, w = 3 }: { color: string; w?: number }) => (
@@ -312,9 +316,9 @@ function Placeholder() {
   );
 }
 
-/** v166 (Designer): the card's time line is 12px at every width, never shrunk. Each time is its own
- * nowrap span, so a range too wide for its day column (1100: '11:00 – 11:58 PM') wraps only at the dash:
- * '11:00 –' then '11:58 PM'. */
+/** v166 (Designer): the card's time line is 12px at every width, never shrunk. v179: it is the start time
+ * only ('9:00 PM', one nowrap line), so it never wraps. The show name keeps 28px on its right from 1000px,
+ * where the 24px hover bookmark (4px from the edge) sits, so a wrapped name never runs under it. */
 export const AIR_SIZE = 12;
 export const tvCalendarCss = `
 :root{--tv-state-downloaded:#22c55e;--tv-state-missing:#ef4444;--tv-state-unaired:#3b82f6}
@@ -325,14 +329,17 @@ export const tvCalendarCss = `
 .tvc-bm:hover{background:rgba(59,130,246,.35)!important}
 @media (hover:none){.tvc-card .tvc-bm{opacity:1}}
 @container tvcal (max-width: 999px){.tvc-card .tvc-bm{display:none!important}}
-@container tvcal (min-width: 1000px){.tvc-card [data-testid=tv-card-show]{padding-right:22px}}
+@container tvcal (min-width: 1000px){.tvc-card [data-testid=tv-card-show]{padding-right:28px}}
 @container tvcal (max-width: 599px){.tvc-card [data-testid=tv-card-show]{-webkit-line-clamp:2!important}.tvc-card [data-testid=tv-card-title]{-webkit-line-clamp:1!important}}
 `;
 
-const gridWrap: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 8 };
-const gridCol: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 };
+/** v179: rows and columns never stretch a card: the grid starts every day column at its content height
+ * (align-items start), and a column is a plain flex stack of cards that keep their text height (flex none). */
+const gridWrap: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', alignItems: 'start', gap: 8 };
+const gridCol: React.CSSProperties = { display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', gap: 6, minWidth: 0 };
 const gridHead: React.CSSProperties = { margin: 0, padding: '6px 8px', borderRadius: 8, fontSize: 12, fontWeight: 600, lineHeight: '16px' };
-/** v178: a text-only card: 6 + name 17 + 1 + episode 16 + 1 + time 16 + 6 (one line each), plus 2 border. */
+/** v178: a text-only card: 6 + name 17 + 1 + episode 16 + 1 + time 16 + 6 (one line each), plus 2 border
+ * (v179: 48 without an air time, which has no line). */
 export const CARD_TEXT_H = 65;
 const one: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 /** v158c: week-grid captions wrap instead of clipping: the show name up to NAME_LINES, the episode line

@@ -4,6 +4,7 @@ import App from './App';
 import './index.css';
 import { installConnectServiceFetchHook } from '@/components/connect/connectService';
 import { getUrlBase } from './urlHelpers';
+import { watchBuild } from '@/utils/buildWatch';
 
 // TODO: Migrate all apiFetch('/api/...') calls in service files to use apiFetch from apiClient.ts
 // This ensures URL base is correctly applied. For now, services use native fetch which works
@@ -96,6 +97,10 @@ if (new URLSearchParams(window.location.search).has('sw_reset')) {
     window.location.reload();
   });
 }
+
+// v179: a tab left open across a deploy reloads into the new build (with or without a service worker:
+// a plain-HTTP LAN address has none). See utils/buildWatch.ts.
+watchBuild({ base: getUrlBase() });
 
 // =============================================================================
 // Update toast — lightweight, no React dependency (runs before/outside React)

@@ -9,7 +9,7 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
 import { SEARCH_DEBOUNCE_MS } from '@/components/library/TvSearch';
-import { CAL_MAX_W, CARD_TEXT_H, POLL_MS, WeekGrid, keepIfSame } from '@/components/library/TvCalendar';
+import { CAL_MAX_W, CARD_TEXT_H, POLL_MS, WeekGrid, airLine, keepIfSame, tvCalendarCss } from '@/components/library/TvCalendar';
 import { ModalHostContext, type ModalHostContextValue } from '@/contexts/ModalHostContext';
 import {
   addDays, agendaLabel, byDay, episodeState, isDay, localDay, seasonsText, shortDate, weekDays, weekLabel, weekStart, type CalEpisode,
@@ -92,6 +92,58 @@ describe('text-only cards (v178)', () => {
     expect(within(card).getByTestId('tv-stripe').style.width).toBe('4px');
     expect(within(card).getByTestId('tv-card-bookmark')).toBeTruthy();
     expect((card.querySelector('.tvc-text') as HTMLElement).style.padding).toBe('6px 8px');
+  });
+});
+
+describe('cards collapse to their text (v179)', () => {
+  const ep = (o: Partial<CalEpisode>): CalEpisode => ({ episode_id: 1, series_id: 1, show: 'Severance', year: 2022, poster_path: '/p.jpg',
+    season: 2, episode: 1, title: 'Hello', air_date: '2026-10-12', downloaded: false, ...o });
+  const SIZING = /aspect-ratio|min-height|(^|[;\s])height\s*:|flex-grow|flex:\s*1|align-self:\s*stretch/i;
+  const week = [
+    ep({ episode_id: 1, airstamp: '2026-10-13T01:00:00Z', runtime: 60 } as Partial<CalEpisode>),     // Mon 9:00 PM EDT
+    ep({ episode_id: 2, episode: 2, show: 'The Lord of the Rings: The Rings of Power', title: 'A Very Long Episode Title That Wraps',
+      airstamp: '2026-10-13T02:00:00Z', downloaded: true } as Partial<CalEpisode>),
+    ep({ episode_id: 3, episode: 3, air_date: '2026-10-14' }),                                      // no air time
+    ep({ episode_id: 4, episode: 4, air_date: '2026-10-17', airstamp: '2026-10-17T20:00:00Z' } as Partial<CalEpisode>),
+  ];
+  it('no image box, no reserved height: nothing on a card or its parts sizes it but its text', () => {
+    render(<WeekGrid eps={week} week={'2026-10-11' as Day} today={'2026-10-15' as Day} />);
+    const cards = screen.getAllByTestId('tv-agenda-row');
+    expect(cards).toHaveLength(4);
+    for (const card of cards) {
+      expect(card.querySelector('img, picture, video, svg image, [data-testid=tv-still], [class*=still], [class*=skel]')).toBeNull();
+      for (const el of [card, ...card.querySelectorAll<HTMLElement>('*')]) {
+        if (el.getAttribute('data-testid') === 'tv-card-bookmark' || el.closest('[data-testid=tv-card-bookmark]')) continue;   // absolute, 24px
+        if (el.getAttribute('data-testid') === 'tv-stripe') continue;                                                         // absolute edge
+        expect(el.getAttribute('style') || '').not.toMatch(SIZING);
+      }
+      expect(card.style.flex).toBe('0 0 auto');                                          // a day column never grows a card
+      const body = within(card).getByTestId('tv-card-body');
+      expect([...body.children].map(c => (c as HTMLElement).className)).toEqual(['tvc-text']);   // the text, nothing above it
+    }
+    // the grid rows and the day columns: content height, no stretch, no row sizing
+    const grid = screen.getByTestId('tv-cal-grid');
+    expect([grid.style.alignItems, grid.style.gridAutoRows, grid.style.gridTemplateRows]).toEqual(['start', '', '']);
+    for (const d of screen.getAllByTestId('tv-grid-day')) {
+      expect([d.style.minHeight, d.style.height, d.style.flex, d.style.justifyContent]).toEqual(['', '', '', 'flex-start']);
+    }
+    // and the stylesheet carries no image or skeleton sizing for the calendar
+    expect(tvCalendarCss).not.toMatch(/aspect-ratio|min-height|tvc-still|skel|(^|[{;])height\s*:/i);
+  });
+  it('the bottom line is the start time in the viewer zone for every state, never the date; no air time, no line', () => {
+    render(<WeekGrid eps={week} week={'2026-10-11' as Day} today={'2026-10-15' as Day} />);
+    const [c1, c2, c3, c4] = screen.getAllByTestId('tv-agenda-row');
+    expect([c1, c2, c3, c4].map(c => c!.getAttribute('data-state'))).toEqual(['missing', 'downloaded', 'missing', 'unaired']);
+    expect(within(c1!).getByTestId('tv-air').textContent).toBe('9:00 PM');          // a start time, no range
+    expect(within(c2!).getByTestId('tv-air').textContent).toBe('10:00 PM');
+    expect(within(c3!).queryByTestId('tv-air')).toBeNull();                         // no air time: the line is gone
+    expect(within(c4!).getByTestId('tv-air').textContent).toBe('4:00 PM');
+    for (const c of [c1, c2, c4]) expect(within(c!).getByTestId('tv-air').textContent).not.toMatch(/Oct|\d+\/\d+/);
+    expect(airLine({ airstamp: '2026-10-19T01:00:00Z' }, 'America/Los_Angeles')).toBe('6:00 PM');   // the viewer's own zone
+    expect(airLine({ airstamp: null })).toBeNull();
+  });
+  it('the show name keeps 28px on its right where the hover bookmark sits (1000px and up)', () => {
+    expect(tvCalendarCss).toContain('@container tvcal (min-width: 1000px){.tvc-card [data-testid=tv-card-show]{padding-right:28px}}');
   });
 });
 
@@ -191,7 +243,7 @@ describe('Calendar', () => {
     expect(title.textContent).toMatch(/^S\d\dE\d\d \u00b7 /);
     expect([title.style.webkitLineClamp, title.style.display, title.style.fontSize, title.style.color])
       .toEqual(['6', '-webkit-box', '12px', 'rgba(255, 255, 255, 0.7)']);                        // v158c: wraps (v164: up to 6 lines)
-    expect(title.nextElementSibling!.getAttribute('data-testid')).toBe('tv-air');   // line 3: the time
+    expect(title.nextElementSibling).toBeNull();      // v179: no air time known, so no line 3 (never the date again)
     // the top row: ‹ range › together in the true center (a 1fr auto 1fr grid), no separate toolbar
     const center = screen.getByTestId('tv-cal-center');
     expect(center.contains(screen.getByTestId('tv-cal-prev')) && center.contains(screen.getByTestId('tv-cal-next'))).toBe(true);
