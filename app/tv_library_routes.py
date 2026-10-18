@@ -16,6 +16,8 @@ Owner only, luma-test builds only (tv_settings._guard).
 
 from __future__ import annotations
 
+import datetime as dt
+
 from flask import Blueprint, jsonify, request
 
 from app import tv_calendar, tv_scan, tv_settings, tv_tmdb
@@ -152,7 +154,8 @@ def tv_calendar_get():
         return _no_store(jsonify({'error': BAD_DATE}), 400)
     data = tv_calendar.calendar(start, int(days))
     # stale air dates (24h) and never-read stills / air times refresh in the background, this week's shows first
-    tv_scan.refresh_on_open({e['series_id'] for e in data['episodes']})
+    data['refreshing'] = tv_scan.refresh_on_open({e['series_id'] for e in data['episodes']},
+                                                 start, start + dt.timedelta(days=int(days)))
     return _no_store(jsonify(data))
 
 

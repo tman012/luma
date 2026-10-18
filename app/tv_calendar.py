@@ -56,8 +56,15 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
                     'SELECT e.id, e.series_id, e.season_number, e.episode_number, e.title, e.air_date, e.airstamp,'
                     ' COALESCE(e.air_runtime, e.runtime) AS minutes, e.still_path, e.tvdb_image, s.backdrop_path,'
                     ' s.title AS show, s.year, s.poster_path,'
-                    ' EXISTS (SELECT 1 FROM episode_file_links l JOIN episode_files f ON f.id = l.file_id'
-                    "         WHERE l.episode_id = e.id AND f.state = 'linked') AS downloaded"
+                    # downloaded: a linked file for this episode row; or (a link row lost, or another row of the
+                    # same TMDB show holds the file) a linked file of that show whose own SxxEyy is this episode
+                    ' (EXISTS (SELECT 1 FROM episode_file_links l JOIN episode_files f ON f.id = l.file_id'
+                    "          WHERE l.episode_id = e.id AND f.state = 'linked')"
+                    '  OR EXISTS (SELECT 1 FROM episode_files f JOIN series fs ON fs.id = f.series_id'
+                    "          WHERE fs.tmdb_id = s.tmdb_id AND f.state = 'linked' AND COALESCE(fs.episode_order, 'tmdb') = 'tmdb'"
+                    "          AND json_valid(f.parsed) AND json_extract(f.parsed, '$.season') = e.season_number"
+                    "          AND EXISTS (SELECT 1 FROM json_each(f.parsed, '$.episodes') j WHERE j.value = e.episode_number)))"
+                    ' AS downloaded'
                     ' FROM episodes e JOIN series s ON s.id = e.series_id'
                     f' WHERE s.path_id IN ({_in(paths)}) AND e.air_date >= ? AND e.air_date < ?'
                     ' ORDER BY e.air_date, s.title COLLATE NOCASE, e.season_number, e.episode_number',
@@ -68,6 +75,7 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
                             'airstamp': r['airstamp'], 'runtime': r['minutes'],
                             'tvdb_image': r['tvdb_image'], 'still_path': r['still_path'], 'backdrop_path': r['backdrop_path'],
                             'downloaded': bool(r['downloaded'])})
+    out.sort(key=lambda e: (e['air_date'], tv_scan.sort_title(e['show']), e['season'] or 0, e['episode'] or 0))
     return {'start': start.isoformat(), 'days': days, 'episodes': out, 'libraries': len(paths),
             'refreshed_at': _last_refresh()}
 

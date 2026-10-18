@@ -33,7 +33,9 @@ export function timeRange(airstamp: string | null | undefined, runtime: number |
   const b = parts(new Date(start.getTime() + runtime * 60000));
   return a.ap === b.ap ? `${a.hm} \u2013 ${b.hm} ${b.ap}` : `${a.hm} ${a.ap} \u2013 ${b.hm} ${b.ap}`;
 }
-export interface CalendarData { start: string; days: number; episodes: CalEpisode[]; libraries: number; refreshed_at: number | null }
+export interface CalendarData { start: string; days: number; episodes: CalEpisode[]; libraries: number; refreshed_at: number | null;
+  /** a background refresh (episode images, air times) started: ask again shortly */
+  refreshing?: boolean }
 export interface FindResult {
   tmdb_id: number; title: string; year: number | null; poster_path: string | null; seasons: number | null;
   in_library: boolean; series_id: number | null;

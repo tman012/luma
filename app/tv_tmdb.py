@@ -33,6 +33,12 @@ CACHE_TTL_S = 24 * 3600
 SEASONS_PER_CALL = 20       # TMDB's append_to_response limit
 _pace_lock = threading.Lock()
 _bucket = {'tokens': float(BURST), 'ts': 0.0, 'pause_until': 0.0}
+# Background work (the Calendar-open refresh / stills backfill) also takes a
+# token from this slower bucket, so it stays well under the budget, burst
+# included: at most BACKGROUND_RATE_PER_S + 1 requests in any second.
+BACKGROUND_RATE_PER_S = 25.0
+_bg_lock = threading.Lock()
+_bg_bucket = {'tokens': 1.0, 'ts': 0.0}
 _local = threading.local()          # .fresh: skip cache reads in this thread (see fresh())
 
 
@@ -61,9 +67,39 @@ def _key() -> str:
         return ''
 
 
+def _wait_background() -> None:
+    while True:
+        with _bg_lock:
+            if BACKGROUND_RATE_PER_S <= 0 or RATE_PER_S <= 0:     # pacing off (tests)
+                return
+            now = time.monotonic()
+            _bg_bucket['tokens'] = min(1.0, _bg_bucket['tokens'] + (now - _bg_bucket['ts']) * BACKGROUND_RATE_PER_S)
+            _bg_bucket['ts'] = now
+            if _bg_bucket['tokens'] >= 1:
+                _bg_bucket['tokens'] -= 1
+                return
+            wait = (1 - _bg_bucket['tokens']) / BACKGROUND_RATE_PER_S
+        time.sleep(max(wait, 0.001))
+
+
+@contextlib.contextmanager
+def background():
+    """Within this block (this thread), requests are paced at
+    BACKGROUND_RATE_PER_S as well as the shared budget."""
+    prev = getattr(_local, 'background', False)
+    _local.background = True
+    try:
+        yield
+    finally:
+        _local.background = prev
+
+
 def wait_turn() -> None:
     """Block until the shared token bucket (RATE_PER_S) has a request for us
-    and no 429 pause is in force. Every worker thread goes through here."""
+    and no 429 pause is in force. Every worker thread goes through here;
+    background work also waits for the slower background bucket."""
+    if getattr(_local, 'background', False):
+        _wait_background()
     while True:
         with _pace_lock:
             now = time.monotonic()

@@ -40,7 +40,9 @@ import json
 import logging
 import os
 import re
+import unicodedata
 import threading
+from contextlib import nullcontext
 import time
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
@@ -813,12 +815,49 @@ def scan_all(now: Optional[float] = None, retry_unmatched: bool = True) -> Dict[
     return total
 
 
-def refresh_added(now: Optional[float] = None, folders: bool = False, first: Optional[set] = None) -> int:
+STILL_WINDOW_DAYS = 14        # episodes within this many days either side of today, or in view
+STILL_GRACE_S = 2 * 86400     # an aired one: asked until a read at least this long after it aired
+STILL_RETRY_S = 6 * 3600      # ... and at most this often meanwhile (upcoming ones too)
+
+
+def still_gaps(start: Optional[dt.date] = None, end: Optional[dt.date] = None, now: Optional[float] = None) -> set:
+    """Shows to read again for episode images: an episode in view ([start, end))
+    or within STILL_WINDOW_DAYS of today has no image from TMDB or TVDB.
+    TMDB adds most stills after an episode airs, so a show read before then is
+    read again at once once it has aired, then every STILL_RETRY_S until a read
+    STILL_GRACE_S after it aired (image or not); an upcoming one every
+    STILL_RETRY_S. Bounded: never a loop on every open."""
+    now = time.time() if now is None else now
+    today = dt.date.fromtimestamp(now)
+    start = start or today
+    end = end or start
+    lo = (today - dt.timedelta(days=STILL_WINDOW_DAYS)).isoformat()
+    hi = (today + dt.timedelta(days=STILL_WINDOW_DAYS + 1)).isoformat()
+    # when it aired: its airstamp, else the end of its air date (UTC), which a US evening slot doesn't pass
+    aired = "COALESCE(CAST(strftime('%s', e.airstamp) AS INTEGER), CAST(strftime('%s', e.air_date) AS INTEGER) + 86400)"
+    with tv_store.connect() as conn:
+        return {r['series_id'] for r in conn.execute(
+            'SELECT DISTINCT e.series_id FROM episodes e JOIN series s ON s.id = e.series_id'
+            ' WHERE e.season_number > 0 AND e.air_date IS NOT NULL'
+            ' AND ((e.air_date >= :start AND e.air_date < :end) OR (e.air_date >= :lo AND e.air_date < :hi))'
+            ' AND e.still_path IS NULL AND e.tvdb_image IS NULL AND s.tmdb_id IS NOT NULL'
+            f' AND (({aired} <= :now AND (COALESCE(s.stills_at, 0) < {aired}'
+            f'       OR (s.stills_at < {aired} + :grace AND :now - s.stills_at >= :retry)))'
+            f'   OR ({aired} > :now AND :now - COALESCE(s.stills_at, 0) >= :retry))',
+            {'start': start.isoformat(), 'end': end.isoformat(), 'lo': lo, 'hi': hi,
+             'now': now, 'grace': STILL_GRACE_S, 'retry': STILL_RETRY_S})}
+
+
+def refresh_added(now: Optional[float] = None, folders: bool = False, first: Optional[set] = None,
+                  background: bool = False, repair: Optional[set] = None, only: Optional[set] = None) -> int:
     """Shows added from Search (a library, no folder) keep their episodes
     current like folder shows: once REFRESH_EPISODES_S has passed, on the next
     scan (Import) or Calendar open (folders=True: every show of the selected
     libraries). TMDB reads on the workers through the shared rate budget; a
-    TMDB error leaves the rest for next time. Returns how many were refreshed."""
+    TMDB error leaves the rest for next time. *background* (the Calendar-open
+    refresh): paced at tv_tmdb.BACKGROUND_RATE_PER_S. *repair*: shows read again
+    whatever their age (still_gaps). *only*: just these shows (the visible-week
+    pass). Returns how many were refreshed."""
     from app import tv_settings
     now = time.time() if now is None else now
     pids = [p['id'] for p in tv_settings.libraries()]
@@ -829,53 +868,96 @@ def refresh_added(now: Optional[float] = None, folders: bool = False, first: Opt
             'SELECT id, tmdb_id, episode_group_id, tmdb_refreshed_at, stills_at FROM series WHERE'
             + ('' if folders else ' folder IS NULL AND') + ' tmdb_id IS NOT NULL AND path_id IN'
             f' ({",".join("?" * len(pids))})', pids)
-            # stale (24h), or its stills never read (backfill now, whatever its age)
-            if now - (r['tmdb_refreshed_at'] or 0) >= REFRESH_EPISODES_S or (folders and r['stills_at'] is None)]
+            # stale (24h), its stills never read (backfill now, whatever its age), or an aired episode
+            # still has no image (repair)
+            if now - (r['tmdb_refreshed_at'] or 0) >= REFRESH_EPISODES_S or (folders and r['stills_at'] is None)
+            or r['id'] in (repair or ())]
+    if only is not None:
+        rows = [r for r in rows if r['id'] in only]
     first = first or set()
     rows.sort(key=lambda r: r['id'] not in first)          # the shows in the visible week first
 
     def work(r):
         try:
-            with tv_tmdb.fresh():
+            with tv_tmdb.fresh(), (tv_tmdb.background() if background else nullcontext()):
                 return {'data': fetch_show(r['tmdb_id'], None, None, r['episode_group_id'])}
         except tv_tmdb.TmdbError as e:
             return {'error': e}
     n = 0
-    for r, res in zip(rows, run_pool(rows, work)):
+    results = run_pool(rows, work)
+    for r, res in zip(rows, results):
         if res.get('data'):
             refresh_episodes(r['id'], r['tmdb_id'], now, res['data'])
             n += 1
+    if folders and rows:
+        ids = [r['id'] for r in rows]
+        with tv_store.connect() as conn:
+            q = f'SELECT COUNT(*) AS n FROM episodes WHERE series_id IN ({",".join("?" * len(ids))})'
+            stills = conn.execute(q + ' AND still_path IS NOT NULL', ids).fetchone()['n']
+            tvdb = conn.execute(q + ' AND tvdb_image IS NOT NULL', ids).fetchone()['n']
+        logger.info('TV episode refresh%s: %d of %d shows read (%d for missing images, %d never read),'
+                    ' %d with episode stills, %d with TVDB images; %s',
+                    ' (this week)' if only is not None else '', n, len(rows),
+                    sum(1 for r in rows if r['id'] in (repair or ())), sum(1 for r in rows if r['stills_at'] is None),
+                    stills, tvdb, 'stopped: ' + type(next(x['error'] for x in results if 'error' in x)).__name__
+                    if any('error' in x for x in results) else 'done')
     return n
 
 
 _refresh_lock = threading.Lock()
+_priority_lock = threading.Lock()
 _RefreshThread = threading.Thread    # the Calendar-open refresh (tests run it inline)
 
 
-def refresh_on_open(first: Optional[set] = None) -> bool:
-    """Calendar open: refresh stale air dates (24h) in the background, once at
-    a time and never during an Import (which refreshes them itself). The open
-    answers from tv.db right away; the next open shows what changed. False
-    when nothing started."""
-    if _scan_lock.locked() or not _refresh_lock.acquire(blocking=False):
-        return False
+def _refresh_pass(only: Optional[set], first: set, repair: set) -> None:
+    try:
+        refresh_added(folders=True, first=first, background=True, repair=repair, only=only)
+    except Exception:                  # noqa: BLE001 - a failed refresh waits for the next open
+        logger.exception('TV calendar refresh failed')
+    try:
+        from app import tv_airtimes      # air times + TVDB images (TVDB, else TVmaze), paced, after TMDB
+        tv_airtimes.refresh(first=first, repair=repair, only=only)
+    except Exception:                  # noqa: BLE001
+        logger.exception('TV air times refresh failed')
 
-    def work():
-        try:
-            refresh_added(folders=True, first=first)
-        except Exception:                  # noqa: BLE001 - a failed refresh waits for the next open
-            logger.exception('TV calendar refresh failed')
-        try:
-            from app import tv_airtimes      # air times (TVDB, else TVmaze), paced, after TMDB
-            tv_airtimes.refresh(first=first)
-        except Exception:                  # noqa: BLE001
-            logger.exception('TV air times refresh failed')
-        finally:
-            _refresh_lock.release()
+
+def refresh_on_open(first: Optional[set] = None, start: Optional[dt.date] = None, end: Optional[dt.date] = None) -> bool:
+    """Calendar open: in the background, never during an Import (which refreshes
+    them itself). First the visible range's shows (*first*: stale ones, stills
+    never read, and aired episodes still without an image), then the rest of the
+    library. When a refresh is already running, the visible range still gets its
+    own pass at once. The open answers from tv.db right away; the page asks
+    again when 'refreshing'. False when nothing started."""
+    if _scan_lock.locked():
+        return False
+    first = set(first or ())
+    try:
+        repair = still_gaps(start, end)
+    except Exception:                  # noqa: BLE001
+        logger.exception('TV still check failed')
+        repair = set()
+    if _refresh_lock.acquire(blocking=False):
+        def work():
+            try:
+                if first:
+                    _refresh_pass(first, first, repair)       # this week first, before the rest
+                _refresh_pass(None, first, repair - first)    # the rest (this week's are fresh now)
+            finally:
+                _refresh_lock.release()
+        lock = _refresh_lock
+    elif first and _priority_lock.acquire(blocking=False):
+        def work():
+            try:
+                _refresh_pass(first, first, repair)           # the full pass is busy elsewhere: this week now
+            finally:
+                _priority_lock.release()
+        lock = _priority_lock
+    else:
+        return False
     try:
         _RefreshThread(target=work, daemon=True, name='tv-calendar-refresh').start()
     except Exception:
-        _refresh_lock.release()
+        lock.release()
         raise
     return True
 
@@ -1221,6 +1303,21 @@ def review_lines(conn, sid: int) -> List[str]:
 CONTINUING = ('Returning Series', 'In Production', 'Planned', 'Pilot')
 
 
+_SORT_DROP = re.compile(r"[.'\u2019\u2018`]")          # S.W.A.T. -> SWAT, Grey's -> Greys
+_SORT_SPACE = re.compile(r'[^0-9a-z]+')
+_SORT_ARTICLE = re.compile(r'^(?:the|a|an) (?=\S)')
+
+
+def sort_title(title: Optional[str]) -> str:
+    """The A-Z key for show names (Series grid, Calendar): accents folded,
+    periods and apostrophes dropped, other symbols as spaces, a leading
+    The/A/An ignored. The frontend's sortKey mirrors it."""
+    t = unicodedata.normalize('NFKD', title or '')
+    t = ''.join(c for c in t if not unicodedata.combining(c)).casefold()
+    t = _SORT_SPACE.sub(' ', _SORT_DROP.sub('', t)).strip()
+    return _SORT_ARTICLE.sub('', t) or t
+
+
 def library_view() -> Dict[str, Any]:
     from app import tv_settings
     # Only the selected libraries' shows; a deselected or removed one's rows
@@ -1275,6 +1372,7 @@ def library_view() -> Dict[str, Any]:
                               'folder': r['folder'], 'guess_title': r['guess_title'], 'guess_year': r['guess_year'],
                               'candidates': cands[:tv_match.TOP_N], 'reason': r['reason'], 'tier': tier,
                               'pick': pick, 'guess_pick': guess})
+    shows.sort(key=lambda x: (sort_title(x['title']), x['year'] or 0, x['id']))
     # Review order: no match, then duplicates, then likely (best guess picked)
     unmatched.sort(key=lambda u: ({'none': 0, 'duplicate': 1, 'likely': 2}.get(u['tier'], 0), u['folder'].lower()))
     return {'shows': shows, 'unmatched': unmatched, 'scan': status()}

@@ -1,17 +1,18 @@
 /** Settings > TV > Calendar (v1, desktop web): the week's episodes by TMDB air
  * date as an agenda (day headers, 72px rows), capped at 720px and centered.
- * Rows aren't clickable. The week toolbar has ‹ ›, the week label and Today. */
+ * Rows aren't clickable. The week toolbar: ‹ › (and Today) on the left, the range centered. */
 import { useEffect, useState } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
 import { Poster } from './TvImport';
-import { posterUrl, tmdbImg } from '@/utils/image';
+import { posterUrl, tvdbImg } from '@/utils/image';
 import {
   STATE_COLOR, STATE_WORD, addDays, agendaLabel, byDay, code, episodeState, loadCalendar, shortDate, timeRange, weekLabel, weekStart,
   type CalEpisode, type CalendarData, type Day,
 } from './tvCalendarApi';
 
 export const CAL_MAX_W = 720;
+export const REFRESH_RELOAD_MS = 6000;
 const W50 = 'rgba(255,255,255,0.5)';
 const W70 = 'rgba(255,255,255,0.7)';
 const W95 = 'rgba(255,255,255,0.95)';
@@ -24,12 +25,19 @@ export function TvCalendar({ today, week, onWeek, reload = 0 }: {
   const key = `${week}/${reload}`;
   useEffect(() => {
     let live = true;
+    let timer = 0;
     setFailed('');
     void loadCalendar(week, 7).then(r => {
       if (!live) return;
       if (r.ok) setData({ key, cal: r.data }); else setFailed(key);
+      // episode images / air times are being fetched for this week: ask once more, quietly
+      if (r.ok && r.data.refreshing) {
+        timer = window.setTimeout(() => {
+          void loadCalendar(week, 7).then(r2 => { if (live && r2.ok) setData({ key, cal: r2.data }); });
+        }, REFRESH_RELOAD_MS);
+      }
     });
-    return () => { live = false; };
+    return () => { live = false; window.clearTimeout(timer); };
   }, [week, key]);
   const loading = data?.key !== key && failed !== key;
   const end = addDays(week, 7);
@@ -58,19 +66,20 @@ function Toolbar({ label, showToday, onPrev, onNext, onToday }: {
   label: string; showToday: boolean; onPrev: () => void; onNext: () => void; onToday: () => void;
 }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <button type="button" aria-label="Previous week" data-testid="tv-cal-prev" className="lp-focus tvc-glass" onClick={onPrev} style={iconBtn}>
-        <ChevronLeftIcon size={18} />
-      </button>
-      <span data-testid="tv-cal-label" aria-live="polite" style={{ flex: 1, textAlign: 'center', fontSize: 15, fontWeight: 600, color: W95, whiteSpace: 'nowrap' }}>
+    <div data-testid="tv-cal-toolbar" style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'center', gap: 8 }}>
+      <div data-testid="tv-cal-nav" style={{ display: 'flex', alignItems: 'center', gap: 8, justifySelf: 'start' }}>
+        <button type="button" aria-label="Previous week" data-testid="tv-cal-prev" className="lp-focus tvc-glass" onClick={onPrev} style={iconBtn}>
+          <ChevronLeftIcon size={18} />
+        </button>
+        <button type="button" aria-label="Next week" data-testid="tv-cal-next" className="lp-focus tvc-glass" onClick={onNext} style={iconBtn}>
+          <ChevronIcon size={18} />
+        </button>
+        {showToday && <button type="button" data-testid="tv-cal-today" className="lp-focus tvc-glass" onClick={onToday} style={pill}>Today</button>}
+      </div>
+      <span data-testid="tv-cal-label" aria-live="polite" style={{ textAlign: 'center', fontSize: 15, fontWeight: 600, color: W95, whiteSpace: 'nowrap' }}>
         {label}
       </span>
-      <button type="button" aria-label="Next week" data-testid="tv-cal-next" className="lp-focus tvc-glass" onClick={onNext} style={iconBtn}>
-        <ChevronIcon size={18} />
-      </button>
-      {showToday
-        ? <button type="button" data-testid="tv-cal-today" className="lp-focus tvc-glass" onClick={onToday} style={pill}>Today</button>
-        : <span aria-hidden="true" style={{ width: 70, flex: 'none' }} />}
+      <span aria-hidden="true" />
     </div>
   );
 }
@@ -79,14 +88,13 @@ function Toolbar({ label, showToday, onPrev, onNext, onToday }: {
 export function WeekGrid({ eps, week, today }: { eps: CalEpisode[]; week: Day; today: Day }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(week, i));
   return (
-    <div data-testid="tv-cal-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 8 }}>
+    <div data-testid="tv-cal-grid" style={gridWrap}>
       {days.map(d => {
         const list = eps.filter(e => e.air_date === d);
         const isToday = d === today;
         return (
-          <section key={d} data-testid="tv-grid-day" data-day={d} style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-            <h4 style={{ margin: 0, padding: '6px 8px', borderRadius: 8, fontSize: 12, fontWeight: 600,
-              background: isToday ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.04)', color: isToday ? '#3b82f6' : W50 }}>
+          <section key={d} data-testid="tv-grid-day" data-day={d} style={gridCol}>
+            <h4 style={{ ...gridHead, background: isToday ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.04)', color: isToday ? '#3b82f6' : W50 }}>
               {dayHeader(d)}
             </h4>
             {list.map(e => <GridCard key={e.episode_id} e={e} today={today} />)}
@@ -112,11 +120,8 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
       <Stripe color={STATE_COLOR[st]} />
       <Still e={e} />
       <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
-          <span data-testid="tv-card-show" style={{ ...clamp2, flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
-          <span style={{ flex: 'none', fontSize: 11, color: W50 }}>{code(e.season, e.episode)}</span>
-        </span>
-        {e.title && <span data-testid="tv-card-title" style={{ ...one, fontSize: 12, color: W70 }}>{e.title}</span>}
+        <span data-testid="tv-card-show" title={e.show} style={{ ...clamp2, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
+        <span data-testid="tv-card-title" title={epLine(e)} style={{ ...one, fontSize: 12, color: W70 }}>{epLine(e)}</span>
         <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: W50 }}>
           {st === 'downloaded' && <Check />}
           {timeRange(e.airstamp, e.runtime) || e.air_time || shortDate(e.air_date)}
@@ -126,9 +131,9 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
   );
 }
 
-/** Still sources in order: TheTVDB image (key set), TMDB episode still, show backdrop. */
+/** Still sources in order: TheTVDB image (key set; through Luma's image proxy), TMDB episode still, show backdrop. */
 export const stillChain = (e: CalEpisode): string[] =>
-  [tmdbImg(e.tvdb_image), posterUrl(e.still_path, 'w780'), posterUrl(e.backdrop_path, 'w780')].filter((u): u is string => !!u);
+  [tvdbImg(e.tvdb_image), posterUrl(e.still_path, 'w780'), posterUrl(e.backdrop_path, 'w780')].filter((u): u is string => !!u);
 
 /** A 16:9 box reserved before load; an error moves to the next source, none left is a glass .04 tile. */
 export function Still({ e }: { e: CalEpisode }) {
@@ -197,13 +202,24 @@ const Check = () => (
   </svg>
 );
 
-/** Quiet loading: glass .04 rows where the agenda goes (no spinner, no motion). */
+/** Quiet loading that mirrors the week grid: 7 day-header strips and 2–3 glass .04
+ * cards per column at a card's height (16:9 still + text); no spinner, no motion. */
+const LOADING_CARDS = [3, 2, 3, 2, 3, 2, 2];
 function Placeholder() {
   return (
-    <div data-testid="tv-cal-loading" aria-busy="true" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ ...glassCard, background: 'rgba(255,255,255,0.04)', marginTop: 37 }}>
-        {[0, 1, 2].map(i => <span key={i} style={{ display: 'block', height: 72, borderTop: i ? '1px solid rgba(255,255,255,0.04)' : 'none' }} />)}
-      </div>
+    <div data-testid="tv-cal-loading" aria-busy="true" style={gridWrap}>
+      {LOADING_CARDS.map((n, c) => (
+        <div key={c} data-testid="tv-cal-loading-day" style={gridCol}>
+          <span aria-hidden="true" style={{ ...gridHead, display: 'block', background: 'rgba(255,255,255,0.04)' }}>{'\u00a0'}</span>
+          {Array.from({ length: n }, (_, i) => (
+            <span key={i} data-testid="tv-cal-loading-card" style={{ display: 'block', borderRadius: 8, overflow: 'hidden',
+              border: '1px solid rgba(255,255,255,0.04)', background: 'rgba(255,255,255,0.04)' }}>
+              <span style={{ display: 'block', aspectRatio: '16 / 9', background: 'rgba(255,255,255,0.02)' }} />
+              <span style={{ display: 'block', height: CARD_TEXT_H }} />
+            </span>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }
@@ -213,6 +229,11 @@ export const tvCalendarCss = `
 .tvc-glass:hover{background:rgba(255,255,255,.10)!important}
 `;
 
+const gridWrap: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 8 };
+const gridCol: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 };
+const gridHead: React.CSSProperties = { margin: 0, padding: '6px 8px', borderRadius: 8, fontSize: 12, fontWeight: 600, lineHeight: '16px' };
+/** A card's text block: 8 + name 17 + 2 + episode 16 + 2 + time 16 + 8 (one-line name). */
+const CARD_TEXT_H = 69;
 const one: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 /** At most 2 lines, then an ellipsis (week-grid show names). */
 const clamp2: React.CSSProperties = {

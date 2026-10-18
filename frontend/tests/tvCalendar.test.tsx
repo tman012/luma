@@ -84,7 +84,8 @@ describe('stills', () => {
     const e = ep({ tvdb_image: 'https://artworks.thetvdb.com/banners/e.jpg', still_path: '/s.jpg', backdrop_path: '/b.jpg' });
     const chain = stillChain(e);
     expect(chain).toHaveLength(3);
-    expect(chain[0]).toBe('https://artworks.thetvdb.com/banners/e.jpg');
+    expect(chain[0]).toBe('/api/img/tmdb?host=tvdb&path=%2Fbanners%2Fe.jpg');           // through Luma's image proxy, never direct
+    expect(stillChain(ep({ tvdb_image: 'https://evil.example/banners/e.jpg' }))).toHaveLength(0);
     expect(chain[1]).toContain('/s.jpg');
     expect(chain[2]).toContain('/b.jpg');
     expect(stillChain(ep({ still_path: '/s.jpg' }))).toHaveLength(1);
@@ -193,9 +194,18 @@ describe('Calendar', () => {
     expect(rows[0]!.textContent).toContain('Episode 1');
     const name = within(rows[0]!).getByTestId('tv-card-show');                     // up to 2 lines, 13/600
     expect([name.style.webkitLineClamp, name.style.display, name.style.fontSize, name.style.fontWeight]).toEqual(['2', '-webkit-box', '13px', '600']);
-    expect(name.nextElementSibling!.textContent).toBe('S02E01');                    // SxxEyy on the first line, right
-    const title = within(rows[0]!).getByTestId('tv-card-title');                   // 1 line with an ellipsis
-    expect([title.style.whiteSpace, title.style.textOverflow]).toEqual(['nowrap', 'ellipsis']);
+    expect(name.getAttribute('title')).toBe(name.textContent);                     // line 1: the show name only, full width
+    const title = within(rows[0]!).getByTestId('tv-card-title');                   // line 2: SxxEyy · title, 12px, 70%, 1 line
+    expect(name.nextElementSibling).toBe(title);
+    expect(title.textContent).toMatch(/^S\d\dE\d\d \u00b7 /);
+    expect([title.style.whiteSpace, title.style.textOverflow, title.style.fontSize, title.style.color])
+      .toEqual(['nowrap', 'ellipsis', '12px', 'rgba(255, 255, 255, 0.7)']);
+    expect(title.nextElementSibling!.getAttribute('data-testid')).toBe('tv-air');   // line 3: the time
+    // toolbar: ‹ › on the left, the range centered
+    const nav = screen.getByTestId('tv-cal-nav');
+    expect(nav.contains(screen.getByTestId('tv-cal-prev')) && nav.contains(screen.getByTestId('tv-cal-next'))).toBe(true);
+    expect(screen.getByTestId('tv-cal-toolbar').style.gridTemplateColumns).toBe('1fr auto 1fr');
+    expect(screen.getByTestId('tv-cal-label').style.textAlign).toBe('center');
     // rows aren't clickable
     expect(rows.every(r => r.tagName === 'DIV' && !r.querySelector('button, a'))).toBe(true);
   });
@@ -237,8 +247,16 @@ describe('Calendar', () => {
     }));
     page(true);
     const ph = await screen.findByTestId('tv-cal-loading');
-    expect((ph.firstElementChild as HTMLElement).style.background).toBe('rgba(255, 255, 255, 0.04)');
-    expect(ph.firstElementChild!.children).toHaveLength(3);
+    const cols = within(ph).getAllByTestId('tv-cal-loading-day');                  // mirrors the grid: 7 columns
+    expect(cols).toHaveLength(7);
+    expect(ph.style.gridTemplateColumns).toBe('repeat(7, minmax(0, 1fr))');
+    for (const c of cols) {
+      expect((c.firstElementChild as HTMLElement).style.background).toBe('rgba(255, 255, 255, 0.04)');   // a day-header strip
+      const cards = within(c).getAllByTestId('tv-cal-loading-card');
+      expect(cards.length >= 2 && cards.length <= 3).toBe(true);
+      expect(cards[0]!.style.background).toBe('rgba(255, 255, 255, 0.04)');
+      expect((cards[0]!.firstElementChild as HTMLElement).style.aspectRatio).toBe('16 / 9');
+    }
     expect(document.querySelector('.tvi-spin, .tvc-pulse, [class*="spin"]')).toBeNull();
     expect(screen.getByTestId('tv-cal-label').textContent).toBe('Oct 11 \u2013 17');   // the toolbar stays put
     await act(async () => release());

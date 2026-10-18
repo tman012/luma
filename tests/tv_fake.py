@@ -70,7 +70,8 @@ class FakeTmdb:
         titles = s.get('titles', {}).get(n, {})
         return {'name': f'Season {n}', 'episodes': [{'episode_number': e, 'id': tid * 1000 + n * 100 + e,
                                                      'name': titles.get(e, f'Episode {e}'),
-                                                     'air_date': s.get('air', {}).get((n, e), '2022-01-01')}
+                                                     'air_date': s.get('air', {}).get((n, e), '2022-01-01'),
+                                                     'still_path': s.get('stills', {}).get((n, e))}
                                                     for e in range(1, s['seasons'][n] + 1)]}
 
 

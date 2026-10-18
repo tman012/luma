@@ -81,7 +81,8 @@ def store(sid: int, tmdb_id: int, maze_id: Optional[int], eps: Dict[tuple, Dict[
     return True
 
 
-def refresh(now: Optional[float] = None, first: Optional[set] = None) -> int:
+def refresh(now: Optional[float] = None, first: Optional[set] = None, repair: Optional[set] = None,
+            only: Optional[set] = None) -> int:
     """Air times for the selected libraries' shows not asked in REFRESH_S. Returns shows written."""
     from app import tv_settings
     now = time.time() if now is None else now
@@ -92,7 +93,10 @@ def refresh(now: Optional[float] = None, first: Optional[set] = None) -> int:
         rows = [dict(r) for r in conn.execute(
             'SELECT id, tmdb_id, tvdb_id, imdb_id, tvmaze_id, tvmaze_checked_at FROM series WHERE tmdb_id IS NOT NULL'
             f' AND path_id IN ({",".join("?" * len(pids))}) ORDER BY COALESCE(tvmaze_checked_at, 0)', pids)
-            if r['tvmaze_checked_at'] is None or now - r['tvmaze_checked_at'] >= REFRESH_S]
+            if r['tvmaze_checked_at'] is None or now - r['tvmaze_checked_at'] >= REFRESH_S
+            or r['id'] in (repair or ())]          # an aired episode still has no image: ask again
+    if only is not None:
+        rows = [r for r in rows if r['id'] in only]
     first = first or set()
     # the visible week first, then never-asked shows, then the stalest
     rows.sort(key=lambda r: (r['id'] not in first, r['tvmaze_checked_at'] is not None, r['tvmaze_checked_at'] or 0))
@@ -112,7 +116,17 @@ def refresh(now: Optional[float] = None, first: Optional[set] = None) -> int:
             logger.info('Air times unavailable (%s); they wait for the next open', type(e).__name__)
             break
         n += store(r['id'], r['tmdb_id'], mid, eps, now)
+    if rows:
+        logger.info('TV air times%s: %d of %d shows written (%s), %d episodes with a TVDB image',
+                    ' (this week)' if only is not None else '', n, len(rows), 'TheTVDB' if creds[0] else 'TVmaze',
+                    _images([r['id'] for r in rows]))
     return n
+
+
+def _images(ids) -> int:
+    with tv_store.connect() as conn:
+        return conn.execute(f'SELECT COUNT(*) AS n FROM episodes WHERE tvdb_image IS NOT NULL AND series_id IN'
+                            f' ({",".join("?" * len(ids))})', ids).fetchone()['n']
 
 
 def _pace() -> None:

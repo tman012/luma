@@ -42,6 +42,15 @@ export function tmdbImg(url: string | undefined | null): string | null {
   return m ? tmdbProxy(m[2]!, m[1]!) : url;
 }
 
+const TVDB_ART = /^https:\/\/artworks\.thetvdb\.com(\/[A-Za-z0-9/_.-]+)$/;
+
+/** A TheTVDB artwork URL through Luma's image proxy (never loaded direct); anything else is null. */
+export function tvdbImg(url: string | undefined | null): string | null {
+  const m = url ? TVDB_ART.exec(url) : null;
+  if (!m || m[1]!.includes('..') || m[1]!.includes('//')) return null;
+  return withBase(`/api/img/tmdb?host=tvdb&path=${encodeURIComponent(m[1]!)}`);
+}
+
 export function posterUrl(
   path: string | undefined | null,
   size: PosterSize = 'w500',

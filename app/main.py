@@ -12903,11 +12903,37 @@ def img_plex_proxy():
         logger.error(f"Plex image proxy error: {e}")
         return Response('Error fetching image', status=502, mimetype='text/plain', headers=_PLEX_NO_STORE)
 
+_TVDB_ART = 'https://artworks.thetvdb.com'
+
+
+def _img_tvdb(path: str):
+    """One TheTVDB artwork image through the proxy: the host is fixed, the
+    path is a plain image path (no '..', '//', query or odd characters), a
+    redirect is not followed and only an image answer is passed on."""
+    from flask import Response
+    if ('..' in path or '//' in path or len(path) > 300
+            or not re.fullmatch(r'/[A-Za-z0-9/_\-.]+', path)):
+        return 'Invalid path', 400
+    try:
+        with requests.Session() as sess:
+            sess.trust_env = False
+            resp = sess.get(_TVDB_ART + path, timeout=15, allow_redirects=False)
+        ctype = (resp.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+        if resp.status_code != 200 or not ctype.startswith('image/'):
+            return 'Image not found', 404
+        return Response(resp.content, content_type=ctype, headers={'Cache-Control': 'public, max-age=604800'})
+    except requests.RequestException as e:
+        logger.error('TheTVDB image proxy error: %s', type(e).__name__)
+        return 'Error fetching image', 502
+
+
 @app.route('/api/img/tmdb')
 def img_tmdb_proxy():
     """Proxy for TMDb images. Caches aggressively since TMDb images rarely change.
 
     Usage: /api/img/tmdb?path=/xYz123.jpg&size=w500
+    TheTVDB episode images (TV Calendar): /api/img/tmdb?host=tvdb&path=/banners/....jpg
+    (artworks.thetvdb.com only, same path rules; no redirects, images only).
     """
     tmdb_path = request.args.get('path', '')
     size = request.args.get('size', 'w500')
@@ -12918,6 +12944,9 @@ def img_tmdb_proxy():
     # Security: only allow image-like paths
     if not tmdb_path.startswith('/') or not any(tmdb_path.lower().endswith(ext) for ext in ('.jpg', '.jpeg', '.png', '.webp')):
         return 'Invalid path', 400
+
+    if request.args.get('host') == 'tvdb':
+        return _img_tvdb(tmdb_path)
 
     # Validate size parameter
     valid_sizes = {'w92', 'w154', 'w185', 'w342', 'w500', 'w780', 'w1280', 'original'}

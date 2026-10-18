@@ -101,3 +101,41 @@ def test_a_429_pauses_every_worker(mt, monkeypatch):
     t0 = time.monotonic()
     tv_tmdb.wait_turn()
     assert time.monotonic() - t0 >= 0.9
+
+
+def test_the_background_backfill_stays_well_under_the_budget(mt, monkeypatch):
+    """The Calendar-open refresh (stills backfill) peaked at 38/s against the
+    35/s budget: in background() it is paced at 25/s, burst included."""
+    monkeypatch.setattr(tv_tmdb, 'RATE_PER_S', 35.0)
+    monkeypatch.setattr(tv_tmdb, 'BURST', 4)
+    tv_tmdb._bucket.update(tokens=4.0, ts=time.monotonic(), pause_until=0.0)   # a quiet spell: full burst
+    tv_tmdb._bg_bucket.update(tokens=1.0, ts=time.monotonic())
+    stamps, lock = [], threading.Lock()
+
+    def worker():
+        with tv_tmdb.background():
+            for _ in range(8):
+                tv_tmdb.wait_turn()
+                with lock:
+                    stamps.append(time.monotonic())
+    ts = [threading.Thread(target=worker) for _ in range(8)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    stamps.sort()
+    peak = max(sum(1 for s in stamps if a <= s < a + 1.0) for a in stamps)
+    assert peak <= 26                                     # 25/s + 1, never the 35 + 4 burst
+    assert getattr(tv_tmdb._local, 'background', False) is False
+
+
+def test_the_calendar_open_refresh_runs_in_the_background_budget(monkeypatch):
+    from app import tv_scan
+    seen = {}
+    monkeypatch.setattr(tv_scan, 'refresh_added', lambda **k: seen.update(k) or 0)
+    monkeypatch.setattr(tv_scan, '_RefreshThread', type('T', (), {
+        '__init__': lambda self, target, **k: setattr(self, 't', target), 'start': lambda self: self.t()}))
+    from app import tv_airtimes
+    monkeypatch.setattr(tv_airtimes, 'refresh', lambda **k: 0)
+    assert tv_scan.refresh_on_open() is True
+    assert seen.get('background') is True and seen.get('folders') is True

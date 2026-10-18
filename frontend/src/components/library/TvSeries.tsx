@@ -1,5 +1,5 @@
 /** Settings > TV > Series (desktop web): every library show as a 2:3 poster,
- * A–Z ignoring a leading "The", with a downloaded-share bar and "N of M
+ * A–Z ignoring punctuation and a leading The/A/An, with a downloaded-share bar and "N of M
  * episodes", and a sticky # – Z rail. Posters aren't clickable (no show detail yet). */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FONT } from '@/components/start/StartUI';
@@ -13,14 +13,20 @@ const ACCENT = '#3b82f6';
 const RAIL_TOP = 24;
 export const LETTERS = ['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'];
 
-/** The sort key: lower case, without a leading "The ". */
-export const sortKey = (title: string) => title.trim().replace(/^the\s+/i, '').toLowerCase();
+/** The sort key (mirrors tv_scan.sort_title): accents folded, lower case, periods and
+ * apostrophes dropped (S.W.A.T. -> swat), other symbols as spaces, a leading The/A/An ignored. */
+export const sortKey = (title: string) => {
+  const t = (title || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[.'\u2019\u2018`]/g, '').replace(/[^0-9a-z]+/g, ' ').trim();
+  return t.replace(/^(?:the|a|an) (?=\S)/, '') || t;
+};
+const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 export const letterOf = (title: string) => {
   const c = sortKey(title).charAt(0).toUpperCase();
   return c >= 'A' && c <= 'Z' ? c : '#';
 };
 export const sortShows = (shows: Show[]) =>
-  [...shows].sort((a, b) => sortKey(a.title).localeCompare(sortKey(b.title)) || (a.year ?? 0) - (b.year ?? 0));
+  [...shows].sort((a, b) => cmp(sortKey(a.title), sortKey(b.title)) || (a.year ?? 0) - (b.year ?? 0));
 
 /** Bar color: red when aired episodes are missing, blue when it continues with none missing, green when complete. */
 export function progress(s: Show): { fill: number; color: string; state: 'missing' | 'continuing' | 'complete' } {
@@ -41,7 +47,7 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
     return m;
   }, [sorted]);
   const [current, setCurrent] = useState<string | null>(null);
-  const [pin, setPin] = useState<{ mode: 'top' | 'fixed' | 'bottom'; left: number }>({ mode: 'top', left: 0 });
+  const pinned = useRef<{ mode: string; left: number }>({ mode: '', left: -1 });
   const col = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLElement>(null);
@@ -57,20 +63,33 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
       if (j && j.getBoundingClientRect().top >= -1) cur = jumped.current;      // still on its way, or the page ended
       else jumped.current = null;
       setCurrent(cur);
-      // sticky at top 24px, by hand: the app's body is a scroll container (overflow: auto), which pins
-      // position: sticky to it instead of the page. While stuck the rail is position: fixed (the compositor
-      // keeps it still: no per-frame moves, no jitter); state changes only at the two edges.
-      const box = root.current?.getBoundingClientRect();
-      const h = railRef.current?.offsetHeight || 0;
-      const left = Math.round(col.current?.getBoundingClientRect().left || 0);
-      if (box) {
-        const mode = box.top >= RAIL_TOP || box.height <= h ? 'top' : box.bottom - h < RAIL_TOP ? 'bottom' : 'fixed';
-        setPin(p => (p.mode === mode && p.left === left ? p : { mode, left }));
-      }
     };
-    // at most once a frame: the reads (a few rects) happen in the rAF, the write is one React state update
+    // sticky at top 24px, by hand: the app's body is a scroll container (overflow: auto), which pins
+    // position: sticky to it instead of the page. While stuck the rail is position: fixed (the compositor
+    // keeps it still: no per-frame moves). The pin is set synchronously, in the scroll event that crosses
+    // the edge (two rect reads, then style writes only when the mode changes), so the frame that crosses
+    // is already painted pinned: no one-frame snap.
+    const pin = () => {
+      const nav = railRef.current;
+      const box = root.current?.getBoundingClientRect();
+      if (!nav || !box) return;
+      const h = nav.offsetHeight;
+      const left = Math.round(col.current?.getBoundingClientRect().left || 0);
+      const mode = box.top >= RAIL_TOP || box.height <= h ? 'top' : box.bottom - h < RAIL_TOP ? 'bottom' : 'fixed';
+      const p = pinned.current;
+      if (p.mode === mode && (mode !== 'fixed' || p.left === left)) return;
+      pinned.current = { mode, left };
+      nav.dataset.pin = mode;
+      Object.assign(nav.style, mode === 'fixed'
+        ? { position: 'fixed', top: `${RAIL_TOP}px`, bottom: '', left: `${left}px` }
+        : mode === 'bottom' ? { position: 'absolute', top: '', bottom: '0px', left: '0px' }
+          : { position: 'absolute', top: '0px', bottom: '', left: '0px' });
+    };
+    // the current letter: at most once a frame (a few rects in the rAF, one React state update)
     let frame = 0;
-    const onEvent = () => { if (!frame) frame = window.requestAnimationFrame(() => { frame = 0; measure(); }); };
+    const onEvent = () => { pin(); if (!frame) frame = window.requestAnimationFrame(() => { frame = 0; measure(); }); };
+    pinned.current = { mode: '', left: -1 };
+    pin();
     measure();
     window.addEventListener('scroll', onEvent, { passive: true, capture: true });
     window.addEventListener('resize', onEvent);
@@ -109,10 +128,9 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
         {sorted.map(s => <Tile key={s.id} s={s} first={firsts.get(letterOf(s.title)) === s.id} />)}
       </div>
       <div ref={col} style={{ width: 28, flex: 'none', alignSelf: 'stretch', position: 'relative' }}>
-      <nav ref={railRef} aria-label="Jump to letter" data-testid="tv-series-rail" data-pin={pin.mode}
-        style={{ width: 28, display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
-          ...(pin.mode === 'fixed' ? { position: 'fixed', top: RAIL_TOP, left: pin.left }
-            : pin.mode === 'bottom' ? { position: 'absolute', bottom: 0, left: 0 } : { position: 'absolute', top: 0, left: 0 }) }}>
+      {/* position, top/bottom/left and data-pin are set by pin() (not by React, so a re-render never undoes them) */}
+      <nav ref={railRef} aria-label="Jump to letter" data-testid="tv-series-rail"
+        style={{ width: 28, display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
         {LETTERS.map(l => {
           const has = firsts.has(l);
           const on = has && l === current;
@@ -156,13 +174,18 @@ function Tile({ s, first }: { s: Show; first: boolean }) {
         <span style={{ display: 'block', height: 4, width: `${Math.round(p.fill * 1000) / 10}%`, background: p.color }} />
       </div>
       <div style={{ paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span style={{ fontSize: 13, fontWeight: 600, color: W95, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title}</span>
-        <span style={{ fontSize: 12, color: W50 }}>{episodesText(s)}</span>
+        <span data-testid="tv-series-name" title={s.title} aria-label={s.title} style={caption}>{s.title}</span>
+        <span data-testid="tv-series-count" style={{ fontSize: 12, color: W50, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{episodesText(s)}</span>
       </div>
     </div>
   );
 }
 
+/** 13/600, 17px lines, at most 2 then an ellipsis; always 2 lines tall so posters and bars line up row to row. */
+const caption: React.CSSProperties = {
+  fontSize: 13, fontWeight: 600, lineHeight: '17px', minHeight: 34, color: W95, overflow: 'hidden', overflowWrap: 'anywhere',
+  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+};
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(128px, 1fr))', gap: 16 };
 const emptyCard: React.CSSProperties = {
   borderRadius: 16, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', height: 160,
