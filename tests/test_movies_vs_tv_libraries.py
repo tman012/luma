@@ -2,6 +2,7 @@
 destinations. Movies file exactly as before TV selected Library paths, for
 every combination of explicit fallback, Movies paths and TV-selected paths."""
 import itertools
+import json
 import logging
 import os
 
@@ -187,14 +188,35 @@ def test_migration_pins_the_previous_fallback_before_adding_any_path(tv_env):
     assert fm.pick_destination(data, INFO)['id'] == 'p_0000a001'
 
 
-def test_migration_never_pins_a_path_tv_takes(tv_env):
+def test_migration_leaves_the_only_movies_path_to_movies(tv_env):
+    # Reviewer F4: a legacy TV folder that is the only Movies path isn't
+    # selected for TV (Movies would silently stop); Movies keep it, pinned
     movies = {'id': 'p_0000a001', 'name': 'Movies', 'path': str(tv_env / 'Movies')}
     fm.save({**fm.load(), 'paths': [movies]})
     _legacy(('t_0000000a', 'Shared', tv_env / 'Movies'), ('t_0000000b', 'TV', tv_env / 'TV'))
+    before = _where_all(tv_env)
     tv_settings.migrate()
     data = fm.load()
-    assert data['fallback_path_id'] is None and len(data['paths']) == 2
-    assert 'p_0000a001' in tv_settings.selected_ids()
+    assert data['fallback_path_id'] == 'p_0000a001' and len(data['paths']) == 2
+    assert 'p_0000a001' not in tv_settings.selected_ids() and len(tv_settings.selected_ids()) == 1
+    assert _where_all(tv_env) == before == str(tv_env / 'Movies')
+    assert 'migration_added' not in json.loads(tv_settings.store_path().read_text())
+
+
+def test_migration_alone_leaves_the_only_movies_path_unselected(tv_env):
+    movies = {'id': 'p_0000a001', 'name': 'Movies', 'path': str(tv_env / 'Movies')}
+    fm.save({**fm.load(), 'paths': [movies]})
+    before = fm.store_path().read_bytes()
+    _legacy(('t_0000000a', 'Movies too', tv_env / 'Movies'))
+    tv_settings.migrate()
+    assert tv_settings.selected_ids() == [] and fm.store_path().read_bytes() == before
+    assert _where_all(tv_env) == str(tv_env / 'Movies')
+
+
+def _where_all(env):
+    from datetime import date
+    p = fm.pick_destination(fm.load(), {'resolution': '1080p', 'source': 'web'}, today=date(2026, 10, 17))
+    return (p or {}).get('path')
 
 
 def test_migration_without_adds_does_not_pin_or_write(tv_env):

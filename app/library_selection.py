@@ -131,8 +131,14 @@ def register(bp: Blueprint, url: str, *, endpoint: str,
             before = get_ids()
             # A path is Movies or TV, never both (PM, M22): a newly selected
             # path can't be a Movies rule destination or the chosen fallback.
-            if set(ids) - set(before) & fm.movies_uses(fm.load()):
+            # That includes the implicit fallback, the single path Movies see (F2).
+            lib = fm.load()
+            if set(ids) - set(before) & fm.movies_uses(lib):
                 return _no_store(jsonify({'errors': {'selected': USED_BY_MOVIES}}), 409)
+            # Selecting or releasing a path changes which paths Movies see; pin
+            # the fallback they file into now so it doesn't move or vanish (F1).
+            if before != ids and fm.pin_fallback(lib):
+                fm.save(lib)
             set_ids(ids)
         if on_change and before != ids:
             on_change(before, ids)

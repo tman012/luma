@@ -41,10 +41,14 @@ def test_tv_cant_select_the_explicit_movies_fallback(owner, three):
     assert tv_settings.selected_ids() == []
 
 
-def test_tv_may_select_an_implicit_single_path(owner, tv_env):  # noqa: F811
-    # no rules, no chosen fallback: nothing chose it for Movies yet
+def test_tv_cant_select_the_implicit_single_path(owner, tv_env):  # noqa: F811
+    # Reviewer F2 / Tester M31: the only path is Movies' implicit fallback, so
+    # TV taking it would silently stop Movies; it counts as used by Movies
     only = _add(owner, 'TV', tv_env / 'TV')
-    assert _put(owner, [only]).status_code == 200
+    before = fm.store_path().read_bytes()
+    r = _put(owner, [only])
+    assert r.status_code == 409 and r.get_json()['errors']['selected'] == 'This path is used by Movies'
+    assert tv_settings.selected_ids() == [] and fm.store_path().read_bytes() == before
 
 
 def test_movies_cant_choose_a_tv_path_as_a_rule_destination(owner, three):

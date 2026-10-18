@@ -484,12 +484,29 @@ def check_rules(body: Dict[str, Any], data: Dict[str, Any]) -> Tuple[Optional[Di
     return {'rules': out, 'fallback_path_id': fb}, {}
 
 
-def movies_uses(data: Dict[str, Any]) -> set:
-    """Library path ids Movies chose: rule destinations and the explicit fallback."""
+def movies_uses(data: Dict[str, Any], taken: Optional[set] = None) -> set:
+    """Library path ids Movies file into: rule destinations and the fallback,
+    explicit or implicit (the single path Movies see; Reviewer F2, M31)."""
     out = {r['path_id'] for r in data['rules']}
     if data.get('fallback_path_id'):
         out.add(data['fallback_path_id'])
+    fb = effective_fallback(data, taken)
+    if fb:
+        out.add(fb['id'])
     return out
+
+
+def pin_fallback(data: Dict[str, Any], taken: Optional[set] = None) -> bool:
+    """Make an implicit fallback explicit before a change that would move or
+    drop it (a path added, a TV selection changed), as the migration does
+    (Reviewer F1). True when *data* changed."""
+    if data.get('fallback_path_id'):
+        return False
+    fb = effective_fallback(data, taken)
+    if not fb:
+        return False
+    data['fallback_path_id'] = fb['id']
+    return True
 
 
 def section_ids() -> set:
@@ -793,6 +810,7 @@ def library_paths_add():
         if errors:
             return None, errors
         rec = {'id': _new_id('p', {p['id'] for p in data['paths']}), 'name': name, 'path': path}
+        pin_fallback(data)              # the single Movies path stays the fallback (F1)
         data['paths'].append(rec)
         return rec, {}
 

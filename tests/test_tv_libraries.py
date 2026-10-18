@@ -37,6 +37,19 @@ def owner(minimal_app, tv_env):
     return _client(minimal_app)
 
 
+FILMS = 'p_f11f11f1'
+
+
+@pytest.fixture
+def films(tv_env):
+    """Movies already file into a 'Films' path they chose (explicit fallback),
+    so a TV path is never Movies' implicit single fallback (Reviewer F1/F2)."""
+    (tv_env / 'Films').mkdir()
+    fm.save({**fm.load(), 'paths': [{'id': FILMS, 'name': 'Films', 'path': str(tv_env / 'Films')}],
+             'fallback_path_id': FILMS})
+    return FILMS
+
+
 def _add(c, name, path):
     r = c.post(FM, json={'name': name, 'path': str(path)}, environ_base=REMOTE, headers=HDR)
     assert r.status_code == 201, r.get_json()
@@ -57,7 +70,7 @@ def _raw_store():
 
 # ---------------------------------------------------------------- selector
 
-def test_lists_library_paths_and_selects_by_reference(owner, tv_env):
+def test_lists_library_paths_and_selects_by_reference(owner, tv_env, films):
     tv = _add(owner, 'TV', tv_env / 'TV')
     anime = _add(owner, 'Anime', tv_env / 'Anime')
     movies = _add(owner, 'Movies', tv_env / 'Movies')
@@ -65,10 +78,10 @@ def test_lists_library_paths_and_selects_by_reference(owner, tv_env):
     assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-store'
     assert r.get_json() == {'selected': [], 'libraries': [
         {'id': i, 'name': n, 'path': str(tv_env / n), 'status': 'ok', 'selected': False}
-        for i, n in ((tv, 'TV'), (anime, 'Anime'), (movies, 'Movies'))]}
+        for i, n in ((films, 'Films'), (tv, 'TV'), (anime, 'Anime'), (movies, 'Movies'))]}
     r = _put(owner, [anime, tv])
     assert r.status_code == 200 and r.get_json()['selected'] == [tv, anime]      # Library paths order
-    assert [x['selected'] for x in r.get_json()['libraries']] == [True, True, False]
+    assert [x['selected'] for x in r.get_json()['libraries']] == [False, True, True, False]
     assert _raw_store()['libraries'] == [tv, anime]                             # ids only, no folders
     assert 'path' not in json.dumps(_raw_store()['libraries'])
     paths = _get(owner, '/api/settings/tv').get_json()['paths']
@@ -78,7 +91,7 @@ def test_lists_library_paths_and_selects_by_reference(owner, tv_env):
     assert _put(owner, []).get_json()['selected'] == [] and tv_settings.libraries() == []
 
 
-def test_a_rename_in_library_paths_shows_in_tv(owner, tv_env):
+def test_a_rename_in_library_paths_shows_in_tv(owner, tv_env, films):
     tv = _add(owner, 'TV', tv_env / 'TV')
     _put(owner, [tv])
     owner.put(f'{FM}/{tv}', json={'name': 'Shows'}, environ_base=REMOTE, headers=HDR)
@@ -93,7 +106,7 @@ def test_a_rename_in_library_paths_shows_in_tv(owner, tv_env):
     ({'selected': [], 'paths': []}, library_selection.INVALID),
     ({}, library_selection.INVALID),
 ])
-def test_only_current_library_paths(owner, tv_env, body, err):
+def test_only_current_library_paths(owner, tv_env, films, body, err):
     tv = _add(owner, 'TV', tv_env / 'TV')
     _put(owner, [tv])
     r = owner.put(URL, json=body, environ_base=REMOTE, headers=HDR)
@@ -101,7 +114,7 @@ def test_only_current_library_paths(owner, tv_env, body, err):
     assert tv_settings.load()['libraries'] == [tv]                       # nothing saved
 
 
-def test_a_repeated_id_counts_once(owner, tv_env):
+def test_a_repeated_id_counts_once(owner, tv_env, films):
     tv = _add(owner, 'TV', tv_env / 'TV')
     assert _put(owner, [tv, tv, tv]).get_json()['selected'] == [tv]
     assert tv_settings.load()['libraries'] == [tv]
@@ -153,7 +166,7 @@ def test_selecting_writes_nothing_in_the_folder(owner, tv_env):
     assert (sorted(os.listdir(tv_env / 'TV')), os.stat(tv_env / 'TV').st_mtime_ns) == before
 
 
-def test_movies_and_tv_never_share_a_library_path(owner, tv_env):
+def test_movies_and_tv_never_share_a_library_path(owner, tv_env, films):
     """PM (M22): a path is Movies or TV. Choosing a TV path for Movies is refused."""
     tv = _add(owner, 'TV', tv_env / 'TV')
     _put(owner, [tv])
@@ -178,7 +191,7 @@ def _tv_rows():
                 sorted(r[0] for r in conn.execute('SELECT path_id FROM unmatched')))
 
 
-def test_removing_a_selected_library_path_drops_the_selection_keeps_tv_db(owner, tv_env):
+def test_removing_a_selected_library_path_drops_the_selection_keeps_tv_db(owner, tv_env, films):
     tv = _add(owner, 'TV', tv_env / 'TV')
     anime = _add(owner, 'Anime', tv_env / 'Anime')
     _put(owner, [tv, anime])
@@ -195,7 +208,7 @@ def test_removing_a_selected_library_path_drops_the_selection_keeps_tv_db(owner,
     assert sorted(os.listdir(tv_env / 'TV')) == []                       # folder untouched
 
 
-def test_deselecting_hides_and_reselecting_restores(owner, tv_env):
+def test_deselecting_hides_and_reselecting_restores(owner, tv_env, films):
     tv = _add(owner, 'TV', tv_env / 'TV')
     _put(owner, [tv])
     _seed_rows(tv, 1)
@@ -220,12 +233,13 @@ def _legacy(*paths, **extra):
     tv_settings.store_path().write_text(json.dumps(raw))
 
 
-def test_migration_matching_path_becomes_a_selection(tv_env):
-    fm.save({**fm.load(), 'paths': [{'id': 'p_00000001', 'name': 'Shows', 'path': str(tv_env / 'TV')}]})
+def test_migration_matching_path_becomes_a_selection(tv_env, films):
+    fm.save({**fm.load(), 'paths': [{'id': 'p_00000001', 'name': 'Shows', 'path': str(tv_env / 'TV')}] + fm.load()['paths']})
     _legacy(('t_0000000a', 'TV', str(tv_env / 'TV') + '/'))                  # same folder after normalizing
     _seed_rows('t_0000000a', 1)
     assert tv_settings.migrate() == {'t_0000000a': 'p_00000001'}
-    assert fm.load()['paths'] == [{'id': 'p_00000001', 'name': 'Shows', 'path': str(tv_env / 'TV')}]
+    assert fm.load()['paths'][0] == {'id': 'p_00000001', 'name': 'Shows', 'path': str(tv_env / 'TV')}
+    assert len(fm.load()['paths']) == 2
     assert tv_settings.load()['libraries'] == ['p_00000001'] and tv_settings.load()['paths'] == []
     assert _tv_rows() == (['p_00000001'], ['p_00000001'])
 
@@ -263,8 +277,8 @@ def test_migration_no_match_is_added_to_library_paths(tv_env):
         os.chmod(tv_env / 'Kids TV', 0o755)
 
 
-def test_migration_duplicates_select_once(tv_env):
-    fm.save({**fm.load(), 'paths': [{'id': 'p_00000001', 'name': 'TV', 'path': str(tv_env / 'TV')}]})
+def test_migration_duplicates_select_once(tv_env, films):
+    fm.save({**fm.load(), 'paths': [{'id': 'p_00000001', 'name': 'TV', 'path': str(tv_env / 'TV')}] + fm.load()['paths']})
     _legacy(('t_0000000a', 'TV', tv_env / 'TV'), ('t_0000000b', 'TV again', f'{tv_env}/TV/'),
             ('t_0000000c', 'Anime', tv_env / 'Anime'), ('t_0000000d', 'Anime 2', f'{tv_env}//Anime'))
     _seed_rows('t_0000000a', 1)
@@ -273,10 +287,10 @@ def test_migration_duplicates_select_once(tv_env):
         conn.execute("INSERT INTO unmatched (path_id, folder, ts) VALUES ('t_0000000b', 'other', 0)")
     mapping = tv_settings.migrate()
     paths = fm.load()['paths']
-    assert len(paths) == 2 and paths[1]['name'] == 'Anime'
+    assert len(paths) == 3 and paths[2]['name'] == 'Anime'
     assert mapping == {'t_0000000a': 'p_00000001', 't_0000000b': 'p_00000001',
-                       't_0000000c': paths[1]['id'], 't_0000000d': paths[1]['id']}
-    assert tv_settings.load()['libraries'] == ['p_00000001', paths[1]['id']]
+                       't_0000000c': paths[2]['id'], 't_0000000d': paths[2]['id']}
+    assert tv_settings.load()['libraries'] == ['p_00000001', paths[2]['id']]
     with tv_store.connect() as conn:
         assert sorted(tuple(r) for r in conn.execute('SELECT path_id, folder FROM unmatched')) == [
             ('p_00000001', 'other'), ('p_00000001', 'u1')]
@@ -329,7 +343,7 @@ def test_main_migrates_on_start():
 
 # ---------------------------------------------------------------- added back later
 
-def test_a_removed_library_added_back_keeps_its_shows(owner, fake_tmdb, tv_env, tmp_path):  # noqa: F811
+def test_a_removed_library_added_back_keeps_its_shows(owner, fake_tmdb, tv_env, films, tmp_path):  # noqa: F811
     from tests.tv_tree import build
     root = build(tv_env / 'TV', outside=tmp_path / 'outside')
     first = _add(owner, 'TV', root)

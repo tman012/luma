@@ -162,6 +162,12 @@ def _normalize(raw: Any) -> Dict[str, Any]:
     r = raw.get('rescan_interval_h')
     if isinstance(r, int) and not isinstance(r, bool) and 1 <= r <= 168:
         d['rescan_interval_h'] = r
+    # Library paths a migration interrupted mid-way added (only while it runs)
+    added = raw.get('migration_added')
+    if isinstance(added, list) and d['paths']:
+        ids = [x for x in added if isinstance(x, str) and _LIB_ID_RE.match(x)]
+        if ids:
+            d['migration_added'] = ids[:MAX_PATHS]
     return d
 
 
@@ -325,15 +331,17 @@ def migrate() -> Dict[str, str]:
         if not data['paths']:
             return {}
         lib = fm.load()
-        movies_before = list(fm.movies_only(lib)['paths'])
+        ours = set(data.get('migration_added') or [])          # a rerun after a crash
+        movies_before = [p for p in fm.movies_only(lib)['paths'] if p['id'] not in ours]
         # Before adding any path, pin the fallback to the previous effective one
         # (an implicit single-path fallback would otherwise vanish or move).
         pinned = False
         adds = [r for r in data['paths'] if not any(_same_folder(p['path'], r['path']) for p in lib['paths'])]
-        # (Not when TV takes that path itself: a path is Movies or TV, not both.)
-        if (adds and lib['fallback_path_id'] is None and len(movies_before) == 1
-                and not any(_same_folder(movies_before[0]['path'], r['path']) for r in data['paths'])):
-            lib['fallback_path_id'] = movies_before[0]['id']
+        # A legacy TV folder that is the only Movies path stays with Movies: it
+        # isn't selected for TV (Movies would silently stop); the owner decides (F4).
+        movies_only_path = movies_before[0]['id'] if len(movies_before) == 1 else None
+        if adds and lib['fallback_path_id'] is None and movies_only_path:
+            lib['fallback_path_id'] = movies_only_path
             pinned = True
         added, mapping = 0, {}
         for rec in data['paths']:
@@ -348,16 +356,19 @@ def migrate() -> Dict[str, str]:
                 added += 1
             mapping[rec['id']] = hit['id']
         if added or pinned:
-            fm.save(lib)                  # first: a rerun after a crash then matches these
+            if added:                     # remembered first: a rerun never takes them for Movies' own
+                save({**data, 'migration_added': sorted(ours | {mapping[r['id']] for r in adds})})
+            fm.save(lib)                  # then: a rerun after a crash matches these
         for old, new in mapping.items():
             if old != new:
                 _move_rows(old, new)
-        chosen = set(data['libraries']) | set(mapping.values())
+        chosen = set(data['libraries']) | (set(mapping.values()) - {movies_only_path})
         data['libraries'] = [p['id'] for p in lib['paths'] if p['id'] in chosen]
         data['rules'] = [dict(r, path_id=mapping.get(r.get('path_id'), r.get('path_id'))) for r in data['rules']]
         if data['fallback_path_id'] in mapping:
             data['fallback_path_id'] = mapping[data['fallback_path_id']]
         data['paths'] = []
+        data.pop('migration_added', None)
         save(data)
     logger.info('TV paths moved to Library paths: %d selected, %d added', len(set(mapping.values())), added)
     return mapping
