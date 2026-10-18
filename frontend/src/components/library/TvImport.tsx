@@ -235,8 +235,7 @@ function ReviewRow({ u, wide, first, checked, pick, fading, disabled, open, onOp
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}>{u.folder}</span>
         <span style={{ flex: 1, minWidth: 0, maxWidth: 520 }}>{trigger}</span>
-        <span style={{ flex: 1 }} />
-        {dup && <span data-testid="tv-duplicate" style={{ fontSize: 12, color: AMBER, fontFamily: FONT, flex: 'none' }}>Duplicate</span>}
+        {dup && <span data-testid="tv-duplicate" style={{ fontSize: 12, color: AMBER, fontFamily: FONT, flex: 'none', marginLeft: 'auto' }}>Duplicate</span>}
         {picker}
       </div>
     );
@@ -353,6 +352,13 @@ export function ShowPicker({ wide, anchor, initial, year, suggestions, current, 
     return () => window.clearTimeout(t);
   }, [q, search]);
 
+  const [up, setUp] = useState(false);     // desktop: opens upward when there's no room below
+  useLayoutEffect(() => {
+    if (!wide || !panel.current) return;
+    const b = panel.current.getBoundingClientRect();
+    const a = anchor.current?.getBoundingClientRect();
+    if (b.bottom > window.innerHeight && a && a.top - b.height - 8 > 0) setUp(true);
+  }, [wide, anchor, results]);
   const list = results.slice(0, PICKER_MAX);
   const body = (
     <>
@@ -411,7 +417,8 @@ export function ShowPicker({ wide, anchor, initial, year, suggestions, current, 
   return (
     <div ref={panel} role="dialog" aria-label="Choose show" data-testid="tv-picker"
       style={{
-        position: 'absolute', zIndex: 50, top: '100%', left: popoverLeft(anchor.current), marginTop: -6,
+        position: 'absolute', zIndex: 50, left: popoverLeft(anchor.current),
+        ...(up ? { bottom: '100%', marginBottom: -6 } : { top: '100%', marginTop: -6 }),
         width: POPOVER_W, maxWidth: 'calc(100vw - 32px)', display: 'flex', flexDirection: 'column', gap: 8, padding: 12, boxSizing: 'border-box',
         borderRadius: 14, background: NAVY_GLASS_POPOVER, border: NAVY_GLASS_BORDER, boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
         backdropFilter: 'blur(24px) saturate(160%)', WebkitBackdropFilter: 'blur(24px) saturate(160%)',
