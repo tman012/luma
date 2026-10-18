@@ -19,9 +19,10 @@ export function LoginPage() {
   const { login, authenticated, loading, needsStart, pinUnlock, signupOpen, implicit } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  // Signed in implicitly (LAN, no sign-in) and sent here to sign in for a
-  // destructive action: show the form instead of bouncing back.
-  const signingIn = implicit && !!(location.state as { signIn?: boolean } | null)?.signIn;
+  // Sent here by a "Sign in to …" button (an implicit LAN session, or a
+  // session the server says expired while this tab still thinks it's signed
+  // in): show the form instead of bouncing back. After signing in, go back.
+  const signingIn = !!(location.state as { signIn?: boolean } | null)?.signIn;
 
   const [flow, setFlow] = useState<Flow>(
     (location.state as any)?.flow === 'signup' ? 'signup' : 'signin',
@@ -80,6 +81,10 @@ export function LoginPage() {
     if (!email.trim() || !pin) return;
     setBusy(true); setError('');
     const result = await login(email.trim(), pin);
+    if (result.success && signingIn) {
+      navigate((location.state as { from?: string } | null)?.from || '/', { replace: true });
+      return;
+    }
     if (!result.success) { setError(result.error || INVALID_LOGIN); setPin(''); setBusy(false); setTimeout(() => pinRef.current?.focus(), 0); }
   }
 
