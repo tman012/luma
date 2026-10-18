@@ -41,7 +41,7 @@ class Fake:
 @pytest.fixture
 def fake(monkeypatch):
     monkeypatch.setenv('LUMA_TMDB_BASE_URL', 'http://tmdb.test/3')
-    monkeypatch.setattr(tv_tmdb, 'MIN_GAP_S', 0)
+    monkeypatch.setattr(tv_tmdb, 'RATE_PER_S', 0)
     monkeypatch.setattr(tv_tmdb.time, 'sleep', lambda s: None)
     f = Fake([])
     tv_tmdb.init(get_key=lambda: 'k' * 32, session_factory=f.factory)
@@ -83,7 +83,7 @@ def test_errors(fake, caplog):
     assert str(e.value) == tv_tmdb.UNREACHABLE
     fake.answers = [Resp(429, {}, {'Retry-After': '1'}), Resp(body={'results': []})]
     assert tv_tmdb.search('x') == []                  # one retry after a rate limit
-    fake.answers = [Resp(429, {}), Resp(429, {})]
+    fake.answers = [Resp(429, {})] * tv_tmdb.ATTEMPTS
     with pytest.raises(tv_tmdb.TmdbError) as e:       # Tester tv1-8646479 M5
         tv_tmdb.search('x')
     assert str(e.value) == tv_tmdb.BUSY == 'TMDB is busy. Try again later.'
@@ -123,7 +123,7 @@ def test_real_session_ignores_proxy_env(monkeypatch):
             seen.append(self.trust_env)
             raise requests.ConnectionError('offline')
     monkeypatch.setenv('HTTPS_PROXY', 'http://proxy.invalid:3128')
-    monkeypatch.setattr(tv_tmdb, 'MIN_GAP_S', 0)
+    monkeypatch.setattr(tv_tmdb, 'RATE_PER_S', 0)
     tv_tmdb.init(get_key=lambda: 'k' * 32, session_factory=Rec)
     with pytest.raises(tv_tmdb.TmdbError):
         tv_tmdb.search('x')

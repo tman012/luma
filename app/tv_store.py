@@ -149,8 +149,24 @@ CREATE INDEX episode_files_series ON episode_files(series_id);
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
 """
 
+# TV Import: a folder's confidence tier and best guess (review pre-selects
+# it), episode-group numbering per show, and a 24 h TMDB answer cache.
+SCHEMA_V3 = """
+ALTER TABLE unmatched ADD COLUMN tier TEXT NOT NULL DEFAULT 'none'
+  CHECK (tier IN ('likely', 'none', 'duplicate'));
+ALTER TABLE unmatched ADD COLUMN pick INTEGER;
+ALTER TABLE series ADD COLUMN match_tier TEXT;
+CREATE TABLE episode_numbering (
+  series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+  season_number INTEGER NOT NULL, episode_number INTEGER NOT NULL,
+  episode_id INTEGER NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+  PRIMARY KEY (series_id, season_number, episode_number)
+);
+CREATE TABLE tmdb_cache (key TEXT PRIMARY KEY, ts REAL NOT NULL, body TEXT NOT NULL);
+"""
+
 # MIGRATIONS[n] takes user_version n to n + 1.
-MIGRATIONS: List[str] = [SCHEMA_V1, SCHEMA_V2]
+MIGRATIONS: List[str] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 

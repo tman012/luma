@@ -387,7 +387,7 @@ def db(tmp_path):
 
 
 def test_schema_is_created_with_wal_and_0600(db):
-    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 2
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 3
     with tv_store.connect() as conn:
         assert conn.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -461,7 +461,7 @@ def test_a_version_1_file_migrates_to_version_2(db):
     conn.execute('PRAGMA user_version = 1')
     conn.commit()
     conn.close()
-    assert tv_store.schema_version() == 2
+    assert tv_store.schema_version() == 3
     with tv_store.connect() as conn:
         assert conn.execute('SELECT state, parsed FROM episode_files').fetchone()[:] == ('linked', None)
         with pytest.raises(sqlite3.IntegrityError):
