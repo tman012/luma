@@ -9,7 +9,7 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
 import { SEARCH_DEBOUNCE_MS } from '@/components/library/TvSearch';
-import { CAL_MAX_W } from '@/components/library/TvCalendar';
+import { CAL_MAX_W, Still, stillChain } from '@/components/library/TvCalendar';
 import {
   addDays, agendaLabel, byDay, episodeState, isDay, localDay, seasonsText, shortDate, weekDays, weekLabel, weekStart, type CalEpisode,
   timeRange,
@@ -76,6 +76,36 @@ const page = (wide: boolean, at = '/settings/tv') => render(
 const calCalls = () => calls.filter(c => c.url.startsWith('/api/settings/tv/calendar')).map(c => c.url.replace('/api/settings/tv/calendar?', ''));
 
 // ---------------------------------------------------------------- dates
+
+describe('stills', () => {
+  const ep = (o: Partial<CalEpisode>): CalEpisode => ({ episode_id: 1, series_id: 1, show: 'Severance', year: 2022, poster_path: null,
+    season: 2, episode: 1, title: 'Hello', air_date: '2026-10-12', downloaded: false, ...o });
+  it('TVDB image, then the TMDB still, then the backdrop; onError moves on; none left is a glass tile, never a broken image', () => {
+    const e = ep({ tvdb_image: 'https://artworks.thetvdb.com/banners/e.jpg', still_path: '/s.jpg', backdrop_path: '/b.jpg' });
+    const chain = stillChain(e);
+    expect(chain).toHaveLength(3);
+    expect(chain[0]).toBe('https://artworks.thetvdb.com/banners/e.jpg');
+    expect(chain[1]).toContain('/s.jpg');
+    expect(chain[2]).toContain('/b.jpg');
+    expect(stillChain(ep({ still_path: '/s.jpg' }))).toHaveLength(1);
+    render(<Still e={e} />);
+    const box = screen.getByTestId('tv-still');
+    expect(box.style.aspectRatio).toBe('16 / 9');
+    let img = box.querySelector('img')!;
+    expect([img.getAttribute('src'), img.getAttribute('alt'), img.getAttribute('loading')]).toEqual([chain[0], 'Severance S02E01', 'lazy']);
+    expect([img.style.width, img.style.objectFit, img.style.opacity, img.style.transition]).toEqual(['100%', 'cover', '0', 'opacity 150ms']);
+    fireEvent.error(img);
+    img = box.querySelector('img')!;
+    expect(img.getAttribute('src')).toBe(chain[1]);
+    fireEvent.load(img);
+    expect(img.style.opacity).toBe('1');
+    fireEvent.error(img);
+    expect(box.querySelector('img')!.getAttribute('src')).toBe(chain[2]);
+    fireEvent.error(box.querySelector('img')!);
+    expect(box.querySelector('img')).toBeNull();
+    expect(box.style.background).toBe('rgba(255, 255, 255, 0.04)');
+  });
+});
 
 describe('air times', () => {
   it('a range in the viewer zone, across DST and the meridiem; no airstamp is no time', () => {

@@ -286,14 +286,22 @@ def _store_episodes(conn, sid: int, seasons: Dict[int, Dict[str, Any]]) -> None:
                 continue
             conn.execute(
                 'INSERT INTO episodes (series_id, season_number, episode_number, tmdb_episode_id, title, overview,'
-                ' air_date, runtime, monitored) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)'
+                ' air_date, runtime, still_path, monitored) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)'
                 ' ON CONFLICT(series_id, season_number, episode_number) DO UPDATE SET'
                 ' tmdb_episode_id = excluded.tmdb_episode_id, title = excluded.title, overview = excluded.overview,'
-                ' air_date = excluded.air_date, runtime = excluded.runtime',
+                ' air_date = excluded.air_date, runtime = excluded.runtime, still_path = excluded.still_path',
                 (sid, n, num, ep.get('id') if isinstance(ep.get('id'), int) else None,
                  str(ep.get('name') or '')[:300] or None, str(ep.get('overview') or '')[:2000] or None,
                  ep.get('air_date') if isinstance(ep.get('air_date'), str) else None,
-                 ep.get('runtime') if isinstance(ep.get('runtime'), int) else None))
+                 ep.get('runtime') if isinstance(ep.get('runtime'), int) else None,
+                 _image_path(ep.get('still_path'))))
+
+
+def _image_path(v: Any) -> Optional[str]:
+    """A TMDB image path ('/abc.jpg'), else None."""
+    if isinstance(v, str) and v.startswith('/') and len(v) <= 200 and v.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+        return v
+    return None
 
 
 def refresh_episodes(sid: int, tmdb_id: int, now: float, data: Optional[Dict[str, Any]] = None) -> None:

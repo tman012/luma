@@ -54,7 +54,7 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
         with tv_store.connect() as conn:
             for r in conn.execute(
                     'SELECT e.id, e.series_id, e.season_number, e.episode_number, e.title, e.air_date, e.airstamp,'
-                    ' COALESCE(e.air_runtime, e.runtime) AS minutes,'
+                    ' COALESCE(e.air_runtime, e.runtime) AS minutes, e.still_path, e.tvdb_image, s.backdrop_path,'
                     ' s.title AS show, s.year, s.poster_path,'
                     ' EXISTS (SELECT 1 FROM episode_file_links l JOIN episode_files f ON f.id = l.file_id'
                     "         WHERE l.episode_id = e.id AND f.state = 'linked') AS downloaded"
@@ -66,6 +66,7 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
                             'poster_path': r['poster_path'], 'season': r['season_number'],
                             'episode': r['episode_number'], 'title': r['title'] or '', 'air_date': r['air_date'],
                             'airstamp': r['airstamp'], 'runtime': r['minutes'],
+                            'tvdb_image': r['tvdb_image'], 'still_path': r['still_path'], 'backdrop_path': r['backdrop_path'],
                             'downloaded': bool(r['downloaded'])})
     return {'start': start.isoformat(), 'days': days, 'episodes': out, 'libraries': len(paths),
             'refreshed_at': _last_refresh()}

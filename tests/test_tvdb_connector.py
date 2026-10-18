@@ -46,7 +46,8 @@ class Tvdb:
             return 200, {'data': {'airsTime': s['airs'], 'originalNetwork': {'country': s['country']}}}
         if params.get('page', 0) > 0:
             return 200, {'data': {'episodes': []}}
-        return 200, {'data': {'episodes': [{'seasonNumber': se, 'number': n, 'aired': a, 'runtime': rt}
+        return 200, {'data': {'episodes': [{'seasonNumber': se, 'number': n, 'aired': a, 'runtime': rt,
+                                            'image': s.get('images', {}).get((se, n))}
                                            for (se, n), (a, rt) in s['eps'].items()]}}
 
 
@@ -142,7 +143,7 @@ def test_no_key_falls_back_to_tvmaze_and_a_401_logs_in_again(scanned, tvdb, monk
     tvdb.series[371980] = {'airs': '21:00', 'country': 'usa', 'eps': {(2, 1): ('2026-10-12', 42)}}
     tvdb.expire_after = 2
     creds = (KEY, '')
-    assert tv_tvdb.episodes(371980, creds, lambda: None) == {(2, 1): {'airstamp': '2026-10-13T01:00:00+00:00', 'runtime': 42}}
+    assert tv_tvdb.episodes(371980, creds, lambda: None) == {(2, 1): {'airstamp': '2026-10-13T01:00:00+00:00', 'runtime': 42, 'image': None}}
     assert len(tvdb.logins) == 2
 
 
@@ -160,3 +161,32 @@ def test_tvdb_rematch_guard(scanned, tvdb, monkeypatch):  # noqa: F811
     monkeypatch.setattr(tv_tvdb, 'episodes', rematch_meanwhile)
     tv_airtimes.refresh(now=5000.0)
     assert rows('SELECT COUNT(*) AS n FROM episodes WHERE series_id = ? AND airstamp IS NOT NULL', sid)[0]['n'] == 0
+
+
+# ------------------------------------------------------------------ stills
+
+def test_stills_tvdb_image_with_a_key_and_tmdb_still_and_backdrop(scanned, tvdb, monkeypatch):  # noqa: F811
+    from app import tv_scan, tv_store
+    monkeypatch.setattr('app.connectors.tvdb_credentials', lambda: (KEY, ''))
+    tvdb.series[371980] = {'airs': '21:00', 'country': 'usa', 'eps': {(2, 1): ('2026-10-12', 42), (2, 2): ('2026-10-13', 42)},
+                           'images': {(2, 1): '/banners/episodes/371980/1.jpg', (2, 2): 'https://evil.example/x.jpg'}}
+    sid = rows('SELECT id FROM series WHERE tmdb_id = 95396')[0]['id']
+    with tv_store.write() as conn:                                     # TMDB's still for S02E02 (the season read)
+        tv_scan._store_episodes(conn, sid, {2: {'episodes': [{'episode_number': 2, 'name': 'Episode 2', 'air_date': '2026-10-13',
+                                                              'still_path': '/still22.jpg'},
+                                                             {'episode_number': 3, 'name': 'Episode 3', 'air_date': '2026-10-14',
+                                                              'still_path': 'javascript:x'}]}})
+        conn.execute("UPDATE series SET backdrop_path = '/bd.jpg' WHERE id = ?", (sid,))
+    tv_airtimes.refresh(now=5000.0)
+    out = {(e['season'], e['episode']): (e['tvdb_image'], e['still_path'], e['backdrop_path'])
+           for e in tv_calendar.calendar(dt.date(2026, 10, 11), 7)['episodes'] if e['show'] == 'Severance'}
+    assert out[(2, 1)][0] == 'https://artworks.thetvdb.com/banners/episodes/371980/1.jpg'
+    assert out[(2, 2)] == (None, '/still22.jpg', '/bd.jpg')            # a foreign host is never stored
+    assert out[(2, 3)] == (None, None, '/bd.jpg')                      # not an image path: dropped
+
+
+def test_tvdb_image_urls_only_from_the_artwork_host():
+    assert tv_tvdb.image_url('/banners/a.jpg') == 'https://artworks.thetvdb.com/banners/a.jpg'
+    assert tv_tvdb.image_url('https://artworks.thetvdb.com/banners/a.jpg') == 'https://artworks.thetvdb.com/banners/a.jpg'
+    for bad in (None, '', 'https://evil.example/a.jpg', 'https://artworks.thetvdb.com.evil/a.jpg', '/a b.jpg', 7):
+        assert tv_tvdb.image_url(bad) is None

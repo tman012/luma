@@ -73,8 +73,9 @@ def store(sid: int, tmdb_id: int, maze_id: Optional[int], eps: Dict[tuple, Dict[
             return False
         conn.execute('UPDATE series SET tvmaze_id = ?, tvmaze_checked_at = ? WHERE id = ?', (maze_id, now, sid))
         for (s, n), v in eps.items():
-            conn.execute('UPDATE episodes SET airstamp = ?, air_runtime = ? WHERE series_id = ? AND season_number = ?'
-                         ' AND episode_number = ?', (v['airstamp'], v['runtime'], sid, s, n))
+            conn.execute('UPDATE episodes SET airstamp = ?, air_runtime = ?, tvdb_image = ? WHERE series_id = ?'
+                         ' AND season_number = ? AND episode_number = ?',
+                         (v.get('airstamp'), v.get('runtime'), v.get('image'), sid, s, n))
     return True
 
 

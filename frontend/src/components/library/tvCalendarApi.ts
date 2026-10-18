@@ -13,6 +13,8 @@ export interface CalEpisode {
   air_time?: string | null;
   /** UTC air time (TVDB, else TVmaze) and minutes; null: the date only. */
   airstamp?: string | null; runtime?: number | null;
+  /** Card still sources: TheTVDB episode image (with a key), TMDB still, show backdrop. */
+  tvdb_image?: string | null; still_path?: string | null; backdrop_path?: string | null;
 }
 
 /** '9:00 – 9:42 PM' (or '11:30 PM – 12:10 AM') in the viewer's zone (*timeZone* for tests); null without an airstamp. */

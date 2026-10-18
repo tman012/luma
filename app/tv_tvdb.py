@@ -107,6 +107,18 @@ def _get(path: str, creds: Tuple[str, str], params: Optional[Dict[str, Any]] = N
     return None
 
 
+ART = 'https://artworks.thetvdb.com'
+
+
+def image_url(v: Any) -> Optional[str]:
+    """An episode image on TheTVDB's artwork host (a relative '/banners/...' gets the host), else None."""
+    if not isinstance(v, str) or not v or len(v) > 300 or any(c in v for c in ' "<>'):
+        return None
+    if v.startswith('/'):
+        v = ART + v
+    return v if v.startswith(ART + '/') else None
+
+
 def zone_for(country: Optional[str]) -> Optional[str]:
     return COUNTRY_TZ.get(str(country or '').lower()) if country else None
 
@@ -145,8 +157,9 @@ def episodes(tvdb_id: int, creds: Tuple[str, str], pace: Callable[[], None]) -> 
                 continue
             stamp = airstamp(e.get('aired'), airs, tz)
             rt = e.get('runtime') if isinstance(e.get('runtime'), int) and 0 < e.get('runtime') < 1000 else None
-            if stamp:
-                out[(s, n)] = {'airstamp': stamp, 'runtime': rt}
+            img = image_url(e.get('image'))
+            if stamp or img:
+                out[(s, n)] = {'airstamp': stamp, 'runtime': rt, 'image': img}
         if len(eps) < 500:
             break
     return out

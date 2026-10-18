@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
 import { Poster } from './TvImport';
+import { posterUrl, tmdbImg } from '@/utils/image';
 import {
   STATE_COLOR, STATE_WORD, addDays, agendaLabel, byDay, code, episodeState, loadCalendar, shortDate, timeRange, weekLabel, weekStart,
   type CalEpisode, type CalendarData, type Day,
@@ -106,18 +107,42 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
   const st = episodeState(e, today);
   return (
     <div data-testid="tv-agenda-row" data-state={st} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`}
-      style={{ position: 'relative', padding: '8px 8px 8px 11px', borderRadius: 8, background: 'rgba(255,255,255,0.06)',
-        border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 2 }}>
+      style={{ position: 'relative', paddingLeft: 3, borderRadius: 8, background: 'rgba(255,255,255,0.06)',
+        border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
       <Stripe color={STATE_COLOR[st]} />
-      <span style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
-        <span style={{ ...one, flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
-        <span style={{ flex: 'none', fontSize: 11, color: W50 }}>{code(e.season, e.episode)}</span>
-      </span>
-      {e.title && <span style={{ ...one, fontSize: 12, color: W70 }}>{e.title}</span>}
-      <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: W50 }}>
-        {st === 'downloaded' && <Check />}
-        {timeRange(e.airstamp, e.runtime) || e.air_time || shortDate(e.air_date)}
-      </span>
+      <Still e={e} />
+      <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+          <span style={{ ...one, flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
+          <span style={{ flex: 'none', fontSize: 11, color: W50 }}>{code(e.season, e.episode)}</span>
+        </span>
+        {e.title && <span style={{ ...one, fontSize: 12, color: W70 }}>{e.title}</span>}
+        <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: W50 }}>
+          {st === 'downloaded' && <Check />}
+          {timeRange(e.airstamp, e.runtime) || e.air_time || shortDate(e.air_date)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Still sources in order: TheTVDB image (key set), TMDB episode still, show backdrop. */
+export const stillChain = (e: CalEpisode): string[] =>
+  [tmdbImg(e.tvdb_image), posterUrl(e.still_path, 'w780'), posterUrl(e.backdrop_path, 'w780')].filter((u): u is string => !!u);
+
+/** A 16:9 box reserved before load; an error moves to the next source, none left is a glass .04 tile. */
+export function Still({ e }: { e: CalEpisode }) {
+  const chain = stillChain(e);
+  const [i, setI] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+  const src = chain[i];
+  return (
+    <div data-testid="tv-still" style={{ position: 'relative', width: '100%', aspectRatio: '16 / 9', background: 'rgba(255,255,255,0.04)', overflow: 'hidden' }}>
+      {src && (
+        <img key={src} src={src} alt={`${e.show} ${code(e.season, e.episode)}`} loading="lazy"
+          onLoad={() => setLoaded(true)} onError={() => { setLoaded(false); setI(n => n + 1); }}
+          style={{ display: 'block', width: '100%', aspectRatio: '16 / 9', objectFit: 'cover', opacity: loaded ? 1 : 0, transition: 'opacity 150ms' }} />
+      )}
     </div>
   );
 }

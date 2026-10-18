@@ -174,8 +174,14 @@ ALTER TABLE series ADD COLUMN tvmaze_id INTEGER;
 ALTER TABLE series ADD COLUMN tvmaze_checked_at REAL;
 """
 
+# Calendar stills: TMDB's episode still and TheTVDB's episode image (with a key).
+SCHEMA_V5 = """
+ALTER TABLE episodes ADD COLUMN still_path TEXT;
+ALTER TABLE episodes ADD COLUMN tvdb_image TEXT;
+"""
+
 # MIGRATIONS[n] takes user_version n to n + 1.
-MIGRATIONS: List[str] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4]
+MIGRATIONS: List[str] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 
