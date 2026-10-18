@@ -41,14 +41,15 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
     return m;
   }, [sorted]);
   const [current, setCurrent] = useState<string | null>(null);
-  const [shift, setShift] = useState(0);
+  const [pin, setPin] = useState<{ mode: 'top' | 'fixed' | 'bottom'; left: number }>({ mode: 'top', left: 0 });
+  const col = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const railRef = useRef<HTMLElement>(null);
   const jumped = useRef<string | null>(null);         // a rail click wins while its show is on screen (the page end)
 
   useEffect(() => {
     if (!sorted.length) return;
-    const onScroll = () => {
+    const measure = () => {
       const tiles = root.current?.querySelectorAll<HTMLElement>('[data-letter]') || [];
       let cur: string | null = null;
       for (const t of tiles) { if (t.getBoundingClientRect().bottom > 80) { cur = t.dataset.letter || null; break; } }
@@ -56,20 +57,29 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
       if (j && j.getBoundingClientRect().top >= -1) cur = jumped.current;      // still on its way, or the page ended
       else jumped.current = null;
       setCurrent(cur);
-      // sticky at top 24px, by hand: the app's body is a scroll container (overflow: auto), which
-      // pins position: sticky to it instead of the page
+      // sticky at top 24px, by hand: the app's body is a scroll container (overflow: auto), which pins
+      // position: sticky to it instead of the page. While stuck the rail is position: fixed (the compositor
+      // keeps it still: no per-frame moves, no jitter); state changes only at the two edges.
       const box = root.current?.getBoundingClientRect();
       const h = railRef.current?.offsetHeight || 0;
-      if (box) setShift(Math.max(0, Math.min(RAIL_TOP - box.top, box.height - h)));
+      const left = Math.round(col.current?.getBoundingClientRect().left || 0);
+      if (box) {
+        const mode = box.top >= RAIL_TOP || box.height <= h ? 'top' : box.bottom - h < RAIL_TOP ? 'bottom' : 'fixed';
+        setPin(p => (p.mode === mode && p.left === left ? p : { mode, left }));
+      }
     };
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true, capture: true });
-    window.addEventListener('resize', onScroll);
+    // at most once a frame: the reads (a few rects) happen in the rAF, the write is one React state update
+    let frame = 0;
+    const onEvent = () => { if (!frame) frame = window.requestAnimationFrame(() => { frame = 0; measure(); }); };
+    measure();
+    window.addEventListener('scroll', onEvent, { passive: true, capture: true });
+    window.addEventListener('resize', onEvent);
     const user = () => { jumped.current = null; };                    // the user scrolls on their own: follow the page
     window.addEventListener('wheel', user, { passive: true });
     window.addEventListener('keydown', user);
     return () => {
-      window.removeEventListener('scroll', onScroll, { capture: true }); window.removeEventListener('resize', onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', onEvent, { capture: true }); window.removeEventListener('resize', onEvent);
       window.removeEventListener('wheel', user); window.removeEventListener('keydown', user);
     };
   }, [sorted]);
@@ -98,9 +108,11 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
       <div style={{ ...grid, flex: 1, minWidth: 0 }}>
         {sorted.map(s => <Tile key={s.id} s={s} first={firsts.get(letterOf(s.title)) === s.id} />)}
       </div>
-      <nav ref={railRef} aria-label="Jump to letter" data-testid="tv-series-rail"
-        style={{ width: 28, flex: 'none', position: 'relative', transform: shift ? `translateY(${shift}px)` : undefined,
-          display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+      <div ref={col} style={{ width: 28, flex: 'none', alignSelf: 'stretch', position: 'relative' }}>
+      <nav ref={railRef} aria-label="Jump to letter" data-testid="tv-series-rail" data-pin={pin.mode}
+        style={{ width: 28, display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
+          ...(pin.mode === 'fixed' ? { position: 'fixed', top: RAIL_TOP, left: pin.left }
+            : pin.mode === 'bottom' ? { position: 'absolute', bottom: 0, left: 0 } : { position: 'absolute', top: 0, left: 0 }) }}>
         {LETTERS.map(l => {
           const has = firsts.has(l);
           const on = has && l === current;
@@ -115,6 +127,7 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
           );
         })}
       </nav>
+      </div>
     </div>
   );
 }

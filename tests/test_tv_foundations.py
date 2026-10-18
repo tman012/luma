@@ -387,7 +387,7 @@ def db(tmp_path):
 
 
 def test_schema_is_created_with_wal_and_0600(db):
-    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 3
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == len(tv_store.MIGRATIONS) == 6
     with tv_store.connect() as conn:
         assert conn.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -450,7 +450,7 @@ def test_migrations_run_in_order(db, monkeypatch):
         assert 'extra' in [r[1] for r in conn.execute('PRAGMA table_info(series)')]
 
 
-def test_a_version_1_file_migrates_to_version_2(db):
+def test_a_version_1_file_migrates_through_every_version(db):
     db.parent.mkdir(parents=True)
     conn = sqlite3.connect(str(db))
     for stmt in tv_store._statements(tv_store.SCHEMA_V1):
@@ -461,8 +461,15 @@ def test_a_version_1_file_migrates_to_version_2(db):
     conn.execute('PRAGMA user_version = 1')
     conn.commit()
     conn.close()
-    assert tv_store.schema_version() == 3
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 6        # 1 -> 2 -> ... -> 6, every step
     with tv_store.connect() as conn:
+        cols = lambda t: {r[1] for r in conn.execute(f'PRAGMA table_info({t})')}            # noqa: E731
+        assert {'state', 'parsed'} <= cols('episode_files')                                 # v2
+        assert {'tier', 'pick'} <= cols('unmatched') and 'match_tier' in cols('series')    # v3
+        assert {'airstamp', 'air_runtime', 'still_path', 'tvdb_image'} <= cols('episodes')  # v4, v5
+        assert {'tvmaze_id', 'tvmaze_checked_at', 'stills_at'} <= cols('series')           # v4, v6
+        assert {'episode_numbering', 'tmdb_cache', 'meta'} <= {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert conn.execute('SELECT state, parsed FROM episode_files').fetchone()[:] == ('linked', None)
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("INSERT INTO series (tmdb_id, title, added_at, path_id, folder) VALUES (2, 'B', 0, 'tp_00000001', 'A')")
@@ -501,3 +508,74 @@ def test_meta(db):
     assert tv_store.get_meta('last_scan') == '2.5'
     tv_store.set_meta('last_scan', None)
     assert tv_store.get_meta('last_scan') is None
+
+
+def test_an_upgrade_backs_up_the_old_file_first_and_a_fresh_create_does_not(db):
+    db.parent.mkdir(parents=True)
+    conn = sqlite3.connect(str(db))
+    conn.execute('PRAGMA journal_mode = WAL')
+    for stmt in tv_store._statements(tv_store.SCHEMA_V1):
+        conn.execute(stmt)
+    conn.execute("INSERT INTO series (tmdb_id, title, added_at) VALUES (7, 'In the WAL', 0)")
+    conn.execute('PRAGMA user_version = 1')
+    conn.commit()                                 # left in the -wal (connection still open, no checkpoint)
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION
+    conn.close()
+    bak = db.parent / 'tv.db.bak-v1'
+    assert bak.exists() and stat.S_IMODE(os.stat(bak).st_mode) == 0o600
+    b = sqlite3.connect(str(bak))
+    assert b.execute('PRAGMA user_version').fetchone()[0] == 1                    # the old schema, untouched
+    assert b.execute('SELECT title FROM series').fetchall() == [('In the WAL',)]   # the -wal's rows made it
+    b.close()
+    assert sorted(p.name for p in db.parent.iterdir() if '.bak-' in p.name) == ['tv.db.bak-v1']
+
+
+def test_a_fresh_create_makes_no_backup(db):
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION
+    assert not [p for p in db.parent.iterdir() if '.bak-' in p.name]
+
+
+def _v1_file(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(path))
+    for stmt in tv_store._statements(tv_store.SCHEMA_V1):
+        conn.execute(stmt)
+    conn.execute('PRAGMA user_version = 1')
+    conn.commit()
+    conn.close()
+
+
+@pytest.mark.parametrize('minimal_build', [False, True], ids=['full', 'minimal'])
+def test_app_creation_migrates_tv_db_to_the_current_schema(tmp_path, minimal_build):
+    """Importing app.main (how both builds create the app) migrates tv.db at
+    boot, backup first: no request needed."""
+    import subprocess
+    import sys
+    data = tmp_path / 'data'
+    _v1_file(data / 'tv.db')
+    env = {**os.environ, 'LUMA_DATA_DIR': str(data), 'BASE_DIR': str(data),
+           'DATABASE_PATH': str(data / 'media.db'), 'SETTINGS_PATH': str(data / 'settings.json'),
+           'LUMA_SKIP_BACKGROUND_THREADS': '1'}
+    env.pop('LUMA_MINIMAL', None)
+    if minimal_build:
+        env['LUMA_MINIMAL'] = '1'
+    root = Path(__file__).resolve().parents[1]
+    r = subprocess.run([sys.executable, '-c', 'import app.main'], cwd=str(root), env=env,
+                       capture_output=True, text=True, timeout=180)
+    assert r.returncode == 0, r.stderr[-2000:]
+    conn = sqlite3.connect(str(data / 'tv.db'))
+    assert conn.execute('PRAGMA user_version').fetchone()[0] == tv_store.SCHEMA_VERSION
+    conn.close()
+    assert (data / 'tv.db.bak-v1').exists()
+    assert 'tv.db ready at schema v%d' % tv_store.SCHEMA_VERSION in r.stderr + r.stdout
+
+
+def test_a_failed_boot_migration_is_logged_and_retried_lazily(db, monkeypatch, caplog):
+    _v1_file(db)
+    real = tv_store._migrate
+    monkeypatch.setattr(tv_store, '_migrate', lambda *a, **k: (_ for _ in ()).throw(sqlite3.OperationalError('database is locked')))
+    with caplog.at_level('ERROR', logger='app.tv_store'):
+        assert tv_store.migrate_on_start() is False          # never raises: boot goes on
+    assert 'will retry on first use' in caplog.text
+    monkeypatch.setattr(tv_store, '_migrate', real)
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION   # the lazy path migrates it

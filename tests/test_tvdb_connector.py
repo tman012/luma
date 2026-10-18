@@ -129,7 +129,8 @@ def test_with_a_key_air_times_come_from_tvdb(scanned, tvdb, monkeypatch):  # noq
     tv_airtimes.refresh(now=5000.0)
     assert _eps(95396) == {(2, 1): ('2026-10-13T01:00:00+00:00', 42)}
     assert _eps(70523) == {(1, 1): ('2026-10-15T07:00:00+00:00', 60)}                    # 09:00 CEST
-    assert maze.calls == []                                                              # TVmaze only without a key
+    asked = {c[1].get('thetvdb') for c in maze.calls if c[0] == '/lookup/shows'}
+    assert not asked & {371980, 334824}                                                  # TVDB knew these: TVmaze not asked
     out = {(e['show'], e['season'], e['episode']): e['airstamp'] for e in tv_calendar.calendar(dt.date(2026, 10, 11), 7)['episodes']}
     assert out[('Severance', 2, 2)] is None                                              # no TVDB data: the date only
 
@@ -190,3 +191,58 @@ def test_tvdb_image_urls_only_from_the_artwork_host():
     assert tv_tvdb.image_url('https://artworks.thetvdb.com/banners/a.jpg') == 'https://artworks.thetvdb.com/banners/a.jpg'
     for bad in (None, '', 'https://evil.example/a.jpg', 'https://artworks.thetvdb.com.evil/a.jpg', '/a b.jpg', 7):
         assert tv_tvdb.image_url(bad) is None
+
+
+# ------------------------------------------------------------------ Reviewer on b07c949
+
+def test_with_a_key_shows_tvdb_lacks_fall_back_to_tvmaze_by_imdb(scanned, tvdb, monkeypatch):  # noqa: F811
+    monkeypatch.setattr('app.connectors.tvdb_credentials', lambda: (KEY, ''))
+    write('UPDATE series SET tvdb_id = NULL WHERE tmdb_id = 70523')                     # Dark: no tvdb_id
+    dark = {'tvdb': -1, 'imdb': 'tt5753856', 'eps': {(1, 1): ('2026-10-15T07:00:00+00:00', 60)}}
+    sev = {'tvdb': -2, 'imdb': 'tt11280740', 'eps': {(2, 1): ('2026-10-13T01:00:00+00:00', 42)}}     # Severance: TVDB 404s
+    maze = Maze({1: dark, 2: sev})
+    tv_airtimes.configure(get=maze, sleep=lambda s: None)
+    tv_airtimes.refresh(now=5000.0)
+    assert _eps(70523) == {(1, 1): ('2026-10-15T07:00:00+00:00', 60)}
+    assert _eps(95396) == {(2, 1): ('2026-10-13T01:00:00+00:00', 42)}
+    assert ('/lookup/shows', {'imdb': 'tt5753856'}) in maze.calls
+    assert any(p == '/series/371980/extended' for p, _ in tvdb.gets)                     # TVDB was asked first
+
+
+class _Redirect:
+    """A requests.Session whose every answer is a 307 to elsewhere."""
+    calls = []
+
+    def __init__(self):
+        self.trust_env = True
+
+    def _go(self, method, url, **kw):
+        _Redirect.calls.append((method, url, kw.get('allow_redirects'), self.trust_env))
+
+        class R:
+            status_code = 307
+            content = b''
+            headers = {'Location': 'https://evil.example/steal'}
+
+            def json(self):
+                return {}
+        return R()
+
+    def post(self, url, **kw):
+        return self._go('POST', url, **kw)
+
+    def get(self, url, **kw):
+        return self._go('GET', url, **kw)
+
+
+def test_a_redirect_is_never_followed(monkeypatch):
+    import requests
+    tv_tvdb.configure()
+    tv_airtimes.configure(get=None, sleep=lambda s: None)
+    _Redirect.calls = []
+    monkeypatch.setattr(requests, 'Session', _Redirect)
+    assert tv_tvdb.check_login(KEY, PIN) == 'Unexpected response'                       # the key and PIN go nowhere else
+    with pytest.raises(requests.HTTPError):
+        tv_airtimes._get('/lookup/shows', {'imdb': 'tt1'})
+    assert [(m, u.split('/')[2], follow, env) for m, u, follow, env in _Redirect.calls] == [
+        ('POST', 'api4.thetvdb.com', False, False), ('GET', 'api.tvmaze.com', False, False)]

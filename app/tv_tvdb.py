@@ -45,6 +45,14 @@ class TvdbError(Exception):
     pass
 
 
+def _session() -> requests.Session:
+    """No proxies or netrc from the environment, and (with allow_redirects=False on every call) no
+    redirects: a 307 must never carry the key, PIN or token anywhere else."""
+    s = requests.Session()
+    s.trust_env = False
+    return s
+
+
 def forget_token() -> None:
     with _lock:
         _tok.update(token=None, **{'for': None})
@@ -57,8 +65,8 @@ def _login(key: str, pin: str) -> Tuple[Optional[str], Optional[str]]:
         if _cfg['post'] is not None:
             status, data = _cfg['post']('/login', body)
         else:
-            r = requests.post(f'{BASE}/login', json=body, timeout=TIMEOUT_S)
-            status, data = r.status_code, (r.json() if r.content else {})
+            r = _session().post(f'{BASE}/login', json=body, timeout=TIMEOUT_S, allow_redirects=False)
+            status, data = r.status_code, (r.json() if r.content and r.status_code == 200 else {})
     except requests.exceptions.Timeout:
         return None, 'Timed out'
     except (requests.RequestException, ValueError):
@@ -95,8 +103,9 @@ def _get(path: str, creds: Tuple[str, str], params: Optional[Dict[str, Any]] = N
         if _cfg['get'] is not None:
             status, data = _cfg['get'](path, params or {}, tok)
         else:
-            r = requests.get(f'{BASE}{path}', params=params, timeout=TIMEOUT_S, headers={'Authorization': f'Bearer {tok}'})
-            status, data = r.status_code, (r.json() if r.content else {})
+            r = _session().get(f'{BASE}{path}', params=params, timeout=TIMEOUT_S, allow_redirects=False,
+                               headers={'Authorization': f'Bearer {tok}'})
+            status, data = r.status_code, (r.json() if r.content and r.status_code == 200 else {})
         if status == 401 and attempt == 0:
             continue
         if status == 404:

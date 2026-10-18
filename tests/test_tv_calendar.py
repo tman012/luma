@@ -3,6 +3,7 @@ downloaded flags, air dates refreshed on open (24h cache), Search ordering, Add
 (owner only, tv.db only, one of the selected TV libraries)."""
 import datetime as dt
 import json
+import threading
 
 import pytest
 
@@ -277,3 +278,54 @@ def test_refresh_survives_tmdb_down(scanned, fake_tmdb):
     tv_calendar.add(6001, None, now=10_000.0)
     fake_tmdb.fail = "Couldn't reach TMDB"
     assert tv_scan.refresh_added(now=10_000.0 + tv_scan.REFRESH_EPISODES_S) == 0
+
+
+# ------------------------------------------------------------------ refresh vs rematch / import (Reviewer on b07c949)
+
+def _ep_rows(sid):
+    return sorted((r['season_number'], r['episode_number'], r['title']) for r in rows(
+        'SELECT season_number, episode_number, title FROM episodes WHERE series_id = ?', sid))
+
+def test_a_rematch_during_a_refresh_never_gets_the_old_shows_episodes(scanned, monkeypatch):  # noqa: F811
+    """Reviewer on b07c949: "Wrong show?" lands (another thread, the real lock) while TMDB's answer for the
+    old show is in flight; the refresh must not write that show's episodes onto the row."""
+    sid = rows('SELECT id FROM series WHERE tmdb_id = 95396')[0]['id']
+    with tv_store.write() as c:
+        c.execute('UPDATE series SET tmdb_refreshed_at = 0 WHERE id = ?', (sid,))
+    real = tv_scan.fetch_show
+    done = {}
+    def fetch(tid, *a, **k):
+        data = real(tid, *a, **k)
+        if tid == 95396 and not done:
+            # the owner's "Wrong show?" lands while the TMDB answer is in flight (another thread, real lock)
+            t = threading.Thread(target=lambda: done.setdefault('r', tv_scan.rematch(sid, 1001, now=7000.0)))
+            t.start(); t.join()
+        return data
+    monkeypatch.setattr(tv_scan, 'fetch_show', fetch)
+    tv_scan.refresh_added(now=1000000.0, folders=True)
+    assert done['r']['ok'], done
+    r = rows('SELECT tmdb_id, tmdb_refreshed_at FROM series WHERE id = ?', sid)[0]
+    nid = rows("SELECT id FROM series WHERE folder = 'Severance (2022)'")[0]['id']
+    assert rows('SELECT tmdb_id FROM series WHERE id = ?', nid)[0]['tmdb_id'] == 1001
+    after = _ep_rows(nid)
+    # only Dark's numbering (S1 x10) remains; no Severance season 2 rows
+    assert {s for s, _, _ in after} <= {1}, after
+    assert len(after) == 3 and r['tmdb_refreshed_at'] != 1000000.0, after
+
+def test_an_import_mid_refresh_keeps_every_shows_episodes(scanned, monkeypatch):  # noqa: F811
+    """Reviewer on b07c949: a whole Import runs while the Calendar refresh is between its read and write."""
+    with tv_store.write() as c:
+        c.execute('UPDATE series SET tmdb_refreshed_at = 0')
+    before = {r['id']: _ep_rows(r['id']) for r in rows('SELECT id FROM series')}
+    real = tv_scan.fetch_show
+    fired = []
+    def fetch(tid, *a, **k):
+        d = real(tid, *a, **k)
+        if not fired:
+            fired.append(1)
+            t = threading.Thread(target=lambda: tv_scan.scan_all(now=8000.0)); t.start(); t.join()
+        return d
+    monkeypatch.setattr(tv_scan, 'fetch_show', fetch)
+    tv_scan.refresh_added(now=1000000.0, folders=True)
+    after = {r['id']: _ep_rows(r['id']) for r in rows('SELECT id FROM series')}
+    assert after == before

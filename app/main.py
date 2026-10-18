@@ -21559,6 +21559,11 @@ from app import tv_tmdb as _tv_tmdb, tv_library_routes as _tv_library_routes
 _tv_tmdb.init(get_key=lambda: settings.get('apis.tmdb.api_key') or os.environ.get('TMDB_API_KEY', ''), cache=True)
 app.register_blueprint(_tv_library_routes.bp)
 
+# tv.db: migrate once at boot (backs up the old file first); a failure is
+# logged and left to the lazy path, never a failed boot.
+from app import tv_store as _tv_store_boot
+_tv_store_boot.migrate_on_start()
+
 
 if __name__ == '__main__':
     # Initialize services (database, caches, background threads)

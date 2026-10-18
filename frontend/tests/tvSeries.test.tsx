@@ -39,7 +39,8 @@ describe('Series grid', () => {
     expect([bar.style.height, bar.style.background]).toEqual(['4px', 'rgba(255, 255, 255, 0.08)']);
     expect((bar.firstElementChild as HTMLElement).style.width).toBe('80%');
     const rail = screen.getByTestId('tv-series-rail');
-    expect(rail.style.width).toBe('28px');                                          // sticky by hand (translateY on scroll)
+    expect(rail.style.width).toBe('28px');
+    expect(rail.getAttribute('data-pin')).toBe('top');                              // pinned (fixed) only once scrolled past                                          // sticky by hand (translateY on scroll)
     expect(screen.getByTestId('tv-rail-B').style.color).toBe('rgba(255, 255, 255, 0.2)');
     expect(screen.getByTestId('tv-rail-B').getAttribute('aria-disabled')).toBe('true');
     fireEvent.click(screen.getByTestId('tv-rail-B'));

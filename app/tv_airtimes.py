@@ -35,11 +35,13 @@ def _get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
     _pace()
     if _cfg['get'] is not None:
         return _cfg['get'](path, params or {})
-    r = requests.get(BASE + path, params=params, timeout=TIMEOUT_S, allow_redirects=True,
-                     headers={'User-Agent': 'Luma'})
+    sess = requests.Session()
+    sess.trust_env = False                       # no env proxies / netrc
+    r = sess.get(BASE + path, params=params, timeout=TIMEOUT_S, allow_redirects=False, headers={'User-Agent': 'Luma'})
     if r.status_code == 404:
         return None
-    r.raise_for_status()
+    if r.status_code != 200:                     # a redirect is never followed
+        raise requests.HTTPError(f'HTTP {r.status_code}')
     return r.json()
 
 
@@ -100,10 +102,10 @@ def refresh(now: Optional[float] = None, first: Optional[set] = None) -> int:
     n = 0
     for r in rows:
         try:
-            if creds[0]:                      # TheTVDB (key in Connectors) first; nothing there: the date only
-                mid = None
-                eps = tv_tvdb.episodes(r['tvdb_id'], creds, _pace) if r['tvdb_id'] else {}
-            else:                             # no TVDB key: TVmaze, no key
+            mid, eps = None, {}
+            if creds[0] and r['tvdb_id']:     # TheTVDB (key in Connectors) first
+                eps = tv_tvdb.episodes(r['tvdb_id'], creds, _pace)
+            if not eps:                       # no key, no tvdb_id, or TVDB doesn't know it: TVmaze (no key)
                 mid = r['tvmaze_id'] or lookup(r['tvdb_id'], r['imdb_id'])
                 eps = episodes(mid) if mid else {}
         except (requests.RequestException, ValueError, tv_tvdb.TvdbError) as e:

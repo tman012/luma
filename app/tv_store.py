@@ -253,10 +253,33 @@ def _open(p: Path) -> sqlite3.Connection:
     return conn
 
 
-def _migrate(conn: sqlite3.Connection) -> None:
+def _backup(conn: sqlite3.Connection, p: Path, version: int) -> None:
+    """Before an upgrade: tv.db (its -wal checkpointed first) copied to tv.db.bak-v{version}, 0600.
+    An existing backup of that version is kept (it is the older copy)."""
+    dst = Path(f'{p}.bak-v{version}')
+    if dst.exists():
+        return
+    conn.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+    fd = os.open(str(dst), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, 'O_CLOEXEC', 0), 0o600)
+    os.close(fd)
+    out = sqlite3.connect(str(dst))
+    try:
+        conn.backup(out)
+    finally:
+        out.close()
+    for f in (str(dst) + '-wal', str(dst) + '-shm'):
+        if os.path.exists(f):
+            os.chmod(f, 0o600)
+    os.chmod(str(dst), 0o600)
+    logger.info('tv.db backed up before upgrading from version %d', version)
+
+
+def _migrate(conn: sqlite3.Connection, p: Optional[Path] = None) -> None:
     version = conn.execute('PRAGMA user_version').fetchone()[0]
     if version > SCHEMA_VERSION:
         raise RuntimeError(f'tv.db is from a newer Luma (schema {version} > {SCHEMA_VERSION})')
+    if p is not None and 0 < version < SCHEMA_VERSION:      # an upgrade, not a fresh create
+        _backup(conn, p, version)
     while version < SCHEMA_VERSION:
         conn.execute('BEGIN IMMEDIATE')
         try:
@@ -297,7 +320,7 @@ def _prepare(p: Path) -> None:
             if conn.execute('PRAGMA quick_check').fetchone()[0] != 'ok':
                 raise Corrupt('quick_check failed')
             conn.execute('PRAGMA journal_mode = WAL')
-            _migrate(conn)
+            _migrate(conn, p)
             _private(p)
             break
         except sqlite3.DatabaseError as e:
@@ -321,6 +344,21 @@ def _prepare(p: Path) -> None:
             if conn is not None:
                 conn.close()
     _ready[str(p)] = True
+
+
+def migrate_on_start() -> bool:
+    """Open and migrate tv.db once at boot (the backup copy is taken first, in
+    _migrate). Never raises: on failure it logs and leaves the file to the
+    lazy path, which retries on the next connect()."""
+    p = db_path()
+    try:
+        with _lock:
+            _prepare(p)
+        logger.info('tv.db ready at schema v%d', schema_version())
+        return True
+    except Exception as e:                # boot must go on
+        logger.error('tv.db migration at boot failed (%s); will retry on first use', type(e).__name__)
+        return False
 
 
 @contextmanager

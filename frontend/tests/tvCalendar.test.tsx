@@ -191,6 +191,11 @@ describe('Calendar', () => {
     expect(within(rows[0]!).getByTestId('tv-check')).toBeTruthy();
     expect(within(rows[1]!).queryByTestId('tv-check')).toBeNull();
     expect(rows[0]!.textContent).toContain('Episode 1');
+    const name = within(rows[0]!).getByTestId('tv-card-show');                     // up to 2 lines, 13/600
+    expect([name.style.webkitLineClamp, name.style.display, name.style.fontSize, name.style.fontWeight]).toEqual(['2', '-webkit-box', '13px', '600']);
+    expect(name.nextElementSibling!.textContent).toBe('S02E01');                    // SxxEyy on the first line, right
+    const title = within(rows[0]!).getByTestId('tv-card-title');                   // 1 line with an ellipsis
+    expect([title.style.whiteSpace, title.style.textOverflow]).toEqual(['nowrap', 'ellipsis']);
     // rows aren't clickable
     expect(rows.every(r => r.tagName === 'DIV' && !r.querySelector('button, a'))).toBe(true);
   });

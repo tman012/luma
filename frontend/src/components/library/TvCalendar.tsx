@@ -113,10 +113,10 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
       <Still e={e} />
       <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <span style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
-          <span style={{ ...one, flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
+          <span data-testid="tv-card-show" style={{ ...clamp2, flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
           <span style={{ flex: 'none', fontSize: 11, color: W50 }}>{code(e.season, e.episode)}</span>
         </span>
-        {e.title && <span style={{ ...one, fontSize: 12, color: W70 }}>{e.title}</span>}
+        {e.title && <span data-testid="tv-card-title" style={{ ...one, fontSize: 12, color: W70 }}>{e.title}</span>}
         <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: W50 }}>
           {st === 'downloaded' && <Check />}
           {timeRange(e.airstamp, e.runtime) || e.air_time || shortDate(e.air_date)}
@@ -214,6 +214,10 @@ export const tvCalendarCss = `
 `;
 
 const one: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+/** At most 2 lines, then an ellipsis (week-grid show names). */
+const clamp2: React.CSSProperties = {
+  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere', lineHeight: '17px',
+};
 export const glassCard: React.CSSProperties = {
   borderRadius: 16, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden',
 };
