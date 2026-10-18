@@ -57,7 +57,7 @@ def test_single_exact_hit_without_year(fake_tmdb):
 
 def test_two_hits_without_year_is_unmatched_with_candidates(fake_tmdb):
     m = tv_match.match('Mystery Show')
-    assert m['status'] == 'unmatched' and m['reason'] == 'not_exact'
+    assert m['status'] == 'unmatched' and m['reason'] == 'unclear'   # same name, no files: pre-picked, unchecked
     assert sorted(c['tmdb_id'] for c in m['candidates']) == [1001, 1002]
 
 
