@@ -7,7 +7,7 @@ import { TvLibrarySettings as Bare } from '@/components/library/TvLibrarySetting
 import { COLLAPSE_MS, PICKER_MAX, initialReview, popoverLeft } from '@/components/library/TvImport';
 import { importedText, lastImportText, sortReview, startingPick, startsChecked, type Unmatched } from '@/components/library/tvLibraryApi';
 
-const Tv = (p: { wide: boolean }): ReactElement => <MemoryRouter><Bare {...p} /></MemoryRouter>;
+const Tv = (p: { wide: boolean }): ReactElement => <MemoryRouter initialEntries={['/?view=import']}><Bare {...p} /></MemoryRouter>;
 const res = (body: unknown, status = 200) => ({ ok: status < 300, status, json: async () => body }) as Response;
 const PATH = { id: 'p_0000aaaa', name: 'TV', path: '/media/TV', status: 'ok' };
 const c = (tmdb_id: number, title: string, year: number | null) => ({ tmdb_id, title, year, poster_path: `/p${tmdb_id}.jpg` });

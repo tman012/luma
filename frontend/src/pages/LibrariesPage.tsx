@@ -28,6 +28,7 @@ import { TrackersSettings, useTrackersAccess } from '@/components/trackers/Track
 import { LibraryPathsSettings } from '@/components/library/LibraryPathsSettings';
 import { SectionTrackersList } from '@/components/settings/SectionTrackersList';
 import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
+import { useTvBack } from '@/components/library/tvRoute';
 import { isMinimal } from '@/minimal';
 import { SAVE_FAILED } from '@/utils/messages';
 
@@ -56,6 +57,7 @@ export function SettingsPage() {
   const owner = usePlexOwner(!!user?.is_admin);
   // Trackers: the API serves only the owner signed in with a session (never the implicit LAN owner).
   const trackersOk = useTrackersAccess(!!user?.is_admin && !implicit && authenticated);
+  const tvBack = useTvBack();      // Settings > TV > Show detail: the sheet's back button returns to the view
   useBodyScroll();
   if (loading) return null;
   if (!authenticated) return <Navigate to="/login" replace />;
@@ -78,15 +80,10 @@ export function SettingsPage() {
         : slug === 'library-paths'
           ? (owner ? <LibraryPathsSettings wide={wide} /> : null)
           : slug === 'tv'
-            ? (owner ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-                  <TvLibrarySettings wide={wide} />
-                  <div style={{ padding: wide ? 0 : '0 20px' }}><SectionTrackersList section="tv" label="Trackers" wide={wide} /></div>
-                </div>
-              ) : null)
+            ? (owner ? <TvLibrarySettings wide={wide} options={<SectionTrackersList section="tv" label="Trackers" wide={wide} />} /> : null)
             : <HomeScreenSection admin={admin} wide={wide} />;
-  // Trackers draws its own title row (desktop) and header (phone: Plus, pushed pages).
-  const ownChrome = known?.slug === 'trackers';
+  // Trackers draws its own title row (desktop) and header (phone: Plus, pushed pages); TV its title row (desktop).
+  const ownChrome = known?.slug === 'trackers' || (wide && known?.slug === 'tv');
 
   if (wide) {
     if (!known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
@@ -152,7 +149,7 @@ export function SettingsPage() {
           </div>
         ) : (
           <div key={known.slug} className="luma-push" data-testid="settings-section">
-            {!ownChrome && <SheetHeader title={known.label} onBack={() => navigate('/settings')} onClose={() => navigate('/')} />}
+            {!ownChrome && <SheetHeader title={known.label} onBack={() => { if (!(known.slug === 'tv' && tvBack())) navigate('/settings'); }} onClose={() => navigate('/')} />}
             <div style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 24px)' }}>{content(known.slug)}</div>
           </div>
         )}

@@ -9,7 +9,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SECTION_GAP, TvLibrarySettings as TvSettingsBare, UPGRADE_OPTIONS } from '@/components/library/TvLibrarySettings';
 import { episodeCount, lastScanText, needsReview, reviewCount, showLabel, showSubtitle } from '@/components/library/tvLibraryApi';
 
-const TvLibrarySettings = (p: { wide: boolean }): ReactElement => <MemoryRouter><TvSettingsBare {...p} /></MemoryRouter>;
+/** The Import view unless at says otherwise (Calendar is the default view: tvCalendar.test.tsx). */
+const TvLibrarySettings = ({ at = '/?view=import', ...p }: { wide: boolean; at?: string }): ReactElement =>
+  <MemoryRouter initialEntries={[at]}><TvSettingsBare {...p} /></MemoryRouter>;
 const res = (body: unknown, status = 200) => ({ ok: status < 300, status, json: async () => body }) as Response;
 const PATH = { id: 'p_0000aaaa', name: 'TV', path: '/media/TV', status: 'ok' };
 const ANIME = { id: 'p_0000bbbb', name: 'Anime', path: '/media/Anime', status: 'ok' };
@@ -85,8 +87,7 @@ describe('Settings > TV', () => {
     expect(screen.queryByText(/linked|mismatch|unrecognized/)).toBeNull();
     expect(within(screen.getByTestId('tv-review')).getByText('Mystery Show')).toBeTruthy();
     expect(screen.queryByTestId('tv-last-import')).toBeNull();          // nothing before the first import
-    expect(screen.getByTestId('tv-upgrades-keep_both').getAttribute('aria-checked')).toBe('true');
-    expect(screen.getByTestId('tv-upgrades-replace_verified').getAttribute('aria-checked')).toBe('false');
+    expect(screen.queryByTestId('tv-upgrades')).toBeNull();               // Upgrades is under Options
   });
 
   it('selects Library paths as TV libraries; no add-path or folder picker', async () => {
@@ -158,22 +159,22 @@ describe('Settings > TV', () => {
   });
 
   it('Upgrades saves Replace and Keep both', async () => {
-    render(<TvLibrarySettings wide />);
+    render(<TvLibrarySettings wide at="/?view=options" />);
+    expect((await screen.findByTestId('tv-upgrades-keep_both')).getAttribute('aria-checked')).toBe('true');
     fireEvent.click(await screen.findByTestId('tv-upgrades-replace_verified'));
     await waitFor(() => expect(screen.getByTestId('tv-upgrades-replace_verified').getAttribute('aria-checked')).toBe('true'));
     expect(calls.find(c => c.url === '/api/settings/tv' && c.method === 'PUT')?.body).toEqual({ upgrades: { mode: 'replace_verified' } });
     expect(UPGRADE_OPTIONS.map(o => o.label)).toEqual(['Replace', 'Keep both']);
   });
 
-  it('the review dot is 8px amber; Libraries, Import, Review, Shows in that order with the section gap', async () => {
+  it('the review dot is 8px amber; Import, Review, Shows in that order with the section gap', async () => {
     render(<TvLibrarySettings wide />);
     const dot = await screen.findByTestId('tv-review-dot');
-    await screen.findAllByTestId('lib-select-row');
     expect([dot.style.width, dot.style.height, dot.style.background]).toEqual(['8px', '8px', 'var(--color-warning)']);
-    const section = screen.getByTestId('tv-section');
-    expect(section.style.gap).toBe(`${SECTION_GAP}px`);
-    const kids = Array.from(section.children).map(c => c.getAttribute('data-testid')).filter(Boolean);
-    expect(kids.slice(0, 5)).toEqual(['tv-paths', 'tv-import', 'tv-review', 'tv-shows', 'tv-upgrades']);
+    const view = screen.getByTestId('tv-view').firstElementChild as HTMLElement;
+    expect(view.style.gap).toBe(`${SECTION_GAP}px`);
+    const kids = Array.from(view.children).map(c => c.getAttribute('data-testid')).filter(Boolean);
+    expect(kids).toEqual(['tv-import', 'tv-review', 'tv-shows']);
     expect(screen.getByTestId('tv-import').style.marginTop).toBe('');
   });
 

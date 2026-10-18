@@ -179,15 +179,17 @@ describe('Settings > TV', () => {
       <Routes><Route path="/settings/:section?" element={<SettingsPage />} /></Routes>
     </MemoryRouter>);
 
-  it('shows on luma-test builds for the owner, with the TV tracker list', async () => {
+  it('shows on luma-test builds for the owner, with the TV tracker list under Options', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/api/settings/sections/tv/trackers')) return server()(url, init);
       if (url.includes('/api/settings/plex')) return res({ owner: true, configured: true });
       if (url.includes('/api/trackers/types')) return res({ types: [] });
+      if (url.endsWith('/api/settings/tv')) return res({ paths: [], upgrades: { mode: 'keep_both' }, rescan_interval_h: 6 });
       return res({}, 404);
     }));
-    await act(async () => { page('/settings/tv'); });
+    await act(async () => { page('/settings/tv?view=options'); });
+    await waitFor(() => expect(screen.getByTestId('tv-upgrades')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('section-trackers-tv')).toBeTruthy());
     await waitFor(() => expect(rows()).toHaveLength(4));
   });

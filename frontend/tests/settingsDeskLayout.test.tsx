@@ -10,7 +10,8 @@ const auth = { authenticated: true, loading: false, implicit: false, logout: vi.
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 // Layout only: the panels are stubs (their own tests cover them).
 vi.mock('@/components/library/LibraryPathsSettings', () => ({ LibraryPathsSettings: () => <div data-testid="lp-stub" /> }));
-vi.mock('@/components/library/TvLibrarySettings', () => ({ TvLibrarySettings: () => <div data-testid="tv-stub" /> }));
+// TV draws its own title row ("TV" and the Calendar | Import | Libraries | Options control, docs/design/tv.md §1).
+vi.mock('@/components/library/TvLibrarySettings', () => ({ TvLibrarySettings: () => <div data-testid="tv-stub"><h2>TV</h2></div> }));
 vi.mock('@/components/settings/SectionTrackersList', () => ({ SectionTrackersList: () => <div data-testid="st-stub" /> }));
 vi.mock('@/minimal', async orig => ({ ...(await orig<typeof import('@/minimal')>()), isMinimal: () => true }));
 
@@ -70,8 +71,8 @@ describe('desktop Settings layout', () => {
     expect(main.style.flex).toBe('1 1 0%');
     // both columns start at the row top: the panel title and the heading share a line
     expect(page.style.alignItems).toBe('');
-    expect(main.firstElementChild!.tagName).toBe('H2');
-    expect(main.firstElementChild!.textContent).toBe('TV');
+    expect(main.firstElementChild!.getAttribute('data-testid')).toBe('tv-stub');   // the TV panel's own title row, no second title
+    expect(main.querySelectorAll('h2')).toHaveLength(1);
     v.unmount();
     at('/settings/library-paths');
     await waitFor(() => expect(screen.getByTestId('settings-main').style.maxWidth).toBe('720px'));

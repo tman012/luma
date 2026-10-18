@@ -9,6 +9,7 @@ import { T, NAVY_GLASS_POPOVER, NAVY_GLASS_BORDER } from '@/theme/tokens';
 import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon } from '@/components/nav/AppNav';
 import { posterUrl } from '@/utils/image';
+import { RATING_ICONS } from '@/utils/ratingIcons';
 import {
   lastImportText, loadProgress, reviewTier, searchShows, showLabel, sortReview, startingPick, startsChecked,
   type Candidate, type ImportProgress, type Unmatched,
@@ -279,11 +280,16 @@ function Checkbox({ on, label, disabled, onChange, big }: {
   );
 }
 
-function Poster({ path, w, h }: { path?: string | null; w: number; h: number }) {
+/** A poster; without one, a glass tile (with the TMDB logo when tmdbLogo). */
+export function Poster({ path, w, h, tmdbLogo }: { path?: string | null; w: number; h: number; tmdbLogo?: boolean }) {
   const src = path ? posterUrl(path, 'w185') : null;
-  return src
-    ? <img src={src} alt="" width={w} height={h} loading="lazy" style={{ width: w, height: h, borderRadius: 4, objectFit: 'cover', flex: 'none', background: GLASS_10 }} />
-    : <span aria-hidden="true" style={{ width: w, height: h, borderRadius: 4, flex: 'none', background: GLASS_10 }} />;
+  if (src) return <img src={src} alt="" width={w} height={h} loading="lazy" style={{ width: w, height: h, borderRadius: 4, objectFit: 'cover', flex: 'none', background: GLASS_10 }} />;
+  return (
+    <span aria-hidden="true" data-testid="tv-poster-tile"
+      style={{ width: w, height: h, borderRadius: 4, flex: 'none', background: GLASS_10, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+      {tmdbLogo && <img src={RATING_ICONS.tmdb} alt="" style={{ width: Math.round(w * 0.7), height: 'auto', opacity: 0.8 }} />}
+    </span>
+  );
 }
 
 const PickerTrigger = ({ ref, pick, wide, open, disabled, onClick }: {
