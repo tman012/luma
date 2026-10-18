@@ -96,11 +96,17 @@ def evaluate() -> Dict[str, Any]:
     undecidable = {k for k in f['folders'] if truth[k].get('accept') or truth[k].get('duplicate') or not truth[k].get('id')}
     decidable = n - len(undecidable)
     auto_decidable = sum(1 for k in f['folders'] if k not in undecidable and k in series)
+    def guess(r):                      # the pick, or (nothing backs it) the candidate shown first
+        if r['pick'] is not None:
+            return r['pick']
+        cands = json.loads(r['candidates'] or '[]')
+        return cands[0]['tmdb_id'] if cands else None
     likely_right = sum(1 for folder, r in review.items() if r['tier'] == 'likely'
-                       and r['pick'] == truth.get(folder, {}).get('id'))
+                       and guess(r) == truth.get(folder, {}).get('id'))
     likely = [folder for folder, r in review.items() if r['tier'] == 'likely']
     # pre-checked review rows (likely, backed: not 'unclear') whose pick isn't the right show
-    prechecked = [folder for folder in likely if review[folder]['reason'] != 'unclear']
+    prechecked = [folder for folder in likely if review[folder]['pick'] is not None]
+    assert all(review[f]['reason'] != 'unclear' for f in prechecked)
     t_ok = lambda folder, tid: tid in (truth.get(folder, {}).get('accept') or [truth.get(folder, {}).get('id')])  # noqa: E731
     prechecked_wrong = [(folder, review[folder]['pick'], truth.get(folder, {}).get('id')) for folder in prechecked
                         if not t_ok(folder, review[folder]['pick'])]

@@ -324,6 +324,10 @@ def _store_unmatched_conn(conn, path_id: str, folder: str, m: Dict[str, Any], no
     else:
         tier = 'likely' if m.get('tier') == 'likely' and m.get('pick') else 'none'
         pick = m.get('pick') if tier == 'likely' else None
+        if tier == 'likely' and reason == 'unclear':
+            # nothing backs the guess: no pick (Import all can't import it unseen); it leads the candidates
+            cands = sorted(cands, key=lambda c: c.get('tmdb_id') != pick)
+            pick = None
     conn.execute('INSERT INTO unmatched (path_id, folder, guess_title, guess_year, candidates, reason, ts, tier, pick)'
                  ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(path_id, folder) DO UPDATE SET'
                  ' guess_title = excluded.guess_title, guess_year = excluded.guess_year,'
@@ -1151,11 +1155,11 @@ def library_view() -> Dict[str, Any]:
             pick = r['pick'] if tier == 'likely' else (cands[0]['tmdb_id'] if tier == 'duplicate' and cands else None)
             # 'pick' is what Import all would import as it stands (pre-checked); a guess nothing backs
             # (reason 'unclear') is only 'guess_pick', shown first in an unchecked row
-            unclear = tier == 'likely' and r['reason'] == 'unclear'
+            guess = pick if pick is not None else (cands[0]['tmdb_id'] if tier == 'likely' and cands else None)
             unmatched.append({'id': r['id'], 'path_id': r['path_id'], 'path_name': names.get(r['path_id'], ''),
                               'folder': r['folder'], 'guess_title': r['guess_title'], 'guess_year': r['guess_year'],
                               'candidates': cands[:tv_match.TOP_N], 'reason': r['reason'], 'tier': tier,
-                              'pick': None if unclear else pick, 'guess_pick': pick})
+                              'pick': pick, 'guess_pick': guess})
     # Review order: no match, then duplicates, then likely (best guess picked)
     unmatched.sort(key=lambda u: ({'none': 0, 'duplicate': 1, 'likely': 2}.get(u['tier'], 0), u['folder'].lower()))
     return {'shows': shows, 'unmatched': unmatched, 'scan': status()}
