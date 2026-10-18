@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
@@ -919,7 +920,7 @@ def _root_for(path_id: str) -> Optional[str]:
 
 
 def _apply(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str, event: str,
-           series_id: Optional[int]) -> Dict[str, Any]:
+           series_id: Optional[int], data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     with tv_store.connect() as conn:
         other = conn.execute('SELECT id FROM series WHERE tmdb_id = ?', (tmdb_id,)).fetchone()
     if other and other['id'] != series_id:
@@ -930,9 +931,12 @@ def _apply(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str, eve
         if root is not None:
             scan_files(sid, path_id, folder, root, now)
         return {'ok': True, 'series_id': sid}
-    if not tv_tmdb.show(tmdb_id):
+    if data is None:                           # one details call, the group picked from the folder's files
+        root = _root_for(path_id)
+        data = fetch_show(tmdb_id, None, _hints(root, folder) if root else None)
+    if not data:
         return {'ok': False, 'error': SHOW_NOT_FOUND, 'status': 404}
-    sid = store_show(path_id, folder, tmdb_id, now, via=via, event=event, series_id=series_id)
+    sid = store_show(path_id, folder, tmdb_id, now, via=via, event=event, series_id=series_id, data=data)
     if sid is None:
         return {'ok': False, 'error': TAKEN, 'status': 409}
     root = _root_for(path_id)
@@ -976,6 +980,71 @@ def match_unmatched(unmatched_id: int, tmdb_id: int, now: Optional[float] = None
     if not row:
         return {'ok': False, 'error': NOT_FOUND, 'status': 404}
     return _apply(row['path_id'], row['folder'], tmdb_id, now, via='manual', event='matched', series_id=None)
+
+
+IMPORT_ALL_MAX = 1000
+
+
+@_locked
+def import_all(items: List[Tuple[int, int]], now: Optional[float] = None) -> Dict[str, Any]:
+    """Import all: give review rows (unmatched id, tmdb id) their shows, as
+    the owner's picks (via manual). Shows are fetched on the workers, then
+    stored one by one. A show picked twice goes to the first row only.
+    {'ok': True, 'imported': [ids], 'failed': [{id, error}]}."""
+    now = time.time() if now is None else now
+    with tv_store.connect() as conn:
+        rows = {r['id']: dict(r) for r in conn.execute('SELECT id, path_id, folder FROM unmatched')}
+    jobs, failed, seen = [], [], set()
+    for uid, tid in items:
+        row = rows.get(uid)
+        if row is None:
+            failed.append({'id': uid, 'error': NOT_FOUND})
+        elif tid in seen:
+            failed.append({'id': uid, 'error': TAKEN})
+        else:
+            seen.add(tid)
+            jobs.append((row, tid))
+
+    def fetch(job):
+        row, tid = job
+        root = _root_for(row['path_id'])
+        try:
+            return {'data': fetch_show(tid, None, _hints(root, row['folder']) if root else None)}
+        except tv_tmdb.TmdbError as e:
+            return {'error': e}
+    imported = []
+    for (row, tid), res in zip(jobs, run_pool(jobs, fetch)):
+        if 'error' in res or res.get('skipped'):
+            failed.append({'id': row['id'], 'error': str(res.get('error') or tv_tmdb.BUSY)})
+            continue
+        if not res.get('data'):
+            failed.append({'id': row['id'], 'error': SHOW_NOT_FOUND})
+            continue
+        out = _apply(row['path_id'], row['folder'], tid, now, via='manual', event='matched', series_id=None,
+                     data=res['data'])
+        if out['ok']:
+            imported.append(row['id'])
+        else:
+            failed.append({'id': row['id'], 'error': out['error']})
+    return {'ok': True, 'imported': imported, 'failed': failed}
+
+
+def lookup(q: str) -> Optional[List[Dict[str, Any]]]:
+    """Picker search by id: 'tmdb:1396', 'tvdb:81189', 'imdb:tt0903747'.
+    None when *q* isn't an id query (search by name then)."""
+    m = re.fullmatch(r'\s*(tmdb|tvdb|imdb)\s*:\s*(\S+)\s*', q, re.I)
+    if not m:
+        return None
+    src, val = m.group(1).lower(), m.group(2)
+    if src == 'imdb':
+        return tv_tmdb.find(val.lower(), 'imdb_id') if re.fullmatch(r'tt\d{1,10}', val, re.I) else []
+    if not val.isdigit() or not 0 < int(val) < 10 ** 9:
+        return []
+    if src == 'tvdb':
+        return tv_tmdb.find(str(int(val)), 'tvdb_id')
+    d = tv_tmdb.show(int(val))
+    b = tv_tmdb.brief(d) if d else None
+    return [b] if b else []
 
 
 # --------------------------------------------------------------------------- view
@@ -1062,7 +1131,12 @@ def library_view() -> Dict[str, Any]:
                 cands = json.loads(r['candidates'] or '[]')
             except ValueError:
                 cands = []
+            tier = 'duplicate' if r['reason'] == 'duplicate' else (r['tier'] or 'none')
+            pick = r['pick'] if tier == 'likely' else (cands[0]['tmdb_id'] if tier == 'duplicate' and cands else None)
             unmatched.append({'id': r['id'], 'path_id': r['path_id'], 'path_name': names.get(r['path_id'], ''),
                               'folder': r['folder'], 'guess_title': r['guess_title'], 'guess_year': r['guess_year'],
-                              'candidates': cands[:tv_match.TOP_N], 'reason': r['reason']})
+                              'candidates': cands[:tv_match.TOP_N], 'reason': r['reason'], 'tier': tier,
+                              'pick': pick})
+    # Review order: no match, then duplicates, then likely (best guess picked)
+    unmatched.sort(key=lambda u: ({'none': 0, 'duplicate': 1, 'likely': 2}.get(u['tier'], 0), u['folder'].lower()))
     return {'shows': shows, 'unmatched': unmatched, 'scan': status()}
