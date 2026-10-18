@@ -46,6 +46,9 @@ def dl(scanned, tmp_path, monkeypatch):  # noqa: F811
     monkeypatch.delenv('LUMA_TEST_TV_TAG', raising=False)
     monkeypatch.delenv('LUMA_TV_CATEGORY', raising=False)
     monkeypatch.setenv('LUMA_INSTANCE', 'test')              # v158b: on prod the watch is a setting (off)
+    from app import tv_plex                                   # v158c: no Plex keys left by an earlier test
+    monkeypatch.setattr(tv_plex, '_have', set())
+    monkeypatch.setitem(tv_plex._state, 'down', False)
     lm.init(settings=Settings())
     root = tmp_path / 'downloads'
     (root / 'incomplete').mkdir(parents=True)
