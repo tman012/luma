@@ -203,6 +203,8 @@ function PillButton({
   label,
   onClick,
   primary,
+  tone,
+  testid,
   padding = '12px 24px',
   fontSize = '15px',
   focusKey,
@@ -212,6 +214,9 @@ function PillButton({
   label: string;
   onClick: () => void;
   primary?: boolean;
+  /** v167 (Designer): 'blue' is the #3b82f6 primary with white text (Add to watchlist, as on TV). */
+  tone?: 'blue';
+  testid?: string;
   padding?: string;
   fontSize?: string;
   focusKey: string;
@@ -225,6 +230,7 @@ function PillButton({
       ref={ref}
       {...focusProps}
       type="button"
+      data-testid={testid}
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -234,11 +240,13 @@ function PillButton({
         gap: '8px',
         padding,
         borderRadius: '28px',
-        background: primary
+        background: tone === 'blue'
+          ? (hovered ? '#60a5fa' : '#3b82f6')
+          : primary
           ? (hovered ? 'rgba(255,255,255,0.88)' : '#fff')
           : (hovered ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.08)'),
-        border: primary ? 'none' : '1px solid rgba(255,255,255,0.15)',
-        color: primary ? '#111' : '#fff',
+        border: primary || tone ? 'none' : '1px solid rgba(255,255,255,0.15)',
+        color: tone === 'blue' ? '#fff' : primary ? '#111' : '#fff',
         fontSize,
         fontWeight: 600,
         cursor: 'pointer',
@@ -1046,7 +1054,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                     <PillButton
                       focusKey="mm-info-watchlist"
                       zoneId="movie-detail-modal"
-                      primary
+                      primary={!!inWatchlist}
+                      tone={inWatchlist ? undefined : 'blue'}
+                      testid={inWatchlist ? 'movie-in-watchlist-desktop' : 'movie-add-watchlist-desktop'}
                       padding={t.pill.padding}
                       fontSize={t.pill.fontSize}
                       icon={
@@ -1061,7 +1071,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                           </svg>
                         )
                       }
-                      label={inWatchlist ? 'In Watchlist' : 'Watchlist'}
+                      label={inWatchlist ? 'In Watchlist' : 'Add to watchlist'}
                       onClick={() => inWatchlist ? setShowAlreadyInWatchlist(true) : handleUpgradeOpen()}
                     />
                   )}

@@ -15,7 +15,8 @@ GET    /api/settings/library-paths/browse?path=  folders for the picker (allowed
 Its own store (data dir, file_management.json, 0600), empty on a fresh
 install. It never reads or shows settings.json media.paths / media.types or
 the *_ROOT defaults, which production's bootstrap seeds. Paths are checked
-with realpath: an existing, writable folder outside system folders, not the
+with realpath: an existing folder outside system folders (read-only is fine;
+write destinations are checked as such), not the
 same as or nested in another configured path (a mount parent such as /media
 is not a configured path, so any /media/<sub> is fine, spaces included).
 Rules and the release parser port prod's auto_rename routing
@@ -359,10 +360,14 @@ def _path_repointed(pid: str) -> None:
             logger.warning('A section did not follow a repointed library path: %s', type(e).__name__)
 
 
-def check_library_path(raw: Any, others: List[Dict[str, Any]], probe: bool = True) -> Tuple[Optional[str], Optional[str]]:
+def check_library_path(raw: Any, others: List[Dict[str, Any]], probe: bool = True,
+                       write: bool = False) -> Tuple[Optional[str], Optional[str]]:
     """(path to store, None) or (None, error) for a library folder. *others*
     are this store's other paths (TV selects from these, it has none of its own).
-    probe=False never writes: os.access stands in for the create/delete probe."""
+    v167 (M15): a Library path may be read-only (a TV share Luma only reads);
+    the write check is only for a write destination (write=True: a path a
+    Movies rule or the chosen fallback files into). probe=False never writes:
+    os.access stands in for the create/delete probe."""
     p, err = clean_abs_path(raw)
     if err:
         return None, err
@@ -379,9 +384,19 @@ def check_library_path(raw: Any, others: List[Dict[str, Any]], probe: bool = Tru
             return None, DUPLICATE
         if _under(real, other) or _under(other, real):
             return None, OVERLAPS
-    if not (writable(real) if probe else os.access(real, os.W_OK | os.X_OK)):
+    if write and not (writable(real) if probe else os.access(real, os.W_OK | os.X_OK)):
         return None, NOT_WRITABLE
     return p, None
+
+
+def _write_target_ok(path: Dict[str, Any]) -> bool:
+    """A write destination (rule or fallback) can be written: probed (CIFS can say yes and fail).
+    A folder that isn't there right now is left to the mover (it waits for it)."""
+    try:
+        real = os.path.realpath(path['path'])
+        return not os.path.isdir(real) or writable(real)
+    except OSError:
+        return True
 
 
 def check_name(raw: Any, others: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[str]]:
@@ -479,6 +494,18 @@ def check_rules(body: Dict[str, Any], data: Dict[str, Any]) -> Tuple[Optional[Di
                 errors[f'rules.{i}.path_id'] = USED_BY_TV
         if fb in tv and fb != data['fallback_path_id'] and 'fallback_path_id' not in errors:
             errors['fallback_path_id'] = USED_BY_TV
+    # v167 (M15): Library paths may be read-only; a write destination may not. A rule or the
+    # fallback newly pointed at a folder Luma can't write is refused (one already there is left).
+    by_id = {p['id']: p for p in data['paths']}
+    was_rule = {r['id']: r['path_id'] for r in data['rules']}
+    for i, r in enumerate(out):
+        k = f'rules.{i}.path_id'
+        if k not in errors and r['path_id'] in by_id and was_rule.get(r['id']) != r['path_id'] \
+                and not _write_target_ok(by_id[r['path_id']]):
+            errors[k] = NOT_WRITABLE
+    if fb in by_id and fb != data['fallback_path_id'] and 'fallback_path_id' not in errors \
+            and not _write_target_ok(by_id[fb]):
+        errors['fallback_path_id'] = NOT_WRITABLE
     if errors:
         return None, errors
     return {'rules': out, 'fallback_path_id': fb}, {}
@@ -514,6 +541,11 @@ def pin_fallback(data: Dict[str, Any], taken: Optional[set] = None, *, adding: b
     fb = effective_fallback(data, taken)
     if not fb:
         return False
+    try:                                  # v167: a read-only Library path is never made a write destination
+        if os.path.isdir(fb['path']) and not os.access(os.path.realpath(fb['path']), os.W_OK | os.X_OK):
+            return False
+    except OSError:
+        pass
     data['fallback_path_id'] = fb['id']
     return True
 
@@ -869,7 +901,9 @@ def library_paths_edit(pid):
             if e:
                 errors['name'] = e
         if 'path' in body:
-            path, e = check_library_path(body.get('path'), others)
+            # a Movies rule or the chosen fallback files into it: the new folder must be writable
+            dest = data['fallback_path_id'] == pid or any(r['path_id'] == pid for r in data['rules'])
+            path, e = check_library_path(body.get('path'), others, write=dest)
             if e:
                 errors['path'] = e
         if errors:

@@ -1461,6 +1461,7 @@ function CompactSourcesView({
             {onAddToWatchlist && (
               <button
                 type="button"
+                data-testid="sources-add-watchlist"
                 onClick={() => {
                   handleDismiss();
                   setTimeout(() => onAddToWatchlist(), 280);
@@ -1478,8 +1479,8 @@ function CompactSourcesView({
                   fontWeight: 600,
                   cursor: 'pointer',
                   border: 'none',
-                  background: '#ffffff',
-                  color: '#000',
+                  background: '#3b82f6',                  // v167 (Designer): the primary, as on detail
+                  color: '#ffffff',
                 }}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

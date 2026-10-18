@@ -225,9 +225,9 @@ function Tile({ s, first, selecting, picked, onOpen }: { s: Show; first: boolean
   const src = posterUrl(s.poster_path, 'w342');
   const [broken, setBroken] = useState(false);
   return (
-    <div data-testid="tv-series-tile" data-show-id={s.id} data-letter={first ? letterOf(s.title) : undefined}
+    <div data-testid="tv-series-tile" data-show-id={s.id} title={s.title} data-letter={first ? letterOf(s.title) : undefined}
       data-state={p.state} data-monitored={s.monitored ? 'true' : 'false'} style={{ minWidth: 0, scrollMarginTop: 24, display: 'flex', flexDirection: 'column' }}>
-      <button type="button" className="lp-focus tvs-poster" data-testid="tv-series-open"
+      <button type="button" className="lp-focus tvs-poster" data-testid="tv-series-open" title={s.title}
         aria-label={selecting ? s.title : `Edit ${s.title}`} aria-pressed={selecting ? picked : undefined} onClick={onOpen}
         style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left' }}>
       <div style={{ position: 'relative', aspectRatio: '2 / 3', borderRadius: '8px 8px 0 0', overflow: 'hidden', background: 'rgba(255,255,255,0.06)',
@@ -279,7 +279,7 @@ export const CAPTION_FLOOR = CAPTION_FIT;
 export const CAPTION_MAX_LINES = 4;            // PM (v166): 12px minimum, up to 4 lines, never shrunk
 const caption: React.CSSProperties = {
   fontSize: CAPTION_TYPE.size, letterSpacing: 'normal', fontWeight: 600, lineHeight: `${CAPTION_TYPE.line}px`, color: W95, overflow: 'hidden', overflowWrap: 'anywhere',
-  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', textOverflow: 'ellipsis',
 };
 const over = (n: HTMLElement) => n.scrollHeight > n.clientHeight + 1;
 const setType = (n: HTMLElement, t: { size: number; line: number }, lines: number) => {
@@ -298,6 +298,8 @@ export function fitCaptions(root: HTMLElement | null): number {
     for (const n of left) { setType(n, t, lines); n.dataset.fit = String(t.size); n.dataset.lines = String(lines); }
     left = left.filter(over);
   }
+  // PM (v167): still over at 12px on 4 lines -> the 4th line ends in an ellipsis (line-clamp), never a hard
+  // clip; the full name stays in the card's accessible name and title (tile, poster button, name).
   for (const n of left) n.dataset.ellipsis = 'true';
   return left.length;
 }

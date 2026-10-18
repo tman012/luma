@@ -154,7 +154,7 @@ def test_migration_checks_without_writing_and_logs(tv_env, caplog):
         text = caplog.text
         assert "'Etc' added to Library paths (Not allowed)" in text
         if os.geteuid() != 0:
-            assert "'Kids' added to Library paths (Can't write to this folder)" in text
+            assert "'Kids' added to Library paths (checks passed)" in text      # v167: read-only is fine
     finally:
         os.chmod(tv_env / 'Kids TV', 0o755)
 

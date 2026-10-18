@@ -75,6 +75,9 @@ _HASH_RE = re.compile(r'^([0-9a-f]{40}|[0-9a-f]{64})$')
 TERMINAL = ('done', 'exists', 'failed', 'skipped')
 
 
+NOT_WRITABLE = 'library folder not writable'
+
+
 class Pending(Exception):
     """Not ready yet (unpacking, still being written, waiting for TMDB)."""
 
@@ -736,6 +739,9 @@ def _open_root(lib_root: str) -> int:
     if os.path.realpath(_fd_path(rfd)) != lib_root:
         os.close(rfd)
         raise Refused('destination folder resolves elsewhere')
+    if not os.access(lib_root, os.W_OK | os.X_OK):        # v167: Library paths may be read-only
+        os.close(rfd)
+        raise Pending(NOT_WRITABLE)
     return rfd
 
 

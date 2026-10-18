@@ -1035,8 +1035,8 @@ function SeasonDetailModal({
                   />
                 ) : (
                   <PillButton
-                    focusKey="sd-watchlist" zoneId="season-detail-modal"
-                    primary padding={t.pill.padding} fontSize={t.pill.fontSize}
+                    focusKey="sd-watchlist" zoneId="season-detail-modal" tone="blue" testid="tv-add-season-watchlist-desktop"
+                    padding={t.pill.padding} fontSize={t.pill.fontSize}
                     icon={<svg width={t.pill.iconSize} height={t.pill.iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>}
                     label={addInFlight ? 'Adding…' : addFailed ? 'Retry — Add Failed' : 'Add season to watchlist'}
                     onClick={async () => {

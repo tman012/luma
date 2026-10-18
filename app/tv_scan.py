@@ -30,7 +30,8 @@ running a scan over a fixture tree and by reading this file's calls.
   candidate. "Match" or "Wrong show?" on either moves the show there.
 * A folder or file that is gone loses its rows (rows only). A missing or
   unreadable library path is skipped as a whole, so an unmounted share never
-  empties the list.
+  empties the list; so is an empty one that had shows (M34: an unmounted
+  share's mount point), until its folders are back.
 """
 
 from __future__ import annotations
@@ -655,11 +656,19 @@ def _resolve_duplicate(owner, pid: str, folder: str, root_real: str, now: float,
     """A scan found *folder* holding the show *owner* already has. The better
     folder (folder_rank) keeps it; the other is an unmatched duplicate whose
     candidate is the show's real TMDB title. The show id when *folder* won.
-    A show whose library is no longer selected (or no longer a Library path)
-    moves here outright, keeping its tv.db row; its file rows from that
-    library are dropped (rows only)."""
+    A show whose Library path was removed moves here outright, keeping its
+    tv.db row; its file rows from that library are dropped (rows only).
+    M33 (v167): a show whose library is only deselected (still a Library path)
+    stays where it is: this folder is an unmatched duplicate, so reselecting
+    the library brings the show back with its folder, files and history."""
+    if owner['path_id'] is not None and owner['folder'] is not None and _path_of(owner['path_id']) is None \
+            and _is_library_path(owner['path_id']):
+        g = tv_match.parse_folder(folder)
+        _store_unmatched(pid, folder, {'guess': {'title': g['title'], 'year': g['year']},
+                                       'candidates': [_show_brief(owner)]}, now, reason='duplicate')
+        return None
     if owner['path_id'] is None or owner['folder'] is None or _path_of(owner['path_id']) is None:
-        # hidden, added from Search (no folder yet), or its library is gone: the folder takes it
+        # hidden, added from Search (no folder yet), or its Library path is gone: the folder takes it
         sid = take_over(owner['id'], pid, folder, now, via=via, event='matched')
         with tv_store.write() as conn:
             conn.execute('DELETE FROM episode_files WHERE series_id = ? AND path_id IS NOT ?', (sid, pid))
@@ -685,6 +694,15 @@ def _resolve_duplicate(owner, pid: str, folder: str, root_real: str, now: float,
     _store_unmatched(pid, folder, {'guess': {'title': g['title'], 'year': g['year']},
                                    'candidates': [_show_brief(owner)]}, now, reason='duplicate')
     return None
+
+
+def _is_library_path(path_id: str) -> bool:
+    """*path_id* is still one of the Library paths (selected for TV or not)."""
+    from app import file_management as fm
+    try:
+        return any(p.get('id') == path_id for p in fm.load().get('paths') or [])
+    except Exception:                                        # noqa: BLE001 - unreadable: keep the show where it is
+        return True
 
 
 def _path_of(path_id: str) -> Optional[str]:
@@ -796,15 +814,40 @@ def run_pool(jobs: List[Any], fn: Callable[[Any], Dict[str, Any]]) -> List[Dict[
     return [r if r is not None else {'skipped': True} for r in out]
 
 
+EMPTY = 'Folder is empty (not mounted?)'
+_empty_logged: Dict[str, str] = {}
+
+
+class EmptyRoot(FileNotFoundError):
+    """A library path with no show folders where tv.db has rows for it: skipped, nothing hidden."""
+
+
+def _has_rows(pid: str) -> bool:
+    """tv.db knows folders under library path *pid* (shows or review rows)."""
+    with tv_store.connect() as conn:
+        return bool(conn.execute('SELECT 1 FROM series WHERE path_id = ? AND folder IS NOT NULL LIMIT 1', (pid,)).fetchone()
+                    or conn.execute('SELECT 1 FROM unmatched WHERE path_id = ? LIMIT 1', (pid,)).fetchone())
+
+
 def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> Dict[str, int]:
     from app import file_management as fm
     root_real = os.path.realpath(rec['path'])
     if fm.blocked(root_real) or not os.path.isdir(root_real):
         raise FileNotFoundError(MISSING)
     pid = rec['id']
+    folders = show_folders(root_real)
+    if not folders and _has_rows(pid):
+        # M34 (v167): an empty library path that had shows is an unmounted share's mount point (or a
+        # share that's still coming up), not a library whose every show was deleted: skip it like a
+        # missing path, so every row stays as last seen until its folders are back.
+        if _empty_logged.get(pid) != root_real:
+            _empty_logged[pid] = root_real
+            logger.warning('TV scan: library path %s is empty but had shows; skipped (not mounted?), shows kept',
+                           pid)
+        raise EmptyRoot(EMPTY)
+    _empty_logged.pop(pid, None)
     _scan_seq[0] += 1
     _path_scans[pid] = (_scan_seq[0], root_real)
-    folders = show_folders(root_real)
     out = {'shows': 0, 'unmatched': 0, 'linked': 0, 'mismatch': 0, 'unrecognized': 0}
     with tv_store.connect() as conn:
         known = {r['folder']: dict(r) for r in conn.execute(

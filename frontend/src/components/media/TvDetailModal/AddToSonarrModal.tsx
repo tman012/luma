@@ -264,8 +264,8 @@ export function AddToSonarrModal({ tvdbId, title, seasons, onClose, onAdded }: A
               padding: '16px',
               borderRadius: '50px',
               border: 'none',
-              background: added ? '#4ade80' : error ? '#ef4444' : '#ffffff',
-              color: added ? '#000' : error ? '#fff' : '#000',
+              background: added ? '#4ade80' : error ? '#ef4444' : '#3b82f6',   // v167 (Designer): #3b82f6 primary
+              color: added ? '#000' : '#ffffff',
               fontSize: '16px',
               fontWeight: 700,
               cursor: adding || added || !canAdd ? 'default' : 'pointer',

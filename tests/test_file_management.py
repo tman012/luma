@@ -192,13 +192,52 @@ def test_a_file_is_not_a_folder(minimal, media):
 
 
 @pytest.mark.skipif(hasattr(os, 'geteuid') and os.geteuid() == 0, reason='root can write anywhere')
-def test_read_only_folder_refused(minimal, media):
+@pytest.mark.skipif(os.geteuid() == 0, reason='root ignores the read-only bit')
+def test_read_only_folder_is_a_library_path_but_never_a_write_destination(minimal, media):
+    """v167 (M15): Library paths may be read-only (a share Luma only reads); the write check is only
+    for write destinations: a Movies rule or the fallback newly pointed at it, or repointing one."""
     ro = media / 'Read only'
     ro.mkdir()
     ro.chmod(0o555)
     try:
         c = _client(minimal)
-        assert _add(c, 'RO', ro).get_json()['errors']['path'] == fm.NOT_WRITABLE
+        r = _add(c, 'RO', ro)
+        assert r.status_code == 201, r.get_json()
+        rid = next(p['id'] for p in _get(c).get_json()['paths'] if p['name'] == 'RO')
+        assert next(p for p in _get(c).get_json()['paths'] if p['id'] == rid)['status'] == 'read_only'
+        assert sorted(os.listdir(ro)) == []                                     # no probe file left, none made
+        assert _add(c, 'Movies', media / 'Movies').status_code == 201
+        mid = next(p['id'] for p in _get(c).get_json()['paths'] if p['name'] == 'Movies')
+        assert _get(c).get_json()['fallback_path_id'] is None          # the lone read-only path isn't pinned as the fallback
+        out = _rules(c, [{'path_id': rid}], mid)
+        assert out.status_code == 400 and out.get_json()['errors'] == {'rules.0.path_id': fm.NOT_WRITABLE}
+        out = _rules(c, [], rid)
+        assert out.status_code == 400 and out.get_json()['errors'] == {'fallback_path_id': fm.NOT_WRITABLE}
+        assert _rules(c, [{'path_id': mid}], mid).status_code == 200            # a writable one is fine
+        # repointing the fallback (a write destination) at a read-only folder is refused; a read-only path elsewhere is fine
+        ro2 = media / 'Read only 2'
+        ro2.mkdir()
+        ro2.chmod(0o555)
+        try:
+            e = c.put(f'{API}/{mid}', json={'path': str(ro2)}, environ_base=REMOTE, headers=HDR)
+            assert e.status_code == 400 and e.get_json()['errors']['path'] == fm.NOT_WRITABLE
+            e = c.put(f'{API}/{rid}', json={'path': str(ro2)}, environ_base=REMOTE, headers=HDR)
+            assert e.status_code == 200, e.get_json()                           # not a destination: read-only is fine
+        finally:
+            ro2.chmod(0o755)
+    finally:
+        ro.chmod(0o755)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason='root ignores the read-only bit')
+def test_the_mover_waits_on_a_read_only_destination(tmp_path):
+    from app import library_mover as mover
+    ro = tmp_path / 'ro'
+    ro.mkdir()
+    ro.chmod(0o555)
+    try:
+        with pytest.raises(mover.Pending, match='not writable'):
+            mover._open_root(os.path.realpath(ro))
     finally:
         ro.chmod(0o755)
 

@@ -708,17 +708,19 @@ export function CompactLayout(props: MovieModalViewProps) {
                       </button>
                     </div>
                   ) : (
-                    /* Add to Watchlist — full-width white pill */
+                    /* Add to watchlist: full-width #3b82f6 primary, white text, sentence case
+                       (v167, Designer: the same button as TV detail; was the white pill) */
                     <button
                       type="button"
+                      data-testid="movie-add-watchlist"
                       onClick={handleUpgradeToggle}
                       style={{
                         width: 'calc(100% - 32px)',
                         margin: '20px 16px 0',
                         padding: '14px 20px',
-                        background: '#ffffff',
-                        color: '#000000',
-                        borderRadius: '50px',
+                        background: '#3b82f6',
+                        color: '#ffffff',
+                        borderRadius: '12px',
                         border: 'none',
                         fontSize: '16px',
                         fontWeight: 600,
@@ -742,7 +744,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                         <line x1="12" y1="5" x2="12" y2="19" />
                         <line x1="5" y1="12" x2="19" y2="12" />
                       </svg>
-                      Add to Watchlist
+                      Add to watchlist
                     </button>
                   )}
                   </div>{/* end action stagger wrapper */}

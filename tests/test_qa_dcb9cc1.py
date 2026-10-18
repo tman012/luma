@@ -83,8 +83,6 @@ def test_migration_keeps_a_single_movies_path_as_the_fallback(owner, tv_env):  #
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason='root ignores the read-only bit')
-@pytest.mark.xfail(strict=True, reason='QA dcb9cc1 M15: a read-only TV folder can no longer be added '
-                                       '("Can\'t write to this folder"), so it can never be selected or re-added')
 def test_a_read_only_tv_folder_can_be_offered_to_tv(owner, tv_env):  # noqa: F811
     ro = tv_env / 'Kids TV'
     os.chmod(ro, stat.S_IRUSR | stat.S_IXUSR)

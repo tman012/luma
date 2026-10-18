@@ -153,4 +153,30 @@ describe('caption fit', () => {
     expect(made.every(n => parseFloat(n.style.fontSize) >= 12)).toBe(true);
     expect(fitCaptions(root)).toBe(1);                                   // idempotent (a resize re-runs it)
   });
+
+  it('PM (v167): a name still over at 12px on 4 lines ends the 4th line in an ellipsis (line-clamp, not a hard clip); the full name is the card\'s accessible name and title', async () => {
+    const { fitCaptions } = await import('@/components/library/TvSeries');
+    const long = 'Life, Larry and the Pursuit of Unhappiness: An Almost History of America';
+    render(<TvSeries shows={[show(1, long), show(2, 'Andor')]} />);
+    const tile = screen.getAllByTestId('tv-series-tile').find(t => t.dataset.showId === '1')!;
+    const open = within(tile).getByTestId('tv-series-open');
+    const name = within(tile).getByTestId('tv-series-name');
+    expect(tile.getAttribute('title')).toBe(long);
+    expect(open.getAttribute('title')).toBe(long);
+    expect(screen.getByRole('button', { name: `Edit ${long}` })).toBe(open);
+    expect(name.getAttribute('title')).toBe(long);
+    expect(name.getAttribute('aria-label')).toBe(long);
+    expect(name.textContent).toBe(long);                                    // the whole name is there; CSS ellipsizes
+    // too long at every step: 4 lines at 12/16, then the ellipsis
+    Object.defineProperty(name, 'clientHeight', { configurable: true, get: () => parseFloat(name.style.maxHeight) || 34 });
+    Object.defineProperty(name, 'scrollHeight', { configurable: true, get: () => 999 });
+    fitCaptions(tile.parentElement);
+    expect(name.dataset.ellipsis).toBe('true');
+    expect([name.style.fontSize, name.style.getPropertyValue('-webkit-line-clamp'), name.style.maxHeight]).toEqual(['12px', '4', '64px']);
+    // an ellipsis, not a hard clip: a vertical -webkit-box with line-clamp and text-overflow ellipsis
+    expect(name.style.display).toBe('-webkit-box');
+    expect(name.style.getPropertyValue('-webkit-box-orient') || (name.style as unknown as Record<string, string>).webkitBoxOrient).toBe('vertical');
+    expect(name.style.textOverflow).toBe('ellipsis');
+    expect(name.style.overflow).toBe('hidden');
+  });
 });
