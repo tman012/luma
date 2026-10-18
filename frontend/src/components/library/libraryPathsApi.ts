@@ -23,10 +23,13 @@ export interface Rule {
 export interface PathMapRow { remote: string; local: string }
 export type Transfer = 'copy' | 'hardlink';
 export interface NotFound { title: string; since: number; reason?: 'not_found' | 'not_mapped' }
+/** A grab the mover failed (not enough space on the destination); Retry puts it back to waiting. */
+export interface FailedJob { hash: string; title: string; since: number; reason: 'no_space' }
 export interface LibraryView {
   paths: LibPath[]; rules: Rule[]; fallback_path_id: string | null; path_map: PathMapRow[]; transfer: Transfer;
   downloads?: { path: string; status: 'ok' | 'missing' };
   not_found?: NotFound[];
+  failed?: FailedJob[];
 }
 export type Errors = Record<string, string>;
 export type Result = { ok: true; view: LibraryView } | { ok: false; errors: Errors; error: string };
@@ -59,6 +62,7 @@ export const addPath = (name: string, path: string) => send(LP_URL, 'POST', { na
 export const editPath = (id: string, name: string, path: string) => send(`${LP_URL}/${encodeURIComponent(id)}`, 'PUT', { name, path });
 export const deletePath = (id: string) => send(`${LP_URL}/${encodeURIComponent(id)}`, 'DELETE');
 export const saveRules = (rules: Rule[], fallback_path_id: string | null) => send(RULES_URL, 'PUT', { rules, fallback_path_id });
+export const retryJob = (hash: string) => send(`${LP_URL}/jobs/${encodeURIComponent(hash)}/retry`, 'POST');
 export const saveMapping = (body: { path_map?: PathMapRow[]; transfer?: Transfer }) => send(MAP_URL, 'PUT', body);
 
 /** "Past 2 years · 2160p · Remux", or "All movies". */

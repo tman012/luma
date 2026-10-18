@@ -512,6 +512,21 @@ describe('Settings > Library paths > Downloads (QA-UI1)', () => {
     expect(lost.map(r => r.textContent)).toEqual(['HeatSince Oct 16Path not mapped', 'RoninSince Oct 16Files not found']);
   });
 
+  it('a grab the mover failed for space says Not enough space with Retry (no auto-retry); Retry requeues it', async () => {
+    const since = Math.floor(new Date(2026, 9, 16, 9, 5).getTime() / 1000);
+    const h = 'a'.repeat(40);
+    state = { ...base(), downloads: { path: '/downloads', status: 'ok' }, failed: [{ hash: h, title: 'Heat', since, reason: 'no_space' }] };
+    answer = c => (c.url.endsWith(`/jobs/${h}/retry`) && c.method === 'POST' ? res({ ...state, failed: [] }) : null);
+    render(<LibraryPathsSettings wide />);
+    const box = await screen.findByTestId('lp-downloads');
+    const row = within(box).getByTestId('lp-failed');
+    expect(within(row).getByTestId('lp-failed-status').textContent).toBe('Not enough space');
+    expect(row.textContent).toBe('HeatSince Oct 16Not enough spaceRetry');
+    fireEvent.click(within(row).getByTestId('lp-failed-retry'));
+    await waitFor(() => expect(screen.queryByTestId('lp-failed')).toBeNull());
+    expect(calls.filter(c => c.method === 'POST').map(c => c.url)).toEqual([`/api/settings/library-paths/jobs/${h}/retry`]);
+  });
+
   it('a readable downloads folder shows no status and no list when nothing is lost', async () => {
     state = { ...base(), downloads: { path: '/downloads', status: 'ok' }, not_found: [] };
     render(<LibraryPathsSettings wide />);

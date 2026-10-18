@@ -84,7 +84,14 @@ class Refused(Exception):
 
 
 class InsufficientSpace(Exception):
-    """The library folder can't hold the copy. Recorded, never retried."""
+    """The library folder can't hold the copy (ENOSPC or the pre-check). The job
+    fails with INSUFFICIENT_SPACE and is never auto-retried on a timer: only a
+    manual Retry, or free space on that destination growing enough to fit, puts it
+    back to waiting (requeue_for_space)."""
+
+    def __init__(self, msg: str = '', path: str = '', need: int = 0):
+        super().__init__(msg)
+        self.path, self.need = path, int(need or 0)
 
 
 INSUFFICIENT_SPACE = 'insufficient space'
@@ -102,7 +109,7 @@ def _check_space(folder: str, need: int) -> None:
     except OSError:
         return   # can't tell (some shares); the copy itself will say
     if free < need + SPACE_MARGIN_BYTES:
-        raise InsufficientSpace(INSUFFICIENT_SPACE)
+        raise InsufficientSpace(INSUFFICIENT_SPACE, folder, need)
 
 
 def init(*, settings) -> None:
@@ -812,7 +819,7 @@ def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root:
                     _paced_copy(sfd, tfd)
                 except OSError as e:
                     if e.errno in (errno.ENOSPC, getattr(errno, 'EDQUOT', -1)):
-                        raise InsufficientSpace(INSUFFICIENT_SPACE) from e
+                        raise InsufficientSpace(INSUFFICIENT_SPACE, folder, st.st_size) from e
                     raise
                 tst = os.fstat(tfd)
                 if not _stat.S_ISREG(tst.st_mode) or tst.st_size != st.st_size:
@@ -1038,9 +1045,12 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
         logger.warning('Library mover: not moving %s (%s)', job.get('title'), e)
         _set_job(h, state='skipped', error=str(e), finished=now)
         return
-    except InsufficientSpace:
-        logger.warning('Library mover: not moving %s (%s)', job.get('title'), INSUFFICIENT_SPACE)
-        _set_job(h, state='skipped', error=INSUFFICIENT_SPACE, finished=now)
+    except InsufficientSpace as e:
+        free = _free_or_none(e.path)
+        logger.warning('Library mover: %s failed (%s: needs %s bytes, %s free at %s); retry manually or when space frees up',
+                       job.get('title'), INSUFFICIENT_SPACE, e.need, free, e.path)
+        _set_job(h, state='failed', error=INSUFFICIENT_SPACE, finished=now,
+                 space={'path': e.path, 'need': e.need, 'free': free})
         return
     except OSError as e:
         _fail(h, job, errno.errorcode.get(e.errno, type(e).__name__) if e.errno else type(e).__name__, now)
@@ -1051,6 +1061,58 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
                 ', '.join(r['result'] for r in fields['files']))
 
 
+def _free_or_none(path: str) -> Optional[int]:
+    """Free bytes on *path*'s filesystem (its nearest existing parent: a failed pass removes the folder it made)."""
+    p = path or ''
+    while p and not os.path.isdir(p):
+        parent = os.path.dirname(p)
+        if parent == p:
+            break
+        p = parent
+    if not p:
+        return None
+    try:
+        return free_bytes(p)
+    except OSError:
+        return None
+
+
+def _requeue(j: Dict[str, Any]) -> None:
+    j.update(state='waiting', error='', attempts=0, misses=0, status='', pending_since=None)
+    for k in ('finished', 'space'):
+        j.pop(k, None)
+
+
+def requeue_for_space() -> int:
+    """Jobs that failed for space go back to waiting once their destination has room
+    (need + SPACE_MARGIN_BYTES free). Never on a timer alone: nothing changes, nothing retries."""
+    def apply(data):
+        n = 0
+        for j in data['jobs'].values():
+            sp = j.get('space') if isinstance(j.get('space'), dict) else None
+            if j.get('state') != 'failed' or j.get('error') != INSUFFICIENT_SPACE or not sp:
+                continue
+            free = _free_or_none(str(sp.get('path') or ''))
+            if free is not None and free >= int(sp.get('need') or 0) + SPACE_MARGIN_BYTES:
+                _requeue(j)
+                n += 1
+        return n
+    return fm.update(apply)
+
+
+def retry(h: str) -> bool:
+    """Manual Retry: a failed or skipped job goes back to waiting. False when there is no such job."""
+    key = (h or '').lower()
+
+    def apply(data):
+        j = data['jobs'].get(key)
+        if not j or j.get('state') not in ('failed', 'skipped'):
+            return False
+        _requeue(j)
+        return True
+    return fm.update(apply)
+
+
 def tick(now: Optional[float] = None, session_factory: Callable = requests.Session) -> Dict[str, int]:
     """One pass over the waiting jobs. Never contacts qBittorrent when no
     library path is configured, nothing is waiting or the downloads folder is
@@ -1058,6 +1120,9 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
     now = time.time() if now is None else now
     summary = {'checked': 0, 'filed': 0, 'dropped': 0}
     data = fm.load()
+    if any(j.get('state') == 'failed' and j.get('error') == INSUFFICIENT_SPACE for j in data['jobs'].values()):
+        if requeue_for_space():
+            data = fm.load()
     if not data['paths']:
         return summary
     waiting = {h: j for h, j in data['jobs'].items() if j.get('state') == 'waiting'}

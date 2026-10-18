@@ -109,7 +109,7 @@ def test_fresh_install_starts_empty(minimal, store):
     j = r.get_json()
     assert j.pop('downloads')['status'] in ('ok', 'missing')
     assert j == {'paths': [], 'rules': [], 'fallback_path_id': None, 'path_map': [],
-                 'transfer': 'copy', 'not_found': []}
+                 'transfer': 'copy', 'not_found': [], 'failed': []}
     assert not store.exists()   # a read writes nothing
 
 
@@ -444,3 +444,16 @@ def test_unreadable_store_reads_empty(minimal, store):
     store.write_text('{not json')
     assert fm.load()['paths'] == []
     assert not store.exists()   # quarantined, not trusted
+
+
+def test_retry_route_requeues_a_failed_grab(minimal, store):
+    h = 'c' * 40
+    fm.update(lambda d: d['jobs'].__setitem__(h, {'state': 'failed', 'error': 'insufficient space', 'title': 'Heat',
+                                                   'finished': 5, 'space': {'path': '/x', 'need': 1}}))
+    c = _client(minimal)
+    assert c.get(API, environ_base=REMOTE, headers=HDR).get_json()['failed'][0]['hash'] == h
+    r = c.post(f'{API}/jobs/{h}/retry', environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and r.get_json()['failed'] == []
+    assert fm.load()['jobs'][h]['state'] == 'waiting'
+    assert c.post(f'{API}/jobs/{h}/retry', environ_base=REMOTE, headers=HDR).status_code == 404
+    assert c.post(f'{API}/jobs/nothex/retry', environ_base=REMOTE, headers=HDR).status_code == 404

@@ -324,7 +324,8 @@ describe('Search', () => {
     expect(rows[0]!.querySelector('button, a')).toBeNull();
     const drop = screen.getByTestId('tv-search-drop');                       // a 480px glass dropdown on the field's left edge
     expect([drop.style.width, drop.style.left, drop.style.position, drop.style.borderRadius, drop.style.background, drop.style.backdropFilter])
-      .toEqual(['480px', '0px', 'absolute', '12px', 'rgba(255, 255, 255, 0.06)', 'blur(16px)']);
+      .toEqual(['480px', '0px', 'absolute', '12px', 'rgba(21, 16, 42, 0.92)', 'blur(24px)']);
+    expect(drop.style.border).toBe('1px solid rgba(255,255,255,0.08)'.replace(/,/g, ', '));
     expect(rows[1]!.firstElementChild!.getAttribute('style')).toContain('height: 72px');            // the same 72px rows
     expect(screen.getAllByTestId('tv-agenda-row').length).toBeGreaterThan(0);                     // the view stays under it
     fireEvent.keyDown(screen.getByTestId('tv-search'), { key: 'Escape' });
@@ -392,6 +393,8 @@ describe('Search', () => {
     fireEvent.click(screen.getByTestId('tv-add'));
     const picker = screen.getByTestId('tv-add-picker');
     expect(picker.style.position).toBe('');                                 // in the dropdown's flow, under the row
+    expect([picker.style.background, picker.style.backdropFilter, picker.style.border])     // the dropdown's surface
+      .toEqual(['rgba(21, 16, 42, 0.92)', 'blur(24px)', '1px solid rgba(255, 255, 255, 0.08)']);
     expect(within(picker).getAllByTestId('tv-add-path').map(r => [r.textContent, r.getAttribute('aria-checked')]))
       .toEqual([['TV/media/TV', 'false'], ['Anime/media/Anime', 'false']]);
     const add = within(picker).getByTestId('tv-add-confirm') as HTMLButtonElement;

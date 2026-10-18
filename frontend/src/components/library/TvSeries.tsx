@@ -62,7 +62,7 @@ export function TvSeries({ shows }: { shows: Show[] | null }) {
   const railRef = useRef<HTMLElement>(null);
   const jumped = useRef<string | null>(null);         // a rail click wins while its show is on screen (the page end)
 
-  // a long name steps down (CAPTION_FIT) until it fits its 2 lines; an ellipsis only past the last step
+  // a name that needs a 3rd line at 13 is set 12/16 (CAPTION_FIT); still over: the 2-line ellipsis
   useLayoutEffect(() => {
     if (!sorted.length) return;
     let frame = 0;
@@ -209,27 +209,25 @@ function Tile({ s, first }: { s: Show; first: boolean }) {
 /** The caption block (name + count) is at least this tall, so posters and bars line up row to row and any
  * space falls below the count (8 top + 2 x 17 + 2 + 15 = 59 with padding; 51 without it). */
 const CAPTION_MIN_H = 51 + 8;
-/** Caption type: 12.5/600, -0.2px tracking, 17px lines, at most 2 lines; the count sits right under it.
- * A name that still needs a third line steps down to 12, then 11.5, then 11 (same tracking); only past 11
- * does the 2-line clamp's ellipsis show (the full name is in title and aria-label). */
-export const CAPTION_TYPE = { size: 12.5, tracking: -0.2, line: 17 };
-/** Step-down for long names: [size px, tracking px]; past the last step, an ellipsis (full name in title/aria-label). */
-export const CAPTION_FIT: [number, number][] = [[12, -0.2], [11.5, -0.2], [11, -0.2], [10.5, -0.3], [10, -0.4]];
+/** Caption type (Designer): 13/600, normal tracking, 17px lines, at most 2 lines; the count sits right under it.
+ * ONE step: a name that would need a third line at 13 is set 12/16. Still over at 12: the 2-line clamp's
+ * ellipsis (the full name is in title and aria-label). */
+export const CAPTION_TYPE = { size: 13, line: 17 };
+export const CAPTION_FIT = { size: 12, line: 16 };
 const caption: React.CSSProperties = {
-  fontSize: CAPTION_TYPE.size, letterSpacing: `${CAPTION_TYPE.tracking}px`, fontWeight: 600, lineHeight: `${CAPTION_TYPE.line}px`, color: W95, overflow: 'hidden', overflowWrap: 'anywhere',
+  fontSize: CAPTION_TYPE.size, letterSpacing: 'normal', fontWeight: 600, lineHeight: `${CAPTION_TYPE.line}px`, color: W95, overflow: 'hidden', overflowWrap: 'anywhere',
   display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
 };
-/** Batched: read every name, then write the ones that overflow, one step at a time (no read/write interleave). */
+const over = (n: HTMLElement) => n.scrollHeight > n.clientHeight + 1;
+/** Batched: reset and read every name, then write the one step to those that overflow; returns how many stay ellipsized. */
 export function fitCaptions(root: HTMLElement | null): number {
   const names = [...(root?.querySelectorAll<HTMLElement>('[data-testid=tv-series-name]') || [])];
-  for (const n of names) { n.style.fontSize = `${CAPTION_TYPE.size}px`; n.style.letterSpacing = `${CAPTION_TYPE.tracking}px`; delete n.dataset.fit; }
-  let over = names.filter(n => n.scrollHeight > n.clientHeight + 1);
-  for (const [size, tracking] of CAPTION_FIT) {
-    if (!over.length) break;
-    for (const n of over) { n.style.fontSize = `${size}px`; n.style.letterSpacing = `${tracking}px`; n.dataset.fit = String(size); }
-    over = over.filter(n => n.scrollHeight > n.clientHeight + 1);
-  }
-  return over.length;
+  for (const n of names) { n.style.fontSize = `${CAPTION_TYPE.size}px`; n.style.lineHeight = `${CAPTION_TYPE.line}px`; delete n.dataset.fit; }
+  const long = names.filter(over);
+  for (const n of long) { n.style.fontSize = `${CAPTION_FIT.size}px`; n.style.lineHeight = `${CAPTION_FIT.line}px`; n.dataset.fit = String(CAPTION_FIT.size); }
+  const left = long.filter(over);
+  for (const n of left) n.dataset.ellipsis = 'true';
+  return left.length;
 }
 const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(128px, 1fr))', gap: 16 };
 const emptyCard: React.CSSProperties = {

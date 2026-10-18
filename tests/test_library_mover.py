@@ -520,7 +520,8 @@ def test_insufficient_space_is_recorded_once(env, monkeypatch):
     lm.track(H1, TMDB, 'Heat.1995')
     torrent(env, H1, 'Heat.1995.mkv')
     env.tick()
-    assert job(H1)['state'] == 'skipped' and job(H1)['error'] == 'insufficient space'
+    assert job(H1)['state'] == 'failed' and job(H1)['error'] == 'insufficient space'
+    assert job(H1)['space']['path'] == os.path.realpath(env.media / 'Movies') and job(H1)['space']['need'] > 0
     assert not any(os.scandir(env.media / 'Movies'))
     env.q.calls.clear()
     env.tick()
@@ -537,8 +538,44 @@ def test_disk_full_mid_copy_is_insufficient_space(env, monkeypatch):
     lm.track(H1, TMDB, 'Heat.1995')
     torrent(env, H1, 'Heat.1995.mkv')
     env.tick()
-    assert job(H1)['error'] == 'insufficient space' and job(H1)['state'] == 'skipped'
+    assert job(H1)['error'] == 'insufficient space' and job(H1)['state'] == 'failed'
     assert not (env.media / 'Movies' / 'Heat (1995)').exists()   # the folder this pass made is gone too
+    assert not any(n.startswith('.') for n in os.listdir(env.media / 'Movies'))   # no partial left behind
+
+
+def test_no_space_never_retries_on_a_timer_only_when_the_destination_has_room(env, monkeypatch):
+    add_path('Movies', env.media / 'Movies')
+    src = movie_file(env, 'Heat.1995.mkv')
+    free = {'n': 1024}
+    monkeypatch.setattr(lm, 'free_bytes', lambda p: free['n'])
+    lm.track(H1, TMDB, 'Heat.1995')
+    torrent(env, H1, 'Heat.1995.mkv')
+    env.tick()
+    assert job(H1)['state'] == 'failed'
+    for _ in range(3):                                       # passes go by, space unchanged: still failed, nothing asked
+        env.q.calls.clear()
+        env.tick()
+        assert job(H1)['state'] == 'failed' and env.q.calls == []
+    free['n'] = lm.SPACE_MARGIN_BYTES + src.stat().st_size - 1      # grew, but not enough
+    env.tick()
+    assert job(H1)['state'] == 'failed'
+    free['n'] = lm.SPACE_MARGIN_BYTES + src.stat().st_size + 1      # now it fits: back to waiting and filed
+    assert env.tick()['filed'] == 1
+    assert job(H1)['state'] == 'done' and 'space' not in job(H1)
+
+
+def test_manual_retry_puts_a_failed_job_back_to_waiting(env, monkeypatch):
+    add_path('Movies', env.media / 'Movies')
+    movie_file(env, 'Heat.1995.mkv')
+    monkeypatch.setattr(lm, 'free_bytes', lambda p: 1024)
+    lm.track(H1, TMDB, 'Heat.1995')
+    torrent(env, H1, 'Heat.1995.mkv')
+    env.tick()
+    assert fm.view()['failed'] == [{'hash': H1, 'title': job(H1)['title'], 'since': job(H1)['finished'], 'reason': 'no_space'}]
+    assert lm.retry('b' * 40) is False
+    assert lm.retry(H1.upper()) is True
+    assert job(H1)['state'] == 'waiting' and job(H1)['error'] == '' and fm.view()['failed'] == []
+    assert lm.retry(H1) is False                                     # only failed/skipped jobs
 
 
 def test_hardlink_needs_no_space(env, monkeypatch):

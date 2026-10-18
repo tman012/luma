@@ -259,7 +259,7 @@ def test_real_enospc_on_a_full_folder_leaves_no_partial(env, monkeypatch):
     torrent(env, H1, 'Heat.1995.mkv')
     env.tick()
     env.tick()
-    assert job(H1)['state'] == 'skipped' and job(H1)['error'] == 'insufficient space'
+    assert job(H1)['state'] == 'failed' and job(H1)['error'] == 'insufficient space'
     folder = env.media / 'Movies' / 'Heat (1995)'
     assert not folder.exists() or os.listdir(folder) == []
 

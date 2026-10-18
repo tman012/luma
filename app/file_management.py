@@ -764,6 +764,12 @@ def view(data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
              for j in data['jobs'].values()
              if j.get('state') == 'waiting' and j.get('status') in ('files not found', 'path not mapped')),
             key=lambda x: x['since'])[:50],
+        # grabs the mover gave up on for space: no timer retries them (Retry, or room on the destination)
+        'failed': sorted(
+            ({'hash': h, 'title': j.get('title') or '', 'since': j.get('finished') or 0, 'reason': 'no_space'}
+             for h, j in data['jobs'].items()
+             if j.get('state') == 'failed' and j.get('error') == 'insufficient space'),
+            key=lambda x: x['since'])[:50],
     }
 
 
@@ -907,6 +913,18 @@ def library_rules_put():
         data.update(out)
         save(data)
         return _no_store(jsonify(view(data)))
+
+
+@bp.route('/api/settings/library-paths/jobs/<h>/retry', methods=['POST'])
+def library_job_retry(h):
+    """Manual Retry for a grab the mover failed (e.g. not enough space)."""
+    err = _guard()
+    if err:
+        return err
+    from app import library_mover
+    if not re.match(r'^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$', h or '') or not library_mover.retry(h):
+        return _no_store(jsonify({'error': 'Not found'})), 404
+    return _no_store(jsonify(view()))
 
 
 @bp.route('/api/settings/library-paths/mapping', methods=['PUT'])

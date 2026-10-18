@@ -331,7 +331,7 @@ def test_hardlink_mode_insufficient_space_leaves_no_empty_folder(env, monkeypatc
     lm.track(H1, TMDB, 'Heat.1995')
     torrent(env, H1, 'Heat.1995.mkv')
     env.tick()
-    assert job(H1)['state'] == 'skipped' and job(H1)['error'] == 'insufficient space'
+    assert job(H1)['state'] == 'failed' and job(H1)['error'] == 'insufficient space'
     assert not any(os.scandir(env.media / 'Movies'))
 
 

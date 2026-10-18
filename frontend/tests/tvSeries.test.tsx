@@ -58,10 +58,10 @@ describe('Series grid', () => {
     expect(w.className).toContain('tvs-rail-btn');
     expect(document.head.textContent + document.body.innerHTML).toContain('.tvs-rail-btn[aria-disabled=false]:hover');
     expect(rail.getAttribute('data-pin')).toBe('top');                              // pinned (fixed) only once scrolled past
-    // captions: 12.5/600, -0.2px tracking, 17px lines, 2 lines max (long names step down, then the ellipsis)
+    // captions: 13/600, normal tracking, 17px lines, 2 lines max (one step to 12/16, then the ellipsis)
     const name = within(tiles[2]!).getByTestId('tv-series-name');
     expect([name.style.fontSize, name.style.fontWeight, name.style.letterSpacing, name.style.lineHeight, name.style.webkitLineClamp, name.style.display])
-      .toEqual(['12.5px', '600', '-0.2px', '17px', '2', '-webkit-box']);
+      .toEqual(['13px', '600', 'normal', '17px', '2', '-webkit-box']);
     const cap = within(tiles[2]!).getByTestId('tv-series-caption');                 // the count right under the name; spare room at the bottom
     expect([cap.style.minHeight, cap.style.paddingTop, cap.style.justifyContent]).toEqual(['59px', '8px', 'flex-start']);   // 51 + 8
     expect(name.nextElementSibling!.getAttribute('data-testid')).toBe('tv-series-count');
@@ -125,25 +125,23 @@ describe('Series rail pin', () => {
 
 
 describe('caption fit', () => {
-  it('steps an overflowing name down 12 -> 11.5 -> 11 -> 10.5 -> 10 (tighter tracking), then leaves it to the ellipsis', async () => {
-    const { fitCaptions } = await import('@/components/library/TvSeries');
+  it('13/17 normal tracking; ONE step to 12/16 when 13 needs a 3rd line; still over at 12 is the 2-line ellipsis', async () => {
+    const { fitCaptions, CAPTION_TYPE, CAPTION_FIT } = await import('@/components/library/TvSeries');
+    expect([CAPTION_TYPE, CAPTION_FIT]).toEqual([{ size: 13, line: 17 }, { size: 12, line: 16 }]);
     const root = document.createElement('div');
     const mk = (lines: Record<string, number>) => {
-      const n = document.createElement('span'); n.dataset.testid = 'tv-series-name';
+      const n = document.createElement('span');
       n.setAttribute('data-testid', 'tv-series-name');
-      Object.defineProperty(n, 'clientHeight', { get: () => 34 });
-      Object.defineProperty(n, 'scrollHeight', { get: () => 17 * (lines[n.style.fontSize] ?? 2) });
+      const lh = () => parseFloat(n.style.lineHeight) || 17;
+      Object.defineProperty(n, 'clientHeight', { get: () => 2 * lh() });
+      Object.defineProperty(n, 'scrollHeight', { get: () => lh() * (lines[n.style.fontSize] ?? 2) });
       root.appendChild(n); return n;
     };
     const short = mk({});
-    const fits12 = mk({ '12.5px': 3, '12px': 2 });
-    const fits11 = mk({ '12.5px': 3, '12px': 3, '11.5px': 3, '11px': 2 });
-    const fits10 = mk({ '12.5px': 4, '12px': 4, '11.5px': 3, '11px': 3, '10.5px': 3, '10px': 2 });
-    const never = mk({ '12.5px': 4, '12px': 4, '11.5px': 3, '11px': 3, '10.5px': 3, '10px': 3 });
+    const fits12 = mk({ '13px': 3, '12px': 2 });
+    const never = mk({ '13px': 4, '12px': 3 });
     expect(fitCaptions(root)).toBe(1);
-    expect([short.style.fontSize, fits12.style.fontSize, fits11.style.fontSize, fits10.style.fontSize, never.style.fontSize])
-      .toEqual(['12.5px', '12px', '11px', '10px', '10px']);
-    expect([short.style.letterSpacing, fits10.style.letterSpacing]).toEqual(['-0.2px', '-0.4px']);
-    expect(short.dataset.fit).toBeUndefined();
+    expect([short, fits12, never].map(n => [n.style.fontSize, n.style.lineHeight])).toEqual([['13px', '17px'], ['12px', '16px'], ['12px', '16px']]);
+    expect([short.dataset.fit, never.dataset.ellipsis, fits12.dataset.ellipsis]).toEqual([undefined, 'true', undefined]);
   });
 });

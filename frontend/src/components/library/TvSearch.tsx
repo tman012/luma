@@ -4,11 +4,16 @@
  * creates no folders or files and downloads nothing. */
 import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { FONT } from '@/components/start/StartUI';
-import { NAVY_GLASS_BORDER, NAVY_GLASS_POPOVER } from '@/theme/tokens';
 import { Poster } from './TvImport';
 import type { LibPath } from './libraryPathsApi';
 import { showLabel } from './tvLibraryApi';
 import { addShow, findShows, seasonsText, type FindResult } from './tvCalendarApi';
+
+/** Designer: the search dropdown and the Add path picker share one surface. */
+export const TV_POPOVER_SURFACE: React.CSSProperties = {
+  background: 'rgba(21,16,42,0.92)', border: '1px solid rgba(255,255,255,0.08)',
+  backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
+};
 
 export const SEARCH_DEBOUNCE_MS = 250;
 export const SEARCH_MIN = 2;
@@ -194,8 +199,7 @@ export function PathPicker({ paths, onCancel, onAdd, inline = false }: {
     </>
   );
   const surface: React.CSSProperties = {
-    display: 'flex', flexDirection: 'column', gap: 12, boxSizing: 'border-box', background: NAVY_GLASS_POPOVER, border: NAVY_GLASS_BORDER,
-    backdropFilter: 'blur(24px) saturate(160%)', WebkitBackdropFilter: 'blur(24px) saturate(160%)', fontFamily: FONT,
+    display: 'flex', flexDirection: 'column', gap: 12, boxSizing: 'border-box', ...TV_POPOVER_SURFACE, fontFamily: FONT,
   };
   return (
     <div ref={panel} role="dialog" aria-label="Add to" data-testid="tv-add-picker"

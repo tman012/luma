@@ -1,5 +1,4 @@
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
-import { isMinimal } from '@/minimal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -8,7 +7,6 @@ import {
   CARD_BG,
   deduplicateCastAndCrew,
   type CastMember,
-  type Ratings,
 } from '@/utils/modalParsers';
 import {
   type TvEpisode,
@@ -17,6 +15,7 @@ import {
 } from '@/services/sonarrApi';
 import { UltraBlurOverlay } from '@/components/media/UltraBlurOverlay';
 import { RatingsBar } from '@/components/media/RatingsBar';
+import { useImdbRatings } from '@/hooks/useImdbRatings';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { TOKENS } from './expandedLayoutTokens';
 import { useTabletPerf } from '@/hooks/useTabletPerf';
@@ -36,7 +35,6 @@ import {
 import { useModalHost } from '@/contexts/ModalHostContext';
 import type { TvModalViewProps } from './types';
 import { useFocusable } from '@/hooks/useFocusable';
-import { apiFetch } from '../../../apiClient';
 import { apiUrl } from '@/urlHelpers';
 
 // ---------------------------------------------------------------------------
@@ -46,50 +44,6 @@ import { apiUrl } from '@/urlHelpers';
 function episodeKey(season: number, episode: number): string {
   return `s${season}e${episode}`;
 }
-
-/** Fetch IMDb (+ RT/Metacritic) via OMDb for TV detail badges. Never TMDb. */
-function useImdbRatings(title: string | null | undefined, year: number | null | undefined): Ratings | null {
-  const [ratings, setRatings] = useState<Ratings | null>(null);
-
-  useEffect(() => {
-    if (!title || isMinimal()) {
-      setRatings(null);
-      return;
-    }
-    const controller = new AbortController();
-    const params = new URLSearchParams();
-    if (year) params.set('year', String(year));
-    apiFetch(`/api/ratings/${encodeURIComponent(title)}?${params}`, { signal: controller.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!d || d.error) {
-          setRatings(null);
-          return;
-        }
-        const imdb = (d.imdb as Ratings['imdb']) ?? null;
-        const rtCritic = (d.rotten_tomatoes_critic as Ratings['rotten_tomatoes_critic']) ?? null;
-        const rtAudience = (d.rotten_tomatoes_audience as Ratings['rotten_tomatoes_audience']) ?? null;
-        const metacritic = (d.metacritic as Ratings['metacritic']) ?? null;
-        if (!imdb?.score && !rtCritic?.score && !rtAudience?.score && !metacritic?.score) {
-          setRatings(null);
-          return;
-        }
-        setRatings({
-          imdb,
-          rotten_tomatoes_critic: rtCritic,
-          rotten_tomatoes_audience: rtAudience,
-          metacritic,
-          tmdb: null,
-        });
-      })
-      .catch(() => setRatings(null));
-    return () => controller.abort();
-  }, [title, year]);
-
-  return ratings;
-}
-
-
 
 function computeSeasonOwnership(
   seasons: { season_number: number; episode_count?: number; episodes: { episode_number: number }[] }[],

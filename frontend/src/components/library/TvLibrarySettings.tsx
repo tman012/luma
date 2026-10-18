@@ -18,7 +18,7 @@ import {
 import { ImportSection, ReviewSection, ShowPicker, FADE_MS, importCss, initialReview, type ReviewState } from './TvImport';
 import { TodayButton, TvCalendar, WeekCenter, tvCalendarCss } from './TvCalendar';
 import { TvSeries } from './TvSeries';
-import { SEARCH_LIST_ID, SEARCH_MIN, TvSearch, searchRowId, tvSearchCss, type SearchKeys } from './TvSearch';
+import { SEARCH_LIST_ID, SEARCH_MIN, TV_POPOVER_SURFACE, TvSearch, searchRowId, tvSearchCss, type SearchKeys } from './TvSearch';
 import { LibrarySelector } from './LibrarySelector';
 import type { SelectableLibrary } from './librarySelectionApi';
 import { SAVE_FAILED } from './libraryPathsApi';
@@ -323,8 +323,7 @@ function SearchBox({ wide, value, onChange, results }: {
         <div data-testid="tv-search-drop"
           style={{ position: 'absolute', zIndex: 60, top: 'calc(100% + 6px)', left: 0, width: SEARCH_DROP_W, maxWidth: 'calc(100vw - 32px)',
             maxHeight: 'min(70vh, 560px)', overflowY: 'auto', boxSizing: 'border-box', borderRadius: 12,
-            background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
-            backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)', boxShadow: '0 16px 48px rgba(0,0,0,0.45)' }}>
+            ...TV_POPOVER_SURFACE, boxShadow: '0 16px 48px rgba(0,0,0,0.45)' }}>
           {typeof results === 'function' ? results(keys, active) : results}
         </div>
       )}

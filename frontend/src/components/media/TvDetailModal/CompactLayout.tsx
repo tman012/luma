@@ -27,6 +27,9 @@ import { MobilePlaybackSheet } from '../MovieDetailModal/MobilePlaybackSheet';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import type { PlexSeason } from '@/services/playbackApi';
 import { posterUrl } from '@/utils/image';
+import { RatingsBar, RATINGS_SLOT_SM } from '@/components/media/RatingsBar';
+import { useImdbRatingsState } from '@/hooks/useImdbRatings';
+import { buildRatingItems } from '@/utils/ratingIcons';
 import type { TvModalViewProps } from './types';
 import { useAuth } from '@/contexts/AuthContext';
 import { seasonTitle, seasonEyebrow, seasonShortLabel, sourcesTargetName } from './seasonLabels';
@@ -198,6 +201,15 @@ export function CompactLayout(props: TvModalViewProps) {
   useEffect(() => {
     if (composed) window.dispatchEvent(new Event(REVEALED_EVENT));
   }, [composed]);
+  // Ratings (shared with ExpandedLayout) arrive after the details: as on the movie
+  // sheet, keep their row reserved once the sheet shows so nothing below moves.
+  const { ratings, loading: ratingsLoading } = useImdbRatingsState(show?.title, show?.year);
+  const hasRatings = !!ratings && buildRatingItems(ratings).length > 0;
+  const [reserveRatings, setReserveRatings] = useState(false);
+  useEffect(() => { setReserveRatings(false); }, [show?.title]);
+  useEffect(() => {
+    if (composed && (ratingsLoading || hasRatings)) setReserveRatings(true);
+  }, [composed, ratingsLoading, hasRatings]);
 
   // Determine if we're in active episode-mode display
   // isEpisodeIntent: episodeContext is set → hide show content immediately
@@ -756,6 +768,11 @@ export function CompactLayout(props: TvModalViewProps) {
                         ))}
                       </div>
                     )}
+
+                    {/* Ratings bar — centered icons (same slot as the movie sheet) */}
+                    <div data-ratings-slot style={{ minHeight: reserveRatings ? `${RATINGS_SLOT_SM}px` : 0 }}>
+                      {ratings && <RatingsBar ratings={ratings} size="sm" />}
+                    </div>
 
                     {activeSeasonData ? (
                       <div style={{ marginTop: '10px' }}>

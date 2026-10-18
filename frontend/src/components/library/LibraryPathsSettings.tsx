@@ -11,7 +11,7 @@ import { move } from '@/components/home/homeApi';
 import { CategoryChip, PlusIcon, Switch, trackersCss } from '@/components/trackers/trackersUi';
 import { FolderBrowser } from './FolderBrowser';
 import {
-  RESOLUTIONS, SAVE_FAILED, SOURCES, addPath, deletePath, editPath, loadLibrary, moviePaths, ruleSummary, saveMapping, saveRules, sinceText,
+  RESOLUTIONS, SAVE_FAILED, SOURCES, addPath, deletePath, editPath, loadLibrary, moviePaths, retryJob, ruleSummary, saveMapping, saveRules, sinceText,
   type Errors, type LibPath, type LibraryView, type PathMapRow, type Result, type Rule, type Transfer, type Unit,
 } from './libraryPathsApi';
 
@@ -74,7 +74,7 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
       <style>{trackersCss}</style>
       {toast && <NoticeToast key={toast + seq.current} text={toast} onDone={() => setToast('')} />}
 
-      <DownloadsStatus view={view} />
+      <DownloadsStatus view={view} onView={setView} />
 
       <div data-testid="lp-paths">
         <h3 style={sectionLabel}>Paths</h3>
@@ -156,11 +156,13 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
 // ---------------------------------------------------------------- downloads
 
 /** The downloads folder the mover reads, and grabs whose files it can't find. */
-function DownloadsStatus({ view }: { view: LibraryView }) {
+function DownloadsStatus({ view, onView }: { view: LibraryView; onView?: (v: LibraryView) => void }) {
   const wide = useContext(WideCtx);
   const dl = view.downloads;
   const lost = view.not_found || [];
-  if (!dl && !lost.length) return null;
+  const failed = view.failed || [];
+  const [busy, setBusy] = useState<string | null>(null);
+  if (!dl && !lost.length && !failed.length) return null;
   const s = STATUS[dl?.status === 'missing' ? 'missing' : 'ok'];
   return (
     <div data-testid="lp-downloads">
@@ -188,6 +190,21 @@ function DownloadsStatus({ view }: { view: LibraryView }) {
             <span data-testid="lp-not-found-status" style={{ fontSize: 13, fontWeight: 500, color: T.danger, flex: 'none' }}>
               {j.reason === 'not_mapped' ? 'Path not mapped' : 'Files not found'}
             </span>
+          </div>
+        ))}
+        {failed.map((j, i) => (
+          <div key={j.hash} data-testid="lp-failed" style={{ ...rowBtn, cursor: 'default', ...(dl || lost.length || i > 0 ? topBorder : null) }}>
+            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: T.danger, flex: 'none' }} />
+            <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={titleText(wide)}>{j.title || 'Untitled'}</span>
+              <span style={subText(wide)}>{sinceText(j.since)}</span>
+            </span>
+            <span data-testid="lp-failed-status" style={{ fontSize: 13, fontWeight: 500, color: T.danger, flex: 'none' }}>Not enough space</span>
+            <button type="button" data-testid="lp-failed-retry" className="lp-focus" disabled={busy === j.hash}
+              aria-label={`Retry ${j.title || 'Untitled'}`}
+              onClick={() => { setBusy(j.hash); void retryJob(j.hash).then(r => { setBusy(null); if (r.ok) onView?.(r.view); }); }}
+              style={{ flex: 'none', padding: '6px 12px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.16)', background: 'rgba(255,255,255,0.06)',
+                color: 'rgba(255,255,255,0.95)', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: busy === j.hash ? 0.4 : 1 }}>Retry</button>
           </div>
         ))}
       </div>
