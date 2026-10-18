@@ -180,8 +180,14 @@ ALTER TABLE episodes ADD COLUMN still_path TEXT;
 ALTER TABLE episodes ADD COLUMN tvdb_image TEXT;
 """
 
+# When a show's episode images (stills) were last read: NULL is never, so the
+# Calendar backfills it at once (a show with no images isn't asked again).
+SCHEMA_V6 = """
+ALTER TABLE series ADD COLUMN stills_at REAL;
+"""
+
 # MIGRATIONS[n] takes user_version n to n + 1.
-MIGRATIONS: List[str] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5]
+MIGRATIONS: List[str] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6]
 SCHEMA_VERSION = len(MIGRATIONS)
 
 

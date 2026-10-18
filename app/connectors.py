@@ -301,6 +301,7 @@ def connectors_tvdb_save():
         _cfg['settings'].update({'apis': {'tvdb': {'api_key': '', 'pin': ''}}})
         from app import tv_tvdb
         tv_tvdb.forget_token()
+        _forget_air_times()
         logger.info('TVDB key removed')
         return _no_store(jsonify(_view()))
     if body.get('api_key') == MASK and body.get('pin', MASK) == MASK:
@@ -316,5 +317,14 @@ def connectors_tvdb_save():
     _cfg['settings'].update({'apis': {'tvdb': {'api_key': key, 'pin': pin}}})
     from app import tv_tvdb
     tv_tvdb.forget_token()
+    _forget_air_times()
     logger.info('TVDB key saved')
     return _no_store(jsonify(_view()))
+
+
+def _forget_air_times() -> None:
+    try:
+        from app import tv_airtimes
+        tv_airtimes.forget()
+    except Exception as e:             # noqa: BLE001 - no tv.db yet: nothing to ask again
+        logger.debug('Air times not reset: %s', type(e).__name__)

@@ -79,7 +79,7 @@ def store(sid: int, tmdb_id: int, maze_id: Optional[int], eps: Dict[tuple, Dict[
     return True
 
 
-def refresh(now: Optional[float] = None) -> int:
+def refresh(now: Optional[float] = None, first: Optional[set] = None) -> int:
     """Air times for the selected libraries' shows not asked in REFRESH_S. Returns shows written."""
     from app import tv_settings
     now = time.time() if now is None else now
@@ -90,7 +90,11 @@ def refresh(now: Optional[float] = None) -> int:
         rows = [dict(r) for r in conn.execute(
             'SELECT id, tmdb_id, tvdb_id, imdb_id, tvmaze_id, tvmaze_checked_at FROM series WHERE tmdb_id IS NOT NULL'
             f' AND path_id IN ({",".join("?" * len(pids))}) ORDER BY COALESCE(tvmaze_checked_at, 0)', pids)
-            if r['tvmaze_checked_at'] is None or now - r['tvmaze_checked_at'] >= REFRESH_S][:MAX_SHOWS]
+            if r['tvmaze_checked_at'] is None or now - r['tvmaze_checked_at'] >= REFRESH_S]
+    first = first or set()
+    # the visible week first, then never-asked shows, then the stalest
+    rows.sort(key=lambda r: (r['id'] not in first, r['tvmaze_checked_at'] is not None, r['tvmaze_checked_at'] or 0))
+    rows = rows[:MAX_SHOWS]
     from app import connectors, tv_tvdb
     creds = connectors.tvdb_credentials()
     n = 0
@@ -120,3 +124,9 @@ def configure(get: Optional[Callable[[str, Dict[str, Any]], Any]] = None, sleep:
     """Tests: a fake TVmaze (*get*) and clock."""
     _cfg.update(get=get, sleep=sleep)
     _last[0] = 0.0
+
+
+def forget() -> None:
+    """A TVDB key was saved or removed: every show's air times and images are asked again on the next open."""
+    with tv_store.write() as conn:
+        conn.execute('UPDATE series SET tvmaze_checked_at = NULL')

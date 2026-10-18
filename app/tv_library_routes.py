@@ -150,8 +150,10 @@ def tv_calendar_get():
     days = request.args.get('days') or '7'
     if start is None or not days.isdigit() or not 1 <= int(days) <= tv_calendar.MAX_DAYS:
         return _no_store(jsonify({'error': BAD_DATE}), 400)
-    tv_scan.refresh_on_open()                 # stale air dates refresh in the background (24h cache, shared budget)
-    return _no_store(jsonify(tv_calendar.calendar(start, int(days))))
+    data = tv_calendar.calendar(start, int(days))
+    # stale air dates (24h) and never-read stills / air times refresh in the background, this week's shows first
+    tv_scan.refresh_on_open({e['series_id'] for e in data['episodes']})
+    return _no_store(jsonify(data))
 
 
 @bp.route('/api/settings/tv/find', methods=['GET'])

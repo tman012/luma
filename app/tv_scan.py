@@ -231,7 +231,8 @@ def store_show(path_id: str, folder: str, tmdb_id: int, now: float, *, via: str,
         other = conn.execute('SELECT id FROM series WHERE tmdb_id = ?', (tmdb_id,)).fetchone()
         if other and other['id'] != series_id:
             return None
-        cols = dict(fields, tmdb_id=tmdb_id, aliases=json.dumps(aliases), tmdb_refreshed_at=now, match_tier=tier or via)
+        cols = dict(fields, tmdb_id=tmdb_id, aliases=json.dumps(aliases), tmdb_refreshed_at=now, stills_at=now,
+                    match_tier=tier or via)
         if series_id is None:
             cols.update(path_id=path_id, folder=folder, monitored=0, monitor_new_seasons=0, added_at=now)
             keys = ', '.join(cols)
@@ -319,7 +320,7 @@ def refresh_episodes(sid: int, tmdb_id: int, now: float, data: Optional[Dict[str
         _store_episodes(conn, sid, data['seasons'])
         if data.get('group') is not None:
             _store_group(conn, sid, data['group'])
-        conn.execute('UPDATE series SET tmdb_refreshed_at = ? WHERE id = ?', (now, sid))
+        conn.execute('UPDATE series SET tmdb_refreshed_at = ?, stills_at = ? WHERE id = ?', (now, now, sid))
 
 
 def _skip_owned(pick: Optional[int], cands: List[Dict[str, Any]], owned: set) -> Tuple[Optional[int], List[Dict[str, Any]]]:
@@ -811,7 +812,7 @@ def scan_all(now: Optional[float] = None, retry_unmatched: bool = True) -> Dict[
     return total
 
 
-def refresh_added(now: Optional[float] = None, folders: bool = False) -> int:
+def refresh_added(now: Optional[float] = None, folders: bool = False, first: Optional[set] = None) -> int:
     """Shows added from Search (a library, no folder) keep their episodes
     current like folder shows: once REFRESH_EPISODES_S has passed, on the next
     scan (Import) or Calendar open (folders=True: every show of the selected
@@ -824,10 +825,13 @@ def refresh_added(now: Optional[float] = None, folders: bool = False) -> int:
         return 0
     with tv_store.connect() as conn:
         rows = [dict(r) for r in conn.execute(
-            'SELECT id, tmdb_id, episode_group_id, tmdb_refreshed_at FROM series WHERE'
+            'SELECT id, tmdb_id, episode_group_id, tmdb_refreshed_at, stills_at FROM series WHERE'
             + ('' if folders else ' folder IS NULL AND') + ' tmdb_id IS NOT NULL AND path_id IN'
             f' ({",".join("?" * len(pids))})', pids)
-            if now - (r['tmdb_refreshed_at'] or 0) >= REFRESH_EPISODES_S]
+            # stale (24h), or its stills never read (backfill now, whatever its age)
+            if now - (r['tmdb_refreshed_at'] or 0) >= REFRESH_EPISODES_S or (folders and r['stills_at'] is None)]
+    first = first or set()
+    rows.sort(key=lambda r: r['id'] not in first)          # the shows in the visible week first
 
     def work(r):
         try:
@@ -847,7 +851,7 @@ _refresh_lock = threading.Lock()
 _RefreshThread = threading.Thread    # the Calendar-open refresh (tests run it inline)
 
 
-def refresh_on_open() -> bool:
+def refresh_on_open(first: Optional[set] = None) -> bool:
     """Calendar open: refresh stale air dates (24h) in the background, once at
     a time and never during an Import (which refreshes them itself). The open
     answers from tv.db right away; the next open shows what changed. False
@@ -857,12 +861,12 @@ def refresh_on_open() -> bool:
 
     def work():
         try:
-            refresh_added(folders=True)
+            refresh_added(folders=True, first=first)
         except Exception:                  # noqa: BLE001 - a failed refresh waits for the next open
             logger.exception('TV calendar refresh failed')
         try:
-            from app import tv_airtimes      # air times from TVmaze (no key), paced, after TMDB
-            tv_airtimes.refresh()
+            from app import tv_airtimes      # air times (TVDB, else TVmaze), paced, after TMDB
+            tv_airtimes.refresh(first=first)
         except Exception:                  # noqa: BLE001
             logger.exception('TV air times refresh failed')
         finally:
