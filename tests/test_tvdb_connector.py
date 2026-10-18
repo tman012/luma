@@ -179,8 +179,10 @@ def test_stills_tvdb_image_with_a_key_and_tmdb_still_and_backdrop(scanned, tvdb,
                                                               'still_path': 'javascript:x'}]}})
         conn.execute("UPDATE series SET backdrop_path = '/bd.jpg' WHERE id = ?", (sid,))
     tv_airtimes.refresh(now=5000.0)
-    out = {(e['season'], e['episode']): (e['tvdb_image'], e['still_path'], e['backdrop_path'])
-           for e in tv_calendar.calendar(dt.date(2026, 10, 11), 7)['episodes'] if e['show'] == 'Severance'}
+    # v178: the calendar answer has no images any more; what is stored is still checked
+    out = {(r['season_number'], r['episode_number']): (r['tvdb_image'], r['still_path'], r['backdrop_path'])
+           for r in rows('SELECT e.season_number, e.episode_number, e.tvdb_image, e.still_path, s.backdrop_path'
+                         ' FROM episodes e JOIN series s ON s.id = e.series_id WHERE s.id = ?', sid)}
     assert out[(2, 1)][0] == 'https://artworks.thetvdb.com/banners/episodes/371980/1.jpg'
     assert out[(2, 2)] == (None, '/still22.jpg', '/bd.jpg')            # a foreign host is never stored
     assert out[(2, 3)] == (None, None, '/bd.jpg')                      # not an image path: dropped

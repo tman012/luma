@@ -1,7 +1,7 @@
 """v177 (Tester BLOCKER B1): port 5002 is a test sign by value, the way the server parses it
 (server_config.get_port() int()s LUMA_PORT; PORT; LUMA_BIND's port), not by spelling. Prod on such a
 host: all 21 gated jobs OFF and one ERROR. FF-17: every "opt-ins ignored" line is an ERROR naming
-LUMA_TEST_ALLOW. Ops: each honored opt-in is stated at boot ("tv_grab is ON (test, opt-in)")."""
+LUMA_TEST_ALLOW. Ops: each honored opt-in is stated at boot ("Instance test: tv_grab is ON (test, opt-in)")."""
 import logging
 
 import pytest
@@ -64,6 +64,6 @@ def test_each_honored_opt_in_is_stated_at_boot(monkeypatch, caplog):
     with caplog.at_level(logging.INFO, logger='app.instance'):
         instance.log_blocked_once()
     on = sorted(r.getMessage() for r in caplog.records if 'is ON (test, opt-in)' in r.getMessage())
-    assert on == ['movie_grab is ON (test, opt-in)', 'tv_grab is ON (test, opt-in)']
+    assert on == ['Instance test: movie_grab is ON (test, opt-in)', 'Instance test: tv_grab is ON (test, opt-in)']
     assert all(r.levelno == logging.INFO for r in caplog.records if 'is ON' in r.getMessage())
     assert len(instance.blocked_jobs()) == 19

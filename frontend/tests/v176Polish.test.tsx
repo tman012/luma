@@ -116,6 +116,12 @@ describe('v176 Security panel', () => {
       'Sonarr quality profile name', 'Library names, comma separated']) expect(src).not.toContain(p);
   });
 
+  it('v178: nor the last three (Hostname, Trusted proxies, Host names); only the PIN masks remain', () => {
+    const src = readFileSync(join(__dirname, '..', 'src', 'pages', 'settings', 'SecurityTab.tsx'), 'utf8');
+    for (const p of ['requests.example.com', 'Addresses or ranges', 'placeholder="Names"']) expect(src).not.toContain(p);
+    expect((src.match(/placeholder=/g) || []).length).toBe(2);
+  });
+
   it('Movie and TV profile are selects of the Radarr and Sonarr profiles', async () => {
     stub('ok', { movie_profile: 'HD-1080p', tv_profile: 'TFlix' });
     wrap(<SecurityTab />);

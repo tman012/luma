@@ -13,8 +13,6 @@ export interface CalEpisode {
   air_time?: string | null;
   /** UTC air time (TVDB, else TVmaze) and minutes; null: the date only. */
   airstamp?: string | null; runtime?: number | null;
-  /** Card still sources: TheTVDB episode image (with a key), TMDB still, show backdrop. */
-  tvdb_image?: string | null; still_path?: string | null; backdrop_path?: string | null;
   /** v158a: the series and this episode are monitored (unmonitored cards render dimmed). */
   monitored?: boolean;
 }
@@ -43,7 +41,7 @@ export function timeRange(airstamp: string | null | undefined, runtime: number |
   return timeRangeParts(airstamp, runtime, timeZone)?.join(' ') ?? null;
 }
 export interface CalendarData { start: string; days: number; episodes: CalEpisode[]; libraries: number; refreshed_at: number | null;
-  /** a background refresh (episode images, air times) started: ask again shortly */
+  /** a background refresh (air times, stale shows) started: ask again shortly */
   refreshing?: boolean }
 export interface FindResult {
   tmdb_id: number; title: string; year: number | null; poster_path: string | null; seasons: number | null;

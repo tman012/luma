@@ -207,7 +207,6 @@ function RequestPortalCard() {
                 type="text"
                 value={hostname}
                 onChange={e => { setHostname(e.target.value); setDirty(true); }}
-                placeholder="requests.example.com"
                 spellCheck={false}
                 className={INPUT_CLASS}
               />
@@ -408,7 +407,7 @@ export function SecurityTab() {
         <label className="block space-y-1.5">
           <span className="block text-[13px] font-medium text-white/70">Trusted proxies</span>
           <input
-            type="text" value={proxies} onChange={e => setProxies(e.target.value)} placeholder="Addresses or ranges"
+            type="text" value={proxies} onChange={e => setProxies(e.target.value)}
             spellCheck={false}
             className={`${INPUT_CLASS} max-w-md`}
           />
@@ -417,7 +416,7 @@ export function SecurityTab() {
         <label className="block space-y-1.5">
           <span className="block text-[13px] font-medium text-white/70">Host names</span>
           <input
-            type="text" value={hostnames} onChange={e => setHostnames(e.target.value)} placeholder="Names"
+            type="text" value={hostnames} onChange={e => setHostnames(e.target.value)}
             spellCheck={false} autoCapitalize="off"
             className={`${INPUT_CLASS} max-w-md`}
           />

@@ -9,7 +9,7 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
 import { SEARCH_DEBOUNCE_MS } from '@/components/library/TvSearch';
-import { CAL_MAX_W, POLL_MS, Still, WeekGrid, keepIfSame, stillChain } from '@/components/library/TvCalendar';
+import { CAL_MAX_W, CARD_TEXT_H, POLL_MS, WeekGrid, keepIfSame } from '@/components/library/TvCalendar';
 import { ModalHostContext, type ModalHostContextValue } from '@/contexts/ModalHostContext';
 import {
   addDays, agendaLabel, byDay, episodeState, isDay, localDay, seasonsText, shortDate, weekDays, weekLabel, weekStart, type CalEpisode,
@@ -78,34 +78,20 @@ const calCalls = () => calls.filter(c => c.url.startsWith('/api/settings/tv/cale
 
 // ---------------------------------------------------------------- dates
 
-describe('stills', () => {
-  const ep = (o: Partial<CalEpisode>): CalEpisode => ({ episode_id: 1, series_id: 1, show: 'Severance', year: 2022, poster_path: null,
+describe('text-only cards (v178)', () => {
+  const ep = (o: Partial<CalEpisode>): CalEpisode => ({ episode_id: 1, series_id: 1, show: 'Severance', year: 2022, poster_path: '/p.jpg',
     season: 2, episode: 1, title: 'Hello', air_date: '2026-10-12', downloaded: false, ...o });
-  it('TVDB image, then the TMDB still, then the backdrop; onError moves on; none left is a glass tile, never a broken image', () => {
-    const e = ep({ tvdb_image: 'https://artworks.thetvdb.com/banners/e.jpg', still_path: '/s.jpg', backdrop_path: '/b.jpg' });
-    const chain = stillChain(e);
-    expect(chain).toHaveLength(3);
-    expect(chain[0]).toBe('/api/img/tmdb?host=tvdb&path=%2Fbanners%2Fe.jpg');           // through Luma's image proxy, never direct
-    expect(stillChain(ep({ tvdb_image: 'https://evil.example/banners/e.jpg' }))).toHaveLength(0);
-    expect(chain[1]).toContain('/s.jpg');
-    expect(chain[2]).toContain('/b.jpg');
-    expect(stillChain(ep({ still_path: '/s.jpg' }))).toHaveLength(1);
-    render(<Still e={e} />);
-    const box = screen.getByTestId('tv-still');
-    expect(box.style.aspectRatio).toBe('16 / 9');
-    let img = box.querySelector('img')!;
-    expect([img.getAttribute('src'), img.getAttribute('alt'), img.getAttribute('loading')]).toEqual([chain[0], 'Severance S02E01', 'lazy']);
-    expect([img.style.width, img.style.objectFit, img.style.opacity, img.style.transition]).toEqual(['100%', 'cover', '0', 'opacity 150ms']);
-    fireEvent.error(img);
-    img = box.querySelector('img')!;
-    expect(img.getAttribute('src')).toBe(chain[1]);
-    fireEvent.load(img);
-    expect(img.style.opacity).toBe('1');
-    fireEvent.error(img);
-    expect(box.querySelector('img')!.getAttribute('src')).toBe(chain[2]);
-    fireEvent.error(box.querySelector('img')!);
-    expect(box.querySelector('img')).toBeNull();
-    expect(box.style.background).toBe('rgba(255, 255, 255, 0.04)');
+  it('no image of any kind: show name, episode code and title, air time, the 4px edge and the bookmark', () => {
+    render(<WeekGrid eps={[ep({ airstamp: '2026-10-12T21:00:00-04:00', runtime: 60 } as Partial<CalEpisode>)]} week={'2026-10-11' as Day} today={'2026-10-12' as Day} />);
+    const card = screen.getByTestId('tv-agenda-row');
+    expect(card.querySelector('img, picture, [data-testid=tv-still]')).toBeNull();
+    expect(card.querySelector('[style*="aspect-ratio"]')).toBeNull();
+    expect(within(card).getByTestId('tv-card-show').textContent).toBe('Severance');
+    expect(within(card).getByTestId('tv-card-title').textContent).toBe('S02E01 \u00b7 Hello');
+    expect(within(card).getByTestId('tv-air').textContent).not.toBe('');
+    expect(within(card).getByTestId('tv-stripe').style.width).toBe('4px');
+    expect(within(card).getByTestId('tv-card-bookmark')).toBeTruthy();
+    expect((card.querySelector('.tvc-text') as HTMLElement).style.padding).toBe('6px 8px');
   });
 });
 
@@ -282,7 +268,8 @@ describe('Calendar', () => {
       const cards = within(c).getAllByTestId('tv-cal-loading-card');
       expect(cards.length >= 2 && cards.length <= 3).toBe(true);
       expect(cards[0]!.style.background).toBe('rgba(255, 255, 255, 0.04)');
-      expect((cards[0]!.firstElementChild as HTMLElement).style.aspectRatio).toBe('16 / 9');
+      expect(cards[0]!.style.height).toBe(`${CARD_TEXT_H}px`);                       // a text-only card's height
+      expect(cards[0]!.querySelector('[style*="aspect-ratio"]')).toBeNull();
     }
     expect(document.querySelector('.tvi-spin, .tvc-pulse, [class*="spin"]')).toBeNull();
     expect(screen.getByTestId('tv-cal-label').textContent).toBe('Oct 11 \u2013 17');   // the toolbar stays put

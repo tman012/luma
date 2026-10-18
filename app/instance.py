@@ -242,7 +242,7 @@ def log_blocked_once() -> None:
             f', and {ALLOW_ENV} opt-ins are ignored' if requested() else '')
     for j in sorted(allowed() & set(GATED)):             # v177 (Ops): each honored opt-in, stated once
         if writes_allowed(j):
-            logger.info('%s is ON (test, opt-in)', j)
+            logger.info('Instance test: %s is ON (test, opt-in)', j)
     for j, d in blocked_jobs().items():
         if opt_ins_honored():
             logger.info('Instance test: %s is OFF (%s); opt in with %s=%s', j, d, ALLOW_ENV, j)

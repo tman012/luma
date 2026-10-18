@@ -63,7 +63,7 @@ def test_week_by_air_date_with_downloaded_flags(scanned):
     ]
     e = out['episodes'][0]
     assert set(e) == {'episode_id', 'series_id', 'tmdb_id', 'monitored', 'show', 'year', 'poster_path', 'season', 'episode', 'title',
-                      'air_date', 'airstamp', 'runtime', 'tvdb_image', 'still_path', 'backdrop_path', 'downloaded'}
+                      'air_date', 'airstamp', 'runtime', 'downloaded'}   # v178: no image fields
     assert e['poster_path'] == '/p95396.jpg' and e['title'] == 'Episode 1' and out['libraries'] == 1
     assert isinstance(e['tmdb_id'], int)                    # the card opens this show's detail
 

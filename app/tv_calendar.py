@@ -64,7 +64,7 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
         with tv_store.connect() as conn:
             for r in conn.execute(
                     'SELECT e.id, e.series_id, e.season_number, e.episode_number, e.title, e.air_date, e.airstamp,'
-                    ' COALESCE(e.air_runtime, e.runtime) AS minutes, e.still_path, e.tvdb_image, s.backdrop_path,'
+                    ' COALESCE(e.air_runtime, e.runtime) AS minutes,'
                     ' s.title AS show, s.year, s.poster_path, s.tmdb_id AS show_tmdb, s.tvdb_id AS show_tvdb,'
                     ' (s.monitored AND e.monitored) AS mon,'
                     # downloaded: a linked file for this exact episode row (one rule, no fallback)
@@ -79,7 +79,7 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
                             'poster_path': r['poster_path'], 'season': r['season_number'],
                             'episode': r['episode_number'], 'title': r['title'] or '', 'air_date': r['air_date'],
                             'airstamp': r['airstamp'], 'runtime': r['minutes'],
-                            'tvdb_image': r['tvdb_image'], 'still_path': r['still_path'], 'backdrop_path': r['backdrop_path'],
+                            # v178 (Taylor): text-only cards, so no episode stills or backdrops in the answer
                             # or Plex has it (tv_plex: read-only, cached; empty when Plex is down)
                             'downloaded': bool(r['downloaded']) or _in_plex(r)})
     out.sort(key=lambda e: (e['air_date'], tv_scan.sort_title(e['show']), e['season'] or 0, e['episode'] or 0))

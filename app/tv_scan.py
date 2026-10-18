@@ -1287,39 +1287,6 @@ def scan_all(now: Optional[float] = None, retry_unmatched: bool = True) -> Dict[
     return total
 
 
-STILL_WINDOW_DAYS = 14        # episodes within this many days either side of today, or in view
-STILL_GRACE_S = 2 * 86400     # an aired one: asked until a read at least this long after it aired
-STILL_RETRY_S = 6 * 3600      # ... and at most this often meanwhile (upcoming ones too)
-
-
-def still_gaps(start: Optional[dt.date] = None, end: Optional[dt.date] = None, now: Optional[float] = None) -> set:
-    """Shows to read again for episode images: an episode in view ([start, end))
-    or within STILL_WINDOW_DAYS of today has no image from TMDB or TVDB.
-    TMDB adds most stills after an episode airs, so a show read before then is
-    read again at once once it has aired, then every STILL_RETRY_S until a read
-    STILL_GRACE_S after it aired (image or not); an upcoming one every
-    STILL_RETRY_S. Bounded: never a loop on every open."""
-    now = time.time() if now is None else now
-    today = dt.date.fromtimestamp(now)
-    start = start or today
-    end = end or start
-    lo = (today - dt.timedelta(days=STILL_WINDOW_DAYS)).isoformat()
-    hi = (today + dt.timedelta(days=STILL_WINDOW_DAYS + 1)).isoformat()
-    # when it aired: its airstamp, else the end of its air date (UTC), which a US evening slot doesn't pass
-    aired = "COALESCE(CAST(strftime('%s', e.airstamp) AS INTEGER), CAST(strftime('%s', e.air_date) AS INTEGER) + 86400)"
-    with tv_store.connect() as conn:
-        return {r['series_id'] for r in conn.execute(
-            'SELECT DISTINCT e.series_id FROM episodes e JOIN series s ON s.id = e.series_id'
-            ' WHERE e.season_number > 0 AND e.air_date IS NOT NULL'
-            ' AND ((e.air_date >= :start AND e.air_date < :end) OR (e.air_date >= :lo AND e.air_date < :hi))'
-            ' AND e.still_path IS NULL AND e.tvdb_image IS NULL AND s.tmdb_id IS NOT NULL'
-            f' AND (({aired} <= :now AND (COALESCE(s.stills_at, 0) < {aired}'
-            f'       OR (s.stills_at < {aired} + :grace AND :now - s.stills_at >= :retry)))'
-            f'   OR ({aired} > :now AND :now - COALESCE(s.stills_at, 0) >= :retry))',
-            {'start': start.isoformat(), 'end': end.isoformat(), 'lo': lo, 'hi': hi,
-             'now': now, 'grace': STILL_GRACE_S, 'retry': STILL_RETRY_S})}
-
-
 def refresh_added(now: Optional[float] = None, folders: bool = False, first: Optional[set] = None,
                   background: bool = False, repair: Optional[set] = None, only: Optional[set] = None,
                   stale_s: Optional[float] = None) -> int:
@@ -1329,7 +1296,7 @@ def refresh_added(now: Optional[float] = None, folders: bool = False, first: Opt
     libraries). TMDB reads on the workers through the shared rate budget; a
     TMDB error leaves the rest for next time. *background* (the Calendar-open
     refresh): paced at tv_tmdb.BACKGROUND_RATE_PER_S. *repair*: shows read again
-    whatever their age (still_gaps). *only*: just these shows (the visible-week
+    whatever their age. *only*: just these shows (the visible-week
     pass). Returns how many were refreshed."""
     from app import tv_settings
     now = time.time() if now is None else now
@@ -1341,10 +1308,9 @@ def refresh_added(now: Optional[float] = None, folders: bool = False, first: Opt
             'SELECT id, tmdb_id, episode_group_id, tmdb_refreshed_at, stills_at FROM series WHERE'
             + ('' if folders else ' folder IS NULL AND') + ' tmdb_id IS NOT NULL AND path_id IN'
             f' ({",".join("?" * len(pids))})', pids)
-            # stale (24h), its stills never read (backfill now, whatever its age), or an aired episode
-            # still has no image (repair)
+            # stale (24h), or asked for by *repair*. v178 (Taylor): the calendar cards are text only, so a
+            # Calendar open no longer reads shows again for episode stills (never read or still missing)
             if now - (r['tmdb_refreshed_at'] or 0) >= (REFRESH_EPISODES_S if stale_s is None else stale_s)
-            or (folders and r['stills_at'] is None)
             or r['id'] in (repair or ())]
     if only is not None:
         rows = [r for r in rows if r['id'] in only]
@@ -1397,19 +1363,14 @@ def _refresh_pass(only: Optional[set], first: set, repair: set) -> None:
 
 def refresh_on_open(first: Optional[set] = None, start: Optional[dt.date] = None, end: Optional[dt.date] = None) -> bool:
     """Calendar open: in the background, never during an Import (which refreshes
-    them itself). First the visible range's shows (*first*: stale ones, stills
-    never read, and aired episodes still without an image), then the rest of the
-    library. When a refresh is already running, the visible range still gets its
+    them itself). First the visible range's shows (*first*: stale ones; v178: never
+    for episode images, the cards are text only), then the rest of the library. When a refresh is already running, the visible range still gets its
     own pass at once. The open answers from tv.db right away; the page asks
     again when 'refreshing'. False when nothing started."""
     if _scan_lock.locked():
         return False
     first = set(first or ())
-    try:
-        repair = still_gaps(start, end)
-    except Exception:                  # noqa: BLE001
-        logger.exception('TV still check failed')
-        repair = set()
+    repair: set = set()                # v178: no still repair reads (text-only calendar cards)
     if _refresh_lock.acquire(blocking=False):
         def work():
             try:
