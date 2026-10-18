@@ -57,6 +57,12 @@ def evaluate() -> Dict[str, Any]:
     with tv_store.connect() as conn:
         series = {r['folder']: dict(r) for r in conn.execute('SELECT * FROM series WHERE path_id IS NOT NULL')}
         review = {r['folder']: dict(r) for r in conn.execute('SELECT * FROM unmatched')}
+    # what Taylor's review table shows (a guess another folder owns gives way: library_view)
+    from app import tv_scan
+    for u in tv_scan.library_view()['unmatched']:
+        if u['folder'] in review and u['tier'] == 'likely':
+            review[u['folder']].update(pick=u['pick'], candidates=json.dumps(u['candidates']))
+    with tv_store.connect() as conn:
         leftovers = {}
         for name in EPISODE_SHOWS:
             s = series.get(name)
@@ -120,6 +126,7 @@ def evaluate() -> Dict[str, Any]:
             # show (duplicate), or a true tie between two guesses (unclear)
             'unchecked': sorted((folder, r['tier'] if r['tier'] != 'likely' else r['reason'])
                                 for folder, r in review.items() if r['pick'] is None or r['tier'] != 'likely'),
+            'review_picks': {k: review[k]['pick'] for k in ('The Office', 'The Staircase', 'WWE Raw', 'Cosmos') if k in review},
             'same_name': {k: _where(k, series, review) for k in ('Cheers', 'The Office (US)', 'Love', 'Cheat (2019)')}}
 
 

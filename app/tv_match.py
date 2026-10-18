@@ -378,10 +378,16 @@ def match(folder: str, hints: Optional[Hints] = None, *, search: Optional[Callab
     # files fit just as well. An exact title is a decision (TMDB's order breaks a same-name tie).
     # A partial-title guess the folder's files don't fit is no decision either (PM: WWE Raw -> Raw Classics,
     # WWE WrestleMania -> Road to WrestleMania): unchecked.
+    brand = _brand_exact(g['title'], rows) if tier != 'high' else None
+    if brand is not None:              # 'WWE Raw' -> Raw, not WWE Raw Classics (Tester on 0a022bf)
+        best = brand['c']
+        rows = [brand] + [r for r in rows if r is not brand]
     fit = file_fit(hints, details.get(best['tmdb_id'])) if hints is not None else None
     misfit = fit is not None and rows[0]['title'] < W_EXACT and not (fits(fit) and fit['tight'] >= 1.0)
-    unclear = tier != 'high' and not backed(rows, hints, details, best['tmdb_id']) and (
-        misfit or tie(rows, hints, details, best['tmdb_id']))
+    unclear = tier != 'high' and brand is None and (why == 'files fit another show' or (
+        not backed(rows, hints, details, best['tmdb_id']) and (misfit or tie(rows, hints, details, best['tmdb_id']))))
+    if brand is not None and fit is not None and contradicts(fit):
+        unclear = True
     if tier == 'high' and best['tmdb_id'] not in details:
         d = show(best['tmdb_id'])
         if d:
@@ -392,6 +398,22 @@ def match(folder: str, hints: Optional[Hints] = None, *, search: Optional[Callab
     if tier == 'high':
         return {**out, 'status': 'matched', 'tmdb_id': best['tmdb_id']}
     return {**out, 'status': 'unmatched', 'reason': 'unclear' if unclear else 'not_exact'}
+
+
+# Folder names that lead with a brand ('WWE Raw'): the show's own title is the rest ('Raw').
+BRANDS = ('wwe',)
+
+
+def _brand_exact(title: str, rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The result titled exactly the folder's name minus its brand word, if there is one."""
+    words = str(title or '').split(None, 1)
+    if len(words) != 2 or normalize(words[0]) not in BRANDS:
+        return None
+    rest = normalize(words[1])
+    for r in rows:
+        if rest and any(normalize(t) == rest for t in (r['c'].get('title'), r['c'].get('original_title')) if t):
+            return r
+    return None
 
 
 def decide(rows: List[Dict[str, Any]], q: Dict[str, Any], hints: Optional[Hints],

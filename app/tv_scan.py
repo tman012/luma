@@ -314,6 +314,21 @@ def refresh_episodes(sid: int, tmdb_id: int, now: float, data: Optional[Dict[str
         conn.execute('UPDATE series SET tmdb_refreshed_at = ? WHERE id = ?', (now, sid))
 
 
+def _skip_owned(pick: Optional[int], cands: List[Dict[str, Any]], owned: set) -> Tuple[Optional[int], List[Dict[str, Any]]]:
+    """A guess another folder already owns isn't this folder's show (Tester on 0a022bf: The Office
+    -> 2001 UK, The Staircase -> 2004): the next candidate of the same title leads instead, else no
+    pick (unchecked, the owned guess shown first)."""
+    lead = pick if pick is not None else (cands[0]['tmdb_id'] if cands else None)
+    if lead is None or lead not in owned:
+        return pick, cands
+    name = tv_match.normalize(next((c.get('title') for c in cands if c.get('tmdb_id') == lead), '') or '')
+    alt = next((c for c in cands if c.get('tmdb_id') not in owned and name
+                and tv_match.normalize(c.get('title') or '') == name), None)
+    if alt is None:
+        return None, cands
+    return (alt['tmdb_id'] if pick is not None else None), [alt] + [c for c in cands if c is not alt]
+
+
 def _store_unmatched(path_id: str, folder: str, m: Dict[str, Any], now: float, reason: Optional[str] = None) -> None:
     with tv_store.write() as conn:
         _store_unmatched_conn(conn, path_id, folder, m, now, reason)
@@ -1215,6 +1230,7 @@ def library_view() -> Dict[str, Any]:
                           'unrecognized': r['unrecognized'] or 0,
                           'review': review_lines(conn, r['id']) if (r['mismatch'] or r['unrecognized']) else []})
         unmatched = []
+        owned = {r['tmdb_id'] for r in conn.execute('SELECT tmdb_id FROM series WHERE tmdb_id IS NOT NULL')}
         for r in conn.execute('SELECT * FROM unmatched ORDER BY folder COLLATE NOCASE'):
             if r['path_id'] not in names:
                 continue
@@ -1224,6 +1240,8 @@ def library_view() -> Dict[str, Any]:
                 cands = []
             tier = 'duplicate' if r['reason'] == 'duplicate' else (r['tier'] or 'none')
             pick = r['pick'] if tier == 'likely' else (cands[0]['tmdb_id'] if tier == 'duplicate' and cands else None)
+            if tier == 'likely':
+                pick, cands = _skip_owned(pick, cands, owned)
             # 'pick' is what Import all would import as it stands (pre-checked); a guess nothing backs
             # (reason 'unclear') is only 'guess_pick', shown first in an unchecked row
             guess = pick if pick is not None else (cands[0]['tmdb_id'] if tier == 'likely' and cands else None)

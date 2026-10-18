@@ -88,3 +88,37 @@ def test_two_partial_titles_without_files_tie():
     search, sh = tmdb(a, b)
     m = tv_match.match('Bullshit', None, search=search, show=sh)
     assert m['status'] == 'unmatched' and m['tier'] == 'likely' and m['reason'] == 'unclear'   # stored without a pick
+
+
+# ------------------------------------------------------------------ Tester on 0a022bf
+
+def test_a_brand_folder_leads_with_the_show_itself():
+    """'WWE Raw' -> Raw (checked), never WWE Raw Classics / Top 10."""
+    raw = {'id': 4656, 'name': 'Raw', 'year': 1993, 'seasons': [52] * 30}
+    top10 = {'id': 205, 'name': 'WWE Raw Top 10', 'year': 2025, 'seasons': [10]}
+    search, sh = tmdb(RAW_CLASSICS, top10, raw)
+    m = tv_match.match('WWE Raw', None, search=search, show=sh)
+    assert (m['status'], m['pick'], m['reason']) == ('unmatched', 4656, 'not_exact')
+    assert m['candidates'][0]['tmdb_id'] == 4656
+    m = tv_match.match('WWE WrestleMania', None, search=tmdb(ROAD_TO_WM)[0], show=tmdb(ROAD_TO_WM)[1])
+    assert m['pick'] == 203 and m['reason'] == 'not_exact'     # no WrestleMania itself: Luma's guess (files decide below)
+    m = tv_match.match('WWE WrestleMania', files('WWE WrestleMania', {38: 3}), search=tmdb(ROAD_TO_WM)[0], show=tmdb(ROAD_TO_WM)[1])
+    assert m['reason'] == 'unclear'
+
+
+def test_files_fit_another_show_is_never_prechecked(monkeypatch):
+    cosmos = {'id': 501, 'name': 'Cosmos', 'year': 1980, 'seasons': [13]}
+    odyssey = {'id': 502, 'name': 'Cosmos: A Spacetime Odyssey', 'year': 2014, 'seasons': [13]}
+    search, sh = tmdb(cosmos, odyssey)
+    monkeypatch.setattr(tv_match, 'decide', lambda *a, **k: ('likely', 'files fit another show'))
+    m = tv_match.match('Cosmos', files('Cosmos', {1: 13}), search=search, show=sh)
+    assert m['status'] == 'unmatched' and m['reason'] == 'unclear'
+
+
+def test_a_guess_another_folder_owns_gives_way_to_the_same_title():
+    from app import tv_scan
+    cands = [{'tmdb_id': 2316, 'title': 'The Office'}, {'tmdb_id': 2996, 'title': 'The Office'}, {'tmdb_id': 9, 'title': 'Office Space'}]
+    assert tv_scan._skip_owned(2316, cands, {2316}) == (2996, [cands[1], cands[0], cands[2]])
+    assert tv_scan._skip_owned(2316, cands, {2316, 2996}) == (None, cands)       # none left: unchecked
+    assert tv_scan._skip_owned(2316, cands, set()) == (2316, cands)
+    assert tv_scan._skip_owned(None, cands, {2316})[0] is None                     # an unchecked guess stays unchecked

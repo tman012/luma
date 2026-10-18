@@ -32,7 +32,8 @@ def test_687_folders(fresh):
     # Luma decides (Taylor, Oct 18): every guess is pre-checked except a true tie; unchecked are only no TMDB
     # result (4), another folder has the show (4) and two ties. Pre-checked guesses can be wrong (reported).
     from collections import Counter
-    assert Counter(why for _, why in ev['unchecked']) == {'none': 4, 'duplicate': 4, 'unclear': 4}, ev['unchecked']
+    assert Counter(why for _, why in ev['unchecked']) == {'none': 4, 'duplicate': 4, 'unclear': 3}, ev['unchecked']
+    assert ev['review_picks'] == {'The Office': 2996, 'The Staircase': 21421, 'WWE Raw': 4656}   # Tester on 0a022bf
     assert ev['prechecked_wrong'] == []     # PM: no WWE row pre-checked with a wrong guess
     # PM: at least 96.5% of decidable folders import automatically (measured 96.69%, 642 of 664; raw 93.74%).
     # Popularity never decides: a same-name rival auto-picks only when the files fit it (3+ episodes) and rule
