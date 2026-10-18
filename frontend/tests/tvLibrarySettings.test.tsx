@@ -207,6 +207,9 @@ describe('needs review, in words (Tester tv1-8646479 M7/M8)', () => {
     const sub = within(rows[0]!).getByTestId('tv-show-subtitle');
     expect(sub.style.whiteSpace).toBe('normal');
     expect([toggle.style.whiteSpace, toggle.style.overflow, toggle.style.textOverflow]).toEqual(['normal', 'visible', 'clip']);
+    // same 13px type as a plain subtitle (a 'font' shorthand used to reset it to 16px)
+    expect(toggle.getAttribute('style')).not.toMatch(/(^|; )font: /);
+    expect(toggle.style.fontSize).toBe('13px');
     const plain = within(rows[1]!).getByTestId('tv-show-subtitle').parentElement!;
     expect([plain.style.whiteSpace, plain.style.overflow]).toEqual(['normal', 'visible']);
     fireEvent.click(toggle);

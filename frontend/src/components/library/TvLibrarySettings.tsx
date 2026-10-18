@@ -172,7 +172,7 @@ function ShowRow({ s, first, open, onOpen }: { s: Show; first: boolean; open: bo
           {review && lines.length > 0 ? (
             <button type="button" className="lp-focus" data-testid="tv-review-toggle" aria-expanded={details}
               onClick={() => setDetails(d => !d)} title={`${s.path_name} · ${s.folder}`}
-              style={{ ...subStyle, background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', font: 'inherit', fontSize: subStyle.fontSize }}>
+              style={{ ...subStyle, background: 'none', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>
               {subtitle}
             </button>
           ) : (
