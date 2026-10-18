@@ -229,11 +229,15 @@ def test_boot_rerun_imports_old_pending_rows_and_touches_nothing_else(lib, monke
     assert out['ok'] and len(out['imported']) == 1 and out['failed'] == [] and out['kept'] == 2
     s = rows("SELECT tmdb_id, match_tier FROM series WHERE folder = 'Mystery Show'")[0]
     assert s['tmdb_id'] == 1001
-    assert not [c for c in fake_tmdb.calls if c[0] == 'search']                    # no rescan, no new guesses
+    # v161a: review rows without a pick are matched again once (only those folders are searched)
+    assert {c[1] for c in fake_tmdb.calls if c[0] == 'search'} <= {'Zzz Nothing', 'Empty Show'}
     after = {r['id']: dict(r) for r in rows('SELECT * FROM series')}
     assert all(after[i] == r for i, r in before.items())                          # imported shows untouched
     assert {r['folder'] for r in rows('SELECT folder FROM unmatched')} == {'Zzz Nothing', 'Empty Show (2020)'}
-    assert tv_scan.auto_import_pending(now=3000.0)['imported'] == []              # idempotent
+    fake_tmdb.calls.clear()
+    again = tv_scan.auto_import_pending(now=3000.0)                               # idempotent, no new searches
+    assert again['imported'] == [] and again['eligible'] == 0 and again['kept'] == 2
+    assert not [c for c in fake_tmdb.calls if c[0] == 'search']
 
 
 def test_v158a_boot_rerun_fetches_and_walks_without_the_scan_lock(lib, monkeypatch, fake_tmdb):
@@ -270,3 +274,87 @@ def test_v158a_boot_rerun_waits_for_a_running_scan_then_skips_rows_it_changed(li
     out = tv_scan.auto_import_pending(now=2000.0)
     assert out['ok'] and out['imported'] == [] and out['failed'] == []
     assert not rows("SELECT 1 FROM series WHERE folder = 'Mystery Show'")
+
+
+# v161a: :5002 kept 125 review rows after the boot re-run, all written before schema v3 or by an
+# older rule (tier 'none' from v3's column default, pick NULL, old reasons, even NULL from v1).
+def _old_rows(root):
+    for name in ('Bluey (2018)', 'Taskmaster', 'The Office (2005)', 'Dark (2017)', 'Nothing Like It', 'Severance copy',
+                 'Severance again'):
+        (root / name).mkdir()
+        (root / name / f'{name}.S01E01.mkv').write_bytes(b'x' * 64)
+    old = [('Bluey (2018)', 'no_results', 'none', None),             # TMDB was down then
+           ('Taskmaster', 'not_exact', 'none', None),                # v3 default tier, no pick
+           ('The Office (2005)', 'unclear', 'none', None),
+           ('Dark (2017)', None, 'none', None),                      # schema v1: no reason
+           ('Nothing Like It', 'no_title', 'none', None),
+           ('Severance copy', 'duplicate', 'duplicate', 95396),      # another folder owns it: never touched
+           ('Severance again', 'duplicate', 'none', None)]          # :5002's shape (Ops 05:56): v3 default tier
+    # Ops' shape: guess_year NULL, candidates 0..5 TMDB briefs (TMDB's order, not Luma's ranking)
+    five = json.dumps([{'id': i, 'name': n, 'year': None} for i, n in
+                       ((5001, 'Bluey'), (1002, 'Mystery Show'), (2316, 'The Office'), (70523, 'Dark'), (63770, 'Taskmaster'))])
+    with tv_store.write() as conn:
+        for folder, reason, tier, pick in old:
+            cands = five if reason == 'not_exact' else '[]'
+            conn.execute('INSERT INTO unmatched (path_id, folder, guess_title, guess_year, candidates, reason, ts, tier, pick)'
+                         ' VALUES (?, ?, ?, NULL, ?, ?, 500.0, ?, ?)', (PID, folder, folder, cands, reason, tier, pick))
+
+
+def test_v161a_boot_rerun_takes_old_format_rows(lib, monkeypatch, fake_tmdb, caplog):
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', True)
+    tv_scan.scan_all(now=400.0)                                      # the tree's own folders imported
+    with tv_store.write() as conn:
+        conn.execute('DELETE FROM unmatched')
+        conn.execute("DELETE FROM series WHERE folder LIKE 'Taskmaster%' OR folder LIKE 'Dark%'")
+    _old_rows(lib)
+    dup_before = rows("SELECT * FROM unmatched WHERE folder LIKE 'Severance %' ORDER BY id")
+    series_before = {r['id']: dict(r) for r in rows('SELECT * FROM series')}
+    caplog.set_level('INFO', logger='app.tv_scan')
+    out = tv_scan.auto_import_pending(now=2000.0)
+    assert out['ok'] and out['total'] == 7 and out['eligible'] == 5 and out['skipped'] == 2
+    got = {r['folder']: r['tmdb_id'] for r in rows('SELECT folder, tmdb_id FROM series')}
+    assert got['Bluey (2018)'] == 5000 and got['Taskmaster'] == 63770 and got['Dark (2017)'] == 70523
+    # The Office (2005): TMDB's show is already imported from the tree's own folder -> now a duplicate
+    left = {r['folder']: r for r in rows('SELECT * FROM unmatched')}
+    assert set(left) == {'Nothing Like It', 'Severance copy', 'Severance again', 'The Office (2005)'}
+    assert left['The Office (2005)']['reason'] == 'duplicate'
+    assert left['Nothing Like It']['ts'] == 2000.0                   # rewritten with today's answer
+    assert rows("SELECT * FROM unmatched WHERE folder LIKE 'Severance %' ORDER BY id") == dup_before
+    after = {r['id']: dict(r) for r in rows('SELECT * FROM series')}
+    assert all(after[i] == r for i, r in series_before.items())     # imported shows untouched
+    line = [r.getMessage() for r in caplog.records if 'boot re-run' in r.getMessage()]
+    assert line and '7 review row(s), 5 eligible' in line[-1] and '3 imported' in line[-1] and '1 now duplicates' in line[-1]
+    # next boot: the marker says these rows were written by this rule; nothing is searched again
+    fake_tmdb.calls.clear()
+    out = tv_scan.auto_import_pending(now=3000.0)
+    assert out['eligible'] == 0 and out['imported'] == [] and not fake_tmdb.calls
+    assert json.loads(tv_store.get_meta(tv_scan.RERUN_META)) == {'rule': tv_scan.RERUN_RULE, 'since': 2000.0}
+
+
+def test_v161a_boot_rerun_retries_rows_when_tmdb_was_down(lib, monkeypatch, fake_tmdb):
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', True)
+    _old_rows(lib)
+    fake_tmdb.fail = 'down'
+    out = tv_scan.auto_import_pending(now=2000.0)
+    assert out['imported'] == [] and out['failed']
+    assert rows("SELECT ts FROM unmatched WHERE folder = 'Taskmaster'")[0]['ts'] == 500.0
+    fake_tmdb.fail = None
+    out = tv_scan.auto_import_pending(now=3000.0)                    # still older than the marker
+    assert 63770 in {r['tmdb_id'] for r in rows('SELECT tmdb_id FROM series')}
+
+
+def test_v161a_boot_rerun_always_logs_a_summary(lib, monkeypatch, caplog):
+    caplog.set_level('INFO', logger='app.tv_scan')
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', True)
+    with tv_store.write() as conn:
+        conn.execute('DELETE FROM unmatched')
+    out = tv_scan.auto_import_pending(now=2000.0)
+    assert out['ok'] and out['eligible'] == 0
+    monkeypatch.setattr(tv_scan, 'AUTO_IMPORT', False)
+    tv_scan.auto_import_pending(now=2000.0)
+    monkeypatch.setenv('LUMA_SKIP_BACKGROUND_THREADS', '1')
+    assert tv_scan.auto_import_on_start() is False
+    msgs = [r.getMessage() for r in caplog.records if 'boot re-run' in r.getMessage()]
+    assert any('0 review row(s), 0 eligible' in m for m in msgs)
+    assert any('auto import off' in m for m in msgs)
+    assert any('LUMA_SKIP_BACKGROUND_THREADS' in m for m in msgs)

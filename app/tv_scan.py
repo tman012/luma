@@ -1305,36 +1305,144 @@ def _import_rows(items: List[Tuple[int, int]], now: Optional[float], via: str, l
     return {'ok': True, 'imported': imported, 'failed': failed}
 
 
-def auto_import_pending(now: Optional[float] = None) -> Dict[str, Any]:
-    """Boot (v157): review rows left by the old rule that carry Luma's ranked pick import it now, as a
-    scan would (via auto); no rescan. Duplicates, no-result and 'unclear' rows (no pick) stay; shows
-    already imported are never touched. tv.db only. {'ok', 'imported', 'failed', 'kept'}.
-    The scan lock is held only while storing (not across the TMDB fetch or the folder walk)."""
-    if not AUTO_IMPORT:
-        return {'ok': True, 'imported': [], 'failed': [], 'kept': 0}
-    with tv_store.connect() as conn:
-        rows = [dict(r) for r in conn.execute('SELECT id, reason, tier, pick FROM unmatched ORDER BY id')]
-    items = [(r['id'], int(r['pick'])) for r in rows
-             if r['pick'] and r['tier'] == 'likely' and r['reason'] in AUTO_REASONS]
-    if not items:
-        return {'ok': True, 'imported': [], 'failed': [], 'kept': len(rows)}
-    with tv_tmdb.background():
-        out = _import_rows(items, now, via='auto', lock=True)
-    if not out['ok']:
-        logger.info('TV import: boot re-run skipped (%s)', out['error'])
+# The boot re-run (v157 rule, widened in v161a). Every review row that isn't a duplicate is
+# unresolved; whatever schema or rule wrote it, it is eligible:
+#   * a row carrying Luma's ranked pick (tier 'likely', reason 'not_exact') imports that pick;
+#   * every other row is matched again with today's matcher (tier 'none' from schema v3's default
+#     or the old rule, pick NULL, reasons 'not_exact', 'unclear', 'no_results', 'no_title', or any
+#     value an older build wrote). A match imports it as a scan would; otherwise the row is
+#     rewritten with today's answer (review).
+# Never touched: 'duplicate' rows (another folder has the show; the owner's own moves leave
+# these) and folders that are gone. Shows already imported aren't review rows, so never touched.
+# The marker (meta RERUN_META) records the rule and when it first ran here; rows written before
+# that are re-matched once, rows written after it were written by this rule. A run cut short
+# (TMDB down) leaves the unprocessed rows for the next boot.
+RERUN_META = 'tv_import_rerun'
+RERUN_RULE = 'v161a'
+KEEP_REASONS = ('duplicate',)
+
+
+def _rerun_since(now: float) -> float:
+    try:
+        cur = json.loads(tv_store.get_meta(RERUN_META) or '{}')
+    except ValueError:
+        cur = {}
+    if isinstance(cur, dict) and cur.get('rule') == RERUN_RULE and isinstance(cur.get('since'), (int, float)):
+        return float(cur['since'])
+    tv_store.set_meta(RERUN_META, json.dumps({'rule': RERUN_RULE, 'since': now}))
+    return now
+
+
+def _rematch_rows(rows: List[Dict[str, Any]], now: float) -> Dict[str, Any]:
+    """Match old review rows again (TMDB reads and folder walks unlocked), then store each under the
+    scan lock: an import as a scan would, else the row rewritten with today's answer."""
+    jobs, gone = [], []
+    for r in rows:
+        root = _root_for(r['path_id'])
+        if not root or not r['folder'] or not os.path.isdir(os.path.join(root, r['folder'])):
+            gone.append(r['id'])
+            continue
+        jobs.append((r, root))
+
+    def work(job):
+        r, root = job
+        try:
+            hints = _hints(root, r['folder'])
+            m = auto_pick(tv_match.match(r['folder'], hints))
+            data = fetch_show(m['tmdb_id'], m.get('details'), hints) if m['status'] == 'matched' else None
+            return {'m': m, 'data': data, 'found': list_files(r['folder'], root) if m['status'] == 'matched' else None}
+        except tv_tmdb.TmdbError as e:
+            return {'error': e}
+    results = list(zip(jobs, run_pool(jobs, work)))
+    out = {'imported': [], 'kept': [], 'duplicates': [], 'failed': [], 'gone': gone, 'error': None}
+    if not _scan_lock.acquire(timeout=LOCK_WAIT_S):
+        out['error'] = BUSY
         return out
-    out['kept'] = len(rows) - len(out['imported'])
-    out['duplicates'] = [f['id'] for f in out['failed'] if f['error'] == TAKEN]      # now duplicates, in review
-    out['failed'] = [f for f in out['failed'] if f['error'] != TAKEN]
-    logger.info('TV import: %d pending row(s) imported at boot, %d kept in review, %d failed',
-                len(out['imported']), out['kept'], len(out['failed']))
+    try:
+        with tv_store.connect() as conn:
+            live = {r['id']: dict(r) for r in conn.execute('SELECT id, path_id, folder, ts FROM unmatched')}
+        for (r, _root), res in results:
+            cur = live.get(r['id'])
+            if cur is None or (cur['path_id'], cur['folder'], cur['ts']) != (r['path_id'], r['folder'], r['ts']):
+                continue                                 # a scan or the owner changed it meanwhile
+            if 'error' in res or res.get('skipped'):
+                out['failed'].append(r['id'])
+                out['error'] = out['error'] or str(res.get('error') or tv_tmdb.BUSY)
+                continue
+            m = res['m']
+            if m['status'] == 'matched' and res.get('data'):
+                if _owned_elsewhere(r, m['tmdb_id'], now):
+                    out['duplicates'].append(r['id'])
+                    continue
+                o = _apply(r['path_id'], r['folder'], m['tmdb_id'], now, via='auto', event='matched', series_id=None,
+                           data=res['data'], found=res.get('found'))
+                if o['ok']:
+                    out['imported'].append(r['id'])
+                    continue
+                out['failed'].append(r['id'])
+                continue
+            _store_unmatched(r['path_id'], r['folder'], m if m['status'] == 'unmatched' else
+                             {**m, 'status': 'unmatched', 'reason': m.get('auto_reason') or 'not_exact'}, now)
+            out['kept'].append(r['id'])
+    finally:
+        _scan_lock.release()
     return out
 
 
+def auto_import_pending(now: Optional[float] = None) -> Dict[str, Any]:
+    """Boot: import every unresolved review row (see the rule above). tv.db only, plus TMDB reads.
+    Always logs one summary line. {'ok', 'eligible', 'imported', 'failed', 'kept', 'duplicates', ...}."""
+    now = time.time() if now is None else now
+    out: Dict[str, Any] = {'ok': True, 'eligible': 0, 'direct': 0, 'rematched': 0, 'imported': [], 'failed': [],
+                           'kept': 0, 'duplicates': [], 'gone': 0, 'skipped': 0, 'total': 0, 'note': None,
+                           'error': None}
+
+    def summary(o):
+        logger.info('TV import: boot re-run (rule %s): %d review row(s), %d eligible (%d with a pick, %d matched again), '
+                    '%d imported, %d kept in review, %d now duplicates, %d failed, %d folders gone, %d skipped (duplicates)%s',
+                    RERUN_RULE, o['total'], o['eligible'], o['direct'], o['rematched'], len(o['imported']), o['kept'],
+                    len(o['duplicates']), len(o['failed']), o['gone'], o['skipped'], f"; {o['note']}" if o['note'] else '')
+        return o
+    if not AUTO_IMPORT:
+        out['note'] = 'auto import off'
+        return summary(out)
+    with tv_store.connect() as conn:
+        rows = [dict(r) for r in conn.execute('SELECT id, path_id, folder, reason, tier, pick, ts FROM unmatched ORDER BY id')]
+    out['total'] = len(rows)
+    since = _rerun_since(now) if rows else now
+    open_rows = [r for r in rows if r['reason'] not in KEEP_REASONS and r['tier'] != 'duplicate']
+    out['skipped'] = len(rows) - len(open_rows)
+    direct = [r for r in open_rows if r['pick'] and r['tier'] == 'likely' and r['reason'] in AUTO_REASONS]
+    ids = {r['id'] for r in direct}
+    again = [r for r in open_rows if r['id'] not in ids and (r['ts'] is None or r['ts'] < since)]
+    out.update(direct=len(direct), rematched=len(again), eligible=len(direct) + len(again))
+    with tv_tmdb.background():
+        if direct:
+            d = _import_rows([(r['id'], int(r['pick'])) for r in direct], now, via='auto', lock=True)
+            if not d['ok']:
+                out.update(ok=False, error=d['error'], note=d['error'], kept=len(open_rows))
+                return summary(out)
+            out['imported'] += d['imported']
+            out['duplicates'] += [f['id'] for f in d['failed'] if f['error'] == TAKEN]
+            out['failed'] += [f for f in d['failed'] if f['error'] != TAKEN]
+        if again:
+            g = _rematch_rows(again, now)
+            out['imported'] += g['imported']
+            out['duplicates'] += g['duplicates']
+            out['failed'] += [{'id': i, 'error': g['error']} for i in g['failed']]
+            out['gone'] = len(g['gone'])
+            if g['error']:
+                out.update(note=g['error'], error=g['error'], ok=g['error'] != BUSY)
+    # what is still in review: every open row not imported and not turned into a duplicate
+    out['kept'] = len(open_rows) - len(out['imported']) - len(out['duplicates'])
+    return summary(out)
+
+
 def auto_import_on_start() -> bool:
-    """A background thread at boot (after the migration); never fails boot."""
+    """A background thread at boot (after the migration); never fails boot. Logs why when it doesn't run."""
     import os as _os
     if _os.environ.get('LUMA_SKIP_BACKGROUND_THREADS'):
+        logger.info('TV import: boot re-run off (LUMA_SKIP_BACKGROUND_THREADS)')
         return False
 
     def run():
