@@ -205,41 +205,74 @@ function DownloadsStatus({ view, onView }: { view: LibraryView; onView?: (v: Lib
           </div>
         ))}
         {failed.map((j, i) => (
-          <div key={j.hash} data-testid="lp-failed" style={{ ...rowBtn, cursor: 'default', ...(dl || lost.length || i > 0 ? topBorder : null) }}>
-            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: T.danger, flex: 'none' }} />
-            <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={titleText(wide)}>{j.title || 'Untitled'}</span>
-              <span style={subText(wide)}>{sinceText(j.since)}</span>
-            </span>
-            <span data-testid="lp-failed-status" style={{ fontSize: 13, fontWeight: 500, color: T.danger, flex: 'none' }}>Not enough space</span>
-            <button type="button" data-testid="lp-failed-retry" className="lp-focus" disabled={busy === j.hash}
-              aria-label={`Retry ${j.title || 'Untitled'}`}
-              onClick={() => { setBusy(j.hash); void retryJob(j.hash).then(r => { setBusy(null); if (r.ok) onView?.(r.view); }); }}
-              style={{ flex: 'none', padding: '6px 12px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.16)', background: 'rgba(255,255,255,0.06)',
-                color: 'rgba(255,255,255,0.95)', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: busy === j.hash ? 0.4 : 1 }}>Retry</button>
-          </div>
+          <JobRow key={j.hash} testId="lp-failed" title={j.title || 'Untitled'} since={j.since} status="Not enough space"
+            top={!!(dl || lost.length || i > 0)} busy={busy === j.hash}
+            onRetry={() => { setBusy(j.hash); void retryJob(j.hash).then(r => { setBusy(null); if (r.ok) onView?.(r.view); }); }} />
         ))}
         {tvJobs.map((j, i) => (
-          <div key={`tv:${j.hash}`} data-testid="lp-tv-job" data-state={j.state}
-            style={{ ...rowBtn, cursor: 'default', ...(dl || lost.length || failed.length || i > 0 ? topBorder : null) }}>
-            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: T.danger, flex: 'none' }} />
-            <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={titleText(wide)} title={j.name || undefined}>{j.name || 'Untitled'}</span>
-              {j.at ? <span style={subText(wide)}>{sinceText(j.at)}</span> : null}
-            </span>
-            <span data-testid="lp-tv-job-status" title={tvJobStatus(j)}
-              style={{ fontSize: 13, fontWeight: 500, color: T.danger, flex: '0 1 auto', minWidth: 0, maxWidth: wide ? 320 : 160, textAlign: 'right',
-                overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: wide ? 2 : 3, WebkitBoxOrient: 'vertical' }}>{tvJobStatus(j)}</span>
-            {j.retry && (
-              <button type="button" data-testid="lp-tv-job-retry" className="lp-focus" disabled={busy === `tv:${j.hash}`}
-                aria-label={`Retry ${j.name || 'Untitled'}`}
-                onClick={() => { setBusy(`tv:${j.hash}`); void retryTvJob(j.hash).then(r => { setBusy(null); if (r.ok) loadTv(); }); }}
-                style={{ flex: 'none', padding: '6px 12px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.16)', background: 'rgba(255,255,255,0.06)',
-                  color: 'rgba(255,255,255,0.95)', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: busy === `tv:${j.hash}` ? 0.4 : 1 }}>Retry</button>
-            )}
-          </div>
+          <JobRow key={`tv:${j.hash}`} testId="lp-tv-job" state={j.state} title={j.name || 'Untitled'} since={j.at} status={tvJobStatus(j)}
+            top={!!(dl || lost.length || failed.length || i > 0)} busy={busy === `tv:${j.hash}`}
+            onRetry={j.retry ? () => { setBusy(`tv:${j.hash}`); void retryTvJob(j.hash).then(r => { setBusy(null); if (r.ok) loadTv(); }); } : undefined} />
         ))}
       </div>
+    </div>
+  );
+}
+
+/** v165 (Designer): a phone (under 600px) gives the job's name the whole first line (ellipsis) and puts
+ * the status and its real failure date on the second, in red: 'Not enough space · Since Oct 15'. */
+export const PHONE_Q = '(max-width: 599px)';
+export function usePhone(): boolean {
+  const get = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(PHONE_Q).matches;
+  const [phone, setPhone] = useState(get);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return undefined;
+    const m = window.matchMedia(PHONE_Q);
+    const on = () => setPhone(m.matches);
+    on();
+    m.addEventListener?.('change', on);
+    return () => m.removeEventListener?.('change', on);
+  }, []);
+  return phone;
+}
+
+/** One failed download job (Movies mover or TV): name, failure date, status, Retry when offered. */
+function JobRow({ testId, state, title, since, status, top, busy, onRetry }: {
+  testId: string; state?: string; title: string; since: number | null | undefined; status: string; top: boolean; busy: boolean; onRetry?: () => void;
+}) {
+  const wide = useContext(WideCtx);
+  const phone = usePhone();
+  const retry = onRetry && (
+    <button type="button" data-testid={`${testId}-retry`} className="lp-focus" disabled={busy} aria-label={`Retry ${title}`} onClick={onRetry}
+      style={{ flex: 'none', padding: '6px 12px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.16)', background: 'rgba(255,255,255,0.06)',
+        color: 'rgba(255,255,255,0.95)', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: busy ? 0.4 : 1 }}>Retry</button>
+  );
+  const dot = <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: T.danger, flex: 'none' }} />;
+  if (phone) {
+    const line2 = since ? `${status} \u00b7 ${sinceText(since)}` : status;
+    return (
+      <div data-testid={testId} data-state={state} data-layout="phone" style={{ ...rowBtn, cursor: 'default', ...(top ? topBorder : null) }}>
+        {dot}
+        <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span data-testid={`${testId}-name`} title={title} style={{ ...titleText(wide), display: 'block' }}>{title}</span>
+          <span data-testid={`${testId}-status`} title={line2}
+            style={{ fontSize: 13, fontWeight: 500, color: T.danger, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{line2}</span>
+        </span>
+        {retry}
+      </div>
+    );
+  }
+  return (
+    <div data-testid={testId} data-state={state} style={{ ...rowBtn, cursor: 'default', ...(top ? topBorder : null) }}>
+      {dot}
+      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span data-testid={`${testId}-name`} style={titleText(wide)} title={title}>{title}</span>
+        {since ? <span style={subText(wide)}>{sinceText(since)}</span> : null}
+      </span>
+      <span data-testid={`${testId}-status`} title={status}
+        style={{ fontSize: 13, fontWeight: 500, color: T.danger, flex: '0 1 auto', minWidth: 0, maxWidth: wide ? 320 : 160, textAlign: 'right',
+          overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: wide ? 2 : 3, WebkitBoxOrient: 'vertical' }}>{status}</span>
+      {retry}
     </div>
   );
 }

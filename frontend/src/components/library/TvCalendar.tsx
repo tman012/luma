@@ -227,7 +227,7 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
       <Bookmark e={e} on={mon} onToggle={flip} />
       <div data-testid="tv-card-body" style={{ opacity: mon ? 1 : DIM, transition: 'opacity 150ms' }}>
         <Still e={e} />
-        <div style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <div className="tvc-text" style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span data-testid="tv-card-show" title={e.show} style={{ ...clamp2, WebkitLineClamp: NAME_LINES, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
           <span data-testid="tv-card-title" title={epLine(e)} style={{ ...clamp2, WebkitLineClamp: EP_LINES, lineHeight: '16px', fontSize: 12, color: W70 }}>{epLine(e)}</span>
           <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: W50 }}>
@@ -336,6 +336,9 @@ function Placeholder() {
   );
 }
 
+/** v165 (Designer): on desktop the card's time line never wraps; a range too wide for its day column
+ * (1100: ~76px for '11:00 – 11:58 PM') shrinks with the column, from 12px down to 9px, rather than wrapping. */
+export const AIR_FONT = 'min(12px, max(9px, 12.5cqi))';
 export const tvCalendarCss = `
 :root{--tv-state-downloaded:#22c55e;--tv-state-missing:#ef4444;--tv-state-unaired:#3b82f6}
 .tvc-row:hover{background:rgba(255,255,255,.04)!important}
@@ -345,6 +348,7 @@ export const tvCalendarCss = `
 .tvc-bm:hover{background:rgba(59,130,246,.35)!important}
 @media (hover:none){.tvc-card .tvc-bm{opacity:1}}
 @container tvcal (max-width: 999px){.tvc-card .tvc-bm{display:none!important}}
+@container tvcal (min-width: 600px){.tvc-text{container-type:inline-size;container-name:tvcard}.tvc-card [data-testid=tv-air]{display:block!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:${AIR_FONT}!important}}
 @container tvcal (max-width: 599px){.tvc-card [data-testid=tv-card-show]{-webkit-line-clamp:2!important}.tvc-card [data-testid=tv-card-title]{-webkit-line-clamp:1!important}}
 `;
 
