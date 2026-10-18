@@ -258,8 +258,8 @@ const emptyCard: React.CSSProperties = {
   fontSize: 15, fontWeight: 500, color: W70, fontFamily: FONT,
 };
 const dayHead: React.CSSProperties = {
-  position: 'sticky', top: 0, zIndex: 2, margin: 0, padding: '8px 4px', fontSize: 13, fontWeight: 600, color: W70,
-  background: 'var(--color-kiosk-black)',
+  position: 'sticky', top: 0, zIndex: 2, margin: '0 -4px', padding: '8px 8px', fontSize: 13, fontWeight: 600, color: W70,
+  borderRadius: 8, background: 'rgba(21,16,42,0.55)', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
 };
 const upLabel: React.CSSProperties = { margin: '0 4px 8px', fontSize: 13, fontWeight: 600, color: W50 };
 const iconBtn = (s: number): React.CSSProperties => ({
