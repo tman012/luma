@@ -16,6 +16,7 @@ Luma's /api/img/plex proxy instead.
 
 from __future__ import annotations
 
+from app import safe_xml as _safe_xml   # v170 (Reviewer): every Plex XML parse is defused
 import logging
 import threading
 import time
@@ -56,7 +57,7 @@ def _request(plex, method: str, path: str, params: Optional[dict] = None, timeou
 
 def _xml(resp) -> ET.Element:
     try:
-        return ET.fromstring(resp.content)
+        return _safe_xml.fromstring(resp.content)
     except ET.ParseError:
         raise MatchError('Unexpected response from Plex', 502)
 

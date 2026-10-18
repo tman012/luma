@@ -20,7 +20,7 @@ Rules:
 * 300 per tracker per rolling 24 h, 120 per hour across all trackers;
 * at least 2 s between requests to one tracker;
 * backoff after a failure, longer on each consecutive failure:
-  429/rate limit: Retry-After, else 1 h (doubling, max 6 h);
+  429/rate limit: 1 h (doubling, max 6 h), or its Retry-After when longer (v170: never shorter);
   400 from a strict site (AvistaZ family, IPTorrents; tracker_types.STRICT_400_TYPES):
   the same as a rate limit (v169, ported from the Prowlarr path's strict 400 cooldown);
   400 from any other tracker: 15 min (doubling, max 6 h), as on the Prowlarr path (v170);
@@ -372,7 +372,8 @@ class TrackerGuard:
             if kind == 'banned':
                 secs = LIMITS['banned_s']
             elif kind == 'rate':
-                secs = retry_after if retry_after else min(LIMITS['rate_s'] * 2 ** min(n, 16), LIMITS['rate_max_s'])
+                # v170 (Reviewer): the schedule is a floor; a longer Retry-After wins below, a shorter one can't shrink it
+                secs = min(LIMITS['rate_s'] * 2 ** min(n, 16), LIMITS['rate_max_s'])
             elif kind == 'auth':
                 secs = min(LIMITS['auth_s'] * 2 ** min(n, 16), LIMITS['auth_max_s'])
             elif kind in ('timeout', 'network', 'tls', 'http'):

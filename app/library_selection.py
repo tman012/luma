@@ -82,10 +82,12 @@ def resolve(ids: List[str], paths: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     return [dict(p) for p in paths if p['id'] in chosen]
 
 
-def view(ids: List[str], paths: List[Dict[str, Any]]) -> Dict[str, Any]:
+def view(ids: List[str], paths: List[Dict[str, Any]],
+         status_of: Optional[Callable[[Dict[str, Any]], str]] = None) -> Dict[str, Any]:
     from app import file_management as fm
     chosen = set(ids)
-    return {'libraries': [{'id': p['id'], 'name': p['name'], 'path': p['path'], 'status': fm.path_status(p),
+    status_of = status_of or fm.path_status
+    return {'libraries': [{'id': p['id'], 'name': p['name'], 'path': p['path'], 'status': status_of(p),
                            'selected': p['id'] in chosen} for p in paths],
             'selected': [p['id'] for p in paths if p['id'] in chosen]}
 
@@ -93,7 +95,8 @@ def view(ids: List[str], paths: List[Dict[str, Any]]) -> Dict[str, Any]:
 def register(bp: Blueprint, url: str, *, endpoint: str,
              get_ids: Callable[[], List[str]], set_ids: Callable[[List[str]], None],
              read_guard: Callable[[], Any], write_guard: Callable[[], Any],
-             section_lock: Any, on_change: Optional[Callable[[List[str], List[str]], None]] = None) -> None:
+             section_lock: Any, on_change: Optional[Callable[[List[str], List[str]], None]] = None,
+             status_of: Optional[Callable[[Dict[str, Any]], str]] = None) -> None:
     """GET/PUT *url* on *bp* for one section's selection. *read_guard* (GET)
     and *write_guard* (PUT) return None or an error response ((body, status)
     or a response). *on_change(before, after)* runs after a save that changed
@@ -115,7 +118,7 @@ def register(bp: Blueprint, url: str, *, endpoint: str,
         err = read_guard()
         if err:
             return err
-        return _no_store(jsonify(view(get_ids(), fm.load()['paths'])))
+        return _no_store(jsonify(view(get_ids(), fm.load()['paths'], status_of)))
 
     def put_view():
         err = write_guard()
@@ -142,7 +145,7 @@ def register(bp: Blueprint, url: str, *, endpoint: str,
             set_ids(ids)
         if on_change and before != ids:
             on_change(before, ids)
-        return _no_store(jsonify(view(ids, paths)))
+        return _no_store(jsonify(view(ids, paths, status_of)))
 
     bp.add_url_rule(url, endpoint=f'{endpoint}_get', view_func=get_view, methods=['GET'])
     bp.add_url_rule(url, endpoint=f'{endpoint}_put', view_func=put_view, methods=['PUT'])

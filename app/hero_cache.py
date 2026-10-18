@@ -11,6 +11,7 @@ Selection criteria:
 4. Top 5 most recently added movies that meet both criteria are selected
 """
 
+from app import safe_xml as _safe_xml   # v170 (Reviewer): every Plex XML parse is defused
 import os
 import re
 import fcntl
@@ -215,7 +216,7 @@ class HeroCache:
             if response.status_code != 200:
                 return None
 
-            root = ET.fromstring(response.content)
+            root = _safe_xml.fromstring(response.content)
             video = root.find('.//Video')
 
             if not video:

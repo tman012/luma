@@ -197,7 +197,8 @@ def test_test_429_starts_persisted_backoff_with_retry_after(owner, store, sent, 
     # A fresh guard (a restart) reads the backoff back from disk and refuses.
     fresh = TrackerGuard(tmp_path / 'tracker_guard.json')
     until, kind = fresh.blocked(IPT_KEY)
-    assert kind == 'rate' and 890 < until - time.time() <= 900
+    # v170 (Reviewer): the 1 h schedule is a floor; a shorter Retry-After (900) can't shrink it
+    assert kind == 'rate' and 3590 < until - time.time() <= 3600
     tracker_guard.reset_guard_for_tests(fresh)
     r = _post(owner, f'/api/trackers/{tid}/test', {})
     assert r.get_json() == {'ok': False, 'error': 'Rate limited'}

@@ -15,7 +15,7 @@ import { loadSelection, saveSelection, toggled, type SelectableLibrary, type Sel
 export const LIBRARY_PATHS_HREF = '/settings/library-paths';
 export const LIBRARY_PATHS_LINK = 'Library paths';
 export const SIGN_IN_TO_CHOOSE = 'Sign in to choose libraries';
-const STATUS_TEXT: Record<string, string> = { missing: 'Missing', read_only: 'Read-only' };
+const STATUS_TEXT: Record<string, string> = { missing: 'Missing', read_only: 'Read-only', unavailable: 'Unavailable' };
 
 export function LibrarySelector({ url, label, testId, onChange }: {
   url: string; label: string; testId: string;

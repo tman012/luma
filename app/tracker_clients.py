@@ -17,6 +17,7 @@ requests only.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import threading
 import time
@@ -29,6 +30,8 @@ from app import safe_xml
 from app import tracker_types as tt
 from app.tracker_http import Response, TrackerError, looks_banned, raise_for_status
 from app.tracker_http import request as http_request
+
+logger = logging.getLogger(__name__)
 
 Request = Callable[..., Response]
 IMDB_RE = re.compile(r'^tt\d{6,10}$')
@@ -491,16 +494,32 @@ def _avz_login(cfg, request: Request, key: str, now: float) -> str:
     return token
 
 
-def avistaz_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id=''):
-    q, imdb = _split_imdb(query, imdb_id)
-    params: Dict[str, Any] = {'in': 1, 'search': q}
-    kind = media_kind(categories)
-    if kind != 'any':
-        params['type'] = 1 if kind == 'movie' else 2
-    if imdb:
-        params['imdb'] = imdb
-    elif tmdb_id:
-        params['tmdb'] = str(tmdb_id)
+# v170 (PM): an AvistaZ-family id search answered 400 with a body that clearly says the id is invalid.
+# Only these words, next to the id's name, count; any other 400 keeps the strict backoff.
+AVZ_ID_REJECTED_RE = re.compile(
+    r'\b(tmdb|imdb)(_?id)?\b.{0,40}\b(invalid|not valid|not found|rejected|unknown|malformed)\b'
+    r'|\b(invalid|not valid|rejected|unknown|malformed)\b.{0,40}\b(tmdb|imdb)(_?id)?\b', re.I | re.S)
+AVZ_REJECTED_TTL_S = 7 * 86400
+_avz_rejected: Dict[Tuple[str, str, str, str], float] = {}   # (site host, 'imdb'|'tmdb', id, title) -> when
+
+
+def _avz_rejected_key(cfg, which: str, value: str, title: str) -> Tuple[str, str, str, str]:
+    from app.tracker_guard import normalize_host
+    return (normalize_host(cfg.get('url')), which, str(value), ' '.join(str(title or '').lower().split()))
+
+
+def avz_id_rejected(cfg, which: str, value: str, title: str) -> bool:
+    with _avz_lock:
+        ts = _avz_rejected.get(_avz_rejected_key(cfg, which, value, title))
+    return ts is not None and time.time() - ts < AVZ_REJECTED_TTL_S
+
+
+def clear_avz_rejected_ids() -> None:
+    with _avz_lock:
+        _avz_rejected.clear()
+
+
+def _avz_get(cfg, request: Request, params: Dict[str, Any]):
     url = f'{_base(cfg)}/api/v1/jackett/torrents?{urlencode(params)}'
     resp = None
     for attempt in (0, 1):
@@ -508,6 +527,31 @@ def avistaz_search(cfg, query, categories, limit, request: Request = http_reques
         resp = request('GET', url, headers={'Authorization': f'Bearer {token}', 'Accept': 'application/json'})
         if resp.status != 401:
             break
+    return resp
+
+
+def avistaz_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id=''):
+    q, imdb = _split_imdb(query, imdb_id)
+    params: Dict[str, Any] = {'in': 1, 'search': q}
+    kind = media_kind(categories)
+    if kind != 'any':
+        params['type'] = 1 if kind == 'movie' else 2
+    which, value = ('imdb', imdb) if imdb else ('tmdb', str(tmdb_id)) if tmdb_id else ('', '')
+    if which and avz_id_rejected(cfg, which, value, q):
+        which = ''                   # this site said the id is invalid for this title: title search only
+    if which:
+        params[which] = value
+    resp = _avz_get(cfg, request, params)
+    if which and resp.status == 400 and AVZ_ID_REJECTED_RE.search(resp.text()[:4000]):
+        # v170 (PM): the id is invalid, not a rate problem: no backoff (nothing is raised), the id is
+        # remembered as rejected for this title, and the title search follows (charged by the guard).
+        with _avz_lock:
+            _avz_rejected[_avz_rejected_key(cfg, which, value, q)] = time.time()
+        logger.info('AvistaZ-family search: the site rejected the %s id; searching by title', which)
+        params.pop(which, None)
+        if not q:
+            return []
+        resp = _avz_get(cfg, request, params)
     if resp.status == 404:          # the API answers 404 for no results
         return []
     raise_for_status(resp)

@@ -820,6 +820,7 @@ _empty_logged: Dict[str, str] = {}
 # a library path "not empty" (.Trash-* is hidden, so show_folders never lists it; it is named anyway).
 SYSTEM_DIRS = ('lost+found', '@eadir', '#recycle')
 MOUNT_META = 'tv_mount:'                     # + path id: the mount point the path was on at its last good scan
+SKIPPED_META = 'tv_skipped:'                 # + path id: v170, the last scan skipped it (empty or system folders only)
 
 
 def _system_dir(name: str) -> bool:
@@ -854,6 +855,32 @@ def _dropped_mount(pid: str, root_real: str) -> bool:
     return under and (now == '/' or was.startswith(now.rstrip('/') + '/')) and not os.path.ismount(was)
 
 
+def forget_mount(pid: str) -> None:
+    """v170 (Reviewer): drop the recorded mount of library path *pid* (edited to another folder or
+    removed), so an old mount can never make its next folder look dropped."""
+    try:
+        tv_store.set_meta(MOUNT_META + pid, None)
+        tv_store.set_meta(SKIPPED_META + pid, None)
+    except Exception as e:                   # noqa: BLE001 - only a signal
+        logger.warning('TV scan: mount record of %s not cleared (%s)', pid, type(e).__name__)
+
+
+def skipped(pid: str) -> bool:
+    """v170 (PM): the last scan skipped library path *pid* as empty (Settings shows 'Unavailable')."""
+    try:
+        return bool(tv_store.get_meta(SKIPPED_META + pid))
+    except Exception:                        # noqa: BLE001
+        return False
+
+
+def _set_skipped(pid: str, on: bool) -> None:
+    try:
+        if skipped(pid) != on:
+            tv_store.set_meta(SKIPPED_META + pid, '1' if on else None)
+    except Exception:                        # noqa: BLE001 - only a status
+        pass
+
+
 class EmptyRoot(FileNotFoundError):
     """A library path with no show folders where tv.db has rows for it: skipped, nothing hidden."""
 
@@ -873,7 +900,10 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
     pid = rec['id']
     folders = show_folders(root_real)
     shows = [f for f in folders if not _system_dir(f)]
-    if (not shows or _dropped_mount(pid, root_real)) and _has_rows(pid):
+    # v170 (Reviewer): only a path with no show folders counts as dropped. A mount the path was on
+    # that is gone now is no longer a skip on its own: with show folders present the mount record
+    # was simply retired (re-recorded below and scanned), or the scan would skip forever.
+    if not shows and _has_rows(pid):
         # M34 (v167): an empty library path that had shows is an unmounted share's mount point (or a
         # share that's still coming up), not a library whose every show was deleted: skip it like a
         # missing path, so every row stays as last seen until its folders are back. v169 (Reviewer):
@@ -881,10 +911,12 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
         # at its last good scan that is gone now (os.path.ismount) counts as empty too.
         if _empty_logged.get(pid) != root_real:
             _empty_logged[pid] = root_real
-            logger.warning('TV scan: library path %s is empty but had shows; skipped (not mounted?), shows kept',
-                           pid)
+            logger.warning('TV scan: library path %s is empty but had shows; skipped (%s), shows kept',
+                           pid, 'its mount is gone' if _dropped_mount(pid, root_real) else 'not mounted?')
+        _set_skipped(pid, True)
         raise EmptyRoot(EMPTY)
     _empty_logged.pop(pid, None)
+    _set_skipped(pid, False)
     if shows:
         try:
             mount = _mount_of(root_real)

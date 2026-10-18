@@ -256,12 +256,23 @@ def series_folder(title: Any, year: Any, data: Optional[Dict[str, Any]] = None, 
     return safe_component(out, fallback='Series')
 
 
+def tv_path_status(p: Dict[str, Any]) -> str:
+    """The Library path status, or 'unavailable' (v170, PM) when the last TV scan skipped it as empty
+    (no show folders, or system folders only)."""
+    from app import file_management as fm
+    st = fm.path_status(p)
+    if st != 'missing':
+        from app import tv_scan
+        if tv_scan.skipped(p['id']):
+            return 'unavailable'
+    return st
+
+
 def view(data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The settings, with the selected TV libraries as 'paths' ({id, name, path, status})."""
-    from app import file_management as fm
     d = data if data is not None else load()
     out = {k: copy.deepcopy(d[k]) for k in ('naming', 'upgrades', 'automation', 'rescan_interval_h')}
-    out['paths'] = [{**p, 'status': fm.path_status(p)} for p in libraries(migrate_first=True)]
+    out['paths'] = [{**p, 'status': tv_path_status(p)} for p in libraries(migrate_first=True)]
     return out
 
 
@@ -411,6 +422,15 @@ def _guard():
 _fm.on_path_removed(lambda pid: _drop_library(pid))
 
 
+def _forget_mount(pid: str) -> None:
+    from app import tv_scan
+    tv_scan.forget_mount(pid)
+
+
+_fm.on_path_removed(_forget_mount)          # v170: a removed or repointed path drops its mount record
+_fm.on_path_repointed(_forget_mount)
+
+
 def _repointed(pid: str) -> None:
     from app import tv_scan
     n = tv_scan.detach_path(pid)
@@ -455,7 +475,8 @@ def _libraries_changed(before: List[str], after: List[str]) -> None:
 
 library_selection.register(bp, '/api/settings/tv/libraries', endpoint='tv_libraries',
                            get_ids=selected_ids, set_ids=_set_libraries, read_guard=_guard,
-                           write_guard=_signed_in_owner, section_lock=_lock, on_change=_libraries_changed)
+                           write_guard=_signed_in_owner, section_lock=_lock, on_change=_libraries_changed,
+                           status_of=lambda p: tv_path_status(p))
 
 
 @bp.route('/api/settings/tv', methods=['PUT'])

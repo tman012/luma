@@ -6,7 +6,8 @@ export const LP_URL = '/api/settings/library-paths';
 export const RULES_URL = '/api/settings/library-rules';
 export const MAP_URL = '/api/settings/library-paths/mapping';
 
-export type PathStatus = 'ok' | 'missing' | 'read_only';
+/** 'unavailable' (v170, TV only): the last scan skipped the path as empty (not mounted?). */
+export type PathStatus = 'ok' | 'missing' | 'read_only' | 'unavailable';
 export interface LibPath {
   id: string; name: string; path: string; status: PathStatus;
   /** Sections (TV) that selected this path: never a Movies rule destination or the fallback. */

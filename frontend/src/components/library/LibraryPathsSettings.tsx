@@ -285,6 +285,7 @@ const STATUS: Record<LibPath['status'], { color: string; text: string }> = {
   ok: { color: T.success, text: '' },
   missing: { color: T.danger, text: 'Missing' },
   read_only: { color: T.warning, text: 'Read-only' },
+  unavailable: { color: T.warning, text: 'Unavailable' },
 };
 
 export function PathRow({ path, first, onOpen }: { path: LibPath; first: boolean; onOpen: () => void }) {

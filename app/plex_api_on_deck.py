@@ -2,6 +2,7 @@
 Plex On Deck using the actual Plex API instead of database queries
 """
 
+from app import safe_xml as _safe_xml   # v170 (Reviewer): every Plex XML parse is defused
 import re
 import requests
 import xml.etree.ElementTree as ET
@@ -69,7 +70,7 @@ def get_plex_api_on_deck(limit=25):
         response.raise_for_status()
 
         # Parse XML response
-        root = ET.fromstring(response.content)
+        root = _safe_xml.fromstring(response.content)
 
         items = []
         for video in root.findall('Video')[:limit]:

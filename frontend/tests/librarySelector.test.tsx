@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LIBRARY_PATHS_HREF, LibrarySelector, SIGN_IN_TO_CHOOSE } from '@/components/library/LibrarySelector';
 import { WideCtx } from '@/components/library/LibraryPathsSettings';
+import { T } from '@/theme/tokens';
 import { loadSelection, saveSelection, toggled } from '@/components/library/librarySelectionApi';
 
 const URL = '/api/settings/movies/libraries';      // any section's URL: nothing here is TV-specific
@@ -152,5 +153,18 @@ describe('librarySelectionApi', () => {
   it('toggles an id', () => {
     expect(toggled(['a'], 'b')).toEqual(['a', 'b']);
     expect(toggled(['a', 'b'], 'a')).toEqual(['b']);
+  });
+});
+
+describe('LibrarySelector: a path the TV scan skipped (v170, PM)', () => {
+  it("reads 'Unavailable' in amber, no helper text", async () => {
+    paths = [{ ...A, status: 'unavailable' }];
+    mount();
+    const st = await screen.findByTestId('lib-select-status');
+    expect(st.textContent).toBe('Unavailable');
+    const amber = document.createElement('span');
+    amber.style.color = T.warning;
+    expect(st.style.color).toBe(amber.style.color);
+    expect(screen.getByTestId('sel').textContent).toBe('LibrariesTV/media/TVUnavailable');
   });
 });

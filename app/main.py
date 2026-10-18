@@ -3,6 +3,7 @@
 Media Search Application - Clean and focused media search interface
 """
 
+from app import safe_xml as _safe_xml   # v170 (Reviewer): every Plex XML parse is defused
 import os
 import re
 import json
@@ -10768,7 +10769,7 @@ def _parse_plex_ratings(rating_key):
     if response.status_code != 200:
         return None
 
-    root = ET.fromstring(response.content)
+    root = _safe_xml.fromstring(response.content)
     # Check for both Video (movies) and Directory (TV shows) elements
     item = root.find('.//Video')
     if item is None:
@@ -12708,7 +12709,7 @@ def get_news():
         })
         resp.raise_for_status()
 
-        root = ET.fromstring(resp.content)
+        root = _safe_xml.fromstring(resp.content)
         ns = {'media': 'http://search.yahoo.com/mrss/'}
 
         items = []
@@ -13344,7 +13345,7 @@ def _resolve_playqueue_start(play_queue_id, fallback_rating_key):
             logger.warning("playQueue %s fetch failed: %s", play_queue_id, resp.status_code)
             return fallback_rating_key, play_queue_id
 
-        root = ET.fromstring(resp.content)
+        root = _safe_xml.fromstring(resp.content)
         # Prefer the selected item (shuffled start), else first Video
         selected_id = root.get('playQueueSelectedItemID')
         first = None
@@ -13469,7 +13470,7 @@ def _plex_session_on(device_ip):
         )
         if resp.status_code != 200:
             return None
-        root = ET.fromstring(resp.content)
+        root = _safe_xml.fromstring(resp.content)
         for v in root.findall('Video'):
             p = v.find('Player')
             if p is None or p.get('address') != device_ip:
@@ -13501,7 +13502,7 @@ def _plex_playqueue_start(play_queue_id, default_rk):
             )
             if resp.status_code != 200:
                 continue
-            root = ET.fromstring(resp.content)
+            root = _safe_xml.fromstring(resp.content)
             videos = root.findall('Video')
             sel = root.get('playQueueSelectedItemID')
             chosen = next((v for v in videos if sel and v.get('playQueueItemID') == sel), None)
@@ -13762,7 +13763,7 @@ def _plex_status(rating_key, device_ip=None):
         if resp.status_code != 200:
             return stopped
 
-        root = ET.fromstring(resp.content)
+        root = _safe_xml.fromstring(resp.content)
         for video in root.findall('./Video'):
             if video.get('ratingKey') != str(rating_key):
                 continue
@@ -14019,7 +14020,7 @@ def _lookup_kodi_artwork(title: str, year: int | None = None) -> dict:
                         headers={'X-Plex-Token': plex_token}, timeout=3, allow_redirects=False,
                     )
                     if meta_resp.status_code == 200:
-                        root = ET.fromstring(meta_resp.content)
+                        root = _safe_xml.fromstring(meta_resp.content)
                         video = root.find('.//Video')
                         if video is not None and video.get('art'):
                             art = f"/api/img/plex?url={video.get('art')}"
@@ -14396,7 +14397,7 @@ def plex_active_sessions():
                                         allow_redirects=False)
                 if response.status_code == 200:
                     import xml.etree.ElementTree as ET
-                    root = ET.fromstring(response.content)
+                    root = _safe_xml.fromstring(response.content)
                     for video in root.findall('.//Video'):
                         player = video.find('.//Player')
                         state = player.get('state') if player is not None else 'stopped'
@@ -14619,7 +14620,7 @@ def _discovered_plex_clients() -> dict:
                             timeout=3, allow_redirects=False)
         if resp.status_code == 200:
             import xml.etree.ElementTree as ET
-            for el in ET.fromstring(resp.content).iter('Server'):
+            for el in _safe_xml.fromstring(resp.content).iter('Server'):
                 host = _plex_norm_host(el.get('host') or el.get('address'))
                 try:
                     port = int(el.get('port') or 0)
@@ -20522,7 +20523,7 @@ def create_plex_playqueue():
 
         if resp.status_code in (200, 201):
             import xml.etree.ElementTree as ET
-            root = ET.fromstring(resp.content)
+            root = _safe_xml.fromstring(resp.content)
             pq_id = root.get('playQueueID', '')
             return jsonify({'success': True, 'play_queue_id': pq_id})
         else:
@@ -20680,7 +20681,7 @@ def test_plex_connection():
             # Try XML first (Plex default for Accept: application/xml)
             if content.startswith('<?xml') or content.startswith('<MediaContainer'):
                 import xml.etree.ElementTree as ET
-                root = ET.fromstring(content)
+                root = _safe_xml.fromstring(content)
                 friendly = root.attrib.get('friendlyName', 'Unknown')
                 machine_id = root.attrib.get('machineIdentifier', '')
             else:

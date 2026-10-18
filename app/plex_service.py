@@ -7,6 +7,7 @@ All image paths are returned as relative paths (e.g. /library/metadata/123/thumb
 so the frontend can route them through /api/img/plex without ever seeing PLEX_TOKEN.
 """
 
+from app import safe_xml as _safe_xml   # v170 (Reviewer): every Plex XML parse is defused
 import re
 import time
 import threading
@@ -90,7 +91,7 @@ class PlexService:
             if '\ufffd' in text:
                 logger.info('Plex returned invalid UTF-8 for %s; replaced bad bytes', path)
             try:
-                return ET.fromstring(text.encode('utf-8'))
+                return _safe_xml.fromstring(text.encode('utf-8'))
             except ET.ParseError:
                 # Plex sometimes emits undeclared namespace prefixes (e.g. at:image)
                 # or unescaped ampersands. Sanitize and retry.
@@ -99,7 +100,7 @@ class PlexService:
                 text = re.sub(r'\s+"?\w+:\w+="[^"]*"', '', text)
                 # Escape bare ampersands (not part of a valid XML entity)
                 text = re.sub(r'&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[0-9a-fA-F]+;)', '&amp;', text)
-                return ET.fromstring(text.encode('utf-8'))
+                return _safe_xml.fromstring(text.encode('utf-8'))
         except requests.RequestException as exc:
             logger.error('Plex API request failed: %s %s — %s', 'GET', path, exc)
             return None

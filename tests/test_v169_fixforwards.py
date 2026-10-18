@@ -127,7 +127,8 @@ def test_a_mount_point_with_only_system_folders_counts_as_empty(lib, tmp_path, j
     assert _state() == before and _visible() == seen          # no mass detach
 
 
-def test_a_dropped_mount_counts_as_empty_whatever_the_bare_folder_holds(lib, tmp_path, monkeypatch):  # noqa: F811
+def test_a_dropped_mount_with_only_junk_left_detaches_nothing(lib, tmp_path, monkeypatch):  # noqa: F811
+    """v170 (Reviewer): a dropped mount counts as empty only when no show folders are left."""
     real_ismount = os.path.ismount
     mounted = {'on': True}
     root = os.path.realpath(lib)
@@ -138,16 +139,53 @@ def test_a_dropped_mount_counts_as_empty_whatever_the_bare_folder_holds(lib, tmp
     away = tmp_path / 'share-contents'
     shutil.move(str(lib), str(away))
     lib.mkdir()
-    (lib / 'Leftover Show (2001)').mkdir()                      # stale junk under the mount point
+    for j in ('lost+found', '@eaDir', '.Trash-1000'):
+        (lib / j).mkdir()
     mounted['on'] = False                                     # the NAS dropped
     out = tv_scan.scan_all(now=2000.0)
     assert out['missing'] == [PID]
-    assert _state() == before and _visible() == seen
+    assert _state() == before and _visible() == seen          # no mass detach
     shutil.rmtree(lib)
     shutil.move(str(away), str(lib))
     mounted['on'] = True                                      # back
     out = tv_scan.scan_all(now=3000.0)
     assert out['missing'] == [] and _state()[0] == before[0]
+
+
+def test_a_retired_mount_with_shows_present_scans_and_rerecords(lib, monkeypatch):  # noqa: F811
+    """v170 (Reviewer, M34 wedge): the recorded mount is gone (ismount False) but the show folders
+    are all there: the scan runs (it used to skip forever), picks up a new folder and re-records."""
+    from app import tv_store
+    real_ismount = os.path.ismount
+    mounted = {'on': True}
+    root = os.path.realpath(lib)
+    monkeypatch.setattr(os.path, 'ismount', lambda p: (mounted['on'] and os.path.realpath(p) == root) or real_ismount(p))
+    tv_scan.scan_all(now=1000.0)
+    assert tv_store.get_meta(tv_scan.MOUNT_META + PID) == root
+    before = _state()
+    mounted['on'] = False                                     # mount retired; the folders now live on /
+    (lib / 'Brand New Show (2026)').mkdir()
+    out = tv_scan.scan_all(now=2000.0)
+    assert out['missing'] == []
+    folders = {r['folder'] for r in rows('SELECT folder FROM series WHERE path_id = ?', PID)} | \
+        {r['folder'] for r in rows('SELECT folder FROM unmatched WHERE path_id = ?', PID)}
+    assert 'Brand New Show (2026)' in folders                 # the scan ran and found it
+    assert _state()[0] == before[0]                           # nothing detached
+    assert tv_store.get_meta(tv_scan.MOUNT_META + PID) == tv_scan._mount_of(root) != root   # re-recorded
+    out = tv_scan.scan_all(now=3000.0)
+    assert out['missing'] == []                               # and stays unwedged
+
+
+def test_editing_or_removing_a_path_clears_its_mount_record(lib):  # noqa: F811
+    from app import tv_settings, tv_store  # noqa: F401 - registers the path hooks
+    tv_scan.scan_all(now=1000.0)
+    key = tv_scan.MOUNT_META + PID
+    assert tv_store.get_meta(key)
+    fm._path_repointed(PID)
+    assert tv_store.get_meta(key) is None
+    tv_store.set_meta(key, '/old-mount')
+    fm._path_removed(PID)
+    assert tv_store.get_meta(key) is None
 
 
 def test_a_path_that_was_never_on_its_own_mount_scans_normally(lib, tmp_path):  # noqa: F811
