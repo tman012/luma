@@ -8,6 +8,8 @@ import { sourcesTargetLabel } from './seasonLabels';
 import { getBadgeColor, buildQualityGroups, buildScopeOptions, filterByScope } from './tvSourcesUtils';
 import { ManualMatchPicker } from '@/components/media/ManualMatchPicker';
 import { grabToLibrary } from '@/services/allSourcesApi';
+import { isMinimal } from '@/minimal';
+import { popupGrab } from '@/components/library/tvCalendarApi';
 import { useIndexerConfigured, useDownloadClientReady } from '@/services/sourcesAvailability';
 import { START_GLOW } from '@/components/start/StartUI';
 import {
@@ -231,6 +233,36 @@ function ExpandedTvSourcesView({
     const disabled = tvGrabDisabledReason(confirmTarget);
     if (disabled) { setGrabError(disabled); return; }
 
+    // v158c (PM): with Luma's TV, every row with a link grabs through Luma's own path (the TV
+    // category; on test the instance guard). Sonarr is only the fallback for its own rows.
+    if (isMinimal() && tmdbId && confirmTarget.downloadUrl && confirmTarget.protocol !== 'usenet') {
+      setConfirmLoading(true);
+      setGrabError(null);
+      const r = await popupGrab({
+        tmdb_id: tmdbId, season: target.season,
+        episode: target.type === 'episode' && typeof target.episode === 'number' ? target.episode : null,
+        download_url: confirmTarget.downloadUrl, title: confirmTarget.title,
+        indexer: confirmTarget.indexer, quality: confirmTarget.quality, size: confirmTarget.size,
+      });
+      if (r.ok) {
+        setConfirmLoading(false);
+        setConfirmTarget(null);
+        window.dispatchEvent(new Event('download-grabbed'));
+        onGrabbed();
+        return;
+      }
+      const sonarrRow = confirmTarget.origin !== 'indexer' && !!confirmTarget.guid && !!confirmTarget.indexerId;
+      if (r.blocked || !r.fallback || !sonarrRow) {
+        setGrabError(r.error);
+        setConfirmLoading(false);
+        return;
+      }
+      // fall through: Sonarr takes its own row
+    } else if (isMinimal() && tvNeedsLibraryGrab(confirmTarget)) {
+      setGrabError('This release has no download link');
+      return;
+    }
+
     // Rejected Arr row OR raw indexer row → grab-to-library pipeline.
     if (tvNeedsLibraryGrab(confirmTarget)) {
       // Keep modal media identity for rename — only open picker when missing.
@@ -259,7 +291,7 @@ function ExpandedTvSourcesView({
       setGrabError('Network error — could not reach server');
     }
     setConfirmLoading(false);
-  }, [confirmTarget, handleGrab, onGrabbed, grabContext, runLibraryGrab]);
+  }, [confirmTarget, handleGrab, onGrabbed, grabContext, runLibraryGrab, tmdbId, target]);
 
   const qualityGroups = buildQualityGroups(scopedReleases);
   const selectedGroup = selectedQuality ? qualityGroups.find((g) => g.quality === selectedQuality) : null;

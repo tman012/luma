@@ -322,18 +322,31 @@ def retry(h: str) -> bool:
     return True
 
 
-def failures() -> List[Dict[str, Any]]:
-    """Torrents the watch couldn't import: {hash, name, state, error, at}."""
+GRAB_JOB_DAYS = 7
+
+
+def failures(now: Optional[float] = None) -> List[Dict[str, Any]]:
+    """The TV download jobs that need the owner: torrents the watch couldn't import ({hash, name,
+    state 'failed'|'refused', error, at, retry}) and (v158c) grabs that never reached qBittorrent
+    (state 'grab_failed', the last GRAB_JOB_DAYS days). retry: the no-space ones (Retry button)."""
+    now = time.time() if now is None else now
     out = []
     with tv_store.connect() as conn:
-        for r in conn.execute("SELECT key, value FROM meta WHERE key LIKE 'tvdl:%'"):
+        for r in conn.execute("SELECT key, value FROM meta WHERE key LIKE 'tvdl:%' OR key LIKE 'tvgrab:%'"):
             try:
                 v = json.loads(r['value'])
             except ValueError:
                 continue
-            if v.get('state') in ('failed', 'refused'):
-                out.append({'hash': r['key'][5:], 'name': v.get('name'), 'state': v['state'], 'error': v.get('error'),
-                            'at': v.get('at')})
+            if not isinstance(v, dict):
+                continue
+            key = r['key']
+            if key.startswith('tvdl:') and v.get('state') in ('failed', 'refused'):
+                out.append({'hash': key[5:], 'name': v.get('name'), 'state': v['state'], 'error': v.get('error'),
+                            'at': v.get('at'), 'retry': v.get('error') == mover.INSUFFICIENT_SPACE})
+            elif key.startswith('tvgrab:') and v.get('state') == 'grab_failed' \
+                    and now - float(v.get('at') or 0) < GRAB_JOB_DAYS * 86400:
+                out.append({'hash': key[7:], 'name': v.get('name'), 'state': 'grab_failed', 'error': v.get('error'),
+                            'at': v.get('at'), 'retry': False})
     return sorted(out, key=lambda x: -(x['at'] or 0))
 
 

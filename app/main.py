@@ -21658,6 +21658,11 @@ _tv_watch.start()
 try:
     from app import tv_downloads as _tv_downloads
     _tv_downloads.start()      # 1-min TV download watch (this instance's TV category only)
+    try:
+        from app import tv_grab as _tv_grab_links
+        _tv_grab_links.register_link_resolver(_resolve_source_link)   # Sources links for the TV popup grab
+    except Exception:
+        logger.exception('TV grab: link resolver not registered')
 except Exception as _e:  # noqa: BLE001
     logger.error('TV download watch not started: %s', type(_e).__name__)
 try:

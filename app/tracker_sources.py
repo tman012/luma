@@ -223,8 +223,13 @@ def _magnet_or_refuse(uri: Any) -> Tuple[str, str]:
     return 'magnet', m
 
 
-def fetch_release(token: Optional[str], resolver=None) -> Tuple[str, Any]:
+def fetch_release(token: Optional[str], resolver=None, automatic: bool = False) -> Tuple[str, Any]:
     """('magnet', uri) or ('torrent', bytes) for a release token.
+
+    *automatic* (v158c, a TV grab Luma made on its own): charged as a background request, purpose
+    'tv' on a capped tracker (tv_budget.capped), without the TV spacing (the search just went);
+    otherwise interactive. Every HTTP request is charged: take() runs again before each redirect
+    hop and the fetch stops when one is refused.
 
     Raises GrabError with a short, UI-safe message."""
     from app.tracker_search import get_search, guard_key
@@ -272,20 +277,33 @@ def fetch_release(token: Optional[str], resolver=None) -> Tuple[str, Any]:
             raise GrabError('This download link points to another site and wasn’t fetched.', 502)
         return {}
 
-    with engine.guard.tracker_lock(gk):
-        reason = engine.guard.take(gk, True, strict)
+    purpose = None
+    if automatic:
+        from app import tv_budget
+        purpose = tv_budget.PURPOSE if tv_budget.capped(cfg) else None
+
+    def charge() -> None:
+        if automatic:
+            reason = engine.guard.take(gk, False, strict, purpose=purpose, spacing=False)
+        else:
+            reason = engine.guard.take(gk, True, strict)
         if reason:
             logger.info('Tracker %s (id %s) download not sent: %s', cfg['name'], cfg['id'], reason)
             raise GrabError('This tracker is rate limited right now. Try again later.', 429)
         engine.guard.wait_spacing(gk)
+
+    with engine.guard.tracker_lock(gk):
+        charge()
         url = target
         # Torznab/Newznab: refuse a server whose resolved address is backing
         # off, and key a new rate limit or ban to the addresses contacted.
         scope = address_scope(cfg, engine.guard)
         try:
             with scope:
-                for _ in range(MAX_REDIRECTS + 1):
+                for hop in range(MAX_REDIRECTS + 1):
                     headers = plan(url)
+                    if hop:
+                        charge()                              # every request is charged
                     resp = engine.request('GET', url, headers=headers, max_bytes=MAX_TORRENT_BYTES,
                                           follow_redirects=False)
                     if resp.status in (301, 302, 303, 307, 308):

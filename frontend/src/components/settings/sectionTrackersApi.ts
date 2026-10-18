@@ -7,7 +7,7 @@ export interface SectionTracker {
   id: number; name: string; type_name: string;
   /** enabled: the saved switch; active: saved on and usable (what the list shows). */
   enabled: boolean; active?: boolean; global_enabled: boolean; has_category: boolean;
-  budget?: { used: number; cap: number } | null;
+  budget?: { used: number; cap: number | null } | null;   // cap null: an indexer with no TV cap (v158c)
 }
 export type TrackersResult = { ok: true; trackers: SectionTracker[] } | { ok: false; error: string };
 

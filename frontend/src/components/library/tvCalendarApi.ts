@@ -91,6 +91,19 @@ export const grabsAllowed = (): Promise<boolean> => {
   return grabsAsk;
 };
 export const resetGrabsAllowed = () => { grabsAsk = null; };
+
+/** v158c: a TV download job that failed (the mover: failed/refused; a grab that never reached
+ * qBittorrent: grab_failed). retry: a no-space failure, offered the Retry button. */
+export interface TvJob { hash: string; name: string | null; state: 'failed' | 'refused' | 'grab_failed'; error: string | null; at: number | null; retry: boolean }
+export const loadTvJobs = () => call<{ failed: TvJob[] }>(`${TV_URL}/downloads`, undefined, d => Array.isArray(d.failed));
+export const retryTvJob = (hash: string) =>
+  call<{ ok: boolean }>(`${TV_URL}/downloads/${encodeURIComponent(hash)}/retry`, { method: 'POST' }, d => d.ok === true);
+/** The row's status: no space reads like the Movies row; anything else is its own error, capitalised. */
+export const tvJobStatus = (j: TvJob): string => {
+  if (j.retry) return 'Not enough space';
+  const e = (j.error || '').trim();
+  return e ? e.charAt(0).toUpperCase() + e.slice(1) : 'Failed';
+};
 /** One short line for a search's outcome (status, not helper text). */
 export function searchOutcome(r: { ok: true; data: SearchResult } | { ok: false; status: number; error: string }): string {
   if (!r.ok) return r.error;
@@ -240,3 +253,17 @@ export const weekDays = (start: Day): Day[] => Array.from({ length: 7 }, (_, i) 
 
 /** "5 seasons", "1 season", '' when unknown. */
 export const seasonsText = (n: number | null) => (n == null ? '' : `${n} ${n === 1 ? 'season' : 'seasons'}`);
+
+/** v158c (PM): the TV Sources popup grabs through Luma's own path (the TV category and tag; on
+ * test the instance guard). fallback: Sonarr may still take it (only when Sonarr is configured);
+ * blocked: grabs are off here, never fall back. */
+export interface PopupGrab { tmdb_id: number; season: number; episode?: number | null; download_url: string; title: string;
+  indexer?: string; quality?: string; size?: number }
+export type PopupGrabResult = { ok: true } | { ok: false; error: string; fallback: boolean; blocked: boolean };
+export async function popupGrab(body: PopupGrab): Promise<PopupGrabResult> {
+  const r = await call<{ ok: boolean; error?: string; fallback?: boolean; blocked?: boolean }>(`${TV_URL}/grab`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, d => typeof d.ok === 'boolean');
+  if (!r.ok) return { ok: false, error: r.error, fallback: r.status === 0 || r.status >= 500, blocked: false };
+  if (r.data.ok) return { ok: true };
+  return { ok: false, error: r.data.error || 'Failed to grab release', fallback: !!r.data.fallback, blocked: !!r.data.blocked };
+}

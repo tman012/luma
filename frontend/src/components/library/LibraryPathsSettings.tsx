@@ -10,6 +10,8 @@ import { CheckIcon, ChevronIcon, GripIcon, XIcon } from '@/components/nav/AppNav
 import { move } from '@/components/home/homeApi';
 import { CategoryChip, PlusIcon, Switch, trackersCss } from '@/components/trackers/trackersUi';
 import { FolderBrowser } from './FolderBrowser';
+import { isMinimal } from '@/minimal';
+import { loadTvJobs, retryTvJob, tvJobStatus, type TvJob } from './tvCalendarApi';
 import {
   RESOLUTIONS, SAVE_FAILED, SOURCES, addPath, deletePath, editPath, loadLibrary, moviePaths, retryJob, ruleSummary, saveMapping, saveRules, sinceText,
   type Errors, type LibPath, type LibraryView, type PathMapRow, type Result, type Rule, type Transfer, type Unit,
@@ -162,7 +164,17 @@ function DownloadsStatus({ view, onView }: { view: LibraryView; onView?: (v: Lib
   const lost = view.not_found || [];
   const failed = view.failed || [];
   const [busy, setBusy] = useState<string | null>(null);
-  if (!dl && !lost.length && !failed.length) return null;
+  // v158c: the TV download jobs that failed, each with its error; no-space ones get Retry
+  // (the existing TV retry endpoint). No TV (404) or unreachable: no rows.
+  const [tvJobs, setTvJobs] = useState<TvJob[]>([]);
+  const loadTv = useCallback(() => {
+    if (!isMinimal()) return undefined;                 // TV lives in the minimal app only
+    let live = true;
+    void loadTvJobs().then(r => { if (live) setTvJobs(r.ok ? r.data.failed : []); });
+    return () => { live = false; };
+  }, []);
+  useEffect(loadTv, [loadTv]);
+  if (!dl && !lost.length && !failed.length && !tvJobs.length) return null;
   const s = STATUS[dl?.status === 'missing' ? 'missing' : 'ok'];
   return (
     <div data-testid="lp-downloads">
@@ -205,6 +217,26 @@ function DownloadsStatus({ view, onView }: { view: LibraryView; onView?: (v: Lib
               onClick={() => { setBusy(j.hash); void retryJob(j.hash).then(r => { setBusy(null); if (r.ok) onView?.(r.view); }); }}
               style={{ flex: 'none', padding: '6px 12px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.16)', background: 'rgba(255,255,255,0.06)',
                 color: 'rgba(255,255,255,0.95)', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: busy === j.hash ? 0.4 : 1 }}>Retry</button>
+          </div>
+        ))}
+        {tvJobs.map((j, i) => (
+          <div key={`tv:${j.hash}`} data-testid="lp-tv-job" data-state={j.state}
+            style={{ ...rowBtn, cursor: 'default', ...(dl || lost.length || failed.length || i > 0 ? topBorder : null) }}>
+            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: T.danger, flex: 'none' }} />
+            <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={titleText(wide)} title={j.name || undefined}>{j.name || 'Untitled'}</span>
+              {j.at ? <span style={subText(wide)}>{sinceText(j.at)}</span> : null}
+            </span>
+            <span data-testid="lp-tv-job-status" title={tvJobStatus(j)}
+              style={{ fontSize: 13, fontWeight: 500, color: T.danger, flex: '0 1 auto', minWidth: 0, maxWidth: wide ? 320 : 160, textAlign: 'right',
+                overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{tvJobStatus(j)}</span>
+            {j.retry && (
+              <button type="button" data-testid="lp-tv-job-retry" className="lp-focus" disabled={busy === `tv:${j.hash}`}
+                aria-label={`Retry ${j.name || 'Untitled'}`}
+                onClick={() => { setBusy(`tv:${j.hash}`); void retryTvJob(j.hash).then(r => { setBusy(null); if (r.ok) loadTv(); }); }}
+                style={{ flex: 'none', padding: '6px 12px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.16)', background: 'rgba(255,255,255,0.06)',
+                  color: 'rgba(255,255,255,0.95)', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: busy === `tv:${j.hash}` ? 0.4 : 1 }}>Retry</button>
+            )}
           </div>
         ))}
       </div>

@@ -78,7 +78,7 @@ export function SectionTrackersList({ section, label, wide = false }: { section:
             const on = shownOn(t);
             const dim = !on;
             const sub = [t.type_name !== t.name ? t.type_name : '', why,
-              on && t.budget ? `${t.budget.used} of ${t.budget.cap} today` : '']
+              on && t.budget && t.budget.cap != null ? `${t.budget.used} of ${t.budget.cap} today` : '']
               .filter(Boolean).join(' · ');
             return (
               <li key={t.id} data-testid="section-tracker-row" data-lifted={lifted ? 'true' : undefined}

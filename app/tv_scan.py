@@ -61,6 +61,11 @@ GROUPS_TRIED = 3                 # episode groups fetched per show whose files d
 
 _Thread = threading.Thread          # the import pool's threads (tests may stub threading.Thread for start())
 _scan_lock = threading.Lock()
+# scan_path starts (v158c, Reviewer): a running number, and per path the last start's (number,
+# folder scanned). detach_path's deferred run uses them to tell whether the repointed folder was
+# scanned meanwhile.
+_scan_seq = [0]
+_path_scans: Dict[str, Tuple[int, str]] = {}
 _state: Dict[str, Any] = {'running': False, 'error': None, 'summary': None}
 # What the Import progress card shows (status(), polled): folders decided so far.
 _progress: Dict[str, Any] = {'total': 0, 'done': 0, 'matched': 0, 'review': 0, 'none': 0, 'ready': True}
@@ -562,12 +567,19 @@ def detach_path(path_id: str, now: Optional[float] = None, wait: Optional[float]
     the new folder's shows, taking back any it already knew. Under _scan_lock (Reviewer on
     49cb7f2): a scan, link or boot re-run never writes rows of the old folder meanwhile. A busy
     lock (*wait*, default LOCK_WAIT_S) hands the detach to a thread that waits its turn; returns
-    -1 then."""
+    -1 then.
+
+    The deferred run (Reviewer on 8b55bb8) touches only rows still at the old folder: it does
+    nothing when a scan of the repointed folder has started since the request (or was the one
+    running then; that scan already dropped the old folder's rows), and it leaves a show that was
+    matched by hand into this path after the request."""
     now = time.time() if now is None else now
 
-    def run() -> int:
+    def run(deferred: bool = False) -> int:
         with tv_store.write() as conn:
             ids = [r['id'] for r in conn.execute('SELECT id FROM series WHERE path_id = ?', (path_id,))]
+            if deferred:
+                ids = [i for i in ids if not _matched_since(conn, i, now)]
             for sid in ids:
                 detach(conn, sid, now, 'repointed')
             conn.execute('DELETE FROM unmatched WHERE path_id = ?', (path_id,))
@@ -577,13 +589,27 @@ def detach_path(path_id: str, now: Optional[float] = None, wait: Optional[float]
             return run()
         finally:
             _scan_lock.release()
+    # The scan holding the lock now counts as "since": it may already be reading the new folder.
+    last = _path_scans.get(path_id)
+    since = last[0] if last else _scan_seq[0] + 1
 
     def later():
         with _scan_lock:
-            n = run()
+            new = _path_of(path_id)
+            new_real = os.path.realpath(new) if new else None
+            got = _path_scans.get(path_id)
+            if got and got[0] >= since and got[1] == new_real:
+                logger.info('Library path %s repointed: its new folder was already scanned, nothing to hide', path_id)
+                return
+            n = run(deferred=True)
         logger.info('Library path %s repointed: %d TV shows hidden (after the running scan)', path_id, n)
     _Thread(target=later, daemon=True, name='tv-detach').start()
     return -1
+
+
+def _matched_since(conn, sid: int, ts: float) -> bool:
+    return conn.execute("SELECT 1 FROM history WHERE series_id = ? AND event IN ('matched', 'rematched') AND ts >= ?",
+                        (sid, ts)).fetchone() is not None
 
 
 def _manual_here(conn, owner) -> bool:
@@ -776,6 +802,8 @@ def scan_path(rec: Dict[str, Any], now: float, retry_unmatched: bool = True) -> 
     if fm.blocked(root_real) or not os.path.isdir(root_real):
         raise FileNotFoundError(MISSING)
     pid = rec['id']
+    _scan_seq[0] += 1
+    _path_scans[pid] = (_scan_seq[0], root_real)
     folders = show_folders(root_real)
     out = {'shows': 0, 'unmatched': 0, 'linked': 0, 'mismatch': 0, 'unrecognized': 0}
     with tv_store.connect() as conn:

@@ -244,7 +244,7 @@ class TrackerGuard:
                     'all_day': sum(1 for v in self.purposes.values() for t, k in v if k == purpose and t > day),
                     'last': max(mine, default=0.0)}
 
-    def _purpose_refusal(self, tid: str, purpose: str, now: float) -> Optional[str]:
+    def _purpose_refusal(self, tid: str, purpose: str, now: float, spacing: bool = True) -> Optional[str]:
         lim = _purpose_limits().get(purpose)
         if lim is None:
             return f'unknown purpose {purpose}'
@@ -255,16 +255,17 @@ class TrackerGuard:
             return f"{purpose} hourly cap {int(lim['per_tracker_hour'])}"
         if c['all_day'] >= lim['all_trackers_day']:
             return f"{purpose} daily cap across trackers {int(lim['all_trackers_day'])}"
-        if c['last'] and now - c['last'] < lim['min_gap_s']:
+        if spacing and c['last'] and now - c['last'] < lim['min_gap_s']:
             return f'{purpose} spacing'
         return None
 
     def take(self, tid: str, interactive: bool, strict: bool, now: Optional[float] = None,
-             purpose: Optional[str] = None) -> Optional[str]:
+             purpose: Optional[str] = None, spacing: bool = True) -> Optional[str]:
         """None when a request to *tid* may be sent now (and records it), else
         the reason it may not. A background request with a *purpose* is also
         held to that purpose's caps; an interactive one is charged to the
-        interactive budget as before."""
+        interactive budget as before. spacing=False (a download right after its search) skips
+        only the purpose's minimum gap; every cap still holds."""
         now = time.time() if now is None else now
         if purpose is not None and (interactive or not isinstance(purpose, str) or not _PURPOSE_RE.match(purpose)):
             purpose = None if interactive else '?'
@@ -279,7 +280,7 @@ class TrackerGuard:
                 return f'backoff ({cd[1]})'
             hr, day, glob = self.counts(tid, now)
             if purpose:
-                why = self._purpose_refusal(tid, purpose, now)
+                why = self._purpose_refusal(tid, purpose, now, spacing)
                 if why:
                     return why
             if day >= LIMITS['per_day']:

@@ -237,7 +237,7 @@ def test_v7_migration_marks_existing_shows_monitored_future_with_a_verified_back
     c.execute('PRAGMA user_version = 6')
     c.commit()
     c.close()
-    assert tv_store.schema_version() == 8
+    assert tv_store.schema_version() == 9
     bak = p.with_name(p.name + '.bak-v6')
     assert bak.exists()
     b = sqlite3.connect(str(bak))
@@ -276,11 +276,12 @@ def test_v158b_v7_migration_keeps_an_existing_monitoring_choice_and_reruns_never
         "INSERT INTO episodes (series_id, season_number, episode_number, air_date, monitored) VALUES"
         " (1, 1, 1, '2001-01-01', 0), (1, 1, 2, '2099-01-01', 0), (2, 1, 1, '2001-01-01', 1),"
         " (4, 1, 1, '2001-01-01', 1), (4, 1, 2, '2099-01-01', 0)"])
-    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 8
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 9
     got = {r['id']: (r['monitored'], r['monitor'], r['monitor_new_seasons'], r['monitor_chosen'])
            for r in rows('SELECT id, monitored, monitor, monitor_new_seasons, monitor_chosen FROM series')}
     assert got[1] == (1, 'future', 1, 1)                                  # no choice: Future
-    assert got[2][:3] == (1, 'none', 0) and got[3][:3] == (0, 'none', 1) and got[4][:3] == (0, 'none', 0)
+    # v158c (v9): the kept choices get the label that matches their episodes; nothing else changes
+    assert got[2][:3] == (1, 'all', 0) and got[3][:3] == (0, 'none', 1) and got[4][:3] == (0, 'pilot', 0)
     assert _mon(2) == {(1, 1): 1} and _mon(4) == {(1, 1): 1, (1, 2): 0}  # flags kept as they were
     assert _mon(1) == {(1, 1): 0, (1, 2): 1}
     # the owner turns a show off entirely (an explicit "none"); a re-run never resets it

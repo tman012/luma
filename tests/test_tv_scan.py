@@ -387,3 +387,57 @@ def test_v158b_detach_path_takes_the_scan_lock(lib, monkeypatch, fake_tmdb):
     assert not rows('SELECT 1 FROM unmatched WHERE path_id = ?', PID)
     _old_rows_again = rows('SELECT 1 FROM series WHERE path_id = ?', PID)
     assert tv_scan.detach_path(PID, now=11.0) == len(_old_rows_again)          # free lock: at once
+
+
+def _join_detach():
+    import threading
+    for t in threading.enumerate():
+        if t.name == 'tv-detach':
+            t.join(5)
+
+
+def test_v158c_deferred_detach_skips_when_the_new_folder_was_scanned_meanwhile(lib, tmp_path):
+    tv_scan.scan_all(now=1000.0)
+    assert rows("SELECT 1 FROM series WHERE path_id = ? AND folder = 'Severance (2022)'", PID)
+    new = tmp_path / 'TV2'
+    (new / 'Severance (2022)').mkdir(parents=True)
+    (new / 'Severance (2022)' / 'Severance.S01E01.mkv').write_bytes(b'x' * 64)
+    select(PID, new)                                                           # the repoint is saved
+    with tv_scan._scan_lock:
+        assert tv_scan.detach_path(PID, now=2000.0, wait=0.05) == -1
+        tv_scan.scan_all(now=2001.0)                                           # a scan of the new folder runs first
+    _join_detach()
+    left = {r['folder'] for r in rows('SELECT folder FROM series WHERE path_id = ?', PID)}
+    assert left == {'Severance (2022)'}                                        # the new folder's show stays
+    assert not rows("SELECT 1 FROM history WHERE event = 'detached' AND detail LIKE '%repointed%'")
+
+
+def test_v158c_deferred_detach_hides_old_rows_but_not_a_show_matched_by_hand_since(lib, tmp_path):
+    tv_scan.scan_all(now=1000.0)
+    old = {r['id'] for r in rows('SELECT id FROM series WHERE path_id = ?', PID)}
+    keep = rows("SELECT id FROM series WHERE path_id = ? AND folder = 'Severance (2022)'", PID)[0]['id']
+    new = tmp_path / 'TV2'
+    new.mkdir()
+    select(PID, new)
+    with tv_scan._scan_lock:
+        assert tv_scan.detach_path(PID, now=2000.0, wait=0.05) == -1
+        with tv_store.write() as conn:                                         # Match by hand after the request
+            conn.execute("INSERT INTO history (ts, series_id, episode_ids, event, detail) VALUES (2001, ?, '[]', 'matched', '{}')",
+                         (keep,))
+    _join_detach()
+    assert {r['id'] for r in rows('SELECT id FROM series WHERE path_id = ?', PID)} == {keep}
+    gone = {r['series_id'] for r in rows("SELECT series_id FROM history WHERE event = 'detached' AND detail LIKE '%repointed%'")}
+    assert gone == old - {keep}
+
+
+def test_v158c_deferred_detach_runs_after_a_scan_of_the_old_folder(lib, tmp_path):
+    tv_scan.scan_all(now=1000.0)
+    new = tmp_path / 'TV2'
+    new.mkdir()
+    with tv_scan._scan_lock:
+        tv_scan.scan_all(now=1500.0)                                           # the running scan reads the old folder
+        select(PID, new)
+        assert tv_scan.detach_path(PID, now=2000.0, wait=0.05) == -1
+    _join_detach()
+    assert not rows('SELECT 1 FROM series WHERE path_id = ?', PID)
+    assert not rows('SELECT 1 FROM unmatched WHERE path_id = ?', PID)

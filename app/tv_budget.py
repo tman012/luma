@@ -11,6 +11,12 @@ The caps are code constants, not settings. While production's Sonarr and
 Prowlarr use the same tracker accounts from the same IP, the test install
 (:5002) makes at most AUTO_PER_TRACKER_DAILY automatic requests per tracker
 per day.
+
+v158c (PM): the cap is not raised. A capped tracker (a site tracker; capped()) gets
+AUTO_PER_TRACKER_DAILY slots a day, one every SLOT_S (spread evenly): the feed polls in a free
+slot, and a post-air (or other automatic) search may take a slot when one is free; either way the
+next slot is SLOT_S later. An indexer with no cap (a generic Torznab/Newznab entry) is polled every
+15 min and searched freely, held only to the guard's own limits (background bucket, 300/day).
 """
 
 from __future__ import annotations
@@ -33,6 +39,39 @@ GUARD_LIMITS: Dict[str, float] = {
 }
 
 
+SLOT_S = 86400 / AUTO_PER_TRACKER_DAILY     # 3 h
+
+
+def capped(cfg: Dict[str, Any]) -> bool:
+    """Site trackers (shared accounts with prod) carry the TV cap; generic Torznab/Newznab
+    indexers don't."""
+    from app import tracker_types as tt
+    return not tt.is_generic(cfg.get('type'))
+
+
+def slot_free(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> bool:
+    """A capped tracker has a free slot: under the daily cap and SLOT_S since its last automatic
+    TV request. Always True for an indexer with no cap."""
+    if not capped(cfg):
+        return True
+    from app.tracker_guard import guard_key
+    g = guard or _guard()
+    now = time.time() if now is None else now
+    c = g.purpose_counts(guard_key(cfg), PURPOSE, now)
+    return c['day'] < AUTO_PER_TRACKER_DAILY and (not c['last'] or now - c['last'] >= SLOT_S)
+
+
+def next_slot(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> Optional[float]:
+    """When a capped tracker's next slot opens (None: no cap)."""
+    if not capped(cfg):
+        return None
+    from app.tracker_guard import guard_key
+    g = guard or _guard()
+    now = time.time() if now is None else now
+    c = g.purpose_counts(guard_key(cfg), PURPOSE, now)
+    return max(now, (c['last'] or 0) + SLOT_S)
+
+
 def _guard():
     from app.tracker_guard import get_guard
     return get_guard()
@@ -53,4 +92,4 @@ def usage(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> Dict[
     from app.tracker_guard import guard_key
     g = guard or _guard()
     c = g.purpose_counts(guard_key(cfg), PURPOSE, time.time() if now is None else now)
-    return {'used': int(c['day']), 'cap': AUTO_PER_TRACKER_DAILY}
+    return {'used': int(c['day']), 'cap': AUTO_PER_TRACKER_DAILY if capped(cfg) else None}

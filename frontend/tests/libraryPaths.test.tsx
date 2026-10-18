@@ -527,6 +527,40 @@ describe('Settings > Library paths > Downloads (QA-UI1)', () => {
     expect(calls.filter(c => c.method === 'POST').map(c => c.url)).toEqual([`/api/settings/library-paths/jobs/${h}/retry`]);
   });
 
+  it('v158c: TV download jobs: no-space rows get Retry (the TV retry endpoint, no helper text); others show their error', async () => {
+    (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__ = true;
+    const since = Math.floor(new Date(2026, 9, 16, 9, 5).getTime() / 1000);
+    const h1 = '1'.repeat(40), h2 = '2'.repeat(40), h3 = '3'.repeat(40);
+    let tv = [
+      { hash: h1, name: 'Severance.S02E03.1080p', state: 'failed', error: 'insufficient space', at: since, retry: true },
+      { hash: h2, name: 'Dark.S01E01.1080p', state: 'grab_failed', error: "Couldn't create the qBittorrent category luma-tv", at: since, retry: false },
+      { hash: h3, name: 'Bluey.S03E01.1080p', state: 'refused', error: 'the file changed since it was checked', at: since, retry: false },
+    ];
+    answer = c => {
+      if (c.url.endsWith('/api/settings/tv/downloads') && c.method === 'GET') return res({ failed: tv, category: 'luma-tv' });
+      if (c.url.endsWith(`/api/settings/tv/downloads/${h1}/retry`) && c.method === 'POST') { tv = tv.slice(1); return res({ ok: true }); }
+      return null;
+    };
+    render(<LibraryPathsSettings wide />);
+    const box = await screen.findByTestId('lp-downloads');
+    const rows = await within(box).findAllByTestId('lp-tv-job');
+    expect(rows.map(r => r.textContent)).toEqual([
+      'Severance.S02E03.1080pSince Oct 16Not enough spaceRetry',
+      "Dark.S01E01.1080pSince Oct 16Couldn't create the qBittorrent category luma-tv",
+      'Bluey.S03E01.1080pSince Oct 16The file changed since it was checked']);
+    expect(rows.map(r => within(r).queryAllByTestId('lp-tv-job-retry').length)).toEqual([1, 0, 0]);
+    fireEvent.click(within(rows[0]!).getByTestId('lp-tv-job-retry'));
+    await waitFor(() => expect(screen.getAllByTestId('lp-tv-job')).toHaveLength(2));
+    expect(calls.filter(c => c.method === 'POST').map(c => c.url)).toEqual([`/api/settings/tv/downloads/${h1}/retry`]);
+  });
+
+  it('v158c: without TV (not the minimal app) no TV jobs are asked for', async () => {
+    render(<LibraryPathsSettings wide />);
+    await screen.findByTestId('library-paths-section');
+    expect(calls.some(c => c.url.includes('/api/settings/tv/'))).toBe(false);
+    expect(screen.queryByTestId('lp-tv-job')).toBeNull();
+  });
+
   it('a readable downloads folder shows no status and no list when nothing is lost', async () => {
     state = { ...base(), downloads: { path: '/downloads', status: 'ok' }, not_found: [] };
     render(<LibraryPathsSettings wide />);

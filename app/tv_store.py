@@ -233,9 +233,46 @@ def monitor_defaults(conn: sqlite3.Connection) -> int:
     return len(ids)
 
 
+# v158c (Tester): a show that kept its v6 monitoring choice (monitored, or some episodes monitored)
+# reached v7 with the column default monitor = 'none', so the Edit sheet said None. v9 gives those
+# shows the option that matches their episodes (no episode, season or series switch changes).
+SCHEMA_V9 = "UPDATE series SET monitor = monitor WHERE 0;"
+LABEL_ORDER = ('all', 'future', 'missing', 'existing', 'recent', 'first_season', 'last_season', 'pilot')
+
+
+def monitor_labels(conn: sqlite3.Connection, today: Optional[str] = None) -> int:
+    """The Monitor option for each show labelled 'none' that is monitored (series switch or any
+    episode): the first option in LABEL_ORDER whose episodes are exactly the monitored regular
+    episodes, else the closest one (fewest differences). Labels only; returns how many."""
+    import datetime as _dt
+    from app import tv_monitor
+    cols = _columns(conn, 'series')
+    if 'monitor' not in cols:
+        return 0
+    today = today or _dt.date.today().isoformat()
+    ids = [r[0] for r in conn.execute(
+        "SELECT s.id FROM series s WHERE s.monitor = 'none' AND (s.monitored = 1"
+        ' OR EXISTS (SELECT 1 FROM episodes e WHERE e.series_id = s.id AND e.monitored = 1))')]
+    for sid in ids:
+        eps = [dict(zip(('season_number', 'episode_number', 'air_date', 'monitored', 'has_file'), r)) for r in conn.execute(
+            f'SELECT e.season_number, e.episode_number, e.air_date, e.monitored, {tv_monitor._LINKED} FROM episodes e'
+            ' WHERE e.series_id = ? AND e.season_number > 0', (sid,))]
+        regular = sorted({e['season_number'] for e in eps})
+        first, last = (regular[0], regular[-1]) if regular else (1, 1)
+        best, best_d = 'all', None
+        for opt in LABEL_ORDER:
+            d = sum(1 for e in eps if bool(tv_monitor._wants(opt, e, today, first, last, bool(e['has_file']))) != bool(e['monitored']))
+            if best_d is None or d < best_d:
+                best, best_d = opt, d
+            if d == 0:
+                break
+        conn.execute('UPDATE series SET monitor = ? WHERE id = ?', (best, sid))
+    return len(ids)
+
+
 # MIGRATIONS[n] takes user_version n to n + 1.
 MIGRATIONS: List[Any] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6,
-                         (SCHEMA_V7, monitor_defaults), SCHEMA_V8]
+                         (SCHEMA_V7, monitor_defaults), SCHEMA_V8, (SCHEMA_V9, monitor_labels)]
 # A step is SQL, or (SQL, fn(conn)) run in the same transaction after it.
 SCHEMA_VERSION = len(MIGRATIONS)
 

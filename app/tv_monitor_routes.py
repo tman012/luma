@@ -11,6 +11,8 @@ PUT    /api/settings/tv/shows/<id>/seasons/<n>/monitored {monitored}
 PUT    /api/settings/tv/episodes/<id>/monitored {monitored}
 POST   /api/settings/tv/shows/monitor-missing {ids}      Series grid bulk opt-in to Missing episodes
 GET    /api/settings/tv/profiles                         {profiles, qualities}
+POST   /api/settings/tv/grab {download_url, title, tmdb_id, season, episode?, size?, quality?, indexer?}
+                                                         the TV Sources popup's grab (v158c), Luma's own path
 POST   /api/settings/tv/profiles  PUT|DELETE /api/settings/tv/profiles/<id>
 """
 from __future__ import annotations
@@ -250,3 +252,67 @@ def downloads_retry(h):
     if not tv_downloads.retry(h):
         return _missing()
     return _out({'ok': True})
+
+
+# ------------------------------------------------------------------ v158c: the TV Sources popup grab
+
+SHOW_NOT_ADDED = 'Add this show to TV first'
+
+
+def _series_for_tmdb(tmdb_id: int, now: float):
+    """(series_id, error). A show not in Luma's TV yet is added (monitoring none) when there's one
+    TV library; with several, the owner picks one by adding the show first."""
+    with tv_store.connect() as conn:
+        r = conn.execute('SELECT id FROM series WHERE tmdb_id = ? AND path_id IS NOT NULL', (tmdb_id,)).fetchone()
+    if r:
+        return r['id'], None
+    from app import tv_calendar
+    out = tv_calendar.add(tmdb_id, None, now=now, monitor='none')
+    if out.get('ok'):
+        return out['series_id'], None
+    if out.get('series_id'):
+        return out['series_id'], None
+    return None, out.get('error') or SHOW_NOT_ADDED
+
+
+@bp.route('/api/settings/tv/grab', methods=['POST'])
+def popup_grab():
+    """Grab one release from the TV Sources popup through Luma's own path (tv_grab: the TV category
+    and tag; on test the instance guard). {ok} or {error, fallback}: fallback true when Sonarr may
+    still take it (the link or the download client failed, or the show isn't in Luma's TV)."""
+    import time as _time
+    err = tv_settings._guard() or tv_settings._signed_in_owner()
+    if err:
+        return err
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return _out({'error': 'Invalid'}, 400)
+    ok_int = lambda v: isinstance(v, int) and not isinstance(v, bool) and v >= 0  # noqa: E731
+    tmdb_id, season, episode = body.get('tmdb_id'), body.get('season'), body.get('episode')
+    url, title = body.get('download_url'), body.get('title')
+    if not ok_int(tmdb_id) or not tmdb_id or not ok_int(season) or (episode is not None and not ok_int(episode)) \
+            or not isinstance(url, str) or not url.strip() or len(url) > 8192 or not isinstance(title, str) or len(title) > 1000:
+        return _out({'error': 'Invalid'}, 400)
+    from app import tv_grab
+    if not tv_grab.allowed():
+        return _out({'ok': False, 'error': tv_grab.OFF, 'blocked': True, 'fallback': False})
+    now = _time.time()
+    sid, why = _series_for_tmdb(tmdb_id, now)
+    if sid is None:
+        return _out({'ok': False, 'error': why, 'fallback': True})
+    with tv_store.connect() as conn:
+        if episode is None:
+            ids = [r['id'] for r in conn.execute('SELECT id FROM episodes WHERE series_id = ? AND season_number = ?',
+                                                 (sid, season))]
+        else:
+            ids = [r['id'] for r in conn.execute('SELECT id FROM episodes WHERE series_id = ? AND season_number = ?'
+                                                 ' AND episode_number = ?', (sid, season, episode))]
+    size = body.get('size')
+    item = {'title': title, 'downloadUrl': url, 'indexer': str(body.get('indexer') or '')[:200] or None,
+            'quality': str(body.get('quality') or '')[:100] or None,
+            'size': size if ok_int(size) else 0, 'indexerId': None}
+    g = tv_grab.grab(item, sid, season, ids, 'manual', now)
+    if g.get('ok'):
+        return _out({'ok': True, 'series_id': sid, 'existing': bool(g.get('existing'))})
+    return _out({'ok': False, 'error': g.get('error'), 'blocked': bool(g.get('blocked')),
+                 'fallback': bool(g.get('link') or g.get('client'))})

@@ -33,6 +33,7 @@ def item(title, seeders=10, size=2 * 1024 ** 3, tracker=7):
 class FakeQ:
     def __init__(self):
         self.calls = []
+        self.cats = {}
 
     def factory(self):
         q = self
@@ -40,9 +41,13 @@ class FakeQ:
         class S:
             def post(self, url, data=None, files=None, **kw):
                 q.calls.append((url, dict(data or {}), bool(files)))
+                if url.endswith('/torrents/createCategory'):
+                    q.cats[(data or {})['category']] = {'name': (data or {})['category'], 'savePath': ''}
                 return Resp()
 
-            def get(self, *a, **k):
+            def get(self, url, *a, **k):
+                if url.endswith('/torrents/categories'):
+                    return Resp(data=dict(q.cats))
                 return Resp(data=[])
 
             def close(self):
@@ -57,6 +62,7 @@ def env(scanned, monkeypatch):  # noqa: F811
     monkeypatch.delenv('LUMA_TEST_ALLOW', raising=False)
     monkeypatch.setenv('LUMA_INSTANCE', 'test')
     lm.init(settings=Settings())
+    tv_grab._have_category.clear()
     q = FakeQ()
     monkeypatch.setattr(tv_search, 'trackers', lambda: [CFG])
     sent = []
@@ -234,19 +240,15 @@ def test_search_on_add_follows_the_monitor_option(env, monkeypatch, owner):  # n
     assert not rows('SELECT 1 FROM episodes WHERE series_id = ? AND next_search_at IS NOT NULL', out['series_id'])
 
 
-def test_feed_visits_each_tracker_at_most_four_times_a_day_and_grabs_wanted(env, monkeypatch):
-    from app import tv_budget
+def test_feed_polls_an_uncapped_indexer_every_15_min_and_grabs_wanted(env, monkeypatch):
     allow_grabs(monkeypatch)
     _auto(feed=True)
-    monkeypatch.setattr(tv_budget, 'usage', lambda cfg, now=None, guard=None: {'used': 0, 'cap': 8})
     env.results = [item('Severance.S02E04.1080p.WEB-DL-B'), item('Nobody.S01E01.1080p.WEB-DL-X')]
     t0 = 2e9
     assert tv_search.feed(t0) == {'trackers': 1, 'grabbed': 1}
-    assert env.sent[-1] == ('', 'feed', False)                                           # automatic: TV budget
-    assert tv_search.feed(t0 + 15 * 60) == {'trackers': 0, 'grabbed': 0}                 # 6 h per tracker
-    assert tv_search.feed(t0 + 6 * 3600) == {'trackers': 1, 'grabbed': 0}               # already grabbed
-    monkeypatch.setattr(tv_budget, 'usage', lambda cfg, now=None, guard=None: {'used': 8, 'cap': 8})
-    assert tv_search.feed(t0 + 12 * 3600)['trackers'] == 0                               # the PM cap holds
+    assert env.sent[-1] == ('', 'feed', False)
+    assert tv_search.feed(t0 + 14 * 60) == {'trackers': 0, 'grabbed': 0}                 # v158c: no cap -> 15 min
+    assert tv_search.feed(t0 + 15 * 60) == {'trackers': 1, 'grabbed': 0}                 # already grabbed
 
 
 def test_only_the_owners_tv_trackers_and_none_preconfigured(monkeypatch, tv_env):  # noqa: F811

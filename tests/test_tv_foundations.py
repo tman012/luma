@@ -127,7 +127,8 @@ def test_routes_owner_gets_and_puts(owner):
     assert r.status_code == 200 and r.headers['Cache-Control'] == 'no-store'
     body = r.get_json()
     assert body['section'] == 'tv' and [t['id'] for t in body['trackers']] == [2, 1, 3, 4]
-    assert body['trackers'][0]['budget'] == {'used': 0, 'cap': tv_budget.AUTO_PER_TRACKER_DAILY}
+    cap = None if body['trackers'][0]['type_name'] in ('Torznab', 'Newznab') else tv_budget.AUTO_PER_TRACKER_DAILY   # v158c: no TV cap for generic indexers
+    assert body['trackers'][0]['budget'] == {'used': 0, 'cap': cap}
     r = owner.put(URL, json={'trackers': [{'id': 1, 'enabled': True}, {'id': 2, 'enabled': True}]},
                   environ_base=REMOTE, headers=HDR)
     assert r.status_code == 200
@@ -387,7 +388,7 @@ def db(tmp_path):
 
 
 def test_schema_is_created_with_wal_and_0600(db):
-    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == len(tv_store.MIGRATIONS) == 8
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == len(tv_store.MIGRATIONS) == 9
     with tv_store.connect() as conn:
         assert conn.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -461,7 +462,7 @@ def test_a_version_1_file_migrates_through_every_version(db):
     conn.execute('PRAGMA user_version = 1')
     conn.commit()
     conn.close()
-    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 8        # 1 -> 2 -> ... -> 8, every step
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 9        # 1 -> 2 -> ... -> 9, every step
     with tv_store.connect() as conn:
         cols = lambda t: {r[1] for r in conn.execute(f'PRAGMA table_info({t})')}            # noqa: E731
         assert {'state', 'parsed'} <= cols('episode_files')                                 # v2

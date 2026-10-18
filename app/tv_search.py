@@ -1,14 +1,16 @@
-"""TV searching (v158b): the recent-releases feed, searches after an episode airs, on Add,
+"""TV searching (v158b, v158c): the recent-releases feed, searches after an episode airs, on Add,
 manual episode/season searches, and the 12-hour series refresh.
 
 Trackers: only the owner's own, the ones on for TV in Settings > TV > Trackers
 (section_trackers.ordered_ids('tv')). Nothing is preconfigured; with none on, nothing is searched.
 
-Budget: every automatic request is purpose 'tv' and held to tv_budget's caps (8/day and 2/h per
-tracker, 600 s apart, 40/day in all) on top of the tracker guard's own limits. The feed's 15-minute
-tick visits each tracker at most FEED_PER_TRACKER_DAILY times a day (every 6 h per tracker), leaving
-the rest of the 8 for episode searches. Manual searches are interactive: the guard's interactive
-budget, never the TV one.
+Budget (v158c, PM): the cap is not raised. A capped tracker (a site tracker, tv_budget.capped) has
+8 slots a day, one every 3 h (tv_budget.SLOT_S), spread evenly: the feed polls it in a free slot,
+and an automatic search (after air, on Add, backlog) may take a free slot instead, which moves the
+next poll one slot on. Those requests are purpose 'tv' (tv_budget's caps on top of the tracker
+guard's limits). An indexer with no cap (generic Torznab/Newznab) is polled every 15 min (FEED_S)
+and searched as needed, held to the guard's own limits only. Manual searches are interactive: the
+guard's interactive budget, never the TV one.
 
 Automatic searching runs only when TV settings' automation is on (enabled; the feed also needs
 feed_enabled, old missing episodes backlog_enabled), and only where a grab could follow
@@ -40,7 +42,7 @@ logger = logging.getLogger(__name__)
 TV_CATEGORIES = [5000, 5030, 5040, 5045, 5060]
 TICK_S = 60
 FEED_S = 15 * 60
-FEED_PER_TRACKER_DAILY = 4
+SLOT_BUSY = 'tv slot'
 REFRESH_S = 12 * 3600
 RECENT_S = 14 * 86400                    # aired within this: an after-air search; older: backlog
 BACKOFF_H = (3, 6, 12, 24, 48, 96, 168)
@@ -80,6 +82,7 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
     """Search each TV tracker once; (items, statuses). Items are search results with a release
     link (tracker_search.to_item). Automatic searches are charged to the TV budget."""
     from app.tracker_search import TrackerError, TrackerSkipped, _match_categories, _secret_values, get_search, search_status
+    from app import tv_budget
     engine = get_search()
     items: List[Dict[str, Any]] = []
     statuses: List[Dict[str, Any]] = []
@@ -87,8 +90,13 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
         cats = _match_categories(cfg, TV_CATEGORIES)
         if not cats:
             continue
+        capped = tv_budget.capped(cfg)
+        if not interactive and capped and not tv_budget.slot_free(cfg, now):
+            statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': SLOT_BUSY})
+            continue                                   # no free slot: not sent, not logged
         try:
-            raw = engine.search_one(cfg, query, cats, LIMIT, interactive, purpose=None if interactive else 'tv')
+            raw = engine.search_one(cfg, query, cats, LIMIT, interactive,
+                                    purpose='tv' if not interactive and capped else None)
         except TrackerSkipped as e:
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
             _log(cfg, purpose, sid, query, 0, 'skipped', now)
@@ -419,18 +427,22 @@ def run_due(now: float, max_shows: int = 3) -> Dict[str, int]:
     return out
 
 
-def feed(now: float) -> Dict[str, int]:
-    """The recent-releases feed: each TV tracker's newest TV releases, at most
-    FEED_PER_TRACKER_DAILY times a day per tracker; picks for any wanted episode are grabbed."""
+def feed_due(cfg: Dict[str, Any], now: float) -> bool:
+    """An indexer with no cap: every FEED_S. A capped tracker: whenever it has a free slot (its
+    daily budget spread evenly; a post-air search that took the slot moves the feed to the next)."""
     from app import tv_budget
+    if tv_budget.capped(cfg):
+        return tv_budget.slot_free(cfg, now)
+    return now - float(tv_store.get_meta(f"tv_feed:{cfg['id']}") or 0) >= FEED_S
+
+
+def feed(now: float) -> Dict[str, int]:
+    """The recent-releases feed: each TV tracker's newest TV releases (see feed_due); picks for
+    any wanted episode are grabbed."""
     out = {'trackers': 0, 'grabbed': 0}
-    every = 86400 / FEED_PER_TRACKER_DAILY
     for cfg in trackers():
         key = f"tv_feed:{cfg['id']}"
-        last = float(tv_store.get_meta(key) or 0)
-        if now - last < every:
-            continue
-        if tv_budget.usage(cfg, now)['used'] >= tv_budget.AUTO_PER_TRACKER_DAILY:
+        if not feed_due(cfg, now):
             continue
         items, st = query_trackers('', 'feed', None, False, now, [cfg])
         if not st or st[0]['status'] != 'ok':
@@ -513,8 +525,9 @@ def status(now: Optional[float] = None) -> Dict[str, Any]:
     auto = automation()
     return {'automation': bool(auto.get('enabled')), 'feed': bool(auto.get('feed_enabled')),
             'grabs_allowed': tv_grab.allowed(),
-            'trackers': [{'id': c['id'], 'name': c['name'], **tv_budget.usage(c, now)} for c in trackers()],
-            'feed_every_s': FEED_S, 'feed_per_tracker_daily': FEED_PER_TRACKER_DAILY, 'refresh_every_s': REFRESH_S}
+            'trackers': [{'id': c['id'], 'name': c['name'], **tv_budget.usage(c, now), 'next_slot': tv_budget.next_slot(c, now)}
+                         for c in trackers()],
+            'feed_every_s': FEED_S, 'slot_s': tv_budget.SLOT_S, 'refresh_every_s': REFRESH_S}
 
 
 _started = {'on': False}
