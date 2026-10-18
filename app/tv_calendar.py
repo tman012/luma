@@ -75,40 +75,6 @@ def _last_refresh() -> Optional[float]:
     return r['t'] if r else None
 
 
-def show_detail(sid: int, today: Optional[dt.date] = None) -> Optional[Dict[str, Any]]:
-    """A show in a selected TV library with its seasons and episodes, each
-    episode's linked files, and how many aired regular episodes have a file."""
-    today = today or dt.date.today()
-    paths = _visible_paths()
-    with tv_store.connect() as conn:
-        s = conn.execute('SELECT * FROM series WHERE id = ?', (sid,)).fetchone()
-        if s is None or s['path_id'] not in paths:
-            return None
-        files: Dict[int, List[str]] = {}
-        for r in conn.execute("SELECT l.episode_id, f.rel_path FROM episode_file_links l JOIN episode_files f"
-                              " ON f.id = l.file_id WHERE f.series_id = ? AND f.state = 'linked' ORDER BY f.rel_path",
-                              (sid,)):
-            files.setdefault(r['episode_id'], []).append(r['rel_path'])
-        seasons: Dict[int, Dict[str, Any]] = {}
-        for r in conn.execute('SELECT season_number, name FROM seasons WHERE series_id = ? ORDER BY season_number', (sid,)):
-            seasons[r['season_number']] = {'number': r['season_number'], 'name': r['name'], 'episodes': []}
-        have = aired = 0
-        for e in conn.execute('SELECT * FROM episodes WHERE series_id = ? ORDER BY season_number, episode_number', (sid,)):
-            f = files.get(e['id'], [])
-            seasons.setdefault(e['season_number'], {'number': e['season_number'], 'name': None, 'episodes': []})
-            seasons[e['season_number']]['episodes'].append({
-                'id': e['id'], 'season': e['season_number'], 'episode': e['episode_number'], 'title': e['title'] or '',
-                'air_date': e['air_date'], 'downloaded': bool(f), 'files': f})
-            if e['season_number'] > 0 and (f or (e['air_date'] and e['air_date'] <= today.isoformat())):
-                aired += 1
-                have += bool(f)
-    order = sorted(n for n in seasons if n > 0) + ([0] if 0 in seasons else [])
-    return {'id': s['id'], 'tmdb_id': s['tmdb_id'], 'title': s['title'], 'year': s['year'], 'network': s['network'],
-            'status': s['status'], 'poster_path': s['poster_path'], 'path_id': s['path_id'],
-            'path_name': paths[s['path_id']]['name'], 'folder': s['folder'], 'have': have, 'aired': aired,
-            'seasons': [seasons[n] for n in order if seasons[n]['episodes']]}
-
-
 def _season_count(conn, sid: int) -> int:
     return conn.execute('SELECT COUNT(DISTINCT season_number) AS n FROM episodes WHERE series_id = ? AND season_number > 0',
                         (sid,)).fetchone()['n']

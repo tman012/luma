@@ -1,13 +1,12 @@
 /** Settings > TV (owner only, luma-test builds), docs/design/tv.md: the "TV"
  * title row with Calendar | Import | Libraries | Options (in the URL as ?view=,
  * so Back works), Search under it, and the view. Calendar (the default) shows
- * episodes by air date; Search finds library shows (Show detail) and TMDB shows
+ * the week's episodes by air date; Search finds library shows and TMDB shows
  * (Add); Import is the Import card, Review and the shows; Libraries is the TV
  * libraries selector; Options holds Upgrades and Trackers. Importing only reads
  * the library folders and Add only writes tv.db. */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
-import { useBackFromShow } from './tvRoute';
 import { T } from '@/theme/tokens';
 import { FONT } from '@/components/start/StartUI';
 import { NoticeToast } from '@/components/start/SetupToast';
@@ -16,10 +15,9 @@ import { trackersCss } from '@/components/trackers/trackersUi';
 import {
   WideCtx, card, libraryPathsCss, muted, pad, primary, rowBtn, sectionLabel, segBtn, segOn, segment, subText, titleText, topBorder,
 } from './LibraryPathsSettings';
-import { ImportSection, ReviewSection, ShowPicker, FADE_MS, AMBER, importCss, initialReview, type ReviewState } from './TvImport';
+import { ImportSection, ReviewSection, ShowPicker, FADE_MS, importCss, initialReview, type ReviewState } from './TvImport';
 import { TvCalendar, tvCalendarCss } from './TvCalendar';
 import { SEARCH_MIN, TvSearch, tvSearchCss } from './TvSearch';
-import { TvShowDetail, tvDetailCss } from './TvShowDetail';
 import { LibrarySelector } from './LibrarySelector';
 import type { SelectableLibrary } from './librarySelectionApi';
 import { SAVE_FAILED } from './libraryPathsApi';
@@ -29,7 +27,7 @@ import {
   saveUpgrades, showLabel, startImport,
   type ImportProgress, type Show, type TvLibrary, type TvSettingsView, type UpgradeMode,
 } from './tvLibraryApi';
-import { isDay, localDay, weekStart, type CalEpisode } from './tvCalendarApi';
+import { isDay, localDay, weekStart } from './tvCalendarApi';
 
 /** Space between sections (Import, Review, Shows; Upgrades, Trackers), as on Library paths. */
 export const SECTION_GAP = 28;
@@ -39,7 +37,6 @@ export const TV_VIEWS = [
 ] as const;
 export type TvView = typeof TV_VIEWS[number]['id'];
 export const tvView = (v: string | null): TvView => (TV_VIEWS.find(x => x.id === v)?.id ?? 'calendar');
-const int = (v: string | null) => (v && /^\d{1,9}$/.test(v) ? Number(v) : null);
 
 export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: ReactNode }) {
   const [settingsView, setSettingsView] = useState<TvSettingsView | null>(null);
@@ -56,9 +53,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
   const [reload, setReload] = useState(0);                          // the Calendar reloads after an import or an Add
   const seq = useRef(0);
   const [params, setParams] = useSearchParams();
-  const backFromShow = useBackFromShow();
   const view = tvView(params.get('view'));
-  const showId = int(params.get('show'));
   const today = localDay();
   const week = isDay(params.get('week')) ? weekStart(params.get('week')!) : weekStart(today);
 
@@ -94,14 +89,12 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
     return loadFailed ? <div role="alert" style={{ ...pad(wide), ...muted }}>{"Couldn't load TV settings"}</div> : null;
   }
   const say = (msg: string) => { seq.current += 1; setToast(msg); };
-  const go = (patch: Record<string, string | null>, push = true, state?: unknown) => {
+  const go = (patch: Record<string, string | null>, push = true) => {
     const next = new URLSearchParams(params);
     for (const [k, v] of Object.entries(patch)) { if (v === null) next.delete(k); else next.set(k, v); }
-    setParams(next, { replace: !push, state });
+    setParams(next, { replace: !push });
   };
-  const pickView = (v: TvView) => { setQ(''); go({ view: v === 'calendar' ? null : v, show: null, season: null, episode: null }); };
-  const openShow = (sid: number, e?: CalEpisode) =>
-    go({ show: String(sid), season: e ? String(e.season) : null, episode: e ? String(e.episode) : null }, true, { tvBack: true });
+  const pickView = (v: TvView) => { setQ(''); go({ view: v === 'calendar' ? null : v }); };
   const start = () => {
     setImportError(null);
     setImporting(true);
@@ -128,7 +121,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
   const noLibraries = settingsView.paths.length === 0;
   const searching = q.trim().length >= SEARCH_MIN;
   const control = (
-    <Segmented value={view} wide={wide} dim={searching && showId == null} badge={importing ? 0 : reviewRows.length} onPick={pickView} />
+    <Segmented value={view} wide={wide} onPick={pickView} />
   );
   const noLibs = (
     <div data-testid="tv-no-libraries" style={{ minHeight: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
@@ -140,19 +133,14 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
   );
 
   let body: ReactNode;
-  if (showId != null) {
-    body = (
-      <TvShowDetail wide={wide} id={showId} season={int(params.get('season'))} episode={int(params.get('episode'))} today={today}
-        onBack={backFromShow} onSeason={n => go({ season: String(n), episode: null }, false)} say={say} />
-    );
-  } else if (searching) {
+  if (searching) {
     body = noLibraries ? noLibs : (
-      <TvSearch wide={wide} q={q} paths={settingsView.paths} onOpen={sid => openShow(sid)} onAdded={() => setReload(n => n + 1)} />
+      <TvSearch q={q} paths={settingsView.paths} onAdded={() => setReload(n => n + 1)} />
     );
   } else if (view === 'calendar') {
     body = noLibraries ? noLibs : (
-      <TvCalendar wide={wide} today={today} week={week} reload={reload}
-        onWeek={w => go({ week: w === weekStart(today) ? null : w }, false)} onOpen={e => openShow(e.series_id, e)} />
+      <TvCalendar today={today} week={week} reload={reload}
+        onWeek={w => go({ week: w === weekStart(today) ? null : w }, false)} />
     );
   } else if (view === 'import') {
     body = (
@@ -204,12 +192,12 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
 
   return (
     <WideCtx.Provider value={wide}>
-    <section data-testid="tv-section" data-view={showId != null ? 'show' : searching ? 'search' : view}
+    <section data-testid="tv-section" data-view={searching ? 'search' : view}
       style={{ ...pad(wide), display: 'flex', flexDirection: 'column', fontFamily: FONT }}>
       <style>{libraryPathsCss}</style>
       <style>{trackersCss}</style>
       <style>{importCss}</style>
-      <style>{tvCalendarCss + tvSearchCss + tvDetailCss + tabsCss}</style>
+      <style>{tvCalendarCss + tvSearchCss + tabsCss}</style>
       {toast && <NoticeToast key={toast + seq.current} text={toast} onDone={() => setToast('')} />}
 
       {wide && (
@@ -218,13 +206,10 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
           {control}
         </div>
       )}
-      <SearchField wide={wide} value={q} onChange={v => {
-        setQ(v);
-        if (showId != null && v.trim().length >= SEARCH_MIN) go({ show: null, season: null, episode: null }, false);
-      }} />
+      <SearchField wide={wide} value={q} onChange={setQ} />
       {!wide && <div style={{ marginTop: 12 }}>{control}</div>}
       {/* The Libraries view stays mounted so the selection (and the paths Add offers) is always current. */}
-      <div style={{ marginTop: 20, display: view === 'libraries' && showId == null && !searching ? undefined : 'none' }}>
+      <div style={{ marginTop: 20, display: view === 'libraries' && !searching ? undefined : 'none' }}>
         <LibrarySelector url={TV_LIBRARIES_URL} label="Libraries" testId="tv-paths" onChange={onLibraries} />
       </div>
       {body && <div data-testid="tv-view" style={{ marginTop: 20 }}>{body}</div>}
@@ -235,11 +220,9 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
 
 // ---------------------------------------------------------------- frame
 
-function Segmented({ value, wide, dim, badge, onPick }: {
-  value: TvView; wide: boolean; dim: boolean; badge: number; onPick: (v: TvView) => void;
-}) {
+function Segmented({ value, wide, onPick }: { value: TvView; wide: boolean; onPick: (v: TvView) => void }) {
   return (
-    <div className="tvt-scroll" style={{ overflowX: wide ? 'visible' : 'auto', opacity: dim ? 0.4 : 1, transition: 'opacity .15s' }}>
+    <div className="tvt-scroll" style={{ overflowX: wide ? 'visible' : 'auto' }}>
       <div role="tablist" aria-label="TV" data-testid="tv-tabs"
         style={{ ...segment, maxWidth: 'none', width: wide ? 'auto' : '100%', minWidth: wide ? undefined : 'max-content', boxSizing: 'border-box' }}>
         {TV_VIEWS.map(t => {
@@ -250,13 +233,6 @@ function Segmented({ value, wide, dim, badge, onPick }: {
               style={{ ...segBtn, ...(on ? segOn : null), height: wide ? 32 : 38, padding: '0 14px', flex: wide ? 'none' : 1,
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, whiteSpace: 'nowrap' }}>
               {t.label}
-              {t.id === 'import' && badge > 0 && (
-                <span data-testid="tv-import-badge" aria-label={`${badge} to review`}
-                  style={{ minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, background: AMBER, color: '#15102a',
-                    fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box' }}>
-                  {badge}
-                </span>
-              )}
             </button>
           );
         })}

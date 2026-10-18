@@ -7,7 +7,6 @@ POST /api/settings/tv/import-all {items: [{id, tmdb_id}]}  review rows imported 
 GET  /api/settings/tv/search?q=&year=          TMDB shows for the picker (q may be tmdb:/tvdb:/imdb:<id>)
 GET  /api/settings/tv/calendar?start=YYYY-MM-DD&days=N   episodes by air date (tv_calendar)
 GET  /api/settings/tv/find?q=                   Search: library shows first, then TMDB
-GET  /api/settings/tv/shows/<id>                Show detail (seasons, episodes, linked files)
 POST /api/settings/tv/shows {tmdb_id, path_id?}  Add from Search (tv.db only; no folders, no files)
 PUT  /api/settings/tv/shows/<id>/match {tmdb_id}      "Wrong show?" (rematched)
 POST /api/settings/tv/unmatched/<id>/match {tmdb_id}  "Match" (matched, manual)
@@ -151,6 +150,7 @@ def tv_calendar_get():
     days = request.args.get('days') or '7'
     if start is None or not days.isdigit() or not 1 <= int(days) <= tv_calendar.MAX_DAYS:
         return _no_store(jsonify({'error': BAD_DATE}), 400)
+    tv_scan.refresh_on_open()                 # stale air dates refresh in the background (24h cache, shared budget)
     return _no_store(jsonify(tv_calendar.calendar(start, int(days))))
 
 
@@ -166,17 +166,6 @@ def tv_find():
         return _no_store(jsonify(tv_calendar.find(q)))
     except tv_tmdb.TmdbError as e:
         return _no_store(jsonify({'error': str(e)}), 502)
-
-
-@bp.route('/api/settings/tv/shows/<int:sid>', methods=['GET'])
-def tv_show_get(sid):
-    err = tv_settings._guard()
-    if err:
-        return err
-    d = tv_calendar.show_detail(sid)
-    if d is None:
-        return _no_store(jsonify({'error': tv_calendar.NOT_FOUND}), 404)
-    return _no_store(jsonify(d))
 
 
 @bp.route('/api/settings/tv/shows', methods=['POST'])

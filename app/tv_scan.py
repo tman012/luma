@@ -780,11 +780,12 @@ def scan_all(now: Optional[float] = None, retry_unmatched: bool = True) -> Dict[
     return total
 
 
-def refresh_added(now: Optional[float] = None) -> int:
+def refresh_added(now: Optional[float] = None, folders: bool = False) -> int:
     """Shows added from Search (a library, no folder) keep their episodes
     current like folder shows: once REFRESH_EPISODES_S has passed, on the next
-    scan (scheduled or Import). TMDB reads on the workers; a TMDB error leaves
-    the rest for the next scan. Returns how many were refreshed."""
+    scan (Import) or Calendar open (folders=True: every show of the selected
+    libraries). TMDB reads on the workers through the shared rate budget; a
+    TMDB error leaves the rest for next time. Returns how many were refreshed."""
     from app import tv_settings
     now = time.time() if now is None else now
     pids = [p['id'] for p in tv_settings.libraries()]
@@ -792,7 +793,8 @@ def refresh_added(now: Optional[float] = None) -> int:
         return 0
     with tv_store.connect() as conn:
         rows = [dict(r) for r in conn.execute(
-            'SELECT id, tmdb_id, episode_group_id, tmdb_refreshed_at FROM series WHERE folder IS NULL AND path_id IN'
+            'SELECT id, tmdb_id, episode_group_id, tmdb_refreshed_at FROM series WHERE'
+            + ('' if folders else ' folder IS NULL AND') + ' tmdb_id IS NOT NULL AND path_id IN'
             f' ({",".join("?" * len(pids))})', pids)
             if now - (r['tmdb_refreshed_at'] or 0) >= REFRESH_EPISODES_S]
 
@@ -808,6 +810,33 @@ def refresh_added(now: Optional[float] = None) -> int:
             refresh_episodes(r['id'], r['tmdb_id'], now, res['data'])
             n += 1
     return n
+
+
+_refresh_lock = threading.Lock()
+_RefreshThread = threading.Thread    # the Calendar-open refresh (tests run it inline)
+
+
+def refresh_on_open() -> bool:
+    """Calendar open: refresh stale air dates (24h) in the background, once at
+    a time and never during an Import (which refreshes them itself). The open
+    answers from tv.db right away; the next open shows what changed. False
+    when nothing started."""
+    if _scan_lock.locked() or not _refresh_lock.acquire(blocking=False):
+        return False
+
+    def work():
+        try:
+            refresh_added(folders=True)
+        except Exception:                  # noqa: BLE001 - a failed refresh waits for the next open
+            logger.exception('TV calendar refresh failed')
+        finally:
+            _refresh_lock.release()
+    try:
+        _RefreshThread(target=work, daemon=True, name='tv-calendar-refresh').start()
+    except Exception:
+        _refresh_lock.release()
+        raise
+    return True
 
 
 def last_scan() -> Optional[float]:

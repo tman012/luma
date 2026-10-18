@@ -1,14 +1,12 @@
-/** Settings > TV > Search (docs/design/tv.md §4): library shows first ("In
- * library", opens Show detail), then TMDB shows with Add. Add saves the show to
+/** Settings > TV > Search (docs/design/tv.md, v1, desktop web): library shows
+ * first ("In library", not clickable), then TMDB shows with Add. Add saves the show to
  * tv.db in one of the selected TV libraries (picked when there are 2+); it
  * creates no folders or files and downloads nothing. */
 import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { FONT } from '@/components/start/StartUI';
-import { ChevronIcon } from '@/components/nav/AppNav';
 import { NAVY_GLASS_BORDER, NAVY_GLASS_POPOVER } from '@/theme/tokens';
 import { Poster } from './TvImport';
-import { glassCard } from './TvCalendar';
+import { CAL_MAX_W, glassCard } from './TvCalendar';
 import type { LibPath } from './libraryPathsApi';
 import { showLabel } from './tvLibraryApi';
 import { addShow, findShows, seasonsText, type FindResult } from './tvCalendarApi';
@@ -22,9 +20,7 @@ const W95 = 'rgba(255,255,255,0.95)';
 
 type AddState = { busy?: boolean; error?: boolean; series_id?: number };
 
-export function TvSearch({ wide, q, paths, onOpen, onAdded }: {
-  wide: boolean; q: string; paths: LibPath[]; onOpen: (seriesId: number) => void; onAdded: () => void;
-}) {
+export function TvSearch({ q, paths, onAdded }: { q: string; paths: LibPath[]; onAdded: () => void }) {
   const [res, setRes] = useState<{ q: string; results: FindResult[] } | null>(null);
   const [failed, setFailed] = useState('');
   const [adds, setAdds] = useState<Record<number, AddState>>({});
@@ -57,18 +53,14 @@ export function TvSearch({ wide, q, paths, onOpen, onAdded }: {
   const ready = res?.q === text;
   const list = ready ? res.results : [];
   return (
-    <div data-testid="tv-search-results" style={{ ...glassCard, overflow: 'visible', fontFamily: FONT }}>
+    <div data-testid="tv-search-results"
+      style={{ ...glassCard, overflow: 'visible', fontFamily: FONT, width: '100%', maxWidth: CAL_MAX_W, margin: '0 auto', boxSizing: 'border-box' }}>
       {failed === text ? (
         <div role="alert" style={centered}>{"Couldn't search"}</div>
       ) : !ready ? (
         <div data-testid="tv-search-loading" aria-busy="true">
           {[0, 1, 2].map(i => (
-            <div key={i} style={{ ...rowBox, borderTop: i ? divider : 'none' }}>
-              <span className="tvc-pulse" style={{ width: 40, height: 60, borderRadius: 4, background: 'rgba(255,255,255,0.04)' }} />
-              <span style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <span className="tvc-pulse" style={{ height: 14, width: '40%', borderRadius: 4, background: 'rgba(255,255,255,0.04)' }} />
-                <span className="tvc-pulse" style={{ height: 12, width: '20%', borderRadius: 4, background: 'rgba(255,255,255,0.04)' }} />
-              </span>
+            <div key={i} style={{ ...rowBox, background: 'rgba(255,255,255,0.04)', borderTop: i ? divider : 'none' }}>
             </div>
           ))}
         </div>
@@ -76,7 +68,6 @@ export function TvSearch({ wide, q, paths, onOpen, onAdded }: {
         <div data-testid="tv-search-empty" style={centered}>No results</div>
       ) : list.map((r, i) => {
         const st = adds[r.tmdb_id] || {};
-        const sid = r.series_id ?? st.series_id ?? null;
         const inLib = r.in_library || st.series_id != null;
         const body = (
           <>
@@ -90,24 +81,22 @@ export function TvSearch({ wide, q, paths, onOpen, onAdded }: {
         return (
           <div key={`${r.in_library ? 'l' : 't'}${r.tmdb_id}`} data-testid="tv-search-row" data-in-library={inLib || undefined}
             style={{ position: 'relative', borderTop: i ? divider : 'none' }}>
-            {inLib && sid != null ? (
-              <button type="button" className="lp-focus tvc-row" onClick={() => onOpen(sid)}
-                style={{ ...rowBox, width: '100%', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', color: W95, fontFamily: FONT }}>
+            {inLib ? (
+              <div style={rowBox}>
                 {body}
                 <InLibrary />
-                <span aria-hidden="true" style={{ display: 'inline-flex', color: 'rgba(255,255,255,0.3)' }}><ChevronIcon size={18} /></span>
-              </button>
+              </div>
             ) : (
               <div style={rowBox}>
                 {body}
                 {st.busy ? (
-                  <span data-testid="tv-add-busy" aria-label="Adding" role="status" style={{ ...addBtn(wide), background: 'rgba(59,130,246,0.4)' }}>
+                  <span data-testid="tv-add-busy" aria-label="Adding" role="status" style={{ ...addBtn, background: 'rgba(59,130,246,0.4)' }}>
                     <span className="tvi-spin" aria-hidden="true" />
                   </span>
                 ) : (
                   <button type="button" className="lp-focus tvs-add" data-testid="tv-add" aria-haspopup={paths.length >= 2 ? 'dialog' : undefined}
                     aria-expanded={paths.length >= 2 ? picking === r.tmdb_id : undefined}
-                    onClick={() => startAdd(r)} style={addBtn(wide)}>Add</button>
+                    onClick={() => startAdd(r)} style={addBtn}>Add</button>
                 )}
               </div>
             )}
@@ -119,7 +108,7 @@ export function TvSearch({ wide, q, paths, onOpen, onAdded }: {
               </div>
             )}
             {picking === r.tmdb_id && (
-              <PathPicker wide={wide} paths={paths} onCancel={() => setPicking(null)} onAdd={p => void add(r, p)} />
+              <PathPicker paths={paths} onCancel={() => setPicking(null)} onAdd={p => void add(r, p)} />
             )}
           </div>
         );
@@ -138,9 +127,9 @@ export const InLibrary = () => (
   </span>
 );
 
-/** "Add to": the selected TV libraries, nothing preselected (desktop popover, phone bottom sheet). */
-export function PathPicker({ wide, paths, onCancel, onAdd }: {
-  wide: boolean; paths: LibPath[]; onCancel: () => void; onAdd: (pathId: string) => void;
+/** "Add to": the selected TV libraries, nothing preselected (a popover under the row). */
+export function PathPicker({ paths, onCancel, onAdd }: {
+  paths: LibPath[]; onCancel: () => void; onAdd: (pathId: string) => void;
 }) {
   const [pick, setPick] = useState<string | null>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -179,9 +168,9 @@ export function PathPicker({ wide, paths, onCancel, onAdd }: {
         })}
       </div>
       <div style={{ display: 'flex', justifyContent: 'center', gap: 12 }}>
-        <button type="button" className="lp-focus" data-testid="tv-add-cancel" onClick={onCancel} style={sheetBtn(false, wide)}>Cancel</button>
+        <button type="button" className="lp-focus" data-testid="tv-add-cancel" onClick={onCancel} style={sheetBtn(false)}>Cancel</button>
         <button type="button" className="lp-focus" data-testid="tv-add-confirm" disabled={!pick}
-          onClick={() => pick && onAdd(pick)} style={{ ...sheetBtn(true, wide), opacity: pick ? 1 : 0.4, cursor: pick ? 'pointer' : 'default' }}>Add</button>
+          onClick={() => pick && onAdd(pick)} style={{ ...sheetBtn(true), opacity: pick ? 1 : 0.4, cursor: pick ? 'pointer' : 'default' }}>Add</button>
       </div>
     </>
   );
@@ -189,18 +178,6 @@ export function PathPicker({ wide, paths, onCancel, onAdd }: {
     display: 'flex', flexDirection: 'column', gap: 12, boxSizing: 'border-box', background: NAVY_GLASS_POPOVER, border: NAVY_GLASS_BORDER,
     backdropFilter: 'blur(24px) saturate(160%)', WebkitBackdropFilter: 'blur(24px) saturate(160%)', fontFamily: FONT,
   };
-  if (!wide) {
-    return createPortal(
-      <div data-testid="tv-add-sheet-backdrop" style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,0.45)' }}>
-        <div ref={panel} role="dialog" aria-label="Add to" data-testid="tv-add-picker"
-          style={{ ...surface, position: 'absolute', left: 0, right: 0, bottom: 0, maxHeight: '70vh', overflowY: 'auto',
-            padding: '16px 16px calc(16px + env(safe-area-inset-bottom, 0px))', borderRadius: '20px 20px 0 0', borderBottom: 'none' }}>
-          {body}
-        </div>
-      </div>,
-      document.body,
-    );
-  }
   return (
     <div ref={panel} role="dialog" aria-label="Add to" data-testid="tv-add-picker"
       style={{ ...surface, position: 'absolute', zIndex: 50, right: 12, top: 'calc(100% - 8px)', width: 320, maxWidth: 'calc(100vw - 32px)',
@@ -220,16 +197,16 @@ const rowBox: React.CSSProperties = { display: 'flex', alignItems: 'center', gap
 const centered: React.CSSProperties = {
   minHeight: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 500, color: W70,
 };
-const addBtn = (wide: boolean): React.CSSProperties => ({
-  height: wide ? 32 : 40, minWidth: wide ? 64 : 72, padding: '0 16px', borderRadius: 10, border: 'none', background: '#3b82f6',
+const addBtn: React.CSSProperties = {
+  height: 32, minWidth: 64, padding: '0 16px', borderRadius: 10, border: 'none', background: '#3b82f6',
   color: '#fff', fontSize: 14, fontWeight: 600, fontFamily: FONT, cursor: 'pointer', flex: 'none',
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center', boxSizing: 'border-box',
-});
+};
 const retryPill: React.CSSProperties = {
   height: 28, padding: '0 12px', borderRadius: 999, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)',
   color: '#fff', fontSize: 13, fontWeight: 600, fontFamily: FONT, cursor: 'pointer', flex: 'none',
 };
-const sheetBtn = (primary: boolean, wide: boolean): React.CSSProperties => ({
-  height: wide ? 36 : 44, minWidth: 104, padding: '0 18px', borderRadius: 10, fontSize: 15, fontWeight: 600, fontFamily: FONT, cursor: 'pointer',
+const sheetBtn = (primary: boolean): React.CSSProperties => ({
+  height: 36, minWidth: 104, padding: '0 18px', borderRadius: 10, fontSize: 15, fontWeight: 600, fontFamily: FONT, cursor: 'pointer',
   border: primary ? 'none' : '1px solid rgba(255,255,255,0.12)', background: primary ? '#3b82f6' : 'rgba(255,255,255,0.06)', color: '#fff',
 });

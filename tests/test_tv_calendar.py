@@ -1,7 +1,6 @@
-"""TV Calendar, Search and Show detail (docs/design/tv.md): episodes by air
-date with downloaded flags, Show detail, Search ordering, Add (owner only,
-tv.db only, one of the selected TV libraries), and the daily refresh of
-shows added from Search."""
+"""TV Calendar and Search v1 (docs/design/tv.md): episodes by air date with
+downloaded flags, air dates refreshed on open (24h cache), Search ordering, Add
+(owner only, tv.db only, one of the selected TV libraries)."""
 import datetime as dt
 import json
 
@@ -90,29 +89,44 @@ def test_calendar_route(owner, scanned):  # noqa: F811
         assert _get(owner, '/api/settings/tv/calendar', **bad).status_code == 400
 
 
-# ------------------------------------------------------------------ show detail
+# ------------------------------------------------------------------ refresh on open
 
-def test_show_detail(scanned):
-    sid = rows("SELECT id FROM series WHERE folder = 'Severance (2022)'")[0]['id']
-    d = tv_calendar.show_detail(sid, today=D(2026, 10, 18))
-    assert (d['title'], d['year'], d['network'], d['status']) == ('Severance', 2022, 'Net', 'Returning Series')
-    assert [s['number'] for s in d['seasons']] == [1, 2]
-    s2 = {e['episode']: e for e in d['seasons'][1]['episodes']}
-    assert s2[1]['files'] == s2[2]['files'] == ['Severance (2022)/Season 02/Severance.S02E01E02.2160p.mkv']
-    assert s2[5]['files'] == ['Severance (2022)/Season 01/Severance.S02E05.mkv'] and s2[3]['files'] == []
-    # aired by Oct 18: S01E01..E02 (Oct 10, 17) and S02E01..E07; with a file: S01E01, S01E02, S02E01, E02, E05
-    assert (d['have'], d['aired']) == (5, 9)
+class _Now:
+    """The Calendar-open refresh run inline."""
+    def __init__(self, target, daemon=None, name=None):
+        self.target = target
+
+    def start(self):
+        self.target()
 
 
-def test_specials_last_and_hidden_shows_404(scanned, owner):  # noqa: F811
-    tv_calendar.add(6001, None, now=2000.0)
-    sid = rows('SELECT id FROM series WHERE tmdb_id = 6001')[0]['id']
-    assert [s['number'] for s in tv_calendar.show_detail(sid)['seasons']] == [1, 0]
-    assert _get(owner, f'/api/settings/tv/shows/{sid}').status_code == 200
-    assert _get(owner, '/api/settings/tv/shows/999999').status_code == 404
-    with tv_store.write() as conn:
-        tv_scan.detach(conn, sid, 3000.0, 'test')
-    assert _get(owner, f'/api/settings/tv/shows/{sid}').status_code == 404
+def test_calendar_open_refreshes_stale_air_dates(owner, scanned, fake_tmdb, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(tv_scan, '_RefreshThread', _Now)
+    monkeypatch.setitem(tv_fake.SHOWS[70523]['air'], (1, 1), '2026-10-16')       # TMDB moved Dark's episode
+    fresh = []
+    real = tv_tmdb.fresh
+    monkeypatch.setattr(tv_tmdb, 'fresh', lambda: (fresh.append(1), real())[1])
+    r = _get(owner, '/api/settings/tv/calendar', start='2026-10-11', days='7')
+    assert r.status_code == 200 and fresh                                        # past the 24h cache, shared budget
+    assert rows("SELECT e.air_date FROM episodes e JOIN series s ON s.id = e.series_id WHERE s.tmdb_id = 70523"
+                " AND e.season_number = 1 AND e.episode_number = 1")[0]['air_date'] == '2026-10-16'
+    n = len(fake_tmdb.calls)
+    _get(owner, '/api/settings/tv/calendar', start='2026-10-11', days='7')
+    assert len(fake_tmdb.calls) == n                                             # fresh now: no TMDB call
+
+
+def test_calendar_open_never_refreshes_during_an_import_and_files_stay(owner, scanned, fake_tmdb, monkeypatch, tv_env):  # noqa: F811
+    monkeypatch.setattr(tv_scan, '_RefreshThread', _Now)
+    before = snapshot(tv_env)
+    n = len(fake_tmdb.calls)
+    with tv_scan._scan_lock:
+        assert tv_scan.refresh_on_open() is False
+        assert _get(owner, '/api/settings/tv/calendar', start='2026-10-11', days='7').status_code == 200
+    assert len(fake_tmdb.calls) == n
+    fake_tmdb.fail = "Couldn't reach TMDB"
+    assert _get(owner, '/api/settings/tv/calendar', start='2026-10-11', days='7').status_code == 200   # TMDB down: tv.db answers
+    assert not tv_scan._refresh_lock.locked()
+    assert snapshot(tv_env) == before                                           # reads only: no files touched
 
 
 # ------------------------------------------------------------------ search
@@ -193,7 +207,7 @@ def test_add_is_owner_only(minimal_app, lib, aired):  # noqa: F811
     assert _post(other, '/api/settings/tv/shows', {'tmdb_id': 6001}).status_code == 403
     r = minimal_app.test_client().post('/api/settings/tv/shows', json={'tmdb_id': 6001}, environ_base=REMOTE, headers=HDR)
     assert r.status_code == 401
-    for u in ('/api/settings/tv/calendar?start=2026-10-11', '/api/settings/tv/find?q=Dark', '/api/settings/tv/shows/1'):
+    for u in ('/api/settings/tv/calendar?start=2026-10-11', '/api/settings/tv/find?q=Dark'):
         assert other.get(u, environ_base=REMOTE, headers=HDR).status_code == 403
         assert minimal_app.test_client().get(u, environ_base=REMOTE, headers=HDR).status_code == 401
     assert not rows('SELECT 1 FROM series WHERE tmdb_id = 6001')

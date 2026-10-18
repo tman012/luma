@@ -1,4 +1,4 @@
-/** Settings > TV Calendar, Search and Show detail (docs/design/tv.md): the API,
+/** Settings > TV Calendar and Search (docs/design/tv.md, v1): the API,
  * and the local-date math the Calendar runs on. TMDB gives air dates, not air
  * times, so dates are calendar days ("YYYY-MM-DD") and never shift by zone;
  * "today" is the viewer's local day. Weeks start on Sunday. */
@@ -16,13 +16,6 @@ export interface CalendarData { start: string; days: number; episodes: CalEpisod
 export interface FindResult {
   tmdb_id: number; title: string; year: number | null; poster_path: string | null; seasons: number | null;
   in_library: boolean; series_id: number | null;
-}
-export interface DetailEpisode { id: number; season: number; episode: number; title: string; air_date: string | null; downloaded: boolean; files: string[] }
-export interface DetailSeason { number: number; name: string | null; episodes: DetailEpisode[] }
-export interface ShowDetail {
-  id: number; tmdb_id: number; title: string; year: number | null; network: string | null; status: string | null;
-  poster_path: string | null; path_id: string; path_name: string; folder: string | null; have: number; aired: number;
-  seasons: DetailSeason[];
 }
 export type EpisodeState = 'downloaded' | 'missing' | 'upcoming';
 
@@ -42,7 +35,6 @@ export const loadCalendar = (start: string, days: number) =>
   call<CalendarData>(`${TV_URL}/calendar?start=${start}&days=${days}`, undefined, d => Array.isArray(d.episodes));
 export const findShows = (q: string) =>
   call<{ results: FindResult[] }>(`${TV_URL}/find?q=${encodeURIComponent(q)}`, undefined, d => Array.isArray(d.results));
-export const loadShow = (id: number) => call<ShowDetail>(`${TV_URL}/shows/${id}`, undefined, d => Array.isArray(d.seasons));
 export const addShow = (tmdb_id: number, path_id?: string) =>
   call<{ ok: true; series_id: number }>(`${TV_URL}/shows`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -73,8 +65,6 @@ export function weekLabel(start: Day): string {
   const a = parts(start); const b = parts(addDays(start, 6));
   return a.m === b.m ? `${MON[a.m]} ${a.d} \u2013 ${b.d}` : `${MON[a.m]} ${a.d} \u2013 ${MON[b.m]} ${b.d}`;
 }
-/** "Sun 12" (the week grid's column header). */
-export const columnLabel = (d: Day) => { const p = parts(d); return `${WD[p.w]} ${p.d}`; };
 /** "Today", "Tomorrow", else "Mon, Oct 20" (agenda day headers). */
 export function agendaLabel(d: Day, today: Day): string {
   if (d === today) return 'Today';
@@ -82,8 +72,8 @@ export function agendaLabel(d: Day, today: Day): string {
   const p = parts(d);
   return `${WD[p.w]}, ${MON[p.m]} ${p.d}`;
 }
-/** "Oct 20, 2026". */
-export const longDate = (d: Day) => { const p = parts(d); return `${MON[p.m]} ${p.d}, ${p.y}`; };
+/** "Oct 20" (a row's air date). */
+export const shortDate = (d: Day) => { const p = parts(d); return `${MON[p.m]} ${p.d}`; };
 
 /** Downloaded: a file is linked. Missing: aired before today, no file. Upcoming: today or later. */
 export function episodeState(e: { downloaded: boolean; air_date: string | null }, today: Day): EpisodeState {
@@ -109,17 +99,3 @@ export const weekDays = (start: Day): Day[] => Array.from({ length: 7 }, (_, i) 
 
 /** "5 seasons", "1 season", '' when unknown. */
 export const seasonsText = (n: number | null) => (n == null ? '' : `${n} ${n === 1 ? 'season' : 'seasons'}`);
-/** "62 of 62 episodes". */
-export const haveText = (have: number, aired: number) => `${have} of ${aired} ${aired === 1 ? 'episode' : 'episodes'}`;
-/** "2008 · AMC · Ended". */
-export const metaText = (s: Pick<ShowDetail, 'year' | 'network' | 'status'>) =>
-  [s.year ? String(s.year) : '', s.network || '', s.status === 'Returning Series' ? 'Returning' : (s.status || '')]
-    .filter(Boolean).join(' \u00b7 ');
-/** Specials (season 0) last; regular seasons in order. */
-export const seasonName = (n: number) => (n === 0 ? 'Specials' : `Season ${n}`);
-/** The season Show detail opens on: the clicked episode's, else the latest regular season. */
-export function openingSeason(seasons: DetailSeason[], want: number | null): number | null {
-  if (want != null && seasons.some(s => s.number === want)) return want;
-  const regular = seasons.filter(s => s.number > 0).map(s => s.number);
-  return regular.length ? Math.max(...regular) : (seasons[0]?.number ?? null);
-}
