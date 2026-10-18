@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TrackersSettings } from '@/components/trackers/TrackersSettings';
+import { secondaryLabel } from '@/components/trackers/trackersApi';
 import { readFileSync } from 'node:fs';
 import TYPES from './fixtures/trackerTypes.json';
 
@@ -147,5 +148,35 @@ describe('Import from Prowlarr', () => {
     const src = readFileSync('src/components/trackers/ProwlarrImport.tsx', 'utf8');
     expect(src).not.toMatch(/Import From|Already Added|Not Supported|Enter Credentials|Test Required/);
     expect(src).not.toMatch(/colour|authoris|organis|licence/i);
+  });
+});
+
+
+describe('v171 (Designer): secondary label and chips', () => {
+  it('the type is hidden when it equals the name, in the modal and the list', async () => {
+    expect(secondaryLabel('BeyondHD', 'BeyondHD')).toBeNull();
+    expect(secondaryLabel('beyondhd ', 'BeyondHD')).toBeNull();
+    expect(secondaryLabel('My IPT', 'IPTorrents')).toBe('IPTorrents');
+    expect(secondaryLabel('X', null)).toBeNull();
+    db = [imported(301, 'BeyondHD', 'beyondhd'), { ...imported(302, 'My IPT', 'iptorrents'), type_name: 'IPTorrents' }];
+    renderAt();
+    await screen.findByText('My IPT');
+    expect(screen.getAllByTestId('tracker-type').map(t => t.textContent)).toEqual(['IPTorrents']);
+    expect(document.body.textContent).not.toMatch(/BeyondHD\s*BeyondHD/);
+    fireEvent.click(await screen.findByTestId('tracker-import-open'));
+    const sheet = await screen.findByTestId('tracker-import');
+    await within(sheet).findAllByTestId('tracker-import-row');
+    expect(within(sheet).queryAllByTestId('import-type')).toHaveLength(0);
+    const rows = within(sheet).getAllByTestId('tracker-import-row');
+    rows.forEach((r, i) => expect(r.textContent!.split(PREVIEW.indexers[i].name).length - 1).toBe(1));   // the name once
+  });
+
+  it("the modal's status chips are 12px", async () => {
+    renderAt();
+    fireEvent.click(await screen.findByTestId('tracker-import-open'));
+    const sheet = await screen.findByTestId('tracker-import');
+    const chips = await within(sheet).findAllByTestId('tracker-import-chip');
+    expect(chips.map(c => c.textContent)).toEqual(['Enter credentials', 'Already added', 'Not supported yet']);
+    for (const c of chips) expect(c.style.fontSize).toBe('12px');
   });
 });

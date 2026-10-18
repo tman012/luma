@@ -51,7 +51,7 @@ JOB_KEY = 'tvgrab:'
 _have_category: set = set()                # (qBittorrent URL, name) already checked this run
 _link_resolvers: List[Callable[[str], Any]] = []   # main's Sources links: url -> (is_link, real_url)
 ORIGINS = ('auto', 'manual', 'upgrade')
-_BTIH_RE = re.compile(r'xt=urn:btih:([0-9a-fA-F]{40}|[A-Z2-7]{32})', re.I)
+_BTIH_RE = re.compile(r'xt=urn:btih:([0-9a-fA-F]{40}|[A-Z2-7]{32})(?=&|$)', re.I)   # v171: the whole value, not a prefix
 
 
 class GrabFailed(Exception):
@@ -92,6 +92,9 @@ def _bdecode_info_span(data: bytes) -> Optional[bytes]:
     except (ValueError, IndexError):
         return None
     return None
+
+
+NO_HASH = 'This release has no info hash'
 
 
 def info_hash(kind: str, payload: Any) -> Optional[str]:
@@ -298,7 +301,8 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
         return {'ok': False, 'error': str(e), 'link': True, 'status': getattr(e, 'status', 502)}
     h = info_hash(kind, payload)
     if not h:
-        return {'ok': False, 'error': 'This release has no info hash'}
+        # v171 (Tester FF-1): a magnet with no (or a short) btih is a bad link: 400 at the route, no fallback
+        return {'ok': False, 'error': NO_HASH, 'link': True, 'status': 400}
     with tv_store.connect() as conn:
         if conn.execute('SELECT 1 FROM grabs WHERE hash = ?', (h,)).fetchone():
             return {'ok': True, 'hash': h, 'existing': True}

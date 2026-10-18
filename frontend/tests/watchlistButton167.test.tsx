@@ -62,7 +62,7 @@ describe('Add to watchlist buttons (v167)', () => {
   it('movie detail on desktop: the watchlist pill is the blue tone (as TV), white text', () => {
     const src = read('MovieDetailModal/ExpandedLayout.tsx');
     expect(src).toContain("tone={inWatchlist ? undefined : 'blue'}");
-    expect(src).toContain("label={inWatchlist ? 'In Watchlist' : 'Add to watchlist'}");
+    expect(src).toContain("label={inWatchlist ? 'In watchlist' : 'Add to watchlist'}");
     expect(src).toMatch(/tone === 'blue'\s*\? \(hovered \? '#60a5fa' : '#3b82f6'\)/);
     expect(src).toContain("color: tone === 'blue' ? '#fff'");
   });

@@ -4824,6 +4824,14 @@ def _mark_not_mapped(downloads, torrents, meta_by_hash, seen_hashes):
     status_of = {_lm.PATH_NOT_MAPPED: 'not_mapped', _lm.NO_WRITABLE_DEST: 'no_writable'}   # v169: no_writable
     flagged = {h.lower(): j for h, j in jobs.items()
                if isinstance(j, dict) and j.get('state') == 'waiting' and j.get('status') in status_of}
+    # v171 (Tester FF-4): an item the mover skipped because no rule matched and there is no fallback
+    # says so on the item (for a day), instead of a read-only path being blamed.
+    import time as _t
+    for h, j in jobs.items():
+        if isinstance(j, dict) and j.get('state') == 'skipped' and j.get('error') == _lm.NO_DESTINATION \
+                and isinstance(j.get('finished'), (int, float)) and _t.time() - j['finished'] < 86400:
+            flagged.setdefault(h.lower(), {**j, 'status': 'no destination'})
+    status_of['no destination'] = 'no_destination'
     if not flagged:
         return
     rows = {d.get('hash'): d for d in downloads if d.get('hash')}
@@ -16614,7 +16622,7 @@ def _magnet_info_hash(magnet: str):
             return None
         h = m.group(1)
         if len(h) == 40:
-            return h.lower()
+            return h.lower() if re.fullmatch(r'[0-9a-fA-F]{40}', h) else None   # v171: hex only
         if len(h) == 32:                # base32-encoded hash
             import base64
             return base64.b32decode(h.upper()).hex().lower()
@@ -16777,6 +16785,12 @@ def add_torrent_to_qbittorrent():
                     'error': 'The indexer returned an invalid or expired download link. '
                              'Nothing was added — re-search for a fresh source and try again.'
                 }), 502
+
+        # v171 (Tester FF-2): a magnet with no (or a short) btih, or a .torrent
+        # whose info hash can't be read, is refused here: nothing goes to qBit.
+        if not expected_hash:
+            logger.warning('Grab-to-library refused: the release has no info hash')
+            return jsonify({'error': 'This release has no info hash'}), 400
 
         # The link is checked (and fetched through the guard) before qBit is
         # contacted at all, so a refused link never logs in to qBittorrent.

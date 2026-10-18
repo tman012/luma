@@ -6,7 +6,7 @@
  * the ticked trackers turned off, each needing a passing Test before it can
  * be turned on. */
 import { useEffect, useMemo, useState } from 'react';
-import { previewImport, runImport, needsSignIn, UNREACHABLE, type ImportPreview, type ImportRow, type Tracker } from './trackersApi';
+import { previewImport, runImport, needsSignIn, secondaryLabel, UNREACHABLE, type ImportPreview, type ImportRow, type Tracker } from './trackersApi';
 import {
   BLUE, CheckMark, CloseIcon, circle, circleHit, DANGER_TEXT, DIVIDER, FONT, Modal, primaryBtn, secondaryBtn, Spinner,
   TEXT, TEXT_3,
@@ -113,7 +113,7 @@ export function ProwlarrImport({ wide, onClose, onImported, onSignIn }: {
                   <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 10 }}>
                     <span style={{ minWidth: 0, fontSize: 15, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden',
                       textOverflow: 'ellipsis', color: can ? TEXT : TEXT_3 }}>{r.name}</span>
-                    {r.type_name && <span style={{ flex: 'none', fontSize: 13, color: TEXT_3 }}>{r.type_name}</span>}
+                    {secondaryLabel(r.name, r.type_name) && <span data-testid="import-type" style={{ flex: 'none', fontSize: 13, color: TEXT_3 }}>{secondaryLabel(r.name, r.type_name)}</span>}
                   </span>
                   {chip && <StatusChip text={chip} amber={r.state === 'needs_credentials'} testId="tracker-import-chip" />}
                 </button>

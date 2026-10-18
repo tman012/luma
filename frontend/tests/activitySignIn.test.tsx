@@ -1,6 +1,6 @@
 /** PM ruling: deleting a download's files needs the owner signed in with a
  * session, even with LAN sign-in off. Activity offers a sign-in instead. */
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'fs';
@@ -10,7 +10,7 @@ const auth = { implicit: false };
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => ({ openMovie: vi.fn(), openTv: vi.fn(), openPerson: vi.fn() }) }));
 
-import { ActivityFeed, activeEdge, historyEdge, PATH_NOT_MAPPED, NO_WRITABLE_DEST, CARD_BG, CARD_BORDER, NO_ART_BG, SIGN_IN_BUTTON, SIGN_IN_TO_DELETE, removeDownload } from '@/components/activity/ActivityFeed';
+import { ActivityFeed, activeEdge, fmtCompleted, historyEdge, PATH_NOT_MAPPED, NO_WRITABLE_DEST, CARD_BG, CARD_BORDER, NO_ART_BG, SIGN_IN_BUTTON, SIGN_IN_TO_DELETE, removeDownload } from '@/components/activity/ActivityFeed';
 
 const H = 'a'.repeat(40);
 const QUEUE = { downloads: [{ name: 'Some.Show.S01.1080p.WEB-GRP', hash: H, progress: 0.5, status: 'downloading',
@@ -208,5 +208,52 @@ describe('Downloads polish (v170, Designer)', () => {
     for (const h of heads) expect(h.className).not.toMatch(/uppercase/);
     const src = readFileSync(resolve(__dirname, '../src/components/activity/ActivityFeed.tsx'), 'utf8');
     expect(src).not.toMatch(/DOWNLOADING NOW|No art/);
+  });
+});
+
+
+describe('Completed rows (v171, Designer)', () => {
+  const NOW = new Date(2026, 9, 18, 9, 0).getTime();
+  const at = (y: number, mo: number, d: number, h: number, mi: number) => new Date(y, mo, d, h, mi).getTime() / 1000;
+  const history = () => vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const u = String(url);
+    if (u.includes('/api/downloads/queue')) return res({ downloads: [
+      { ...QUEUE.downloads[0], name: 'Live.S01', hash: '2'.repeat(40), tracker: 'IPTorrents' }] });
+    if (u.includes('/api/downloads/history')) return res({ history: [
+      { tmdb_title: 'Heat', torrent_name: 'Heat.1995', completed_timestamp: at(2026, 9, 17, 4, 20), success: true, imported: true,
+        tracker: 'IPTorrents', origin_label: 'Manual' },
+      { tmdb_title: 'Ronin', torrent_name: 'Ronin.1998', completed_timestamp: at(2025, 11, 31, 23, 5), success: true, imported: true,
+        tracker: null, origin_label: 'Manual' },
+    ] });
+    return res({});
+  }));
+
+  it("the date reads 'Oct 17, 4:20 AM': no leading zeros, the year only when it isn't this year", () => {
+    expect(fmtCompleted(at(2026, 9, 17, 4, 20) * 1000, NOW)).toBe('Oct 17, 4:20 AM');
+    expect(fmtCompleted(at(2026, 2, 5, 0, 7) * 1000, NOW)).toBe('Mar 5, 12:07 AM');
+    expect(fmtCompleted(at(2026, 9, 1, 12, 0) * 1000, NOW)).toBe('Oct 1, 12:00 PM');
+    expect(fmtCompleted(at(2025, 11, 31, 23, 5) * 1000, NOW)).toBe('Dec 31, 2025, 11:05 PM');
+  });
+
+  it("the tracker is the active rows' chip, the origin a neutral 'Manual' chip, no all caps", async () => {
+    history();
+    render(<MemoryRouter><ActivityFeed /></MemoryRouter>);
+    await screen.findByText('Heat');
+    const live = screen.getByText('Live.S01').closest('[style*="border-radius: 18px"]') as HTMLElement;
+    const liveChip = within(live).getByText('IPTorrents');
+    const trackers = screen.getAllByTestId('history-tracker');
+    expect(trackers.map(t => t.textContent)).toEqual(['IPTorrents']);              // Ronin has no tracker: no chip
+    expect(trackers[0].className).toBe(liveChip.className.replace(/\s+$/, '') + ' whitespace-nowrap');
+    expect(trackers[0].getAttribute('style')).toBe(liveChip.getAttribute('style'));   // same tracker color
+    const origins = screen.getAllByTestId('history-origin');
+    expect(origins.map(o => o.textContent)).toEqual(['Manual', 'Manual']);
+    expect(origins[0].style.background).toBe('rgba(255, 255, 255, 0.06)');            // neutral
+    for (const el of [...trackers, ...origins, ...screen.getAllByTestId('history-date')]) {
+      expect(el.className).not.toMatch(/uppercase|tracking-wide/);
+      expect(el.textContent).not.toBe(el.textContent!.toUpperCase());
+    }
+    const src = readFileSync(resolve(__dirname, '../src/components/activity/ActivityFeed.tsx'), 'utf8');
+    expect(src).not.toMatch(/\buppercase\b|toUpperCase|MANUAL/);
+    expect(screen.getAllByTestId('history-date').map(d => d.textContent)[0]).toMatch(/^Oct 17, 4:20 AM$/);
   });
 });

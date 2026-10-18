@@ -79,3 +79,12 @@ export const fetchImportAvailable = () => call<{ available: boolean }>(IMPORT_AP
 export const previewImport = () => send<ImportPreview>(`${IMPORT_API}/preview`, 'POST', {});
 export const runImport = (previewId: string, keys: number[]) =>
   send<ImportResult>(IMPORT_API, 'POST', { preview_id: previewId, keys });
+
+/** v171 (Designer): the type shown next to a tracker's name, or null when it just repeats the name
+ *  (no 'BeyondHD BeyondHD'). Case and spacing don't count as a difference. */
+export function secondaryLabel(name: string | null | undefined, typeName: string | null | undefined): string | null {
+  const t = (typeName || '').trim();
+  if (!t) return null;
+  const norm = (x: string) => x.trim().replace(/\s+/g, ' ').toLowerCase();
+  return norm(name || '') === norm(t) ? null : t;
+}

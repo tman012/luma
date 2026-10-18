@@ -47,7 +47,7 @@ interface ActiveDownload {
   mediaType: 'movie' | 'tv';
   progress: number;      // 0..1
   eta: string | null;
-  status: string;        // 'downloading' | 'stalled' | 'copying' | 'importing' | 'not_mapped' | 'no_writable'
+  status: string;        // 'downloading' | 'stalled' | 'copying' | 'importing' | 'not_mapped' | 'no_writable' | 'no_destination'
   tracker: string | null;
   name: string;
   hash: string;          // qBittorrent info-hash (for remove / delete+files)
@@ -69,6 +69,8 @@ export const CARD_BORDER = '1px solid rgba(255,255,255,0.08)';   // white 8% (--
 export const PATH_NOT_MAPPED = 'Path not mapped';
 /** v169 (Reviewer, PM): the only Movies destination is read-only; shown on the item, no helper text. */
 export const NO_WRITABLE_DEST = 'No writable destination';
+/** v171 (Tester): no rule matched and no fallback is chosen; the real reason, not a read-only path. */
+export const NO_DESTINATION = 'No destination';
 export const NO_ART_BG = 'rgba(255,255,255,0.04)';
 /** v170 (Designer): the row's left edge follows its state, never the tracker (the chip shows that). */
 export const EDGE_ATTENTION = '#fbbf24';
@@ -76,7 +78,7 @@ export const EDGE_DOWNLOADING = '#3b82f6';
 export const EDGE_IMPORTED = '#22c55e';
 export const EDGE_NEUTRAL = 'rgba(255,255,255,0.18)';
 export function activeEdge(status: string): string {
-  if (status === 'stalled' || status === 'not_mapped' || status === 'no_writable') return EDGE_ATTENTION;
+  if (status === 'stalled' || status === 'not_mapped' || status === 'no_writable' || status === 'no_destination') return EDGE_ATTENTION;
   if (status === 'downloading') return EDGE_DOWNLOADING;
   return EDGE_NEUTRAL;            // copying/importing: done downloading, not in the library yet
 }
@@ -267,12 +269,28 @@ interface HistoryApiItem {
   origin_label?: string;
 }
 
-/** Origin chip: one neutral gray pill; Genre Roulette gets a faint violet tint. */
-function originChipStyle(badge: string): React.CSSProperties | undefined {
+const NEUTRAL_CHIP: React.CSSProperties = {
+  background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.6)', border: '1px solid rgba(255,255,255,0.10)',
+};
+
+/** Origin chip: one neutral gray pill (the tracker chip's shape); Genre Roulette gets a faint violet tint. */
+function originChipStyle(badge: string): React.CSSProperties {
   if (badge === 'Genre Roulette') {
-    return { background: 'rgba(167,139,250,0.12)', color: 'rgba(196,181,253,0.8)' };
+    return { ...NEUTRAL_CHIP, background: 'rgba(167,139,250,0.12)', color: 'rgba(196,181,253,0.8)', border: '1px solid rgba(167,139,250,0.25)' };
   }
-  return undefined;
+  return NEUTRAL_CHIP;
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** v171 (Designer): 'Oct 17, 4:20 AM'; no leading zeros; the year only when it isn't this year
+ *  ('Dec 31, 2025, 11:05 PM'). Local time, American English. */
+export function fmtCompleted(ts: number, now: number = Date.now()): string {
+  const d = new Date(ts);
+  const h = d.getHours();
+  const time = `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+  const year = d.getFullYear() !== new Date(now).getFullYear() ? `, ${d.getFullYear()}` : '';
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}${year}, ${time}`;
 }
 
 export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean; onOpen?: () => void }) {
@@ -481,7 +499,8 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
           const c = dl.tracker ? getBadgeColor(dl.tracker) : null;
           const pct = Math.round(dl.progress * 100);
           const notMapped = dl.status === 'not_mapped';
-          const noWritable = dl.status === 'no_writable';
+          const noWritable = dl.status === 'no_writable' || dl.status === 'no_destination';
+          const noDest = dl.status === 'no_destination';
           const stalled = dl.status === 'stalled' || notMapped || noWritable;
           const copying = dl.status === 'copying';
           const importing = dl.status === 'importing';
@@ -491,6 +510,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
             ? 'Processing…'
             : copying ? `Copying to library… ${pct}%`
             : notMapped ? PATH_NOT_MAPPED
+            : noDest ? NO_DESTINATION
             : noWritable ? NO_WRITABLE_DEST
             : stalled ? 'Stalled'
             : dl.eta ? `${dl.eta} left` : 'Downloading…';
@@ -735,14 +755,6 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                     {entry.title}
                     {entry.year ? <span className="text-white/30 ml-1">({entry.year})</span> : null}
                   </p>
-                  {/* Origin badge — was a 92px text column, now a chip, so the
-                      poster costs no horizontal room from the title. */}
-                  <span
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-white/[0.06] text-white/50 whitespace-nowrap"
-                    style={originChipStyle(entry.badge)}
-                  >
-                    {entry.badge}
-                  </span>
                 </div>
                 {entry.mediaType === 'tv' && entry.season != null && (
                   <p className="text-[12.5px] text-white/45 mt-1 truncate">
@@ -765,20 +777,22 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                     </p>
                   );
                 })()}
-                <p className="text-[12px] text-white/30 mt-1.5">
+                {/* v171 (Designer): the same tracker chip as the active rows, then the origin as a neutral
+                    chip ('Manual'), then the date. Sentence case throughout, no all caps. */}
+                <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[12px] text-white/30">
                   {entry.tracker && (
-                    <>
-                      <span className="font-semibold uppercase tracking-wide" style={{ color: c!.fg }}>
-                        {entry.tracker}
-                      </span>
-                      <span className="mx-1.5 text-white/20">·</span>
-                    </>
+                    <span data-testid="history-tracker" style={{ background: c!.bg, color: c!.fg, border: `1px solid ${c!.border}` }}
+                      className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap">
+                      {entry.tracker}
+                    </span>
                   )}
-                  {entry.ts ? new Date(entry.ts).toLocaleDateString(undefined, {
-                    month: 'short', day: 'numeric', year: 'numeric',
-                    hour: '2-digit', minute: '2-digit',
-                  } as Intl.DateTimeFormatOptions) : ''}
-                </p>
+                  <span data-testid="history-origin"
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap"
+                    style={originChipStyle(entry.badge)}>
+                    {entry.badge}
+                  </span>
+                  {entry.ts ? <span data-testid="history-date" className="whitespace-nowrap">{fmtCompleted(entry.ts)}</span> : null}
+                </div>
               </div>
               </div>
             </div>

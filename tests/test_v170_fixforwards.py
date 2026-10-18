@@ -180,3 +180,19 @@ def test_a_skipped_path_reads_unavailable_until_a_scan_succeeds(lib, tmp_path): 
     shutil.move(str(away), str(lib))
     assert tv_scan.scan_all(now=3000.0)['missing'] == []
     assert tv_settings.tv_path_status(rec) in ('ok', 'read_only')
+
+
+# ------------------------------------------------------------------ v171 (Tester): forbid_dtd
+
+def test_safe_xml_refuses_an_external_dtd_and_any_doctype(monkeypatch):
+    import socket
+    from app import safe_xml
+    connects = []
+    monkeypatch.setattr(socket.socket, 'connect', lambda self, a: connects.append(a))
+    for doc in ('<?xml version="1.0"?><!DOCTYPE rss SYSTEM "http://203.0.113.9/evil.dtd"><rss/>',
+                '<?xml version="1.0"?><!DOCTYPE MediaContainer PUBLIC "-//x//y" "file:///etc/passwd"><MediaContainer/>',
+                '<!DOCTYPE rss><rss/>'):
+        with pytest.raises(safe_xml.ParseError):
+            safe_xml.fromstring(doc)
+    assert connects == []
+    assert safe_xml.fromstring('<?xml version="1.0"?><MediaContainer size="1"><Video title="Heat"/></MediaContainer>')[0].get('title') == 'Heat'

@@ -5,7 +5,10 @@ blowup) and external entities / DTD fetches, which a tracker or anything in
 front of it could otherwise send us. Anything refused, malformed, or a
 missing defusedxml raises xml.etree.ElementTree.ParseError, so callers keep
 their one existing except clause, and a missing dependency fails closed (no
-parse at all) instead of falling back to the stdlib parser."""
+parse at all) instead of falling back to the stdlib parser.
+
+v171: forbid_dtd=True, so any DOCTYPE (an external DTD with no entities included) is refused;
+tracker feeds and Plex answers have none."""
 import xml.etree.ElementTree as ET
 from typing import Union
 
@@ -19,6 +22,6 @@ def fromstring(data: Union[str, bytes]) -> ET.Element:
     except ImportError:                                     # fail closed
         raise ParseError('defusedxml is not installed; tracker XML is not parsed') from None
     try:
-        return _defused(data)
+        return _defused(data, forbid_dtd=True)     # v171 (Tester): no DOCTYPE at all, external or not
     except DefusedXmlException as e:
         raise ParseError(f'unsafe XML refused: {type(e).__name__}') from None

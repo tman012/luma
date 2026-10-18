@@ -1071,7 +1071,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                           </svg>
                         )
                       }
-                      label={inWatchlist ? 'In Watchlist' : 'Add to watchlist'}
+                      label={inWatchlist ? 'In watchlist' : 'Add to watchlist'}
                       onClick={() => inWatchlist ? setShowAlreadyInWatchlist(true) : handleUpgradeOpen()}
                     />
                   )}
@@ -1619,7 +1619,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
           />
         )}
 
-        {/* Remove from Watchlist confirm */}
+        {/* Remove from watchlist confirm */}
         {showAlreadyInWatchlist && (
           <div
             onClick={() => { if (!removingWatchlist) setShowAlreadyInWatchlist(false); }}
@@ -1637,7 +1637,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               onClick={(e) => e.stopPropagation()}
               role="dialog"
               aria-modal="true"
-              aria-label="Remove from Watchlist"
+              aria-label="Remove from watchlist"
               style={{
                 background: 'var(--color-kiosk-black)',
                 borderRadius: '16px',
@@ -1664,7 +1664,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 </svg>
               </div>
               <p style={{ fontSize: '20px', fontWeight: 600, color: '#fff', margin: '0 0 8px' }}>
-                Remove from Watchlist?
+                Remove from watchlist?
               </p>
               <p style={{ fontSize: '15px', color: 'rgba(255,255,255,0.5)', margin: '0 0 20px' }}>
                 {detail?.title ?? 'This movie'} will be unmonitored in Radarr. It will not be deleted.

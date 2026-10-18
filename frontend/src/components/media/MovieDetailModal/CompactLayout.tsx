@@ -668,7 +668,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                       Watch
                     </button>
                   ) : inWatchlist ? (
-                    /* In Watchlist — tap to remove (confirm sheet) */
+                    /* In watchlist — tap to remove (confirm sheet) */
                     <div
                       style={{
                         display: 'flex',
@@ -704,7 +704,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                             background: '#4ade80',
                           }}
                         />
-                        In Watchlist
+                        In watchlist
                       </button>
                     </div>
                   ) : (
@@ -1370,12 +1370,12 @@ export function CompactLayout(props: MovieModalViewProps) {
 
 
 
-      {/* Remove from Watchlist confirm sheet */}
+      {/* Remove from watchlist confirm sheet */}
       {showRemoveConfirm && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Remove from Watchlist"
+          aria-label="Remove from watchlist"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1470,7 +1470,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                 opacity: removingWatchlist ? 0.6 : 1,
               }}
             >
-              {removingWatchlist ? 'Removing…' : 'Remove from Watchlist'}
+              {removingWatchlist ? 'Removing…' : 'Remove from watchlist'}
             </button>
             <button
               type="button"

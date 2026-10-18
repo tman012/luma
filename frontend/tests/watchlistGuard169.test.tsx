@@ -2,7 +2,7 @@
 // PillButton, or anything with role="button") whose label, text or aria-label is about ADDING to the
 // watchlist must be the #3b82f6 primary with white text, labelled 'Add to watchlist' / 'Add season to
 // watchlist' (sentence case). Anything else that says "Watchlist" must be navigation (home pills, top bar,
-// side menu, the Watchlist page's tab), a state ('In Watchlist') or a removal; nothing in movie or TV
+// side menu, the Watchlist page's tab), a state ('In watchlist') or a removal; nothing in movie or TV
 // detail may be a bare "Watchlist" button.
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
@@ -105,6 +105,22 @@ describe('watchlist button guard (v169): by role and text', () => {
     }
     expect(readFileSync(join(SRC, 'components/media/TvDetailModal/CompactLayout.tsx'), 'utf8')).toContain('Added to watchlist');
     expect(readFileSync(join(SRC, 'components/upgrades/UpgradesSheet.tsx'), 'utf8')).toContain('added to watchlist`');
+  });
+
+  it("v171 (Tester): 'In watchlist' states and 'Remove from watchlist' are sentence case", () => {
+    let states = 0, removes = 0;
+    for (const f of walk(SRC)) {
+      const rel = relative(SRC, f);
+      const code = readFileSync(f, 'utf8');
+      expect(code, rel).not.toMatch(/In Watchlist|Remove from Watchlist|Remove From Watchlist/);
+      states += (code.match(/In watchlist/g) || []).length;
+      removes += (code.match(/Remove from watchlist/g) || []).length;
+      for (const h of scan(code, rel)) {
+        if (h.kind === 'state' || h.kind === 'remove') expect(h.label, `${rel}: ${h.label}`).not.toMatch(/\bWatchlist\b/);
+      }
+    }
+    expect(states).toBeGreaterThanOrEqual(3);      // movie compact + expanded, TV compact
+    expect(removes).toBeGreaterThanOrEqual(2);     // the two confirm buttons
   });
 
   it('no bare "Watchlist" button outside navigation (the 390 one Designer saw is the home nav pill)', () => {

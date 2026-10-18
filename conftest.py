@@ -281,6 +281,25 @@ def test_app():
 
 
 @pytest.fixture(autouse=True)
+def tv_plex_clean():
+    """v171: the S02E03 calendar flake. tv_plex keeps a module-level 'in Plex' index; a Plex test
+    that indexed Severance S02E03 (tests/test_tv_downloaded_v157 and friends) left it behind, so a
+    later calendar test read S02E03 as downloaded, depending on order. Not date/time: start every
+    test with an empty index."""
+    from app import tv_plex
+
+    def clear():
+        with tv_plex._lock:
+            tv_plex._have.clear()
+            tv_plex._shows.clear()
+            tv_plex._new.clear()
+            tv_plex._state.update(built_at=0.0, down=False)
+    clear()
+    yield
+    clear()
+
+
+@pytest.fixture(autouse=True)
 def tracker_test_env(monkeypatch):
     """Tracker code never does real DNS or real pauses in tests: every name
     resolves to one public address and the AvistaZ sign-in gap doesn't

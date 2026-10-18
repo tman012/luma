@@ -294,7 +294,7 @@ export function CompactLayout(props: TvModalViewProps) {
 
   // Show-level add confirmation. The parent flips `watchlistToast` true only on
   // a successful Sonarr add, so mirror it into a persistent session flag to flip
-  // the primary action to an "In Watchlist" state immediately (optimistic, and
+  // the primary action to an "In watchlist" state immediately (optimistic, and
   // it survives the 2s toast timeout until `sonarrStatus.exists` catches up).
   const [showAddedThisSession, setShowAddedThisSession] = useState(false);
   useEffect(() => {
@@ -868,7 +868,7 @@ export function CompactLayout(props: TvModalViewProps) {
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="20 6 9 17 4 12" />
                         </svg>
-                        In Watchlist
+                        In watchlist
                       </div>
                     ) : (
                       /* Add to watchlist: full-width #3b82f6 primary button (v158a; was the white pill).

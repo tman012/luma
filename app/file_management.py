@@ -629,8 +629,13 @@ def pick_destination(data: Dict[str, Any], info: Dict[str, Any],
 def no_writable_destination(data: Dict[str, Any], taken: Optional[set] = None) -> bool:
     """pick_destination found nothing because the Movies paths there are read-only (v169): the
     mover flags the item 'No writable destination' instead of skipping it as 'no destination'."""
-    paths = movies_only(data, taken)['paths']
-    return bool(paths) and any(read_only(p) for p in paths)
+    # v171 (Tester FF-4): only when read-only is the true cause, i.e. the one Movies path would have been
+    # the implicit fallback but is read-only. Mixed paths with no matching rule and no fallback chosen
+    # are plain 'no destination'.
+    d = movies_only(data, taken)
+    if d.get('fallback_path_id') in {p['id'] for p in d['paths']}:
+        return False
+    return len(d['paths']) == 1 and read_only(d['paths'][0])
 
 
 def needs_release_date(data: Dict[str, Any]) -> bool:

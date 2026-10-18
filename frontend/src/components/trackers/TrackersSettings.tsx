@@ -15,7 +15,7 @@ import type React from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import {
   createTracker, deleteTracker, fetchTrackers, fetchTypes, setTrackerEnabled, testSavedTracker, testTrackerForm,
-  updateTracker, fetchImportAvailable, needsSignIn, SECRET_MASK, SIGN_IN_TO_EDIT, UNREACHABLE, type Tracker, type TrackerField, type TrackerType,
+  updateTracker, fetchImportAvailable, needsSignIn, secondaryLabel, SECRET_MASK, SIGN_IN_TO_EDIT, UNREACHABLE, type Tracker, type TrackerField, type TrackerType,
 } from './trackersApi';
 import {
   initialForm, isDirty, keptSecrets, splitServerErrors, toPayload, validate, UNREADABLE,
@@ -311,7 +311,7 @@ function TrackerList({ wide, trackers, onAdd, onOpen, onToggle, onExit, onImport
               <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 10 }}>
                 <span data-testid="tracker-name" style={{ minWidth: 0, fontSize: wide ? 15 : 17, fontWeight: wide ? 500 : 400,
                   color: t.enabled ? TEXT : TEXT_3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.name}</span>
-                <span data-testid="tracker-type" style={{ flex: 'none', fontSize: 13, color: TEXT_3 }}>{t.type_name}</span>
+                {secondaryLabel(t.name, t.type_name) && <span data-testid="tracker-type" style={{ flex: 'none', fontSize: 13, color: TEXT_3 }}>{secondaryLabel(t.name, t.type_name)}</span>}
               </span>
               {t.test_required && <StatusChip text={(t.missing || []).length ? 'Enter credentials' : TEST_REQUIRED} amber testId="tracker-test-required" />}
               {status && <span style={srOnly}>{status}</span>}

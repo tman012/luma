@@ -77,6 +77,7 @@ TERMINAL = ('done', 'exists', 'failed', 'skipped')
 
 NOT_WRITABLE = 'library folder not writable'
 NO_WRITABLE_DEST = 'no writable destination'   # v169: flagged on the Downloads item right away
+NO_DESTINATION = 'no destination'              # v171: no rule matched and no fallback (shown on the item)
 
 
 class Pending(Exception):
@@ -926,7 +927,7 @@ def process(job: Dict[str, Any], torrent: Dict[str, Any], data: Dict[str, Any], 
     if not dest:
         if fm.no_writable_destination(data):      # v169: read-only paths only: say so, wait for a fix
             raise Pending(NO_WRITABLE_DEST)
-        raise Refused('no destination')
+        raise Refused(NO_DESTINATION)
     lib_root = os.path.realpath(dest['path'])
     if fm.blocked(lib_root) or not os.path.isdir(lib_root) or fm.overlaps_downloads(lib_root):
         raise Pending('library folder not available')
