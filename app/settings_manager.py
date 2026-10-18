@@ -119,6 +119,11 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "_type": "object",
             "api_key": {"type": "string", "default": "", "sensitive": True, "description": "OMDb API key"},
         },
+        "tvdb": {
+            "_type": "object",
+            "api_key":       {"type": "string", "default": "", "sensitive": True, "description": "TheTVDB v4 API key (Calendar air times)"},
+            "pin":           {"type": "string", "default": "", "sensitive": True, "description": "TheTVDB subscriber PIN (optional)"},
+        },
         "trakt": {
             "_type": "object",
             "enabled":       {"type": "boolean", "default": False, "sensitive": False, "description": "Enable Trakt integration"},

@@ -1,4 +1,4 @@
-"""Settings > Connectors: the TMDB API key and the Trakt client ID (owner only).
+"""Settings > Connectors: the TMDB API key, the Trakt client ID and the TheTVDB key and PIN (owner only).
 
 The key is stored server-side in settings (apis.tmdb.api_key, a sensitive
 field) and never sent back to the browser: GET answers whether one is saved
@@ -77,8 +77,20 @@ def trakt_connected() -> bool:
     return bool(_cfg) and bool(_stored_trakt())
 
 
+def _stored_tvdb() -> tuple:
+    s = _cfg['settings']
+    return str(s.get('apis.tvdb.api_key') or '').strip(), str(s.get('apis.tvdb.pin') or '').strip()
+
+
+def tvdb_credentials() -> tuple:
+    """(api key, pin) for TheTVDB v4, ('', '') when no key is saved."""
+    return _stored_tvdb() if _cfg else ('', '')
+
+
 def _view() -> dict:
-    return {'tmdb': _masked(_stored_key()), 'trakt': _masked(_stored_trakt())}
+    key, pin = _stored_tvdb()
+    return {'tmdb': _masked(_stored_key()), 'trakt': _masked(_stored_trakt()),
+            'tvdb': dict(_masked(key), pin_set=bool(pin))}
 
 
 def _clean(raw) -> Optional[str]:
@@ -242,4 +254,67 @@ def connectors_trakt_save():
     _cfg['settings'].update({'apis': {'trakt': {'client_id': cid, 'enabled': True, 'connector_saved': True}}})
     _cfg['on_trakt_change']()
     logger.info('Trakt client ID saved')
+    return _no_store(jsonify(_view()))
+
+
+def test_tvdb_key(key: str, pin: str = '') -> Optional[str]:
+    """None when TheTVDB v4 logs in with *key* (and *pin*), else a short error."""
+    from app import tv_tvdb
+    return tv_tvdb.check_login(key, pin)
+
+
+def _tvdb_body(body) -> tuple:
+    """(key, pin) from a Test/Save body: the mask (or nothing) keeps the stored value."""
+    skey, spin = _stored_tvdb()
+    raw_k = body.get('api_key', MASK) if isinstance(body, dict) else MASK
+    raw_p = body.get('pin', MASK) if isinstance(body, dict) else MASK
+    key = skey if raw_k in (MASK, None) else (_clean(raw_k) or '')
+    pin = spin if raw_p in (MASK, None) else ('' if raw_p == '' else (_clean(raw_p) or ''))
+    return key, pin
+
+
+@bp.route('/api/settings/connectors/tvdb/test', methods=['POST'])
+def connectors_tvdb_test():
+    user, err = _cfg['owner_or_error']()
+    if err:
+        return err
+    key, pin = _tvdb_body(request.get_json(silent=True) or {})
+    if not key:
+        return _no_store(jsonify({'ok': False, 'error': 'Required'}), 400)
+    if _throttled(user['id'], 'tvdb-test'):
+        return _no_store(jsonify({'ok': False, 'error': 'Rate limited'}))
+    problem = test_tvdb_key(key, pin)
+    if problem:
+        return _no_store(jsonify({'ok': False, 'error': problem}))
+    return _no_store(jsonify({'ok': True, 'message': 'Connected'}))
+
+
+@bp.route('/api/settings/connectors/tvdb', methods=['PUT'])
+def connectors_tvdb_save():
+    user, err = _cfg['owner_or_error']()
+    if err:
+        return err
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or 'api_key' not in body:
+        return _no_store(jsonify({'error': 'Required'}), 400)
+    if body.get('api_key') in ('', None):
+        _cfg['settings'].update({'apis': {'tvdb': {'api_key': '', 'pin': ''}}})
+        from app import tv_tvdb
+        tv_tvdb.forget_token()
+        logger.info('TVDB key removed')
+        return _no_store(jsonify(_view()))
+    if body.get('api_key') == MASK and body.get('pin', MASK) == MASK:
+        return _no_store(jsonify(_view()))
+    key, pin = _tvdb_body(body)
+    if not key:
+        return _no_store(jsonify({'error': 'Invalid key'}), 400)
+    if _throttled(user['id'], 'tvdb-save'):
+        return _no_store(jsonify({'error': 'Rate limited'}), 429)
+    problem = test_tvdb_key(key, pin)
+    if problem:
+        return _no_store(jsonify({'error': problem}), 400)
+    _cfg['settings'].update({'apis': {'tvdb': {'api_key': key, 'pin': pin}}})
+    from app import tv_tvdb
+    tv_tvdb.forget_token()
+    logger.info('TVDB key saved')
     return _no_store(jsonify(_view()))

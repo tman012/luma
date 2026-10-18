@@ -28,6 +28,8 @@ ALLOWED_PATHS = frozenset({
     '/api/settings/connectors/tmdb/test',
     # Settings > Connectors: Trakt (its rails join Home's list once connected).
     '/api/settings/connectors/trakt', '/api/settings/connectors/trakt/test',
+    # Settings > Connectors: TheTVDB (Calendar air times).
+    '/api/settings/connectors/tvdb', '/api/settings/connectors/tvdb/test',
     # Settings > Connectors: qBittorrent (the download path's settings section).
     '/api/settings/connectors/qbittorrent', '/api/settings/connectors/qbittorrent/test',
     # Search and the detail popup: TMDB images through prod's proxy (works when

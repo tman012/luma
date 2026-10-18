@@ -1,4 +1,5 @@
-"""Air times for the Calendar from TVmaze's free, keyless API.
+"""Air times for the Calendar: TheTVDB v4 when its key is saved (tv_tvdb), else
+TVmaze's free, keyless API.
 
 A show maps to TVmaze through its TMDB external ids (tvdb_id, else imdb_id:
 /lookup/shows), then /shows/{id}/episodes gives each episode's airstamp (UTC)
@@ -31,10 +32,7 @@ _last = [0.0]
 
 def _get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
     """JSON for *path*, None on 404; raises on other failures."""
-    wait = _last[0] + PACE_S - time.monotonic()
-    if wait > 0:
-        _cfg['sleep'](wait)
-    _last[0] = time.monotonic()
+    _pace()
     if _cfg['get'] is not None:
         return _cfg['get'](path, params or {})
     r = requests.get(BASE + path, params=params, timeout=TIMEOUT_S, allow_redirects=True,
@@ -92,16 +90,29 @@ def refresh(now: Optional[float] = None) -> int:
             'SELECT id, tmdb_id, tvdb_id, imdb_id, tvmaze_id, tvmaze_checked_at FROM series WHERE tmdb_id IS NOT NULL'
             f' AND path_id IN ({",".join("?" * len(pids))}) ORDER BY COALESCE(tvmaze_checked_at, 0)', pids)
             if r['tvmaze_checked_at'] is None or now - r['tvmaze_checked_at'] >= REFRESH_S][:MAX_SHOWS]
+    from app import connectors, tv_tvdb
+    creds = connectors.tvdb_credentials()
     n = 0
     for r in rows:
         try:
-            mid = r['tvmaze_id'] or lookup(r['tvdb_id'], r['imdb_id'])
-            eps = episodes(mid) if mid else {}
-        except (requests.RequestException, ValueError) as e:
-            logger.info('TVmaze unavailable (%s); air times wait for the next open', type(e).__name__)
+            if creds[0]:                      # TheTVDB (key in Connectors) first; nothing there: the date only
+                mid = None
+                eps = tv_tvdb.episodes(r['tvdb_id'], creds, _pace) if r['tvdb_id'] else {}
+            else:                             # no TVDB key: TVmaze, no key
+                mid = r['tvmaze_id'] or lookup(r['tvdb_id'], r['imdb_id'])
+                eps = episodes(mid) if mid else {}
+        except (requests.RequestException, ValueError, tv_tvdb.TvdbError) as e:
+            logger.info('Air times unavailable (%s); they wait for the next open', type(e).__name__)
             break
         n += store(r['id'], r['tmdb_id'], mid, eps, now)
     return n
+
+
+def _pace() -> None:
+    wait = _last[0] + PACE_S - time.monotonic()
+    if wait > 0:
+        _cfg['sleep'](wait)
+    _last[0] = time.monotonic()
 
 
 def configure(get: Optional[Callable[[str, Dict[str, Any]], Any]] = None, sleep: Callable[[float], None] = time.sleep) -> None:

@@ -1,5 +1,5 @@
 /** Settings > Connectors (owner only): the TMDB API key, the Trakt client
- * ID and qBittorrent. Keys stay on the server; the browser only learns
+ * ID, TheTVDB (API key and optional subscriber PIN) and qBittorrent. Keys stay on the server; the browser only learns
  * whether one is saved and its last 4 (never any of the qBittorrent password). */
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/apiClient';
@@ -9,9 +9,10 @@ import { NoticeToast } from '@/components/start/SetupToast';
 import { useKioskWidth } from '@/components/home/KioskHome';
 import { QbitConnector } from '@/components/home/QbitConnector';
 
-type Masked = { set: boolean; last4: string };
-interface View { tmdb: Masked; trakt?: Masked }
-type Id = 'tmdb' | 'trakt';
+type Masked = { set: boolean; last4: string; pin_set?: boolean };
+interface View { tmdb: Masked; trakt?: Masked; tvdb?: Masked }
+type Id = 'tmdb' | 'trakt' | 'tvdb';
+const MASK = '********';
 
 async function call<T>(url: string, init?: RequestInit): Promise<{ ok: boolean; data: T }> {
   try {
@@ -24,8 +25,9 @@ async function call<T>(url: string, init?: RequestInit): Promise<{ ok: boolean; 
 const send = <T,>(url: string, method: string, body: unknown) =>
   call<T>(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
-const GROUPS: { id: Id; title: string; field: string; body: string; removeTitle: string }[] = [
+const GROUPS: { id: Id; title: string; field: string; body: string; removeTitle: string; pin?: boolean }[] = [
   { id: 'tmdb', title: 'TMDB', field: 'API key', body: 'api_key', removeTitle: 'Remove TMDB API key?' },
+  { id: 'tvdb', title: 'TheTVDB', field: 'API key', body: 'api_key', removeTitle: 'Remove TheTVDB API key?', pin: true },
   { id: 'trakt', title: 'Trakt', field: 'Client ID', body: 'client_id', removeTitle: 'Remove Trakt client ID?' },
 ];
 
@@ -58,6 +60,7 @@ function ConnectorGroup({ group, masked, onSaved }: {
 }) {
   const { id } = group;
   const [key, setKey] = useState('');
+  const [pin, setPin] = useState('');
   const [show, setShow] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -72,22 +75,27 @@ function ConnectorGroup({ group, masked, onSaved }: {
 
   const saved = masked.set;
   const trimmed = key.trim();
+  const pinTrim = pin.trim();
+  const pinBody = group.pin && pinTrim ? { pin: pinTrim } : {};
+  const dirty = !!trimmed || (!!group.pin && !!pinTrim && saved);
 
   const test = async () => {
     setTesting(true);
     const r = await send<{ ok?: boolean; message?: string; error?: string }>(
-      `/api/settings/connectors/${id}/test`, 'POST', trimmed ? { [group.body]: trimmed } : {});
+      `/api/settings/connectors/${id}/test`, 'POST', { ...(trimmed ? { [group.body]: trimmed } : {}), ...pinBody });
     setTesting(false);
     setResult(r.data.ok ? { ok: true, text: 'Connected' } : { ok: false, text: r.data.error || 'Not connected' });
   };
 
   const save = async (value: string) => {
     setSaving(true);
-    const r = await send<View & { error?: string }>(`/api/settings/connectors/${id}`, 'PUT', { [group.body]: value });
+    const body = value ? { [group.body]: value, ...pinBody } : { [group.body]: '' };
+    const r = await send<View & { error?: string }>(`/api/settings/connectors/${id}`, 'PUT', body);
     setSaving(false);
     setConfirmRemove(false);
     if (!r.ok) { setResult({ ok: false, text: r.data.error || "Couldn't save" }); return; }
     setKey('');
+    setPin('');
     setShow(false);
     onSaved(r.data, !value);
   };
@@ -111,15 +119,23 @@ function ConnectorGroup({ group, masked, onSaved }: {
             {show ? 'Hide' : 'Show'}
           </button>
         </div>
+        {group.pin && (
+          <>
+            <label htmlFor={`${id}-pin`} style={{ ...label, marginTop: 12 }}>Subscriber PIN (optional)</label>
+            <input id={`${id}-pin`} data-testid={`${id}-pin`} style={{ ...input, paddingRight: 14 }} autoComplete="off" spellCheck={false}
+              type="password" value={pin} placeholder={masked.pin_set ? '••••••••' : ''}
+              onChange={e => { setPin(e.target.value); setConfirmRemove(false); }} />
+          </>
+        )}
         <div style={actions}>
           <button type="button" style={ghostBtn} disabled={testing || (!trimmed && !saved)} onClick={test} data-testid={`${id}-test`}>
             {testing ? 'Testing…' : 'Test'}
           </button>
-          <button type="button" style={{ ...primary, opacity: trimmed && !saving ? 1 : 0.4 }}
-                  disabled={!trimmed || saving} onClick={() => save(trimmed)} data-testid={`${id}-save`}>
+          <button type="button" style={{ ...primary, opacity: dirty && !saving ? 1 : 0.4 }}
+                  disabled={!dirty || saving} onClick={() => save(trimmed || MASK)} data-testid={`${id}-save`}>
             Save
           </button>
-          {saved && !trimmed && (
+          {saved && !dirty && (
             <button type="button" style={dangerBtn} onClick={() => setConfirmRemove(true)} data-testid={`${id}-remove`}>Remove</button>
           )}
           {result && (

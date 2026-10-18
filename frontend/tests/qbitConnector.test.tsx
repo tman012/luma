@@ -55,7 +55,7 @@ describe('Settings > Connectors > qBittorrent', () => {
     render(<ConnectorsSettings />);
     const card = await screen.findByTestId('connector-qbittorrent');
     const groups = [...document.querySelectorAll('[data-testid^="connector-"]')].map(e => e.getAttribute('data-testid'));
-    expect(groups).toEqual(['connector-tmdb', 'connector-trakt', 'connector-qbittorrent']);
+    expect(groups).toEqual(['connector-tmdb', 'connector-tvdb', 'connector-trakt', 'connector-qbittorrent']);
     expect(field('url').value).toBe('http://qbit.local:8080');
     expect(field('username').value).toBe('admin');
     expect(field('category').value).toBe('luma-test');
