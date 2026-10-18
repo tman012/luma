@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { timeRange } from '@/components/library/tvCalendarApi';
-import { AIR_FONT, tvCalendarCss } from '@/components/library/TvCalendar';
+import { timeRange, timeRangeParts } from '@/components/library/tvCalendarApi';
+import { AIR_SIZE, tvCalendarCss } from '@/components/library/TvCalendar';
 
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ authenticated: true, loading: false, implicit: false, logout: vi.fn(), user: { id: 1, name: 'taylor', is_admin: true } }) }));
 import { LibraryPathsSettings } from '@/components/library/LibraryPathsSettings';
@@ -19,14 +19,16 @@ describe('calendar time line', () => {
     expect(timeRange(null, 30)).toBeNull();
   });
 
-  it('never wraps on desktop: one line, shrinking with the day column from 12px to at least 9px', () => {
-    expect(AIR_FONT).toBe('min(12px, max(9px, 12.5cqi))');
-    const q = tvCalendarCss.slice(tvCalendarCss.indexOf('@container tvcal (min-width: 600px)'));
-    const rule = q.slice(0, q.indexOf('\n'));
-    expect(rule).toContain('.tvc-text{container-type:inline-size;container-name:tvcard}');
-    expect(rule).toContain('[data-testid=tv-air]{display:block!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:min(12px, max(9px, 12.5cqi))!important}');
+  it('v166: 12px at every width, never shrunk; each time is its own nowrap span, so a range wraps only at the dash', () => {
+    expect(AIR_SIZE).toBe(12);
+    expect(tvCalendarCss).not.toMatch(/cqi|tv-air|tvcard/);                 // no shrinking, no ellipsis rule
+    expect(timeRangeParts('2026-10-16T03:00:00Z', 58, 'America/New_York')).toEqual(['11:00 \u2013', '11:58 PM']);
+    expect(timeRangeParts('2026-10-15T15:30:00Z', 45, 'America/New_York')).toEqual(['11:30 AM \u2013', '12:15 PM']);
+    expect(timeRangeParts('2026-10-16T03:00:00Z', null, 'America/New_York')).toEqual(['11:00 PM']);
+    expect(timeRangeParts(null, 30)).toBeNull();
     const card = readFileSync(resolve(__dirname, '../src/components/library/TvCalendar.tsx'), 'utf8');
-    expect(card).toContain('<div className="tvc-text"');
+    expect(card).toContain('data-testid="tv-air-part" style={{ whiteSpace: \'nowrap\' }}');
+    expect(card).toMatch(/data-testid="tv-air" style=\{\{ display: 'block', fontSize: AIR_SIZE/);
   });
 });
 
@@ -62,6 +64,9 @@ describe('Downloads job row on a phone', () => {
     const status = within(tv[0]!).getByTestId('lp-tv-job-status');
     expect(status.textContent).toBe('Not enough space \u00b7 Since Oct 15');
     expect(status.style.color).toBe('var(--color-danger)');
+    const sinceEl = within(tv[0]!).getByTestId('lp-tv-job-since');             // v166: 'Since Oct 15' never splits
+    expect([sinceEl.textContent, sinceEl.style.whiteSpace]).toEqual(['Since Oct 15', 'nowrap']);
+    expect(within(movie).getByTestId('lp-failed-since').style.whiteSpace).toBe('nowrap');
     expect(within(movie).getByTestId('lp-failed-status').textContent).toBe('Not enough space \u00b7 Since Oct 15');
     expect(within(tv[1]!).getByTestId('lp-tv-job-status').textContent).toBe("Couldn't create the qBittorrent category luma-tv \u00b7 Since Oct 13");
     // Retry is the row's last child (right), only on no-space rows

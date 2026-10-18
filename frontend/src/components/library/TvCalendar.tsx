@@ -1,14 +1,14 @@
 /** Settings > TV > Calendar (v1, desktop web): the week's episodes by TMDB air
  * date as an agenda (day headers, 72px rows), capped at 720px and centered.
  * A card opens the show's detail at that episode. The week toolbar: ‹ › (and Today) on the left, the range centered. */
-import { useContext, useEffect, useState } from 'react';
+import { Fragment, useContext, useEffect, useState } from 'react';
 import { ModalHostContext } from '@/contexts/ModalHostContext';
 import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
 import { Poster } from './TvImport';
 import { posterUrl, tvdbImg } from '@/utils/image';
 import {
-  STATE_COLOR, STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, setEpisodeMonitored, shortDate, timeRange, weekLabel, weekStart,
+  STATE_COLOR, STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, setEpisodeMonitored, shortDate, timeRangeParts, weekLabel, weekStart,
   type CalEpisode, type CalendarData, type Day,
 } from './tvCalendarApi';
 
@@ -230,8 +230,10 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
         <div className="tvc-text" style={{ padding: 8, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span data-testid="tv-card-show" title={e.show} style={{ ...clamp2, WebkitLineClamp: NAME_LINES, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
           <span data-testid="tv-card-title" title={epLine(e)} style={{ ...clamp2, WebkitLineClamp: EP_LINES, lineHeight: '16px', fontSize: 12, color: W70 }}>{epLine(e)}</span>
-          <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, color: W50 }}>
-            {timeRange(e.airstamp, e.runtime) || e.air_time || shortDate(e.air_date)}
+          <span data-testid="tv-air" style={{ display: 'block', fontSize: AIR_SIZE, lineHeight: '16px', color: W50 }}>
+            {(timeRangeParts(e.airstamp, e.runtime) || [e.air_time || shortDate(e.air_date)]).map((t, i) => (
+              <Fragment key={i}>{i > 0 && ' '}<span data-testid="tv-air-part" style={{ whiteSpace: 'nowrap' }}>{t}</span></Fragment>
+            ))}
           </span>
         </div>
       </div>
@@ -336,9 +338,10 @@ function Placeholder() {
   );
 }
 
-/** v165 (Designer): on desktop the card's time line never wraps; a range too wide for its day column
- * (1100: ~76px for '11:00 – 11:58 PM') shrinks with the column, from 12px down to 9px, rather than wrapping. */
-export const AIR_FONT = 'min(12px, max(9px, 12.5cqi))';
+/** v166 (Designer): the card's time line is 12px at every width, never shrunk. Each time is its own
+ * nowrap span, so a range too wide for its day column (1100: '11:00 – 11:58 PM') wraps only at the dash:
+ * '11:00 –' then '11:58 PM'. */
+export const AIR_SIZE = 12;
 export const tvCalendarCss = `
 :root{--tv-state-downloaded:#22c55e;--tv-state-missing:#ef4444;--tv-state-unaired:#3b82f6}
 .tvc-row:hover{background:rgba(255,255,255,.04)!important}
@@ -348,7 +351,6 @@ export const tvCalendarCss = `
 .tvc-bm:hover{background:rgba(59,130,246,.35)!important}
 @media (hover:none){.tvc-card .tvc-bm{opacity:1}}
 @container tvcal (max-width: 999px){.tvc-card .tvc-bm{display:none!important}}
-@container tvcal (min-width: 600px){.tvc-text{container-type:inline-size;container-name:tvcard}.tvc-card [data-testid=tv-air]{display:block!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:${AIR_FONT}!important}}
 @container tvcal (max-width: 599px){.tvc-card [data-testid=tv-card-show]{-webkit-line-clamp:2!important}.tvc-card [data-testid=tv-card-title]{-webkit-line-clamp:1!important}}
 `;
 

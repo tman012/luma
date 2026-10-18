@@ -81,7 +81,7 @@ export function TvSeries({ shows, onChanged }: { shows: Show[] | null; onChanged
   const railRef = useRef<HTMLElement>(null);
   const jumped = useRef<string | null>(null);         // a rail click wins while its show is on screen (the page end)
 
-  // a name that needs a 3rd line at 13: 12/16, then 3 lines at 12/16, then 11.5/15 (fitCaptions)
+  // a name that needs a 3rd line at 13: 12/16, then more lines at 12/16, never smaller (fitCaptions)
   useLayoutEffect(() => {
     if (!sorted.length) return;
     let frame = 0;
@@ -268,13 +268,15 @@ function Tile({ s, first, selecting, picked, onOpen }: { s: Show; first: boolean
  * space falls below the count (8 top + 2 x 17 + 2 + 15 = 59 with padding; 51 without it). */
 const CAPTION_MIN_H = 51 + 8;
 /** Caption type: 13/600, normal tracking, 17px lines; the count sits right under the name.
- * Steps (PM over Designer, Taylor wants full names): a name that would need a 3rd line at 13 is set 12/16
- * on 2 lines; still over, 12/16 on 3 lines; still over, 11.5/15 on 3 lines (the floor), then on 4 (v165, PM:
- * 'Life, Larry and the Pursuit of Unhappiness…' at 1100-1440); only then the ellipsis (full name in title and aria-label). The grid row stretches every tile to the row's height and
- * the caption block fills it, so all captions in a row share one height. */
+ * Steps (v166, Designer: never below 12px): a name that would need a 3rd line at 13 is set 12/16 on 2
+ * lines; still over, 12/16 on 3, then 4, ... up to CAPTION_MAX_LINES; only then the ellipsis (full name
+ * in title and aria-label). The grid row stretches every tile to the row's height and the caption block
+ * fills it, so all captions in a row share one height. */
 export const CAPTION_TYPE = { size: 13, line: 17 };
 export const CAPTION_FIT = { size: 12, line: 16 };
-export const CAPTION_FLOOR = { size: 11.5, line: 15 };
+/** The floor is the fit size: captions never go below 12px. */
+export const CAPTION_FLOOR = CAPTION_FIT;
+export const CAPTION_MAX_LINES = 6;
 const caption: React.CSSProperties = {
   fontSize: CAPTION_TYPE.size, letterSpacing: 'normal', fontWeight: 600, lineHeight: `${CAPTION_TYPE.line}px`, color: W95, overflow: 'hidden', overflowWrap: 'anywhere',
   display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
@@ -289,7 +291,8 @@ export function fitCaptions(root: HTMLElement | null): number {
   const names = [...(root?.querySelectorAll<HTMLElement>('[data-testid=tv-series-name]') || [])];
   for (const n of names) { setType(n, CAPTION_TYPE, 2); delete n.dataset.fit; delete n.dataset.lines; delete n.dataset.ellipsis; }
   let left = names.filter(over);
-  const steps: [{ size: number; line: number }, number][] = [[CAPTION_FIT, 2], [CAPTION_FIT, 3], [CAPTION_FLOOR, 3], [CAPTION_FLOOR, 4]];
+  const steps: [{ size: number; line: number }, number][] = [];
+  for (let lines = 2; lines <= CAPTION_MAX_LINES; lines++) steps.push([CAPTION_FIT, lines]);
   for (const [t, lines] of steps) {
     if (!left.length) break;
     for (const n of left) { setType(n, t, lines); n.dataset.fit = String(t.size); n.dataset.lines = String(lines); }

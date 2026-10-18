@@ -20,7 +20,11 @@ export interface CalEpisode {
 }
 
 /** '9:00 – 9:42 PM' (or '11:30 PM – 12:10 AM') in the viewer's zone (*timeZone* for tests); null without an airstamp. */
-export function timeRange(airstamp: string | null | undefined, runtime: number | null | undefined, timeZone?: string): string | null {
+/** v166 (Designer): the two halves of an air-time range, each kept whole (nowrap) so a range too wide
+ * for its column wraps only at the dash: ['11:00 \u2013', '11:58 PM']. A start time alone is one part.
+ * The first AM/PM is dropped when both times share it. */
+export function timeRangeParts(airstamp: string | null | undefined, runtime: number | null | undefined,
+  timeZone?: string): string[] | null {
   if (!airstamp) return null;
   const start = new Date(airstamp);
   if (Number.isNaN(start.getTime())) return null;
@@ -31,9 +35,12 @@ export function timeRange(airstamp: string | null | undefined, runtime: number |
     return { hm: `${get('hour')}:${get('minute')}`, ap: get('dayPeriod').toUpperCase() };
   };
   const a = parts(start);
-  if (!runtime || runtime <= 0) return `${a.hm} ${a.ap}`;
+  if (!runtime || runtime <= 0) return [`${a.hm} ${a.ap}`];
   const b = parts(new Date(start.getTime() + runtime * 60000));
-  return a.ap === b.ap ? `${a.hm} \u2013 ${b.hm} ${b.ap}` : `${a.hm} ${a.ap} \u2013 ${b.hm} ${b.ap}`;
+  return [a.ap === b.ap ? `${a.hm} \u2013` : `${a.hm} ${a.ap} \u2013`, `${b.hm} ${b.ap}`];
+}
+export function timeRange(airstamp: string | null | undefined, runtime: number | null | undefined, timeZone?: string): string | null {
+  return timeRangeParts(airstamp, runtime, timeZone)?.join(' ') ?? null;
 }
 export interface CalendarData { start: string; days: number; episodes: CalEpisode[]; libraries: number; refreshed_at: number | null;
   /** a background refresh (episode images, air times) started: ask again shortly */

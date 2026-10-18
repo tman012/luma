@@ -128,9 +128,9 @@ describe('Series rail pin', () => {
 
 
 describe('caption fit', () => {
-  it('13/17; then 12/16 on 2 lines; then 12/16 on 3 lines; then the 11.5/15 floor on 3, then on 4; only then the ellipsis', async () => {
-    const { fitCaptions, CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR } = await import('@/components/library/TvSeries');
-    expect([CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR]).toEqual([{ size: 13, line: 17 }, { size: 12, line: 16 }, { size: 11.5, line: 15 }]);
+  it('13/17; then 12/16 on 2 lines, then 3, 4, 5, 6 lines at 12/16 (never below 12px); only then the ellipsis', async () => {
+    const { fitCaptions, CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR, CAPTION_MAX_LINES } = await import('@/components/library/TvSeries');
+    expect([CAPTION_TYPE, CAPTION_FIT, CAPTION_FLOOR, CAPTION_MAX_LINES]).toEqual([{ size: 13, line: 17 }, { size: 12, line: 16 }, { size: 12, line: 16 }, 6]);
     const root = document.createElement('div');
     // lines[size] = lines the name needs at that size; the box shows line-clamp lines
     const mk = (lines: Record<string, number>) => {
@@ -143,16 +143,14 @@ describe('caption fit', () => {
       root.appendChild(n); return n;
     };
     const short = mk({});
-    const two12 = mk({ '13px': 3, '12px': 2 });
-    const three12 = mk({ '13px': 4, '12px': 3 });
-    const floor = mk({ '13px': 5, '12px': 4, '11.5px': 3 });
-    const four = mk({ '13px': 6, '12px': 5, '11.5px': 4 });
-    const never = mk({ '13px': 7, '12px': 6, '11.5px': 5 });
+    const need = (n: number) => mk({ '13px': n + 1, '12px': n });
+    const made = [short, need(2), need(3), need(4), need(5), need(6), need(7)];
     expect(fitCaptions(root)).toBe(1);
     const t = (n: HTMLElement) => [n.style.fontSize, n.style.lineHeight, n.style.getPropertyValue('-webkit-line-clamp'), n.dataset.ellipsis ?? null];
-    expect([short, two12, three12, floor, four, never].map(t)).toEqual([
-      ['13px', '17px', '2', null], ['12px', '16px', '2', null], ['12px', '16px', '3', null], ['11.5px', '15px', '3', null],
-      ['11.5px', '15px', '4', null], ['11.5px', '15px', '4', 'true']]);
+    expect(made.map(t)).toEqual([
+      ['13px', '17px', '2', null], ['12px', '16px', '2', null], ['12px', '16px', '3', null], ['12px', '16px', '4', null],
+      ['12px', '16px', '5', null], ['12px', '16px', '6', null], ['12px', '16px', '6', 'true']]);
+    expect(made.every(n => parseFloat(n.style.fontSize) >= 12)).toBe(true);
     expect(fitCaptions(root)).toBe(1);                                   // idempotent (a resize re-runs it)
   });
 });

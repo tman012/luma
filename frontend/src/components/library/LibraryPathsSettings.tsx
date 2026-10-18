@@ -256,7 +256,9 @@ function JobRow({ testId, state, title, since, status, top, busy, onRetry }: {
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
           <span data-testid={`${testId}-name`} title={title} style={{ ...titleText(wide), display: 'block' }}>{title}</span>
           <span data-testid={`${testId}-status`} title={line2}
-            style={{ fontSize: 13, fontWeight: 500, color: T.danger, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{line2}</span>
+            style={{ fontSize: 13, fontWeight: 500, color: T.danger, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+            {status}{since ? <>{' \u00b7 '}<span data-testid={`${testId}-since`} style={{ whiteSpace: 'nowrap' }}>{sinceText(since)}</span></> : null}
+          </span>
         </span>
         {retry}
       </div>
