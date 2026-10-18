@@ -238,7 +238,10 @@ def test_turning_tv_automation_on_sends_no_tracker_request(minimal, sec, tmp_pat
     assert real
 
 
-def test_no_production_code_calls_the_tv_purpose_yet():
+def test_only_automatic_tv_searches_and_grabs_charge_the_tv_purpose():
+    """Was 'no production code calls the TV purpose yet' (78d7f1e). Since v158b/c the TV purpose is
+    charged by Luma's own automatic TV requests only: tv_search (automatic searches on capped
+    trackers) and tracker_sources.fetch_release (automatic grabs, Reviewer on 8b55bb8)."""
     import pathlib
     import re
     root = pathlib.Path(app.main.__file__).parent
@@ -247,9 +250,9 @@ def test_no_production_code_calls_the_tv_purpose_yet():
         if p.name in ('tv_budget.py', 'tracker_guard.py'):
             continue
         s = p.read_text()
-        if re.search(r"tv_budget\.take\(|purpose\s*=\s*['\"]tv['\"]|purpose=tv_budget\.PURPOSE", s):
+        if re.search(r"tv_budget\.take\(|purpose\s*=\s*['\"]tv['\"]|tv_budget\.PURPOSE", s):
             hits.append(p.name)
-    assert hits == [], hits
+    assert sorted(hits) == ['tracker_sources.py', 'tv_search.py'], hits
 
 
 # ----------------------------------------------------------------- swaps after the scan (B3 widened)

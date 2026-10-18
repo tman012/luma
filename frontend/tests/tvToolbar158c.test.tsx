@@ -38,6 +38,8 @@ describe('TV top row', () => {
   it('week-grid captions wrap (name up to 5 lines, episode line up to 3), no one-line clip', () => {
     expect([NAME_LINES, EP_LINES]).toEqual([5, 3]);
     const s = src('components/library/TvCalendar.tsx');
+    // under 1000px the day columns are narrow: 2 and 1 lines, as in v162
+    expect(s).toContain('@container tvcal (max-width: 999px){.tvc-card [data-testid=tv-card-show]{-webkit-line-clamp:2!important}.tvc-card [data-testid=tv-card-title]{-webkit-line-clamp:1!important}}');
     const title = s.slice(s.indexOf('data-testid="tv-card-title"'), s.indexOf('</span>', s.indexOf('data-testid="tv-card-title"')));
     expect(title).toContain('WebkitLineClamp: EP_LINES');
     expect(title).not.toContain('...one');

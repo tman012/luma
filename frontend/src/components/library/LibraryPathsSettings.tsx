@@ -229,7 +229,7 @@ function DownloadsStatus({ view, onView }: { view: LibraryView; onView?: (v: Lib
             </span>
             <span data-testid="lp-tv-job-status" title={tvJobStatus(j)}
               style={{ fontSize: 13, fontWeight: 500, color: T.danger, flex: '0 1 auto', minWidth: 0, maxWidth: wide ? 320 : 160, textAlign: 'right',
-                overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{tvJobStatus(j)}</span>
+                overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: wide ? 2 : 3, WebkitBoxOrient: 'vertical' }}>{tvJobStatus(j)}</span>
             {j.retry && (
               <button type="button" data-testid="lp-tv-job-retry" className="lp-focus" disabled={busy === `tv:${j.hash}`}
                 aria-label={`Retry ${j.name || 'Untitled'}`}
