@@ -189,6 +189,83 @@ def series_view(sid: int) -> Optional[Dict[str, Any]]:
             'seasons': seasons, 'episodes': eps}
 
 
+ACTIVE_GRABS = ('downloading', 'importing')
+_SOURCE_WORD = {'web': 'WEB', 'bluray': 'Bluray', 'hdtv': 'HDTV', 'remux': 'Remux'}
+
+
+def _file_quality(f: Dict[str, Any]) -> Optional[str]:
+    res, src = f.get('resolution'), f.get('source')
+    if not res and not src:                       # an older scan row: read it off the name ('1080p-web')
+        q = quality_of(os.path.basename(str(f.get('release_name') or f.get('rel_path') or '')))
+        res, _, src = (q or '').partition('-')
+    words = ['SD' if res == 'sd' else res, _SOURCE_WORD.get(str(src or ''), src)]
+    return ' '.join(str(w) for w in words if w) or None
+
+
+def _counted(e: Dict[str, Any], today: str) -> bool:
+    """v182 (the detail page's have/total): a monitored regular episode that has aired or has a file."""
+    return e['season'] > 0 and e['monitored'] and (e['has_file'] or (bool(e['air_date']) and e['air_date'] <= today))
+
+
+def detail_view(sid: int, today: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """v182 (Taylor): the Sonarr-style series detail page. The header (poster, title, year, network, status,
+    quality profile, path, size on disk, have/total monitored episodes, monitored), the seasons newest first
+    (specials last) with their own have/total, and every episode with its title, air date and airstamp,
+    monitored state, file and status (downloaded, downloading, missing, unaired, no air date). Reads only."""
+    today = today or dt.date.today().isoformat()
+    base = series_view(sid)
+    if base is None:
+        return None
+    with tv_store.connect() as conn:
+        r = conn.execute('SELECT s.network, s.status, s.overview, s.poster_path, s.backdrop_path, q.name AS profile_name'
+                         ' FROM series s LEFT JOIN quality_profiles q ON q.id = s.profile_id WHERE s.id = ?', (sid,)).fetchone()
+        size = conn.execute("SELECT COALESCE(SUM(size), 0) AS n FROM episode_files WHERE series_id = ? AND state = 'linked'",
+                            (sid,)).fetchone()['n']
+        files = {x['episode_id']: dict(x) for x in conn.execute(
+            "SELECT l.episode_id, f.size, f.resolution, f.source, f.release_name, f.rel_path FROM episode_file_links l JOIN episode_files f ON f.id = l.file_id"
+            " WHERE f.series_id = ? AND f.state = 'linked'", (sid,))}
+        extra = {x['id']: dict(x) for x in conn.execute(
+            'SELECT id, airstamp, runtime FROM episodes WHERE series_id = ?', (sid,))}
+        busy: Set[int] = set()
+        for g in conn.execute(f"SELECT episode_ids FROM grabs WHERE series_id = ? AND state IN ({','.join('?' * len(ACTIVE_GRABS))})",
+                              (sid, *ACTIVE_GRABS)):
+            try:
+                busy |= {int(i) for i in json.loads(g['episode_ids'] or '[]')}
+            except (TypeError, ValueError):
+                pass
+    eps = []
+    for e in base['episodes']:
+        x = extra.get(e['id'], {})
+        f = files.get(e['id'])
+        if e['has_file']:
+            state = 'downloaded'
+        elif e['id'] in busy:
+            state = 'downloading'
+        elif not e['air_date']:
+            state = 'no_date'
+        elif e['air_date'] > today:
+            state = 'unaired'
+        else:
+            state = 'missing'
+        eps.append({**e, 'airstamp': x.get('airstamp'), 'runtime': x.get('runtime'), 'state': state,
+                    'quality': _file_quality(f) if f else None,
+                    'size': (f.get('size') or 0) if f else None})
+    mon = {x['season']: x['monitored'] for x in base['seasons']}
+    nums = sorted({e['season'] for e in eps} | set(mon), key=lambda n: (n == 0, -n))
+    seasons = []
+    for n in nums:
+        mine = [e for e in eps if e['season'] == n]
+        counted = [e for e in mine if _counted(e, today)]
+        seasons.append({'season': n, 'monitored': bool(mon.get(n, False)), 'episodes': len(mine),
+                        'have': sum(1 for e in counted if e['has_file']), 'total': len(counted),
+                        'size': sum(e['size'] or 0 for e in mine)})
+    counted = [e for e in eps if _counted(e, today)]
+    return {**base, 'network': r['network'], 'status': r['status'], 'overview': r['overview'], 'poster_path': r['poster_path'],
+            'backdrop_path': r['backdrop_path'], 'profile_name': r['profile_name'], 'size': int(size or 0),
+            'have': sum(1 for e in counted if e['has_file']), 'total': len(counted),
+            'seasons': seasons, 'episodes': eps}
+
+
 def _root(path_id: Optional[str]) -> Optional[str]:
     from app import tv_settings
     for rec in tv_settings.libraries():

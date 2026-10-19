@@ -6,7 +6,7 @@ GET  /api/settings/tv/import    the small progress the Import card polls
 POST /api/settings/tv/import-all {items: [{id, tmdb_id}]}  review rows imported as the owner's picks
 GET  /api/settings/tv/search?q=&year=          TMDB shows for the picker (q may be tmdb:/tvdb:/imdb:<id>)
 GET  /api/settings/tv/calendar?start=YYYY-MM-DD&days=N   episodes by air date (tv_calendar)
-GET  /api/settings/tv/find?q=                   Search: library shows first, then TMDB
+GET  /api/settings/tv/find?q=                   Add series search (owner): library shows first, then TMDB
 POST /api/settings/tv/shows {tmdb_id, path_id?, monitor?, profile_id?}  Add from Search (tv.db only; no folders, no files;
                                                  monitor defaults to All episodes)
 PUT  /api/settings/tv/shows/<id>/match {tmdb_id}      "Wrong show?" (rematched)
@@ -162,7 +162,7 @@ def tv_calendar_get():
 
 @bp.route('/api/settings/tv/find', methods=['GET'])
 def tv_find():
-    err = tv_settings._guard()
+    err = tv_settings._guard() or tv_settings._signed_in_owner()     # v182: adding is owner-only
     if err:
         return err
     q = (request.args.get('q') or '').strip()
@@ -176,7 +176,7 @@ def tv_find():
 
 @bp.route('/api/settings/tv/shows', methods=['POST'])
 def tv_show_add():
-    err = tv_settings._guard()
+    err = tv_settings._guard() or tv_settings._signed_in_owner()     # v182: adding is owner-only
     if err:
         return err
     body = request.get_json(silent=True)

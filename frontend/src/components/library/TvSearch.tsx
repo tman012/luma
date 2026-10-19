@@ -1,4 +1,4 @@
-/** Settings > TV > Search (docs/design/tv.md, v1, desktop web): library shows
+/** Settings > TV > Series > Add series (v182; was the Series toolbar search): library shows
  * first ("In library", not clickable), then TMDB shows with Add. Add saves the show to
  * tv.db in one of the selected TV libraries (picked when there are 2+); it
  * creates no folders or files and downloads nothing. */
@@ -217,7 +217,7 @@ export function PathPicker({ paths, onCancel, onAdd, inline = false }: {
 }) {
   const one = paths.length === 1 ? paths[0] : null;
   const [pick, setPick] = useState<string | null>(one ? one.id : null);
-  const [monitor, setMonitor] = useState<MonitorOption>('all');
+  const [monitor, setMonitor] = useState<MonitorOption>('future');     // v182: Future episodes by default
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [profile, setProfile] = useState<number | null>(null);
   useEffect(() => {

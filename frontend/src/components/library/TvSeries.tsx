@@ -59,7 +59,13 @@ export type SeriesLayout = 'posters' | 'list';
 const LAYOUT_KEY = 'luma.tv.series.layout';
 const savedLayout = (): SeriesLayout => { try { return localStorage.getItem(LAYOUT_KEY) === 'list' ? 'list' : 'posters'; } catch { return 'posters'; } };
 
-export function TvSeries({ shows, onChanged }: { shows: Show[] | null; onChanged?: () => void }) {
+export function TvSeries({ shows, onChanged, onOpen, add }: {
+  shows: Show[] | null; onChanged?: () => void;
+  /** v182: the Add series button (its own flow), at the end of the bar row */
+  add?: React.ReactNode;
+  /** v182: open the show's detail page (else a poster opens Edit and a list title the show sheet) */
+  onOpen?: (s: Show) => void;
+}) {
   const sorted = useMemo(() => (shows ? sortShows(shows) : []), [shows]);
   const [layout, setLayoutState] = useState<SeriesLayout>(savedLayout);
   const setLayout = (l: SeriesLayout) => { setLayoutState(l); setPicked(new Set()); setSelecting(false); setBulk(''); try { localStorage.setItem(LAYOUT_KEY, l); } catch { /* private mode */ } };
@@ -170,7 +176,13 @@ export function TvSeries({ shows, onChanged }: { shows: Show[] | null; onChanged
     );
   }
   if (!sorted.length) {
-    return <div data-testid="tv-series-empty" style={emptyCard}>No shows</div>;
+    const empty = <div data-testid="tv-series-empty" style={emptyCard}>No shows</div>;
+    return add ? (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontFamily: FONT }}>
+        <div data-testid="tv-series-bar-row" style={{ display: 'flex', justifyContent: 'flex-end', minHeight: 36 }}>{add}</div>
+        {empty}
+      </div>
+    ) : empty;
   }
   const jump = (l: string) => {
     const id = firsts.get(l);
@@ -203,8 +215,9 @@ export function TvSeries({ shows, onChanged }: { shows: Show[] | null; onChanged
         <div data-testid="tv-series-bar-row" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 36 }}>
           {toggleBar}
           <span data-testid="tv-series-picked" style={{ fontSize: 13, fontWeight: 600, color: W50 }}>{`${ids.length} selected`}</span>
+          {add}
         </div>
-        <SeriesList shows={sorted} profiles={profiles} picked={picked} setPicked={setPicked} onOpen={setSheet} />
+        <SeriesList shows={sorted} profiles={profiles} picked={picked} setPicked={setPicked} onOpen={onOpen || setSheet} />
         {ids.length > 0 && (
           <BulkBar ids={ids} profiles={profiles} onClear={() => setPicked(new Set())}
             onDone={() => { setPicked(new Set()); onChanged?.(); }} />
@@ -228,12 +241,13 @@ export function TvSeries({ shows, onChanged }: { shows: Show[] | null; onChanged
       ) : (
         <button type="button" className="lp-focus tvs-glass" data-testid="tv-series-select" onClick={() => setSelecting(true)} style={barBtn(false)}>Select</button>
       )}
+      {!selecting && add}
     </div>
     <div ref={root} data-testid="tv-series" style={{ display: 'flex', alignItems: 'flex-start', fontFamily: FONT }}>
       <div style={{ ...grid, flex: 1, minWidth: 0 }}>
         {sorted.map(s => (
           <Tile key={s.id} s={s} first={firsts.get(letterOf(s.title)) === s.id} selecting={selecting} picked={picked.has(s.id)}
-            onOpen={() => (selecting ? toggle(s.id) : setEditing(s))} />
+            opens={!!onOpen} onOpen={() => (selecting ? toggle(s.id) : onOpen ? onOpen(s) : setEditing(s))} />
         ))}
       </div>
       <style>{tvSeriesCss}</style>
@@ -271,7 +285,9 @@ const barBtn = (primary: boolean): React.CSSProperties => ({
   border: primary ? 'none' : '1px solid rgba(255,255,255,0.08)', background: primary ? ACCENT : 'rgba(255,255,255,0.06)',
 });
 
-function Tile({ s, first, selecting, picked, onOpen }: { s: Show; first: boolean; selecting: boolean; picked: boolean; onOpen: () => void }) {
+function Tile({ s, first, selecting, picked, onOpen, opens = false }: {
+  s: Show; first: boolean; selecting: boolean; picked: boolean; onOpen: () => void; opens?: boolean;
+}) {
   const p = progress(s);
   const src = posterUrl(s.poster_path, 'w342');
   const [broken, setBroken] = useState(false);
@@ -279,7 +295,7 @@ function Tile({ s, first, selecting, picked, onOpen }: { s: Show; first: boolean
     <div data-testid="tv-series-tile" data-show-id={s.id} title={s.title} data-letter={first ? letterOf(s.title) : undefined}
       data-state={p.state} data-monitored={s.monitored ? 'true' : 'false'} style={{ minWidth: 0, scrollMarginTop: 24, display: 'flex', flexDirection: 'column' }}>
       <button type="button" className="lp-focus tvs-poster" data-testid="tv-series-open" title={s.title}
-        aria-label={selecting ? s.title : `Edit ${s.title}`} aria-pressed={selecting ? picked : undefined} onClick={onOpen}
+        aria-label={selecting || opens ? s.title : `Edit ${s.title}`} aria-pressed={selecting ? picked : undefined} onClick={onOpen}
         style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left' }}>
       <div style={{ position: 'relative', aspectRatio: '2 / 3', borderRadius: '8px 8px 0 0', overflow: 'hidden', background: 'rgba(255,255,255,0.06)',
         outline: picked ? `2px solid ${ACCENT}` : undefined, outlineOffset: -2 }}>

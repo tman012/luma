@@ -336,6 +336,13 @@ describe('Calendar', () => {
 
 describe('Search', () => {
   const type = (v: string) => fireEvent.change(screen.getByTestId('tv-search'), { target: { value: v } });
+  // v182 (Taylor): adding is the Series page's own Add series dialog; the toolbar finds only your shows
+  const addType = (v: string) => fireEvent.change(screen.getByTestId('tv-add-series-search'), { target: { value: v } });
+  const openAdd = async () => {
+    page(true, '/settings/tv?view=series');
+    fireEvent.click(await screen.findByTestId('tv-add-series'));
+    return screen.getByTestId('tv-add-series-modal');
+  };
 
   it('a compact 36px field; waits 250ms and 2 characters; library first with In library (not clickable), then TMDB with Add', async () => {
     page(true);
@@ -356,24 +363,31 @@ describe('Search', () => {
     expect(screen.getByTestId('tv-top-right').contains(screen.getByTestId('tv-tabs'))).toBe(true);
     expect(screen.queryByTestId('tv-title')).toBeNull();                                           // no 'TV' heading
     cleanup();
-    page(true, '/settings/tv?view=series');                                                        // v181: Add stays on the Series page
+    page(true, '/settings/tv?view=series');                                                        // v182: the Series toolbar too
     await screen.findByTestId('tv-series-empty');
     field = screen.getByTestId('tv-search') as HTMLInputElement;
-    expect(field.placeholder).toBe('Search shows');
-    type('S');
-    expect(screen.getByTestId('tv-section').getAttribute('data-view')).toBe('series');
-    type('Se'); type('Sev');
+    expect(field.placeholder).toBe('Search your shows');
+    type('Sev');
+    await new Promise(r => setTimeout(r, SEARCH_DEBOUNCE_MS + 50));
+    expect(calls.filter(c => c.url.startsWith('/api/settings/tv/find'))).toEqual([]);
+    expect(screen.queryAllByTestId('tv-add')).toHaveLength(0);
+    expect(screen.queryAllByTestId('tv-search-row')).toHaveLength(0);
+    // Add series: its own dialog searches TMDB (250ms, 2 characters); library first with In library, then Add
+    fireEvent.click(screen.getByTestId('tv-add-series'));
+    const modal = screen.getByTestId('tv-add-series-modal');
+    expect(modal.getAttribute('aria-label')).toBe('Add series');
+    addType('S');
+    addType('Se'); addType('Sev');
     expect(SEARCH_DEBOUNCE_MS).toBe(250);
-    const rows = await screen.findAllByTestId('tv-search-row');
+    const rows = await within(modal).findAllByTestId('tv-search-row');
     expect(calls.filter(c => c.url.startsWith('/api/settings/tv/find')).map(c => c.url)).toEqual(['/api/settings/tv/find?q=Sev']);
     expect(rows.map(r => r.textContent)).toEqual(['Severance (2022)2 seasonsIn library', 'Severance Pay (2026)1 seasonAdd']);
     expect(rows[0]!.getAttribute('data-in-library')).toBe('true');
     expect(rows[0]!.querySelector('button, a')).toBeNull();
-    const drop = screen.getByTestId('tv-search-drop');                       // a 480px glass dropdown on the field's left edge
-    expect([drop.style.width, drop.style.left, drop.style.position, drop.style.borderRadius, drop.style.background, drop.style.backdropFilter])
-      .toEqual(['480px', '0px', 'absolute', '12px', 'rgba(21, 16, 42, 0.92)', 'blur(24px)']);
-    expect(drop.style.border).toBe('1px solid rgba(255,255,255,0.08)'.replace(/,/g, ', '));
     expect(rows[1]!.firstElementChild!.getAttribute('style')).toContain('height: 72px');            // the same 72px rows
+    fireEvent.click(within(modal).getByTestId('tv-add-series-done'));
+    expect(screen.queryByTestId('tv-add-series-modal')).toBeNull();
+    fireEvent.focus(field);
     expect(screen.getByTestId('tv-series-empty')).toBeTruthy();                                    // the view stays under it
     fireEvent.keyDown(screen.getByTestId('tv-search'), { key: 'Escape' });
     expect(screen.queryByTestId('tv-search-drop')).toBeNull();               // Esc closes
@@ -382,12 +396,11 @@ describe('Search', () => {
     expect(field.value).toBe('');                                            // a second Esc clears
   });
 
-  it('keyboard: ↓/↑ highlight rows (wrapping), Enter adds the highlighted show; a click outside closes', async () => {
-    page(true, '/settings/tv?view=series');
-    await screen.findByTestId('tv-series-empty');
-    type('Severance');
+  it('keyboard: ↓/↑ highlight rows (wrapping), Enter adds the highlighted show', async () => {
+    await openAdd();
+    addType('Severance');
     const rows = await screen.findAllByTestId('tv-search-row');
-    const field = screen.getByTestId('tv-search');
+    const field = screen.getByTestId('tv-add-series-search');
     expect(field.getAttribute('role')).toBe('combobox');
     expect(field.getAttribute('aria-expanded')).toBe('true');
     fireEvent.keyDown(field, { key: 'ArrowDown' });
@@ -402,48 +415,44 @@ describe('Search', () => {
     expect(screen.getAllByTestId('tv-search-row')[1]!.getAttribute('aria-selected')).toBe('true');
     fireEvent.keyDown(field, { key: 'Enter' });                              // v158a: opens the Add picker
     fireEvent.click(screen.getByTestId('tv-add-confirm'));
-    await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => c.body)).toEqual([{ tmdb_id: 6001, monitor: 'all' }]));
-    fireEvent.pointerDown(document.body);
-    expect(screen.queryByTestId('tv-search-drop')).toBeNull();
-    fireEvent.focus(field);                                                  // focus opens it again
-    expect(screen.getByTestId('tv-search-drop')).toBeTruthy();
+    await waitFor(() => expect(calls.filter(c => c.method === 'POST').map(c => c.body)).toEqual([{ tmdb_id: 6001, monitor: 'future' }]));
   });
 
-  it('no results says No results; the x clears', async () => {
-    page(true, '/settings/tv?view=series');
-    await screen.findByTestId('tv-search');
+  it('no results says No results; the toolbar x clears', async () => {
+    const modal = await openAdd();
+    addType('nothing');
+    expect((await within(modal).findByTestId('tv-search-empty')).textContent).toBe('No results');
+    fireEvent.click(within(modal).getByTestId('tv-add-series-modal-close'));
     type('nothing');
-    expect((await screen.findByTestId('tv-search-empty')).textContent).toBe('No results');
+    expect((await screen.findByTestId('tv-search-empty')).textContent).toBe('No shows');      // your shows only
     fireEvent.click(screen.getByTestId('tv-search-clear'));
     expect((screen.getByTestId('tv-search') as HTMLInputElement).value).toBe('');
     await screen.findByTestId('tv-series-empty');
   });
 
-  it('Add with one library opens Monitor (All episodes) plus the path line, then shows In library', async () => {
-    page(true, '/settings/tv?view=series');
-    await screen.findByTestId('tv-search');
-    type('Severance');
+  it('Add with one library opens Monitor (Future episodes) plus the path line, then shows In library', async () => {
+    await openAdd();
+    addType('Severance');
     fireEvent.click(await screen.findByTestId('tv-add'));
     const picker = screen.getByTestId('tv-add-picker');
     expect(within(picker).queryAllByTestId('tv-add-path')).toHaveLength(0);             // no radio with one library
     expect(within(picker).getByTestId('tv-add-path-line').textContent).toContain('TV');
     const mon = within(picker).getByTestId('tv-add-monitor-select');
-    expect(mon.textContent).toBe('All episodes');
+    expect(mon.textContent).toBe('Future episodes');
     fireEvent.click(mon);
     expect(within(picker).getAllByRole('option').map(o => o.textContent))
       .toEqual(['All episodes', 'Future episodes', 'Missing episodes', 'First season', 'Last season', 'None']);
-    fireEvent.click(within(picker).getByRole('option', { name: 'Future episodes' }));
+    fireEvent.click(within(picker).getByRole('option', { name: 'Missing episodes' }));
     fireEvent.click(within(picker).getByTestId('tv-add-confirm'));
     await waitFor(() => expect(screen.getAllByTestId('tv-in-library')).toHaveLength(2));
-    expect(calls.filter(c => c.method === 'POST').map(c => [c.url, c.body])).toEqual([['/api/settings/tv/shows', { tmdb_id: 6001, monitor: 'future' }]]);
+    expect(calls.filter(c => c.method === 'POST').map(c => [c.url, c.body])).toEqual([['/api/settings/tv/shows', { tmdb_id: 6001, monitor: 'missing' }]]);
     expect(screen.queryByTestId('tv-add-picker')).toBeNull();
   });
 
   it('Add with 2+ libraries asks where: nothing preselected, Add at 40% until one is picked; Cancel adds nothing', async () => {
     paths = [TV, ANIME];
-    page(true, '/settings/tv?view=series');
-    await screen.findByTestId('tv-search');
-    type('Severance');
+    await openAdd();
+    addType('Severance');
     fireEvent.click(await screen.findByTestId('tv-add'));
     fireEvent.click(screen.getByTestId('tv-add-cancel'));
     expect(screen.queryByTestId('tv-add-picker')).toBeNull();
@@ -461,14 +470,13 @@ describe('Search', () => {
     expect([add.disabled, add.style.opacity]).toEqual([false, '1']);
     fireEvent.click(add);
     await waitFor(() => expect(screen.getAllByTestId('tv-in-library')).toHaveLength(2));
-    expect(calls.find(c => c.method === 'POST')?.body).toEqual({ tmdb_id: 6001, path_id: ANIME.id, monitor: 'all' });
+    expect(calls.find(c => c.method === 'POST')?.body).toEqual({ tmdb_id: 6001, path_id: ANIME.id, monitor: 'future' });
   });
 
   it("a failed Add says Couldn't add show with Retry", async () => {
     addStatus = 502;
-    page(true, '/settings/tv?view=series');
-    await screen.findByTestId('tv-search');
-    type('Severance');
+    await openAdd();
+    addType('Severance');
     fireEvent.click(await screen.findByTestId('tv-add'));
     fireEvent.click(screen.getByTestId('tv-add-confirm'));
     const err = await screen.findByTestId('tv-add-error');

@@ -18,6 +18,12 @@ GET    /api/settings/tv/profiles                         {profiles, qualities}
 POST   /api/settings/tv/grab {download_url, title, tmdb_id, season, episode?, size?, quality?, indexer?}
                                                          the TV Sources popup's grab (v158c), Luma's own path
 POST   /api/settings/tv/profiles  PUT|DELETE /api/settings/tv/profiles/<id>
+GET    /api/settings/tv/shows/<id>/detail               v182 series detail page (header, seasons, episodes; reads only)
+POST   /api/settings/tv/shows/<id>/interactive {season | episode_id}   v182 Interactive search: lists releases with
+                                                         their rejections, grabs nothing (signed-in owner)
+POST   /api/settings/tv/shows/<id>/interactive/grab {download_url, title, size?, quality?, indexer?}
+                                                         v182 grab the picked release: origin manual (past the 24 h floor,
+                                                         never an episode with a file), tv_grab's category/tag and scope
 """
 from __future__ import annotations
 
@@ -270,6 +276,82 @@ def show_search(sid):
     if out.get('error') == 'Not found':
         return _missing()
     return _out(out)
+
+
+def _target(body):
+    """(season, episode_id) from {season} or {episode_id} (exactly one, non-negative ints), else None."""
+    if not isinstance(body, dict) or set(body) - {'season', 'episode_id'}:
+        return None
+    season, eid = body.get('season'), body.get('episode_id')
+    ok_int = lambda v: isinstance(v, int) and not isinstance(v, bool) and v >= 0  # noqa: E731
+    if (season is None) == (eid is None) or (season is not None and not ok_int(season)) or (eid is not None and not ok_int(eid)):
+        return None
+    return season, eid
+
+
+@bp.route('/api/settings/tv/shows/<int:sid>/detail', methods=['GET'])
+def show_detail(sid):
+    """v182: the series detail page (reads tv.db only)."""
+    err = tv_settings._guard()
+    if err:
+        return err
+    v = tv_monitor.detail_view(sid)
+    return _out(v) if v else _missing()
+
+
+@bp.route('/api/settings/tv/shows/<int:sid>/interactive', methods=['POST'])
+def show_interactive(sid):
+    """v182: Interactive search for a season or an episode. Searches (interactive budget), grabs nothing."""
+    err = tv_settings._guard() or tv_settings._signed_in_owner()
+    if err:
+        return err
+    t = _target(request.get_json(silent=True))
+    if t is None:
+        return _out({'error': 'Invalid'}, 400)
+    from app import tv_search
+    out = tv_search.interactive(sid, season=t[0], episode_id=t[1])
+    if out.get('error') == 'Not found':
+        return _missing()
+    return _out(out)
+
+
+GRAB_KEYS = {'download_url', 'title', 'size', 'quality', 'indexer'}
+
+
+@bp.route('/api/settings/tv/shows/<int:sid>/interactive/grab', methods=['POST'])
+def show_interactive_grab(sid):
+    """v182: grab one release from Interactive search (owner-initiated: origin manual). Only a release
+    token Luma's own tracker search issued; what it covers comes from the title, checked against this show."""
+    err = tv_settings._guard() or tv_settings._signed_in_owner()
+    if err:
+        return err
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) - GRAB_KEYS:
+        return _out({'error': 'Invalid'}, 400)
+    url, title, size = body.get('download_url'), body.get('title'), body.get('size', 0)
+    if not isinstance(url, str) or not url.strip() or len(url) > 8192 or not isinstance(title, str) or not title.strip() \
+            or len(title) > 1000 or not isinstance(size, int) or isinstance(size, bool) or size < 0:
+        return _out({'error': 'Invalid'}, 400)
+    for k in ('quality', 'indexer'):
+        if body.get(k) is not None and not isinstance(body.get(k), str):
+            return _out({'error': 'Invalid'}, 400)
+    bad = _link_problem(url)
+    if bad:
+        return _out({'ok': False, 'error': bad}, 400)
+    with tv_store.connect() as conn:
+        if not conn.execute('SELECT 1 FROM series WHERE id = ?', (sid,)).fetchone():
+            return _missing()
+    from app import tv_grab, tv_search
+    if not tv_grab.allowed():
+        return _out({'ok': False, 'error': tv_grab.OFF, 'blocked': True})
+    item = {'title': title, 'downloadUrl': url, 'indexer': str(body.get('indexer') or '')[:200] or None,
+            'quality': str(body.get('quality') or '')[:100] or None, 'size': size, 'indexerId': None}
+    g = tv_search.grab_release(sid, item)
+    if g.get('status') in (400, 404) and not g.get('ok'):
+        return _out({'ok': False, 'error': g.get('error')}, g['status'])
+    if g.get('ok'):
+        return _out({'ok': True, 'existing': bool(g.get('existing')), 'episodes': g.get('episodes', [])})
+    return _out({'ok': False, 'error': g.get('error'), 'refused': g.get('refused'), 'blocked': bool(g.get('blocked'))})
 
 
 @bp.route('/api/settings/tv/search/status', methods=['GET'])

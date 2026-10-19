@@ -222,9 +222,18 @@ def _get_telegram_bot_token() -> str:
 
 
 def send_telegram(chat_id: str, message: str):
-    """Send a Telegram message via Bot API (direct HTTP, no CLI dependency)."""
+    """Send a Telegram message via Bot API (direct HTTP, no CLI dependency).
+
+    v182: this urllib send is outside the requests write guard, so it asks the instance itself: on the
+    test instance it is blocked unless 'telegram' is opted in (LUMA_TEST_ALLOW, LUMA_INSTANCE exactly
+    'test'). Prod is unchanged."""
     import urllib.request
     import urllib.parse
+    from app import instance
+
+    if not instance.writes_allowed('telegram'):
+        logger.warning('Instance test: blocked a Telegram send (telegram is off on the test instance)')
+        return
 
     token = _get_telegram_bot_token()
     if not token:

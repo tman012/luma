@@ -19,8 +19,10 @@ import { ImportSection, ReviewSection, ShowPicker, FADE_MS, importCss, initialRe
 import { TodayButton, TvCalendar, WeekCenter, tvCalendarCss } from './TvCalendar';
 import { TvSeries } from './TvSeries';
 import { QualityProfiles } from './TvEdit';
-import { SEARCH_LIST_ID, SEARCH_MIN, TV_POPOVER_SURFACE, TvOwnedSearch, TvSearch, searchRowId, tvSearchCss, type SearchKeys } from './TvSearch';
-import { ShowSheet } from './TvBulk';
+import { SEARCH_LIST_ID, SEARCH_MIN, TV_POPOVER_SURFACE, TvOwnedSearch, searchRowId, tvSearchCss, type SearchKeys } from './TvSearch';
+import { TvSeriesDetail } from './TvSeriesDetail';
+import { AddSeriesButton } from './TvAddSeries';
+import { OpenShowContext } from './TvCalendar';
 import { LibrarySelector } from './LibrarySelector';
 import type { SelectableLibrary } from './librarySelectionApi';
 import { SAVE_FAILED } from './libraryPathsApi';
@@ -44,7 +46,6 @@ export const tvView = (v: string | null): TvView => (TV_VIEWS.find(x => x.id ===
 export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: ReactNode }) {
   const [settingsView, setSettingsView] = useState<TvSettingsView | null>(null);
   const [lib, setLib] = useState<TvLibrary | null>(null);
-  const [sheet, setSheet] = useState<Show | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [toast, setToast] = useState('');
   const [editing, setEditing] = useState<number | null>(null);     // the show whose "Wrong show?" picker is open
@@ -140,24 +141,35 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
   );
 
   const onWeek = (w: string) => go({ week: w === weekStart(today) ? null : w }, false);
-  // v181: only the Series page searches TMDB to add shows; everywhere else (the calendar toolbar) finds only your shows
-  const adding = view === 'series';
-  const openShow = (s: Show) => { setQ(''); setSheet(s); };
+  // v182: the series detail page (?view=series&show=<id>), from Series, the calendar and search results
+  const showId = Number(params.get('show')) || 0;
+  const openDetail = (id: number, episodeId?: number | null) => {
+    setQ('');
+    go({ view: 'series', show: String(id), episode: episodeId ? String(episodeId) : null });
+  };
+  const openShow = (s: Show) => openDetail(s.id);
   const search = (
-    <SearchBox wide={wide} value={q} onChange={setQ} placeholder={adding ? 'Search shows' : 'Search your shows'}
-      results={noLibraries ? noLibs : (keys, active) => (adding
-        ? <TvSearch q={q} paths={settingsView.paths} onAdded={changed} keys={keys} active={active} />
-        : <TvOwnedSearch q={q} shows={lib ? lib.shows : null} onOpen={openShow} keys={keys} active={active} />
+    // v182 (Taylor): on every TV view the toolbar finds only your own shows (tv.db, already loaded): no network
+    // search and no Add; a result opens the detail page. Adding is the Series page's own Add series flow.
+    <SearchBox wide={wide} value={q} onChange={setQ} placeholder="Search your shows"
+      results={noLibraries ? noLibs : (keys, active) => (
+        <TvOwnedSearch q={q} shows={lib ? lib.shows : null} onOpen={openShow} keys={keys} active={active} />
       )} />
   );
 
   let body: ReactNode;
   if (view === 'calendar') {
     body = noLibraries ? noLibs : (
-      <TvCalendar today={today} week={week} reload={reload} toolbar={!calendarTop} onWeek={onWeek} />
+      <OpenShowContext.Provider value={openDetail}>
+        <TvCalendar today={today} week={week} reload={reload} toolbar={!calendarTop} onWeek={onWeek} />
+      </OpenShowContext.Provider>
     );
   } else if (view === 'series') {
-    body = noLibraries ? noLibs : <TvSeries shows={lib ? lib.shows : null} onChanged={changed} />;
+    body = noLibraries ? noLibs : showId ? (
+      <TvSeriesDetail key={showId} seriesId={showId} episodeId={Number(params.get('episode')) || null} wide={wide}
+        onBack={() => go({ show: null, episode: null })} onChanged={changed} say={say} />
+    ) : <TvSeries shows={lib ? lib.shows : null} onChanged={changed} onOpen={s => openDetail(s.id)}
+      add={<AddSeriesButton paths={settingsView.paths} onAdded={changed} />} />;
   } else if (view === 'import') {
     body = (
       <div style={{ display: 'flex', flexDirection: 'column', gap: SECTION_GAP }}>
@@ -240,7 +252,6 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
         <LibrarySelector url={TV_LIBRARIES_URL} label="Libraries" testId="tv-paths" onChange={onLibraries} />
       </div>
       {body && <div data-testid="tv-view" style={{ marginTop: 20 }}>{body}</div>}
-      {sheet && <ShowSheet seriesId={sheet.id} title={sheet.title} onClose={() => setSheet(null)} onChanged={changed} />}
     </section>
     </WideCtx.Provider>
   );

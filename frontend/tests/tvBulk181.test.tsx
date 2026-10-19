@@ -190,7 +190,7 @@ describe('Episode select', () => {
 });
 
 describe('Calendar toolbar search', () => {
-  it('finds only your own shows (no TMDB or TVDB lookup); a result opens the show', async () => {
+  it('finds only your own shows (no TMDB or TVDB lookup); a result opens the show page', async () => {
     render(<MemoryRouter initialEntries={['/settings/tv']}><TvLibrarySettings wide /></MemoryRouter>);
     const field = await screen.findByTestId('tv-search') as HTMLInputElement;
     expect(field.placeholder).toBe('Search your shows');
@@ -204,7 +204,9 @@ describe('Calendar toolbar search', () => {
     fireEvent.change(field, { target: { value: 'bear' } });
     fireEvent.keyDown(field, { key: 'ArrowDown' });
     fireEvent.keyDown(field, { key: 'Enter' });
-    expect(await screen.findByTestId('tv-show-sheet')).toBeTruthy();
+    // v182: a result opens the show's detail page
+    await waitFor(() => expect(calls.some(c => c.url === '/api/settings/tv/shows/2/detail')).toBe(true));
+    expect(document.querySelector('[data-testid^="tv-detail"]')).toBeTruthy();
     expect(field.value).toBe('');
     await new Promise(r => setTimeout(r, 300));                                                // past the debounce
     expect(calls.filter(c => /\/find|\/search|tmdb|tvdb/i.test(c.url))).toEqual([]);

@@ -290,3 +290,37 @@ export async function popupGrab(body: PopupGrab): Promise<PopupGrabResult> {
   if (r.data.ok) return { ok: true };
   return { ok: false, error: r.data.error || 'Failed to grab release', fallback: !!r.data.fallback, blocked: !!r.data.blocked };
 }
+
+// ---------------------------------------------------------------- v182: the series detail page
+
+export type DetailState = 'downloaded' | 'downloading' | 'missing' | 'unaired' | 'no_date';
+export interface DetailEpisode {
+  id: number; season: number; episode: number; monitored: boolean; title: string | null; air_date: string | null;
+  airstamp: string | null; runtime: number | null; has_file: boolean; state: DetailState; quality: string | null; size: number | null;
+}
+export interface DetailSeason { season: number; monitored: boolean; episodes: number; have: number; total: number; size: number }
+export interface DetailView extends Omit<SeriesView, 'seasons' | 'episodes'> {
+  network: string | null; status: string | null; overview: string | null; poster_path: string | null; backdrop_path: string | null;
+  profile_name: string | null; size: number; have: number; total: number; seasons: DetailSeason[]; episodes: DetailEpisode[];
+}
+export const getDetail = (id: number) => call<DetailView>(`${TV_URL}/shows/${id}/detail`, undefined, d => typeof d.id === 'number' && Array.isArray(d.seasons));
+
+export interface Release {
+  title: string; tracker: string | null; size: number; seeders: number; leechers: number; quality: string | null;
+  published: string | null; freeleech: boolean; download_url: string; season: number | null;
+  episodes: { id: number; season: number; episode: number }[]; pack: boolean; rejections: string[]; grabbable: boolean;
+}
+export interface InteractiveResult { ok: boolean; searched: number; releases: Release[]; grabs_allowed: boolean; error: string | null }
+export type SearchTarget = { season: number } | { episode_id: number };
+/** v182: Interactive search (lists releases with their rejections; grabs nothing). */
+export const interactiveSearch = (seriesId: number, target: SearchTarget) =>
+  call<InteractiveResult>(`${TV_URL}/shows/${seriesId}/interactive`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(target),
+  }, d => Array.isArray(d.releases) || typeof d.error === 'string');
+/** v182: grab the release the owner picked (what it covers is worked out on the server). */
+export const grabRelease = (seriesId: number, r: Release) =>
+  call<{ ok: boolean; error?: string | null; existing?: boolean; blocked?: boolean; refused?: string | null }>(
+    `${TV_URL}/shows/${seriesId}/interactive/grab`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ download_url: r.download_url, title: r.title, size: r.size, quality: r.quality ?? undefined, indexer: r.tracker ?? undefined }),
+    }, d => typeof d.ok === 'boolean');

@@ -1,7 +1,7 @@
 /** Settings > TV > Calendar (v1, desktop web): the week's episodes by TMDB air
  * date as an agenda (day headers, 72px rows), capped at 720px and centered.
  * A card opens the show's detail at that episode. The week toolbar: ‹ › (and Today) on the left, the range centered. */
-import { useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { ModalHostContext } from '@/contexts/ModalHostContext';
 import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
@@ -12,6 +12,9 @@ import {
 } from './tvCalendarApi';
 
 export const CAL_MAX_W = 720;
+/** v182: Settings > TV opens a card's show on its own series detail page (series id, episode id); without it,
+ * the app's TV detail modal (ModalHostContext) as before. */
+export const OpenShowContext = createContext<((seriesId: number, episodeId?: number | null) => void) | null>(null);
 export const REFRESH_RELOAD_MS = 6000;
 export const POLL_MS = 60_000;
 const W50 = 'rgba(255,255,255,0.5)';
@@ -172,6 +175,14 @@ const dayHeader = (d: Day) => {
 /** Click or Enter/Space: the show's detail, at that season and episode (no-op without a TMDB id or a modal host). */
 function useOpenEpisode(e: CalEpisode) {
   const host = useContext(ModalHostContext);
+  const openShow = useContext(OpenShowContext);
+  if (openShow && e.series_id) {
+    const go = () => openShow(e.series_id, e.episode_id);
+    return {
+      role: 'button' as const, tabIndex: 0, 'data-clickable': 'true', className: 'lp-focus', onClick: go,
+      onKeyDown: (k: React.KeyboardEvent) => { if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); go(); } },
+    };
+  }
   if (!host || !e.tmdb_id) return {};
   const open = () => host.openTv({ tmdbId: e.tmdb_id as number, origin: 'tv_calendar',
     episodeContext: { seasonNumber: e.season, episodeNumber: e.episode } });

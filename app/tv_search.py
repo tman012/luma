@@ -361,6 +361,169 @@ def manual(sid: int, season: Optional[int] = None, episode_id: Optional[int] = N
     return out
 
 
+# ------------------------------------------------------------------ v182: interactive search
+
+WRONG_SHOW = 'Not this show'
+WRONG_YEAR = 'Wrong year'
+NOT_TARGET = 'Not the episodes searched for'
+HAS_FILE = 'Already has a file'
+GRABBED = 'Already grabbed'
+BLOCKLISTED = 'Blocklisted'
+NOT_IN_PROFILE = 'Quality not in the profile'
+FEW_SEEDERS = 'Too few seeders'
+MISSING_WORD = 'Missing a required word'
+BLOCKED_WORD = 'Has a blocked word'
+BAD_SIZE = 'Size outside the profile'
+#: the reasons a release can't be grabbed at all (rule 2, the blocklist, not the show); the profile's own
+#: rejections are shown but the owner may still grab it (Sonarr's interactive search does the same)
+HARD = (WRONG_SHOW, WRONG_YEAR, NOT_TARGET, HAS_FILE, BLOCKLISTED)
+
+
+def _episodes(conn, sid: int) -> List[Dict[str, Any]]:
+    return [dict(r) for r in conn.execute(
+        f'SELECT e.id, e.season_number, e.episode_number, e.air_date, e.airstamp, e.runtime, {tv_monitor._LINKED} AS has_file'
+        ' FROM episodes e WHERE e.series_id = ? ORDER BY e.season_number, e.episode_number', (sid,))]
+
+
+def covers(title: str, show: Dict[str, Any], eps: List[Dict[str, Any]]) -> Tuple[Optional[str], List[int], Optional[int]]:
+    """What a release title covers among the show's episodes: (why not, episode ids, season). A season pack
+    covers every episode of that season (with a file or not: rule 2 then refuses it)."""
+    rel = tv_release.parse(title)
+    if tv_match.normalize(rel.title or '') not in show['names']:
+        return WRONG_SHOW, [], None
+    if rel.year and show.get('year') and rel.year != show['year']:
+        return WRONG_YEAR, [], None
+    ids: List[int] = []
+    if rel.kind in ('episode', 'multi') and rel.season is not None:
+        ids = [e['id'] for e in eps if e['season_number'] == rel.season and e['episode_number'] in set(rel.episodes)]
+    elif rel.kind == 'season' and rel.season is not None:
+        ids = [e['id'] for e in eps if e['season_number'] == rel.season]
+    elif rel.kind == 'daily' and rel.air_date:
+        ids = [e['id'] for e in eps if e['air_date'] == rel.air_date]
+    if not ids:
+        return NOT_TARGET, [], None
+    season = next(e['season_number'] for e in eps if e['id'] == ids[0])
+    return None, ids, season
+
+
+def judge(items: List[Dict[str, Any]], show: Dict[str, Any], eps: List[Dict[str, Any]], targets: Iterable[int],
+          blocked: set, grabbed: set) -> List[Dict[str, Any]]:
+    """Every release with why it would be rejected (none: the best kind). Sorted: grabbable first, then the
+    profile's order, then seeders."""
+    p = show.get('profile')
+    must, never = (_words(p['must_contain']), _words(p['must_not_contain'])) if p else ([], [])
+    min_seeders = int(p['min_seeders']) if p else 1
+    by_id = {e['id']: e for e in eps}
+    want = set(targets)
+    out = []
+    for it in items:
+        title = str(it.get('title') or '')
+        if not title:
+            continue
+        why, ids, season = covers(title, show, eps)
+        rej: List[str] = [why] if why else []
+        if ids and not set(ids) & want:
+            rej.append(NOT_TARGET)
+        if any(by_id[i]['has_file'] for i in ids):
+            rej.append(HAS_FILE)
+        if title in blocked:
+            rej.append(BLOCKLISTED)
+        if ids and set(ids) <= grabbed:
+            rej.append(GRABBED)
+        q = tv_monitor.quality_of(title)
+        rank = _rank(p, q)
+        if rank is None:
+            rej.append(NOT_IN_PROFILE)
+        if int(it.get('seeders') or 0) < min_seeders:
+            rej.append(FEW_SEEDERS)
+        low = title.casefold()
+        if any(w not in low for w in must):
+            rej.append(MISSING_WORD)
+        if any(w in low for w in never):
+            rej.append(BLOCKED_WORD)
+        if p and ids and (p['min_mb_per_min'] or p['max_mb_per_min']):
+            mins = sum(int(by_id[i].get('runtime') or DEFAULT_RUNTIME) for i in ids)
+            mb = (int(it.get('size') or 0) / 1048576) / max(1, mins)
+            if (p['min_mb_per_min'] and mb < p['min_mb_per_min']) or (p['max_mb_per_min'] and mb > p['max_mb_per_min']):
+                rej.append(BAD_SIZE)
+        out.append({'title': title, 'tracker': it.get('indexer'), 'size': int(it.get('size') or 0),
+                    'seeders': int(it.get('seeders') or 0), 'leechers': int(it.get('leechers') or 0),
+                    'quality': q, 'published': it.get('publishDate') or None, 'freeleech': bool(it.get('freeleech')),
+                    'download_url': it.get('downloadUrl'), 'season': season,
+                    'episodes': [{'id': i, 'season': by_id[i]['season_number'], 'episode': by_id[i]['episode_number']} for i in ids],
+                    'pack': tv_release.parse(title).kind == 'season',
+                    'rejections': rej, 'grabbable': not any(r in HARD for r in rej) and bool(it.get('downloadUrl')),
+                    '_rank': 999 if rank is None else rank})
+    out.sort(key=lambda r: (not r['grabbable'], bool(r['rejections']), r['_rank'], -r['seeders']))
+    for r in out:
+        r.pop('_rank')
+    return out
+
+
+def interactive(sid: int, season: Optional[int] = None, episode_id: Optional[int] = None,
+                now: Optional[float] = None) -> Dict[str, Any]:
+    """The owner's Interactive search for a season or an episode: searches (interactive budget), grabs
+    nothing, and lists every release with its rejections so the owner picks one (grab_release)."""
+    now = time.time() if now is None else now
+    with tv_store.connect() as conn:
+        show = _show(conn, sid)
+        if show is None:
+            return {'ok': False, 'error': 'Not found'}
+        eps = _episodes(conn, sid)
+        targets = [e for e in eps if (e['season_number'] == season if season is not None else e['id'] == episode_id)]
+        if not targets:
+            return {'ok': False, 'error': 'Not found'}
+        blocked = {r['release_title'] for r in conn.execute('SELECT release_title FROM blocklist WHERE series_id = ?', (sid,))}
+        got = _grabbed(conn, sid)
+    out: Dict[str, Any] = {'ok': True, 'searched': 0, 'releases': [], 'statuses': [], 'error': None,
+                           'grabs_allowed': tv_grab.allowed()}
+    cfgs = trackers()
+    if not cfgs:
+        out.update(ok=False, error=NO_TRACKERS)
+        return out
+    if season is not None and show.get('series_type') != 'daily':
+        queries = [f"{show['title']} S{season:02d}"]
+    else:
+        queries = [q for _, q in _queries(show, targets)]
+    items: List[Dict[str, Any]] = []
+    for q in queries[:MAX_QUERIES]:
+        found, st = query_trackers(q, 'manual', sid, True, now, cfgs)
+        out['searched'] += 1
+        out['statuses'] += st
+        items += found
+    seen, uniq = set(), []
+    for it in items:
+        k = (it.get('indexerId'), it.get('title'), it.get('size'))
+        if k not in seen:
+            seen.add(k)
+            uniq.append(it)
+    out['releases'] = judge(uniq, show, eps, [e['id'] for e in targets], blocked, got)
+    return out
+
+
+def grab_release(sid: int, item: Dict[str, Any], now: Optional[float] = None) -> Dict[str, Any]:
+    """v182: grab the release the owner picked in Interactive search. Owner-initiated, so origin 'manual':
+    the 24 h floor doesn't apply (tv_safety rule 1 is for automatic grabs only); rule 2 still does (an
+    episode with a file is refused, so is a pack that covers one), and the grab goes through tv_grab (the TV
+    category and tag, the scoped add). What it covers is worked out here from the title, never taken
+    from the request."""
+    now = time.time() if now is None else now
+    with tv_store.connect() as conn:
+        show = _show(conn, sid)
+        if show is None:
+            return {'ok': False, 'error': 'Not found', 'status': 404}
+        eps = _episodes(conn, sid)
+    why, ids, season = covers(str(item.get('title') or ''), show, eps)
+    if why:
+        return {'ok': False, 'error': why, 'status': 400}
+    g = tv_grab.grab(item, sid, season, ids, 'manual', now, tokens_only=True)
+    if g.get('ok'):
+        with tv_store.write() as conn:
+            conn.executemany('UPDATE episodes SET last_search_at = ?, next_search_at = NULL WHERE id = ?',
+                             [(now, i) for i in ids])
+    return {**g, 'episodes': ids}
+
+
 # ------------------------------------------------------------------ automatic
 
 def automation() -> Dict[str, Any]:
