@@ -44,34 +44,27 @@ const QUALITIES = ['1080p-web', '720p-web', '720p-hdtv'].map(id => ({ id, name: 
 describe('calendar bookmark', () => {
   const ep = (id: number, monitored: boolean): CalEpisode => ({ episode_id: id, series_id: 1, tmdb_id: 95396, show: 'Severance', year: 2022,
     poster_path: null, season: 2, episode: id, title: `Episode ${id}`, air_date: '2026-10-12', downloaded: id === 1, monitored });
-  it('filled = monitored; a click toggles that episode only (no navigation); unmonitored cards dim to .5, the edge stays', async () => {
+  it('filled = monitored; unmonitored episodes are not in the week grid (v184); a click unmonitors that episode only and hides it', async () => {
     handler = (url, method) => (method === 'PUT' && url.startsWith('/api/settings/tv/episodes/') ? res({ ...VIEW, id: 1 }) : null);
     render(<WeekGrid eps={[ep(1, true), ep(2, false)]} week="2026-10-11" today="2026-10-18" />);
     const cards = screen.getAllByTestId('tv-agenda-row');
-    expect(cards.map(c => c.getAttribute('data-monitored'))).toEqual(['true', 'false']);
-    const bodies = cards.map(c => within(c).getByTestId('tv-card-body'));
-    expect(bodies.map(b => b.style.opacity)).toEqual(['1', String(DIM)]);
+    expect(cards.map(c => c.getAttribute('data-monitored'))).toEqual(['true']);
+    expect(within(cards[0]!).getByTestId('tv-card-body').style.opacity).toBe('1');
     expect(DIM).toBe(0.5);
-    expect(within(cards[1]!).getByTestId('tv-stripe').parentElement).toBe(cards[1]);        // the edge is outside the dimmed body
-    const marks = cards.map(c => within(c).getByTestId('tv-card-bookmark'));
-    expect(marks.map(m => m.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
-    expect(marks[0]!.getAttribute('aria-label')).toBe('Monitored: Severance S02E01');
-    expect(marks[0]!.querySelector('svg')!.getAttribute('fill')).toBe('currentColor');
-    expect(marks[1]!.querySelector('svg')!.getAttribute('fill')).toBe('none');
-    expect(marks.every(m => !m.textContent)).toBe(true);                                       // no label on screen
-    fireEvent.click(marks[1]!);
-    expect(marks[1]!.getAttribute('aria-pressed')).toBe('true');
-    expect(bodies[1]!.style.opacity).toBe('1');
-    await waitFor(() => expect(calls).toEqual([{ url: '/api/settings/tv/episodes/2/monitored', method: 'PUT', body: { monitored: true } }]));
+    const mark = within(cards[0]!).getByTestId('tv-card-bookmark');
+    expect([mark.getAttribute('aria-pressed'), mark.getAttribute('aria-label')]).toEqual(['true', 'Monitored: Severance S02E01']);
+    expect(mark.querySelector('svg')!.getAttribute('fill')).toBe('currentColor');
+    expect(mark.textContent).toBe('');                                                          // no label on screen
+    fireEvent.click(mark);
+    expect(screen.queryAllByTestId('tv-agenda-row')).toHaveLength(0);
+    await waitFor(() => expect(calls).toEqual([{ url: '/api/settings/tv/episodes/1/monitored', method: 'PUT', body: { monitored: false } }]));
   });
 
   it('a failed toggle snaps back', async () => {
     handler = () => res({ error: 'nope' }, 500);
     render(<WeekGrid eps={[ep(1, true)]} week="2026-10-11" today="2026-10-18" />);
-    const mark = screen.getByTestId('tv-card-bookmark');
-    fireEvent.click(mark);
-    expect(mark.getAttribute('aria-pressed')).toBe('false');
-    await waitFor(() => expect(mark.getAttribute('aria-pressed')).toBe('true'));
+    fireEvent.click(screen.getByTestId('tv-card-bookmark'));
+    await waitFor(() => expect(screen.getByTestId('tv-card-bookmark').getAttribute('aria-pressed')).toBe('true'));
   });
 
   it('the bookmark shows on hover / focus (always on touch)', () => {

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import os
 import shutil
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -27,8 +28,10 @@ from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 from app import file_management as fm
 from app import tv_store
 
+logger = logging.getLogger(__name__)
+
 OPTIONS = ('all', 'future', 'missing', 'existing', 'recent', 'pilot', 'first_season', 'last_season', 'none')
-ADD_DEFAULT = 'all'            # Add from Search
+ADD_DEFAULT = 'future'         # Add series (v184, Tester: like the UI's default; no monitor sent = Future episodes)
 IMPORT_DEFAULT = 'future'      # a library folder (and the v7 migration): no back catalog
 RECENT_DAYS = 90
 SERIES_TYPES = ('standard', 'daily', 'anime')
@@ -151,9 +154,18 @@ def set_season(conn, sid: int, season: int, on: bool) -> int:
     return n
 
 
-def set_series(conn, sid: int, on: bool) -> None:
-    """The series switch: off stops everything (episodes keep their flags for when it's back on)."""
-    conn.execute('UPDATE series SET monitored = ?, monitor_chosen = 1 WHERE id = ?', (int(on), sid))
+def set_series(conn, sid: int, on: bool, today: Optional[str] = None) -> None:
+    """The show's bookmark (v184, PM: Sonarr's cascade). Off unmonitors the show and every season and
+    episode; the saved Monitor option is kept. On applies that saved option again (e.g. Future: aired
+    episodes stay off), Future when it was None. tv.db only, never a search."""
+    if not on:
+        conn.execute('UPDATE episodes SET monitored = 0 WHERE series_id = ?', (sid,))
+        conn.execute('UPDATE series SET monitored = 0, monitor_chosen = 1 WHERE id = ?', (sid,))
+        sync_seasons(conn, sid)
+        return
+    row = conn.execute('SELECT monitor FROM series WHERE id = ?', (sid,)).fetchone()
+    option = row['monitor'] if row is not None and row['monitor'] in OPTIONS and row['monitor'] != 'none' else ADD_DEFAULT
+    apply(conn, sid, option, today=today)
 
 
 def wanted(conn, today: Optional[str] = None) -> List[int]:
@@ -203,8 +215,47 @@ def _file_quality(f: Dict[str, Any]) -> Optional[str]:
 
 
 def _counted(e: Dict[str, Any], today: str) -> bool:
-    """v182 (the detail page's have/total): a monitored regular episode that has aired or has a file."""
-    return e['season'] > 0 and e['monitored'] and (e['has_file'] or (bool(e['air_date']) and e['air_date'] <= today))
+    """The detail page's have/total, counted like the Series list (v184, Tester): every regular episode that
+    has aired (monitored or not); have is those with a linked file."""
+    return e['season'] > 0 and bool(e['air_date']) and e['air_date'] <= today
+
+
+def _imported(h: Optional[str]) -> bool:
+    try:
+        from app import tv_downloads
+        return bool(h) and (tv_downloads.status(str(h)) or {}).get('state') == 'imported'
+    except Exception:                                    # noqa: BLE001
+        return False
+
+
+def _on_disk(episodes: List[Dict[str, Any]], ids, hashes: List[str]) -> Set[int]:
+    """v184 (PM, live :5002): a file on disk always means Downloaded. Besides a linked file (has_file), an
+    episode counts when Plex has it (as the calendar does) or when Luma's own import record placed a file
+    for it that is still on disk (the link pass catches up within a minute). So an open grab row can
+    never turn a downloaded episode back to Downloading. Reads only."""
+    want = {e['id']: e for e in episodes if not e['has_file']}
+    out: Set[int] = set()
+    if not want:
+        return out
+    try:
+        from app import tv_plex
+        for eid, e in want.items():
+            if ids is not None and tv_plex.has(ids['tmdb_id'], ids['tvdb_id'], e['season'], e['episode']):
+                out.add(eid)
+    except Exception:                                    # noqa: BLE001 - Plex trouble: the files still answer
+        pass
+    try:
+        from app import tv_downloads
+        for h in hashes:
+            st = tv_downloads.status(h) or {}
+            if st.get('state') != 'imported':
+                continue
+            for f in st.get('files') or []:
+                if isinstance(f, dict) and f.get('path') and os.path.isfile(str(f['path'])):
+                    out |= {int(i) for i in (f.get('episode_ids') or []) if isinstance(i, int) and i in want}
+    except Exception:                                    # noqa: BLE001
+        logger.exception('TV detail: import records unreadable')
+    return out
 
 
 def detail_view(sid: int, today: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -227,16 +278,25 @@ def detail_view(sid: int, today: Optional[str] = None) -> Optional[Dict[str, Any
         extra = {x['id']: dict(x) for x in conn.execute(
             'SELECT id, airstamp, runtime FROM episodes WHERE series_id = ?', (sid,))}
         busy: Set[int] = set()
-        for g in conn.execute(f"SELECT episode_ids FROM grabs WHERE series_id = ? AND state IN ({','.join('?' * len(ACTIVE_GRABS))})",
+        for g in conn.execute(f"SELECT hash, episode_ids FROM grabs WHERE series_id = ? AND state IN ({','.join('?' * len(ACTIVE_GRABS))})",
                               (sid, *ACTIVE_GRABS)):
+            # v184 (Ops): a grab row is only Downloading while its torrent hasn't been imported; once Luma
+            # imported it, a missing file is Missing (deleted since), never a stale Downloading
+            if _imported(g['hash']):
+                continue
             try:
                 busy |= {int(i) for i in json.loads(g['episode_ids'] or '[]')}
             except (TypeError, ValueError):
                 pass
+        ids = conn.execute('SELECT tmdb_id, tvdb_id FROM series WHERE id = ?', (sid,)).fetchone()
+        hashes = [g['hash'] for g in conn.execute('SELECT hash FROM grabs WHERE series_id = ? AND hash IS NOT NULL', (sid,))]
+    on_disk = _on_disk(base['episodes'], ids, hashes)
     eps = []
     for e in base['episodes']:
         x = extra.get(e['id'], {})
         f = files.get(e['id'])
+        if e['id'] in on_disk:
+            e = {**e, 'has_file': True}
         if e['has_file']:
             state = 'downloaded'
         elif e['id'] in busy:

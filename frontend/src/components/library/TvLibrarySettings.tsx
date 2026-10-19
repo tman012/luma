@@ -101,7 +101,9 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
     for (const [k, v] of Object.entries(patch)) { if (v === null) next.delete(k); else next.set(k, v); }
     setParams(next, { replace: !push });
   };
-  const pickView = (v: TvView) => { setQ(''); go({ view: v === 'calendar' ? null : v }); };
+  // v184 (PM): a top tab always opens its root (never a remembered sub-page such as a show's detail);
+  // pushed, so browser Back still returns to where you were
+  const pickView = (v: TvView) => { setQ(''); go({ view: v === 'calendar' ? null : v, show: null, episode: null }); };
   const start = () => {
     setImportError(null);
     setImporting(true);

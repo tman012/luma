@@ -19,6 +19,7 @@ API keys, passkeys and cookies.
 from __future__ import annotations
 
 import ipaddress
+import logging
 import re
 import os
 import socket
@@ -128,6 +129,8 @@ def raise_for_status(resp: Response) -> None:
         raise TrackerError('http', s, retry_after_seconds(resp.headers.get('Retry-After')))
     raise TrackerError('http', s)
 
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_PORTS = {'http': 80, 'https': 443}
 
@@ -404,6 +407,25 @@ def check_target(url: str) -> Tuple[str, int]:
     """Resolve *url*'s host and return (pinned address, port), or raise
     TrackerError('blocked') when any resolved address or the port is not
     allowed, 'network' when it does not resolve."""
+    addrs, port = check_targets(url)
+    return addrs[0], port
+
+
+# v184: the owner-facing reasons behind a 'network' error (the kind, and so every backoff, is unchanged)
+NO_DNS = "Couldn't resolve the host"
+NO_CONNECT = "Couldn't connect"
+NO_RESPONSE = 'Connection closed without a response'
+
+
+def _order(addrs: List[str]) -> List[str]:
+    """IPv4 first, then IPv6 (each in the resolver's order): a host without a working IPv6 route still
+    reaches a dual-stack site on the first try; the others stay as fallbacks."""
+    v4 = [a for a in addrs if ':' not in a]
+    return v4 + [a for a in addrs if ':' in a]
+
+
+def check_targets(url: str) -> Tuple[List[str], int]:
+    """Every resolved address of *url*'s host, IPv4 first (all of them must be allowed), and the port."""
     try:
         p = urlsplit(url)
         host = p.hostname or ''
@@ -418,12 +440,61 @@ def check_target(url: str) -> Tuple[str, int]:
     try:
         addrs = list(dict.fromkeys(resolve(host, port)))
     except (OSError, UnicodeError, ValueError):
-        raise TrackerError('network') from None
+        logger.warning('Tracker request: %s did not resolve', bare)
+        raise TrackerError('network', message=NO_DNS) from None
     if not addrs:
-        raise TrackerError('network')
+        logger.warning('Tracker request: %s did not resolve', bare)
+        raise TrackerError('network', message=NO_DNS)
     if not all(address_allowed(a) and port_allowed(a, port) for a in addrs):
         raise TrackerError('blocked')
-    return addrs[0].split('%')[0], port
+    return _order([a.split('%')[0] for a in addrs]), port
+
+
+def _connect_failed(e: BaseException) -> bool:
+    """True when nothing was sent: the TCP/TLS connect itself failed (refused, unreachable, connect
+    timeout). Then the next resolved address may be tried without sending anything twice."""
+    from urllib3.exceptions import ConnectTimeoutError, NewConnectionError
+    return _caused_by(e, (NewConnectionError, ConnectTimeoutError, requests.exceptions.ConnectTimeout))
+
+
+def _no_response(e: BaseException) -> bool:
+    """The server took the connection and closed it (or reset it) before any HTTP answer."""
+    import http.client
+    from urllib3.exceptions import ProtocolError
+    return _caused_by(e, (ProtocolError, http.client.RemoteDisconnected, ConnectionResetError, ConnectionAbortedError))
+
+
+def _chain(e: BaseException) -> List[BaseException]:
+    seen, todo, out = set(), [e], []
+    while todo:
+        x = todo.pop(0)
+        if x is None or id(x) in seen:
+            continue
+        seen.add(id(x))
+        out.append(x)
+        todo.extend([getattr(x, 'reason', None), x.__cause__, x.__context__] +
+                    [a for a in getattr(x, 'args', ()) if isinstance(a, BaseException)])
+    return out
+
+
+def cause_names(e: BaseException) -> str:
+    """The exception classes behind a failed request, outermost first ('ConnectionError <- ProtocolError
+    <- RemoteDisconnected'): class names only, never a message (messages can carry a URL or a key)."""
+    return ' <- '.join(dict.fromkeys(type(x).__name__ for x in _chain(e)))
+
+
+def _caused_by(e: BaseException, kinds: tuple) -> bool:
+    seen, todo = set(), [e]
+    while todo:
+        x = todo.pop()
+        if x is None or id(x) in seen:
+            continue
+        seen.add(id(x))
+        if isinstance(x, kinds):
+            return True
+        todo.extend([getattr(x, 'reason', None), x.__cause__, x.__context__] +
+                    [a for a in getattr(x, 'args', ()) if isinstance(a, BaseException)])
+    return False
 
 
 class PinnedAdapter(HTTPAdapter):
@@ -541,28 +612,51 @@ def request(method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
         for _ in range(MAX_REDIRECTS + 1):
             if time.monotonic() > deadline:
                 raise TrackerError('timeout')
-            address, _port_ = check_target(cur_url)        # every hop, before anything is sent
+            addresses, _port_ = check_targets(cur_url)     # every hop, before anything is sent
             if is_proxy_url(cur_url):                      # every hop, same-site redirects included
                 raise TrackerError('blocked')
-            scope = current_scope()
-            if scope is not None:
-                scope.visit(str(ipaddress.ip_address(address)))   # may refuse a backed-off server
-            if sess is not None and session is None:
-                sess.close()
-            sess = session or _pinned_session(cur_url, address)
-            try:
-                r = sess.request(cur_method, cur_url, headers=hdrs, params=cur_params, data=cur_data,
-                                 json=cur_json, timeout=timeout or (CONNECT_TIMEOUT, READ_TIMEOUT),
-                                 allow_redirects=False, stream=True)
-            except requests.exceptions.SSLError:
-                raise TrackerError('tls') from None
-            except requests.exceptions.Timeout:
-                raise TrackerError('timeout') from None
-            except (requests.exceptions.ConnectionError, requests.exceptions.InvalidURL,
-                    requests.exceptions.MissingSchema, requests.exceptions.InvalidSchema):
-                raise TrackerError('network') from None
-            except requests.exceptions.RequestException:
-                raise TrackerError('network') from None
+            host = (urlsplit(cur_url).hostname or '').lower()
+            r = None
+            for n, address in enumerate(addresses if session is None else addresses[:1]):
+                scope = current_scope()
+                if scope is not None:
+                    scope.visit(str(ipaddress.ip_address(address)))   # may refuse a backed-off server
+                if sess is not None and session is None:
+                    sess.close()
+                sess = session or _pinned_session(cur_url, address)
+                try:
+                    r = sess.request(cur_method, cur_url, headers=hdrs, params=cur_params, data=cur_data,
+                                     json=cur_json, timeout=timeout or (CONNECT_TIMEOUT, READ_TIMEOUT),
+                                     allow_redirects=False, stream=True)
+                    break
+                except requests.exceptions.SSLError:
+                    logger.warning('Tracker request: %s TLS failed', host)
+                    raise TrackerError('tls') from None
+                except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                    if _connect_failed(e):
+                        # v184: the connect failed (nothing sent): the next resolved address, if any
+                        logger.warning('Tracker request: %s connect to address %d of %d (IPv%d) failed (%s)', host, n + 1,
+                                       len(addresses), 6 if ':' in address else 4, cause_names(e))
+                        if n + 1 < len(addresses) and session is None and time.monotonic() < deadline:
+                            continue
+                        if isinstance(e, requests.exceptions.Timeout):
+                            raise TrackerError('timeout') from None
+                        raise TrackerError('network', message=NO_CONNECT) from None
+                    if isinstance(e, requests.exceptions.Timeout):
+                        raise TrackerError('timeout') from None
+                    if _no_response(e):
+                        logger.warning('Tracker request: %s %s closed without a response (%s)', host, cur_method, cause_names(e))
+                        raise TrackerError('network', message=NO_RESPONSE) from None
+                    logger.warning('Tracker request: %s %s connection failed (%s)', host, cur_method, cause_names(e))
+                    raise TrackerError('network') from None
+                except (requests.exceptions.InvalidURL, requests.exceptions.MissingSchema, requests.exceptions.InvalidSchema) as e:
+                    logger.warning('Tracker request: %s invalid request (%s)', host, cause_names(e))
+                    raise TrackerError('network') from None
+                except requests.exceptions.RequestException as e:
+                    logger.warning('Tracker request: %s %s failed (%s)', host, cur_method, cause_names(e))
+                    raise TrackerError('network') from None
+            if r is None:
+                raise TrackerError('network', message=NO_CONNECT)
             try:
                 loc = r.headers.get('Location') if r.status_code in (301, 302, 303, 307, 308) else None
                 if loc and follow_redirects:
@@ -582,8 +676,9 @@ def request(method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
                             raise TrackerError('timeout')
                 except requests.exceptions.Timeout:
                     raise TrackerError('timeout') from None
-                except requests.exceptions.RequestException:
-                    raise TrackerError('network') from None
+                except requests.exceptions.RequestException as e:
+                    logger.warning('Tracker request: %s body read failed after HTTP %s (%s)', host, r.status_code, cause_names(e))
+                    raise TrackerError('network', r.status_code, message=NO_RESPONSE) from None
                 return Response(r.status_code, {k: v for k, v in r.headers.items()}, bytes(body), cur_url)
             finally:
                 r.close()

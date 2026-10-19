@@ -33,7 +33,7 @@ def _mon(sid):
 
 # ------------------------------------------------------------------ options
 
-def test_imported_shows_are_monitored_future_and_search_adds_all(scanned, owner):  # noqa: F811
+def test_imported_shows_are_monitored_future_and_search_adds_future(scanned, owner):  # noqa: F811
     s = rows("SELECT monitored, monitor, monitor_new_seasons FROM series WHERE title = 'Severance'")[0]
     assert (s['monitored'], s['monitor'], s['monitor_new_seasons']) == (1, 'future', 1)
     sev = _mon(_sid('Severance'))
@@ -43,8 +43,12 @@ def test_imported_shows_are_monitored_future_and_search_adds_all(scanned, owner)
     assert all(sev[k] == int(air[k] is None or air[k] >= today) for k in sev)
     r = _req(owner, 'post', '/api/settings/tv/shows', {'tmdb_id': 6001})
     assert r.status_code == 201
-    m = _mon(r.get_json()['series_id'])
-    assert m[(0, 1)] == 0 and all(v == 1 for (s_, _), v in m.items() if s_ > 0)     # All, specials off
+    sid = r.get_json()['series_id']
+    m = _mon(sid)
+    assert rows('SELECT monitor FROM series WHERE id = ?', sid)[0]['monitor'] == 'future'   # v184: no monitor sent = Future
+    air = {(r_['season_number'], r_['episode_number']): r_['air_date'] for r_ in rows(
+        'SELECT season_number, episode_number, air_date FROM episodes WHERE series_id = ?', sid)}
+    assert m[(0, 1)] == 0 and all(v == int(air[k] is None or air[k] >= today) for k, v in m.items() if k[0] > 0)
 
 
 def test_add_takes_a_monitor_option_and_validates(scanned, owner):  # noqa: F811

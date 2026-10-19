@@ -291,6 +291,9 @@ def test_manual_search_route_needs_the_signed_in_owner_and_valid_body(env, owner
     u = f'/api/settings/tv/shows/{env.sid}/search'
     assert _req(owner, 'post', u, {'season': 2, 'episode_id': 1}).status_code == 400
     assert _req(owner, 'post', u, {}).status_code == 400
+    from app import tv_store
+    with tv_store.write() as c:                     # v184: a pack only for a season with no file yet
+        c.execute('DELETE FROM episode_file_links WHERE episode_id IN (SELECT id FROM episodes WHERE series_id = ? AND season_number = 2)', (env.sid,))
     r = _req(owner, 'post', u, {'season': 2})
     assert r.status_code == 200 and r.get_json()['picks'][0]['title'] == 'Severance.S02.1080p.WEB-DL-PACK'
     assert _req(owner, 'post', '/api/settings/tv/shows/999999/search', {'season': 1}).status_code == 404

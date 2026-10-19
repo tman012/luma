@@ -14,6 +14,11 @@ import {
 export const CAL_MAX_W = 720;
 /** v182: Settings > TV opens a card's show on its own series detail page (series id, episode id); without it,
  * the app's TV detail modal (ModalHostContext) as before. */
+/** v184 (PM): the week grid hides unmonitored episodes (the episode, its season or its show). A card's own
+ * bookmark hides it at once; a change made elsewhere arrives with the quiet poll, like a downloaded flip. */
+const HideContext = createContext<((id: number, hidden: boolean) => void) | null>(null);
+export const shown = (e: CalEpisode) => e.monitored !== false;
+
 export const OpenShowContext = createContext<((seriesId: number, episodeId?: number | null) => void) | null>(null);
 export const REFRESH_RELOAD_MS = 6000;
 export const POLL_MS = 60_000;
@@ -66,7 +71,7 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true }: 
   }, [week, key]);
   const loading = data?.key !== key && failed !== key;
   const end = addDays(week, 7);
-  const eps = data?.key === key ? data.cal.episodes.filter(e => e.air_date >= week && e.air_date < end) : [];
+  const eps = data?.key === key ? data.cal.episodes.filter(e => e.air_date >= week && e.air_date < end && shown(e)) : [];
 
   return (
     <div data-testid="tv-calendar" style={{ fontFamily: FONT, width: '100%', containerType: 'inline-size', containerName: 'tvcal' }}>
@@ -146,9 +151,15 @@ function Toolbar({ label, showToday, onPrev, onNext, onToday }: {
 }
 
 /** The week grid (default): 7 columns, Sunday first, one text-only glass card per episode with a 4px state edge. */
-export function WeekGrid({ eps, week, today }: { eps: CalEpisode[]; week: Day; today: Day }) {
+export function WeekGrid({ eps: all, week, today }: { eps: CalEpisode[]; week: Day; today: Day }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(week, i));
+  const [gone, setGone] = useState<Set<number>>(new Set());
+  // a new answer from the server is the truth again for what it lists as unmonitored
+  useEffect(() => { setGone(g => (g.size ? new Set([...g].filter(id => all.some(e => e.episode_id === id && shown(e)))) : g)); }, [all]);
+  const hide = (id: number, hidden: boolean) => setGone(g => { const n = new Set(g); if (hidden) n.add(id); else n.delete(id); return n; });
+  const eps = all.filter(e => shown(e) && !gone.has(e.episode_id));
   return (
+    <HideContext.Provider value={hide}>
     <div data-testid="tv-cal-grid" style={gridWrap}>
       {days.map(d => {
         const list = sortDay(eps.filter(e => e.air_date === d));
@@ -163,6 +174,7 @@ export function WeekGrid({ eps, week, today }: { eps: CalEpisode[]; week: Day; t
         );
       })}
     </div>
+    </HideContext.Provider>
   );
 }
 
@@ -195,10 +207,12 @@ function useOpenEpisode(e: CalEpisode) {
 /** v158a: the card's own monitored state (the bookmark flips it at once; the server answer wins). */
 function useMonitored(e: CalEpisode): [boolean, (on: boolean) => void] {
   const [mon, setMon] = useState(e.monitored !== false);
+  const hide = useContext(HideContext);
   useEffect(() => { setMon(e.monitored !== false); }, [e.monitored, e.episode_id]);
   const flip = (on: boolean) => {
     setMon(on);
-    void setEpisodeMonitored(e.episode_id, on).then(r => { if (!r.ok) setMon(!on); });
+    if (!on) hide?.(e.episode_id, true);           // v184: unmonitored cards leave the week grid at once
+    void setEpisodeMonitored(e.episode_id, on).then(r => { if (!r.ok) { setMon(!on); if (!on) hide?.(e.episode_id, false); } });
   };
   return [mon, flip];
 }

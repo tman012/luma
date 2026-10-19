@@ -6,14 +6,15 @@
  * no checkmarks), monitor switch, Search and Interactive search, and the v181 episode checkboxes.
  * Search and Interactive search are the owner's own: their grabs may go past the 24 h floor; an episode that
  * has a file is still refused, and monitor switches never search. */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { Poster } from './TvImport';
 import { EditSeriesModal, Modal, glassBtn, primaryBtn } from './TvEdit';
 import { MonitorFlag, monitorFlagCss } from './TvMonitorFlag';
-import { Check, seasonName } from './TvBulk';
+import { useMonitorSearch } from './TvMonitorSearch';
+import { seasonName } from './TvBulk';
 import {
-  getDetail, grabRelease, interactiveSearch, searchOutcome, searchShow, setEpisodeMonitored, setEpisodesMonitored,
+  getDetail, grabRelease, interactiveSearch, searchOutcome, searchShow, setEpisodeMonitored,
   setSeasonMonitored, setSeriesMonitored,
   type DetailEpisode, type DetailState, type DetailView, type InteractiveResult, type Release, type SearchTarget,
 } from './tvCalendarApi';
@@ -67,25 +68,27 @@ export function bytes(n: number | null | undefined): string {
 export const sentence = (s?: string | null) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '');
 export const code = (s: number, e: number) => `S${String(s).padStart(2, '0')}E${String(e).padStart(2, '0')}`;
 
+/** v184 (Taylor): the page's content width, centered */
+export const DETAIL_MAX = 1200;
+
 export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, say }: {
   seriesId: number; episodeId?: number | null; wide: boolean; onBack: () => void; onChanged?: () => void; say: (msg: string) => void;
 }) {
   const [view, setView] = useState<DetailView | null>(null);
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState<Set<number> | null>(null);
-  const [picked, setPicked] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState(false);
   const [interactive, setInteractive] = useState<{ target: SearchTarget; label: string } | null>(null);
-  const [bulkBusy, setBulkBusy] = useState(false);
   const live = useRef(true);
   useEffect(() => () => { live.current = false; }, []);
+  const [onSearch, searchAsk] = useMonitorSearch(say);
 
   const load = useCallback(() => getDetail(seriesId).then(r => {
     if (!live.current) return;
     if (r.ok) { setView(r.data); setFailed(false); } else setFailed(true);
   }), [seriesId]);
-  useEffect(() => { setView(null); setOpen(null); setPicked(new Set()); void load(); }, [load]);
+  useEffect(() => { setView(null); setOpen(null); void load(); }, [load]);
   // the newest season starts open (or the season of the episode the page was opened at); derived in the
   // render, so the first paint with the data already has it open
   const startOpen = (v: DetailView): Set<number> => {
@@ -108,29 +111,20 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   const monitorShow = async (on: boolean) => {
     setView(v => (v ? { ...v, monitored: on } : v));
     const r = await setSeriesMonitored(seriesId, on);
-    if (!r.ok) say(r.error);
+    if (!r.ok) say(r.error); else onSearch(seriesId, null, r.data.search);
     changed();
   };
   const monitorSeason = async (n: number, on: boolean) => {
     setView(v => (v ? { ...v, seasons: v.seasons.map(s => (s.season === n ? { ...s, monitored: on } : s)),
       episodes: v.episodes.map(e => (e.season === n ? { ...e, monitored: on } : e)) } : v));
     const r = await setSeasonMonitored(seriesId, n, on);
-    if (!r.ok) say(r.error);
+    if (!r.ok) say(r.error); else onSearch(seriesId, n, r.data.search);
     changed();
   };
   const monitorEpisode = async (id: number, on: boolean) => {
     setView(v => (v ? { ...v, episodes: v.episodes.map(e => (e.id === id ? { ...e, monitored: on } : e)) } : v));
     const r = await setEpisodeMonitored(id, on);
-    if (!r.ok) say(r.error);
-    changed();
-  };
-  const monitorPicked = async (on: boolean) => {
-    if (!picked.size || bulkBusy) return;
-    setBulkBusy(true);
-    const r = await setEpisodesMonitored(seriesId, [...picked], on);
-    setBulkBusy(false);
-    if (!r.ok) { say(r.error); return; }
-    setPicked(new Set());
+    if (!r.ok) say(r.error); else onSearch(seriesId, null, r.data.search);
     changed();
   };
   const search = async (target: SearchTarget, label: string) => {
@@ -155,9 +149,9 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
     ['Size', bytes(view.size), 'size'],
     ['Episodes', `${view.have} of ${view.total}`, 'episodes'],
   ];
-  const allState = picked.size === 0 ? false : picked.size === eps.length ? true : 'mixed';
   return (
-    <div data-testid="tv-detail" data-series-id={view.id} style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, paddingBottom: picked.size ? 88 : 0 }}>
+    <div data-testid="tv-detail" data-series-id={view.id}
+      style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, width: '100%', maxWidth: DETAIL_MAX, margin: '0 auto', boxSizing: 'border-box' }}>
       <style>{detailCss + monitorFlagCss}</style>
       <button type="button" className="lp-focus tvd-back" data-testid="tv-detail-back" onClick={onBack}
         style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 8px 0 4px', border: 'none',
@@ -169,13 +163,18 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
       <section data-testid="tv-detail-header" aria-label={view.title}
         style={{ display: 'grid', gridTemplateColumns: wide ? '128px minmax(0, 1fr)' : '88px minmax(0, 1fr)', columnGap: wide ? 24 : 16, rowGap: 16,
           padding: wide ? 20 : 16, borderRadius: 16, background: GLASS, border: '1px solid rgba(255,255,255,0.08)' }}>
-        <Poster path={view.poster_path} w={wide ? 128 : 88} h={wide ? 192 : 132} tmdbLogo />
+        <div data-testid="tv-detail-poster" style={{ position: 'relative', width: wide ? 128 : 88, height: wide ? 192 : 132 }}>
+          <Poster path={view.poster_path} w={wide ? 128 : 88} h={wide ? 192 : 132} tmdbLogo />
+          {/* v184 (Taylor): the show's bookmark sits on the poster's top-left corner, Sonarr style */}
+          <MonitorFlag on={view.monitored} title={view.title} testid="tv-detail-monitored" size={wide ? 40 : 32}
+            onChange={on => void monitorShow(on)} style={{ position: 'absolute', top: 6, left: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }} />
+        </div>
         <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <h2 data-testid="tv-detail-title" style={{ margin: 0, flex: 1, minWidth: 0, fontSize: wide ? 24 : 20, lineHeight: wide ? '30px' : '26px', fontWeight: 700, color: W95, overflowWrap: 'anywhere' }}>
               {view.title}
             </h2>
-            {wide && <HeaderActions view={view} onMonitor={on => void monitorShow(on)} onEdit={() => setEditing(true)} />}
+            {wide && <HeaderActions onEdit={() => setEditing(true)} />}
           </div>
           {meta.length > 0 && <div data-testid="tv-detail-meta" style={{ fontSize: 14, color: W70 }}>{meta.join(' \u00b7 ')}</div>}
           {wide && <Facts facts={facts} wide />}
@@ -183,28 +182,20 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
         {!wide && (
           <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 12 }}>
             <Facts facts={facts} wide={false} />
-            <HeaderActions view={view} onMonitor={on => void monitorShow(on)} onEdit={() => setEditing(true)} />
+            <HeaderActions onEdit={() => setEditing(true)} />
           </div>
         )}
       </section>
 
-      <div data-testid="tv-detail-toolbar" style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 36, padding: '0 4px' }}>
-        <Check state={allState} label="Select all episodes" testid="tv-detail-select-all"
-          onChange={on => setPicked(on ? new Set(eps.map(e => e.id)) : new Set())} />
-        <span data-testid="tv-detail-count" style={{ fontSize: 13, fontWeight: 600, color: W50 }}>{`${picked.size} selected`}</span>
-      </div>
-
       {view.seasons.map(s => {
         const list = eps.filter(e => e.season === s.season).sort((a, b) => b.episode - a.episode);
         const isOpen = !!opened?.has(s.season);
-        const on = list.filter(e => picked.has(e.id)).length;
         const label = seasonName(s.season);
         return (
           <section key={s.season} data-testid="tv-detail-season" data-season={s.season} data-open={isOpen || undefined}
             style={{ borderRadius: 16, border: '1px solid rgba(255,255,255,0.08)', background: GLASS, overflow: 'hidden' }}>
             <div className="tvd-season-head" style={{ display: 'flex', alignItems: 'center', gap: wide ? 12 : 8, minHeight: 56, padding: wide ? '0 12px 0 16px' : '0 8px 0 12px' }}>
-              <Check state={on === 0 ? false : on === list.length ? true : 'mixed'} label={`Select ${label}`} testid="tv-detail-season-check"
-                onChange={v => setPicked(p => { const n = new Set(p); list.forEach(e => (v ? n.add(e.id) : n.delete(e.id))); return n; })} />
+              <MonitorFlag on={s.monitored} title={label} testid="tv-detail-season-monitored" onChange={v => void monitorSeason(s.season, v)} />
               <button type="button" className="lp-focus" data-testid="tv-detail-season-toggle" aria-expanded={isOpen}
                 onClick={() => setOpen(o => { const n = new Set(o || opened || []); if (n.has(s.season)) n.delete(s.season); else n.add(s.season); return n; })}
                 style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, height: 44, padding: 0, border: 'none', background: 'none',
@@ -217,7 +208,6 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
                 </span>
                 {wide && s.size > 0 && <span style={{ fontSize: 12, color: W50, whiteSpace: 'nowrap' }}>{bytes(s.size)}</span>}
               </button>
-              <MonitorFlag on={s.monitored} title={label} testid="tv-detail-season-monitored" onChange={v => void monitorSeason(s.season, v)} />
               <IconBtn kind="search" label={`Search ${label}`} busy={busy.has(`s${s.season}`)} testid="tv-detail-season-search"
                 onClick={() => void search({ season: s.season }, label)} />
               <IconBtn kind="interactive" label={`Interactive search ${label}`} testid="tv-detail-season-interactive"
@@ -226,9 +216,8 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
             {isOpen && (
               <div role="list" aria-label={label}>
                 {list.map(e => (
-                  <EpisodeRow key={e.id} e={e} wide={wide} picked={picked.has(e.id)} focus={e.id === episodeId}
+                  <EpisodeRow key={e.id} e={e} wide={wide} focus={e.id === episodeId}
                     busy={busy.has(`e${e.id}`)}
-                    onPick={v => setPicked(p => { const n = new Set(p); if (v) n.add(e.id); else n.delete(e.id); return n; })}
                     onMonitor={v => void monitorEpisode(e.id, v)}
                     onSearch={() => void search({ episode_id: e.id }, code(e.season, e.episode))}
                     onInteractive={() => setInteractive({ target: { episode_id: e.id }, label: `${view.title} \u00b7 ${code(e.season, e.episode)}` })} />
@@ -240,10 +229,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
         );
       })}
 
-      {picked.size > 0 && (
-        <EpisodeBar n={picked.size} busy={bulkBusy} wide={wide} onClear={() => setPicked(new Set())}
-          onMonitor={on => void monitorPicked(on)} />
-      )}
+      {searchAsk}
       {editing && (
         <EditSeriesModal seriesId={view.id} title={view.title} onClose={() => setEditing(false)}
           onSaved={() => changed()} onDeleted={() => { onChanged?.(); onBack(); }} />
@@ -256,10 +242,9 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   );
 }
 
-function HeaderActions({ view, onMonitor, onEdit }: { view: DetailView; onMonitor: (on: boolean) => void; onEdit: () => void }) {
+function HeaderActions({ onEdit }: { onEdit: () => void }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 'none' }}>
-      <MonitorFlag on={view.monitored} title={view.title} testid="tv-detail-monitored" onChange={onMonitor} />
       <button type="button" className="lp-focus tve-glass" data-testid="tv-detail-edit" onClick={onEdit} style={{ ...glassBtn, height: 36 }}>Edit</button>
     </div>
   );
@@ -301,9 +286,9 @@ function IconBtn({ kind, label, onClick, busy = false, testid }: {
   );
 }
 
-function EpisodeRow({ e, wide, picked, focus, busy, onPick, onMonitor, onSearch, onInteractive }: {
-  e: DetailEpisode; wide: boolean; picked: boolean; focus: boolean; busy: boolean;
-  onPick: (on: boolean) => void; onMonitor: (on: boolean) => void; onSearch: () => void; onInteractive: () => void;
+function EpisodeRow({ e, wide, focus, busy, onMonitor, onSearch, onInteractive }: {
+  e: DetailEpisode; wide: boolean; focus: boolean; busy: boolean;
+  onMonitor: (on: boolean) => void; onSearch: () => void; onInteractive: () => void;
 }) {
   const air = airET(e);
   const word = DETAIL_STATE_WORD[e.state];
@@ -316,10 +301,10 @@ function EpisodeRow({ e, wide, picked, focus, busy, onPick, onMonitor, onSearch,
       data-monitored={e.monitored ? 'true' : 'false'} data-focus={focus || undefined}
       style={{ position: 'relative', display: 'grid', alignItems: 'center', columnGap: wide ? 12 : 8, minHeight: wide ? 52 : 64, borderTop: LINE,
         padding: wide ? '0 12px 0 16px' : '8px 8px 8px 12px', boxSizing: 'border-box',
-        gridTemplateColumns: wide ? '20px 32px minmax(0, 1fr) 190px 100px 40px 36px 36px' : '20px 24px minmax(0, 1fr) 40px 36px 36px',
-        background: picked ? 'rgba(59,130,246,0.10)' : focus ? 'rgba(255,255,255,0.05)' : undefined }}>
+        gridTemplateColumns: wide ? '28px 32px minmax(0, 1fr) 190px 100px 36px 36px' : '28px 24px minmax(0, 1fr) 36px 36px',
+        background: focus ? 'rgba(255,255,255,0.05)' : undefined }}>
       <span data-testid="tv-detail-edge" aria-hidden="true" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: EDGE_W, background: color }} />
-      <Check state={picked} label={`Select ${tag}`} testid="tv-detail-check" onChange={onPick} />
+      <MonitorFlag on={e.monitored} title={tag} testid="tv-detail-episode-monitored" onChange={onMonitor} />
       <span style={{ fontSize: 13, color: W50, fontVariantNumeric: 'tabular-nums', opacity: dim }}>{e.episode}</span>
       <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, opacity: dim }}>
         <span data-testid="tv-detail-episode-title" style={{ fontSize: 14, fontWeight: 500, color: W95, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
@@ -333,46 +318,11 @@ function EpisodeRow({ e, wide, picked, focus, busy, onPick, onMonitor, onSearch,
       </span>
       {wide && <span data-testid="tv-detail-air" style={{ fontSize: 13, color: W70, opacity: dim, whiteSpace: 'nowrap' }}>{air}</span>}
       {wide && <span data-testid="tv-detail-status" style={{ fontSize: 13, fontWeight: 600, color, opacity: dim, whiteSpace: 'nowrap' }}>{word}</span>}
-      <MonitorFlag on={e.monitored} title={tag} testid="tv-detail-episode-monitored" onChange={onMonitor} />
       <IconBtn kind="search" label={`Search ${tag}`} busy={busy} onClick={onSearch} testid="tv-detail-episode-search" />
       <IconBtn kind="interactive" label={`Interactive search ${tag}`} onClick={onInteractive} testid="tv-detail-episode-interactive" />
     </div>
   );
 }
-
-function EpisodeBar({ n, busy, wide, onClear, onMonitor }: {
-  n: number; busy: boolean; wide: boolean; onClear: () => void; onMonitor: (on: boolean) => void;
-}) {
-  const slot = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState({ left: 0, width: 0 });
-  useLayoutEffect(() => {
-    const place = () => {
-      const r = slot.current?.getBoundingClientRect();
-      if (r) setBox(b => (b.left === r.left && b.width === r.width ? b : { left: r.left, width: r.width }));
-    };
-    place();
-    window.addEventListener('resize', place);
-    return () => window.removeEventListener('resize', place);
-  }, []);
-  return (
-    <div ref={slot} style={{ height: 0 }}>
-      <div data-testid="tv-detail-bar" role="region" aria-label="Selected episodes"
-        style={{ position: 'fixed', bottom: wide ? 16 : 12, left: box.left, width: box.width || undefined, zIndex: 20, boxSizing: 'border-box',
-          display: 'flex', alignItems: 'center', gap: wide ? 12 : 8, padding: wide ? '12px 16px' : '10px 12px', borderRadius: 16, fontFamily: FONT,
-          background: 'rgba(21,16,42,0.94)', border: '1px solid rgba(255,255,255,0.10)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
-          boxShadow: '0 16px 48px rgba(0,0,0,0.5)' }}>
-        <span data-testid="tv-detail-bar-count" style={{ fontSize: 14, fontWeight: 600, color: W95, flex: 1, whiteSpace: 'nowrap' }}>{`${n} selected`}</span>
-        <button type="button" className="lp-focus tve-glass" data-testid="tv-detail-bar-clear" onClick={onClear} style={{ ...glassBtn, padding: wide ? undefined : '0 12px' }}>Clear</button>
-        <button type="button" className="lp-focus tve-glass" data-testid="tv-detail-bar-unmonitor" disabled={busy} onClick={() => onMonitor(false)}
-          style={{ ...glassBtn, padding: wide ? undefined : '0 12px', opacity: busy ? 0.4 : 1 }}>Unmonitor</button>
-        <button type="button" className="lp-focus tve-primary" data-testid="tv-detail-bar-monitor" disabled={busy} onClick={() => onMonitor(true)}
-          style={{ ...primaryBtn(!busy), padding: wide ? undefined : '0 12px' }}>Monitor</button>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- interactive search
 
 type GrabState = { busy?: boolean; done?: boolean; error?: string };
 

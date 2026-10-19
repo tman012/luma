@@ -192,6 +192,9 @@ def _download_headers(cfg: Dict[str, Any]) -> Dict[str, str]:
     if cfg.get('type') == 'iptorrents':
         from app.tracker_clients import iptorrents_download_headers
         return {k: v for k, v in iptorrents_download_headers(cfg).items() if v}
+    if (tt.get_type(str(cfg.get('type') or '')) or {}).get('family') == 'avistaz':
+        from app.tracker_clients import _avz_headers                  # v184: not the bare 'Luma' UA (Cloudflare)
+        return {'User-Agent': _avz_headers(cfg)['User-Agent']}
     return {}
 
 

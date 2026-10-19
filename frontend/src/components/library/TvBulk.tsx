@@ -13,6 +13,7 @@ import {
 } from './tvCalendarApi';
 import type { Show } from './tvLibraryApi';
 import { MonitorFlag, monitorFlagCss } from './TvMonitorFlag';
+import { useMonitorSearch } from './TvMonitorSearch';
 
 const W50 = 'rgba(255,255,255,0.5)';
 const W70 = 'rgba(255,255,255,0.7)';
@@ -60,6 +61,7 @@ export function SeriesList({ shows, profiles, picked, setPicked, onOpen, onMonit
   // the bookmark flips at once; the server's answer wins (a failure flips it back)
   const [flips, setFlips] = useState<Record<number, boolean>>({});
   const [saving, setSaving] = useState<Set<number>>(new Set());
+  const [onSearch, searchAsk] = useMonitorSearch();
   useEffect(() => { setFlips({}); }, [shows]);
   const flip = async (id: number, on: boolean) => {
     setFlips(f => ({ ...f, [id]: on }));
@@ -68,11 +70,13 @@ export function SeriesList({ shows, profiles, picked, setPicked, onOpen, onMonit
     setSaving(x => { const n = new Set(x); n.delete(id); return n; });
     if (!r.ok) { setFlips(f => ({ ...f, [id]: !on })); return; }
     setFlips(f => ({ ...f, [id]: r.data.monitored }));
+    onSearch(id, null, r.data.search);
     onMonitored?.();
   };
   const toggle = (id: number, on: boolean) => { const n = new Set(picked); if (on) n.add(id); else n.delete(id); setPicked(n); };
   return (
     <div data-testid="tv-series-list" role="table" aria-label="Shows" style={{ ...listCard, fontFamily: FONT }}>
+      {searchAsk}
       <style>{bulkCss + monitorFlagCss}</style>
       <div role="row" style={{ ...rowGrid, minHeight: 44, borderBottom: LINE }}>
         <span role="columnheader" style={cellCenter}>

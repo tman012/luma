@@ -1654,6 +1654,11 @@ def _csrf_api_guard():
     if g.current_user.get('id') == 0 and request.headers.get("X-API-Key"):
         return None
     
+    # v184 (Tester): a browser that says the request is cross-site (or same-site, another origin) is refused
+    # even when Origin/Referer claim this server (the two can't both be true).
+    if request.headers.get('Sec-Fetch-Site', '').lower() in ('cross-site', 'same-site'):
+        return jsonify({"error": "Cross-site request refused"}), 403
+
     origin = request.headers.get('Origin')
     referer = request.headers.get('Referer')
     
@@ -1677,6 +1682,32 @@ def _csrf_api_guard():
         return jsonify({"error": "CSRF validation failed: missing Origin/Referer"}), 403
     
     return None
+TV_JSON_MAX = 1 << 20   # 1 MiB; a TV settings body is a few hundred bytes
+
+
+@app.before_request
+def _tv_json_body_guard():
+    """v184 (Tester): junk, too deeply nested or oversized JSON on a TV write route is a 400, never a 5xx.
+    The body is parsed once here (Flask caches it for the route)."""
+    p = request.path
+    if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE') or not (p.startswith('/api/settings/tv') or p.startswith('/api/tv/')):
+        return None
+    if (request.content_length or 0) > TV_JSON_MAX:
+        return jsonify({'error': 'Request too large'}), 400
+    raw = request.get_data(cache=True)
+    if len(raw) > TV_JSON_MAX:
+        return jsonify({'error': 'Request too large'}), 400
+    if not raw.strip():
+        return None
+    try:
+        request.get_json(force=True, silent=False)
+    except RecursionError:
+        return jsonify({'error': 'Invalid JSON'}), 400
+    except Exception:
+        return jsonify({'error': 'Invalid JSON'}), 400
+    return None
+
+
 def _serve_spa():
     """Serve the React SPA index.html (from SPA_DIR) with runtime URL base injection."""
     spa_index = os.path.join(app.config['SPA_DIR'], 'index.html')
@@ -9696,6 +9727,10 @@ def _send_account_request_notification(user_id: int, name: str, email: str = Non
         }
     }
 
+    from app import instance as _instance
+    if not _instance.writes_allowed('telegram'):     # v184: the test write guard (opt in with LUMA_TEST_ALLOW=telegram)
+        logger.warning('Instance test: blocked a Telegram send (telegram is off on the test instance)')
+        return
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     try:
         req = _urllib_req.Request(
@@ -10212,6 +10247,10 @@ def _send_plex_access_request_notification(user_id: int, name: str, email: str =
         }
     }
 
+    from app import instance as _instance
+    if not _instance.writes_allowed('telegram'):     # v184: the test write guard (opt in with LUMA_TEST_ALLOW=telegram)
+        logger.warning('Instance test: blocked a Telegram send (telegram is off on the test instance)')
+        return
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     try:
         req = _urllib_req.Request(

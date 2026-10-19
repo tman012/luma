@@ -454,6 +454,17 @@ def clear_avistaz_tokens() -> None:
         _avz_tokens.clear()
 
 
+# v184: the AvistaZ sites sit behind Cloudflare, which refuses the bare 'Luma' User-Agent on their API
+# paths (PrivateHD's sign-in POST never got an HTTP answer while GET / worked). A standard app
+# User-Agent (name/version and platform, as Prowlarr sends), or the owner's own when set.
+AVZ_UA = 'Luma/1.0 (Linux x86_64; TV and movie automation)'
+
+
+def _avz_headers(cfg, **extra) -> Dict[str, str]:
+    ua = str(cfg.get('user_agent') or '').strip()
+    return {'User-Agent': ua if ua and '\n' not in ua and '\r' not in ua else AVZ_UA, 'Accept': 'application/json', **extra}
+
+
 # Pause between an AvistaZ sign-in and the request that follows it, so a
 # Test or search never sends two requests closer than the guard's spacing.
 AVZ_LOGIN_GAP_S = 2.0
@@ -480,7 +491,7 @@ def _avz_login(cfg, request: Request, key: str, now: float) -> str:
     resp = request('POST', f'{_base(cfg)}/api/v1/jackett/auth',
                    data={'username': cfg.get('username', ''), 'password': cfg.get('password', ''),
                          'pid': cfg.get('pid', '')},
-                   headers={'Accept': 'application/json'})
+                   headers=_avz_headers(cfg))
     if resp.status in (401, 403, 422):
         raise TrackerError('banned' if looks_banned(resp.text()) else 'auth', resp.status)
     raise_for_status(resp)
@@ -529,7 +540,7 @@ def _avz_get(cfg, request: Request, params: Dict[str, Any]):
     resp = None
     for attempt in (0, 1):
         token = _avz_token(cfg, request, force=attempt == 1)
-        resp = request('GET', url, headers={'Authorization': f'Bearer {token}', 'Accept': 'application/json'})
+        resp = request('GET', url, headers=_avz_headers(cfg, Authorization=f'Bearer {token}'))
         if resp.status != 401:
             break
     return resp

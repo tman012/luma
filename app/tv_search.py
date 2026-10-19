@@ -287,7 +287,8 @@ def _queries(show: Dict[str, Any], want: List[Dict[str, Any]]) -> List[Tuple[str
 
 def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin: str = 'auto',
                 purpose: Optional[str] = None, interactive: bool = False, now: Optional[float] = None,
-                do_grab: bool = True) -> Dict[str, Any]:
+                do_grab: bool = True, queries: Optional[List[Tuple[str, str]]] = None,
+                packs: Optional[bool] = None) -> Dict[str, Any]:
     """Search the show's wanted episodes (or *episode_ids* of them); grab the picks when allowed.
     {'ok', 'searched', 'results', 'picks': [{title, quality, episodes, grabbed, error}], 'statuses', 'error'}."""
     now = time.time() if now is None else now
@@ -309,7 +310,7 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
         return out
     items: List[Dict[str, Any]] = []
     answered = False
-    for p, q in _queries(show, want):
+    for p, q in (queries if queries is not None else _queries(show, want)):
         got, st = query_trackers(q, purpose or p, sid, interactive, now, cfgs)
         out['searched'] += 1
         out['statuses'] += st
@@ -317,7 +318,10 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
         items += got
     out['results'] = len(items)
     out['answered'] = answered
-    picks = choose(candidates(items, show, want, blocked))
+    cands = candidates(items, show, want, blocked)
+    if packs is not None:                    # v184: the monitor search asks for season packs only, or never
+        cands = [c for c in cands if c['pack'] == packs]
+    picks = choose(cands)
     for c in picks:
         it = c['item']
         row = {'title': it['title'], 'quality': it.get('quality'), 'episodes': sorted(c['covers']),
@@ -347,7 +351,16 @@ def _after(sid: int, want: List[Dict[str, Any]], out: Dict[str, Any], now: float
 
 def manual(sid: int, season: Optional[int] = None, episode_id: Optional[int] = None,
            now: Optional[float] = None) -> Dict[str, Any]:
-    """The owner's Search for an episode or a season (interactive budget); grabs what it picks."""
+    """The owner's Search for an episode or a season (interactive budget); grabs what it picks. A season
+    uses the monitor search's rule (v184): a season pack first (never when an episode of the season
+    already has a file), else each missing aired episode on its own, spaced."""
+    if season is not None:
+        with tv_store.connect() as conn:
+            if not conn.execute('SELECT 1 FROM episodes WHERE series_id = ? AND season_number = ?', (sid, season)).fetchone():
+                return {'ok': False, 'error': 'Not found'}
+        out = run_plan(sid, plan(sid, season=season, monitored_only=False), now=now, sync=True)
+        out['grabs_allowed'] = tv_grab.allowed()
+        return out
     with tv_store.connect() as conn:
         if season is not None:
             ids = [r['id'] for r in conn.execute('SELECT id FROM episodes WHERE series_id = ? AND season_number = ?',
@@ -359,6 +372,185 @@ def manual(sid: int, season: Optional[int] = None, episode_id: Optional[int] = N
     out = search_show(sid, ids, origin='manual', purpose='manual', interactive=True, now=now)
     out['grabs_allowed'] = tv_grab.allowed()
     return out
+
+
+
+# ------------------------------------------------------------------ v184 (Taylor): monitoring searches
+# Turning a bookmark ON (the owner's session) searches what it monitors that has aired and has no file:
+# an episode at once; a season pack first (skipped when an episode of that season already has a file),
+# else each missing aired episode on its own; a show applies its Monitor option, then the same per
+# season. All are manual grabs (past the 24h floor, not the 30/day cap; files and upgrades refused).
+# Queries are spaced: a burst of MS_BURST, then one per MS_REFILL_S (40/h), on one worker thread. A
+# click that would queue more than CONFIRM_OVER episode searches asks first and searches nothing.
+# The bulk editor, Edit's Monitor option and every unmonitor never search.
+
+MS_BURST = 5
+MS_REFILL_S = 90.0
+CONFIRM_OVER = 25
+_ms_lock = threading.Lock()
+_ms_bucket = [float(MS_BURST), 0.0]          # tokens, last refill
+_ms_queue: List[Tuple[int, int, str, List[int]]] = []   # (sid, season, kind 'pack'|'episode', ids)
+_ms_worker: List[threading.Thread] = []
+
+
+def plan(sid: int, season: Optional[int] = None, episode_id: Optional[int] = None,
+         monitored_only: bool = True) -> List[Dict[str, Any]]:
+    """[{season, ids (missing aired episodes to search), pack (a season pack may be tried)}], per season."""
+    today = dt.date.today().isoformat()
+    with tv_store.connect() as conn:
+        eps = _episodes(conn, sid)
+        mon = {r['id']: bool(r['monitored']) for r in conn.execute('SELECT id, monitored FROM episodes WHERE series_id = ?', (sid,))}
+        smon = conn.execute('SELECT monitored FROM series WHERE id = ?', (sid,)).fetchone()
+        got = _grabbed(conn, sid)
+    if smon is None:
+        return []
+    out = []
+    for n in sorted({e['season_number'] for e in eps}):
+        if season is not None and n != season:
+            continue
+        mine = [e for e in eps if e['season_number'] == n]
+        ids = [e['id'] for e in sorted(mine, key=lambda e: e['episode_number'])
+               if (episode_id is None or e['id'] == episode_id) and not e['has_file'] and e['id'] not in got
+               and e['air_date'] and e['air_date'] <= today and (not monitored_only or (mon.get(e['id']) and smon['monitored']))]
+        if ids:
+            out.append({'season': n, 'ids': ids, 'pack': episode_id is None and n > 0 and len(ids) >= 2
+                        and not any(e['has_file'] for e in mine)})
+    return out
+
+
+def plan_count(p: List[Dict[str, Any]]) -> int:
+    return sum(len(x['ids']) for x in p)
+
+
+def _token(now: float) -> float:
+    """0 when a query may go now (one token taken), else seconds to wait."""
+    with _ms_lock:
+        b = _ms_bucket
+        if MS_REFILL_S <= 0:
+            return 0.0
+        b[0] = min(float(MS_BURST), b[0] + max(0.0, now - b[1]) / MS_REFILL_S)
+        b[1] = now
+        if b[0] >= 1:
+            b[0] -= 1
+            return 0.0
+        return (1 - b[0]) * MS_REFILL_S
+
+
+def _one(sid: int, season: int, kind: str, ids: List[int], now: Optional[float] = None) -> Dict[str, Any]:
+    with tv_store.connect() as conn:
+        show = _show(conn, sid)
+        live = {e['id'] for e in wanted(conn, sid, ids=ids)} if show else set()
+    ids = [i for i in ids if i in live]        # files, grabs or an unmonitor since the click: not searched
+    if not show or not ids:
+        return {'ok': True, 'searched': 0, 'results': 0, 'picks': [], 'statuses': [], 'error': None, 'wanted': 0}
+    if kind == 'pack':
+        q = [('season', f"{show['title']} S{season:02d}")]
+        return search_show(sid, ids, origin='manual', purpose='manual', interactive=True, now=now, queries=q, packs=True)
+    return search_show(sid, ids, origin='manual', purpose='manual', interactive=True, now=now, packs=False)
+
+
+def _merge(out: Dict[str, Any], r: Dict[str, Any]) -> None:
+    out['searched'] += r.get('searched', 0)
+    out['results'] += r.get('results', 0)
+    out['picks'] += r.get('picks', [])
+    out['statuses'] += r.get('statuses', [])
+    out['answered'] = out.get('answered', False) or bool(r.get('answered'))
+    if r.get('error') and not out['error']:
+        out['error'] = r['error']
+        out['ok'] = bool(r.get('ok', True)) and out['ok']
+
+
+def _season_jobs(sid: int, step: Dict[str, Any]) -> List[Tuple[int, int, str, List[int]]]:
+    if step['pack']:
+        return [(sid, step['season'], 'pack', list(step['ids']))]
+    return [(sid, step['season'], 'episode', [i]) for i in step['ids']]
+
+
+def _run_job(job, out: Dict[str, Any], now: Optional[float] = None) -> None:
+    sid, season, kind, ids = job
+    r = _one(sid, season, kind, ids, now)
+    _merge(out, r)
+    if kind == 'pack' and not r.get('picks'):
+        # no acceptable pack: each missing aired episode on its own (queued, spaced)
+        with _ms_lock:
+            _ms_queue[:0] = [(sid, season, 'episode', [i]) for i in ids]
+
+
+def run_plan(sid: int, p: List[Dict[str, Any]], now: Optional[float] = None, sync: bool = False) -> Dict[str, Any]:
+    """Queue the plan's searches. *sync* (the Search button): run what the bucket allows now and say what
+    was queued; otherwise everything runs on the worker. Returns the sync part's outcome."""
+    out: Dict[str, Any] = {'ok': True, 'searched': 0, 'results': 0, 'picks': [], 'statuses': [], 'error': None,
+                           'wanted': plan_count(p), 'queued': 0}
+    if not p:
+        return out
+    if not trackers():
+        out.update(ok=False, error=NO_TRACKERS)
+        return out
+    jobs = [j for step in p for j in _season_jobs(sid, step)]
+    with _ms_lock:
+        _ms_queue.extend(jobs)
+    if sync:
+        while True:
+            with _ms_lock:
+                if not _ms_queue or _ms_queue[0][0] != sid:
+                    break
+            if _token(time.time()) > 0:
+                break
+            with _ms_lock:
+                job = _ms_queue.pop(0) if _ms_queue else None
+            if job is None:
+                break
+            _run_job(job, out, now)
+    with _ms_lock:
+        out['queued'] = sum(len(j[3]) for j in _ms_queue if j[0] == sid)
+    _spawn()
+    return out
+
+
+def drain(max_jobs: int = 1000) -> int:
+    """Run queued monitor searches as the bucket allows (the worker; tests call it directly)."""
+    n = 0
+    while n < max_jobs:
+        with _ms_lock:
+            if not _ms_queue:
+                return n
+        wait = _token(time.time())
+        if wait > 0:
+            time.sleep(min(wait, MS_REFILL_S))
+            continue
+        with _ms_lock:
+            job = _ms_queue.pop(0) if _ms_queue else None
+        if job is None:
+            return n
+        try:
+            _run_job(job, {'ok': True, 'searched': 0, 'results': 0, 'picks': [], 'statuses': [], 'error': None})
+        except Exception:                        # noqa: BLE001 - one search's trouble never stops the queue
+            logger.exception('TV monitor search failed')
+        n += 1
+    return n
+
+
+def _spawn() -> None:
+    with _ms_lock:
+        if not _ms_queue or (_ms_worker and _ms_worker[0].is_alive()):
+            return
+        t = threading.Thread(target=drain, name='tv-monitor-search', daemon=True)
+        _ms_worker[:] = [t]
+    t.start()
+
+
+def monitor_search(sid: int, season: Optional[int] = None, episode_id: Optional[int] = None,
+                   confirm: bool = False) -> Dict[str, Any]:
+    """After a bookmark turned ON: {'started': n} (queued on the worker), {'confirm': n} (more than
+    CONFIRM_OVER: nothing searched until the owner confirms), or {'started': 0}."""
+    p = plan(sid, season=season, episode_id=episode_id)
+    n = plan_count(p)
+    if n > CONFIRM_OVER and not confirm:
+        return {'confirm': n}
+    if n:
+        run_plan(sid, p)
+    logger.info('TV monitor search: show %s season %s episode %s: %d episode(s)', sid, season, episode_id, n)
+    return {'started': n}
 
 
 # ------------------------------------------------------------------ v182: interactive search

@@ -662,6 +662,39 @@ RENAME_NOREPLACE = 1
 _renameat2 = None
 
 
+def _rename2(dfd: int, old: str, new: str) -> Optional[bool]:
+    """renameat2(RENAME_NOREPLACE) inside one folder: True renamed, False *new* exists, None when the
+    kernel or filesystem lacks it (the caller falls back)."""
+    global _renameat2
+    if _renameat2 is None:
+        _rename_noreplace_load()
+    if not _renameat2:
+        return None
+    import ctypes
+    rc = _renameat2(dfd, os.fsencode(old), dfd, os.fsencode(new), RENAME_NOREPLACE)
+    if rc == 0:
+        return True
+    err = ctypes.get_errno()
+    if err == errno.EEXIST:
+        return False
+    if err in (errno.EINVAL, errno.ENOSYS, getattr(errno, 'EOPNOTSUPP', -1), errno.ENOTSUP):
+        return None
+    raise OSError(err, os.strerror(err))
+
+
+def _rename_noreplace_load() -> None:
+    global _renameat2
+    try:
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        fn = libc.renameat2
+        fn.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        fn.restype = ctypes.c_int
+        _renameat2 = fn
+    except (OSError, AttributeError):
+        _renameat2 = False
+
+
 def _rename_noreplace(dfd: int, old: str, new: str) -> bool:
     """Rename old -> new inside one folder, never replacing new. True when
     renamed, False when new already exists. Uses renameat2(RENAME_NOREPLACE);
@@ -838,6 +871,11 @@ def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root:
                 _finish_fd(tfd, 0o664, owner)
             finally:
                 os.close(tfd)
+            # v184 (Ops): the partial is renamed into place (renameat2 NOREPLACE: atomic, never replaces), so
+            # nothing is left to delete: deleting a same-size partial on a NAS share sends it to the recycle bin
+            got = _rename2(dfd, tmp, name)
+            if got is not None:
+                return 'copied' if got else 'exists'
             try:
                 os.link(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd, follow_symlinks=False)   # refuses an existing name
             except FileExistsError:
@@ -848,7 +886,7 @@ def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root:
                 return 'copied' if _rename_noreplace(dfd, tmp, name) else 'exists'
             return 'copied'
         finally:
-            _unlink_ours(dfd, tmp, ident)
+            _unlink_ours(dfd, tmp, ident)          # only when it was not renamed into place (or the name exists)
     finally:
         os.close(sfd)
 

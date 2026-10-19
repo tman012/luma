@@ -128,6 +128,12 @@ export const setSeasonMonitored = (seriesId: number, season: number, monitored: 
   call<SeriesView>(`${TV_URL}/shows/${seriesId}/seasons/${season}/monitored`, put({ monitored }), d => typeof d.id === 'number');
 export const setSeriesMonitored = (seriesId: number, monitored: boolean) =>
   call<SeriesView>(`${TV_URL}/shows/${seriesId}/monitored`, put({ monitored }), d => typeof d.id === 'number');
+/** v184: a bookmark turned ON searches what it monitors (aired, no file): started, or more than 25 asks first */
+export type MonitorSearch = { started?: number; confirm?: number };
+export const confirmMonitorSearch = (seriesId: number, season?: number | null) =>
+  call<MonitorSearch>(`${TV_URL}/shows/${seriesId}/monitor-search`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(season == null ? { confirm: true } : { season, confirm: true }) },
+    d => typeof d.started === 'number');
 
 // ---------------------------------------------------------------- series edit + profiles (v158a)
 
@@ -138,6 +144,8 @@ export interface SeriesView {
   profile_id: number | null; path_id: string | null; folder: string | null; path: string | null;
   seasons: { season: number; monitored: boolean }[];
   episodes: { id: number; season: number; episode: number; monitored: boolean; title?: string | null; air_date?: string | null; has_file?: boolean }[];
+  /** v184: present after a bookmark turned ON */
+  search?: MonitorSearch;
 }
 export type SeriesEdit = Partial<Pick<SeriesView, 'monitored' | 'monitor_new_seasons' | 'monitor_specials' | 'season_folder' | 'series_type' | 'profile_id' | 'path'>>;
 export const getSeries = (id: number) => call<SeriesView>(`${TV_URL}/shows/${id}`, undefined, d => typeof d.id === 'number');

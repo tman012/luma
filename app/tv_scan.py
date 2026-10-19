@@ -501,9 +501,18 @@ def scan_files(sid: int, path_id: str, folder: str, root_real: str, now: float,
             conn.execute('DELETE FROM episode_file_links WHERE file_id = ?', (fid,))
             for eid in ids:
                 conn.execute('INSERT OR IGNORE INTO episode_file_links (file_id, episode_id) VALUES (?, ?)', (fid, eid))
-        for row in conn.execute('SELECT id, rel_path FROM episode_files WHERE series_id = ?', (sid,)).fetchall():
-            if row['rel_path'] not in keep:
+        # the show folder itself unreachable (a share dropped): not a deletion, keep the rows for the next pass
+        reachable = os.path.isdir(os.path.join(root_real, folder))
+        for row in conn.execute('SELECT id, rel_path, state, size FROM episode_files WHERE series_id = ?', (sid,)).fetchall():
+            if row['rel_path'] not in keep and reachable:
+                gone = [r['episode_id'] for r in conn.execute('SELECT episode_id FROM episode_file_links WHERE file_id = ?', (row['id'],))]
                 conn.execute('DELETE FROM episode_files WHERE id = ?', (row['id'],))
+                if row['state'] == 'linked' and gone:
+                    # v184 (Ops): a file the last pass had is gone from disk (deleted outside Luma): say so
+                    conn.execute('INSERT INTO history (ts, series_id, episode_ids, event, detail) VALUES (?, ?, ?, ?, ?)',
+                                 (now, sid, json.dumps(sorted(gone)), 'deleted',
+                                  json.dumps({'rel_path': row['rel_path'], 'size': row['size'], 'via': 'link pass'})))
+                    logger.info('TV link: a file of show %s is gone from disk (%s)', sid, row['rel_path'][-120:])
         conn.execute('UPDATE series SET last_scan_at = ? WHERE id = ?', (now, sid))
     return counts
 

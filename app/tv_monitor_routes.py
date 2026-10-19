@@ -112,14 +112,21 @@ def _toggle(fn):
     err = tv_settings._guard() or tv_settings._signed_in_owner()
     if err:
         return err
-    on = _flag(request.get_json(silent=True))
+    body = request.get_json(silent=True)
+    on = _flag(body)
     if on is None:
         return _out({'error': 'Invalid'}, 400)
     with tv_store.write() as conn:
-        sid = fn(conn, on)
-    if sid is None:
+        got = fn(conn, on)
+    if got is None:
         return _missing()
-    return _out(tv_monitor.series_view(sid))
+    sid, scope = got if isinstance(got, tuple) else (got, None)
+    out = tv_monitor.series_view(sid)
+    if on and scope is not None:
+        # v184 (Taylor): turning a bookmark ON searches what it monitors that has aired and has no file
+        from app import tv_search
+        out = {**out, 'search': tv_search.monitor_search(sid, **scope)}
+    return _out(out)
 
 
 @bp.route('/api/settings/tv/shows/<int:sid>/monitored', methods=['PUT'])
@@ -128,7 +135,7 @@ def series_monitored(sid):
         if not conn.execute('SELECT 1 FROM series WHERE id = ?', (sid,)).fetchone():
             return None
         tv_monitor.set_series(conn, sid, on)
-        return sid
+        return sid, {}                         # the whole show, season by season (one search, no per-season repeats)
     return _toggle(go)
 
 
@@ -138,7 +145,7 @@ def season_monitored(sid, n):
         if not conn.execute('SELECT 1 FROM seasons WHERE series_id = ? AND season_number = ?', (sid, n)).fetchone():
             return None
         tv_monitor.set_season(conn, sid, n, on)
-        return sid
+        return sid, {'season': n}
     return _toggle(go)
 
 
@@ -149,8 +156,27 @@ def episode_monitored(eid):
         if r is None:
             return None
         tv_monitor.set_episodes(conn, r['series_id'], [eid], on)
-        return r['series_id']
+        return r['series_id'], {'episode_id': eid}
     return _toggle(go)
+
+
+@bp.route('/api/settings/tv/shows/<int:sid>/monitor-search', methods=['POST'])
+def monitor_search_confirmed(sid):
+    """v184: the owner confirmed 'Search N episodes?' for a show ({}) or a season ({season})."""
+    err = tv_settings._guard() or tv_settings._signed_in_owner()
+    if err:
+        return err
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) - {'season', 'confirm'} or body.get('confirm') is not True:
+        return _out({'error': 'Invalid'}, 400)
+    season = body.get('season')
+    if season is not None and (not isinstance(season, int) or isinstance(season, bool) or season < 0):
+        return _out({'error': 'Invalid'}, 400)
+    with tv_store.connect() as conn:
+        if not conn.execute('SELECT 1 FROM series WHERE id = ?', (sid,)).fetchone():
+            return _missing()
+    from app import tv_search
+    return _out(tv_search.monitor_search(sid, season=season, confirm=True))
 
 
 @bp.route('/api/settings/tv/shows/monitor-missing', methods=['POST'])

@@ -201,20 +201,20 @@ def import_torrent(t: Dict[str, Any], data: Dict[str, Any], now: float,
         rel = os.path.relpath(f.path, os.path.dirname(os.path.realpath(content)))
         season, eps = _episodes(s['id'], f.path, rel)
         if eps:
-            plan.append((f, season))
+            plan.append((f, season, eps))
     if not plan:
         raise mover.Refused('no episodes of this show in the download')
     folder = _show_folder(s)
     owner = mover._owner_of(lib_root)
     mode = 'hardlink' if data.get('transfer') == 'hardlink' else 'copy'
     if mode == 'copy':
-        mover._check_space(lib_root, sum(f.size for f, _ in plan))
+        mover._check_space(lib_root, sum(f.size for f, _, _ in plan))
     files = []
     rfd = mover._open_root(lib_root)
     try:
         sfd, _, show_path = mover._ensure_folder(rfd, lib_root, folder, owner)
         try:
-            for f, season in plan:
+            for f, season, nums in plan:
                 dfd, dpath, close = sfd, show_path, False
                 if s['season_folder']:
                     dfd, _, dpath = mover._ensure_folder(sfd, show_path, f'Season {season:02d}', owner)
@@ -229,12 +229,149 @@ def import_torrent(t: Dict[str, Any], data: Dict[str, Any], now: float,
                         os.close(dfd)
                 dest = os.path.join(dpath, fname)
                 linked = tv_watch.episode_imported(dest)          # the import hook: the card turns now
-                files.append({'path': dest, 'how': how, 'linked': bool(linked)})
+                files.append({'path': dest, 'how': how, 'linked': bool(linked), 'episode_ids': _ids(s['id'], season, nums)})
         finally:
             os.close(sfd)
     finally:
         os.close(rfd)
-    return {'state': 'imported', 'files': files, 'series_id': s['id']}
+    return {'state': 'imported', 'files': files, 'series_id': s['id'],
+            'episode_ids': sorted({i for x in files for i in x['episode_ids']})}
+
+
+def _ids(sid: int, season: int, nums: List[int]) -> List[int]:
+    with tv_store.connect() as conn:
+        return sorted(r['id'] for r in conn.execute(
+            f"SELECT id FROM episodes WHERE series_id = ? AND season_number = ? AND episode_number IN ({','.join('?' * len(nums))})",
+            (sid, season, *nums)))
+
+
+# ---------------------------------------------------------------- the grab row (v184, Tester FF-21)
+# A successful import used to stop at the tvdl:<hash> meta: nothing moved the tv.db grabs row on from
+# 'downloading' (no state, no finished_at, no 'imported' history event). finish_grab() does it in the
+# same pass, in one transaction; reconcile() repairs rows left behind (at the watch's start and on every
+# pass), from the import record or, failing that, from the episodes' linked files. Both are idempotent:
+# a row only moves out of downloading/importing once, and the history event is written once per hash.
+
+OPEN_GRABS = ('downloading', 'importing')
+LINKED = ("EXISTS (SELECT 1 FROM episode_file_links l JOIN episode_files f ON f.id = l.file_id"
+          " WHERE l.episode_id = episodes.id AND f.state = 'linked')")
+
+
+def _want(g) -> List[int]:
+    try:
+        return sorted({int(i) for i in json.loads(g['episode_ids'] or '[]')})
+    except (TypeError, ValueError):
+        return []
+
+
+def _linked(conn, ids: List[int]) -> set:
+    if not ids:
+        return set()
+    return {r['id'] for r in conn.execute(
+        f"SELECT id FROM episodes WHERE id IN ({','.join('?' * len(ids))}) AND {LINKED}", ids)}
+
+
+def finish_grab(h: str, name: Optional[str], series_id: Optional[int], covered: Optional[List[int]], files: int,
+                now: float, via: str = 'import') -> Optional[str]:
+    """Mark this torrent's grab row imported (every grabbed episode covered) or partial, with
+    finished_at, and write the 'imported' history event. *covered*: the episode ids the import placed
+    (None: from the episodes' linked files). The row is found by info hash, else (a grab whose hash
+    qBittorrent reports differently) by its exact release name among the open rows. Returns the new
+    state, or None when there was no open row (the event is still written once for a Luma import)."""
+    h = (h or '').lower()
+    with tv_store.write() as conn:
+        g = conn.execute('SELECT * FROM grabs WHERE hash = ?', (h,)).fetchone()
+        if g is None and name:
+            g = conn.execute(f"SELECT * FROM grabs WHERE release_title = ? AND state IN ({','.join('?' * len(OPEN_GRABS))})"
+                             ' ORDER BY grabbed_at DESC LIMIT 1', (name, *OPEN_GRABS)).fetchone()
+        state = None
+        ids = list(covered or [])
+        if g is not None and g['state'] in OPEN_GRABS:
+            want = _want(g)
+            have = set(ids) if covered is not None else _linked(conn, want)
+            if covered is None:
+                ids = sorted(have)
+            state = 'imported' if want and set(want) <= have else 'partial'
+            conn.execute(f"UPDATE grabs SET state = ?, finished_at = ?, results = ?, error = NULL WHERE hash = ?"
+                         f" AND state IN ({','.join('?' * len(OPEN_GRABS))})",
+                         (state, now, json.dumps({'episode_ids': ids, 'files': files, 'via': via}), g['hash'], *OPEN_GRABS))
+            series_id = g['series_id'] if g['series_id'] is not None else series_id
+            ids = sorted(set(ids) | (set(want) & have))
+        elif g is not None:
+            return None                                       # already finished: nothing to do, no second event
+        key = g['hash'] if g is not None else h
+        seen = conn.execute("SELECT 1 FROM history WHERE event = 'imported'"
+                            " AND (CASE WHEN json_valid(detail) THEN json_extract(detail, '$.hash') END) = ?", (key,)).fetchone()
+        if not seen and (g is not None or via == 'import'):
+            detail = {'hash': key, 'title': (g['release_title'] if g is not None else None) or name, 'files': files, 'via': via}
+            if g is not None:
+                detail.update(origin=g['origin'], state=state)
+            conn.execute('INSERT INTO history (ts, series_id, episode_ids, event, detail) VALUES (?, ?, ?, ?, ?)',
+                         (now, series_id, json.dumps(ids), 'imported', json.dumps(detail)))
+    if state:
+        logger.info('TV import: grab %s marked %s (%s)', name or h, state, via)
+    return state
+
+
+def reconcile(now: Optional[float] = None) -> int:
+    """Self-heal (v184): a grab still downloading/importing whose torrent this watch already imported
+    (tvdl:<hash> says imported), or whose every episode now has a linked file, is finished now.
+    DB only (never contacts qBittorrent). Returns how many rows moved on."""
+    now = time.time() if now is None else now
+    with tv_store.connect() as conn:
+        rows = [dict(r) for r in conn.execute(
+            f"SELECT hash, series_id, episode_ids, release_title FROM grabs WHERE state IN ({','.join('?' * len(OPEN_GRABS))})",
+            OPEN_GRABS)]
+        linked = {r['hash']: _linked(conn, _want(r)) for r in rows}
+    n = 0
+    for r in rows:
+        want = _want(r)
+        st = status(r['hash']) or {}
+        if st.get('state') == 'imported':
+            cov = st.get('episode_ids')
+            if not isinstance(cov, list) and not linked[r['hash']]:
+                continue                                      # a pre-v184 record: wait for its file's link (the 60s poll)
+            got = finish_grab(r['hash'], r['release_title'], r['series_id'], cov if isinstance(cov, list) else None,
+                              len(st.get('files') or []), float(st.get('at') or now), via='reconciled')
+        elif want and set(want) <= linked[r['hash']]:
+            got = finish_grab(r['hash'], r['release_title'], r['series_id'], None, 0, now, via='reconciled')
+        else:
+            continue
+        n += 1 if got else 0
+    return n
+
+
+def _reconcile_safely(now: Optional[float] = None) -> int:
+    try:
+        return reconcile(now)
+    except Exception:                                        # noqa: BLE001 - never end a pass over the repair
+        logger.exception('TV import: grab reconcile failed')
+        return 0
+
+
+ALREADY_IMPORTED = 'already imported'
+UNMONITORED = 'episode not monitored'
+
+
+def _no_import(h: str, name: Optional[str]) -> Optional[str]:
+    """v184 (PM): why the watcher must not import this torrent: its grab row is already closed as imported
+    (by an earlier pass or by hand; the file may have been deleted on purpose since), or every episode it
+    was grabbed for is unmonitored now (or the show is). None: import it."""
+    with tv_store.connect() as conn:
+        g = conn.execute('SELECT * FROM grabs WHERE hash = ?', (h,)).fetchone()
+        if g is None and name:
+            g = conn.execute('SELECT * FROM grabs WHERE release_title = ? ORDER BY grabbed_at DESC LIMIT 1', (name,)).fetchone()
+        if g is None:
+            return None
+        if g['state'] in ('imported', 'partial'):
+            return ALREADY_IMPORTED
+        ids = _want(g)
+        if ids:
+            on = conn.execute(f"SELECT COUNT(*) AS n FROM episodes e JOIN series s ON s.id = e.series_id"
+                              f" WHERE e.id IN ({','.join('?' * len(ids))}) AND e.monitored = 1 AND s.monitored = 1", ids).fetchone()['n']
+            if not on:
+                return UNMONITORED
+    return None
 
 
 def tick(now: Optional[float] = None, session_factory: Callable = requests.Session) -> Dict[str, int]:
@@ -243,6 +380,7 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
     out = {'checked': 0, 'imported': 0}
     if not watch_enabled() or not tv_settings.libraries():
         return out
+    _reconcile_safely(now)                                    # v184: rows an earlier import left 'downloading'
     try:
         mover._downloads_root()
     except mover.Pending:
@@ -285,12 +423,24 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
                         continue
                     _save(h, auto_retried=True)
                     logger.info('TV import: %s retried once (free space grew by %d bytes)', t.get('name'), grew)
+                why = _no_import(h, t.get('name'))
+                if why:                                       # v184 (PM): never again, never for an unmonitored episode
+                    if why == ALREADY_IMPORTED:
+                        _save(h, state='refused', error=why, at=now, name=t.get('name'))
+                    elif st.get('error') != why:
+                        _save(h, state='waiting', error=why, at=now, name=t.get('name'))
+                        logger.info('TV import: %s not imported (%s)', t.get('name'), why)
+                    continue
                 out['checked'] += 1
                 try:
                     res = import_torrent(t, data, now, list_files)
                     _save(h, **res, at=now, completed=t.get('completion_on'), name=t.get('name'), error=None)
                     out['imported'] += 1
                     logger.info('TV import: %s -> %d file(s)', t.get('name'), len(res['files']))
+                    try:                                       # v184 (FF-21): the grab row and its history event
+                        finish_grab(h, t.get('name'), res.get('series_id'), res.get('episode_ids'), len(res['files']), now)
+                    except Exception:                          # noqa: BLE001 - reconcile() repairs it next pass
+                        logger.exception('TV import: %s imported, grab row not updated', t.get('name'))
                 except mover.InsufficientSpace as e:
                     _save(h, state='failed', error=mover.INSUFFICIENT_SPACE, at=now, finished=now, name=t.get('name'),
                           space={'path': e.path, 'need': e.need, 'free': mover._free_or_none(e.path)})
@@ -359,6 +509,7 @@ def start() -> bool:
     _started['on'] = True
 
     def loop():
+        _reconcile_safely()                                   # v184: at start, before the first 60s pass
         while True:
             time.sleep(INTERVAL_S)
             try:

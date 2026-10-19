@@ -319,3 +319,24 @@ def _no_tvmaze():
     tv_airtimes.configure(get=lambda path, params: None, sleep=lambda s: None)
     yield
     tv_airtimes.configure()
+
+
+@pytest.fixture(autouse=True)
+def _tv_monitor_search_inline():
+    """v184: monitoring searches run on a background worker in the app; under test they stay queued (no
+    stray threads touching another test's tv.db). A test that wants them runs tv_search.drain() itself.
+    No monkeypatch here (requesting it reorders other fixtures' teardown)."""
+    import sys
+    tv_search = sys.modules.get('app.tv_search')     # never imports the app for tests that don't use it
+    if tv_search is None:
+        yield
+        return
+    real = tv_search._spawn
+    tv_search._spawn = lambda: None
+    tv_search._ms_queue.clear()
+    tv_search._ms_bucket[:] = [float(tv_search.MS_BURST), 0.0]
+    try:
+        yield
+    finally:
+        tv_search._spawn = real
+        tv_search._ms_queue.clear()

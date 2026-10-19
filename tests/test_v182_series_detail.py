@@ -69,8 +69,10 @@ def test_detail_has_the_header_seasons_newest_first_and_episode_states(owner, en
     assert v['size'] == 1000 * files
     assert [s['season'] for s in v['seasons']] == [2, 1]                          # newest first
     s2 = v['seasons'][0]
-    assert (s2['have'], s2['total']) == (1, 3)                                    # monitored E03 E04 E05 aired (E05 has a file); E06 not yet
-    assert (v['have'], v['total']) == (1, 3)
+    assert (s2['have'], s2['total']) == (3, 6)       # v184: every aired regular episode, monitored or not (like the list)
+    from app import tv_scan
+    lst = [x for x in tv_scan.library_view()['shows'] if x['id'] == env.sid][0]
+    assert (v['have'], v['total']) == (min(lst['have'], lst['aired']), lst['aired'])
     st = {e['episode']: e['state'] for e in v['episodes'] if e['season'] == 2}
     assert (st[3], st[5], st[6]) == ('missing', 'downloaded', 'unaired')
     e = next(e for e in v['episodes'] if e['id'] == env.e2[5])

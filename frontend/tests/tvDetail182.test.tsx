@@ -1,5 +1,5 @@
 /** v182: the series detail page (header, seasons newest first, episodes with the status edge, monitored bookmarks
- * that never search, Search, Interactive search and its grab, the episode checkboxes), and how it is opened. */
+ * that never search, Search, Interactive search and its grab, the v184 layout), and how it is opened. */
 process.env.TZ = 'America/New_York';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
@@ -37,8 +37,9 @@ const RELEASES = {
 };
 const calls: { url: string; method: string; body: unknown }[] = [];
 let grabOk = true;
+let monSearch: unknown;
 beforeEach(() => {
-  calls.length = 0; grabOk = true;
+  calls.length = 0; grabOk = true; monSearch = undefined;
   vi.stubGlobal('fetch', vi.fn(async (u: string, init?: RequestInit) => {
     const url = String(u); const method = init?.method || 'GET';
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -49,7 +50,8 @@ beforeEach(() => {
     if (url === '/api/settings/tv/shows/1/detail') return res(DETAIL);
     if (url === '/api/settings/tv/shows/1' && method === 'GET') return res({ ...DETAIL, seasons: [], episodes: [] });
     if (url === '/api/settings/tv/profiles') return res({ profiles: [], qualities: [] });
-    if (url.endsWith('/monitored') && method === 'PUT') return res({ ...DETAIL, seasons: [], episodes: [], updated: 1 });
+    if (url.endsWith('/monitored') && method === 'PUT') return res({ ...DETAIL, seasons: [], episodes: [], updated: 1, search: monSearch });
+    if (url === '/api/settings/tv/shows/1/monitor-search') return res({ started: 30 });
     if (url === '/api/settings/tv/shows/1/search') return res({ ok: true, wanted: 1, searched: 1, results: 3, picks: [{ title: 'x', quality: null, episodes: [22], grabbed: true, error: null }], grabs_allowed: true, error: null });
     if (url === '/api/settings/tv/shows/1/interactive') return res(RELEASES);
     if (url === '/api/settings/tv/shows/1/interactive/grab') return grabOk ? res({ ok: true, existing: false, episodes: [22] }) : res({ ok: false, error: 'Not grabbed: already has a file', refused: 'already has a file' });
@@ -92,7 +94,7 @@ describe('Series detail page', () => {
     expect(within(seasons[0]!).getByTestId('tv-detail-season-count').textContent).toBe('1 of 2');
     const flags = seasons.map(x => within(x).getAllByTestId('tv-detail-season-monitored')[0]!);
     expect(flags.map(f => [f.getAttribute('aria-pressed'), f.getAttribute('aria-label'), f.querySelector('svg')!.getAttribute('fill')]))
-      .toEqual([['true', 'Monitored', 'currentColor'], ['false', 'Not monitored', 'none']]);
+      .toEqual([['true', 'Monitored', 'currentColor'], ['false', 'Monitored', 'none']]);
     expect(within(seasons[0]!).getByRole('button', { name: 'Search Season 2' })).toBeTruthy();
     expect(within(seasons[0]!).getByRole('button', { name: 'Interactive search Season 2' })).toBeTruthy();
     expect(within(seasons[0]!).getAllByTestId('tv-detail-episode').map(e => e.getAttribute('data-episode-id'))).toEqual(['23', '22', '21']);
@@ -174,20 +176,30 @@ describe('Series detail page', () => {
     expect((await screen.findByTestId('tv-interactive-grab-error')).textContent).toBe('Not grabbed: already has a file');
   });
 
-  it('the episode checkboxes: per episode, per season, select all; Monitor selected never searches', async () => {
+  it('v184 layout: no checkboxes or select-all; the show bookmark on the poster; season and episode bookmarks lead their rows; 1200px max width', async () => {
     page();
     await screen.findAllByTestId('tv-detail-episode');
-    fireEvent.click(within(screen.getAllByTestId('tv-detail-season')[0]!).getByTestId('tv-detail-season-check'));
-    expect(screen.getByTestId('tv-detail-bar-count').textContent).toBe('3 selected');
-    expect(screen.getByTestId('tv-detail-select-all').getAttribute('aria-checked')).toBe('mixed');
-    fireEvent.click(screen.getAllByTestId('tv-detail-check')[0]!);
-    expect(screen.getByTestId('tv-detail-count').textContent).toBe('2 selected');
-    fireEvent.click(screen.getByTestId('tv-detail-bar-monitor'));
-    await waitFor(() => expect(calls.some(c => c.url === '/api/settings/tv/shows/1/episodes/monitored')).toBe(true));
-    expect(calls.find(c => c.url === '/api/settings/tv/shows/1/episodes/monitored')!.body).toEqual({ episode_ids: [22, 21], monitored: true });
-    await waitFor(() => expect(screen.queryByTestId('tv-detail-bar')).toBeNull());
-    fireEvent.click(screen.getByTestId('tv-detail-select-all'));
-    expect(screen.getByTestId('tv-detail-count').textContent).toBe('5 selected');
+    for (const id of ['tv-detail-select-all', 'tv-detail-count', 'tv-detail-check', 'tv-detail-season-check', 'tv-detail-bar'])
+      expect(screen.queryByTestId(id)).toBeNull();
+    expect(document.querySelectorAll('[role="checkbox"], input[type="checkbox"]').length).toBe(0);
+    const show = screen.getByTestId('tv-detail-monitored');
+    expect(screen.getByTestId('tv-detail-poster').contains(show)).toBe(true);
+    expect([show.getAttribute('aria-label'), show.getAttribute('aria-pressed'), show.style.width, show.style.position]).toEqual(['Monitored', 'true', '40px', 'absolute']);
+    expect(screen.getAllByTestId('tv-detail-monitored')).toHaveLength(1);           // none next to Edit
+    for (const sec of screen.getAllByTestId('tv-detail-season')) {
+      const head = sec.querySelector('.tvd-season-head')!;
+      expect(head.querySelectorAll('[data-testid="tv-detail-season-monitored"]')).toHaveLength(1);
+      expect(head.firstElementChild?.getAttribute('data-testid')).toBe('tv-detail-season-monitored');
+    }
+    for (const row of screen.getAllByTestId('tv-detail-episode')) {
+      const kids = [...row.children].filter(k => k.getAttribute('data-testid') !== 'tv-detail-edge');
+      expect(kids[0]?.getAttribute('data-testid')).toBe('tv-detail-episode-monitored');
+      expect(row.querySelectorAll('[data-testid="tv-detail-episode-monitored"]')).toHaveLength(1);
+    }
+    const root = screen.getByTestId('tv-detail');
+    expect([root.style.maxWidth, root.style.margin]).toEqual(['1200px', '0px auto']);
+    fireEvent.click(show);
+    await waitFor(() => expect(calls.some(c => c.method === 'PUT' && /\/shows\/1\/monitored$/.test(c.url))).toBe(true));
     expect(searches()).toEqual([]);
   });
 
@@ -226,5 +238,55 @@ describe('Opening the page', () => {
     render(<OpenShowContext.Provider value={open}><WeekGrid week="2026-10-11" today="2026-10-17" eps={[e]} /></OpenShowContext.Provider>);
     fireEvent.click(screen.getByTestId('tv-agenda-row'));
     expect(open).toHaveBeenCalledWith(1, 22);
+  });
+
+  it('v184: a top tab always opens its root, never the remembered detail page', async () => {
+    render(<MemoryRouter initialEntries={['/settings/tv?view=series&show=1&episode=22']}><TvLibrarySettings wide /><Where /></MemoryRouter>);
+    await screen.findByTestId('tv-detail-title');
+    for (const [tab, want] of [['calendar', '/settings/tv'], ['series', '/settings/tv?view=series'], ['import', '/settings/tv?view=import'],
+      ['libraries', '/settings/tv?view=libraries'], ['options', '/settings/tv?view=options'], ['series', '/settings/tv?view=series']] as const) {
+      const btn = screen.queryByTestId(`tv-tab-${tab}`);
+      if (!btn) continue;
+      fireEvent.click(btn);
+      expect(loc).toBe(want);
+    }
+    expect(screen.queryByTestId('tv-detail')).toBeNull();
+  });
+
+  it('v184: the week grid hides unmonitored episodes (episode, season or show), at once on the card bookmark', async () => {
+    const mk = (id: number, extra: Partial<CalEpisode> = {}): CalEpisode => ({ episode_id: id, series_id: 1, show: 'Severance', year: 2022, poster_path: null,
+      season: 2, episode: id, title: `Episode ${id}`, air_date: '2026-10-15', downloaded: false, monitored: true, ...extra });
+    const eps = [mk(1), mk(2), mk(3, { downloaded: true }), mk(4, { monitored: false, downloaded: true })];
+    const { rerender } = render(<WeekGrid week="2026-10-11" today="2026-10-17" eps={eps} />);
+    const ids = () => screen.queryAllByTestId('tv-agenda-row').map(r => r.getAttribute('aria-label'));
+    expect(ids()).toHaveLength(3);                                          // the unmonitored downloaded one is hidden
+    // the episode's own bookmark: gone at once, and only a PUT to its monitored route (no search)
+    fireEvent.click(within(screen.getAllByTestId('tv-agenda-row')[0]!).getByTestId('tv-card-bookmark'));
+    expect(ids()).toHaveLength(2);
+    await waitFor(() => expect(calls.filter(c => c.method === 'PUT').map(c => c.url)).toEqual(['/api/settings/tv/episodes/1/monitored']));
+    // a season or the show unmonitored elsewhere: the next quiet answer lists them unmonitored, and they go
+    rerender(<WeekGrid week="2026-10-11" today="2026-10-17" eps={[mk(1, { monitored: false }), mk(2, { monitored: false }), mk(3, { downloaded: true }), eps[3]!]} />);
+    expect(ids()).toHaveLength(1);
+    rerender(<WeekGrid week="2026-10-11" today="2026-10-17" eps={eps.map(e => ({ ...e, monitored: false }))} />);
+    expect(ids()).toHaveLength(0);
+    expect(searches()).toEqual([]);
+  });
+
+  it('v184: a bookmark ON that would queue more than 25 episode searches asks first, and searches only when confirmed', async () => {
+    monSearch = { confirm: 30 };
+    const say = page();
+    await screen.findAllByTestId('tv-detail-season');
+    const s1 = screen.getAllByTestId('tv-detail-season')[1]!;
+    fireEvent.click(within(s1).getByTestId('tv-detail-season-monitored'));
+    const dlg = await screen.findByTestId('tv-monitor-search-confirm');
+    expect(dlg.textContent).toContain('Search 30 episodes?');
+    expect(calls.filter(c => c.url.endsWith('/monitor-search'))).toEqual([]);
+    fireEvent.click(screen.getByTestId('tv-monitor-search-cancel'));
+    expect(screen.queryByTestId('tv-monitor-search-confirm')).toBeNull();
+    expect(calls.filter(c => c.url.endsWith('/monitor-search'))).toEqual([]);
+    fireEvent.click(within(screen.getAllByTestId('tv-detail-season')[1]!).getByTestId('tv-detail-season-monitored'));
+    fireEvent.click(await screen.findByTestId('tv-monitor-search-go'));
+    await waitFor(() => expect(calls.filter(c => c.url.endsWith('/monitor-search')).map(c => c.body)).toEqual([{ season: 1, confirm: true }]));
+    await waitFor(() => expect(say).toHaveBeenCalledWith('Searching 30 episodes'));
   });
 });

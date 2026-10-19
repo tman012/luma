@@ -78,7 +78,7 @@ describe('Series list view', () => {
     expect(rows.map(r => within(r).getByTestId('tv-list-open').textContent)).toEqual(['The Bear (2020)', 'Dark (2020)', 'Severance (2020)', 'Slow Horses (2020)']);
     await waitFor(() => expect(within(rows[0]!).getByText('Ultra-HD')).toBeTruthy());
     const flag0 = within(rows[0]!).getByTestId('tv-list-monitored-flag');           // v183: a bookmark, not text or a switch
-    expect([flag0.getAttribute('aria-pressed'), flag0.getAttribute('aria-label')]).toEqual(['false', 'Not monitored']);
+    expect([flag0.getAttribute('aria-pressed'), flag0.getAttribute('aria-label')]).toEqual(['false', 'Monitored']);
     expect(within(rows[1]!).getByTestId('tv-list-monitored-flag').getAttribute('aria-label')).toBe('Monitored');
     expect(within(rows[1]!).getByText('Anime')).toBeTruthy();
     expect(screen.getByTestId('tv-series-picked').textContent).toBe('0 selected');
