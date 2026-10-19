@@ -500,6 +500,10 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
                 st = status(h) or {}
                 if st.get('state') in _DONE:
                     continue
+                if st.get('state') == 'waiting' and float(st.get('next_try') or 0) > now:
+                    continue                                  # hotfix: an OSError backoff is running
+                if st.get('state') == 'failed' and str(st.get('error') or '').startswith('file error ('):
+                    continue                                  # hotfix: gave up; the Retry button starts over
                 if st.get('state') == 'failed' and st.get('error') == mover.INSUFFICIENT_SPACE:
                     grew = mover.space_retry_due(st, now)     # the mover's rule: once, or Retry
                     if grew is None:
@@ -531,6 +535,8 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
                     _save(h, state='refused', error=str(e), at=now, name=t.get('name'))
                 except mover.Pending as e:
                     _save(h, state='waiting', error=str(e), at=now, name=t.get('name'))
+                except OSError as e:
+                    _os_failure(h, t.get('name'), e, st, now)
                 except Exception as e:                        # one bad torrent never ends the pass
                     logger.exception('TV import: %s failed', t.get('name'))
                     _save(h, state='waiting', error=type(e).__name__, at=now, name=t.get('name'))
@@ -541,6 +547,29 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
     return out
 
 
+# Hotfix (Reviewer, REQUIRED): an import that keeps hitting the same OSError (ENAMETOOLONG, EACCES, EIO,
+# a read-only share) is logged once and backed off (5 min doubling to 6 h); after OS_ERROR_MAX tries
+# it is 'failed' with a Retry button, never retried every pass forever.
+OS_BACKOFF_S = 300
+OS_BACKOFF_MAX_S = 6 * 3600
+OS_ERROR_MAX = 6
+
+
+def _os_failure(h: str, name: Optional[str], e: OSError, st: Dict[str, Any], now: float) -> None:
+    import errno as _errno
+    code = _errno.errorcode.get(e.errno, '') if e.errno else ''
+    why = f'file error ({code or type(e).__name__})'
+    n = int(st.get('os_errors') or 0) + 1 if st.get('error') == why else 1
+    if n == 1:
+        logger.warning('TV import: %s hit %s; backing off', name, why)
+    if n >= OS_ERROR_MAX:
+        _save(h, state='failed', error=why, at=now, finished=now, name=name, os_errors=n, next_try=None)
+        logger.warning('TV import: %s gave up after %d tries (%s); Retry to try again', name, n, why)
+        return
+    _save(h, state='waiting', error=why, at=now, name=name, os_errors=n,
+          next_try=now + min(OS_BACKOFF_S * 2 ** (n - 1), OS_BACKOFF_MAX_S))
+
+
 def retry(h: str) -> bool:
     """The Retry button: a failed or refused torrent is looked at again on the next pass, and a later
     no-space failure gets its one automatic retry again. False when there's nothing to retry."""
@@ -548,7 +577,7 @@ def retry(h: str) -> bool:
     st = status(h)
     if not st or st.get('state') not in ('failed', 'refused', 'waiting'):
         return False
-    st.update(state='waiting', error=None)
+    st.update(state='waiting', error=None, os_errors=0, next_try=None)
     for k in ('auto_retried', 'space', 'finished'):
         st.pop(k, None)
     tv_store.set_meta(_key(h), json.dumps(st))
@@ -575,7 +604,8 @@ def failures(now: Optional[float] = None) -> List[Dict[str, Any]]:
             key = r['key']
             if key.startswith('tvdl:') and v.get('state') in ('failed', 'refused'):
                 out.append({'hash': key[5:], 'name': v.get('name'), 'state': v['state'], 'error': v.get('error'),
-                            'at': v.get('at'), 'retry': v.get('error') == mover.INSUFFICIENT_SPACE})
+                            'at': v.get('at'), 'retry': v.get('error') == mover.INSUFFICIENT_SPACE
+                            or str(v.get('error') or '').startswith('file error (')})
             elif key.startswith('tvgrab:') and v.get('state') == 'grab_failed' \
                     and now - float(v.get('at') or 0) < GRAB_JOB_DAYS * 86400:
                 out.append({'hash': key[7:], 'name': v.get('name'), 'state': 'grab_failed', 'error': v.get('error'),

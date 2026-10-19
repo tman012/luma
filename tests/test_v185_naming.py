@@ -152,7 +152,7 @@ def test_never_overwrites_an_existing_name(dl):  # noqa: F811
     assert tv_downloads.status(H2)['files'][0]['how'] == 'exists'
 
 
-def test_rename_off_keeps_the_release_name_and_a_new_season_follows_the_siblings(dl, monkeypatch):  # noqa: F811
+def test_rename_off_keeps_the_release_name_and_a_new_season_follows_the_format(dl, monkeypatch):  # noqa: F811
     monkeypatch.setattr(tv_downloads, '_naming', lambda: {**D, 'rename_episodes': False})
     with tv_store.write() as conn:
         sid = conn.execute("SELECT id FROM series WHERE title = 'Severance'").fetchone()['id']
@@ -161,7 +161,9 @@ def test_rename_off_keeps_the_release_name_and_a_new_season_follows_the_siblings
     rel = 'Severance.S03E01.1080p.WEB-DL-GRP'
     grab(dl, H1, rel, [rel + '.mkv'])
     assert dl.tick()['imported'] == 1
-    assert (dl.lib / 'Severance (2022)' / 'Season 03' / (rel + '.mkv')).is_file()       # 'Season 01/02' padding
+    # v185 hotfix: a new season folder follows the format ('Season {season}'), not the siblings' 'Season 01/02'
+    assert (dl.lib / 'Severance (2022)' / 'Season 3' / (rel + '.mkv')).is_file()
+    assert not (dl.lib / 'Severance (2022)' / 'Season 03').exists()
 
 
 def test_a_dotted_format_leaves_no_dash_dot():

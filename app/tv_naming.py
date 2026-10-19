@@ -51,7 +51,12 @@ REQUIRED = {'standard': [{'season'}, {'episode'}], 'daily': [{'air-date', 'air d
             'season_folder': [{'season'}], 'specials_folder': []}
 FORMAT_MAX = 255
 SIDECAR_EXTS = ('.srt', '.ass', '.ssa', '.sub', '.idx', '.vtt', '.sup', '.smi')
+# Hotfix (Reviewer/PM, REQUIRED): every final name is at most 240 UTF-8 bytes. The copy's partial is a
+# short fixed '.luma-<hex16>.luma-partial' (library_mover._new_partial), never the release name, so it
+# can't push a name past the 255-byte limit. Only the title part is shortened (SxxEyy, quality and the
+# extension stay); a video keeps SIDECAR_ROOM bytes so '.en.forced.srt' & co. share its exact stem.
 NAME_MAX_BYTES = 240
+SIDECAR_ROOM = 24
 
 _TOKEN_RE = re.compile(r'\{([^{}]*)\}')
 _SOURCE = {'web': 'WEBDL', 'webrip': 'WEBRip', 'bluray': 'Bluray', 'hdtv': 'HDTV', 'remux': 'Bluray'}
@@ -326,10 +331,40 @@ def render(fmt: str, ctx: Dict[str, Any], cfg: Dict[str, Any]) -> str:
     return _tidy(_TOKEN_RE.sub(value, fmt))
 
 
-def _fit(stem: str, ext: str) -> str:
-    while len((stem + ext).encode('utf-8')) > NAME_MAX_BYTES and len(stem) > 1:
+def _b(s: str) -> int:
+    return len(s.encode('utf-8'))
+
+
+def _fit(stem: str, ext: str, room: int = 0) -> str:
+    """stem + ext in at most NAME_MAX_BYTES bytes (the stem cut on a character boundary, never the
+    extension); *room*: also keep the stem short enough for a suffix of that many bytes."""
+    limit = NAME_MAX_BYTES - max(_b(ext), room)
+    while _b(stem) > limit and len(stem) > 1:
         stem = stem[:-1].rstrip()
     return stem.rstrip(' .') + ext
+
+
+def _shortened(fmt: str, ctx: Dict[str, Any], cfg: Dict[str, Any], limit: int) -> str:
+    """render(fmt) in at most *limit* bytes by shortening only the title parts: the episode titles
+    first (longest first), then the series title; never SxxEyy, the date, quality or group."""
+    stem = render(fmt, ctx, cfg)
+    if _b(stem) <= limit:
+        return stem
+    c = dict(ctx)
+    titles = [str(t or '') for t in (c.get('titles') or [])]
+    while _b(stem) > limit and any(titles):
+        i = max(range(len(titles)), key=lambda j: len(titles[j]))
+        cut = max(1, (_b(stem) - limit) // 2)
+        titles[i] = titles[i][:max(0, len(titles[i]) - cut)].rstrip(' .,-')
+        c['titles'] = titles
+        stem = render(fmt, c, cfg)
+    title = str(c.get('title') or '')
+    while _b(stem) > limit and len(title) > 1:
+        title = title[:max(1, len(title) - max(1, (_b(stem) - limit) // 2))].rstrip(' .,-')
+        c['title'] = title
+        c['folder'] = None                                   # the folder's own title would undo the cut
+        stem = render(fmt, c, cfg)
+    return stem
 
 
 def episode_name(ctx: Dict[str, Any], ext: str, series_type: str, cfg: Dict[str, Any]) -> Optional[str]:
@@ -338,10 +373,10 @@ def episode_name(ctx: Dict[str, Any], ext: str, series_type: str, cfg: Dict[str,
     kind = series_type if series_type in ('daily', 'anime') else 'standard'
     if kind == 'daily' and not ctx.get('air_date'):
         kind = 'standard'
-    stem = render(cfg[kind], ctx, cfg)
+    stem = _shortened(cfg[kind], ctx, cfg, NAME_MAX_BYTES - max(_b(ext), SIDECAR_ROOM))
     if not stem or stem in ('.', '..') or '/' in stem:
         return None
-    return _fit(stem, ext)
+    return _fit(stem, ext, SIDECAR_ROOM)
 
 
 _SEASON_DIR = re.compile(r'^(?P<pre>(?:season|series|s)\s*)(?P<n>\d+)$', re.I)

@@ -812,7 +812,9 @@ def _new_partial(dfd: int, name: str) -> Tuple[str, int, Tuple[int, int]]:
     import secrets
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW | _O_CLOEXEC
     for _ in range(8):
-        tmp = f'.{name}.{secrets.token_hex(4)}{PARTIAL_SUFFIX}'
+        # Hotfix (Reviewer, REQUIRED): short and fixed-length, never derived from *name*: a long final name
+        # ('.<name>.<hex8>.luma-partial') no longer hits ENAMETOOLONG before the rename
+        tmp = f'.luma-{secrets.token_hex(8)}{PARTIAL_SUFFIX}'
         try:
             fd = os.open(tmp, flags, 0o600, dir_fd=dfd)
         except FileExistsError:
