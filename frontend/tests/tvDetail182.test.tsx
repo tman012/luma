@@ -28,7 +28,7 @@ const DETAIL = {
 };
 const RELEASES = {
   ok: true, searched: 1, grabs_allowed: true, error: null, releases: [
-    { title: 'Severance.S02E02.1080p.WEB-DL-B', tracker: 'MyTracker', size: 2 * 1024 ** 3, seeders: 40, leechers: 1, quality: '1080p-web', published: null,
+    { title: 'Severance.S02E02.1080p.WEB-DL-B', tracker: 'MyTracker', size: 2 * 1024 ** 3, seeders: 40, leechers: 1, quality: '1080p-web', quality_label: '1080p WEB', published: null,
       freeleech: false, download_url: '/api/trackers/release/' + 'x' * 20, season: 2, episodes: [{ id: 22, season: 2, episode: 2 }], pack: false, rejections: [], grabbable: true },
     { title: 'Severance.S02E01.2160p.WEB-DL-C', tracker: 'MyTracker', size: 8 * 1024 ** 3, seeders: 9, leechers: 0, quality: '2160p-web', published: null,
       freeleech: false, download_url: '/api/trackers/release/' + 'y' * 20, season: 2, episodes: [{ id: 21, season: 2, episode: 1 }], pack: false,
@@ -37,9 +37,10 @@ const RELEASES = {
 };
 const calls: { url: string; method: string; body: unknown }[] = [];
 let grabOk = true;
+let grabsAllowed = true;
 let monSearch: unknown;
 beforeEach(() => {
-  calls.length = 0; grabOk = true; monSearch = undefined;
+  calls.length = 0; grabOk = true; grabsAllowed = true; monSearch = undefined;
   vi.stubGlobal('fetch', vi.fn(async (u: string, init?: RequestInit) => {
     const url = String(u); const method = init?.method || 'GET';
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -53,7 +54,7 @@ beforeEach(() => {
     if (url.endsWith('/monitored') && method === 'PUT') return res({ ...DETAIL, seasons: [], episodes: [], updated: 1, search: monSearch });
     if (url === '/api/settings/tv/shows/1/monitor-search') return res({ started: 30 });
     if (url === '/api/settings/tv/shows/1/search') return res({ ok: true, wanted: 1, searched: 1, results: 3, picks: [{ title: 'x', quality: null, episodes: [22], grabbed: true, error: null }], grabs_allowed: true, error: null });
-    if (url === '/api/settings/tv/shows/1/interactive') return res(RELEASES);
+    if (url === '/api/settings/tv/shows/1/interactive') return res({ ...RELEASES, grabs_allowed: grabsAllowed });
     if (url === '/api/settings/tv/shows/1/interactive/grab') return grabOk ? res({ ok: true, existing: false, episodes: [22] }) : res({ ok: false, error: 'Not grabbed: already has a file', refused: 'already has a file' });
     return res({ error: 'Not found' }, 404);
   }));
@@ -110,7 +111,7 @@ describe('Series detail page', () => {
     const rows = screen.getAllByTestId('tv-detail-episode');
     const e21 = rows.find(r => r.getAttribute('data-episode-id') === '21')!;
     expect(within(e21).getByTestId('tv-detail-episode-title').textContent).toBe('Hello, Ms. Cobel');
-    expect(within(e21).getByTestId('tv-detail-air').textContent).toBe('Jan 16, 2025, 9:00 PM ET');
+    expect(within(e21).getByTestId('tv-detail-air').textContent).toBe('Jan 16, 2025, 9:00 PM');
     expect(rows.map(r => within(r).getByTestId('tv-detail-status').textContent)).toEqual(['Unaired', 'Downloading', 'Downloaded']);
     const edge = within(e21).getByTestId('tv-detail-edge');
     expect([edge.style.width, edge.style.background]).toEqual(['4px', 'var(--tv-state-downloaded, #22c55e)']);
@@ -207,14 +208,18 @@ describe('Series detail page', () => {
     page({ wide: false });
     const rows = await screen.findAllByTestId('tv-detail-episode');
     expect(within(rows[2]!).getByTestId('tv-detail-status').textContent).toBe('Downloaded');
-    expect(within(rows[2]!).getByTestId('tv-detail-air').textContent).toBe(' \u00b7 Jan 16, 2025, 9:00 PM ET');
+    expect(within(rows[2]!).getByTestId('tv-detail-air').textContent).toBe(' \u00b7 Jan 16, 2025, 9:00 PM');
     expect(screen.getByTestId('tv-detail-edit')).toBeTruthy();
   });
 
   it('helpers', () => {
-    expect(airET({ air_date: '2025-03-01' })).toBe('Mar 1, 2025');
-    expect(airET({ airstamp: '2025-07-04T01:00:00Z' })).toBe('Jul 3, 2025, 9:00 PM ET');
-    expect(airET({})).toBe('');
+    // v185 (Designer): 'Nov 1, 9:00 PM': no year in the current year, no 'ET'
+    const now = new Date('2026-10-18T12:00:00Z');
+    expect(airET({ air_date: '2025-03-01' }, now)).toBe('Mar 1, 2025');
+    expect(airET({ air_date: '2026-11-01' }, now)).toBe('Nov 1');
+    expect(airET({ airstamp: '2025-07-04T01:00:00Z' }, now)).toBe('Jul 3, 2025, 9:00 PM');
+    expect(airET({ airstamp: '2026-11-02T02:00:00Z' }, now)).toBe('Nov 1, 9:00 PM');
+    expect(airET({}, now)).toBe('');
     expect([bytes(0), bytes(850 * 1024 ** 2), bytes(1.5 * 1024 ** 3)]).toEqual(['0 B', '850 MB', '1.5 GB']);
   });
 });
@@ -290,3 +295,39 @@ describe('Opening the page', () => {
     await waitFor(() => expect(say).toHaveBeenCalledWith('Searching 30 episodes'));
   });
 });
+
+describe('v185 Designer polish', () => {
+  it('the poster bookmark: a 40px dark glass chip, 22px glyph, 8px inside the top-left corner; filled white when monitored', async () => {
+    page();
+    const flag = await screen.findByTestId('tv-detail-monitored');
+    expect(flag.closest('[data-testid="tv-detail-poster"]')).toBeTruthy();
+    expect([flag.style.width, flag.style.height, flag.style.top, flag.style.left, flag.style.position]).toEqual(['40px', '40px', '8px', '8px', 'absolute']);
+    const svg = flag.querySelector('svg')!;
+    expect([svg.getAttribute('width'), svg.getAttribute('height')]).toEqual(['22', '22']);
+    expect(flag.getAttribute('aria-label')).toBe('Monitored');
+    expect(flag.getAttribute('aria-pressed')).toBe(String(DETAIL.monitored));
+    expect(svg.getAttribute('fill')).toBe(DETAIL.monitored ? 'currentColor' : 'none');
+  });
+
+  it('Interactive search with grabs off: no notice line and no Grab buttons (like the search chips); one quality format', async () => {
+    grabsAllowed = false;
+    page();
+    await screen.findAllByTestId('tv-detail-episode');
+    fireEvent.click(screen.getByRole('button', { name: 'Interactive search S02E02 Episode 2' }));
+    const modal = await screen.findByTestId('tv-interactive');
+    const rows = await within(modal).findAllByTestId('tv-interactive-row');
+    expect(within(modal).queryByText(/Grabs are off/)).toBeNull();
+    expect(within(modal).queryByTestId('tv-interactive-off')).toBeNull();
+    expect(within(modal).queryAllByTestId('tv-interactive-grab')).toHaveLength(0);
+    expect(rows[0]!.textContent).toContain('1080p WEB');
+    expect(rows[0]!.textContent).not.toContain('1080p-web');
+  });
+
+  it('the detail page has no checkboxes and no selected-count bar', async () => {
+    page();
+    await screen.findAllByTestId('tv-detail-episode');
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+    expect(screen.queryByText(/selected/i)).toBeNull();
+  });
+});
+

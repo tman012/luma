@@ -315,6 +315,8 @@ export const getDetail = (id: number) => call<DetailView>(`${TV_URL}/shows/${id}
 
 export interface Release {
   title: string; tracker: string | null; size: number; seeders: number; leechers: number; quality: string | null;
+  /** v185 (Designer): '1080p WEB', the one display format */
+  quality_label?: string | null;
   published: string | null; freeleech: boolean; download_url: string; season: number | null;
   episodes: { id: number; season: number; episode: number }[]; pack: boolean; rejections: string[]; grabbable: boolean;
 }

@@ -17,6 +17,7 @@ from tests.tv_fake import fake_tmdb  # noqa: F401
 @pytest.fixture
 def ms(env, monkeypatch):  # noqa: F811
     monkeypatch.setattr(tv_search, 'MS_REFILL_S', 0.0)
+    monkeypatch.setattr(tv_search, 'BG_GAP_S', 0.0)
     allow_grabs(monkeypatch)
     return env
 

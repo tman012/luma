@@ -1,11 +1,12 @@
 /** Settings > TV API (owner only, luma-test builds): the selected TV libraries, Import
  * and its progress, the review rows and Import all, the shows, fix-match and Upgrades. */
 import { apiFetch } from '@/apiClient';
+import type { Naming } from './TvNaming';
 import { SAVE_FAILED, UNREACHABLE, type Errors, type LibPath } from './libraryPathsApi';
 
 export const TV_URL = '/api/settings/tv';
 export type UpgradeMode = 'keep_both' | 'replace_verified';
-export interface TvSettingsView { paths: LibPath[]; upgrades: { mode: UpgradeMode }; rescan_interval_h: number }
+export interface TvSettingsView { paths: LibPath[]; upgrades: { mode: UpgradeMode }; rescan_interval_h: number; naming?: Naming }
 export interface Candidate { tmdb_id: number; title: string; year: number | null; poster_path?: string | null }
 export interface Show {
   id: number; tmdb_id: number; title: string; year: number | null; path_id: string; path_name: string; folder: string;

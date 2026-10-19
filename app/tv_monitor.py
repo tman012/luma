@@ -202,7 +202,7 @@ def series_view(sid: int) -> Optional[Dict[str, Any]]:
 
 
 ACTIVE_GRABS = ('downloading', 'importing')
-_SOURCE_WORD = {'web': 'WEB', 'bluray': 'Bluray', 'hdtv': 'HDTV', 'remux': 'Remux'}
+_SOURCE_WORD = {'web': 'WEB', 'bluray': 'Bluray', 'hdtv': 'HDTV', 'remux': 'Remux'}   # = SOURCE_LABEL (v185)
 
 
 def _file_quality(f: Dict[str, Any]) -> Optional[str]:
@@ -531,8 +531,17 @@ def delete(sid: int, delete_files: bool) -> Dict[str, Any]:
 
 # ------------------------------------------------------------------ quality profiles
 
-SOURCE_LABEL = {'remux': 'Remux', 'bluray': 'Blu-ray', 'web': 'WEB-DL', 'hdtv': 'HDTV'}
+# v185 (Designer): one quality format everywhere ('1080p WEB', '2160p WEB', '720p HDTV')
+SOURCE_LABEL = {'remux': 'Remux', 'bluray': 'Bluray', 'web': 'WEB', 'hdtv': 'HDTV'}
 RES_LABEL = {'2160p': '2160p', '1080p': '1080p', '720p': '720p', 'sd': 'SD'}
+
+
+def quality_label(qid: Any) -> Optional[str]:
+    """'1080p-web' -> '1080p WEB' (v185, Designer: the one display format)."""
+    res, _, src = str(qid or '').partition('-')
+    if res not in RES_LABEL or src not in SOURCE_LABEL:
+        return None
+    return f'{RES_LABEL[res]} {SOURCE_LABEL[src]}'
 
 
 def qualities() -> List[Dict[str, str]]:

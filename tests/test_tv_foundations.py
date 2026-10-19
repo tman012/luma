@@ -10,6 +10,7 @@ import stat
 import pytest
 
 import app.main
+from app import tv_naming
 from app import minimal, section_trackers as st, tracker_guard, tv_budget, tv_settings, tv_store
 from app.tracker_guard import TrackerGuard
 from tests.test_file_management import HDR, minimal as minimal_app, store  # noqa: F401
@@ -312,7 +313,7 @@ def tvs(tmp_path, monkeypatch):
 
 def test_defaults_follow_the_pm_rulings(tvs):
     d = tv_settings.load()
-    assert d['naming']['series_folder'] == '{title} ({year})'
+    assert d['naming']['series_folder'] == '{Series Title}'          # v185: Taylor's Sonarr NamingConfig
     assert d['upgrades'] == {'mode': 'keep_both'}
     assert d['automation']['enabled'] is False and d['automation']['feed_enabled'] is False
     assert d['paths'] == [] and d['rules'] == []
@@ -321,39 +322,39 @@ def test_defaults_follow_the_pm_rulings(tvs):
 
 
 def test_series_folder_naming(tvs):
-    assert tv_settings.series_folder('The Bear', 2022) == 'The Bear (2022)'
+    assert tv_settings.series_folder('The Bear', 2022) == 'The Bear'
     assert tv_settings.series_folder('Shōgun', '') == 'Shōgun'
-    assert tv_settings.series_folder('Marvel: {Agents}/S.H.I.E.L.D.', 2013) == 'Marvel- {Agents}S.H.I.E.L.D. (2013)'
+    assert tv_settings.series_folder('Marvel: {Agents}/S.H.I.E.L.D.', 2013) == 'Marvel- {Agents}+S.H.I.E.L.D'
     d = tv_settings.load()
-    d['naming']['series_folder'] = '{title} [{year}] {{tmdb-{tmdb_id}}}'
-    assert tv_settings.series_folder('Andor', 2022, d, tmdb_id=83867) == 'Andor [2022] {tmdb-83867}'
-    assert tv_settings.series_folder('Andor', None, d, tmdb_id=83867) == 'Andor {tmdb-83867}'
+    d['naming']['series_folder'] = '{Series TitleYear}'
+    assert tv_settings.series_folder('Andor', 2022, d) == 'Andor (2022)'
+    assert tv_settings.series_folder('Andor', None, d) == 'Andor'
 
 
 @pytest.mark.parametrize('key,value,ok', [
-    ('series_folder', '{title} ({year})', True), ('series_folder', '{title}', True),
-    ('series_folder', '{year}', False), ('series_folder', '{title}/{year}', False),
-    ('series_folder', '{title} {season}', False), ('series_folder', '{title!r}', False),
-    ('series_folder', '{title:>40}', False), ('series_folder', '{title', False), ('series_folder', '', False),
-    ('season_folder', 'Season {season:02}', True), ('season_folder', 'S{season}', True),
-    ('episode', '{series} - S{season:02}E{episode:02} - {episode_title}', True),
-    ('episode', '{series} - {episode_title}', False), ('daily', '{series} - {air_date}', True),
-    ('specials_folder', 'Specials', True), ('specials_folder', '..', False), ('episode', 7, False),
+    ('series_folder', '{Series TitleYear}', True), ('series_folder', '{Series Title}', True),
+    ('series_folder', '{Series Year}', False), ('series_folder', '{Series Title}/{Series Year}', False),
+    ('series_folder', '{Series Title} {season}', False), ('series_folder', '{title}', False),
+    ('series_folder', '{Series Title:>40}', False), ('series_folder', '{Series Title', False), ('series_folder', '', False),
+    ('season_folder', 'Season {season:00}', True), ('season_folder', 'S{season}', True),
+    ('standard', '{Series Title} - S{season:00}E{episode:00} - {Episode Title}', True),
+    ('standard', '{Series Title} - {Episode Title}', False), ('daily', '{Series Title} - {Air-Date}', True),
+    ('specials_folder', 'Specials', True), ('specials_folder', '..', False), ('standard', 7, False),
 ])
 def test_template_validation(key, value, ok):
-    assert (tv_settings.check_template(key, value)[1] is None) is ok
+    assert (tv_naming.check_format(key, value) is None) is ok
 
 
 def test_put_applies_and_rejects(tvs):
     d = tv_settings.load()
     assert tv_settings.apply_put(d, {'upgrades': {'mode': 'replace_verified'},
-                                     'naming': {'series_folder': '{title}'},
+                                     'naming': {'series_folder': '{Series TitleYear}'},
                                      'automation': {'enabled': True, 'first_search_delay_h': 6}}) == {}
-    assert d['upgrades']['mode'] == 'replace_verified' and d['naming']['series_folder'] == '{title}'
+    assert d['upgrades']['mode'] == 'replace_verified' and d['naming']['series_folder'] == '{Series TitleYear}'
     d = tv_settings.load()
-    errs = tv_settings.apply_put(d, {'upgrades': {'mode': 'delete_old'}, 'naming': {'episode': '{x}'},
+    errs = tv_settings.apply_put(d, {'upgrades': {'mode': 'delete_old'}, 'naming': {'standard': '{x}'},
                                      'automation': {'daily_cap': 99}, 'paths': []})
-    assert set(errs) == {'upgrades.mode', 'naming.episode', 'automation', '_'}
+    assert set(errs) == {'upgrades.mode', 'naming.standard', 'automation', '_'}
 
 
 def test_settings_routes(minimal_app, tvs):

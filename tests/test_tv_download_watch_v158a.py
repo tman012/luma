@@ -39,6 +39,15 @@ class Q:
         return S()
 
 
+@pytest.fixture(autouse=True)
+def _release_names(monkeypatch):
+    """v185: these tests are about the watch, not naming: keep the release's name and 'Season 0N'
+    (tests/test_v185_naming.py covers the Sonarr-style names)."""
+    from app import tv_naming
+    monkeypatch.setattr(tv_downloads, '_naming', lambda: {**tv_naming.DEFAULTS, 'rename_episodes': False,
+                                                          'season_folder': 'Season {season:00}'})
+
+
 @pytest.fixture
 def dl(scanned, tmp_path, monkeypatch):  # noqa: F811
     monkeypatch.setattr(lm, 'STABLE_WAIT_S', 0)

@@ -201,7 +201,7 @@ def test_delete_keeps_files_unless_asked_and_files_need_the_signed_in_owner(scan
 def test_profiles_crud_default_cutoff_and_in_use(scanned, owner):  # noqa: F811
     g = _req(owner, 'get', '/api/settings/tv/profiles').get_json()
     assert g['profiles'] == [] and len(g['qualities']) == 14                      # no presets
-    assert {'id': '1080p-web', 'name': '1080p WEB-DL', 'resolution': '1080p', 'source': 'web'} in g['qualities']
+    assert {'id': '1080p-web', 'name': '1080p WEB', 'resolution': '1080p', 'source': 'web'} in g['qualities']
     for bad in ({}, {'name': 'A', 'items': []}, {'name': 'A', 'items': [{'id': 'nope', 'allowed': True}]},
                 {'name': 'A', 'items': [{'id': '720p-web', 'allowed': True}], 'cutoff': '1080p-web'}):
         assert _req(owner, 'post', '/api/settings/tv/profiles', bad).status_code == 400

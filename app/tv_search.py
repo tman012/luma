@@ -77,6 +77,11 @@ def _log(cfg, purpose: str, sid: Optional[int], query: str, n: int, outcome: str
                      " VALUES (?, 'tv', ?, ?, ?, ?, ?, ?)", (now, guard_key(cfg), purpose, sid, query, n, outcome))
 
 
+#: v185 (PM): a monitor-ON click's searches past its interactive burst: background requests (the guard's
+#: background bucket, never a TV automation slot), logged under this purpose.
+MANUAL_BACKGROUND = 'manual-background'
+
+
 def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bool, now: float,
                    cfgs: Optional[List[Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Search each TV tracker once; (items, statuses). Items are search results with a release
@@ -91,12 +96,13 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
         if not cats:
             continue
         capped = tv_budget.capped(cfg)
-        if not interactive and capped and not tv_budget.slot_free(cfg, now):
+        bg_manual = purpose == MANUAL_BACKGROUND        # v185: the owner's click, past its burst (guard background bucket)
+        if not interactive and capped and not bg_manual and not tv_budget.slot_free(cfg, now):
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': SLOT_BUSY})
             continue                                   # no free slot: not sent, not logged
         try:
             raw = engine.search_one(cfg, query, cats, LIMIT, interactive,
-                                    purpose='tv' if not interactive and capped else None)
+                                    purpose='tv' if not interactive and capped and not bg_manual else None)
         except TrackerSkipped as e:
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
             _log(cfg, purpose, sid, query, 0, 'skipped', now)
@@ -134,10 +140,16 @@ def _show(conn, sid: int) -> Optional[Dict[str, Any]]:
     return s
 
 
-def _grabbed(conn, sid: int) -> set:
+#: v185 (PM): a monitor-ON search goes by the file on disk now: only a grab still downloading or
+#: importing holds an episode back; an imported one whose file is gone is searched again. Automatic
+#: paths keep ACTIVE_GRABS (imported is done), so a deliberately deleted file is never re-grabbed on its own.
+OPEN_GRABS = ('downloading', 'importing')
+
+
+def _grabbed(conn, sid: int, states: Tuple[str, ...] = ACTIVE_GRABS) -> set:
     out = set()
-    for r in conn.execute(f'SELECT episode_ids FROM grabs WHERE series_id = ? AND state IN ({",".join("?" * len(ACTIVE_GRABS))})',
-                          (sid, *ACTIVE_GRABS)):
+    for r in conn.execute(f'SELECT episode_ids FROM grabs WHERE series_id = ? AND state IN ({",".join("?" * len(states))})',
+                          (sid, *states)):
         try:
             out |= {int(x) for x in json.loads(r['episode_ids'] or '[]')}
         except (ValueError, TypeError):
@@ -145,7 +157,8 @@ def _grabbed(conn, sid: int) -> set:
     return out
 
 
-def wanted(conn, sid: int, today: Optional[str] = None, ids: Optional[Iterable[int]] = None) -> List[Dict[str, Any]]:
+def wanted(conn, sid: int, today: Optional[str] = None, ids: Optional[Iterable[int]] = None,
+           states: Tuple[str, ...] = ACTIVE_GRABS) -> List[Dict[str, Any]]:
     """Monitored, aired, no linked file, not already grabbed (optionally only *ids*)."""
     today = today or dt.date.today().isoformat()
     rows = [dict(r) for r in conn.execute(
@@ -153,7 +166,7 @@ def wanted(conn, sid: int, today: Optional[str] = None, ids: Optional[Iterable[i
         ' FROM episodes e JOIN series s ON s.id = e.series_id'
         ' WHERE s.id = ? AND s.monitored = 1 AND e.monitored = 1 AND e.air_date IS NOT NULL AND e.air_date <= ?'
         f' AND NOT {tv_monitor._LINKED}', (sid, today))]
-    got = _grabbed(conn, sid)
+    got = _grabbed(conn, sid, states)
     keep = None if ids is None else {int(i) for i in ids}
     return [e for e in rows if e['id'] not in got and (keep is None or e['id'] in keep)]
 
@@ -288,7 +301,7 @@ def _queries(show: Dict[str, Any], want: List[Dict[str, Any]]) -> List[Tuple[str
 def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin: str = 'auto',
                 purpose: Optional[str] = None, interactive: bool = False, now: Optional[float] = None,
                 do_grab: bool = True, queries: Optional[List[Tuple[str, str]]] = None,
-                packs: Optional[bool] = None) -> Dict[str, Any]:
+                packs: Optional[bool] = None, states: Tuple[str, ...] = ACTIVE_GRABS) -> Dict[str, Any]:
     """Search the show's wanted episodes (or *episode_ids* of them); grab the picks when allowed.
     {'ok', 'searched', 'results', 'picks': [{title, quality, episodes, grabbed, error}], 'statuses', 'error'}."""
     now = time.time() if now is None else now
@@ -296,7 +309,7 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
         show = _show(conn, sid)
         if show is None:
             return {'ok': False, 'error': 'Not found'}
-        want = wanted(conn, sid, ids=episode_ids)
+        want = wanted(conn, sid, ids=episode_ids, states=states if origin == 'manual' else ACTIVE_GRABS)
         if origin != 'manual':               # v177: an automatic search never asks for anything past the floor
             want = [e for e in want if tv_safety.in_floor(e, now)]
         blocked = {r['release_title'] for r in conn.execute('SELECT release_title FROM blocklist WHERE series_id = ?', (sid,))}
@@ -331,7 +344,7 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
             g = tv_grab.grab(it, sid, season, c['covers'], origin, now)
             row['grabbed'], row['error'] = bool(g.get('ok')), g.get('error')
         out['picks'].append(row)
-    _after(sid, want, out, now, automatic=not interactive)
+    _after(sid, want, out, now, automatic=not interactive and purpose != MANUAL_BACKGROUND)
     return out
 
 
@@ -380,7 +393,10 @@ def manual(sid: int, season: Optional[int] = None, episode_id: Optional[int] = N
 # an episode at once; a season pack first (skipped when an episode of that season already has a file),
 # else each missing aired episode on its own; a show applies its Monitor option, then the same per
 # season. All are manual grabs (past the 24h floor, not the 30/day cap; files and upgrades refused).
-# Queries are spaced: a burst of MS_BURST, then one per MS_REFILL_S (40/h), on one worker thread. A
+# Queries are spaced: a burst of MS_BURST, then one per MS_REFILL_S (40/h), on one worker thread.
+# v185 (PM): one click's first MS_BURST searches go on the interactive bucket; the rest are background
+# requests paced one per BG_GAP_S (the guard's background refill), so a show or season click can't
+# drain the 40/h. A pack's per-episode fallback belongs to the same click. A
 # click that would queue more than CONFIRM_OVER episode searches asks first and searches nothing.
 # The bulk editor, Edit's Monitor option and every unmonitor never search.
 
@@ -389,8 +405,12 @@ MS_REFILL_S = 90.0
 CONFIRM_OVER = 25
 _ms_lock = threading.Lock()
 _ms_bucket = [float(MS_BURST), 0.0]          # tokens, last refill
-_ms_queue: List[Tuple[int, int, str, List[int]]] = []   # (sid, season, kind 'pack'|'episode', ids)
+_ms_queue: List[Tuple[int, int, str, List[int], int]] = []   # (sid, season, kind 'pack'|'episode', ids, click)
 _ms_worker: List[threading.Thread] = []
+BG_GAP_S = 180.0                              # = tracker_guard LIMITS['refill_s'] (background, 20/h)
+_ms_bg_next = [0.0]                           # when the next background-lane search may go
+_ms_clicks: Dict[int, int] = {}               # click -> interactive searches it has left
+_ms_seq = [0]
 
 
 def plan(sid: int, season: Optional[int] = None, episode_id: Optional[int] = None,
@@ -401,7 +421,7 @@ def plan(sid: int, season: Optional[int] = None, episode_id: Optional[int] = Non
         eps = _episodes(conn, sid)
         mon = {r['id']: bool(r['monitored']) for r in conn.execute('SELECT id, monitored FROM episodes WHERE series_id = ?', (sid,))}
         smon = conn.execute('SELECT monitored FROM series WHERE id = ?', (sid,)).fetchone()
-        got = _grabbed(conn, sid)
+        got = _grabbed(conn, sid, OPEN_GRABS)
     if smon is None:
         return []
     out = []
@@ -436,17 +456,20 @@ def _token(now: float) -> float:
         return (1 - b[0]) * MS_REFILL_S
 
 
-def _one(sid: int, season: int, kind: str, ids: List[int], now: Optional[float] = None) -> Dict[str, Any]:
+def _one(sid: int, season: int, kind: str, ids: List[int], now: Optional[float] = None,
+         interactive: bool = True) -> Dict[str, Any]:
     with tv_store.connect() as conn:
         show = _show(conn, sid)
-        live = {e['id'] for e in wanted(conn, sid, ids=ids)} if show else set()
+        live = {e['id'] for e in wanted(conn, sid, ids=ids, states=OPEN_GRABS)} if show else set()
     ids = [i for i in ids if i in live]        # files, grabs or an unmonitor since the click: not searched
     if not show or not ids:
         return {'ok': True, 'searched': 0, 'results': 0, 'picks': [], 'statuses': [], 'error': None, 'wanted': 0}
     if kind == 'pack':
         q = [('season', f"{show['title']} S{season:02d}")]
-        return search_show(sid, ids, origin='manual', purpose='manual', interactive=True, now=now, queries=q, packs=True)
-    return search_show(sid, ids, origin='manual', purpose='manual', interactive=True, now=now, packs=False)
+        return search_show(sid, ids, origin='manual', purpose='manual' if interactive else MANUAL_BACKGROUND,
+                           interactive=interactive, now=now, queries=q, packs=True, states=OPEN_GRABS)
+    return search_show(sid, ids, origin='manual', purpose='manual' if interactive else MANUAL_BACKGROUND,
+                       interactive=interactive, now=now, packs=False, states=OPEN_GRABS)
 
 
 def _merge(out: Dict[str, Any], r: Dict[str, Any]) -> None:
@@ -460,20 +483,50 @@ def _merge(out: Dict[str, Any], r: Dict[str, Any]) -> None:
         out['ok'] = bool(r.get('ok', True)) and out['ok']
 
 
-def _season_jobs(sid: int, step: Dict[str, Any]) -> List[Tuple[int, int, str, List[int]]]:
+def _season_jobs(sid: int, step: Dict[str, Any], click: int = 0) -> List[Tuple[int, int, str, List[int], int]]:
     if step['pack']:
-        return [(sid, step['season'], 'pack', list(step['ids']))]
-    return [(sid, step['season'], 'episode', [i]) for i in step['ids']]
+        return [(sid, step['season'], 'pack', list(step['ids']), click)]
+    return [(sid, step['season'], 'episode', [i], click) for i in step['ids']]
 
 
-def _run_job(job, out: Dict[str, Any], now: Optional[float] = None) -> None:
-    sid, season, kind, ids = job
-    r = _one(sid, season, kind, ids, now)
+def _new_click() -> int:
+    with _ms_lock:
+        _ms_seq[0] += 1
+        _ms_clicks[_ms_seq[0]] = MS_BURST
+        return _ms_seq[0]
+
+
+def _lane(job) -> bool:
+    """True: the head job goes on the interactive bucket (its click has some of its burst left)."""
+    return _ms_clicks.get(job[4], 0) > 0
+
+
+def _wait(job, now: float) -> float:
+    """0 when *job* may run now (its lane's token taken), else seconds to wait."""
+    if _lane(job):
+        w = _token(now)
+        if w == 0:
+            with _ms_lock:
+                _ms_clicks[job[4]] = _ms_clicks.get(job[4], 0) - 1
+        return w
+    with _ms_lock:
+        if now < _ms_bg_next[0]:
+            return _ms_bg_next[0] - now
+        _ms_bg_next[0] = now + BG_GAP_S
+        return 0.0
+
+
+def _run_job(job, out: Dict[str, Any], now: Optional[float] = None, interactive: bool = True) -> None:
+    sid, season, kind, ids, click = job
+    r = _one(sid, season, kind, ids, now, interactive=interactive)
     _merge(out, r)
     if kind == 'pack' and not r.get('picks'):
-        # no acceptable pack: each missing aired episode on its own (queued, spaced)
+        # no acceptable pack: each missing aired episode on its own (queued, spaced; the same click)
         with _ms_lock:
-            _ms_queue[:0] = [(sid, season, 'episode', [i]) for i in ids]
+            _ms_queue[:0] = [(sid, season, 'episode', [i], click) for i in ids]
+    with _ms_lock:
+        if not any(j[4] == click for j in _ms_queue):
+            _ms_clicks.pop(click, None)
 
 
 def run_plan(sid: int, p: List[Dict[str, Any]], now: Optional[float] = None, sync: bool = False) -> Dict[str, Any]:
@@ -486,25 +539,33 @@ def run_plan(sid: int, p: List[Dict[str, Any]], now: Optional[float] = None, syn
     if not trackers():
         out.update(ok=False, error=NO_TRACKERS)
         return out
-    jobs = [j for step in p for j in _season_jobs(sid, step)]
+    click = _new_click()
+    jobs = [j for step in p for j in _season_jobs(sid, step, click)]
     with _ms_lock:
         _ms_queue.extend(jobs)
     if sync:
-        while True:
+        while True:                                # the Search button: this click's interactive part, now
             with _ms_lock:
-                if not _ms_queue or _ms_queue[0][0] != sid:
-                    break
-            if _token(time.time()) > 0:
+                head = _ms_queue[0] if _ms_queue else None
+            if head is None or head[4] != click or not _lane(head) or _wait(head, time.time()) > 0:
                 break
             with _ms_lock:
                 job = _ms_queue.pop(0) if _ms_queue else None
             if job is None:
                 break
-            _run_job(job, out, now)
+            _run_job(job, out, now, interactive=True)
     with _ms_lock:
         out['queued'] = sum(len(j[3]) for j in _ms_queue if j[0] == sid)
     _spawn()
     return out
+
+
+def _clock() -> float:
+    return time.time()
+
+
+def _sleep(s: float) -> None:
+    time.sleep(s)
 
 
 def drain(max_jobs: int = 1000) -> int:
@@ -514,16 +575,19 @@ def drain(max_jobs: int = 1000) -> int:
         with _ms_lock:
             if not _ms_queue:
                 return n
-        wait = _token(time.time())
+            head = _ms_queue[0]
+        lane = _lane(head)
+        wait = _wait(head, _clock())
         if wait > 0:
-            time.sleep(min(wait, MS_REFILL_S))
+            _sleep(min(wait, max(MS_REFILL_S, BG_GAP_S)))
             continue
         with _ms_lock:
             job = _ms_queue.pop(0) if _ms_queue else None
         if job is None:
             return n
         try:
-            _run_job(job, {'ok': True, 'searched': 0, 'results': 0, 'picks': [], 'statuses': [], 'error': None})
+            _run_job(job, {'ok': True, 'searched': 0, 'results': 0, 'picks': [], 'statuses': [], 'error': None},
+                     interactive=lane)
         except Exception:                        # noqa: BLE001 - one search's trouble never stops the queue
             logger.exception('TV monitor search failed')
         n += 1
@@ -640,7 +704,7 @@ def judge(items: List[Dict[str, Any]], show: Dict[str, Any], eps: List[Dict[str,
                 rej.append(BAD_SIZE)
         out.append({'title': title, 'tracker': it.get('indexer'), 'size': int(it.get('size') or 0),
                     'seeders': int(it.get('seeders') or 0), 'leechers': int(it.get('leechers') or 0),
-                    'quality': q, 'published': it.get('publishDate') or None, 'freeleech': bool(it.get('freeleech')),
+                    'quality': q, 'quality_label': tv_monitor.quality_label(q), 'published': it.get('publishDate') or None, 'freeleech': bool(it.get('freeleech')),
                     'download_url': it.get('downloadUrl'), 'season': season,
                     'episodes': [{'id': i, 'season': by_id[i]['season_number'], 'episode': by_id[i]['episode_number']} for i in ids],
                     'pack': tv_release.parse(title).kind == 'season',

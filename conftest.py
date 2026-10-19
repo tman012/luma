@@ -335,6 +335,8 @@ def _tv_monitor_search_inline():
     tv_search._spawn = lambda: None
     tv_search._ms_queue.clear()
     tv_search._ms_bucket[:] = [float(tv_search.MS_BURST), 0.0]
+    tv_search._ms_clicks.clear()
+    tv_search._ms_bg_next[:] = [0.0]
     try:
         yield
     finally:

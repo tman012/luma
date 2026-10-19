@@ -19,6 +19,15 @@ NAME = 'Time.S03E03.1080p.WEBRip.X264-DEADPOOL'
 TODAY = time.strftime('%Y-%m-%d')
 
 
+@pytest.fixture(autouse=True)
+def _release_names(monkeypatch):
+    """v185: these tests are about the watch, not naming: keep the release's name and 'Season 0N'
+    (tests/test_v185_naming.py covers the Sonarr-style names)."""
+    from app import tv_naming
+    monkeypatch.setattr(tv_downloads, '_naming', lambda: {**tv_naming.DEFAULTS, 'rename_episodes': False,
+                                                          'season_folder': 'Season {season:00}'})
+
+
 @pytest.fixture
 def time_show(dl):
     """The show from the live bug: Time (2021), season 3, in the scanned TV library."""
@@ -253,3 +262,15 @@ def test_an_unmonitored_episode_is_not_imported_until_monitored_again(dl, time_s
         conn.execute('UPDATE episodes SET monitored = 1 WHERE id = ?', (eps[3],))
     assert dl.tick(now + 180)['imported'] == 1
     assert (dl.lib / 'Time (2021)' / 'Season 03' / (NAME + '.mkv')).is_file() and _row(H1)['state'] == 'imported'
+
+
+def test_a_closed_row_is_matched_by_hash_only(dl, time_show):
+    """v185 (Reviewer b): another torrent with the same release name is never refused by a closed row."""
+    sid, eps = time_show
+    _grab_row(H1, sid, [eps[3]])
+    with tv_store.write() as conn:
+        conn.execute("UPDATE grabs SET state = 'imported', finished_at = ? WHERE hash = ?", (time.time(), H1))
+    assert tv_downloads._no_import(H1, NAME) == tv_downloads.ALREADY_IMPORTED
+    assert tv_downloads._no_import('d' * 40, NAME) is None
+    assert tv_downloads.finish_grab('d' * 40, NAME, sid, [eps[3]], 1, time.time()) is None
+    assert _row(H1)['state'] == 'imported'

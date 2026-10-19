@@ -4,7 +4,7 @@ mode TV shares).
 
     {"version": 1,
      "libraries": ["p_..."], "rules": [], "fallback_path_id": null,
-     "naming": {"series_folder": "{title} ({year})", ...},
+     "naming": {"rename_episodes": true, "standard": "{Series Title} - S{season:00}E{episode:00} - ...", ...},
      "upgrades": {"mode": "keep_both" | "replace_verified"},
      "automation": {"enabled": false, ...},
      "rescan_interval_h": 6}
@@ -15,8 +15,8 @@ mode TV shares).
   its shows stay in tv.db, hidden until it is selected again or a scan finds
   them in another selected library. Earlier builds' own TV paths ("paths")
   are moved over once by migrate().
-* Naming: a scan accepts any existing folder name; only new series get a
-  folder from `series_folder`, which starts at "Title (Year)".
+* Naming (v185, app/tv_naming): Sonarr-style formats seeded from Taylor's Sonarr; a scan accepts any
+  existing name; only files Luma imports (and new series folders) are named by them.
 * Upgrades: keep_both (the old file stays and is listed as superseded) until
   the owner picks replace_verified (the old file goes only after the new one
   is in place and verified).
@@ -58,73 +58,24 @@ MAX_PATHS = 20
 _TV_ID_RE = re.compile(r'^t_[0-9a-f]{8}$')      # an earlier build's own TV paths (migrate)
 _LIB_ID_RE = re.compile(r'^p_[0-9a-f]{8}$')     # Library path ids (file_management)
 UPGRADE_MODES = ('keep_both', 'replace_verified')
-DEFAULT_NAMING = {
-    'series_folder': '{title} ({year})',
-    'season_folder': 'Season {season:02}',
-    'episode': '{series} - S{season:02}E{episode:02} - {episode_title}',
-    'daily': '{series} - {air_date} - {episode_title}',
-    'specials_folder': 'Specials',
-}
-# Fields each template may use (and only these).
-NAMING_FIELDS = {
-    'series_folder': {'title', 'year', 'tmdb_id'},
-    'season_folder': {'season'},
-    'episode': {'series', 'season', 'episode', 'episode_title', 'year', 'resolution', 'source'},
-    'daily': {'series', 'air_date', 'episode_title', 'year', 'resolution', 'source'},
-    'specials_folder': set(),
-}
-# Number fields; the rest are text, and a format spec ('{title:02}') on text
-# would raise at naming time, so it is refused when the template is saved.
-INT_FIELDS = {'season', 'episode', 'year', 'tmdb_id'}
-REQUIRED_FIELDS = {'series_folder': {'title'}, 'season_folder': set(),
-                   'episode': {'season', 'episode'}, 'daily': {'air_date'}, 'specials_folder': set()}
+# v185: naming is Sonarr-style (app/tv_naming), seeded from Taylor's Sonarr NamingConfig
 # import_enabled: the TV download watch on prod (off by default; on test it follows the instance's
 # tv_import job, see tv_downloads.watch_enabled).
 AUTOMATION_FLAGS = ('enabled', 'feed_enabled', 'backlog_enabled', 'upgrades_enabled', 'import_enabled')
 DEFAULT_AUTOMATION = {'enabled': False, 'feed_enabled': False, 'backlog_enabled': False,
                       'upgrades_enabled': False, 'import_enabled': False, 'first_search_delay_h': 4}
-TEMPLATE_MAX = 120
 INVALID = 'Invalid'
 _CTRL_RE = re.compile(r'[\x00-\x1f\x7f/\\]')
-_FMT_RE = re.compile(r'^0?\d?$')
 
 
 def empty() -> Dict[str, Any]:
     return {'version': 1, 'paths': [], 'libraries': [], 'rules': [], 'fallback_path_id': None,
-            'naming': dict(DEFAULT_NAMING), 'upgrades': {'mode': 'keep_both'},
+            'naming': dict(_naming().DEFAULTS), 'upgrades': {'mode': 'keep_both'},
             'automation': dict(DEFAULT_AUTOMATION), 'rescan_interval_h': 6}
 
 
 def store_path() -> Path:
     return Path(_cfg.get('store_path') or _paths.data_path(STORE_NAME))
-
-
-def check_template(key: str, value: Any) -> Tuple[Optional[str], Optional[str]]:
-    """(template, None) or (None, error). Placeholders must be known for the
-    template; required ones must be there; no path separators or control
-    characters; '{season:02}'-style zero padding only, and only on number
-    fields."""
-    if not isinstance(value, str):
-        return None, INVALID
-    v = value.strip()
-    if not v or len(v) > TEMPLATE_MAX or _CTRL_RE.search(v) or v in ('.', '..'):
-        return None, INVALID
-    try:
-        parts = list(string.Formatter().parse(v))
-    except ValueError:
-        return None, INVALID
-    used = set()
-    for _lit, field, spec, conv in parts:
-        if field is None:
-            continue
-        if field not in NAMING_FIELDS[key] or conv or not _FMT_RE.match(spec or ''):
-            return None, INVALID
-        if spec and field not in INT_FIELDS:
-            return None, INVALID
-        used.add(field)
-    if not REQUIRED_FIELDS[key] <= used:
-        return None, INVALID
-    return v, None
 
 
 def _normalize(raw: Any) -> Dict[str, Any]:
@@ -146,11 +97,7 @@ def _normalize(raw: Any) -> Dict[str, Any]:
         d['libraries'] = seen[:library_selection.MAX_SELECTED]
     if isinstance(raw.get('fallback_path_id'), str):
         d['fallback_path_id'] = raw['fallback_path_id']
-    naming = raw.get('naming') if isinstance(raw.get('naming'), dict) else {}
-    for k in DEFAULT_NAMING:
-        v, err = check_template(k, naming.get(k)) if k in naming else (None, 'missing')
-        if not err:
-            d['naming'][k] = v
+    d['naming'] = _naming().normalize(raw.get('naming'))
     up = raw.get('upgrades') if isinstance(raw.get('upgrades'), dict) else {}
     if up.get('mode') in UPGRADE_MODES:
         d['upgrades']['mode'] = up['mode']
@@ -199,16 +146,10 @@ def apply_put(data: Dict[str, Any], body: Any) -> Dict[str, str]:
     if not isinstance(body, dict):
         return {'_': INVALID}
     if 'naming' in body:
-        n = body['naming']
-        if not isinstance(n, dict) or not set(n) <= set(DEFAULT_NAMING):
-            errors['naming'] = INVALID
-        else:
-            for k, v in n.items():
-                t, e = check_template(k, v)
-                if e:
-                    errors[f'naming.{k}'] = e
-                else:
-                    data['naming'][k] = t
+        new, errs = _naming().apply(data['naming'], body['naming'])
+        errors.update(errs)
+        if not errs:
+            data['naming'] = new
     if 'upgrades' in body:
         u = body['upgrades']
         if not isinstance(u, dict) or set(u) != {'mode'} or u['mode'] not in UPGRADE_MODES:
@@ -237,23 +178,16 @@ def apply_put(data: Dict[str, Any], body: Any) -> Dict[str, str]:
 
 
 def series_folder(title: Any, year: Any, data: Optional[Dict[str, Any]] = None, tmdb_id: Any = None) -> str:
-    """Folder name for a new series from the naming setting ("Title (Year)"
-    by default). An empty year drops its parentheses. Safe as one path part."""
-    from app.file_management import safe_component
-    tpl = (data or load())['naming']['series_folder']
-    y = int(year) if isinstance(year, (str, int)) and not isinstance(year, bool) \
-        and re.fullmatch(r'\d{4}', str(year)) else None
-    tid = tmdb_id if isinstance(tmdb_id, int) and not isinstance(tmdb_id, bool) and tmdb_id > 0 else None
-    for name, val in (('year', y), ('tmdb_id', tid)):
-        if val is None:                   # drop the field, with its brackets
-            tpl = re.sub(r'\s*(?:\{\{|[(\[])[A-Za-z_-]*\{%s(?::[^}]*)?\}(?:\}\}|[)\]])' % name, '', tpl)
-            tpl = re.sub(r'\{%s(?::[^}]*)?\}' % name, '', tpl)
-    t = title.replace('{', '{{').replace('}', '}}') if isinstance(title, str) else ''
-    try:
-        out = tpl.replace('{title}', t).format(year=y, tmdb_id=tid)
-    except (ValueError, KeyError, IndexError):
-        out = t
-    return safe_component(out, fallback='Series')
+    """Folder name for a new series from the Series folder format (v185: Sonarr's '{Series Title}').
+    Safe as one path part."""
+    n = _naming()
+    y = str(year) if isinstance(year, (str, int)) and not isinstance(year, bool) and re.fullmatch(r'\d{4}', str(year)) else None
+    return n.series_folder({'title': title if isinstance(title, str) else '', 'year': y}, (data or load())['naming'])
+
+
+def _naming():
+    from app import tv_naming
+    return tv_naming
 
 
 def tv_path_status(p: Dict[str, Any]) -> str:
@@ -499,3 +433,28 @@ def tv_settings_put():
             return _no_store(jsonify({'errors': errors}), 400)
         save(data)
     return _no_store(jsonify(view(data)))
+
+
+@bp.route('/api/settings/tv/naming/preview', methods=['POST'])
+def tv_naming_preview():
+    """v185: the live example under each naming field, for the formats being typed (nothing is
+    saved): {examples: {field: name}, errors: {naming.field: text}}. The owner's."""
+    err = _guard() or _signed_in_owner()
+    if err:
+        return err
+    body = request.get_json(silent=True)
+    n = _naming()
+    cur = load()['naming']
+    raw = body.get('naming') if isinstance(body, dict) else None
+    if not isinstance(raw, dict) or set(raw) - set(n.DEFAULTS):
+        return _no_store(jsonify({'error': INVALID})), 400
+    _, errors = n.apply(cur, raw)
+    cfg = {**cur, **{k: v for k, v in raw.items() if f'naming.{k}' not in errors}}
+    ex = n.preview(cfg)
+    for k in errors:
+        f = k.split('.', 1)[1]
+        if f in ex:
+            ex[f] = ''
+        if f == 'standard':
+            ex['multi_episode_style'] = ''
+    return _no_store(jsonify({'examples': ex, 'errors': errors}))

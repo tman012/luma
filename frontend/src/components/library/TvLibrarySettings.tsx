@@ -21,6 +21,7 @@ import { TvSeries } from './TvSeries';
 import { QualityProfiles } from './TvEdit';
 import { SEARCH_LIST_ID, SEARCH_MIN, TV_POPOVER_SURFACE, TvOwnedSearch, searchRowId, tvSearchCss, type SearchKeys } from './TvSearch';
 import { TvSeriesDetail } from './TvSeriesDetail';
+import { NamingSettings } from './TvNaming';
 import { AddSeriesButton } from './TvAddSeries';
 import { OpenShowContext } from './TvCalendar';
 import { LibrarySelector } from './LibrarySelector';
@@ -214,6 +215,10 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
           }} />
         </div>
         <QualityProfiles />
+        {settingsView.naming && (
+          <NamingSettings value={settingsView.naming} say={say}
+            onSaved={n => setSettingsView(v => (v ? { ...v, naming: n } : v))} />
+        )}
         {options}
       </div>
     );

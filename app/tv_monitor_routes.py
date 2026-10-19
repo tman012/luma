@@ -9,7 +9,7 @@ DELETE /api/settings/tv/shows/<id>?delete_files=1        remove from Luma; files
 PUT    /api/settings/tv/shows/<id>/monitored {monitored}
 PUT    /api/settings/tv/shows/<id>/seasons/<n>/monitored {monitored}
 PUT    /api/settings/tv/episodes/<id>/monitored {monitored}
-POST   /api/settings/tv/shows/monitor-missing {ids}      Series grid bulk opt-in to Missing episodes
+POST   /api/settings/tv/shows/monitor-missing {ids}      Series grid bulk opt-in to Missing episodes (signed-in owner)
 PUT    /api/settings/tv/shows/bulk {ids, changes}        v181 bulk editor: monitored, monitor, monitor_new_seasons,
                                                          profile_id, series_type, season_folder (signed-in owner;
                                                          tv.db only, never a search or grab)
@@ -181,7 +181,7 @@ def monitor_search_confirmed(sid):
 
 @bp.route('/api/settings/tv/shows/monitor-missing', methods=['POST'])
 def monitor_missing():
-    err = tv_settings._guard()
+    err = tv_settings._guard() or tv_settings._signed_in_owner()   # v185 (Reviewer, PM): the owner's
     if err:
         return err
     body = request.get_json(silent=True)

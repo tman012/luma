@@ -52,6 +52,11 @@ export const typeLabel = (t?: string | null) => SERIES_TYPES.find(o => o.id === 
 
 // ---------------------------------------------------------------- the list view
 
+/** v185 (Designer): the title's line height (2 lines at most) */
+export const TITLE_LINE = 18;
+/** v185 (Designer): the show's quality profile by name, or 'Default' (none set, or one since deleted). */
+export const profileName = (id: number | null | undefined, names: Map<number, string>) => (id != null && names.get(id)) || 'Default';
+
 export function SeriesList({ shows, profiles, picked, setPicked, onOpen, onMonitored }: {
   shows: Show[]; profiles: Profile[]; picked: Set<number>; setPicked: (p: Set<number>) => void; onOpen: (s: Show) => void;
   /** v183: after a Monitored bookmark flip saved (tv.db only, never a search) */
@@ -94,10 +99,12 @@ export function SeriesList({ shows, profiles, picked, setPicked, onOpen, onMonit
             onClick={() => toggle(s.id, !on)}
             style={{ ...rowGrid, minHeight: 48, borderTop: LINE, cursor: 'pointer', background: on ? 'rgba(59,130,246,0.10)' : undefined }}>
             <span role="cell" style={cellCenter}><Check state={on} label={s.title} testid="tv-list-check" onChange={v => toggle(s.id, v)} /></span>
-            <span role="cell" style={{ ...cell, minWidth: 0 }}>
+            <span role="cell" style={{ ...cell, minWidth: 0, whiteSpace: 'normal', textOverflow: 'clip' }}>
+              {/* v185 (Designer): a long title wraps to 2 lines, no ellipsis */}
               <button type="button" className="lp-focus tvb-title" data-testid="tv-list-open" onClick={e => { e.stopPropagation(); onOpen(s); }}
                 style={{ padding: 0, border: 'none', background: 'none', cursor: 'pointer', fontFamily: FONT, fontSize: 14, fontWeight: 600, color: W95,
-                  textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+                  textAlign: 'left', whiteSpace: 'normal', overflowWrap: 'anywhere', lineHeight: `${TITLE_LINE}px`, maxHeight: TITLE_LINE * 2,
+                  overflow: 'hidden', display: 'block', maxWidth: '100%' }}>
                 {s.year ? `${s.title} (${s.year})` : s.title}
               </button>
             </span>
@@ -106,7 +113,7 @@ export function SeriesList({ shows, profiles, picked, setPicked, onOpen, onMonit
                 onChange={v => void flip(s.id, v)} />
             </span>
             <span role="cell" style={cell}>{monitorLabel(s.monitor)}</span>
-            <span role="cell" style={cell}>{s.profile_id != null ? names.get(s.profile_id) ?? '' : ''}</span>
+            <span role="cell" data-testid="tv-list-profile" style={cell}>{profileName(s.profile_id, names)}</span>
             <span role="cell" style={cell}>{typeLabel(s.series_type)}</span>
             <span role="cell" style={{ ...cell, color: W70 }}>{`${Math.min(s.have ?? 0, s.aired ?? 0)} of ${s.aired ?? 0}`}</span>
           </div>

@@ -100,21 +100,18 @@ def test_the_configured_app_category_is_reserved(monkeypatch):
     assert qbit_owner.tag_name() == 'luma-prod'
 
 
-# ------------------------------------------------------------- reviewer (5): tv naming specs
+# ------------------------------------------------------------- reviewer (5): tv naming specs (v185: Sonarr tokens)
 
-@pytest.mark.parametrize('tpl', ['{title:>10}', '{title:02}', '{title} ({year:x})', '{title} {tmdb_id:,}'])
+@pytest.mark.parametrize('tpl', ['{Series Title:>10}', '{Series Title:02}', '{Series Title} ({Series Year:x})'])
 def test_format_specs_only_on_number_fields(tpl):
-    assert tv_settings.check_template('series_folder', tpl) == (None, tv_settings.INVALID)
+    assert tv_settings._naming().check_format('series_folder', tpl) is not None
 
 
 def test_year_is_formatted_as_a_number():
-    data = {'naming': dict(tv_settings.DEFAULT_NAMING, series_folder='{title} [{year:04}]')}
-    assert tv_settings.check_template('series_folder', '{title} [{year:04}]')[1] is None
+    data = {'naming': dict(tv_settings._naming().DEFAULTS, series_folder='{Series Title} [{Series Year}]')}
     assert tv_settings.series_folder('Show', '0999', data) == 'Show [0999]'
     assert tv_settings.series_folder('Show', 2008, data) == 'Show [2008]'
     assert tv_settings.series_folder('Show', 'abcd', data) == 'Show'
-    assert tv_settings.series_folder('Show', None, {'naming': tv_settings.DEFAULT_NAMING}) == 'Show'
-    assert tv_settings.series_folder('Show', '2008', {'naming': tv_settings.DEFAULT_NAMING}) == 'Show (2008)'
 
 
 # ------------------------------------------------------------- reviewer (6): tv_store

@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import re
+import stat
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -32,7 +33,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import requests
 
 from app import file_management as fm
-from app import instance, library_mover as mover, qbit_owner, tv_match, tv_release, tv_settings, tv_store
+from app import instance, library_mover as mover, qbit_owner, tv_match, tv_monitor, tv_naming, tv_release, tv_settings, tv_store
 
 logger = logging.getLogger(__name__)
 
@@ -158,10 +159,19 @@ def _episodes(sid: int, name: str, rel_path: str) -> Tuple[Optional[int], List[i
 def _show_folder(s: Dict[str, Any]) -> str:
     if s['folder']:
         return s['folder']
-    folder, _ = fm.movie_names(s['title'], s['year'] or '', '')
+    from app import tv_settings
+    folder = tv_settings.series_folder(s['title'], s['year'])        # v185: the Series folder format
     if not folder or '/' in folder or folder in ('.', '..'):
         raise mover.Refused('unsafe file name')
     with tv_store.write() as conn:                      # a show added from Search gets its folder now
+        taken = conn.execute('SELECT 1 FROM series WHERE path_id IS ? AND folder = ? AND id != ?',
+                             (s.get('path_id'), folder, s['id'])).fetchone()
+        if taken and s['year']:                         # another show has that folder: never share it
+            folder = fm.safe_component(f"{folder} ({s['year']})", fallback='Series')
+            taken = conn.execute('SELECT 1 FROM series WHERE path_id IS ? AND folder = ? AND id != ?',
+                                 (s.get('path_id'), folder, s['id'])).fetchone()
+        if taken:
+            raise mover.Refused('another show has this folder')
         conn.execute('UPDATE series SET folder = ? WHERE id = ? AND folder IS NULL', (folder, s['id']))
     return folder
 
@@ -214,28 +224,99 @@ def import_torrent(t: Dict[str, Any], data: Dict[str, Any], now: float,
     try:
         sfd, _, show_path = mover._ensure_folder(rfd, lib_root, folder, owner)
         try:
+            naming = _naming()
             for f, season, nums in plan:
                 dfd, dpath, close = sfd, show_path, False
                 if s['season_folder']:
-                    dfd, _, dpath = mover._ensure_folder(sfd, show_path, f'Season {season:02d}', owner)
+                    # v185: the show's own season folder when it has one, else one in its siblings' style
+                    sname = tv_naming.season_folder(season, _subdirs(sfd), naming)
+                    if not sname or '/' in sname or sname in ('.', '..'):
+                        raise mover.Refused('unsafe file name')
+                    dfd, _, dpath = mover._ensure_folder(sfd, show_path, sname, owner)
                     close = True
+                extra = []
                 try:
-                    fname = os.path.basename(f.path)
-                    if not fname or fname in ('.', '..'):
+                    fname = _new_name(s, season, nums, f.path, str(t.get('name') or ''), naming)
+                    if not fname or '/' in fname or fname in ('.', '..'):
                         raise mover.Refused('unsafe file name')
                     how = mover.transfer(f.path, dfd, dpath, fname, mode, owner, root, f)
+                    if how != 'exists':
+                        extra = _sidecars(f, fname, dfd, dpath, mode, owner, root)
                 finally:
                     if close:
                         os.close(dfd)
                 dest = os.path.join(dpath, fname)
                 linked = tv_watch.episode_imported(dest)          # the import hook: the card turns now
-                files.append({'path': dest, 'how': how, 'linked': bool(linked), 'episode_ids': _ids(s['id'], season, nums)})
+                files.append({'path': dest, 'how': how, 'linked': bool(linked), 'episode_ids': _ids(s['id'], season, nums),
+                              **({'sidecars': extra} if extra else {})})
         finally:
             os.close(sfd)
     finally:
         os.close(rfd)
     return {'state': 'imported', 'files': files, 'series_id': s['id'],
             'episode_ids': sorted({i for x in files for i in x['episode_ids']})}
+
+
+def _naming() -> Dict[str, Any]:
+    try:
+        return tv_settings.load()['naming']
+    except Exception:                                   # noqa: BLE001 - unreadable settings: Taylor's Sonarr defaults
+        logger.exception('TV import: naming settings unreadable')
+        return dict(tv_naming.DEFAULTS)
+
+
+def _subdirs(fd: int) -> List[str]:
+    out = []
+    for n in os.listdir(fd):
+        try:
+            if stat.S_ISDIR(os.stat(n, dir_fd=fd, follow_symlinks=False).st_mode):
+                out.append(n)
+        except OSError:
+            pass
+    return out
+
+
+def _new_name(s: Dict[str, Any], season: int, nums: List[int], path: str, release: str, naming: Dict[str, Any]) -> str:
+    """v185: the file's name in the library: the episode format (Rename episodes on), the extension
+    kept; the release's own name when renaming is off or the format can't name it."""
+    base = os.path.basename(path)
+    if not naming.get('rename_episodes'):
+        return base
+    ext = os.path.splitext(base)[1]
+    with tv_store.connect() as conn:
+        rows = [dict(r) for r in conn.execute(
+            f"SELECT episode_number, title, air_date, absolute_number FROM episodes WHERE series_id = ? AND season_number = ?"
+            f" AND episode_number IN ({','.join('?' * len(nums))}) ORDER BY episode_number", (s['id'], season, *nums))]
+        st = conn.execute('SELECT series_type FROM series WHERE id = ?', (s['id'],)).fetchone()
+    if not rows:
+        return base
+    rel = tv_release.parse(release or base)
+    q = tv_monitor.quality_of(base) or tv_monitor.quality_of(release)
+    ctx = {'title': s['title'], 'folder': s.get('folder'), 'year': s.get('year'), 'season': season,
+           'episodes': [r['episode_number'] for r in rows], 'absolutes': [r.get('absolute_number') for r in rows],
+           'titles': [r['title'] or '' for r in rows], 'air_date': rows[0]['air_date'], 'quality': q,
+           'proper': bool(getattr(rel, 'proper', False)), 'group': getattr(rel, 'group', ''), 'release': release or base}
+    return tv_naming.episode_name(ctx, ext, (st['series_type'] if st else None) or 'standard', naming) or base
+
+
+def _sidecars(f, fname: str, dfd: int, dpath: str, mode: str, owner, root: str) -> List[Dict[str, Any]]:
+    """v185: subtitles beside the video follow it under its new name (never over an existing file)."""
+    out = []
+    stem = os.path.splitext(fname)[0]
+    for src, suffix in tv_naming.sidecars(f.path):
+        if not fm._under(os.path.realpath(src), root):
+            continue
+        name = tv_naming._fit(stem, suffix)
+        try:
+            st = os.stat(src, follow_symlinks=False)
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            how = mover.transfer(src, dfd, dpath, name, mode, owner, root, mover._found(src, st))
+        except (OSError, mover.Refused, mover.Pending, TypeError) as e:
+            logger.info('TV import: a sidecar was skipped (%s)', type(e).__name__)
+            continue
+        out.append({'path': os.path.join(dpath, name), 'how': how})
+    return out
 
 
 def _ids(sid: int, season: int, nums: List[int]) -> List[int]:
@@ -360,7 +441,9 @@ def _no_import(h: str, name: Optional[str]) -> Optional[str]:
     with tv_store.connect() as conn:
         g = conn.execute('SELECT * FROM grabs WHERE hash = ?', (h,)).fetchone()
         if g is None and name:
-            g = conn.execute('SELECT * FROM grabs WHERE release_title = ? ORDER BY grabbed_at DESC LIMIT 1', (name,)).fetchone()
+            # v185 (Reviewer b): a closed row is matched by its hash only; the name fallback is for open rows
+            g = conn.execute(f"SELECT * FROM grabs WHERE release_title = ? AND state IN ({','.join('?' * len(OPEN_GRABS))})"
+                             ' ORDER BY grabbed_at DESC LIMIT 1', (name, *OPEN_GRABS)).fetchone()
         if g is None:
             return None
         if g['state'] in ('imported', 'partial'):

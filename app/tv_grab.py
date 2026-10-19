@@ -248,9 +248,16 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
     if not h:
         # v171 (Tester FF-1): a magnet with no (or a short) btih is a bad link: 400 at the route, no fallback
         return {'ok': False, 'error': NO_HASH, 'link': True, 'status': 400}
+    reopen = False
     with tv_store.connect() as conn:
-        if conn.execute('SELECT 1 FROM grabs WHERE hash = ?', (h,)).fetchone():
-            return {'ok': True, 'hash': h, 'existing': True}
+        g = conn.execute('SELECT state FROM grabs WHERE hash = ?', (h,)).fetchone()
+        if g is not None:
+            # v185 (PM): the owner's monitor-ON search goes by the file on disk now. The same release was
+            # imported before but its file is gone (tv_safety already refused any episode with a file):
+            # reopen that grab so the watcher imports it again; send it again in case the client dropped it.
+            if origin != 'manual' or g['state'] not in ('imported', 'partial'):
+                return {'ok': True, 'hash': h, 'existing': True}
+            reopen = True
         if conn.execute('SELECT 1 FROM blocklist WHERE info_hash = ? OR (release_title = ? AND series_id = ?)',
                         (h, item.get('title'), series_id)).fetchone():
             return {'ok': False, 'error': 'Blocklisted'}
@@ -288,10 +295,24 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
     finally:
         mover._close(sess)
     from app.qbit_connector import text_of
-    if r.status_code != 200 or text_of(r).strip() not in ('Ok.', ''):
+    if reopen and r.status_code == 200 and text_of(r).strip() == 'Fails.':
+        pass                                                 # still in the client: the watcher imports it again
+    elif r.status_code != 200 or text_of(r).strip() not in ('Ok.', ''):
         err = f'qBittorrent returned HTTP {r.status_code}' if r.status_code != 200 else 'qBittorrent refused the torrent'
         _job_failed(h, item, series_id, err, now)
         return {'ok': False, 'error': err}
+    if reopen:
+        with tv_store.write() as conn:
+            conn.execute("UPDATE grabs SET state = 'downloading', finished_at = NULL, error = NULL, origin = 'manual',"
+                         ' episode_ids = ?, grabbed_at = ? WHERE hash = ?', (json.dumps(sorted(episode_ids)), now, h))
+            conn.execute('INSERT INTO history (ts, series_id, episode_ids, event, detail) VALUES (?, ?, ?, ?, ?)',
+                         (now, series_id, json.dumps(sorted(episode_ids)), 'grabbed',
+                          json.dumps({'title': item.get('title'), 'origin': origin, 'hash': h, 'tracker': item.get('indexer'),
+                                      'again': True})))
+        tv_downloads._save(h, state='waiting', error=None, at=now, reopened=now)
+        _job_clear(h)
+        logger.info('TV grab: %s again (its earlier file is gone; owner monitor search)', item.get('title'))
+        return {'ok': True, 'hash': h, 'again': True}
     with tv_store.write() as conn:
         conn.execute('INSERT OR IGNORE INTO grabs (hash, series_id, season_number, episode_ids, release_title, tracker_id,'
                      ' quality, size, origin, grabbed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',

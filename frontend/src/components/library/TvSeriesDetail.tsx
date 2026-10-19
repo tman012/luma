@@ -3,7 +3,7 @@
  * Header: poster, title, year, network, status, quality profile, path, size, have/total monitored episodes,
  * the show's monitor switch and Edit. Seasons: collapsible, newest first, each with its monitor switch, have/total,
  * Search and Interactive search. Episodes: number, title, air date (ET), status (the 4px status edge and a word;
- * no checkmarks), monitor switch, Search and Interactive search, and the v181 episode checkboxes.
+ * no checkmarks), the monitored bookmark, Search and Interactive search (v184: no checkboxes; the bulk editor is the Series list's).
  * Search and Interactive search are the owner's own: their grabs may go past the 24 h floor; an episode that
  * has a file is still refused, and monitor switches never search. */
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -11,6 +11,10 @@ import { FONT } from '@/components/start/StartUI';
 import { Poster } from './TvImport';
 import { EditSeriesModal, Modal, glassBtn, primaryBtn } from './TvEdit';
 import { MonitorFlag, monitorFlagCss } from './TvMonitorFlag';
+
+/** v185 (Designer): the poster's bookmark chip and glyph */
+export const POSTER_FLAG = 40;
+export const POSTER_GLYPH = 22;
 import { useMonitorSearch } from './TvMonitorSearch';
 import { seasonName } from './TvBulk';
 import {
@@ -42,18 +46,23 @@ export const detailCss = `
 .tvd-season-head:hover{background:rgba(255,255,255,.06)!important}
 `;
 
-/** "Jan 17, 2025, 9:00 PM ET" from the airstamp (America/New_York); a date only ("Jan 17, 2025") without one. */
-export function airET(e: { airstamp?: string | null; air_date?: string | null }): string {
+/** v185 (Designer): the app's date format, "Nov 1, 9:00 PM" (the airstamp, in Eastern time), the year only when
+ * it isn't this year ("Jan 17, 2025, 9:00 PM"), no zone; a date only ("Nov 1") without an airstamp. */
+export function airET(e: { airstamp?: string | null; air_date?: string | null }, now: Date = new Date()): string {
+  const yearOf = (d: Date, tz: string) => new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric' }).format(d);
+  const thisYear = yearOf(now, ET);
   if (e.airstamp) {
     const d = new Date(e.airstamp);
     if (!Number.isNaN(d.getTime())) {
-      return `${new Intl.DateTimeFormat('en-US', { timeZone: ET, month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(d)} ET`;
+      const year = yearOf(d, ET) === thisYear ? {} : { year: 'numeric' as const };
+      return new Intl.DateTimeFormat('en-US', { timeZone: ET, month: 'short', day: 'numeric', ...year, hour: 'numeric', minute: '2-digit' }).format(d);
     }
   }
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(e.air_date || '');
   if (!m) return '';
-  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' })
-    .format(new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))));
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  const year = m[1] === thisYear ? {} : { year: 'numeric' as const };
+  return new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', ...year }).format(d);
 }
 /** 2.1 GB / 850 MB / 0 B. */
 export function bytes(n: number | null | undefined): string {
@@ -165,9 +174,12 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
           padding: wide ? 20 : 16, borderRadius: 16, background: GLASS, border: '1px solid rgba(255,255,255,0.08)' }}>
         <div data-testid="tv-detail-poster" style={{ position: 'relative', width: wide ? 128 : 88, height: wide ? 192 : 132 }}>
           <Poster path={view.poster_path} w={wide ? 128 : 88} h={wide ? 192 : 132} tmdbLogo />
-          {/* v184 (Taylor): the show's bookmark sits on the poster's top-left corner, Sonarr style */}
-          <MonitorFlag on={view.monitored} title={view.title} testid="tv-detail-monitored" size={wide ? 40 : 32}
-            onChange={on => void monitorShow(on)} style={{ position: 'absolute', top: 6, left: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }} />
+          {/* v184 (Taylor): the show's bookmark sits on the poster's top-left corner, Sonarr style; v185 (Designer):
+              a 40px dark glass chip with a 22px glyph, 8px inside the corner, filled white when monitored */}
+          <MonitorFlag on={view.monitored} title={view.title} testid="tv-detail-monitored" size={POSTER_FLAG} glyph={POSTER_GLYPH}
+            onChange={on => void monitorShow(on)}
+            style={{ position: 'absolute', top: 8, left: 8, borderRadius: 10, background: 'rgba(21,16,42,0.72)', backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)', color: view.monitored ? '#fff' : 'rgba(255,255,255,0.85)', boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }} />
         </div>
         <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
@@ -359,7 +371,6 @@ export function InteractiveModal({ seriesId, target, title, wide, onClose, onGra
         <button type="button" className="lp-focus tve-glass" data-testid="tv-interactive-done" onClick={onClose} style={glassBtn}>Close</button>
       </>
     )}>
-      {off && <div role="status" data-testid="tv-interactive-off" style={{ fontSize: 13, color: W70 }}>Grabs are off on the test instance</div>}
       {error && !list.length ? (
         <div role="alert" data-testid="tv-interactive-error" style={{ minHeight: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, color: W70 }}>{error}</div>
       ) : !res ? (
@@ -380,8 +391,9 @@ export function InteractiveModal({ seriesId, target, title, wide, onClose, onGra
           {list.map((r, i) => {
             const k = `${r.tracker}|${r.title}|${r.size}`;
             const g = grabs[k] || {};
-            const can = r.grabbable && !off && !g.done;
-            const btn = (
+            const can = r.grabbable && !g.done;
+            // v185 (Designer): grabs off (test instance): no Grab button, like the search chips; no notice line
+            const btn = off ? null : (
               <button type="button" className="lp-focus tve-primary" data-testid="tv-interactive-grab" disabled={!can || g.busy}
                 aria-label={`Grab ${r.title}`} onClick={() => void grab(r, k)}
                 style={{ ...primaryBtn(can && !g.busy), height: 32, padding: '0 14px', fontSize: 13 }}>
@@ -402,16 +414,16 @@ export function InteractiveModal({ seriesId, target, title, wide, onClose, onGra
                 <span role="cell" style={cellText}>{r.tracker || ''}</span>
                 <span role="cell" style={{ ...cellText, textAlign: 'right' }}>{bytes(r.size)}</span>
                 <span role="cell" style={{ ...cellText, textAlign: 'right' }}>{r.seeders}</span>
-                <span role="cell" style={cellText}>{r.quality || ''}</span>
+                <span role="cell" style={cellText}>{r.quality_label || r.quality || ''}</span>
                 <span role="cell" style={{ display: 'flex', justifyContent: 'flex-end' }}>{btn}</span>
               </div>
             ) : (
               <div key={k} role="row" data-testid="tv-interactive-row" data-grabbable={r.grabbable || undefined}
                 style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: 12, borderTop: i ? LINE : 'none' }}>
                 <span style={{ fontSize: 13, color: W95, overflowWrap: 'anywhere' }}>{r.title}</span>
-                <span style={{ fontSize: 12, color: W50 }}>{[r.tracker, bytes(r.size), `${r.seeders} seeders`, r.quality].filter(Boolean).join(' \u00b7 ')}</span>
+                <span style={{ fontSize: 12, color: W50 }}>{[r.tracker, bytes(r.size), `${r.seeders} seeders`, r.quality_label || r.quality].filter(Boolean).join(' \u00b7 ')}</span>
                 {rej}{err}
-                <span style={{ display: 'flex', justifyContent: 'flex-end' }}>{btn}</span>
+                {btn && <span style={{ display: 'flex', justifyContent: 'flex-end' }}>{btn}</span>}
               </div>
             );
           })}
