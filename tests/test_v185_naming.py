@@ -68,7 +68,7 @@ def test_tokens_case_separator_and_empty_values():
 def test_season_folders_reuse_the_show_s_own_or_its_padding_style():
     assert tv_naming.season_folder(3, ['Season 03', 'Season 01'], D) == 'Season 03'            # its own folder
     assert tv_naming.season_folder(3, ['season 3'], D) == 'season 3'
-    assert tv_naming.season_folder(4, ['Season 01', 'Season 02'], D) == 'Season 04'            # padded siblings
+    assert tv_naming.season_folder(4, ['Season 01', 'Season 02'], D) == 'Season 4'             # hotfix: the format, not siblings
     assert tv_naming.season_folder(4, ['Season 1', 'Season 2'], D) == 'Season 4'
     assert tv_naming.season_folder(4, ['Extras'], D) == 'Season 4'                             # the format
     assert tv_naming.season_folder(4, [], {**D, 'season_folder': 'S{season:00}'}) == 'S04'

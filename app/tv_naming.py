@@ -349,29 +349,20 @@ _SPECIALS = re.compile(r'^(?:specials?|season\s*0+|s0+)$', re.I)
 
 
 def season_folder(season: int, existing: Iterable[str], cfg: Dict[str, Any]) -> str:
-    """The season's folder: the one the show already has for it ('Season 03' stays 'Season 03'),
-    else one like its siblings ('Season 01' -> 'Season 04'; 'Season 1' -> 'Season 4'), else the
-    format (specials: the specials format)."""
-    names = [n for n in existing if n and not n.startswith('.')]
+    """The season's folder. v185 hotfix (Taylor): the show's existing folder for this season is reused
+    as it is ('Season 8' or 'Season 08', 'S08', 'Series 8'; specials: 'Specials', 'Season 00'); with
+    none, a new folder follows the Season (Specials) folder format exactly, never its siblings' style.
+    Nothing is ever renamed. Two folders for the same season: the one the format names, else the first."""
+    names = sorted(n for n in existing if n and not n.startswith('.'))
     if season == 0:
-        for n in names:
-            if _SPECIALS.match(n):
-                return n
-        return clean_text(render(cfg['specials_folder'], {'season': 0}, cfg), cfg) or 'Specials'
-    sibs = []
-    for n in names:
-        m = _SEASON_DIR.match(n)
-        if m:
-            if int(m.group('n')) == season:
-                return n
-            sibs.append(m)
-    if sibs:
-        padded = [m for m in sibs if len(m.group('n')) >= 2 and m.group('n').startswith('0')]
-        unpadded = [m for m in sibs if not m.group('n').startswith('0') and int(m.group('n')) < 10]
-        like = padded[0] if len(padded) > len(unpadded) else (unpadded or sibs)[0]
-        width = len(like.group('n')) if like in padded else 1
-        return f"{like.group('pre')}{str(season).zfill(width)}"
-    return clean_text(render(cfg['season_folder'], {'season': season}, cfg), cfg) or f'Season {season}'
+        want = clean_text(render(cfg['specials_folder'], {'season': 0}, cfg), cfg) or 'Specials'
+        same = [n for n in names if _SPECIALS.match(n) or n == want]
+    else:
+        want = clean_text(render(cfg['season_folder'], {'season': season}, cfg), cfg) or f'Season {season}'
+        same = [n for n in names if n == want or ((m := _SEASON_DIR.match(n)) and int(m.group('n')) == season)]
+    if not same:
+        return want
+    return want if want in same else same[0]
 
 
 def series_folder(show: Dict[str, Any], cfg: Dict[str, Any]) -> str:
