@@ -33,8 +33,9 @@ const VIEW = {
 };
 const calls: { url: string; method: string; body: unknown }[] = [];
 let bulkStatus = 200;
+let monStatus = 200;
 beforeEach(() => {
-  calls.length = 0; bulkStatus = 200;
+  calls.length = 0; bulkStatus = 200; monStatus = 200;
   localStorage.clear();
   vi.stubGlobal('fetch', vi.fn(async (u: string, init?: RequestInit) => {
     const url = String(u); const method = init?.method || 'GET';
@@ -52,6 +53,8 @@ beforeEach(() => {
       const ids = new Set(body.episode_ids as number[]);
       return res({ ...VIEW, updated: ids.size, episodes: VIEW.episodes.map(e => (ids.has(e.id) ? { ...e, monitored: body.monitored } : e)) });
     }
+    const mon = url.match(/^\/api\/settings\/tv\/shows\/(\d+)\/monitored$/);
+    if (mon && method === 'PUT') return monStatus === 200 ? res({ ...VIEW, id: Number(mon[1]), monitored: body.monitored }) : res({ error: 'Sign in' }, monStatus);
     if (url === '/api/settings/tv/shows/1') return res(VIEW);
     return res({ error: 'Not found' }, 404);
   }));
@@ -74,7 +77,9 @@ describe('Series list view', () => {
     const rows = screen.getAllByTestId('tv-list-row');
     expect(rows.map(r => within(r).getByTestId('tv-list-open').textContent)).toEqual(['The Bear (2020)', 'Dark (2020)', 'Severance (2020)', 'Slow Horses (2020)']);
     await waitFor(() => expect(within(rows[0]!).getByText('Ultra-HD')).toBeTruthy());
-    expect(within(rows[0]!).getByTestId('tv-list-monitored').textContent).toBe('Unmonitored');
+    const flag0 = within(rows[0]!).getByTestId('tv-list-monitored-flag');           // v183: a bookmark, not text or a switch
+    expect([flag0.getAttribute('aria-pressed'), flag0.getAttribute('aria-label')]).toEqual(['false', 'Not monitored']);
+    expect(within(rows[1]!).getByTestId('tv-list-monitored-flag').getAttribute('aria-label')).toBe('Monitored');
     expect(within(rows[1]!).getByText('Anime')).toBeTruthy();
     expect(screen.getByTestId('tv-series-picked').textContent).toBe('0 selected');
     expect(screen.queryByTestId('tv-bulk-bar')).toBeNull();
@@ -87,6 +92,27 @@ describe('Series list view', () => {
     expect(screen.getByTestId('tv-list-select-all').getAttribute('aria-checked')).toBe('true');
     fireEvent.click(screen.getByTestId('tv-list-select-all'));
     expect(screen.queryByTestId('tv-bulk-bar')).toBeNull();
+  });
+
+  it('v183: the Monitored bookmark flips the show on a click (tv.db only, never a search, never selects the row); a failure flips back', async () => {
+    const onChanged = vi.fn();
+    render(<TvSeries shows={SHOWS} onChanged={onChanged} />);
+    fireEvent.click(screen.getByTestId('tv-series-layout-list'));
+    const bear = screen.getAllByTestId('tv-list-row').find(r => r.getAttribute('data-show-id') === '2')!;
+    const flag = within(bear).getByTestId('tv-list-monitored-flag');
+    fireEvent.click(flag);
+    expect(flag.getAttribute('aria-pressed')).toBe('true');                          // at once
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+    expect(calls.filter(c => c.method !== 'GET').map(c => [c.method, c.url, c.body])).toEqual([['PUT', '/api/settings/tv/shows/2/monitored', { monitored: true }]]);
+    expect(calls.filter(searchy)).toEqual([]);
+    expect(bear.getAttribute('data-picked')).toBeNull();
+    expect(screen.getByTestId('tv-series-picked').textContent).toBe('0 selected');
+    monStatus = 401;
+    const sev = within(screen.getAllByTestId('tv-list-row').find(r => r.getAttribute('data-show-id') === '1')!).getByTestId('tv-list-monitored-flag');
+    fireEvent.click(sev);
+    expect(sev.getAttribute('aria-pressed')).toBe('false');
+    await waitFor(() => expect(sev.getAttribute('aria-pressed')).toBe('true'));
+    expect(onChanged).toHaveBeenCalledTimes(1);
   });
 
   it('the action bar offers the 6 fields (no root folder, no delete); Monitor lists all 9 options', async () => {

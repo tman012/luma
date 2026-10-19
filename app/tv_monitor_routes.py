@@ -108,7 +108,8 @@ def show_delete(sid):
 
 
 def _toggle(fn):
-    err = tv_settings._guard()
+    # v183: the monitored bookmarks (show, season, episode) are the signed-in owner's; tv.db only, never a search
+    err = tv_settings._guard() or tv_settings._signed_in_owner()
     if err:
         return err
     on = _flag(request.get_json(silent=True))

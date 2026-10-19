@@ -8,10 +8,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { EditSeriesModal, Modal, NEW_SEASONS, SERIES_TYPES, Select, footBtn, glassBtn, primaryBtn } from './TvEdit';
 import {
-  MONITOR_OPTIONS, bulkEditShows, getSeries, setEpisodesMonitored,
+  MONITOR_OPTIONS, bulkEditShows, getSeries, setEpisodesMonitored, setSeriesMonitored,
   type BulkChanges, type MonitorOption, type Profile, type SeriesType, type SeriesView,
 } from './tvCalendarApi';
 import type { Show } from './tvLibraryApi';
+import { MonitorFlag, monitorFlagCss } from './TvMonitorFlag';
 
 const W50 = 'rgba(255,255,255,0.5)';
 const W70 = 'rgba(255,255,255,0.7)';
@@ -50,14 +51,29 @@ export const typeLabel = (t?: string | null) => SERIES_TYPES.find(o => o.id === 
 
 // ---------------------------------------------------------------- the list view
 
-export function SeriesList({ shows, profiles, picked, setPicked, onOpen }: {
+export function SeriesList({ shows, profiles, picked, setPicked, onOpen, onMonitored }: {
   shows: Show[]; profiles: Profile[]; picked: Set<number>; setPicked: (p: Set<number>) => void; onOpen: (s: Show) => void;
+  /** v183: after a Monitored bookmark flip saved (tv.db only, never a search) */
+  onMonitored?: () => void;
 }) {
   const names = useMemo(() => new Map(profiles.map(p => [p.id, p.name])), [profiles]);
+  // the bookmark flips at once; the server's answer wins (a failure flips it back)
+  const [flips, setFlips] = useState<Record<number, boolean>>({});
+  const [saving, setSaving] = useState<Set<number>>(new Set());
+  useEffect(() => { setFlips({}); }, [shows]);
+  const flip = async (id: number, on: boolean) => {
+    setFlips(f => ({ ...f, [id]: on }));
+    setSaving(x => new Set(x).add(id));
+    const r = await setSeriesMonitored(id, on);
+    setSaving(x => { const n = new Set(x); n.delete(id); return n; });
+    if (!r.ok) { setFlips(f => ({ ...f, [id]: !on })); return; }
+    setFlips(f => ({ ...f, [id]: r.data.monitored }));
+    onMonitored?.();
+  };
   const toggle = (id: number, on: boolean) => { const n = new Set(picked); if (on) n.add(id); else n.delete(id); setPicked(n); };
   return (
     <div data-testid="tv-series-list" role="table" aria-label="Shows" style={{ ...listCard, fontFamily: FONT }}>
-      <style>{bulkCss}</style>
+      <style>{bulkCss + monitorFlagCss}</style>
       <div role="row" style={{ ...rowGrid, minHeight: 44, borderBottom: LINE }}>
         <span role="columnheader" style={cellCenter}>
           <Check state={allState(picked.size, shows.length)} label="Select all" testid="tv-list-select-all"
@@ -81,7 +97,10 @@ export function SeriesList({ shows, profiles, picked, setPicked, onOpen }: {
                 {s.year ? `${s.title} (${s.year})` : s.title}
               </button>
             </span>
-            <span role="cell" data-testid="tv-list-monitored" style={{ ...cell, color: s.monitored ? W95 : W50 }}>{s.monitored ? 'Monitored' : 'Unmonitored'}</span>
+            <span role="cell" data-testid="tv-list-monitored" data-monitored={(flips[s.id] ?? s.monitored) ? 'true' : 'false'} style={cell}>
+              <MonitorFlag on={flips[s.id] ?? !!s.monitored} title={s.title} testid="tv-list-monitored-flag" busy={saving.has(s.id)}
+                onChange={v => void flip(s.id, v)} />
+            </span>
             <span role="cell" style={cell}>{monitorLabel(s.monitor)}</span>
             <span role="cell" style={cell}>{s.profile_id != null ? names.get(s.profile_id) ?? '' : ''}</span>
             <span role="cell" style={cell}>{typeLabel(s.series_type)}</span>
@@ -281,7 +300,7 @@ export function ShowSheet({ seriesId, title, onClose, onChanged }: {
   return (
     <>
       <Modal title={title} testid="tv-show-sheet" width={760} onClose={onClose} actions={actions} footer={footer}>
-        <style>{bulkCss}</style>
+        <style>{bulkCss + monitorFlagCss}</style>
         {failed ? (
           <div role="alert" style={{ fontSize: 14, color: W70 }}>{"Couldn't load"}</div>
         ) : !view ? (

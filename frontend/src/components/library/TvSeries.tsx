@@ -217,7 +217,7 @@ export function TvSeries({ shows, onChanged, onOpen, add }: {
           <span data-testid="tv-series-picked" style={{ fontSize: 13, fontWeight: 600, color: W50 }}>{`${ids.length} selected`}</span>
           {add}
         </div>
-        <SeriesList shows={sorted} profiles={profiles} picked={picked} setPicked={setPicked} onOpen={onOpen || setSheet} />
+        <SeriesList shows={sorted} profiles={profiles} picked={picked} setPicked={setPicked} onOpen={onOpen || setSheet} onMonitored={() => onChanged?.()} />
         {ids.length > 0 && (
           <BulkBar ids={ids} profiles={profiles} onClear={() => setPicked(new Set())}
             onDone={() => { setPicked(new Set()); onChanged?.(); }} />

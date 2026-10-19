@@ -9,7 +9,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { Poster } from './TvImport';
-import { EditSeriesModal, Modal, Toggle, glassBtn, primaryBtn } from './TvEdit';
+import { EditSeriesModal, Modal, glassBtn, primaryBtn } from './TvEdit';
+import { MonitorFlag, monitorFlagCss } from './TvMonitorFlag';
 import { Check, seasonName } from './TvBulk';
 import {
   getDetail, grabRelease, interactiveSearch, searchOutcome, searchShow, setEpisodeMonitored, setEpisodesMonitored,
@@ -157,7 +158,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   const allState = picked.size === 0 ? false : picked.size === eps.length ? true : 'mixed';
   return (
     <div data-testid="tv-detail" data-series-id={view.id} style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, paddingBottom: picked.size ? 88 : 0 }}>
-      <style>{detailCss}</style>
+      <style>{detailCss + monitorFlagCss}</style>
       <button type="button" className="lp-focus tvd-back" data-testid="tv-detail-back" onClick={onBack}
         style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 8px 0 4px', border: 'none',
           background: 'none', color: W70, fontFamily: FONT, fontSize: 14, fontWeight: 600, cursor: 'pointer', borderRadius: 8 }}>
@@ -216,7 +217,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
                 </span>
                 {wide && s.size > 0 && <span style={{ fontSize: 12, color: W50, whiteSpace: 'nowrap' }}>{bytes(s.size)}</span>}
               </button>
-              <Toggle on={s.monitored} label={`Monitor ${label}`} onChange={v => void monitorSeason(s.season, v)} />
+              <MonitorFlag on={s.monitored} title={label} testid="tv-detail-season-monitored" onChange={v => void monitorSeason(s.season, v)} />
               <IconBtn kind="search" label={`Search ${label}`} busy={busy.has(`s${s.season}`)} testid="tv-detail-season-search"
                 onClick={() => void search({ season: s.season }, label)} />
               <IconBtn kind="interactive" label={`Interactive search ${label}`} testid="tv-detail-season-interactive"
@@ -258,10 +259,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
 function HeaderActions({ view, onMonitor, onEdit }: { view: DetailView; onMonitor: (on: boolean) => void; onEdit: () => void }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 'none' }}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-        <span id="tv-detail-monitored-label" style={{ fontSize: 13, fontWeight: 600, color: W70 }}>Monitored</span>
-        <Toggle id="tv-detail-monitored" on={view.monitored} onChange={onMonitor} />
-      </span>
+      <MonitorFlag on={view.monitored} title={view.title} testid="tv-detail-monitored" onChange={onMonitor} />
       <button type="button" className="lp-focus tve-glass" data-testid="tv-detail-edit" onClick={onEdit} style={{ ...glassBtn, height: 36 }}>Edit</button>
     </div>
   );
@@ -335,7 +333,7 @@ function EpisodeRow({ e, wide, picked, focus, busy, onPick, onMonitor, onSearch,
       </span>
       {wide && <span data-testid="tv-detail-air" style={{ fontSize: 13, color: W70, opacity: dim, whiteSpace: 'nowrap' }}>{air}</span>}
       {wide && <span data-testid="tv-detail-status" style={{ fontSize: 13, fontWeight: 600, color, opacity: dim, whiteSpace: 'nowrap' }}>{word}</span>}
-      <Toggle on={e.monitored} label={`Monitor ${tag}`} onChange={onMonitor} />
+      <MonitorFlag on={e.monitored} title={tag} testid="tv-detail-episode-monitored" onChange={onMonitor} />
       <IconBtn kind="search" label={`Search ${tag}`} busy={busy} onClick={onSearch} testid="tv-detail-episode-search" />
       <IconBtn kind="interactive" label={`Interactive search ${tag}`} onClick={onInteractive} testid="tv-detail-episode-interactive" />
     </div>

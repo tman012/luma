@@ -1,4 +1,4 @@
-/** v182: the series detail page (header, seasons newest first, episodes with the status edge, monitor switches
+/** v182: the series detail page (header, seasons newest first, episodes with the status edge, monitored bookmarks
  * that never search, Search, Interactive search and its grab, the episode checkboxes), and how it is opened. */
 process.env.TZ = 'America/New_York';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -66,7 +66,7 @@ const page = (props: Partial<Parameters<typeof TvSeriesDetail>[0]> = {}) => {
 };
 
 describe('Series detail page', () => {
-  it('the header: poster, title, year, network, status, quality profile, path, size, have/total, the monitor switch and Edit', async () => {
+  it('the header: poster, title, year, network, status, quality profile, path, size, have/total, the monitored bookmark and Edit', async () => {
     page();
     expect((await screen.findByTestId('tv-detail-title')).textContent).toBe('Severance');
     expect(screen.getByTestId('tv-detail-meta').textContent).toBe('2022 \u00b7 Apple TV+ \u00b7 Returning series');
@@ -75,20 +75,24 @@ describe('Series detail page', () => {
     expect(within(facts).getByTestId('tv-detail-fact-path').textContent).toBe('Path/media/TV/Severance (2022)');
     expect(within(facts).getByTestId('tv-detail-fact-size').textContent).toBe('Size5.0 GB');
     expect(within(facts).getByTestId('tv-detail-fact-episodes').textContent).toBe('Episodes2 of 4');
-    expect(screen.getByTestId('tv-detail-monitored-toggle').getAttribute('aria-checked')).toBe('true');
+    const flag = screen.getByTestId('tv-detail-monitored');                     // v183: a bookmark, not a switch
+    expect([flag.tagName, flag.getAttribute('aria-pressed'), flag.getAttribute('aria-label')]).toEqual(['BUTTON', 'true', 'Monitored']);
+    expect(flag.querySelector('path')!.closest('svg')!.getAttribute('fill')).toBe('currentColor');
+    expect(screen.queryAllByRole('switch')).toEqual([]);
     expect(screen.getByTestId('tv-poster-tile')).toBeTruthy();
     fireEvent.click(screen.getByTestId('tv-detail-edit'));
     expect(await screen.findByTestId('tv-edit-series')).toBeTruthy();
   });
 
-  it('seasons newest first, the newest open; collapsible; each with have/total, a monitor switch, Search and Interactive search', async () => {
+  it('seasons newest first, the newest open; collapsible; each with have/total, a monitored bookmark, Search and Interactive search', async () => {
     page();
     const seasons = await screen.findAllByTestId('tv-detail-season');
     expect(seasons.map(s => s.getAttribute('data-season'))).toEqual(['2', '1']);
     expect(seasons.map(s => s.getAttribute('data-open'))).toEqual(['true', null]);
     expect(within(seasons[0]!).getByTestId('tv-detail-season-count').textContent).toBe('1 of 2');
-    expect(within(seasons[0]!).getByRole('switch', { name: 'Monitor Season 2' }).getAttribute('aria-checked')).toBe('true');
-    expect(within(seasons[1]!).getByRole('switch', { name: 'Monitor Season 1' }).getAttribute('aria-checked')).toBe('false');
+    const flags = seasons.map(x => within(x).getAllByTestId('tv-detail-season-monitored')[0]!);
+    expect(flags.map(f => [f.getAttribute('aria-pressed'), f.getAttribute('aria-label'), f.querySelector('svg')!.getAttribute('fill')]))
+      .toEqual([['true', 'Monitored', 'currentColor'], ['false', 'Not monitored', 'none']]);
     expect(within(seasons[0]!).getByRole('button', { name: 'Search Season 2' })).toBeTruthy();
     expect(within(seasons[0]!).getByRole('button', { name: 'Interactive search Season 2' })).toBeTruthy();
     expect(within(seasons[0]!).getAllByTestId('tv-detail-episode').map(e => e.getAttribute('data-episode-id'))).toEqual(['23', '22', '21']);
@@ -113,12 +117,16 @@ describe('Series detail page', () => {
     expect(document.querySelector('path[d="M20 6L9 17l-5-5"]')).toBeNull();                      // no checkmark anywhere
   });
 
-  it('monitor switches (show, season, episode) write tv.db only and never search', async () => {
+  it('the monitored bookmarks (show, season, episode) flip on a click, write tv.db only and never search', async () => {
     page();
     await screen.findAllByTestId('tv-detail-episode');
-    fireEvent.click(screen.getByTestId('tv-detail-monitored-toggle'));
-    fireEvent.click(screen.getByRole('switch', { name: 'Monitor Season 1' }));
-    fireEvent.click(screen.getByRole('switch', { name: 'Monitor S02E03 Episode 3' }));
+    const season1 = screen.getAllByTestId('tv-detail-season').find(x => x.getAttribute('data-season') === '1')!;
+    const ep23 = document.querySelector('[data-episode-id="23"]') as HTMLElement;
+    const epFlag = within(ep23).getByTestId('tv-detail-episode-monitored');
+    expect([epFlag.getAttribute('aria-pressed'), epFlag.getAttribute('aria-label'), epFlag.style.width, epFlag.style.height]).toEqual(['true', 'Monitored', '28px', '28px']);
+    fireEvent.click(screen.getByTestId('tv-detail-monitored'));
+    fireEvent.click(within(season1).getByTestId('tv-detail-season-monitored'));
+    fireEvent.click(epFlag);
     await waitFor(() => expect(calls.filter(c => c.method === 'PUT')).toHaveLength(3));
     expect(calls.filter(c => c.method === 'PUT').map(c => [c.url, c.body])).toEqual([
       ['/api/settings/tv/shows/1/monitored', { monitored: false }],
