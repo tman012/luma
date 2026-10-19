@@ -177,7 +177,7 @@ describe('Series detail page', () => {
     expect((await screen.findByTestId('tv-interactive-grab-error')).textContent).toBe('Not grabbed: already has a file');
   });
 
-  it('v184 layout: no checkboxes or select-all; the show bookmark on the poster; season and episode bookmarks lead their rows; 1200px max width', async () => {
+  it('v184 layout: no checkboxes or select-all; the show bookmark on the poster; season and episode bookmarks lead their rows; 1200px max width, left-aligned (v185.1)', async () => {
     page();
     await screen.findAllByTestId('tv-detail-episode');
     for (const id of ['tv-detail-select-all', 'tv-detail-count', 'tv-detail-check', 'tv-detail-season-check', 'tv-detail-bar'])
@@ -198,7 +198,7 @@ describe('Series detail page', () => {
       expect(row.querySelectorAll('[data-testid="tv-detail-episode-monitored"]')).toHaveLength(1);
     }
     const root = screen.getByTestId('tv-detail');
-    expect([root.style.maxWidth, root.style.margin]).toEqual(['1200px', '0px auto']);
+    expect([root.style.maxWidth, root.style.margin]).toEqual(['1200px', '0px']);
     fireEvent.click(show);
     await waitFor(() => expect(calls.some(c => c.method === 'PUT' && /\/shows\/1\/monitored$/.test(c.url))).toBe(true));
     expect(searches()).toEqual([]);

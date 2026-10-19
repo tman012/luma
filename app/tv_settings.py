@@ -35,6 +35,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 import re
 import string
 import threading
@@ -71,7 +72,87 @@ _CTRL_RE = re.compile(r'[\x00-\x1f\x7f/\\]')
 def empty() -> Dict[str, Any]:
     return {'version': 1, 'paths': [], 'libraries': [], 'rules': [], 'fallback_path_id': None,
             'naming': dict(_naming().DEFAULTS), 'upgrades': {'mode': 'keep_both'},
-            'automation': dict(DEFAULT_AUTOMATION), 'rescan_interval_h': 6}
+            'automation': dict(DEFAULT_AUTOMATION), 'rescan_interval_h': 6, 'naming_rev': NAMING_REV}
+
+
+# v185.1 (PM, Tester FF2): naming migration. Before v185 the store held python-format templates (the
+# code defaults below); v185's Sonarr check rejected them and fell back to a bare '{Series Title}'.
+# Now: a value equal to an old code default maps to the new default (series folder '{Series Title} ({Series Year})',
+# 'Title (Year)'; season folder 'Season {season}', Taylor's 'Season 8' ruling); any other old value is
+# converted token by token, never dropped (one that still can't be a Sonarr format is kept verbatim
+# under naming_legacy and logged). v185's own untouched '{Series Title}' default also moves to
+# '{Series Title} ({Series Year})'. The file is copied to tv_settings.json.bak-185.1 (0600) before it is rewritten.
+NAMING_REV = 1851
+BACKUP_SUFFIX = '.bak-185.1'
+OLD_NAMING_DEFAULTS = {
+    'series_folder': '{title} ({year})', 'season_folder': 'Season {season:02}',
+    'episode': '{series} - S{season:02}E{episode:02} - {episode_title}',
+    'daily': '{series} - {air_date} - {episode_title}', 'specials_folder': 'Specials',
+}
+_OLD_KEY = {'episode': 'standard'}
+_OLD_TOKEN = {'title': 'Series Title', 'series': 'Series Title', 'year': 'Series Year', 'episode_title': 'Episode Title',
+              'air_date': 'Air-Date', 'resolution': 'Quality Title', 'source': 'Quality Title', 'season': 'season',
+              'episode': 'episode'}
+_OLD_TOKEN_RE = re.compile(r'\{([a-z_]+)(?::(0?\d?))?\}')
+
+
+def _convert_old(value: str) -> Optional[str]:
+    """An old python-format template in Sonarr tokens ('{title} ({year})' -> '{Series Title} ({Series Year})',
+    '{season:02}' -> '{season:00}'); None when a placeholder has no Sonarr token."""
+    bad = []
+
+    def sub(m):
+        name, spec = m.group(1), m.group(2) or ''
+        tok = _OLD_TOKEN.get(name)
+        if tok is None:
+            bad.append(name)
+            return m.group(0)
+        if tok in ('season', 'episode'):
+            width = int(spec.lstrip('0') or 0) if spec else 0
+            return '{%s%s}' % (tok, (':' + '0' * width) if width > 1 else '')
+        return '{%s}' % tok
+    out = _OLD_TOKEN_RE.sub(sub, value)
+    return None if bad else out
+
+
+def migrate_naming(raw: Any, rev: Any) -> Tuple[Dict[str, Any], Dict[str, str], bool]:
+    """(naming in the new keys, {key: old value kept verbatim}, changed)."""
+    n = _naming()
+    if not isinstance(raw, dict):
+        return {}, {}, False
+    new_rev = isinstance(rev, int) and not isinstance(rev, bool) and rev >= NAMING_REV
+    out: Dict[str, Any] = {}
+    legacy: Dict[str, str] = {}
+    changed = False
+    for k, v in raw.items():
+        key = _OLD_KEY.get(k, k)
+        if key not in n.DEFAULTS:
+            if isinstance(v, str):
+                legacy[k] = v
+            changed = True
+            continue
+        if key != k:
+            changed = True
+        if not isinstance(v, str) or key not in n.FORMATS:
+            out[key] = v
+            continue
+        if k in OLD_NAMING_DEFAULTS and v == OLD_NAMING_DEFAULTS[k] and not (k == 'specials_folder' and v == n.DEFAULTS[k]):
+            out[key] = n.DEFAULTS[key]
+            changed = True
+        elif n.check_format(key, v) is None:
+            out[key] = v                                    # already a Sonarr format (v185 or a choice): kept
+        else:
+            conv = _convert_old(v)
+            if conv is not None and n.check_format(key, conv) is None:
+                out[key] = conv
+            else:
+                legacy[k] = v
+                logger.warning('TV naming: the saved %s format could not be converted; kept under naming_legacy, '
+                               'the default is used', k)
+            changed = True
+    if not new_rev:
+        changed = True
+    return out, legacy, changed
 
 
 def store_path() -> Path:
@@ -97,7 +178,12 @@ def _normalize(raw: Any) -> Dict[str, Any]:
         d['libraries'] = seen[:library_selection.MAX_SELECTED]
     if isinstance(raw.get('fallback_path_id'), str):
         d['fallback_path_id'] = raw['fallback_path_id']
-    d['naming'] = _naming().normalize(raw.get('naming'))
+    nm, legacy, _ = migrate_naming(raw.get('naming'), raw.get('naming_rev'))
+    d['naming'] = _naming().normalize(nm if isinstance(raw.get('naming'), dict) else None)
+    old_legacy = raw.get('naming_legacy') if isinstance(raw.get('naming_legacy'), dict) else {}
+    keep = {str(k): v for k, v in {**old_legacy, **legacy}.items() if isinstance(v, str)}
+    if keep:
+        d['naming_legacy'] = keep
     up = raw.get('upgrades') if isinstance(raw.get('upgrades'), dict) else {}
     if up.get('mode') in UPGRADE_MODES:
         d['upgrades']['mode'] = up['mode']
@@ -111,6 +197,7 @@ def _normalize(raw: Any) -> Dict[str, Any]:
     r = raw.get('rescan_interval_h')
     if isinstance(r, int) and not isinstance(r, bool) and 1 <= r <= 168:
         d['rescan_interval_h'] = r
+    d['naming_rev'] = NAMING_REV
     # Library paths a migration interrupted mid-way added (only while it runs)
     added = raw.get('migration_added')
     if isinstance(added, list) and d['paths']:
@@ -124,14 +211,33 @@ def load() -> Dict[str, Any]:
     p = store_path()
     with _lock:
         try:
-            raw = json.loads(p.read_text())
+            text = p.read_text()
+            raw = json.loads(text)
         except FileNotFoundError:
             return empty()
         except (OSError, ValueError) as e:
             logger.error('TV settings unreadable (%s); starting from defaults', type(e).__name__)
             _paths.quarantine(p, 'unreadable', logger)
             return empty()
-        return _normalize(raw)
+        d = _normalize(raw)
+        if isinstance(raw, dict) and migrate_naming(raw.get('naming'), raw.get('naming_rev'))[2]:
+            _migrate_file(p, text, d)
+        return d
+
+
+def _migrate_file(p: Path, text: str, d: Dict[str, Any]) -> None:
+    """v185.1: back the file up as it was (0600, once), then write the migrated settings."""
+    bak = p.with_name(p.name + BACKUP_SUFFIX)
+    try:
+        if not bak.exists():
+            fd = os.open(str(bak), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, 'w') as f:
+                f.write(text)
+            os.chmod(str(bak), 0o600)
+        _paths.atomic_write_json(p, d, mode=0o600)
+        logger.info('TV settings: naming migrated to Sonarr formats (backup %s)', bak.name)
+    except OSError as e:                                 # read-only store: the migrated values still apply
+        logger.warning('TV settings: naming migration not saved (%s)', type(e).__name__)
 
 
 def save(data: Dict[str, Any]) -> None:

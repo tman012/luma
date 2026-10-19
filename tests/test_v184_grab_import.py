@@ -108,18 +108,15 @@ def test_the_stuck_row_from_before_the_fix_is_repaired_on_the_next_pass_and_at_s
     assert dl.tick(at + 700) == {'checked': 0, 'imported': 0}
 
 
-def test_the_next_pass_runs_the_repair_once_the_file_is_linked(dl, time_show):
+def test_a_pre_v184_record_closes_the_row_without_waiting_for_a_link(dl, time_show):
+    """v185.1 (PM, FF-21 residual): was 'wait for its file's link'; that left the live Time row
+    'downloading' forever once its file was deleted. The import record says imported: that stands."""
     sid, eps = time_show
     _grab_row(H1, sid, [eps[3]])
     tv_downloads._save(H1, state='imported', at=123.0, files=[{'path': 'x'}], name=NAME)    # a pre-v184 record
     dl.tick()
-    assert _row(H1)['state'] == 'downloading'                                     # its file isn't linked yet: wait
-    folder = dl.lib / 'Time (2021)' / 'Season 03'
-    folder.mkdir(parents=True)
-    (folder / (NAME + '.mkv')).write_bytes(b'episode-bytes' * 10)
-    assert tv_watch.link_path(str(folder / (NAME + '.mkv')))
-    dl.tick()
-    assert _row(H1)['state'] == 'imported' and _row(H1)['finished_at'] == 123.0
+    r = _row(H1)
+    assert (r['state'], r['finished_at']) == ('imported', 123.0) and len(_events(H1)) == 1
 
 
 def test_reconcile_from_linked_files_alone_and_leaves_real_downloads(dl, time_show):
@@ -274,3 +271,58 @@ def test_a_closed_row_is_matched_by_hash_only(dl, time_show):
     assert tv_downloads._no_import('d' * 40, NAME) is None
     assert tv_downloads.finish_grab('d' * 40, NAME, sid, [eps[3]], 1, time.time()) is None
     assert _row(H1)['state'] == 'imported'
+
+
+# ---------------------------------------------------------------- v185.1: the live Time S03E03 shape
+
+PRE_V184 = {'state': 'imported', 'at': 1760922480.0, 'completed': 1760922300, 'error': None,
+            'name': NAME, 'files': [{'path': '/media/TV/Time (2021)/Season 03/' + NAME + '.mkv', 'how': 'copied'}]}
+
+
+@pytest.mark.parametrize('row_hash', [H1, H1.upper()])          # pre-v184 rows may keep the tracker's uppercase hash
+def test_the_live_time_row_closes_with_its_file_deleted_and_the_episode_unmonitored(dl, time_show, row_hash):
+    """Imported at 9:08 PM ET under a pre-v184 build (a record with no episode_ids), the file deleted on
+    purpose later, the episode unmonitored, the grab row still 'downloading'."""
+    sid, eps = time_show
+    with tv_store.write() as conn:
+        conn.execute('UPDATE episodes SET monitored = 0 WHERE id = ?', (eps[3],))
+    _grab_row(row_hash, sid, [eps[3]], at=PRE_V184['at'] - 600)
+    tv_downloads._save(H1, **PRE_V184)
+    assert not (dl.lib / 'Time (2021)' / 'Season 03' / (NAME + '.mkv')).exists()        # the file is gone
+    files0 = sorted(p.name for p in dl.lib.rglob('*'))
+    grabs0 = rows('SELECT COUNT(*) AS n FROM grabs')[0]['n']
+    assert tv_downloads.reconcile(PRE_V184['at'] + 3600) == 1
+    r = rows('SELECT state, finished_at, results FROM grabs WHERE hash = ?', row_hash)[0]
+    assert (r['state'], r['finished_at']) == ('imported', PRE_V184['at'])
+    assert json.loads(r['results'])['episode_ids'] == [eps[3]]
+    ev = [e for e in rows("SELECT * FROM history WHERE event = 'imported'")
+          if json.loads(e['detail']).get('hash') in (H1, row_hash)]
+    assert len(ev) == 1
+    assert tv_downloads.reconcile(PRE_V184['at'] + 7200) == 0                             # once
+    assert sorted(p.name for p in dl.lib.rglob('*')) == files0                            # no file operations
+    assert rows('SELECT COUNT(*) AS n FROM grabs')[0]['n'] == grabs0                      # no new grab (no search)
+    assert tv_downloads.status(H1)['state'] == 'imported'                                 # the record is not redone
+    assert dl.tick(PRE_V184['at'] + 7300) == {'checked': 0, 'imported': 0}
+
+
+@pytest.mark.parametrize('ids', ['["%d"]', '[{"id": %d}]', '%d'])
+def test_older_grab_row_episode_id_shapes(dl, time_show, ids):
+    sid, eps = time_show
+    with tv_store.write() as conn:
+        conn.execute("INSERT INTO grabs (hash, series_id, season_number, episode_ids, release_title, tracker_id, quality, size, origin, grabbed_at)"
+                     " VALUES (?, ?, 3, ?, ?, 1, '1080p-web', 1, 'auto', ?)", (H1, sid, ids % eps[3], NAME, time.time() - 90))
+    tv_downloads._save(H1, **PRE_V184)
+    assert tv_downloads.reconcile() == 1 and _row(H1)['state'] == 'imported'
+
+
+def test_a_record_found_by_its_release_name_when_the_row_hash_differs(dl, time_show):
+    sid, eps = time_show
+    _grab_row('f' * 40, sid, [eps[3]])
+    tv_downloads._save(H1, **PRE_V184)
+    assert tv_downloads.reconcile() == 1 and _row('f' * 40)['state'] == 'imported'
+
+
+def test_no_record_and_no_file_stays_downloading(dl, time_show):
+    sid, eps = time_show
+    _grab_row(H1, sid, [eps[3]])
+    assert tv_downloads.reconcile() == 0 and _row(H1)['state'] == 'downloading'

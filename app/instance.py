@@ -261,16 +261,101 @@ _READ_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
 
 
 def write_kind(method: str, url: str) -> Optional[str]:
-    """'qbit' / 'arr' when this request would change qBittorrent or an *arr app, else None."""
+    """'qbit' / 'arr' when this request would change qBittorrent or an *arr app, else None.
+    v185.1 (PM, PrivateHD): an /api/v1|v3 write is 'arr' only when it goes to a configured Radarr,
+    Sonarr or Prowlarr (arr_target), or, as extra safety, to a LAN/loopback host. A public tracker's
+    own API under /api/v1 (PrivateHD's POST /api/v1/jackett/auth) is not an *arr write and passes."""
     path = urlsplit(url or '').path or ''
     m = _QBIT.search(path)
     if m:
         return None if m.group(1).casefold() in _QBIT_READS else 'qbit'
     if (method or 'GET').upper() in _READ_METHODS:
         return None
-    if _ARR.search(path):
+    if _ARR.search(path) and arr_target(url):
         return 'arr'
     return None
+
+
+TEST_GUARD_BLOCKED = 'blocked by test guard'
+_DEFAULT_PORTS_I = {'http': 80, 'https': 443}
+_ARR_SETTING_KEYS = ('radarr.url', 'sonarr.url', 'indexer.base_url', 'prowlarr.url')
+_ARR_ENV_KEYS = ('RADARR_URL', 'SONARR_URL', 'PROWLARR_URL')
+_arr_cache: Dict[str, Any] = {'at': 0.0, 'bases': frozenset()}
+ARR_CACHE_S = 30.0
+
+
+def _origin(url: Any) -> Optional[Tuple[str, int]]:
+    """(host, port) of *url*, host lowercased without a trailing dot; None when it has none."""
+    try:
+        p = urlsplit(str(url or '').strip())
+        host = (p.hostname or '').lower().rstrip('.')
+        port = p.port or _DEFAULT_PORTS_I.get((p.scheme or '').lower())
+    except ValueError:
+        return None
+    return (host, int(port)) if host and port else None
+
+
+def _configured_arr_urls() -> List[str]:
+    """Every Radarr/Sonarr/Prowlarr base URL this install talks to: Settings, the env, each user's own."""
+    out: List[str] = [os.environ.get(k) or '' for k in _ARR_ENV_KEYS]
+    try:
+        from app.settings_manager import SettingsManager, _infer_data_dir
+        saved = _infer_data_dir() / 'settings.json'
+        if saved.is_file():
+            sm = SettingsManager(str(saved))
+            out += [str(sm.get(k) or '') for k in _ARR_SETTING_KEYS]
+    except Exception:                                    # noqa: BLE001 - unreadable: the LAN rule still holds
+        logger.warning('Instance test: arr URLs unreadable; only LAN/loopback writes are treated as arr')
+    try:
+        from app import user_auth
+        for u in (user_auth.list_users() or []):
+            us = user_auth.get_user_settings(u['id']) or {}
+            out += [str(us.get(k) or '') for k in ('sonarr_url', 'radarr_url')]
+    except Exception:                                    # noqa: BLE001 - no user store (tests, first boot)
+        pass
+    return [x for x in out if x.strip()]
+
+
+def arr_bases(now: Optional[float] = None) -> FrozenSet[Tuple[str, int]]:
+    import time as _t
+    now = _t.monotonic() if now is None else now
+    if now - _arr_cache['at'] > ARR_CACHE_S or not _arr_cache['at']:
+        _arr_cache['bases'] = frozenset(o for o in map(_origin, _configured_arr_urls()) if o)
+        _arr_cache['at'] = now
+    return _arr_cache['bases']
+
+
+def clear_arr_cache() -> None:
+    _arr_cache['at'] = 0.0
+
+
+def _lan_host(host: str) -> bool:
+    """A loopback, private, link-local or local-only name/address (extra safety: an unconfigured *arr)."""
+    import ipaddress
+    import socket
+    if not host or host == 'localhost' or host.endswith(('.localhost', '.local', '.lan', '.home', '.internal')) or '.' not in host:
+        return True
+    try:
+        addrs = [ipaddress.ip_address(host.strip('[]').split('%')[0])]
+    except ValueError:
+        try:
+            addrs = [ipaddress.ip_address(i[4][0].split('%')[0]) for i in socket.getaddrinfo(host, None)]
+        except (OSError, UnicodeError, ValueError):
+            return False                                 # unresolvable: nothing reaches it anyway
+    for a in addrs:
+        a = getattr(a, 'ipv4_mapped', None) or a
+        if a.is_private or a.is_loopback or a.is_link_local or a.is_reserved or a.is_unspecified:
+            return True
+    return False
+
+
+def arr_target(url: str) -> bool:
+    """True when *url* goes to a configured Radarr/Sonarr/Prowlarr (same host and port), or to a
+    LAN/loopback host."""
+    o = _origin(url)
+    if o is None:
+        return True                                      # can't tell: fail closed
+    return o in arr_bases() or _lan_host(o[0])
 
 
 # A scoped exemption (v158b TV grabs): inside scoped_add(job, name) on this thread, two kinds of
@@ -383,8 +468,9 @@ def install_write_guard() -> bool:
         def send(self, request, **kw):
             kind = write_kind(request.method, request.url)
             if kind and not writes_allowed(kind) and not (kind == 'qbit' and _scoped_ok(request)):
-                logger.warning('Instance test: blocked %s %s (%s write)', request.method, urlsplit(request.url).path, kind)
-                raise WritesBlocked(f'{kind} writes are off on the test instance')
+                logger.warning('Instance test: %s %s %s (%s write)', request.method, urlsplit(request.url).path,
+                               TEST_GUARD_BLOCKED, kind)
+                raise WritesBlocked(f'{kind} writes are off on the test instance ({TEST_GUARD_BLOCKED})')
             return orig(self, request, **kw)
         send._luma_orig = orig  # type: ignore[attr-defined]
         requests.Session.send = send

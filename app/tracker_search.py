@@ -53,7 +53,10 @@ class TrackerSkipped(Exception):
 def search_status(err: Exception) -> str:
     """Short per-tracker status for the Sources UI: 'auth' (sign-in failed,
     banned, or in an auth/ban backoff), 'rate' (rate limit, caps, rate backoff)
-    or 'unavailable' (anything else)."""
+    'guard' (v185.1: the test instance's write guard refused it; nothing was sent) or 'unavailable'
+    (anything else)."""
+    if getattr(err, 'test_guard', False):
+        return 'guard'
     if isinstance(err, TrackerSkipped):
         reason = str(err)
         if reason.startswith('backoff ('):
@@ -387,7 +390,7 @@ class TrackerSearch:
                 self._log_steps(cfg, st)
                 # One redacted line per failure: name, stage, reason, HTTP status. Never a URL or header.
                 logger.warning('Tracker %s (id %s) search failed: %s (HTTP %s, %s bytes, %s rows parsed)',
-                               cfg['name'], cfg['id'], e.kind,
+                               cfg['name'], cfg['id'], 'blocked by test guard' if e.test_guard else e.kind,
                                e.status if e.status is not None else st.get('status') or '-',
                                st.get('bytes', '-'), st.get('rows', '-'))
                 self._record_failure(cfg, gk, e, scope)

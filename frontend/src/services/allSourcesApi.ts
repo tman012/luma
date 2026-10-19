@@ -44,13 +44,17 @@ export interface AllResultsRelease {
 /** A tracker that was not searched or failed, as all-results reports it. */
 export interface TrackerStatus {
   name: string;
-  status: 'auth' | 'rate' | 'unavailable';
+  status: 'auth' | 'rate' | 'guard' | 'unavailable';
 }
+
+/** v185.1 (PM): the test instance's write guard refused the request; never a connection error. */
+export const TEST_GUARD_TEXT = 'Blocked by test guard';
 
 /** Short status line for one tracker, e.g. "IPTorrents sign-in failed". */
 export function trackerStatusText(t: TrackerStatus): string {
   if (t.status === 'auth') return `${t.name} sign-in failed`;
   if (t.status === 'rate') return `${t.name} search limit reached`;
+  if (t.status === 'guard') return `${t.name}: ${TEST_GUARD_TEXT}`;
   return `${t.name} unavailable`;
 }
 
@@ -104,7 +108,7 @@ export async function fetchAllResults(
       .filter((t): t is { name: string; status: string } => !!t && typeof (t as { name?: unknown }).name === 'string')
       .map((t) => ({
         name: t.name,
-        status: t.status === 'auth' || t.status === 'rate' ? t.status : 'unavailable',
+        status: t.status === 'auth' || t.status === 'rate' || t.status === 'guard' ? t.status : 'unavailable',
       })));
   }
   return (data.releases ?? []).map(normalizeIndexerRelease);

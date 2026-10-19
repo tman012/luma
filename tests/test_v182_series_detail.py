@@ -59,6 +59,10 @@ def test_detail_has_the_header_seasons_newest_first_and_episode_states(owner, en
         conn.execute("UPDATE series SET network = 'Apple TV+', status = 'Returning Series' WHERE id = ?", (env.sid,))
         conn.execute('UPDATE episode_files SET size = 1000 WHERE series_id = ?', (env.sid,))
         conn.execute('UPDATE episodes SET air_date = ? WHERE id = ?', ('2099-01-01', env.e2[6]))
+        # pinned (v185.1): the fake's later S2 dates sit on the real calendar, so on Oct 19, 2026 one more had
+        # aired and the count drifted; past E07 stays unaired whatever today is
+        conn.execute("UPDATE episodes SET air_date = '2099-01-01', airstamp = NULL WHERE series_id = ? AND season_number = 2 AND episode_number > 7",
+                     (env.sid,))
     r = _req(owner, 'get', f'/api/settings/tv/shows/{env.sid}/detail')
     assert r.status_code == 200
     v = r.get_json()

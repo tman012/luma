@@ -65,6 +65,7 @@ class TrackerError(Exception):
         self.kind = kind if kind in MESSAGES else 'response'
         self.status = status
         self.retry_after = retry_after
+        self.test_guard = message == 'Blocked by test guard'    # v185.1: never starts a backoff
         msg = message or MESSAGES[self.kind]
         if self.kind == 'http' and status and not message:
             msg = f'HTTP {status}'
@@ -415,6 +416,17 @@ def check_target(url: str) -> Tuple[str, int]:
 NO_DNS = "Couldn't resolve the host"
 NO_CONNECT = "Couldn't connect"
 NO_RESPONSE = 'Connection closed without a response'
+TEST_GUARD = 'Blocked by test guard'
+
+
+def _test_guard(e: BaseException) -> bool:
+    from app.instance import WritesBlocked
+    return isinstance(e, WritesBlocked)
+
+
+# v185.1: failures that are not the network ('response' kind)
+INVALID_REQUEST = 'Invalid tracker URL or header'
+UNDECODABLE = "Couldn't decode the answer"
 
 
 def _order(addrs: List[str]) -> List[str]:
@@ -649,10 +661,17 @@ def request(method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
                         raise TrackerError('network', message=NO_RESPONSE) from None
                     logger.warning('Tracker request: %s %s connection failed (%s)', host, cur_method, cause_names(e))
                     raise TrackerError('network') from None
-                except (requests.exceptions.InvalidURL, requests.exceptions.MissingSchema, requests.exceptions.InvalidSchema) as e:
+                except (requests.exceptions.InvalidURL, requests.exceptions.MissingSchema, requests.exceptions.InvalidSchema,
+                        requests.exceptions.InvalidHeader) as e:
+                    # v185.1: a request that can't be built (the URL or a header) is not a network failure
                     logger.warning('Tracker request: %s invalid request (%s)', host, cause_names(e))
-                    raise TrackerError('network') from None
+                    raise TrackerError('response', message=INVALID_REQUEST) from None
                 except requests.exceptions.RequestException as e:
+                    if _test_guard(e):
+                        # v185.1 (PM): the test instance's write guard refused it; nothing was sent. Never a
+                        # network failure and never a backoff (TrackerError.test_guard).
+                        logger.warning('Tracker request: %s %s blocked by test guard', host, cur_method)
+                        raise TrackerError('blocked', message=TEST_GUARD) from None
                     logger.warning('Tracker request: %s %s failed (%s)', host, cur_method, cause_names(e))
                     raise TrackerError('network') from None
             if r is None:
@@ -676,6 +695,11 @@ def request(method: str, url: str, *, headers: Optional[Dict[str, str]] = None,
                             raise TrackerError('timeout')
                 except requests.exceptions.Timeout:
                     raise TrackerError('timeout') from None
+                except requests.exceptions.ContentDecodingError as e:
+                    # v185.1: the server answered, in an encoding that didn't decode: not a network failure
+                    logger.warning('Tracker request: %s body did not decode after HTTP %s (%s, %s)', host, r.status_code,
+                                   r.headers.get('Content-Encoding') or 'no encoding', cause_names(e))
+                    raise TrackerError('response', r.status_code, message=UNDECODABLE) from None
                 except requests.exceptions.RequestException as e:
                     logger.warning('Tracker request: %s body read failed after HTTP %s (%s)', host, r.status_code, cause_names(e))
                     raise TrackerError('network', r.status_code, message=NO_RESPONSE) from None

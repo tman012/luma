@@ -35,6 +35,19 @@ const ET = 'America/New_York';
 export const DETAIL_STATE_WORD: Record<DetailState, string> = {
   downloaded: 'Downloaded', downloading: 'Downloading', missing: 'Missing', unaired: 'Unaired', no_date: 'No air date',
 };
+/** v185.1 (Taylor): a season card's left-edge bar, the episode rows' style. have/missing, not monitoring:
+ * unmonitored episodes count, unaired ones never do; specials follow the same rule. */
+export type SeasonStatus = 'complete' | 'partial' | 'none' | 'unaired';
+export const SEASON_STATUS_COLOR: Record<SeasonStatus, string> = {
+  complete: 'var(--tv-state-downloaded, #22c55e)', partial: 'var(--tv-state-partial, #fbbf24)',
+  none: 'var(--tv-state-missing, #ef4444)', unaired: 'var(--tv-state-unaired, #3b82f6)',
+};
+export function seasonStatus(eps: Pick<DetailEpisode, 'has_file' | 'state'>[]): SeasonStatus {
+  const aired = eps.filter(e => e.has_file || e.state === 'missing' || e.state === 'downloading' || e.state === 'downloaded');
+  if (!aired.length) return 'unaired';
+  const have = aired.filter(e => e.has_file).length;
+  return have === aired.length ? 'complete' : have === 0 ? 'none' : 'partial';
+}
 export const DETAIL_STATE_COLOR: Record<DetailState, string> = {
   downloaded: 'var(--tv-state-downloaded, #22c55e)', downloading: '#f59e0b', missing: 'var(--tv-state-missing, #ef4444)',
   unaired: 'var(--tv-state-unaired, #3b82f6)', no_date: 'rgba(255,255,255,0.3)',
@@ -160,7 +173,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   ];
   return (
     <div data-testid="tv-detail" data-series-id={view.id}
-      style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, width: '100%', maxWidth: DETAIL_MAX, margin: '0 auto', boxSizing: 'border-box' }}>
+      style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, width: '100%', maxWidth: DETAIL_MAX, margin: 0, boxSizing: 'border-box' }}>
       <style>{detailCss + monitorFlagCss}</style>
       <button type="button" className="lp-focus tvd-back" data-testid="tv-detail-back" onClick={onBack}
         style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 8px 0 4px', border: 'none',
@@ -203,10 +216,11 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
         const list = eps.filter(e => e.season === s.season).sort((a, b) => b.episode - a.episode);
         const isOpen = !!opened?.has(s.season);
         const label = seasonName(s.season);
+        const status = seasonStatus(list);
         return (
-          <section key={s.season} data-testid="tv-detail-season" data-season={s.season} data-open={isOpen || undefined}
+          <section key={s.season} data-testid="tv-detail-season" data-season={s.season} data-open={isOpen || undefined} data-status={status}
             style={{ borderRadius: 16, border: '1px solid rgba(255,255,255,0.08)', background: GLASS, overflow: 'hidden' }}>
-            <div className="tvd-season-head" style={{ display: 'flex', alignItems: 'center', gap: wide ? 12 : 8, minHeight: 56, padding: wide ? '0 12px 0 16px' : '0 8px 0 12px' }}>
+            <div className="tvd-season-head" style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: wide ? 12 : 8, minHeight: 56, padding: wide ? '0 12px 0 16px' : '0 8px 0 12px' }}>
               <MonitorFlag on={s.monitored} title={label} testid="tv-detail-season-monitored" onChange={v => void monitorSeason(s.season, v)} />
               <button type="button" className="lp-focus" data-testid="tv-detail-season-toggle" aria-expanded={isOpen}
                 onClick={() => setOpen(o => { const n = new Set(o || opened || []); if (n.has(s.season)) n.delete(s.season); else n.add(s.season); return n; })}
@@ -224,6 +238,9 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
                 onClick={() => void search({ season: s.season }, label)} />
               <IconBtn kind="interactive" label={`Interactive search ${label}`} testid="tv-detail-season-interactive"
                 onClick={() => setInteractive({ target: { season: s.season }, label: `${view.title} \u00b7 ${label}` })} />
+              {/* the card's own status bar on its header row (collapsed or expanded); each episode row keeps its own */}
+              <span data-testid="tv-detail-season-edge" aria-hidden="true"
+                style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: EDGE_W, background: SEASON_STATUS_COLOR[status] }} />
             </div>
             {isOpen && (
               <div role="list" aria-label={label}>

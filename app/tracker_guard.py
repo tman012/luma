@@ -530,6 +530,8 @@ def record_failure(g: TrackerGuard, gk: str, err, scope=None) -> float:
     Torznab/Newznab server also covers the addresses it was reached at. A 400
     from a strict site starts a rate backoff (1 h doubling to 6 h, or its
     Retry-After when longer), so the next request waits as on the Prowlarr path."""
+    if getattr(err, 'test_guard', False):
+        return 0.0                                       # v185.1: the test guard refused it, nothing was sent
     kind = 'rate' if strict_400(gk, err) else err.kind
     until = g.failure(gk, kind, err.retry_after, status=getattr(err, 'status', None))
     if scope is not None and getattr(scope, 'by_ip', False) and err.kind in _IP_KINDS:

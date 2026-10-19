@@ -130,7 +130,7 @@ def _series_for(name: str) -> Optional[Dict[str, Any]]:
     paths = {r['id']: os.path.realpath(r['path']) for r in tv_settings.libraries()}
     with tv_store.connect() as conn:
         rows = [dict(r) for r in conn.execute(
-            'SELECT id, title, year, aliases, path_id, folder, season_folder FROM series WHERE path_id IS NOT NULL')]
+            'SELECT id, title, year, tvdb_id, aliases, path_id, folder, season_folder FROM series WHERE path_id IS NOT NULL')]
     hits = []
     for r in rows:
         if r['path_id'] not in paths:
@@ -160,17 +160,33 @@ def _show_folder(s: Dict[str, Any]) -> str:
     if s['folder']:
         return s['folder']
     from app import tv_settings
-    folder = tv_settings.series_folder(s['title'], s['year'])        # v185: the Series folder format
+    with tv_store.connect() as conn:                    # folders other shows (another tvdb id) already own
+        others = {r['folder'] for r in conn.execute(
+            'SELECT folder FROM series WHERE path_id IS ? AND folder IS NOT NULL AND id != ?'
+            ' AND (tvdb_id IS NULL OR ? IS NULL OR tvdb_id != ?)', (s.get('path_id'), s['id'], s.get('tvdb_id'), s.get('tvdb_id')))}
+    try:
+        on_disk = [n for n in os.listdir(s['root']) if os.path.isdir(os.path.join(s['root'], n))]
+    except OSError:
+        on_disk = []
+    # v185.1 (Taylor): the library's own folder for this show when it has one ('Time (2021)', 'The Office
+    # (US)', 'Firefly'), else the Series folder format ('{Series Title} ({Series Year})')
+    folder = tv_naming.existing_folder(s, [n for n in on_disk if n not in others])
+    if not folder:
+        folder = tv_settings.series_folder(s['title'], s['year'])
+        # v185.1 (Taylor, PM, Sonarr-style): a name another show already has, in tv.db or on disk,
+        # gets ' (Year)'; refused only when that is taken too
+        taken_now = others | set(on_disk)
+        if folder in taken_now and s['year'] and not folder.endswith(f"({s['year']})"):
+            folder = fm.safe_component(f"{folder} ({s['year']})", fallback='Series')
+        if folder in taken_now:
+            raise mover.Refused('another show has this folder')
     if not folder or '/' in folder or folder in ('.', '..'):
         raise mover.Refused('unsafe file name')
     with tv_store.write() as conn:                      # a show added from Search gets its folder now
-        taken = conn.execute('SELECT 1 FROM series WHERE path_id IS ? AND folder = ? AND id != ?',
-                             (s.get('path_id'), folder, s['id'])).fetchone()
-        if taken and s['year']:                         # another show has that folder: never share it
-            folder = fm.safe_component(f"{folder} ({s['year']})", fallback='Series')
-            taken = conn.execute('SELECT 1 FROM series WHERE path_id IS ? AND folder = ? AND id != ?',
-                                 (s.get('path_id'), folder, s['id'])).fetchone()
-        if taken:
+        taken = conn.execute('SELECT 1 FROM series WHERE path_id IS ? AND folder = ? AND id != ?'
+                             ' AND (tvdb_id IS NULL OR ? IS NULL OR tvdb_id != ?)',
+                             (s.get('path_id'), folder, s['id'], s.get('tvdb_id'), s.get('tvdb_id'))).fetchone()
+        if taken:                                       # another show has that folder: never share it
             raise mover.Refused('another show has this folder')
         conn.execute('UPDATE series SET folder = ? WHERE id = ? AND folder IS NULL', (folder, s['id']))
     return folder
@@ -339,10 +355,20 @@ LINKED = ("EXISTS (SELECT 1 FROM episode_file_links l JOIN episode_files f ON f.
 
 
 def _want(g) -> List[int]:
+    """The row's episode ids: a JSON list of ids (v184), or older shapes (ids as strings, {'id': n}
+    items, one bare id)."""
     try:
-        return sorted({int(i) for i in json.loads(g['episode_ids'] or '[]')})
+        raw = json.loads(g['episode_ids'] or '[]') if isinstance(g['episode_ids'], str) else g['episode_ids']
     except (TypeError, ValueError):
         return []
+    items = raw if isinstance(raw, list) else [raw]
+    out = set()
+    for i in items:
+        try:
+            out.add(int(i['id'] if isinstance(i, dict) else i))
+        except (TypeError, ValueError, KeyError):
+            pass
+    return sorted(out)
 
 
 def _linked(conn, ids: List[int]) -> set:
@@ -353,7 +379,7 @@ def _linked(conn, ids: List[int]) -> set:
 
 
 def finish_grab(h: str, name: Optional[str], series_id: Optional[int], covered: Optional[List[int]], files: int,
-                now: float, via: str = 'import') -> Optional[str]:
+                now: float, via: str = 'import', imported: bool = False) -> Optional[str]:
     """Mark this torrent's grab row imported (every grabbed episode covered) or partial, with
     finished_at, and write the 'imported' history event. *covered*: the episode ids the import placed
     (None: from the episodes' linked files). The row is found by info hash, else (a grab whose hash
@@ -372,7 +398,8 @@ def finish_grab(h: str, name: Optional[str], series_id: Optional[int], covered: 
             have = set(ids) if covered is not None else _linked(conn, want)
             if covered is None:
                 ids = sorted(have)
-            state = 'imported' if want and set(want) <= have else 'partial'
+            # imported=True (v185.1): the torrent's import record says imported; that stands (file gone or not)
+            state = 'imported' if imported or (want and set(want) <= have) else 'partial'
             conn.execute(f"UPDATE grabs SET state = ?, finished_at = ?, results = ?, error = NULL WHERE hash = ?"
                          f" AND state IN ({','.join('?' * len(OPEN_GRABS))})",
                          (state, now, json.dumps({'episode_ids': ids, 'files': files, 'via': via}), g['hash'], *OPEN_GRABS))
@@ -405,21 +432,67 @@ def reconcile(now: Optional[float] = None) -> int:
             OPEN_GRABS)]
         linked = {r['hash']: _linked(conn, _want(r)) for r in rows}
     n = 0
+    by_name = _imported_by_name() if rows else {}
     for r in rows:
         want = _want(r)
-        st = status(r['hash']) or {}
+        st = _import_record(r, by_name)
         if st.get('state') == 'imported':
-            cov = st.get('episode_ids')
-            if not isinstance(cov, list) and not linked[r['hash']]:
-                continue                                      # a pre-v184 record: wait for its file's link (the 60s poll)
-            got = finish_grab(r['hash'], r['release_title'], r['series_id'], cov if isinstance(cov, list) else None,
-                              len(st.get('files') or []), float(st.get('at') or now), via='reconciled')
+            # v185.1 (PM, FF-21 residual): an open row whose torrent has an 'imported' record is closed as
+            # imported, with finished_at and one history event, even when the file is gone now (deleted on
+            # purpose) and even for a pre-v184 record without episode_ids. DB only: no re-import, no search.
+            # (v184 waited for the file's link here, so a deleted file left the row 'downloading' forever.)
+            cov = _covered(st)
+            got = finish_grab(r['hash'], r['release_title'], r['series_id'], cov if cov is not None else want,
+                              len(st.get('files') or []), float(st.get('at') or now), via='reconciled', imported=True)
         elif want and set(want) <= linked[r['hash']]:
             got = finish_grab(r['hash'], r['release_title'], r['series_id'], None, 0, now, via='reconciled')
         else:
             continue
         n += 1 if got else 0
     return n
+
+
+def _import_record(r: Dict[str, Any], by_name: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """This grab row's import record: by its hash (as stored, or lowercased: pre-v184 rows may keep the
+    tracker's uppercase hash), else the one 'imported' record with the row's exact release name."""
+    h = str(r.get('hash') or '')
+    st = status(h) or (status(h.lower()) if h != h.lower() else None)
+    if st:
+        return st
+    return by_name.get(str(r.get('release_title') or '')) or {}
+
+
+def _imported_by_name() -> Dict[str, Dict[str, Any]]:
+    seen: Dict[str, List[Dict[str, Any]]] = {}
+    with tv_store.connect() as conn:
+        for row in conn.execute("SELECT value FROM meta WHERE key LIKE 'tvdl:%'"):
+            try:
+                v = json.loads(row['value'])
+            except (ValueError, TypeError):
+                continue
+            if isinstance(v, dict) and v.get('state') == 'imported' and isinstance(v.get('name'), str) and v['name']:
+                seen.setdefault(v['name'], []).append(v)
+    return {k: v[0] for k, v in seen.items() if len(v) == 1}
+
+
+def _covered(st: Dict[str, Any]) -> Optional[List[int]]:
+    """The episode ids an import record says it placed: v184+ 'episode_ids', else (pre-v184) its files'
+    ids; None when the record doesn't say."""
+    def ints(xs):
+        out = set()
+        for x in xs if isinstance(xs, list) else []:
+            try:
+                out.add(int(x['id'] if isinstance(x, dict) else x))
+            except (TypeError, ValueError, KeyError):
+                pass
+        return out
+    if isinstance(st.get('episode_ids'), list):
+        return sorted(ints(st['episode_ids']))
+    ids = set()
+    for f in st.get('files') or []:
+        if isinstance(f, dict):
+            ids |= ints(f.get('episode_ids'))
+    return sorted(ids) if ids else None
 
 
 def _reconcile_safely(now: Optional[float] = None) -> int:
@@ -457,8 +530,11 @@ def _no_import(h: str, name: Optional[str]) -> Optional[str]:
     return None
 
 
-def tick(now: Optional[float] = None, session_factory: Callable = requests.Session) -> Dict[str, int]:
-    """One pass. Never contacts qBittorrent without a TV library or a downloads folder."""
+def tick(now: Optional[float] = None, session_factory: Callable = requests.Session,
+         clock: Optional[Callable[[], float]] = None) -> Dict[str, int]:
+    """One pass. Never contacts qBittorrent without a TV library or a downloads folder. *clock*: the time
+    an import finished (default: the real clock, or *now* when a test passes one)."""
+    clock = clock or ((lambda: time.time()) if now is None else None)
     now = time.time() if now is None else now
     out = {'checked': 0, 'imported': 0}
     if not watch_enabled() or not tv_settings.libraries():
@@ -521,11 +597,17 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
                 out['checked'] += 1
                 try:
                     res = import_torrent(t, data, now, list_files)
-                    _save(h, **res, at=now, completed=t.get('completion_on'), name=t.get('name'), error=None)
+                    # v185.1 (Ops/Tester, AHS S08): import_torrent returns only once every file is copied or
+                    # renamed into place (a failed copy raises and the row stays downloading, retryable). Stamp
+                    # the import, finished_at and the 'imported' event with THAT time, not the pass's start
+                    # (a 22 GB pack read 'imported' at 12:30:39 although the last copy landed at 12:45:19)
+                    done = clock() if clock else now
+                    _save(h, **res, at=done, completed=t.get('completion_on'), name=t.get('name'), error=None)
                     out['imported'] += 1
                     logger.info('TV import: %s -> %d file(s)', t.get('name'), len(res['files']))
                     try:                                       # v184 (FF-21): the grab row and its history event
-                        finish_grab(h, t.get('name'), res.get('series_id'), res.get('episode_ids'), len(res['files']), now)
+                        if res.get('state') == 'imported' and res.get('files'):
+                            finish_grab(h, t.get('name'), res.get('series_id'), res.get('episode_ids'), len(res['files']), done)
                     except Exception:                          # noqa: BLE001 - reconcile() repairs it next pass
                         logger.exception('TV import: %s imported, grab row not updated', t.get('name'))
                 except mover.InsufficientSpace as e:

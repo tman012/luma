@@ -28,7 +28,7 @@ from urllib.parse import urlencode, urljoin, urlsplit
 
 from app import safe_xml
 from app import tracker_types as tt
-from app.tracker_http import Response, TrackerError, looks_banned, raise_for_status
+from app.tracker_http import Response, TrackerError, looks_banned, raise_for_status, retry_after_seconds
 from app.tracker_http import request as http_request
 
 logger = logging.getLogger(__name__)
@@ -440,12 +440,29 @@ _avz_tokens: Dict[str, tuple] = {}
 _avz_lock = threading.Lock()
 
 
+def _avz_base(cfg) -> str:
+    """v185.1: the site's https origin (https://host[:port]). The API lives at the site root
+    ('https://privatehd.to/api/v1/jackett/auth'); a URL saved with a path ('…/login', '…/torrents')
+    never moves it."""
+    from urllib.parse import urlsplit
+    p = urlsplit(_base(cfg))
+    return f'https://{p.netloc}' if p.scheme in ('http', 'https') and p.netloc else _base(cfg)   # the sites are https only
+
+
+def _avz_creds(cfg) -> Dict[str, str]:
+    """v185.1: the sign-in form. Username and PID are trimmed (a pasted PID often carries a newline or
+    a space; the sites, like Prowlarr, use the bare value); the password is sent exactly as saved."""
+    return {'username': str(cfg.get('username') or '').strip(), 'password': str(cfg.get('password') or ''),
+            'pid': str(cfg.get('pid') or '').strip()}
+
+
 def _avz_key(cfg) -> str:
     """Token cache key: the site (normalized host) and the account, so a
     path or case variant of the URL reuses a valid token."""
     import hashlib
     from app.tracker_guard import normalize_host
-    raw = '\0'.join([normalize_host(cfg.get('url'))] + [str(cfg.get(k) or '') for k in ('username', 'password', 'pid')])
+    c = _avz_creds(cfg)
+    raw = '\0'.join([normalize_host(cfg.get('url'))] + [c[k] for k in ('username', 'password', 'pid')])
     return hashlib.sha256(raw.encode('utf-8')).hexdigest()
 
 
@@ -485,24 +502,76 @@ def _avz_token(cfg, request: Request, force: bool = False) -> str:
     return token
 
 
-def _avz_login(cfg, request: Request, key: str, now: float) -> str:
-    # '/api/v1/jackett/...' is the AvistaZ sites' own API path name; nothing
-    # here talks to Jackett.
-    resp = request('POST', f'{_base(cfg)}/api/v1/jackett/auth',
-                   data={'username': cfg.get('username', ''), 'password': cfg.get('password', ''),
-                         'pid': cfg.get('pid', '')},
-                   headers=_avz_headers(cfg))
-    if resp.status in (401, 403, 422):
-        raise TrackerError('banned' if looks_banned(resp.text()) else 'auth', resp.status)
-    raise_for_status(resp)
-    data = _json(resp)
-    token = data.get('token') if isinstance(data, dict) else None
-    if not token or not isinstance(token, str):
-        raise TrackerError('auth', resp.status)
-    ttl = _int(data.get('expiry'), 3600) or 3600
+def _avz_forget(key: str) -> None:
     with _avz_lock:
-        _avz_tokens[key] = (token, now + min(max(ttl, 120), 86400))
-    return token
+        _avz_tokens.pop(key, None)
+
+
+# v185.1: Cloudflare's own refusals (a challenge or a WAF block) are not the site rejecting the account
+_CF_BLOCK_RE = re.compile(r'cf-(?:browser-verification|challenge|error-details|chl-)|just a moment\.\.\.|attention required|'
+                          r'cloudflare ray id|error code:? ?10\d\d', re.I)
+
+
+def cloudflare_block(resp) -> bool:
+    """True when *resp* is Cloudflare refusing the request (its challenge or block page, or the
+    cf-mitigated header), not the tracker answering."""
+    h = {str(k).lower(): str(v) for k, v in (resp.headers or {}).items()}
+    if h.get('cf-mitigated', '').lower() == 'challenge':
+        return True
+    return resp.status in (403, 429, 503) and 'cloudflare' in h.get('server', '').lower() \
+        and bool(_CF_BLOCK_RE.search(resp.text()[:20000]))
+
+
+CF_BLOCKED = 'Blocked by Cloudflare'
+AVZ_NOT_JSON = 'Sign-in answer was not JSON'
+
+
+def _avz_login(cfg, request: Request, key: str, now: float) -> str:
+    """POST the form (username, password, pid) to /api/v1/jackett/auth ('jackett' is the AvistaZ sites'
+    own API path name; nothing here talks to Jackett), Accept JSON; the answer is {token, expiry}.
+    v185.1: a Cloudflare block is 'http' ('Blocked by Cloudflare'), never 'auth'; a redirect is
+    'redirect'; a 2xx that isn't the token JSON is 'response'; 401/403/422 from the site is 'auth'."""
+    resp = request('POST', f'{_avz_base(cfg)}/api/v1/jackett/auth', data=_avz_creds(cfg),
+                   headers=_avz_headers(cfg), follow_redirects=False)
+    if cloudflare_block(resp):
+        _avz_forget(key)
+        raise TrackerError('http', resp.status, retry_after_seconds(resp.headers.get('Retry-After')), message=CF_BLOCKED)
+    if resp.status in (401, 403, 422):
+        _avz_forget(key)
+        raise TrackerError('banned' if looks_banned(resp.text()) else 'auth', resp.status)
+    if 300 <= resp.status < 400:
+        raise TrackerError('redirect', resp.status)
+    raise_for_status(resp)
+    try:
+        data = json.loads(resp.text() or 'null')
+    except ValueError:
+        raise TrackerError('response', resp.status, message=AVZ_NOT_JSON) from None
+    token = data.get('token') if isinstance(data, dict) else None
+    if not token or not isinstance(token, str) or not token.strip():
+        raise TrackerError('auth', resp.status)
+    ttl = _avz_ttl(data.get('expiry'), now)
+    with _avz_lock:
+        _avz_tokens[key] = (token.strip(), now + ttl)
+    return token.strip()
+
+
+def _avz_ttl(expiry, now: float) -> float:
+    """Seconds the token lives: 'expiry' in seconds (the sites send a lifetime), or an absolute Unix
+    time / ISO date when a site sends one; 2 min to 24 h, 1 h when unknown."""
+    ttl: float = 3600
+    if isinstance(expiry, (int, float)) and not isinstance(expiry, bool) or (isinstance(expiry, str) and expiry.strip().isdigit()):
+        v = float(expiry)
+        ttl = v - now if v > 1e9 else v
+    elif isinstance(expiry, str) and expiry.strip():
+        from datetime import datetime, timezone
+        try:
+            dt = datetime.fromisoformat(expiry.strip().replace('Z', '+00:00').replace(' ', 'T'))
+            ttl = (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp() - now
+        except ValueError:
+            ttl = 3600
+    if not ttl or ttl != ttl:
+        ttl = 3600
+    return min(max(ttl, 120), 86400)
 
 
 # v170 (PM): an AvistaZ-family id search answered 400 with a body that clearly says the id is invalid.
@@ -536,14 +605,20 @@ def clear_avz_rejected_ids() -> None:
 
 
 def _avz_get(cfg, request: Request, params: Dict[str, Any]):
-    url = f'{_base(cfg)}/api/v1/jackett/torrents?{urlencode(params)}'
+    url = f'{_avz_base(cfg)}/api/v1/jackett/torrents?{urlencode(params)}'
     resp = None
     for attempt in (0, 1):
         token = _avz_token(cfg, request, force=attempt == 1)
         resp = request('GET', url, headers=_avz_headers(cfg, Authorization=f'Bearer {token}'))
-        if resp.status != 401:
+        if resp.status not in AVZ_REFRESH:
             break
+    if cloudflare_block(resp):
+        raise TrackerError('http', resp.status, retry_after_seconds(resp.headers.get('Retry-After')), message=CF_BLOCKED)
     return resp
+
+
+# v185.1: an expired or revoked token answers 401, or 412 Precondition Failed: sign in again once
+AVZ_REFRESH = (401, 412)
 
 
 def avistaz_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id=''):

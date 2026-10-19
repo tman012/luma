@@ -27,7 +27,7 @@ DEFAULTS: Dict[str, Any] = {        # Taylor's Sonarr NamingConfig (colon: what 
     'standard': '{Series Title} - S{season:00}E{episode:00} - {Episode Title}',
     'daily': '{Series Title} - {Air-Date} - {Episode Title} {Quality Full}',
     'anime': '{Series Title} - S{season:00}E{episode:00} - {Episode Title} {Quality Full}',
-    'series_folder': '{Series Title}',
+    'series_folder': '{Series Title}',         # v185.1 (PM, final): plain Sonarr default; tags kept, a collision adds the year
     'season_folder': 'Season {season}',
     'specials_folder': 'Specials',
     'multi_episode_style': 'prefixed_range',
@@ -379,7 +379,8 @@ def episode_name(ctx: Dict[str, Any], ext: str, series_type: str, cfg: Dict[str,
     return _fit(stem, ext, SIDECAR_ROOM)
 
 
-_SEASON_DIR = re.compile(r'^(?P<pre>(?:season|series|s)\s*)(?P<n>\d+)$', re.I)
+# v185.1: also a suffixed folder, 'Season 8 (2018)' or 'Season 08 - Apocalypse'
+_SEASON_DIR = re.compile(r'^(?P<pre>(?:season|series|s)\s*)(?P<n>\d+)(?:\s*(?:\(.*\)|\[.*\]|[-–:.].*))?\s*$', re.I)
 _SPECIALS = re.compile(r'^(?:specials?|season\s*0+|s0+)$', re.I)
 
 
@@ -401,9 +402,56 @@ def season_folder(season: int, existing: Iterable[str], cfg: Dict[str, Any]) -> 
 
 
 def series_folder(show: Dict[str, Any], cfg: Dict[str, Any]) -> str:
+    """v185.1 (Taylor, PM): {Series Title} is the series name as-is, its disambiguator kept ('The Office
+    (US)', 'Doctor Who (2005)'); a year the title already carries is not repeated ('Doctor Who (2005)')."""
     from app.file_management import safe_component
-    return safe_component(render(cfg['series_folder'], {'title': show.get('title'), 'year': show.get('year')}, cfg),
-                          fallback='Series')
+    out = render(cfg['series_folder'], {'title': show.get('title'), 'year': show.get('year')}, cfg)
+    out = re.sub(r'\((\d{4})\)\s*\(\1\)', r'(\1)', out)
+    return safe_component(out, fallback='Series')
+
+
+_PAREN = re.compile(r'^(?P<t>.*?)\s*\((?P<p>\d{4}|[A-Za-z]{2,3})\)\s*$')
+
+
+def _base(x: str) -> str:
+    return re.sub(r'[^a-z0-9]', '', clean_text(x, DEFAULTS).replace('&', 'and').lower())
+
+
+def _split(x: str) -> Tuple[str, str]:
+    m = _PAREN.match(x)
+    return (m.group('t'), m.group('p')) if m else (x, '')
+
+
+def existing_folder(show: Dict[str, Any], names: Iterable[str]) -> Optional[str]:
+    """v185.1 (Taylor): a folder the library already has for this show: its title with its year
+    ('Time (2021)'), with a country ('Your Honor (US)'), or bare ('Firefly'); a folder with another
+    year is another show. A title carrying its own tag ('The Office (US)') matches only that tag (or
+    its year), never 'The Office (UK)' nor a bare 'The Office'. The year match wins; None when none."""
+    raw = str(show.get('title') or '')
+    t0, tag = _split(raw)
+    title = _base(t0)
+    year = tag if tag.isdigit() else str(show.get('year') or '')
+    tag = '' if tag.isdigit() else tag.lower()
+    if not title:
+        return None
+    hits: List[Tuple[int, str]] = []
+    for n in names:
+        if not n or n.startswith('.'):
+            continue
+        t, p = _split(n)
+        if _base(t) != title:
+            continue
+        if p.isdigit():
+            if p == year:
+                hits.append((0, n))
+        elif p:
+            if not tag:
+                hits.append((1, n))
+            elif p.lower() == tag:
+                hits.append((0, n))
+        elif not tag:
+            hits.append((2, n))
+    return min(hits)[1] if hits else None
 
 
 def sidecars(video: str) -> List[Tuple[str, str]]:
