@@ -2,6 +2,7 @@
  * v180: prod's library ownership on Home's rails. Plex library cards are owned
  * (prod's ratingKey fast path); Trakt cards resolve through prod's batch check
  * (POST /api/check-ownership-batch, read-only). The orb is prod's getOrbColor.
+ * v181: as prod, all-owned library rails show no orb; only mixed (Trakt) rails do.
  */
 import { useEffect, useState } from 'react';
 import { resolveOwnership, mediaKey } from '@/services/ownership';

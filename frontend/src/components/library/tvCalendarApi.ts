@@ -70,7 +70,7 @@ export const findShows = (q: string) =>
 export type MonitorOption = 'all' | 'future' | 'missing' | 'existing' | 'recent' | 'pilot' | 'first_season' | 'last_season' | 'none';
 export const ADD_MONITOR: { id: MonitorOption; label: string }[] = [
   { id: 'all', label: 'All episodes' }, { id: 'future', label: 'Future episodes' }, { id: 'missing', label: 'Missing episodes' },
-  { id: 'first_season', label: 'First season' }, { id: 'last_season', label: 'Latest season' }, { id: 'none', label: 'None' },
+  { id: 'first_season', label: 'First season' }, { id: 'last_season', label: 'Last season' }, { id: 'none', label: 'None' },
 ];
 export const addShow = (tmdb_id: number, path_id?: string, opts: { monitor?: MonitorOption; profile_id?: number | null } = {}) =>
   call<{ ok: true; series_id: number }>(`${TV_URL}/shows`, {
@@ -137,7 +137,7 @@ export interface SeriesView {
   monitor_new_seasons: 'all' | 'none'; monitor_specials: boolean; season_folder: boolean; series_type: SeriesType;
   profile_id: number | null; path_id: string | null; folder: string | null; path: string | null;
   seasons: { season: number; monitored: boolean }[];
-  episodes: { id: number; season: number; episode: number; monitored: boolean }[];
+  episodes: { id: number; season: number; episode: number; monitored: boolean; title?: string | null; air_date?: string | null; has_file?: boolean }[];
 }
 export type SeriesEdit = Partial<Pick<SeriesView, 'monitored' | 'monitor_new_seasons' | 'monitor_specials' | 'season_folder' | 'series_type' | 'profile_id' | 'path'>>;
 export const getSeries = (id: number) => call<SeriesView>(`${TV_URL}/shows/${id}`, undefined, d => typeof d.id === 'number');
@@ -150,6 +150,24 @@ export const monitorMissing = (ids: number[]) =>
   call<{ ok: true; updated: number }>(`${TV_URL}/shows/monitor-missing`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
   }, d => d.ok === true);
+
+/** v181: every Monitor option, in Sonarr's order (the bulk editor). */
+export const MONITOR_OPTIONS: { id: MonitorOption; label: string }[] = [
+  { id: 'all', label: 'All episodes' }, { id: 'future', label: 'Future episodes' }, { id: 'missing', label: 'Missing episodes' },
+  { id: 'existing', label: 'Existing episodes' }, { id: 'recent', label: 'Recent episodes' }, { id: 'pilot', label: 'Pilot episode' },
+  { id: 'first_season', label: 'First season' }, { id: 'last_season', label: 'Last season' }, { id: 'none', label: 'None' },
+];
+/** v181: what the bulk action bar can change (no root folder or path, no delete). */
+export interface BulkChanges {
+  monitored?: boolean; monitor?: MonitorOption; monitor_new_seasons?: 'all' | 'none';
+  profile_id?: number; series_type?: SeriesType; season_folder?: boolean;
+}
+export const bulkEditShows = (ids: number[], changes: BulkChanges) =>
+  call<{ ok: true; updated: number; not_found: number[] }>(`${TV_URL}/shows/bulk`, put({ ids, changes }), d => d.ok === true);
+/** v181: monitor or unmonitor the selected episodes of one show (never a search). */
+export const setEpisodesMonitored = (seriesId: number, episodeIds: number[], monitored: boolean) =>
+  call<SeriesView & { updated: number }>(`${TV_URL}/shows/${seriesId}/episodes/monitored`, put({ episode_ids: episodeIds, monitored }),
+    d => typeof d.id === 'number');
 
 export interface Quality { id: string; name: string; resolution: string; source: string }
 export interface QualityItem { id: string; allowed: boolean }

@@ -174,9 +174,12 @@ def series_view(sid: int) -> Optional[Dict[str, Any]]:
             return None
         seasons = [{'season': x['season_number'], 'monitored': bool(x['monitored'])} for x in conn.execute(
             'SELECT season_number, monitored FROM seasons WHERE series_id = ? ORDER BY season_number', (sid,))]
-        eps = [{'id': x['id'], 'season': x['season_number'], 'episode': x['episode_number'], 'monitored': bool(x['monitored'])}
-               for x in conn.execute('SELECT id, season_number, episode_number, monitored FROM episodes WHERE series_id = ?'
-                                     ' ORDER BY season_number, episode_number', (sid,))]
+        eps = [{'id': x['id'], 'season': x['season_number'], 'episode': x['episode_number'], 'monitored': bool(x['monitored']),
+                # v181: the episode select (title, air date, file)
+                'title': x['title'], 'air_date': x['air_date'], 'has_file': bool(x['has_file'])}
+               for x in conn.execute(f'SELECT e.id, e.season_number, e.episode_number, e.monitored, e.title, e.air_date,'
+                                     f' {_LINKED} AS has_file FROM episodes e WHERE e.series_id = ?'
+                                     ' ORDER BY e.season_number, e.episode_number', (sid,))]
     root = _root(r['path_id'])
     return {'id': r['id'], 'title': r['title'], 'year': r['year'], 'tmdb_id': r['tmdb_id'], 'monitored': bool(r['monitored']),
             'monitor': r['monitor'], 'monitor_new_seasons': 'all' if r['monitor_new_seasons'] else 'none',
@@ -274,6 +277,84 @@ def edit(sid: int, body: Dict[str, Any], today: Optional[str] = None) -> Dict[st
             if 'monitored' in upd:            # an explicit switch wins over the option's implied one
                 conn.execute('UPDATE series SET monitored = ? WHERE id = ?', (upd['monitored'], sid))
     return series_view(sid)  # type: ignore[return-value]
+
+
+# ------------------------------------------------------------------ v181: the Series bulk editor
+
+# What the bulk action bar may change, and nothing else (no root folder or path, no delete).
+BULK_FIELDS = ('monitored', 'monitor', 'monitor_new_seasons', 'profile_id', 'series_type', 'season_folder')
+
+
+def check_bulk(changes: Any) -> Dict[str, Any]:
+    """Validate the bulk changes: a non-empty dict of BULK_FIELDS only, each a valid value. Raises Invalid."""
+    if not isinstance(changes, dict) or not changes:
+        raise Invalid({'changes': 'Invalid'})
+    errors: Dict[str, str] = {}
+    for k in changes:
+        if k not in BULK_FIELDS:
+            errors[str(k)[:40]] = 'Invalid'
+    v = changes.get('monitored')
+    if 'monitored' in changes and not isinstance(v, bool):
+        errors['monitored'] = 'Invalid'
+    if 'monitor' in changes and changes['monitor'] not in OPTIONS:
+        errors['monitor'] = 'Invalid'
+    if 'monitor_new_seasons' in changes and changes['monitor_new_seasons'] not in ('all', 'none'):
+        errors['monitor_new_seasons'] = 'Invalid'
+    if 'series_type' in changes and changes['series_type'] not in SERIES_TYPES:
+        errors['series_type'] = 'Invalid'
+    if 'season_folder' in changes and not isinstance(changes['season_folder'], bool):
+        errors['season_folder'] = 'Invalid'
+    if 'profile_id' in changes:
+        pid = changes['profile_id']
+        if not isinstance(pid, int) or isinstance(pid, bool) or get_profile(pid) is None:
+            errors['profile_id'] = 'Pick a profile'
+    if errors:
+        raise Invalid(errors)
+    return dict(changes)
+
+
+def bulk_edit(ids: Iterable[int], changes: Dict[str, Any], today: Optional[str] = None) -> Dict[str, Any]:
+    """Apply validated *changes* to every show in *ids*, in one tv.db transaction. Writes tv.db only:
+    it never searches, grabs or schedules a search (next_search_at is never touched; the air-date floor,
+    the no-file and no-backlog rules decide later what automatic search may look at)."""
+    changes = check_bulk(changes)
+    upd: Dict[str, Any] = {}
+    if 'monitored' in changes:
+        upd['monitored'] = int(changes['monitored'])
+    if 'monitor_new_seasons' in changes:
+        upd['monitor_new_seasons'] = int(changes['monitor_new_seasons'] == 'all')
+    if 'series_type' in changes:
+        upd['series_type'] = changes['series_type']
+    if 'season_folder' in changes:
+        upd['season_folder'] = int(changes['season_folder'])
+    if 'profile_id' in changes:
+        upd['profile_id'] = changes['profile_id']
+    if 'monitored' in upd or 'monitor_new_seasons' in upd:
+        upd['monitor_chosen'] = 1
+    option = changes.get('monitor')
+    done: List[int] = []
+    missing: List[int] = []
+    with tv_store.write() as conn:
+        for sid in dict.fromkeys(int(i) for i in ids):
+            if conn.execute('SELECT 1 FROM series WHERE id = ?', (sid,)).fetchone() is None:
+                missing.append(sid)
+                continue
+            if upd:
+                conn.execute(f'UPDATE series SET {", ".join(f"{k} = ?" for k in upd)} WHERE id = ?', (*upd.values(), sid))
+            if option is not None:
+                apply(conn, sid, option, None, today)
+                if 'monitored' in upd:            # an explicit switch wins over the option's implied one
+                    conn.execute('UPDATE series SET monitored = ? WHERE id = ?', (upd['monitored'], sid))
+            done.append(sid)
+    return {'ok': True, 'updated': len(done), 'not_found': missing}
+
+
+def bulk_episodes(sid: int, ids: Iterable[int], on: bool) -> int:
+    """Monitor or unmonitor the chosen episodes of one show (tv.db only; never a search)."""
+    with tv_store.write() as conn:
+        if conn.execute('SELECT 1 FROM series WHERE id = ?', (sid,)).fetchone() is None:
+            raise KeyError(sid)
+        return set_episodes(conn, sid, ids, on)
 
 
 def bulk_missing(ids: Iterable[int], today: Optional[str] = None) -> int:

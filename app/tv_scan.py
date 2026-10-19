@@ -1974,7 +1974,7 @@ def library_view() -> Dict[str, Any]:
         shows = []
         for r in conn.execute(
                 'SELECT s.id, s.tmdb_id, s.title, s.year, s.path_id, s.folder, s.poster_path, s.monitored, s.status,'
-                ' s.added_at,'
+                ' s.added_at, s.monitor, s.monitor_new_seasons, s.profile_id, s.series_type, s.season_folder,'
                 # Series grid: aired episodes (not specials) and those with a linked file
                 ' (SELECT COUNT(*) FROM episodes e WHERE e.series_id = s.id AND e.season_number > 0'
                 '  AND e.air_date IS NOT NULL AND e.air_date <= :today) AS aired,'
@@ -1998,6 +1998,10 @@ def library_view() -> Dict[str, Any]:
                           'unrecognized': r['unrecognized'] or 0,
                           'aired': r['aired'] or 0, 'have': r['have'] or 0, 'status': r['status'],
                           'continuing': (r['status'] or '') in CONTINUING, 'added_at': r['added_at'],
+                          # v181: the Series list view (bulk editor) columns
+                          'monitor': r['monitor'], 'monitor_new_seasons': 'all' if r['monitor_new_seasons'] else 'none',
+                          'profile_id': r['profile_id'], 'series_type': r['series_type'],
+                          'season_folder': bool(r['season_folder']),
                           'review': review_lines(conn, r['id']) if (r['mismatch'] or r['unrecognized']) else []})
         unmatched = []
         owned = {r['tmdb_id'] for r in conn.execute('SELECT tmdb_id FROM series WHERE tmdb_id IS NOT NULL')}

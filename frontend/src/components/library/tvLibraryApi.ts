@@ -14,6 +14,8 @@ export interface Show {
   review?: string[];
   /** Series grid: aired episodes (no specials), those with a file, and whether TMDB says it continues. */
   aired?: number; have?: number; status?: string | null; continuing?: boolean; added_at?: number | null;
+  /** v181: the Series list view (bulk editor) columns. */
+  monitor?: string | null; monitor_new_seasons?: 'all' | 'none'; profile_id?: number | null; series_type?: string | null; season_folder?: boolean;
 }
 export type ReviewTier = 'likely' | 'none' | 'duplicate';
 export interface Unmatched {

@@ -32,8 +32,10 @@ export const tvEditCss = `
 
 // ---------------------------------------------------------------- frame + controls
 
-export function Modal({ title, onClose, children, footer, testid }: {
+export function Modal({ title, onClose, children, footer, testid, width = 560, actions }: {
   title: string; onClose: () => void; children: ReactNode; footer: ReactNode; testid: string;
+  /** v181: the show sheet is wider; header actions sit left of the close button */
+  width?: number; actions?: ReactNode;
 }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
@@ -45,11 +47,12 @@ export function Modal({ title, onClose, children, footer, testid }: {
       style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(10,8,24,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT }}>
       <style>{tvEditCss}</style>
       <div role="dialog" aria-modal="true" aria-label={title} data-testid={testid}
-        style={{ width: 560, maxWidth: 'calc(100vw - 32px)', maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', boxSizing: 'border-box', padding: 24,
+        style={{ width, maxWidth: 'calc(100vw - 32px)', maxHeight: 'calc(100vh - 32px)', overflowY: 'auto', boxSizing: 'border-box', padding: 24,
           borderRadius: 16, background: MODAL_SURFACE, border: '1px solid rgba(255,255,255,0.08)',
           backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)', boxShadow: '0 24px 64px rgba(0,0,0,.5)', color: W95 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 20 }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, lineHeight: '24px', color: W95, minWidth: 0, overflowWrap: 'anywhere' }}>{title}</h2>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, lineHeight: '24px', color: W95, minWidth: 0, overflowWrap: 'anywhere', flex: 1 }}>{title}</h2>
+          {actions}
           <button type="button" aria-label="Close" className="lp-focus tve-glass" data-testid={`${testid}-close`} onClick={onClose} style={{ ...glassBtn, width: 36, height: 36, padding: 0, flex: 'none' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
           </button>
@@ -83,8 +86,10 @@ export function Toggle({ id, on, onChange, label }: { id?: string; on: boolean; 
   );
 }
 
-export function Select<V extends string | number>({ id, value, options, onChange, testid }: {
+export function Select<V extends string | number>({ id, value, options, onChange, testid, up = false }: {
   id: string; value: V | null; options: { id: V; label: string }[]; onChange: (v: V) => void; testid?: string;
+  /** v181: open upward (the bulk action bar at the bottom of the screen) */
+  up?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -116,7 +121,7 @@ export function Select<V extends string | number>({ id, value, options, onChange
       </button>
       {open && (
         <div role="listbox" aria-labelledby={`${id}-label`} data-testid={`${id}-menu`}
-          style={{ position: 'absolute', zIndex: 5, top: 44, left: 0, right: 0, padding: 4, borderRadius: 8, maxHeight: 288, overflowY: 'auto',
+          style={{ position: 'absolute', zIndex: 5, ...(up ? { bottom: 44 } : { top: 44 }), left: 0, right: 0, padding: 4, borderRadius: 8, maxHeight: 288, overflowY: 'auto',
             background: 'rgba(30,24,58,0.96)', border: '1px solid rgba(255,255,255,0.10)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
             boxShadow: '0 16px 40px rgba(0,0,0,.45)' }}>
           {options.map(o => {
@@ -137,15 +142,15 @@ export function Select<V extends string | number>({ id, value, options, onChange
   );
 }
 
-const footBtn: React.CSSProperties = { height: 40, padding: '0 18px', borderRadius: 10, fontSize: 14, fontWeight: 600, fontFamily: FONT, cursor: 'pointer', flex: 'none' };
-const glassBtn: React.CSSProperties = {
+export const footBtn: React.CSSProperties = { height: 40, padding: '0 18px', borderRadius: 10, fontSize: 14, fontWeight: 600, fontFamily: FONT, cursor: 'pointer', flex: 'none' };
+export const glassBtn: React.CSSProperties = {
   ...footBtn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,255,255,0.06)',
   border: '1px solid rgba(255,255,255,0.08)', color: W95,
 };
-const primaryBtn = (enabled: boolean): React.CSSProperties => ({
+export const primaryBtn = (enabled: boolean): React.CSSProperties => ({
   ...footBtn, border: 'none', background: ACCENT, color: '#fff', opacity: enabled ? 1 : 0.4, cursor: enabled ? 'pointer' : 'default',
 });
-const field: React.CSSProperties = {
+export const field: React.CSSProperties = {
   width: '100%', height: 40, boxSizing: 'border-box', padding: '0 12px', borderRadius: 10, background: 'rgba(255,255,255,0.06)',
   border: '1px solid rgba(255,255,255,0.08)', color: W95, fontSize: 14, fontFamily: FONT,
 };

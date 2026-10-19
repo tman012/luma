@@ -19,7 +19,8 @@ import { ImportSection, ReviewSection, ShowPicker, FADE_MS, importCss, initialRe
 import { TodayButton, TvCalendar, WeekCenter, tvCalendarCss } from './TvCalendar';
 import { TvSeries } from './TvSeries';
 import { QualityProfiles } from './TvEdit';
-import { SEARCH_LIST_ID, SEARCH_MIN, TV_POPOVER_SURFACE, TvSearch, searchRowId, tvSearchCss, type SearchKeys } from './TvSearch';
+import { SEARCH_LIST_ID, SEARCH_MIN, TV_POPOVER_SURFACE, TvOwnedSearch, TvSearch, searchRowId, tvSearchCss, type SearchKeys } from './TvSearch';
+import { ShowSheet } from './TvBulk';
 import { LibrarySelector } from './LibrarySelector';
 import type { SelectableLibrary } from './librarySelectionApi';
 import { SAVE_FAILED } from './libraryPathsApi';
@@ -43,6 +44,7 @@ export const tvView = (v: string | null): TvView => (TV_VIEWS.find(x => x.id ===
 export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: ReactNode }) {
   const [settingsView, setSettingsView] = useState<TvSettingsView | null>(null);
   const [lib, setLib] = useState<TvLibrary | null>(null);
+  const [sheet, setSheet] = useState<Show | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [toast, setToast] = useState('');
   const [editing, setEditing] = useState<number | null>(null);     // the show whose "Wrong show?" picker is open
@@ -81,6 +83,8 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
     loadTv().then(r => (r.ok ? setSettingsView(r.data) : setLoadFailed(true)));
     refreshLib();
   }, [refreshLib]);
+  // v181: a Series edit (bulk, episode select, Edit, Add) reloads the shows as well as the calendar
+  const changed = useCallback(() => { void refreshLib(); setReload(n => n + 1); }, [refreshLib]);
   const onFinish = useCallback((p: ImportProgress) => {
     setImportError(p.error);
     setReload(n => n + 1);
@@ -136,10 +140,14 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
   );
 
   const onWeek = (w: string) => go({ week: w === weekStart(today) ? null : w }, false);
+  // v181: only the Series page searches TMDB to add shows; everywhere else (the calendar toolbar) finds only your shows
+  const adding = view === 'series';
+  const openShow = (s: Show) => { setQ(''); setSheet(s); };
   const search = (
-    <SearchBox wide={wide} value={q} onChange={setQ}
-      results={noLibraries ? noLibs : (keys, active) => (
-        <TvSearch q={q} paths={settingsView.paths} onAdded={() => setReload(n => n + 1)} keys={keys} active={active} />
+    <SearchBox wide={wide} value={q} onChange={setQ} placeholder={adding ? 'Search shows' : 'Search your shows'}
+      results={noLibraries ? noLibs : (keys, active) => (adding
+        ? <TvSearch q={q} paths={settingsView.paths} onAdded={changed} keys={keys} active={active} />
+        : <TvOwnedSearch q={q} shows={lib ? lib.shows : null} onOpen={openShow} keys={keys} active={active} />
       )} />
   );
 
@@ -149,7 +157,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
       <TvCalendar today={today} week={week} reload={reload} toolbar={!calendarTop} onWeek={onWeek} />
     );
   } else if (view === 'series') {
-    body = noLibraries ? noLibs : <TvSeries shows={lib ? lib.shows : null} onChanged={() => setReload(n => n + 1)} />;
+    body = noLibraries ? noLibs : <TvSeries shows={lib ? lib.shows : null} onChanged={changed} />;
   } else if (view === 'import') {
     body = (
       <div style={{ display: 'flex', flexDirection: 'column', gap: SECTION_GAP }}>
@@ -232,6 +240,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
         <LibrarySelector url={TV_LIBRARIES_URL} label="Libraries" testId="tv-paths" onChange={onLibraries} />
       </div>
       {body && <div data-testid="tv-view" style={{ marginTop: 20 }}>{body}</div>}
+      {sheet && <ShowSheet seriesId={sheet.id} title={sheet.title} onClose={() => setSheet(null)} onChanged={changed} />}
     </section>
     </WideCtx.Provider>
   );
@@ -265,8 +274,8 @@ export const SEARCH_DROP_W = 480;
 
 /** The compact search (320px, right of the tabs) with its results in a 480px glass dropdown anchored to the
  * field's right edge. ↑/↓ move through the rows, Enter adds the highlighted show, Esc or a click outside closes. */
-function SearchBox({ wide, value, onChange, results }: {
-  wide: boolean; value: string; onChange: (v: string) => void;
+function SearchBox({ wide, value, onChange, results, placeholder = 'Search shows' }: {
+  wide: boolean; value: string; onChange: (v: string) => void; placeholder?: string;
   results: ReactNode | ((keys: React.MutableRefObject<SearchKeys | null>, active: number) => ReactNode);
 }) {
   const [open, setOpen] = useState(false);
@@ -304,7 +313,7 @@ function SearchBox({ wide, value, onChange, results }: {
         strokeLinecap="round" strokeLinejoin="round" style={{ position: 'absolute', left: 12, top: 10, pointerEvents: 'none' }}>
         <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
       </svg>
-      <input type="search" data-testid="tv-search" aria-label="Search shows" placeholder="Search shows" value={value}
+      <input type="search" data-testid="tv-search" aria-label={placeholder} placeholder={placeholder} value={value}
         className="tvt-search" role="combobox" aria-expanded={shown} aria-controls={SEARCH_LIST_ID} aria-autocomplete="list"
         aria-activedescendant={shown && active >= 0 ? searchRowId(active) : undefined}
         onChange={e => { onChange(e.target.value); setOpen(true); }}

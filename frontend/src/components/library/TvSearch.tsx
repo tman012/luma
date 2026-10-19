@@ -2,11 +2,11 @@
  * first ("In library", not clickable), then TMDB shows with Add. Add saves the show to
  * tv.db in one of the selected TV libraries (picked when there are 2+); it
  * creates no folders or files and downloads nothing. */
-import { useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { Poster } from './TvImport';
 import type { LibPath } from './libraryPathsApi';
-import { showLabel } from './tvLibraryApi';
+import { showLabel, type Show } from './tvLibraryApi';
 import { ADD_MONITOR, addShow, findShows, loadProfiles, seasonsText, type FindResult, type MonitorOption, type Profile } from './tvCalendarApi';
 import { Select } from './TvEdit';
 
@@ -143,6 +143,59 @@ export function TvSearch({ q, paths, onAdded, active = -1, keys }: {
   );
 }
 
+/** v181 (Taylor): the calendar toolbar search finds only your own shows (the series in tv.db, from the library
+ * already loaded): no TVDB or TMDB lookup and no unowned results. A result opens the show; adding shows stays on
+ * the Series page search. */
+export const ownedKey = (t: string) => (t || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  .replace(/[.'\u2019\u2018`]/g, '').replace(/[^0-9a-z]+/g, ' ').trim();
+export const OWNED_MAX = 20;
+export function ownedMatches(shows: Show[], q: string): Show[] {
+  const k = ownedKey(q);
+  if (k.length < SEARCH_MIN) return [];
+  const words = k.split(' ');
+  const scored: [number, Show][] = [];
+  for (const s of shows) {
+    const t = ownedKey(s.title);
+    const bare = t.replace(/^(?:the|a|an) (?=\S)/, '');
+    if (!words.every(w => t.includes(w))) continue;
+    const rank = t === k || bare === k ? 0 : t.startsWith(k) || bare.startsWith(k) ? 1 : t.split(' ').some(w => w.startsWith(words[0] ?? k)) ? 2 : 3;
+    scored.push([rank, s]);
+  }
+  return scored.sort((a, b) => a[0] - b[0] || ownedKey(a[1].title).localeCompare(ownedKey(b[1].title)) || (a[1].year ?? 0) - (b[1].year ?? 0))
+    .slice(0, OWNED_MAX).map(x => x[1]);
+}
+
+export function TvOwnedSearch({ q, shows, onOpen, active = -1, keys }: {
+  q: string; shows: Show[] | null; onOpen: (s: Show) => void;
+  active?: number; keys?: MutableRefObject<SearchKeys | null>;
+}) {
+  const list = useMemo(() => ownedMatches(shows || [], q), [shows, q]);
+  if (keys) keys.current = { count: list.length, enter: i => { const s = list[i]; if (s) onOpen(s); } };
+  return (
+    <div data-testid="tv-owned-results" id={SEARCH_LIST_ID} role="listbox" aria-label="Your shows"
+      style={{ fontFamily: FONT, width: '100%', boxSizing: 'border-box' }}>
+      {shows === null ? (
+        <div data-testid="tv-search-loading" aria-busy="true" style={{ ...rowBox, background: 'rgba(255,255,255,0.04)' }} />
+      ) : !list.length ? (
+        <div data-testid="tv-search-empty" style={centered}>No shows</div>
+      ) : list.map((s, i) => (
+        <button key={s.id} type="button" data-testid="tv-owned-row" data-show-id={s.id} id={searchRowId(i)} role="option"
+          aria-selected={i === active} data-active={i === active || undefined} className="lp-focus tvs-owned"
+          onClick={() => onOpen(s)}
+          style={{ ...rowBox, width: '100%', border: 'none', borderTop: i ? divider : 'none', cursor: 'pointer', textAlign: 'left', fontFamily: FONT,
+            background: i === active ? 'rgba(255,255,255,0.06)' : 'transparent' }}>
+          <Poster path={s.poster_path} w={40} h={60} tmdbLogo />
+          <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <span style={{ ...oneLine, fontSize: 14, fontWeight: 600, color: W95 }}>{showLabel(s)}</span>
+            <span style={{ ...oneLine, fontSize: 13, color: W50 }}>{`${Math.min(s.have ?? 0, s.aired ?? 0)} of ${s.aired ?? 0} episodes`}</span>
+          </span>
+          {!s.monitored && <span style={{ fontSize: 12, color: W50, flex: 'none' }}>Unmonitored</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export const InLibrary = () => (
   <span data-testid="tv-in-library" style={{
     display: 'inline-flex', alignItems: 'center', gap: 6, height: 22, padding: '0 10px', borderRadius: 999, flex: 'none',
@@ -252,6 +305,7 @@ export function PathPicker({ paths, onCancel, onAdd, inline = false }: {
 
 export const tvSearchCss = `
 .tvs-add:hover{background:#60a5fa!important}
+.tvs-owned:hover{background:rgba(255,255,255,0.06)!important}
 `;
 
 const oneLine: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };

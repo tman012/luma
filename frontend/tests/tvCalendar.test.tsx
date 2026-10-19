@@ -29,6 +29,7 @@ let paths: typeof TV[];
 let episodes: CalEpisode[];
 let unmatched: unknown[];
 let addStatus: number;
+let libShows: unknown[];
 const calls: { url: string; method: string; body: unknown }[] = [];
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
@@ -37,6 +38,7 @@ beforeEach(() => {
   paths = [TV];
   unmatched = [];
   addStatus = 201;
+  libShows = [];
   episodes = [ep(1, '2026-10-12', true), ep(2, '2026-10-16', false), ep(3, '2026-10-17', false),
     ep(4, '2026-10-19', false), ep(5, '2026-10-29', false, 'Dark', 1, 1)];
   vi.stubGlobal('fetch', vi.fn(async (u: string, init?: RequestInit) => {
@@ -46,7 +48,7 @@ beforeEach(() => {
     calls.push({ url, method, body });
     if (url === '/api/settings/tv') return res({ paths, upgrades: { mode: 'keep_both' }, rescan_interval_h: 6 });
     if (url === '/api/settings/tv/libraries') return res({ selected: paths.map(p => p.id), libraries: [TV, ANIME].map(l => ({ ...l, selected: paths.some(p => p.id === l.id) })) });
-    if (url === '/api/settings/tv/library') return res({ shows: [], unmatched, scan: { running: false, error: null, last_scan: null } });
+    if (url === '/api/settings/tv/library') return res({ shows: libShows, unmatched, scan: { running: false, error: null, last_scan: null } });
     if (url.startsWith('/api/settings/tv/calendar')) {
       const p = new URL(url, 'http://x').searchParams;
       const start = p.get('start')!; const end = addDays(start, Number(p.get('days')));
@@ -338,8 +340,8 @@ describe('Search', () => {
   it('a compact 36px field; waits 250ms and 2 characters; library first with In library (not clickable), then TMDB with Add', async () => {
     page(true);
     await screen.findAllByTestId('tv-agenda-row');
-    const field = screen.getByTestId('tv-search') as HTMLInputElement;
-    expect([field.placeholder, field.style.height]).toEqual(['Search shows', '36px']);
+    let field = screen.getByTestId('tv-search') as HTMLInputElement;
+    expect([field.placeholder, field.style.height]).toEqual(['Search your shows', '36px']);     // v181: the calendar finds only your shows
     expect([screen.getByTestId('tv-search-box').style.width, screen.getByTestId('tv-search-box').style.maxWidth]).toEqual(['100%', '320px']);
     // the top row (v158c): a 3-column grid (minmax(200px, 320px) 1fr auto); search left, ‹ range › centered, tabs right
     const row = screen.getByTestId('tv-top-row');
@@ -353,8 +355,13 @@ describe('Search', () => {
     expect(screen.getByTestId('tv-top-right').className).toBe('tvt-top-tabs');
     expect(screen.getByTestId('tv-top-right').contains(screen.getByTestId('tv-tabs'))).toBe(true);
     expect(screen.queryByTestId('tv-title')).toBeNull();                                           // no 'TV' heading
+    cleanup();
+    page(true, '/settings/tv?view=series');                                                        // v181: Add stays on the Series page
+    await screen.findByTestId('tv-series-empty');
+    field = screen.getByTestId('tv-search') as HTMLInputElement;
+    expect(field.placeholder).toBe('Search shows');
     type('S');
-    expect(screen.getByTestId('tv-section').getAttribute('data-view')).toBe('calendar');
+    expect(screen.getByTestId('tv-section').getAttribute('data-view')).toBe('series');
     type('Se'); type('Sev');
     expect(SEARCH_DEBOUNCE_MS).toBe(250);
     const rows = await screen.findAllByTestId('tv-search-row');
@@ -367,7 +374,7 @@ describe('Search', () => {
       .toEqual(['480px', '0px', 'absolute', '12px', 'rgba(21, 16, 42, 0.92)', 'blur(24px)']);
     expect(drop.style.border).toBe('1px solid rgba(255,255,255,0.08)'.replace(/,/g, ', '));
     expect(rows[1]!.firstElementChild!.getAttribute('style')).toContain('height: 72px');            // the same 72px rows
-    expect(screen.getAllByTestId('tv-agenda-row').length).toBeGreaterThan(0);                     // the view stays under it
+    expect(screen.getByTestId('tv-series-empty')).toBeTruthy();                                    // the view stays under it
     fireEvent.keyDown(screen.getByTestId('tv-search'), { key: 'Escape' });
     expect(screen.queryByTestId('tv-search-drop')).toBeNull();               // Esc closes
     expect(field.value).toBe('Sev');
@@ -376,8 +383,8 @@ describe('Search', () => {
   });
 
   it('keyboard: ↓/↑ highlight rows (wrapping), Enter adds the highlighted show; a click outside closes', async () => {
-    page(true);
-    await screen.findAllByTestId('tv-agenda-row');
+    page(true, '/settings/tv?view=series');
+    await screen.findByTestId('tv-series-empty');
     type('Severance');
     const rows = await screen.findAllByTestId('tv-search-row');
     const field = screen.getByTestId('tv-search');
@@ -403,17 +410,17 @@ describe('Search', () => {
   });
 
   it('no results says No results; the x clears', async () => {
-    page(true);
+    page(true, '/settings/tv?view=series');
     await screen.findByTestId('tv-search');
     type('nothing');
     expect((await screen.findByTestId('tv-search-empty')).textContent).toBe('No results');
     fireEvent.click(screen.getByTestId('tv-search-clear'));
     expect((screen.getByTestId('tv-search') as HTMLInputElement).value).toBe('');
-    await screen.findAllByTestId('tv-agenda-row');
+    await screen.findByTestId('tv-series-empty');
   });
 
   it('Add with one library opens Monitor (All episodes) plus the path line, then shows In library', async () => {
-    page(true);
+    page(true, '/settings/tv?view=series');
     await screen.findByTestId('tv-search');
     type('Severance');
     fireEvent.click(await screen.findByTestId('tv-add'));
@@ -424,7 +431,7 @@ describe('Search', () => {
     expect(mon.textContent).toBe('All episodes');
     fireEvent.click(mon);
     expect(within(picker).getAllByRole('option').map(o => o.textContent))
-      .toEqual(['All episodes', 'Future episodes', 'Missing episodes', 'First season', 'Latest season', 'None']);
+      .toEqual(['All episodes', 'Future episodes', 'Missing episodes', 'First season', 'Last season', 'None']);
     fireEvent.click(within(picker).getByRole('option', { name: 'Future episodes' }));
     fireEvent.click(within(picker).getByTestId('tv-add-confirm'));
     await waitFor(() => expect(screen.getAllByTestId('tv-in-library')).toHaveLength(2));
@@ -434,7 +441,7 @@ describe('Search', () => {
 
   it('Add with 2+ libraries asks where: nothing preselected, Add at 40% until one is picked; Cancel adds nothing', async () => {
     paths = [TV, ANIME];
-    page(true);
+    page(true, '/settings/tv?view=series');
     await screen.findByTestId('tv-search');
     type('Severance');
     fireEvent.click(await screen.findByTestId('tv-add'));
@@ -459,7 +466,7 @@ describe('Search', () => {
 
   it("a failed Add says Couldn't add show with Retry", async () => {
     addStatus = 502;
-    page(true);
+    page(true, '/settings/tv?view=series');
     await screen.findByTestId('tv-search');
     type('Severance');
     fireEvent.click(await screen.findByTestId('tv-add'));

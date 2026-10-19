@@ -10,6 +10,10 @@ PUT    /api/settings/tv/shows/<id>/monitored {monitored}
 PUT    /api/settings/tv/shows/<id>/seasons/<n>/monitored {monitored}
 PUT    /api/settings/tv/episodes/<id>/monitored {monitored}
 POST   /api/settings/tv/shows/monitor-missing {ids}      Series grid bulk opt-in to Missing episodes
+PUT    /api/settings/tv/shows/bulk {ids, changes}        v181 bulk editor: monitored, monitor, monitor_new_seasons,
+                                                         profile_id, series_type, season_folder (signed-in owner;
+                                                         tv.db only, never a search or grab)
+PUT    /api/settings/tv/shows/<id>/episodes/monitored {episode_ids, monitored}   v181 episode select
 GET    /api/settings/tv/profiles                         {profiles, qualities}
 POST   /api/settings/tv/grab {download_url, title, tmdb_id, season, episode?, size?, quality?, indexer?}
                                                          the TV Sources popup's grab (v158c), Luma's own path
@@ -153,6 +157,49 @@ def monitor_missing():
             or not all(isinstance(i, int) and not isinstance(i, bool) for i in ids)):
         return _out({'error': 'Invalid'}, 400)
     return _out({'ok': True, 'updated': tv_monitor.bulk_missing(ids)})
+
+
+def _ids(v, cap=MAX_BULK):
+    if (not isinstance(v, list) or not v or len(v) > cap
+            or not all(isinstance(i, int) and not isinstance(i, bool) and i > 0 for i in v)):
+        return None
+    return v
+
+
+@bp.route('/api/settings/tv/shows/bulk', methods=['PUT'])
+def shows_bulk():
+    """v181: the Series bulk editor. Signed-in owner only; tv.db only; never a search or grab."""
+    err = tv_settings._guard() or tv_settings._signed_in_owner()
+    if err:
+        return err
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) - {'ids', 'changes'}:
+        return _out({'error': 'Invalid', 'errors': {}}, 400)
+    ids = _ids(body.get('ids'))
+    if ids is None:
+        return _out({'error': 'Invalid', 'errors': {'ids': 'Invalid'}}, 400)
+    try:
+        return _out(tv_monitor.bulk_edit(ids, body.get('changes')))
+    except tv_monitor.Invalid as e:
+        return _out({'error': 'Invalid', 'errors': e.errors}, 400)
+
+
+@bp.route('/api/settings/tv/shows/<int:sid>/episodes/monitored', methods=['PUT'])
+def episodes_bulk(sid):
+    """v181: monitor or unmonitor the selected episodes. Signed-in owner only; never a search."""
+    err = tv_settings._guard() or tv_settings._signed_in_owner()
+    if err:
+        return err
+    body = request.get_json(silent=True)
+    on = _flag(body)
+    ids = _ids(body.get('episode_ids'), 20000) if isinstance(body, dict) else None
+    if on is None or ids is None or set(body) - {'episode_ids', 'monitored'}:
+        return _out({'error': 'Invalid'}, 400)
+    try:
+        n = tv_monitor.bulk_episodes(sid, ids, on)
+    except KeyError:
+        return _missing()
+    return _out({**(tv_monitor.series_view(sid) or {}), 'updated': n})
 
 
 @bp.route('/api/settings/tv/profiles', methods=['GET'])

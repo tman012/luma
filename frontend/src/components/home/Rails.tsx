@@ -123,17 +123,19 @@ export function SkeletonRails({ rails = 3 }: { rails?: number }) {
 }
 
 export function HomeRails({ cw, rails, onOpen }: { cw: Card[]; rails: Rail[]; onOpen?: (card: Card, el?: HTMLElement | null) => void }) {
-  const own = useRailOwnership([...cw, ...rails.flatMap(r => r.items)]);
+  // v181: prod's rule: no orb on all-owned library rails (Continue watching, every Plex library rail);
+  // the orb only on mixed rails (Trakt), resolved by prod's batch check.
+  const own = useRailOwnership(rails.flatMap(r => r.items).filter(c => c.tmdb_id));
   return (
     <div data-testid="home-rails" className="luma-rails-in">
       {cw.length > 0 && (
         <RailRow title="Continue watching" testId="rail-continue">
-          {cw.map(c => <WideCard key={c.key} card={c} onOpen={onOpen} own={own[c.key]} />)}
+          {cw.map(c => <WideCard key={c.key} card={c} onOpen={onOpen} />)}
         </RailRow>
       )}
       {rails.filter(r => r.items.length > 0).map(r => (
         <RailRow key={r.id} title={r.title} testId={`rail-${r.id}`}>
-          {r.items.map(c => <PosterCard key={c.key} card={c} onOpen={onOpen} own={own[c.key]} />)}
+          {r.items.map(c => <PosterCard key={c.key} card={c} onOpen={onOpen} own={c.tmdb_id ? own[c.key] : undefined} />)}
         </RailRow>
       ))}
     </div>

@@ -1,10 +1,12 @@
 /** Settings > TV > Series (desktop web): every library show as a 2:3 poster,
  * A–Z ignoring punctuation and a leading The/A/An, with a downloaded-share bar and "N of M
  * episodes", and a sticky # – Z rail. A poster opens Edit series (v158a); Select picks shows
- * for the bulk Missing episodes opt-in. */
+ * for the bulk Missing episodes opt-in. v181: a Posters/List toggle; the list view is the Sonarr-style bulk editor
+ * (TvBulk: a checkbox per show, select all, the action bar) and a title opens the show sheet (episode select). */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { EditSeriesModal } from './TvEdit';
-import { monitorMissing } from './tvCalendarApi';
+import { loadProfiles, monitorMissing, type Profile } from './tvCalendarApi';
+import { BulkBar, SeriesList, ShowSheet } from './TvBulk';
 import { FONT } from '@/components/start/StartUI';
 import { posterUrl } from '@/utils/image';
 import { RATING_ICONS } from '@/utils/ratingIcons';
@@ -53,8 +55,22 @@ export function progress(s: Show): { fill: number; color: string; state: 'missin
 }
 export const episodesText = (s: Show) => `${Math.min(s.have ?? 0, s.aired ?? 0)} of ${s.aired ?? 0} episodes`;
 
+export type SeriesLayout = 'posters' | 'list';
+const LAYOUT_KEY = 'luma.tv.series.layout';
+const savedLayout = (): SeriesLayout => { try { return localStorage.getItem(LAYOUT_KEY) === 'list' ? 'list' : 'posters'; } catch { return 'posters'; } };
+
 export function TvSeries({ shows, onChanged }: { shows: Show[] | null; onChanged?: () => void }) {
   const sorted = useMemo(() => (shows ? sortShows(shows) : []), [shows]);
+  const [layout, setLayoutState] = useState<SeriesLayout>(savedLayout);
+  const setLayout = (l: SeriesLayout) => { setLayoutState(l); setPicked(new Set()); setSelecting(false); setBulk(''); try { localStorage.setItem(LAYOUT_KEY, l); } catch { /* private mode */ } };
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [sheet, setSheet] = useState<Show | null>(null);
+  useEffect(() => {
+    if (layout !== 'list') return;
+    let live = true;
+    void loadProfiles().then(r => { if (live && r.ok) setProfiles(r.data.profiles); });
+    return () => { live = false; };
+  }, [layout]);
   const [editing, setEditing] = useState<Show | null>(null);
   const [selecting, setSelecting] = useState(false);
   const [picked, setPicked] = useState<Set<number>>(new Set());
@@ -90,7 +106,7 @@ export function TvSeries({ shows, onChanged }: { shows: Show[] | null; onChanged
     const onResize = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(fit); };
     window.addEventListener('resize', onResize);
     return () => { cancelAnimationFrame(frame); window.removeEventListener('resize', onResize); };
-  }, [sorted]);
+  }, [sorted, layout]);
 
   useEffect(() => {
     if (!sorted.length) return;
@@ -142,7 +158,7 @@ export function TvSeries({ shows, onChanged }: { shows: Show[] | null; onChanged
       window.removeEventListener('scroll', onEvent, { capture: true }); window.removeEventListener('resize', onEvent);
       window.removeEventListener('wheel', user); window.removeEventListener('keydown', user);
     };
-  }, [sorted]);
+  }, [sorted, layout]);
 
   if (shows === null) {
     return (
@@ -163,9 +179,44 @@ export function TvSeries({ shows, onChanged }: { shows: Show[] | null; onChanged
     root.current?.querySelector(`[data-show-id="${id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     setCurrent(l);
   };
+  const toggleBar = (
+    <div role="radiogroup" aria-label="Layout" data-testid="tv-series-layout" style={{ display: 'inline-flex', gap: 2, padding: 2, borderRadius: 10,
+      background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', marginRight: 'auto' }}>
+      {(['posters', 'list'] as const).map(l => (
+        <button key={l} type="button" role="radio" aria-checked={layout === l} data-testid={`tv-series-layout-${l}`} className="lp-focus tvs-glass"
+          onClick={() => setLayout(l)}
+          style={{ height: 30, padding: '0 12px', borderRadius: 8, border: 'none', fontFamily: FONT, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            color: layout === l ? '#fff' : W50, background: layout === l ? 'rgba(255,255,255,0.12)' : 'transparent' }}>
+          {l === 'posters' ? 'Posters' : 'List'}
+        </button>
+      ))}
+    </div>
+  );
+  const sheetEl = sheet && (
+    <ShowSheet seriesId={sheet.id} title={sheet.title} onClose={() => setSheet(null)} onChanged={() => onChanged?.()} />
+  );
+  if (layout === 'list') {
+    const ids = sorted.filter(s => picked.has(s.id)).map(s => s.id);
+    return (
+      <div data-testid="tv-series-wrap" data-layout="list" style={{ display: 'flex', flexDirection: 'column', gap: 12, fontFamily: FONT }}>
+        <style>{tvSeriesCss}</style>
+        <div data-testid="tv-series-bar-row" style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 36 }}>
+          {toggleBar}
+          <span data-testid="tv-series-picked" style={{ fontSize: 13, fontWeight: 600, color: W50 }}>{`${ids.length} selected`}</span>
+        </div>
+        <SeriesList shows={sorted} profiles={profiles} picked={picked} setPicked={setPicked} onOpen={setSheet} />
+        {ids.length > 0 && (
+          <BulkBar ids={ids} profiles={profiles} onClear={() => setPicked(new Set())}
+            onDone={() => { setPicked(new Set()); onChanged?.(); }} />
+        )}
+        {sheetEl}
+      </div>
+    );
+  }
   return (
     <div data-testid="tv-series-wrap" style={{ display: 'flex', flexDirection: 'column', gap: 12, fontFamily: FONT }}>
     <div data-testid="tv-series-bar-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, minHeight: 36, paddingRight: RAIL.width }}>
+      {!selecting && toggleBar}
       {selecting ? (
         <>
           <span data-testid="tv-series-picked" style={{ fontSize: 13, fontWeight: 600, color: W50, marginRight: 'auto' }}>{`${picked.size} selected`}</span>

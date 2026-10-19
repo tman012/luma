@@ -29,15 +29,12 @@ const RAILS = [
   ] },
 ];
 
-describe('v180 owned indicators on Home rails (prod orb)', () => {
-  it('marks Plex library cards owned (green) on every library rail without a request', async () => {
+describe('owned indicators on Home rails (prod orb, prod placement)', () => {
+  it('shows no orb on all-owned library rails, as prod (v181), and asks nothing', async () => {
     batch.mockResolvedValue({});
     render(<HomeRails cw={CW} rails={RAILS.slice(0, 3)} onOpen={() => {}} />);
-    for (const t of ['Severance', 'Heat', 'Sinners', 'Oppenheimer']) {
-      const orb = orbOf(t);
-      expect(orb?.getAttribute('data-owned-orb')).toBe('owned');
-      expect(orb?.querySelector('span')?.className).toContain('bg-green-400');
-    }
+    for (const t of ['Severance', 'Heat', 'Sinners', 'Oppenheimer']) expect(orbOf(t)).toBeNull();
+    expect(document.querySelectorAll('[data-owned-orb]').length).toBe(0);
     expect(batch).not.toHaveBeenCalled();
   });
 
@@ -58,6 +55,13 @@ describe('v180 owned indicators on Home rails (prod orb)', () => {
     expect(orbOf('Nope')?.querySelector('span')?.className).toContain('bg-red-400');
     expect(orbOf('Andor')?.getAttribute('data-owned-orb')).toBe('shared');
     expect(orbOf('Andor')?.querySelector('span')?.className).toContain('bg-blue-400');
+  });
+
+  it('a library card next to a mixed rail still shows no orb', async () => {
+    batch.mockResolvedValue({ 'movie:arrival_2016': { owned: true }, 'movie:nope_2022': { owned: false }, 'tv:andor_2022': { owned: true } });
+    render(<HomeRails cw={CW} rails={RAILS} onOpen={() => {}} />);
+    await waitFor(() => expect(orbOf('Arrival')).not.toBeNull());
+    for (const t of ['Severance', 'Heat', 'Sinners', 'Oppenheimer']) expect(orbOf(t)).toBeNull();
   });
 
   it('uses prod\'s getOrbColor and orb geometry', () => {

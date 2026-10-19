@@ -2,7 +2,7 @@
 
 A real browser opens an owned title on a LUMA_MINIMAL Luma at 1440 and 390: prod's owned Play
 (desktop movie popup) or Watch is shown, clicking it starts nothing (no request, no player), and
-every Plex library card on Home's rails carries prod's green owned orb.
+as prod, Home's all-owned Plex library rails carry no owned orb (v181).
 
 Needs a minimal Luma whose Plex library holds LUMA_E2E_OWNED_TITLE (default Arrival) and an
 owner sign-in: LUMA_E2E_USER plus LUMA_E2E_PASSWORD (the /login form) or LUMA_E2E_PIN.
@@ -61,10 +61,10 @@ def test_owned_watch_is_display_only(browser, width):
         if pg.evaluate("() => window.__LUMA_MINIMAL__ !== true"):
             pytest.skip("not a LUMA_MINIMAL build")
         if phone:
-            pg.wait_for_selector("[data-testid^=rail-] [data-owned-orb]", timeout=15000)
-            orbs = pg.evaluate("() => [...document.querySelectorAll('[data-testid^=rail-] [data-owned-orb]')].map(e => e.dataset.ownedOrb)")
-            cards = pg.evaluate("() => document.querySelectorAll('[data-testid^=rail-] button[data-testid^=card-]:not([data-testid*=tmdb])').length")
-            assert cards > 0 and orbs.count("owned") >= cards
+            pg.wait_for_selector("[data-testid^=rail-] button[data-testid^=card-]", timeout=15000)
+            pg.wait_for_timeout(1000)
+            lib_orbs = pg.evaluate("() => document.querySelectorAll('[data-testid^=rail-] button[data-testid^=card-]:not([data-testid*=tmdb]) [data-owned-orb]').length")
+            assert lib_orbs == 0
         _open(pg, phone)
         watch = pg.locator("[data-owned-watch]").first
         btn = watch.locator("button").first if watch.locator("button").count() else watch
