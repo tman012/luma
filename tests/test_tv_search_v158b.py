@@ -212,6 +212,8 @@ def test_after_air_search_waits_the_delay_and_backs_off(env, monkeypatch):
     allow_grabs(monkeypatch)
     _auto(delay=4)
     e3 = env.e2[3]
+    with tv_store.write() as conn:              # v185.2a: the delay applies to an episode with a runtime
+        conn.execute('UPDATE episodes SET runtime = 50 WHERE id = ?', (e3,))
     aired = tv_search.aired_at(rows('SELECT air_date, airstamp, runtime FROM episodes WHERE id = ?', e3)[0])
     now = aired + 60
     tv_search.schedule(now)
@@ -221,7 +223,7 @@ def test_after_air_search_waits_the_delay_and_backs_off(env, monkeypatch):
     env.results = []
     assert tv_search.run_due(nxt + 1)['shows'] == 1
     r = rows('SELECT next_search_at, search_attempts FROM episodes WHERE id = ?', e3)[0]
-    assert r['search_attempts'] == 1 and r['next_search_at'] == pytest.approx(nxt + 1 + 3 * 3600)
+    assert r['search_attempts'] == 1 and r['next_search_at'] == pytest.approx(nxt + 1 + 15 * 60)   # v185.2a: 15 min in the first 6 h
     env.results = [item('Severance.S02E03.1080p.WEB-DL-B')]
     assert tv_search.run_due(r['next_search_at'] + 1)['grabbed'] >= 1
     assert rows('SELECT next_search_at FROM episodes WHERE id = ?', e3)[0]['next_search_at'] is None

@@ -46,6 +46,11 @@ FEED_S = 15 * 60
 SLOT_BUSY = 'tv slot'
 REFRESH_S = 12 * 3600
 BACKOFF_H = (3, 6, 12, 24, 48, 96, 168)
+# v185.2a (Taylor): an aired, missing episode is searched every FAST_S for the first FAST_WINDOW_S after
+# it aired, then every SLOW_S (the 24 h floor, the no-backlog rule and every cap unchanged)
+FAST_S = 15 * 60
+FAST_WINDOW_S = 6 * 3600
+SLOW_S = 3600
 MAX_QUERIES = 4                          # per show per search
 LIMIT = 100
 DEFAULT_RUNTIME = 45
@@ -97,7 +102,7 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
             continue
         capped = tv_budget.capped(cfg)
         bg_manual = purpose == MANUAL_BACKGROUND        # v185: the owner's click, past its burst (guard background bucket)
-        if not interactive and capped and not bg_manual and not tv_budget.slot_free(cfg, now):
+        if not interactive and capped and not bg_manual and purpose != 'feed' and not tv_budget.slot_free(cfg, now):
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': SLOT_BUSY})
             continue                                   # no free slot: not sent, not logged
         try:
@@ -356,10 +361,14 @@ def _after(sid: int, want: List[Dict[str, Any]], out: Dict[str, Any], now: float
             if e['id'] in grabbed:
                 conn.execute('UPDATE episodes SET last_search_at = ?, next_search_at = NULL WHERE id = ?', (now, e['id']))
             elif out.get('answered'):
-                n = int(e['search_attempts'] or 0)
-                nxt = now + 3600 * BACKOFF_H[min(n, len(BACKOFF_H) - 1)] if automatic else None
+                nxt = _next_retry(e, now) if automatic else None
                 conn.execute('UPDATE episodes SET last_search_at = ?, search_attempts = search_attempts + 1,'
                              ' next_search_at = COALESCE(?, next_search_at) WHERE id = ?', (now, nxt, e['id']))
+
+
+def _next_retry(e: Dict[str, Any], now: float) -> float:
+    at = aired_at(e)
+    return now + (FAST_S if at is not None and now - at < FAST_WINDOW_S else SLOW_S)
 
 
 def manual(sid: int, season: Optional[int] = None, episode_id: Optional[int] = None,
@@ -814,19 +823,25 @@ def schedule(now: float) -> int:
     n = 0
     with tv_store.write() as conn:
         rows = [dict(r) for r in conn.execute(
-            'SELECT e.id, e.air_date, e.airstamp, e.runtime FROM episodes e JOIN series s ON s.id = e.series_id'
-            ' WHERE s.monitored = 1 AND e.monitored = 1 AND e.next_search_at IS NULL AND e.last_search_at IS NULL'
+            'SELECT e.id, e.air_date, e.airstamp, e.runtime, e.next_search_at FROM episodes e JOIN series s ON s.id = e.series_id'
+            ' WHERE s.monitored = 1 AND e.monitored = 1 AND e.last_search_at IS NULL'
             f' AND e.air_date IS NOT NULL AND NOT {tv_monitor._LINKED}')]
         for e in rows:
             at = aired_at(e)
             if at is None or not tv_safety.in_floor(e, now):
                 continue                     # v177 (Taylor): no Missing / backlog searches for TV, ever
-            conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (at + delay, e['id']))
+            # v185.2a (Taylor): an episode with no runtime is searched at air time (no delay). A never-searched
+            # episode already scheduled later than this rule (an older build's time) is moved up, so it is
+            # picked up on the next pass (Judy Justice, Line of Fire S01E05)
+            want = at + (delay if e.get('runtime') else 0)
+            if e.get('next_search_at') is not None and float(e['next_search_at']) <= want:
+                continue
+            conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (want, e['id']))
             n += 1
     return n
 
 
-def run_due(now: float, max_shows: int = 3) -> Dict[str, int]:
+def run_due(now: float, max_shows: int = 10) -> Dict[str, int]:
     """Search the shows with episodes due (next_search_at passed), a few per pass."""
     with tv_store.connect() as conn:
         rows = [dict(r) for r in conn.execute(
@@ -859,9 +874,8 @@ def run_due(now: float, max_shows: int = 3) -> Dict[str, int]:
 def feed_due(cfg: Dict[str, Any], now: float) -> bool:
     """An indexer with no cap: every FEED_S. A capped tracker: whenever it has a free slot (its
     daily budget spread evenly; a post-air search that took the slot moves the feed to the next)."""
-    from app import tv_budget
-    if tv_budget.capped(cfg):
-        return tv_budget.slot_free(cfg, now)
+    # v185.2a (Taylor): every tracker's feed (IPT's RSS included) is polled every FEED_S; a capped tracker's
+    # per-tracker caps still hold (the guard refuses past them: purpose 'tv')
     return now - float(tv_store.get_meta(f"tv_feed:{cfg['id']}") or 0) >= FEED_S
 
 

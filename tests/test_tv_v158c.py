@@ -97,18 +97,14 @@ def test_automatic_searches_take_a_free_slot_on_capped_trackers_only(engine):
 
 
 def test_feed_capped_in_free_slots_uncapped_every_15_min_and_a_post_air_search_moves_the_feed(engine, guard):
+    """v185.2a (Taylor): every feed, a capped site's (IPT) too, is due every 15 min; the guard's caps still hold."""
     t = 2e9
     engine.now = t
     assert tv_search.feed_due(SITE, t) and tv_search.feed_due(GEN, t)
     tv_search.feed(t)
     assert [c[0] for c in engine.calls] == [1, 2]
-    for dt in (15 * 60, 30 * 60, 3 * 3600 - 1):
-        assert not tv_search.feed_due(SITE, t + dt)
-    assert tv_search.feed_due(GEN, t + 15 * 60) and not tv_search.feed_due(GEN, t + 14 * 60)
-    engine.now = t + 3 * 3600                                                # a post-air search takes IPT's slot
-    tv_search.query_trackers('Show S01E03', 'episode', None, False, t + 3 * 3600, [SITE])
-    assert not tv_search.feed_due(SITE, t + 3 * 3600 + 60)                  # the feed waits for the next slot
-    assert tv_search.feed_due(SITE, t + 6 * 3600)
+    for cfg in (SITE, GEN):
+        assert tv_search.feed_due(cfg, t + 15 * 60) and not tv_search.feed_due(cfg, t + 14 * 60)
 
 
 def test_status_reports_slots(engine):
