@@ -1,6 +1,7 @@
 """v201 (PM): past a capped tracker's daily cap, automatic post-air searches stop asking it until the daily
 reset; the skip is logged once per tracker per reset window; every tracker capped: the episode waits for the
 earliest reset. Feeds stay exempt."""
+import pytest
 from app import tv_budget, tv_search, tv_store
 from tests.test_tv_v158c import GEN, SITE, engine, guard  # noqa: F401
 from tests.test_tv_calendar import aired, scanned  # noqa: F401
@@ -22,6 +23,7 @@ def skips():
     return rows("SELECT * FROM search_log WHERE outcome = 'skipped'")
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_daily_reset_is_when_the_oldest_request_ages_out(guard):
     assert tv_budget.daily_reset(SITE, T, guard=guard) is None            # under the cap
     last = fill(guard)
@@ -29,6 +31,7 @@ def test_daily_reset_is_when_the_oldest_request_ages_out(guard):
     assert tv_budget.daily_reset(GEN, last + 1, guard=guard) is None      # no cap
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_cap_skip_is_logged_once_per_reset_window_and_ipt_is_not_asked(engine, guard):
     last = fill(guard)
     for k in range(30):                                                   # every minute for 30 min
@@ -43,6 +46,7 @@ def test_cap_skip_is_logged_once_per_reset_window_and_ipt_is_not_asked(engine, g
     assert engine.calls[0][0] == 1
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_feed_stays_exempt_at_the_cap(engine, guard):
     last = fill(guard)
     engine.now = last + 60

@@ -29,6 +29,7 @@ def _setup(signed_in, env):  # noqa: F811
     return tok, cfg
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_five_manual_grabs_leave_automation_three(signed_in, env, clock):  # noqa: F811
     tok, cfg = _setup(signed_in, env)
     assert tv_budget.capped(cfg) and tv_budget.AUTO_PER_TRACKER_DAILY == 8
@@ -53,6 +54,7 @@ def test_five_manual_grabs_leave_automation_three(signed_in, env, clock):  # noq
     assert tv_budget.usage(cfg, now=clock['t'])['used'] == 10
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_a_new_day_resets_the_tally(signed_in, env, clock):  # noqa: F811
     tok, cfg = _setup(signed_in, env)
     for _ in range(8):

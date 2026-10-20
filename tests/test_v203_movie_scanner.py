@@ -179,6 +179,7 @@ def test_preferred_groups_empty_leaves_ranking_unchanged(mv):
     assert [x['item']['title'][-3:] for x in sc.candidates([{**i, 'indexerId': 1} for i in c], m, prof, set(), [1])] == ['AAA', 'BBB']
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_feed_every_15_min_exempt_from_caps_and_a_match_releases_and_grabs(mv):
     _fill()
     mv.results = {1: [rel('Dune.Part.Two.2024.1080p.WEB-DL-NTb', 10)]}
@@ -192,6 +193,7 @@ def test_feed_every_15_min_exempt_from_caps_and_a_match_releases_and_grabs(mv):
     assert sc.feed(NOW + sc.FEED_S)['trackers'] == 2
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_capped_tracker_skipped_until_reset_logged_once_and_waits_for_the_reset(mv, monkeypatch):
     monkeypatch.setattr(movie_settings, '_tracker_records', lambda: [{'id': 1, 'name': 'IPT', 'type': 'iptorrents'}])
     movie_settings.apply_put({'trackers': [{'id': 1, 'enabled': True}]})

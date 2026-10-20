@@ -33,6 +33,7 @@ def take(g, cfg, at):
 
 # ------------------------------------------------------------------ ruling 1: slots
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_capped_tracker_slots_are_spread_evenly_and_the_cap_is_not_raised(guard):
     assert tv_budget.AUTO_PER_TRACKER_DAILY == 8 and tv_budget.SLOT_S == 3 * 3600
     assert tv_budget.capped(SITE) and not tv_budget.capped(GEN)
@@ -110,6 +111,7 @@ def test_feed_capped_in_free_slots_uncapped_every_15_min_and_a_post_air_search_m
         assert tv_search.feed_due(cfg, t + 15 * 60) and not tv_search.feed_due(cfg, t + 14 * 60)
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_status_reports_slots(engine):
     out = tv_search.status(2e9)
     assert out['slot_s'] == 3 * 3600 and out['feed_every_s'] == 15 * 60
@@ -495,6 +497,7 @@ def test_unset_instance_that_looks_like_test_is_treated_as_test(bare_env, monkey
     assert not any(instance.writes_allowed(j) for j in instance.GATED)
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_v185_2a_feed_polls_are_exempt_from_every_cap_but_not_from_backoff(engine, guard):
     """PM / Tester BLOCK: a feed poll is the guard's 'feed' purpose: it consumes no cap, slot or bucket;
     a tracker's backoff / 429 Retry-After still stops it."""

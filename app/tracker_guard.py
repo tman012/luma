@@ -53,7 +53,6 @@ LIMITS = {
     'interactive_per_hour': 40,
     'burst': 5,
     'refill_s': 180.0,
-    'per_day': 300,
     'global_per_hour': 120,
     'min_interval_s': 2.0,
     'rate_s': 3600, 'rate_max_s': 6 * 3600,
@@ -262,13 +261,7 @@ class TrackerGuard:
         lim = _purpose_limits().get(purpose)
         if lim is None:
             return f'unknown purpose {purpose}'
-        c = self.purpose_counts(tid, purpose, now)
-        if c['day'] >= lim['per_tracker_day']:
-            return f"{purpose} daily cap {int(lim['per_tracker_day'])}"
-        if c['hour'] >= lim['per_tracker_hour']:
-            return f"{purpose} hourly cap {int(lim['per_tracker_hour'])}"
-        if c['all_day'] >= lim['all_trackers_day']:
-            return f"{purpose} daily cap across trackers {int(lim['all_trackers_day'])}"
+        c = self.purpose_counts(tid, purpose, now)     # v204a: no per-purpose daily/hourly caps, spacing only
         if spacing and c['last'] and now - c['last'] < lim['min_gap_s']:
             return f'{purpose} spacing'
         return None
@@ -301,8 +294,6 @@ class TrackerGuard:
                 why = self._purpose_refusal(tid, purpose, now, spacing)
                 if why:
                     return why
-            if day >= LIMITS['per_day']:
-                return f"daily cap {LIMITS['per_day']}"
             if glob >= LIMITS['global_per_hour']:
                 return f"global hourly cap {LIMITS['global_per_hour']}"
             if interactive and not strict:

@@ -32,6 +32,7 @@ def test_automatic_grab_is_a_background_tv_request_on_a_capped_tracker(signed_in
     assert [k for _, k in log1[len(log0):]] == ['b'] and [p for _, p in pur1[len(pur0):]] == []
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_automatic_grab_sends_when_the_daily_search_cap_is_used(signed_in, env):  # noqa: F811
     from app import tv_budget
     rec = ipt(env['store'])

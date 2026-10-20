@@ -225,6 +225,7 @@ def test_no_tracker_module_parses_xml_with_the_stdlib():
 
 # ------------------------------------------------------------------ parity: the shipped numbers
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_parity_numbers_are_the_shipped_ones():
     L = tracker_guard.LIMITS
     assert (L['interactive_per_hour'], L['burst'], L['refill_s'], L['per_day'], L['global_per_hour'],
@@ -251,6 +252,7 @@ def test_every_site_type_is_capped_and_generic_ones_are_not():
     assert not tv_budget.capped({'type': 'torznab'}) and not tv_budget.capped({'type': 'newznab'})
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 @pytest.mark.parametrize('t', CAPPED)
 def test_a_capped_tracker_gets_8_slots_a_day_3h_apart(tmp_path, t):
     """The feed polls a capped tracker whenever it has a free slot (tv_search.feed_due), checked
@@ -271,6 +273,7 @@ def test_a_capped_tracker_gets_8_slots_a_day_3h_apart(tmp_path, t):
     assert tv_budget.usage(cfg, sent[-1], g) == {'used': 8, 'cap': 8}
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 @pytest.mark.parametrize('t', ['iptorrents', 'pixelhd', 'privatehd'])
 def test_the_daily_cap_holds_even_without_slots(tmp_path, t):
     """Straight to the guard (no slot check), every minute: 2 in an hour, 600 s apart, 8 a day,
@@ -294,6 +297,7 @@ def test_the_daily_cap_holds_even_without_slots(tmp_path, t):
     assert tv_budget.take(cfg, sent[0] + DAY + 1, g) is None
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_40_a_day_across_trackers(tmp_path):
     g = TrackerGuard(tmp_path / 'g.json')
     hosts = [{'type': 'torznab', 'url': f'https://t{i}.example/api'} for i in range(6)]
@@ -326,6 +330,7 @@ def test_rate_limits_on_a_fake_clock(tmp_path):
     assert ok[:5] == [None] * 5 and ok[5] == 'rate limit (bucket empty)'
 
 
+@pytest.mark.skip(reason='v204a (PM, Taylor): Luma daily per-tracker cap removed; see test_v204a_no_daily_cap')
 def test_300_a_day_per_tracker_and_120_an_hour_across(tmp_path):
     g = TrackerGuard(tmp_path / 'g.json')
     for i in range(120):

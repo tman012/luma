@@ -26,20 +26,18 @@ from typing import Any, Dict, Optional
 
 PURPOSE = 'tv'
 
-AUTO_PER_TRACKER_DAILY = 8      # PM ruling: 8/day per tracker while prod shares the accounts
-AUTO_PER_TRACKER_HOURLY = 8    # v202a (Taylor): post-air searches every 15 min; only the daily cap limits them
-AUTO_ALL_TRACKERS_DAILY = 40
+# v204a (PM, Taylor): no Luma-side daily/hourly per-tracker cap on TV or movie searches and grabs.
+# Luma searches on Sonarr's cadence and backs off only when a tracker says so (429, rate limit,
+# network error) through the guard's backoff, as Prowlarr does.
+AUTO_PER_TRACKER_DAILY = None
 AUTO_MIN_GAP_S = 60             # v202a: 1 min between automatic TV requests to one tracker (was 10 min)
 
 GUARD_LIMITS: Dict[str, float] = {
-    'per_tracker_day': AUTO_PER_TRACKER_DAILY,
-    'per_tracker_hour': AUTO_PER_TRACKER_HOURLY,
-    'all_trackers_day': AUTO_ALL_TRACKERS_DAILY,
     'min_gap_s': AUTO_MIN_GAP_S,
 }
 
 
-SLOT_S = 86400 / AUTO_PER_TRACKER_DAILY     # 3 h
+SLOT_S = AUTO_MIN_GAP_S
 
 
 def capped(cfg: Dict[str, Any]) -> bool:
@@ -58,32 +56,18 @@ def slot_free(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> b
     g = guard or _guard()
     now = time.time() if now is None else now
     c = g.purpose_counts(guard_key(cfg), PURPOSE, now)
-    return c['day'] < AUTO_PER_TRACKER_DAILY and (not c['last'] or now - c['last'] >= SLOT_S)
+    return not c['last'] or now - c['last'] >= SLOT_S
 
 
 def under_daily(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> bool:
     """v196c (Taylor): a post-air episode search needs only the tracker's daily cap, not a 3 h slot."""
-    if not capped(cfg):
-        return True
-    from app.tracker_guard import guard_key
-    g = guard or _guard()
-    now = time.time() if now is None else now
-    return g.purpose_counts(guard_key(cfg), PURPOSE, now)['day'] < AUTO_PER_TRACKER_DAILY
+    return True                 # v204a: no daily cap
 
 
 def daily_reset(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> Optional[float]:
     """v201 (PM): when a capped tracker that's at its daily cap gets a request back (the rolling 24 h window
     drops enough of today's automatic TV requests to go under AUTO_PER_TRACKER_DAILY). None: no cap, or under it."""
-    if not capped(cfg):
-        return None
-    from app.tracker_guard import guard_key
-    g = guard or _guard()
-    now = time.time() if now is None else now
-    times = sorted(g.purpose_times(guard_key(cfg), PURPOSE, now))
-    over = len(times) - AUTO_PER_TRACKER_DAILY
-    if over < 0:
-        return None
-    return times[over] + 86400
+    return None                 # v204a: no daily cap
 
 
 def next_slot(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> Optional[float]:
@@ -117,4 +101,4 @@ def usage(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> Dict[
     from app.tracker_guard import guard_key
     g = guard or _guard()
     c = g.purpose_counts(guard_key(cfg), PURPOSE, time.time() if now is None else now)
-    return {'used': int(c['day']), 'cap': AUTO_PER_TRACKER_DAILY if capped(cfg) else None}
+    return {'used': int(c['day']), 'cap': None}
