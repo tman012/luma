@@ -97,6 +97,8 @@ def _log_cap_skip(cfg, purpose: str, sid: Optional[int], query: str, now: float,
 #: v185 (PM): a monitor-ON click's searches past its interactive burst: background requests (the guard's
 #: background bucket, never a TV automation slot), logged under this purpose.
 MANUAL_BACKGROUND = 'manual-background'
+#: v185.2: the owner's searches that count toward the TV tally (not its caps)
+MONITOR_PURPOSES = ('manual', MANUAL_BACKGROUND)
 
 
 def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bool, now: float,
@@ -135,6 +137,15 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
             _log(cfg, purpose, sid, query, 0, 'failed', now, section)
             continue
+        if capped and purpose in MONITOR_PURPOSES:
+            # v185.2 (PM, Tester FF9): a monitor-ON / manual search on a capped tracker counts toward the
+            # per-tracker and daily TV tally so automation backs off; never held to that cap itself
+            # (v204b removed tv_safety's daily auto-grab ceiling, so there is no grab cap to exempt it from)
+            try:
+                from app.tracker_guard import guard_key
+                engine.guard.note_purpose(guard_key(cfg), tv_budget.PURPOSE, now)
+            except Exception:                      # noqa: BLE001 - a tally never fails a search
+                logger.debug('TV tally note failed', exc_info=True)
         sv = _secret_values(cfg)
         got = [it for it in (engine.to_item(cfg, r, sv) for r in raw) if it]
         items += got

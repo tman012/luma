@@ -371,10 +371,20 @@ LINKED = ("EXISTS (SELECT 1 FROM episode_file_links l JOIN episode_files f ON f.
 
 
 def _want(g) -> List[int]:
+    """The row's episode ids: a JSON list of ids (v184), or older shapes (FF-21) (ids as strings, {'id': n}
+    items, one bare id)."""
     try:
-        return sorted({int(i) for i in json.loads(g['episode_ids'] or '[]')})
+        raw = json.loads(g['episode_ids'] or '[]') if isinstance(g['episode_ids'], str) else g['episode_ids']
     except (TypeError, ValueError):
         return []
+    items = raw if isinstance(raw, list) else [raw]
+    out = set()
+    for i in items:
+        try:
+            out.add(int(i['id'] if isinstance(i, dict) else i))
+        except (TypeError, ValueError, KeyError):
+            pass
+    return sorted(out)
 
 
 def _linked(conn, ids: List[int]) -> set:
@@ -443,12 +453,16 @@ def reconcile(now: Optional[float] = None) -> int:
     n = 0
     for r in rows:
         want = _want(r)
-        st = status(r['hash']) or {}
+        st = _import_record(r)
         if st.get('state') == 'imported':
-            cov = st.get('episode_ids')
-            if not isinstance(cov, list) and not linked[r['hash']]:
-                continue                                      # a pre-v184 record: wait for its file's link (the 60s poll)
-            got = finish_grab(r['hash'], r['release_title'], r['series_id'], cov if isinstance(cov, list) else None,
+            # FF-21 (v185.2 on v217): an open row whose OWN torrent has an 'imported' record is closed now, with
+            # finished_at and one history event, even when the file is gone (deleted on purpose) or was never
+            # linked (a pre-v184 record without episode_ids). DB only: the grab row and its event; no file
+            # operation, no re-import, no search. (v184 waited for the link, so such rows stayed 'downloading'.)
+            cov = _covered(st)
+            if cov is None:
+                cov = sorted(set(want) | linked[r['hash']]) if want else None
+            got = finish_grab(r['hash'], r['release_title'], r['series_id'], cov,
                               len(st.get('files') or []), float(st.get('at') or now), via='reconciled')
         elif want and set(want) <= linked[r['hash']]:
             got = finish_grab(r['hash'], r['release_title'], r['series_id'], None, 0, now, via='reconciled')
@@ -456,6 +470,34 @@ def reconcile(now: Optional[float] = None) -> int:
             continue
         n += 1 if got else 0
     return n
+
+
+def _import_record(r: Dict[str, Any]) -> Dict[str, Any]:
+    """This grab row's OWN import record: by its hash (as stored, or lowercased: pre-v184 rows may keep the
+    tracker's uppercase hash). v185.2 (Tester BLOCK, PM): never by release name and never across hashes,
+    so a new grab of a release imported before under another hash stays open and imports when it finishes."""
+    h = str(r.get('hash') or '')
+    return status(h) or (status(h.lower()) if h != h.lower() else None) or {}
+
+
+def _covered(st: Dict[str, Any]) -> Optional[List[int]]:
+    """The episode ids an import record says it placed: v184+ 'episode_ids', else (pre-v184) its files'
+    ids; None when the record doesn't say."""
+    def ints(xs):
+        out = set()
+        for x in xs if isinstance(xs, list) else []:
+            try:
+                out.add(int(x['id'] if isinstance(x, dict) else x))
+            except (TypeError, ValueError, KeyError):
+                pass
+        return out
+    if isinstance(st.get('episode_ids'), list):
+        return sorted(ints(st['episode_ids']))
+    ids = set()
+    for f in st.get('files') or []:
+        if isinstance(f, dict):
+            ids |= ints(f.get('episode_ids'))
+    return sorted(ids) if ids else None
 
 
 def _reconcile_safely(now: Optional[float] = None) -> int:
