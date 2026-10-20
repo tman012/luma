@@ -2,6 +2,8 @@
  * preferred groups, in TV Settings' visual style. Stored in movies.db; nothing reads Radarr. */
 import { useEffect, useState, type CSSProperties } from 'react';
 import { FONT } from '@/components/start/StartUI';
+import { apiFetch } from '@/apiClient';
+const W70 = 'rgba(255,255,255,0.7)';
 import { Modal, Row, Select, Toggle, SAVE_ERROR, field, glassBtn, primaryBtn, tvEditCss } from '@/components/library/TvEdit';
 import { PreferredGroups } from '@/components/library/TvLibrarySettings';
 import { sectionLabel } from '@/components/library/LibraryPathsSettings';
@@ -95,6 +97,8 @@ export function MoviesSettings() {
       </div>
 
       <PreferredGroups value={d.preferred_groups} onChange={g => put({ preferred_groups: g }, { ...d, preferred_groups: g })} />
+
+      <MovieImportSettings />
 
       {editing && (
         <MovieProfileEditor profile={editing === 'new' ? null : editing} qualities={d.qualities}
@@ -191,5 +195,65 @@ export function MovieProfileEditor({ profile, qualities, onClose, onSaved }: {
         </div>
       </div>
     </Modal>
+  );
+}
+
+
+// ------------------------------------------------------------------ v203 Import: library path and naming
+
+interface ImportView { root: string; naming: { rename: boolean; folder: string; standard: string } }
+const IMPORT_URL = '/api/settings/movies/import';
+
+export function MovieImportSettings() {
+  const [v, setV] = useState<ImportView | null>(null);
+  const [root, setRoot] = useState('');
+  const [folder, setFolder] = useState('');
+  const [file, setFile] = useState('');
+  const [rename, setRename] = useState(true);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const take = (d: ImportView) => { setV(d); setRoot(d.root); setFolder(d.naming.folder); setFile(d.naming.standard); setRename(d.naming.rename !== false); };
+  useEffect(() => {
+    void apiFetch(IMPORT_URL).then(r => r.ok ? r.json() : null).then(d => { if (d && d.naming) take(d as ImportView); }).catch(() => {});
+  }, []);
+  if (!v) return null;
+  const dirty = root !== v.root || folder !== v.naming.folder || file !== v.naming.standard || rename !== (v.naming.rename !== false);
+  const save = async () => {
+    setBusy(true); setErrors({}); setSaved(false);
+    const body: Record<string, unknown> = { naming: { rename, folder, standard: file } };
+    if (root.trim() && root !== v.root) body.root = root.trim();
+    try {
+      const r = await apiFetch(IMPORT_URL, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.naming) { take(d as ImportView); setSaved(true); } else setErrors(d.errors || { _: SAVE_ERROR });
+    } catch { setErrors({ _: SAVE_ERROR }); }
+    setBusy(false);
+  };
+  const err = (k: string) => errors[k] ? <div role="alert" style={{ fontSize: 12, color: '#fca5a5', marginTop: 4 }}>{errors[k]}</div> : null;
+  return (
+    <div data-testid="movie-import-settings">
+      <h3 style={sectionLabel}>Import</h3>
+      <div style={{ ...card, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Row label="Library path" id="mv-root">
+          <input id="mv-root" className="tve-in" data-testid="mv-root" value={root} onChange={e => setRoot(e.target.value)} style={field} />
+          {err('root')}
+        </Row>
+        <Row label="Rename movies" id="mv-rename"><Toggle id="mv-rename" on={rename} onChange={setRename} /></Row>
+        <Row label="Folder format" id="mv-folder">
+          <input id="mv-folder" className="tve-in" data-testid="mv-folder" value={folder} onChange={e => setFolder(e.target.value)} style={field} />
+        </Row>
+        <Row label="File format" id="mv-file">
+          <input id="mv-file" className="tve-in" data-testid="mv-file" value={file} disabled={!rename} onChange={e => setFile(e.target.value)} style={field} />
+          {err('naming')}
+        </Row>
+        {err('_')}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+          {saved && !dirty && <span style={{ fontSize: 13, color: W70 }}>Saved</span>}
+          <button type="button" className="lp-focus tve-primary" data-testid="mv-import-save" disabled={!dirty || busy}
+            onClick={() => void save()} style={primaryBtn(dirty && !busy)}>Save</button>
+        </div>
+      </div>
+    </div>
   );
 }
