@@ -1,13 +1,13 @@
 /** Settings > TV > Calendar (v1, desktop web): the week's episodes by TMDB air
  * date as an agenda (day headers, 72px rows), capped at 720px and centered.
  * A card opens the show's detail at that episode. The week toolbar: ‹ › (and Today) on the left, the range centered. */
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { ModalHostContext } from '@/contexts/ModalHostContext';
 import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
 import { Poster } from './TvImport';
 import {
-  STATE_COLOR, STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, setEpisodeMonitored, shortDate, timeRangeParts, weekLabel, weekStart,
+  STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, setEpisodeMonitored, shortDate, timeRangeParts, weekLabel, weekStart,
   type CalEpisode, type CalendarData, type Day,
 } from './tvCalendarApi';
 
@@ -70,22 +70,26 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true }: 
     };
   }, [week, key]);
   const phone = usePhone();
+  const [dayPick, setDayPick] = useState<Day>(today);
+  const inWeek = (d: Day) => d >= week && d < addDays(week, 7);
+  const day = inWeek(dayPick) ? dayPick : inWeek(today) ? today : week;
+  const step = (delta: number) => { const n = addDays(day, delta); setDayPick(n); if (!inWeek(n)) onWeek(weekStart(n)); };
   const loading = data?.key !== key && failed !== key;
   const end = addDays(week, 7);
   const eps = data?.key === key ? data.cal.episodes.filter(e => e.air_date >= week && e.air_date < end && shown(e)) : [];
 
   return (
     <div data-testid="tv-calendar" style={{ fontFamily: FONT, width: '100%', containerType: 'inline-size', containerName: 'tvcal' }}>
-      {toolbar && <WeekControls today={today} week={week} onWeek={onWeek} />}
-      <div style={{ marginTop: toolbar ? 16 : 0 }}>
+      {phone ? <DayHeader day={day} today={today} onStep={step} /> : toolbar && <WeekControls today={today} week={week} onWeek={onWeek} />}
+      <div style={{ marginTop: toolbar || phone ? 16 : 0 }}>
         {failed === key ? (
           <div role="alert" style={emptyCard}>{"Couldn't load calendar"}</div>
         ) : loading ? (
           <Placeholder />
+        ) : phone ? (
+          <PhoneDay eps={eps} day={day} today={today} />
         ) : !eps.length ? (
           <div data-testid="tv-cal-empty" style={emptyCard}>No episodes this week</div>
-        ) : phone ? (
-          <PhoneAgenda eps={eps} week={week} today={today} onWeek={onWeek} />
         ) : (
           <WeekGrid eps={eps} week={week} today={today} />
         )}
@@ -253,7 +257,6 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
       className={`tvc-card ${open.className || ''}`.trim()}
       style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', flex: 'none', paddingLeft: EDGE_W, borderRadius: 8, background: 'rgba(255,255,255,0.06)',
         border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-      <Stripe color={STATE_COLOR[st]} w={EDGE_W} />
       <Bookmark e={e} on={mon} onToggle={flip} />
       <div data-testid="tv-card-body" style={{ opacity: mon ? 1 : DIM, transition: 'opacity 150ms' }}>
         <div className="tvc-text" style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -262,6 +265,7 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
           {air && (
             <span data-testid="tv-air" style={{ display: 'block', fontSize: AIR_SIZE, lineHeight: '16px', color: W50, whiteSpace: 'nowrap' }}>{air}</span>
           )}
+          <QualityChip e={e} style={{ alignSelf: 'flex-start', marginTop: 2 }} />
         </div>
       </div>
     </div>
@@ -269,12 +273,12 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
 }
 
 /** The agenda: a day header and one glass card per day; empty days are left out. */
-export function Agenda({ eps, today }: { eps: CalEpisode[]; today: Day }) {
+export function Agenda({ eps, today, noHead = false }: { eps: CalEpisode[]; today: Day; noHead?: boolean }) {
   return (
     <div data-testid="tv-cal-agenda" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {byDay(eps).map(([d, list]) => (
         <section key={d} data-testid="tv-agenda-day" data-day={d}>
-          <h4 style={dayHead}>{agendaLabel(d, today)}</h4>
+          {!noHead && <h4 style={dayHead}>{agendaLabel(d, today)}</h4>}
           <div style={glassCard}>
             {list.map((e, i) => <AgendaRow key={e.episode_id} e={e} today={today} first={i === 0} />)}
           </div>
@@ -292,7 +296,6 @@ function AgendaRow({ e, today, first }: { e: CalEpisode; today: Day; first: bool
     <div data-testid="tv-agenda-row" data-state={st} data-monitored={mon ? 'true' : 'false'} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
       style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', display: 'flex', alignItems: 'center', height: 72, padding: '0 16px 0 15px', gap: 12, boxSizing: 'border-box',
         borderTop: first ? 'none' : '1px solid rgba(255,255,255,0.06)' }}>
-      <Stripe color={STATE_COLOR[st]} />
       <span style={{ display: 'inline-flex', opacity: mon ? 1 : DIM }}><Poster path={e.poster_path} w={32} h={48} tmdbLogo /></span>
       <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, opacity: mon ? 1 : DIM }}>
         <span style={{ ...one, fontSize: 14, fontWeight: 600, color: W95 }}>{e.show}</span>
@@ -300,10 +303,7 @@ function AgendaRow({ e, today, first }: { e: CalEpisode; today: Day; first: bool
       </span>
       <span style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
         <span data-testid="tv-air" style={{ fontSize: 13, color: W50 }}>{e.air_time ? `${shortDate(e.air_date)}, ${e.air_time}` : shortDate(e.air_date)}</span>
-        <span data-testid="tv-state-word" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600, color: STATE_COLOR[st] }}>
-          {st === 'downloaded' && <Check />}
-          {STATE_WORD[st]}
-        </span>
+        <QualityChip e={e} />
       </span>
     </div>
   );
@@ -314,17 +314,23 @@ export const airLine = (e: Pick<CalEpisode, 'airstamp'>, timeZone?: string): str
 
 const epLine = (e: CalEpisode) => (e.title ? `${code(e.season, e.episode)} \u00b7 ${e.title}` : code(e.season, e.episode));
 
+/** v197 (Taylor, Q2): a downloaded episode's file quality as an outlined chip; nothing when there's no file.
+ * One color, from the --quality-chip CSS variable (index.css). */
+export function QualityChip({ e, style }: { e: Pick<CalEpisode, 'downloaded' | 'quality'>; style?: React.CSSProperties }) {
+  if (!e.downloaded || !e.quality) return null;
+  return (
+    <span data-testid="tv-quality-chip" style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', height: 24, padding: '0 8px', borderRadius: 6, boxSizing: 'border-box',
+      fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', color: 'var(--quality-chip, #adc7ff)', border: '1px solid var(--quality-chip, #adc7ff)', ...style }}>
+      {e.quality}
+    </span>
+  );
+}
+
 export const Stripe = ({ color, w = 3 }: { color: string; w?: number }) => (
   <span aria-hidden="true" data-testid="tv-stripe" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: w, background: color, zIndex: 1 }} />
 );
 /** The week-grid card's state edge: full card height, beside the text (v178: text-only cards). */
 const EDGE_W = 4;
-const Check = () => (
-  <svg data-testid="tv-check" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" style={{ flex: 'none' }}>
-    <path d="M2.5 6.2l2.3 2.3 4.7-5" fill="none" stroke="#22c55e" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
 /** Quiet loading that mirrors the week grid: 7 day-header strips and 2–3 glass .04
  * cards per column at a text-only card's height; no spinner, no motion. */
 const LOADING_CARDS = [3, 2, 3, 2, 3, 2, 2];
@@ -411,50 +417,35 @@ export function usePhone(): boolean {
   return m;
 }
 
-/** Variant B phone calendar: a 7-day strip with state dots, then the selected day's cards. */
-export function PhoneAgenda({ eps, week, today, onWeek }: { eps: CalEpisode[]; week: Day; today: Day; onWeek?: (start: Day) => void }) {
-  const days = Array.from({ length: 7 }, (_, i) => addDays(week, i));
-  // the selected weekday (0-6) is kept across weeks (Sun -> Sun)
-  const [idx, setIdx] = useState(() => Math.max(0, days.indexOf(today)));
-  const sel = days[idx] ?? week;
-  const setDay = (d: Day) => setIdx(Math.max(0, days.indexOf(d)));
-  const touch = useRef<{ x: number; y: number; t: number } | null>(null);
-  const onStart = (e: React.TouchEvent) => { const p = e.touches[0]; touch.current = p ? { x: p.clientX, y: p.clientY, t: Date.now() } : null; };
-  const onEnd = (e: React.TouchEvent) => {
-    const s0 = touch.current; touch.current = null;
-    const p = e.changedTouches[0];
-    if (!s0 || !p || !onWeek) return;
-    const dx = p.clientX - s0.x, dy = p.clientY - s0.y, dt = Math.max(1, Date.now() - s0.t);
-    if (Math.abs(dx) <= Math.abs(dy)) return;                       // vertical lock
-    if (Math.abs(dx) < 48 && Math.abs(dx) / dt <= 0.3) return;     // 48px or a fling over 0.3px/ms
-    onWeek(addDays(week, dx < 0 ? 7 : -7));
-  };
-  const list = eps.filter(e => e.air_date === sel);
+/** v197 phone calendar header A (Taylor's pick): one day at a time, ‹ and ›, "Today" or the weekday bold and centered, the date under it. */
+export function DayHeader({ day, today, onStep }: { day: Day; today: Day; onStep: (delta: number) => void }) {
+  const dt = new Date(`${day}T12:00:00`);
+  const big = day === today ? 'Today' : dt.toLocaleDateString('en-US', { weekday: 'long' });
+  const small = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const nav: React.CSSProperties = { width: 52, height: 52, flex: 'none', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: W95, padding: 0 };
+  return (
+    <div data-testid="tv-day-header" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <button type="button" className="lp-focus tvc-glass" data-testid="tv-day-prev" aria-label="Previous day" onClick={() => onStep(-1)} style={nav}><ChevronLeftIcon size={18} /></button>
+      <div aria-live="polite" style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+        <div data-testid="tv-day-title" style={{ fontSize: 20, fontWeight: 700, color: W95, lineHeight: '26px' }}>{big}</div>
+        <div data-testid="tv-day-date" style={{ fontSize: 15, color: W70, lineHeight: '20px' }}>{small}</div>
+      </div>
+      <button type="button" className="lp-focus tvc-glass" data-testid="tv-day-next" aria-label="Next day" onClick={() => onStep(1)} style={nav}><ChevronIcon size={18} /></button>
+    </div>
+  );
+}
+
+/** The phone day list: the count on the right (the date is in the header), then the day's cards. */
+export function PhoneDay({ eps, day, today }: { eps: CalEpisode[]; day: Day; today: Day }) {
+  const list = eps.filter(e => e.air_date === day);
+  if (!list.length) return <div data-testid="tv-cal-empty" style={{ ...emptyCard, minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No episodes</div>;
   return (
     <div data-testid="tv-cal-phone">
-      <div data-testid="tv-week-strip" onTouchStart={onStart} onTouchEnd={onEnd} style={{ touchAction: 'pan-y',  display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
-        {days.map(d => {
-          const on = d === sel; const dt = new Date(`${d}T12:00:00`);
-          const dots = eps.filter(e => e.air_date === d).slice(0, 4);
-          return (
-            <button key={d} type="button" data-testid="tv-week-chip" data-day={d} aria-pressed={on} onClick={() => setDay(d)} className="lp-focus"
-              style={{ height: 68, minWidth: 0, borderRadius: 12, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
-                background: on ? '#3b82f6' : 'rgba(255,255,255,0.06)', color: on ? '#fff' : W95,
-                border: !on && d === today ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.08)' }}>
-              <span style={{ fontSize: 12, fontWeight: 500, color: on ? '#fff' : W70 }}>{dt.toLocaleDateString('en-US', { weekday: 'short' })}</span>
-              <span style={{ fontSize: 17, fontWeight: 700 }}>{dt.getDate()}</span>
-              <span style={{ display: 'flex', gap: 3, height: 5 }}>
-                {dots.map(e => <span key={e.episode_id} style={{ width: 5, height: 5, borderRadius: 3, background: on ? '#fff' : STATE_COLOR[episodeState(e, today)] }} />)}
-              </span>
-            </button>
-          );
-        })}
+      <div data-testid="tv-day-count" style={{ margin: '0 4px 8px', fontSize: 15, fontWeight: 600, color: W95 }}>
+        {list.length === 1 ? '1 episode' : `${list.length} episodes`}
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '16px 4px 8px' }}>
-        <span style={{ fontSize: 15, fontWeight: 700, color: W95 }}>{new Date(`${sel}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</span>
-        <span style={{ fontSize: 12, color: W70 }}>{list.length === 1 ? '1 episode' : `${list.length} episodes`}</span>
-      </div>
-      {list.length ? <Agenda eps={list} today={today} /> : <div data-testid="tv-cal-empty" style={{ ...emptyCard, minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No episodes</div>}
+      <Agenda eps={list} today={today} noHead />
     </div>
   );
 }

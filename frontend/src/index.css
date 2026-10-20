@@ -87,6 +87,7 @@ html.layout-compact .settings-tab-header {
 
 /* Dynamic viewport height — fixes Android WebView / Fully Kiosk address bar issues */
 :root {
+  --quality-chip: #adc7ff;
   --dvh: 1vh;
   /* --vvh, --vvw, --vvoffsetTop are set by useVisualViewport hook at runtime */
 }

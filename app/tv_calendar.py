@@ -81,10 +81,31 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
                             'airstamp': r['airstamp'], 'runtime': r['minutes'],
                             # v178 (Taylor): text-only cards, so no episode stills or backdrops in the answer
                             # or Plex has it (tv_plex: read-only, cached; empty when Plex is down)
-                            'downloaded': bool(r['downloaded']) or _in_plex(r)})
+                            'downloaded': bool(r['downloaded']) or _in_plex(r),
+                            'quality': None})
+            _add_file_quality(conn, out)
     out.sort(key=lambda e: (e['air_date'], tv_scan.sort_title(e['show']), e['season'] or 0, e['episode'] or 0))
     return {'start': start.isoformat(), 'days': days, 'episodes': out, 'libraries': len(paths),
             'refreshed_at': _last_refresh()}
+
+
+def _add_file_quality(conn, eps: List[Dict[str, Any]]) -> None:
+    """v197: each episode's 'quality' is its linked file's ('1080p WEB', the detail page's tv_monitor._file_quality
+    from episode_files resolution/source, or the release name for older scan rows); None when there's no file."""
+    if not eps:
+        return
+    from app import tv_monitor               # lazy: tv_monitor is the heavier module
+    by_id = {e['episode_id']: e for e in eps}
+    ids = list(by_id)
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        for x in conn.execute(
+                'SELECT l.episode_id, f.resolution, f.source, f.release_name, f.rel_path FROM episode_file_links l'
+                f" JOIN episode_files f ON f.id = l.file_id WHERE f.state = 'linked' AND l.episode_id IN ({_in(chunk)})"
+                ' ORDER BY f.id', tuple(chunk)):
+            e = by_id.get(x['episode_id'])
+            if e is not None and e['quality'] is None:
+                e['quality'] = tv_monitor._file_quality(dict(x))
 
 
 def _last_refresh() -> Optional[float]:

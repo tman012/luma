@@ -13,6 +13,8 @@ export interface CalEpisode {
   air_time?: string | null;
   /** UTC air time (TVDB, else TVmaze) and minutes; null: the date only. */
   airstamp?: string | null; runtime?: number | null;
+  /** v197: the linked file's quality ('1080p WEB'); null when there's no file (not rendered yet). */
+  quality?: string | null;
   /** v158a: the series and this episode are monitored (unmonitored cards render dimmed). */
   monitored?: boolean;
 }

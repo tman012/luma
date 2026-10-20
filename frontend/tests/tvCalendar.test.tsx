@@ -91,7 +91,7 @@ describe('text-only cards (v178)', () => {
     expect(within(card).getByTestId('tv-card-show').textContent).toBe('Severance');
     expect(within(card).getByTestId('tv-card-title').textContent).toBe('S02E01 \u00b7 Hello');
     expect(within(card).getByTestId('tv-air').textContent).not.toBe('');
-    expect(within(card).getByTestId('tv-stripe').style.width).toBe('4px');
+    expect(within(card).queryByTestId('tv-stripe')).toBeNull();   // v197: no state edge
     expect(within(card).getByTestId('tv-card-bookmark')).toBeTruthy();
     expect((card.querySelector('.tvc-text') as HTMLElement).style.padding).toBe('6px 8px');
   });
@@ -230,10 +230,8 @@ describe('Calendar', () => {
     expect(rows.map(r => r.getAttribute('aria-label'))).toEqual([
       'Downloaded: Severance S02E01', 'Missing: Severance S02E02', 'Unaired: Severance S02E03']);
     // the edge: 4px, full card height, colors from CSS vars (Designer's defaults); the state is in aria-label only
-    const edges = rows.map(r => within(r).getByTestId('tv-stripe'));
-    expect(edges.map(e => e.style.background)).toEqual([
-      'var(--tv-state-downloaded, #22c55e)', 'var(--tv-state-missing, #ef4444)', 'var(--tv-state-unaired, #3b82f6)']);
-    expect([edges[0]!.style.width, edges[0]!.style.top, edges[0]!.style.bottom, rows[0]!.style.paddingLeft]).toEqual(['4px', '0px', '0px', '4px']);
+    // v197 (Taylor, Q2): no state color on calendar rows
+    expect(rows.some(r => within(r).queryByTestId('tv-stripe'))).toBe(false);
     expect(rows.some(r => within(r).queryByTestId('tv-check'))).toBe(false);          // no check: the time line stays put
     expect(rows.some(r => /Downloaded|Missing|Unaired/.test(r.textContent || ''))).toBe(false);   // nothing on screen
     expect(rows[0]!.textContent).toContain('Episode 1');

@@ -56,30 +56,40 @@ describe('v194 EpisodeSheet (Reviewer)', () => {
   });
 });
 
-import { PhoneAgenda } from '@/components/library/TvCalendar';
+import { DayHeader, PhoneDay } from '@/components/library/TvCalendar';
 
-describe('v195 week strip swipe', () => {
-  it('a left swipe goes to the next week, right to the previous; short or vertical drags do nothing; the weekday is kept', () => {
-    const onWeek = vi.fn();
-    const { rerender } = render(<PhoneAgenda eps={[]} week="2026-10-18" today="2026-10-20" onWeek={onWeek} />);
-    const strip = screen.getByTestId('tv-week-strip');
-    let now = 1000;
-    vi.spyOn(Date, 'now').mockImplementation(() => now);
-    const swipe = (x0: number, x1: number, y1 = 0, ms = 200) => {
-      fireEvent.touchStart(strip, { touches: [{ clientX: x0, clientY: 0 }] });
-      now += ms;
-      fireEvent.touchEnd(strip, { changedTouches: [{ clientX: x1, clientY: y1 }] });
-    };
-    swipe(300, 200);
-    expect(onWeek).toHaveBeenLastCalledWith('2026-10-25');
-    swipe(100, 200);
-    expect(onWeek).toHaveBeenLastCalledWith('2026-10-11');
-    onWeek.mockClear();
-    swipe(100, 120, 0, 1000);
-    swipe(100, 160, 200);
-    expect(onWeek).not.toHaveBeenCalled();
-    vi.restoreAllMocks();
-    rerender(<PhoneAgenda eps={[]} week="2026-10-25" today="2026-10-20" onWeek={onWeek} />);
-    expect(screen.getAllByTestId('tv-week-chip').find(c => c.getAttribute('aria-pressed') === 'true')?.dataset.day).toBe('2026-10-27');
+describe('v197 phone day header A', () => {
+  it('shows Today or the weekday bold with the date under it; ‹ and › step one day', () => {
+    const onStep = vi.fn();
+    const { rerender } = render(<DayHeader day="2026-10-18" today="2026-10-18" onStep={onStep} />);
+    expect(screen.getByTestId('tv-day-title').textContent).toBe('Today');
+    expect(screen.getByTestId('tv-day-date').textContent).toBe('Sun, Oct 18');
+    rerender(<DayHeader day="2026-10-19" today="2026-10-18" onStep={onStep} />);
+    expect(screen.getByTestId('tv-day-title').textContent).toBe('Monday');
+    fireEvent.click(screen.getByTestId('tv-day-prev'));
+    fireEvent.click(screen.getByTestId('tv-day-next'));
+    expect(onStep.mock.calls).toEqual([[-1], [1]]);
+    expect(screen.queryByTestId('tv-week-strip')).toBeNull();
+  });
+  it('the day list has the count and no date heading; an empty day says No episodes', () => {
+    render(<PhoneDay eps={[]} day="2026-10-18" today="2026-10-18" />);
+    expect(screen.getByTestId('tv-cal-empty').textContent).toBe('No episodes');
+    expect(document.querySelector('h4')).toBeNull();
+  });
+});
+
+import { QualityChip } from '@/components/library/TvCalendar';
+
+describe('v197 quality chip (Q2)', () => {
+  it('a downloaded row shows its file quality in the --quality-chip color; no file, no chip', () => {
+    const { rerender } = render(<QualityChip e={{ downloaded: true, quality: '1080p WEB' }} />);
+    const chip = screen.getByTestId('tv-quality-chip');
+    expect(chip.textContent).toBe('1080p WEB');
+    expect(chip.style.color).toBe('var(--quality-chip, #adc7ff)');
+    expect(parseInt(chip.style.fontSize, 10)).toBeGreaterThanOrEqual(12);
+    rerender(<QualityChip e={{ downloaded: false, quality: null }} />);
+    expect(screen.queryByTestId('tv-quality-chip')).toBeNull();
+    rerender(<QualityChip e={{ downloaded: true, quality: null }} />);
+    expect(screen.queryByTestId('tv-quality-chip')).toBeNull();
   });
 });

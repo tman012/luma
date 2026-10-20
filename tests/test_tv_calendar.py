@@ -63,9 +63,28 @@ def test_week_by_air_date_with_downloaded_flags(scanned):
     ]
     e = out['episodes'][0]
     assert set(e) == {'episode_id', 'series_id', 'tmdb_id', 'monitored', 'show', 'year', 'poster_path', 'season', 'episode', 'title',
-                      'air_date', 'airstamp', 'runtime', 'downloaded'}   # v178: no image fields
+                      'air_date', 'airstamp', 'runtime', 'downloaded', 'quality'}   # v178: no image fields; v197 quality
     assert e['poster_path'] == '/p95396.jpg' and e['title'] == 'Episode 1' and out['libraries'] == 1
     assert isinstance(e['tmdb_id'], int)                    # the card opens this show's detail
+
+
+def test_v197_quality_is_the_linked_files_or_none(scanned):
+    out = tv_calendar.calendar(D(2026, 10, 11), 7)
+    for e in out['episodes']:
+        if not e['downloaded']:
+            assert e['quality'] is None                    # no file, no quality
+    # set one linked file's resolution/source: the payload reads it, in the detail page's format
+    with tv_store.connect() as conn:
+        eid = next(e['episode_id'] for e in out['episodes'] if e['downloaded'])
+        fid = conn.execute('SELECT file_id FROM episode_file_links WHERE episode_id = ?', (eid,)).fetchone()['file_id']
+        conn.execute("UPDATE episode_files SET resolution = '1080p', source = 'web' WHERE id = ?", (fid,))
+        conn.commit()
+    again = {e['episode_id']: e for e in tv_calendar.calendar(D(2026, 10, 11), 7)['episodes']}
+    assert again[eid]['quality'] == '1080p WEB'
+    with tv_store.connect() as conn:
+        conn.execute('DELETE FROM episode_file_links WHERE episode_id = ?', (eid,))
+        conn.commit()
+    assert {e['episode_id']: e for e in tv_calendar.calendar(D(2026, 10, 11), 7)['episodes']}[eid]['quality'] is None
 
 
 def test_range_is_half_open_and_capped(scanned):
