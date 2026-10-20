@@ -23,7 +23,8 @@ import { SEARCH_LIST_ID, SEARCH_MIN, TV_POPOVER_SURFACE, TvOwnedSearch, searchRo
 import { TvSeriesDetail } from './TvSeriesDetail';
 import { NamingSettings } from './TvNaming';
 import { AddSeriesButton } from './TvAddSeries';
-import { OpenShowContext } from './TvCalendar';
+import { OpenShowContext, usePhone } from './TvCalendar';
+import { TvEpisodePage } from './TvEpisodePage';
 import { LibrarySelector } from './LibrarySelector';
 import type { SelectableLibrary } from './librarySelectionApi';
 import { SAVE_FAILED } from './libraryPathsApi';
@@ -93,6 +94,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
     void refreshLib().then(() => setImporting(false));
   }, [refreshLib]);
 
+  const phone = usePhone();   // v201: before the early return (hooks order)
   if (!settingsView) {
     return loadFailed ? <div role="alert" style={{ ...pad(wide), ...muted }}>{"Couldn't load TV settings"}</div> : null;
   }
@@ -168,7 +170,12 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
       </OpenShowContext.Provider>
     );
   } else if (view === 'series') {
-    body = noLibraries ? noLibs : showId ? (
+    const epId = Number(params.get('episode')) || 0;
+    body = noLibraries ? noLibs : showId && epId && phone ? (
+      // v201 (Taylor's pick E2): on a phone an episode opens its own page
+      <TvEpisodePage key={`${showId}/${epId}`} seriesId={showId} episodeId={epId} onChanged={changed}
+        onBack={() => { if (window.history.length > 1) window.history.back(); else go({ episode: null }); }} />
+    ) : showId ? (
       <TvSeriesDetail key={showId} seriesId={showId} episodeId={Number(params.get('episode')) || null} wide={wide}
         onBack={() => go({ show: null, episode: null })} onChanged={changed} say={say} />
     ) : <TvSeries shows={lib ? lib.shows : null} onChanged={changed} onOpen={s => openDetail(s.id)}
