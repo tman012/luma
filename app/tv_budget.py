@@ -27,9 +27,9 @@ from typing import Any, Dict, Optional
 PURPOSE = 'tv'
 
 AUTO_PER_TRACKER_DAILY = 8      # PM ruling: 8/day per tracker while prod shares the accounts
-AUTO_PER_TRACKER_HOURLY = 2
+AUTO_PER_TRACKER_HOURLY = 8    # v202a (Taylor): post-air searches every 15 min; only the daily cap limits them
 AUTO_ALL_TRACKERS_DAILY = 40
-AUTO_MIN_GAP_S = 600            # between automatic TV requests to one tracker
+AUTO_MIN_GAP_S = 60             # v202a: 1 min between automatic TV requests to one tracker (was 10 min)
 
 GUARD_LIMITS: Dict[str, float] = {
     'per_tracker_day': AUTO_PER_TRACKER_DAILY,

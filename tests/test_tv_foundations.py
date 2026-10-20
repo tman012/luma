@@ -196,10 +196,12 @@ def test_tv_is_capped_at_8_a_day_per_tracker(guard):
 
 
 def test_tv_hourly_cap_and_spacing(guard):
+    # v202a (Taylor): 1-min spacing, hourly cap equal to the daily cap (8)
     assert guard.take('site:x', False, False, now=T0, purpose='tv') is None
     assert guard.take('site:x', False, False, now=T0 + 10, purpose='tv') == 'tv spacing'
-    assert guard.take('site:x', False, False, now=T0 + 600, purpose='tv') is None
-    assert guard.take('site:x', False, False, now=T0 + 1200, purpose='tv') == f'tv hourly cap {tv_budget.AUTO_PER_TRACKER_HOURLY}'
+    assert guard.take('site:x', False, False, now=T0 + 60, purpose='tv') is None
+    assert guard.take('site:x', False, False, now=T0 + 600, purpose='tv') is None      # a 3rd in the hour: no 2/h cap
+    assert tv_budget.AUTO_PER_TRACKER_HOURLY == tv_budget.AUTO_PER_TRACKER_DAILY
 
 
 def test_tv_cap_across_trackers(guard, monkeypatch):
