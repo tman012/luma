@@ -57,6 +57,18 @@ def _take_due(kind: str, now: float) -> List[Dict[str, Any]]:
     return due
 
 
+RAISE_DELAY_S = 180
+
+
+def _restore(r: Dict[str, Any], now: float) -> None:
+    """Re-add a taken row whose retry raised, due again after RAISE_DELAY_S (no hot loop)."""
+    row = dict(r, due_at=max(float(r['due_at']), now + RAISE_DELAY_S))
+    with _lock:
+        rows = [x for x in _load() if not _same(x, row)]
+        rows.append(row)
+        _save(rows)
+
+
 def _done_elsewhere(r: Dict[str, Any]) -> bool:
     if r['kind'] == 'tv':
         from app import tv_search
@@ -78,16 +90,21 @@ def run_due(now: Optional[float] = None, kind: str = 'tv') -> Dict[str, int]:
         except Exception as e:                       # noqa: BLE001 - unsure: retry; grab() still dedupes by hash
             logger.debug('Pending grab check failed: %s', type(e).__name__)
         out['retried'] += 1
-        if kind == 'tv':
-            from app import tv_grab
-            g = tv_grab.grab(r['item'], r['series_id'], r.get('season'), r.get('episode_ids') or [], 'auto', now)
-            if g.get('ok'):
-                with tv_store.write() as conn:
-                    conn.executemany('UPDATE episodes SET next_search_at = NULL, last_search_at = ? WHERE id = ?',
-                                     [(now, i) for i in r.get('episode_ids') or []])
-        else:
-            from app import movie_scanner
-            g = movie_scanner.grab(r['item'], r['tmdb_id'], 'auto', now)
+        try:
+            if kind == 'tv':
+                from app import tv_grab
+                g = tv_grab.grab(r['item'], r['series_id'], r.get('season'), r.get('episode_ids') or [], 'auto', now)
+                if g.get('ok'):
+                    with tv_store.write() as conn:
+                        conn.executemany('UPDATE episodes SET next_search_at = NULL, last_search_at = ? WHERE id = ?',
+                                         [(now, i) for i in r.get('episode_ids') or []])
+            else:
+                from app import movie_scanner
+                g = movie_scanner.grab(r['item'], r['tmdb_id'], 'auto', now)
+        except Exception as e:                       # noqa: BLE001 - _take_due removed the row: put it back, never drop it
+            _restore(r, now)
+            logger.warning('Pending grab %s raised %s; kept pending', r['item'].get('title'), type(e).__name__)
+            continue
         if g.get('ok'):
             out['grabbed'] += 1
         logger.info('Pending grab %s: %s', r['item'].get('title'), 'sent' if g.get('ok') else g.get('error'))

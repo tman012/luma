@@ -60,3 +60,25 @@ def test_a_burst_blocked_grab_is_pending_and_retried_after_the_refill(env, monke
     assert grab_retry.run_due(due, 'tv') == {'retried': 1, 'grabbed': 1}
     assert len(adds(env)) == 1 and grab_retry.pending('tv') == []
 
+
+
+@pytest.mark.parametrize('kind', ['tv', 'movie'])
+def test_a_retry_that_raises_is_kept_pending_not_dropped(tmp_path, monkeypatch, kind):
+    store = {}
+    monkeypatch.setattr(tv_store, 'get_meta', lambda k: store.get(k))
+    monkeypatch.setattr(tv_store, 'set_meta', lambda k, v: store.__setitem__(k, v))
+    monkeypatch.setattr(grab_retry, '_done_elsewhere', lambda r: False)
+
+    def boom(*a, **k):
+        raise RuntimeError('tracker exploded')
+    from app import movie_scanner, tv_grab
+    monkeypatch.setattr(tv_grab, 'grab', boom)
+    monkeypatch.setattr(movie_scanner, 'grab', boom)
+    extra = {'series_id': 1, 'season': 1, 'episode_ids': [5]} if kind == 'tv' else {'tmdb_id': 42}
+    grab_retry.add(kind, {'title': 'X', 'downloadUrl': 'u1'}, NOW, **extra)
+    grab_retry.add(kind, {'title': 'Y', 'downloadUrl': 'u2'}, NOW, **extra)
+    assert grab_retry.run_due(NOW, kind) == {'retried': 2, 'grabbed': 0}
+    left = grab_retry.pending(kind)
+    assert sorted(p['item']['downloadUrl'] for p in left) == ['u1', 'u2']
+    assert all(p['due_at'] == NOW + grab_retry.RAISE_DELAY_S for p in left)
+    assert grab_retry.run_due(NOW + 1, kind) == {'retried': 0, 'grabbed': 0}
