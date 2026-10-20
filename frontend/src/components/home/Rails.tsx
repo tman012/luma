@@ -79,7 +79,8 @@ export function PosterCard({ card, onOpen, own }: { card: Card; onOpen?: OnOpen;
         {src && <img src={src} alt="" loading="lazy" style={fill} draggable={false} />}
         <OwnedOrb own={own} />
       </div>
-      <div style={cardTitle}>{card.title}</div>
+      {card.label && <div style={cardLabel} data-testid="card-label">{card.label}</div>}
+      <div style={card.label ? { ...cardTitle, marginTop: 2 } : cardTitle}>{card.title}</div>
       {card.subtitle && <div style={cardSub}>{card.subtitle}</div>}
     </CardShell>
   );
@@ -135,7 +136,7 @@ export function HomeRails({ cw, rails, onOpen }: { cw: Card[]; rails: Rail[]; on
       )}
       {rails.filter(r => r.items.length > 0).map(r => (
         <RailRow key={r.id} title={r.title} testId={`rail-${r.id}`}>
-          {r.items.map(c => <PosterCard key={c.key} card={c} onOpen={onOpen} own={c.tmdb_id ? own[c.key] : undefined} />)}
+          {r.items.map(c => <PosterCard key={c.key} card={c} onOpen={onOpen} own={c.tmdb_id && !c.label && !c.key.startsWith('watchlist-') ? own[c.key] : undefined} />)}
         </RailRow>
       ))}
     </div>
@@ -174,6 +175,11 @@ const fill: React.CSSProperties = { position: 'absolute', inset: 0, width: '100%
 const cardTitle: React.CSSProperties = {
   marginTop: 8, fontSize: 14, fontWeight: 500, color: 'rgba(255,255,255,0.92)', fontFamily: FONT,
   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+};
+// Prod MobilePosterCard digitalReleaseLabel: 9px semibold, wide tracking, white/70, centered, mt-1.
+const cardLabel: React.CSSProperties = {
+  marginTop: 4, fontSize: 9, fontWeight: 600, letterSpacing: '0.025em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)',
+  textAlign: 'center', fontFamily: FONT,
 };
 const cardSub: React.CSSProperties = { marginTop: 2, fontSize: 12, color: 'rgba(255,255,255,0.5)', fontFamily: FONT };
 const barTrack: React.CSSProperties = { position: 'absolute', left: 10, right: 10, bottom: 10, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.25)' };

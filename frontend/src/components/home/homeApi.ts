@@ -9,6 +9,8 @@ export interface Card {
   poster: string | null; art?: string | null; progress?: number;
   /** Trakt rail cards: open the TMDB detail popup (no Plex rating key). */
   tmdb_id?: number;
+  /** Watchlist rail cards: prod's digital-release label ('Jan 9'), shown above the title. */
+  label?: string | null;
 }
 export interface Rail { id: string; title: string; type: string; items: Card[] }
 export interface HomeData { continue_watching: Card[]; rails: Rail[]; plex: boolean }

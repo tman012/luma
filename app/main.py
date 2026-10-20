@@ -21685,9 +21685,18 @@ _qbit_owner.init(settings=settings)
 _library_mover.init(settings=settings)
 app.register_blueprint(_file_management.bp)
 
+def _watchlist_rail_poster(tmdb_id):
+    """Poster path for a native watchlist rail card from the /api/movie detail cache, else TMDB."""
+    with _tmdb_detail_cache_lock:
+        cached = _tmdb_detail_cache.get(f"movie:{tmdb_id}")
+    data = cached[1] if cached else (tmdb.get_movie_details(tmdb_id) or {})
+    return data.get('poster_path') if isinstance(data, dict) else None
+
+
 from app import home_rails as _home_rails
 _home_rails.init(get_plex=lambda: plex_service, get_current_user=_get_current_user,
-                 trakt_connected=_connectors.trakt_connected, fetch_trakt=_fetch_trakt_rail)
+                 trakt_connected=_connectors.trakt_connected, fetch_trakt=_fetch_trakt_rail,
+                 fetch_poster=_watchlist_rail_poster)
 app.register_blueprint(_home_rails.bp)
 
 

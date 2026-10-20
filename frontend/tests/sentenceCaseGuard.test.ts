@@ -65,6 +65,10 @@ export const PROPER_WORDS = new Set(['Alfred', 'Plex', 'Radarr', 'Sonarr', 'Kodi
 /** Data that reads like labels but isn't one (feed, model, team and example names; quoted OS strings), and
  * v205 prod 1b4ea74-matched movie modal labels (PM: test modals match prod's capitalization). */
 export const PROD_MATCHED = ['Add to Watchlist', 'In Watchlist', 'Select Quality', 'Upgrade Quality', 'Watchlist'];
+/** v212 prod 1b4ea74-matched Home Watchlist rail date label ('NOV 3'): prod upper-cases it by CSS, so test does too
+ * (PM: test matches prod's capitalization). Only this file's cardLabel style may do it. */
+export const PROD_MATCHED_UPPERCASE = ["components/home/Rails.tsx: textTransform: 'uppercase'"];
+const prodUpper = (h: string) => /^components\/home\/Rails\.tsx:\d+: .*cardLabel|^components\/home\/Rails\.tsx:\d+: marginTop: 4, fontSize: 9/.test(h);
 const DATA_RE = /^(Add to Watchlist$|In Watchlist$|Select Quality$|Upgrade Quality$|Watchlist$|BBC News|NPR News|GPT-|e\.g\. |Sport, Sports$|Recently Released$|Watch Shield$|"|.*"$|A (blue )?banner will appear|-apple-system|ui-monospace|Amazon Ember|Your download is complete|I've added|Here are some movies)/;
 const PROPS = '(?:label|aria-label|ariaLabel|title|placeholder|heading|subtitle|eyebrow|description|emptyText|buttonLabel|confirmLabel|cancelLabel|actionLabel|text|name|header|caption|tooltip|alt|cta)';
 const LABEL_RES = [
@@ -121,8 +125,8 @@ function titleCaseHits(): string[] {
 
 describe('sentence case guard', () => {
   it('no CSS upper-casing anywhere in the app', () => {
-    expect(hits(/(^|['"`\s])uppercase(?=['"`\s]|$)/)).toEqual([]);
-    expect(hits(/textTransform:\s*['"]uppercase['"]/)).toEqual([]);
+    expect(hits(/(^|['"`\s])uppercase(?=['"`\s]|$)/).filter((h) => !prodUpper(h))).toEqual([]);
+    expect(hits(/textTransform:\s*['"]uppercase['"]/).filter((h) => !prodUpper(h))).toEqual([]);
     expect(hits(/text-transform:\s*uppercase/)).toEqual([]);
   });
 

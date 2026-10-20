@@ -46,14 +46,55 @@ TRAKT_RAILS = (
     ('trakt_anticipated_shows', 'Anticipated Shows', 'show', '/api/trakt/shows/anticipated'),
 )
 TRAKT_IDS = frozenset(r[0] for r in TRAKT_RAILS)
+# v208: prod's Home Watchlist rail (homeRails.ts 'Watchlist'), from the native watchlist on test.
+WATCHLIST_ID = 'watchlist'
+KEEP_IDS = TRAKT_IDS | {WATCHLIST_ID}
+WATCHLIST_LIMIT = 25  # prod useHomeRails: slice(0, 25)
 TMDB_POSTER = 'https://image.tmdb.org/t/p/w342'
 
 
 def init(*, get_plex: Callable[[], Any], get_current_user: Callable[[], Optional[dict]],
          trakt_connected: Callable[[], bool] = lambda: False,
-         fetch_trakt: Optional[Callable[[str], List[Dict[str, Any]]]] = None):
+         fetch_trakt: Optional[Callable[[str], List[Dict[str, Any]]]] = None,
+         fetch_poster: Optional[Callable[[int], Optional[str]]] = None):
     _cfg.update(get_plex=get_plex, get_current_user=get_current_user,
-                trakt_connected=trakt_connected, fetch_trakt=fetch_trakt)
+                trakt_connected=trakt_connected, fetch_trakt=fetch_trakt, fetch_poster=fetch_poster)
+
+
+def extra_rails() -> List[Dict[str, Any]]:
+    """Trakt rails plus, on test, the native Watchlist rail."""
+    from app import instance
+    out = trakt_rails()
+    if instance.is_test():
+        out.append({'id': WATCHLIST_ID, 'title': 'Watchlist', 'type': 'movie', 'source': 'watchlist'})
+    return out
+
+
+def watchlist_items() -> List[Dict[str, Any]]:
+    """Prod's rail: soonest digital release first (none last), 25 max, the
+    digital-date label under the poster. Dates come from the native watchlist rows."""
+    try:
+        from app import movie_watchlist, digital_release_cache as drc
+        rows = movie_watchlist.movies()
+        drc.enrich_watchlist_items(rows)
+    except Exception as e:  # noqa: BLE001 - a rail failing must not break Home
+        logger.warning('Watchlist rail failed: %s', type(e).__name__)
+        return []
+    rows.sort(key=lambda m: (m.get('digital_release_date') is None, m.get('digital_release_date') or ''))
+    poster_of = _cfg.get('fetch_poster')
+    out = []
+    for m in rows[:WATCHLIST_LIMIT]:
+        tid = m.get('tmdb_id')
+        poster = None
+        if poster_of:
+            try:
+                poster = poster_of(int(tid))
+            except Exception:  # noqa: BLE001
+                poster = None
+        out.append({'key': f'watchlist-{tid}', 'type': 'movie', 'title': str(m.get('title') or ''),
+                    'subtitle': str(m.get('year') or ''), 'label': m.get('digital_release_label') or None, 'tmdb_id': tid,
+                    'poster': f'{TMDB_POSTER}{poster}' if isinstance(poster, str) and poster.startswith('/') else None})
+    return out
 
 
 def trakt_rails() -> List[Dict[str, Any]]:
@@ -247,7 +288,7 @@ def home():
     sections = _sections_or_none(plex) if plex is not None else None
     if sections is None:
         return jsonify({'continue_watching': [], 'rails': [], 'plex': False})
-    libs = [l for l in arrange(sections, load_prefs(), trakt_rails()) if l['enabled']]
+    libs = [l for l in arrange(sections, load_prefs(), extra_rails()) if l['enabled']]
     from flask import current_app
     flask_app = current_app._get_current_object()
 
@@ -259,6 +300,7 @@ def home():
     with ThreadPoolExecutor(max_workers=min(6, len(libs) + 1)) as pool:
         cw = pool.submit(in_app, continue_watching, plex)
         rails = [(l, pool.submit(in_app, trakt_items, l['id']) if l['source'] == 'trakt'
+                  else pool.submit(in_app, watchlist_items) if l['source'] == 'watchlist'
                   else pool.submit(in_app, recently_added, plex, l['id'])) for l in libs]
         out_rails = [{'id': l['id'], 'title': l['title'], 'type': l['type'], 'items': f.result()}
                      for l, f in rails]
@@ -274,7 +316,7 @@ def libraries():
     if err:
         return err
     plex = _plex()
-    libs = arrange(_sections(plex) if plex else [], load_prefs(), trakt_rails())
+    libs = arrange(_sections(plex) if plex else [], load_prefs(), extra_rails())
     return jsonify({'libraries': libs})
 
 
@@ -303,9 +345,9 @@ def save_libraries():
     plex = _plex()
     known = {l['id'] for l in arrange(_sections(plex), {'order': [], 'hidden': []})} if plex else set()
     if known:
-        # Trakt rails keep their place while Trakt is disconnected.
-        order = [s for s in order if s in known or s in TRAKT_IDS]
-        hidden = [s for s in hidden if s in known or s in TRAKT_IDS]
+        # Trakt rails keep their place while Trakt is disconnected; so does Watchlist.
+        order = [s for s in order if s in known or s in KEEP_IDS]
+        hidden = [s for s in hidden if s in known or s in KEEP_IDS]
     with _lock:
         save_prefs({'order': order, 'hidden': hidden})
-    return jsonify({'libraries': arrange(_sections(plex) if plex else [], load_prefs(), trakt_rails())})
+    return jsonify({'libraries': arrange(_sections(plex) if plex else [], load_prefs(), extra_rails())})
