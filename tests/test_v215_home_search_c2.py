@@ -29,9 +29,11 @@ def test_pill_geometry():
 
 def test_palette_geometry_and_copy():
     assert 'calc(100vh - 24px - 420px)' in PAL and 'min(720px, calc(100vw - 96px))' in PAL
-    for s in ("'In your library'", "'People'", "'Find more'", "'No results'", "Couldn't search", 'Try again', 'placeholder="Search"'):
+    for s in ("'In your library'", "'People'", "'No results'", "Couldn't search", 'Try again', 'placeholder="Search"'):
         assert s in PAL
-    assert 'In Your Library' not in PAL and 'Find More' not in PAL
+    assert 'In Your Library' not in PAL and "'Find more'" not in PAL
+    # PM ruling: prod 1b4ea74's collapsed "Find More" button, label as is.
+    assert '>Find More<ChevronDown />' in PAL and '<ChevronLeft />Find More<' in PAL
     assert 'prefers-reduced-motion' in PAL
 
 

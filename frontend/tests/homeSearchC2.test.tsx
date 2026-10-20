@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const modals = { openMovie: vi.fn(), openTv: vi.fn(), close: vi.fn() };
 vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => modals }));
 
-import { HomeSearchPalette, buildGroups, metaLine, CLOSE_MS } from '@/components/search/HomeSearchPalette';
+import { HomeSearchPalette, buildGroups, metaLine, autoExpand, CLOSE_MS } from '@/components/search/HomeSearchPalette';
 import { HomeSearchPill } from '@/components/search/HomeSearchPill';
 import { openSearch } from '@/components/search/MinimalSearchHost';
 
@@ -72,25 +72,39 @@ describe('C2 palette states', () => {
     mount(); act(() => openSearch());
     await type('dune');
     await waitFor(() => screen.getByTestId('search-results'));
-    expect([...document.querySelectorAll('.lsp-ghd')].map(e => e.textContent)).toEqual(['In your library', 'People', 'Find more']);
+    expect([...document.querySelectorAll('.lsp-ghd')].map(e => e.textContent)).toEqual(['In your library', 'People']);
+    // Prod 1b4ea74: TMDb titles sit behind a collapsed "Find More" button.
+    expect(screen.getByTestId('find-more').textContent).toBe('Find More');
     expect(document.querySelector('.lsp-em')!.textContent).toBe('Dune');
     expect(document.querySelector('[data-row="0"]')!.getAttribute('data-hi')).toBe('true');
-    expect([...document.querySelectorAll('.lsp-b')].map(e => e.textContent)).toEqual(['2021 · Movie', '2024 · TV', 'Directing', '1984 · Movie']);
+    expect([...document.querySelectorAll('.lsp-b')].map(e => e.textContent)).toEqual(['2021 · Movie', '2024 · TV', 'Directing']);
+  });
+  it('Find More expands to the TMDb titles only (prod), its back button collapses', async () => {
+    mount(); act(() => openSearch());
+    await type('dune');
+    await waitFor(() => screen.getByTestId('search-results'));
+    fireEvent.click(screen.getByTestId('find-more'));
+    expect(screen.queryByTestId('group-library')).toBeNull();
+    expect(screen.queryByTestId('group-people')).toBeNull();
+    expect(screen.getByTestId('find-more-back').textContent).toBe('Find More');
+    expect([...document.querySelectorAll('.lsp-b')].map(e => e.textContent)).toEqual(['1984 · Movie']);
+    fireEvent.click(screen.getByTestId('find-more-back'));
+    expect(screen.getByTestId('group-library')).toBeTruthy();
+    expect(screen.getByTestId('find-more')).toBeTruthy();
   });
   it('arrow keys + Enter open the movie popup and close the palette', async () => {
     mount(); act(() => openSearch());
     await type('dune');
     await waitFor(() => screen.getByTestId('search-results'));
+    fireEvent.click(screen.getByTestId('find-more'));
     const input = screen.getByTestId('search-input');
-    fireEvent.keyDown(input, { key: 'ArrowDown' });
-    fireEvent.keyDown(input, { key: 'ArrowDown' }); fireEvent.keyDown(input, { key: 'ArrowDown' });
-    fireEvent.keyDown(input, { key: 'ArrowDown' }); fireEvent.keyDown(input, { key: 'ArrowDown' });
-    expect(input.getAttribute('aria-activedescendant')).toBe('lsp-row-3');
+    fireEvent.keyDown(input, { key: 'ArrowDown' }); fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(input.getAttribute('aria-activedescendant')).toBe('lsp-row-0');
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ tmdbId: 841, ratingKey: undefined }));
-    await act(async () => { vi.advanceTimersByTime(CLOSE_MS); });
+    await act(async () => { vi.advanceTimersByTime(CLOSE_MS + 50); });
     expect(screen.queryByTestId('search-palette')).toBeNull();
-    expect(document.activeElement).toBe(screen.getByTestId('home-search-pill'));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('home-search-pill')));
   });
   it('chips filter as prod: TV shows only TV rows', async () => {
     mount(); act(() => openSearch());
@@ -128,12 +142,14 @@ describe('C2 palette states', () => {
 });
 
 describe('C2 grouping', () => {
-  it('caps Find more at 5 on All and omits empty groups', () => {
+  it('Find More: collapsed by default, uncapped when open, auto-opens on Movies/TV with nothing owned (never All)', () => {
     const unowned = Array.from({ length: 8 }, (_, i) => ({ title: `Dune ${i}`, year: 2000 + i, id: i, media_type: 'movie' as const }));
-    const g = buildGroups({ owned: [], unowned, ownedPeople: [], unownedPeople: [] }, 'all', 'dune');
-    expect(g.map(x => x.title)).toEqual(['Find more']);
-    expect(g[0]!.rows).toHaveLength(5);
-    expect(buildGroups({ owned: [], unowned, ownedPeople: [], unownedPeople: [] }, 'movies', 'dune')[0]!.rows).toHaveLength(8);
+    const res = { owned: [], unowned, ownedPeople: [], unownedPeople: [] };
+    expect(buildGroups(res, 'all', 'dune')).toEqual([]);
+    expect(buildGroups(res, 'all', 'dune', true)[0]!.rows).toHaveLength(8);
+    expect(autoExpand(res, 'all')).toBe(false);
+    expect(autoExpand(res, 'movies')).toBe(true);
+    expect(autoExpand(res, 'tv')).toBe(false);
     expect(metaLine({ kind: 'person', item: { name: 'X', known_for_department: 'Acting' } })).toBe('Acting');
   });
 });

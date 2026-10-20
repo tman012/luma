@@ -22,7 +22,6 @@ const CHIPS: { id: Chip; label: string }[] = [
 export const MIN_QUERY = 2;
 export const DEBOUNCE_MS = 300;
 export const SKELETON_DELAY_MS = 150;
-export const FIND_MORE_CAP = 5;
 export const CLOSE_MS = 140;
 
 export type Row =
@@ -30,21 +29,34 @@ export type Row =
   | { kind: 'person'; item: SearchPerson };
 export type Group = { id: 'library' | 'people' | 'more'; title: string; rows: Row[] };
 
-/** Groups in spec order; empty groups are omitted. */
-export function buildGroups(res: SearchResults | null, chip: Chip, q: string): Group[] {
+/** Prod 1b4ea74 KioskSearch: TMDb titles (word-match filtered) hide behind a collapsed "Find More" button. */
+export function unownedRows(res: SearchResults | null, chip: Chip, q: string): Row[] {
+  if (!res || chip === 'people') return [];
+  return res.unowned.filter(m => mediaFor(chip)(m)).filter(m => wordMatchRatio(q, getTitle(m)) >= MIN_MATCH_RATIO)
+    .map((item): Row => ({ kind: 'media', item, owned: false }));
+}
+const mediaFor = (chip: Chip) => (m: SearchMovie) =>
+  chip === 'all' || (chip === 'movies' ? m.media_type !== 'tv' : chip === 'tv' ? m.media_type === 'tv' : false);
+
+/** Prod: on Movies/TV with nothing owned, Find More opens by itself (never on All). */
+export function autoExpand(res: SearchResults | null, chip: Chip): boolean {
+  return !!res && (chip === 'movies' || chip === 'tv') && res.owned.filter(mediaFor(chip)).length === 0
+    && res.unowned.filter(mediaFor(chip)).length > 0;
+}
+
+/** Collapsed: In your library + People (Find More button below). Expanded: the TMDb titles only, as prod. */
+export function buildGroups(res: SearchResults | null, chip: Chip, q: string, expanded = false): Group[] {
   if (!res) return [];
-  const media = (m: SearchMovie) =>
-    chip === 'all' || (chip === 'movies' ? m.media_type !== 'tv' : chip === 'tv' ? m.media_type === 'tv' : false);
-  const owned = res.owned.filter(media).map((item): Row => ({ kind: 'media', item, owned: true }));
+  if (expanded) {
+    const more = unownedRows(res, chip, q);
+    return more.length ? [{ id: 'more', title: 'Find More', rows: more }] : [];
+  }
+  const owned = res.owned.filter(mediaFor(chip)).map((item): Row => ({ kind: 'media', item, owned: true }));
   const people = chip === 'all' || chip === 'people'
     ? [...res.ownedPeople, ...res.unownedPeople].map((item): Row => ({ kind: 'person', item })) : [];
-  let more = res.unowned.filter(media).filter(m => wordMatchRatio(q, getTitle(m)) >= MIN_MATCH_RATIO)
-    .map((item): Row => ({ kind: 'media', item, owned: false }));
-  if (chip === 'all') more = more.slice(0, FIND_MORE_CAP);
   return ([
     { id: 'library', title: 'In your library', rows: owned },
     { id: 'people', title: 'People', rows: people },
-    { id: 'more', title: 'Find more', rows: more },
   ] as Group[]).filter(g => g.rows.length > 0);
 }
 
@@ -83,6 +95,7 @@ export function HomeSearchPalette() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [skeleton, setSkeleton] = useState(false);
   const [hi, setHi] = useState(0);
+  const [expanded, setExpanded] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -90,6 +103,8 @@ export function HomeSearchPalette() {
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skelRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastQ = useRef('');
+  const chipRef = useRef<Chip>('all');
+  chipRef.current = chip;
 
   const run = useCallback(async (q: string) => {
     abortRef.current?.abort();
@@ -104,7 +119,7 @@ export function HomeSearchPalette() {
     try {
       const r = await performSearch(q, ctl.signal);
       if (ctl.signal.aborted) return;
-      setRes(r); setHi(0); setPhase(r.failed ? 'error' : 'done');
+      setRes(r); setHi(0); setExpanded(autoExpand(r, chipRef.current)); setPhase(r.failed ? 'error' : 'done');
     } catch (e) {
       if ((e as { name?: string })?.name === 'AbortError' || ctl.signal.aborted) return;
       setPhase('error');
@@ -121,7 +136,10 @@ export function HomeSearchPalette() {
     window.setTimeout(() => {
       setOpen(false); setClosing(false);
       window.dispatchEvent(new CustomEvent('search-palette', { detail: { open: false } }));
-      (document.querySelector('[data-testid="home-search-pill"]') as HTMLElement | null)?.focus();
+      // Tester MED: the pill is still visibility:hidden this tick, so focus() would land on body.
+      // Wait for React to commit data-hidden="false", then focus on the next frame.
+      requestAnimationFrame(() => requestAnimationFrame(() =>
+        (document.querySelector('[data-testid="home-search-pill"]') as HTMLElement | null)?.focus()));
     }, CLOSE_MS);
   }, []);
 
@@ -135,9 +153,10 @@ export function HomeSearchPalette() {
     return () => window.removeEventListener('open-search', onOpen);
   }, []);
 
-  const groups = useMemo(() => buildGroups(res, chip, lastQ.current), [res, chip]);
+  const groups = useMemo(() => buildGroups(res, chip, lastQ.current, expanded), [res, chip, expanded]);
+  const moreCount = useMemo(() => unownedRows(res, chip, lastQ.current).length, [res, chip]);
   const rows = useMemo(() => groups.flatMap(g => g.rows), [groups]);
-  useEffect(() => { setHi(0); }, [chip]);
+  useEffect(() => { setHi(0); }, [chip, expanded]);
   useEffect(() => {
     listRef.current?.querySelector<HTMLElement>(`[data-row="${hi}"]`)?.scrollIntoView?.({ block: 'nearest' });
   }, [hi]);
@@ -198,7 +217,7 @@ export function HomeSearchPalette() {
           <div className="lsp-chips" role="tablist">
             {CHIPS.map(c => (
               <button key={c.id} type="button" role="tab" aria-selected={chip === c.id} className="lsp-chip"
-                data-on={chip === c.id ? 'true' : 'false'} onClick={() => setChip(c.id)}>{c.label}</button>
+                data-on={chip === c.id ? 'true' : 'false'} onClick={() => { setChip(c.id); setExpanded(autoExpand(res, c.id)); }}>{c.label}</button>
             ))}
           </div>
         )}
@@ -212,7 +231,7 @@ export function HomeSearchPalette() {
             ))}
           </div>
         )}
-        {phase === 'done' && rows.length === 0 && (
+        {phase === 'done' && rows.length === 0 && moreCount === 0 && (
           <div className="lsp-empty" data-testid="search-empty">{res?.rateLimited ? TMDB_BUSY_TEXT : 'No results'}</div>
         )}
         {phase === 'error' && (
@@ -221,11 +240,13 @@ export function HomeSearchPalette() {
             <button type="button" className="lsp-retry" onClick={() => void run(lastQ.current)}>Try again</button>
           </div>
         )}
-        {phase === 'done' && rows.length > 0 && (
+        {phase === 'done' && (rows.length > 0 || moreCount > 0) && (
           <div ref={listRef} className="lsp-list lsp-scroll" id="lsp-list" role="listbox" data-testid="search-results">
             {groups.map(g => (
               <div key={g.id} role="group" aria-label={g.title}>
-                <div className="lsp-ghd" data-testid={`group-${g.id}`}>{g.title}</div>
+                {g.id === 'more'
+                  ? <button type="button" className="lsp-fm-back" data-testid="find-more-back" onClick={() => setExpanded(false)}><ChevronLeft />Find More</button>
+                  : <div className="lsp-ghd" data-testid={`group-${g.id}`}>{g.title}</div>}
                 {g.rows.map(r => {
                   idx += 1; const i = idx;
                   const title = r.kind === 'person' ? r.item.name : getTitle(r.item);
@@ -246,11 +267,22 @@ export function HomeSearchPalette() {
                 })}
               </div>
             ))}
+            {!expanded && moreCount > 0 && (
+              <button type="button" className="lsp-fm" data-testid="find-more" onClick={() => setExpanded(true)}>Find More<ChevronDown /></button>
+            )}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+/** Prod 1b4ea74's Find More chevrons, as is. */
+function ChevronDown() {
+  return <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>;
+}
+function ChevronLeft() {
+  return <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>;
 }
 
 const PAL_TOP = `min(${PILL_TOP}, calc(100vh - 24px - 420px))`;
@@ -286,6 +318,11 @@ export const paletteCss = `
 .lsp-sk2{background:var(--color-glass-10)}
 .lsp-sk-h{height:12px;width:110px;border-radius:6px;margin:12px}
 .lsp-th.lsp-sk2{border-color:var(--color-glass-8);animation:lsp-pulse 1.2s ease-in-out infinite}
+.lsp-fm{display:flex;width:100%;align-items:center;justify-content:center;gap:8px;padding:12px 0;background:none;border:0;font:inherit;font-size:18px;font-weight:500;color:rgba(255,255,255,.80);cursor:pointer;transition:color 150ms;outline:none;border-radius:10px}
+.lsp-fm:hover{color:#fff}
+.lsp-fm-back{display:flex;width:100%;align-items:center;justify-content:center;gap:8px;margin:6px 0 12px;padding:0;background:none;border:0;font:inherit;font-size:18px;font-weight:600;color:var(--color-text-secondary, rgba(255,255,255,.70));cursor:pointer;transition:color 150ms;outline:none;border-radius:10px}
+.lsp-fm-back:hover{color:var(--color-text-primary, rgba(255,255,255,.95))}
+.lsp-fm:focus-visible,.lsp-fm-back:focus-visible{box-shadow:0 0 0 3px rgba(59,130,246,.28)}
 .lsp-empty{padding:44px 0 52px;text-align:center;font-size:15px;color:rgba(255,255,255,.70)}
 .lsp-error{padding:40px 0 44px;text-align:center}
 .lsp-error-t{font-size:15px;color:rgba(255,255,255,.95)}
