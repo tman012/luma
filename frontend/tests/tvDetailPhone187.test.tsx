@@ -55,3 +55,31 @@ describe('v194 EpisodeSheet (Reviewer)', () => {
     expect(document.body.style.overflow).toBe('hidden');
   });
 });
+
+import { PhoneAgenda } from '@/components/library/TvCalendar';
+
+describe('v195 week strip swipe', () => {
+  it('a left swipe goes to the next week, right to the previous; short or vertical drags do nothing; the weekday is kept', () => {
+    const onWeek = vi.fn();
+    const { rerender } = render(<PhoneAgenda eps={[]} week="2026-10-18" today="2026-10-20" onWeek={onWeek} />);
+    const strip = screen.getByTestId('tv-week-strip');
+    let now = 1000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const swipe = (x0: number, x1: number, y1 = 0, ms = 200) => {
+      fireEvent.touchStart(strip, { touches: [{ clientX: x0, clientY: 0 }] });
+      now += ms;
+      fireEvent.touchEnd(strip, { changedTouches: [{ clientX: x1, clientY: y1 }] });
+    };
+    swipe(300, 200);
+    expect(onWeek).toHaveBeenLastCalledWith('2026-10-25');
+    swipe(100, 200);
+    expect(onWeek).toHaveBeenLastCalledWith('2026-10-11');
+    onWeek.mockClear();
+    swipe(100, 120, 0, 1000);
+    swipe(100, 160, 200);
+    expect(onWeek).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+    rerender(<PhoneAgenda eps={[]} week="2026-10-25" today="2026-10-20" onWeek={onWeek} />);
+    expect(screen.getAllByTestId('tv-week-chip').find(c => c.getAttribute('aria-pressed') === 'true')?.dataset.day).toBe('2026-10-27');
+  });
+});

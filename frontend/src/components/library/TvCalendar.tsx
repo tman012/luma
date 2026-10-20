@@ -1,7 +1,7 @@
 /** Settings > TV > Calendar (v1, desktop web): the week's episodes by TMDB air
  * date as an agenda (day headers, 72px rows), capped at 720px and centered.
  * A card opens the show's detail at that episode. The week toolbar: ‹ › (and Today) on the left, the range centered. */
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { ModalHostContext } from '@/contexts/ModalHostContext';
 import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
@@ -85,7 +85,7 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true }: 
         ) : !eps.length ? (
           <div data-testid="tv-cal-empty" style={emptyCard}>No episodes this week</div>
         ) : phone ? (
-          <PhoneAgenda eps={eps} week={week} today={today} />
+          <PhoneAgenda eps={eps} week={week} today={today} onWeek={onWeek} />
         ) : (
           <WeekGrid eps={eps} week={week} today={today} />
         )}
@@ -412,14 +412,27 @@ export function usePhone(): boolean {
 }
 
 /** Variant B phone calendar: a 7-day strip with state dots, then the selected day's cards. */
-export function PhoneAgenda({ eps, week, today }: { eps: CalEpisode[]; week: Day; today: Day }) {
+export function PhoneAgenda({ eps, week, today, onWeek }: { eps: CalEpisode[]; week: Day; today: Day; onWeek?: (start: Day) => void }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(week, i));
-  const [day, setDay] = useState<Day>(days.includes(today) ? today : week);
-  const sel = days.includes(day) ? day : week;
+  // the selected weekday (0-6) is kept across weeks (Sun -> Sun)
+  const [idx, setIdx] = useState(() => Math.max(0, days.indexOf(today)));
+  const sel = days[idx] ?? week;
+  const setDay = (d: Day) => setIdx(Math.max(0, days.indexOf(d)));
+  const touch = useRef<{ x: number; y: number; t: number } | null>(null);
+  const onStart = (e: React.TouchEvent) => { const p = e.touches[0]; touch.current = p ? { x: p.clientX, y: p.clientY, t: Date.now() } : null; };
+  const onEnd = (e: React.TouchEvent) => {
+    const s0 = touch.current; touch.current = null;
+    const p = e.changedTouches[0];
+    if (!s0 || !p || !onWeek) return;
+    const dx = p.clientX - s0.x, dy = p.clientY - s0.y, dt = Math.max(1, Date.now() - s0.t);
+    if (Math.abs(dx) <= Math.abs(dy)) return;                       // vertical lock
+    if (Math.abs(dx) < 48 && Math.abs(dx) / dt <= 0.3) return;     // 48px or a fling over 0.3px/ms
+    onWeek(addDays(week, dx < 0 ? 7 : -7));
+  };
   const list = eps.filter(e => e.air_date === sel);
   return (
     <div data-testid="tv-cal-phone">
-      <div data-testid="tv-week-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+      <div data-testid="tv-week-strip" onTouchStart={onStart} onTouchEnd={onEnd} style={{ touchAction: 'pan-y',  display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
         {days.map(d => {
           const on = d === sel; const dt = new Date(`${d}T12:00:00`);
           const dots = eps.filter(e => e.air_date === d).slice(0, 4);
