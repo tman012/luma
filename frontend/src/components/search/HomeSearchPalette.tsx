@@ -83,6 +83,12 @@ export function Highlight({ text, q }: { text: string; q: string }) {
   return <>{out}</>;
 }
 
+/** A focusable control other than the search input: it handles its own Enter/Space. */
+export function isControl(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  return !!el?.closest?.('button, a[href], select, textarea, [role="button"], [role="tab"], [role="checkbox"]');
+}
+
 type Phase = 'idle' | 'loading' | 'done' | 'error';
 
 export function HomeSearchPalette() {
@@ -183,6 +189,8 @@ export function HomeSearchPalette() {
       const n = e.shiftKey ? (i <= 0 ? f.length - 1 : i - 1) : (i === f.length - 1 ? 0 : i + 1);
       e.preventDefault(); f[n]?.focus(); return;
     }
+    // Tester MED: Enter/Space on a focused control (Find More, ‹ Find More, Try again, chips) is that control's own click.
+    if ((e.key === 'Enter' || e.key === ' ') && isControl(e.target)) return;
     if (!rows.length) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); setHi(h => Math.min(rows.length - 1, h + 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(h => Math.max(0, h - 1)); }

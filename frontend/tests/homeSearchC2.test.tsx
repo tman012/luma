@@ -153,3 +153,48 @@ describe('C2 grouping', () => {
     expect(metaLine({ kind: 'person', item: { name: 'X', known_for_department: 'Acting' } })).toBe('Acting');
   });
 });
+
+describe('C2 Enter/Space on a focused control is that control only (Tester MED)', () => {
+  const setup = async () => {
+    mount(); act(() => openSearch());
+    await type('dune');
+    await waitFor(() => screen.getByTestId('search-results'));
+  };
+  for (const key of ['Enter', ' ']) {
+    const k = key === ' ' ? 'Space' : key;
+    it(`${k} on Find More opens no row`, async () => {
+      await setup();
+      const b = screen.getByTestId('find-more');
+      fireEvent.keyDown(b, { key });
+      expect(modals.openMovie).not.toHaveBeenCalled(); expect(modals.openTv).not.toHaveBeenCalled();
+      expect(screen.getByTestId('search-palette')).toBeTruthy();
+    });
+    it(`${k} on ‹ Find More opens no row`, async () => {
+      await setup();
+      fireEvent.click(screen.getByTestId('find-more'));
+      fireEvent.keyDown(screen.getByTestId('find-more-back'), { key });
+      expect(modals.openMovie).not.toHaveBeenCalled();
+      expect(screen.getByTestId('search-palette')).toBeTruthy();
+    });
+    it(`${k} on a chip opens no row`, async () => {
+      await setup();
+      fireEvent.keyDown(screen.getByRole('tab', { name: 'Movies' }), { key });
+      expect(modals.openMovie).not.toHaveBeenCalled();
+      expect(screen.getByTestId('search-palette')).toBeTruthy();
+    });
+    it(`${k} on Try again opens no row`, async () => {
+      mode = 'fail'; mount(); act(() => openSearch());
+      await type('dune');
+      await waitFor(() => screen.getByTestId('search-error'));
+      fireEvent.keyDown(screen.getByRole('button', { name: 'Try again' }), { key });
+      expect(modals.openMovie).not.toHaveBeenCalled();
+      expect(screen.getByTestId('search-palette')).toBeTruthy();
+    });
+  }
+  it('Enter in the input still opens the highlighted row', async () => {
+    await setup();
+    fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'Enter' });
+    expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ ratingKey: 1 }));
+  });
+});
+
