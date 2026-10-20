@@ -182,7 +182,7 @@ type UnifiedResult =
   | { kind: 'person'; item: SearchPerson };
 
 /** What fraction of query words appear (prefix-match) in the label? */
-function wordMatchRatio(query: string, label: string): number {
+export function wordMatchRatio(query: string, label: string): number {
   // Strip bare years (e.g. "Wrestlemania 2026") — years are backend filter hints,
   // not title words, so they shouldn't count against the match ratio.
   const strippedQuery = query.replace(/\b(?:19|20)\d{2}\b/g, '').trim();
@@ -211,7 +211,7 @@ function popSignal(entry: UnifiedResult): number {
   return raw;
 }
 
-const MIN_MATCH_RATIO = 0.5; // at least half of query words must match
+export const MIN_MATCH_RATIO = 0.5; // at least half of query words must match
 const MAX_ALL_RESULTS = 20;
 
 function relevanceScore(entry: UnifiedResult, query: string): number {

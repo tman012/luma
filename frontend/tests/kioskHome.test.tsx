@@ -94,7 +94,9 @@ describe('web kiosk home (>=1024px)', () => {
     const { container } = renderHome();
     await waitFor(() => screen.getByText('Movie 0'));
     const focusable = container.querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"]), [role="button"], input, select, textarea');
-    expect([...focusable].map(e => e.getAttribute('aria-label') || e.textContent)).toEqual(['Movie 0', 'Search', 'Account']);
+    // v215 C2: search is the hero pill after the header (logo + avatar only); the round header button is gone.
+    expect(container.querySelector('[data-testid="kiosk-header"] button[aria-label="Search"]')).toBeNull();
+    expect([...focusable].map(e => e.getAttribute('aria-label') || e.textContent)).toEqual(['Movie 0', 'Account', 'Search']);
     const hero = container.querySelector('[data-hero-display-only]') as HTMLElement;
     // The backdrop, plot and genres open nothing; a drag doesn't swipe.
     fireEvent.click(hero);

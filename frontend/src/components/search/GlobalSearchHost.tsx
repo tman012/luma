@@ -14,7 +14,8 @@
 import { useEffect, useRef } from 'react';
 import { KioskSearch, type KioskSearchHandle } from './KioskSearch';
 
-export function GlobalSearchHost() {
+/** v215: `palette` — the C2 palette owns `open-search`; this host only takes `search-query` (person views). */
+export function GlobalSearchHost({ palette = false }: { palette?: boolean } = {}) {
   const searchRef = useRef<KioskSearchHandle>(null);
 
   useEffect(() => {
@@ -27,13 +28,13 @@ export function GlobalSearchHost() {
         searchRef.current?.openSearch('', 'all');
       }
     };
-    window.addEventListener('open-search', onOpen);
+    if (!palette) window.addEventListener('open-search', onOpen);
     window.addEventListener('search-query', onQuery);
     return () => {
       window.removeEventListener('open-search', onOpen);
       window.removeEventListener('search-query', onQuery);
     };
-  }, []);
+  }, [palette]);
 
   return <KioskSearch ref={searchRef} />;
 }

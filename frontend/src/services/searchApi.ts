@@ -77,6 +77,8 @@ export interface SearchResults {
   unownedPeople: SearchPerson[];
   /** TMDb answered 429 recently, so new titles may be missing. */
   rateLimited?: boolean;
+  /** v215: both the library and TMDb requests failed (the palette shows "Couldn't search"). */
+  failed?: boolean;
 }
 
 /** Shown instead of "No results" while TMDb is rate limiting us. */
@@ -134,13 +136,14 @@ export async function performSearch(
   signal?: AbortSignal,
 ): Promise<SearchResults> {
   // Parallel fetch: library (owned) + TMDb (external)
+  let misses = 0;
+  const miss = (e: unknown) => {
+    if ((e as { name?: string })?.name !== 'AbortError') misses += 1;
+    return { movies: [], tv_shows: [], people: [] };
+  };
   const [libraryData, tmdbData] = await Promise.all([
-    apiFetch(`/api/library/search?q=${encodeURIComponent(query)}`, { signal })
-      .then((r) => r.json())
-      .catch(() => ({ movies: [], tv_shows: [], people: [] })),
-    apiFetch(`/search?q=${encodeURIComponent(query)}&type=all`, { signal })
-      .then((r) => r.json())
-      .catch(() => ({ movies: [], tv_shows: [], people: [] })),
+    apiFetch(`/api/library/search?q=${encodeURIComponent(query)}`, { signal }).then((r) => r.json()).catch(miss),
+    apiFetch(`/search?q=${encodeURIComponent(query)}&type=all`, { signal }).then((r) => r.json()).catch(miss),
   ]);
 
   // -- Owned results (from Plex) --
@@ -184,7 +187,7 @@ export async function performSearch(
       return (b.popularity ?? 0) - (a.popularity ?? 0);
     });
 
-  return { owned, unowned, ownedPeople, unownedPeople, rateLimited: !!tmdbData.rate_limited };
+  return { owned, unowned, ownedPeople, unownedPeople, rateLimited: !!tmdbData.rate_limited, failed: misses === 2 };
 }
 
 // ---------------------------------------------------------------------------
