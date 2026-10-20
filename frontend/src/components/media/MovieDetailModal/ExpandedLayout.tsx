@@ -685,7 +685,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
         }}
       >
         {/* ⓘ File Info — sits just left of the close X (44px chip + 12px gap) */}
-        {canShowFileInfo && !isMinimal() && (
+        {/* v216 (Designer): prod 1b4ea74's file-info button shows in minimal builds too (owned state). */}
+        {canShowFileInfo && (
           <FileInfoButton
             top={t.close.top}
             right={`calc(${t.close.right} + 56px)`}

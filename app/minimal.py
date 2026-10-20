@@ -54,7 +54,9 @@ ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts
                     # Per-section tracker lists (owner only; the routes check).
                     '/api/settings/sections/',
                     # TV library paths, scan, shows and fix-match (owner only; the routes check).
-                    '/api/settings/tv/', '/api/settings/movies/', '/api/movies/watchlist/')
+                    '/api/settings/tv/', '/api/settings/movies/', '/api/movies/watchlist/',
+                    # v216: the file-info sheet's Fix Match (admin only; the routes check).
+                    '/api/plex/match/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).
 # GET only, sign-in required like everything else in minimal mode.
 DETAIL_READ_PREFIXES = (
@@ -62,6 +64,8 @@ DETAIL_READ_PREFIXES = (
     '/api/plex/ratings/', '/api/plex/ultrablur/', '/api/tmdb/colors/',
     '/api/clearlogo/', '/api/plex/lookup', '/api/plex/episode/',
     '/api/tmdb/person_by_id/',
+    # v216: the wide popup's file-info (i) sheet, prod 1b4ea74's (signed-in; the route checks).
+    '/api/plex/file-info/',
 )
 # v180: prod's library ownership (Plex match) on test. These are the routes the
 # owned Play/Watch and Home's owned orbs read; every one was already on above
