@@ -261,7 +261,7 @@ def candidates(items: List[Dict[str, Any]], show: Dict[str, Any], want: List[Dic
         if tv_match.normalize(rel.title or '') not in show['names']:
             _rej(title, 'title does not match the show')
             continue
-        if rel.year and show.get('year') and rel.year != show['year']:
+        if rel.year and show.get('year') and rel.year != show['year'] and str(rel.year) not in {str(e.get('air_date') or '')[:4] for e in want}:
             _rej(title, f'year {rel.year} is not {show["year"]}')
             continue
         covers: List[int] = []
