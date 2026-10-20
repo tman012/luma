@@ -966,20 +966,33 @@ def tick(now: Optional[float] = None) -> Dict[str, Any]:
     if not _lock.acquire(blocking=False):
         return out
     try:
-        try:
-            out['refreshed'] = refresh(now)
-        except Exception as e:                       # noqa: BLE001 - TMDB trouble never stops searching
-            logger.warning('TV series refresh failed: %s', type(e).__name__)
-        if not auto_on():
-            return out
-        out['scheduled'] = schedule(now)
-        if automation().get('feed_enabled') and now - float(tv_store.get_meta('tv_feed_at') or 0) >= FEED_S:
-            tv_store.set_meta('tv_feed_at', str(now))
-            out['feed'] = feed(now)
-        out['due'] = run_due(now)
+        if auto_on():                                # v196b: searches first; a long TMDB refresh never delays them
+            out['scheduled'] = schedule(now)
+            if automation().get('feed_enabled') and now - float(tv_store.get_meta('tv_feed_at') or 0) >= FEED_S:
+                tv_store.set_meta('tv_feed_at', str(now))
+                out['feed'] = feed(now)
+            out['due'] = run_due(now)
     finally:
         _lock.release()
+    if _refresh_running['on']:
+        return out
+    _refresh_running['on'] = True
+
+    def _bg():
+        try:
+            refresh(time.time())
+        except Exception as e:                       # noqa: BLE001 - TMDB trouble never stops searching
+            logger.warning('TV series refresh failed: %s', type(e).__name__)
+        finally:
+            _refresh_running['on'] = False
+    if os.environ.get('LUMA_SKIP_BACKGROUND_THREADS') or threading.current_thread().name != 'tv-search':
+        _bg()                                        # tests and direct calls: inline
+    else:
+        threading.Thread(target=_bg, name='tv-refresh', daemon=True).start()
     return out
+
+
+_refresh_running = {'on': False}
 
 
 def status(now: Optional[float] = None) -> Dict[str, Any]:
