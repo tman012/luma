@@ -1,0 +1,365 @@
+"""v204 (movie piece 4): completed movie downloads are imported into the Movies library (test only).
+
+Every INTERVAL_S on LUMA_INSTANCE=test: completed torrents in the download client with the movie category or
+tag (LUMA_MOVIE_CATEGORY, default 'movie') are matched to a watchlist movie through their movie_grabs row
+(by info hash; piece 3 writes it). The biggest video file is COPIED (never moved; the source is never touched
+or deleted) into the Movies root (Settings > Movies, meta 'library_root') under the Movies naming (meta
+'naming'; default Taylor's Radarr export: '{Movie Title} ({Release Year})' folder and
+'{Movie Title} ({Release Year}) {Quality Full}' file, smart colon replacement, illegal characters replaced).
+The copy goes to a temporary name in the movie folder, is verified (size and sha256 against the source), then
+linked into place with an exclusive create, so an existing file is never overwritten (a different file
+already there: refused). Only after that is the grab marked 'imported' and the movie taken off the watchlist.
+
+Routes (test only, else 404; reading needs the owner, changes and a manual run need the signed-in owner):
+GET  /api/settings/movies/import        {root, naming, grabs}
+PUT  /api/settings/movies/import        {root?, naming?: {standard, folder}}
+POST /api/settings/movies/import/run    one pass now -> {checked, imported}
+"""
+from __future__ import annotations
+
+import hashlib
+import logging
+import os
+import re
+import threading
+import time
+from typing import Any, Callable, Dict, List, Optional
+
+import requests
+from flask import Blueprint, request
+
+from app import instance, movie_grabs, movie_settings as ms
+
+logger = logging.getLogger(__name__)
+bp = Blueprint('movie_import', __name__)
+
+CATEGORY_ENV = 'LUMA_MOVIE_CATEGORY'
+DEFAULT_CATEGORY = 'movie'
+INTERVAL_S = 60
+VIDEO_EXT = ('.mkv', '.mp4', '.avi', '.m4v', '.ts', '.mov', '.wmv')
+PART = '.lumapart'
+# Taylor's Radarr export (/workspace/luma-tv1/radarr-export/NamingConfig.json): ColonReplacementFormat 4 = smart
+DEFAULT_NAMING: Dict[str, Any] = {
+    'standard': '{Movie Title} ({Release Year}) {Quality Full}',
+    'folder': '{Movie Title} ({Release Year})',
+    'colon_replacement': 'smart', 'replace_illegal': True,
+}
+_lock = threading.Lock()
+
+
+class Skip(Exception):
+    """Not now (left for a later pass)."""
+
+
+class Refused(Exception):
+    """Never (the grab is marked failed with the reason)."""
+
+
+# ------------------------------------------------------------------ settings
+
+def category() -> str:
+    return (os.environ.get(CATEGORY_ENV) or '').strip() or DEFAULT_CATEGORY
+
+
+def root() -> str:
+    with ms.connect() as conn:
+        return str(ms._meta(conn, 'library_root', '') or '')
+
+
+def naming() -> Dict[str, Any]:
+    with ms.connect() as conn:
+        raw = ms._meta(conn, 'naming', {}) or {}
+    out = dict(DEFAULT_NAMING)
+    for k in ('standard', 'folder'):
+        if isinstance(raw.get(k), str) and raw[k].strip():
+            out[k] = raw[k].strip()[:300]
+    return out
+
+
+def save_settings(body: Any) -> Dict[str, str]:
+    errors: Dict[str, str] = {}
+    if not isinstance(body, dict):
+        return {'body': 'Invalid'}
+    upd: Dict[str, Any] = {}
+    if 'root' in body:
+        r = body['root']
+        if not isinstance(r, str) or not r.startswith('/') or '\x00' in r or len(r) > 1024:
+            errors['root'] = 'Use a full folder path'
+        elif not os.path.isdir(r):
+            errors['root'] = 'Folder not found'
+        else:
+            upd['library_root'] = os.path.normpath(r)
+    if 'naming' in body:
+        n = body['naming']
+        if not isinstance(n, dict) or any(k not in ('standard', 'folder') or not isinstance(v, str) or '/' in v for k, v in n.items()):
+            errors['naming'] = 'Invalid'
+        else:
+            upd['naming'] = {k: v.strip()[:300] for k, v in n.items() if v.strip()}
+    if errors:
+        return errors
+    with ms.connect() as conn:
+        for k, v in upd.items():
+            ms._set_meta(conn, k, v)
+    return {}
+
+
+# ------------------------------------------------------------------ naming
+
+def _quality(release: str):
+    from app import tv_monitor, tv_naming
+    q = tv_monitor.quality_of(release)
+    return tv_naming.quality_full(q, bool(re.search(r'\b(proper|repack)\b', release, re.I)), release), q
+
+
+def render(fmt: str, title: str, year: Optional[int], release: str, cfg: Optional[Dict[str, Any]] = None) -> str:
+    from app import tv_monitor, tv_naming
+    cfg = cfg or DEFAULT_NAMING
+    full, q = _quality(release)
+    vals = {'movie title': title, 'movie cleantitle': tv_naming.clean_title(title), 'release year': str(year or ''),
+            'quality full': full, 'quality title': tv_monitor.quality_label(q) or ''}
+    out = re.sub(r'\{([^{}]+)\}', lambda m: vals.get(m.group(1).strip().lower(), ''), fmt)
+    out = tv_naming.clean_text(out, {'colon_replacement': cfg.get('colon_replacement', 'smart'),
+                                     'replace_illegal': cfg.get('replace_illegal', True)})
+    out = re.sub(r'\(\s*\)|\[\s*\]', '', out)               # an empty year or token
+    out = re.sub(r'\s+', ' ', out).strip(' .-')
+    if not out or out in ('.', '..') or '/' in out or '\x00' in out:
+        raise Refused('unsafe file name')
+    return out
+
+
+# ------------------------------------------------------------------ copy
+
+def _sha256(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for b in iter(lambda: f.read(1 << 20), b''):
+            h.update(b)
+    return h.hexdigest()
+
+
+def copy_verified(src: str, dest: str) -> str:
+    """Copy *src* to *dest* without ever overwriting: 'copied', or 'exists' when the same file is already there.
+    The source is only read. A different file at *dest* raises Refused."""
+    if os.path.lexists(dest):
+        if os.path.isfile(dest) and not os.path.islink(dest) and os.path.getsize(dest) == os.path.getsize(src) \
+                and _sha256(dest) == _sha256(src):
+            return 'exists'
+        raise Refused('a different file is already there')
+    tmp = dest + PART
+    if os.path.lexists(tmp):
+        os.unlink(tmp)                                     # only our own leftover temp name
+    try:
+        with open(src, 'rb') as fi, open(tmp, 'xb') as fo:
+            for b in iter(lambda: fi.read(1 << 20), b''):
+                fo.write(b)
+            fo.flush()
+            os.fsync(fo.fileno())
+        if os.path.getsize(tmp) != os.path.getsize(src) or _sha256(tmp) != _sha256(src):
+            raise OSError('copy did not verify')
+        os.link(tmp, dest)                                 # exclusive: fails if dest appeared meanwhile
+    except FileExistsError:
+        raise Refused('a different file is already there')
+    finally:
+        if os.path.lexists(tmp):
+            os.unlink(tmp)
+    return 'copied'
+
+
+# ------------------------------------------------------------------ import
+
+def _video(content: str) -> str:
+    if os.path.islink(content):
+        raise Refused('symlink')
+    if os.path.isfile(content):
+        if content.lower().endswith(VIDEO_EXT):
+            return content
+        raise Refused('no video file')
+    if not os.path.isdir(content):
+        raise Skip('download not found')
+    best, size = '', -1
+    for d, dirs, files in os.walk(content):
+        dirs[:] = [x for x in dirs if x.lower() not in ('sample', 'samples', 'extras')]
+        for f in files:
+            p = os.path.join(d, f)
+            if f.lower().endswith(VIDEO_EXT) and 'sample' not in f.lower() and not os.path.islink(p):
+                s = os.path.getsize(p)
+                if s > size:
+                    best, size = p, s
+    if not best:
+        raise Refused('no video file')
+    return best
+
+
+def _watch(tmdb_id: int) -> Optional[Dict[str, Any]]:
+    with ms.connect() as conn:
+        r = conn.execute('SELECT * FROM watchlist WHERE tmdb_id = ?', (tmdb_id,)).fetchone()
+        return dict(r) if r else None
+
+
+def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[str], str]] = None,
+               now: Optional[float] = None) -> Dict[str, Any]:
+    """File one completed torrent. Returns {state, path, how}. Raises Skip / Refused."""
+    now = time.time() if now is None else now
+    h = str(t.get('hash') or '').lower()
+    g = movie_grabs.by_hash(h)
+    if not g:
+        raise Skip('no movie grab for this download')
+    if g['state'] == 'imported':
+        return {'state': 'imported', 'path': g['path'], 'how': 'done'}
+    m = _watch(g['tmdb_id'])
+    title, year = (m['title'], m['year']) if m else (None, None)
+    if not title:
+        raise Refused('movie not on the watchlist')
+    content = str(t.get('content_path') or '')
+    content = path_map(content) if path_map else content
+    if not content.startswith('/'):
+        raise Skip('no download path')
+    src = _video(os.path.realpath(content) if not os.path.islink(content) else content)
+    if not lib_root or not os.path.isdir(lib_root) or not os.access(lib_root, os.W_OK | os.X_OK):
+        raise Skip('movies folder not available')
+    rr, sr = os.path.realpath(lib_root), os.path.realpath(src)
+    if sr.startswith(rr + os.sep) or rr.startswith(os.path.realpath(os.path.dirname(sr)) + os.sep):
+        raise Refused('download and library overlap')
+    cfg = naming()
+    release = str(g['release_title'] or t.get('name') or '')
+    folder = render(cfg['folder'], title, year, release, cfg)
+    fname = render(cfg['standard'], title, year, release, cfg) + os.path.splitext(src)[1].lower()
+    dest_dir = os.path.join(rr, folder)
+    if os.path.realpath(os.path.dirname(dest_dir)) != rr:
+        raise Refused('unsafe file name')
+    movie_grabs.set_state(h, 'importing', now=now)
+    os.makedirs(dest_dir, exist_ok=True)
+    dest = os.path.join(dest_dir, fname)
+    how = copy_verified(src, dest)
+    # verified: only now is the grab imported and the movie off the watchlist
+    movie_grabs.set_state(h, 'imported', path=dest, now=now)
+    with ms.connect() as conn:
+        conn.execute('DELETE FROM watchlist WHERE tmdb_id = ?', (g['tmdb_id'],))
+    logger.info('Movie import: %s -> %s (%s)', t.get('name'), dest, how)
+    return {'state': 'imported', 'path': dest, 'how': how}
+
+
+def _torrents(session_factory: Callable = requests.Session, now: Optional[float] = None) -> Optional[List[Dict[str, Any]]]:
+    from app import library_mover as mover
+    sess, url = mover._qbit_session(session_factory, now)
+    if not sess:
+        return None
+    try:
+        name, seen, out = category(), set(), []
+        for params in ({'category': name, 'filter': 'completed'}, {'tag': name, 'filter': 'completed'}):
+            try:
+                r = sess.get(f'{url}/api/v2/torrents/info', params=params, timeout=10, allow_redirects=False)
+                got = r.json() if r.status_code == 200 else None
+            except (requests.RequestException, ValueError):
+                got = None
+            if not isinstance(got, list):
+                return None
+            for t in got:
+                h = str((t or {}).get('hash') or '').lower() if isinstance(t, dict) else ''
+                if h and h not in seen:
+                    seen.add(h)
+                    out.append(t)
+        return out
+    finally:
+        mover._close(sess)
+
+
+def _is_movie(t: Dict[str, Any]) -> bool:
+    name = category().casefold()
+    tags = {x.strip().casefold() for x in str(t.get('tags') or '').split(',') if x.strip()}
+    return str(t.get('category') or '').casefold() == name or name in tags
+
+
+def _complete(t: Dict[str, Any]) -> bool:
+    try:
+        return float(t.get('progress') or 0) >= 1.0 and float(t.get('amount_left') or 0) == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def tick(now: Optional[float] = None, fetch: Optional[Callable[[], Optional[List[Dict[str, Any]]]]] = None,
+         path_map: Optional[Callable[[str], str]] = None) -> Dict[str, int]:
+    """One pass (test only). *fetch* returns the completed torrents (default: qBittorrent)."""
+    now = time.time() if now is None else now
+    out = {'checked': 0, 'imported': 0}
+    if not instance.is_test():
+        return out
+    lib = root()
+    if not lib or not _lock.acquire(blocking=False):
+        return out
+    try:
+        if path_map is None:
+            from app import file_management as fm
+            pm = fm.load().get('path_map') or []
+            path_map = lambda p: fm.map_path(p, pm)  # noqa: E731
+        torrents = (fetch or _torrents)() or []
+        for t in torrents:
+            if not isinstance(t, dict) or not _is_movie(t) or not _complete(t):
+                continue
+            g = movie_grabs.by_hash(str(t.get('hash') or ''))
+            if not g or g['state'] in ('imported', 'failed'):
+                continue
+            out['checked'] += 1
+            try:
+                if import_one(t, lib, path_map, now)['state'] == 'imported':
+                    out['imported'] += 1
+            except Refused as e:
+                movie_grabs.set_state(g['hash'], 'failed', error=str(e), now=now)
+                logger.info('Movie import: %s refused (%s)', t.get('name'), e)
+            except Skip as e:
+                movie_grabs.set_state(g['hash'], 'grabbed', error=str(e), now=now)
+            except OSError as e:
+                movie_grabs.set_state(g['hash'], 'grabbed', error=f'file error ({type(e).__name__})', now=now)
+                logger.warning('Movie import: %s file error %s', t.get('name'), type(e).__name__)
+    finally:
+        _lock.release()
+    return out
+
+
+_started = False
+
+
+def start() -> bool:
+    global _started
+    if _started or not instance.is_test():
+        return False
+    _started = True
+
+    def loop():
+        while True:
+            time.sleep(INTERVAL_S)
+            try:
+                tick()
+            except Exception:                          # noqa: BLE001 - the loop never dies
+                logger.exception('Movie import pass failed')
+    threading.Thread(target=loop, name='movie-import', daemon=True).start()
+    return True
+
+
+# ------------------------------------------------------------------ routes
+
+def _guard(write: bool = False):
+    if not instance.is_test():
+        return ms._out({'error': 'Not found'}, 404)
+    return ms._guard(write)
+
+
+@bp.route('/api/settings/movies/import', methods=['GET'])
+def import_get():
+    return _guard() or ms._out({'root': root(), 'naming': naming(), 'grabs': movie_grabs.all_rows()})
+
+
+@bp.route('/api/settings/movies/import', methods=['PUT'])
+def import_put():
+    bad = _guard(write=True)
+    if bad:
+        return bad
+    errors = save_settings(request.get_json(silent=True))
+    if errors:
+        return ms._out({'errors': errors}, 400)
+    return ms._out({'root': root(), 'naming': naming()})
+
+
+@bp.route('/api/settings/movies/import/run', methods=['POST'])
+def import_run():
+    return _guard(write=True) or ms._out(tick())

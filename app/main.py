@@ -21712,6 +21712,12 @@ from app import movie_settings as _movie_settings  # noqa: E402  v198: Settings 
 app.register_blueprint(_movie_settings.bp)
 from app import movie_watchlist as _movie_watchlist  # noqa: E402  v202: the native movie watchlist (test only)
 app.register_blueprint(_movie_watchlist.bp)
+from app import movie_import as _movie_import  # noqa: E402  v204: movie import and rename (test only)
+app.register_blueprint(_movie_import.bp)
+try:
+    _movie_import.start()       # v204: 1-min movie import pass (test only)
+except Exception:  # noqa: BLE001
+    logger.exception("Movie import not started")
 _tv_settings.migrate_on_start()   # TV paths of earlier builds become Library path selections
 
 # TV library scan (Phase 1): TMDB key from Settings > Connectors.
