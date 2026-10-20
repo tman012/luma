@@ -490,21 +490,24 @@ const relGrid: React.CSSProperties = {
 const cellText: React.CSSProperties = { fontSize: 13, color: W70, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 
 /** v187 phone: the episode row menu as a bottom sheet (scrim tap, swipe down or Escape closes). */
-function EpisodeSheet({ heading, title, sub, monitored, onClose, onSearch, onInteractive, onMonitor }: {
+export function EpisodeSheet({ heading, title, sub, monitored, onClose, onSearch, onInteractive, onMonitor }: {
   heading: string; title: string; sub: string; monitored: boolean;
   onClose: () => void; onSearch: () => void; onInteractive: () => void; onMonitor: () => void;
 }) {
   const ref = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLHeadingElement | null>(null);
-  const swipe = useSwipeToDismiss({ scrollRef: ref, onDismiss: onClose });
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const swipe = useSwipeToDismiss({ scrollRef: ref, onDismiss: () => closeRef.current() });
+  // runs on open and close only: a parent re-render (a new inline onClose) must not move focus or toggle the scroll lock
   useEffect(() => {
     const back = document.activeElement as HTMLElement | null;
     const prev = document.body.style.overflow; document.body.style.overflow = 'hidden';
     titleRef.current?.focus();
-    const key = (ev: KeyboardEvent) => { if (ev.key === 'Escape') onClose(); };
+    const key = (ev: KeyboardEvent) => { if (ev.key === 'Escape') closeRef.current(); };
     window.addEventListener('keydown', key);
     return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', key); back?.focus?.(); };
-  }, [onClose]);
+  }, []);
   const act: React.CSSProperties = { height: 56, width: '100%', borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: GLASS,
     color: W95, fontFamily: FONT, fontSize: 16, fontWeight: 600, textAlign: 'left', padding: '0 16px', cursor: 'pointer' };
   return (
