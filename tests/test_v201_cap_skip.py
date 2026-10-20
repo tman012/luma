@@ -64,3 +64,21 @@ def test_every_tracker_capped_the_episode_waits_for_the_earliest_reset(scanned):
     tv_search._after(1, [{'id': eid, 'air_date': None, 'airstamp': None}], out, T, automatic=True)
     with tv_store.connect() as conn:
         assert conn.execute('SELECT next_search_at FROM episodes WHERE id = ?', (eid,)).fetchone()[0] != T + 200
+
+
+def test_v203_schedule_leaves_a_cap_reset_time_alone(scanned):  # noqa: F811
+    import datetime as dt
+    stamp = dt.datetime.fromtimestamp(T - 600, dt.timezone.utc)
+    with tv_store.write() as conn:
+        conn.execute('DELETE FROM episode_file_links')
+        eid = conn.execute('SELECT id FROM episodes ORDER BY id LIMIT 1').fetchone()['id']
+        conn.execute('UPDATE series SET monitored = 1')
+        conn.execute('UPDATE episodes SET monitored = 1, last_search_at = NULL, next_search_at = NULL,'
+                     ' airstamp = ?, air_date = ?, runtime = 30 WHERE id = ?',
+                     (stamp.isoformat(), stamp.date().isoformat(), eid))
+    assert tv_search.schedule(T) >= 1                                     # never searched: due at air time
+    out = {'picks': [], 'answered': False, 'statuses': [{'id': 1, 'status': tv_search.SLOT_BUSY, 'reset_at': T + 5000}]}
+    tv_search._after(1, [{'id': eid}], out, T, automatic=True)
+    tv_search.schedule(T + 60)                                            # the next pass
+    with tv_store.connect() as conn:
+        assert conn.execute('SELECT next_search_at FROM episodes WHERE id = ?', (eid,)).fetchone()[0] == T + 5000

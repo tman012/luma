@@ -394,7 +394,10 @@ def _after(sid: int, want: List[Dict[str, Any]], out: Dict[str, Any], now: float
             elif automatic and out['statuses'] and all(st['status'] == SLOT_BUSY for st in out['statuses']):
                 # v201 (PM): every tracker is at its daily cap: wait for the earliest reset, not every pass
                 reset = min(st.get('reset_at') or now for st in out['statuses'])
-                conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (max(reset, now), e['id']))
+                # v203 (Reviewer on c7ca1d8): last_search_at is set too, so schedule() (never-searched rows
+                # only) leaves this cap-reset time alone instead of pulling it back to air time next pass
+                conn.execute('UPDATE episodes SET next_search_at = ?, last_search_at = COALESCE(last_search_at, ?)'
+                             ' WHERE id = ?', (max(reset, now), now, e['id']))
             elif out.get('answered'):
                 nxt = _next_retry(e, now) if automatic else None
                 conn.execute('UPDATE episodes SET last_search_at = ?, search_attempts = search_attempts + 1,'
