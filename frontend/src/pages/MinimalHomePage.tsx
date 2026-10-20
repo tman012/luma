@@ -155,7 +155,8 @@ export const homePage: React.CSSProperties = {
   minHeight: '100dvh', color: '#fff', fontFamily: FONT, WebkitFontSmoothing: 'antialiased',
   background: NAVY_BG, backgroundAttachment: 'fixed',
 };
-const page = homePage;
+/** v213 (Designer): the home page behind the rails is prod 1b4ea74's flat navy, no glow (settings keep homePage's). */
+const page: React.CSSProperties = { ...homePage, background: 'var(--color-kiosk-black)', backgroundAttachment: undefined };
 export const homeBar: React.CSSProperties = {
   position: 'sticky', top: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
   padding: 'calc(env(safe-area-inset-top) + 12px) 20px 12px',

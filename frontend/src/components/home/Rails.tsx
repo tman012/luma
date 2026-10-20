@@ -9,11 +9,11 @@ export const GLASS: React.CSSProperties = {
   background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
 };
 
-export function RailRow({ title, children, testId }: { title: string; children: React.ReactNode; testId?: string }) {
+export function RailRow({ title, children, testId, prod }: { title: string; children: React.ReactNode; testId?: string; prod?: boolean }) {
   return (
-    <section style={railWrap} data-testid={testId}>
-      <h2 style={railTitle}>{title}</h2>
-      <div style={scroller} className="luma-rail">{children}</div>
+    <section style={prod ? wlRailWrap : railWrap} data-testid={testId}>
+      <h2 style={prod ? wlRailTitle : railTitle}>{title}</h2>
+      <div style={prod ? wlScroller : scroller} className="luma-rail">{children}</div>
     </section>
   );
 }
@@ -86,6 +86,24 @@ export function PosterCard({ card, onOpen, own }: { card: Card; onOpen?: OnOpen;
   );
 }
 
+/** v213 (Designer): the Watchlist rail card is prod 1b4ea74's AuthenticatedHomePage poster card as is: 116x174,
+ * radius 10, no border; label 10/600 above a 12/500 title and a 10px year, prod's font stack. */
+export function WatchlistPosterCard({ card, onOpen }: { card: Card; onOpen?: OnOpen }) {
+  const src = img(card.poster);
+  return (
+    <CardShell card={card} onOpen={onOpen} style={wlCard}>
+      <div style={wlPoster}>
+        {src && <img src={src} alt="" loading="lazy" style={fill} draggable={false} />}
+      </div>
+      <div style={wlText}>
+        {card.label && <p style={wlLabel} data-testid="card-label">{card.label}</p>}
+        <p style={wlTitle}>{card.title}</p>
+        {card.subtitle && <p style={wlSub}>{card.subtitle}</p>}
+      </div>
+    </CardShell>
+  );
+}
+
 export function WideCard({ card, onOpen, own }: { card: Card; onOpen?: OnOpen; own?: CardOwnership }) {
   const src = img(card.art || card.poster);
   const pct = Math.max(0, Math.min(1, card.progress || 0));
@@ -135,8 +153,8 @@ export function HomeRails({ cw, rails, onOpen }: { cw: Card[]; rails: Rail[]; on
         </RailRow>
       )}
       {rails.filter(r => r.items.length > 0).map(r => (
-        <RailRow key={r.id} title={r.title} testId={`rail-${r.id}`}>
-          {r.items.map(c => <PosterCard key={c.key} card={c} onOpen={onOpen} own={c.tmdb_id && !c.label && !c.key.startsWith('watchlist-') ? own[c.key] : undefined} />)}
+        <RailRow key={r.id} title={r.title} testId={`rail-${r.id}`} prod={r.id === 'watchlist'}>
+          {r.id === 'watchlist' ? r.items.map(c => <WatchlistPosterCard key={c.key} card={c} onOpen={onOpen} />) : r.items.map(c => <PosterCard key={c.key} card={c} onOpen={onOpen} own={c.tmdb_id && !c.label && !c.key.startsWith('watchlist-') ? own[c.key] : undefined} />)}
         </RailRow>
       ))}
     </div>
@@ -178,10 +196,34 @@ const cardTitle: React.CSSProperties = {
 };
 // Prod MobilePosterCard digitalReleaseLabel: 9px semibold, wide tracking, white/70, centered, mt-1.
 const cardLabel: React.CSSProperties = {
-  marginTop: 4, fontSize: 9, fontWeight: 600, letterSpacing: '0.025em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.7)',
+  marginTop: 4, fontSize: 9, fontWeight: 600, letterSpacing: '0.025em', color: 'rgba(255,255,255,0.7)',
   textAlign: 'center', fontFamily: FONT,
 };
 const cardSub: React.CSSProperties = { marginTop: 2, fontSize: 12, color: 'rgba(255,255,255,0.5)', fontFamily: FONT };
 const barTrack: React.CSSProperties = { position: 'absolute', left: 10, right: 10, bottom: 10, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.25)' };
 const barFill: React.CSSProperties = { height: '100%', borderRadius: 2, background: '#3b82f6' };
 const skel: React.CSSProperties = { borderRadius: 12 };
+
+/** Prod 1b4ea74's font stack (Tailwind's default sans, inherited by its home page). */
+export const PROD_FONT = 'ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"';
+const wlRailWrap: React.CSSProperties = { marginTop: 28, fontFamily: PROD_FONT };
+const wlRailTitle: React.CSSProperties = {
+  margin: '0 12px 12px', fontSize: 18, fontWeight: 600, color: 'rgba(255,255,255,0.92)', letterSpacing: '-0.3px', fontFamily: PROD_FONT,
+};
+const wlScroller: React.CSSProperties = {
+  display: 'flex', gap: 12, paddingLeft: 12, paddingRight: 12, overflowX: 'auto', paddingBottom: 8,
+};
+const wlCard: React.CSSProperties = { flexShrink: 0, width: 116, fontFamily: PROD_FONT };
+const wlPoster: React.CSSProperties = {
+  position: 'relative', width: 116, height: 174, borderRadius: 10, overflow: 'hidden', background: 'rgba(255,255,255,0.06)',
+};
+const wlText: React.CSSProperties = { marginTop: 6, width: 116 };
+const wlLabel: React.CSSProperties = {
+  margin: '0 0 2px', fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase',
+  color: 'rgba(255,255,255,0.7)', textAlign: 'center', lineHeight: 1.2,
+};
+const wlTitle: React.CSSProperties = {
+  margin: 0, fontSize: 12, fontWeight: 500, color: 'rgba(255,255,255,0.88)', whiteSpace: 'nowrap', overflow: 'hidden',
+  textOverflow: 'ellipsis', lineHeight: 1.3,
+};
+const wlSub: React.CSSProperties = { margin: '2px 0 0', fontSize: 10, color: 'rgba(255,255,255,0.38)' };

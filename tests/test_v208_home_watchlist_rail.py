@@ -78,8 +78,23 @@ def test_v212_date_label_all_caps_like_prod_with_guard_exemption():
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent
     r = (root / 'frontend/src/components/home/Rails.tsx').read_text()
-    i = r.index('const cardLabel')
+    i = r.index('const wlLabel')
     assert "textTransform: 'uppercase'" in r[i:r.index('};', i)]
     assert r.count("textTransform: 'uppercase'") == 1
     g = (root / 'frontend/tests/sentenceCaseGuard.test.ts').read_text()
     assert 'PROD_MATCHED_UPPERCASE' in g and 'prodUpper' in g
+
+
+def test_v213_watchlist_rail_is_prods_card_flat_navy_and_font():
+    """Designer: prod 1b4ea74's AuthenticatedHomePage poster card values, no border, flat navy page, prod's font stack."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    r = (root / 'frontend/src/components/home/Rails.tsx').read_text()
+    for v in ("width: 116, height: 174, borderRadius: 10", "marginTop: 6, width: 116",
+              "margin: '0 0 2px', fontSize: 10, fontWeight: 600, letterSpacing: '0.04em'",
+              "margin: 0, fontSize: 12, fontWeight: 500", "margin: '2px 0 0', fontSize: 10, color: 'rgba(255,255,255,0.38)'",
+              'ui-sans-serif, system-ui, sans-serif', "prod={r.id === 'watchlist'}"):
+        assert v in r, v
+    i = r.index('const wlPoster'); assert 'border' not in r[i:r.index('};', i)].replace('borderRadius', '')
+    h = (root / 'frontend/src/pages/MinimalHomePage.tsx').read_text()
+    assert "const page: React.CSSProperties = { ...homePage, background: 'var(--color-kiosk-black)'" in h
