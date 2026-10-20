@@ -353,3 +353,31 @@ describe('v187 phone detail and episode sheet', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('v196 phone interactive sheet', () => {
+  it('opens full screen from the episode sheet, sorts, expands one row, and a grab closes it', async () => {
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(max-width: 767px)', addEventListener() {}, removeEventListener() {} }));
+    render(<MemoryRouter><TvSeriesDetail seriesId={1} wide={false} onBack={() => {}} say={() => {}} /></MemoryRouter>);
+    await screen.findByTestId('tv-detail-backrow');
+    fireEvent.click(screen.getAllByTestId('tv-detail-episode-menu')[0]!);
+    fireEvent.click(screen.getByTestId('tv-sheet-interactive'));
+    const sheet = await screen.findByTestId('tv-interactive');
+    expect(sheet.getAttribute('role')).toBe('dialog');
+    await within(sheet).findAllByTestId('tv-interactive-row');
+    expect(within(sheet).getByTestId('tv-interactive-count').textContent).toMatch(/2 releases$/);
+    const titles = () => within(sheet).getAllByTestId('tv-interactive-row').map(r => r.textContent || '');
+    expect(titles()[0]).toContain('S02E02');            // seeders, descending
+    fireEvent.click(within(sheet).getByTestId('tv-interactive-sort-size'));
+    expect(titles()[0]).toContain('S02E01');
+    const toggles = within(sheet).getAllByTestId('tv-interactive-toggle');
+    fireEvent.click(toggles[1]!);
+    expect(within(sheet).getAllByTestId('tv-interactive-grab')).toHaveLength(1);
+    fireEvent.click(toggles[0]!);                        // one row open at a time
+    expect(within(sheet).getAllByTestId('tv-interactive-grab')).toHaveLength(1);
+    fireEvent.click(toggles[1]!);
+    fireEvent.click(within(sheet).getByTestId('tv-interactive-grab'));
+    await waitFor(() => expect(screen.queryByTestId('tv-interactive')).toBeNull());
+    expect(calls.some(c => c.url.endsWith('/interactive/grab'))).toBe(true);
+    vi.unstubAllGlobals();
+  });
+});

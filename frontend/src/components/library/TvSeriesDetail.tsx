@@ -92,7 +92,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   const [editing, setEditing] = useState(false);
   const phoneQ = usePhone();
   const [menu, setMenu] = useState<number | null>(null);
-  const [interactive, setInteractive] = useState<{ target: SearchTarget; label: string } | null>(null);
+  const [interactive, setInteractive] = useState<{ target: SearchTarget; label: string; epTitle?: string } | null>(null);
   const live = useRef(true);
   useEffect(() => () => { live.current = false; }, []);
   const [onSearch, searchAsk] = useMonitorSearch(say);
@@ -267,7 +267,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
             sub={[DETAIL_STATE_WORD[e.state], airET(e)].filter(Boolean).join(' \u00b7 ')} monitored={e.monitored}
             onClose={() => setMenu(null)}
             onSearch={() => { setMenu(null); void search({ episode_id: e.id }, c); }}
-            onInteractive={() => { setMenu(null); setInteractive({ target: { episode_id: e.id }, label: `${view.title} \u00b7 ${c}` }); }}
+            onInteractive={() => { setMenu(null); setInteractive({ target: { episode_id: e.id }, label: `${view.title} \u00b7 ${c}`, epTitle: e.title || `Episode ${e.episode}` }); }}
             onMonitor={() => { setMenu(null); void monitorEpisode(e.id, !e.monitored); }} />
         );
       })()}
@@ -277,7 +277,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
           onSaved={() => changed()} onDeleted={() => { onChanged?.(); onBack(); }} />
       )}
       {interactive && (
-        <InteractiveModal seriesId={view.id} target={interactive.target} title={interactive.label} wide={wide}
+        <InteractiveModal seriesId={view.id} target={interactive.target} title={interactive.label} wide={wide} phone={phone} epTitle={interactive.epTitle}
           onClose={() => setInteractive(null)} onGrabbed={changed} />
       )}
     </div>
@@ -389,8 +389,8 @@ function EpisodeRow({ e, wide, phone = false, onMenu, focus, busy, onMonitor, on
 
 type GrabState = { busy?: boolean; done?: boolean; error?: string };
 
-export function InteractiveModal({ seriesId, target, title, wide, onClose, onGrabbed }: {
-  seriesId: number; target: SearchTarget; title: string; wide: boolean; onClose: () => void; onGrabbed: () => void;
+export function InteractiveModal({ seriesId, target, title, wide, phone = false, epTitle, onClose, onGrabbed }: {
+  seriesId: number; target: SearchTarget; title: string; wide: boolean; phone?: boolean; epTitle?: string; onClose: () => void; onGrabbed: () => void;
 }) {
   const [res, setRes] = useState<InteractiveResult | null>(null);
   const [error, setError] = useState('');
@@ -408,11 +408,18 @@ export function InteractiveModal({ seriesId, target, title, wide, onClose, onGra
   const grab = async (r: Release, k: string) => {
     setGrabs(g => ({ ...g, [k]: { busy: true } }));
     const out = await grabRelease(seriesId, r);
-    if (out.ok && out.data.ok) { setGrabs(g => ({ ...g, [k]: { done: true } })); onGrabbed(); return; }
+    if (out.ok && out.data.ok) { setGrabs(g => ({ ...g, [k]: { done: true } })); onGrabbed(); if (phone) onClose(); return; }
     setGrabs(g => ({ ...g, [k]: { error: out.ok ? out.data.error || 'Not grabbed' : out.error } }));
   };
   const list = res?.releases ?? [];
   const off = res ? !res.grabs_allowed : false;
+  if (phone) {
+    return (
+      <PhoneInteractive heading={res ? `${title} \u00b7 ${list.length} ${list.length === 1 ? 'release' : 'releases'}` : title} title={epTitle || title}
+        res={res} error={error} off={off} grabs={grabs} onClose={onClose}
+        onGrab={(r, k) => void grab(r, k).then(() => undefined)} />
+    );
+  }
   return (
     <Modal title={title} testid="tv-interactive" width={wide ? 1000 : 560} onClose={onClose} footer={(
       <>
@@ -527,6 +534,109 @@ export function EpisodeSheet({ heading, title, sub, monitored, onClose, onSearch
           <button type="button" className="lp-focus" data-testid="tv-sheet-interactive" style={act} onClick={onInteractive}>Interactive search</button>
           <button type="button" className="lp-focus" data-testid="tv-sheet-monitor" aria-pressed={monitored} style={act} onClick={onMonitor}>{monitored ? 'Monitored' : 'Unmonitored'}</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+type SortKey = 'seeders' | 'size' | 'quality';
+const QRANK = (r: Release) => { const q = (r.quality || '').toLowerCase(); const n = parseInt(q, 10) || 0; return n * 10 + (q.includes('bluray') || q.includes('remux') ? 2 : q.includes('web') ? 1 : 0); };
+
+/** v196 phone: Interactive search as a full-screen sheet (section 5); the fetch and grab stay in InteractiveModal. */
+function PhoneInteractive({ heading, title, res, error, off, grabs, onClose, onGrab }: {
+  heading: string; title: string; res: InteractiveResult | null; error: string; off: boolean; grabs: Record<string, GrabState>;
+  onClose: () => void; onGrab: (r: Release, k: string) => void;
+}) {
+  const [sort, setSort] = useState<SortKey>('seeders');
+  const [openK, setOpenK] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const swipe = useSwipeToDismiss({ scrollRef: ref, onDismiss: () => closeRef.current() });
+  useEffect(() => {
+    const prev = document.body.style.overflow; document.body.style.overflow = 'hidden';
+    const key = (ev: KeyboardEvent) => { if (ev.key === 'Escape') closeRef.current(); };
+    window.addEventListener('keydown', key);
+    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', key); };
+  }, []);
+  const list = [...(res?.releases ?? [])].sort((a, b) =>
+    sort === 'size' ? b.size - a.size : sort === 'quality' ? QRANK(b) - QRANK(a) || b.seeders - a.seeders : b.seeders - a.seeders);
+  const segBtn = (on: boolean): React.CSSProperties => ({ flex: 1, height: 36, borderRadius: 10, border: 'none', fontFamily: FONT, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+    background: on ? '#3b82f6' : 'transparent', color: on ? '#fff' : W70 });
+  return (
+    <div data-testid="tv-interactive-scrim" onClick={onClose}
+      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(21,16,42,0.72)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', opacity: swipe.backdropOpacity }}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={title} data-testid="tv-interactive" onClick={ev => ev.stopPropagation()} {...swipe.handlers}
+        style={{ position: 'absolute', top: 47, left: 0, right: 0, bottom: 0, overflowY: 'auto', borderRadius: '20px 20px 0 0', padding: '8px 0 22px', fontFamily: FONT,
+          background: 'rgba(21,16,42,0.92)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)', transform: `translateY(${swipe.translateY}px)`, transition: swipe.transition }}>
+        <div aria-hidden="true" style={{ width: 36, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.3)', margin: '0 auto 8px' }} />
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '0 8px 0 16px' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div data-testid="tv-interactive-count" style={{ fontSize: 12, color: W70 }}>{heading}</div>
+            <h3 style={{ margin: '2px 0 0', fontSize: 17, fontWeight: 700, color: W95, overflowWrap: 'anywhere' }}>{title}</h3>
+          </div>
+          <button type="button" className="lp-focus tve-glass" data-testid="tv-interactive-done" aria-label="Close" onClick={onClose}
+            style={{ ...glassBtn, width: 44, height: 44, padding: 0, fontSize: 20 }}>{'\u00d7'}</button>
+        </div>
+        <div role="group" aria-label="Sort" style={{ display: 'flex', gap: 4, padding: 4, margin: '12px 16px', borderRadius: 14, background: GLASS }}>
+          {(['seeders', 'size', 'quality'] as const).map(k => (
+            <button key={k} type="button" data-testid={`tv-interactive-sort-${k}`} aria-pressed={sort === k} onClick={() => setSort(k)} style={segBtn(sort === k)}>
+              {k === 'seeders' ? 'Seeders' : k === 'size' ? 'Size' : 'Quality'}
+            </button>
+          ))}
+        </div>
+        {error && !list.length ? (
+          <div role="alert" data-testid="tv-interactive-error" style={{ minHeight: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, color: W70 }}>{error}</div>
+        ) : !res ? (
+          <div data-testid="tv-interactive-loading" aria-busy="true">
+            {[0, 1, 2, 3, 4, 5, 6].map(i => <div key={i} style={{ height: 64, borderTop: i ? LINE : 'none', background: GLASS, opacity: 0.6 }} />)}
+          </div>
+        ) : !list.length ? (
+          <div data-testid="tv-interactive-empty" style={{ minHeight: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, color: W70 }}>No releases</div>
+        ) : (
+          <div role="list" aria-label="Releases" data-testid="tv-interactive-list">
+            {list.map((r, i) => {
+              const k = `${r.tracker}|${r.title}|${r.size}`;
+              const g = grabs[k] || {};
+              const open = openK === k;
+              const can = r.grabbable && !g.done && !g.busy;
+              return (
+                <div key={k} role="listitem" data-testid="tv-interactive-row" data-grabbable={r.grabbable || undefined} data-open={open || undefined}
+                  style={open ? { margin: '4px 8px', borderRadius: 14, background: GLASS } : { borderTop: i ? LINE : 'none' }}>
+                  <button type="button" className="lp-focus" aria-expanded={open} data-testid="tv-interactive-toggle" onClick={() => setOpenK(open ? null : k)}
+                    style={{ width: '100%', minHeight: 64, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 8px 12px 16px', border: 'none', background: 'none',
+                      textAlign: 'left', cursor: 'pointer', fontFamily: FONT, color: W95 }}>
+                    <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500, wordBreak: 'break-all' }}>{r.title}</span>
+                      <span style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, fontSize: 12, color: W70 }}>
+                        {(r.quality_label || r.quality) && <span style={{ height: 24, display: 'inline-flex', alignItems: 'center', padding: '0 8px', borderRadius: 8, background: GLASS, fontWeight: 500, color: W95 }}>{r.quality_label || r.quality}</span>}
+                        <span>{`${r.seeders} seeders`}</span>
+                        {r.rejections.length > 0 && <span data-testid="tv-interactive-rejections" style={{ fontWeight: 500, color: r.grabbable ? '#f59e0b' : RED }}>{r.rejections.join(' \u00b7 ')}</span>}
+                      </span>
+                    </span>
+                    <span aria-hidden="true" style={{ width: 44, height: 44, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', color: W70,
+                      transform: open ? 'rotate(90deg)' : undefined }}>{'\u203a'}</span>
+                  </button>
+                  {open && (
+                    <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <div><dt style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>Size</dt><dd style={{ margin: 0, fontSize: 14, fontWeight: 600, color: W95 }}>{bytes(r.size)}</dd></div>
+                        <div><dt style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>Tracker</dt><dd style={{ margin: 0, fontSize: 14, fontWeight: 600, color: W95 }}>{r.tracker || ''}</dd></div>
+                      </dl>
+                      {g.error && <span role="alert" data-testid="tv-interactive-grab-error" style={{ fontSize: 12, color: RED }}>{g.error}</span>}
+                      {!off && (
+                        <button type="button" className="lp-focus tve-primary" data-testid="tv-interactive-grab" disabled={!can} aria-label={`Grab ${r.title}`}
+                          onClick={() => onGrab(r, k)} style={{ ...primaryBtn(can), height: 44, width: '100%' }}>
+                          {g.done ? 'Grabbed' : 'Grab'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
