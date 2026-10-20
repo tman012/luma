@@ -236,13 +236,14 @@ def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[st
     if not content.startswith('/'):
         raise Skip('no download path')
     src = _video(os.path.realpath(content) if not os.path.islink(content) else content)
+    cfg = naming()
+    release = str(g['release_title'] or t.get('name') or '')
+    lib_root = route(lib_root, release, os.path.basename(src), title, year, cfg, now)
     if not lib_root or not os.path.isdir(lib_root) or not os.access(lib_root, os.W_OK | os.X_OK):
         raise Skip('movies folder not available')
     rr, sr = os.path.realpath(lib_root), os.path.realpath(src)
     if sr.startswith(rr + os.sep) or rr.startswith(os.path.realpath(os.path.dirname(sr)) + os.sep):
         raise Refused('download and library overlap')
-    cfg = naming()
-    release = str(g['release_title'] or t.get('name') or '')
     folder = render(cfg['folder'], title, year, release, cfg)
     if cfg.get('rename', True):
         fname = render(cfg['standard'], title, year, release, cfg) + os.path.splitext(src)[1].lower()
@@ -263,6 +264,41 @@ def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[st
         conn.execute('DELETE FROM watchlist WHERE tmdb_id = ?', (g['tmdb_id'],))
     logger.info('Movie import: %s -> %s (%s)', t.get('name'), dest, how)
     return {'state': 'imported', 'path': dest, 'how': how}
+
+
+ROUTE_FOLDERS = {'4k': '4K', 'remux': 'Full Rips', 'recent': 'Recently Released', 'movies': 'Movies'}
+
+
+def route(lib_root: str, release: str, fname: str, title: str, year: Any, cfg: Dict[str, Any],
+          now: Optional[float] = None) -> str:
+    """v203b (PM, ported from prod auto_rename 1b4ea74): the sibling of *lib_root* this movie belongs in:
+    4K, Full Rips (remux), Recently Released (year >= current-1), else Movies. A movie whose folder
+    already exists in any of them stays there."""
+    if not lib_root:
+        return lib_root
+    parent = os.path.dirname(os.path.normpath(lib_root))
+    roots = {k: os.path.join(parent, v) for k, v in ROUTE_FOLDERS.items()}
+    if os.path.normpath(lib_root) not in roots.values():
+        return lib_root                                   # not the Video/<4K|Full Rips|...> layout: one root
+    folder = render(cfg['folder'], title, year, release, cfg)
+    for k in ('4k', 'remux', 'recent', 'movies'):
+        if os.path.isdir(roots[k]) and existing_folder(roots[k], folder):
+            return roots[k]
+    pick = _route_pick(roots, release, fname, year, now)
+    return pick if os.path.isdir(pick) else lib_root      # a missing sibling folder: file under the set root
+
+
+def _route_pick(roots: Dict[str, str], release: str, fname: str, year: Any, now: Optional[float]) -> str:
+    from app import file_management as fm
+    c = dict(fm.classify(release, fname))
+    if c.get('resolution') == '2160p':
+        return roots['4k']
+    if c.get('source') == 'remux':
+        return roots['remux']
+    cur = time.localtime(time.time() if now is None else now).tm_year
+    if str(year or '').isdigit() and int(year) >= cur - 1:
+        return roots['recent']
+    return roots['movies']
 
 
 def existing_folder(lib_root: str, folder: str) -> Optional[str]:
