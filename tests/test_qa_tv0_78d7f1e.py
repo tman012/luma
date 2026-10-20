@@ -250,7 +250,7 @@ def test_only_automatic_tv_searches_and_grabs_charge_the_tv_purpose():
         if p.name in ('tv_budget.py', 'tracker_guard.py'):
             continue
         s = p.read_text()
-        if re.search(r"tv_budget\.take\(|purpose\s*=\s*['\"]tv['\"]|tv_budget\.PURPOSE", s):
+        if re.search(r"(?m)tv_budget\.take\(|purpose\s*=\s*['\"]tv['\"]|^\s*['\"]tv['\"] if not interactive|tv_budget\.PURPOSE", s):
             hits.append(p.name)
     assert sorted(hits) == ['tracker_sources.py', 'tv_search.py'], hits
 

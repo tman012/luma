@@ -55,7 +55,7 @@ def frozen(monkeypatch):
 
 # ------------------------------------------------------------------ the page's data
 
-def test_detail_has_the_header_seasons_newest_first_and_episode_states(owner, env):  # noqa: F811
+def test_detail_has_the_header_seasons_newest_first_and_episode_states(owner, env, frozen):  # noqa: F811
     with tv_store.write() as conn:
         conn.execute("UPDATE series SET network = 'Apple TV+', status = 'Returning Series' WHERE id = ?", (env.sid,))
         conn.execute('UPDATE episode_files SET size = 1000 WHERE series_id = ?', (env.sid,))
@@ -70,7 +70,7 @@ def test_detail_has_the_header_seasons_newest_first_and_episode_states(owner, en
     assert v['size'] == 1000 * files
     assert [s['season'] for s in v['seasons']] == [2, 1]                          # newest first
     s2 = v['seasons'][0]
-    assert (s2['have'], s2['total']) == (3, 6)       # v184: every aired regular episode, monitored or not (like the list)
+    assert (s2['have'], s2['total']) == (3, 9)       # frozen at NOW: S02E01-E10 aired but E06 (2099); v184: every aired regular episode, monitored or not (like the list)
     from app import tv_scan
     lst = [x for x in tv_scan.library_view()['shows'] if x['id'] == env.sid][0]
     assert (v['have'], v['total']) == (min(lst['have'], lst['aired']), lst['aired'])
