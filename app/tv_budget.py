@@ -61,6 +61,16 @@ def slot_free(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> b
     return c['day'] < AUTO_PER_TRACKER_DAILY and (not c['last'] or now - c['last'] >= SLOT_S)
 
 
+def under_daily(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> bool:
+    """v196c (Taylor): a post-air episode search needs only the tracker's daily cap, not a 3 h slot."""
+    if not capped(cfg):
+        return True
+    from app.tracker_guard import guard_key
+    g = guard or _guard()
+    now = time.time() if now is None else now
+    return g.purpose_counts(guard_key(cfg), PURPOSE, now)['day'] < AUTO_PER_TRACKER_DAILY
+
+
 def next_slot(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> Optional[float]:
     """When a capped tracker's next slot opens (None: no cap)."""
     if not capped(cfg):

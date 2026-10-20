@@ -102,9 +102,11 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
             continue
         capped = tv_budget.capped(cfg)
         bg_manual = purpose == MANUAL_BACKGROUND        # v185: the owner's click, past its burst (guard background bucket)
-        if not interactive and capped and not bg_manual and purpose != 'feed' and not tv_budget.slot_free(cfg, now):
+        # v196c (Taylor): post-air searches every 15 min for 6 h need only the daily cap, not a 3 h slot
+        if not interactive and capped and not bg_manual and purpose != 'feed' and not tv_budget.under_daily(cfg, now):
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': SLOT_BUSY})
-            continue                                   # no free slot: not sent, not logged
+            _log(cfg, purpose, sid, query, 0, 'skipped', now)
+            continue
         try:
             raw = engine.search_one(cfg, query, cats, LIMIT, interactive,
                                     # v185.2a (PM): a feed poll is the guard's 'feed' purpose: no cap or slot of

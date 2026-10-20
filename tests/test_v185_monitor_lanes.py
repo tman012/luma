@@ -116,7 +116,7 @@ def test_query_trackers_background_lane_skips_tv_slots_and_purpose(monkeypatch):
     monkeypatch.setattr(tracker_search, '_match_categories', lambda cfg, cats: [5000])
     monkeypatch.setattr(tracker_search, '_secret_values', lambda cfg: [])
     monkeypatch.setattr(tv_budget, 'capped', lambda cfg: True)
-    monkeypatch.setattr(tv_budget, 'slot_free', lambda cfg, now=None: False)     # no TV automation slot free
+    monkeypatch.setattr(tv_budget, 'under_daily', lambda cfg, now=None: False)   # v196c: daily cap reached
     monkeypatch.setattr(tv_search, '_log', lambda *a, **k: None)
     cfg = {'id': 1, 'name': 'T'}
     _, st = tv_search.query_trackers('X S01E01', 'tv', None, False, 0.0, [cfg])

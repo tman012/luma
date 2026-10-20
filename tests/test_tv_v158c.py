@@ -91,12 +91,12 @@ def test_automatic_searches_take_a_free_slot_on_capped_trackers_only(engine):
     engine.calls.clear()
     engine.now = t + 600
     items, st = tv_search.query_trackers('Show S01E02', 'episode', None, False, t + 600)
-    assert engine.calls == [(2, 'Show S01E02', False, None)]                # IPT: slot taken
-    assert {s['id']: s['status'] for s in st} == {1: tv_search.SLOT_BUSY, 2: 'ok'}
+    # v196c (Taylor): no 3 h slot for post-air searches; only the daily cap (and the guard) hold IPT back
+    assert engine.calls == [(1, 'Show S01E02', False, 'tv'), (2, 'Show S01E02', False, None)]
+    assert {s['id']: s['status'] for s in st} == {1: 'ok', 2: 'ok'}
     engine.calls.clear()                                                     # manual: interactive, no slots
     tv_search.query_trackers('Show S01E02', 'manual', None, True, t + 600)
     assert engine.calls == [(1, 'Show S01E02', True, None), (2, 'Show S01E02', True, None)]
-    assert len([r for r in rows("SELECT * FROM search_log WHERE outcome = 'skipped'")]) == 0   # a busy slot isn't logged
 
 
 def test_feed_capped_in_free_slots_uncapped_every_15_min_and_a_post_air_search_moves_the_feed(engine, guard):
@@ -532,3 +532,11 @@ def test_v185_2a_feeds_never_starve_a_post_air_search(engine, guard):
     assert engine.calls == [(1, 'Show S01E03', False, 'tv')]
     for i in range(1, 8):                                                    # (b) the rest of the day's budget
         assert tv_budget.take(SITE, end + i * 7200, guard=guard) is None
+
+
+def test_v196c_past_the_daily_cap_ipt_is_skipped_and_logged(engine, monkeypatch):
+    from app import tv_budget
+    monkeypatch.setattr(tv_budget, 'under_daily', lambda cfg, now=None, guard=None: False)
+    items, st = tv_search.query_trackers('Show S01E03', 'episode', None, False, 2e9)
+    assert {s['id']: s['status'] for s in st} == {1: tv_search.SLOT_BUSY, 2: 'ok'}
+    assert len(rows("SELECT * FROM search_log WHERE outcome = 'skipped'")) == 1
