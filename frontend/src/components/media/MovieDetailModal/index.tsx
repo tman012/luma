@@ -9,7 +9,7 @@ import { ExpandedLayout } from './ExpandedLayout';
 import { CompactLayout } from './CompactLayout';
 import { FocusZone } from '@/components/tv/FocusZone';
 import { useTVMode } from '@/contexts/TVModeContext';
-import { notifyWatchlistChanged } from '@/services/watchlistApi';
+import { NATIVE_WATCHLIST_URL, notifyWatchlistChanged } from '@/services/watchlistApi';
 import { apiFetch } from '../../../apiClient';
 
 export function MovieDetailModal({
@@ -73,10 +73,10 @@ export function MovieDetailModal({
   // Check if movie is already in Radarr watchlist
   useEffect(() => {
     const id = resolvedTmdbId;
-    // Minimal mode has no Radarr (the route is off): skip the console 404.
-    if (!id || isMinimal()) return;
+    if (!id) return;
     let cancelled = false;
-    apiFetch('/api/radarr/watchlist/tmdb-ids')
+    // v202: minimal (test) builds read the native watchlist; never Radarr
+    apiFetch(isMinimal() ? `${NATIVE_WATCHLIST_URL}/tmdb-ids` : '/api/radarr/watchlist/tmdb-ids')
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (cancelled || !data?.tmdb_ids) return;

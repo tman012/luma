@@ -1,3 +1,5 @@
+import { isMinimal } from '@/minimal';
+import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { sheetBase } from '@/utils/posterColors';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
@@ -178,6 +180,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   const [openReview, setOpenReview] = useState<TopReview | null>(null);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [removingWatchlist, setRemovingWatchlist] = useState(false);
+  const [showNativeAdd, setShowNativeAdd] = useState(false);   // v202: the native watchlist (test install)
   const [removeWatchlistError, setRemoveWatchlistError] = useState<string | null>(null);
 
   const collectionId = detail?.collectionId ?? null;
@@ -671,7 +674,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                     </button>
                   ) : inWatchlist ? (
                     /* In watchlist — tap to remove (confirm sheet) */
-                    <div
+                    <div data-modal-keep=""
                       style={{
                         display: 'flex',
                         justifyContent: 'center',
@@ -715,7 +718,8 @@ export function CompactLayout(props: MovieModalViewProps) {
                     <button
                       type="button"
                       data-testid="movie-add-watchlist"
-                      onClick={handleUpgradeToggle}
+                      data-modal-keep=""
+                      onClick={() => (isMinimal() ? setShowNativeAdd(true) : handleUpgradeToggle())}
                       style={{
                         width: 'calc(100% - 32px)',
                         margin: '20px 16px 0',
@@ -1372,6 +1376,10 @@ export function CompactLayout(props: MovieModalViewProps) {
 
 
 
+      {showNativeAdd && detail && props.resolvedTmdbId && (
+        <WatchlistAddSheet tmdbId={props.resolvedTmdbId} title={detail.title} year={detail.year}
+          onClose={() => setShowNativeAdd(false)} onAdded={() => { setShowNativeAdd(false); props.onUpgradeAdded?.(); }} />
+      )}
       {/* Remove from watchlist confirm sheet */}
       {showRemoveConfirm && (
         <div

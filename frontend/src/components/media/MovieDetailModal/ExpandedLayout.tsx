@@ -1,3 +1,4 @@
+import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
@@ -342,6 +343,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
 
   // Backdrop effects hook no longer needed — full-bleed backdrop with scrim handles readability
   const [showAlreadyInWatchlist, setShowAlreadyInWatchlist] = useState(false);
+  const [showNativeAdd, setShowNativeAdd] = useState(false);   // v202: the native watchlist (test install)
   const [removingWatchlist, setRemovingWatchlist] = useState(false);
   const [removeWatchlistError, setRemoveWatchlistError] = useState<string | null>(null);
   const [showUpgradeShelf, setShowUpgradeShelf] = useState(false);
@@ -1053,6 +1055,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                     />
                     </span>
                   ) : (
+                    <span data-modal-keep="" style={{ display: 'contents' }}>
                     <PillButton
                       focusKey="mm-info-watchlist"
                       zoneId="movie-detail-modal"
@@ -1074,8 +1077,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                         )
                       }
                       label={inWatchlist ? 'In watchlist' : 'Add to watchlist'}
-                      onClick={() => inWatchlist ? setShowAlreadyInWatchlist(true) : handleUpgradeOpen()}
+                      onClick={() => inWatchlist ? setShowAlreadyInWatchlist(true) : isMinimal() ? setShowNativeAdd(true) : handleUpgradeOpen()}
                     />
+                    </span>
                   )}
                   {trailerKey && (
                     <PillButton
@@ -1622,6 +1626,10 @@ export function ExpandedLayout(props: MovieModalViewProps) {
         )}
 
         {/* Remove from watchlist confirm */}
+        {showNativeAdd && detail && props.resolvedTmdbId && (
+          <WatchlistAddSheet tmdbId={props.resolvedTmdbId} title={detail.title} year={detail.year}
+            onClose={() => setShowNativeAdd(false)} onAdded={() => { setShowNativeAdd(false); props.onUpgradeAdded?.(); }} />
+        )}
         {showAlreadyInWatchlist && (
           <div
             onClick={() => { if (!removingWatchlist) setShowAlreadyInWatchlist(false); }}

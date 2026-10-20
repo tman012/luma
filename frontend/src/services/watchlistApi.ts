@@ -11,8 +11,8 @@ import { apiFetch } from '../apiClient';
 import { isMinimal } from '@/minimal';
 
 export async function fetchWatchlistTmdbIds(): Promise<Set<number>> {
-  // Minimal mode has no Radarr (the route is off): don't call it.
-  if (isMinimal()) return new Set();
+  // Minimal (test) builds have no Radarr: v202 the native watchlist instead (movies.db).
+  if (isMinimal()) return fetchNativeWatchlistIds();
   try {
     const resp = await fetchWithTimeout('/api/radarr/watchlist/tmdb-ids');
     if (!resp.ok) return new Set();
@@ -89,8 +89,49 @@ export function notifyWatchlistChanged(
   }
 }
 
-/** Unmonitor in Radarr (DELETE /api/watchlist/:tmdbId). Does not delete the movie. */
+/** v202: the native movie watchlist on the test install (never Radarr). */
+export const NATIVE_WATCHLIST_URL = '/api/movies/watchlist';
+
+export async function fetchNativeWatchlistIds(): Promise<Set<number>> {
+  try {
+    const resp = await fetchWithTimeout(`${NATIVE_WATCHLIST_URL}/tmdb-ids`);
+    if (!resp.ok) return new Set();
+    const data = await resp.json();
+    return new Set((data.tmdb_ids ?? []) as number[]);
+  } catch {
+    return new Set();
+  }
+}
+
+export async function addToNativeWatchlist(m: { tmdbId: number; title: string; year?: number | null; profileId?: number | null }):
+  Promise<{ ok: boolean; error?: string }> {
+  try {
+    const resp = await apiFetch(NATIVE_WATCHLIST_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tmdb_id: m.tmdbId, title: m.title, ...(m.year ? { year: m.year } : {}),
+        ...(m.profileId != null ? { profile_id: m.profileId } : {}) }),
+    });
+    if (!resp.ok) return { ok: false, error: "Couldn't add" };
+    notifyWatchlistChanged({ tmdbId: m.tmdbId, action: 'added' });
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Couldn't add" };
+  }
+}
+
+/** Unmonitor in Radarr (DELETE /api/watchlist/:tmdbId). Does not delete the movie. v202: on the test
+ * install (minimal builds) the native watchlist's entry is removed instead; Radarr is never called. */
 export async function removeFromWatchlist(tmdbId: number): Promise<{ ok: boolean; error?: string }> {
+  if (isMinimal()) {
+    try {
+      const resp = await apiFetch(`${NATIVE_WATCHLIST_URL}/${tmdbId}`, { method: 'DELETE' });
+      if (!resp.ok && resp.status !== 404) return { ok: false, error: "Couldn't remove" };
+      notifyWatchlistChanged({ tmdbId, action: 'removed' });
+      return { ok: true };
+    } catch {
+      return { ok: false, error: "Couldn't remove" };
+    }
+  }
   try {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 10_000);

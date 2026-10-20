@@ -1,3 +1,6 @@
+import { isMinimal } from '@/minimal';
+import { fetchNativeWatchlistIds } from '@/services/watchlistApi';
+import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 /**
  * KioskSearch — full-featured search that mirrors /web behavior.
  *
@@ -48,10 +51,36 @@ export interface KioskSearchHandle {
 function SearchResultCard({
   item,
   onClick,
+  wl,
 }: {
   item: SearchMovie;
   onClick: () => void;
+  /** v202 (test install): an unowned movie's Add to watchlist / In watchlist (the native watchlist) */
+  wl?: { inList: boolean; onAdd: () => void };
 }) {
+  if (wl) {
+    return (
+      <div className="flex flex-col items-stretch" data-testid="search-watchlist-card">
+        <SearchResultCard item={item} onClick={onClick} />
+        {wl.inList ? (
+          <span data-testid="search-in-watchlist"
+            style={{ alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 18px', borderRadius: 50,
+              background: 'rgba(74,222,128,0.12)', border: '1px solid rgba(74,222,128,0.3)', fontSize: 14, fontWeight: 600, color: '#4ade80' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#4ade80' }} />In watchlist
+          </span>
+        ) : (
+          <button type="button" data-testid="search-add-watchlist" onClick={wl.onAdd}
+            style={{ alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 18px', borderRadius: 12,
+              background: '#3b82f6', color: '#fff', border: 'none', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Add to watchlist
+          </button>
+        )}
+      </div>
+    );
+  }
   const title = getTitle(item);
   const year = getYear(item);
   const poster = sizedPlexImg(getPosterUrl(item), 400, 600);
@@ -576,6 +605,24 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
   // Handle result click → open detail modal
   // ---------------------------------------------------------------------------
 
+  // v202 (test install): Add to watchlist on unowned movie results (the native watchlist; never Radarr)
+  const [wlIds, setWlIds] = useState<Set<number> | null>(null);
+  const [wlAdd, setWlAdd] = useState<SearchMovie | null>(null);
+  useEffect(() => {
+    if (!isMinimal()) return;
+    void fetchNativeWatchlistIds().then(setWlIds);
+  }, []);
+  const wlFor = (item: SearchMovie): { inList: boolean; onAdd: () => void } | undefined => {
+    const id = item.tmdb_id || item.id;
+    if (!wlIds || !id || item.media_type === 'tv' || item.isOwned) return undefined;
+    return { inList: wlIds.has(id), onAdd: () => setWlAdd(item) };
+  };
+  const wlSheet = wlAdd && (wlAdd.tmdb_id || wlAdd.id) ? (
+    <WatchlistAddSheet tmdbId={(wlAdd.tmdb_id || wlAdd.id)!} title={getTitle(wlAdd)} year={getYear(wlAdd) || null}
+      onClose={() => setWlAdd(null)}
+      onAdded={() => { const id = (wlAdd.tmdb_id || wlAdd.id)!; setWlIds(p => new Set([...(p ?? []), id])); setWlAdd(null); }} />
+  ) : null;
+
   const handleResultClick = (item: SearchMovie) => {
     const rk = item.rating_key;
     const tmdbId = item.tmdb_id || item.id;
@@ -737,6 +784,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
 
   return (
     <>
+      {wlSheet}
       {/* Background dim overlay — click to dismiss; z-[60] in person view to cover TopBar */}
       {isActive && (
         <div
@@ -1014,6 +1062,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                           <SearchResultCard
                             key={`unified-${i}`}
                             item={entry.item}
+                            wl={entry.owned ? undefined : wlFor(entry.item)}
                             onClick={() => handleResultClick(entry.item)}
                           />
                         );
@@ -1104,6 +1153,7 @@ export const KioskSearch = forwardRef<KioskSearchHandle>(function KioskSearch(_,
                           <SearchResultCard
                             key={`unowned-${i}`}
                             item={item}
+                            wl={wlFor(item)}
                             onClick={() => handleResultClick(item)}
                           />
                         ))}
