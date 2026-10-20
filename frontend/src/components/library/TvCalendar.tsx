@@ -320,7 +320,7 @@ export function QualityChip({ e, style }: { e: Pick<CalEpisode, 'downloaded' | '
   if (!e.downloaded || !e.quality) return null;
   return (
     <span data-testid="tv-quality-chip" style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', height: 24, padding: '0 8px', borderRadius: 6, boxSizing: 'border-box',
-      fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', color: 'var(--quality-chip, #adc7ff)', border: '1px solid var(--quality-chip, #adc7ff)', ...style }}>
+      fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', color: 'color-mix(in srgb, var(--quality-chip) 55%, #fff)', background: 'color-mix(in srgb, var(--quality-chip) 14%, transparent)', border: '1px solid color-mix(in srgb, var(--quality-chip) 45%, transparent)', ...style }}>
       {e.quality}
     </span>
   );
