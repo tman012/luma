@@ -82,6 +82,16 @@ def _log(cfg, purpose: str, sid: Optional[int], query: str, n: int, outcome: str
                      " VALUES (?, 'tv', ?, ?, ?, ?, ?, ?)", (now, guard_key(cfg), purpose, sid, query, n, outcome))
 
 
+def _log_cap_skip(cfg, purpose: str, sid: Optional[int], query: str, now: float, reset: float) -> None:
+    """v201 (PM): a daily-cap skip is logged at most once per tracker per reset window (not every pass)."""
+    from app.tracker_guard import guard_key
+    key = f'tv_capskip:{guard_key(cfg)}'
+    if float(tv_store.get_meta(key) or 0) > now:
+        return
+    tv_store.set_meta(key, str(reset))
+    _log(cfg, purpose, sid, query, 0, 'skipped', now)
+
+
 #: v185 (PM): a monitor-ON click's searches past its interactive burst: background requests (the guard's
 #: background bucket, never a TV automation slot), logged under this purpose.
 MANUAL_BACKGROUND = 'manual-background'
@@ -104,8 +114,9 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
         bg_manual = purpose == MANUAL_BACKGROUND        # v185: the owner's click, past its burst (guard background bucket)
         # v196c (Taylor): post-air searches every 15 min for 6 h need only the daily cap, not a 3 h slot
         if not interactive and capped and not bg_manual and purpose != 'feed' and not tv_budget.under_daily(cfg, now):
-            statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': SLOT_BUSY})
-            _log(cfg, purpose, sid, query, 0, 'skipped', now)
+            reset = tv_budget.daily_reset(cfg, now) or now + tv_budget.SLOT_S
+            statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': SLOT_BUSY, 'reset_at': reset})
+            _log_cap_skip(cfg, purpose, sid, query, now, reset)
             continue
         try:
             raw = engine.search_one(cfg, query, cats, LIMIT, interactive,
@@ -380,6 +391,10 @@ def _after(sid: int, want: List[Dict[str, Any]], out: Dict[str, Any], now: float
         for e in want:
             if e['id'] in grabbed:
                 conn.execute('UPDATE episodes SET last_search_at = ?, next_search_at = NULL WHERE id = ?', (now, e['id']))
+            elif automatic and out['statuses'] and all(st['status'] == SLOT_BUSY for st in out['statuses']):
+                # v201 (PM): every tracker is at its daily cap: wait for the earliest reset, not every pass
+                reset = min(st.get('reset_at') or now for st in out['statuses'])
+                conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (max(reset, now), e['id']))
             elif out.get('answered'):
                 nxt = _next_retry(e, now) if automatic else None
                 conn.execute('UPDATE episodes SET last_search_at = ?, search_attempts = search_attempts + 1,'

@@ -71,6 +71,21 @@ def under_daily(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) ->
     return g.purpose_counts(guard_key(cfg), PURPOSE, now)['day'] < AUTO_PER_TRACKER_DAILY
 
 
+def daily_reset(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> Optional[float]:
+    """v201 (PM): when a capped tracker that's at its daily cap gets a request back (the rolling 24 h window
+    drops enough of today's automatic TV requests to go under AUTO_PER_TRACKER_DAILY). None: no cap, or under it."""
+    if not capped(cfg):
+        return None
+    from app.tracker_guard import guard_key
+    g = guard or _guard()
+    now = time.time() if now is None else now
+    times = sorted(g.purpose_times(guard_key(cfg), PURPOSE, now))
+    over = len(times) - AUTO_PER_TRACKER_DAILY
+    if over < 0:
+        return None
+    return times[over] + 86400
+
+
 def next_slot(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> Optional[float]:
     """When a capped tracker's next slot opens (None: no cap)."""
     if not capped(cfg):

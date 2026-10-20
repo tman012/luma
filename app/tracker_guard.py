@@ -251,6 +251,13 @@ class TrackerGuard:
                     'all_day': sum(1 for v in self.purposes.values() for t, k in v if k == purpose and t > day),
                     'last': max(mine, default=0.0)}
 
+    def purpose_times(self, tid: str, purpose: str, now: Optional[float] = None) -> List[float]:
+        """This tracker's *purpose* request times in the last 24 h (v201: when its daily cap resets)."""
+        now = time.time() if now is None else now
+        with self._lock:
+            self._load()
+            return [t for t, k in self.purposes.get(tid, []) if k == purpose and t > now - 86400]
+
     def _purpose_refusal(self, tid: str, purpose: str, now: float, spacing: bool = True) -> Optional[str]:
         lim = _purpose_limits().get(purpose)
         if lim is None:
