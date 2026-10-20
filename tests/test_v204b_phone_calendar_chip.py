@@ -61,8 +61,8 @@ def _prod(path):
     return subprocess.run(['git', 'show', f'1b4ea74:{path}'], cwd=ROOT, capture_output=True, text=True, check=True).stdout
 
 
-def _norm(s):   # standing rule: sentence case on test (prod was Title Case); everything else is prod's
-    return s.replace('m Watchlist', 'm watchlist').replace('In Watchlist', 'In watchlist').replace('to Watchlist', 'to watchlist')
+def _norm(s):   # v205 (PM): prod's capitalization exactly, except the confirm sheet (not part of the ask)
+    return s.replace('m Watchlist', 'm watchlist')
 
 
 def test_compact_watchlist_buttons_and_confirm_are_prods():
@@ -91,8 +91,8 @@ def test_native_watchlist_remove_api():
 def test_expanded_watchlist_pill_is_prods():
     f = 'frontend/src/components/media/MovieDetailModal/ExpandedLayout.tsx'
     test = (ROOT / f).read_text()
-    assert "label={inWatchlist ? 'In watchlist' : 'Watchlist'}" in test
-    i = test.index("label={inWatchlist ? 'In watchlist' : 'Watchlist'}")
+    assert "label={inWatchlist ? 'In Watchlist' : 'Watchlist'}" in test
+    i = test.index("label={inWatchlist ? 'In Watchlist' : 'Watchlist'}")
     assert 'primary\n' in test[i - 1500:i] and "tone={inWatchlist ? undefined : 'blue'}" not in test
 
 
@@ -102,10 +102,20 @@ def test_picker_sheet_is_prods_and_native_on_test():
     assert "apiFetch(isMinimal() ? '/api/movies/watchlist/profiles' : '/api/radarr/upgrade-profiles')" in s
     assert 'addToNativeWatchlist({ tmdbId, title, year, profileId: opt?.id ?? null })' in s
     prod = _prod(f)
-    ui = prod[prod.index('{/* Title */}'):].replace(" Quality'", " quality'")   # sentence case (standing rule)
+    ui = prod[prod.index('{/* Title */}'):]   # v205: prod's 'Select Quality' exactly
     assert ui in s                                    # prod's picker UI, unchanged
 
 
 def test_settings_movies_picker_option():
     s = (ROOT / 'frontend/src/components/movies/MoviesSettings.tsx').read_text()
     assert '>Watchlist picker</h3>' in s and 'put({ picker_profiles: all }' in s
+
+
+def test_v205_prod_capitalization_and_guard_exemption():
+    m = ROOT / 'frontend/src/components/media/MovieDetailModal'
+    c = (m / 'CompactLayout.tsx').read_text()
+    assert 'Add to Watchlist\n' in c and 'In Watchlist\n' in c
+    assert "'Select Quality'" in (m / 'MobileUpgradeSheet.tsx').read_text()
+    g = (ROOT / 'frontend/tests/sentenceCaseGuard.test.ts').read_text()
+    for lbl in ('Add to Watchlist', 'In Watchlist', 'Select Quality', 'Watchlist'):
+        assert f"{lbl}$|" in g

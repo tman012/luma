@@ -708,7 +708,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                             background: '#4ade80',
                           }}
                         />
-                        In watchlist
+                        In Watchlist
                       </button>
                     </div>
                   ) : (
@@ -749,7 +749,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                         <line x1="12" y1="5" x2="12" y2="19" />
                         <line x1="5" y1="12" x2="19" y2="12" />
                       </svg>
-                      Add to watchlist
+                      Add to Watchlist
                     </button>
                   )}
                   {isMinimal() && inWatchlist && props.resolvedTmdbId && detail ? (

@@ -1076,7 +1076,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                           </svg>
                         )
                       }
-                      label={inWatchlist ? 'In watchlist' : 'Watchlist'}
+                      label={inWatchlist ? 'In Watchlist' : 'Watchlist'}
                       onClick={() => inWatchlist ? setShowAlreadyInWatchlist(true) : isMinimal() ? setShowNativeAdd(true) : handleUpgradeOpen()}
                     />
                     </span>
