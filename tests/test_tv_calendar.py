@@ -349,3 +349,26 @@ def test_an_import_mid_refresh_keeps_every_shows_episodes(scanned, monkeypatch):
     tv_scan.refresh_added(now=1000000.0, folders=True)
     after = {r['id']: _ep_rows(r['id']) for r in rows('SELECT id FROM series')}
     assert after == before
+
+
+def test_v208_standard_named_file_takes_the_imported_grabs_quality(scanned):
+    """Live 87f6a4c: 'Line of Fire - S01E05 - Title.mkv' (Taylor's standard format, no quality token) scans with
+    no resolution/source, so the chip had nothing; the imported grab's quality fills it. Pre-existing files
+    with no grab and no quality in the name stay None."""
+    out = tv_calendar.calendar(D(2026, 10, 11), 7)
+    down = [e for e in out['episodes'] if e['downloaded']]
+    a, b = down[0]['episode_id'], down[1]['episode_id']
+    with tv_store.connect() as conn:
+        conn.execute('UPDATE episode_files SET resolution = NULL, source = NULL, release_name = NULL,'
+                     " rel_path = 'Show/Season 1/Show - S01E05 - Title.mkv'"
+                     ' WHERE id IN (SELECT file_id FROM episode_file_links WHERE episode_id IN (?, ?))', (a, b))
+        conn.execute("INSERT INTO grabs (hash, series_id, episode_ids, release_title, quality, origin, grabbed_at, state)"
+                     " VALUES ('h1', ?, ?, 'Show.S01E05.1080p.WEB.h264-GRP', '1080p-web', 'auto', 1.0, 'imported')",
+                     (down[0]['series_id'], json.dumps([a])))
+        conn.execute("INSERT INTO grabs (hash, series_id, episode_ids, release_title, quality, origin, grabbed_at, state)"
+                     " VALUES ('h2', ?, ?, 'Show.S01E05.720p.HDTV.x264-GRP', '720p-hdtv', 'auto', 0.5, 'failed')",
+                     (down[0]['series_id'], json.dumps([b])))
+        conn.commit()
+    got = {e['episode_id']: e for e in tv_calendar.calendar(D(2026, 10, 11), 7)['episodes']}
+    assert got[a]['quality'] == '1080p WEB'
+    assert got[b]['quality'] is None                     # a failed grab never names a file's quality

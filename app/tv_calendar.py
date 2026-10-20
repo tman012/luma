@@ -106,6 +106,31 @@ def _add_file_quality(conn, eps: List[Dict[str, Any]]) -> None:
             e = by_id.get(x['episode_id'])
             if e is not None and e['quality'] is None:
                 e['quality'] = tv_monitor._file_quality(dict(x))
+    _add_grab_quality(conn, [e for e in eps if e['quality'] is None and e['downloaded']])
+
+
+def _add_grab_quality(conn, eps: List[Dict[str, Any]]) -> None:
+    """v208 (Taylor, live 87f6a4c): a file named by the standard format ('Show - S01E05 - Title', no quality
+    token) has no resolution/source in its scan row, so its quality is the newest imported grab's for that
+    episode (grabs.quality '1080p-web', else read off release_title). Reads only; None when no grab placed it."""
+    if not eps:
+        return
+    from app import tv_monitor
+    by_id = {e['episode_id']: e for e in eps}
+    ids = list(by_id)
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        for x in conn.execute(
+                'SELECT CAST(j.value AS INTEGER) AS episode_id, g.quality, g.release_title FROM grabs g, json_each(g.episode_ids) j'
+                f" WHERE g.state IN ('imported', 'partial') AND CAST(j.value AS INTEGER) IN ({_in(chunk)})"
+                ' ORDER BY COALESCE(g.finished_at, g.grabbed_at) DESC', tuple(chunk)):
+            e = by_id.get(x['episode_id'])
+            if e is None or e['quality'] is not None:
+                continue
+            q = x['quality'] if x['quality'] in tv_monitor.QUALITY_IDS else tv_monitor.quality_of(str(x['release_title'] or ''))
+            if q:
+                res, _, src = q.partition('-')
+                e['quality'] = tv_monitor._file_quality({'resolution': res, 'source': src})
 
 
 def _last_refresh() -> Optional[float]:
