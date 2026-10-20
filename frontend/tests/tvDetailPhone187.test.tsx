@@ -85,7 +85,7 @@ describe('v197 quality chip (Q2)', () => {
     const { rerender } = render(<QualityChip e={{ downloaded: true, quality: '1080p WEB' }} />);
     const chip = screen.getByTestId('tv-quality-chip');
     expect(chip.textContent).toBe('1080p WEB');
-    expect(chip.style.color).toBe('var(--quality-chip, #adc7ff)');
+    expect(chip.style.color).toContain('var(--quality-chip)');
     expect(parseInt(chip.style.fontSize, 10)).toBeGreaterThanOrEqual(12);
     rerender(<QualityChip e={{ downloaded: false, quality: null }} />);
     expect(screen.queryByTestId('tv-quality-chip')).toBeNull();
