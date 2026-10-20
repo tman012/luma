@@ -1,3 +1,4 @@
+import { MovieSearchActions } from '@/components/movies/MovieSearchActions';
 import { isMinimal } from '@/minimal';
 import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { sheetBase } from '@/utils/posterColors';
@@ -753,6 +754,9 @@ export function CompactLayout(props: MovieModalViewProps) {
                       Add to watchlist
                     </button>
                   )}
+                  {isMinimal() && inWatchlist && props.resolvedTmdbId && detail ? (
+                    <MovieSearchActions tmdbId={props.resolvedTmdbId} title={detail.title} year={detail.year} />
+                  ) : null}
                   </div>{/* end action stagger wrapper */}
                   </div>{/* end hidden-when-shelf-open wrapper */}
                 </div>{/* end shelf overlay zone */}

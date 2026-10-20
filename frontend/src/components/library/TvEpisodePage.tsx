@@ -9,7 +9,7 @@ import { MonitorFlag, monitorFlagCss } from './TvMonitorFlag';
 import { airET, bytes } from './TvSeriesDetail';
 import {
   getDetail, grabRelease, interactiveSearch, searchOutcome, searchShow, setEpisodeMonitored,
-  type DetailEpisode, type DetailView, type InteractiveResult, type Release,
+  type DetailView, type InteractiveResult, type Release,
 } from './tvCalendarApi';
 
 const W95 = 'rgba(255,255,255,0.95)';
@@ -29,7 +29,7 @@ export const qualityText = (q: string | null | undefined) => {
 /** The release group: the name's last '-GROUP'. */
 export const groupOf = (title: string) => title.replace(/\.(mkv|mp4|avi)$/i, '').match(/-([A-Za-z0-9]+)$/)?.[1] ?? '';
 
-type Auto = { k: 'searching' } | { k: 'grabbed'; title: string; quality: string; size: number | null } | { k: 'none' } | { k: 'msg'; text: string };
+export type Auto = { k: 'searching' } | { k: 'grabbed'; title: string; quality: string; size: number | null } | { k: 'none' } | { k: 'msg'; text: string };
 
 const iconBack = (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
@@ -73,7 +73,8 @@ export function TvEpisodePage({ seriesId, episodeId, onBack, onChanged }: {
 
   if (inter) {
     return (
-      <InteractiveScreen seriesId={seriesId} e={e} show={view.title} onBack={() => setInter(false)}
+      <InteractiveScreen title={view.title} sub={`${shortCode(e.season, e.episode)} \u00b7 ${e.title || `Episode ${e.episode}`}`}
+        load={() => interactiveSearch(seriesId, { episode_id: e.id })} doGrab={r => grabRelease(seriesId, r)} onBack={() => setInter(false)}
         onGrabbed={(r) => { setInter(false); setAuto({ k: 'grabbed', title: r.title, quality: r.quality_label || qualityText(r.quality), size: r.size }); changed(); }} />
     );
   }
@@ -112,7 +113,7 @@ export function TvEpisodePage({ seriesId, episodeId, onBack, onChanged }: {
   );
 }
 
-function AutoDialog({ auto, sub, onClose, onInteractive }: { auto: Auto; sub: string; onClose: () => void; onInteractive: () => void }) {
+export function AutoDialog({ auto, sub, onClose, onInteractive }: { auto: Auto; sub: string; onClose: () => void; onInteractive: () => void }) {
   const big = (t: string) => <div data-testid="tv-auto-title" style={{ fontSize: 17, fontWeight: 600, color: W95 }}>{t}</div>;
   const subEl = <div style={{ fontSize: 13, color: W70, marginTop: 4 }}>{sub}</div>;
   const full: React.CSSProperties = { width: '100%', height: 44, marginTop: 8 };
@@ -159,8 +160,12 @@ function AutoDialog({ auto, sub, onClose, onInteractive }: { auto: Auto; sub: st
 type SortKey = 'seeders' | 'size' | 'quality';
 const qrank = (r: Release) => { const q = (r.quality || '').toLowerCase(); return (parseInt(q, 10) || 0) * 10 + (/remux|bluray/.test(q) ? 2 : q.includes('web') ? 1 : 0); };
 
-export function InteractiveScreen({ seriesId, e, show, onBack, onGrabbed }: {
-  seriesId: number; e: DetailEpisode; show: string; onBack: () => void; onGrabbed: (r: Release) => void;
+type GrabOut = { ok: true; data: { ok: boolean; error?: string | null } } | { ok: false; error: string };
+
+/** v203: shared by the episode page and the movie page (load and doGrab name the target). */
+export function InteractiveScreen({ title, sub, load, doGrab, onBack, onGrabbed }: {
+  title: string; sub: string; load: () => Promise<{ ok: true; data: InteractiveResult } | { ok: false; error: string }>;
+  doGrab: (r: Release) => Promise<GrabOut>; onBack: () => void; onGrabbed: (r: Release) => void;
 }) {
   const [res, setRes] = useState<InteractiveResult | null>(null);
   const [error, setError] = useState('');
@@ -169,18 +174,18 @@ export function InteractiveScreen({ seriesId, e, show, onBack, onGrabbed }: {
   const [errs, setErrs] = useState<Record<string, string>>({});
   useEffect(() => {
     let live = true;
-    void interactiveSearch(seriesId, { episode_id: e.id }).then(r => {
+    void load().then(r => {
       if (!live) return;
       if (r.ok) { setRes(r.data); setError(r.data.error || ''); } else setError(r.error);
     });
     return () => { live = false; };
-  }, [seriesId, e.id]);
+  }, [title, sub]);   // eslint-disable-line react-hooks/exhaustive-deps
   const list = [...(res?.releases ?? [])].sort((a, b) =>
     sort === 'size' ? b.size - a.size : sort === 'quality' ? qrank(b) - qrank(a) || b.seeders - a.seeders : b.seeders - a.seeders);
   const off = res ? !res.grabs_allowed : false;
   const grab = async (r: Release, k: string) => {
     setBusy(k);
-    const out = await grabRelease(seriesId, r);
+    const out = await doGrab(r);
     setBusy(null);
     if (out.ok && out.data.ok) { onGrabbed(r); return; }
     setErrs(x => ({ ...x, [k]: out.ok ? out.data.error || 'Not grabbed' : out.error }));
@@ -192,8 +197,8 @@ export function InteractiveScreen({ seriesId, e, show, onBack, onGrabbed }: {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 16px' }}>
         <button type="button" className="lp-focus" data-testid="tv-interactive-back" aria-label="Back" onClick={onBack} style={backBtn}>{iconBack}</button>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: W95, overflowWrap: 'anywhere' }}>{show}</div>
-          <div style={{ fontSize: 13, color: W70 }}>{`${shortCode(e.season, e.episode)} \u00b7 ${e.title || `Episode ${e.episode}`}`}</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: W95, overflowWrap: 'anywhere' }}>{title}</div>
+          <div style={{ fontSize: 13, color: W70 }}>{sub}</div>
         </div>
         {res && <span data-testid="tv-interactive-count" style={{ fontSize: 13, color: W70, whiteSpace: 'nowrap' }}>{`${list.length} ${list.length === 1 ? 'release' : 'releases'}`}</span>}
       </div>

@@ -1,3 +1,4 @@
+import { MovieSearchActions } from '@/components/movies/MovieSearchActions';
 import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -1192,6 +1193,9 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                       onClick={handleCastOpen}
                     />
                   )}
+                {isMinimal() && inWatchlist && props.resolvedTmdbId && detail ? (
+                  <MovieSearchActions tmdbId={props.resolvedTmdbId} title={detail.title} year={detail.year} />
+                ) : null}
                 </div>
 
               </div>{/* end bottom group */}
