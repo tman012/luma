@@ -291,6 +291,10 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
         kind, payload = (fetch or (lambda u: tv_grab.fetch_link(u, automatic=origin == 'auto',
                                                                 tokens_only=origin != 'auto')))(item.get('downloadUrl'))
     except tracker_sources.GrabError as e:
+        if origin == 'auto' and getattr(e, 'retry_at', None):
+            from app import grab_retry               # v204b (PM): rate-limited automatic grab: pending, retried
+            grab_retry.add('movie', item, e.retry_at, tmdb_id=tmdb_id)
+            return {'ok': False, 'error': str(e), 'link': True, 'pending': True, 'blocked': True}
         return {'ok': False, 'error': str(e), 'link': True}
     h = tv_grab.info_hash(kind, payload)
     if not h:
@@ -454,6 +458,8 @@ def tick(now: Optional[float] = None) -> Dict[str, Any]:
         return {'skipped': 'busy'}
     try:
         out: Dict[str, Any] = {'dates': refresh_dates(now)}
+        from app import grab_retry
+        out['pending'] = grab_retry.run_due(now, 'movie')
         out['feed'] = feed(now)
         out['scheduled'] = schedule(now)
         out['due'] = run_due(now)

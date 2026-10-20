@@ -99,7 +99,7 @@ def main(argv=None) -> int:
     print(f'TV grab dry run (read-only) of {db}')
     print(f'Window: {fmt(tv_safety.floor_at(now))} (floor: start of today ET or 24 h ago, whichever is earlier)'
           f' through {fmt(until)}; now {fmt(now)}')
-    print(f'Automatic grabs in the last 24 h: {done} of {tv_safety.DAILY_CAP}')
+    print(f'Automatic grabs in the last 24 h: {done}')
     print(f'Eligible episodes (monitored, no file): {len(rows)}')
     for r in rows:
         title = f" - {r['title']}" if r['title'] else ''

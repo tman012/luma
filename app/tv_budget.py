@@ -1,22 +1,11 @@
 """TV's share of the tracker budget (automatic searches only).
 
-Every automatic TV request (the recent-releases feed, targeted episode and
-season searches, backlog) goes through tracker_guard.take(..., purpose='tv')
-and is held to these caps on top of the guard's own limits (300/day per
-tracker, the background bucket, 120/h across trackers, backoff). Manual
-searches from TV Sources are interactive and are charged to the guard's
-interactive budget instead.
-
-The caps are code constants, not settings. While production's Sonarr and
-Prowlarr use the same tracker accounts from the same IP, the test install
-(:5002) makes at most AUTO_PER_TRACKER_DAILY automatic requests per tracker
-per day.
-
-v158c (PM): the cap is not raised. A capped tracker (a site tracker; capped()) gets
-AUTO_PER_TRACKER_DAILY slots a day, one every SLOT_S (spread evenly): the feed polls in a free
-slot, and a post-air (or other automatic) search may take a slot when one is free; either way the
-next slot is SLOT_S later. An indexer with no cap (a generic Torznab/Newznab entry) is polled every
-15 min and searched freely, held only to the guard's own limits (background bucket, 300/day).
+Every automatic TV request (targeted episode and season searches; the recent-releases feed uses
+the guard's 'feed' purpose) goes through tracker_guard.take(..., purpose='tv'). v204a (PM, Taylor):
+Luma sets no daily or hourly per-tracker cap of its own. A request is held only by the guard's
+limits (burst bucket, 120/h across trackers, spacing) and by backoff when a tracker signals it
+(429, rate limit, network error), as Prowlarr does. Manual searches from TV Sources are charged
+to the guard's interactive budget instead.
 """
 
 from __future__ import annotations
@@ -48,8 +37,8 @@ def capped(cfg: Dict[str, Any]) -> bool:
 
 
 def slot_free(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> bool:
-    """A capped tracker has a free slot: under the daily cap and SLOT_S since its last automatic
-    TV request. Always True for an indexer with no cap."""
+    """A site tracker may take an automatic TV request: AUTO_MIN_GAP_S since its last one (v204a: no
+    daily cap). Always True for a generic indexer."""
     if not capped(cfg):
         return True
     from app.tracker_guard import guard_key
@@ -60,18 +49,17 @@ def slot_free(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> b
 
 
 def under_daily(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> bool:
-    """v196c (Taylor): a post-air episode search needs only the tracker's daily cap, not a 3 h slot."""
+    """v204a (PM, Taylor): no daily cap, so always True (kept for callers)."""
     return True                 # v204a: no daily cap
 
 
 def daily_reset(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> Optional[float]:
-    """v201 (PM): when a capped tracker that's at its daily cap gets a request back (the rolling 24 h window
-    drops enough of today's automatic TV requests to go under AUTO_PER_TRACKER_DAILY). None: no cap, or under it."""
+    """v204a (PM, Taylor): no daily cap, so never a reset time (kept for callers). Always None."""
     return None                 # v204a: no daily cap
 
 
 def next_slot(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> Optional[float]:
-    """When a capped tracker's next slot opens (None: no cap)."""
+    """When a site tracker may take its next automatic TV request (spacing only; None: generic indexer)."""
     if not capped(cfg):
         return None
     from app.tracker_guard import guard_key

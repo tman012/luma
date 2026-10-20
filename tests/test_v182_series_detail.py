@@ -3,6 +3,7 @@ owner's (signed-in) and user-initiated, so their grabs are origin 'manual': they
 and are never held to the daily ceiling, but an episode with a file is still refused (no upgrades), every grab
 goes through tv_grab (luma-test-tv category and tag, the scoped add), and the automatic paths stay floored.
 Monitor toggles never search."""
+import pytest
 import json
 
 import pytest
@@ -126,6 +127,7 @@ def test_interactive_grab_may_go_past_the_floor_with_the_tv_category_and_tag(own
     assert (g['series_id'], g['origin'], json.loads(g['episode_ids'])) == (env.sid, 'manual', [env.e2[3]])
 
 
+@pytest.mark.skip(reason='v204b (PM, Taylor): daily ceiling of automatic TV grabs removed; see test_v204b_grab_retry')
 def test_interactive_grab_is_never_held_to_the_daily_ceiling(owner, env, monkeypatch, known_token, frozen):  # noqa: F811
     allow_grabs(monkeypatch)
     _fill(tv_safety.DAILY_CAP)                                                   # 30 automatic grabs today

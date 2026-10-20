@@ -1015,6 +1015,8 @@ def tick(now: Optional[float] = None) -> Dict[str, Any]:
                 tv_store.set_meta('tv_feed_at', str(now))
                 out['feed'] = feed(now)
             out['due'] = run_due(now)
+            from app import grab_retry
+            out['pending'] = grab_retry.run_due(now, 'tv')
     finally:
         _lock.release()
     if _refresh_running['on']:

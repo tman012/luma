@@ -122,6 +122,7 @@ def _fill(n, origin='auto', at=NOW - 3600):
                          (f'{origin[0]}{i:039d}', origin, at))
 
 
+@pytest.mark.skip(reason='v204b (PM, Taylor): daily ceiling of automatic TV grabs removed; see test_v204b_grab_retry')
 def test_the_daily_ceiling_is_30_automatic_grabs_in_a_rolling_24h(env, monkeypatch, caplog):
     allow_grabs(monkeypatch)
     air(env.e2[3], NOW - 3600)
@@ -219,7 +220,7 @@ def test_the_dry_run_lists_tonight_read_only(env, tmp_path):
     out = run()
     assert 'S02E04' in out and 'S02E06' in out                   # aired an hour ago; airs tonight (5 AM ET)
     assert 'S02E03' not in out and 'S02E05' not in out           # too old; has a file
-    assert 'Automatic grabs in the last 24 h: 0 of 30' in out
+    assert 'Automatic grabs in the last 24 h: 0' in out
     assert 'Eligible episodes (monitored, no file): 2' in out
     assert 'TV automation (no tv_settings.json: defaults): enabled=False, feed_enabled=False' in out
     assert 'TV trackers enabled: none yet (0 switched on' in out

@@ -292,7 +292,10 @@ def fetch_release(token: Optional[str], resolver=None, automatic: bool = False) 
             reason = engine.guard.take(gk, True, strict)
         if reason:
             logger.info('Tracker %s (id %s) download not sent: %s', cfg['name'], cfg['id'], reason)
-            raise GrabError('This tracker is rate limited right now. Try again later.', 429)
+            err = GrabError('This tracker is rate limited right now. Try again later.', 429)
+            if automatic:
+                err.retry_at = engine.guard.ready_at(gk)   # v204b: the automatic grab is retried then, never dropped
+            raise err
         if not automatic and purpose and not counted:
             # v173 (PM, Tester FF-6): a manual grab counts once toward the tracker's daily automation
             # tally (8/day) so automation backs off; the daily cap never blocks the manual grab

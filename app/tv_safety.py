@@ -10,8 +10,8 @@ by tv_grab.grab before anything is fetched or sent to qBittorrent:
    never grabbed, nor a release that covers one.
 3. No Missing / backlog search jobs for TV (tv_search: backlog_enabled is ignored; nothing older than
    the floor is ever scheduled, and search on add queues only episodes inside the floor).
-4. Daily ceiling (automatic grabs): at most DAILY_CAP automatic TV grabs in any rolling 24 h
-   (grabs.origin 'auto' by grabbed_at), across all trackers; per-tracker caps (tv_budget) still apply.
+4. (v204b, PM: removed) No daily ceiling on automatic grabs; only the tracker guard's burst bucket,
+   120/h total and backoff hold a grab back, and a grab they hold is retried (app.grab_retry).
 
 Manual grabs (the owner's Search or the Sources popup) only get rule 2. An 'upgrade' grab also needs TV
 automation's upgrades_enabled (off by default; nothing issues one today), and rule 2 refuses it anyway.
@@ -33,14 +33,12 @@ logger = logging.getLogger(__name__)
 
 FLOOR_S = 24 * 3600
 ET = ZoneInfo('America/New_York')
-DAILY_CAP = 30
 WINDOW_S = 24 * 3600            # the ceiling's window: rolling 24 h
 AUTOMATIC = ('auto', 'upgrade')
 
 OLD = 'aired before the floor (start of today ET or 24 hours ago, whichever is earlier)'
 NO_DATE = 'no air date'
 HAS_FILE = 'already has a file'
-CAP = f'daily limit of {DAILY_CAP} automatic TV grabs reached'
 UPGRADES_OFF = 'upgrades are off'
 NO_EPISODES = 'no episodes'
 UNKNOWN = 'unknown episode'
@@ -134,8 +132,6 @@ def _why(series_id: Any, episode_ids: Iterable[Any], origin: str, now: float) ->
                 return NO_DATE
             if not all(in_floor(r, now) for r in rows):
                 return OLD
-            if automatic_today(conn, now) >= DAILY_CAP:
-                return CAP
     return None
 
 

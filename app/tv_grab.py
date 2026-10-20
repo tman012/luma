@@ -243,6 +243,10 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
     try:
         kind, payload = (fetch or (lambda u: fetch_link(u, automatic=origin == 'auto', tokens_only=tokens_only)))(item.get('downloadUrl'))
     except tracker_sources.GrabError as e:
+        if origin == 'auto' and getattr(e, 'retry_at', None):
+            from app import grab_retry               # v204b (PM): rate-limited automatic grab: pending, retried
+            grab_retry.add('tv', item, e.retry_at, series_id=series_id, season=season, episode_ids=list(episode_ids))
+            return {'ok': False, 'error': str(e), 'link': True, 'status': 429, 'pending': True}
         return {'ok': False, 'error': str(e), 'link': True, 'status': getattr(e, 'status', 502)}
     h = info_hash(kind, payload)
     if not h:

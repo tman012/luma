@@ -310,6 +310,26 @@ class TrackerGuard:
             self._save()
             return None
 
+    def ready_at(self, tid: str, now: Optional[float] = None) -> float:
+        """v204b (PM): when a background request to *tid* refused by the burst bucket, the 120/h total,
+        a backoff or the pause can go again (the earliest time it could; take() still decides)."""
+        now = time.time() if now is None else now
+        with self._lock:
+            self._load()
+            at = now
+            if self.fail_closed_until > now:
+                at = max(at, self.fail_closed_until)
+            cd = self.cooldown.get(tid)
+            if cd and cd[0] > now:
+                at = max(at, float(cd[0]))
+            b = self._tokens(tid, now)
+            if b[0] < 1.0:
+                at = max(at, now + (1.0 - b[0]) * LIMITS['refill_s'])
+            hr = sorted(t for v in self.log.values() for t, _ in v if t > now - 3600)
+            if len(hr) >= LIMITS['global_per_hour']:
+                at = max(at, hr[len(hr) - LIMITS['global_per_hour']] + 3600)
+            return at + 1.0
+
     def note_purpose(self, tid: str, purpose: str, now: Optional[float] = None) -> None:
         """v173 (PM, Tester FF-6): count a request toward *purpose*'s tally without holding it to that
         purpose's caps. A manual grab on a capped tracker counts toward the automation day (8/day),
