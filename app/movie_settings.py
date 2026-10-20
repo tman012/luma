@@ -317,11 +317,12 @@ def view() -> Dict[str, Any]:
                 'preferred_groups': list(_meta(conn, 'preferred_groups', [])),
                 'trackers': trackers(conn),
                 'profiles': [_profile(r) for r in conn.execute('SELECT * FROM profiles ORDER BY name COLLATE NOCASE')],
-                'qualities': qualities()}
+                'qualities': qualities(),
+                'picker_profiles': list(_meta(conn, 'picker_profiles', []))}   # v204: [] = every profile
 
 
 def apply_put(body: Any) -> Dict[str, str]:
-    if not isinstance(body, dict) or not body or set(body) - {'monitoring', 'preferred_groups', 'trackers'}:
+    if not isinstance(body, dict) or not body or set(body) - {'monitoring', 'preferred_groups', 'trackers', 'picker_profiles'}:
         return {'_': 'Invalid'}
     errors: Dict[str, str] = {}
     vals: Dict[str, Any] = {}
@@ -346,12 +347,31 @@ def apply_put(body: Any) -> Dict[str, str]:
             vals['trackers'] = [{'id': x['id'], 'enabled': bool(x.get('enabled'))} for x in t]
         else:
             errors['trackers'] = 'Invalid'
+    if 'picker_profiles' in body:
+        v = body['picker_profiles']
+        with connect() as conn:
+            known = {r['id'] for r in conn.execute('SELECT id FROM profiles')}
+        if isinstance(v, list) and all(type(x) is int and x in known for x in v) and len(set(v)) == len(v):
+            vals['picker_profiles'] = v
+        else:
+            errors['picker_profiles'] = 'Invalid'
     if errors:
         return errors
     with connect() as conn:
         for k, v in vals.items():
             _set_meta(conn, k, v)
     return {}
+
+
+def picker_profiles() -> List[Dict[str, Any]]:
+    """v204: the Add to watchlist picker's profiles, from movies.db only: the ones chosen in
+    Settings > Movies (all when none are chosen, or none of the chosen still exist), the default (TFlix) first."""
+    with connect() as conn:
+        rows = [dict(id=r['id'], name=r['name'], default=bool(r['is_default']))
+                for r in conn.execute('SELECT * FROM profiles ORDER BY name COLLATE NOCASE')]
+        chosen = set(_meta(conn, 'picker_profiles', []) or [])
+    shown = [r for r in rows if r['id'] in chosen] or rows
+    return sorted(shown, key=lambda r: (not r['default'], r['name'].lower() != 'tflix'))
 
 
 # ------------------------------------------------------------------ routes

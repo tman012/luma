@@ -26,8 +26,10 @@ const W50 = 'rgba(255,255,255,0.5)';
 const W70 = 'rgba(255,255,255,0.7)';
 const W95 = 'rgba(255,255,255,0.95)';
 
-export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true }: {
+export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, phone: forcePhone = false }: {
   today: Day; week: Day; onWeek: (start: Day) => void; reload?: number;
+  /** v204: the home screen's TV calendar sheet is always the phone layout */
+  phone?: boolean;
   /** false: the page shows WeekControls in its top row instead */
   toolbar?: boolean;
 }) {
@@ -69,7 +71,8 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true }: 
       window.removeEventListener('focus', quiet); document.removeEventListener('visibilitychange', onVis);
     };
   }, [week, key]);
-  const phone = usePhone();
+  const isPhone = usePhone();
+  const phone = forcePhone || isPhone;
   const [dayPick, setDayPick] = useState<Day>(today);
   const inWeek = (d: Day) => d >= week && d < addDays(week, 7);
   const day = inWeek(dayPick) ? dayPick : inWeek(today) ? today : week;
@@ -445,7 +448,34 @@ export function PhoneDay({ eps, day, today }: { eps: CalEpisode[]; day: Day; tod
       <div data-testid="tv-day-count" style={{ margin: '0 4px 8px', fontSize: 15, fontWeight: 600, color: W95 }}>
         {list.length === 1 ? '1 episode' : `${list.length} episodes`}
       </div>
-      <Agenda eps={list} today={today} noHead />
+      {/* v204 (Taylor's pick T2): the day's episodes under air-time headers, in ET */}
+      {airGroups(list).map(([t, g]) => (
+        <section key={t || 'untimed'} data-testid="tv-time-group" style={{ marginBottom: 16 }}>
+          {t && <h4 data-testid="tv-time-head" style={{ margin: '0 4px 8px', fontSize: 13, fontWeight: 600, color: W70 }}>{t}</h4>}
+          <Agenda eps={g} today={today} noHead />
+        </section>
+      ))}
     </div>
   );
+}
+
+/** '8:00 PM' in ET (America/New_York) from an episode's UTC airstamp; '' when untimed. */
+export function etTime(airstamp: string | null | undefined): string {
+  if (!airstamp) return '';
+  const d = new Date(airstamp);
+  return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
+}
+
+/** T2: consecutive episodes (already in air order) grouped by their ET air time; untimed ones last, no header. */
+export function airGroups(list: CalEpisode[]): [string, CalEpisode[]][] {
+  const out: [string, CalEpisode[]][] = [];
+  const untimed: CalEpisode[] = [];
+  for (const e of list) {
+    const t = etTime(e.airstamp);
+    if (!t) { untimed.push(e); continue; }
+    const last = out[out.length - 1];
+    if (last && last[0] === t) last[1].push(e); else out.push([t, [e]]);
+  }
+  if (untimed.length) out.push(['', untimed]);
+  return out;
 }

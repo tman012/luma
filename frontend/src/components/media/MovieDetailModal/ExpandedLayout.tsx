@@ -1060,8 +1060,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                     <PillButton
                       focusKey="mm-info-watchlist"
                       zoneId="movie-detail-modal"
-                      primary={!!inWatchlist}
-                      tone={inWatchlist ? undefined : 'blue'}
+                      primary
                       testid={inWatchlist ? 'movie-in-watchlist-desktop' : 'movie-add-watchlist-desktop'}
                       padding={t.pill.padding}
                       fontSize={t.pill.fontSize}
@@ -1077,7 +1076,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                           </svg>
                         )
                       }
-                      label={inWatchlist ? 'In watchlist' : 'Add to watchlist'}
+                      label={inWatchlist ? 'In watchlist' : 'Watchlist'}
                       onClick={() => inWatchlist ? setShowAlreadyInWatchlist(true) : isMinimal() ? setShowNativeAdd(true) : handleUpgradeOpen()}
                     />
                     </span>

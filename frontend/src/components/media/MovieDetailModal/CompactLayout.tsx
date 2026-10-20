@@ -1,6 +1,5 @@
 import { MovieSearchActions } from '@/components/movies/MovieSearchActions';
 import { isMinimal } from '@/minimal';
-import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { sheetBase } from '@/utils/posterColors';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
@@ -181,7 +180,6 @@ export function CompactLayout(props: MovieModalViewProps) {
   const [openReview, setOpenReview] = useState<TopReview | null>(null);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [removingWatchlist, setRemovingWatchlist] = useState(false);
-  const [showNativeAdd, setShowNativeAdd] = useState(false);   // v202: the native watchlist (test install)
   const [removeWatchlistError, setRemoveWatchlistError] = useState<string | null>(null);
 
   const collectionId = detail?.collectionId ?? null;
@@ -714,20 +712,20 @@ export function CompactLayout(props: MovieModalViewProps) {
                       </button>
                     </div>
                   ) : (
-                    /* Add to watchlist: full-width #3b82f6 primary, white text, sentence case
-                       (v167, Designer: the same button as TV detail; was the white pill) */
+                    /* Add to watchlist: v204 (PM): prod 1b4ea74's full-width white pill again (white, black
+                       text, 50px radius); label stays sentence case */
                     <button
                       type="button"
                       data-testid="movie-add-watchlist"
                       data-modal-keep=""
-                      onClick={() => (isMinimal() ? setShowNativeAdd(true) : handleUpgradeToggle())}
+                      onClick={handleUpgradeToggle}
                       style={{
                         width: 'calc(100% - 32px)',
                         margin: '20px 16px 0',
                         padding: '14px 20px',
-                        background: '#3b82f6',
-                        color: '#ffffff',
-                        borderRadius: '12px',
+                        background: '#ffffff',
+                        color: '#000000',
+                        borderRadius: '50px',
                         border: 'none',
                         fontSize: '16px',
                         fontWeight: 600,
@@ -1380,10 +1378,6 @@ export function CompactLayout(props: MovieModalViewProps) {
 
 
 
-      {showNativeAdd && detail && props.resolvedTmdbId && (
-        <WatchlistAddSheet tmdbId={props.resolvedTmdbId} title={detail.title} year={detail.year}
-          onClose={() => setShowNativeAdd(false)} onAdded={() => { setShowNativeAdd(false); props.onUpgradeAdded?.(); }} />
-      )}
       {/* Remove from watchlist confirm sheet */}
       {showRemoveConfirm && (
         <div

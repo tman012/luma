@@ -74,6 +74,28 @@ export function MoviesSettings() {
         </div>
       </div>
 
+      <div data-testid="movie-picker-profiles">
+        <h3 style={sectionLabel}>Watchlist picker</h3>
+        <div style={card}>
+          {d.profiles.map((p, i) => {
+            const chosen = d.picker_profiles ?? [];
+            const on = chosen.length === 0 || chosen.includes(p.id);
+            return (
+              <div key={p.id} data-testid="movie-picker-profile" style={rowStyle(i)}>
+                <span style={{ flex: 1, fontSize: 14, color: on ? W95 : W50 }}>{p.name}</span>
+                <Toggle id={`mv-picker-${p.id}`} label={p.name} on={on} onChange={v => {
+                  const base = chosen.length ? chosen : d.profiles.map(x => x.id);
+                  const next = v ? [...base, p.id] : base.filter(x => x !== p.id);
+                  if (!next.length) return;                        // at least one profile stays in the picker
+                  const all = next.length === d.profiles.length ? [] : d.profiles.map(x => x.id).filter(x => next.includes(x));
+                  put({ picker_profiles: all }, { ...d, picker_profiles: all });
+                }} />
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div data-testid="movie-trackers">
         <h3 style={sectionLabel}>Trackers</h3>
         {trackers.length === 0 ? (

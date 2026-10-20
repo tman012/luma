@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiFetch } from '../../../apiClient';
+import { isMinimal } from '@/minimal';
+import { addToNativeWatchlist } from '@/services/watchlistApi';
 
 const DISMISS_THRESHOLD = 120;
 
@@ -42,7 +44,8 @@ export function MobileUpgradeSheet({
 
   useEffect(() => {
     let cancelled = false;
-    apiFetch('/api/radarr/upgrade-profiles')
+    // v204 (test install): Luma's own movie profiles (movies.db, Settings > Movies); never Radarr
+    apiFetch(isMinimal() ? '/api/movies/watchlist/profiles' : '/api/radarr/upgrade-profiles')
       .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then((data: QualityProfile[]) => { if (!cancelled) setProfiles(data); })
       .catch(() => { if (!cancelled) setProfiles([]); });
@@ -98,6 +101,15 @@ export function MobileUpgradeSheet({
     setAdding(qualityProfile);
     setError(null);
     setErrorMsg(null);
+    if (isMinimal()) {
+      // v204: the native watchlist on the test install, with the picked profile's id
+      const opt = (profiles ?? []).find(p => p.name === qualityProfile);
+      const r = await addToNativeWatchlist({ tmdbId, title, year, profileId: opt?.id ?? null });
+      if (r.ok) { handleDismiss(); setTimeout(() => onAdded(), 280); return; }
+      setAdding(null); setError(qualityProfile); setErrorMsg(r.error ?? 'Failed');
+      setTimeout(() => { setError(null); setErrorMsg(null); }, 4000);
+      return;
+    }
     try {
       const resp = await apiFetch('/api/watchlist', {
         method: 'POST',
@@ -126,7 +138,7 @@ export function MobileUpgradeSheet({
       setErrorMsg('Network error');
       setTimeout(() => { setError(null); setErrorMsg(null); }, 4000);
     }
-  }, [adding, tmdbId, title, year, handleDismiss, onAdded]);
+  }, [adding, profiles, tmdbId, title, year, handleDismiss, onAdded]);
 
   const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
 

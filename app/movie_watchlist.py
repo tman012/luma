@@ -84,6 +84,12 @@ def ids_get():
     return _guard() or ms._out({'tmdb_ids': tmdb_ids()})
 
 
+@bp.route('/api/movies/watchlist/profiles', methods=['GET'])
+def profiles_get():
+    """v204: the Add to watchlist picker (prod's MobileUpgradeSheet) lists these instead of Radarr's."""
+    return _guard() or ms._out([{'id': p['id'], 'name': p['name']} for p in ms.picker_profiles()])
+
+
 @bp.route('/api/movies/watchlist', methods=['GET'])
 def list_get():
     return _guard() or ms._out({'movies': movies()})
