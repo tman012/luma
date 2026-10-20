@@ -55,7 +55,7 @@ def mv(tmp_path, monkeypatch, guard, tv_env):  # noqa: F811
     from app import tracker_search
     monkeypatch.setenv('LUMA_INSTANCE', 'test')
     monkeypatch.setenv('LUMA_TEST_ALLOW', 'movie_grab')
-    monkeypatch.delenv('LUMA_TEST_MOVIE_TAG', raising=False)
+    monkeypatch.delenv('LUMA_MOVIE_CATEGORY', raising=False)
     monkeypatch.setitem(movie_settings._cfg, 'db_path', str(tmp_path / 'mdb' / 'movies.db'))
     monkeypatch.setitem(movie_settings._cfg, 'seed_path', str(tmp_path / 'no-seed.json'))
     monkeypatch.setattr(movie_settings, '_tracker_records', lambda: [{'id': 1, 'name': 'IPT', 'type': 'iptorrents'},
@@ -162,8 +162,8 @@ def test_picks_by_profile_size_priority_and_groups_and_grabs_once(mv):
     # the 2160p is outside the profile, TINY under the size floor, Dune (2021) not this movie, the IPT FLUX
     # blocklisted; tracker priority (IPT first) beats the indexer's FLUX with more seeders
     assert [x['release_title'] for x in g] == ['Dune.Part.Two.2024.1080p.WEB-DL.DDP5.1-NTb']
-    assert g[0]['tmdb_id'] == 693134 and g[0]['state'] == 'downloading' and len(g[0]['hash']) == 40
-    assert mv.q.torrents[0]['category'] == mv.q.torrents[0]['tags'] == 'luma-test-movies'
+    assert g[0]['tmdb_id'] == 693134 and g[0]['state'] == 'grabbed' and len(g[0]['hash']) == 40
+    assert mv.q.torrents[0]['category'] == mv.q.torrents[0]['tags'] == 'movie'
     assert _scan()['next_search_at'] is None
     mv.calls.clear()
     assert sc.run_due(NOW + 3600)['movies'] == 0 and sc.feed(NOW + 3600)['grabbed'] == 0     # never twice

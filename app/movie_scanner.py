@@ -12,7 +12,7 @@ Every TICK_S, when LUMA_INSTANCE is test and Settings > Movies monitoring is on 
   * grab: the best release by the movie's profile (allowed qualities in order, MB/min limits by TMDB runtime),
     then tracker priority, preferred groups (empty: ranking unchanged), PROPER, freeleech, seeders; the
     blocklist is skipped. Sent through TV's download client path (tv_grab.fetch_link, the same scoped
-    qBittorrent add) with this instance's movie category and tag (luma-test-movies). Recorded in movies.db
+    qBittorrent add) with the movie category and tag ('movie'; LUMA_MOVIE_CATEGORY). Recorded in movies.db
     movie_grabs; a movie with a grab is never grabbed again.
 
 Only test's own watchlist (movies.db) is read; Radarr is never read or written. Roulette, 4K and Franchise
@@ -45,19 +45,14 @@ MOVIE_CATEGORIES = [2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060, 2070, 2080]
 SECTION = 'movies'
 AUTO_PURPOSE = 'backlog'            # search_log's label for an automatic movie search (guard purpose: 'tv')
 JOB = 'movie_grab'                  # the instance job for a movie add on test (instance.scoped_add)
-CATEGORY_ENV = 'LUMA_TEST_MOVIE_TAG'
-DEFAULT_CATEGORY = 'luma-test-movies'
+CATEGORY_ENV = 'LUMA_MOVIE_CATEGORY'              # the same name piece 4's import watches
+DEFAULT_CATEGORY = 'movie'
 TZ = ZoneInfo('America/New_York')
-ACTIVE = ('downloading', 'importing', 'imported')
+ACTIVE = ('grabbed', 'importing', 'imported')    # movie_grabs states; 'failed' may be grabbed again
 NO_TRACKERS = 'No movie trackers are on'
 OFF = 'Not available'
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS movie_grabs (
-  hash TEXT PRIMARY KEY, tmdb_id INTEGER NOT NULL, release_title TEXT, state TEXT NOT NULL DEFAULT 'downloading',
-  grabbed_at REAL NOT NULL
-);
-CREATE INDEX IF NOT EXISTS movie_grabs_tmdb ON movie_grabs(tmdb_id);
 CREATE TABLE IF NOT EXISTS movie_blocklist (
   id INTEGER PRIMARY KEY, tmdb_id INTEGER, release_title TEXT, info_hash TEXT, added_at REAL NOT NULL
 );
@@ -69,7 +64,8 @@ CREATE TABLE IF NOT EXISTS movie_scan (
 
 
 def ensure(conn) -> None:
-    conn.executescript(SCHEMA)
+    from app.movie_grabs import SCHEMA as GRABS     # piece 4's movie_grabs (one table, shared)
+    conn.executescript(GRABS + SCHEMA)
 
 
 def on_test() -> bool:
@@ -288,9 +284,9 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
         return {'ok': False, 'error': OFF, 'blocked': True}
     with ms.connect() as conn:
         ensure(conn)
-        if conn.execute(f"SELECT 1 FROM movie_grabs WHERE tmdb_id = ? AND state IN ({','.join('?' * len(ACTIVE))})",
-                        (tmdb_id, *ACTIVE)).fetchone():
-            return {'ok': False, 'error': 'Already grabbed', 'existing': True}
+    from app import movie_grabs
+    if any(g['state'] in ACTIVE for g in movie_grabs.for_movie(tmdb_id)):
+        return {'ok': False, 'error': 'Already grabbed', 'existing': True}
     try:
         kind, payload = (fetch or (lambda u: tv_grab.fetch_link(u, automatic=origin == 'auto',
                                                                 tokens_only=origin != 'auto')))(item.get('downloadUrl'))
@@ -303,8 +299,8 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
         if conn.execute('SELECT 1 FROM movie_blocklist WHERE info_hash = ? OR (release_title = ? AND tmdb_id = ?)',
                         (h, item.get('title'), tmdb_id)).fetchone():
             return {'ok': False, 'error': 'Blocklisted'}
-        if conn.execute('SELECT 1 FROM movie_grabs WHERE hash = ?', (h,)).fetchone():
-            return {'ok': False, 'error': 'Already grabbed', 'existing': True}
+    if movie_grabs.by_hash(h):
+        return {'ok': False, 'error': 'Already grabbed', 'existing': True}
     name = category()
     sess, url = mover._qbit_session(session_factory or requests.Session, now)
     if not sess:
@@ -332,9 +328,8 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
         return {'ok': False, 'error': f'qBittorrent returned HTTP {r.status_code}' if r.status_code != 200
                 else 'qBittorrent refused the torrent'}
     with ms.connect() as conn:
-        conn.execute("INSERT OR IGNORE INTO movie_grabs (hash, tmdb_id, release_title, state, grabbed_at)"
-                     " VALUES (?, ?, ?, 'downloading', ?)", (h, tmdb_id, item.get('title'), now))
         _set(conn, tmdb_id, next_search_at=None, last_search_at=now)
+    movie_grabs.record(tmdb_id, str(item.get('title') or ''), h, now)
     logger.info('Movie grab: %s (%s, category %s)', item.get('title'), origin, name)
     return {'ok': True, 'hash': h}
 
