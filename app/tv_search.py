@@ -235,6 +235,10 @@ def _rank(profile: Optional[Dict[str, Any]], q: Optional[str]) -> Optional[int]:
     return None
 
 
+def _rej(title: Any, why: str) -> None:
+    logger.info('TV release rejected: %s (%s)', str(title or '')[:200], why)
+
+
 def candidates(items: List[Dict[str, Any]], show: Dict[str, Any], want: List[Dict[str, Any]],
                blocked: Optional[set] = None) -> List[Dict[str, Any]]:
     """Releases for *show* covering *want*, each {item, covers (episode ids), rank, why}."""
@@ -251,11 +255,14 @@ def candidates(items: List[Dict[str, Any]], show: Dict[str, Any], want: List[Dic
     for it in items:
         title = str(it.get('title') or '')
         if not title or title in (blocked or set()):
+            _rej(title, 'blocklisted' if title else 'no title')
             continue
         rel = tv_release.parse(title)
         if tv_match.normalize(rel.title or '') not in show['names']:
+            _rej(title, 'title does not match the show')
             continue
         if rel.year and show.get('year') and rel.year != show['year']:
+            _rej(title, f'year {rel.year} is not {show["year"]}')
             continue
         covers: List[int] = []
         if rel.kind in ('episode', 'multi') and rel.season is not None:
@@ -265,21 +272,27 @@ def candidates(items: List[Dict[str, Any]], show: Dict[str, Any], want: List[Dic
         elif rel.kind == 'daily' and rel.air_date in by_date:
             covers = [by_date[rel.air_date]['id']]
         if not covers:
+            _rej(title, 'not a wanted episode')
             continue
         low = title.casefold()
         if any(w not in low for w in must) or any(w in low for w in never):
+            _rej(title, 'must or must-not words')
             continue
         if int(it.get('seeders') or 0) < min_seeders:
+            _rej(title, f'seeders {it.get("seeders")} below {min_seeders}')
             continue
         q = tv_monitor.quality_of(title)
         rank = _rank(p, q)
         if rank is None:
+            _rej(title, f'quality {q} not allowed by the profile')
             continue
         if p and (p['min_mb_per_min'] or p['max_mb_per_min']):
             mins = sum(int(next((e['runtime'] for e in want if e['id'] == i), 0) or DEFAULT_RUNTIME) for i in covers)
             mb = (int(it.get('size') or 0) / 1048576) / max(1, mins)
             if (p['min_mb_per_min'] and mb < p['min_mb_per_min']) or (p['max_mb_per_min'] and mb > p['max_mb_per_min']):
+                _rej(title, f'size {mb:.1f} MB/min outside the profile')
                 continue
+        logger.info('TV release accepted: %s (quality %s)', title[:200], q)
         out.append({'item': {**it, 'quality': q}, 'covers': covers, 'rank': rank, 'proper': rel.proper,
                     'pack': rel.kind == 'season', 'prefer_packs': prefer_packs})
     return out
