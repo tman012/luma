@@ -1,4 +1,3 @@
-import { isMinimal } from '@/minimal';
 import { useState, useEffect } from 'react';
 import type { ReviewsData } from '@/types/reviews';
 import { apiFetch } from '../apiClient';
@@ -21,8 +20,8 @@ export function useReviews(title: string, year: number | null, mediaType: 'movie
 
   useEffect(() => {
     // Don't fetch with empty title — detail hasn't loaded yet
-    // Minimal builds have no RT reviews endpoint: don't call it.
-    if (!title || isMinimal()) {
+    // v217: minimal builds call the RT reviews endpoint too, as prod 1b4ea74.
+    if (!title) {
       setLoading(false);
       return;
     }

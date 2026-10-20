@@ -1727,7 +1727,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                           {/* Seasons — available as soon as show meta or light
                               season summary is known; do not wait on full grid. */}
                           {(seasons.length > 0 || (show?.numberOfSeasons ?? 0) > 0) && (
-                            <span {...(lumaMon ? { 'data-modal-keep': '' } : {})} style={{ display: 'contents' }}>
+                            <span data-modal-keep="" style={{ display: 'contents' }}>
                             <PillButton
                               focusKey="tm-seasons"
                               zoneId="tv-detail-modal"
@@ -1771,7 +1771,9 @@ export function ExpandedLayout(props: TvModalViewProps) {
                           )}
 
                           {/* Cast */}
+                          {/* v217: Seasons and Cast show in minimal builds too, as prod 1b4ea74. */}
                           {(castForDisplay.length > 0 || creatorsForDisplay.length > 0) && (
+                            <span data-modal-keep="" style={{ display: 'contents' }}>
                             <PillButton
                               focusKey="tm-cast"
                               zoneId="tv-detail-modal"
@@ -1788,6 +1790,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
                               label="Cast"
                               onClick={handleCastOpen}
                             />
+                            </span>
                           )}
                         </div>
                       </>

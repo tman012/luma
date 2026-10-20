@@ -66,6 +66,8 @@ DETAIL_READ_PREFIXES = (
     '/api/tmdb/person_by_id/',
     # v216: the wide popup's file-info (i) sheet, prod 1b4ea74's (signed-in; the route checks).
     '/api/plex/file-info/',
+    # v217: prod 1b4ea74's reviews (the popup's 'Cast & Reviews' and the RT score fill). Keyless RT reads.
+    '/api/reviews/top', '/api/rt/reviews',
 )
 # v180: prod's library ownership (Plex match) on test. These are the routes the
 # owned Play/Watch and Home's owned orbs read; every one was already on above

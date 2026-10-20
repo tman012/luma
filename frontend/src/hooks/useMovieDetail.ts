@@ -45,9 +45,7 @@ export function useMovieDetail(
   const [detail, setDetail] = useState<MediaDetail | null>(null);
   const [ratings, setRatings] = useState<Ratings | null>(null);
   const [loading, setLoading] = useState(true);
-  // Minimal mode shows Plex ratings only: an unowned title has none to wait for.
-  const noRatings = isMinimal() && !ratingKey;
-  const [ratingsLoading, setRatingsLoading] = useState(!noRatings);
+  const [ratingsLoading, setRatingsLoading] = useState(true);
   const [error, setError] = useState(false);
   const [trailerKey, setTrailerKey] = useState<string | null | undefined>(undefined);
 
@@ -235,7 +233,6 @@ export function useMovieDetail(
   const movieYear = detail?.year;
   useEffect(() => {
     if (!movieTitle) return;
-    if (noRatings) { setRatingsLoading(false); return; }
 
     const controller = new AbortController();
     let cancelled = false;
@@ -250,7 +247,7 @@ export function useMovieDetail(
 
       const params = new URLSearchParams();
       if (movieYear) params.set('year', String(movieYear));
-      // Minimal mode shows Plex's own ratings only (no OMDb, no RT scrape).
+      // Minimal builds skip OMDb (no OMDb connector on test); the RT fill below runs, as prod 1b4ea74.
       const omdbPromise: Promise<Record<string, unknown> | null> = isMinimal() ? Promise.resolve(null) : apiFetch(
         `/api/ratings/${encodeURIComponent(movieTitle!)}?${params}`,
         { signal: controller.signal },
@@ -292,7 +289,7 @@ export function useMovieDetail(
       // Background fill: if RT critic or audience is missing, try RT scraper
       const missingRtCritic = merged.rotten_tomatoes_critic?.score == null;
       const missingRtAudience = merged.rotten_tomatoes_audience?.score == null;
-      if (!isMinimal() && (missingRtCritic || missingRtAudience)) {
+      if (missingRtCritic || missingRtAudience) {
         const rtParams = new URLSearchParams({ title: movieTitle! });
         if (movieYear) rtParams.set('year', String(movieYear));
         apiFetch(`/api/rt/reviews?${rtParams}`, { signal: controller.signal })
@@ -320,7 +317,7 @@ export function useMovieDetail(
       cancelled = true;
       controller.abort();
     };
-  }, [movieTitle, movieYear, ratingKey, reloadNonce, noRatings]);
+  }, [movieTitle, movieYear, ratingKey, reloadNonce]);
 
   // -------------------------------------------------------------------------
   // Fetch UltraBlurColors — race Plex (fast) vs TMDb (slow but higher quality)

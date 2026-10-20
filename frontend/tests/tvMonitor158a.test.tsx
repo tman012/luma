@@ -294,12 +294,14 @@ describe('TV detail polish', () => {
     expect(btn).not.toContain("borderRadius: '50px'");
     expect(read('AddToSonarrModal.tsx')).not.toContain('Add to Watchlist');
   });
-  it('minimal builds keep the monitor toggle and the Seasons pill (data-modal-keep); the rest of the actions stay hidden', () => {
+  it('minimal builds keep the monitor toggle, Seasons and Cast (data-modal-keep, v217 as prod); Sonarr-only actions stay hidden', () => {
     const css = readFileSync(resolve(__dirname, '../src/index.css'), 'utf8');
     expect(css).toContain('html.luma-minimal [data-modal-actions]:has(> [data-modal-sources], > [data-modal-keep])');
     expect(css).toContain('> :not([data-modal-sources]):not([data-modal-keep]) {\n  display: none !important;');
     const src = read('ExpandedLayout.tsx');
     expect(src).toContain(`{lumaMon && <span data-modal-keep="" style={{ display: 'contents' }}><SeriesMark /></span>}`);
-    expect(src).toContain(`<span {...(lumaMon ? { 'data-modal-keep': '' } : {})} style={{ display: 'contents' }}>`);
+    expect(src).not.toContain(`{...(lumaMon ? { 'data-modal-keep': '' } : {})}`);
+    expect(src).toMatch(/<span data-modal-keep="" style=\{\{ display: 'contents' \}\}>\s*<PillButton\s*focusKey="tm-seasons"/);
+    expect(src).toMatch(/<span data-modal-keep="" style=\{\{ display: 'contents' \}\}>\s*<PillButton\s*focusKey="tm-cast"/);
   });
 });

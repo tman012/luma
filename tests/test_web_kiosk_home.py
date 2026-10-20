@@ -129,8 +129,10 @@ def test_popup_read_paths_in_minimal():
     from app import minimal
     assert minimal.path_allowed('/api/plex/episode/123', 'GET')
     assert minimal.path_allowed('/settings/home-screen', 'GET')
-    for off in ('/api/ratings/Heat', '/api/reviews/top', '/api/rt/reviews'):
-        assert not minimal.path_allowed(off, 'GET'), off
+    # v217: prod's reviews are on (keyless RT); OMDb ratings stay off (no OMDb connector on test).
+    assert not minimal.path_allowed('/api/ratings/Heat', 'GET')
+    for on in ('/api/reviews/top', '/api/rt/reviews'):
+        assert minimal.path_allowed(on, 'GET'), on
 
 
 @pytest.mark.parametrize('minimal, expected', [(True, 10), (False, 0)])

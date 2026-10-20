@@ -55,13 +55,16 @@ describe('no layout shift from late images', () => {
 
 describe('ratings loading in minimal mode', () => {
   afterEach(() => { (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__ = undefined; vi.unstubAllGlobals(); });
-  it('an unowned title has no ratings to wait for (no reserved blank row)', async () => {
+  // v217: minimal builds fill RT scores for unowned titles too (prod 1b4ea74), so ratings load and then settle.
+  it('an unowned title loads its ratings (RT fill) and settles', async () => {
     _resetModalPrefetch();
     (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__ = true;
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ id: 5, title: 'X', videos: { results: [] } }), { status: 200 })));
     const { result } = renderHook(() => useMovieDetail(undefined, 5));
-    expect(result.current.ratingsLoading).toBe(false);
     await waitFor(() => expect(result.current.detail?.title).toBe('X'));
-    expect(result.current.ratingsLoading).toBe(false);
+    await waitFor(() => expect(result.current.ratingsLoading).toBe(false));
+    const urls = (fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.includes('/api/rt/reviews'))).toBe(true);
+    expect(urls.some((u) => u.includes('/api/ratings/'))).toBe(false);   // no OMDb connector on test
   });
 });
