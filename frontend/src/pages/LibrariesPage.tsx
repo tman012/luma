@@ -135,7 +135,7 @@ export function SettingsPage() {
       <style>{css}</style>
       <div role="dialog" aria-modal="true" aria-label="Settings" data-testid="settings-sheet" className="luma-sheet" style={sheet}>
         {!known ? (
-          <div key="list">
+          <div key="list" data-scroll-content style={{ paddingBottom: SHEET_SCROLL_PAD }}>
             <SheetHeader title="Settings" onClose={() => navigate('/')} />
             <ul style={{ listStyle: 'none', margin: '16px 0 0', padding: 0 }} data-testid="settings-list">
               {sections.map((s, i) => (
@@ -152,7 +152,7 @@ export function SettingsPage() {
         ) : (
           <div key={known.slug} className="luma-push" data-testid="settings-section">
             {!ownChrome && <SheetHeader title={known.label} onBack={() => navigate('/settings')} onClose={() => navigate('/')} />}
-            <div style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 24px)' }}>{content(known.slug)}</div>
+            <div data-scroll-content style={{ paddingBottom: SHEET_SCROLL_PAD }}>{content(known.slug)}</div>
           </div>
         )}
       </div>
@@ -387,9 +387,18 @@ const bar: React.CSSProperties = {
 const deskTitle: React.CSSProperties = {
   margin: '0 0 8px', fontSize: 20, fontWeight: 600, fontFamily: FONT, color: 'rgba(255,255,255,0.95)', lineHeight: '40px',
 };
+/** v210 (PM, Taylor): the phone Settings sheet runs full-bleed to the bottom edge of an installed iPhone PWA,
+ * as prod's Settings does. iOS standalone stops a `position: fixed; bottom: 0` layer at the top of the bottom
+ * safe-area inset, which left an empty html-colored band under the sheet; the backdrop (and the sheet pinned
+ * to it) now reaches one inset past the edge, and the inset is padding only inside the scroll content
+ * (SHEET_SCROLL_PAD). */
 const sheetBackdrop: React.CSSProperties = {
-  ...homePage, position: 'fixed', inset: 0, backgroundImage: 'linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55))',
+  ...homePage, position: 'fixed', inset: 0, bottom: 'calc(-1 * env(safe-area-inset-bottom, 0px))',
+  minHeight: undefined, backgroundImage: 'linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55))',
 };
+/** Bottom padding of the sheet's scroll content: the inset the sheet extends past the edge, the home
+ * indicator inset, and 24px. */
+export const SHEET_SCROLL_PAD = 'calc(env(safe-area-inset-bottom, 0px) * 2 + 24px)';
 const sheet: React.CSSProperties = {
   position: 'absolute', top: 'calc(env(safe-area-inset-top) + 8px)', left: 0, right: 0, bottom: 0,
   // App navy token (#15102a = --color-kiosk-black) + white 4% + the StartUI navy glow at top.
