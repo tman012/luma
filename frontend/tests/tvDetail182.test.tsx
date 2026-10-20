@@ -115,7 +115,7 @@ describe('Series detail page', () => {
     expect(rows.map(r => within(r).getByTestId('tv-detail-status').textContent)).toEqual(['Unaired', 'Downloading', 'Downloaded']);
     const edge = within(e21).getByTestId('tv-detail-edge');
     expect([edge.style.width, edge.style.background]).toEqual(['4px', 'var(--tv-state-downloaded, #22c55e)']);
-    expect(within(rows[1]!).getByTestId('tv-detail-edge').style.background).toBe('rgb(245, 158, 11)');
+    expect(within(rows[1]!).getByTestId('tv-detail-edge').style.background).toBe('var(--tv-state-downloading, #3b82f6)');
     for (const r of rows) expect(within(r).getByTestId('tv-detail-status').querySelector('svg')).toBeNull();
     expect(document.querySelector('path[d="M20 6L9 17l-5-5"]')).toBeNull();                      // no checkmark anywhere
   });

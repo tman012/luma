@@ -69,6 +69,7 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true }: 
       window.removeEventListener('focus', quiet); document.removeEventListener('visibilitychange', onVis);
     };
   }, [week, key]);
+  const phone = usePhone();
   const loading = data?.key !== key && failed !== key;
   const end = addDays(week, 7);
   const eps = data?.key === key ? data.cal.episodes.filter(e => e.air_date >= week && e.air_date < end && shown(e)) : [];
@@ -83,6 +84,8 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true }: 
           <Placeholder />
         ) : !eps.length ? (
           <div data-testid="tv-cal-empty" style={emptyCard}>No episodes this week</div>
+        ) : phone ? (
+          <PhoneAgenda eps={eps} week={week} today={today} />
         ) : (
           <WeekGrid eps={eps} week={week} today={today} />
         )}
@@ -394,3 +397,51 @@ const pill: React.CSSProperties = {
   height: 32, padding: '0 14px', borderRadius: 999, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
   color: W95, fontSize: 13, fontWeight: 600, fontFamily: FONT, cursor: 'pointer', flex: 'none', marginLeft: 4,
 };
+
+const PHONE_MQ = '(max-width: 767px)';
+/** Phone widths (under 768px) get the agenda with the 7-day strip; desktop is unchanged. */
+export function usePhone(): boolean {
+  const get = () => typeof window !== 'undefined' && !!window.matchMedia && window.matchMedia(PHONE_MQ).matches;
+  const [m, setM] = useState(get);
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const q = window.matchMedia(PHONE_MQ); const on = () => setM(q.matches);
+    q.addEventListener?.('change', on); return () => q.removeEventListener?.('change', on);
+  }, []);
+  return m;
+}
+
+/** Variant B phone calendar: a 7-day strip with state dots, then the selected day's cards. */
+export function PhoneAgenda({ eps, week, today }: { eps: CalEpisode[]; week: Day; today: Day }) {
+  const days = Array.from({ length: 7 }, (_, i) => addDays(week, i));
+  const [day, setDay] = useState<Day>(days.includes(today) ? today : week);
+  const sel = days.includes(day) ? day : week;
+  const list = eps.filter(e => e.air_date === sel);
+  return (
+    <div data-testid="tv-cal-phone">
+      <div data-testid="tv-week-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+        {days.map(d => {
+          const on = d === sel; const dt = new Date(`${d}T12:00:00`);
+          const dots = eps.filter(e => e.air_date === d).slice(0, 4);
+          return (
+            <button key={d} type="button" data-testid="tv-week-chip" data-day={d} aria-pressed={on} onClick={() => setDay(d)} className="lp-focus"
+              style={{ height: 68, minWidth: 0, borderRadius: 12, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
+                background: on ? '#3b82f6' : 'rgba(255,255,255,0.06)', color: on ? '#fff' : W95,
+                border: !on && d === today ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.08)' }}>
+              <span style={{ fontSize: 12, fontWeight: 500, color: on ? '#fff' : W70 }}>{dt.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+              <span style={{ fontSize: 17, fontWeight: 700 }}>{dt.getDate()}</span>
+              <span style={{ display: 'flex', gap: 3, height: 5 }}>
+                {dots.map(e => <span key={e.episode_id} style={{ width: 5, height: 5, borderRadius: 3, background: on ? '#fff' : STATE_COLOR[episodeState(e, today)] }} />)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '16px 4px 8px' }}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: W95 }}>{new Date(`${sel}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</span>
+        <span style={{ fontSize: 12, color: W70 }}>{list.length === 1 ? '1 episode' : `${list.length} episodes`}</span>
+      </div>
+      {list.length ? <Agenda eps={list} today={today} /> : <div data-testid="tv-cal-empty" style={{ ...emptyCard, minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No episodes</div>}
+    </div>
+  );
+}

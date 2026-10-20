@@ -36,7 +36,7 @@ export const DETAIL_STATE_WORD: Record<DetailState, string> = {
   downloaded: 'Downloaded', downloading: 'Downloading', missing: 'Missing', unaired: 'Unaired', no_date: 'No air date',
 };
 export const DETAIL_STATE_COLOR: Record<DetailState, string> = {
-  downloaded: 'var(--tv-state-downloaded, #22c55e)', downloading: '#f59e0b', missing: 'var(--tv-state-missing, #ef4444)',
+  downloaded: 'var(--tv-state-downloaded, #22c55e)', downloading: 'var(--tv-state-downloading, #3b82f6)', missing: 'var(--tv-state-missing, #ef4444)',
   unaired: 'var(--tv-state-unaired, #3b82f6)', no_date: 'rgba(255,255,255,0.3)',
 };
 export const detailCss = `
