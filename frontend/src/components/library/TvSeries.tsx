@@ -395,9 +395,11 @@ export function PhoneSeriesList({ shows, onOpen, onChanged }: { shows: Show[]; o
   const [flips, setFlips] = useState<Record<number, boolean>>({});
   const flip = async (id: number, on: boolean) => {
     setFlips(f => ({ ...f, [id]: on }));
-    const r = await setSeriesMonitored(id, on);
-    setFlips(f => ({ ...f, [id]: r.ok ? r.data.monitored : !on }));
-    if (r.ok) onChanged();
+    try {
+      const r = await setSeriesMonitored(id, on);
+      setFlips(f => ({ ...f, [id]: r.ok ? r.data.monitored : !on }));
+      if (r.ok) onChanged();
+    } catch { setFlips(f => ({ ...f, [id]: !on })); }
   };
   return (
     <div data-testid="tv-series-phone" style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 12, overflow: 'hidden' }}>

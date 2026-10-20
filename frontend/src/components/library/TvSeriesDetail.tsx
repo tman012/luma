@@ -17,6 +17,7 @@ export const POSTER_FLAG = 40;
 export const POSTER_GLYPH = 22;
 import { useMonitorSearch } from './TvMonitorSearch';
 import { seasonName } from './TvBulk';
+import { usePhone } from './TvCalendar';
 import {
   getDetail, grabRelease, interactiveSearch, searchOutcome, searchShow, setEpisodeMonitored,
   setSeasonMonitored, setSeriesMonitored,
@@ -88,6 +89,8 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   const [open, setOpen] = useState<Set<number> | null>(null);
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState(false);
+  const phoneQ = usePhone();
+  const [menu, setMenu] = useState<number | null>(null);
   const [interactive, setInteractive] = useState<{ target: SearchTarget; label: string } | null>(null);
   const live = useRef(true);
   useEffect(() => () => { live.current = false; }, []);
@@ -119,7 +122,8 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   // monitor switches: tv.db only, never a search (the server answer wins)
   const monitorShow = async (on: boolean) => {
     setView(v => (v ? { ...v, monitored: on } : v));
-    const r = await setSeriesMonitored(seriesId, on);
+    let r: Awaited<ReturnType<typeof setSeriesMonitored>>;
+    try { r = await setSeriesMonitored(seriesId, on); } catch { setView(v => (v ? { ...v, monitored: !on } : v)); say("Couldn't save"); return; }
     if (!r.ok) say(r.error); else onSearch(seriesId, null, r.data.search);
     changed();
   };
@@ -150,6 +154,8 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   if (failed) return <div role="alert" data-testid="tv-detail-failed" style={{ fontSize: 15, color: W70, fontFamily: FONT }}>{"Couldn't load"}</div>;
   if (!view) return <div data-testid="tv-detail-loading" aria-busy="true" style={{ height: 320, borderRadius: 16, background: GLASS }} />;
 
+  const phone = phoneQ && !wide;
+  const PW = phone ? 120 : wide ? 128 : 88, PH = PW * 1.5;
   const eps = view.episodes;
   const meta = [view.year ? String(view.year) : '', view.network || '', sentence(view.status)].filter(Boolean);
   const facts: [string, string, string][] = [
@@ -159,21 +165,31 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
     ['Episodes', `${view.have} of ${view.total}`, 'episodes'],
   ];
   return (
-    <div data-testid="tv-detail" data-series-id={view.id}
+    <div data-testid="tv-detail" data-series-id={view.id} data-menu={menu ?? undefined}
       style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, width: '100%', maxWidth: DETAIL_MAX, margin: '0 auto', boxSizing: 'border-box' }}>
       <style>{detailCss + monitorFlagCss}</style>
+      {phone ? (
+        <div data-testid="tv-detail-backrow" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <button type="button" className="lp-focus" data-testid="tv-detail-back" onClick={onBack}
+            style={{ height: 44, padding: '0 8px 0 0', border: 'none', background: 'none', color: '#3b82f6', fontFamily: FONT, fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>
+            {'\u2039 Series'}
+          </button>
+          <button type="button" className="lp-focus tve-glass" data-testid="tv-detail-edit" onClick={() => setEditing(true)} style={{ ...glassBtn, height: 44 }}>Edit</button>
+        </div>
+      ) : (
       <button type="button" className="lp-focus tvd-back" data-testid="tv-detail-back" onClick={onBack}
-        style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 8px 0 4px', border: 'none',
-          background: 'none', color: W70, fontFamily: FONT, fontSize: 14, fontWeight: 600, cursor: 'pointer', borderRadius: 8 }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
-        Series
-      </button>
+          style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 8px 0 4px', border: 'none',
+            background: 'none', color: W70, fontFamily: FONT, fontSize: 14, fontWeight: 600, cursor: 'pointer', borderRadius: 8 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+          Series
+        </button>
+      )}
 
       <section data-testid="tv-detail-header" aria-label={view.title}
-        style={{ display: 'grid', gridTemplateColumns: wide ? '128px minmax(0, 1fr)' : '88px minmax(0, 1fr)', columnGap: wide ? 24 : 16, rowGap: 16,
+        style={{ display: 'grid', gridTemplateColumns: `${PW}px minmax(0, 1fr)`, columnGap: wide ? 24 : phone ? 14 : 16, rowGap: 16,
           padding: wide ? 20 : 16, borderRadius: 16, background: GLASS, border: '1px solid rgba(255,255,255,0.08)' }}>
-        <div data-testid="tv-detail-poster" style={{ position: 'relative', width: wide ? 128 : 88, height: wide ? 192 : 132 }}>
-          <Poster path={view.poster_path} w={wide ? 128 : 88} h={wide ? 192 : 132} tmdbLogo />
+        <div data-testid="tv-detail-poster" style={{ position: 'relative', width: PW, height: PH }}>
+          <Poster path={view.poster_path} w={PW} h={PH} tmdbLogo />
           {/* v184 (Taylor): the show's bookmark sits on the poster's top-left corner, Sonarr style; v185 (Designer):
               a 40px dark glass chip with a 22px glyph, 8px inside the corner, filled white when monitored */}
           <MonitorFlag on={view.monitored} title={view.title} testid="tv-detail-monitored" size={POSTER_FLAG} glyph={POSTER_GLYPH}
@@ -194,7 +210,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
         {!wide && (
           <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 12 }}>
             <Facts facts={facts} wide={false} />
-            <HeaderActions onEdit={() => setEditing(true)} />
+            {!phone && <HeaderActions onEdit={() => setEditing(true)} />}
           </div>
         )}
       </section>
@@ -228,7 +244,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
             {isOpen && (
               <div role="list" aria-label={label}>
                 {list.map(e => (
-                  <EpisodeRow key={e.id} e={e} wide={wide} focus={e.id === episodeId}
+                  <EpisodeRow key={e.id} e={e} wide={wide} phone={phone} onMenu={() => setMenu(e.id)} focus={e.id === episodeId}
                     busy={busy.has(`e${e.id}`)}
                     onMonitor={v => void monitorEpisode(e.id, v)}
                     onSearch={() => void search({ episode_id: e.id }, code(e.season, e.episode))}
@@ -298,8 +314,8 @@ function IconBtn({ kind, label, onClick, busy = false, testid }: {
   );
 }
 
-function EpisodeRow({ e, wide, focus, busy, onMonitor, onSearch, onInteractive }: {
-  e: DetailEpisode; wide: boolean; focus: boolean; busy: boolean;
+function EpisodeRow({ e, wide, phone = false, onMenu, focus, busy, onMonitor, onSearch, onInteractive }: {
+  e: DetailEpisode; wide: boolean; phone?: boolean; onMenu?: () => void; focus: boolean; busy: boolean;
   onMonitor: (on: boolean) => void; onSearch: () => void; onInteractive: () => void;
 }) {
   const air = airET(e);
@@ -308,6 +324,27 @@ function EpisodeRow({ e, wide, focus, busy, onMonitor, onSearch, onInteractive }
   const dim = e.monitored ? 1 : 0.5;
   const name = e.title || `Episode ${e.episode}`;
   const tag = `${code(e.season, e.episode)} ${name}`;
+  if (phone) return (
+    <div role="listitem" className="tvd-row" data-testid="tv-detail-episode" data-episode-id={e.id} data-state={e.state}
+      data-monitored={e.monitored ? 'true' : 'false'} data-focus={focus || undefined}
+      style={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr) 44px', alignItems: 'center', columnGap: 4, minHeight: 60, padding: '8px 4px 8px 8px',
+        boxShadow: `inset ${EDGE_W}px 0 0 ${color}`, borderTop: LINE, boxSizing: 'border-box', background: focus ? 'rgba(255,255,255,0.05)' : undefined }}>
+      <span data-testid="tv-detail-edge" aria-hidden="true" style={{ display: 'none', background: color }} />
+      <span style={{ display: 'flex', justifyContent: 'center' }}><MonitorFlag on={e.monitored} title={tag} testid="tv-detail-episode-monitored" onChange={onMonitor} /></span>
+      <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, opacity: dim }}>
+        <span data-testid="tv-detail-episode-title" style={{ fontSize: 14, fontWeight: 600, color: W95, overflowWrap: 'anywhere' }}>{`${e.episode} \u00b7 ${name}`}</span>
+        <span style={{ fontSize: 12, color: W70 }}>
+          {air && <span data-testid="tv-detail-air">{`${air} \u00b7 `}</span>}
+          <span data-testid="tv-detail-status" style={{ color, fontWeight: 600 }}>{word}</span>
+          {e.quality ? ` \u00b7 ${e.quality}` : ''}
+        </span>
+      </span>
+      <button type="button" className="lp-focus tvd-icon" data-testid="tv-detail-episode-menu" aria-label={`More ${tag}`} aria-haspopup="dialog" onClick={onMenu}
+        style={{ width: 44, height: 44, padding: 0, border: 'none', borderRadius: 10, background: 'transparent', color: W70, cursor: 'pointer', fontSize: 20, lineHeight: 1 }}>
+        {'\u22ef'}
+      </button>
+    </div>
+  );
   return (
     <div role="listitem" className="tvd-row" data-testid="tv-detail-episode" data-episode-id={e.id} data-state={e.state}
       data-monitored={e.monitored ? 'true' : 'false'} data-focus={focus || undefined}
