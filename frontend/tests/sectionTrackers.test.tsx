@@ -205,7 +205,7 @@ describe('Settings > TV', () => {
     await act(async () => { page('/settings/tv'); });
     const nav = screen.getByTestId('settings-nav');
     await waitFor(() => expect(Array.from(nav.querySelectorAll('a')).map(a => a.textContent))
-      .toEqual(['Home screen', 'Plex', 'Connectors', 'Trackers', 'Library paths', 'TV']));
+      .toEqual(['Home screen', 'Plex', 'Connectors', 'Trackers', 'Library paths', 'Movies', 'TV']));
   });
 
   it('is not offered on production builds', async () => {
