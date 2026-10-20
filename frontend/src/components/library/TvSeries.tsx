@@ -8,6 +8,9 @@ import { EditSeriesModal } from './TvEdit';
 import { loadProfiles, monitorMissing, type Profile } from './tvCalendarApi';
 import { BulkBar, SeriesList, ShowSheet } from './TvBulk';
 import { FONT } from '@/components/start/StartUI';
+import { usePhone } from './TvCalendar';
+import { MonitorFlag, monitorFlagCss } from './TvMonitorFlag';
+import { setSeriesMonitored } from './tvCalendarApi';
 import { posterUrl } from '@/utils/image';
 import { RATING_ICONS } from '@/utils/ratingIcons';
 import type { Show } from './tvLibraryApi';
@@ -71,6 +74,7 @@ export function TvSeries({ shows, onChanged, onOpen, add }: {
   const setLayout = (l: SeriesLayout) => { setLayoutState(l); setPicked(new Set()); setSelecting(false); setBulk(''); try { localStorage.setItem(LAYOUT_KEY, l); } catch { /* private mode */ } };
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [sheet, setSheet] = useState<Show | null>(null);
+  const phone = usePhone();
   useEffect(() => {
     if (layout !== 'list') return;
     let live = true;
@@ -207,6 +211,15 @@ export function TvSeries({ shows, onChanged, onOpen, add }: {
   const sheetEl = sheet && (
     <ShowSheet seriesId={sheet.id} title={sheet.title} onClose={() => setSheet(null)} onChanged={() => onChanged?.()} />
   );
+  if (phone) {
+    return (
+      <div data-testid="tv-series-wrap" data-layout="phone" style={{ display: 'flex', flexDirection: 'column', gap: 12, fontFamily: FONT }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>{add}</div>
+        <PhoneSeriesList shows={sorted} onOpen={onOpen || setSheet} onChanged={() => onChanged?.()} />
+        {sheetEl}
+      </div>
+    );
+  }
   if (layout === 'list') {
     const ids = sorted.filter(s => picked.has(s.id)).map(s => s.id);
     return (
@@ -376,3 +389,36 @@ const emptyCard: React.CSSProperties = {
   borderRadius: 16, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', height: 160,
   display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 500, color: 'rgba(255,255,255,0.7)', fontFamily: FONT,
 };
+
+/** Variant B phone list: state edge, title, "network · n of m", bookmark on the right. */
+export function PhoneSeriesList({ shows, onOpen, onChanged }: { shows: Show[]; onOpen: (s: Show) => void; onChanged: () => void }) {
+  const [flips, setFlips] = useState<Record<number, boolean>>({});
+  const flip = async (id: number, on: boolean) => {
+    setFlips(f => ({ ...f, [id]: on }));
+    const r = await setSeriesMonitored(id, on);
+    setFlips(f => ({ ...f, [id]: r.ok ? r.data.monitored : !on }));
+    if (r.ok) onChanged();
+  };
+  return (
+    <div data-testid="tv-series-phone" style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 12, overflow: 'hidden' }}>
+      <style>{monitorFlagCss}</style>
+      {shows.map((s, i) => {
+        const p = progress(s);
+        const meta = [s.year ? String(s.year) : '', `${Math.min(s.have ?? 0, s.aired ?? 0)} of ${s.aired ?? 0}`].filter(Boolean).join(' · ');
+        return (
+          <div key={s.id} data-testid="tv-phone-row" data-show-id={s.id} onClick={() => onOpen(s)}
+            style={{ display: 'flex', alignItems: 'center', minHeight: 60, padding: '6px 4px 6px 16px', gap: 8, cursor: 'pointer',
+              boxShadow: `inset 4px 0 0 ${p.color}`, borderTop: i ? '1px solid rgba(255,255,255,0.08)' : 'none' }}>
+            <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 15, fontWeight: 600, color: 'rgba(255,255,255,0.95)', overflowWrap: 'anywhere' }}>{s.title}</span>
+              <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>{meta}</span>
+            </span>
+            <span onClick={e => e.stopPropagation()} style={{ minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <MonitorFlag on={flips[s.id] ?? !!s.monitored} title={s.title} testid="tv-phone-flag" onChange={v => void flip(s.id, v)} />
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
