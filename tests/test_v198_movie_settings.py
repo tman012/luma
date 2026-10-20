@@ -34,7 +34,7 @@ def test_a_fresh_store_has_one_any_profile_and_is_off(ms, tmp_path):
     db = tmp_path / 'mdb' / 'movies.db'
     assert db.is_file() and oct(os.stat(db).st_mode & 0o777) == '0o600'
     names = {r[0] for r in sqlite3.connect(db).execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert names == {'profiles', 'meta'}
+    assert names == {'profiles', 'meta', 'watchlist'}   # v202: the native watchlist
     assert str(db) != str(tv_store.db_path()) if hasattr(tv_store, 'db_path') else True
 
 
@@ -102,7 +102,7 @@ def test_seeded_from_the_saved_export(ms, monkeypatch):
     by = {p['name']: p for p in d['profiles']}
     assert len(by) == 9 and set(by) >= {'Any', 'SD', 'HD-720p', 'HD-1080p', 'Ultra-HD', 'HD - 720p/1080p', 'TFlix',
                                          '1080p Remux', '2160p Remux'}
-    assert [p['name'] for p in d['profiles'] if p['default']] == ['Any']
+    assert [p['name'] for p in d['profiles'] if p['default']] == ['TFlix']
     remux = by['2160p Remux']
     assert [i['id'] for i in remux['items'] if i['allowed']] == ['2160p-remux'] and remux['cutoff'] == '2160p-remux'
     assert (remux['min_mb_per_min'], remux['max_mb_per_min']) == (33.17, None)

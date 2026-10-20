@@ -43,6 +43,10 @@ CREATE TABLE IF NOT EXISTS profiles (
   is_default INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS watchlist (
+  tmdb_id INTEGER PRIMARY KEY, title TEXT NOT NULL, year INTEGER,
+  profile_id INTEGER REFERENCES profiles(id) ON DELETE SET NULL, added_at REAL NOT NULL
+);
 """
 
 
@@ -62,15 +66,13 @@ def db_path() -> Path:
 def connect() -> Iterator[sqlite3.Connection]:
     p = db_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    new = not p.exists()
+    try:                                   # created 0600 before sqlite opens it (never the umask's mode)
+        os.close(os.open(str(p), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+    except FileExistsError:
+        pass
     conn = sqlite3.connect(str(p), timeout=10)
     conn.row_factory = sqlite3.Row
     try:
-        if new:
-            try:
-                os.chmod(p, 0o600)
-            except OSError:
-                pass
         conn.executescript(SCHEMA)
         with _lock:
             _seed(conn)
@@ -92,8 +94,26 @@ def _seed_data() -> Optional[Dict[str, Any]]:
     return d if isinstance(d, dict) and isinstance(d.get('profiles'), list) and d['profiles'] else None
 
 
+DEFAULT_NAME = 'TFlix'
+
+
+def _migrate_default(conn: sqlite3.Connection) -> None:
+    """v202 (one time): a store seeded with 'Any' as the default gets TFlix, unless the owner changed it since."""
+    if _meta(conn, 'default_mig_tflix', False):
+        return
+    if not _meta(conn, 'default_changed', False):
+        cur = conn.execute('SELECT name FROM profiles WHERE is_default = 1').fetchone()
+        t = conn.execute('SELECT id FROM profiles WHERE name = ?', (DEFAULT_NAME,)).fetchone()
+        if cur and cur['name'] == 'Any' and t:
+            conn.execute('UPDATE profiles SET is_default = (id = ?)', (t['id'],))
+            logger.info('Movies: default profile set to %s (one-time)', DEFAULT_NAME)
+    _set_meta(conn, 'default_mig_tflix', True)
+    conn.commit()
+
+
 def _seed(conn: sqlite3.Connection) -> None:
     if conn.execute('SELECT 1 FROM meta WHERE key = ?', ('seeded',)).fetchone():
+        _migrate_default(conn)
         return
     ids = quality_ids()
     seed = _seed_data()
@@ -107,7 +127,7 @@ def _seed(conn: sqlite3.Connection) -> None:
             items = [{'id': q, 'allowed': True} for q in allowed] + [{'id': q, 'allowed': False} for q in ids if q not in allowed]
             cut = p.get('cutoff') if p.get('cutoff') in allowed else allowed[0]
             rows.append((p['name'][:60], json.dumps(items), cut, p.get('min_mb_per_min'), p.get('max_mb_per_min'),
-                         int(p['name'] == 'Any')))      # the export doesn't say which is the library default: 'Any'
+                         int(p.get('default') is True)))   # the library's default (TFlix: 761 of 963 movies)
         if rows:
             how = 'export'
             if not any(r[5] for r in rows):
@@ -119,6 +139,7 @@ def _seed(conn: sqlite3.Connection) -> None:
     if seed and isinstance(seed.get('trackers'), list):
         _set_meta(conn, 'tracker_seed', [t for t in seed['trackers'] if isinstance(t, dict) and isinstance(t.get('type'), str)])
     conn.execute("INSERT INTO meta (key, value) VALUES ('seeded', ?)", (json.dumps(how),))
+    _set_meta(conn, 'default_mig_tflix', True)          # a fresh seed already has the right default
     conn.commit()
 
 
@@ -214,6 +235,7 @@ def _check(body: Any) -> Dict[str, Any]:
 def save_profile(body: Any, pid: Optional[int] = None) -> Dict[str, Any]:
     vals = _check(body)
     with connect() as conn:
+        before = conn.execute('SELECT id FROM profiles WHERE is_default = 1').fetchone()
         if vals['is_default']:
             conn.execute('UPDATE profiles SET is_default = 0')
         try:
@@ -228,6 +250,9 @@ def save_profile(body: Any, pid: Optional[int] = None) -> Dict[str, Any]:
                 conn.execute(f'UPDATE profiles SET {", ".join(f"{k} = ?" for k in vals)} WHERE id = ?', (*vals.values(), pid))
             if not conn.execute('SELECT 1 FROM profiles WHERE is_default = 1').fetchone():
                 conn.execute('UPDATE profiles SET is_default = 1 WHERE id = ?', (pid,))   # always one default
+            after = conn.execute('SELECT id FROM profiles WHERE is_default = 1').fetchone()
+            if (before and before['id']) != (after and after['id']):
+                _set_meta(conn, 'default_changed', True)        # the owner's choice: no migration touches it
         except sqlite3.IntegrityError:
             raise Invalid({'name': 'Name already used'})
         return _profile(conn.execute('SELECT * FROM profiles WHERE id = ?', (pid,)).fetchone())
