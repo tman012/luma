@@ -5,7 +5,7 @@
  * (Add); Import is the Import card, Review and the shows; Libraries is the TV
  * libraries selector; Options holds Upgrades and Trackers. Importing only reads
  * the library folders and Add only writes tv.db. */
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
 import { useSearchParams } from 'react-router';
 import { T } from '@/theme/tokens';
 import { FONT } from '@/components/start/StartUI';
@@ -30,7 +30,7 @@ import { SAVE_FAILED } from './libraryPathsApi';
 import type { Candidate } from './tvLibraryApi';
 import {
   TV_LIBRARIES_URL, importAll, importedText, showSubtitle, loadTv, loadTvLibrary, needsReview, rematchShow,
-  saveUpgrades, showLabel, startImport,
+  saveUpgrades, savePreferredGroups, showLabel, startImport,
   type ImportProgress, type Show, type TvLibrary, type TvSettingsView, type UpgradeMode,
 } from './tvLibraryApi';
 import { isDay, localDay, weekStart } from './tvCalendarApi';
@@ -215,6 +215,11 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
           }} />
         </div>
         <QualityProfiles />
+        <PreferredGroups value={settingsView.preferred_groups ?? []} onChange={g => {
+          const before = settingsView;
+          setSettingsView({ ...settingsView, preferred_groups: g });
+          savePreferredGroups(g).then(r => { if (r.ok) setSettingsView(r.data); else { setSettingsView(before); say(r.error); } });
+        }} />
         {settingsView.naming && (
           <NamingSettings value={settingsView.naming} say={say}
             onSaved={n => setSettingsView(v => (v ? { ...v, naming: n } : v))} />
@@ -469,3 +474,47 @@ const linkBtn: React.CSSProperties = {
   minHeight: 44, padding: '0 4px', border: 'none', background: 'none', color: T.accent, fontSize: 15, fontWeight: 500,
   fontFamily: FONT, cursor: 'pointer', flex: 'none',
 };
+
+/** v185.2a (Taylor): preferred release groups, in order; a release from one wins at the same quality.
+ * Starts empty; add, remove and reorder. */
+export function PreferredGroups({ value, onChange }: { value: string[]; onChange: (g: string[]) => void }) {
+  const [draft, setDraft] = useState('');
+  const btn: CSSProperties = { minHeight: 32, padding: '0 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)',
+    background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: 13, cursor: 'pointer' };
+  const move = (i: number, d: number) => {
+    const j = i + d;
+    if (j < 0 || j >= value.length) return;
+    const g = [...value];
+    [g[i], g[j]] = [g[j]!, g[i]!];
+    onChange(g);
+  };
+  const add = () => {
+    const v = draft.trim();
+    if (!v || value.some(x => x.toLowerCase() === v.toLowerCase())) { setDraft(''); return; }
+    onChange([...value, v]);
+    setDraft('');
+  };
+  return (
+    <div data-testid="tv-preferred-groups">
+      <h3 style={sectionLabel}>Preferred groups</h3>
+      <ol style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {value.map((g, i) => (
+          <li key={g} data-testid="tv-group" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#fff' }}>
+            <span style={{ minWidth: 20, color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>{i + 1}</span>
+            <span style={{ flex: 1 }}>{g}</span>
+            <button type="button" style={btn} aria-label={`Move ${g} up`} disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+            <button type="button" style={btn} aria-label={`Move ${g} down`} disabled={i === value.length - 1} onClick={() => move(i, 1)}>↓</button>
+            <button type="button" style={btn} aria-label={`Remove ${g}`} onClick={() => onChange(value.filter(x => x !== g))}>Remove</button>
+          </li>
+        ))}
+      </ol>
+      <div style={{ display: 'flex', gap: 8, marginTop: value.length ? 10 : 0 }}>
+        <input value={draft} onChange={e => setDraft(e.target.value)} maxLength={40} placeholder="Group" aria-label="Group"
+          onKeyDown={e => { if (e.key === 'Enter') add(); }}
+          style={{ flex: '0 1 220px', minHeight: 36, padding: '0 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)',
+            background: 'rgba(255,255,255,0.04)', color: '#fff', fontSize: 14 }} />
+        <button type="button" style={btn} onClick={add} disabled={!draft.trim()}>Add</button>
+      </div>
+    </div>
+  );
+}

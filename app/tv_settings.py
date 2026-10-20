@@ -65,13 +65,32 @@ AUTOMATION_FLAGS = ('enabled', 'feed_enabled', 'backlog_enabled', 'upgrades_enab
 DEFAULT_AUTOMATION = {'enabled': False, 'feed_enabled': False, 'backlog_enabled': False,
                       'upgrades_enabled': False, 'import_enabled': False, 'first_search_delay_h': 4}
 INVALID = 'Invalid'
+# v185.2a (Taylor): release groups preferred at the same quality, in the owner's order; empty by default
+# (nothing seeded): an empty list leaves the ranking unchanged
+DEFAULT_GROUPS: tuple = ()
+MAX_GROUPS = 20
+_GROUP_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._ -]{0,39}$')
+
+
+def groups(v: Any) -> Optional[List[str]]:
+    """The list, cleaned (trimmed, deduped case-insensitively); None when invalid."""
+    if not isinstance(v, list) or len(v) > MAX_GROUPS:
+        return None
+    out: List[str] = []
+    for g in v:
+        if not isinstance(g, str) or not _GROUP_RE.match(g.strip()):
+            return None
+        if g.strip().casefold() not in {x.casefold() for x in out}:
+            out.append(g.strip())
+    return out
 _CTRL_RE = re.compile(r'[\x00-\x1f\x7f/\\]')
 
 
 def empty() -> Dict[str, Any]:
     return {'version': 1, 'paths': [], 'libraries': [], 'rules': [], 'fallback_path_id': None,
             'naming': dict(_naming().DEFAULTS), 'upgrades': {'mode': 'keep_both'},
-            'automation': dict(DEFAULT_AUTOMATION), 'rescan_interval_h': 6}
+            'automation': dict(DEFAULT_AUTOMATION), 'rescan_interval_h': 6,
+            'preferred_groups': list(DEFAULT_GROUPS)}
 
 
 def store_path() -> Path:
@@ -108,6 +127,10 @@ def _normalize(raw: Any) -> Dict[str, Any]:
     delay = auto.get('first_search_delay_h')
     if isinstance(delay, int) and not isinstance(delay, bool) and 0 <= delay <= 72:
         d['automation']['first_search_delay_h'] = delay
+    if 'preferred_groups' in raw:
+        g = groups(raw.get('preferred_groups'))
+        if g is not None:
+            d['preferred_groups'] = g
     r = raw.get('rescan_interval_h')
     if isinstance(r, int) and not isinstance(r, bool) and 1 <= r <= 168:
         d['rescan_interval_h'] = r
@@ -171,7 +194,13 @@ def apply_put(data: Dict[str, Any], body: Any) -> Dict[str, str]:
                     errors[f'automation.{k}'] = INVALID
                     continue
                 data['automation'][k] = v
-    unknown = set(body) - {'naming', 'upgrades', 'automation'}
+    if 'preferred_groups' in body:
+        g = groups(body['preferred_groups'])
+        if g is None:
+            errors['preferred_groups'] = INVALID
+        else:
+            data['preferred_groups'] = g
+    unknown = set(body) - {'naming', 'upgrades', 'automation', 'preferred_groups'}
     if unknown:
         errors['_'] = INVALID
     return errors
@@ -205,7 +234,7 @@ def tv_path_status(p: Dict[str, Any]) -> str:
 def view(data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The settings, with the selected TV libraries as 'paths' ({id, name, path, status})."""
     d = data if data is not None else load()
-    out = {k: copy.deepcopy(d[k]) for k in ('naming', 'upgrades', 'automation', 'rescan_interval_h')}
+    out = {k: copy.deepcopy(d[k]) for k in ('naming', 'upgrades', 'automation', 'rescan_interval_h', 'preferred_groups')}
     out['paths'] = [{**p, 'status': tv_path_status(p)} for p in libraries(migrate_first=True)]
     return out
 

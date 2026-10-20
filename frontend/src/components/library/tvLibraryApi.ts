@@ -6,7 +6,7 @@ import { SAVE_FAILED, UNREACHABLE, type Errors, type LibPath } from './libraryPa
 
 export const TV_URL = '/api/settings/tv';
 export type UpgradeMode = 'keep_both' | 'replace_verified';
-export interface TvSettingsView { paths: LibPath[]; upgrades: { mode: UpgradeMode }; rescan_interval_h: number; naming?: Naming }
+export interface TvSettingsView { paths: LibPath[]; upgrades: { mode: UpgradeMode }; rescan_interval_h: number; naming?: Naming; preferred_groups?: string[] }
 export interface Candidate { tmdb_id: number; title: string; year: number | null; poster_path?: string | null }
 export interface Show {
   id: number; tmdb_id: number; title: string; year: number | null; path_id: string; path_name: string; folder: string;
@@ -54,6 +54,8 @@ const isLib = (d: Record<string, unknown>) => Array.isArray(d.shows) && Array.is
 export const loadTv = () => call<TvSettingsView>(TV_URL, undefined, isView);
 /** The TV libraries selector (LibrarySelector / librarySelectionApi). */
 export const TV_LIBRARIES_URL = `${TV_URL}/libraries`;
+/** v185.2a: the owner's preferred release groups, in order (empty: no preference). */
+export const savePreferredGroups = (groups: string[]) => call<TvSettingsView>(TV_URL, json('PUT', { preferred_groups: groups }), isView);
 export const saveUpgrades = (mode: UpgradeMode) => call<TvSettingsView>(TV_URL, json('PUT', { upgrades: { mode } }), isView);
 
 export const loadTvLibrary = () => call<TvLibrary>(`${TV_URL}/library`, undefined, isLib);

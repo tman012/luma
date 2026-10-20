@@ -269,12 +269,27 @@ def candidates(items: List[Dict[str, Any]], show: Dict[str, Any], want: List[Dic
     return out
 
 
+def _preferred() -> Dict[str, int]:
+    """{group (casefolded): its place in the owner's order}; empty: no preference."""
+    try:
+        return {g.casefold(): i for i, g in enumerate(tv_settings.load().get('preferred_groups') or [])}
+    except Exception:                               # noqa: BLE001 - ranking never fails on settings
+        return {}
+
+
+def _group(title: Any) -> str:
+    return (tv_release.parse(str(title or '')).group or '').casefold()
+
+
 def choose(cands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """The fewest best releases covering the most wanted episodes: quality first (profile order),
     then a season pack when the profile prefers them, PROPER/REPACK, freeleech, seeders."""
+    pref = _preferred()
+
     def key(c):
         it = c['item']
         return (c['rank'], -(len(c['covers']) if c['prefer_packs'] else 0), -c['proper'],
+                pref.get(_group(it.get('title')), len(pref)),   # v185.2a: preferred groups, in order, same quality
                 -int(bool(it.get('freeleech'))), -int(it.get('seeders') or 0))
     left = sorted(cands, key=key)
     picked, done = [], set()
@@ -722,7 +737,9 @@ def judge(items: List[Dict[str, Any]], show: Dict[str, Any], eps: List[Dict[str,
                     'pack': tv_release.parse(title).kind == 'season',
                     'rejections': rej, 'grabbable': not any(r in HARD for r in rej) and bool(it.get('downloadUrl')),
                     '_rank': 999 if rank is None else rank})
-    out.sort(key=lambda r: (not r['grabbable'], bool(r['rejections']), r['_rank'], -r['seeders']))
+    pref = _preferred()
+    out.sort(key=lambda r: (not r['grabbable'], bool(r['rejections']), r['_rank'],
+                            pref.get(_group(r['title']), len(pref)), -r['seeders']))
     for r in out:
         r.pop('_rank')
     return out
