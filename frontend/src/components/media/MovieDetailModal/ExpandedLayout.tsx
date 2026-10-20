@@ -1,4 +1,3 @@
-import { MovieSearchActions } from '@/components/movies/MovieSearchActions';
 import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -1029,7 +1028,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 </div>
 
                 {/* Action pills */}
-                <div data-modal-actions
+                <div data-modal-actions data-modal-full-row=""
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -1188,13 +1187,10 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                           <path d="M16 3.13a4 4 0 0 1 0 7.75" />
                         </svg>
                       }
-                      label={topReviews.length > 0 ? 'Cast & reviews' : 'Cast'}
+                      label={topReviews.length > 0 ? 'Cast & Reviews' : 'Cast'}
                       onClick={handleCastOpen}
                     />
                   )}
-                {isMinimal() && inWatchlist && props.resolvedTmdbId && detail ? (
-                  <MovieSearchActions tmdbId={props.resolvedTmdbId} title={detail.title} year={detail.year} />
-                ) : null}
                 </div>
 
               </div>{/* end bottom group */}
@@ -1253,7 +1249,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               {/* Quality options — horizontal row */}
               <div style={{ position: 'relative' }}>
                 <h2 style={{ fontSize: t.upgrade.headingFontSize, fontWeight: 600, color: '#fff', margin: t.upgrade.headingMargin, textShadow: '0 2px 8px rgba(0,0,0,0.7)', textAlign: 'center' }}>
-                  {isOwned ? 'Upgrade quality' : 'Select quality'}
+                  {isOwned ? 'Upgrade Quality' : 'Select Quality'}
                 </h2>
                 <div
                   style={{
@@ -1628,7 +1624,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
           />
         )}
 
-        {/* Remove from watchlist confirm */}
+        {/* Remove from Watchlist confirm */}
         {showNativeAdd && detail && props.resolvedTmdbId && (
           <WatchlistAddSheet tmdbId={props.resolvedTmdbId} title={detail.title} year={detail.year}
             onClose={() => setShowNativeAdd(false)} onAdded={() => { setShowNativeAdd(false); props.onUpgradeAdded?.(); }} />
@@ -1650,7 +1646,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               onClick={(e) => e.stopPropagation()}
               role="dialog"
               aria-modal="true"
-              aria-label="Remove from watchlist"
+              aria-label="Remove from Watchlist"
               style={{
                 background: 'var(--color-kiosk-black)',
                 borderRadius: '16px',
@@ -1677,7 +1673,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
                 </svg>
               </div>
               <p style={{ fontSize: '20px', fontWeight: 600, color: '#fff', margin: '0 0 8px' }}>
-                Remove from watchlist?
+                Remove from Watchlist?
               </p>
               <p style={{ fontSize: '15px', color: 'rgba(255,255,255,0.5)', margin: '0 0 20px' }}>
                 {detail?.title ?? 'This movie'} will be unmonitored in Radarr. It will not be deleted.

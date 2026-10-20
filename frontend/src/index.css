@@ -1378,6 +1378,14 @@ html.luma-minimal [data-modal="MovieDetailModal"][data-modal] [data-action-row][
 html.luma-minimal [data-modal="MovieDetailModal"][data-modal] [data-file-info-button][data-modal-actions] {
   display: flex !important;
 }
+/* v214 (Taylor): the wide movie popup's pill row is prod 1b4ea74's as is in every state (Watchlist / In Watchlist / Play,
+   Trailer, Sources, Similar, Collection, Cast & Reviews): the minimal action hide no longer applies to it. */
+html.luma-minimal [data-modal="MovieDetailModal"][data-modal] [data-modal-actions][data-modal-full-row][data-modal-full-row] > button {
+  display: inline-flex !important;
+}
+html.luma-minimal [data-modal="MovieDetailModal"][data-modal] [data-modal-actions][data-modal-full-row][data-modal-full-row] > span {
+  display: contents !important;
+}
 
 /* LUMA_MINIMAL: the search layer covers the home header (no nav behind it). */
 html.luma-minimal .kiosk-search-dim { z-index: 60; }
