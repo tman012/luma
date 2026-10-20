@@ -21758,6 +21758,11 @@ except Exception as _e:  # noqa: BLE001
 try:
     from app import tv_search as _tv_search
     _tv_search.start()         # feed (15 min tick), after-air and on-add searches, 12 h series refresh
+    try:
+        from app import movie_scanner as _movie_scanner
+        _movie_scanner.start()     # v203: the movie scanner (test install only; never prod)
+    except Exception:
+        logger.exception('Movie scanner did not start')
 except Exception as _e:  # noqa: BLE001
     logger.error('TV search not started: %s', type(_e).__name__)
 from app import tv_scan as _tv_scan_boot  # noqa: E402

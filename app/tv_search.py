@@ -75,21 +75,23 @@ def trackers() -> List[Dict[str, Any]]:
     return [by_id[i] for i in ids if i in by_id]
 
 
-def _log(cfg, purpose: str, sid: Optional[int], query: str, n: int, outcome: str, now: float) -> None:
+def _log(cfg, purpose: str, sid: Optional[int], query: str, n: int, outcome: str, now: float,
+         section: str = 'tv') -> None:
     from app.tracker_guard import guard_key
     with tv_store.write() as conn:
         conn.execute('INSERT INTO search_log (ts, section, tracker_key, purpose, series_id, query, results, outcome)'
-                     " VALUES (?, 'tv', ?, ?, ?, ?, ?, ?)", (now, guard_key(cfg), purpose, sid, query, n, outcome))
+                     ' VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (now, section, guard_key(cfg), purpose, sid, query, n, outcome))
 
 
-def _log_cap_skip(cfg, purpose: str, sid: Optional[int], query: str, now: float, reset: float) -> None:
+def _log_cap_skip(cfg, purpose: str, sid: Optional[int], query: str, now: float, reset: float,
+                  section: str = 'tv') -> None:
     """v201 (PM): a daily-cap skip is logged at most once per tracker per reset window (not every pass)."""
     from app.tracker_guard import guard_key
     key = f'tv_capskip:{guard_key(cfg)}'
     if float(tv_store.get_meta(key) or 0) > now:
         return
     tv_store.set_meta(key, str(reset))
-    _log(cfg, purpose, sid, query, 0, 'skipped', now)
+    _log(cfg, purpose, sid, query, 0, 'skipped', now, section)
 
 
 #: v185 (PM): a monitor-ON click's searches past its interactive burst: background requests (the guard's
@@ -98,7 +100,8 @@ MANUAL_BACKGROUND = 'manual-background'
 
 
 def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bool, now: float,
-                   cfgs: Optional[List[Dict[str, Any]]] = None) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+                   cfgs: Optional[List[Dict[str, Any]]] = None, categories: Optional[List[int]] = None,
+                   section: str = 'tv') -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Search each TV tracker once; (items, statuses). Items are search results with a release
     link (tracker_search.to_item). Automatic searches are charged to the TV budget."""
     from app.tracker_search import TrackerError, TrackerSkipped, _match_categories, _secret_values, get_search, search_status
@@ -107,7 +110,7 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
     items: List[Dict[str, Any]] = []
     statuses: List[Dict[str, Any]] = []
     for cfg in trackers() if cfgs is None else cfgs:
-        cats = _match_categories(cfg, TV_CATEGORIES)
+        cats = _match_categories(cfg, categories or TV_CATEGORIES)   # v203: the movie scanner passes its own
         if not cats:
             continue
         capped = tv_budget.capped(cfg)
@@ -116,7 +119,7 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
         if not interactive and capped and not bg_manual and purpose != 'feed' and not tv_budget.under_daily(cfg, now):
             reset = tv_budget.daily_reset(cfg, now) or now + tv_budget.SLOT_S
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': SLOT_BUSY, 'reset_at': reset})
-            _log_cap_skip(cfg, purpose, sid, query, now, reset)
+            _log_cap_skip(cfg, purpose, sid, query, now, reset, section)
             continue
         try:
             raw = engine.search_one(cfg, query, cats, LIMIT, interactive,
@@ -126,17 +129,17 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
                                     'tv' if not interactive and capped and not bg_manual else None)
         except TrackerSkipped as e:
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
-            _log(cfg, purpose, sid, query, 0, 'skipped', now)
+            _log(cfg, purpose, sid, query, 0, 'skipped', now, section)
             continue
         except TrackerError as e:
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
-            _log(cfg, purpose, sid, query, 0, 'failed', now)
+            _log(cfg, purpose, sid, query, 0, 'failed', now, section)
             continue
         sv = _secret_values(cfg)
         got = [it for it in (engine.to_item(cfg, r, sv) for r in raw) if it]
         items += got
         statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': 'ok'})
-        _log(cfg, purpose, sid, query, len(got), 'ok', now)
+        _log(cfg, purpose, sid, query, len(got), 'ok', now, section)
     engine.tokens.flush()
     return items, statuses
 

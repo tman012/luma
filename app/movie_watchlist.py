@@ -108,3 +108,34 @@ def remove_delete(tid: int):
     if not remove(tid):
         return ms._out({'success': False, 'error': 'Not found'}, 404)
     return ms._out({'success': True})
+
+
+# ------------------------------------------------------------------ v203 the movie page's searches (test only)
+
+def _search_out(r):
+    st = int(r.pop('status', 200) or 200)
+    return ms._out(r, st)
+
+
+@bp.route('/api/movies/watchlist/<int:tid>/search', methods=['POST'])
+def search_post(tid: int):
+    from app import movie_scanner
+    return _guard(write=True) or _search_out(movie_scanner.manual(tid))
+
+
+@bp.route('/api/movies/watchlist/<int:tid>/interactive', methods=['POST'])
+def interactive_post(tid: int):
+    from app import movie_scanner
+    return _guard(write=True) or _search_out(movie_scanner.interactive(tid))
+
+
+@bp.route('/api/movies/watchlist/<int:tid>/interactive/grab', methods=['POST'])
+def interactive_grab_post(tid: int):
+    from app import movie_scanner
+    err = _guard(write=True)
+    if err:
+        return err
+    r = movie_scanner.grab_release(tid, request.get_json(silent=True))
+    if not r.get('ok') and 'status' not in r:
+        r['status'] = 200                      # a refused grab is an answer, like TV's
+    return _search_out(r)

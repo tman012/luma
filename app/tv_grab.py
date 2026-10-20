@@ -183,7 +183,7 @@ def _categories(sess, url: str) -> Optional[Dict[str, Any]]:
     return got if isinstance(got, dict) else None
 
 
-def ensure_category(sess, url: str, name: str) -> Optional[str]:
+def ensure_category(sess, url: str, name: str, job: str = JOB) -> Optional[str]:
     """None when qBittorrent has *name* (created now when missing), else the error to show."""
     if (url, name) in _have_category:
         return None
@@ -192,7 +192,7 @@ def ensure_category(sess, url: str, name: str) -> Optional[str]:
         return CATEGORY_UNREAD
     if name not in cats:
         try:
-            with instance.scoped_add(JOB, name):
+            with instance.scoped_add(job, name):
                 r = sess.post(f'{url}/api/v2/torrents/createCategory', data={'category': name}, timeout=10,
                               allow_redirects=False)
         except instance.WritesBlocked:

@@ -22,6 +22,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
+from app import instance
 from flask import Blueprint, jsonify, request
 
 from app import paths as _paths
@@ -312,7 +313,7 @@ def trackers(conn=None) -> List[Dict[str, Any]]:
 
 def view() -> Dict[str, Any]:
     with connect() as conn:
-        return {'monitoring': bool(_meta(conn, 'monitoring', False)),
+        return {'monitoring': bool(_meta(conn, 'monitoring', instance.is_test() and instance.opt_ins_honored())),   # v203: on by default on test
                 'preferred_groups': list(_meta(conn, 'preferred_groups', [])),
                 'trackers': trackers(conn),
                 'profiles': [_profile(r) for r in conn.execute('SELECT * FROM profiles ORDER BY name COLLATE NOCASE')],
