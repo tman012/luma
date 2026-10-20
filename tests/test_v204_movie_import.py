@@ -51,7 +51,7 @@ def test_import_copies_renames_verifies_then_imports_and_unwatchlists(env):
     movie_grabs.record(693134, REL, H)
     out = mi.tick(now=100, fetch=lambda: [torrent(dl)], path_map=lambda p: p)
     assert out == {'checked': 1, 'imported': 1}
-    dest = lib / 'Dune - Part Two (2024)' / 'Dune - Part Two (2024) WEBDL-2160p.mkv'
+    dest = lib / 'Dune- Part Two (2024)' / 'Dune- Part Two (2024).mkv'          # v203 (PM): Luma's naming
     assert dest.read_bytes() == b'x' * 4096
     assert (dl / REL / f'{REL}.mkv').exists()                                     # copied, never moved
     assert not list(lib.rglob('*' + mi.PART))
@@ -67,9 +67,10 @@ def test_never_overwrites_a_different_file_and_keeps_the_grab_unimported(env):
     movie_grabs.record(693134, REL, H)
     d = lib / 'Dune - Part Two (2024)'
     d.mkdir()
-    (d / 'Dune - Part Two (2024) WEBDL-2160p.mkv').write_bytes(b'mine')
+    (d / 'Dune- Part Two (2024).mkv').write_bytes(b'mine')       # v203: the existing folder is reused as spelled
     mi.tick(now=100, fetch=lambda: [torrent(dl)], path_map=lambda p: p)
-    assert (d / 'Dune - Part Two (2024) WEBDL-2160p.mkv').read_bytes() == b'mine'
+    assert (d / 'Dune- Part Two (2024).mkv').read_bytes() == b'mine'
+    assert sorted(p.name for p in lib.iterdir()) == ['Dune - Part Two (2024)']
     g = movie_grabs.by_hash(H)
     assert g['state'] == 'failed' and 'already there' in g['error']
     with movie_settings.connect() as conn:
@@ -108,7 +109,7 @@ def test_off_unless_test(env, monkeypatch):
 
 def test_naming_defaults_to_radarr_and_saved_naming_wins(env):
     assert mi.render(mi.DEFAULT_NAMING['standard'], 'Mission: Impossible', 1996, 'M.I.1996.1080p.BluRay.x264-GRP') == \
-        'Mission - Impossible (1996) Bluray-1080p'
+        'Mission- Impossible (1996)'
     assert mi.render(mi.DEFAULT_NAMING['folder'], 'Alien', None, '') == 'Alien'
     assert mi.save_settings({'naming': {'standard': '{Movie Title} {Quality Title}'}}) == {}
     assert mi.naming()['standard'] == '{Movie Title} {Quality Title}' and mi.naming()['folder'] == mi.DEFAULT_NAMING['folder']
@@ -132,3 +133,24 @@ def test_routes_test_only_and_owner_for_changes(env, owner, monkeypatch):  # noq
         tv_settings._cfg.pop('signed_in_owner', None)
     monkeypatch.setattr(instance, 'is_test', lambda: False)
     assert _req(owner, 'get', '/api/settings/movies/import').status_code == 404
+
+
+def test_v203_luma_naming_rename_off_keeps_the_release_name_and_existing_folders_are_reused(env):
+    dl, lib = env
+    assert mi.DEFAULT_NAMING['rename'] is True and mi.naming()['colon_replacement'] == 'dash'
+    assert mi.save_settings({'naming': {'rename': 'yes'}}) == {'naming': 'Invalid'}
+    assert mi.save_settings({'naming': {'rename': False}}) == {} and mi.naming()['rename'] is False
+    (lib / 'dune part two (2024)').mkdir()
+    movie_grabs.record(693134, REL, H)
+    assert mi.tick(now=100, fetch=lambda: [torrent(dl)], path_map=lambda p: p)['imported'] == 1
+    assert (lib / 'dune part two (2024)' / f'{REL}.mkv').exists()
+    assert sorted(p.name for p in lib.iterdir()) == ['dune part two (2024)']
+
+
+def test_v203_library_path_prefills_from_lumas_movies_path(env, monkeypatch):
+    from app import settings_manager
+    with movie_settings.connect() as conn:
+        conn.execute("DELETE FROM meta WHERE key = 'library_root'")
+    monkeypatch.setattr(settings_manager.SettingsManager, 'get', lambda self, k, d=None:
+                        [{'type': 'tv', 'path': '/tv'}, {'type': 'movies', 'path': '/media/Movies'}] if k == 'media.paths' else d)
+    assert mi.root() == '/media/Movies'

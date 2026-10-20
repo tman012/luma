@@ -4,8 +4,9 @@ Every INTERVAL_S on LUMA_INSTANCE=test: completed torrents in the download clien
 tag (LUMA_MOVIE_CATEGORY, default 'movie') are matched to a watchlist movie through their movie_grabs row
 (by info hash; piece 3 writes it). The biggest video file is COPIED (never moved; the source is never touched
 or deleted) into the Movies root (Settings > Movies, meta 'library_root') under the Movies naming (meta
-'naming'; default Taylor's Radarr export: '{Movie Title} ({Release Year})' folder and
-'{Movie Title} ({Release Year}) {Quality Full}' file, smart colon replacement, illegal characters replaced).
+'naming'; v203 (PM) default Luma's own: rename on, 'Title (Year)/Title (Year).ext', a colon becomes a dash).
+An existing movie folder is reused as spelled; an existing file is never touched. The Library path is pre-filled
+from Luma's Movies library path (Radarr's root folder isn't in the export).
 The copy goes to a temporary name in the movie folder, is verified (size and sha256 against the source), then
 linked into place with an exclusive create, so an existing file is never overwritten (a different file
 already there: refused). Only after that is the grab marked 'imported' and the movie taken off the watchlist.
@@ -38,11 +39,13 @@ DEFAULT_CATEGORY = 'movie'
 INTERVAL_S = 60
 VIDEO_EXT = ('.mkv', '.mp4', '.avi', '.m4v', '.ts', '.mov', '.wmv')
 PART = '.lumapart'
-# Taylor's Radarr export (/workspace/luma-tv1/radarr-export/NamingConfig.json): ColonReplacementFormat 4 = smart
+# v203 (PM): Luma's own movie naming (file_management.movie_names, prod's auto_rename): rename on,
+# 'Title (Year)/Title (Year).ext', a colon becomes a dash ('Mission- Impossible - Fallout (2018)')
 DEFAULT_NAMING: Dict[str, Any] = {
-    'standard': '{Movie Title} ({Release Year}) {Quality Full}',
+    'rename': True,
+    'standard': '{Movie Title} ({Release Year})',
     'folder': '{Movie Title} ({Release Year})',
-    'colon_replacement': 'smart', 'replace_illegal': True,
+    'colon_replacement': 'dash', 'replace_illegal': True,
 }
 _lock = threading.Lock()
 
@@ -61,15 +64,29 @@ def category() -> str:
     return (os.environ.get(CATEGORY_ENV) or '').strip() or DEFAULT_CATEGORY
 
 
+def luma_movies_root() -> str:
+    """v203 (PM): the pre-fill: Luma's own Movies library path (Settings > Library paths, type 'movies')."""
+    try:
+        from app.settings_manager import SettingsManager
+        for p in (SettingsManager().get('media.paths') or []):
+            if isinstance(p, dict) and p.get('type') == 'movies' and isinstance(p.get('path'), str) and p['path'].startswith('/'):
+                return p['path']
+    except Exception:                                    # noqa: BLE001
+        pass
+    return ''
+
+
 def root() -> str:
     with ms.connect() as conn:
-        return str(ms._meta(conn, 'library_root', '') or '')
+        return str(ms._meta(conn, 'library_root', '') or '') or luma_movies_root()
 
 
 def naming() -> Dict[str, Any]:
     with ms.connect() as conn:
         raw = ms._meta(conn, 'naming', {}) or {}
     out = dict(DEFAULT_NAMING)
+    if isinstance(raw.get('rename'), bool):
+        out['rename'] = raw['rename']
     for k in ('standard', 'folder'):
         if isinstance(raw.get(k), str) and raw[k].strip():
             out[k] = raw[k].strip()[:300]
@@ -91,10 +108,14 @@ def save_settings(body: Any) -> Dict[str, str]:
             upd['library_root'] = os.path.normpath(r)
     if 'naming' in body:
         n = body['naming']
-        if not isinstance(n, dict) or any(k not in ('standard', 'folder') or not isinstance(v, str) or '/' in v for k, v in n.items()):
+        if not isinstance(n, dict) or any(
+                (k == 'rename' and not isinstance(v, bool)) or (k != 'rename' and (k not in ('standard', 'folder')
+                                                                                   or not isinstance(v, str) or '/' in v))
+                for k, v in n.items()):
             errors['naming'] = 'Invalid'
         else:
-            upd['naming'] = {k: v.strip()[:300] for k, v in n.items() if v.strip()}
+            upd['naming'] = {k: (v if isinstance(v, bool) else v.strip()[:300]) for k, v in n.items()
+                             if isinstance(v, bool) or v.strip()}
     if errors:
         return errors
     with ms.connect() as conn:
@@ -223,7 +244,12 @@ def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[st
     cfg = naming()
     release = str(g['release_title'] or t.get('name') or '')
     folder = render(cfg['folder'], title, year, release, cfg)
-    fname = render(cfg['standard'], title, year, release, cfg) + os.path.splitext(src)[1].lower()
+    if cfg.get('rename', True):
+        fname = render(cfg['standard'], title, year, release, cfg) + os.path.splitext(src)[1].lower()
+    else:
+        fname = os.path.basename(src)
+    # v203 (PM): a movie folder that already exists is reused as spelled (same name, any case or punctuation)
+    folder = existing_folder(rr, folder) or folder
     dest_dir = os.path.join(rr, folder)
     if os.path.realpath(os.path.dirname(dest_dir)) != rr:
         raise Refused('unsafe file name')
@@ -237,6 +263,21 @@ def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[st
         conn.execute('DELETE FROM watchlist WHERE tmdb_id = ?', (g['tmdb_id'],))
     logger.info('Movie import: %s -> %s (%s)', t.get('name'), dest, how)
     return {'state': 'imported', 'path': dest, 'how': how}
+
+
+def existing_folder(lib_root: str, folder: str) -> Optional[str]:
+    """The library's folder for this movie as already spelled on disk, if there is one."""
+    from app import tv_match
+    want = tv_match.normalize(folder)
+    try:
+        names = sorted(os.listdir(lib_root))
+    except OSError:
+        return None
+    exact = [n for n in names if n == folder and os.path.isdir(os.path.join(lib_root, n))]
+    if exact:
+        return exact[0]
+    near = [n for n in names if tv_match.normalize(n) == want and os.path.isdir(os.path.join(lib_root, n))]
+    return near[0] if len(near) == 1 else None
 
 
 def _torrents(session_factory: Callable = requests.Session, now: Optional[float] = None) -> Optional[List[Dict[str, Any]]]:
