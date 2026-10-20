@@ -448,13 +448,10 @@ export function PhoneDay({ eps, day, today }: { eps: CalEpisode[]; day: Day; tod
       <div data-testid="tv-day-count" style={{ margin: '0 4px 8px', fontSize: 15, fontWeight: 600, color: W95 }}>
         {list.length === 1 ? '1 episode' : `${list.length} episodes`}
       </div>
-      {/* v204 (Taylor's pick T2): the day's episodes under air-time headers, in ET */}
-      {airGroups(list).map(([t, g]) => (
-        <section key={t || 'untimed'} data-testid="tv-time-group" style={{ marginBottom: 16 }}>
-          {t && <h4 data-testid="tv-time-head" style={{ margin: '0 4px 8px', fontSize: 13, fontWeight: 600, color: W70 }}>{t}</h4>}
-          <Agenda eps={g} today={today} noHead />
-        </section>
-      ))}
+      {/* v211 (Taylor's pick U3, replaces T2's air-time headers): one card per episode, a leading ET time column */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {list.map(e => <U3Row key={e.episode_id} e={e} today={today} />)}
+      </div>
     </div>
   );
 }
@@ -466,16 +463,36 @@ export function etTime(airstamp: string | null | undefined): string {
   return isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
 }
 
-/** T2: consecutive episodes (already in air order) grouped by their ET air time; untimed ones last, no header. */
-export function airGroups(list: CalEpisode[]): [string, CalEpisode[]][] {
-  const out: [string, CalEpisode[]][] = [];
-  const untimed: CalEpisode[] = [];
-  for (const e of list) {
-    const t = etTime(e.airstamp);
-    if (!t) { untimed.push(e); continue; }
-    const last = out[out.length - 1];
-    if (last && last[0] === t) last[1].push(e); else out.push([t, [e]]);
-  }
-  if (untimed.length) out.push(['', untimed]);
-  return out;
+/** U3: the ET air time split for the time column, ['9:00', 'PM']; null when untimed (the column stays, blank). */
+export function etParts(airstamp: string | null | undefined): [string, string] | null {
+  const t = etTime(airstamp).replace(/\u202f/g, ' ');
+  const m = /^(\d{1,2}:\d{2})\s*([AP]M)$/.exec(t);
+  return m ? [m[1]!, m[2]!] : null;
+}
+
+/** v211 U3 row: the time column (bold time, muted AM/PM below) vertically centered, show and episode to the
+ * right, the quality chip on the far right for downloaded episodes only (QualityChip renders nothing otherwise). */
+function U3Row({ e, today }: { e: CalEpisode; today: Day }) {
+  const st = episodeState(e, today);
+  const open = useOpenEpisode(e);
+  const [mon] = useMonitored(e);
+  const t = etParts(e.airstamp);
+  return (
+    <div data-testid="tv-agenda-row" data-state={st} data-monitored={mon ? 'true' : 'false'} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
+      className={`tv-u3-row ${open.className || ''}`.trim()}
+      style={{ cursor: open.onClick ? 'pointer' : undefined, display: 'flex', alignItems: 'center', gap: 12, minHeight: 82, padding: '10px 16px 10px 12px', boxSizing: 'border-box',
+        borderRadius: 12, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+      <span data-testid="tv-u3-time" style={{ flex: 'none', width: 50, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', alignSelf: 'center', opacity: mon ? 1 : DIM }}>
+        {t && <span style={{ fontSize: 16, fontWeight: 700, color: W95, lineHeight: '20px' }}>{t[0]}</span>}
+        {t && <span style={{ fontSize: 13, color: W50, lineHeight: '16px' }}>{t[1]}</span>}
+      </span>
+      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6, opacity: mon ? 1 : DIM }}>
+        <span data-testid="tv-card-show" style={{ fontSize: 17, fontWeight: 600, color: W95, lineHeight: '22px' }}>{e.show}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span data-testid="tv-card-title" style={{ ...one, flex: 1, minWidth: 0, fontSize: 14, color: W70 }}>{epLine(e)}</span>
+          <QualityChip e={e} />
+        </span>
+      </span>
+    </div>
+  );
 }

@@ -30,29 +30,11 @@ def test_tap_opens_e2_episode_page():
     assert 'const go = () => openShow(e.series_id, e.episode_id);' in CAL
 
 
-def test_t2_time_headers_in_et():
-    assert "timeZone: 'America/New_York'" in CAL and 'airGroups(list).map(' in CAL and 'data-testid="tv-time-head"' in CAL
-
-
-@pytest.mark.skipif(not shutil.which('node'), reason='node not installed')
-def test_et_grouping_behaviour(tmp_path):
-    start = CAL.index('/** \'8:00 PM\' in ET')
-    code = CAL[start:CAL.index('return out;\n}', start) + len('return out;\n}')]
-    js = (code.replace('export function', 'function').replace(': CalEpisode[]', '').replace('[string, CalEpisode[]][]', '')
-          .replace('(airstamp: string | null | undefined): string', '(airstamp)').replace('(list): ', '(list) ')
-          .replace('const out: = []', 'const out = []').replace('const untimed = []', 'const untimed = []'))
-    import re
-    js = re.sub(r'const (\w+): [^=]+=', r'const \1 =', js)
-    js = re.sub(r'\)\s*:\s*\{', ') {', js)
-    js += """
-const eps = [{id:1, airstamp:'2026-10-19T00:00:00Z'}, {id:2, airstamp:'2026-10-19T01:00:00Z'},
-             {id:3, airstamp:'2026-10-19T01:00:00Z'}, {id:4, airstamp:null}];
-console.log(JSON.stringify(airGroups(eps).map(([t, g]) => [t, g.map(e => e.id)])));
-"""
-    f = tmp_path / 't.js'
-    f.write_text(js)
-    out = subprocess.run(['node', str(f)], capture_output=True, text=True, check=True).stdout.strip()
-    assert out.replace('\u202f', ' ') == '[["8:00 PM",[1]],["9:00 PM",[2,3]],["",[4]]]'
+def test_u3_replaces_t2_headers():
+    """v211 (Taylor's pick U3): no air-time group headers; a leading ET time column, vertically centered."""
+    assert 'airGroups' not in CAL and 'tv-time-head' not in CAL and 'tv-time-group' not in CAL
+    assert "timeZone: 'America/New_York'" in CAL and '<U3Row key={e.episode_id}' in CAL
+    assert "alignItems: 'center', justifyContent: 'center', alignSelf: 'center'" in CAL
 
 
 
