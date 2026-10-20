@@ -37,6 +37,7 @@ def test_first_search_is_air_plus_runtime_with_no_delay_even_when_delay_set(env,
     assert _due(e4)['next_search_at'] == pytest.approx(t + 43 * 60)   # v196a: no 4 h delay
 
 
+@pytest.mark.skip(reason='v203c (PM): superseded by two searches then feed-only plus a daily catch-up (test_v203c_feed_only)')
 def test_missing_episodes_retry_every_15_min_for_6_h_then_hourly(env, monkeypatch):
     allow_grabs(monkeypatch)
     _auto(delay=0)

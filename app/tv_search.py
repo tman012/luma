@@ -415,14 +415,21 @@ def _after(sid: int, want: List[Dict[str, Any]], out: Dict[str, Any], now: float
                 conn.execute('UPDATE episodes SET next_search_at = ?, last_search_at = COALESCE(last_search_at, ?)'
                              ' WHERE id = ?', (max(reset, now), now, e['id']))
             elif out.get('answered'):
-                nxt = _next_retry(e, now) if automatic else None
+                nxt = _next_retry(e, now, int(e.get('search_attempts') or 0) + 1) if automatic else None
                 conn.execute('UPDATE episodes SET last_search_at = ?, search_attempts = search_attempts + 1,'
                              ' next_search_at = COALESCE(?, next_search_at) WHERE id = ?', (now, nxt, e['id']))
 
 
-def _next_retry(e: Dict[str, Any], now: float) -> float:
-    at = aired_at(e)
-    return now + (FAST_S if at is not None and now - at < FAST_WINDOW_S else SLOW_S)
+#: v203c (PM, Sonarr-style): the air-time search plus one retry; after that the episode is feed-only
+#: (the 15-min feed poll grabs it) with one catch-up search a day (still inside the air-date floor)
+AUTO_SEARCHES = 2
+CATCHUP_S = 24 * 3600
+
+
+def _next_retry(e: Dict[str, Any], now: float, attempts: int = 1) -> float:
+    if attempts >= AUTO_SEARCHES:
+        return now + CATCHUP_S
+    return now + FAST_S
 
 
 def manual(sid: int, season: Optional[int] = None, episode_id: Optional[int] = None,
