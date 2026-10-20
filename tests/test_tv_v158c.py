@@ -61,7 +61,10 @@ class Eng:
 
     def search_one(self, cfg, query, cats, limit, interactive, purpose=None, **k):
         self.calls.append((cfg['id'], query, interactive, purpose))
-        if purpose:
+        if purpose == 'feed':                  # v185.2a: the guard's own 'feed' purpose (no caps)
+            from app.tracker_guard import guard_key
+            assert tv_budget._guard().take(guard_key(cfg), False, True, now=self.now, purpose='feed') is None
+        elif purpose:
             assert tv_budget.take(cfg, self.now) is None
         return [{'title': f'{query} r'}]
 
@@ -490,3 +493,42 @@ def test_unset_instance_that_looks_like_test_is_treated_as_test(bare_env, monkey
     monkeypatch.setenv('LUMA_INSTANCE', 'prod')                       # v175 (PM): prod on a test-like host fails closed
     assert instance.is_test() and not instance.assumed_test() and instance.prod_conflict()
     assert not any(instance.writes_allowed(j) for j in instance.GATED)
+
+
+def test_v185_2a_feed_polls_are_exempt_from_every_cap_but_not_from_backoff(engine, guard):
+    """PM / Tester BLOCK: a feed poll is the guard's 'feed' purpose: it consumes no cap, slot or bucket;
+    a tracker's backoff / 429 Retry-After still stops it."""
+    from app.tracker_guard import guard_key
+    t = 2e9
+    gk = guard_key(SITE)
+    for i in range(8):                                                       # IPT's 8/day TV budget is spent
+        take(guard, SITE, t + i * 7200)
+    now = t + 8 * 7200
+    assert tv_budget.take(SITE, now, guard=guard) is not None                # a search is still capped
+    engine.now = now
+    for k in range(4):                                                       # four 15-min feed polls after 8
+        engine.calls.clear()
+        items, st = tv_search.query_trackers('', 'feed', None, False, now + k * 900, [SITE])
+        assert engine.calls == [(1, '', False, 'feed')] and st[0]['status'] == 'ok'
+        assert guard.take(gk, False, True, now=now + k * 900, purpose='feed') is None
+    guard.failure(gk, 'rate', retry_after=3600, status=429)                  # a 429 with Retry-After
+    assert guard.take(gk, False, True, purpose='feed') is not None           # the feed backs off too
+
+
+def test_v185_2a_feeds_never_starve_a_post_air_search(engine, guard):
+    """(a) the feed due every 15 min plus an aired no-runtime episode: its search gets the first slot;
+    (b) after 24 h of feeds the capped tracker still has its whole post-air budget."""
+    from app.tracker_guard import guard_key
+    t = 2e9
+    gk = guard_key(SITE)
+    for k in range(96):                                                      # 24 h of 15-min feed polls
+        assert guard.take(gk, False, True, now=t + k * 900, purpose='feed') is None
+    end = t + 96 * 900
+    assert tv_budget.usage(SITE, end, guard=guard)['used'] == 0
+    assert tv_budget.slot_free(SITE, end, guard=guard)
+    engine.now = end                                                         # (a) the episode search goes now
+    engine.calls.clear()
+    tv_search.query_trackers('Show S01E03', 'episode', None, False, end, [SITE])
+    assert engine.calls == [(1, 'Show S01E03', False, 'tv')]
+    for i in range(1, 8):                                                    # (b) the rest of the day's budget
+        assert tv_budget.take(SITE, end + i * 7200, guard=guard) is None

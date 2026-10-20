@@ -107,7 +107,10 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
             continue                                   # no free slot: not sent, not logged
         try:
             raw = engine.search_one(cfg, query, cats, LIMIT, interactive,
-                                    purpose='tv' if not interactive and capped and not bg_manual else None)
+                                    # v185.2a (PM): a feed poll is the guard's 'feed' purpose: no cap or slot of
+                                    # any kind (Sonarr-style 15-min RSS); backoff and 429/Retry-After still apply
+                                    purpose='feed' if purpose == 'feed' and not interactive else
+                                    'tv' if not interactive and capped and not bg_manual else None)
         except TrackerSkipped as e:
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
             _log(cfg, purpose, sid, query, 0, 'skipped', now)

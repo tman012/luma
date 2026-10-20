@@ -72,6 +72,7 @@ def _purpose_limits() -> Dict[str, Dict[str, float]]:
     return {tv_budget.PURPOSE: tv_budget.GUARD_LIMITS}
 
 
+FEED_PURPOSE = 'feed'
 _PURPOSE_RE = __import__('re').compile(r'^[a-z]{1,16}$')
 _KIND_RE = __import__('re').compile(r'^[ib](:[a-z]{1,16})?$')
 # Rollback safety: `log` keeps only [ts, 'i'|'b'] pairs, the shape every
@@ -284,6 +285,10 @@ class TrackerGuard:
             cd = self.cooldown.get(tid)
             if cd and cd[0] > now:
                 return f'backoff ({cd[1]})'
+            if purpose == FEED_PURPOSE:
+                # v185.2a (PM, Tester BLOCK): a TV feed poll (Sonarr-style 15-min RSS) consumes no cap, slot or
+                # bucket and is never recorded; only the pause and the tracker's backoff / 429 Retry-After stop it
+                return None
             hr, day, glob = self.counts(tid, now)
             if purpose:
                 why = self._purpose_refusal(tid, purpose, now, spacing)
