@@ -28,7 +28,20 @@ def test_automatic_grab_is_a_background_tv_request_on_a_capped_tracker(signed_in
     kind, _ = tracker_sources.fetch_release(tok, automatic=True)
     log1, pur1 = _entries(env['guard'], gk)
     assert kind == 'torrent'
-    assert [k for _, k in log1[len(log0):]] == ['b'] and [p for _, p in pur1[len(pur0):]] == ['tv']
+    # v203c (PM): an accepted release's download is a plain background request, never the 8/day search budget
+    assert [k for _, k in log1[len(log0):]] == ['b'] and [p for _, p in pur1[len(pur0):]] == []
+
+
+def test_automatic_grab_sends_when_the_daily_search_cap_is_used(signed_in, env):  # noqa: F811
+    from app import tv_budget
+    rec = ipt(env['store'])
+    env['mock'].set('ipt.example', R(body=IPT_HTML), R(body=torrent_bytes()))
+    tok = _tok(signed_in)
+    gk = guard_key(env['store'].config(env['store'].get(rec['id'])))
+    for _ in range(tv_budget.AUTO_PER_TRACKER_DAILY):
+        env['guard'].note_purpose(gk, 'tv')
+    kind, _ = tracker_sources.fetch_release(tok, automatic=True)
+    assert kind == 'torrent'
 
 
 def test_manual_grab_stays_interactive(signed_in, env):  # noqa: F811

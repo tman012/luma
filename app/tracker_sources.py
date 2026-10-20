@@ -285,7 +285,9 @@ def fetch_release(token: Optional[str], resolver=None, automatic: bool = False) 
 
     def charge() -> None:
         if automatic:
-            reason = engine.guard.take(gk, False, strict, purpose=purpose, spacing=False)
+            # v203c (PM, Ops audit): an accepted release's download never waits on the 8/day TV search
+            # budget: a plain background request, held only to the tracker's own guard limits
+            reason = engine.guard.take(gk, False, strict, spacing=False)
         else:
             reason = engine.guard.take(gk, True, strict)
         if reason:
