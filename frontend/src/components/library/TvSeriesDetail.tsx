@@ -18,6 +18,7 @@ export const POSTER_GLYPH = 22;
 import { useMonitorSearch } from './TvMonitorSearch';
 import { seasonName } from './TvBulk';
 import { usePhone } from './TvCalendar';
+import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
 import {
   getDetail, grabRelease, interactiveSearch, searchOutcome, searchShow, setEpisodeMonitored,
   setSeasonMonitored, setSeriesMonitored,
@@ -165,7 +166,7 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
     ['Episodes', `${view.have} of ${view.total}`, 'episodes'],
   ];
   return (
-    <div data-testid="tv-detail" data-series-id={view.id} data-menu={menu ?? undefined}
+    <div data-testid="tv-detail" data-series-id={view.id}
       style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, width: '100%', maxWidth: DETAIL_MAX, margin: '0 auto', boxSizing: 'border-box' }}>
       <style>{detailCss + monitorFlagCss}</style>
       {phone ? (
@@ -257,6 +258,19 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
         );
       })}
 
+      {menu !== null && (() => {
+        const e = eps.find(x => x.id === menu);
+        if (!e) return null;
+        const c = code(e.season, e.episode);
+        return (
+          <EpisodeSheet heading={`${view.title} \u00b7 ${c}`} title={e.title || `Episode ${e.episode}`}
+            sub={[DETAIL_STATE_WORD[e.state], airET(e)].filter(Boolean).join(' \u00b7 ')} monitored={e.monitored}
+            onClose={() => setMenu(null)}
+            onSearch={() => { setMenu(null); void search({ episode_id: e.id }, c); }}
+            onInteractive={() => { setMenu(null); setInteractive({ target: { episode_id: e.id }, label: `${view.title} \u00b7 ${c}` }); }}
+            onMonitor={() => { setMenu(null); void monitorEpisode(e.id, !e.monitored); }} />
+        );
+      })()}
       {searchAsk}
       {editing && (
         <EditSeriesModal seriesId={view.id} title={view.title} onClose={() => setEditing(false)}
@@ -474,3 +488,43 @@ const relGrid: React.CSSProperties = {
   display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 110px 80px 64px 96px 84px', alignItems: 'center', columnGap: 12, padding: '0 12px', boxSizing: 'border-box',
 };
 const cellText: React.CSSProperties = { fontSize: 13, color: W70, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+
+/** v187 phone: the episode row menu as a bottom sheet (scrim tap, swipe down or Escape closes). */
+function EpisodeSheet({ heading, title, sub, monitored, onClose, onSearch, onInteractive, onMonitor }: {
+  heading: string; title: string; sub: string; monitored: boolean;
+  onClose: () => void; onSearch: () => void; onInteractive: () => void; onMonitor: () => void;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const titleRef = useRef<HTMLHeadingElement | null>(null);
+  const swipe = useSwipeToDismiss({ scrollRef: ref, onDismiss: onClose });
+  useEffect(() => {
+    const back = document.activeElement as HTMLElement | null;
+    const prev = document.body.style.overflow; document.body.style.overflow = 'hidden';
+    titleRef.current?.focus();
+    const key = (ev: KeyboardEvent) => { if (ev.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', key);
+    return () => { document.body.style.overflow = prev; window.removeEventListener('keydown', key); back?.focus?.(); };
+  }, [onClose]);
+  const act: React.CSSProperties = { height: 56, width: '100%', borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: GLASS,
+    color: W95, fontFamily: FONT, fontSize: 16, fontWeight: 600, textAlign: 'left', padding: '0 16px', cursor: 'pointer' };
+  return (
+    <div data-testid="tv-episode-sheet-scrim" onClick={onClose}
+      style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(21,16,42,0.72)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+        opacity: swipe.backdropOpacity, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={title} data-testid="tv-episode-sheet" onClick={ev => ev.stopPropagation()} {...swipe.handlers}
+        style={{ margin: 8, width: '100%', maxWidth: 480, boxSizing: 'border-box', borderRadius: 24, padding: '8px 16px 22px', fontFamily: FONT,
+          background: 'rgba(21,16,42,0.92)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)', border: '1px solid rgba(255,255,255,0.08)',
+          transform: `translateY(${swipe.translateY}px)`, transition: swipe.transition }}>
+        <div aria-hidden="true" style={{ width: 36, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.3)', margin: '0 auto 12px' }} />
+        <div style={{ fontSize: 12, color: W70 }}>{heading}</div>
+        <h3 ref={titleRef} tabIndex={-1} style={{ margin: '2px 0', fontSize: 17, fontWeight: 700, color: W95, outline: 'none', overflowWrap: 'anywhere' }}>{title}</h3>
+        {sub && <div style={{ fontSize: 13, color: W70 }}>{sub}</div>}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
+          <button type="button" className="lp-focus" data-testid="tv-sheet-search" style={act} onClick={onSearch}>Search</button>
+          <button type="button" className="lp-focus" data-testid="tv-sheet-interactive" style={act} onClick={onInteractive}>Interactive search</button>
+          <button type="button" className="lp-focus" data-testid="tv-sheet-monitor" aria-pressed={monitored} style={act} onClick={onMonitor}>{monitored ? 'Monitored' : 'Unmonitored'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}

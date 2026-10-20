@@ -331,3 +331,25 @@ describe('v185 Designer polish', () => {
   });
 });
 
+
+describe('v187 phone detail and episode sheet', () => {
+  it('phone rows read "n · Title" with a ⋯ that opens the sheet; the scrim closes it; Monitored toggles', async () => {
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(max-width: 767px)', addEventListener() {}, removeEventListener() {} }));
+    render(<MemoryRouter><TvSeriesDetail seriesId={1} wide={false} onBack={() => {}} say={() => {}} /></MemoryRouter>);
+    await screen.findByTestId('tv-detail-backrow');
+    expect(screen.getByTestId('tv-detail-back').textContent).toBe('\u2039 Series');
+    expect(screen.queryAllByTestId('tv-detail-episode-search')).toHaveLength(0);
+    const titles = screen.getAllByTestId('tv-detail-episode-title').map(t => t.textContent);
+    expect(titles).toContain('1 \u00b7 Hello, Ms. Cobel');
+    fireEvent.click(screen.getAllByTestId('tv-detail-episode-menu')[0]!);
+    const sheet = await screen.findByTestId('tv-episode-sheet');
+    expect(within(sheet).getByText('Search')).toBeTruthy();
+    expect(within(sheet).getByText('Interactive search')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('tv-episode-sheet-scrim'));
+    expect(screen.queryByTestId('tv-episode-sheet')).toBeNull();
+    fireEvent.click(screen.getAllByTestId('tv-detail-episode-menu')[0]!);
+    fireEvent.click(screen.getByTestId('tv-sheet-monitor'));
+    await waitFor(() => expect(calls.some(c => c.url.endsWith('/monitored') && c.method === 'PUT')).toBe(true));
+    vi.unstubAllGlobals();
+  });
+});
