@@ -268,6 +268,7 @@ _QBIT_READS = frozenset({'info', 'properties', 'trackers', 'webseeds', 'files', 
 _QBIT = re.compile(r'/api/v2/torrents/([A-Za-z]+)/?$')
 _ARR = re.compile(r'/api/v[13]/')
 _READ_METHODS = frozenset({'GET', 'HEAD', 'OPTIONS'})
+_AVZ_AUTH = re.compile(r'^/api/v1/jackett/auth/?$')
 
 
 def write_kind(method: str, url: str) -> Optional[str]:
@@ -278,6 +279,8 @@ def write_kind(method: str, url: str) -> Optional[str]:
         return None if m.group(1).casefold() in _QBIT_READS else 'qbit'
     if (method or 'GET').upper() in _READ_METHODS:
         return None
+    if _AVZ_AUTH.search(path):
+        return None                                      # v203c (PM): the AvistaZ sites' token login, a read
     if _ARR.search(path):
         return 'arr'
     return None
