@@ -1364,6 +1364,20 @@ html.luma-minimal [data-modal-actions]:has(> [data-modal-sources], > [data-modal
   display: none !important;
 }
 /* v158a: Luma TV's monitor toggle and the Seasons pill (to the season/episode toggles) stay, marked data-modal-keep. */
+/* v206 (Taylor): the phone movie popup (the one with data-action-row) is prod 1b4ea74's as is in minimal
+   builds: the primary pill, the whole action row (Trailer, Sources, Similar, Collection) and file info show. */
+html.luma-minimal [data-modal="MovieDetailModal"][data-modal]:has([data-action-row]) [data-modal-actions]:not([data-action-row]):not([data-file-info-button]) {
+  display: block !important;
+}
+html.luma-minimal [data-modal="MovieDetailModal"][data-modal] [data-action-row][data-modal-actions] {
+  display: grid !important;
+}
+html.luma-minimal [data-modal="MovieDetailModal"][data-modal] [data-action-row][data-modal-actions] > :not([data-modal-sources]) {
+  display: flex !important;
+}
+html.luma-minimal [data-modal="MovieDetailModal"][data-modal] [data-file-info-button][data-modal-actions] {
+  display: flex !important;
+}
 
 /* LUMA_MINIMAL: the search layer covers the home header (no nav behind it). */
 html.luma-minimal .kiosk-search-dim { z-index: 60; }

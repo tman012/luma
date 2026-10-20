@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 ON_DISK = 'already in the library'
 IN_QBIT = 'already in qBittorrent'
 NO_QBIT = "qBittorrent can't be reached to check for a duplicate"
+NO_TITLE = 'no title to check for a duplicate'
 VIDEO_EXTS = ('.mkv', '.mp4', '.avi', '.m4v', '.ts', '.m2ts', '.mov', '.wmv', '.mpg', '.mpeg', '.webm')
 
 
@@ -83,7 +84,11 @@ def in_qbit(title: str, year: Any, session_factory: Callable = requests.Session,
 
 def check(title: str, year: Any, session_factory: Callable = requests.Session,
           now: Optional[float] = None) -> Optional[str]:
-    """None: no duplicate, grab. Else the skip reason (logged at INFO)."""
+    """None: no duplicate, grab. Else the skip reason (logged at INFO). v206 (Reviewer): a missing or blank
+    title can't be checked, so it fails closed too (skip)."""
+    if not isinstance(title, str) or not title.strip():
+        logger.info('Movie grab skipped: (%s): %s', year, NO_TITLE)
+        return NO_TITLE
     where = on_disk(title, year)
     if where:
         logger.info('Movie grab skipped: %s (%s) %s (%s)', title, year, ON_DISK, where)

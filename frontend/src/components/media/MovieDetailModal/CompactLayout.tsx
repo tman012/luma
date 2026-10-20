@@ -1,5 +1,3 @@
-import { MovieSearchActions } from '@/components/movies/MovieSearchActions';
-import { isMinimal } from '@/minimal';
 import { sheetBase } from '@/utils/posterColors';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
@@ -672,8 +670,8 @@ export function CompactLayout(props: MovieModalViewProps) {
                       Watch
                     </button>
                   ) : inWatchlist ? (
-                    /* In watchlist — tap to remove (confirm sheet) */
-                    <div data-modal-keep=""
+                    /* In Watchlist — tap to remove (confirm sheet) */
+                    <div
                       style={{
                         display: 'flex',
                         justifyContent: 'center',
@@ -712,12 +710,9 @@ export function CompactLayout(props: MovieModalViewProps) {
                       </button>
                     </div>
                   ) : (
-                    /* Add to watchlist: v204 (PM): prod 1b4ea74's full-width white pill again (white, black
-                       text, 50px radius); label stays sentence case */
+                    /* Add to Watchlist — full-width white pill */
                     <button
                       type="button"
-                      data-testid="movie-add-watchlist"
-                      data-modal-keep=""
                       onClick={handleUpgradeToggle}
                       style={{
                         width: 'calc(100% - 32px)',
@@ -752,9 +747,6 @@ export function CompactLayout(props: MovieModalViewProps) {
                       Add to Watchlist
                     </button>
                   )}
-                  {isMinimal() && inWatchlist && props.resolvedTmdbId && detail ? (
-                    <MovieSearchActions tmdbId={props.resolvedTmdbId} title={detail.title} year={detail.year} />
-                  ) : null}
                   </div>{/* end action stagger wrapper */}
                   </div>{/* end hidden-when-shelf-open wrapper */}
                 </div>{/* end shelf overlay zone */}
@@ -1378,12 +1370,12 @@ export function CompactLayout(props: MovieModalViewProps) {
 
 
 
-      {/* Remove from watchlist confirm sheet */}
+      {/* Remove from Watchlist confirm sheet */}
       {showRemoveConfirm && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Remove from watchlist"
+          aria-label="Remove from Watchlist"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1478,7 +1470,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                 opacity: removingWatchlist ? 0.6 : 1,
               }}
             >
-              {removingWatchlist ? 'Removing…' : 'Remove from watchlist'}
+              {removingWatchlist ? 'Removing…' : 'Remove from Watchlist'}
             </button>
             <button
               type="button"

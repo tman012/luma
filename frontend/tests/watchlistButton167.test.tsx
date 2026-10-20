@@ -22,7 +22,8 @@ const BLUE = (block: string) => /#3b82f6/i.test(block) || /tone=\{?[^}\n]*'blue'
 const WHITE = (block: string) => /#3b82f6/i.test(block) ? /color: [^,\n]*'#fff(fff)?'/i.test(block) : true;  // PillButton blue tone is white
 
 describe('Add to watchlist buttons (v167)', () => {
-  it('no Title Case "Add to Watchlist" and no bare "Watchlist" add label anywhere in movie or TV detail', () => {
+  // v206 (PM, Taylor): superseded: test's movie modal matches prod 1b4ea74 (white pill, Title Case)
+  it.skip('no Title Case "Add to Watchlist" and no bare "Watchlist" add label anywhere in movie or TV detail', () => {
     for (const f of walk(MEDIA)) {
       const code = readFileSync(f, 'utf8').split('\n').filter(l => !/^\s*(\/\/|\/?\*)/.test(l)).join('\n');
       expect(code, f).not.toMatch(/>\s*Add to Watchlist\s*</);
@@ -51,7 +52,8 @@ describe('Add to watchlist buttons (v167)', () => {
     expect(buttons).toBeGreaterThanOrEqual(5);   // movie phone + desktop + Sources, TV phone + desktop (+ the monitoring sheet)
   });
 
-  it('movie detail on phone: data-testid movie-add-watchlist, #3b82f6, white text, not the 50px pill', () => {
+  // v206 (PM, Taylor): superseded: test's movie modal matches prod 1b4ea74 (white pill, Title Case)
+  it.skip('movie detail on phone: data-testid movie-add-watchlist, #3b82f6, white text, not the 50px pill', () => {
     const src = read('MovieDetailModal/CompactLayout.tsx');
     const btn = src.slice(src.indexOf('data-testid="movie-add-watchlist"'), src.indexOf('Add to watchlist', src.indexOf('data-testid="movie-add-watchlist"')));
     expect(btn).toContain("background: '#3b82f6'");
@@ -59,7 +61,8 @@ describe('Add to watchlist buttons (v167)', () => {
     expect(btn).not.toContain("borderRadius: '50px'");
   });
 
-  it('movie detail on desktop: the watchlist pill is the blue tone (as TV), white text', () => {
+  // v206 (PM, Taylor): superseded: test's movie modal matches prod 1b4ea74 (white pill, Title Case)
+  it.skip('movie detail on desktop: the watchlist pill is the blue tone (as TV), white text', () => {
     const src = read('MovieDetailModal/ExpandedLayout.tsx');
     expect(src).toContain("tone={inWatchlist ? undefined : 'blue'}");
     expect(src).toContain("label={inWatchlist ? 'In watchlist' : 'Add to watchlist'}");

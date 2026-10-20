@@ -62,7 +62,7 @@ def _prod(path):
 
 
 def _norm(s):   # v205 (PM): prod's capitalization exactly, except the confirm sheet (not part of the ask)
-    return s.replace('m Watchlist', 'm watchlist')
+    return s   # v206: prod exactly, confirm sheet included
 
 
 def test_compact_watchlist_buttons_and_confirm_are_prods():
