@@ -183,10 +183,10 @@ def test_a_tv_season_episode_forms_pass_through(env, signed_in, title):
 
 def test_b_movie_falls_back_to_title_only(env, signed_in):
     ipt(env['store'])
-    env['mock'].set('ipt.example', R(body=SIGNED_IN_EMPTY), R(body=ipt_page(ipt_row(1, 'Heat Directors Cut 1080p BluRay'))))
+    env['mock'].set('ipt.example', R(body=SIGNED_IN_EMPTY), R(body=ipt_page(ipt_row(1, 'Heat 1995 1080p BluRay'), ipt_row(2, 'Heat Directors Cut 1080p BluRay'))))
     rel = signed_in.get('/api/sources/all-results?title=Heat&media_type=movie&year=1995').get_json()['releases']
     assert [q_of(h['url']) for h in env['mock'].hits('ipt.example')] == ['Heat 1995', 'Heat']
-    assert [x['title'] for x in rel] == ['Heat Directors Cut 1080p BluRay']
+    assert [x['title'] for x in rel] == ['Heat 1995 1080p BluRay']  # v208: a yearless release is dropped
 
 
 def test_b_movie_no_fallback_when_year_search_has_results(env, signed_in):

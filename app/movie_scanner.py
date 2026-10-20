@@ -134,7 +134,10 @@ def matches(title: str, movie: Dict[str, Any]) -> bool:
     name, year = parse(title)
     if not name or name != tv_match.normalize(movie['title']):
         return False
-    return year is None or movie.get('year') is None or abs(int(year) - int(movie['year'])) <= 1
+    if movie.get('year') is None:
+        return True
+    # v208 (PM): a release with no year can't be told apart from another movie of the same name: never grabbed
+    return year is not None and abs(int(year) - int(movie['year'])) <= 1
 
 
 def candidates(items: List[Dict[str, Any]], movie: Dict[str, Any], profile: Optional[Dict[str, Any]],

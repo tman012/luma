@@ -2472,6 +2472,18 @@ def sources_all_results():
         else:
             raw = client.search_all(title, media_type, year)
 
+        if media_type == 'movie' and year:
+            # v208 (PM): only this movie's releases, on every indexer path. A release whose title (sequel
+            # numbers included) or year (±1) doesn't match is dropped, so 'Shrek 5' never shows Shrek (2001);
+            # an unreleased movie with no matching release shows nothing. A plain-text override (no year)
+            # stays as typed.
+            from app import movie_scanner as _ms
+            _want = {'title': title, 'year': int(year)}
+            _kept = [it for it in raw if _ms.matches(str(it.get('title') or ''), _want)]
+            if len(_kept) != len(raw):
+                logger.info('Sources: dropped %d releases of another movie', len(raw) - len(_kept))
+            raw = _kept
+
         releases = []
         for item in raw:
             resolution = (item.get('resolution', '') or '').upper()

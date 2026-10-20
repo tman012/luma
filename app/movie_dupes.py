@@ -75,7 +75,7 @@ def in_qbit(title: str, year: Any, session_factory: Callable = requests.Session,
         for t in got:
             name = str((t or {}).get('name') or '') if isinstance(t, dict) else ''
             n, ty = movie_scanner.parse(name)
-            if n and n == want and (y is None or ty == y):
+            if n and n == want and (y is None or (ty is not None and abs(ty - y) <= 1)):   # v208: ±1 as the scanner
                 return {'hit': name}
         return {'hit': None}
     finally:
