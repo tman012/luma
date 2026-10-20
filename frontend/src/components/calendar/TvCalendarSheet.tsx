@@ -112,7 +112,9 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
     <div
       data-sheet="TvCalendarSheet"
       style={{
-        position: 'fixed', inset: 0,
+        // v211 (as v210's Settings sheet): iOS standalone stops a fixed bottom:0 layer at the bottom inset, so
+        // the backdrop (and the sheet pinned to it) reaches one inset past the edge; no empty band below
+        position: 'fixed', inset: 0, bottom: 'calc(-1 * env(safe-area-inset-bottom, 0px))',
         zIndex: behindModal ? 9999 : 10001,
         display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
         backgroundColor: behindModal ? 'rgba(0,0,0,0)' : phase === 'visible' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0)',
@@ -162,7 +164,7 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
               <TvCalendar today={today} week={week} onWeek={setWeek} toolbar={false} phone />
             </OpenShowContext.Provider>
           )}
-          <div className="shrink-0" style={{ height: 'env(safe-area-inset-bottom, 12px)' }} />
+          <div data-scroll-content className="shrink-0" style={{ height: 'calc(env(safe-area-inset-bottom, 0px) * 2 + 12px)' }} />
         </div>
       </div>
     </div>,

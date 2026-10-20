@@ -18,4 +18,6 @@ def test_guard_present():
 
 
 def test_sw_v210():
-    assert "media-kiosk-v210" in (ROOT / 'static/sw.js').read_text()
+    import re
+    v = int(re.search(r"media-kiosk-v(\d+)", (ROOT / 'static/sw.js').read_text()).group(1))
+    assert v >= 210                                          # v211 (TV calendar U3) ships on top

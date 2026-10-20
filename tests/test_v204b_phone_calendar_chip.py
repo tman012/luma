@@ -101,3 +101,12 @@ def test_v205_prod_capitalization_and_guard_exemption():
     g = (ROOT / 'frontend/tests/sentenceCaseGuard.test.ts').read_text()
     for lbl in ('Add to Watchlist', 'In Watchlist', 'Select Quality', 'Watchlist'):
         assert f"{lbl}$|" in g
+
+
+def test_v211_tv_calendar_sheet_runs_to_the_bottom_edge():
+    """Designer: like v210's Settings sheet, the backdrop reaches one inset past the edge and the inset is
+    only inside the scroll content (no band below the sheet)."""
+    assert "position: 'fixed', inset: 0, bottom: 'calc(-1 * env(safe-area-inset-bottom, 0px))'" in SHEET
+    i = SHEET.index('data-scroll-container')
+    assert SHEET.index("env(safe-area-inset-bottom, 0px) * 2 + 12px", i) > i
+    assert SHEET.count('safe-area-inset-bottom') == 2
