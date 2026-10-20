@@ -18,7 +18,7 @@ def test_sheet_reads_luma_calendar_not_sonarr():
     assert '<TvCalendar today={today} week={week} onWeek={setWeek} toolbar={false} phone />' in SHEET
     assert 'const phone = forcePhone || isPhone;' in CAL
     assert '<DayHeader day={day} today={today} onStep={step} />' in CAL
-    assert CAL.count('<QualityChip e={e}') >= 2 and "if (!e.downloaded || !e.quality) return null;" in CAL
+    assert CAL.count('<QualityChip e={e}') >= 2 and "if (!e.downloaded) return null;" in CAL and "{e.quality || 'Downloaded'}" in CAL
 
 
 def test_tap_opens_e2_episode_page():

@@ -374,8 +374,8 @@ def test_v208_standard_named_file_takes_the_imported_grabs_quality(scanned):
     assert got[b]['quality'] is None                     # a failed grab never names a file's quality
 
 
-def test_v211_resolution_only_reads_hdtv(scanned):
-    """Taylor: a known resolution with no source is labelled HDTV like Sonarr."""
+def test_v211_resolution_only_is_unknown_quality(scanned):
+    """Taylor: a resolution with no source is not a known quality: no label (the chip reads 'Downloaded')."""
     out = tv_calendar.calendar(D(2026, 10, 11), 7)
     eid = next(e['episode_id'] for e in out['episodes'] if e['downloaded'])
     with tv_store.connect() as conn:
@@ -384,7 +384,7 @@ def test_v211_resolution_only_reads_hdtv(scanned):
                      ' WHERE id IN (SELECT file_id FROM episode_file_links WHERE episode_id = ?)', (eid,))
         conn.commit()
     got = {e['episode_id']: e for e in tv_calendar.calendar(D(2026, 10, 11), 7)['episodes']}
-    assert got[eid]['quality'] == '1080p HDTV'
+    assert got[eid]['quality'] is None and got[eid]['downloaded'] is True
 
 
 def test_v211_link_pass_stores_the_grabs_quality_and_keeps_it(scanned):

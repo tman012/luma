@@ -117,6 +117,7 @@ describe('cards collapse to their text (v179)', () => {
       for (const el of [card, ...card.querySelectorAll<HTMLElement>('*')]) {
         if (el.getAttribute('data-testid') === 'tv-card-bookmark' || el.closest('[data-testid=tv-card-bookmark]')) continue;   // absolute, 24px
         if (el.getAttribute('data-testid') === 'tv-stripe') continue;                                                         // absolute edge
+        if (el.getAttribute('data-testid') === 'tv-quality-chip') continue;                                                   // v211: a 24px chip, 'Downloaded' when quality unknown
         expect(el.getAttribute('style') || '').not.toMatch(SIZING);
       }
       expect(card.style.flex).toBe('0 0 auto');                                          // a day column never grows a card
@@ -233,7 +234,9 @@ describe('Calendar', () => {
     // v197 (Taylor, Q2): no state color on calendar rows
     expect(rows.some(r => within(r).queryByTestId('tv-stripe'))).toBe(false);
     expect(rows.some(r => within(r).queryByTestId('tv-check'))).toBe(false);          // no check: the time line stays put
-    expect(rows.some(r => /Downloaded|Missing|Unaired/.test(r.textContent || ''))).toBe(false);   // nothing on screen
+    // nothing on screen but v211's chip ('Downloaded' for a downloaded episode of unknown quality)
+    expect(rows.some(r => /Missing|Unaired/.test(r.textContent || ''))).toBe(false);
+    expect(rows.map(r => within(r).queryByTestId('tv-quality-chip')?.textContent ?? null)).toEqual(['Downloaded', null, null]);
     expect(rows[0]!.textContent).toContain('Episode 1');
     const name = within(rows[0]!).getByTestId('tv-card-show');                     // up to 2 lines, 13/600
     expect([name.style.webkitLineClamp, name.style.display, name.style.fontSize, name.style.fontWeight]).toEqual(['8', '-webkit-box', '13px', '600']);   // v158c: wraps (v164: up to 8)
@@ -243,7 +246,7 @@ describe('Calendar', () => {
     expect(title.textContent).toMatch(/^S\d\dE\d\d \u00b7 /);
     expect([title.style.webkitLineClamp, title.style.display, title.style.fontSize, title.style.color])
       .toEqual(['6', '-webkit-box', '12px', 'rgba(255, 255, 255, 0.7)']);                        // v158c: wraps (v164: up to 6 lines)
-    expect(title.nextElementSibling).toBeNull();      // v179: no air time known, so no line 3 (never the date again)
+    expect(title.nextElementSibling?.getAttribute('data-testid') ?? null).toBe('tv-quality-chip');   // v179: no air line; v211: the 'Downloaded' chip
     // the top row: ‹ range › together in the true center (a 1fr auto 1fr grid), no separate toolbar
     const center = screen.getByTestId('tv-cal-center');
     expect(center.contains(screen.getByTestId('tv-cal-prev')) && center.contains(screen.getByTestId('tv-cal-next'))).toBe(true);

@@ -320,11 +320,11 @@ const epLine = (e: CalEpisode) => (e.title ? `${code(e.season, e.episode)} \u00b
 /** v197 (Taylor, Q2): a downloaded episode's file quality as an outlined chip; nothing when there's no file.
  * One color, from the --quality-chip CSS variable (index.css). */
 export function QualityChip({ e, style }: { e: Pick<CalEpisode, 'downloaded' | 'quality'>; style?: React.CSSProperties }) {
-  if (!e.downloaded || !e.quality) return null;
+  if (!e.downloaded) return null;      // v211 (Taylor): a downloaded episode of unknown quality reads 'Downloaded'
   return (
     <span data-testid="tv-quality-chip" style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', height: 24, padding: '0 8px', borderRadius: 6, boxSizing: 'border-box',
       fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap', color: 'color-mix(in srgb, var(--quality-chip) 55%, #fff)', background: 'color-mix(in srgb, var(--quality-chip) 14%, transparent)', border: '1px solid color-mix(in srgb, var(--quality-chip) 45%, transparent)', ...style }}>
-      {e.quality}
+      {e.quality || 'Downloaded'}
     </span>
   );
 }

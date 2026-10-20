@@ -110,16 +110,12 @@ def _add_file_quality(conn, eps: List[Dict[str, Any]]) -> None:
 
 
 def _label(f: Dict[str, Any]) -> Optional[str]:
-    """v211 (Taylor): the chip for every downloaded file; a known resolution with no source reads HDTV like
-    Sonarr ('1080p HDTV')."""
+    """v211 (Taylor): the quality label only when the quality is known (a resolution AND a source, stored or read
+    off the name); a resolution alone is ignored (None), and the phone chip then reads 'Downloaded'."""
     from app import tv_monitor
-    q = tv_monitor._file_quality(f)
-    if q is None or f.get('source'):
-        return q
-    res = f.get('resolution')
-    if not res:                      # read off the name: _file_quality already split it
-        return q
-    return tv_monitor._file_quality({'resolution': res, 'source': 'hdtv'})
+    if f.get('resolution') and not f.get('source'):
+        return None
+    return tv_monitor._file_quality(f)
 
 
 def _add_grab_quality(conn, eps: List[Dict[str, Any]]) -> None:
