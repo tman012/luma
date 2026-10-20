@@ -63,8 +63,10 @@ def test_test_blocks_every_writer_by_default_and_opts_in_by_name(test_instance, 
         if j != 'library_mover':
             assert not instance.writes_allowed(j), j
     assert instance.writes_allowed('mover') and instance.writes_allowed('tv_link')     # allowed by default (scoped)
-    monkeypatch.setenv('LUMA_TEST_ALLOW', 'mover, Roulette')
-    assert instance.writes_allowed('roulette') and not instance.writes_allowed('movie_night')
+    monkeypatch.setenv('LUMA_TEST_ALLOW', 'mover, Roulette, movie_night')
+    assert instance.writes_allowed('movie_night')
+    assert not instance.writes_allowed('roulette')      # v198 (Taylor): movie automations never opt in on test
+    monkeypatch.setenv('LUMA_TEST_ALLOW', 'mover')
     with pytest.raises(instance.WritesBlocked):
         instance.require('movie_night')
 
@@ -87,7 +89,8 @@ def test_each_job_start_is_gated(test_instance, monkeypatch, mod):
     assert getattr(m, fn)() is None
     assert started == []                                                   # no thread on test
     monkeypatch.setenv('LUMA_TEST_ALLOW', job_name)
-    assert instance.writes_allowed(job_name)                               # opt-in reaches the same gate
+    # opt-in reaches the same gate; v198 (Taylor): movie automations stay off on test even when opted in
+    assert instance.writes_allowed(job_name) is (job_name not in instance.MOVIE_AUTOMATIONS)
 
 
 def test_start_services_gates_each_scheduler(test_instance):

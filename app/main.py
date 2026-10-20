@@ -1690,7 +1690,8 @@ def _tv_json_body_guard():
     """v184 (Tester): junk, too deeply nested or oversized JSON on a TV write route is a 400, never a 5xx.
     The body is parsed once here (Flask caches it for the route)."""
     p = request.path
-    if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE') or not (p.startswith('/api/settings/tv') or p.startswith('/api/tv/')):
+    if request.method not in ('POST', 'PUT', 'PATCH', 'DELETE') or not (p.startswith('/api/settings/tv') or p.startswith('/api/tv/')
+                                                                 or p.startswith('/api/settings/movies')):
         return None
     if (request.content_length or 0) > TV_JSON_MAX:
         return jsonify({'error': 'Request too large'}), 400
@@ -21707,6 +21708,8 @@ app.register_blueprint(_section_trackers.bp)
 _tv_settings.init(owner_or_error=_start_flow._owner_or_error,
                   signed_in_owner=_start_flow.require_signed_in_owner)
 app.register_blueprint(_tv_settings.bp)
+from app import movie_settings as _movie_settings  # noqa: E402  v198: Settings > Movies (movies.db)
+app.register_blueprint(_movie_settings.bp)
 _tv_settings.migrate_on_start()   # TV paths of earlier builds become Library path selections
 
 # TV library scan (Phase 1): TMDB key from Settings > Connectors.

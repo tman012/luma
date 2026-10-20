@@ -197,7 +197,17 @@ def allowed() -> FrozenSet[str]:
     return requested() if opt_ins_honored() else frozenset()
 
 
+#: v198 (Taylor): movie automations are always off on the test instance (no opt-in)
+MOVIE_AUTOMATIONS: FrozenSet[str] = frozenset({'roulette', 'upgrade_4k', 'franchise_completer'})
+
+
 def writes_allowed(job: str) -> bool:
+    if is_test() and str(job).casefold() in MOVIE_AUTOMATIONS:
+        return False
+    return _writes_allowed(job)
+
+
+def _writes_allowed(job: str) -> bool:
     """True on prod; on test only for the mover/TV link or, with LUMA_INSTANCE exactly 'test', a job named in
     LUMA_TEST_ALLOW (v176)."""
     if not is_test():

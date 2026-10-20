@@ -1,0 +1,139 @@
+{
+ "source": "Radarr 6.0.4 export (read-only; names, qualities, cutoff, sizes; no secrets or URLs)",
+ "profiles": [
+  {
+   "name": "Any",
+   "allowed": [
+    "2160p-remux",
+    "2160p-bluray",
+    "2160p-web",
+    "1080p-remux",
+    "1080p-bluray",
+    "1080p-web",
+    "720p-bluray",
+    "720p-web"
+   ],
+   "cutoff": "720p-web",
+   "min_mb_per_min": 33.17,
+   "max_mb_per_min": null,
+   "radarr_id": 1
+  },
+  {
+   "name": "SD",
+   "allowed": [
+    "sd-bluray",
+    "sd-web",
+    "sd-hdtv"
+   ],
+   "cutoff": "sd-bluray",
+   "min_mb_per_min": 0,
+   "max_mb_per_min": 100,
+   "radarr_id": 2
+  },
+  {
+   "name": "HD-720p",
+   "allowed": [
+    "720p-bluray",
+    "720p-web",
+    "720p-hdtv"
+   ],
+   "cutoff": "720p-bluray",
+   "min_mb_per_min": 0,
+   "max_mb_per_min": 100,
+   "radarr_id": 3
+  },
+  {
+   "name": "HD-1080p",
+   "allowed": [
+    "1080p-remux",
+    "1080p-bluray",
+    "1080p-web",
+    "1080p-hdtv"
+   ],
+   "cutoff": "1080p-bluray",
+   "min_mb_per_min": 0,
+   "max_mb_per_min": null,
+   "radarr_id": 4
+  },
+  {
+   "name": "Ultra-HD",
+   "allowed": [
+    "2160p-remux",
+    "2160p-bluray",
+    "2160p-web",
+    "2160p-hdtv"
+   ],
+   "cutoff": "2160p-remux",
+   "min_mb_per_min": 0,
+   "max_mb_per_min": null,
+   "radarr_id": 5
+  },
+  {
+   "name": "HD - 720p/1080p",
+   "allowed": [
+    "1080p-remux",
+    "1080p-bluray",
+    "1080p-web",
+    "1080p-hdtv",
+    "720p-bluray",
+    "720p-web",
+    "720p-hdtv"
+   ],
+   "cutoff": "720p-bluray",
+   "min_mb_per_min": 0,
+   "max_mb_per_min": null,
+   "radarr_id": 6
+  },
+  {
+   "name": "TFlix",
+   "allowed": [
+    "1080p-web",
+    "1080p-bluray",
+    "720p-web",
+    "720p-bluray"
+   ],
+   "cutoff": "1080p-bluray",
+   "min_mb_per_min": 33.17,
+   "max_mb_per_min": 100,
+   "radarr_id": 7
+  },
+  {
+   "name": "1080p Remux",
+   "allowed": [
+    "1080p-remux"
+   ],
+   "cutoff": "1080p-remux",
+   "min_mb_per_min": 33.17,
+   "max_mb_per_min": null,
+   "radarr_id": 8
+  },
+  {
+   "name": "2160p Remux",
+   "allowed": [
+    "2160p-remux"
+   ],
+   "cutoff": "2160p-remux",
+   "min_mb_per_min": 33.17,
+   "max_mb_per_min": null,
+   "radarr_id": 9
+  }
+ ],
+ "trackers": [
+  {
+   "type": "iptorrents",
+   "enabled": true
+  },
+  {
+   "type": "privatehd",
+   "enabled": true
+  },
+  {
+   "type": "beyondhd",
+   "enabled": true
+  },
+  {
+   "type": "pixelhd",
+   "enabled": true
+  }
+ ]
+}
