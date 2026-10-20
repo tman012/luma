@@ -839,7 +839,6 @@ def schedule(now: float) -> int:
     only episodes inside the air-date floor (tv_safety); backlog_enabled is ignored, older missing episodes
     are never searched automatically. Episodes already scheduled or searched are kept."""
     auto = automation()
-    delay = 3600 * int(auto.get('first_search_delay_h') or 0)
     n = 0
     with tv_store.write() as conn:
         rows = [dict(r) for r in conn.execute(
@@ -853,7 +852,8 @@ def schedule(now: float) -> int:
             # v185.2a (Taylor): an episode with no runtime is searched at air time (no delay). A never-searched
             # episode already scheduled later than this rule (an older build's time) is moved up, so it is
             # picked up on the next pass (Judy Justice, Line of Fire S01E05)
-            want = at + (delay if e.get('runtime') else 0)
+            want = at                        # v196a (Taylor): no first-search delay for any episode: air + runtime
+            #   (or air time with no runtime), then 15-min retries for 6 h, then hourly; first_search_delay_h is ignored
             if e.get('next_search_at') is not None and float(e['next_search_at']) <= want:
                 continue
             conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (want, e['id']))

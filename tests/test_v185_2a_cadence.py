@@ -25,7 +25,7 @@ def _due(e):
     return rows('SELECT next_search_at, last_search_at FROM episodes WHERE id = ?', e)[0]
 
 
-def test_no_runtime_is_searched_at_air_time_and_with_one_the_delay_holds(env, monkeypatch):
+def test_first_search_is_air_plus_runtime_with_no_delay_even_when_delay_set(env, monkeypatch):
     allow_grabs(monkeypatch)
     _auto(delay=4)
     t = _time.time() - 600
@@ -34,7 +34,7 @@ def test_no_runtime_is_searched_at_air_time_and_with_one_the_delay_holds(env, mo
     _air(e4, t, 43)
     tv_search.schedule(t + 60)
     assert _due(e3)['next_search_at'] == pytest.approx(t)
-    assert _due(e4)['next_search_at'] == pytest.approx(t + 43 * 60 + 4 * 3600)
+    assert _due(e4)['next_search_at'] == pytest.approx(t + 43 * 60)   # v196a: no 4 h delay
 
 
 def test_missing_episodes_retry_every_15_min_for_6_h_then_hourly(env, monkeypatch):
@@ -75,3 +75,13 @@ def test_every_feed_is_due_every_15_minutes_capped_or_not(monkeypatch):
         monkeypatch.setattr(tv_budget, 'slot_free', lambda cfg, now: False)
         assert not tv_search.feed_due({'id': 1}, 1000 + 14 * 60)
         assert tv_search.feed_due({'id': 1}, 1000 + 15 * 60)
+
+
+def test_v196a_line_of_fire_scheduled_late_with_a_runtime_is_pulled_to_air_plus_runtime(env, monkeypatch):
+    allow_grabs(monkeypatch)
+    _auto(delay=4)
+    t = _time.time() - 3 * 3600
+    e = env.e2[3]
+    _air(e, t, 60, nxt=t + 4 * 3600 + 3600)     # an older build's 4 h delay
+    tv_search.schedule(_time.time())
+    assert _due(e)['next_search_at'] == pytest.approx(t + 3600)

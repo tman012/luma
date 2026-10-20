@@ -218,8 +218,8 @@ def test_after_air_search_waits_the_delay_and_backs_off(env, monkeypatch):
     now = aired + 60
     tv_search.schedule(now)
     nxt = rows('SELECT next_search_at FROM episodes WHERE id = ?', e3)[0]['next_search_at']
-    assert nxt == pytest.approx(aired + 4 * 3600)
-    assert tv_search.run_due(now)['shows'] == 0                                          # not yet
+    assert nxt == pytest.approx(aired)   # v196a (Taylor): no first-search delay
+    assert tv_search.run_due(aired - 1)['shows'] == 0                                    # not before air + runtime
     env.results = []
     assert tv_search.run_due(nxt + 1)['shows'] == 1
     r = rows('SELECT next_search_at, search_attempts FROM episodes WHERE id = ?', e3)[0]
