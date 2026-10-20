@@ -147,10 +147,11 @@ def test_v203_luma_naming_rename_off_keeps_the_release_name_and_existing_folders
     assert sorted(p.name for p in lib.iterdir()) == ['dune part two (2024)']
 
 
-def test_v203_library_path_prefills_from_lumas_movies_path(env, monkeypatch):
+def test_v203_library_path_never_falls_back_to_lumas_movies_path(env, monkeypatch):
     from app import settings_manager
     with movie_settings.connect() as conn:
         conn.execute("DELETE FROM meta WHERE key = 'library_root'")
     monkeypatch.setattr(settings_manager.SettingsManager, 'get', lambda self, k, d=None:
                         [{'type': 'tv', 'path': '/tv'}, {'type': 'movies', 'path': '/media/Movies'}] if k == 'media.paths' else d)
-    assert mi.root() == '/media/Movies'
+    assert mi.root() == ''
+    assert mi.tick(now=100, fetch=lambda: [], path_map=lambda p: p)['imported'] == 0

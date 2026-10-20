@@ -78,7 +78,7 @@ def luma_movies_root() -> str:
 
 def root() -> str:
     with ms.connect() as conn:
-        return str(ms._meta(conn, 'library_root', '') or '') or luma_movies_root()
+        return str(ms._meta(conn, 'library_root', '') or '')   # PM: never fall back; unset means no imports
 
 
 def naming() -> Dict[str, Any]:
