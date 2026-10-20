@@ -287,6 +287,12 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
     from app import movie_grabs
     if any(g['state'] in ACTIVE for g in movie_grabs.for_movie(tmdb_id)):
         return {'ok': False, 'error': 'Already grabbed', 'existing': True}
+    m = _movie(tmdb_id) or {}
+    if m.get('title'):
+        from app import movie_dupes           # v204c (PM): never grab a movie the library or qBittorrent already has
+        dup = movie_dupes.check(m['title'], m.get('year'), session_factory or requests.Session, now)
+        if dup:
+            return {'ok': False, 'error': dup, 'duplicate': True, 'blocked': True}
     try:
         kind, payload = (fetch or (lambda u: tv_grab.fetch_link(u, automatic=origin == 'auto',
                                                                 tokens_only=origin != 'auto')))(item.get('downloadUrl'))
