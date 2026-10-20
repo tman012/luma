@@ -105,8 +105,21 @@ def _add_file_quality(conn, eps: List[Dict[str, Any]]) -> None:
                 ' ORDER BY f.id', tuple(chunk)):
             e = by_id.get(x['episode_id'])
             if e is not None and e['quality'] is None:
-                e['quality'] = tv_monitor._file_quality(dict(x))
+                e['quality'] = _label(dict(x))
     _add_grab_quality(conn, [e for e in eps if e['quality'] is None and e['downloaded']])
+
+
+def _label(f: Dict[str, Any]) -> Optional[str]:
+    """v211 (Taylor): the chip for every downloaded file; a known resolution with no source reads HDTV like
+    Sonarr ('1080p HDTV')."""
+    from app import tv_monitor
+    q = tv_monitor._file_quality(f)
+    if q is None or f.get('source'):
+        return q
+    res = f.get('resolution')
+    if not res:                      # read off the name: _file_quality already split it
+        return q
+    return tv_monitor._file_quality({'resolution': res, 'source': 'hdtv'})
 
 
 def _add_grab_quality(conn, eps: List[Dict[str, Any]]) -> None:
@@ -130,7 +143,7 @@ def _add_grab_quality(conn, eps: List[Dict[str, Any]]) -> None:
             q = x['quality'] if x['quality'] in tv_monitor.QUALITY_IDS else tv_monitor.quality_of(str(x['release_title'] or ''))
             if q:
                 res, _, src = q.partition('-')
-                e['quality'] = tv_monitor._file_quality({'resolution': res, 'source': src})
+                e['quality'] = _label({'resolution': res, 'source': src})
 
 
 def _last_refresh() -> Optional[float]:

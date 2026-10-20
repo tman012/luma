@@ -378,6 +378,10 @@ def finish_grab(h: str, name: Optional[str], series_id: Optional[int], covered: 
                          (state, now, json.dumps({'episode_ids': ids, 'files': files, 'via': via}), g['hash'], *OPEN_GRABS))
             series_id = g['series_id'] if g['series_id'] is not None else series_id
             ids = sorted(set(ids) | (set(want) & have))
+            from app import tv_scan                       # v211 (PM B): the imported files keep this grab's quality
+            for fr in conn.execute(f"SELECT DISTINCT l.file_id FROM episode_file_links l WHERE l.episode_id IN ({','.join('?' * len(ids)) or 'NULL'})",
+                                   tuple(ids)).fetchall():
+                tv_scan.fill_quality_from_grab(conn, fr['file_id'], ids)
         elif g is not None:
             return None                                       # already finished: nothing to do, no second event
         key = g['hash'] if g is not None else h

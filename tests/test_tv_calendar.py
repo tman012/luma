@@ -372,3 +372,39 @@ def test_v208_standard_named_file_takes_the_imported_grabs_quality(scanned):
     got = {e['episode_id']: e for e in tv_calendar.calendar(D(2026, 10, 11), 7)['episodes']}
     assert got[a]['quality'] == '1080p WEB'
     assert got[b]['quality'] is None                     # a failed grab never names a file's quality
+
+
+def test_v211_resolution_only_reads_hdtv(scanned):
+    """Taylor: a known resolution with no source is labelled HDTV like Sonarr."""
+    out = tv_calendar.calendar(D(2026, 10, 11), 7)
+    eid = next(e['episode_id'] for e in out['episodes'] if e['downloaded'])
+    with tv_store.connect() as conn:
+        conn.execute("UPDATE episode_files SET resolution = '1080p', source = NULL, release_name = NULL,"
+                     " rel_path = 'Show/Season 1/Show - S01E05 - Title.mkv'"
+                     ' WHERE id IN (SELECT file_id FROM episode_file_links WHERE episode_id = ?)', (eid,))
+        conn.commit()
+    got = {e['episode_id']: e for e in tv_calendar.calendar(D(2026, 10, 11), 7)['episodes']}
+    assert got[eid]['quality'] == '1080p HDTV'
+
+
+def test_v211_link_pass_stores_the_grabs_quality_and_keeps_it(scanned):
+    """PM B: a linked file Luma imported keeps the grab's quality on its row; a rescan never blanks it."""
+    out = tv_calendar.calendar(D(2026, 10, 11), 7)
+    e0 = next(e for e in out['episodes'] if e['downloaded'])
+    with tv_store.connect() as conn:
+        fid = conn.execute('SELECT file_id FROM episode_file_links WHERE episode_id = ?', (e0['episode_id'],)).fetchone()['file_id']
+        conn.execute('UPDATE episode_files SET resolution = NULL, source = NULL WHERE id = ?', (fid,))
+        conn.execute("INSERT INTO grabs (hash, series_id, episode_ids, release_title, quality, origin, grabbed_at, state)"
+                     " VALUES ('h9', ?, ?, 'Show.S02E01.2160p.WEB-DL.x265-GRP', '2160p-web', 'auto', 1.0, 'imported')",
+                     (e0['series_id'], json.dumps([e0['episode_id']])))
+        conn.commit()
+    tv_scan.scan_all(now=2000.0)
+    with tv_store.connect() as conn:
+        r = conn.execute('SELECT resolution, source, release_name FROM episode_files f JOIN episode_file_links l ON l.file_id = f.id'
+                         ' WHERE l.episode_id = ?', (e0['episode_id'],)).fetchone()
+    assert r['source'] == 'web' and r['resolution'] and r['release_name'] == 'Show.S02E01.2160p.WEB-DL.x265-GRP'
+    tv_scan.scan_all(now=3000.0)
+    with tv_store.connect() as conn:
+        r2 = conn.execute('SELECT resolution, source FROM episode_files f JOIN episode_file_links l ON l.file_id = f.id'
+                          ' WHERE l.episode_id = ?', (e0['episode_id'],)).fetchone()
+    assert (r2['resolution'], r2['source']) == (r['resolution'], 'web')

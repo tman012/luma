@@ -491,7 +491,8 @@ def scan_files(sid: int, path_id: str, folder: str, root_real: str, now: float,
                 ' release_group, proper, origin, added_at, state, parsed)'
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scan', ?, ?, ?)"
                 ' ON CONFLICT(path_id, rel_path) DO UPDATE SET series_id = excluded.series_id, size = excluded.size,'
-                ' mtime = excluded.mtime, dev = excluded.dev, ino = excluded.ino, resolution = excluded.resolution,'
+                ' mtime = excluded.mtime, dev = excluded.dev, ino = excluded.ino,'
+                ' resolution = COALESCE(excluded.resolution, episode_files.resolution),'
                 ' release_group = excluded.release_group, proper = excluded.proper, state = excluded.state,'
                 ' parsed = excluded.parsed',
                 (sid, path_id, rel_path, st.st_size, st.st_mtime, st.st_dev, st.st_ino, r.resolution or None,
@@ -501,6 +502,8 @@ def scan_files(sid: int, path_id: str, folder: str, root_real: str, now: float,
             conn.execute('DELETE FROM episode_file_links WHERE file_id = ?', (fid,))
             for eid in ids:
                 conn.execute('INSERT OR IGNORE INTO episode_file_links (file_id, episode_id) VALUES (?, ?)', (fid, eid))
+            if ids:
+                fill_quality_from_grab(conn, fid, ids)
         # the show folder itself unreachable (a share dropped): not a deletion, keep the rows for the next pass
         reachable = os.path.isdir(os.path.join(root_real, folder))
         for row in conn.execute('SELECT id, rel_path, state, size FROM episode_files WHERE series_id = ?', (sid,)).fetchall():
@@ -515,6 +518,31 @@ def scan_files(sid: int, path_id: str, folder: str, root_real: str, now: float,
                     logger.info('TV link: a file of show %s is gone from disk (%s)', sid, row['rel_path'][-120:])
         conn.execute('UPDATE series SET last_scan_at = ? WHERE id = ?', (now, sid))
     return counts
+
+
+def fill_quality_from_grab(conn, fid: int, episode_ids) -> None:
+    """v211 (PM B): a file Luma imported keeps its quality on its episode_files row, from the newest
+    imported/partial/importing grab covering its episodes (grabs.quality, else read off release_title), so the
+    library never depends on the file name. Fills empty fields only."""
+    from app import tv_monitor
+    ids = [int(i) for i in episode_ids]
+    if not ids:
+        return
+    row = conn.execute('SELECT resolution, source FROM episode_files WHERE id = ?', (fid,)).fetchone()
+    if row is None or (row['resolution'] and row['source']):
+        return
+    g = conn.execute(
+        'SELECT g.quality, g.release_title FROM grabs g WHERE g.state IN (\'imported\', \'partial\', \'importing\', \'downloading\')'
+        f" AND EXISTS (SELECT 1 FROM json_each(g.episode_ids) j WHERE CAST(j.value AS INTEGER) IN ({','.join('?' * len(ids))}))"
+        ' ORDER BY COALESCE(g.finished_at, g.grabbed_at) DESC LIMIT 1', tuple(ids)).fetchone()
+    if g is None:
+        return
+    q = g['quality'] if g['quality'] in tv_monitor.QUALITY_IDS else tv_monitor.quality_of(str(g['release_title'] or ''))
+    if not q:
+        return
+    res, _, src = q.partition('-')
+    conn.execute('UPDATE episode_files SET resolution = COALESCE(resolution, ?), source = COALESCE(source, ?),'
+                 ' release_name = COALESCE(release_name, ?) WHERE id = ?', (res or None, src or None, g['release_title'], fid))
 
 
 # --------------------------------------------------------------------------- duplicates
