@@ -384,21 +384,31 @@ def choose(cands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return picked
 
 
+def _numbered(e: Dict[str, Any]) -> bool:
+    return isinstance(e.get('season_number'), int) and isinstance(e.get('episode_number'), int)
+
+
 def _queries(show: Dict[str, Any], want: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
     """(purpose, query) for the wanted episodes: a season query when a season has 2+ wanted,
     else one per episode (daily shows by date and, when numbered, SxxEyy). At most MAX_QUERIES."""
     title = show['title']
     out: List[Tuple[str, str]] = []
     by_season: Dict[int, List[Dict[str, Any]]] = {}
-    for e in sorted(want, key=lambda e: (e['season_number'], e['episode_number'])):
-        by_season.setdefault(e['season_number'], []).append(e)
+    daily = show.get('series_type') == 'daily'
+    # v233.5 (Reviewer): an episode with no season or episode number gets no SxxEyy query (a daily one still
+    # gets its date query); never a format error
+    for e in sorted(want, key=lambda e: (e.get('season_number') if e.get('season_number') is not None else -1,
+                                         e.get('episode_number') if e.get('episode_number') is not None else -1)):
+        if not daily and not _numbered(e):
+            continue
+        by_season.setdefault(e.get('season_number'), []).append(e)
     for s, eps in by_season.items():
-        if show.get('series_type') == 'daily':
+        if daily:
             # v233: by date, and by SxxEyy too when the episode is numbered (many daily releases use it)
             for e in eps:
                 if e.get('air_date'):
                     out.append(('episode', f"{title} {str(e['air_date']).replace('-', '.')}"))
-                if s and e.get('episode_number'):
+                if _numbered(e) and s and e.get('episode_number'):
                     out.append(('episode', f"{title} S{s:02d}E{e['episode_number']:02d}"))
         elif len(eps) >= 2:
             out.append(('season', f'{title} S{s:02d}'))
@@ -447,7 +457,7 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
         # miss episodes. Wanted episodes of a searched season that nothing found are searched one by one.
         seasons = {int(q.rsplit('S', 1)[1]) for p, q in _queries(show, want) if p == 'season'}
         covered = {i for c in candidates(items, show, want, blocked) for i in c['covers']}
-        missed = [e for e in want if e['season_number'] in seasons and e['id'] not in covered]
+        missed = [e for e in want if _numbered(e) and e['season_number'] in seasons and e['id'] not in covered]
         for e in missed[:MAX_QUERIES]:
             q = f"{show['title']} S{e['season_number']:02d}E{e['episode_number']:02d}"
             got, st = query_trackers(q, purpose or 'episode', sid, interactive, now, cfgs)

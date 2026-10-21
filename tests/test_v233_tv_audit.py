@@ -239,3 +239,27 @@ def test_no_air_time_still_gets_the_15_minute_window_and_a_grab(env, monkeypatch
     _timeline(sid, start - 15 * 60, start + 4 * 3600)
     assert sorted(set(when)) == [start + i * tv_search.FAST_S for i in range(13)]
     assert sorted(r['release_title'] for r in rows('SELECT release_title FROM grabs WHERE series_id = ?', sid)) == names
+
+
+# ------------------------------------------------------------------ v233.5 (Reviewer): null episode numbers
+
+def test_queries_and_fallback_skip_episodes_with_no_number():
+    show = {'title': 'Love Is Blind', 'series_type': 'standard'}
+    want = [{'id': 1, 'season_number': 11, 'episode_number': 6, 'air_date': '2026-10-21'},
+            {'id': 2, 'season_number': 11, 'episode_number': None, 'air_date': '2026-10-21'},
+            {'id': 3, 'season_number': None, 'episode_number': None, 'air_date': '2026-10-21'}]
+    assert tv_search._queries(show, want) == [('episode', 'Love Is Blind S11E06')]
+    daily = {'title': 'WWE Raw', 'series_type': 'daily'}
+    assert tv_search._queries(daily, [{'season_number': None, 'episode_number': None, 'air_date': '2026-10-20'}]) == \
+        [('episode', 'WWE Raw 2026.10.20')]
+
+
+def test_fallback_with_a_null_number_does_not_raise(env, monkeypatch):
+    sid, ids = make_show(env, 'Love Is Blind', 'standard', 11, (6, 8), '2026-10-21', '2026-10-21T07:00:00Z', 60)
+    real = tv_search.wanted
+    monkeypatch.setattr(tv_search, 'wanted', lambda *a, **k: [
+        {**e, 'episode_number': None} if e['episode_number'] == 8 else e for e in real(*a, **k)] + [
+        {'id': 9999, 'season_number': 11, 'episode_number': None, 'air_date': '2026-10-21', 'airstamp': None}])
+    sent = _per_query(env, monkeypatch, {})
+    out = tv_search.search_show(sid, None, origin='auto', now=ts(2026, 10, 21, 4, 15), do_grab=False)
+    assert out['ok'] and sent == ['Love Is Blind S11E06']
