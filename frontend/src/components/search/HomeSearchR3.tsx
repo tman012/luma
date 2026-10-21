@@ -334,11 +334,13 @@ function TopCard({ item, onOpen }: { item: SearchMovie; onOpen: () => void }) {
 function PosterCard({ item, onOpen, wl }: { item: SearchMovie; onOpen: () => void; wl?: { inList: boolean; onAdd: () => void; tv?: boolean } }) {
   const img = sizedPlexImg(getPosterUrl(item), 272, 408);
   const title = getTitle(item);
+  const [broken, setBroken] = useState(false);
   return (
     <div className="r3-cardw">
       <button type="button" className="r3-card" data-testid="r3-card" data-owned={item.isOwned ? 'true' : 'false'} onClick={onOpen} aria-label={title}>
         <span className="r3-po">
-          {img && <img src={img} alt="" loading="lazy" />}
+          {img && !broken ? <img src={img} alt="" loading="lazy" onError={() => setBroken(true)} />
+            : <span className="r3-ph" data-testid="r3-placeholder" data-title={title} aria-hidden="true" />}
           {item.isOwned && <InLibrary />}
         </span>
         <span className="r3-ct">{title}</span>
@@ -404,8 +406,8 @@ export const r3Css = `
 .r3-btn{height:44px;padding:0 22px;border-radius:999px;font:inherit;font-size:15px;font-weight:600;color:#fff;cursor:pointer;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.16);outline:none}
 .r3-btn:hover{background:rgba(255,255,255,.18)}
 .r3-primary{background:var(--color-accent, #3b82f6);border-color:var(--color-accent, #3b82f6)}
-.r3-grid{flex:1;min-width:0;display:grid;grid-template-columns:repeat(auto-fill, var(--r3-po));gap:20px 16px}
-.r3-cardw{position:relative;min-width:0}
+.r3-grid{flex:1;min-width:0;display:grid;grid-template-columns:repeat(auto-fill, var(--r3-po));gap:20px 16px;align-items:start}
+.r3-cardw{position:relative;min-width:0;width:var(--r3-po);overflow:hidden}
 .r3-wl{position:absolute;top:8px;right:8px;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;padding:0;cursor:pointer;color:#fff;
   background:rgba(21,16,42,.78);border:1px solid rgba(255,255,255,.16);outline:none}
 .r3-tvadd{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:rgba(0,0,0,.5)}
@@ -414,11 +416,15 @@ export const r3Css = `
 .r3-wl:hover{background:rgba(59,130,246,.85)}
 span.r3-wl{cursor:default;background:#22c55e;border-color:#22c55e}
 .r3-wl:focus-visible{box-shadow:0 0 0 3px rgba(59,130,246,.45)}
-.r3-card{display:flex;flex-direction:column;align-items:stretch;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;outline:none;min-width:0;border-radius:12px}
-.r3-po{position:relative;display:block;aspect-ratio:2/3;border-radius:12px;overflow:hidden;background:rgba(255,255,255,.06);box-shadow:0 8px 24px rgba(0,0,0,.4)}
-.r3-po img{width:100%;height:100%;object-fit:cover;display:block}
+.r3-card{display:flex;flex-direction:column;align-items:stretch;width:100%;box-sizing:border-box;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;outline:none;min-width:0;border-radius:12px}
+.r3-po{position:relative;display:block;width:100%;aspect-ratio:2/3;border-radius:12px;overflow:hidden;background:rgba(255,255,255,.06);box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.r3-po img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+/* v244: no poster: a styled tile with the title (R3) */
+.r3-ph{position:absolute;inset:0;display:flex;align-items:flex-end;padding:10px;box-sizing:border-box;font-size:15px;font-weight:800;line-height:1.15;
+  color:rgba(255,255,255,.9);background:linear-gradient(160deg, rgba(59,130,246,.28), rgba(21,16,42,.9));overflow:hidden;word-break:break-word}
+.r3-ph::after{content:attr(data-title);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:5;overflow:hidden}
 .r3-card:hover .r3-po img{filter:brightness(1.08)}
-.r3-ct{font-size:13px;font-weight:600;margin-top:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r3-ct{font-size:13px;font-weight:600;margin-top:8px;line-height:1.3;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
 .r3-cm{font-size:11px;color:rgba(255,255,255,.55);margin-top:2px}
 .r3-badge{position:absolute;top:8px;right:8px;display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px 0 4px;border-radius:999px;font-size:11px;font-weight:600;
   background:rgba(21,16,42,.78);border:1px solid rgba(255,255,255,.12);color:#fff}

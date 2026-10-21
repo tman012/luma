@@ -352,3 +352,36 @@ describe('v243 A1: the top bar opens from a bare chevron', () => {
     window.history.pushState({}, '', '/');
   });
 });
+
+describe('v244: uniform 2:3 tiles, no overlap, 2-line titles, a placeholder for no poster', () => {
+  it('each tile is exactly one track wide; the poster fills it at 2:3 (the button no longer sizes to its image)', () => {
+    expect(r3Css).toContain('.r3-grid{flex:1;min-width:0;display:grid;grid-template-columns:repeat(auto-fill, var(--r3-po));gap:20px 16px;align-items:start}');
+    expect(r3Css).toContain('.r3-cardw{position:relative;min-width:0;width:var(--r3-po);overflow:hidden}');
+    expect(r3Css).toContain('.r3-card{display:flex;flex-direction:column;align-items:stretch;width:100%;box-sizing:border-box;');
+    expect(r3Css).toContain('.r3-po{position:relative;display:block;width:100%;aspect-ratio:2/3;');
+    expect(r3Css).toContain('.r3-po img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;');
+    expect(r3Css).toMatch(/\.r3-ct\{[^}]*-webkit-line-clamp:2;[^}]*overflow:hidden/);
+    expect(r3Css).toMatch(/\.r3-wl\{position:absolute;top:8px;right:8px;/);
+  });
+  it('no poster (or a broken one): a styled placeholder with the title; the + stays in the tile', async () => {
+    render(<HomeSearchR3 />);
+    await type('dune');
+    const cards = screen.getAllByTestId('r3-card');
+    const ph = cards[2]!.querySelector('[data-testid="r3-placeholder"]') as HTMLElement;
+    expect(ph.dataset.title).toBe('Dune');
+    expect(cards[2]!.querySelector('img')).toBeNull();
+    expect(ph.parentElement!.className).toBe('r3-po');
+    const w = cards[2]!.parentElement!;
+    expect(w.className).toBe('r3-cardw');
+    expect(w.querySelector('[data-testid="r3-wl-add"]')!.parentElement).toBe(w);
+  });
+  it('a poster that fails to load turns into the placeholder', async () => {
+    tm = { ...TM, movies: [{ id: 841, title: 'Dune', release_date: '1984-12-14', poster_path: '/broken.jpg' }] };
+    render(<HomeSearchR3 />);
+    await type('dune');
+    const card = screen.getAllByTestId('r3-card').find(c => c.textContent!.startsWith('Dune1984'))!;
+    fireEvent.error(card.querySelector('img')!);
+    expect(card.querySelector('img')).toBeNull();
+    expect((card.querySelector('[data-testid="r3-placeholder"]') as HTMLElement).dataset.title).toBe('Dune');
+  });
+});
