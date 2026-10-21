@@ -39,6 +39,8 @@ class FakeOmdb:
         self.calls.append(dict(params or {}))
         if self.fail:
             raise self.fail
+        if params.get('apikey') == 'limited-key-01':
+            return Resp(401, {'Response': 'False', 'Error': 'Request limit reached!'})
         if params.get('apikey') != KEY:
             return Resp(401, {'Response': 'False', 'Error': 'Invalid API key!'})
         if params.get('i') == 'tt0162222':
@@ -170,3 +172,10 @@ def test_other_refusals_fail_open_and_are_not_cached(fake, monkeypatch, iid):
     assert omdb.get_ratings(iid) is None
     assert omdb.get_ratings(iid) is None
     assert len(fake.calls) == 2 and iid not in omdb._cache
+
+
+def test_https_and_test_key_errors(fake):
+    assert omdb.OMDB_URL == 'https://www.omdbapi.com/'
+    assert omdb.test_key(KEY) is None
+    assert omdb.test_key('limited-key-01') == 'Rate limited'
+    assert omdb.test_key('wrong-key-000') == 'Invalid key'

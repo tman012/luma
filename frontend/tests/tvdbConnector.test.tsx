@@ -71,3 +71,16 @@ describe('v248 OMDb connector', () => {
     expect(calls.find(c => c.url.endsWith('/connectors/omdb') && c.method === 'PUT')!.body).toEqual({ api_key: 'good-om99' });
   });
 });
+
+describe('v249 OMDb Remove', () => {
+  it('pressing Remove clears an earlier Connected at once', async () => {
+    view = { ...view, omdb: { set: true, last4: 'om99' } };
+    render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('omdb-test'));
+    await waitFor(() => expect(screen.getByTestId('omdb-result').textContent).toBe('Connected'));
+    fireEvent.click(screen.getByTestId('omdb-remove'));
+    fireEvent.click(screen.getByRole('dialog').querySelectorAll('button')[1]!);
+    expect(screen.queryByTestId('omdb-result')).toBeNull();
+    await waitFor(() => expect((screen.getByTestId('omdb-key') as HTMLInputElement).placeholder).toBe(''));
+  });
+});

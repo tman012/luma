@@ -19,7 +19,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-OMDB_URL = 'http://www.omdbapi.com/'
+OMDB_URL = 'https://www.omdbapi.com/'
 TEST_IMDB_ID = 'tt0162222'          # Cast Away: the Settings Test lookup
 CACHE_DAYS = 90
 CACHE_MAX = 5000
@@ -121,19 +121,17 @@ def test_key(key: str) -> Optional[str]:
         return 'Timed out'
     except Exception:                  # noqa: BLE001
         return "Can't reach OMDb"
-    if r.status_code == 401:
-        return 'Invalid key'
-    if r.status_code == 429:
-        return 'Rate limited'
-    if r.status_code != 200:
-        return 'Unexpected response'
     try:
         body = r.json() or {}
     except ValueError:
+        body = {}
+    err = str(body.get('Error') or '').lower() if isinstance(body, dict) else ''
+    if r.status_code == 429 or 'limit' in err:
+        return 'Rate limited'
+    if r.status_code == 401 or 'key' in err:
+        return 'Invalid key'
+    if r.status_code != 200 or body.get('Response') != 'True' or body.get('imdbID') != TEST_IMDB_ID:
         return 'Unexpected response'
-    if body.get('Response') != 'True' or body.get('imdbID') != TEST_IMDB_ID:
-        err = str(body.get('Error') or '')
-        return 'Invalid key' if 'key' in err.lower() else 'Unexpected response'
     return None
 
 

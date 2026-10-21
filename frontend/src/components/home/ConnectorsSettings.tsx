@@ -90,6 +90,7 @@ function ConnectorGroup({ group, masked, onSaved }: {
 
   const save = async (value: string) => {
     setSaving(true);
+    if (!value) setResult(null);       // Remove: drop an earlier Connected at once
     const body = value ? { [group.body]: value, ...pinBody } : { [group.body]: '' };
     const r = await send<View & { error?: string }>(`/api/settings/connectors/${id}`, 'PUT', body);
     setSaving(false);
