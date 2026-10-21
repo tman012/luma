@@ -348,6 +348,9 @@ def _is_movie(t: Dict[str, Any]) -> bool:
 
 
 def _complete(t: Dict[str, Any]) -> bool:
+    from app import library_mover as mover
+    if mover.is_paused(t):  # never import a paused/stopped torrent
+        return False
     try:
         return float(t.get('progress') or 0) >= 1.0 and float(t.get('amount_left') or 0) == 0
     except (TypeError, ValueError):

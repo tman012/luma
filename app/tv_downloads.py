@@ -115,6 +115,8 @@ def _save(h: str, **fields) -> None:
 
 
 def _complete(t: Dict[str, Any]) -> bool:
+    if mover.is_paused(t):  # never import a paused/stopped torrent
+        return False
     try:
         return float(t.get('progress') or 0) >= 1.0
     except (TypeError, ValueError):

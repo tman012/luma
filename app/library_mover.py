@@ -67,9 +67,14 @@ EXTRACT_WAIT_S = 3600      # prod: wait up to an hour for an unpack
 MIN_VIDEO_BYTES = 100 * 1024 * 1024
 STABLE_WAIT_S = 3          # prod's is_file_stable window
 MAX_JOBS_WAITING = 500
-# Prod's completed states, plus qBittorrent 5's names for them.
-COMPLETED_STATES = ('completed', 'pausedUP', 'stalledUP', 'uploading', 'queuedUP',
-                    'stoppedUP', 'forcedUP')
+# Prod's completed states, plus qBittorrent 5's names for them. Paused/stopped torrents are never
+# imported (PM): a user pausing a torrent is how they say "don't file this".
+PAUSED_STATES = frozenset(('pausedUP', 'pausedDL', 'stoppedUP', 'stoppedDL'))  # qBit v4 paused*, v5 stopped*
+COMPLETED_STATES = ('completed', 'stalledUP', 'uploading', 'queuedUP', 'forcedUP')
+
+
+def is_paused(t: Dict[str, Any]) -> bool:
+    return str(t.get('state') or '') in PAUSED_STATES
 VIDEO_EXTS = ('.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg', '.m2ts')
 _HASH_RE = re.compile(r'^([0-9a-f]{40}|[0-9a-f]{64})$')
 TERMINAL = ('done', 'exists', 'failed', 'skipped')

@@ -753,7 +753,7 @@ def test_path_map_for_other_setups(env):
     fm.update(lambda d: d.update(path_map=[{'remote': '/data/torrents', 'local': str(env.dl)}]))
     movie_file(env, 'Heat.1995.mkv')
     lm.track(H1, TMDB, 'Heat.1995')
-    env.q.torrents[H1] = {'hash': H1, 'name': 'Heat.1995.mkv', 'tags': TAG, 'progress': 1, 'state': 'pausedUP',
+    env.q.torrents[H1] = {'hash': H1, 'name': 'Heat.1995.mkv', 'tags': TAG, 'progress': 1, 'state': 'stalledUP',
                           'save_path': '/data/torrents/', 'content_path': '/data/torrents/Heat.1995.mkv'}
     env.tick()
     assert job(H1)['state'] == 'done'
