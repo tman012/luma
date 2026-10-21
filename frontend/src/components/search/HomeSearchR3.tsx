@@ -334,12 +334,12 @@ function TopCard({ item, onOpen }: { item: SearchMovie; onOpen: () => void }) {
 function PosterCard({ item, onOpen, wl }: { item: SearchMovie; onOpen: () => void; wl?: { inList: boolean; onAdd: () => void; tv?: boolean } }) {
   const img = sizedPlexImg(getPosterUrl(item), 272, 408);
   const title = getTitle(item);
-  const [broken, setBroken] = useState(false);
+  const [broken, setBroken] = useState<string | null>(null);   // the URL that failed
   return (
     <div className="r3-cardw">
       <button type="button" className="r3-card" data-testid="r3-card" data-owned={item.isOwned ? 'true' : 'false'} onClick={onOpen} aria-label={title}>
         <span className="r3-po">
-          {img && !broken ? <img src={img} alt="" loading="lazy" onError={() => setBroken(true)} />
+          {img && broken !== img ? <img key={img} src={img} alt="" loading="lazy" onError={() => setBroken(img)} />
             : <span className="r3-ph" data-testid="r3-placeholder" data-title={title} aria-hidden="true" />}
           {item.isOwned && <InLibrary />}
         </span>

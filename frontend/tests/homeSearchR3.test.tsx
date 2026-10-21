@@ -407,4 +407,16 @@ describe('v245: one seamless reveal', () => {
     expect([b.dataset.open, h.dataset.open]).toEqual(['false', 'false']);
     expect(h.hasAttribute('inert')).toBe(true);
   });
+  it('a reused card with a new poster URL shows the new image (the broken state belongs to the old URL)', async () => {
+    tm = { ...TM, movies: [{ id: 841, title: 'Dune', release_date: '1984-12-14', poster_path: '/broken.jpg' }] };
+    render(<HomeSearchR3 />);
+    await type('dune');
+    const find = () => screen.getAllByTestId('r3-card').find(c => c.textContent!.startsWith('Dune1984'))!;
+    fireEvent.error(find().querySelector('img')!);
+    expect(find().querySelector('img')).toBeNull();
+    tm = { ...TM, movies: [{ id: 841, title: 'Dune', release_date: '1984-12-14', poster_path: '/fixed.jpg' }] };
+    await type('dune ');
+    const img = find().querySelector('img');
+    expect(img && img.getAttribute('src')).toContain('fixed.jpg');
+  });
 });
