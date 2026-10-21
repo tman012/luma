@@ -415,15 +415,28 @@ export function PhoneSeriesList({ shows, onOpen }: { shows: Show[]; onOpen: (s: 
   const listRef = useRef<HTMLDivElement | null>(null);
   const railRef = useRef<HTMLDivElement | null>(null);
   // v226.1 (Designer): the rail keeps reaching the bottom once it sticks (no gap under Z after scrolling)
-  useEffect(() => {
+  useLayoutEffect(() => {
     const fit = () => {
       const r = railRef.current, l = listRef.current;
       if (r && l) r.style.height = `${railFit(l.getBoundingClientRect().top, window.innerHeight)}px`;
     };
+    // v228 (Tester on 1fcc3c3): also once the rows have rendered and the sheet has finished opening (its
+    // slide-in put the list off screen at mount, squeezing the rail to its minimum until the first scroll)
     fit();
+    const frame = requestAnimationFrame(fit);
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(fit) : null;
+    if (ro && listRef.current) ro.observe(listRef.current);
     document.addEventListener('scroll', fit, { capture: true, passive: true });
+    document.addEventListener('animationend', fit, true);
+    document.addEventListener('transitionend', fit, true);
     window.addEventListener('resize', fit);
-    return () => { document.removeEventListener('scroll', fit, { capture: true }); window.removeEventListener('resize', fit); };
+    return () => {
+      cancelAnimationFrame(frame); ro?.disconnect();
+      document.removeEventListener('scroll', fit, { capture: true });
+      document.removeEventListener('animationend', fit, true);
+      document.removeEventListener('transitionend', fit, true);
+      window.removeEventListener('resize', fit);
+    };
   }, [shows.length]);
   const shown = shows;
   const firstOf = new Map<string, number>();

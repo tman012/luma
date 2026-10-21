@@ -5,7 +5,6 @@ const modals = { openMovie: vi.fn(), openTv: vi.fn(), close: vi.fn() };
 vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => modals }));
 
 import { HomeSearchPalette, buildGroups, metaLine, autoExpand, CLOSE_MS } from '@/components/search/HomeSearchPalette';
-import { HomeSearchPill } from '@/components/search/HomeSearchPill';
 import { openSearch } from '@/components/search/MinimalSearchHost';
 
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -27,29 +26,11 @@ const fetchMock = vi.fn(async (u: string) => {
 beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); vi.stubGlobal('fetch', fetchMock); mode = 'ok'; modals.openMovie.mockReset(); modals.openTv.mockReset(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-const mount = () => render(<><HomeSearchPill /><HomeSearchPalette /></>);
+const mount = () => render(<><button type="button" data-testid="opener">Search</button><HomeSearchPalette /></>);
 const type = async (q: string) => {
   fireEvent.change(screen.getByTestId('search-input'), { target: { value: q } });
   await act(async () => { vi.advanceTimersByTime(300); });
 };
-
-describe('C2 pill', () => {
-  it('is a 480x52 button labeled Search with a / keycap, hidden while the palette is open', async () => {
-    mount();
-    const pill = screen.getByTestId('home-search-pill');
-    expect(pill.tagName).toBe('BUTTON');
-    expect(pill.getAttribute('aria-label')).toBe('Search');
-    expect(pill.textContent).toBe('Search');
-    const css = document.querySelector('style')!.textContent!;
-    expect(css).toContain('width:480px;height:52px');
-    expect(css).toContain('top:clamp(184px, 31vh, 372px)');
-    fireEvent.click(pill);
-    await act(async () => { vi.advanceTimersByTime(1); });
-    expect(screen.getByTestId('search-palette')).toBeTruthy();
-    expect(pill.dataset.hidden).toBe('true');
-    expect(document.activeElement).toBe(screen.getByTestId('search-input'));
-  });
-});
 
 describe('C2 palette states', () => {
   it('rest: dialog with Search placeholder, no chips before 2 characters', () => {
@@ -92,8 +73,8 @@ describe('C2 palette states', () => {
     expect(screen.getByTestId('group-library')).toBeTruthy();
     expect(screen.getByTestId('find-more')).toBeTruthy();
   });
-  it('arrow keys + Enter open the movie popup and close the palette', async () => {
-    mount(); act(() => openSearch());
+  it('arrow keys + Enter open the movie popup and close the palette; focus returns to the opener', async () => {
+    mount(); screen.getByTestId('opener').focus(); act(() => openSearch());
     await type('dune');
     await waitFor(() => screen.getByTestId('search-results'));
     fireEvent.click(screen.getByTestId('find-more'));
@@ -104,7 +85,7 @@ describe('C2 palette states', () => {
     expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ tmdbId: 841, ratingKey: undefined }));
     await act(async () => { vi.advanceTimersByTime(CLOSE_MS + 50); });
     expect(screen.queryByTestId('search-palette')).toBeNull();
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('home-search-pill')));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('opener')));
   });
   it('chips filter as prod: TV shows only TV rows', async () => {
     mount(); act(() => openSearch());

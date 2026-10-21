@@ -1,6 +1,6 @@
 /**
- * v215 C2: desktop search palette (>= 1024px). Opens from the Home pill, '/' or
- * `open-search`; top edge sits on the pill's top. Same data as KioskSearch
+ * v215 C2: desktop search palette (>= 1024px) off the kiosk Home (v227 R3 has its own field there).
+ * Opens from '/' or `open-search`; v228: closing returns focus to whatever had it before. Same data as KioskSearch
  * (performSearch, 300 ms debounce, 2-char minimum, abort on retype).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -13,7 +13,6 @@ import {
 import { sizedPlexImg } from '@/utils/image';
 import { SearchIcon } from './MinimalSearchHost';
 import { wordMatchRatio, MIN_MATCH_RATIO } from './KioskSearch';
-import { PILL_TOP } from './HomeSearchPill';
 
 export type Chip = 'all' | 'movies' | 'tv' | 'people';
 const CHIPS: { id: Chip; label: string }[] = [
@@ -112,6 +111,7 @@ export function HomeSearchPalette() {
     panelRef.current?.querySelector<HTMLElement>(`[data-testid="${id}"]`)?.focus();
   }, [expanded]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const returnTo = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -151,10 +151,8 @@ export function HomeSearchPalette() {
     window.setTimeout(() => {
       setOpen(false); setClosing(false);
       window.dispatchEvent(new CustomEvent('search-palette', { detail: { open: false } }));
-      // Tester MED: the pill is still visibility:hidden this tick, so focus() would land on body.
-      // Wait for React to commit data-hidden="false", then focus on the next frame.
-      requestAnimationFrame(() => requestAnimationFrame(() =>
-        (document.querySelector('[data-testid="home-search-pill"]') as HTMLElement | null)?.focus()));
+      const back = returnTo.current; returnTo.current = null;
+      requestAnimationFrame(() => requestAnimationFrame(() => back?.focus?.()));
     }, CLOSE_MS);
   }, []);
 
@@ -162,6 +160,7 @@ export function HomeSearchPalette() {
     const onOpen = () => {
       // v227: on the kiosk Home, R3's own field takes '/' and open-search
       if (document.querySelector('[data-r3-search]')) return;
+      returnTo.current = document.activeElement as HTMLElement | null;
       setClosing(false); setOpen(true); setQuery(''); setRes(null); setPhase('idle'); setChip('all'); setHi(0);
       window.dispatchEvent(new CustomEvent('search-palette', { detail: { open: true } }));
       setTimeout(() => inputRef.current?.focus(), 0);
@@ -303,7 +302,8 @@ function ChevronLeft() {
   return <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>;
 }
 
-const PAL_TOP = `min(${PILL_TOP}, calc(100vh - 24px - 420px))`;
+/** v228: the C2 pill is gone; the palette (off Home) keeps its old top, clamp(184px, 31vh, 372px). */
+const PAL_TOP = 'min(clamp(184px, 31vh, 372px), calc(100vh - 24px - 420px))';
 export const paletteCss = `
 .lsp-root{position:fixed;inset:0;z-index:200;color:rgba(255,255,255,.95);line-height:normal}
 .lsp-scrim{position:absolute;inset:0;background:rgba(21,16,42,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:lsp-fade 180ms ease-out}

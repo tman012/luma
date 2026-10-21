@@ -124,3 +124,24 @@ describe('v226.1 S1 follow-ups', () => {
     expect(railFit(-400, 844)).toBe(844 - 8 - 16);   // scrolled: sticky at 8px, no gap under Z
   });
 });
+
+describe('v228 rail on first load (Tester on 1fcc3c3)', () => {
+  it('re-measures once the rows render and after the sheet opens, without a scroll or resize', async () => {
+    let top = 900;                                   // mid slide-in: the list is below the viewport
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { top: this.dataset.testid === 'tv-series-phone' ? top : 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON() {} } as DOMRect;
+    });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    render(<PhoneSeriesList shows={SHOWS} onOpen={() => {}} />);
+    const rail = screen.getByTestId('tv-phone-rail');
+    expect(rail.style.height).toBe(`${27 * 14}px`);  // squeezed while off screen
+    top = 250;                                       // the sheet finished opening
+    document.body.dispatchEvent(new Event('transitionend', { bubbles: true }));
+    expect(rail.style.height).toBe(`${844 - 250 - 16}px`);
+    top = 230;
+    await new Promise(r => requestAnimationFrame(() => r(null)));
+    document.body.dispatchEvent(new Event('animationend', { bubbles: true }));
+    expect(rail.style.height).toBe(`${844 - 230 - 16}px`);
+    rect.mockRestore();
+  });
+});

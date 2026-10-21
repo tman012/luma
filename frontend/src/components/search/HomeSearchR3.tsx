@@ -15,6 +15,10 @@ import {
 } from '@/services/searchApi';
 import { backdropUrl, sizedPlexImg, tmdbImg } from '@/utils/image';
 import { SearchIcon } from './MinimalSearchHost';
+import { isMinimal } from '@/minimal';
+import { fetchNativeWatchlistIds } from '@/services/watchlistApi';
+import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
+import { img as homeImg, type Card } from '@/components/home/homeApi';
 import { DEBOUNCE_MS, MIN_QUERY, SKELETON_DELAY_MS, unownedRows } from './HomeSearchPalette';
 
 type Phase = 'idle' | 'loading' | 'done' | 'error';
@@ -26,26 +30,45 @@ export type R3View = {
   more: SearchMovie[];
 };
 
-/** Top result: the first title in your library, else the first TMDb title (then left out of Find more). */
+/** The grid holds up to this many titles: your library first, then TMDb titles (as the mock). */
+export const GRID_MAX = 6;
+
+/** Top result: the first title in your library, else the first TMDb title (then left out of Find more).
+ * v228 (PM): the grid is the rest of your library, then TMDb titles up to GRID_MAX; Find more lists every
+ * TMDb title (its count is all of them). */
 export function buildR3(res: SearchResults | null, q: string): R3View {
   if (!res) return { top: null, grid: [], people: [], more: [] };
-  const more = unownedRows(res, 'all', q).map(r => r.item as SearchMovie);
+  const tmdb = unownedRows(res, 'all', q).map(r => r.item as SearchMovie);
   const owned = res.owned;
-  const top = owned[0] ?? more[0] ?? null;
+  const top = owned[0] ?? tmdb[0] ?? null;
+  const more = owned.length ? tmdb : tmdb.slice(1);
+  const rest = owned.slice(1, 1 + GRID_MAX);
   return {
     top,
-    grid: owned.slice(1),
+    grid: [...rest, ...more.slice(0, Math.max(0, GRID_MAX - rest.length))],
     people: [...res.ownedPeople, ...res.unownedPeople],
-    more: owned.length ? more : more.slice(1),
+    more,
   };
 }
+
+/** The watchlist '+' shows on TMDb movie cards on the test install (the native watchlist is movies only). */
+export const wlId = (m: SearchMovie): number | null =>
+  (!m.isOwned && m.media_type !== 'tv' && (m.tmdb_id || m.id)) || null;
 
 const kind = (m: SearchMovie) => (m.media_type === 'tv' ? 'TV' : 'Movie');
 export const metaR3 = (m: SearchMovie) => { const y = getYear(m); return y ? `${y} · ${kind(m)}` : kind(m); };
 const backdropOf = (m: SearchMovie) => (m.backdrop_url ? tmdbImg(m.backdrop_url) : backdropUrl(m.backdrop_path, 'w780'));
 
-export function HomeSearchR3() {
+export function HomeSearchR3({ recent = [], onOpenCard }: { recent?: Card[]; onOpenCard?: (c: Card) => void } = {}) {
   const { openMovie, openTv } = useModalHost();
+  // v228 (PM): the existing native watchlist state and add flow, as KioskSearch (v202): ids, then the profile sheet
+  const [wlIds, setWlIds] = useState<Set<number> | null>(null);
+  const [wlAdd, setWlAdd] = useState<SearchMovie | null>(null);
+  useEffect(() => { if (isMinimal()) void fetchNativeWatchlistIds().then(setWlIds); }, []);
+  const wlFor = (m: SearchMovie) => {
+    const id = wlId(m);
+    return wlIds && id ? { inList: wlIds.has(id), onAdd: () => setWlAdd(m) } : undefined;
+  };
   const [query, setQuery] = useState('');
   const [res, setRes] = useState<SearchResults | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -120,7 +143,12 @@ export function HomeSearchR3() {
   return (
     <div data-r3-search data-testid="r3-search" data-searching={searching ? 'true' : 'false'} style={{ fontFamily: FONT }}>
       <style>{r3Css}</style>
-      {searching && <div className="r3-cover" data-testid="r3-cover" aria-hidden="true" />}
+      {/* v228 (PM, R3-rest): the hero is a short band at rest too */}
+      <div className="r3-cover" data-testid="r3-cover" aria-hidden="true" />
+      {wlAdd && wlId(wlAdd) && (
+        <WatchlistAddSheet tmdbId={wlId(wlAdd)!} title={getTitle(wlAdd)} year={getYear(wlAdd) || null} onClose={() => setWlAdd(null)}
+          onAdded={() => { const id = wlId(wlAdd)!; setWlIds(p => new Set([...(p ?? []), id])); setWlAdd(null); }} />
+      )}
       <div className="r3-head">
         <h1 className="r3-title">Search</h1>
         <label className="r3-field" data-focus-ring>
@@ -134,6 +162,22 @@ export function HomeSearchR3() {
             }} />
         </label>
       </div>
+      {!searching && recent.length > 0 && (
+        <div className="r3-body" data-testid="r3-rest">
+          <section className="r3-sec">
+            <h2 className="r3-sh">Recently added</h2>
+            <div className="r3-grid r3-grid-rest">
+              {recent.map((c, i) => (
+                <button key={`${c.type}-${c.key}-${i}`} type="button" className="r3-card" data-testid="r3-recent" aria-label={c.title} onClick={() => onOpenCard?.(c)}>
+                  <span className="r3-po">{c.poster && <img src={homeImg(c.poster) ?? undefined} alt="" loading="lazy" />}<InLibrary /></span>
+                  <span className="r3-ct">{c.title}</span>
+                  {c.subtitle && <span className="r3-cm">{c.subtitle}</span>}
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
       {searching && (
         <div className="r3-body" data-testid="r3-results" data-state={phase === 'loading' ? (skeleton ? 'loading' : 'pending') : nothing ? 'empty' : phase}>
           {phase === 'loading' && skeleton && (
@@ -153,7 +197,7 @@ export function HomeSearchR3() {
             <div className="r3-main" data-testid="r3-main">
               <TopCard item={view.top} onOpen={() => open(view.top!)} />
               <div className="r3-grid" data-testid="r3-grid">
-                {view.grid.map((m, i) => <PosterCard key={`${m.media_type}-${m.rating_key ?? m.id}-${i}`} item={m} onOpen={() => open(m)} />)}
+                {view.grid.map((m, i) => <PosterCard key={`${m.media_type}-${m.rating_key ?? m.id}-${i}`} item={m} onOpen={() => open(m)} wl={wlFor(m)} />)}
               </div>
             </div>
           )}
@@ -185,7 +229,7 @@ export function HomeSearchR3() {
             <section className="r3-sec" data-testid="r3-tmdb">
               <h2 className="r3-sh">On TMDb <span className="r3-count">{view.more.length}</span></h2>
               <div className="r3-grid r3-grid-wide">
-                {view.more.map((m, i) => <PosterCard key={`t-${m.media_type}-${m.id}-${i}`} item={m} onOpen={() => open(m)} />)}
+                {view.more.map((m, i) => <PosterCard key={`t-${m.media_type}-${m.id}-${i}`} item={m} onOpen={() => open(m)} wl={wlFor(m)} />)}
               </div>
             </section>
           )}
@@ -219,18 +263,29 @@ function TopCard({ item, onOpen }: { item: SearchMovie; onOpen: () => void }) {
   );
 }
 
-function PosterCard({ item, onOpen }: { item: SearchMovie; onOpen: () => void }) {
+function PosterCard({ item, onOpen, wl }: { item: SearchMovie; onOpen: () => void; wl?: { inList: boolean; onAdd: () => void } }) {
   const img = sizedPlexImg(getPosterUrl(item), 272, 408);
   const title = getTitle(item);
   return (
-    <button type="button" className="r3-card" data-testid="r3-card" data-owned={item.isOwned ? 'true' : 'false'} onClick={onOpen} aria-label={title}>
-      <span className="r3-po">
-        {img && <img src={img} alt="" loading="lazy" />}
-        {item.isOwned && <InLibrary />}
-      </span>
-      <span className="r3-ct">{title}</span>
-      <span className="r3-cm">{metaR3(item)}</span>
-    </button>
+    <div className="r3-cardw">
+      <button type="button" className="r3-card" data-testid="r3-card" data-owned={item.isOwned ? 'true' : 'false'} onClick={onOpen} aria-label={title}>
+        <span className="r3-po">
+          {img && <img src={img} alt="" loading="lazy" />}
+          {item.isOwned && <InLibrary />}
+        </span>
+        <span className="r3-ct">{title}</span>
+        <span className="r3-cm">{metaR3(item)}</span>
+      </button>
+      {wl && (wl.inList ? (
+        <span className="r3-wl" data-testid="r3-wl-in" role="img" aria-label={`${title} is in your watchlist`}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+        </span>
+      ) : (
+        <button type="button" className="r3-wl" data-testid="r3-wl-add" aria-label={`Add ${title} to watchlist`} onClick={wl.onAdd}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -241,7 +296,7 @@ function Chevron() {
 /** Layout: 48px page gutter at 1440 (32px at 1024); the field is 640px (520px at 1024); the band is 200px. */
 export const R3_BAND = 200;
 export const r3Css = `
-[data-r3-search]{--r3-pad:clamp(32px, 3.4vw, 48px);--r3-top:clamp(300px, 29vw, 420px);--r3-po:clamp(112px, 9.5vw, 136px);color:rgba(255,255,255,.95);line-height:normal}
+[data-r3-search]{--r3-pad:clamp(32px, 3.4vw, 48px);--r3-top:clamp(300px, 29vw, 420px);--r3-po:clamp(112px, 9.5vw, 136px);--r3-rest-po:clamp(128px, 10.4vw, 150px);color:rgba(255,255,255,.95);line-height:normal}
 .r3-cover{position:fixed;left:0;right:0;top:0;bottom:0;z-index:40;pointer-events:none;
   background:linear-gradient(to bottom, transparent 0, rgba(21,16,42,.55) ${R3_BAND - 80}px, #15102a ${R3_BAND}px, #15102a 100%)}
 .r3-head{position:fixed;z-index:55;top:104px;left:var(--r3-pad);right:var(--r3-pad);display:flex;align-items:center;gap:clamp(20px, 2vw, 28px)}
@@ -268,6 +323,13 @@ export const r3Css = `
 .r3-btn:hover{background:rgba(255,255,255,.18)}
 .r3-primary{background:var(--color-accent, #3b82f6);border-color:var(--color-accent, #3b82f6)}
 .r3-grid{flex:1;min-width:0;display:grid;grid-template-columns:repeat(auto-fill, var(--r3-po));gap:20px 16px}
+.r3-cardw{position:relative;min-width:0}
+.r3-wl{position:absolute;top:8px;right:8px;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;padding:0;cursor:pointer;color:#fff;
+  background:rgba(21,16,42,.78);border:1px solid rgba(255,255,255,.16);outline:none}
+.r3-wl:hover{background:rgba(59,130,246,.85)}
+span.r3-wl{cursor:default;background:#22c55e;border-color:#22c55e}
+.r3-wl:focus-visible{box-shadow:0 0 0 3px rgba(59,130,246,.45)}
+.r3-grid-rest{grid-template-columns:repeat(auto-fill, var(--r3-rest-po))}
 .r3-card{display:flex;flex-direction:column;align-items:stretch;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;outline:none;min-width:0;border-radius:12px}
 .r3-po{position:relative;display:block;aspect-ratio:2/3;border-radius:12px;overflow:hidden;background:rgba(255,255,255,.06);box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .r3-po img{width:100%;height:100%;object-fit:cover;display:block}

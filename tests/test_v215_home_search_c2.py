@@ -3,7 +3,7 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parent.parent / 'frontend' / 'src'
 HOME = (SRC / 'pages' / 'MinimalHomePage.tsx').read_text()
-PILL = (SRC / 'components' / 'search' / 'HomeSearchPill.tsx').read_text()
+PILL_FILE = SRC / 'components' / 'search' / 'HomeSearchPill.tsx'
 PAL = (SRC / 'components' / 'search' / 'HomeSearchPalette.tsx').read_text()
 HOST = (SRC / 'components' / 'search' / 'MinimalSearchHost.tsx').read_text()
 
@@ -14,7 +14,7 @@ def test_kiosk_header_is_logo_and_avatar_only():
     assert 'kiosk-logo' in header and 'menu(48)' in header
     assert 'button' not in header and 'kioskSearchBtn' not in HOME and 'headLeft' not in HOME
     # v227 R3: the kiosk Home's search is the Search title and field at the top (the pill left Home)
-    assert '<HomeSearchR3 />' in kiosk and '<HomeSearchPill />' not in kiosk
+    assert '<HomeSearchR3 ' in kiosk and 'HomeSearchPill' not in HOME
 
 
 def test_phone_branch_keeps_round_search_button():
@@ -22,11 +22,9 @@ def test_phone_branch_keeps_round_search_button():
     assert 'data-testid="search-button"' in phone
 
 
-def test_pill_geometry():
-    assert 'clamp(184px, 31vh, 372px)' in PILL
-    assert 'width:480px;height:52px' in PILL and 'border-radius:999px' in PILL
-    # v227 (Taylor's R3): no key badges
-    assert 'aria-label="Search"' in PILL and 'aria-hidden="true">/<' not in PILL
+def test_pill_is_gone():
+    # v228 (PM): HomeSearchPill deleted; no key badges on the palette
+    assert not PILL_FILE.exists()
     assert 'lsp-key' not in PAL.split('export const paletteCss', 1)[0]
 
 

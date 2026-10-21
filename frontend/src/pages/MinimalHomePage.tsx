@@ -39,7 +39,7 @@ export function MinimalHomePage() {
 
   const ready = !loading && authenticated && !startInProgress;
   useEffect(() => {
-    if (!ready || kiosk) return;
+    if (!ready) return;
     let alive = true;
     setFailed(false);
     setSlow(false);
@@ -75,7 +75,7 @@ export function MinimalHomePage() {
           <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="kiosk-logo" style={{ height: 64, width: 'auto' }} draggable={false} />
           {menu(48)}
         </header>
-        <HomeSearchR3 />
+        <HomeSearchR3 recent={recentAdded(data)} onOpenCard={c => openDetail(modals, c)} />
       </div>
     );
   }
@@ -103,6 +103,19 @@ export function MinimalHomePage() {
 }
 
 export const SKELETON_TIMEOUT_MS = 8000;
+
+/** v228 R3 rest (PM): Recently added under the band: the Plex libraries' recently-added rails (not Trakt or
+ * the watchlist), interleaved one from each in turn, 12 at most. */
+export const RECENT_MAX = 12;
+export function recentAdded(data: HomeData | null): Card[] {
+  if (!data || data.plex === false) return [];
+  const rails = (Array.isArray(data.rails) ? data.rails : []).filter(r => r && Array.isArray(r.items) && r.id !== 'watchlist' && !String(r.id).startsWith('trakt_'));
+  const out: Card[] = [];
+  for (let i = 0; out.length < RECENT_MAX && rails.some(r => i < r.items.length); i++) {
+    for (const r of rails) { const c = r.items[i]; if (c && out.length < RECENT_MAX) out.push(c); }
+  }
+  return out;
+}
 
 /** Opens main's movie or TV popup; episodes and seasons open their show. */
 export function openDetail(modals: { openMovie: (o: object) => void; openTv: (o: object) => void }, c: Card) {

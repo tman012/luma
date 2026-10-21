@@ -53,9 +53,9 @@ describe('web kiosk home (>=1024px)', () => {
   beforeEach(() => { wide = true; reduced = false; stubMatchMedia(); });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); setHidden(false); });
 
-  it('shows the spinner on solid navy, then the slideshow; only /api/hero/content is called', async () => {
+  it('shows the spinner on solid navy, then the slideshow; only /api/hero/content (and v228 /api/home for Recently added)', async () => {
     let resolve!: (r: Response) => void;
-    const fetchMock = vi.fn(() => new Promise<Response>(r => { resolve = r; }));
+    const fetchMock = vi.fn((u: string) => (String(u).includes('/api/home') ? new Promise<Response>(() => {}) : new Promise<Response>(r => { resolve = r; })));
     vi.stubGlobal('fetch', fetchMock);
     renderHome();
     expect(screen.getByTestId('kiosk-loading')).toBeTruthy();
@@ -64,7 +64,8 @@ describe('web kiosk home (>=1024px)', () => {
     await act(async () => { resolve(json({ success: true, movies: TEN })); });
     await waitFor(() => screen.getByText('Movie 0'));
     const urls = fetchMock.mock.calls.map(c => String((c as unknown[])[0]));
-    expect(urls.every(u => u.includes('/api/hero/content'))).toBe(true);
+    expect(urls.filter(u => !u.includes('/api/home')).every(u => u.includes('/api/hero/content'))).toBe(true);
+    expect(urls.filter(u => /\/api\/home(\?|$)/.test(u))).toHaveLength(1);
     expect(screen.getByText('2026 · 2h 14m · PG-13')).toBeTruthy();
     expect(screen.getByText('Plot 0.')).toBeTruthy();
     expect(screen.getAllByText('Drama')).toHaveLength(1);
@@ -158,7 +159,8 @@ describe('web kiosk home (>=1024px)', () => {
       expect(screen.getByText(`Movie ${step % 10}`)).toBeTruthy();
     }
     // Only one hero fetch: the kiosk never remounted.
-    expect((globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+    // the hero once (v228: plus /api/home once for Recently added)
+    expect((globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(c => String((c as unknown[])[0]).includes('/api/hero')).length).toBe(1);
   });
 
   it('logo and avatar only; the avatar dropdown holds Settings (admins) and Sign out', async () => {
