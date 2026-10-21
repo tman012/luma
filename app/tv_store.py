@@ -316,7 +316,9 @@ def repair_v9_labels(conn: sqlite3.Connection, today: Optional[str] = None) -> i
 # and any show with a grab whose release is named by its air date (YYYY MM DD / YYYY.MM.DD / YYYY-MM-DD,
 # no SxxEyy). Only 'standard' shows change; the type stays editable. Safe to run again.
 SCHEMA_V11 = "UPDATE series SET series_type = series_type WHERE 0;"
-DAILY_TITLES = ('wwe monday night raw', 'wwe raw', 'judy justice')
+# v233: Judy Justice is released as SxxEyy (Judy Justice S04E117 1080p WEB h264-EDITH), so it is not Daily
+DAILY_TITLES = ('wwe monday night raw', 'wwe raw')
+NOT_DAILY_TITLES = ('judy justice',)
 
 
 def daily_types(conn: sqlite3.Connection) -> List[int]:
@@ -337,10 +339,34 @@ def daily_types(conn: sqlite3.Connection) -> List[int]:
     return out
 
 
+# v233 (PM): v11 set Judy Justice to Daily by title; its releases are SxxEyy. Put it back to Standard unless
+# a grab of it was named by air date. Safe to run again.
+SCHEMA_V12 = "UPDATE series SET series_type = series_type WHERE 0;"
+
+
+def undaily_titles(conn: sqlite3.Connection) -> List[int]:
+    if 'series_type' not in _columns(conn, 'series'):
+        return []
+    from app import tv_match, tv_release
+    names = {tv_match.normalize(t) for t in NOT_DAILY_TITLES}
+    out = []
+    for sid, title in conn.execute("SELECT id, title FROM series WHERE series_type = 'daily'").fetchall():
+        if tv_match.normalize(title or '') not in names:
+            continue
+        rels = [r[0] for r in conn.execute('SELECT release_title FROM grabs WHERE series_id = ?', (sid,))]
+        if any(r and tv_release.parse(r).kind == 'daily' for r in rels):
+            continue
+        conn.execute("UPDATE series SET series_type = 'standard' WHERE id = ?", (sid,))
+        out.append(sid)
+    if out:
+        logger.info('tv.db v12: %d show(s) back to Standard from Daily: %s', len(out), out)
+    return out
+
+
 # MIGRATIONS[n] takes user_version n to n + 1.
 MIGRATIONS: List[Any] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6,
                          (SCHEMA_V7, monitor_defaults), SCHEMA_V8, (SCHEMA_V9, monitor_labels),
-                         (SCHEMA_V10, repair_v9_labels), (SCHEMA_V11, daily_types)]
+                         (SCHEMA_V10, repair_v9_labels), (SCHEMA_V11, daily_types), (SCHEMA_V12, undaily_titles)]
 # A step is SQL, or (SQL, fn(conn)) run in the same transaction after it.
 SCHEMA_VERSION = len(MIGRATIONS)
 

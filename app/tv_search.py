@@ -343,7 +343,7 @@ def choose(cands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def _queries(show: Dict[str, Any], want: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
     """(purpose, query) for the wanted episodes: a season query when a season has 2+ wanted,
-    else one per episode (daily shows by date). At most MAX_QUERIES."""
+    else one per episode (daily shows by date and, when numbered, SxxEyy). At most MAX_QUERIES."""
     title = show['title']
     out: List[Tuple[str, str]] = []
     by_season: Dict[int, List[Dict[str, Any]]] = {}
@@ -351,11 +351,18 @@ def _queries(show: Dict[str, Any], want: List[Dict[str, Any]]) -> List[Tuple[str
         by_season.setdefault(e['season_number'], []).append(e)
     for s, eps in by_season.items():
         if show.get('series_type') == 'daily':
-            out += [('episode', f"{title} {str(e['air_date']).replace('-', '.')}") for e in eps]
+            # v233: by date, and by SxxEyy too when the episode is numbered (many daily releases use it)
+            for e in eps:
+                if e.get('air_date'):
+                    out.append(('episode', f"{title} {str(e['air_date']).replace('-', '.')}"))
+                if s and e.get('episode_number'):
+                    out.append(('episode', f"{title} S{s:02d}E{e['episode_number']:02d}"))
         elif len(eps) >= 2:
             out.append(('season', f'{title} S{s:02d}'))
         else:
             out.append(('episode', f"{title} S{s:02d}E{eps[0]['episode_number']:02d}"))
+    seen: set = set()
+    out = [x for x in out if not (x[1] in seen or seen.add(x[1]))]     # v233: two episodes on one date: one query
     return out[:MAX_QUERIES]
 
 
