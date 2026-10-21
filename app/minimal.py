@@ -46,6 +46,8 @@ ALLOWED_PATHS = frozenset({
     '/api/settings/tv',
     # v198 Settings > Movies (owner only; the routes check).
     '/api/settings/movies',
+    # v224 Settings > Rooms (reads signed in; writes the signed-in owner; the routes check).
+    '/api/rooms',
     # v202 the native movie watchlist (test instance only; the routes check).
     '/api/movies/watchlist',
 })
@@ -54,7 +56,7 @@ ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts
                     # Per-section tracker lists (owner only; the routes check).
                     '/api/settings/sections/',
                     # TV library paths, scan, shows and fix-match (owner only; the routes check).
-                    '/api/settings/tv/', '/api/settings/movies/', '/api/movies/watchlist/',
+                    '/api/settings/tv/', '/api/settings/movies/', '/api/movies/watchlist/', '/api/rooms/',
                     # v216: the file-info sheet's Fix Match (admin only; the routes check).
                     '/api/plex/match/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).

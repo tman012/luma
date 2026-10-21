@@ -1,0 +1,209 @@
+"""v224 Settings > Rooms (Option A): prod's devices.rooms model, default room, Plex /clients discovery
+(mocked), wake methods, legacy flat rooms, owner-only writes. Nothing contacts a device or Plex."""
+import copy
+import threading
+
+import pytest
+
+from app import minimal, rooms_setup
+from tests.test_file_management import HDR, minimal as minimal_app, store  # noqa: F401
+from tests.test_home_rails import _client
+from tests.test_tv_libraries import owner, tv_env  # noqa: F401
+from tests.test_v182_series_detail import _req
+from app.settings_manager import SettingsManager
+
+API = '/api/rooms'
+CLIENTS = [{'name': 'SHIELD Android TV', 'machineIdentifier': 'mid-shield', 'product': 'Plex for Android (TV)',
+            'platform': 'Android', 'address': '192.168.1.40'},
+           {'name': 'Living Room TV', 'machineIdentifier': 'mid-lrtv', 'product': 'Plex for Android (TV)',
+            'platform': 'Android', 'address': '192.168.1.41'}]
+
+
+class FakeSettings:
+    """SettingsManager's room methods on an in-memory dict (never data/settings.json)."""
+    def __init__(self, data=None):
+        self._settings = copy.deepcopy(data or {})
+        self._lock = threading.RLock()
+        self.saves = 0
+
+    def _save(self):
+        self.saves += 1
+
+    def get(self, dotted, default=None):
+        cur = self._settings
+        for k in dotted.split('.'):
+            if not isinstance(cur, dict) or k not in cur:
+                return default
+            cur = cur[k]
+        return copy.deepcopy(cur)
+
+    add_room = SettingsManager.add_room
+    update_room = SettingsManager.update_room
+    delete_room = SettingsManager.delete_room
+
+
+@pytest.fixture
+def rs(owner, monkeypatch):  # noqa: F811
+    fake = FakeSettings({'devices': {'rooms': []}})
+    calls = []
+
+    def clients():
+        calls.append(1)
+        return copy.deepcopy(CLIENTS)
+    monkeypatch.setitem(rooms_setup._cfg, 'settings', fake)
+    monkeypatch.setitem(rooms_setup._cfg, 'clients_fn', clients)
+    return owner, fake, calls
+
+
+def _add(c, name, mid='mid-shield', host='192.168.1.40', **kw):
+    return _req(c, 'post', API, {'name': name, 'player': {'machine_id': mid, 'name': 'SHIELD Android TV',
+                                                          'product': 'Plex for Android (TV)', 'platform': 'Android', 'host': host}, **kw})
+
+
+def test_routes_allowlisted_in_minimal():
+    for p, m in ((API, 'GET'), (API, 'POST'), (API + '/abc', 'PUT'), (API + '/abc', 'DELETE'), (API + '/players', 'GET')):
+        assert minimal.path_allowed(p, m), p
+
+
+def test_empty_then_create_first_room_is_default_with_plex_service(rs):
+    c, fake, _ = rs
+    assert _req(c, 'get', API).get_json() == {'rooms': [], 'default_room_id': ''}
+    r = _add(c, 'Living Room')
+    assert r.status_code == 201, r.get_json()
+    d = r.get_json()
+    room = d['rooms'][0]
+    assert room['name'] == 'Living Room' and room['default'] is True and d['default_room_id'] == room['id']
+    assert room['player']['online'] is True and room['player']['wake'] == 'adb' and room['player']['port'] == 5555
+    stored = fake._settings['devices']['rooms'][0]
+    dev = stored['devices'][0]
+    assert dev['machineId'] == 'mid-shield' and dev['platform'] == 'android_tv' and dev['powerMethod'] == 'adb'
+    assert [s['type'] for s in dev['services']] == ['plex']
+    assert 'homeassistant' not in str(stored).lower()
+
+
+def test_validation(rs):
+    c, _, _ = rs
+    assert _add(c, 'Living Room').status_code == 201
+    for body in ({'name': '', 'player': {'machine_id': 'x'}}, {'name': 'x' * 41, 'player': {'machine_id': 'x'}},
+                 {'name': 'living room', 'player': {'machine_id': 'x'}}, {'name': 'Den'}, {'name': 'Den', 'player': {}},
+                 {'name': 'Den', 'player': {'host': 'not a host!'}}, {'name': 'Den', 'player': {'host': '10.0.0.9'}, 'wake': 'homeassistant'},
+                 [1, 2]):
+        assert _req(c, 'post', API, body).status_code == 400, body
+    rid = _req(c, 'get', API).get_json()['rooms'][0]['id']
+    for body in ({'port': 0}, {'port': 70000}, {'mac': 'zz'}, {'wake': 'ha'}, {'default': 'yes'}, {'devices': []}, {}):
+        assert _req(c, 'put', f'{API}/{rid}', body).status_code == 400, body
+    assert _req(c, 'put', f'{API}/nope', {'name': 'X'}).status_code == 404
+    assert _req(c, 'delete', f'{API}/nope').status_code == 404
+
+
+def test_add_by_ip_offline_and_wake_methods(rs):
+    c, fake, _ = rs
+    r = _req(c, 'post', API, {'name': 'Office', 'player': {'host': '192.168.1.77'}})
+    assert r.status_code == 201, r.get_json()
+    room = r.get_json()['rooms'][0]
+    assert room['player']['online'] is False and room['player']['name'] == '192.168.1.77'
+    rid = room['id']
+    d = _req(c, 'put', f'{API}/{rid}', {'wake': 'wol', 'mac': 'aa-bb-cc-dd-ee-ff'}).get_json()
+    p = d['rooms'][0]['player']
+    assert p['wake'] == 'wol' and p['mac'] == 'AA:BB:CC:DD:EE:FF'
+    d = _req(c, 'put', f'{API}/{rid}', {'wake': 'harmony', 'harmony_hub': '192.168.1.5', 'harmony_activity': 'Watch TV'}).get_json()
+    assert d['rooms'][0]['player']['wake'] == 'harmony' and d['rooms'][0]['harmony_hub'] == '192.168.1.5'
+    assert fake._settings['devices']['rooms'][0]['useHarmonyHub'] is True
+    d = _req(c, 'put', f'{API}/{rid}', {'wake': 'none'}).get_json()
+    assert d['rooms'][0]['player']['wake'] == 'none' and fake._settings['devices']['rooms'][0]['useHarmonyHub'] is False
+
+
+def test_default_room_rename_change_player_and_remove(rs):
+    c, fake, _ = rs
+    a = _add(c, 'Living Room').get_json()['rooms'][0]['id']
+    b = next(r['id'] for r in _add(c, 'Bedroom', mid='mid-lrtv', host='192.168.1.41').get_json()['rooms'] if r['name'] == 'Bedroom')
+    d = _req(c, 'put', f'{API}/{b}', {'default': True, 'name': 'Main Bedroom'}).get_json()
+    assert d['default_room_id'] == b and fake._settings['devices']['defaultRoomId'] == b
+    assert [r['name'] for r in d['rooms']] == ['Living Room', 'Main Bedroom']
+    fake._settings['devices']['rooms'][0]['devices'][0]['paired'] = True
+    d = _req(c, 'put', f'{API}/{a}', {'player': {'machine_id': 'mid-lrtv', 'name': 'Living Room TV', 'host': '192.168.1.41'}}).get_json()
+    pa = d['rooms'][0]['player']
+    assert pa['name'] == 'Living Room TV' and pa['paired'] is False      # another player pairs again
+    d = _req(c, 'put', f'{API}/{b}', {'default': False}).get_json()
+    assert d['default_room_id'] == a
+    _req(c, 'put', f'{API}/{b}', {'default': True})
+    d = _req(c, 'delete', f'{API}/{b}').get_json()
+    assert [r['name'] for r in d['rooms']] == ['Living Room'] and d['default_room_id'] == a
+
+
+def test_players_discovery_merges_configured_offline(rs):
+    c, _, _ = rs
+    _req(c, 'post', API, {'name': 'Bedroom', 'player': {'host': '192.168.1.90', 'name': 'Apple TV 4K', 'product': 'Plex for Apple TV'}})
+    ps = _req(c, 'get', API + '/players').get_json()['players']
+    assert [(p['name'], p['online']) for p in ps] == [('SHIELD Android TV', True), ('Living Room TV', True), ('Apple TV 4K', False)]
+
+
+def test_plex_unreachable_reads_offline(rs, monkeypatch):
+    c, _, _ = rs
+    _add(c, 'Living Room')
+    monkeypatch.setitem(rooms_setup._cfg, 'clients_fn', lambda: (_ for _ in ()).throw(OSError('down')))
+    d = _req(c, 'get', API).get_json()
+    assert d['rooms'][0]['player']['online'] is False
+    assert [(p['name'], p['online']) for p in _req(c, 'get', API + '/players').get_json()['players']] == [('SHIELD Android TV', False)]
+
+
+def test_legacy_flat_room_reads_and_writes_back_nested(rs):
+    c, fake, _ = rs
+    fake._settings['devices'] = {'rooms': [{'id': 'r1', 'name': 'Family Room', 'ip': '192.168.1.40', 'adb_port': 5555,
+                                            'type': 'android_tv', 'plex_machine_id': 'mid-shield'}]}
+    d = _req(c, 'get', API).get_json()
+    r = d['rooms'][0]
+    assert r['name'] == 'Family Room' and r['default'] is True and r['player']['host'] == '192.168.1.40'
+    assert r['player']['online'] is True and r['player']['wake'] == 'adb'
+    assert _req(c, 'put', f'{API}/r1', {'name': 'Family'}).status_code == 200
+    stored = fake._settings['devices']['rooms'][0]
+    assert isinstance(stored['devices'], list) and stored['devices'][0]['host'] == '192.168.1.40'
+    assert not {'ip', 'adb_port', 'type'} & set(stored)
+
+
+def test_v3_room_extra_devices_and_kodi_services_untouched(rs):
+    c, fake, _ = rs
+    kodi = {'id': 'k', 'type': 'kodi', 'kodi_host': '10.0.0.2', 'kodi_port': 8080}
+    fake._settings['devices'] = {'rooms': [{'id': 'r1', 'name': 'Den', 'devices': [
+        {'id': 'd1', 'name': 'Shield', 'host': '192.168.1.40', 'platform': 'android_tv', 'powerMethod': 'homeassistant', 'services': [kodi]},
+        {'id': 'd2', 'name': 'Other', 'host': '10.0.0.3', 'services': []}]}]}
+    r = _req(c, 'get', API).get_json()['rooms'][0]
+    assert r['player']['wake'] == 'none'                        # no Home Assistant: shown as None
+    assert _req(c, 'put', f'{API}/r1', {'port': 5556}).status_code == 200
+    devs = fake._settings['devices']['rooms'][0]['devices']
+    assert devs[0]['powerMethod'] == 'homeassistant' and devs[0]['connectPort'] == 5556   # left as is unless wake changes
+    assert devs[0]['services'][0] == kodi and [s['type'] for s in devs[0]['services']] == ['kodi', 'plex']
+    assert devs[1] == {'id': 'd2', 'name': 'Other', 'host': '10.0.0.3', 'services': []}
+
+
+def test_settings_rooms_default_target_follows_default_room(rs, monkeypatch):
+    c, fake, _ = rs
+    from app import main
+    monkeypatch.setattr(main, 'settings', fake)
+    monkeypatch.setattr(minimal, 'path_allowed', lambda *a, **k: True)   # the playback SHA opens this GET in minimal
+    a = _add(c, 'Living Room').get_json()['rooms'][0]['id']
+    b = next(r['id'] for r in _add(c, 'Bedroom', mid='mid-lrtv').get_json()['rooms'] if r['name'] == 'Bedroom')
+    r0 = _req(c, 'get', '/api/settings/rooms')
+    assert r0.status_code == 200, (r0.status_code, r0.get_json())
+    assert r0.get_json()['defaultPlaybackTarget']['roomId'] == a
+    _req(c, 'put', f'{API}/{b}', {'default': True})
+    d = _req(c, 'get', '/api/settings/rooms').get_json()
+    assert d['defaultPlaybackTarget']['roomId'] == b and d['defaultRoomId'] == b
+
+
+def test_writes_need_the_signed_in_owner(minimal_app, monkeypatch):  # noqa: F811
+    fake = FakeSettings({'devices': {'rooms': [{'id': 'r1', 'name': 'Den', 'devices': []}]}})
+    monkeypatch.setitem(rooms_setup._cfg, 'settings', fake)
+    monkeypatch.setitem(rooms_setup._cfg, 'clients_fn', lambda: [])
+    c = minimal_app.test_client()
+    for m, u, b in (('get', API, None), ('get', API + '/players', None), ('post', API, {'name': 'X', 'player': {'host': '1.2.3.4'}}),
+                    ('put', API + '/r1', {'name': 'Y'}), ('delete', API + '/r1', None)):
+        r = _req(c, m, u, b)
+        assert r.status_code in (401, 403), (m, u, r.status_code)
+    assert fake.saves == 0 and fake._settings['devices']['rooms'][0]['name'] == 'Den'
+
+
+def test_no_play_or_wake_or_home_assistant_in_module():
+    src = open(rooms_setup.__file__).read()
+    for bad in ('device_wake', 'harmony_service', 'playqueue', 'player/play', 'adb_shell', 'send_magic', 'requests.'):
+        assert bad not in src, bad

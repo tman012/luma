@@ -19888,7 +19888,9 @@ def get_rooms():
         # Build default playback target from first room
         default_target = {'roomId': '', 'deviceId': '', 'serviceId': ''}
         if frontend_rooms:
-            first = frontend_rooms[0]
+            # v224: the default room (Settings > Rooms, devices.defaultRoomId), else the first room
+            want = settings.get('devices.defaultRoomId') or '' if is_admin else ''
+            first = next((r for r in frontend_rooms if want and r['id'] == want), frontend_rooms[0])
             devs = first.get('devices', [])
             if devs:
                 svcs = devs[0].get('services', [])
@@ -19897,7 +19899,8 @@ def get_rooms():
                     'deviceId': devs[0].get('id', ''),
                     'serviceId': svcs[0].get('id', '') if svcs else '',
                 }
-        return jsonify({'rooms': frontend_rooms, 'defaultPlaybackTarget': default_target})
+        return jsonify({'rooms': frontend_rooms, 'defaultPlaybackTarget': default_target,
+                        'defaultRoomId': default_target['roomId']})
     except Exception as e:
         logger.error(f"GET /api/settings/rooms error: {e}")
         return jsonify({'rooms': [], 'defaultPlaybackTarget': {}, 'error': str(e)}), 500
@@ -21731,6 +21734,10 @@ _tv_settings.init(owner_or_error=_start_flow._owner_or_error,
 app.register_blueprint(_tv_settings.bp)
 from app import movie_settings as _movie_settings  # noqa: E402  v198: Settings > Movies (movies.db)
 app.register_blueprint(_movie_settings.bp)
+from app import rooms_setup as _rooms_setup  # noqa: E402  v224: Settings > Rooms (Option A; reads signed in, writes signed-in owner)
+_rooms_setup.init(settings=settings, get_current_user=lambda: _get_current_user(),
+                  signed_in_owner=_start_flow.require_signed_in_owner)
+app.register_blueprint(_rooms_setup.bp)
 from app import movie_watchlist as _movie_watchlist  # noqa: E402  v202: the native movie watchlist (test only)
 app.register_blueprint(_movie_watchlist.bp)
 from app import movie_import as _movie_import  # noqa: E402  v204: movie import and rename (test only)

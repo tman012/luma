@@ -29,12 +29,14 @@ import { LibraryPathsSettings } from '@/components/library/LibraryPathsSettings'
 import { SectionTrackersList } from '@/components/settings/SectionTrackersList';
 import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
 import { MoviesSettings } from '@/components/movies/MoviesSettings';
+import { RoomsSettings } from '@/components/rooms/RoomsSettings';
 import { isMinimal } from '@/minimal';
 import { SAVE_FAILED } from '@/utils/messages';
 
 export const SETTINGS_SECTIONS = [
   { slug: 'home-screen', label: 'Home screen' },
   { slug: 'plex', label: 'Plex' },   // owner only
+  { slug: 'rooms', label: 'Rooms' },   // v224: owner only (Option A)
   { slug: 'connectors', label: 'Connectors' },   // owner only
   { slug: 'trackers', label: 'Trackers' },   // owner with a session only
   { slug: 'library-paths', label: 'Library paths' },   // owner only
@@ -63,7 +65,7 @@ export function SettingsPage() {
   if (!authenticated) return <Navigate to="/login" replace />;
   const known = SETTINGS_SECTIONS.find(s => s.slug === section);
   if (section && !known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
-  const ownerOnly = (slug: string) => slug === 'plex' || slug === 'connectors' || slug === 'library-paths' || slug === 'tv' || slug === 'movies';
+  const ownerOnly = (slug: string) => slug === 'plex' || slug === 'connectors' || slug === 'library-paths' || slug === 'tv' || slug === 'movies' || slug === 'rooms';
   if (known && ownerOnly(known.slug) && owner === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   if (known?.slug === 'trackers' && trackersOk === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   // Library paths: the API exists only on minimal (luma-test) builds.
@@ -81,11 +83,13 @@ export function SettingsPage() {
           ? (owner ? <LibraryPathsSettings wide={wide} /> : null)
           : slug === 'movies'
             ? (owner ? <MoviesSettings wide={wide} /> : null)
+          : slug === 'rooms'
+            ? (owner ? <RoomsSettings wide={wide} onExit={() => navigate('/settings')} /> : null)
           : slug === 'tv'
             ? (owner ? <TvLibrarySettings wide={wide} options={<SectionTrackersList section="tv" label="Trackers" wide={wide} />} /> : null)
             : <HomeScreenSection admin={admin} wide={wide} />;
   // Trackers draws its own title row (desktop) and header (phone: Plus, pushed pages); TV its title row (desktop).
-  const ownChrome = known?.slug === 'trackers' || (wide && known?.slug === 'tv');
+  const ownChrome = known?.slug === 'trackers' || known?.slug === 'rooms' || (wide && known?.slug === 'tv');
 
   if (wide) {
     if (!known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
