@@ -1,7 +1,7 @@
 /** v224 where Play (movie popup) and Shuffle (TV show popup) play: one room plays at once with a
  * 'Playing in <Room> · Change' toast; several open the 'Play in' picker with the default preselected.
  * No play buttons here; the popups call choosePlayRoom and render these. */
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { FONT } from '@/components/start/StartUI';
 import type { Room } from './roomsApi';
@@ -108,7 +108,7 @@ export function PlayingToast({ room, onChange, onDone, ms = 6000 }: { room: Room
  * so prod's own room step shows. The popups keep everything after the room (device, resume, play). */
 export function useRoomFirst<T extends { id: string; name: string }>({ action, select, onCancel }: {
   action: 'Play' | 'Shuffle'; select: (room: T) => void; onCancel: () => void;
-}): { start: (usable: T[], defaultId?: string) => boolean; closeAfter: (ms: number) => void; ui: ReactNode } {
+}): { start: (usable: T[], defaultId?: string) => boolean; closeAfter: (ms: number) => void; failed: () => void; ui: ReactNode } {
   const [pick, setPick] = useState<{ rooms: Room[]; preselect: string; byId: Map<string, T>; fromToast: boolean } | null>(null);
   const [toast, setToast] = useState<Room | null>(null);
   const [all, setAll] = useState<T[]>([]);
@@ -117,7 +117,17 @@ export function useRoomFirst<T extends { id: string; name: string }>({ action, s
   // prod closes the popup 2s after playback starts; while the toast or the picker shows, it waits for them
   useEffect(() => { if (closeWanted && !toast && !pick) { setCloseWanted(false); onCancel(); } }, [closeWanted, toast, pick, onCancel]);
   const closeAfter = useCallback((ms: number) => { window.setTimeout(() => setCloseWanted(true), ms); }, []);
-  const [pendingStop, setPendingStop] = useState<{ from: string; to: string } | null>(null);
+  const [pendingStop, setPendingStop] = useState<{ from: string; to: string; fromRoom: Room } | null>(null);
+  const changedFrom = useRef<Room | null>(null);
+  const pendingRef = useRef(pendingStop);
+  pendingRef.current = pendingStop;
+  // v231 (Tester): play failed in the room just picked. After Change the first room still plays, so the toast
+  // goes back to it; on a first play nothing plays, so it hides. The popup keeps showing its error.
+  const failed = useCallback(() => {
+    const p = pendingRef.current;
+    setPendingStop(null);
+    if (p) { setCurrent(p.from); setToast(p.fromRoom); } else setToast(null);
+  }, []);
   // Change: once playback has started in the new room, stop the first one (never before, so nothing is left silent)
   useEffect(() => {
     if (!pendingStop) return;
@@ -154,17 +164,18 @@ export function useRoomFirst<T extends { id: string; name: string }>({ action, s
   const ui = (toast || pick) && typeof document !== 'undefined' && createPortal(
     <>
       {toast && !pick && <PlayingToast room={toast} onDone={() => setToast(null)}
-        onChange={() => { setToast(null); openPicker(all, def || toast.id, true); }} />}
+        onChange={() => { changedFrom.current = toast; setToast(null); openPicker(all, def || toast.id, true); }} />}
       {pick && <PlayInPicker rooms={pick.rooms} preselect={pick.preselect} action={action}
         onCancel={() => { const t = pick.fromToast; setPick(null); if (!t) onCancel(); }}
         onPick={r => {
           const room = pick.byId.get(r.id); setPick(null);
           if (!room) return;
           setCloseWanted(false);
-          if (pick.fromToast && current && current !== room.id) setPendingStop({ from: current, to: room.id });
+          const was = changedFrom.current;
+          setPendingStop(pick.fromToast && current && current !== room.id && was ? { from: current, to: room.id, fromRoom: was } : null);
           setCurrent(room.id); select(room); setToast(r);
         }} />}
     </>, document.body,
   );
-  return { start, closeAfter, ui: ui || null };
+  return { start, closeAfter, failed, ui: ui || null };
 }

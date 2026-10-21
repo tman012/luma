@@ -292,11 +292,13 @@ export function PlaybackModal({
       try {
         const pq = await createPlayQueue(activeRatingKey, true);
         if (!pq.success || !pq.play_queue_id) {
+          roomFirst.failed();
           setStep({ type: 'error', message: pq.error ?? 'Failed to create play queue' });
           return;
         }
         await initiatePlayback(room, device, 0, pq.play_queue_id, service);
       } catch {
+        roomFirst.failed();
         setStep({ type: 'error', message: 'Network error creating play queue' });
       }
       return;
@@ -336,6 +338,7 @@ export function PlaybackModal({
         serviceId,
       );
       if (!result.success) {
+        roomFirst.failed();   // v231: the toast goes back to the room still playing
         setStep({ type: 'error', message: result.message ?? 'Playback failed' });
         return;
       }
@@ -347,6 +350,7 @@ export function PlaybackModal({
       setStep({ type: 'success', roomName });
       roomFirst.closeAfter(2000);   // v225: prod's 2s close, after the Playing in toast / picker
     } catch {
+      roomFirst.failed();
       setStep({ type: 'error', message: 'Network error' });
     }
   }, [activeRatingKey, onClose]);

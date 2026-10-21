@@ -162,3 +162,43 @@ describe('v231 Play in for a signed-in non-owner (Reviewer: /api/rooms is id, na
     await waitFor(() => expect(plays(calls)).toEqual(['POST /api/player/play']));
   });
 });
+
+describe('v231 (Tester MED) Change to a room that fails: the toast goes back to the room still playing', () => {
+  const failPlays = (fail: () => boolean) => {
+    const f = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const inner = f.getMockImplementation()!;
+    f.mockImplementation(async (u: RequestInfo | URL, init?: RequestInit) =>
+      String(u).includes('/api/player/play') && fail() ? new Response(JSON.stringify({ success: false, message: 'Bedroom is offline' })) : inner(u, init));
+  };
+  it.each(['desktop', 'phone'] as const)('%s: Playing in Living Room · Change again, the error still shows, nothing stopped', async (kind) => {
+    const calls = stub([LR, BR], 'lr');
+    let fail = false;
+    failPlays(() => fail);
+    if (kind === 'desktop') render(<PlaybackModal ratingKey={11} title="Dune" onClose={() => {}} />);
+    else render(<MobilePlaybackSheet ratingKey={11} title="Dune" onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId('play-in')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('play-in-go'));                                  // Living Room plays
+    await waitFor(() => expect(screen.getByTestId('playing-toast').textContent).toContain('Playing in Living Room'));
+    fail = true;
+    fireEvent.click(screen.getByTestId('playing-toast-change'));
+    fireEvent.click(screen.getAllByTestId('play-in-room')[1]!);                         // Bedroom fails
+    fireEvent.click(screen.getByTestId('play-in-go'));
+    await waitFor(() => expect(document.body.textContent).toContain('Bedroom is offline'));
+    await waitFor(() => expect(screen.getByTestId('playing-toast').textContent).toContain('Playing in Living Room'));
+    expect(screen.getByTestId('playing-toast').textContent).not.toContain('Bedroom');
+    expect(calls.some(c => c.endsWith('/stop'))).toBe(false);
+    // Change from the restored toast, to Bedroom once it works: Living Room is stopped after it starts
+    fail = false;
+    fireEvent.click(screen.getByTestId('playing-toast-change'));
+    fireEvent.click(screen.getAllByTestId('play-in-room')[1]!);
+    fireEvent.click(screen.getByTestId('play-in-go'));
+    await waitFor(() => expect(calls.some(c => c.endsWith('/rooms/lr/stop') || (c.endsWith('/stop') && c.includes('lr')))).toBe(true));
+  });
+  it('a first play that fails hides the toast and keeps the error', async () => {
+    stub([BR]);
+    failPlays(() => true);
+    render(<PlaybackModal ratingKey={11} title="Dune" onClose={() => {}} />);
+    await waitFor(() => expect(document.body.textContent).toContain('Bedroom is offline'));
+    expect(screen.queryByTestId('playing-toast')).toBeNull();
+  });
+});
