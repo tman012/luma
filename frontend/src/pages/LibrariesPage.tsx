@@ -124,7 +124,7 @@ export function SettingsPage() {
               })}
             </ul>
           </nav>
-          <main data-testid="settings-main" style={{ flex: 1, minWidth: 0, maxWidth: known.slug === 'tv' ? undefined : 720 }}>
+          <main data-testid="settings-main" style={{ flex: 1, minWidth: 0, maxWidth: known.slug === 'tv' || known.slug === 'rooms' ? undefined : 720 }}>
             {!ownChrome && <h2 style={deskTitle}>{known.label}</h2>}
             {content(known.slug)}
           </main>

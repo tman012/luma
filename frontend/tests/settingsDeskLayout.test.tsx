@@ -78,6 +78,13 @@ describe('desktop Settings layout', () => {
     await waitFor(() => expect(screen.getByTestId('settings-main').style.maxWidth).toBe('720px'));
   });
 
+  it('Rooms takes the freed width too (cards 3 per row), as TV', async () => {
+    setup(true);
+    at('/settings/rooms');
+    await screen.findByTestId('settings-nav');
+    await waitFor(() => expect(screen.getByTestId('settings-main').style.maxWidth).toBe(''));
+  });
+
   it('phone is unchanged', async () => {
     setup(false);
     const v = at('/settings');
