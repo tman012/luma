@@ -9,6 +9,7 @@ from app import tv_grab, tv_search, tv_store
 from tests.test_tv_search_v158b import allow_grabs, env, item, rows  # noqa: F401
 from tests.test_tv_search_v158b import aired, owner, scanned, store, tv_env, lib, fake_tmdb, minimal_app  # noqa: F401
 
+_real_query_trackers = tv_search.query_trackers   # before any fixture mocks it
 ET = dt.timezone(dt.timedelta(hours=-4))          # October: EDT
 
 
@@ -326,3 +327,50 @@ def test_a_usual_slot_keeps_the_6_hour_window():
     assert tv_search.fast_window_end(e) == ts(2026, 10, 21, 22) + tv_search.FAST_WINDOW_S
     e = {'air_date': '2026-10-21', 'airstamp': '2026-10-21T07:00:00Z', 'runtime': 60}
     assert tv_search.fast_window_end(e) == ts(2026, 10, 21, 4) + tv_search.FAST_WINDOW_S
+
+
+# ------------------------------------------------------------------ v233.8 (Reviewer): every window search is charged
+
+def test_each_search_in_the_6h_window_is_charged_to_the_background_budget(env, monkeypatch, tmp_path):
+    """The real query_trackers and search engine with a real guard; only the tracker's HTTP client is mocked.
+    Each search the 15-min window sends takes one background ('tv' purpose) slot in the guard."""
+    import time as _time
+    from app import tracker_clients, tracker_guard, tracker_search
+    from app.tracker_guard import TrackerGuard, guard_key
+    from app.tracker_search import ReleaseTokens, TrackerSearch
+    from app.tracker_store import TrackerStore
+    store = TrackerStore(tmp_path / 'trackers.json', tmp_path / 'tracker_secrets.key')
+    guard = TrackerGuard(tmp_path / 'tracker_guard.json')
+    engine = TrackerSearch(store=store, guard=guard, request=lambda *a, **k: None,
+                           tokens=ReleaseTokens(store, tmp_path / 'tracker_releases.json'))
+    tracker_guard.reset_guard_for_tests(guard)
+    tracker_search.reset_search_for_tests(engine)
+    monkeypatch.setattr(tracker_search, 'NEG_TTL', 0)               # no cached answers: every search is sent
+    monkeypatch.setattr(tracker_search, 'TTL_BACKGROUND', 0)
+    ipt = {'id': 7, 'name': 'IPTorrents', 'type': 'iptorrents', 'priority': 1, 'categories': [5000, 5030, 5040]}
+    monkeypatch.setattr(tv_search, 'trackers', lambda: [ipt])
+    monkeypatch.setattr(tv_search, 'query_trackers', _real_query_trackers)   # the env fixture's mock replaced it
+    sent = []
+    monkeypatch.setattr(tracker_clients, 'search', lambda cfg, q, cats, limit, req, **k: (sent.append(q), [])[1])
+    takes = []
+    real_take = guard.take
+    monkeypatch.setattr(guard, 'take', lambda tid, interactive, strict, now=None, purpose=None, spacing=True: (
+        lambda r: (takes.append((tid, interactive, purpose, r)), r)[1])(real_take(tid, interactive, strict, now, purpose, spacing)))
+    clock = {'t': 0.0}
+    monkeypatch.setattr(_time, 'time', lambda: clock['t'])
+    sid, ids = make_show(env, 'Love Is Blind', 'standard', 11, (6, 8), '2026-10-21', '2026-10-21T07:00:00Z', 60)
+    aired = ts(2026, 10, 21, 4)
+    t = aired
+    while t <= aired + tv_search.FAST_WINDOW_S:
+        clock['t'] = t
+        tv_search.schedule(t)
+        tv_search.run_due(t)
+        t += tv_search.FAST_S
+    # every request asks the guard first, as a background 'tv' request (never the interactive budget)
+    assert takes and all(tk[:3] == (guard_key(ipt), False, 'tv') for tk in takes)
+    ok = [tk for tk in takes if tk[3] is None]
+    assert len(sent) == len(ok)                                     # nothing is sent without a charge
+    assert len(guard.log.get(guard_key(ipt), [])) == len(sent)      # and each one sent is recorded
+    # each 15-min pass sends at least one search through the whole window (the 60 s gap holds the rest back)
+    assert len(sent) >= 25
+
