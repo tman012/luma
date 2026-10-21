@@ -39,7 +39,7 @@ export function MinimalHomePage() {
 
   const ready = !loading && authenticated && !startInProgress;
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || kiosk) return;                // v235: KioskHome loads its own hero and rails (as before v228)
     let alive = true;
     setFailed(false);
     setSlow(false);
@@ -70,12 +70,12 @@ export function MinimalHomePage() {
     return (
       <div data-step="home" data-layout="kiosk">
         <KioskHome />
-        {/* v227 R3: logo and avatar; search is the title and field at the top of the page. */}
+        {/* v235: logo and avatar; the search field is centered in this bar (HomeSearchR3). */}
         <header style={kioskBar} data-testid="kiosk-header">
           <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="kiosk-logo" style={{ height: 64, width: 'auto' }} draggable={false} />
           {menu(48)}
         </header>
-        <HomeSearchR3 recent={recentAdded(data)} onOpenCard={c => openDetail(modals, c)} />
+        <HomeSearchR3 />
       </div>
     );
   }

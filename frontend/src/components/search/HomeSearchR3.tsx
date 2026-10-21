@@ -22,7 +22,6 @@ import { loadTv, loadTvLibrary } from '@/components/library/tvLibraryApi';
 import { addShow, loadProfiles, type MonitorOption } from '@/components/library/tvCalendarApi';
 import type { LibPath } from '@/components/library/libraryPathsApi';
 import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
-import { img as homeImg, type Card } from '@/components/home/homeApi';
 import { DEBOUNCE_MS, MIN_QUERY, SKELETON_DELAY_MS, unownedRows } from './HomeSearchPalette';
 
 type Phase = 'idle' | 'loading' | 'done' | 'error';
@@ -65,7 +64,7 @@ const kind = (m: SearchMovie) => (m.media_type === 'tv' ? 'TV' : 'Movie');
 export const metaR3 = (m: SearchMovie) => { const y = getYear(m); return y ? `${y} · ${kind(m)}` : kind(m); };
 const backdropOf = (m: SearchMovie) => (m.backdrop_url ? tmdbImg(m.backdrop_url) : backdropUrl(m.backdrop_path, 'w780'));
 
-export function HomeSearchR3({ recent = [], onOpenCard }: { recent?: Card[]; onOpenCard?: (c: Card) => void } = {}) {
+export function HomeSearchR3() {
   const { openMovie, openTv } = useModalHost();
   // v228 (PM): the existing native watchlist state and add flow, as KioskSearch (v202): ids, then the profile sheet
   const [wlIds, setWlIds] = useState<Set<number> | null>(null);
@@ -179,8 +178,8 @@ export function HomeSearchR3({ recent = [], onOpenCard }: { recent?: Card[]; onO
   return (
     <div data-r3-search data-testid="r3-search" data-searching={searching ? 'true' : 'false'} style={{ fontFamily: FONT }}>
       <style>{r3Css}</style>
-      {/* v228 (PM, R3-rest): the hero is a short band at rest too */}
-      <div className="r3-cover" data-testid="r3-cover" aria-hidden="true" />
+      {/* v235 (PM): at rest Home shows its full hero and rails; the band covers them only while searching */}
+      {searching && <div className="r3-cover" data-testid="r3-cover" aria-hidden="true" />}
       {wlAdd && wlId(wlAdd) && (
         <WatchlistAddSheet tmdbId={wlId(wlAdd)!} title={getTitle(wlAdd)} year={getYear(wlAdd) || null} onClose={() => setWlAdd(null)}
           onAdded={() => { const id = wlId(wlAdd)!; setWlIds(p => new Set([...(p ?? []), id])); setWlAdd(null); }} />
@@ -194,7 +193,6 @@ export function HomeSearchR3({ recent = [], onOpenCard }: { recent?: Card[]; onO
         </div>
       )}
       <div className="r3-head">
-        <h1 className="r3-title">Search</h1>
         <label className="r3-field" data-focus-ring>
           <span className="r3-icon"><SearchIcon size={20} /></span>
           <input ref={inputRef} className="r3-input" data-testid="search-input" type="search" placeholder="Search" aria-label="Search"
@@ -206,22 +204,6 @@ export function HomeSearchR3({ recent = [], onOpenCard }: { recent?: Card[]; onO
             }} />
         </label>
       </div>
-      {!searching && recent.length > 0 && (
-        <div className="r3-body" data-testid="r3-rest">
-          <section className="r3-sec">
-            <h2 className="r3-sh">Recently added</h2>
-            <div className="r3-grid r3-grid-rest">
-              {recent.map((c, i) => (
-                <button key={`${c.type}-${c.key}-${i}`} type="button" className="r3-card" data-testid="r3-recent" aria-label={c.title} onClick={() => onOpenCard?.(c)}>
-                  <span className="r3-po">{c.poster && <img src={homeImg(c.poster) ?? undefined} alt="" loading="lazy" />}<InLibrary /></span>
-                  <span className="r3-ct">{c.title}</span>
-                  {c.subtitle && <span className="r3-cm">{c.subtitle}</span>}
-                </button>
-              ))}
-            </div>
-          </section>
-        </div>
-      )}
       {searching && (
         <div className="r3-body" data-testid="r3-results" data-state={phase === 'loading' ? (skeleton ? 'loading' : 'pending') : nothing ? 'empty' : phase}>
           {phase === 'loading' && skeleton && (
@@ -340,11 +322,11 @@ function Chevron() {
 /** Layout: 48px page gutter at 1440 (32px at 1024); the field is 640px (520px at 1024); the band is 200px. */
 export const R3_BAND = 200;
 export const r3Css = `
-[data-r3-search]{--r3-pad:clamp(32px, 3.4vw, 48px);--r3-top:clamp(300px, 29vw, 420px);--r3-po:clamp(112px, 9.5vw, 136px);--r3-rest-po:clamp(128px, 10.4vw, 150px);color:rgba(255,255,255,.95);line-height:normal}
+[data-r3-search]{--r3-pad:clamp(32px, 3.4vw, 48px);--r3-top:clamp(300px, 29vw, 420px);--r3-po:clamp(112px, 9.5vw, 136px);color:rgba(255,255,255,.95);line-height:normal}
 .r3-cover{position:fixed;left:0;right:0;top:0;bottom:0;z-index:40;pointer-events:none;
   background:linear-gradient(to bottom, transparent 0, rgba(21,16,42,.55) ${R3_BAND - 80}px, #15102a ${R3_BAND}px, #15102a 100%)}
-.r3-head{position:fixed;z-index:55;top:104px;left:var(--r3-pad);right:var(--r3-pad);display:flex;align-items:center;gap:clamp(20px, 2vw, 28px)}
-.r3-title{margin:0;font-size:clamp(28px, 2.2vw, 32px);font-weight:800;letter-spacing:-.01em;color:#fff}
+/* v235 (PM): the field sits in the top bar (logo left, avatar right), centered, at rest and while searching */
+.r3-head{position:fixed;z-index:55;top:28px;left:50%;transform:translateX(-50%);display:flex;align-items:center}
 .r3-field{display:flex;align-items:center;gap:12px;width:clamp(520px, 44vw, 640px);height:48px;box-sizing:border-box;padding:0 18px;border-radius:999px;
   background:rgba(21,16,42,.62);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid rgba(255,255,255,.14);cursor:text;
   transition:border-color 150ms,box-shadow 150ms}
@@ -376,7 +358,6 @@ export const r3Css = `
 .r3-wl:hover{background:rgba(59,130,246,.85)}
 span.r3-wl{cursor:default;background:#22c55e;border-color:#22c55e}
 .r3-wl:focus-visible{box-shadow:0 0 0 3px rgba(59,130,246,.45)}
-.r3-grid-rest{grid-template-columns:repeat(auto-fill, var(--r3-rest-po))}
 .r3-card{display:flex;flex-direction:column;align-items:stretch;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;outline:none;min-width:0;border-radius:12px}
 .r3-po{position:relative;display:block;aspect-ratio:2/3;border-radius:12px;overflow:hidden;background:rgba(255,255,255,.06);box-shadow:0 8px 24px rgba(0,0,0,.4)}
 .r3-po img{width:100%;height:100%;object-fit:cover;display:block}

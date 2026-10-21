@@ -50,13 +50,23 @@ const type = async (q: string) => {
 };
 
 describe('R3 layout (1440 and 1024)', () => {
-  it('rest: a Search title and field at the top of the page, the hero a short band, no results', () => {
+  it('rest (v235): only the field, centered in the top bar; no heading, no band, no results', () => {
     render(<HomeSearchR3 />);
-    expect(screen.getByRole('heading', { name: 'Search' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Search' })).toBeNull();
     expect((screen.getByTestId('search-input') as HTMLInputElement).placeholder).toBe('Search');
     expect(screen.queryByTestId('r3-results')).toBeNull();
-    expect(screen.getByTestId('r3-cover')).toBeTruthy();       // v228: the band at rest too
-    expect(r3Css).toContain('.r3-head{position:fixed;z-index:55;top:104px');
+    expect(screen.queryByTestId('r3-cover')).toBeNull();      // the full Home hero shows at rest
+    expect(screen.queryByTestId('r3-rest')).toBeNull();
+    expect(r3Css).toContain('.r3-head{position:fixed;z-index:55;top:28px;left:50%;transform:translateX(-50%)');
+  });
+  it('typing shows the band and the results; clearing goes back to rest', async () => {
+    render(<HomeSearchR3 />);
+    await type('dune');
+    expect(screen.getByTestId('r3-cover')).toBeTruthy();
+    expect(screen.getByTestId('r3-results')).toBeTruthy();
+    await type('');
+    expect(screen.queryByTestId('r3-cover')).toBeNull();
+    expect(screen.queryByTestId('r3-results')).toBeNull();
   });
   it('sizes: field 640px at 1440 and 520px at 1024; top card 420/300px; posters 136/112px; band 200px', () => {
     const at = (expr: string, vw: number) => {   // evaluate the clamp(min, Nvw, max) at a viewport width
@@ -275,16 +285,5 @@ describe('v228 R3 rest: Recently added under the band', () => {
     expect(recentAdded(data).map(c => c.key)).toEqual(['a1', 'b1', 'a2', 'b2', 'b3']);
     expect(recentAdded({ ...data, rails: [{ id: '1', title: 'M', type: 'movie', items: Array.from({ length: 30 }, (_, i) => card(String(i))) }] })).toHaveLength(12);
     expect(recentAdded(null)).toEqual([]);
-  });
-  it('rest shows Recently added posters that open the popup; searching hides it', async () => {
-    const open = vi.fn();
-    render(<HomeSearchR3 recent={[card('1'), card('2')]} onOpenCard={open} />);
-    expect(screen.getByRole('heading', { name: 'Recently added' })).toBeTruthy();
-    const posters = screen.getAllByTestId('r3-recent');
-    expect(posters.map(p => p.textContent)).toEqual(['✓In libraryT12021', '✓In libraryT22021']);
-    fireEvent.click(posters[1]!);
-    expect(open).toHaveBeenCalledWith(card('2'));
-    await type('dune');
-    expect(screen.queryByTestId('r3-rest')).toBeNull();
   });
 });
