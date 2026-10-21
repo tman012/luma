@@ -11681,7 +11681,7 @@ def _build_hero_movies():
     if cached and (time.time() - cached['ts']) < _HERO_RESULT_TTL:
         return cached['movies'], cached['boost']
     section_id = settings.get('ui.hero.library_section_id', 0)
-    limit = settings.get('ui.hero.limit', 10)
+    limit = _hero_source.clamp_limit(settings.get('ui.hero.limit', 10))   # v237: 5-30
     boost = settings.get('ui.hero.boost_popular_titles', False)
     pop_source = settings.get('ui.hero.popularity_source', 'tmdb')
 
@@ -11719,7 +11719,26 @@ def _build_hero_movies():
     else:
         fetch_limit = limit * 3 if (excluded_genres or max_age_days) else limit
 
-    if minimal_kiosk:
+    # v237: Settings > Home screen 'Most popular' (cached TMDb ranking, rebuilt daily).
+    popular = _hero_source.current()['source'] == 'popular'
+    if popular:
+        limit = _hero_source.clamp_limit(limit)
+        max_age_days, boost = 0, False
+        keys = _hero_source.ranked_keys(str(section_id))
+        items = []
+        if keys:
+            try:
+                pool = (plex.get_all_movies(int(section_id), sort='titleSort', limit=_hero_source.POOL_MAX) or {}).get('movies') or []
+            except Exception as e:
+                logger.warning(f"Hero: popular lookup failed: {e}")
+                pool = []
+            by_key = {str(it.get('ratingKey') or it.get('rating_key') or ''): it for it in pool if it.get('artPath')}
+            items = [by_key[k] for k in keys if k in by_key]
+        if not items:
+            popular = False   # no ranking yet: the newest movies until it's built
+    if popular:
+        pass
+    elif minimal_kiosk:
         # Web kiosk (#12): the library's newest movies by date added. Plex's
         # /recentlyAdded applies its own recency window (it returned 2 items on
         # :5002, so the slideshow had almost nothing to rotate through). Only
@@ -21713,6 +21732,14 @@ def _watchlist_rail_poster(tmdb_id):
     data = cached[1] if cached else (tmdb.get_movie_details(tmdb_id) or {})
     return data.get('poster_path') if isinstance(data, dict) else None
 
+
+from app import hero_source as _hero_source  # noqa: E402  v237: Settings > Home screen hero
+from app import paths as _paths_v237  # noqa: E402
+_hero_source.init(settings=settings, get_plex=get_plex_for_request, get_current_user=_get_current_user,
+                  tmdb_details=lambda tid: tmdb.get_movie_details(tid),
+                  cache_dir=_paths_v237.cache_dir, sections=lambda p: __import__('app.home_rails', fromlist=['_sections'])._sections(p),
+                  clear_hero=lambda: _hero_result_cache.clear())
+app.register_blueprint(_hero_source.bp)
 
 from app import home_rails as _home_rails
 _home_rails.init(get_plex=lambda: plex_service, get_current_user=_get_current_user,

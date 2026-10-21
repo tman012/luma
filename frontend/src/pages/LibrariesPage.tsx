@@ -2,7 +2,7 @@
  * docs/design/mobile-settings-spec.md (row behavior).
  * Desktop (>=1024px): a full page under the app header (logo back to Home,
  * avatar): a left section list and the section on the right. Home screen
- * shows only Kiosk > Backdrop library (owner/admin).
+ * shows only Kiosk > Backdrop library, Hero source and count (owner/admin).
  * Phone: a full-screen sheet (X close, section list); a section pushes in
  * with a back chevron. Home screen shows only Libraries (drag to reorder,
  * switch on/off, instant save). */
@@ -31,6 +31,7 @@ import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
 import { MoviesSettings } from '@/components/movies/MoviesSettings';
 import { RoomsSettings } from '@/components/rooms/RoomsSettings';
 import { isMinimal } from '@/minimal';
+import { HeroSettingsRows } from '@/components/home/HeroSettings';
 import { SAVE_FAILED } from '@/utils/messages';
 
 export const SETTINGS_SECTIONS = [
@@ -232,6 +233,7 @@ export function KioskLibraryPicker() {
             })}
           </div>
         )}
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}><HeroSettingsRows /></div>
       </div>
     </section>
   );

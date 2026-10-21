@@ -48,6 +48,8 @@ ALLOWED_PATHS = frozenset({
     '/api/settings/movies',
     # v224 Settings > Rooms (reads signed in; writes the signed-in owner; the routes check).
     '/api/rooms',
+    # v237: Settings > Home screen hero source and count (PUT is admin-only; the route checks).
+    '/api/settings/hero',
     # v202 the native movie watchlist (test instance only; the routes check).
     '/api/movies/watchlist',
 })
