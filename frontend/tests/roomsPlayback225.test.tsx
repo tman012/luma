@@ -202,3 +202,28 @@ describe('v231 (Tester MED) Change to a room that fails: the toast goes back to 
     expect(screen.queryByTestId('playing-toast')).toBeNull();
   });
 });
+
+describe('v231e non-admin /api/settings/rooms has no hosts, only available: playback still goes by room id', () => {
+  const slim = (id: string, name: string) => ({ id, name, default: false, devices: [{ id: `${id}-d`, name, platform: 'android_tv', available: true, services: [{ id: `${id}-p`, type: 'plex' }] }] });
+  it.each(['desktop', 'phone'] as const)('%s: one room plays at once; the body has the room id and no address', async (kind) => {
+    let body: Record<string, unknown> | null = null;
+    stub([slim('br', 'Bedroom')]);
+    const f = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const inner = f.getMockImplementation()!;
+    f.mockImplementation(async (u: RequestInfo | URL, init?: RequestInit) => {
+      if (String(u).includes('/api/player/play')) body = JSON.parse(String(init!.body));
+      return inner(u, init);
+    });
+    if (kind === 'desktop') render(<PlaybackModal ratingKey={11} title="Dune" onClose={() => {}} />);
+    else render(<MobilePlaybackSheet ratingKey={11} title="Dune" onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId('playing-toast').textContent).toContain('Playing in Bedroom'));
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body).toMatchObject({ room_id: 'br', device_id: 'br-d', service_id: 'br-p', client_ip: '' });
+  });
+  it('several slim rooms open the Play in picker', async () => {
+    stub([slim('lr', 'Living Room'), slim('br', 'Bedroom')], 'br');
+    render(<PlaybackModal ratingKey={11} title="Dune" onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Play in' })).toBeTruthy());
+    expect(screen.getAllByTestId('play-in-room')).toHaveLength(2);
+  });
+});

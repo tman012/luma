@@ -19900,11 +19900,28 @@ def get_rooms():
                     'deviceId': devs[0].get('id', ''),
                     'serviceId': svcs[0].get('id', '') if svcs else '',
                 }
+        if not is_admin:
+            # v231e (Reviewer): non-admins get only what PlaybackModal needs to pick a room; player/play
+            # resolves the host from the room id on the server. No host, port, MAC, Harmony or Kodi details.
+            frontend_rooms = [_public_settings_room(r, default_target['roomId']) for r in frontend_rooms]
         return jsonify({'rooms': frontend_rooms, 'defaultPlaybackTarget': default_target,
                         'defaultRoomId': default_target['roomId']})
     except Exception as e:
         logger.error(f"GET /api/settings/rooms error: {e}")
         return jsonify({'rooms': [], 'defaultPlaybackTarget': {}, 'error': str(e)}), 500
+
+
+def _public_settings_room(r, default_id):
+    """A room as GET /api/settings/rooms shows it to a non-admin: ids, names, default, and whether a device can play."""
+    return {
+        'id': r['id'], 'name': r.get('name', ''), 'default': r['id'] == default_id,
+        'devices': [{
+            'id': d.get('id', ''), 'name': d.get('name', ''), 'platform': d.get('platform', ''),
+            'available': bool(d.get('host')),
+            'services': [{'id': sv.get('id', ''), 'type': sv.get('type', '')}
+                         for sv in (d.get('services') or []) if isinstance(sv, dict)],
+        } for d in (r.get('devices') or []) if isinstance(d, dict)],
+    }
 
 
 @app.route('/api/settings/rooms', methods=['POST'])

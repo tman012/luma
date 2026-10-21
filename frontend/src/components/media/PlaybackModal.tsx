@@ -149,8 +149,11 @@ function PlatformIcon({ platform, size = 28 }: { platform: string; size?: number
 // ---------------------------------------------------------------------------
 
 /** Check if a room has any device with a host configured */
+/** v231e: a non-admin's room list has no hosts, only available (the server resolves the host from the room id). */
+const canPlay = (d: { host?: string; available?: boolean }) => !!(d.host || d.available);
+
 function roomHasAvailableDevice(room: Room): boolean {
-  return room.devices.some((d) => !!d.host);
+  return room.devices.some(canPlay);
 }
 
 /** Format platform name for display */
@@ -241,7 +244,7 @@ export function PlaybackModal({
     setSelectedRoom(room);
 
     // Find available devices in this room
-    const availableDevices = room.devices.filter((d) => !!d.host);
+    const availableDevices = room.devices.filter(canPlay);
 
     const singleDevice = availableDevices.length === 1 ? availableDevices[0] : undefined;
     if (singleDevice) {
@@ -259,7 +262,7 @@ export function PlaybackModal({
 
   // --- Device selection ---
   const handleDeviceSelect = useCallback(async (room: Room, device: Device) => {
-    if (!device.host) return;
+    if (!canPlay(device)) return;
     setSelectedDevice(device);
     await proceedAfterDeviceSelect(room, device);
   }, [activeRatingKey, shuffle]);
@@ -330,7 +333,7 @@ export function PlaybackModal({
     try {
       const result = await startPlayback(
         activeRatingKey,
-        device.host,
+        device.host ?? '',
         room.id,
         offset,
         playQueueId,
@@ -767,7 +770,7 @@ export function PlaybackModal({
                 gap: '14px',
               }}>
                 {step.room.devices.map((device) => {
-                  const available = !!device.host;
+                  const available = canPlay(device);
                   return (
                     <button
                       key={device.id}
@@ -817,7 +820,7 @@ export function PlaybackModal({
                 margin: '0 auto',
               }}>
                 {step.room.devices.map((device) => {
-                  const available = !!device.host;
+                  const available = canPlay(device);
                   return (
                     <button
                       key={device.id}

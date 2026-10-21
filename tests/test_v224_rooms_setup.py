@@ -1,5 +1,6 @@
 """v224 Settings > Rooms (Option A): prod's devices.rooms model, default room, Plex /clients discovery
 (mocked), wake methods, legacy flat rooms, owner-only writes. Nothing contacts a device or Plex."""
+import json
 import copy
 import threading
 
@@ -40,6 +41,7 @@ class FakeSettings:
     add_room = SettingsManager.add_room
     update_room = SettingsManager.update_room
     delete_room = SettingsManager.delete_room
+    get_room_by_id = SettingsManager.get_room_by_id
 
 
 @pytest.fixture
@@ -320,3 +322,76 @@ def test_v231_family_user_gets_the_default_room_preselected(rs, monkeypatch):
     # editing stays owner-only
     assert _req(c, 'put', f'{API}/{a}', {'default': True}).status_code == 403
     assert fake.get('devices.defaultRoomId') == b
+
+
+# v231e (Reviewer): GET /api/settings/rooms gives non-admins only what PlaybackModal needs
+
+def _settings_rooms_setup(rs, monkeypatch):
+    c, fake, _ = rs
+    from app import main
+    monkeypatch.setattr(main, 'settings', fake)
+    monkeypatch.setattr(minimal, 'path_allowed', lambda *a, **k: True)
+    a = _add(c, 'Living Room').get_json()['rooms'][0]['id']
+    assert _req(c, 'put', f'{API}/{a}', {'wake': 'wol', 'mac': 'AA:BB:CC:DD:EE:FF', 'port': 5555,
+                                         'harmony_hub': '192.168.1.9', 'harmony_activity': 'Shield'}).status_code == 200
+    b = next(r['id'] for r in _add(c, 'Bedroom', mid='mid-lrtv', host='192.168.1.41').get_json()['rooms'] if r['name'] == 'Bedroom')
+    return c, fake, main, a, b
+
+
+def _as_family(monkeypatch, main, fake):
+    family = {'id': 5, 'username': 'kid', 'is_admin': False}
+    rooms = fake.get('devices.rooms')
+    monkeypatch.setattr(main, '_get_current_user', lambda: family)
+    monkeypatch.setattr(main.user_auth, 'get_user_settings', lambda uid: {'rooms': rooms})
+    return family
+
+
+def test_v231_settings_rooms_admin_keeps_full_device_data(rs, monkeypatch):
+    c, _, _, a, _ = _settings_rooms_setup(rs, monkeypatch)
+    d = _req(c, 'get', '/api/settings/rooms').get_json()
+    raw = json.dumps(d)
+    assert '192.168.1.40' in raw and '192.168.1.41' in raw
+    lr = next(r for r in d['rooms'] if r['id'] == a)
+    assert lr['devices'][0]['host'] == '192.168.1.40'
+
+
+def test_v231_settings_rooms_non_admin_gets_ids_names_default_only(rs, monkeypatch):
+    c, fake, main, a, b = _settings_rooms_setup(rs, monkeypatch)
+    _req(c, 'put', f'{API}/{b}', {'default': True})
+    full = _req(c, 'get', '/api/settings/rooms').get_json()
+    _as_family(monkeypatch, main, fake)
+    r = _req(c, 'get', '/api/settings/rooms')
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d['defaultRoomId'] == b and d['defaultPlaybackTarget'] == full['defaultPlaybackTarget']
+    assert [(x['id'], x['name'], x['default']) for x in d['rooms']] == [(a, 'Living Room', False), (b, 'Bedroom', True)]
+    for room in d['rooms']:
+        assert sorted(room) == ['default', 'devices', 'id', 'name']
+        for dev in room['devices']:
+            assert sorted(dev) == ['available', 'id', 'name', 'platform', 'services'] and dev['available'] is True
+            assert all(sorted(sv) == ['id', 'type'] for sv in dev['services'])
+    raw = r.get_data(as_text=True)
+    for secret in ('192.168.1.40', '192.168.1.41', 'AA:BB:CC:DD:EE:FF', '192.168.1.9', '5555', 'host', 'mac',
+                   'connectPort', 'harmony', 'Harmony', 'kodi_password', 'kodi_username'):
+        assert secret not in raw, secret
+
+
+def test_v231_non_admin_still_plays_by_room_id(rs, monkeypatch):
+    """player/play resolves the host from the room id on the server; the client sends no address."""
+    c, fake, main, a, _ = _settings_rooms_setup(rs, monkeypatch)
+    _as_family(monkeypatch, main, fake)
+    d = _req(c, 'get', '/api/settings/rooms').get_json()
+    room = next(r for r in d['rooms'] if r['id'] == a)
+    dev, svc = room['devices'][0], room['devices'][0]['services'][0]
+    monkeypatch.setattr(main.user_auth, 'is_plex_approved', lambda u: True)
+    monkeypatch.setattr(fake, 'get_default_adb_port', lambda: 5555, raising=False)
+    monkeypatch.setattr(main, 'settings', fake)
+    played = []
+    fake_play = lambda service, rk, off, name, ip, *a, **k: (played.append((rk, ip, name)), main.jsonify({'success': True}))[1]
+    monkeypatch.setattr(main, '_play_via_plex', fake_play)
+    monkeypatch.setattr(main, '_play_via_kodi', fake_play)
+    monkeypatch.setattr(main, '_configured_plex_clients', lambda: [('192.168.1.40', None), ('192.168.1.41', None)], raising=False)
+    r = _req(c, 'post', '/api/player/play', {'rating_key': 11, 'client_ip': '', 'room_id': a,
+                                             'device_id': dev['id'], 'service_id': svc['id']})
+    assert r.status_code == 200, r.get_json()
+    assert played == [(11, '192.168.1.40', 'Living Room')]

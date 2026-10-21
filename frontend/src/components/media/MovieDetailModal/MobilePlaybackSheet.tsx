@@ -125,8 +125,11 @@ function PlatformIcon({ platform, size = 28 }: { platform: string; size?: number
   );
 }
 
+/** v231e: a non-admin's room list has no hosts, only available (the server resolves the host from the room id). */
+const canPlay = (d: { host?: string; available?: boolean }) => !!(d.host || d.available);
+
 function roomHasAvailableDevice(room: Room): boolean {
-  return room.devices.some((d) => !!d.host);
+  return room.devices.some(canPlay);
 }
 
 
@@ -264,7 +267,7 @@ export function MobilePlaybackSheet({
     if (!roomHasAvailableDevice(room)) return;
     setSelectedRoom(room);
 
-    const availableDevices = room.devices.filter((d) => !!d.host);
+    const availableDevices = room.devices.filter(canPlay);
     const singleDevice = availableDevices.length === 1 ? availableDevices[0] : undefined;
     if (singleDevice) {
       setSelectedDevice(singleDevice);
@@ -279,7 +282,7 @@ export function MobilePlaybackSheet({
 
   // --- Device selection ---
   const handleDeviceSelect = useCallback(async (room: Room, device: Device) => {
-    if (!device.host) return;
+    if (!canPlay(device)) return;
     setSelectedDevice(device);
     await proceedAfterDeviceSelect(room, device);
   }, [activeRatingKey, shuffle]);
@@ -345,7 +348,7 @@ export function MobilePlaybackSheet({
     try {
       const result = await startPlayback(
         activeRatingKey,
-        device.host,
+        device.host ?? '',
         room.id,
         offset,
         playQueueId,
