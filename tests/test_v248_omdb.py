@@ -11,6 +11,7 @@ from app import omdb
 from tests.test_minimal_search import REMOTE, _client, minimal  # noqa: F401
 
 KEY = 'omdbkey-1234abcd'
+ERRS = {'tt0000405': 'Movie not found!', 'tt0000429': 'Request limit reached!', 'tt0000401': 'Invalid API key!', 'tt0000500': 'Something odd.'}
 HDR = {'Origin': 'http://localhost', 'Host': 'localhost'}
 CAST_AWAY = {'Response': 'True', 'imdbID': 'tt0162222', 'imdbRating': '7.8', 'imdbVotes': '665,432'}
 
@@ -42,6 +43,8 @@ class FakeOmdb:
             return Resp(401, {'Response': 'False', 'Error': 'Invalid API key!'})
         if params.get('i') == 'tt0162222':
             return Resp(200, CAST_AWAY)
+        if params.get('i') in ERRS:
+            return Resp(200, {'Response': 'False', 'Error': ERRS[params['i']]})
         if params.get('i') == 'tt0000404':
             return Resp(200, {'Response': 'False', 'Error': 'Incorrect IMDb ID.'})
         return Resp(200, {'Response': 'True', 'imdbID': params['i'], 'imdbRating': 'N/A', 'imdbVotes': 'N/A'})
@@ -151,3 +154,19 @@ def test_stale_verdicts_expire_and_the_cache_is_capped(fake, monkeypatch):
     for i in range(5):
         omdb.get_ratings(f'tt100000{i}')
     assert len(omdb._cache) <= 3
+
+
+@pytest.mark.parametrize('iid', ['tt0000404', 'tt0000405'])     # Incorrect IMDb ID. / Movie not found!
+def test_not_found_is_a_cached_null_verdict(fake, monkeypatch, iid):
+    monkeypatch.setattr(omdb, 'api_key', lambda: KEY)
+    assert omdb.get_ratings(iid) == {'rating': None, 'votes': None}
+    assert omdb.get_ratings(iid) == {'rating': None, 'votes': None}
+    assert len(fake.calls) == 1 and iid in omdb._cache
+
+
+@pytest.mark.parametrize('iid', ['tt0000429', 'tt0000401', 'tt0000500'])   # limit, invalid key, unknown error
+def test_other_refusals_fail_open_and_are_not_cached(fake, monkeypatch, iid):
+    monkeypatch.setattr(omdb, 'api_key', lambda: KEY)
+    assert omdb.get_ratings(iid) is None
+    assert omdb.get_ratings(iid) is None
+    assert len(fake.calls) == 2 and iid not in omdb._cache

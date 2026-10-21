@@ -24,6 +24,7 @@ TEST_IMDB_ID = 'tt0162222'          # Cast Away: the Settings Test lookup
 CACHE_DAYS = 90
 CACHE_MAX = 5000
 _IMDB_ID = re.compile(r'^tt\d{5,10}$')
+_NO_TITLE = frozenset({'Movie not found!', 'Incorrect IMDb ID.'})
 _cache: Dict[str, Dict[str, Any]] = {}
 _lock = threading.Lock()
 
@@ -58,7 +59,11 @@ def lookup(imdb_id: str, key: str, timeout: float = 15) -> Optional[Dict[str, An
         logger.warning('OMDb lookup for %s failed: %s', imdb_id, type(e).__name__)
         return None
     if body.get('Response') != 'True':
-        return {'rating': None, 'votes': None, 'at': today}
+        # Only "IMDb has nothing" is a verdict; a limit, bad key or anything else is "could not ask".
+        if str(body.get('Error') or '').strip() in _NO_TITLE:
+            return {'rating': None, 'votes': None, 'at': today}
+        logger.warning('OMDb lookup for %s refused: %s', imdb_id, str(body.get('Error') or 'unknown')[:80])
+        return None
     votes = str(body.get('imdbVotes') or '').replace(',', '')
     rating = str(body.get('imdbRating') or '').strip()
     try:
