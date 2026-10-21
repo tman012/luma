@@ -177,7 +177,9 @@ def test_found_mid_window_is_grabbed_and_stops(env, monkeypatch):
 
     def fake(query, purpose, s, interactive, now, cfgs=None):
         up = now >= aired + 2 * 3600 + 30 * 60                  # on IPT 2.5 h after air
-        return ([item(t) for t in release.get(query, [])] if up else []), [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]
+        # on IPT both ways: the season query and each SxxEyy (v233.6 retries only the SxxEyy ones)
+        hit = [t for t in release['Love Is Blind S11'] if query == 'Love Is Blind S11' or t.startswith(query + ' ')]
+        return ([item(t) for t in hit] if up else []), [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]
     monkeypatch.setattr(tv_search, 'query_trackers', fake)
     _timeline(sid, aired, aired + 4 * 3600)
     g = rows('SELECT release_title, grabbed_at FROM grabs WHERE series_id = ? ORDER BY release_title', sid)
@@ -233,7 +235,8 @@ def test_no_air_time_still_gets_the_15_minute_window_and_a_grab(env, monkeypatch
     def fake(query, purpose, s, interactive, now, cfgs=None):
         when.append(now)
         up = now >= start + 3 * 3600
-        return ([item(n) for n in names] if up and query == 'Vanderpump Rules S13' else []), \
+        hit = [n for n in names if query == 'Vanderpump Rules S13' or n.startswith(query + ' ')]
+        return ([item(n) for n in hit] if up else []), \
             [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]
     monkeypatch.setattr(tv_search, 'query_trackers', fake)
     _timeline(sid, start - 15 * 60, start + 4 * 3600)
@@ -263,3 +266,41 @@ def test_fallback_with_a_null_number_does_not_raise(env, monkeypatch):
     sent = _per_query(env, monkeypatch, {})
     out = tv_search.search_show(sid, None, origin='auto', now=ts(2026, 10, 21, 4, 15), do_grab=False)
     assert out['ok'] and sent == ['Love Is Blind S11E06']
+
+
+# ------------------------------------------------------------------ v233.6 (Tester FF1): retry only the missed
+
+def test_retries_search_only_the_missed_episodes_no_repeat_season_query(env, monkeypatch):
+    sid, ids = make_show(env, 'Love Is Blind', 'standard', 11, (6, 8), '2026-10-21', '2026-10-21T07:00:00Z', 60)
+    capped = [f'Love Is Blind S{s:02d}E{e:02d} 1080p WEB h264-OTHER' for s in (8, 9, 10) for e in range(1, 17)][:50]
+    log = []
+
+    def fake(query, purpose, s, interactive, now, cfgs=None):
+        log.append((now, query))
+        return ([item(t) for t in capped] if query == 'Love Is Blind S11' else []), [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]
+    monkeypatch.setattr(tv_search, 'query_trackers', fake)
+    aired = ts(2026, 10, 21, 4)
+    _timeline(sid, aired, aired + tv_search.FAST_WINDOW_S)
+    first = [q for t, q in log if t == aired]
+    assert first == ['Love Is Blind S11', 'Love Is Blind S11E06', 'Love Is Blind S11E08']
+    later = [q for t, q in log if t > aired]
+    assert later and set(later) == {'Love Is Blind S11E06', 'Love Is Blind S11E08'}      # no season query again
+    assert len(later) == 2 * 24 and len(log) == 3 + 48                                     # was ~75
+
+
+def test_a_new_episode_still_gets_its_own_query_next_to_the_missed_ones(env, monkeypatch):
+    sid, ids = make_show(env, 'Love Is Blind', 'standard', 11, (6, 8, 9, 10), '2026-10-21', '2026-10-21T07:00:00Z', 60)
+    tv_search._set_missed(sid, [ids[6], ids[8]])
+    sent = _per_query(env, monkeypatch, {})
+    tv_search.search_show(sid, None, origin='auto', now=ts(2026, 10, 21, 4, 15), do_grab=False)
+    assert sent[:3] == ['Love Is Blind S11', 'Love Is Blind S11E06', 'Love Is Blind S11E08']   # E09+E10: season
+    assert 'Love Is Blind S11' not in sent[3:]
+
+
+def test_manual_queries_ignore_the_missed_marks(env, monkeypatch):
+    sid, ids = make_show(env, 'Love Is Blind', 'standard', 11, (6, 8), '2026-10-21', '2026-10-21T07:00:00Z', 60)
+    tv_search._set_missed(sid, list(ids.values()))
+    sent = _per_query(env, monkeypatch, {})
+    tv_search.search_show(sid, None, origin='manual', now=ts(2026, 10, 21, 4, 15), do_grab=False,
+                          queries=[('season', 'Love Is Blind S11')])
+    assert sent == ['Love Is Blind S11']

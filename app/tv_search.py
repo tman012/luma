@@ -388,6 +388,24 @@ def _numbered(e: Dict[str, Any]) -> bool:
     return isinstance(e.get('season_number'), int) and isinstance(e.get('episode_number'), int)
 
 
+def _sxe(show: Dict[str, Any], e: Dict[str, Any]) -> str:
+    return f"{show['title']} S{e['season_number']:02d}E{e['episode_number']:02d}"
+
+
+def _missed_ids(sid: int) -> set:
+    """v233.6: episodes of *sid* a season search missed (tv.db meta), retried by SxxEyy only."""
+    try:
+        return {int(i) for i in json.loads(tv_store.get_meta(f'tv_season_missed:{sid}') or '[]')}
+    except (ValueError, TypeError):
+        return set()
+
+
+def _set_missed(sid: int, ids: Iterable[int]) -> None:
+    ids = sorted({int(i) for i in ids})
+    if ids or _missed_ids(sid):
+        tv_store.set_meta(f'tv_season_missed:{sid}', json.dumps(ids))
+
+
 def _queries(show: Dict[str, Any], want: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
     """(purpose, query) for the wanted episodes: a season query when a season has 2+ wanted,
     else one per episode (daily shows by date and, when numbered, SxxEyy). At most MAX_QUERIES."""
@@ -446,7 +464,13 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
         return out
     items: List[Dict[str, Any]] = []
     answered = False
-    for p, q in (queries if queries is not None else _queries(show, want)):
+    # v233.6 (Tester FF1): episodes a season search already missed are retried by SxxEyy only, with no
+    # repeat season query (else every 15-min retry re-ran the season query and the fallback: ~75 a show in 6 h)
+    marked = _missed_ids(sid) & {e['id'] for e in want} if queries is None else set()
+    rest = [e for e in want if e['id'] not in marked]
+    plan_q = queries if queries is not None else _queries(show, rest)
+    ep_q = [('episode', _sxe(show, e)) for e in want if e['id'] in marked and _numbered(e)]
+    for p, q in (plan_q if queries is not None else (plan_q + ep_q)[:MAX_QUERIES]):
         got, st = query_trackers(q, purpose or p, sid, interactive, now, cfgs)
         out['searched'] += 1
         out['statuses'] += st
@@ -455,12 +479,11 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
     if queries is None:
         # v233 (PM, Love Is Blind S11): a season query can stop at the tracker's cap (IPT answers 50 rows) and
         # miss episodes. Wanted episodes of a searched season that nothing found are searched one by one.
-        seasons = {int(q.rsplit('S', 1)[1]) for p, q in _queries(show, want) if p == 'season'}
+        seasons = {int(q.rsplit('S', 1)[1]) for p, q in plan_q if p == 'season'}
         covered = {i for c in candidates(items, show, want, blocked) for i in c['covers']}
-        missed = [e for e in want if _numbered(e) and e['season_number'] in seasons and e['id'] not in covered]
+        missed = [e for e in rest if _numbered(e) and e['season_number'] in seasons and e['id'] not in covered]
         for e in missed[:MAX_QUERIES]:
-            q = f"{show['title']} S{e['season_number']:02d}E{e['episode_number']:02d}"
-            got, st = query_trackers(q, purpose or 'episode', sid, interactive, now, cfgs)
+            got, st = query_trackers(_sxe(show, e), purpose or 'episode', sid, interactive, now, cfgs)
             out['searched'] += 1
             out['statuses'] += st
             answered |= any(x['status'] == 'ok' for x in st)
@@ -468,6 +491,8 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
         if missed:
             logger.info('TV search: %s season search missed %d episode(s); searched them one by one',
                         show['title'], len(missed))
+        if answered:
+            _set_missed(sid, (marked | {e['id'] for e in missed}) & {e['id'] for e in want})
     out['results'] = len(items)
     out['answered'] = answered
     cands = candidates(items, show, want, blocked)
