@@ -80,7 +80,7 @@ export function SettingsPage() {
         : slug === 'library-paths'
           ? (owner ? <LibraryPathsSettings wide={wide} /> : null)
           : slug === 'movies'
-            ? (owner ? <MoviesSettings /> : null)
+            ? (owner ? <MoviesSettings wide={wide} /> : null)
           : slug === 'tv'
             ? (owner ? <TvLibrarySettings wide={wide} options={<SectionTrackersList section="tv" label="Trackers" wide={wide} />} /> : null)
             : <HomeScreenSection admin={admin} wide={wide} />;

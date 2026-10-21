@@ -25,23 +25,28 @@ function stub(puts: { url: string; body: unknown }[]) {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('v220 Settings > Movies cleanup', () => {
-  it('shows only Quality profiles, Watchlist picker, Trackers, Preferred groups, Naming, in that order', async () => {
+  it('shows Monitoring first, then Quality profiles, Watchlist picker, Trackers, Preferred groups, Naming', async () => {
     stub([]);
     render(<MoviesSettings />);
     await waitFor(() => expect(screen.getByTestId('movie-naming-settings')).toBeTruthy());
     const heads = Array.from(screen.getByTestId('movies-settings').querySelectorAll('h3')).map(h => h.textContent);
     expect(heads).toEqual(['Quality profiles', 'Watchlist picker', 'Trackers', 'Preferred groups', 'Naming']);
+    const root = screen.getByTestId('movies-settings');
+    const sw = screen.getByRole('switch', { name: 'Monitoring' });
+    const firstCard = Array.from(root.children).find(c => c.tagName !== 'STYLE' && c.getAttribute('role') !== 'alert')!;
+    expect(firstCard.contains(sw)).toBe(true);
+    expect(firstCard.textContent).toContain('Monitoring');
   });
-  it('has no Import card, Library path, Rename movies or Monitoring', async () => {
+  it('has no Import card or Library path', async () => {
     stub([]);
     render(<MoviesSettings />);
     await waitFor(() => expect(screen.getByTestId('movie-naming-settings')).toBeTruthy());
     expect(screen.queryByTestId('movie-import-settings')).toBeNull();
     expect(screen.queryByTestId('mv-root')).toBeNull();
     const text = document.body.textContent || '';
-    for (const t of ['Import', 'Library path', 'Rename movies', 'Monitoring']) expect(text).not.toContain(t);
+    for (const t of ['Import', 'Library path']) expect(text).not.toContain(t);
   });
-  it('Naming saves folder and file format to the same keys, keeps the stored rename and never sends root', async () => {
+  it('Naming saves folder and file format to the same keys with the rename flag and never sends root', async () => {
     const puts: { url: string; body: unknown }[] = [];
     stub(puts);
     render(<MovieNamingSettings />);
@@ -54,5 +59,32 @@ describe('v220 Settings > Movies cleanup', () => {
   });
   it('SW is media-kiosk-v220', () => {
     expect(readFileSync(resolve(__dirname, '../../static/sw.js'), 'utf8')).toContain("const CACHE_VERSION = 'media-kiosk-v220';");
+  });
+  it('Rename movies sits above Folder format and File format, saves the rename flag and enables File format', async () => {
+    const puts: { url: string; body: unknown }[] = [];
+    stub(puts);
+    render(<MovieNamingSettings />);
+    await waitFor(() => expect(screen.getByTestId('mv-folder')).toBeTruthy());
+    const text = screen.getByTestId('movie-naming-settings').textContent || '';
+    expect(text.indexOf('Rename movies')).toBeLessThan(text.indexOf('Folder format'));
+    expect(text.indexOf('Folder format')).toBeLessThan(text.indexOf('File format'));
+    expect((screen.getByTestId('mv-file') as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('switch', { name: 'Rename movies' }));
+    expect((screen.getByTestId('mv-file') as HTMLInputElement).disabled).toBe(false);
+    fireEvent.click(screen.getByTestId('mv-naming-save'));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]!.body).toEqual({ naming: { rename: true, folder: IMPORT.naming.folder, standard: IMPORT.naming.standard } });
+  });
+  it('Preferred groups render as glass-card rows', async () => {
+    const d = { ...DATA, preferred_groups: ['FLUX', 'NTb'] };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(String(url).includes('/movies/import') ? IMPORT : d), { status: 200 })));
+    render(<MoviesSettings />);
+    await waitFor(() => expect(screen.getAllByTestId('tv-group')).toHaveLength(2));
+    expect(screen.getAllByTestId('tv-group')[0]!.style.minHeight).toBe('56px');
+  });
+  it('phone adds 16px side gutters', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(String(url).includes('/movies/import') ? IMPORT : DATA), { status: 200 })));
+    render(<MoviesSettings wide={false} />);
+    await waitFor(() => expect(screen.getByTestId('movies-settings').style.padding).toBe('8px 16px 0px'));
   });
 });

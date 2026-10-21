@@ -13,7 +13,7 @@ const DATA = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('v200 Settings > Movies', () => {
-  it('shows profiles, trackers and preferred groups, and saves tracker order', async () => {
+  it('shows monitoring, profiles, trackers and preferred groups, and saves the monitoring switch', async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       calls.push({ url, init });
@@ -27,9 +27,12 @@ describe('v200 Settings > Movies', () => {
     expect(screen.getAllByTestId('movie-tracker').map(n => n.textContent)).toEqual([
       expect.stringContaining('PrivateHD'), expect.stringContaining('BeyondHD')]);
     expect(screen.getByTestId('tv-preferred-groups')).toBeTruthy();
+    fireEvent.click(screen.getByRole('switch', { name: 'Monitoring' }));
+    await waitFor(() => expect(calls.some(c => c.init?.method === 'PUT')).toBe(true));
+    expect(JSON.parse(String(calls.find(c => c.init?.method === 'PUT')!.init!.body))).toEqual({ monitoring: true });
     fireEvent.click(screen.getByLabelText('Move BeyondHD up'));
-    await waitFor(() => expect(calls.filter(c => c.init?.method === 'PUT')).toHaveLength(1));
-    expect(JSON.parse(String(calls.filter(c => c.init?.method === 'PUT')[0]!.init!.body)).trackers.map((t: { id: number }) => t.id)).toEqual([1, 2]);
+    await waitFor(() => expect(calls.filter(c => c.init?.method === 'PUT')).toHaveLength(2));
+    expect(JSON.parse(String(calls.filter(c => c.init?.method === 'PUT')[1]!.init!.body)).trackers.map((t: { id: number }) => t.id)).toEqual([1, 2]);
     expect(document.body.textContent || '').not.toMatch(/radarr|test instance/i);
   });
 });

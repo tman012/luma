@@ -1,5 +1,5 @@
-/** v200 Settings > Movies (the native movie watchlist, piece 1): quality profiles, watchlist picker, trackers,
- * preferred groups and naming (v220: Import card and Monitoring row removed; their stored values are untouched), in TV Settings' visual style. Stored in movies.db; nothing reads Radarr. */
+/** v200 Settings > Movies (the native movie watchlist, piece 1): monitoring, quality profiles, watchlist picker, trackers,
+ * preferred groups and naming (v220: Import card removed; its stored values are untouched), in TV Settings' visual style. Stored in movies.db; nothing reads Radarr. */
 import { useEffect, useState, type CSSProperties } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { apiFetch } from '@/apiClient';
@@ -20,7 +20,7 @@ const rowStyle = (i: number): CSSProperties => ({ minHeight: 56, display: 'flex'
   borderTop: i ? '1px solid rgba(255,255,255,0.06)' : 'none', fontFamily: FONT });
 const small: CSSProperties = { ...glassBtn, height: 32, padding: '0 10px', fontSize: 13 };
 
-export function MoviesSettings() {
+export function MoviesSettings({ wide = true }: { wide?: boolean } = {}) {
   const [d, setD] = useState<MovieSettings | null>(null);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState('');
@@ -44,9 +44,16 @@ export function MoviesSettings() {
     put({ trackers: t.map(x => ({ id: x.id, enabled: x.enabled })) }, { ...d, trackers: t });
   };
   return (
-    <div data-testid="movies-settings" style={{ display: 'flex', flexDirection: 'column', gap: 32, fontFamily: FONT }}>
+    <div data-testid="movies-settings" style={{ display: 'flex', flexDirection: 'column', gap: 32, fontFamily: FONT, padding: wide ? 0 : '8px 16px 0' }}>
       <style>{tvEditCss}</style>
       {error && <div role="alert" style={{ fontSize: 13, color: '#fca5a5' }}>{error}</div>}
+      <div style={card}>
+        <div style={rowStyle(0)}>
+          <span id="mv-monitoring" style={{ fontSize: 14, fontWeight: 600, color: W95, flex: 1 }}>Monitoring</span>
+          <Toggle id="mv-monitoring-toggle" label="Monitoring" on={d.monitoring} onChange={v => put({ monitoring: v }, { ...d, monitoring: v })} />
+        </div>
+      </div>
+
       <div data-testid="movie-profiles">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 4px 12px' }}>
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: W95 }}>Quality profiles</h3>
@@ -111,7 +118,7 @@ export function MoviesSettings() {
         )}
       </div>
 
-      <PreferredGroups value={d.preferred_groups} onChange={g => put({ preferred_groups: g }, { ...d, preferred_groups: g })} />
+      <PreferredGroups card value={d.preferred_groups} onChange={g => put({ preferred_groups: g }, { ...d, preferred_groups: g })} />
 
       <MovieNamingSettings />
 
@@ -225,18 +232,19 @@ export function MovieNamingSettings() {
   const [v, setV] = useState<ImportView | null>(null);
   const [folder, setFolder] = useState('');
   const [file, setFile] = useState('');
+  const [rename, setRename] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
-  const take = (d: ImportView) => { setV(d); setFolder(d.naming.folder); setFile(d.naming.standard); };
+  const take = (d: ImportView) => { setV(d); setFolder(d.naming.folder); setFile(d.naming.standard); setRename(d.naming.rename !== false); };
   useEffect(() => {
     void apiFetch(IMPORT_URL).then(r => r.ok ? r.json() : null).then(d => { if (d && d.naming) take(d as ImportView); }).catch(() => {});
   }, []);
   if (!v) return null;
-  const dirty = folder !== v.naming.folder || file !== v.naming.standard;
+  const dirty = folder !== v.naming.folder || file !== v.naming.standard || rename !== (v.naming.rename !== false);
   const save = async () => {
     setBusy(true); setErrors({}); setSaved(false);
-    const body = { naming: { rename: v.naming.rename, folder, standard: file } };
+    const body = { naming: { rename, folder, standard: file } };
     try {
       const r = await apiFetch(IMPORT_URL, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const d = await r.json().catch(() => ({}));
@@ -248,16 +256,22 @@ export function MovieNamingSettings() {
   return (
     <div data-testid="movie-naming-settings">
       <h3 style={sectionLabel}>Naming</h3>
-      <div style={{ ...card, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <Row label="Folder format" id="mv-folder">
-          <input id="mv-folder" className="tve-in" data-testid="mv-folder" value={folder} onChange={e => setFolder(e.target.value)} style={field} />
-        </Row>
-        <Row label="File format" id="mv-file">
-          <input id="mv-file" className="tve-in" data-testid="mv-file" value={file} disabled={!v.naming.rename} onChange={e => setFile(e.target.value)} style={field} />
-          {err('naming')}
-        </Row>
-        {err('_')}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
+      <div style={card}>
+        <div style={rowStyle(0)}>
+          <span id="mv-rename" style={{ flex: 1, fontSize: 14, color: W95 }}>Rename movies</span>
+          <Toggle id="mv-rename-toggle" label="Rename movies" on={rename} onChange={setRename} />
+        </div>
+        <label style={{ ...rowStyle(1), fontSize: 14, color: W95 }}>
+          <span style={{ width: 120, flex: 'none' }}>Folder format</span>
+          <input id="mv-folder" className="tve-in" data-testid="mv-folder" value={folder} onChange={e => setFolder(e.target.value)} style={{ ...field, flex: 1, minWidth: 0 }} />
+        </label>
+        <label style={{ ...rowStyle(2), fontSize: 14, color: rename ? W95 : W50 }}>
+          <span style={{ width: 120, flex: 'none' }}>File format</span>
+          <input id="mv-file" className="tve-in" data-testid="mv-file" value={file} disabled={!rename} onChange={e => setFile(e.target.value)} style={{ ...field, flex: 1, minWidth: 0 }} />
+        </label>
+        {err('naming') && <div style={{ padding: '0 16px 8px' }}>{err('naming')}</div>}
+        <div style={{ ...rowStyle(3), justifyContent: 'flex-end', gap: 12 }}>
+          {err('_')}
           {saved && !dirty && <span style={{ fontSize: 13, color: W70 }}>Saved</span>}
           <button type="button" className="lp-focus tve-primary" data-testid="mv-naming-save" disabled={!dirty || busy}
             onClick={() => void save()} style={primaryBtn(dirty && !busy)}>Save</button>

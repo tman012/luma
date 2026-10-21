@@ -484,7 +484,8 @@ const linkBtn: React.CSSProperties = {
 
 /** v185.2a (Taylor): preferred release groups, in order; a release from one wins at the same quality.
  * Starts empty; add, remove and reorder. */
-export function PreferredGroups({ value, onChange }: { value: string[]; onChange: (g: string[]) => void }) {
+/** card: Settings > Movies draws the groups as glass-card rows (56px, 16px padding) like its Trackers card; TV keeps the bare list. */
+export function PreferredGroups({ value, onChange, card = false }: { value: string[]; onChange: (g: string[]) => void; card?: boolean }) {
   const [draft, setDraft] = useState('');
   const btn: CSSProperties = { minHeight: 32, padding: '0 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)',
     background: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: 13, cursor: 'pointer' };
@@ -504,9 +505,9 @@ export function PreferredGroups({ value, onChange }: { value: string[]; onChange
   return (
     <div data-testid="tv-preferred-groups">
       <h3 style={sectionLabel}>Preferred groups</h3>
-      <ol style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <ol style={card ? { listStyle: 'none', margin: 0, padding: 0, ...GROUP_CARD } : { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
         {value.map((g, i) => (
-          <li key={g} data-testid="tv-group" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#fff' }}>
+          <li key={g} data-testid="tv-group" style={card ? { ...groupRow, borderTop: i ? '1px solid rgba(255,255,255,0.06)' : 'none' } : { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#fff' }}>
             <span style={{ minWidth: 20, color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>{i + 1}</span>
             <span style={{ flex: 1 }}>{g}</span>
             <button type="button" style={btn} aria-label={`Move ${g} up`} disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
@@ -515,7 +516,7 @@ export function PreferredGroups({ value, onChange }: { value: string[]; onChange
           </li>
         ))}
       </ol>
-      <div style={{ display: 'flex', gap: 8, marginTop: value.length ? 10 : 0 }}>
+      <div style={card ? { display: 'flex', gap: 8, marginTop: 10 } : { display: 'flex', gap: 8, marginTop: value.length ? 10 : 0 }}>
         <input value={draft} onChange={e => setDraft(e.target.value)} maxLength={40} placeholder="Group" aria-label="Group"
           onKeyDown={e => { if (e.key === 'Enter') add(); }}
           style={{ flex: '0 1 220px', minHeight: 36, padding: '0 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)',
@@ -525,3 +526,6 @@ export function PreferredGroups({ value, onChange }: { value: string[]; onChange
     </div>
   );
 }
+
+const GROUP_CARD: CSSProperties = { borderRadius: 16, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' };
+const groupRow: CSSProperties = { minHeight: 56, display: 'flex', alignItems: 'center', gap: 10, padding: '0 16px', fontSize: 14, color: '#fff' };
