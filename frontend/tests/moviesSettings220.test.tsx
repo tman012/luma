@@ -57,8 +57,9 @@ describe('v220 Settings > Movies cleanup', () => {
     expect(puts[0]!.url).toContain('/api/settings/movies/import');
     expect(puts[0]!.body).toEqual({ naming: { rename: false, folder: '{Movie Title}', standard: IMPORT.naming.standard } });
   });
-  it('SW is media-kiosk-v220', () => {
-    expect(readFileSync(resolve(__dirname, '../../static/sw.js'), 'utf8')).toContain("const CACHE_VERSION = 'media-kiosk-v220';");
+  it('SW is media-kiosk-v220 or later', () => {
+    const m = /const CACHE_VERSION = 'media-kiosk-v(\d+)';/.exec(readFileSync(resolve(__dirname, '../../static/sw.js'), 'utf8'));
+    expect(Number(m![1])).toBeGreaterThanOrEqual(220);
   });
   it('Rename movies sits above Folder format and File format, saves the rename flag and enables File format', async () => {
     const puts: { url: string; body: unknown }[] = [];

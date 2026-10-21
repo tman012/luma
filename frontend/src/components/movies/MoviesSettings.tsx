@@ -20,17 +20,28 @@ const rowStyle = (i: number): CSSProperties => ({ minHeight: 56, display: 'flex'
   borderTop: i ? '1px solid rgba(255,255,255,0.06)' : 'none', fontFamily: FONT });
 const small: CSSProperties = { ...glassBtn, height: 32, padding: '0 10px', fontSize: 13 };
 
+/** v223 (Tester LOW): list fields that are not arrays in the API data read as empty, never crash the page. */
+const arr = <T,>(x: T[] | null | undefined): T[] => (Array.isArray(x) ? x : []);
+export function normMovieSettings(d: MovieSettings): MovieSettings {
+  return { ...d, profiles: arr(d.profiles), qualities: arr(d.qualities), trackers: arr(d.trackers),
+    picker_profiles: arr(d.picker_profiles), preferred_groups: arr(d.preferred_groups) };
+}
+
+/** v223 (Designer): at 600px and below Folder/File format stack the label above a full-width field. */
+export const movieNamingCss = '@media (max-width: 600px){.mv-fmt{flex-direction:column!important;align-items:stretch!important;gap:6px!important;padding:10px 16px!important}'
+  + '.mv-fmt>span{width:auto!important}.mv-fmt>input{width:100%!important;flex:none!important}}';
+
 export function MoviesSettings({ wide = true }: { wide?: boolean } = {}) {
   const [d, setD] = useState<MovieSettings | null>(null);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<MovieProfile | 'new' | null>(null);
-  const load = () => void loadMovieSettings().then(r => { if (r.ok) { setD(r.data); setFailed(false); } else setFailed(true); });
+  const load = () => void loadMovieSettings().then(r => { if (r.ok) { setD(normMovieSettings(r.data)); setFailed(false); } else setFailed(true); });
   useEffect(load, []);
   const put = (patch: Parameters<typeof saveMovieSettings>[0], optimistic: MovieSettings) => {
     const before = d;
     setD(optimistic); setError('');
-    void saveMovieSettings(patch).then(r => { if (r.ok) setD(r.data); else { setD(before); setError(SAVE_ERROR); } });
+    void saveMovieSettings(patch).then(r => { if (r.ok) setD(normMovieSettings(r.data)); else { setD(before); setError(SAVE_ERROR); } });
   };
   if (failed) return <div role="alert" style={{ ...card, height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, color: W50 }}>{"Couldn't load"}</div>;
   if (!d) return <div aria-busy="true" style={{ ...card, height: 120 }} />;
@@ -118,7 +129,7 @@ export function MoviesSettings({ wide = true }: { wide?: boolean } = {}) {
         )}
       </div>
 
-      <PreferredGroups card value={d.preferred_groups} onChange={g => put({ preferred_groups: g }, { ...d, preferred_groups: g })} />
+      <PreferredGroups card value={d.preferred_groups ?? []} onChange={g => put({ preferred_groups: g }, { ...d, preferred_groups: g })} />
 
       <MovieNamingSettings />
 
@@ -255,17 +266,18 @@ export function MovieNamingSettings() {
   const err = (k: string) => errors[k] ? <div role="alert" style={{ fontSize: 12, color: '#fca5a5', marginTop: 4 }}>{errors[k]}</div> : null;
   return (
     <div data-testid="movie-naming-settings">
+      <style>{movieNamingCss}</style>
       <h3 style={sectionLabel}>Naming</h3>
       <div style={card}>
         <div style={rowStyle(0)}>
           <span id="mv-rename" style={{ flex: 1, fontSize: 14, color: W95 }}>Rename movies</span>
           <Toggle id="mv-rename-toggle" label="Rename movies" on={rename} onChange={setRename} />
         </div>
-        <label style={{ ...rowStyle(1), fontSize: 14, color: W95 }}>
+        <label className="mv-fmt" style={{ ...rowStyle(1), fontSize: 14, color: W95 }}>
           <span style={{ width: 120, flex: 'none' }}>Folder format</span>
           <input id="mv-folder" className="tve-in" data-testid="mv-folder" value={folder} onChange={e => setFolder(e.target.value)} style={{ ...field, flex: 1, minWidth: 0 }} />
         </label>
-        <label style={{ ...rowStyle(2), fontSize: 14, color: rename ? W95 : W50 }}>
+        <label className="mv-fmt" style={{ ...rowStyle(2), fontSize: 14, color: rename ? W95 : W50 }}>
           <span style={{ width: 120, flex: 'none' }}>File format</span>
           <input id="mv-file" className="tve-in" data-testid="mv-file" value={file} disabled={!rename} onChange={e => setFile(e.target.value)} style={{ ...field, flex: 1, minWidth: 0 }} />
         </label>
