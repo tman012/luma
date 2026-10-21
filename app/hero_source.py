@@ -83,8 +83,16 @@ def current() -> Dict[str, Any]:
             'excluded_genres': excluded(s.get('ui.hero.excluded_genres', []))}
 
 
+LEGACY_DEFAULT = ['sport', 'sports']   # v242: the old schema default, never picked by anyone
+
+
 def excluded(raw: Any) -> List[str]:
-    """v240: the stored exclusions as a clean list (older builds stored a comma string)."""
+    """v240: the stored exclusions as a clean list (older builds stored a comma string).
+    v242: the old seeded default (Sport, Sports) reads as nothing excluded."""
+    if isinstance(raw, list) and sorted(str(g).strip().lower() for g in raw) == LEGACY_DEFAULT:
+        return []
+    if isinstance(raw, str) and sorted(g.strip().lower() for g in raw.replace('\n', ',').split(',') if g.strip()) == LEGACY_DEFAULT:
+        return []
     if isinstance(raw, str):
         raw = raw.replace('\n', ',').split(',')
     out: List[str] = []
@@ -99,14 +107,24 @@ def library_genres(section_id: str) -> List[str]:
     """v240: genres of the chosen library's movies from the cached ranking build
     (no outside call); TMDb's movie genre list until a ranking exists."""
     data = load(section_id) if section_id else None
-    names = sorted({g for m in (data or {}).get('movies') or [] for g in m.get('genres') or []})
-    return names or list(TMDB_MOVIE_GENRES)
+    found = [g for m in (data or {}).get('movies') or [] for g in (m.get('genres') or []) + (m.get('plex_genres') or [])]
+    return _dedupe(found or list(TMDB_MOVIE_GENRES))
+
+
+def _dedupe(names: List[str]) -> List[str]:
+    """v242: one entry per genre, case-insensitively (Plex 'Sports' vs 'sports'), sorted."""
+    seen: Dict[str, str] = {}
+    for g in names:
+        g = str(g).strip()
+        if g and g.lower() not in seen:
+            seen[g.lower()] = g
+    return sorted(seen.values(), key=str.lower)
 
 
 def cached_genres(section_id: str) -> Dict[str, List[str]]:
     """v240: rating_key -> TMDb genre names from the cached ranking build."""
     data = load(str(section_id)) if section_id else None
-    return {m['rating_key']: m.get('genres') or [] for m in (data or {}).get('movies') or [] if m.get('rating_key')}
+    return {m['rating_key']: (m.get('genres') or []) + (m.get('plex_genres') or []) for m in (data or {}).get('movies') or [] if m.get('rating_key')}
 
 
 # --- ranking ------------------------------------------------------------------
@@ -175,6 +193,7 @@ def build(section_id: str) -> List[dict]:
                 'year': m.get('year'), 'tmdb_id': m['tmdb_id'],
                 'popularity': float(d.get('popularity') or 0), 'vote_count': int(d.get('vote_count') or 0),
                 'genres': [g.get('name') for g in d.get('genres') or [] if isinstance(g, dict) and g.get('name')],
+                'plex_genres': [str(g) for g in m.get('genres') or [] if g],   # v242
                 'release_date': d.get('release_date') or '', 'added_at': int(m.get('added_at') or m.get('addedAt') or 0)}
     with ThreadPoolExecutor(max_workers=6) as pool:
         rows = list(pool.map(look, items))
@@ -263,7 +282,8 @@ def get_hero():
 
 def _out():
     cur = current()
-    return jsonify({**cur, 'libraries': _movie_libraries(), 'genres': library_genres(cur['section_id'])})
+    return jsonify({**cur, 'libraries': _movie_libraries(),
+                    'genres': _dedupe(library_genres(cur['section_id']) + cur['excluded_genres'])})   # v242
 
 
 @bp.route('/api/settings/hero', methods=['PUT'])
@@ -293,9 +313,7 @@ def put_hero():
         raw = body['excluded_genres']
         if not isinstance(raw, list) or len(raw) > MAX_EXCLUDED or not all(isinstance(g, str) and 0 < len(g.strip()) <= 64 for g in raw):
             return jsonify({'error': 'Invalid genres'}), 400
-        known = {g.lower() for g in library_genres(current()['section_id'])} | {g.lower() for g in TMDB_MOVIE_GENRES}
-        if any(g.strip().lower() not in known for g in raw):
-            return jsonify({'error': 'Invalid genres'}), 400
+        # v242: any non-empty name up to 64 characters; a valid pick never fails
         hero['excluded_genres'] = excluded(raw)
     if hero:
         _cfg['settings'].update({'ui': {'hero': hero}})

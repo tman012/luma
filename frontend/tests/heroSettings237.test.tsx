@@ -74,4 +74,11 @@ describe('v237 Settings > Home screen > Hero source and count', () => {
     fireEvent.click(within(screen.getByTestId('hero-genres-list')).getAllByRole('option')[2]!);
     await waitFor(() => expect(screen.getByTestId('hero-genres-value').textContent).toBe('Documentary'));
   });
+
+  it('v242: a genre listed twice shows once', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ...BASE, genres: ['Sports', 'Drama', 'sports'] })));
+    render(<HeroSettingsRows />);
+    fireEvent.click(await screen.findByTestId('hero-genres'));
+    expect(within(screen.getByTestId('hero-genres-list')).getAllByRole('option').map(b => b.parentElement!.textContent)).toEqual(['Sports', 'Drama']);
+  });
 });

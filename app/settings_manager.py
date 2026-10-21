@@ -353,7 +353,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "library_section_id": {"type": "integer", "default": 0, "sensitive": False, "description": "Plex library section ID for hero content (0 = first movie library)"},
             "limit":              {"type": "integer", "default": 10, "sensitive": False, "description": "Number of movies to show in hero rotation", "min": 1, "max": 50},
             "max_age_days":       {"type": "integer", "default": 30, "sensitive": False, "description": "Only show movies added within this many days", "min": 1, "max": 365},
-            "excluded_genres":    {"type": "array", "default": ["Sport", "Sports"], "sensitive": False, "description": "Genres to exclude from hero content"},
+            "excluded_genres":    {"type": "array", "default": [], "sensitive": False, "description": "Genres to exclude from hero content"},
             "boost_popular_titles": {"type": "boolean", "default": False, "sensitive": False, "description": "Sort hero by popularity instead of recently added"},
             "popularity_source":  {"type": "string", "default": "tmdb", "sensitive": False, "description": "Popularity data source (tmdb or imdb)"},
             "backdrop_source":    {"type": "string", "default": "plex", "sensitive": False, "description": "Hero backdrop image source (plex or tmdb)"},

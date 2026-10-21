@@ -285,7 +285,7 @@ def test_v239b_failed_refresh_does_not_loop(env):
 def test_v240_default_is_no_exclusions_and_genres_fall_back_to_tmdb_list(env):
     r = _app().get('/api/settings/hero').get_json()
     assert r['excluded_genres'] == []
-    assert r['genres'] == list(hs.TMDB_MOVIE_GENRES)
+    assert r['genres'] == sorted(hs.TMDB_MOVIE_GENRES, key=str.lower)
 
 
 def test_v240_genres_come_from_the_cached_ranking_build(env, monkeypatch):
@@ -301,7 +301,7 @@ def test_v240_save_validates_and_is_admin_only(env):
     r = c.put('/api/settings/hero', json={'excluded_genres': ['Horror', 'horror', 'Documentary']})
     assert r.status_code == 200 and r.get_json()['excluded_genres'] == ['Horror', 'Documentary']
     assert env['cleared']                                            # hero cache cleared: applies right away
-    for bad in ('Horror', [1], ['Not A Genre'], [''], ['Drama'] * 51):
+    for bad in ('Horror', [1], [''], ['x' * 65], ['Drama'] * 51):
         assert c.put('/api/settings/hero', json={'excluded_genres': bad}).status_code == 400
     env['user']['u'] = {'id': 2, 'is_admin': False}
     assert c.put('/api/settings/hero', json={'excluded_genres': []}).status_code == 403
@@ -348,3 +348,35 @@ def test_v240_most_popular_excludes_by_tmdb_genres_and_fills(monkeypatch):
 def test_v240_no_exclusions_changes_nothing(monkeypatch):
     movies = [_mv(i, ['Horror']) for i in range(10)]
     assert len(_hero(monkeypatch, 'newest', [], movies)) == 5
+
+
+# --- v242: live bug repros -------------------------------------------------------
+
+def test_v242_seeded_sport_default_reads_as_nothing_excluded(env):
+    from app.settings_manager import SettingsManager
+    import inspect
+    assert '"excluded_genres":    {"type": "array", "default": [],' in inspect.getsource(__import__('app.settings_manager', fromlist=['x']))
+    env['s'].d = {'ui': {'hero': {'excluded_genres': ['Sport', 'Sports']}}}      # what :5002 had stored
+    r = _app().get('/api/settings/hero').get_json()
+    assert r['excluded_genres'] == []
+    assert hs.excluded('Sport, Sports') == [] and hs.excluded(['Sports', 'Horror']) == ['Sports', 'Horror']
+
+
+def test_v242_saving_a_plex_only_genre_succeeds(env):
+    # Bug 1: the old seeded 'Sport' (not a TMDb genre) made every save 400 with {"error":"Invalid genres"}
+    env['s'].d = {'ui': {'hero': {'excluded_genres': ['Sport', 'Sports']}}}
+    c = _app()
+    r = c.put('/api/settings/hero', json={'excluded_genres': ['Sport', 'Sports', 'Horror']})
+    assert r.status_code == 200 and r.get_json()['excluded_genres'] == ['Sport', 'Sports', 'Horror']
+    assert c.put('/api/settings/hero', json={'excluded_genres': ['Anime']}).status_code == 200
+
+
+def test_v242_options_are_plex_plus_tmdb_deduped(env, monkeypatch):
+    # Bug 2: 'Sports' listed twice
+    env['plex'].movies[0]['genres'] = ['Sports', 'Drama']
+    env['plex'].movies[1]['genres'] = ['sports']
+    monkeypatch.setitem(hs._cfg, 'tmdb_details', lambda t: {'popularity': 1, 'genres': [{'name': 'Drama'}, {'name': 'Sports'}]})
+    env['s'].d = {'ui': {'hero': {'library_section_id': 1, 'excluded_genres': ['SPORTS']}}}
+    hs.build('1')
+    g = _app().get('/api/settings/hero').get_json()['genres']
+    assert [x.lower() for x in g] == ['drama', 'sports']

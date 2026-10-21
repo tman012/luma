@@ -19,13 +19,13 @@ export async function fetchHero(): Promise<HeroSettings> {
   if (!r.ok) throw new Error(String(r.status));
   const d = await r.json();
   if (!d || (d.source !== 'newest' && d.source !== 'popular')) throw new Error('bad');
-  return { ...d, excluded_genres: Array.isArray(d.excluded_genres) ? d.excluded_genres : [], genres: Array.isArray(d.genres) ? d.genres : [] };
+  return { ...d, excluded_genres: Array.isArray(d.excluded_genres) ? d.excluded_genres : [], genres: uniq(Array.isArray(d.genres) ? d.genres : []) };
 }
 export async function saveHero(p: Partial<Pick<HeroSettings, 'source' | 'section_id' | 'limit' | 'excluded_genres'>>): Promise<HeroSettings> {
   const r = await apiFetch('/api/settings/hero', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
   if (!r.ok) throw new Error(String(r.status));
   const d = await r.json();
-  return { ...d, excluded_genres: Array.isArray(d.excluded_genres) ? d.excluded_genres : [], genres: Array.isArray(d.genres) ? d.genres : [] };
+  return { ...d, excluded_genres: Array.isArray(d.excluded_genres) ? d.excluded_genres : [], genres: uniq(Array.isArray(d.genres) ? d.genres : []) };
 }
 
 const SOURCES: { value: HeroSource; label: string }[] = [
@@ -111,3 +111,9 @@ export const CHECK_CSS = `.luma-check{appearance:none;-webkit-appearance:none;ma
 .luma-check:checked{border-color:#3b82f6}
 .luma-check:checked::after{opacity:1}
 .luma-check:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}`;
+
+/** v242: one option per genre, case-insensitively. */
+export function uniq(gs: string[]): string[] {
+  const seen = new Set<string>();
+  return gs.filter(g => { const k = String(g).trim().toLowerCase(); if (!k || seen.has(k)) return false; seen.add(k); return true; });
+}
