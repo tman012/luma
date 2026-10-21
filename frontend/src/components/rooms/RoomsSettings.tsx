@@ -3,7 +3,7 @@
  * Phone: the room list, then pushed pages: New room (name) -> pick a player (Add by IP) -> Add room; a room's
  * page edits its name, player, wake method (ADB, Wake-on-LAN, Harmony, None) and Default room, with Remove room.
  * Writes need the signed-in owner (the API checks). Nothing here plays, wakes or pairs a device. */
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { Modal, Toggle, field, glassBtn, primaryBtn, tvEditCss } from '@/components/library/TvEdit';
 import {
@@ -39,6 +39,8 @@ export function RoomsSettings({ wide = true, onExit }: { wide?: boolean; onExit?
   const [failed, setFailed] = useState(false);
   const [view, setView] = useState<View>({ k: 'list' });
   const [error, setError] = useState('');
+  const [editSave, setEditSave] = useState<{ dirty: boolean; save: () => void }>({ dirty: false, save: () => {} });
+  const onSaveState = useCallback((dirty: boolean, save: () => void) => setEditSave({ dirty, save }), []);
   const load = useCallback(() => void loadRooms().then(r => { if (r.ok) { setData(r.data); setFailed(false); } else setFailed(true); }), []);
   useEffect(load, [load]);
   const take = (r: Awaited<ReturnType<typeof loadRooms>>, then?: () => void) => {
@@ -61,8 +63,8 @@ export function RoomsSettings({ wide = true, onExit }: { wide?: boolean; onExit?
       <PickStep cta="Add room" error={error} onPick={p => void createRoom(view.name, p).then(r => take(r, toList))} />) };
   } else if (view.k === 'edit' && room(view.id)) {
     const r = room(view.id)!;
-    flow = { title: r.name, back: toList, body: (
-      <EditRoom key={r.id} room={r} error={error} onChangePlayer={() => setView({ k: 'repick', id: r.id })}
+    flow = { title: r.name, back: toList, action: <HeaderSave dirty={editSave.dirty} onSave={editSave.save} />, body: (
+      <EditRoom key={r.id} room={r} error={error} onSaveState={onSaveState} onChangePlayer={() => setView({ k: 'repick', id: r.id })}
         onSave={patch => void updateRoom(r.id, patch).then(x => take(x, toList))}
         onRemove={() => void removeRoom(r.id).then(x => take(x, toList))} />) };
   } else if (view.k === 'repick' && room(view.id)) {
@@ -77,7 +79,7 @@ export function RoomsSettings({ wide = true, onExit }: { wide?: boolean; onExit?
       return (
         <div data-testid="rooms-settings" data-view={view.k} style={{ fontFamily: FONT }}>
           <style>{tvEditCss}</style>
-          <PageHeader title={flow.title} onBack={flow.back} />
+          <PageHeader title={flow.title} onBack={flow.back} action={flow.action} />
           <div style={{ padding: '8px 16px 0' }}>{flow.body}</div>
         </div>
       );
@@ -125,7 +127,7 @@ export function RoomsSettings({ wide = true, onExit }: { wide?: boolean; onExit?
           ))}
         </div>
       )}
-      {flow && <Modal title={flow.title} testid="room-flow" onClose={toList} footer={null}>{flow.body}</Modal>}
+      {flow && <Modal title={flow.title} testid="room-flow" onClose={toList} footer={null} actions={flow.action}>{flow.body}</Modal>}
     </div>
   );
 }
@@ -137,6 +139,15 @@ function PageHeader({ title, onBack, action }: { title: string; onBack?: () => v
       <h1 style={{ flex: 1, margin: 0, fontSize: 18, fontWeight: 700, color: W95, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</h1>
       {action}
     </header>
+  );
+}
+
+/** Designer: the room page's Save is blue text at the right of the title row, dimmed until something changes, 44px target. */
+function HeaderSave({ dirty, onSave }: { dirty: boolean; onSave: () => void }) {
+  return (
+    <button type="button" data-testid="room-save" disabled={!dirty} onClick={onSave} className="lp-focus"
+      style={{ minWidth: 44, height: 44, padding: '0 8px', background: 'none', border: 'none', borderRadius: 10, color: ACCENT,
+        fontSize: 16, fontWeight: 600, fontFamily: FONT, opacity: dirty ? 1 : 0.4, cursor: dirty ? 'pointer' : 'default', flex: 'none' }}>Save</button>
   );
 }
 
@@ -297,8 +308,9 @@ function PickStep({ cta, current, error, onPick }: { cta: string; current?: stri
   );
 }
 
-function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer }: {
+function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer, onSaveState }: {
   room: Room; error: string; onSave: (p: RoomPatch) => void; onRemove: () => void; onChangePlayer: () => void;
+  onSaveState: (dirty: boolean, save: () => void) => void;
 }) {
   const p = r.player;
   const [name, setName] = useState(r.name);
@@ -320,6 +332,10 @@ function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer }: {
   if (wake === 'harmony' && act.trim() !== (p?.harmony_activity || '')) patch.harmony_activity = act.trim();
   if (def !== r.default) patch.default = def;
   const dirty = Object.keys(patch).length > 0 && !!name.trim();
+  const patchKey = JSON.stringify(patch);
+  const saveRef = useRef(onSave);
+  saveRef.current = onSave;
+  useEffect(() => { onSaveState(dirty, () => saveRef.current(JSON.parse(patchKey) as RoomPatch)); }, [dirty, patchKey, onSaveState]);
   const fieldRow = (l: string, id: string, v: string, set: (s: string) => void, mode?: 'decimal' | 'numeric') => (
     <label key={id} style={{ ...row(id === 'host' ? 0 : 1), justifyContent: 'space-between' }}>
       <span style={{ fontSize: 14 }}>{l}</span>
@@ -374,7 +390,6 @@ function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer }: {
         <Toggle id="room-default-toggle" label="Default room" on={def} onChange={setDef} />
       </div>
       {error && <div role="alert" style={{ color: '#fca5a5', fontSize: 13 }}>{error}</div>}
-      <button type="button" data-testid="room-save" disabled={!dirty} onClick={() => onSave(patch)} className="lp-focus tve-primary" style={{ ...primaryBtn(dirty), width: '100%' }}>Save</button>
       <button type="button" data-testid="room-remove-open" onClick={() => setConfirm(true)} className="lp-focus tve-glass"
         style={{ ...glassBtn, width: '100%', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)' }}>Remove room</button>
       {confirm && <ConfirmRemove name={r.name} onCancel={() => setConfirm(false)} onRemove={() => { setConfirm(false); onRemove(); }} />}

@@ -153,8 +153,16 @@ describe('Settings > Rooms', () => {
     expect(['ADB', 'Wake-on-LAN', 'Harmony', 'None'].every(l => screen.getByRole('radio', { name: l }))).toBe(true);
     expect(screen.getByTestId('room-port')).toBeTruthy();
     expect(screen.getByTestId('room-paired').textContent).toBe('Paired');
-    expect((screen.getByTestId('room-save') as HTMLButtonElement).disabled).toBe(true);
+    const save = screen.getByTestId('room-save') as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(save.closest('header')).toBeTruthy();                       // Save sits in the title row (Designer)
+    expect([save.style.opacity, save.style.height, save.style.minWidth, save.textContent]).toEqual(['0.4', '44px', '44px', 'Save']);
+    expect(save.style.color).toBe('rgb(59, 130, 246)');
+    const page = screen.getByTestId('room-edit');
+    expect(page.lastElementChild!.getAttribute('data-testid')).toBe('room-remove-open');   // Remove room is the last item
+    expect(screen.getAllByRole('button', { name: 'Save' })).toHaveLength(1);
     fireEvent.click(screen.getByTestId('room-wake-wol'));
+    expect((screen.getByTestId('room-save') as HTMLButtonElement).style.opacity).toBe('1');
     expect(screen.queryByTestId('room-port')).toBeNull();
     fireEvent.change(screen.getByTestId('room-mac'), { target: { value: 'AA:BB:CC:DD:EE:FF' } });
     fireEvent.click(screen.getByRole('switch', { name: 'Default room' }));
