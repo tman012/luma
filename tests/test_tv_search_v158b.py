@@ -231,15 +231,21 @@ def test_after_air_search_waits_the_delay_and_backs_off(env, monkeypatch):
 
 def test_search_on_add_follows_the_monitor_option(env, monkeypatch, owner):  # noqa: F811
     from app import tv_calendar
+    import datetime as _dt
+    from tests import tv_fake
     allow_grabs(monkeypatch)
     _auto()
+    today = _dt.date.today()                       # v225: relative to today (the fixture's fixed E2 10-21 aired on that day)
+    monkeypatch.setitem(tv_fake.SHOWS, 6001, {**tv_fake.SHOWS[6001], 'air': {
+        (1, 1): (today - _dt.timedelta(days=7)).isoformat(), (1, 2): (today + _dt.timedelta(days=7)).isoformat(),
+        (1, 3): (today + _dt.timedelta(days=14)).isoformat()}})
     out = tv_calendar.add(6001, PID, now=3000.0, monitor='all')                         # Severance Pay: E1 aired
     sid = out['series_id']
     due = {r['episode_number'] for r in rows('SELECT episode_number FROM episodes WHERE series_id = ?'
                                                  ' AND season_number = 1 AND next_search_at = 3000.0', sid)}
     aired_ = {r['episode_number'] for r in rows("SELECT episode_number FROM episodes WHERE series_id = ? AND season_number = 1"
                                                 " AND air_date <= date('now', 'localtime')", sid)}
-    assert 1 in due and 2 not in due and due == aired_                               # aired ones only (E2 airs 10-21)
+    assert 1 in due and 2 not in due and due == aired_                               # aired ones only (E2 airs next week)
     with tv_store.write() as conn:
         conn.execute('DELETE FROM series WHERE id = ?', (sid,))
     out = tv_calendar.add(6001, PID, now=3000.0, monitor='future')                      # Future: nothing aired wanted
