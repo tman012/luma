@@ -53,7 +53,7 @@ describe('R3 layout (1440 and 1024)', () => {
   it('rest (v235): only the field, centered in the top bar; no heading, no band, no results', () => {
     render(<HomeSearchR3 />);
     expect(screen.queryByRole('heading', { name: 'Search' })).toBeNull();
-    expect((screen.getByTestId('search-input') as HTMLInputElement).placeholder).toBe('Search');
+    expect((screen.getByTestId('search-input') as HTMLInputElement).placeholder).toBe('Search movies and shows');   // v241 (H2)
     expect(screen.queryByTestId('r3-results')).toBeNull();
     expect(screen.queryByTestId('r3-cover')).toBeNull();      // the full Home hero shows at rest
     expect(screen.queryByTestId('r3-rest')).toBeNull();
@@ -68,14 +68,16 @@ describe('R3 layout (1440 and 1024)', () => {
     expect(screen.queryByTestId('r3-cover')).toBeNull();
     expect(screen.queryByTestId('r3-results')).toBeNull();
   });
-  it('sizes: field 640px at 1440 and 520px at 1024; top card 420/300px; posters 136/112px; band 200px', () => {
+  it('sizes: field 480x48 (H2); top card 420/300px; posters 136/112px; band 200px', () => {
     const at = (expr: string, vw: number) => {   // evaluate the clamp(min, Nvw, max) at a viewport width
       const m = /clamp\((\d+)px, ([\d.]+)vw, (\d+)px\)/.exec(expr)!;
       return Math.min(Number(m[3]), Math.max(Number(m[1]), (Number(m[2]) * vw) / 100));
     };
     const v = (name: string) => new RegExp(`${name}:(clamp\\([^)]*\\))`).exec(r3Css)![1]!;
-    const field = /\.r3-field\{[^}]*width:(clamp\([^)]*\))/.exec(r3Css)![1]!;
-    expect([at(field, 1440), at(field, 1024)]).toEqual([633.6, 520]);
+    // v241 (H2): a fixed 480x48 pill, radius 24, rgba(51,53,58,.85), no border
+    expect(r3Css).toContain('.r3-field{display:flex;align-items:center;gap:12px;width:480px;height:48px;box-sizing:border-box;padding:0 20px;border-radius:24px;');
+    expect(r3Css).toContain('background:rgba(51,53,58,.85);border:0;color:#c4c6d0');
+    expect(r3Css).toContain('.r3-input::placeholder{color:#c4c6d0;opacity:1}');
     expect([at(v('--r3-top'), 1440), at(v('--r3-top'), 1024)]).toEqual([417.6, 300]);
     expect([at(v('--r3-po'), 1440), at(v('--r3-po'), 1024)]).toEqual([136, 112]);
     expect([at(v('--r3-pad'), 1440), at(v('--r3-pad'), 1024)]).toEqual([48, 34.816]);

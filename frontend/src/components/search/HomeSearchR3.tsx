@@ -194,8 +194,8 @@ export function HomeSearchR3() {
       )}
       <div className="r3-head">
         <label className="r3-field" data-focus-ring>
-          <span className="r3-icon"><SearchIcon size={20} /></span>
-          <input ref={inputRef} className="r3-input" data-testid="search-input" type="search" placeholder="Search" aria-label="Search"
+          <span className="r3-icon"><H2SearchIcon /></span>
+          <input ref={inputRef} className="r3-input" data-testid="search-input" type="search" placeholder="Search movies and shows" aria-label="Search"
             value={query} autoComplete="off" spellCheck={false} onKeyDown={onKey}
             onChange={e => {
               const v = e.target.value; setQuery(v);
@@ -327,13 +327,13 @@ export const r3Css = `
   background:linear-gradient(to bottom, transparent 0, rgba(21,16,42,.55) ${R3_BAND - 80}px, #15102a ${R3_BAND}px, #15102a 100%)}
 /* v235 (PM): the field sits in the top bar (logo left, avatar right), centered, at rest and while searching */
 .r3-head{position:fixed;z-index:55;top:28px;left:50%;transform:translateX(-50%);display:flex;align-items:center}
-.r3-field{display:flex;align-items:center;gap:12px;width:clamp(520px, 44vw, 640px);height:48px;box-sizing:border-box;padding:0 18px;border-radius:999px;
-  background:rgba(21,16,42,.62);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid rgba(255,255,255,.14);cursor:text;
-  transition:border-color 150ms,box-shadow 150ms}
-.r3-field:focus-within{border-color:var(--color-accent, #3b82f6);box-shadow:0 0 0 3px rgba(59,130,246,.28);background:rgba(21,16,42,.75)}
-.r3-icon{display:inline-flex;color:var(--color-accent-hover, #60a5fa)}
-.r3-input{flex:1;min-width:0;background:none;border:0;outline:none;color:#fff;font:inherit;font-size:16px;caret-color:var(--color-accent-hover, #60a5fa)}
-.r3-input::placeholder{color:rgba(255,255,255,.55)}
+/* v241 (H2): 480x48 pill, rgba(51,53,58,.85) fill, no border, filled 20px search icon, #c4c6d0 */
+.r3-field{display:flex;align-items:center;gap:12px;width:480px;height:48px;box-sizing:border-box;padding:0 20px;border-radius:24px;
+  background:rgba(51,53,58,.85);border:0;color:#c4c6d0;cursor:text;transition:box-shadow 150ms}
+.r3-field:focus-within{box-shadow:0 0 0 2px var(--color-accent, #3b82f6)}
+.r3-icon{display:inline-flex;color:#c4c6d0}
+.r3-input{flex:1;min-width:0;background:none;border:0;outline:none;color:#e2e2e9;font:inherit;font-size:16px;caret-color:#e2e2e9}
+.r3-input::placeholder{color:#c4c6d0;opacity:1}
 .r3-input::-webkit-search-cancel-button{display:none}
 .r3-body{position:fixed;z-index:45;top:${R3_BAND}px;left:0;right:0;bottom:0;overflow-y:auto;overscroll-behavior:contain;padding:8px var(--r3-pad) 40px;box-sizing:border-box}
 .r3-main{display:flex;gap:24px;align-items:flex-start;margin-bottom:28px}
@@ -387,3 +387,12 @@ span.r3-wl{cursor:default;background:#22c55e;border-color:#22c55e}
 @keyframes r3-pulse{0%,100%{opacity:1}50%{opacity:.55}}
 @media (prefers-reduced-motion: reduce){.r3-sk{animation:none}}
 `;
+
+/** v241 (H2): the filled search glyph from the H2 mock. */
+function H2SearchIcon() {
+  return (
+    <svg width={20} height={20} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M15.5 14h-.8l-.3-.3A6.5 6.5 0 1 0 9.5 16a6.5 6.5 0 0 0 4.2-1.6l.3.3v.8l5 5 1.5-1.5-5-5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z" />
+    </svg>
+  );
+}

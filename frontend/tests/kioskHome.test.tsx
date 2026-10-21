@@ -65,7 +65,13 @@ describe('web kiosk home (>=1024px)', () => {
     await waitFor(() => screen.getByText('Movie 0'));
     const urls = fetchMock.mock.calls.map(c => String((c as unknown[])[0]));
     expect(urls.every(u => u.includes('/api/hero/content'))).toBe(true);
-    expect(screen.getByText('2026 · 2h 14m · PG-13')).toBeTruthy();
+    // v241 (H2): outlined chips
+    expect([...document.querySelectorAll('[data-hero-chip]')].map(e => e.textContent)).toEqual(['2026', '2h 14m', 'PG-13']);
+    const chip = document.querySelector('[data-hero-chip]') as HTMLElement;
+    expect([chip.style.border, chip.style.borderRadius, chip.style.padding, chip.style.fontSize]).toEqual(['1px solid rgb(142, 144, 153)', '8px', '4px 12px', '14px']);
+    const h1 = document.querySelector('[data-hero-h2-title]') as HTMLElement;
+    expect([h1.style.fontSize, h1.style.fontWeight]).toEqual(['96px', '400']);
+    expect(h1.querySelector('img')).toBeNull();   // no clearlogo
     expect(screen.getByText('Plot 0.')).toBeTruthy();
     expect(screen.getAllByText('Drama')).toHaveLength(1);
   });

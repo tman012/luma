@@ -78,15 +78,6 @@ function preloadImage(url: string | null, timeoutMs = 1500): Promise<void> {
 }
 
 /** Logo art when the title has one, else the title text. */
-function LogoOrTitle({ logo, title }: { logo: string | null | undefined; title: string }) {
-  const [failed, setFailed] = useState(false);
-  if (!logo || failed) return <>{title}</>;
-  return (
-    <img src={logo} alt={title} draggable={false} onError={() => setFailed(true)}
-      style={{ maxHeight: 'clamp(80px,12vh,160px)', maxWidth: '40vw', objectFit: 'contain', display: 'block' }} />
-  );
-}
-
 export function HeroSection({ movies, backdropSource = 'plex', className, displayOnly = false }: HeroSectionProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const activeIndexRef = useRef(0);
@@ -218,22 +209,28 @@ export function HeroSection({ movies, backdropSource = 'plex', className, displa
   const details = (
     <>
           {/* Title (the kiosk's only clickable spot: opens the details popup) */}
-          <h1 className={cn(
-            'mb-4 font-bold leading-tight drop-shadow-2xl', text,
-            d.isTablet ? 'text-[44px]' : 'text-[clamp(36px,3.2vw,60px)]',
-          )}>
-            {displayOnly ? (
+          {displayOnly ? (
+            /* v241 (H2): the title as text, 96px regular; no clearlogo */
+            <h1 data-hero-h2-title className="text-[#e2e2e9]"
+              style={{ margin: 0, fontSize: 96, fontWeight: 400, letterSpacing: '-1.5px', lineHeight: 1 }}>
               <button
                 type="button"
                 data-hero-title
                 onClick={handleHeroClick}
                 className="pointer-events-auto cursor-pointer rounded-lg text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
-                style={{ background: 'none', border: 0, padding: 0, font: 'inherit', color: 'inherit' }}
+                style={{ background: 'none', border: 0, padding: 0, font: 'inherit', color: 'inherit', letterSpacing: 'inherit' }}
               >
-                <LogoOrTitle key={movie.ratingKey ?? movie.title} logo={movie.clearlogoUrl} title={movie.title} />
+                {movie.title}
               </button>
-            ) : movie.title}
-          </h1>
+            </h1>
+          ) : (
+            <h1 className={cn(
+              'mb-4 font-bold leading-tight drop-shadow-2xl', text,
+              d.isTablet ? 'text-[44px]' : 'text-[clamp(36px,3.2vw,60px)]',
+            )}>
+              {movie.title}
+            </h1>
+          )}
 
           {/* Meta row: Year · Duration · MPAA */}
           {(() => {
@@ -241,18 +238,37 @@ export function HeroSection({ movies, backdropSource = 'plex', className, displa
             if (movie.year) parts.push(String(movie.year));
             if (movie.duration > 0) parts.push(formatRuntime(movie.duration));
             if (movie.contentRating) parts.push(movie.contentRating);
-            return parts.length > 0 ? (
+            if (parts.length === 0) return null;
+            if (displayOnly) {
+              // v241 (H2): outlined chips, 16px above, 12px below
+              return (
+                <p data-hero-chips style={{ margin: '16px 0 12px', fontSize: 16 }}>
+                  {parts.map(p => (
+                    <span key={p} data-hero-chip
+                      style={{ display: 'inline-block', border: '1px solid #8e9099', borderRadius: 8, padding: '4px 12px',
+                        fontSize: 14, marginRight: 8, color: '#e2e2e9' }}>{p}</span>
+                  ))}
+                </p>
+              );
+            }
+            return (
               <p className={cn(
                 'mb-4 font-medium', text,
                 d.isTablet ? 'text-[22px]' : 'text-[clamp(18px,1.6vw,24px)]',
               )}>
                 {parts.join(' \u00B7 ')}
               </p>
-            ) : null;
+            );
           })()}
 
           {/* Plot */}
-          {movie.summary && (
+          {movie.summary && displayOnly && (
+            <p data-hero-plot style={{ margin: 0, fontSize: 18, color: '#e2e2e9', whiteSpace: 'nowrap', overflow: 'hidden',
+              textOverflow: 'ellipsis', maxWidth: 720 }}>
+              {movie.summary}
+            </p>
+          )}
+          {movie.summary && !displayOnly && (
             <p className={cn(
               'max-w-[65%] leading-relaxed', text,
               d.isTablet
@@ -287,7 +303,7 @@ export function HeroSection({ movies, backdropSource = 'plex', className, displa
         aria-roledescription="slideshow"
       >
         {backdrop}
-        <div data-hero-content className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-[60px] pb-[60px]">
+        <div data-hero-content className="pointer-events-none absolute bottom-[72px] left-[64px] z-10" style={{ maxWidth: 760 }}>{/* v241 (H2) */}
           {details}
         </div>
       </section>
