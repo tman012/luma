@@ -187,7 +187,7 @@ export const phoneBar: React.CSSProperties = {
 export const kioskBar: React.CSSProperties = {
   position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50, display: 'flex', alignItems: 'center',
   justifyContent: 'space-between', padding: '20px 60px 20px 44px',
-  background: 'linear-gradient(to bottom, rgba(0,0,0,0.8), transparent)',
+  // v245: no top scrim or shadow (closed or open)
 };
 const headRight: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 12 };
 /** 44px circular search button, left of the avatar. */

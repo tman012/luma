@@ -216,14 +216,14 @@ export function HomeSearchR3() {
           </div>
         </div>
       )}
-      {shown && <div className="a1-bar" data-testid="a1-bar" />}
+      <div className="a1-bar" data-testid="a1-bar" data-open={shown ? 'true' : 'false'} aria-hidden="true" />
       <button type="button" className="a1-chev" data-testid="a1-chevron" aria-label={shown ? 'Close menu' : 'Open menu'}
         aria-expanded={shown} onClick={() => (shown ? closeBar() : setBar(true))}>
         <svg width={48} height={48} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d={shown ? 'M7.4 15.4 12 10.8l4.6 4.6L18 14l-6-6-6 6z' : 'M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z'} />
         </svg>
       </button>
-      <div className="r3-head" data-testid="r3-head" hidden={!shown}>
+      <div className="r3-head" data-testid="r3-head" data-open={shown ? 'true' : 'false'} inert={!shown}>
         <div className="a1-nav" data-testid="a1-nav">
           <button type="button" className="a1-tb" onClick={() => go('/watchlist')} aria-label="Watchlist">
             <svg width={20} height={20} viewBox="0 0 24 24" fill="#adc7ff" aria-hidden="true"><path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z" /></svg>
@@ -371,12 +371,15 @@ export const r3Css = `
   background:linear-gradient(to bottom, transparent 0, rgba(21,16,42,.55) ${R3_BAND - 80}px, #15102a ${R3_BAND}px, #15102a 100%)}
 /* v235 (PM): the field sits in the top bar (logo left, avatar right), centered, at rest and while searching */
 .r3-head{position:fixed;z-index:55;top:84px;left:50%;transform:translateX(-50%);display:flex;align-items:center}
-.r3-head[hidden]{display:none}
-/* v243 A1: glass bar (152px) revealed by a bare chevron; Watchlist, Library, Explore right of the search */
+/* v245: one seamless reveal: the glass bar (fill + blur) and the controls share one transition, in the same frame */
+[data-r3-search]{--a1-dur:240ms;--a1-ease:cubic-bezier(.2,0,0,1)}
+.a1-bar,.r3-head{transition:transform var(--a1-dur) var(--a1-ease),opacity var(--a1-dur) var(--a1-ease),visibility 0s linear var(--a1-dur)}
+.a1-bar[data-open="true"],.r3-head[data-open="true"]{opacity:1;visibility:visible;transition-delay:0s}
+.a1-bar[data-open="false"]{transform:translateY(-100%);opacity:0;visibility:hidden;pointer-events:none}
+.r3-head[data-open="false"]{transform:translate(-50%,-152px);opacity:0;visibility:hidden;pointer-events:none}
 .a1-bar{position:fixed;z-index:49;top:0;left:0;right:0;height:152px;background:rgba(17,19,24,.55);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
-  border-bottom:1px solid rgba(255,255,255,.08);animation:a1-in 200ms ease-out}
-@keyframes a1-in{from{transform:translateY(-100%)}to{transform:none}}
-@media (prefers-reduced-motion: reduce){.a1-bar{animation:none}}
+  border-bottom:1px solid rgba(255,255,255,.08);will-change:transform,opacity}
+@media (prefers-reduced-motion: reduce){[data-r3-search]{--a1-dur:0ms}}
 .a1-chev{position:fixed;z-index:56;top:28px;left:50%;transform:translateX(-50%);width:48px;height:48px;padding:0;border:0;background:none;box-shadow:none;
   color:#e2e2e9;display:grid;place-items:center;cursor:pointer;border-radius:8px}
 .a1-chev:focus-visible{outline:2px solid var(--color-accent, #3b82f6);outline-offset:2px}

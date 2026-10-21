@@ -292,8 +292,8 @@ describe('v228 R3 rest: Recently added under the band', () => {
 
 describe('v243 A1: the top bar opens from a bare chevron', () => {
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
-  const bar = () => screen.queryByTestId('a1-bar');
-  const head = () => screen.getByTestId('r3-head');
+  const bar = () => (screen.getByTestId('a1-bar').dataset.open === 'true' ? screen.getByTestId('a1-bar') : null);
+  const head = () => { const h = screen.getByTestId('r3-head'); return { hidden: h.dataset.open !== 'true' || h.hasAttribute('inert') }; };
   it('closed at rest: only the chevron (no circle or background, 48px); search and buttons hidden', () => {
     render(<HomeSearchR3 />);
     expect(bar()).toBeNull();
@@ -311,6 +311,7 @@ describe('v243 A1: the top bar opens from a bare chevron', () => {
     expect(screen.getByTestId('a1-chevron').getAttribute('aria-expanded')).toBe('true');
     expect([...screen.getByTestId('a1-nav').querySelectorAll('button')].map(b => b.textContent)).toEqual(['Watchlist', 'Library', 'Explore']);
     expect(r3Css).toContain('.a1-bar{position:fixed;z-index:49;top:0;left:0;right:0;height:152px;background:rgba(17,19,24,.55);backdrop-filter:blur(24px)');
+    expect(r3Css).not.toMatch(/a1-in|animation:a1/);   // v245: no separate, later backdrop animation
     fireEvent.click(screen.getByTestId('a1-chevron'));
     expect(bar()).toBeNull();
     expect(head().hidden).toBe(true);
@@ -383,5 +384,27 @@ describe('v244: uniform 2:3 tiles, no overlap, 2-line titles, a placeholder for 
     fireEvent.error(card.querySelector('img')!);
     expect(card.querySelector('img')).toBeNull();
     expect((card.querySelector('[data-testid="r3-placeholder"]') as HTMLElement).dataset.title).toBe('Dune');
+  });
+});
+
+describe('v245: one seamless reveal', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+  it('the glass bar and the controls share one transition (same properties, duration and easing), no delay on open', () => {
+    expect(r3Css).toContain('[data-r3-search]{--a1-dur:240ms;--a1-ease:cubic-bezier(.2,0,0,1)}');
+    expect(r3Css).toContain('.a1-bar,.r3-head{transition:transform var(--a1-dur) var(--a1-ease),opacity var(--a1-dur) var(--a1-ease),visibility 0s linear var(--a1-dur)}');
+    expect(r3Css).toContain('.a1-bar[data-open="true"],.r3-head[data-open="true"]{opacity:1;visibility:visible;transition-delay:0s}');
+    expect((r3Css.match(/--a1-dur\)/g) || []).length).toBe(3);   // the one shared rule: transform, opacity, visibility delay
+    expect(r3Css).not.toMatch(/\.a1-bar\{[^}]*(transition|animation)/);
+  });
+  it('both are always mounted and flip state in the same render (open and close)', () => {
+    render(<HomeSearchR3 />);
+    const b = screen.getByTestId('a1-bar'); const h = screen.getByTestId('r3-head');
+    expect([b.dataset.open, h.dataset.open]).toEqual(['false', 'false']);
+    fireEvent.click(screen.getByTestId('a1-chevron'));
+    expect([b.dataset.open, h.dataset.open]).toEqual(['true', 'true']);
+    expect(screen.getByTestId('a1-bar')).toBe(b);
+    fireEvent.click(screen.getByTestId('a1-chevron'));
+    expect([b.dataset.open, h.dataset.open]).toEqual(['false', 'false']);
+    expect(h.hasAttribute('inert')).toBe(true);
   });
 });

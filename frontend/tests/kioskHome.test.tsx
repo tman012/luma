@@ -88,7 +88,8 @@ describe('web kiosk home (>=1024px)', () => {
     expect(stage.style.overflow).toBe('hidden');
     const header = screen.getByTestId('kiosk-header');
     expect(header.style.position).toBe('fixed');
-    expect(header.style.background).toContain('rgba(0, 0, 0, 0.8)');
+    expect(header.style.background).toBe('');   // v245: no top scrim
+    expect(header.style.boxShadow).toBe('');
     expect(header.style.padding).toBe('20px 60px 20px 44px');
     expect((header.querySelector('img') as HTMLImageElement).style.height).toBe('64px');
     expect(screen.getByRole('button', { name: 'Account' }).style.width).toBe('48px');
@@ -102,7 +103,7 @@ describe('web kiosk home (>=1024px)', () => {
     const focusable = container.querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"]), [role="button"], input, select, textarea');
     // v215 C2: search is the hero pill after the header (logo + avatar only); the round header button is gone.
     expect(container.querySelector('[data-testid="kiosk-header"] button[aria-label="Search"]')).toBeNull();
-    expect([...focusable].filter(e => !e.closest('[hidden]')).map(e => e.getAttribute('aria-label') || e.textContent)).toEqual(['Movie 0', 'Account', 'Open menu']);   // v243 A1
+    expect([...focusable].filter(e => !e.closest('[hidden],[inert]')).map(e => e.getAttribute('aria-label') || e.textContent)).toEqual(['Movie 0', 'Account', 'Open menu']);   // v243 A1
     const hero = container.querySelector('[data-hero-display-only]') as HTMLElement;
     // The backdrop, plot and genres open nothing; a drag doesn't swipe.
     fireEvent.click(hero);
