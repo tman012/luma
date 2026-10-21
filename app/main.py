@@ -21735,7 +21735,8 @@ def _watchlist_rail_poster(tmdb_id):
 
 from app import hero_source as _hero_source  # noqa: E402  v237: Settings > Home screen hero
 from app import paths as _paths_v237  # noqa: E402
-_hero_source.init(settings=settings, get_plex=get_plex_for_request, get_current_user=_get_current_user,
+_hero_source.init(settings=settings, get_plex=lambda: plex_service,   # v238: no request context in the rebuild thread
+                  get_current_user=_get_current_user,
                   tmdb_details=lambda tid: tmdb.get_movie_details(tid),
                   cache_dir=_paths_v237.cache_dir, sections=lambda p: __import__('app.home_rails', fromlist=['_sections'])._sections(p),
                   clear_hero=lambda: _hero_result_cache.clear())

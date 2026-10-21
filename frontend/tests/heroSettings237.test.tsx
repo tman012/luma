@@ -27,6 +27,7 @@ describe('v237 Settings > Home screen > Hero source and count', () => {
     expect([...sel.options].map(o => o.textContent)).toEqual(['Recently added', 'Most popular']);
     const n = screen.getByTestId('hero-count') as HTMLInputElement;
     expect(n.value).toBe('10'); expect(n.min).toBe('5'); expect(n.max).toBe('30');
+    expect(n.className).not.toContain('font-mono'); expect(n.style.fontFamily).not.toBe('');   // v238: UI font
     expect(screen.getByTestId('hero-settings').textContent).toBe('HeroRecently addedMost popularNumber of movies');
   });
 

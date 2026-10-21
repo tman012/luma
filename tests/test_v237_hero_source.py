@@ -152,3 +152,24 @@ def test_hero_content_uses_the_popular_ranking(monkeypatch, tmp_path):
     movies, boost = m._build_hero_movies()
     m._hero_result_cache.clear()
     assert [x.get('title') for x in movies][:2] == ['C', 'A'] and boost is False
+
+
+def test_v238_build_runs_outside_a_request_with_the_global_plex(monkeypatch, tmp_path):
+    """The daily rebuild runs in a thread with no request context: main wires the global plex_service."""
+    import flask
+    import app.main as m
+    plex = FakePlex()
+    monkeypatch.setattr(m, 'plex_service', plex)
+    monkeypatch.setattr(m, 'get_plex_for_request', lambda: (_ for _ in ()).throw(RuntimeError('request only')))
+    monkeypatch.setitem(hs._cfg, 'cache_dir', lambda: tmp_path)
+    monkeypatch.setitem(hs._cfg, 'tmdb_details', lambda t: {11: {'popularity': 1}, 22: {'popularity': 9}, 33: {'popularity': 5}}[t])
+    # main's own get_plex, re-installed (an earlier test's init may have replaced _cfg)
+    import importlib, re
+    src = open(m.__file__).read()
+    assert re.search(r"_hero_source\.init\(settings=settings, get_plex=lambda: plex_service", src)
+    monkeypatch.setitem(hs._cfg, 'get_plex', lambda: m.plex_service)
+    assert not flask.has_request_context()
+    import threading
+    out = {}
+    t = threading.Thread(target=lambda: out.setdefault('r', hs.build('1'))); t.start(); t.join()
+    assert [x['rating_key'] for x in out['r']] == ['2', '3', '1']

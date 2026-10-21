@@ -6,6 +6,7 @@ import { cn } from '@/utils/cn';
 import { INPUT_CLASS } from '@/pages/settings/components/legacyTokens';
 import { NoticeToast } from '@/components/start/SetupToast';
 import { SAVE_FAILED } from '@/utils/messages';
+import { FONT } from '@/components/start/StartUI';
 
 export type HeroSource = 'newest' | 'popular';
 export interface HeroSettings { source: HeroSource; section_id: string; limit: number; libraries: { id: string; title: string }[] }
@@ -64,7 +65,7 @@ export function HeroSettingsRows() {
       <div className="flex flex-col gap-1.5">
         <label htmlFor="hero-count" className="text-[14px] font-medium text-white/60">Number of movies</label>
         <input id="hero-count" data-testid="hero-count" type="number" min={HERO_MIN} max={HERO_MAX} step={1}
-          className={cn(INPUT_CLASS, 'font-mono')} value={count}
+          className={INPUT_CLASS} style={{ fontFamily: FONT }} value={count}
           onChange={e => setCount(e.target.value)} onBlur={commitCount}
           onKeyDown={e => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur(); }} />
       </div>
