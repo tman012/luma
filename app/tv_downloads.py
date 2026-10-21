@@ -45,6 +45,10 @@ INTERVAL_S = 60
 JOB = 'tv_import'
 NOT_WRITABLE = 'library folder not writable'
 NO_SHOW = 'no show in the library'
+NO_EPISODES = 'no episodes of this show in the download'
+#: bumped when episode matching learns a new kind of name: a torrent refused NO_EPISODES under an older
+#: matcher is looked at once more (daily: date-named releases refused before air-date matching).
+MATCHER = 2
 _DONE = ('imported', 'refused')
 _lock = threading.Lock()
 
@@ -149,6 +153,14 @@ def _series_for(name: str) -> Optional[Dict[str, Any]]:
 
 def _episodes(sid: int, name: str, rel_path: str) -> Tuple[Optional[int], List[int]]:
     r = tv_release.parse_file(os.path.basename(name), rel_path)
+    if r.season is None and not r.episodes and not r.air_date:
+        for part in reversed([p for p in (rel_path or '').replace('\\', '/').split('/') if p][:-1]):
+            pr = tv_release.parse(part)                   # a daily file inside a dated release folder
+            if pr.air_date:
+                r = pr
+                break
+    if r.season is None and r.air_date and not r.episodes:
+        return _daily_episodes(sid, r.air_date) if _is_daily(sid) else (None, [])          # daily shows (Sonarr's daily type): match by air date
     if r.season is None or not r.episodes:
         return None, []
     with tv_store.connect() as conn:
@@ -156,6 +168,24 @@ def _episodes(sid: int, name: str, rel_path: str) -> Tuple[Optional[int], List[i
             'SELECT episode_number FROM episodes WHERE series_id = ? AND season_number = ?', (sid, r.season))}
     eps = [e for e in r.episodes if e in have]
     return (r.season, eps) if eps and len(eps) == len(r.episodes) else (None, [])
+
+
+def _is_daily(sid: Optional[int]) -> bool:
+    with tv_store.connect() as conn:
+        r = conn.execute('SELECT series_type FROM series WHERE id = ?', (sid,)).fetchone()
+    return bool(r) and r['series_type'] == 'daily'
+
+
+def _daily_episodes(sid: int, air_date: str) -> Tuple[Optional[int], List[int]]:
+    """The episode(s) of *sid* that aired on *air_date* (tv.db air_date, exact). Same-day episodes in
+    one season are all matched; none, or the date spread over seasons, matches nothing."""
+    with tv_store.connect() as conn:
+        rows = conn.execute('SELECT season_number, episode_number FROM episodes WHERE series_id = ? AND air_date = ?'
+                            ' ORDER BY season_number, episode_number', (sid, air_date)).fetchall()
+    seasons = {x['season_number'] for x in rows}
+    if len(seasons) != 1:
+        return None, []
+    return rows[0]['season_number'], [x['episode_number'] for x in rows]
 
 
 def _show_folder(s: Dict[str, Any]) -> str:
@@ -215,7 +245,7 @@ def import_torrent(t: Dict[str, Any], data: Dict[str, Any], now: float,
         if eps:
             plan.append((f, season, eps))
     if not plan:
-        raise mover.Refused('no episodes of this show in the download')
+        raise mover.Refused(NO_EPISODES)
     folder = _show_folder(s)
     owner = mover._owner_of(lib_root)
     mode = 'hardlink' if data.get('transfer') == 'hardlink' else 'copy'
@@ -504,7 +534,10 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
                 if not mover._HASH_RE.match(h):
                     continue
                 st = status(h) or {}
-                if st.get('state') in _DONE:
+                if st.get('state') in _DONE and not (st.get('state') == 'refused' and st.get('error') == NO_EPISODES
+                                                     and int(st.get('matcher') or 1) < MATCHER
+                                                     and tv_release.parse(str(t.get('name') or '')).kind == 'daily'
+                                                     and _is_daily((_series_for(str(t.get('name') or '')) or {}).get('id'))):
                     continue
                 if st.get('state') == 'waiting' and float(st.get('next_try') or 0) > now:
                     continue                                  # hotfix: an OSError backoff is running
@@ -538,7 +571,7 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
                     _save(h, state='failed', error=mover.INSUFFICIENT_SPACE, at=now, finished=now, name=t.get('name'),
                           space={'path': e.path, 'need': e.need, 'free': mover._free_or_none(e.path)})
                 except mover.Refused as e:
-                    _save(h, state='refused', error=str(e), at=now, name=t.get('name'))
+                    _save(h, state='refused', error=str(e), at=now, name=t.get('name'), matcher=MATCHER)
                 except mover.Pending as e:
                     _save(h, state='waiting', error=str(e), at=now, name=t.get('name'))
                 except OSError as e:

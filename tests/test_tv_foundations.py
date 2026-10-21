@@ -395,7 +395,7 @@ def db(tmp_path):
 
 
 def test_schema_is_created_with_wal_and_0600(db):
-    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == len(tv_store.MIGRATIONS) == 10
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == len(tv_store.MIGRATIONS) == 11
     with tv_store.connect() as conn:
         assert conn.execute('PRAGMA journal_mode').fetchone()[0] == 'wal'
         names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -469,7 +469,7 @@ def test_a_version_1_file_migrates_through_every_version(db):
     conn.execute('PRAGMA user_version = 1')
     conn.commit()
     conn.close()
-    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 10       # 1 -> 2 -> ... -> 10, every step
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 11       # 1 -> 2 -> ... -> 11, every step
     with tv_store.connect() as conn:
         cols = lambda t: {r[1] for r in conn.execute(f'PRAGMA table_info({t})')}            # noqa: E731
         assert {'state', 'parsed'} <= cols('episode_files')                                 # v2

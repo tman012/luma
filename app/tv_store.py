@@ -312,10 +312,35 @@ def repair_v9_labels(conn: sqlite3.Connection, today: Optional[str] = None) -> i
     return fixed
 
 
+# v220 (Taylor via PM): date-named shows are Daily (Sonarr's daily series type): WWE Raw and Judy Justice,
+# and any show with a grab whose release is named by its air date (YYYY MM DD / YYYY.MM.DD / YYYY-MM-DD,
+# no SxxEyy). Only 'standard' shows change; the type stays editable. Safe to run again.
+SCHEMA_V11 = "UPDATE series SET series_type = series_type WHERE 0;"
+DAILY_TITLES = ('wwe monday night raw', 'wwe raw', 'judy justice')
+
+
+def daily_types(conn: sqlite3.Connection) -> List[int]:
+    if 'series_type' not in _columns(conn, 'series'):
+        return []
+    from app import tv_match, tv_release
+    ids = {r[0] for r in conn.execute('SELECT id, title FROM series') if tv_match.normalize(r[1] or '') in
+           {tv_match.normalize(t) for t in DAILY_TITLES}}
+    for r in conn.execute('SELECT DISTINCT series_id, release_title FROM grabs WHERE series_id IS NOT NULL'):
+        if r[1] and tv_release.parse(r[1]).kind == 'daily':
+            ids.add(r[0])
+    out = []
+    for sid in sorted(ids):
+        if conn.execute("UPDATE series SET series_type = 'daily' WHERE id = ? AND series_type = 'standard'", (sid,)).rowcount:
+            out.append(sid)
+    if out:
+        logger.info('tv.db v11: %d show(s) set to Daily: %s', len(out), out)
+    return out
+
+
 # MIGRATIONS[n] takes user_version n to n + 1.
 MIGRATIONS: List[Any] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6,
                          (SCHEMA_V7, monitor_defaults), SCHEMA_V8, (SCHEMA_V9, monitor_labels),
-                         (SCHEMA_V10, repair_v9_labels)]
+                         (SCHEMA_V10, repair_v9_labels), (SCHEMA_V11, daily_types)]
 # A step is SQL, or (SQL, fn(conn)) run in the same transaction after it.
 SCHEMA_VERSION = len(MIGRATIONS)
 
