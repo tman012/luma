@@ -17,7 +17,7 @@ def test_rank_recent_first_by_popularity_then_the_rest():
         {'title': 'Just Too Old', 'popularity': 999, 'release_date': '2024-10-20'},
         {'title': 'Old Mid', 'popularity': 100, 'release_date': '1999-01-01'},
     ]
-    assert [r['title'] for r in hs.rank(rows, today)] == ['New Big', 'New Small', 'Just Too Old', 'Old Hit', 'Old Mid']
+    assert [r['title'] for r in hs.fallback(rows, today)] == ['New Big', 'New Small', 'Just Too Old', 'Old Hit', 'Old Mid']
 
 
 def test_clamp_limit():
@@ -43,15 +43,18 @@ class FakeSettings:
 
 class FakePlex:
     is_configured = True
-    def __init__(self): self.calls = []
+    def __init__(self):
+        self.calls = []
+        self.movies = [
+            {'rating_key': '1', 'title': 'A', 'tmdb_id': 11, 'artPath': '/a', 'added_at': 1000},
+            {'rating_key': '2', 'title': 'B', 'tmdb_id': 22, 'artPath': '/b', 'added_at': 1001},
+            {'rating_key': '3', 'title': 'C', 'tmdb_id': 33, 'artPath': '/c', 'added_at': 1002},
+            {'rating_key': '4', 'title': 'NoTmdb', 'tmdb_id': None, 'artPath': '/d', 'added_at': 1003},
+        ]
     def get_all_movies(self, sid, sort='', limit=50, offset=0):
-        self.calls.append(('all', sid))
-        return {'movies': [
-            {'rating_key': '1', 'title': 'A', 'tmdb_id': 11, 'artPath': '/a'},
-            {'rating_key': '2', 'title': 'B', 'tmdb_id': 22, 'artPath': '/b'},
-            {'rating_key': '3', 'title': 'C', 'tmdb_id': 33, 'artPath': '/c'},
-            {'rating_key': '4', 'title': 'NoTmdb', 'tmdb_id': None, 'artPath': '/d'},
-        ]}
+        self.calls.append(('all', sid, limit))
+        ms = sorted(self.movies, key=lambda m: -m['added_at']) if sort.startswith('addedAt') else list(self.movies)
+        return {'movies': ms[:limit]}
 
 
 @pytest.fixture
@@ -60,7 +63,7 @@ def env(tmp_path):
     tm = {11: {'popularity': 10, 'release_date': '2001-01-01'}, 22: {'popularity': 3, 'release_date': date.today().isoformat()},
           33: {'popularity': 80, 'release_date': '2003-01-01'}}
     user = {'u': {'id': 1, 'is_admin': True}}
-    hs._inflight.clear()
+    hs._inflight.clear(); hs._checked.clear()
     hs.init(settings=s, get_plex=lambda: plex, get_current_user=lambda: user['u'],
             tmdb_details=lambda t: looked.append(t) or tm[t], cache_dir=lambda: tmp_path,
             sections=lambda p: [{'id': '1', 'title': 'Movies', 'type': 'movie'}, {'id': '2', 'title': '4K', 'type': 'movie'},
@@ -89,7 +92,7 @@ def test_cache_refreshes_once_a_day_never_per_request(env):
     for _ in range(5):
         assert hs.ranked_keys('1', now=now + 3600, spawn=spawn) == ['2', '3', '1']
     assert len(spawned) == 1                                       # fresh: no refresh
-    assert len(env['plex'].calls) == 1
+    assert [c[2] for c in env['plex'].calls] == [hs.POOL_MAX, 1]   # one rebuild + one 15-min check
     hs.ranked_keys('1', now=now + hs.DAY_S + 1, spawn=spawn)
     hs.ranked_keys('1', now=now + hs.DAY_S + 2, spawn=spawn)
     assert len(spawned) == 2                                       # a day later: one refresh
@@ -173,3 +176,72 @@ def test_v238_build_runs_outside_a_request_with_the_global_plex(monkeypatch, tmp
     out = {}
     t = threading.Thread(target=lambda: out.setdefault('r', hs.build('1'))); t.start(); t.join()
     assert [x['rating_key'] for x in out['r']] == ['2', '3', '1']
+
+
+# --- v239: just-added popular first, obscure out, fallback fills ---------------
+NOW = 1_800_000_000.0
+DAY = 86400
+
+
+def _row(k, pop, votes, added_days_ago, released):
+    return {'rating_key': k, 'title': k, 'popularity': pop, 'vote_count': votes,
+            'added_at': NOW - added_days_ago * DAY, 'release_date': released}
+
+
+def test_v239_just_added_blockbuster_first_obscure_dropped_and_fill():
+    rows = [
+        _row('Blockbuster', 300, 9000, 3, '2026-07-01'),   # just added, famous
+        _row('Cult Hit', 12, 450, 20, '1994-01-01'),        # just added, enough votes
+        _row('Obscure', 2, 15, 1, '2026-09-01'),            # just added, nobody knows it: not fresh
+        _row('Old Popular', 500, 20000, 400, '2010-01-01'),  # added long ago
+        _row('Recent Release', 80, 1000, 300, '2025-06-01'),
+    ]
+    order = [r['rating_key'] for r in hs.rank(rows, today=date(2026, 10, 21), now=NOW)]
+    assert order[:2] == ['Blockbuster', 'Cult Hit']
+    # fallback fill: released in the last 2 years by popularity, then the rest by popularity
+    assert order[2:] == ['Recent Release', 'Obscure', 'Old Popular']
+    assert len(order) == len(set(order))
+
+
+def test_v239_popularity_floor_alone_qualifies():
+    rows = [_row('Trending', hs.POP_FLOOR + 1, 10, 5, '2026-01-01'), _row('Quiet', hs.POP_FLOOR, 199, 5, '2026-01-01')]
+    assert hs.notable(rows[0]) and not hs.notable(rows[1])
+
+
+def test_v239_build_uses_added_at_and_vote_count(env, monkeypatch):
+    now = time.time()
+    env['plex'].movies[0]['added_at'] = int(now - 2 * DAY)        # A: just added, famous
+    monkeypatch.setitem(hs._cfg, 'tmdb_details', lambda t: {11: {'popularity': 1, 'vote_count': 5000, 'release_date': '1990-01-01'},
+                                                         22: {'popularity': 3, 'vote_count': 1, 'release_date': '1990-01-01'},
+                                                         33: {'popularity': 80, 'vote_count': 1, 'release_date': '1990-01-01'}}[t])
+    assert [m['rating_key'] for m in hs.build('1')] == ['1', '3', '2']
+
+
+def test_v239_new_addition_triggers_one_rebuild_at_most_every_15_minutes(env):
+    hs._checked.clear()
+    spawned = []
+    hs.ranked_keys('1', spawn=spawned.append); spawned[0]()     # first build
+    t0 = time.time()
+    hs._checked['1'] = t0
+    env['plex'].movies.append({'rating_key': '5', 'title': 'New', 'tmdb_id': 11, 'artPath': '/e', 'added_at': 5000})
+    hs.ranked_keys('1', now=t0 + 60, spawn=spawned.append)       # within 15 min: no Plex check
+    assert len(spawned) == 1
+    n_calls = len(env['plex'].calls)
+    hs.ranked_keys('1', now=t0 + hs.CHECK_S + 1, spawn=spawned.append)
+    assert len(spawned) == 2                                       # newest addedAt changed: rebuild
+    assert len(env['plex'].calls) == n_calls + 1 and env['plex'].calls[-1][2] == 1
+    hs.ranked_keys('1', now=t0 + hs.CHECK_S + 5, spawn=spawned.append)
+    assert len(spawned) == 2 and len(env['plex'].calls) == n_calls + 1   # in flight / within 15 min
+    spawned[1]()
+    hs.ranked_keys('1', now=t0 + 2 * hs.CHECK_S + 2, spawn=spawned.append)
+    assert len(spawned) == 2                                       # unchanged after rebuild: none
+
+
+def test_v239_requests_never_look_up_tmdb(env):
+    hs._checked.clear()
+    spawned = []
+    hs.ranked_keys('1', spawn=spawned.append); spawned[0]()
+    env['looked'].clear()
+    for i in range(20):
+        hs.ranked_keys('1', now=time.time() + i * hs.CHECK_S, spawn=lambda f: None)
+    assert env['looked'] == []

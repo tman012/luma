@@ -1,5 +1,8 @@
 """v237: Settings > Home screen hero source and count.
 
+v239 'Most popular': popular movies just added (last 60 days, not obscure)
+first, then the library by release recency and popularity.
+
 Sources: 'newest' (the current hero, by date added) or 'popular' (one chosen
 Plex movie library ranked by TMDb popularity, recent releases first).
 Reads only: Plex library listings and TMDb movie lookups. The ranking is cached
@@ -27,10 +30,26 @@ LIMIT_MIN, LIMIT_MAX, LIMIT_DEFAULT = 5, 30, 10
 DAY_S = 24 * 3600
 RECENT_YEARS = 2
 POOL_MAX = 2000          # movies read from the library per refresh
+FRESH_DAYS = 60          # v239: 'just added' window (Plex addedAt)
+MIN_VOTES = 200          # v239: a just-added movie counts when TMDb has >= this many votes ...
+POP_FLOOR = 40.0         # ... or its TMDb popularity is above this
+CHECK_S = 15 * 60        # v239: at most one newest-addedAt check per library per 15 minutes
 
 _cfg: Dict[str, Any] = {}
 _lock = threading.Lock()
 _inflight: set = set()
+_checked: Dict[str, float] = {}   # v239: last newest-addedAt check per library
+
+
+def _newest_added(section_id: str) -> Optional[int]:
+    """The library's newest addedAt (one Plex listing of one item); None if Plex doesn't answer."""
+    try:
+        res = _cfg['get_plex']().get_all_movies(int(section_id), sort='addedAt:desc', limit=1) or {}
+        ms = res.get('movies') or []
+        return int(ms[0].get('added_at') or ms[0].get('addedAt') or 0) if ms else 0
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"Hero newest check failed: {e}")
+        return None
 
 
 def init(*, settings, get_plex: Callable[[], Any], get_current_user: Callable[[], Optional[dict]],
@@ -67,7 +86,7 @@ def _release_year(m: dict) -> Optional[int]:
     return m.get('year')
 
 
-def rank(movies: List[dict], today: Optional[date] = None) -> List[dict]:
+def fallback(movies: List[dict], today: Optional[date] = None) -> List[dict]:
     """Released in the last RECENT_YEARS years first, each group by TMDb popularity."""
     today = today or date.today()
     cutoff = today.year - RECENT_YEARS
@@ -83,6 +102,22 @@ def rank(movies: List[dict], today: Optional[date] = None) -> List[dict]:
             recent = (_release_year(m) or 0) > cutoff
         return (0 if recent else 1, -(m.get('popularity') or 0), (m.get('title') or '').lower())
     return sorted(movies, key=key)
+
+
+def notable(m: dict) -> bool:
+    return (m.get('vote_count') or 0) >= MIN_VOTES or (m.get('popularity') or 0) > POP_FLOOR
+
+
+def rank(movies: List[dict], today: Optional[date] = None, now: Optional[float] = None) -> List[dict]:
+    """v239: notable movies added in the last FRESH_DAYS days by popularity, then
+    everything else in the fallback order. One list, no duplicates: the hero
+    takes its first N, so the fallback fills in when few qualify."""
+    now = now or time.time()
+    cutoff = now - FRESH_DAYS * DAY_S
+    fresh = [m for m in movies if (m.get('added_at') or 0) >= cutoff and notable(m)]
+    fresh.sort(key=lambda m: (-(m.get('popularity') or 0), (m.get('title') or '').lower()))
+    seen = {id(m) for m in fresh}
+    return fresh + fallback([m for m in movies if id(m) not in seen], today)
 
 
 def _path(section_id: str) -> Path:
@@ -106,14 +141,21 @@ def build(section_id: str) -> List[dict]:
         d = _cfg['tmdb_details'](int(m['tmdb_id'])) or {}
         return {'rating_key': str(m.get('ratingKey') or m.get('rating_key') or ''), 'title': m.get('title'),
                 'year': m.get('year'), 'tmdb_id': m['tmdb_id'],
-                'popularity': float(d.get('popularity') or 0), 'release_date': d.get('release_date') or ''}
+                'popularity': float(d.get('popularity') or 0), 'vote_count': int(d.get('vote_count') or 0),
+                'release_date': d.get('release_date') or '', 'added_at': int(m.get('added_at') or m.get('addedAt') or 0)}
     with ThreadPoolExecutor(max_workers=6) as pool:
         rows = list(pool.map(look, items))
     ranked = rank(rows)
+    seen, uniq = set(), []
+    for r in ranked:   # one entry per Plex item
+        if r['rating_key'] not in seen:
+            seen.add(r['rating_key']); uniq.append(r)
+    ranked = uniq
+    newest = max([int(m.get('added_at') or m.get('addedAt') or 0) for m in (res.get('movies') or [])] or [0])
     p = _path(section_id)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix('.tmp')
-    tmp.write_text(json.dumps({'ts': time.time(), 'section_id': section_id, 'movies': ranked}))
+    tmp.write_text(json.dumps({'ts': time.time(), 'section_id': section_id, 'newest_added': newest, 'movies': ranked}))
     tmp.replace(p)
     _cfg['clear_hero']()
     return ranked
@@ -142,7 +184,12 @@ def ranked_keys(section_id: str, now: Optional[float] = None,
     start one background rebuild (at most one per section at a time)."""
     now = now or time.time()
     data = load(section_id)
-    if not data or now - float(data.get('ts') or 0) >= DAY_S:
+    stale = not data or now - float(data.get('ts') or 0) >= DAY_S
+    if not stale and now - _checked.get(section_id, 0) >= CHECK_S:
+        _checked[section_id] = now   # v239: one cheap Plex listing (newest item) per 15 minutes
+        newest = _newest_added(section_id)
+        stale = newest is not None and newest != int(data.get('newest_added') or 0)
+    if stale:
         with _lock:
             go = section_id not in _inflight
             if go:
