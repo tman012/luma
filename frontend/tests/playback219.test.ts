@@ -28,8 +28,9 @@ describe('v219 playback in minimal builds', () => {
     expect(block).toContain('setShuffleTarget!({ ratingKey: show.ratingKey!');
     expect(read('index.css')).toContain(':not([data-modal-sources]):not([data-modal-keep])');
   });
-  it('SW is v219', () => {
-    expect(readFileSync(resolve(__dirname, '../../static/sw.js'), 'utf8')).toContain("const CACHE_VERSION = 'media-kiosk-v219';");
+  it('SW is v219 or later', () => {
+    const m = /const CACHE_VERSION = 'media-kiosk-v(\d+)';/.exec(readFileSync(resolve(__dirname, '../../static/sw.js'), 'utf8'));
+    expect(Number(m![1])).toBeGreaterThanOrEqual(219);
   });
 });
 

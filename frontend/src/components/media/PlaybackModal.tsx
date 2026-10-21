@@ -11,6 +11,7 @@
  * Centered bounce dialog — not a bottom sheet.
  */
 
+import { useRoomFirst } from '@/components/rooms/PlayIn';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -216,9 +217,10 @@ export function PlaybackModal({
         setRoomsLoading(false);
 
         // Only auto-select if there is exactly one room with one device
-        const singleRoom = data.rooms.length === 1 ? data.rooms[0] : undefined;
-        if (singleRoom && step.type === 'room' && roomHasAvailableDevice(singleRoom)) {
-          handleRoomSelect(singleRoom);
+        // v225 room first (Option A): one usable room plays at once with the 'Playing in' toast; several open
+        // 'Play in' / 'Shuffle in' with the default room preselected; none shows prod's room step.
+        if (step.type === 'room') {
+          roomFirst.start(data.rooms.filter(roomHasAvailableDevice), data.defaultPlaybackTarget?.roomId);
         }
       }
     });
@@ -251,6 +253,9 @@ export function PlaybackModal({
       setStep({ type: 'device', room });
     }
   }, [activeRatingKey, shuffle]);
+  const roomSelectRef = useRef(handleRoomSelect);
+  roomSelectRef.current = handleRoomSelect;
+  const roomFirst = useRoomFirst<Room>({ action: shuffle ? 'Shuffle' : 'Play', select: r => { void roomSelectRef.current(r); }, onCancel: () => onClose() });
 
   // --- Device selection ---
   const handleDeviceSelect = useCallback(async (room: Room, device: Device) => {
@@ -1344,6 +1349,7 @@ export function PlaybackModal({
           to { transform: rotate(360deg); }
         }
       `}</style>
+      {roomFirst.ui}
     </div>,
     document.body,
   );

@@ -1,10 +1,11 @@
 /** v224 where Play (movie popup) and Shuffle (TV show popup) play: one room plays at once with a
  * 'Playing in <Room> · Change' toast; several open the 'Play in' picker with the default preselected.
  * No play buttons here; the popups call choosePlayRoom and render these. */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { FONT } from '@/components/start/StartUI';
 import type { Room } from './roomsApi';
-import { badge } from './roomsApi';
+import { badge, loadRooms } from './roomsApi';
 
 export type PlayChoice = { mode: 'none' } | { mode: 'auto'; room: Room } | { mode: 'pick'; rooms: Room[]; preselect: string };
 
@@ -44,7 +45,7 @@ export function PlayInPicker({ rooms, preselect, action = 'Play', onPick, onCanc
   const room = rooms.find(r => r.id === sel);
   return (
     <div data-testid="play-in-scrim" onPointerDown={e => { if (e.target === e.currentTarget) onCancel(); }}
-      style={{ position: 'fixed', inset: 0, zIndex: 1300, background: 'rgba(10,8,24,.6)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+      style={{ position: 'fixed', inset: 0, zIndex: 10010, background: 'rgba(10,8,24,.6)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT, padding: 16 }}>
       <div role="dialog" aria-modal="true" aria-label={`${action} in`} data-testid="play-in"
         style={{ width: 360, maxWidth: '100%', boxSizing: 'border-box', padding: 16, borderRadius: 16, background: 'rgba(21,16,42,0.96)',
@@ -87,7 +88,7 @@ export function PlayingToast({ room, onChange, onDone, ms = 6000 }: { room: Room
   useEffect(() => { if (!onDone) return; const t = window.setTimeout(onDone, ms); return () => window.clearTimeout(t); }, [onDone, ms]);
   return (
     <div role="status" data-testid="playing-toast"
-      style={{ position: 'fixed', top: 'calc(env(safe-area-inset-top, 0px) + 12px)', left: '50%', transform: 'translateX(-50%)', zIndex: 1300,
+      style={{ position: 'fixed', top: 'calc(env(safe-area-inset-top, 0px) + 12px)', left: '50%', transform: 'translateX(-50%)', zIndex: 10010,
         width: 'min(420px, calc(100vw - 24px))', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: 10, padding: '6px 6px 6px 14px',
         borderRadius: 12, background: 'rgba(21,16,42,0.96)', border: '1px solid rgba(255,255,255,0.1)', color: W95, fontFamily: FONT, fontSize: 13,
         boxShadow: '0 12px 32px rgba(0,0,0,.4)' }}>
@@ -98,4 +99,46 @@ export function PlayingToast({ room, onChange, onDone, ms = 6000 }: { room: Room
           color: '#93c5fd', fontSize: 13, fontWeight: 600, fontFamily: FONT, cursor: 'pointer' }}>Change</button>
     </div>
   );
+}
+
+/** v225 the playback popups (prod's PlaybackModal / MobilePlaybackSheet) start room first: with their usable rooms
+ * (a device with a host), one room is selected at once and the toast shows; several open the picker with the
+ * default room preselected (names, players and online state from /api/rooms when it answers); none returns false
+ * so prod's own room step shows. The popups keep everything after the room (device, resume, play). */
+export function useRoomFirst<T extends { id: string; name: string }>({ action, select, onCancel }: {
+  action: 'Play' | 'Shuffle'; select: (room: T) => void; onCancel: () => void;
+}): { start: (usable: T[], defaultId?: string) => boolean; ui: ReactNode } {
+  const [pick, setPick] = useState<{ rooms: Room[]; preselect: string; byId: Map<string, T>; fromToast: boolean } | null>(null);
+  const [toast, setToast] = useState<Room | null>(null);
+  const [all, setAll] = useState<T[]>([]);
+  const [def, setDef] = useState('');
+  const view = (rooms: T[], known: Room[]): Room[] => rooms.map(r => known.find(k => k.id === r.id) || { id: r.id, name: r.name, default: false, harmony_hub: '', player: null });
+  const openPicker = useCallback((rooms: T[], defaultId: string, fromToast: boolean) => {
+    const byId = new Map(rooms.map(r => [r.id, r]));
+    const preselect = rooms.find(r => r.id === defaultId)?.id || rooms[0]!.id;
+    setPick({ rooms: view(rooms, []), preselect, byId, fromToast });
+    void loadRooms().then(r => { if (r.ok) setPick(p => (p && p.byId === byId ? { ...p, rooms: view(rooms, r.data.rooms) } : p)); });
+  }, []);
+  const start = useCallback((usable: T[], defaultId?: string) => {
+    setAll(usable); setDef(defaultId || '');
+    const c = choosePlayRoom(usable.map(r => ({ id: r.id, name: r.name, default: r.id === defaultId, harmony_hub: '', player: {} as Room['player'] })), defaultId);
+    if (c.mode === 'none') return false;
+    if (c.mode === 'auto') {
+      select(usable[0]!);
+      setToast({ id: usable[0]!.id, name: usable[0]!.name, default: true, harmony_hub: '', player: null });
+      return true;
+    }
+    openPicker(usable, c.preselect, false);
+    return true;
+  }, [select, openPicker]);
+  const ui = (toast || pick) && typeof document !== 'undefined' && createPortal(
+    <>
+      {toast && !pick && <PlayingToast room={toast} onDone={() => setToast(null)}
+        onChange={() => { setToast(null); openPicker(all, def || toast.id, true); }} />}
+      {pick && <PlayInPicker rooms={pick.rooms} preselect={pick.preselect} action={action}
+        onCancel={() => { const t = pick.fromToast; setPick(null); if (!t) onCancel(); }}
+        onPick={r => { const room = pick.byId.get(r.id); setPick(null); if (room) { select(room); setToast(r); } }} />}
+    </>, document.body,
+  );
+  return { start, ui: ui || null };
 }
