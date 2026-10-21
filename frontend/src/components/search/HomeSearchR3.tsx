@@ -389,13 +389,13 @@ export const r3Css = `
 .r3-primary{background:var(--color-accent, #3b82f6);border-color:var(--color-accent, #3b82f6)}
 .r3-grid{flex:1;min-width:0;display:grid;grid-template-columns:repeat(auto-fill, var(--r3-po));gap:20px 16px;align-items:start}
 .r3-cardw{position:relative;min-width:0;width:var(--r3-po);overflow:hidden}
-/* v246 D3: chips, then a 7-column grid (160px tiles at 1440, narrower on tablet) */
-.d3{margin:0 calc(40px - var(--r3-pad))}
+/* v247 D3: chips and grid share one centered container (equal gutters); auto-fill columns fill it */
+.d3{max-width:1600px;margin:0 auto}
 .d3-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 24px}
 .d3-chip{height:36px;padding:0 16px;border-radius:8px;border:1px solid #44474e;background:none;color:#e2e2e9;font:inherit;font-size:14px;cursor:pointer;outline:none}
 .d3-chip[aria-pressed="true"]{background:#3a4458;border-color:#3a4458;color:#d8e2ff}
 .d3-chip:focus-visible{box-shadow:0 0 0 3px rgba(59,130,246,.45)}
-.d3-grid{display:grid;grid-template-columns:repeat(7, minmax(0, 160px));gap:28px clamp(12px, 2.1vw, 30px);align-items:start}
+.d3-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(min(160px, 100%), 1fr));gap:28px clamp(12px, 2.1vw, 30px);align-items:start}
 .d3-grid .r3-cardw{width:100%}
 .d3-grid .r3-ct{font-size:14px;font-weight:400;-webkit-line-clamp:1;line-clamp:1}
 .d3-grid .r3-cm{font-size:12px;color:#c4c6d0}

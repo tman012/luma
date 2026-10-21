@@ -448,8 +448,10 @@ describe('v246 D3: filter chips over a 7-column grid', () => {
     expect(document.querySelector('.r3-badge')).toBeNull();
     expect(screen.getByTestId('r3-grid').textContent).not.toContain('In library');
   });
-  it('7 columns, 160px at 1440 and narrower on tablet; D3 chip styles', () => {
-    expect(r3Css).toContain('.d3-grid{display:grid;grid-template-columns:repeat(7, minmax(0, 160px));gap:28px clamp(12px, 2.1vw, 30px);');
+  it('v247: chips and grid in one centered max-width container; auto-fill columns; D3 chip styles', () => {
+    expect(r3Css).toContain('.d3{max-width:1600px;margin:0 auto}');
+    expect(r3Css).toContain('.d3-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(min(160px, 100%), 1fr));gap:28px clamp(12px, 2.1vw, 30px);');
+    expect(r3Css).not.toContain('repeat(7');
     expect(r3Css).toContain('.d3-grid .r3-cardw{width:100%}');
     expect(r3Css).toMatch(/\.d3-chip\{height:36px;padding:0 16px;border-radius:8px;border:1px solid #44474e;/);
     expect(r3Css).toContain('.d3-chip[aria-pressed="true"]{background:#3a4458;border-color:#3a4458;color:#d8e2ff}');
