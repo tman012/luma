@@ -9,8 +9,6 @@ import { loadProfiles, monitorMissing, type Profile } from './tvCalendarApi';
 import { BulkBar, SeriesList, ShowSheet } from './TvBulk';
 import { FONT } from '@/components/start/StartUI';
 import { usePhone } from './TvCalendar';
-import { MonitorFlag, monitorFlagCss } from './TvMonitorFlag';
-import { setSeriesMonitored } from './tvCalendarApi';
 import { posterUrl } from '@/utils/image';
 import { RATING_ICONS } from '@/utils/ratingIcons';
 import type { Show } from './tvLibraryApi';
@@ -214,8 +212,7 @@ export function TvSeries({ shows, onChanged, onOpen, add }: {
   if (phone) {
     return (
       <div data-testid="tv-series-wrap" data-layout="phone" style={{ display: 'flex', flexDirection: 'column', gap: 12, fontFamily: FONT }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>{add}</div>
-        <PhoneSeriesList shows={sorted} onOpen={onOpen || setSheet} onChanged={() => onChanged?.()} />
+        <PhoneSeriesList shows={sorted} onOpen={onOpen || setSheet} />
         {sheetEl}
       </div>
     );
@@ -390,26 +387,28 @@ const emptyCard: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 500, color: 'rgba(255,255,255,0.7)', fontFamily: FONT,
 };
 
-type PhoneFilter = 'all' | 'missing' | 'continuing';
-const FILTERS: [PhoneFilter, string][] = [['all', 'All'], ['missing', 'Missing'], ['continuing', 'Continuing']];
+/** v226 (Taylor's S1): the phone row's bar is green when every aired episode is downloaded, else blue. */
+export const phoneBarColor = (s: Show) => ((s.aired ?? 0) > 0 && (s.have ?? 0) >= (s.aired ?? 0) ? '#22c55e' : ACCENT);
 
-/** Variant B phone list: filter chips, rows with the state edge, title, "year · n of m", bookmark; an A–Z scrub rail. */
-export function PhoneSeriesList({ shows, onOpen, onChanged }: { shows: Show[]; onOpen: (s: Show) => void; onChanged: () => void }) {
-  const [flips, setFlips] = useState<Record<number, boolean>>({});
-  const [filter, setFilter] = useState<PhoneFilter>('all');
+/** The phone row's 40x60 poster: the show's TMDB poster, else a neutral glass tile. */
+function PhonePoster({ s }: { s: Show }) {
+  const src = posterUrl(s.poster_path, 'w185');
+  const [broken, setBroken] = useState(false);
+  const box: React.CSSProperties = { flex: 'none', width: 40, height: 60, borderRadius: 6, overflow: 'hidden',
+    background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', boxSizing: 'border-box' };
+  return src && !broken ? (
+    <img data-testid="tv-phone-poster" src={src} alt="" loading="lazy" onError={() => setBroken(true)}
+      style={{ ...box, display: 'block', objectFit: 'cover' }} />
+  ) : <span data-testid="tv-phone-poster-empty" aria-hidden="true" style={{ ...box, display: 'block' }} />;
+}
+
+/** v226 (Taylor's S1) phone list: glass card rows with a 40x60 poster, the title, "Year · N of M" and a thin
+ * progress bar; an A–Z scrub rail. No filter chips, no Add series, no per-row monitored button, no state edge. */
+export function PhoneSeriesList({ shows, onOpen }: { shows: Show[]; onOpen: (s: Show) => void; onChanged?: () => void }) {
   const [cur, setCur] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const railRef = useRef<HTMLDivElement | null>(null);
-  const flip = async (id: number, on: boolean) => {
-    setFlips(f => ({ ...f, [id]: on }));
-    try {
-      const r = await setSeriesMonitored(id, on);
-      setFlips(f => ({ ...f, [id]: r.ok ? r.data.monitored : !on }));
-      if (r.ok) onChanged();
-    } catch { setFlips(f => ({ ...f, [id]: !on })); }
-  };
-  const count = (f: PhoneFilter) => (f === 'all' ? shows.length : shows.filter(s => progress(s).state === f).length);
-  const shown = filter === 'all' ? shows : shows.filter(s => progress(s).state === filter);
+  const shown = shows;
   const firstOf = new Map<string, number>();
   shown.forEach(s => { const l = letterOf(s.title); if (!firstOf.has(l)) firstOf.set(l, s.id); });
   const jump = (l: string) => {
@@ -425,33 +424,29 @@ export function PhoneSeriesList({ shows, onOpen, onChanged }: { shows: Show[]; o
     const i = Math.min(LETTERS.length - 1, Math.max(0, Math.floor(((y - r.top) / r.height) * LETTERS.length)));
     jump(LETTERS[i]!);
   };
-  const chip = (on: boolean): React.CSSProperties => ({ flex: 'none', height: 44, padding: '0 10px', borderRadius: 12, fontFamily: FONT, fontSize: 13, fontWeight: 600, cursor: 'pointer',
-    border: '1px solid rgba(255,255,255,0.08)', background: on ? ACCENT : 'rgba(255,255,255,0.06)', color: on ? '#fff' : 'rgba(255,255,255,0.7)' });
   return (
-    <div data-testid="tv-series-phone-wrap" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div data-testid="tv-series-filters" role="group" aria-label="Filter" style={{ display: 'flex', gap: 8, overflowX: 'auto', scrollbarWidth: 'none' }}>
-        {FILTERS.map(([f, label]) => (
-          <button key={f} type="button" className="lp-focus" data-testid={`tv-filter-${f}`} aria-pressed={filter === f} onClick={() => setFilter(f)} style={chip(filter === f)}>
-            {`${label} ${count(f)}`}
-          </button>
-        ))}
-      </div>
-      <div style={{ position: 'relative' }}>
-        <div ref={listRef} data-testid="tv-series-phone" style={{ marginRight: 44, background: 'rgba(255,255,255,0.06)', borderRadius: 12, overflow: 'hidden' }}>
-          <style>{monitorFlagCss}</style>
-          {shown.map((s, i) => {
-            const p = progress(s);
-            const meta = [s.year ? String(s.year) : '', `${Math.min(s.have ?? 0, s.aired ?? 0)} of ${s.aired ?? 0}`].filter(Boolean).join(' · ');
+    <div data-testid="tv-series-phone-wrap" style={{ display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginRight: -6 }}>
+        <div ref={listRef} data-testid="tv-series-phone" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {shown.map(s => {
+            const aired = s.aired ?? 0;
+            const have = Math.min(s.have ?? 0, aired);
+            const meta = [s.year ? String(s.year) : '', `${have} of ${aired}`].filter(Boolean).join(' · ');
+            const fill = aired > 0 ? have / aired : 0;
             return (
-              <div key={s.id} data-testid="tv-phone-row" data-show-id={s.id} data-letter={letterOf(s.title)} onClick={() => onOpen(s)}
-                style={{ display: 'flex', alignItems: 'center', minHeight: 60, padding: '6px 4px 6px 16px', gap: 8, cursor: 'pointer', scrollMarginTop: 8,
-                  boxShadow: `inset 4px 0 0 ${p.color}`, borderTop: i ? '1px solid rgba(255,255,255,0.08)' : 'none' }}>
-                <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span style={{ fontSize: 15, fontWeight: 600, color: 'rgba(255,255,255,0.95)', overflowWrap: 'anywhere' }}>{s.title}</span>
-                  <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>{meta}</span>
-                </span>
-                <span onClick={e => e.stopPropagation()} style={{ minWidth: 44, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <MonitorFlag on={flips[s.id] ?? !!s.monitored} title={s.title} testid="tv-phone-flag" onChange={v => void flip(s.id, v)} />
+              <div key={s.id} data-testid="tv-phone-row" data-show-id={s.id} data-letter={letterOf(s.title)} role="button" tabIndex={0}
+                className="lp-focus" aria-label={s.title} onClick={() => onOpen(s)}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(s); } }}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, minHeight: 76, padding: '8px 10px', boxSizing: 'border-box', borderRadius: 12,
+                  background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer', scrollMarginTop: 8 }}>
+                <PhonePoster s={s} />
+                <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                  <span data-testid="tv-phone-title" style={{ fontSize: 15, fontWeight: 600, color: W95, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.title}</span>
+                  <span data-testid="tv-phone-meta" style={{ fontSize: 12, color: 'rgba(255,255,255,0.65)', marginTop: 3 }}>{meta}</span>
+                  <span data-testid="tv-phone-bar" role="progressbar" aria-label={`${s.title}: ${have} of ${aired}`} aria-valuemin={0} aria-valuemax={aired} aria-valuenow={have}
+                    style={{ display: 'block', height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.12)', marginTop: 7 }}>
+                    <span style={{ display: 'block', height: 3, borderRadius: 2, width: `${Math.round(fill * 1000) / 10}%`, background: phoneBarColor(s) }} />
+                  </span>
                 </span>
               </div>
             );
@@ -460,12 +455,13 @@ export function PhoneSeriesList({ shows, onOpen, onChanged }: { shows: Show[]; o
         {shown.length > 0 && (
           <div ref={railRef} data-testid="tv-phone-rail" role="navigation" aria-label="Jump to letter"
             onTouchStart={e => scrub(e.touches[0]!.clientY)} onTouchMove={e => { e.preventDefault(); scrub(e.touches[0]!.clientY); }}
-            style={{ position: 'absolute', top: 0, right: 0, bottom: 16, width: 44, display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-              alignItems: 'center', touchAction: 'none', userSelect: 'none', maxHeight: 'calc(100vh - 120px)' }}>
+            // sticky in the sheet's scroller: the whole # – Z column fits the visible list and stays while it scrolls
+            style={{ position: 'sticky', top: 8, flex: 'none', width: 28, height: 'calc(100dvh - 260px)', minHeight: 27 * 14, display: 'flex', flexDirection: 'column',
+              justifyContent: 'space-between', alignItems: 'center', touchAction: 'none', userSelect: 'none' }}>
             {LETTERS.map(l => (
               <button key={l} type="button" data-testid="tv-phone-rail-letter" data-letter={l} aria-label={l} onClick={() => jump(l)}
-                style={{ flex: 1, minHeight: 0, width: 44, padding: 0, border: 'none', background: 'none', fontFamily: FONT, fontSize: 12, fontWeight: 600, lineHeight: 1,
-                  color: cur === l ? ACCENT : 'rgba(255,255,255,0.55)', cursor: 'pointer' }}>{l}</button>
+                style={{ flex: 1, minHeight: 0, width: 28, padding: 0, border: 'none', background: 'none', fontFamily: FONT, fontSize: 12, fontWeight: 600, lineHeight: 1,
+                  color: cur === l ? ACCENT : 'rgba(255,255,255,0.7)', cursor: 'pointer' }}>{l}</button>
             ))}
           </div>
         )}

@@ -134,7 +134,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
   const searching = q.trim().length >= SEARCH_MIN;
   const calendarTop = wide && view === 'calendar' && !noLibraries;    // the week controls sit in the top row
   const control = (
-    <Segmented value={view} wide={wide} onPick={pickView} />
+    phone ? <PhoneSegmented value={view} onPick={pickView} /> : <Segmented value={view} wide={wide} onPick={pickView} />
   );
   const noLibs = (
     <div data-testid="tv-no-libraries" style={{ minHeight: 240, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
@@ -277,6 +277,41 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
 }
 
 // ---------------------------------------------------------------- frame
+
+/** v226 (Taylor's S1) the phone tab icons, 18px line icons as the mock. */
+const PHONE_TAB_ICONS: Record<TvView, ReactNode> = {
+  series: <><rect x="3" y="5" width="18" height="12" rx="2" /><path d="M8 21h8" /></>,
+  calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></>,
+  import: <path d="M12 3v12M7 10l5 5 5-5M4 21h16" />,
+  libraries: <path d="M4 4v16M9 4v16M14 4l5 16" />,
+  options: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2" /></>,
+};
+
+/** v226 (Taylor's S1): on a phone the views are a full-width 5-part segmented control, an icon over each
+ * label, equal parts that fit 320 to 430px with nothing cut off (no horizontal slider). */
+function PhoneSegmented({ value, onPick }: { value: TvView; onPick: (v: TvView) => void }) {
+  return (
+    <div role="tablist" aria-label="TV" data-testid="tv-tabs" data-variant="phone"
+      style={{ display: 'flex', width: '100%', height: 56, padding: 4, gap: 0, boxSizing: 'border-box', borderRadius: 14,
+        background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+      {TV_VIEWS.map(t => {
+        const on = t.id === value;
+        return (
+          <button key={t.id} type="button" role="tab" aria-selected={on} className="lp-focus" data-testid={`tv-tab-${t.id}`}
+            onClick={() => onPick(t.id)}
+            style={{ flex: '1 1 0', minWidth: 0, padding: 0, border: 'none', borderRadius: 10, cursor: 'pointer', fontFamily: FONT,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
+              fontSize: 12, fontWeight: 600, lineHeight: '14px', whiteSpace: 'nowrap',
+              background: on ? '#3b82f6' : 'transparent', color: on ? '#fff' : 'rgba(255,255,255,0.7)' }}>
+            <svg data-testid="tv-tab-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+              strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{PHONE_TAB_ICONS[t.id]}</svg>
+            <span>{t.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function Segmented({ value, wide, onPick }: { value: TvView; wide: boolean; onPick: (v: TvView) => void }) {
   return (
