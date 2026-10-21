@@ -84,22 +84,20 @@ describe('R3 layout (1440 and 1024)', () => {
     expect(R3_BAND).toBe(200);
     expect(r3Css).toContain(`.r3-body{position:fixed;z-index:45;top:${R3_BAND}px`);
   });
-  it('searching: the hero shrinks to a band; a top-result card beside a mixed grid, then People and Find more', async () => {
+  it('searching (v246 D3): the hero shrinks to a band; chips over one grid of titles, then people; no top card, no Find more', async () => {
     render(<HomeSearchR3 />);
     await type('dune');
     expect(screen.getByTestId('r3-search').dataset.searching).toBe('true');
     expect(screen.getByTestId('r3-cover')).toBeTruthy();
-    expect(screen.getByTestId('r3-top-title').textContent).toBe('Dune');
-    const main = screen.getByTestId('r3-main');
-    expect(main.firstElementChild).toBe(screen.getByTestId('r3-top'));
-    expect(main.lastElementChild).toBe(screen.getByTestId('r3-grid'));
+    expect(screen.queryByTestId('r3-top')).toBeNull();
+    expect(screen.queryByTestId('find-more')).toBeNull();
     const cards = screen.getAllByTestId('r3-card');
-    // v228: the rest of your library, then TMDb titles (up to 6)
-    expect(cards.map(c => c.textContent)).toEqual(['✓In libraryDune: Part Two2024 · Movie', '✓In libraryDune: Prophecy2024 · TV',
+    expect(cards.map(c => c.textContent)).toEqual(['Dune2021 · Movie', 'Dune: Part Two2024 · Movie', 'Dune: Prophecy2024 · TV',
       'Dune1984 · Movie', "Frank Herbert's Dune2000 · TV"]);
-    expect(screen.getAllByTestId('r3-person').map(p => p.textContent)).toEqual(['Denis VilleneuveDirecting']);
-    expect(screen.queryByText('Play')).toBeNull();    // PM: no new Play buttons
-    fireEvent.click(screen.getByTestId('r3-details'));
+    expect(screen.getAllByTestId('r3-person').map(p => p.textContent)).toEqual(['Denis VilleneuvePerson']);
+    expect(screen.getByTestId('r3-grid').lastElementChild).toBe(screen.getByTestId('r3-person'));
+    expect(screen.queryByText('Play')).toBeNull();
+    fireEvent.click(cards[0]!);
     expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: 1, tmdbId: 438631, origin: 'search' });
     fireEvent.keyDown(screen.getByTestId('search-input'), { key: 'Escape' });
     expect(screen.queryByTestId('r3-results')).toBeNull();
@@ -129,27 +127,17 @@ describe('R3: no key badges, no helper text', () => {
 const MANY = { movies: Array.from({ length: 8 }, (_, i) => ({ id: 900 + i, title: `Dune ${i + 1}`, release_date: `${1990 + i}-01-01` })), tv_shows: [], people: [] };
 
 describe('R3 Find more is TMDb', () => {
-  it('only the titles not already in the grid: counts and opens them from /search (mocked), word-match filtered', async () => {
+  it('v246: every TMDb title not already in your library is in the one grid (word-match filtered, no repeats)', async () => {
     tm = { ...MANY, tv_shows: [{ id: 1880, name: "Frank Herbert's Dune", first_air_date: '2000-12-03' }],
       movies: [...MANY.movies, { id: 5, title: 'Unrelated Thing', release_date: '2000-01-01' }] };
     render(<HomeSearchR3 />);
     await type('dune');
     expect(calls.some(u => u.startsWith('/search?q=dune&type=all'))).toBe(true);
-    const grid = screen.getByTestId('r3-grid');
-    const inGrid = [...grid.querySelectorAll('[data-testid="r3-card"]')].map(c => c.getAttribute('aria-label'));
-    expect(inGrid).toHaveLength(6);
-    const more = screen.getByTestId('find-more');
-    fireEvent.click(more);
-    const tmS = screen.getByTestId('r3-tmdb');
-    const cards = [...tmS.querySelectorAll('[data-testid="r3-card"]')];
-    const names = cards.map(c => c.getAttribute('aria-label'));
-    expect(names.length).toBeGreaterThan(0);
-    expect(names.filter(n => inGrid.includes(n))).toEqual([]);        // nothing repeats the grid
-    expect(more.textContent).toBe(`Find more for “dune”${names.length} on TMDb`);
-    expect(tmS.querySelector('.r3-count')!.textContent).toBe(String(names.length));
-    expect(tmS.textContent).not.toContain('Unrelated Thing');
-    fireEvent.click(cards[0]!);
-    expect(modals.openMovie.mock.calls[0]![0]).toMatchObject({ origin: 'search' });
+    const names = screen.getAllByTestId('r3-card').map(c => c.getAttribute('aria-label'));
+    expect(names.length).toBeGreaterThan(6);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).not.toContain('Unrelated Thing');
+    expect(screen.queryByTestId('find-more')).toBeNull();
   });
   it('no Find more when every TMDb title is already shown above', async () => {
     render(<HomeSearchR3 />);
@@ -190,10 +178,9 @@ describe('v228 R3 watchlist + on TMDb cards (mocked native watchlist)', () => {
     render(<HomeSearchR3 />);
     await type('dune');
     await act(async () => { await Promise.resolve(); });
-    fireEvent.click(screen.getByTestId('find-more'));
-    const tmS = screen.getByTestId('r3-tmdb');
+    const tmS = screen.getByTestId('r3-grid');
     expect([...tmS.querySelectorAll('[data-testid="r3-wl-in"]')].map(e => e.getAttribute('aria-label'))).toEqual(['Dune 8 is in your watchlist']);
-    expect(tmS.querySelectorAll('[data-testid="r3-wl-add"]')).toHaveLength(tmS.querySelectorAll('[data-testid="r3-card"]').length - 1);
+    expect(tmS.querySelectorAll('[data-testid="r3-wl-add"]')).toHaveLength(tmS.querySelectorAll('[data-testid="r3-card"]').length - 1 - 3);  // minus the check and 3 library titles
   });
   it.each([404, 500])('v231 (Tester): the id lookup fails (%i): no + anywhere, not even after Find more', async (st) => {
     tm = MANY; wlStatus = st;
@@ -201,7 +188,6 @@ describe('v228 R3 watchlist + on TMDb cards (mocked native watchlist)', () => {
     await type('dune');
     await act(async () => { await Promise.resolve(); });
     expect(screen.queryByTestId('r3-wl-add')).toBeNull();
-    fireEvent.click(screen.getByTestId('find-more'));
     expect(screen.queryByTestId('r3-wl-add')).toBeNull();
     expect(screen.queryByTestId('r3-wl-in')).toBeNull();
   });
@@ -368,11 +354,11 @@ describe('v244: uniform 2:3 tiles, no overlap, 2-line titles, a placeholder for 
     render(<HomeSearchR3 />);
     await type('dune');
     const cards = screen.getAllByTestId('r3-card');
-    const ph = cards[2]!.querySelector('[data-testid="r3-placeholder"]') as HTMLElement;
+    const ph = cards[3]!.querySelector('[data-testid="r3-placeholder"]') as HTMLElement;
     expect(ph.dataset.title).toBe('Dune');
-    expect(cards[2]!.querySelector('img')).toBeNull();
+    expect(cards[3]!.querySelector('img')).toBeNull();
     expect(ph.parentElement!.className).toBe('r3-po');
-    const w = cards[2]!.parentElement!;
+    const w = cards[3]!.parentElement!;
     expect(w.className).toBe('r3-cardw');
     expect(w.querySelector('[data-testid="r3-wl-add"]')!.parentElement).toBe(w);
   });
@@ -418,5 +404,54 @@ describe('v245: one seamless reveal', () => {
     await type('dune ');
     const img = find().querySelector('img');
     expect(img && img.getAttribute('src')).toContain('fixed.jpg');
+  });
+});
+
+describe('v246 D3: filter chips over a 7-column grid', () => {
+  const labels = () => screen.getAllByTestId('r3-card').map(c => c.getAttribute('aria-label'));
+  const people = () => screen.queryAllByTestId('r3-person').map(p => p.textContent);
+  it('chips with counts; All is on first', async () => {
+    render(<HomeSearchR3 />);
+    await type('dune');
+    const chips = [...screen.getByTestId('d3-chips').querySelectorAll('button')];
+    expect(chips.map(c => c.textContent)).toEqual(['All 6', 'Movies 3', 'TV 2', 'People 1', 'In library 3']);
+    expect(chips.map(c => c.getAttribute('aria-pressed'))).toEqual(['true', 'false', 'false', 'false', 'false']);
+  });
+  it('each chip filters on the client (no new requests)', async () => {
+    render(<HomeSearchR3 />);
+    await type('dune');
+    const n = calls.length;
+    fireEvent.click(screen.getByTestId('d3-chip-movie'));
+    expect(screen.getByTestId('d3-chip-movie').getAttribute('aria-pressed')).toBe('true');
+    expect(labels()).toEqual(['Dune', 'Dune: Part Two', 'Dune']); expect(people()).toEqual([]);
+    fireEvent.click(screen.getByTestId('d3-chip-tv'));
+    expect(labels()).toEqual(['Dune: Prophecy', "Frank Herbert's Dune"]); expect(people()).toEqual([]);
+    fireEvent.click(screen.getByTestId('d3-chip-people'));
+    expect(screen.queryAllByTestId('r3-card')).toHaveLength(0); expect(people()).toEqual(['Denis VilleneuvePerson']);
+    fireEvent.click(screen.getByTestId('d3-chip-owned'));
+    expect(labels()).toEqual(['Dune', 'Dune: Part Two', 'Dune: Prophecy']); expect(people()).toEqual([]);
+    fireEvent.click(screen.getByTestId('d3-chip-all'));
+    expect(labels()).toHaveLength(5); expect(people()).toHaveLength(1);
+    expect(calls.length).toBe(n);
+  });
+  it('a new search goes back to All', async () => {
+    render(<HomeSearchR3 />);
+    await type('dune');
+    fireEvent.click(screen.getByTestId('d3-chip-tv'));
+    await type('dune part');
+    expect(screen.getByTestId('d3-chip-all').getAttribute('aria-pressed')).toBe('true');
+  });
+  it('no In library badge or overlay on any poster', async () => {
+    render(<HomeSearchR3 />);
+    await type('dune');
+    expect(screen.queryByTestId('r3-in-library')).toBeNull();
+    expect(document.querySelector('.r3-badge')).toBeNull();
+    expect(screen.getByTestId('r3-grid').textContent).not.toContain('In library');
+  });
+  it('7 columns, 160px at 1440 and narrower on tablet; D3 chip styles', () => {
+    expect(r3Css).toContain('.d3-grid{display:grid;grid-template-columns:repeat(7, minmax(0, 160px));gap:28px clamp(12px, 2.1vw, 30px);');
+    expect(r3Css).toContain('.d3-grid .r3-cardw{width:100%}');
+    expect(r3Css).toMatch(/\.d3-chip\{height:36px;padding:0 16px;border-radius:8px;border:1px solid #44474e;/);
+    expect(r3Css).toContain('.d3-chip[aria-pressed="true"]{background:#3a4458;border-color:#3a4458;color:#d8e2ff}');
   });
 });

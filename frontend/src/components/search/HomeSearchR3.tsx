@@ -14,8 +14,7 @@ import {
   performSearch, getPosterUrl, getProfileUrl, getTitle, getYear, TMDB_BUSY_TEXT,
   type SearchMovie, type SearchPerson, type SearchResults,
 } from '@/services/searchApi';
-import { backdropUrl, sizedPlexImg, tmdbImg } from '@/utils/image';
-import { SearchIcon } from './MinimalSearchHost';
+import { sizedPlexImg } from '@/utils/image';
 import { isMinimal } from '@/minimal';
 import { fetchNativeWatchlistIdsOrNull } from '@/services/watchlistApi';
 import { PathPicker } from '@/components/library/TvSearch';
@@ -63,7 +62,6 @@ export const wlId = (m: SearchMovie): number | null =>
 
 const kind = (m: SearchMovie) => (m.media_type === 'tv' ? 'TV' : 'Movie');
 export const metaR3 = (m: SearchMovie) => { const y = getYear(m); return y ? `${y} · ${kind(m)}` : kind(m); };
-const backdropOf = (m: SearchMovie) => (m.backdrop_url ? tmdbImg(m.backdrop_url) : backdropUrl(m.backdrop_path, 'w780'));
 
 export function HomeSearchR3() {
   const { openMovie, openTv } = useModalHost();
@@ -109,7 +107,7 @@ export function HomeSearchR3() {
   const [res, setRes] = useState<SearchResults | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [skeleton, setSkeleton] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [, setExpanded] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const debRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -261,45 +259,9 @@ export function HomeSearchR3() {
               <button type="button" className="r3-btn r3-primary" style={{ marginTop: 16 }} onClick={() => void run(lastQ.current)}>Try again</button>
             </div>
           )}
-          {phase === 'done' && view.top && (
-            <div className="r3-main" data-testid="r3-main">
-              <TopCard item={view.top} onOpen={() => open(view.top!)} />
-              <div className="r3-grid" data-testid="r3-grid">
-                {view.grid.map((m, i) => <PosterCard key={`${m.media_type}-${m.rating_key ?? m.id}-${i}`} item={m} onOpen={() => open(m)} wl={wlFor(m)} />)}
-              </div>
-            </div>
-          )}
-          {phase === 'done' && view.people.length > 0 && (
-            <section className="r3-sec" data-testid="r3-people">
-              <h2 className="r3-sh">People <span className="r3-count">{view.people.length}</span></h2>
-              <div className="r3-people">
-                {view.people.map(p => {
-                  const img = getProfileUrl(p);
-                  return (
-                    <button key={`${p.id}-${p.name}`} type="button" className="r3-person" data-testid="r3-person" onClick={() => openPerson(p)}>
-                      <span className="r3-avatar">{img && <img src={img} alt="" />}</span>
-                      <span className="r3-pn">{p.name}</span>
-                      <span className="r3-pr">{p.role || p.known_for_department || ''}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-          {phase === 'done' && view.more.length > 0 && !expanded && (
-            <button type="button" className="r3-more" data-testid="find-more" onClick={() => setExpanded(true)}>
-              <span className="r3-icon"><SearchIcon size={18} /></span>
-              <span className="r3-more-t">{`Find more for “${q}”`}</span>
-              <span className="r3-more-n">{`${view.more.length} on TMDb`}<Chevron /></span>
-            </button>
-          )}
-          {phase === 'done' && expanded && (
-            <section className="r3-sec" data-testid="r3-tmdb">
-              <h2 className="r3-sh">On TMDb <span className="r3-count">{view.more.length}</span></h2>
-              <div className="r3-grid r3-grid-wide">
-                {view.more.map((m, i) => <PosterCard key={`t-${m.media_type}-${m.id}-${i}`} item={m} onOpen={() => open(m)} wl={wlFor(m)} />)}
-              </div>
-            </section>
+          {phase === 'done' && !nothing && (
+            <D3Results key={q} titles={[...(view.top ? [view.top] : []), ...view.grid, ...view.more]} people={view.people}
+              onOpen={open} onPerson={openPerson} wlFor={wlFor} />
           )}
         </div>
       )}
@@ -307,27 +269,48 @@ export function HomeSearchR3() {
   );
 }
 
-function InLibrary() {
-  return <span className="r3-badge" data-testid="r3-in-library"><i aria-hidden="true">✓</i>In library</span>;
-}
+type D3Filter = 'all' | 'movie' | 'tv' | 'people' | 'owned';
+type WlFor = (m: SearchMovie) => { inList: boolean; onAdd: () => void; tv?: boolean } | undefined;
 
-function TopCard({ item, onOpen }: { item: SearchMovie; onOpen: () => void }) {
-  const img = backdropOf(item) || getPosterUrl(item);
+/** v246 D3 (Taylor-approved): filter chips over one 7-column grid (titles, then people); filtered on the client. */
+function D3Results({ titles, people, onOpen, onPerson, wlFor }: {
+  titles: SearchMovie[]; people: SearchPerson[]; onOpen: (m: SearchMovie) => void; onPerson: (p: SearchPerson) => void; wlFor: WlFor;
+}) {
+  const [f, setF] = useState<D3Filter>('all');
+  const movies = titles.filter(m => m.media_type !== 'tv');
+  const tv = titles.filter(m => m.media_type === 'tv');
+  const owned = titles.filter(m => m.isOwned);
+  const chips: { id: D3Filter; label: string; n: number }[] = [
+    { id: 'all', label: 'All', n: titles.length + people.length },
+    { id: 'movie', label: 'Movies', n: movies.length },
+    { id: 'tv', label: 'TV', n: tv.length },
+    { id: 'people', label: 'People', n: people.length },
+    { id: 'owned', label: 'In library', n: owned.length },
+  ];
+  const shownTitles = f === 'all' ? titles : f === 'movie' ? movies : f === 'tv' ? tv : f === 'owned' ? owned : [];
+  const shownPeople = f === 'all' || f === 'people' ? people : [];
   return (
-    <article className="r3-top" data-testid="r3-top">
-      <div className="r3-top-img">
-        {img && <img src={img} alt="" />}
-        {item.isOwned && <InLibrary />}
+    <div className="d3" data-testid="d3">
+      <div className="d3-chips" role="group" aria-label="Filter results" data-testid="d3-chips">
+        {chips.map(c => (
+          <button key={c.id} type="button" className="d3-chip" data-testid={`d3-chip-${c.id}`} aria-pressed={f === c.id}
+            onClick={() => setF(c.id)}>{`${c.label} ${c.n}`}</button>
+        ))}
       </div>
-      <div className="r3-top-text">
-        <div className="r3-top-k">Top result</div>
-        <div className="r3-top-t" data-testid="r3-top-title">{getTitle(item)}</div>
-        <div className="r3-top-m">{metaR3(item)}</div>
-        <div className="r3-btns">
-          <button type="button" className="r3-btn" data-testid="r3-details" onClick={onOpen}>Details</button>
-        </div>
+      <div className="d3-grid" data-testid="r3-grid">
+        {shownTitles.map((m, i) => <PosterCard key={`${m.media_type}-${m.rating_key ?? m.id}-${i}`} item={m} onOpen={() => onOpen(m)} wl={wlFor(m)} />)}
+        {shownPeople.map(p => {
+          const img = getProfileUrl(p);
+          return (
+            <button key={`${p.id}-${p.name}`} type="button" className="d3-person" data-testid="r3-person" onClick={() => onPerson(p)}>
+              <span className="d3-avatar">{img && <img src={img} alt="" />}</span>
+              <span className="r3-ct">{p.name}</span>
+              <span className="r3-cm">Person</span>
+            </button>
+          );
+        })}
       </div>
-    </article>
+    </div>
   );
 }
 
@@ -341,7 +324,6 @@ function PosterCard({ item, onOpen, wl }: { item: SearchMovie; onOpen: () => voi
         <span className="r3-po">
           {img && broken !== img ? <img key={img} src={img} alt="" loading="lazy" onError={() => setBroken(img)} />
             : <span className="r3-ph" data-testid="r3-placeholder" data-title={title} aria-hidden="true" />}
-          {item.isOwned && <InLibrary />}
         </span>
         <span className="r3-ct">{title}</span>
         <span className="r3-cm">{metaR3(item)}</span>
@@ -357,10 +339,6 @@ function PosterCard({ item, onOpen, wl }: { item: SearchMovie; onOpen: () => voi
       ))}
     </div>
   );
-}
-
-function Chevron() {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>;
 }
 
 /** Layout: 48px page gutter at 1440 (32px at 1024); the field is 640px (520px at 1024); the band is 200px. */
@@ -411,6 +389,20 @@ export const r3Css = `
 .r3-primary{background:var(--color-accent, #3b82f6);border-color:var(--color-accent, #3b82f6)}
 .r3-grid{flex:1;min-width:0;display:grid;grid-template-columns:repeat(auto-fill, var(--r3-po));gap:20px 16px;align-items:start}
 .r3-cardw{position:relative;min-width:0;width:var(--r3-po);overflow:hidden}
+/* v246 D3: chips, then a 7-column grid (160px tiles at 1440, narrower on tablet) */
+.d3{margin:0 calc(40px - var(--r3-pad))}
+.d3-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 24px}
+.d3-chip{height:36px;padding:0 16px;border-radius:8px;border:1px solid #44474e;background:none;color:#e2e2e9;font:inherit;font-size:14px;cursor:pointer;outline:none}
+.d3-chip[aria-pressed="true"]{background:#3a4458;border-color:#3a4458;color:#d8e2ff}
+.d3-chip:focus-visible{box-shadow:0 0 0 3px rgba(59,130,246,.45)}
+.d3-grid{display:grid;grid-template-columns:repeat(7, minmax(0, 160px));gap:28px clamp(12px, 2.1vw, 30px);align-items:start}
+.d3-grid .r3-cardw{width:100%}
+.d3-grid .r3-ct{font-size:14px;font-weight:400;-webkit-line-clamp:1;line-clamp:1}
+.d3-grid .r3-cm{font-size:12px;color:#c4c6d0}
+.d3-person{display:flex;flex-direction:column;align-items:stretch;width:100%;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;outline:none;min-width:0}
+.d3-avatar{display:block;width:100%;aspect-ratio:1;border-radius:50%;overflow:hidden;background:rgba(255,255,255,.08)}
+.d3-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.d3-person:focus-visible .d3-avatar{box-shadow:0 0 0 3px rgba(59,130,246,.45)}
 .r3-wl{position:absolute;top:8px;right:8px;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;padding:0;cursor:pointer;color:#fff;
   background:rgba(21,16,42,.78);border:1px solid rgba(255,255,255,.16);outline:none}
 .r3-tvadd{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:rgba(0,0,0,.5)}
