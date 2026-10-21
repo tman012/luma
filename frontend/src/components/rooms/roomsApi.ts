@@ -6,7 +6,9 @@ export type RoomPlayer = {
   id: string; name: string; product: string; platform: string; machine_id: string; host: string;
   port: number | null; mac: string; harmony_activity: string; paired: boolean; online: boolean; wake: Wake;
 };
-export type Room = { id: string; name: string; default: boolean; harmony_hub: string; player: RoomPlayer | null };
+/** v231 (Reviewer): a signed-in non-owner gets only id, name, default and online (no harmony_hub or player). */
+export type Room = { id: string; name: string; default: boolean; online?: boolean; harmony_hub?: string; player?: RoomPlayer | null };
+export const roomOnline = (r: Pick<Room, 'online' | 'player'>) => !!(r.online ?? r.player?.online);
 export type RoomsView = { rooms: Room[]; default_room_id: string };
 export type FoundPlayer = { machine_id: string; name: string; product: string; platform: string; host: string; online: boolean };
 export type R<T> = { ok: true; data: T } | { ok: false; status: number; errors: Record<string, string> };

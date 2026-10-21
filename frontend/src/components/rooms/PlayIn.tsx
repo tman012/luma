@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { FONT } from '@/components/start/StartUI';
 import type { Room } from './roomsApi';
-import { badge, loadRooms } from './roomsApi';
+import { badge, loadRooms, roomOnline } from './roomsApi';
 import { PLAYBACK_STARTED, stopRoom } from '@/services/playbackApi';
 
 export type PlayChoice = { mode: 'none' } | { mode: 'auto'; room: Room } | { mode: 'pick'; rooms: Room[]; preselect: string };
@@ -66,7 +66,7 @@ export function PlayInPicker({ rooms, preselect, action = 'Play', onPick, onCanc
                 <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                   <span style={{ fontSize: 14, fontWeight: 600 }}>{r.name}</span>
                   <span style={{ fontSize: 12, color: W50, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <StatusDot online={!!r.player?.online} />{r.player?.online ? 'Online' : 'Offline'}
+                    <StatusDot online={roomOnline(r)} />{roomOnline(r) ? 'Online' : 'Offline'}
                   </span>
                 </span>
               </button>

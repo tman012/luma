@@ -142,7 +142,17 @@ def view_room(room: Dict[str, Any], default_id: str, clients: List[Dict[str, Any
                   'harmony_activity': dev.get('harmonyActivity') or '', 'paired': bool(dev.get('paired')),
                   'online': _online(dev, clients), 'wake': _wake(room, dev)}
     return {'id': room['id'], 'name': room.get('name') or '', 'default': room['id'] == default_id,
-            'harmony_hub': room.get('harmonyHubIp') or '', 'player': player}
+            'online': bool(player and player['online']), 'harmony_hub': room.get('harmonyHubIp') or '', 'player': player}
+
+
+PUBLIC_ROOM_KEYS = ('id', 'name', 'default', 'online')
+
+
+def public_view(full: Dict[str, Any]) -> Dict[str, Any]:
+    """v231 (Reviewer): what a signed-in non-owner sees: each room's id, name, default and online only;
+    no player, host, port, MAC, Harmony hub or any other device detail."""
+    return {'rooms': [{k: r[k] for k in PUBLIC_ROOM_KEYS} for r in full.get('rooms', [])],
+            'default_room_id': full.get('default_room_id')}
 
 
 def view() -> Dict[str, Any]:
@@ -367,7 +377,11 @@ def _writer():
 
 @bp.route('/api/rooms', methods=['GET'])
 def rooms_get():
-    return _reader() or jsonify(view())
+    err = _reader()
+    if err:
+        return err
+    _, not_owner = _cfg['signed_in_owner']()
+    return jsonify(public_view(view()) if not_owner else view())
 
 
 @bp.route('/api/rooms/players', methods=['GET'])

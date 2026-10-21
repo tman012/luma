@@ -140,3 +140,25 @@ describe('v225 room-first playback', () => {
     await waitFor(() => expect(screen.getByTestId('playing-toast').textContent).toContain('Playing in Bedroom'));
   });
 });
+
+describe('v231 Play in for a signed-in non-owner (Reviewer: /api/rooms is id, name, default, online only)', () => {
+  it('the picker shows names and Online/Offline from the slim view, and a pick plays', async () => {
+    const calls = stub([LR, BR], 'br');
+    const f = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const inner = f.getMockImplementation()!;
+    f.mockImplementation(async (u: RequestInfo | URL, init?: RequestInit) => (String(u).endsWith('/api/rooms')
+      ? new Response(JSON.stringify({ rooms: [{ id: 'lr', name: 'Living Room', default: false, online: true },
+        { id: 'br', name: 'Bedroom', default: true, online: false }], default_room_id: 'br' }))
+      : inner(u, init)));
+    render(<PlaybackModal ratingKey={11} title="Dune" onClose={() => {}} />);
+    await waitFor(() => expect(screen.getAllByTestId('play-in-room')[1]!.textContent).toContain('Offline'));
+    const rows = screen.getAllByTestId('play-in-room');
+    expect(rows[0]!.textContent).toContain('Living Room');
+    expect(rows[0]!.textContent).toContain('Online');
+    expect(rows.map(r => r.getAttribute('aria-checked'))).toEqual(['false', 'true']);
+    fireEvent.click(rows[0]!);
+    fireEvent.click(screen.getByTestId('play-in-go'));
+    await waitFor(() => expect(screen.getByTestId('playing-toast').textContent).toContain('Playing in Living Room'));
+    await waitFor(() => expect(plays(calls)).toEqual(['POST /api/player/play']));
+  });
+});

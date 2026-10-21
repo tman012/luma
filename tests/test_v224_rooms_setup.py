@@ -248,3 +248,50 @@ def test_v225_plex_stop_matches_by_machine_id_through_the_server(rs, monkeypatch
     assert events == [('proxy', 'mid-shield', True), ('stop', 'mid-shield')]
     events.clear()
     assert rooms_setup._plex_stop({'machineId': 'gone', 'host': '192.168.1.40'}) is False and events == []
+
+
+# v231 (Reviewer): GET /api/rooms hides device details from signed-in non-owners
+
+def _wake_room(c):
+    assert _add(c, 'Living Room').status_code == 201
+    rid = _req(c, 'get', API).get_json()['rooms'][0]['id']
+    assert _req(c, 'put', f'{API}/{rid}', {'wake': 'wol', 'mac': 'AA:BB:CC:DD:EE:FF', 'port': 5555,
+                                           'harmony_hub': '192.168.1.9', 'harmony_activity': 'Shield'}).status_code == 200
+    assert _add(c, 'Bedroom', mid='mid-lrtv', host='192.168.1.41').status_code == 201
+    return rid
+
+
+def test_rooms_get_owner_keeps_full_device_data(rs):
+    c, _, _ = rs
+    _wake_room(c)
+    d = _req(c, 'get', API).get_json()
+    lr = next(r for r in d['rooms'] if r['name'] == 'Living Room')
+    assert lr['player']['host'] == '192.168.1.40' and lr['player']['mac'] == 'AA:BB:CC:DD:EE:FF'
+    assert lr['harmony_hub'] == '192.168.1.9' and lr['online'] is True and lr['default'] is True
+
+
+def test_rooms_get_non_owner_sees_only_id_name_default_online(rs, monkeypatch):
+    c, _, _ = rs
+    rid = _wake_room(c)
+    owner_view = _req(c, 'get', API).get_json()
+    monkeypatch.setitem(rooms_setup._cfg, 'get_current_user', lambda: {'id': 2, 'name': 'guest', 'is_admin': False})
+    monkeypatch.setitem(rooms_setup._cfg, 'signed_in_owner', lambda: (None, ({'error': 'Owner only'}, 403)))
+    r = _req(c, 'get', API)
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d['default_room_id'] == rid == owner_view['default_room_id']
+    assert [sorted(x) for x in d['rooms']] == [['default', 'id', 'name', 'online']] * 2
+    assert [(x['id'], x['name'], x['default'], x['online']) for x in d['rooms']] == \
+        [(x['id'], x['name'], x['default'], x['online']) for x in owner_view['rooms']]
+    raw = r.get_data(as_text=True)
+    for secret in ('192.168.1.40', '192.168.1.41', 'AA:BB:CC:DD:EE:FF', '192.168.1.9', '5555', 'mid-shield', 'harmony', 'host', 'mac', 'player'):
+        assert secret not in raw
+    # writes and player discovery stay owner-only
+    assert _req(c, 'get', f'{API}/players').status_code == 403
+    assert _add(c, 'Den').status_code == 403
+
+
+def test_rooms_get_signed_out_is_401(rs, monkeypatch):
+    c, _, _ = rs
+    monkeypatch.setitem(rooms_setup._cfg, 'get_current_user', lambda: None)
+    assert _req(c, 'get', API).status_code == 401
