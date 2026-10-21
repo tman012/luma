@@ -102,6 +102,15 @@ export function HomeSearchPalette() {
   const [skeleton, setSkeleton] = useState(false);
   const [hi, setHi] = useState(0);
   const [expanded, setExpanded] = useState(false);
+  // Tester: toggling Find More unmounts the pressed button; focus moves to the button that replaces it.
+  const focusAfter = useRef<'find-more' | 'find-more-back' | null>(null);
+  const toggleMore = (open: boolean) => { focusAfter.current = open ? 'find-more-back' : 'find-more'; setExpanded(open); };
+  useEffect(() => {
+    const id = focusAfter.current;
+    if (!id) return;
+    focusAfter.current = null;
+    panelRef.current?.querySelector<HTMLElement>(`[data-testid="${id}"]`)?.focus();
+  }, [expanded]);
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -253,7 +262,7 @@ export function HomeSearchPalette() {
             {groups.map(g => (
               <div key={g.id} role="group" aria-label={g.title}>
                 {g.id === 'more'
-                  ? <button type="button" className="lsp-fm-back" data-testid="find-more-back" onClick={() => setExpanded(false)}><ChevronLeft />Find More</button>
+                  ? <button type="button" className="lsp-fm-back" data-testid="find-more-back" onClick={() => toggleMore(false)}><ChevronLeft />Find More</button>
                   : <div className="lsp-ghd" data-testid={`group-${g.id}`}>{g.title}</div>}
                 {g.rows.map(r => {
                   idx += 1; const i = idx;
@@ -276,7 +285,7 @@ export function HomeSearchPalette() {
               </div>
             ))}
             {!expanded && moreCount > 0 && (
-              <button type="button" className="lsp-fm" data-testid="find-more" onClick={() => setExpanded(true)}>Find More<ChevronDown /></button>
+              <button type="button" className="lsp-fm" data-testid="find-more" onClick={() => toggleMore(true)}>Find More<ChevronDown /></button>
             )}
           </div>
         )}

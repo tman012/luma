@@ -198,3 +198,16 @@ describe('C2 Enter/Space on a focused control is that control only (Tester MED)'
   });
 });
 
+describe('C2 Find More focus (Tester)', () => {
+  it('focus moves to the button that replaces the pressed one', async () => {
+    mount(); act(() => openSearch());
+    await type('dune');
+    await waitFor(() => screen.getByTestId('search-results'));
+    screen.getByTestId('find-more').focus();
+    fireEvent.click(screen.getByTestId('find-more'));
+    expect(document.activeElement).toBe(screen.getByTestId('find-more-back'));
+    fireEvent.click(screen.getByTestId('find-more-back'));
+    expect(document.activeElement).toBe(screen.getByTestId('find-more'));
+  });
+});
+
