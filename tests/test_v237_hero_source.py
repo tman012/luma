@@ -92,7 +92,7 @@ def test_cache_refreshes_once_a_day_never_per_request(env):
     for _ in range(5):
         assert hs.ranked_keys('1', now=now + 3600, spawn=spawn) == ['2', '3', '1']
     assert len(spawned) == 1                                       # fresh: no refresh
-    assert [c[2] for c in env['plex'].calls] == [hs.POOL_MAX, 1]   # one rebuild + one 15-min check
+    assert [c[2] for c in env['plex'].calls] == [hs.POOL_MAX, 1, 1]   # one rebuild (pool + its newest) + one 15-min check
     hs.ranked_keys('1', now=now + hs.DAY_S + 1, spawn=spawn)
     hs.ranked_keys('1', now=now + hs.DAY_S + 2, spawn=spawn)
     assert len(spawned) == 2                                       # a day later: one refresh
@@ -245,3 +245,35 @@ def test_v239_requests_never_look_up_tmdb(env):
     for i in range(20):
         hs.ranked_keys('1', now=time.time() + i * hs.CHECK_S, spawn=lambda f: None)
     assert env['looked'] == []
+
+
+def test_v239b_pool_larger_than_pool_max_no_rebuild_loop_and_fresh_ranked(env, monkeypatch):
+    monkeypatch.setattr(hs, 'POOL_MAX', 3)
+    now = time.time()
+    plex = env['plex']
+    plex.movies = [{'rating_key': str(i), 'title': f'M{i}', 'tmdb_id': 11, 'artPath': '/x', 'added_at': 1000 + i} for i in range(10)]
+    plex.movies.append({'rating_key': 'new', 'title': 'Fresh Hit', 'tmdb_id': 33, 'artPath': '/n', 'added_at': int(now - 3600)})
+    monkeypatch.setitem(hs._cfg, 'tmdb_details', lambda t: {11: {'popularity': 1, 'vote_count': 1},
+                                                         33: {'popularity': 90, 'vote_count': 5000}}[t])
+    spawned = []
+    hs.ranked_keys('1', spawn=spawned.append); spawned[0]()
+    assert hs.ranked_keys('1', spawn=spawned.append)[0] == 'new'   # in the pool (newest first) and ranked first
+    for i in range(1, 6):
+        hs.ranked_keys('1', now=now + i * (hs.CHECK_S + 1), spawn=spawned.append)
+    assert len(spawned) == 1                                          # newest_added matches the check: no loop
+
+
+def test_v239b_failed_refresh_does_not_loop(env):
+    spawned = []
+    hs.ranked_keys('1', spawn=spawned.append); spawned[0]()         # good first build
+    env['plex'].movies.append({'rating_key': '9', 'title': 'N', 'tmdb_id': 11, 'artPath': '/z', 'added_at': 9000})
+    real = env['plex'].get_all_movies
+    env['plex'].get_all_movies = lambda sid, sort='', limit=50, offset=0: (
+        real(sid, sort, limit) if limit == 1 else (_ for _ in ()).throw(RuntimeError('down')))
+    now = time.time()
+    hs.ranked_keys('1', now=now + hs.CHECK_S + 1, spawn=spawned.append)
+    assert len(spawned) == 2
+    spawned[1]()                                                     # rebuild fails
+    for i in range(2, 8):
+        hs.ranked_keys('1', now=now + i * (hs.CHECK_S + 1), spawn=spawned.append)
+    assert len(spawned) == 2                                         # newest_added updated: no loop

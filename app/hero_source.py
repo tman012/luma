@@ -134,7 +134,7 @@ def load(section_id: str) -> Optional[dict]:
 def build(section_id: str) -> List[dict]:
     """Plex reads + TMDb lookups only. Returns the ranked list and caches it."""
     plex = _cfg['get_plex']()
-    res = plex.get_all_movies(int(section_id), sort='titleSort', limit=POOL_MAX) or {}
+    res = plex.get_all_movies(int(section_id), sort='addedAt:desc', limit=POOL_MAX) or {}   # v239b: newest first, so recent additions are always in the pool
     items = [m for m in (res.get('movies') or []) if m.get('tmdb_id') and m.get('artPath')]
 
     def look(m):
@@ -151,7 +151,9 @@ def build(section_id: str) -> List[dict]:
         if r['rating_key'] not in seen:
             seen.add(r['rating_key']); uniq.append(r)
     ranked = uniq
-    newest = max([int(m.get('added_at') or m.get('addedAt') or 0) for m in (res.get('movies') or [])] or [0])
+    newest = _newest_added(section_id)   # v239b: the same value the 15-minute check compares
+    if newest is None:
+        newest = max([int(m.get('added_at') or m.get('addedAt') or 0) for m in (res.get('movies') or [])] or [0])
     p = _path(section_id)
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix('.tmp')
@@ -169,6 +171,9 @@ def _refresh(section_id: str) -> None:
         try:   # keep the old ranking; try again tomorrow, not on the next request
             old = load(section_id) or {'section_id': section_id, 'movies': []}
             old['ts'] = time.time()
+            cur = _newest_added(section_id)   # v239b: so the 15-minute check doesn't loop
+            if cur is not None:
+                old['newest_added'] = cur
             _path(section_id).parent.mkdir(parents=True, exist_ok=True)
             _path(section_id).write_text(json.dumps(old))
         except OSError:
