@@ -540,6 +540,28 @@ export function PreferredGroups({ value, onChange, card = false }: { value: stri
   return (
     <div data-testid="tv-preferred-groups">
       <h3 style={sectionLabel}>Preferred groups</h3>
+      {card ? (
+        <div data-testid="tv-groups-card" style={GROUP_CARD}>
+          <ol style={card ? { listStyle: 'none', margin: 0, padding: 0 } : { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {value.map((g, i) => (
+              <li key={g} data-testid="tv-group" style={card ? { ...groupRow, borderTop: i ? '1px solid rgba(255,255,255,0.06)' : 'none' } : { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#fff' }}>
+                <span style={{ minWidth: 20, color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>{i + 1}</span>
+                <span style={{ flex: 1 }}>{g}</span>
+                <button type="button" style={btn} aria-label={`Move ${g} up`} disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
+                <button type="button" style={btn} aria-label={`Move ${g} down`} disabled={i === value.length - 1} onClick={() => move(i, 1)}>↓</button>
+                <button type="button" style={btn} aria-label={`Remove ${g}`} onClick={() => onChange(value.filter(x => x !== g))}>Remove</button>
+              </li>
+            ))}
+          </ol>
+          <div data-testid="tv-group-add-row" style={{ ...groupRow, borderTop: value.length ? '1px solid rgba(255,255,255,0.06)' : 'none', gap: 8 }}>
+            <input value={draft} onChange={e => setDraft(e.target.value)} maxLength={40} placeholder="Group" aria-label="Group"
+              onKeyDown={e => { if (e.key === 'Enter') add(); }}
+              style={{ flex: '0 1 220px', minHeight: 36, padding: '0 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.14)',
+                background: 'rgba(255,255,255,0.04)', color: '#fff', fontSize: 14 }} />
+            <button type="button" style={btn} onClick={add} disabled={!draft.trim()}>Add</button>
+          </div>
+        </div>
+      ) : (<>
       <ol style={card ? { listStyle: 'none', margin: 0, padding: 0, ...GROUP_CARD } : { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
         {value.map((g, i) => (
           <li key={g} data-testid="tv-group" style={card ? { ...groupRow, borderTop: i ? '1px solid rgba(255,255,255,0.06)' : 'none' } : { display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, color: '#fff' }}>
@@ -558,6 +580,7 @@ export function PreferredGroups({ value, onChange, card = false }: { value: stri
             background: 'rgba(255,255,255,0.04)', color: '#fff', fontSize: 14 }} />
         <button type="button" style={btn} onClick={add} disabled={!draft.trim()}>Add</button>
       </div>
+      </>)}
     </div>
   );
 }
