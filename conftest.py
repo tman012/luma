@@ -342,3 +342,28 @@ def _tv_monitor_search_inline():
     finally:
         tv_search._spawn = real
         tv_search._ms_queue.clear()
+
+
+_TV_THREADS = ('tv-calendar-refresh', 'tv-scan', 'tv-rescan')
+
+
+@pytest.fixture(autouse=True)
+def _tv_background_isolated():
+    """v225: TV work a test starts in the background must not outlive it. A Calendar-open
+    refresh or scan thread left running wrote into the next test's tv.db (v158b search on add,
+    test_calendar_open_refreshes_stale_air_dates: failing only in the full run)."""
+    import sys
+    import threading
+    yield
+    scan = sys.modules.get('app.tv_scan')
+    if scan is not None:
+        scan.stop_scheduler()
+        for t in [t for t in threading.enumerate() if t.name in _TV_THREADS and t.is_alive()]:
+            t.join(timeout=10)
+        scan._refresh_lock = threading.Lock()
+        scan._priority_lock = threading.Lock()
+        scan._sched_stop = threading.Event()
+        scan._sched_thread = None
+    tmdb = sys.modules.get('app.tv_tmdb')
+    if tmdb is not None:
+        tmdb._local = threading.local()
