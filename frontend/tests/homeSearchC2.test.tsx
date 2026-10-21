@@ -39,7 +39,7 @@ describe('C2 pill', () => {
     const pill = screen.getByTestId('home-search-pill');
     expect(pill.tagName).toBe('BUTTON');
     expect(pill.getAttribute('aria-label')).toBe('Search');
-    expect(pill.textContent).toBe('Search/');
+    expect(pill.textContent).toBe('Search');
     const css = document.querySelector('style')!.textContent!;
     expect(css).toContain('width:480px;height:52px');
     expect(css).toContain('top:clamp(184px, 31vh, 372px)');

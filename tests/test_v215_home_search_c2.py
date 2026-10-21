@@ -13,7 +13,8 @@ def test_kiosk_header_is_logo_and_avatar_only():
     header = kiosk.split('<header', 1)[1].split('</header>', 1)[0]
     assert 'kiosk-logo' in header and 'menu(48)' in header
     assert 'button' not in header and 'kioskSearchBtn' not in HOME and 'headLeft' not in HOME
-    assert '<HomeSearchPill />' in kiosk
+    # v227 R3: the kiosk Home's search is the Search title and field at the top (the pill left Home)
+    assert '<HomeSearchR3 />' in kiosk and '<HomeSearchPill />' not in kiosk
 
 
 def test_phone_branch_keeps_round_search_button():
@@ -24,7 +25,9 @@ def test_phone_branch_keeps_round_search_button():
 def test_pill_geometry():
     assert 'clamp(184px, 31vh, 372px)' in PILL
     assert 'width:480px;height:52px' in PILL and 'border-radius:999px' in PILL
-    assert 'aria-label="Search"' in PILL and 'aria-hidden="true">/<' in PILL
+    # v227 (Taylor's R3): no key badges
+    assert 'aria-label="Search"' in PILL and 'aria-hidden="true">/<' not in PILL
+    assert 'lsp-key' not in PAL.split('export const paletteCss', 1)[0]
 
 
 def test_palette_geometry_and_copy():

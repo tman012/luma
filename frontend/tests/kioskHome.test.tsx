@@ -226,3 +226,23 @@ describe('phones keep #11 (<1024px)', () => {
     expect(document.documentElement.style.overflow).toBe('auto');
   });
 });
+
+describe('v227 R3 on Home: desktop and tablet only, phone unchanged', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+  it('>= 1024px: the R3 Search title and field, no C2 pill', async () => {
+    wide = true; stubMatchMedia();
+    vi.stubGlobal('fetch', vi.fn(async () => json({ success: true, movies: TEN })));
+    renderHome();
+    await waitFor(() => screen.getByText('Movie 0'));
+    expect(screen.getByTestId('r3-search')).toBeTruthy();
+    expect(screen.queryByTestId('home-search-pill')).toBeNull();
+  });
+  it('phone: no R3, the header search button as before', async () => {
+    wide = false; stubMatchMedia();
+    vi.stubGlobal('fetch', vi.fn(async () => json({ continue_watching: [], rails: [], plex: true })));
+    renderHome();
+    expect(screen.getByTestId('search-button')).toBeTruthy();
+    expect(screen.queryByTestId('r3-search')).toBeNull();
+    expect(screen.queryByTestId('home-search-pill')).toBeNull();
+  });
+});

@@ -19,8 +19,6 @@ export function HomeSearchPill() {
         data-hidden={hidden ? 'true' : 'false'} onClick={openSearch} style={{ fontFamily: FONT }}>
         <span className="luma-home-pill-icon"><SearchIcon size={20} /></span>
         <span className="luma-home-pill-label">Search</span>
-        <span style={{ flex: 1 }} />
-        <span className="luma-home-pill-key" aria-hidden="true">/</span>
       </button>
     </>
   );

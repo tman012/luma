@@ -160,6 +160,8 @@ export function HomeSearchPalette() {
 
   useEffect(() => {
     const onOpen = () => {
+      // v227: on the kiosk Home, R3's own field takes '/' and open-search
+      if (document.querySelector('[data-r3-search]')) return;
       setClosing(false); setOpen(true); setQuery(''); setRes(null); setPhase('idle'); setChip('all'); setHi(0);
       window.dispatchEvent(new CustomEvent('search-palette', { detail: { open: true } }));
       setTimeout(() => inputRef.current?.focus(), 0);
@@ -228,7 +230,6 @@ export function HomeSearchPalette() {
               if (debRef.current) clearTimeout(debRef.current);
               debRef.current = setTimeout(() => void run(v.trim()), DEBOUNCE_MS);
             }} />
-          <span className="lsp-key" aria-hidden="true">Esc</span>
         </div>
         {showChips && (
           <div className="lsp-chips" role="tablist">

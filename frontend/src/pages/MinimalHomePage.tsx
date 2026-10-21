@@ -14,7 +14,7 @@ import { fetchHome, type HomeData } from '@/components/home/homeApi';
 import { KioskHome, useKioskWidth } from '@/components/home/KioskHome';
 import { UserMenu } from '@/components/nav/UserMenu';
 import { openSearch, SearchIcon } from '@/components/search/MinimalSearchHost';
-import { HomeSearchPill } from '@/components/search/HomeSearchPill';
+import { HomeSearchR3 } from '@/components/search/HomeSearchR3';
 
 export function MinimalHomePage() {
   const { authenticated, loading, needsStart, startInProgress, pinUnlock, user, implicit, logout } = useAuth();
@@ -70,12 +70,12 @@ export function MinimalHomePage() {
     return (
       <div data-step="home" data-layout="kiosk">
         <KioskHome />
-        {/* v215 C2: logo and avatar only; search is the hero pill. */}
+        {/* v227 R3: logo and avatar; search is the title and field at the top of the page. */}
         <header style={kioskBar} data-testid="kiosk-header">
           <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="kiosk-logo" style={{ height: 64, width: 'auto' }} draggable={false} />
           {menu(48)}
         </header>
-        <HomeSearchPill />
+        <HomeSearchR3 />
       </div>
     );
   }
