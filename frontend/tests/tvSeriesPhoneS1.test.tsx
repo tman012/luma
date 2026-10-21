@@ -107,3 +107,20 @@ describe('v226 S1 phone Series list', () => {
     expect(screen.getAllByTestId('tv-series-tile')).toHaveLength(2);
   });
 });
+
+import { phoneFill, railFit } from '@/components/library/TvSeries';
+describe('v226.1 S1 follow-ups', () => {
+  it('the phone bar fill is clamped to 0..1 and 0 of 0 is empty (Reviewer)', () => {
+    expect(phoneFill(show(1, 'A', { have: 80, aired: 70 }))).toBe(1);
+    expect(phoneFill(show(1, 'A', { have: 0, aired: 0 }))).toBe(0);
+    expect(phoneFill(show(1, 'A', { have: 5, aired: 0 }))).toBe(0);
+    expect(phoneFill(show(1, 'A', { have: -1, aired: 4 }))).toBe(0);
+    expect(phoneFill(show(1, 'A', { have: 62, aired: 70 }))).toBeCloseTo(62 / 70);
+    render(<PhoneSeriesList shows={[show(9, 'Over', { have: 9, aired: 3 })]} onOpen={() => {}} />);
+    expect((screen.getByTestId('tv-phone-bar').firstElementChild as HTMLElement).style.width).toBe('100%');
+  });
+  it('the rail reaches 16px above the bottom both before and after it sticks (Designer)', () => {
+    expect(railFit(250, 844)).toBe(844 - 250 - 16);
+    expect(railFit(-400, 844)).toBe(844 - 8 - 16);   // scrolled: sticky at 8px, no gap under Z
+  });
+});

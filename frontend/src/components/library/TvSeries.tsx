@@ -390,6 +390,12 @@ const emptyCard: React.CSSProperties = {
 /** v226 (Taylor's S1): the phone row's bar is green when every aired episode is downloaded, else blue. */
 export const phoneBarColor = (s: Show) => ((s.aired ?? 0) > 0 && (s.have ?? 0) >= (s.aired ?? 0) ? '#22c55e' : ACCENT);
 
+/** v226.1 (Reviewer): the phone bar's share, clamped to 0..1; 0 of 0 is an empty bar. */
+export const phoneFill = (s: Show) => { const aired = s.aired ?? 0; return aired > 0 ? Math.max(0, Math.min(1, (s.have ?? 0) / aired)) : 0; };
+
+/** The rail's height: from its top (or the sticky 8px once scrolled) to 16px above the viewport bottom. */
+export const railFit = (top: number, vh: number) => Math.max(27 * 14, Math.round(vh - Math.max(top, 8) - 16));
+
 /** The phone row's 40x60 poster: the show's TMDB poster, else a neutral glass tile. */
 function PhonePoster({ s }: { s: Show }) {
   const src = posterUrl(s.poster_path, 'w185');
@@ -408,6 +414,17 @@ export function PhoneSeriesList({ shows, onOpen }: { shows: Show[]; onOpen: (s: 
   const [cur, setCur] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const railRef = useRef<HTMLDivElement | null>(null);
+  // v226.1 (Designer): the rail keeps reaching the bottom once it sticks (no gap under Z after scrolling)
+  useEffect(() => {
+    const fit = () => {
+      const r = railRef.current, l = listRef.current;
+      if (r && l) r.style.height = `${railFit(l.getBoundingClientRect().top, window.innerHeight)}px`;
+    };
+    fit();
+    document.addEventListener('scroll', fit, { capture: true, passive: true });
+    window.addEventListener('resize', fit);
+    return () => { document.removeEventListener('scroll', fit, { capture: true }); window.removeEventListener('resize', fit); };
+  }, [shows.length]);
   const shown = shows;
   const firstOf = new Map<string, number>();
   shown.forEach(s => { const l = letterOf(s.title); if (!firstOf.has(l)) firstOf.set(l, s.id); });
@@ -432,7 +449,7 @@ export function PhoneSeriesList({ shows, onOpen }: { shows: Show[]; onOpen: (s: 
             const aired = s.aired ?? 0;
             const have = Math.min(s.have ?? 0, aired);
             const meta = [s.year ? String(s.year) : '', `${have} of ${aired}`].filter(Boolean).join(' · ');
-            const fill = aired > 0 ? have / aired : 0;
+            const fill = phoneFill(s);
             return (
               <div key={s.id} data-testid="tv-phone-row" data-show-id={s.id} data-letter={letterOf(s.title)} role="button" tabIndex={0}
                 className="lp-focus" aria-label={s.title} onClick={() => onOpen(s)}
@@ -456,7 +473,7 @@ export function PhoneSeriesList({ shows, onOpen }: { shows: Show[]; onOpen: (s: 
           <div ref={railRef} data-testid="tv-phone-rail" role="navigation" aria-label="Jump to letter"
             onTouchStart={e => scrub(e.touches[0]!.clientY)} onTouchMove={e => { e.preventDefault(); scrub(e.touches[0]!.clientY); }}
             // sticky in the sheet's scroller: the whole # – Z column fits the visible list and stays while it scrolls
-            style={{ position: 'sticky', top: 8, flex: 'none', width: 28, height: 'calc(100dvh - 260px)', minHeight: 27 * 14, display: 'flex', flexDirection: 'column',
+            style={{ position: 'sticky', top: 8, flex: 'none', width: 28, height: 'calc(100dvh - 260px)', display: 'flex', flexDirection: 'column',
               justifyContent: 'space-between', alignItems: 'center', touchAction: 'none', userSelect: 'none' }}>
             {LETTERS.map(l => (
               <button key={l} type="button" data-testid="tv-phone-rail-letter" data-letter={l} aria-label={l} onClick={() => jump(l)}
