@@ -164,6 +164,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
         "omdb": {
             "_type": "object",
             "api_key": {"type": "string", "default": "", "sensitive": True, "description": "OMDb API key"},
+            "connector_saved": {"type": "boolean", "default": False, "sensitive": False, "description": "Key saved in Settings > Connectors (minimal builds use only that key)"},
         },
         "tvdb": {
             "_type": "object",
@@ -1632,6 +1633,7 @@ def _minimal_tmdb_locked(data: dict) -> bool:
 # Minimal builds: values that count only once saved in Settings > Connectors.
 _MINIMAL_CONNECTOR_GATED = {
     'apis.tmdb.api_key': ('apis.tmdb.connector_saved', ''),
+    'apis.omdb.api_key': ('apis.omdb.connector_saved', ''),
     'apis.trakt.client_id': ('apis.trakt.connector_saved', ''),
     'apis.trakt.client_secret': ('apis.trakt.connector_saved', ''),
     'apis.trakt.enabled': ('apis.trakt.connector_saved', False),

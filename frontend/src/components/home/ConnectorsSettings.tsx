@@ -1,4 +1,4 @@
-/** Settings > Connectors (owner only): the TMDB API key, the Trakt client
+/** Settings > Connectors (owner only): the TMDB API key, the OMDb API key, the Trakt client
  * ID, TheTVDB (API key and optional subscriber PIN) and qBittorrent. Keys stay on the server; the browser only learns
  * whether one is saved and its last 4 (never any of the qBittorrent password). */
 import { useCallback, useEffect, useState } from 'react';
@@ -10,8 +10,8 @@ import { useKioskWidth } from '@/components/home/KioskHome';
 import { QbitConnector } from '@/components/home/QbitConnector';
 
 type Masked = { set: boolean; last4: string; pin_set?: boolean };
-interface View { tmdb: Masked; trakt?: Masked; tvdb?: Masked }
-type Id = 'tmdb' | 'trakt' | 'tvdb';
+interface View { tmdb: Masked; omdb?: Masked; trakt?: Masked; tvdb?: Masked }
+type Id = 'tmdb' | 'omdb' | 'trakt' | 'tvdb';
 const MASK = '********';
 
 async function call<T>(url: string, init?: RequestInit): Promise<{ ok: boolean; data: T }> {
@@ -27,6 +27,7 @@ const send = <T,>(url: string, method: string, body: unknown) =>
 
 const GROUPS: { id: Id; title: string; field: string; body: string; removeTitle: string; pin?: boolean }[] = [
   { id: 'tmdb', title: 'TMDB', field: 'API key', body: 'api_key', removeTitle: 'Remove TMDB API key?' },
+  { id: 'omdb', title: 'OMDb', field: 'API key', body: 'api_key', removeTitle: 'Remove OMDb API key?' },
   { id: 'tvdb', title: 'TheTVDB', field: 'API key', body: 'api_key', removeTitle: 'Remove TheTVDB API key?', pin: true },
   { id: 'trakt', title: 'Trakt', field: 'Client ID', body: 'client_id', removeTitle: 'Remove Trakt client ID?' },
 ];

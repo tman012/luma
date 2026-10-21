@@ -10751,7 +10751,8 @@ def get_ratings(title):
             return jsonify(cached[1])
 
         # Query OMDB API (settings → env var fallback)
-        omdb_key = settings.get('apis.omdb.api_key') or Config.OMDB_API_KEY
+        from app import omdb as _omdb
+        omdb_key = _omdb.api_key()
         if not omdb_key:
             return jsonify({'error': 'No OMDb API key configured'}), 503
         omdb_url = f"http://www.omdbapi.com/?apikey={omdb_key}&t={title}"

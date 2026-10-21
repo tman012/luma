@@ -1,4 +1,4 @@
-"""Settings > Connectors: the TMDB API key, the Trakt client ID and the TheTVDB key and PIN (owner only).
+"""Settings > Connectors: the TMDB API key, the OMDb API key, the Trakt client ID and the TheTVDB key and PIN (owner only).
 
 The key is stored server-side in settings (apis.tmdb.api_key, a sensitive
 field) and never sent back to the browser: GET answers whether one is saved
@@ -87,9 +87,13 @@ def tvdb_credentials() -> tuple:
     return _stored_tvdb() if _cfg else ('', '')
 
 
+def _stored_omdb() -> str:
+    return str(_cfg['settings'].get('apis.omdb.api_key') or '').strip()
+
+
 def _view() -> dict:
     key, pin = _stored_tvdb()
-    return {'tmdb': _masked(_stored_key()), 'trakt': _masked(_stored_trakt()),
+    return {'tmdb': _masked(_stored_key()), 'trakt': _masked(_stored_trakt()), 'omdb': _masked(_stored_omdb()),
             'tvdb': dict(_masked(key), pin_set=bool(pin))}
 
 
@@ -261,6 +265,56 @@ def connectors_trakt_save():
     _cfg['settings'].update({'apis': {'trakt': {'client_id': cid, 'enabled': True, 'connector_saved': True}}})
     _cfg['on_trakt_change']()
     logger.info('Trakt client ID saved')
+    return _no_store(jsonify(_view()))
+
+
+@bp.route('/api/settings/connectors/omdb/test', methods=['POST'])
+def connectors_omdb_test():
+    from app import omdb
+    user, err = _cfg['owner_or_error']()
+    if err:
+        return err
+    body = request.get_json(silent=True) or {}
+    raw = body.get('api_key', MASK) if isinstance(body, dict) else MASK
+    key = _stored_omdb() if raw in (MASK, None) else _clean(raw)
+    if not key:
+        return _no_store(jsonify({'ok': False, 'error': 'Required'}), 400)
+    if _throttled(user['id'], 'omdb-test'):
+        return _no_store(jsonify({'ok': False, 'error': 'Rate limited'}))
+    problem = omdb.test_key(key)
+    if problem:
+        return _no_store(jsonify({'ok': False, 'error': problem}))
+    return _no_store(jsonify({'ok': True, 'message': 'Connected'}))
+
+
+@bp.route('/api/settings/connectors/omdb', methods=['PUT'])
+def connectors_omdb_save():
+    from app import omdb
+    user, err = _cfg['owner_or_error']()
+    if err:
+        return err
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or 'api_key' not in body:
+        return _no_store(jsonify({'error': 'Required'}), 400)
+    raw = body.get('api_key')
+    if raw == MASK:
+        return _no_store(jsonify(_view()))
+    if raw in ('', None):
+        _cfg['settings'].update({'apis': {'omdb': {'api_key': '', 'connector_saved': True}}})
+        omdb.forget()
+        logger.info('OMDb key removed')
+        return _no_store(jsonify(_view()))
+    key = _clean(raw)
+    if not key:
+        return _no_store(jsonify({'error': 'Invalid key'}), 400)
+    if _throttled(user['id'], 'omdb-save'):
+        return _no_store(jsonify({'error': 'Rate limited'}), 429)
+    problem = omdb.test_key(key)
+    if problem:
+        return _no_store(jsonify({'error': problem}), 400)
+    _cfg['settings'].update({'apis': {'omdb': {'api_key': key, 'connector_saved': True}}})
+    omdb.forget()
+    logger.info('OMDb key saved')
     return _no_store(jsonify(_view()))
 
 
