@@ -295,3 +295,28 @@ def test_rooms_get_signed_out_is_401(rs, monkeypatch):
     c, _, _ = rs
     monkeypatch.setitem(rooms_setup._cfg, 'get_current_user', lambda: None)
     assert _req(c, 'get', API).status_code == 401
+
+
+def test_v231_family_user_gets_the_default_room_preselected(rs, monkeypatch):
+    """PM: everyone who can play gets the default room, family users included; editing stays owner-only."""
+    c, fake, _ = rs
+    from app import main
+    monkeypatch.setattr(main, 'settings', fake)
+    monkeypatch.setattr(minimal, 'path_allowed', lambda *a, **k: True)
+    a = _add(c, 'Living Room').get_json()['rooms'][0]['id']
+    b = next(r['id'] for r in _add(c, 'Bedroom', mid='mid-lrtv').get_json()['rooms'] if r['name'] == 'Bedroom')
+    _req(c, 'put', f'{API}/{b}', {'default': True})
+    rooms = fake.get('devices.rooms')
+    family = {'id': 5, 'username': 'kid', 'is_admin': False}
+    monkeypatch.setattr(main, '_get_current_user', lambda: family)
+    monkeypatch.setattr(main.user_auth, 'get_user_settings', lambda uid: {'rooms': rooms} if uid == 5 else {})
+    monkeypatch.setitem(rooms_setup._cfg, 'get_current_user', lambda: family)
+    monkeypatch.setitem(rooms_setup._cfg, 'signed_in_owner', lambda: (None, ({'error': 'Owner only'}, 403)))
+    d = _req(c, 'get', '/api/settings/rooms').get_json()
+    assert d['defaultPlaybackTarget']['roomId'] == b and d['defaultRoomId'] == b
+    v = _req(c, 'get', API).get_json()
+    assert v['default_room_id'] == b
+    assert [(r['id'], r['default']) for r in v['rooms']] == [(a, False), (b, True)]
+    # editing stays owner-only
+    assert _req(c, 'put', f'{API}/{a}', {'default': True}).status_code == 403
+    assert fake.get('devices.defaultRoomId') == b

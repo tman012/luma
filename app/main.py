@@ -19889,7 +19889,8 @@ def get_rooms():
         default_target = {'roomId': '', 'deviceId': '', 'serviceId': ''}
         if frontend_rooms:
             # v224: the default room (Settings > Rooms, devices.defaultRoomId), else the first room
-            want = settings.get('devices.defaultRoomId') or '' if is_admin else ''
+            # v231 (PM): every user who can play gets it preselected, family users included (editing stays admin-only)
+            want = settings.get('devices.defaultRoomId') or ''
             first = next((r for r in frontend_rooms if want and r['id'] == want), frontend_rooms[0])
             devs = first.get('devices', [])
             if devs:
