@@ -666,7 +666,7 @@ export function PlaybackModal({
                         color: available ? '#10b981' : 'rgba(255,255,255,0.3)',
                         fontWeight: 500,
                       }}>
-                        {available ? 'Available' : 'Not configured'}
+                        {available ? 'Available' : 'Not Configured'}
                       </span>
                     </button>
                   );

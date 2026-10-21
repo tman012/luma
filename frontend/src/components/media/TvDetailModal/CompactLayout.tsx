@@ -38,7 +38,6 @@ import {
   useSonarrStatusData, sonarrEpisode, sonarrSeason, seasonInFlight, isInFlight, orbWithSonarr,
 } from './SonarrStatus';
 import { apiUrl, withBase } from '@/urlHelpers';
-import { seasonsLabel } from '@/utils/seasonsLabel';
 
 function resolveEpisodeThumbnail(ep: TvEpisode): string | null {
   if (ep.still_path) {
@@ -404,7 +403,7 @@ export function CompactLayout(props: TvModalViewProps) {
       ];
 
   const seasonsCountDisplay = show?.numberOfSeasons
-    ? seasonsLabel(show.numberOfSeasons)
+    ? `${show.numberOfSeasons} Season${show.numberOfSeasons !== 1 ? 's' : ''}`
     : seasons.length > 0
       ? `${seasons.length} Season${seasons.length !== 1 ? 's' : ''}`
       : '';

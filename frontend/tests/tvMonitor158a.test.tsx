@@ -279,10 +279,9 @@ describe('TV detail polish', () => {
   const read = (p: string) => readFileSync(resolve(__dirname, '../src/components/media/TvDetailModal', p), 'utf8');
   it("'1 season' / '2 seasons' in sentence case", () => {
     expect([seasonsLabel(1), seasonsLabel(2), seasonsLabel(0)]).toEqual(['1 season', '2 seasons', '0 seasons']);
-    for (const f of ['CompactLayout.tsx', 'ExpandedLayout.tsx']) {
-      expect(read(f)).toContain('seasonsLabel(show.numberOfSeasons)');
-      expect(read(f)).not.toMatch(/Season\$\{show\.numberOfSeasons/);
-    }
+    // Wide popup keeps sentence case; the phone popup matches prod 1b4ea74's 'N Season(s)' (PM/Designer GO on d4d1fee).
+    expect(read('ExpandedLayout.tsx')).toContain('seasonsLabel(show.numberOfSeasons)');
+    expect(read('CompactLayout.tsx')).toMatch(/Season\$\{show\.numberOfSeasons/);
   });
   it("'Add to watchlist' is a #3b82f6 primary button, not the white pill", () => {
     const src = read('CompactLayout.tsx');
