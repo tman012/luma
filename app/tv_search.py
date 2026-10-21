@@ -399,6 +399,22 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
         out['statuses'] += st
         answered |= any(s['status'] == 'ok' for s in st)
         items += got
+    if queries is None:
+        # v233 (PM, Love Is Blind S11): a season query can stop at the tracker's cap (IPT answers 50 rows) and
+        # miss episodes. Wanted episodes of a searched season that nothing found are searched one by one.
+        seasons = {int(q.rsplit('S', 1)[1]) for p, q in _queries(show, want) if p == 'season'}
+        covered = {i for c in candidates(items, show, want, blocked) for i in c['covers']}
+        missed = [e for e in want if e['season_number'] in seasons and e['id'] not in covered]
+        for e in missed[:MAX_QUERIES]:
+            q = f"{show['title']} S{e['season_number']:02d}E{e['episode_number']:02d}"
+            got, st = query_trackers(q, purpose or 'episode', sid, interactive, now, cfgs)
+            out['searched'] += 1
+            out['statuses'] += st
+            answered |= any(x['status'] == 'ok' for x in st)
+            items += got
+        if missed:
+            logger.info('TV search: %s season search missed %d episode(s); searched them one by one',
+                        show['title'], len(missed))
     out['results'] = len(items)
     out['answered'] = answered
     cands = candidates(items, show, want, blocked)

@@ -78,3 +78,45 @@ def test_judy_justice_e117_e118_found_and_grabbed(env, monkeypatch, series_type)
     assert sent == (['Judy Justice S04'] if series_type == 'standard' else
                     ['Judy Justice 2026.10.20', 'Judy Justice S04E117', 'Judy Justice S04E118'])
     assert sorted(p['title'] for p in out['picks'] if p['grabbed']) == names
+
+
+# ------------------------------------------------------------------ 2. a season search that misses episodes
+
+def _per_query(env, monkeypatch, answers):
+    """query_trackers mocked per query (the fixture's mock answers every query the same)."""
+    sent = []
+
+    def fake(query, purpose, sid, interactive, now, cfgs=None):
+        sent.append(query)
+        return [item(t) for t in answers.get(query, [])], [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]
+    monkeypatch.setattr(tv_search, 'query_trackers', fake)
+    return sent
+
+
+def test_love_is_blind_e06_e08_found_after_a_capped_season_search(env, monkeypatch):
+    allow_grabs(monkeypatch)
+    sid, ids = make_show(env, 'Love Is Blind', 'standard', 11, (6, 8), '2026-10-21', '2026-10-21T07:00:00Z', 60)
+    # the season query: 50 rows (IPT's cap) of other seasons and episodes, none of E06 or E08
+    capped = [f'Love Is Blind S{s:02d}E{e:02d} 1080p WEB h264-OTHER' for s in (8, 9, 10) for e in range(1, 17)][:50]
+    names = {'Love Is Blind S11E06': ['Love Is Blind S11E06 1080p WEB h264-HOTDOGWATER'],
+             'Love Is Blind S11E08': ['Love Is Blind S11E08 1080p WEB h264-HOTDOGWATER']}
+    sent = _per_query(env, monkeypatch, {'Love Is Blind S11': capped, **names})
+    out = tv_search.search_show(sid, list(ids.values()), origin='auto', now=ts(2026, 10, 21, 4, 15))
+    assert sent == ['Love Is Blind S11', 'Love Is Blind S11E06', 'Love Is Blind S11E08']
+    assert sorted(p['title'] for p in out['picks'] if p['grabbed']) == \
+        ['Love Is Blind S11E06 1080p WEB h264-HOTDOGWATER', 'Love Is Blind S11E08 1080p WEB h264-HOTDOGWATER']
+
+
+def test_no_per_episode_queries_when_the_season_search_found_everything(env, monkeypatch):
+    sid, ids = make_show(env, 'Love Is Blind', 'standard', 11, (6, 8), '2026-10-21', '2026-10-21T07:00:00Z', 60)
+    sent = _per_query(env, monkeypatch, {'Love Is Blind S11': ['Love Is Blind S11E06 1080p WEB h264-HOTDOGWATER',
+                                                               'Love Is Blind S11E08 1080p WEB h264-HOTDOGWATER']})
+    tv_search.search_show(sid, list(ids.values()), origin='auto', now=ts(2026, 10, 21, 4, 15), do_grab=False)
+    assert sent == ['Love Is Blind S11']
+
+
+def test_only_the_missed_episode_is_searched_again(env, monkeypatch):
+    sid, ids = make_show(env, 'Love Is Blind', 'standard', 11, (6, 8), '2026-10-21', '2026-10-21T07:00:00Z', 60)
+    sent = _per_query(env, monkeypatch, {'Love Is Blind S11': ['Love Is Blind S11E06 1080p WEB h264-HOTDOGWATER']})
+    tv_search.search_show(sid, list(ids.values()), origin='auto', now=ts(2026, 10, 21, 4, 15), do_grab=False)
+    assert sent == ['Love Is Blind S11', 'Love Is Blind S11E08']
