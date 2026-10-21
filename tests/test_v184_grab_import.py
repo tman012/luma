@@ -371,3 +371,17 @@ def test_a_row_reopened_by_a_tv_db_restore_closes_again_without_a_second_event(d
     assert (r['state'], r['finished_at']) == ('imported', PRE_V184['at'])
     assert len(_events(H1)) == 1
     assert sorted(p.name for p in dl.lib.rglob('*')) == files0
+
+
+def test_ff21_uppercase_row_does_not_close_same_name_regrab(dl, time_show):
+    """Tester (g): an old row stored with an uppercase hash whose 'imported' record is under the lowercase
+    hash closes by its own hash; a newer re-grab of the same release name (other hash, still downloading)
+    stays open (reconcile never matches by name)."""
+    sid, eps = time_show
+    _grab_row(H1.upper(), sid, [eps[3]], at=PRE_V184['at'] - 600)
+    _grab_row(H2, sid, [eps[3]], at=time.time() - 10)
+    tv_downloads._save(H1, **PRE_V184)
+    tv_downloads.reconcile()
+    states = {r['hash']: r['state'] for r in rows('SELECT hash, state FROM grabs')}
+    assert states[H2] == 'downloading'
+    assert states[H1.upper()] == 'imported'

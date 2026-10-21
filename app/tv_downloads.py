@@ -403,7 +403,7 @@ def finish_grab(h: str, name: Optional[str], series_id: Optional[int], covered: 
     state, or None when there was no open row (the event is still written once for a Luma import)."""
     h = (h or '').lower()
     with tv_store.write() as conn:
-        g = conn.execute('SELECT * FROM grabs WHERE hash = ?', (h,)).fetchone()
+        g = conn.execute('SELECT * FROM grabs WHERE lower(hash) = ?', (h,)).fetchone()
         if g is None and name:
             g = conn.execute(f"SELECT * FROM grabs WHERE release_title = ? AND state IN ({','.join('?' * len(OPEN_GRABS))})"
                              ' ORDER BY grabbed_at DESC LIMIT 1', (name, *OPEN_GRABS)).fetchone()
@@ -462,10 +462,10 @@ def reconcile(now: Optional[float] = None) -> int:
             cov = _covered(st)
             if cov is None:
                 cov = sorted(set(want) | linked[r['hash']]) if want else None
-            got = finish_grab(r['hash'], r['release_title'], r['series_id'], cov,
+            got = finish_grab(r['hash'], None, r['series_id'], cov,  # never by name on reconcile
                               len(st.get('files') or []), float(st.get('at') or now), via='reconciled')
         elif want and set(want) <= linked[r['hash']]:
-            got = finish_grab(r['hash'], r['release_title'], r['series_id'], None, 0, now, via='reconciled')
+            got = finish_grab(r['hash'], None, r['series_id'], None, 0, now, via='reconciled')
         else:
             continue
         n += 1 if got else 0
