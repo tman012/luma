@@ -57,7 +57,7 @@ describe('R3 layout (1440 and 1024)', () => {
     expect(screen.queryByTestId('r3-results')).toBeNull();
     expect(screen.queryByTestId('r3-cover')).toBeNull();      // the full Home hero shows at rest
     expect(screen.queryByTestId('r3-rest')).toBeNull();
-    expect(r3Css).toContain('.r3-head{position:fixed;z-index:55;top:28px;left:50%;transform:translateX(-50%)');
+    expect(r3Css).toContain('.r3-head{position:fixed;z-index:55;top:84px;left:50%;transform:translateX(-50%)');   // v243 A1: inside the bar
   });
   it('typing shows the band and the results; clearing goes back to rest', async () => {
     render(<HomeSearchR3 />);
@@ -287,5 +287,68 @@ describe('v228 R3 rest: Recently added under the band', () => {
     expect(recentAdded(data).map(c => c.key)).toEqual(['a1', 'b1', 'a2', 'b2', 'b3']);
     expect(recentAdded({ ...data, rails: [{ id: '1', title: 'M', type: 'movie', items: Array.from({ length: 30 }, (_, i) => card(String(i))) }] })).toHaveLength(12);
     expect(recentAdded(null)).toEqual([]);
+  });
+});
+
+describe('v243 A1: the top bar opens from a bare chevron', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+  const bar = () => screen.queryByTestId('a1-bar');
+  const head = () => screen.getByTestId('r3-head');
+  it('closed at rest: only the chevron (no circle or background, 48px); search and buttons hidden', () => {
+    render(<HomeSearchR3 />);
+    expect(bar()).toBeNull();
+    expect(head().hidden).toBe(true);
+    const chev = screen.getByTestId('a1-chevron');
+    expect(chev.getAttribute('aria-expanded')).toBe('false');
+    expect(chev.querySelector('svg')!.getAttribute('width')).toBe('48');
+    expect(r3Css).toContain('.a1-chev{position:fixed;z-index:56;top:28px;left:50%;transform:translateX(-50%);width:48px;height:48px;padding:0;border:0;background:none;box-shadow:none;');
+  });
+  it('the chevron opens the glass bar with the search and Watchlist, Library, Explore; the chevron closes it', () => {
+    render(<HomeSearchR3 />);
+    fireEvent.click(screen.getByTestId('a1-chevron'));
+    expect(bar()).toBeTruthy();
+    expect(head().hidden).toBe(false);
+    expect(screen.getByTestId('a1-chevron').getAttribute('aria-expanded')).toBe('true');
+    expect([...screen.getByTestId('a1-nav').querySelectorAll('button')].map(b => b.textContent)).toEqual(['Watchlist', 'Library', 'Explore']);
+    expect(r3Css).toContain('.a1-bar{position:fixed;z-index:49;top:0;left:0;right:0;height:152px;background:rgba(17,19,24,.55);backdrop-filter:blur(24px)');
+    fireEvent.click(screen.getByTestId('a1-chevron'));
+    expect(bar()).toBeNull();
+    expect(head().hidden).toBe(true);
+  });
+  it('Esc closes it', () => {
+    render(<HomeSearchR3 />);
+    fireEvent.click(screen.getByTestId('a1-chevron'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(bar()).toBeNull();
+  });
+  it('a click outside closes it; clicks inside the bar do not', () => {
+    render(<><p data-testid="outside">hero</p><HomeSearchR3 /></>);
+    fireEvent.click(screen.getByTestId('a1-chevron'));
+    fireEvent.pointerDown(screen.getByTestId('search-input'));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Library' }));
+    fireEvent.pointerDown(screen.getByTestId('a1-bar'));
+    expect(bar()).toBeTruthy();
+    fireEvent.pointerDown(screen.getByTestId('outside'));
+    expect(bar()).toBeNull();
+  });
+  it('on the test install the buttons do nothing (no such pages)', () => {
+    render(<HomeSearchR3 />);
+    fireEvent.click(screen.getByTestId('a1-chevron'));
+    const before = window.location.pathname;
+    fireEvent.click(screen.getByRole('button', { name: 'Watchlist' }));
+    expect(window.location.pathname).toBe(before);
+    expect(bar()).toBeTruthy();
+  });
+  it('outside the test install they go to /watchlist, /browse and /explore', () => {
+    delete window.__LUMA_MINIMAL__;
+    render(<HomeSearchR3 />);
+    const seen: string[] = [];
+    for (const name of ['Watchlist', 'Library', 'Explore']) {
+      fireEvent.click(screen.getByTestId('a1-chevron'));
+      fireEvent.click(screen.getByRole('button', { name }));
+      seen.push(window.location.pathname);
+    }
+    expect(seen).toEqual(['/watchlist', '/browse', '/explore']);
+    window.history.pushState({}, '', '/');
   });
 });
