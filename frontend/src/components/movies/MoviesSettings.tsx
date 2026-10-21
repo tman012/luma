@@ -1,5 +1,5 @@
-/** v200 Settings > Movies (the native movie watchlist, piece 1): monitoring, quality profiles, trackers and
- * preferred groups, in TV Settings' visual style. Stored in movies.db; nothing reads Radarr. */
+/** v200 Settings > Movies (the native movie watchlist, piece 1): quality profiles, watchlist picker, trackers,
+ * preferred groups and naming (v220: Import card and Monitoring row removed; their stored values are untouched), in TV Settings' visual style. Stored in movies.db; nothing reads Radarr. */
 import { useEffect, useState, type CSSProperties } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { apiFetch } from '@/apiClient';
@@ -47,13 +47,6 @@ export function MoviesSettings() {
     <div data-testid="movies-settings" style={{ display: 'flex', flexDirection: 'column', gap: 32, fontFamily: FONT }}>
       <style>{tvEditCss}</style>
       {error && <div role="alert" style={{ fontSize: 13, color: '#fca5a5' }}>{error}</div>}
-      <div style={card}>
-        <div style={rowStyle(0)}>
-          <span id="mv-monitoring" style={{ fontSize: 14, fontWeight: 600, color: W95, flex: 1 }}>Monitoring</span>
-          <Toggle id="mv-monitoring-toggle" label="Monitoring" on={d.monitoring} onChange={v => put({ monitoring: v }, { ...d, monitoring: v })} />
-        </div>
-      </div>
-
       <div data-testid="movie-profiles">
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '0 4px 12px' }}>
           <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: W95 }}>Quality profiles</h3>
@@ -120,7 +113,7 @@ export function MoviesSettings() {
 
       <PreferredGroups value={d.preferred_groups} onChange={g => put({ preferred_groups: g }, { ...d, preferred_groups: g })} />
 
-      <MovieImportSettings />
+      <MovieNamingSettings />
 
       {editing && (
         <MovieProfileEditor profile={editing === 'new' ? null : editing} qualities={d.qualities}
@@ -221,30 +214,29 @@ export function MovieProfileEditor({ profile, qualities, onClose, onSaved }: {
 }
 
 
-// ------------------------------------------------------------------ v203 Import: library path and naming
+// ------------------------------------------------------------------ v220 Naming (v203 Import card minus Library path / Rename movies)
+// The library path and rename flag are left exactly as stored: the PUT carries only naming, with the stored rename echoed back
+// because the backend stores the naming object whole.
 
 interface ImportView { root: string; naming: { rename: boolean; folder: string; standard: string } }
 const IMPORT_URL = '/api/settings/movies/import';
 
-export function MovieImportSettings() {
+export function MovieNamingSettings() {
   const [v, setV] = useState<ImportView | null>(null);
-  const [root, setRoot] = useState('');
   const [folder, setFolder] = useState('');
   const [file, setFile] = useState('');
-  const [rename, setRename] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
-  const take = (d: ImportView) => { setV(d); setRoot(d.root); setFolder(d.naming.folder); setFile(d.naming.standard); setRename(d.naming.rename !== false); };
+  const take = (d: ImportView) => { setV(d); setFolder(d.naming.folder); setFile(d.naming.standard); };
   useEffect(() => {
     void apiFetch(IMPORT_URL).then(r => r.ok ? r.json() : null).then(d => { if (d && d.naming) take(d as ImportView); }).catch(() => {});
   }, []);
   if (!v) return null;
-  const dirty = root !== v.root || folder !== v.naming.folder || file !== v.naming.standard || rename !== (v.naming.rename !== false);
+  const dirty = folder !== v.naming.folder || file !== v.naming.standard;
   const save = async () => {
     setBusy(true); setErrors({}); setSaved(false);
-    const body: Record<string, unknown> = { naming: { rename, folder, standard: file } };
-    if (root.trim() && root !== v.root) body.root = root.trim();
+    const body = { naming: { rename: v.naming.rename, folder, standard: file } };
     try {
       const r = await apiFetch(IMPORT_URL, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const d = await r.json().catch(() => ({}));
@@ -254,25 +246,20 @@ export function MovieImportSettings() {
   };
   const err = (k: string) => errors[k] ? <div role="alert" style={{ fontSize: 12, color: '#fca5a5', marginTop: 4 }}>{errors[k]}</div> : null;
   return (
-    <div data-testid="movie-import-settings">
-      <h3 style={sectionLabel}>Import</h3>
+    <div data-testid="movie-naming-settings">
+      <h3 style={sectionLabel}>Naming</h3>
       <div style={{ ...card, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <Row label="Library path" id="mv-root">
-          <input id="mv-root" className="tve-in" data-testid="mv-root" value={root} onChange={e => setRoot(e.target.value)} style={field} />
-          {err('root')}
-        </Row>
-        <Row label="Rename movies" id="mv-rename"><Toggle id="mv-rename" on={rename} onChange={setRename} /></Row>
         <Row label="Folder format" id="mv-folder">
           <input id="mv-folder" className="tve-in" data-testid="mv-folder" value={folder} onChange={e => setFolder(e.target.value)} style={field} />
         </Row>
         <Row label="File format" id="mv-file">
-          <input id="mv-file" className="tve-in" data-testid="mv-file" value={file} disabled={!rename} onChange={e => setFile(e.target.value)} style={field} />
+          <input id="mv-file" className="tve-in" data-testid="mv-file" value={file} disabled={!v.naming.rename} onChange={e => setFile(e.target.value)} style={field} />
           {err('naming')}
         </Row>
         {err('_')}
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12 }}>
           {saved && !dirty && <span style={{ fontSize: 13, color: W70 }}>Saved</span>}
-          <button type="button" className="lp-focus tve-primary" data-testid="mv-import-save" disabled={!dirty || busy}
+          <button type="button" className="lp-focus tve-primary" data-testid="mv-naming-save" disabled={!dirty || busy}
             onClick={() => void save()} style={primaryBtn(dirty && !busy)}>Save</button>
         </div>
       </div>
