@@ -538,12 +538,28 @@ AUTO_SEARCHES = 2
 CATCHUP_S = 24 * 3600
 
 
+def fast_window_end(e: Dict[str, Any]) -> Optional[float]:
+    """When the 15-min retries stop: FAST_WINDOW_S after it aired. v233.7 (Tester FF2): an episode with no air
+    time and no usual slot is searched from the start of its air date in ET, so its window runs to the end of
+    that day in ET (not midnight to 6 AM)."""
+    at = aired_at(e)
+    if at is None:
+        return None
+    if not e.get('airstamp') and not e.get('usual_time'):
+        try:
+            d = dt.date.fromisoformat(str(e['air_date'])) + dt.timedelta(days=1)
+            return max(at + FAST_WINDOW_S, dt.datetime(d.year, d.month, d.day, tzinfo=_et()).timestamp())
+        except (KeyError, ValueError):
+            pass
+    return at + FAST_WINDOW_S
+
+
 def _next_retry(e: Dict[str, Any], now: float, attempts: int = 1) -> float:
     # v233 (PM): v203c's "air-time search plus one retry, then a day" overrode 0312e53's window, so a new
     # episode stopped after 2 searches with the next one 24 h out. Inside FAST_WINDOW_S after it aired it is
     # searched every FAST_S whatever the count; after the window, v203c's rule (feed-only, a daily catch-up).
-    at = aired_at(e)
-    if at is not None and now < at + FAST_WINDOW_S:
+    end = fast_window_end(e)
+    if end is not None and now < end:
         return now + FAST_S
     if attempts >= AUTO_SEARCHES:
         return now + CATCHUP_S

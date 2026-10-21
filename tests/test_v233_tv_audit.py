@@ -304,3 +304,25 @@ def test_manual_queries_ignore_the_missed_marks(env, monkeypatch):
     tv_search.search_show(sid, None, origin='manual', now=ts(2026, 10, 21, 4, 15), do_grab=False,
                           queries=[('season', 'Love Is Blind S11')])
     assert sent == ['Love Is Blind S11']
+
+
+# ------------------------------------------------------------------ v233.7 (Tester FF2): date-only window
+
+def test_no_air_time_no_usual_slot_retries_until_the_end_of_the_air_date_in_et(env, monkeypatch):
+    sid, ids = _vpr(env)
+    when = []
+    monkeypatch.setattr(tv_search, 'query_trackers', lambda q, p, s, i, now, cfgs=None: (
+        when.append(now), ([], [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]))[1])
+    start, end = ts(2026, 10, 21, 0), ts(2026, 10, 22, 0)
+    _timeline(sid, start, end + 3600)
+    passes = sorted(set(when))
+    assert passes[0] == start and passes[-1] == end                     # every 15 min through the whole day ET
+    assert passes == [start + i * tv_search.FAST_S for i in range(97)]
+    assert tv_search.fast_window_end({'air_date': '2026-10-21'}) == end
+
+
+def test_a_usual_slot_keeps_the_6_hour_window():
+    e = {'air_date': '2026-10-21', 'usual_time': (21, 0), 'runtime': 60}
+    assert tv_search.fast_window_end(e) == ts(2026, 10, 21, 22) + tv_search.FAST_WINDOW_S
+    e = {'air_date': '2026-10-21', 'airstamp': '2026-10-21T07:00:00Z', 'runtime': 60}
+    assert tv_search.fast_window_end(e) == ts(2026, 10, 21, 4) + tv_search.FAST_WINDOW_S
