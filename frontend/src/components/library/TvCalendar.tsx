@@ -88,7 +88,7 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, ph
         {failed === key ? (
           <div role="alert" style={emptyCard}>{"Couldn't load calendar"}</div>
         ) : loading ? (
-          <Placeholder />
+          phone ? <PhonePlaceholder /> : <Placeholder />
         ) : phone ? (
           <PhoneDay eps={eps} day={day} today={today} />
         ) : !eps.length ? (
@@ -349,6 +349,22 @@ function Placeholder() {
           ))}
         </div>
       ))}
+    </div>
+  );
+}
+
+/** v222: phone loading in the agenda's shape (a count line and U3-height rows), so a phone never paints
+ * the desktop week grid first. */
+function PhonePlaceholder() {
+  return (
+    <div data-testid="tv-cal-loading-phone" aria-busy="true">
+      <span aria-hidden="true" style={{ display: 'block', width: 96, height: 18, margin: '0 4px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.04)' }} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {[0, 1, 2].map(i => (
+          <span key={i} data-testid="tv-cal-loading-row" style={{ display: 'block', height: 82, borderRadius: 12,
+            border: '1px solid rgba(255,255,255,0.04)', background: 'rgba(255,255,255,0.04)' }} />
+        ))}
+      </div>
     </div>
   );
 }
