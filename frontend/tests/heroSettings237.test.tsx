@@ -60,7 +60,10 @@ describe('v237 Settings > Home screen > Hero source and count', () => {
     expect(screen.getByTestId('hero-genres-value').textContent).toBe('None');
     expect(btn.className).toBe((screen.getByTestId('hero-source') as HTMLElement).className.replace('cursor-pointer', '').trim() + ' cursor-pointer flex items-center justify-between text-left');
     fireEvent.click(btn);
+    // v241b: app-styled boxes, not native
+    expect(document.head.innerHTML + document.body.innerHTML).toContain('.luma-check{appearance:none');
     const boxes = within(screen.getByTestId('hero-genres-list')).getAllByRole('option') as HTMLInputElement[];
+    expect(boxes.every(b => b.className === 'luma-check')).toBe(true);
     expect(boxes.map(b => b.parentElement!.textContent)).toEqual(['Comedy', 'Documentary', 'Horror']);
     fireEvent.click(boxes[2]!);
     await waitFor(() => expect(screen.getByTestId('hero-genres-value').textContent).toBe('Horror'));

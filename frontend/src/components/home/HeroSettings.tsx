@@ -56,6 +56,8 @@ export function HeroSettingsRows() {
     if (next !== d.limit) save({ limit: next });
   };
   return (
+    <>
+    <style>{CHECK_CSS}</style>
     <div data-testid="hero-settings" className="flex flex-col gap-4" style={{ padding: '16px 20px' }}>
       {toast > 0 && <NoticeToast key={toast} text={SAVE_FAILED} onDone={() => setToast(0)} />}
       <div className="flex flex-col gap-1.5">
@@ -88,7 +90,7 @@ export function HeroSettingsRows() {
               const on = d.excluded_genres.some(x => x.toLowerCase() === g.toLowerCase());
               return (
                 <label key={g} className="flex items-center gap-2 cursor-pointer text-white/90" style={{ minHeight: 40, fontSize: 15, fontFamily: FONT }}>
-                  <input type="checkbox" role="option" aria-selected={on} checked={on} style={{ width: 18, height: 18, accentColor: '#3b82f6' }}
+                  <input type="checkbox" role="option" aria-selected={on} checked={on} className="luma-check"
                     onChange={() => save({ excluded_genres: on ? d.excluded_genres.filter(x => x.toLowerCase() !== g.toLowerCase()) : [...d.excluded_genres, g] })} />
                   {g}
                 </label>
@@ -98,5 +100,14 @@ export function HeroSettingsRows() {
         )}
       </div>
     </div>
+    </>
   );
 }
+
+/** v241b (Designer): app-styled checkboxes: dark fill, 1px border, #3b82f6 check. */
+export const CHECK_CSS = `.luma-check{appearance:none;-webkit-appearance:none;margin:0;flex:none;width:18px;height:18px;border-radius:4px;
+  background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.24);display:inline-grid;place-content:center;cursor:pointer}
+.luma-check::after{content:"";width:10px;height:6px;border-left:2px solid #3b82f6;border-bottom:2px solid #3b82f6;transform:translateY(-1px) rotate(-45deg);opacity:0}
+.luma-check:checked{border-color:#3b82f6}
+.luma-check:checked::after{opacity:1}
+.luma-check:focus-visible{outline:2px solid #3b82f6;outline-offset:2px}`;
