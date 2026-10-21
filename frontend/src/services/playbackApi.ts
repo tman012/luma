@@ -145,3 +145,17 @@ export async function createPlayQueue(
 }
 
 export { roomIcon };
+
+/** Prod's PlaybackModal / MobilePlaybackSheet fire this (detail.roomId) once /api/player/play succeeded. */
+export const PLAYBACK_STARTED = 'playback-started';
+
+/** v225 Change (PM): stop the first room's player once playback has started in the new room. */
+export async function stopRoom(roomId: string): Promise<boolean> {
+  try {
+    const resp = await apiFetch(`/api/rooms/${encodeURIComponent(roomId)}/stop`, { method: 'POST' });
+    const d = await resp.json().catch(() => ({}));
+    return resp.ok && !!d.stopped;
+  } catch {
+    return false;
+  }
+}

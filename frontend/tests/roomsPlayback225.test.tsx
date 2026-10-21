@@ -19,6 +19,8 @@ function stub(rooms: unknown[], defaultRoom = '') {
     const url = String(u); calls.push(`${init?.method || 'GET'} ${url}`);
     if (url.includes('/api/settings/rooms')) return new Response(JSON.stringify({ rooms, defaultPlaybackTarget: { roomId: defaultRoom, deviceId: '', serviceId: '' } }));
     if (url.endsWith('/api/rooms')) return new Response(JSON.stringify(ROOMS_VIEW));
+    if (url.endsWith('/stop')) return new Response(JSON.stringify({ stopped: true }));
+    if (url.includes('/api/player/play')) return new Response(JSON.stringify({ success: true }));
     return new Response(JSON.stringify({}), { status: 200 });
   }));
   return calls;
@@ -26,7 +28,52 @@ function stub(rooms: unknown[], defaultRoom = '') {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const after = (calls: string[]) => calls.filter(c => !c.includes('/rooms'));
 
+const plays = (calls: string[]) => calls.filter(c => c.includes('/api/player/play') || c.endsWith('/stop'));
+
 describe('v225 room-first playback', () => {
+  it('Change to another room: plays there, then (only after it started) stops the first room', async () => {
+    let body: Record<string, unknown>[] = [];
+    const calls = stub([LR, BR], 'lr');
+    const f = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const inner = f.getMockImplementation()!;
+    f.mockImplementation(async (u: RequestInfo | URL, init?: RequestInit) => {
+      if (String(u).includes('/api/player/play')) body = [...body, JSON.parse(String(init!.body))];
+      return inner(u, init);
+    });
+    const onClose = vi.fn();
+    render(<PlaybackModal ratingKey={11} title="Dune" onClose={onClose} />);
+    await waitFor(() => expect(screen.getByTestId('play-in')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('play-in-go'));                                  // Living Room (default)
+    await waitFor(() => expect(plays(calls)).toEqual(['POST /api/player/play']));
+    expect(body[0]!.room_id).toBe('lr');
+    fireEvent.click(await screen.findByTestId('playing-toast-change'));
+    fireEvent.click(screen.getAllByTestId('play-in-room')[1]!);
+    fireEvent.click(screen.getByTestId('play-in-go'));                                  // Bedroom
+    await waitFor(() => expect(plays(calls)).toEqual(['POST /api/player/play', 'POST /api/player/play', 'POST /api/rooms/lr/stop']));
+    expect(body[1]!.room_id).toBe('br');
+    expect(onClose).not.toHaveBeenCalled();                                              // the toast keeps the popup until it ends
+  });
+  it('Change back to the same room stops nothing; a failed play in the new room stops nothing', async () => {
+    const calls = stub([LR, BR], 'lr');
+    render(<PlaybackModal ratingKey={11} title="Dune" onClose={() => {}} />);
+    await waitFor(() => expect(screen.getByTestId('play-in')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('play-in-go'));
+    await waitFor(() => expect(plays(calls)).toHaveLength(1));
+    fireEvent.click(await screen.findByTestId('playing-toast-change'));
+    fireEvent.click(screen.getByTestId('play-in-go'));                                  // same room
+    await waitFor(() => expect(plays(calls)).toHaveLength(2));
+    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+    expect(calls.some(c => c.endsWith('/stop'))).toBe(false);
+    const f = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const inner = f.getMockImplementation()!;
+    f.mockImplementation(async (u: RequestInfo | URL, init?: RequestInit) =>
+      String(u).includes('/api/player/play') ? new Response(JSON.stringify({ success: false, message: 'Offline' })) : inner(u, init));
+    fireEvent.click(await screen.findByTestId('playing-toast-change'));
+    fireEvent.click(screen.getAllByTestId('play-in-room')[1]!);
+    fireEvent.click(screen.getByTestId('play-in-go'));
+    await act(async () => { await new Promise(r => setTimeout(r, 80)); });
+    expect(calls.some(c => c.endsWith('/stop'))).toBe(false);
+  });
   it('one room: no picker, plays there at once with the Playing in toast', async () => {
     const calls = stub([LR]);
     render(<PlaybackModal ratingKey={11} title="Dune: Part Two" onClose={() => {}} />);

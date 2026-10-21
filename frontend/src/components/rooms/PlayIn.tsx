@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { FONT } from '@/components/start/StartUI';
 import type { Room } from './roomsApi';
 import { badge, loadRooms } from './roomsApi';
+import { PLAYBACK_STARTED, stopRoom } from '@/services/playbackApi';
 
 export type PlayChoice = { mode: 'none' } | { mode: 'auto'; room: Room } | { mode: 'pick'; rooms: Room[]; preselect: string };
 
@@ -107,10 +108,28 @@ export function PlayingToast({ room, onChange, onDone, ms = 6000 }: { room: Room
  * so prod's own room step shows. The popups keep everything after the room (device, resume, play). */
 export function useRoomFirst<T extends { id: string; name: string }>({ action, select, onCancel }: {
   action: 'Play' | 'Shuffle'; select: (room: T) => void; onCancel: () => void;
-}): { start: (usable: T[], defaultId?: string) => boolean; ui: ReactNode } {
+}): { start: (usable: T[], defaultId?: string) => boolean; closeAfter: (ms: number) => void; ui: ReactNode } {
   const [pick, setPick] = useState<{ rooms: Room[]; preselect: string; byId: Map<string, T>; fromToast: boolean } | null>(null);
   const [toast, setToast] = useState<Room | null>(null);
   const [all, setAll] = useState<T[]>([]);
+  const [current, setCurrent] = useState('');
+  const [closeWanted, setCloseWanted] = useState(false);
+  // prod closes the popup 2s after playback starts; while the toast or the picker shows, it waits for them
+  useEffect(() => { if (closeWanted && !toast && !pick) { setCloseWanted(false); onCancel(); } }, [closeWanted, toast, pick, onCancel]);
+  const closeAfter = useCallback((ms: number) => { window.setTimeout(() => setCloseWanted(true), ms); }, []);
+  const [pendingStop, setPendingStop] = useState<{ from: string; to: string } | null>(null);
+  // Change: once playback has started in the new room, stop the first one (never before, so nothing is left silent)
+  useEffect(() => {
+    if (!pendingStop) return;
+    const on = (e: Event) => {
+      const id = (e as CustomEvent<{ roomId?: string }>).detail?.roomId;
+      if (id !== pendingStop.to) return;
+      setPendingStop(null);
+      void stopRoom(pendingStop.from);
+    };
+    window.addEventListener(PLAYBACK_STARTED, on);
+    return () => window.removeEventListener(PLAYBACK_STARTED, on);
+  }, [pendingStop]);
   const [def, setDef] = useState('');
   const view = (rooms: T[], known: Room[]): Room[] => rooms.map(r => known.find(k => k.id === r.id) || { id: r.id, name: r.name, default: false, harmony_hub: '', player: null });
   const openPicker = useCallback((rooms: T[], defaultId: string, fromToast: boolean) => {
@@ -125,6 +144,7 @@ export function useRoomFirst<T extends { id: string; name: string }>({ action, s
     if (c.mode === 'none') return false;
     if (c.mode === 'auto') {
       select(usable[0]!);
+      setCurrent(usable[0]!.id);
       setToast({ id: usable[0]!.id, name: usable[0]!.name, default: true, harmony_hub: '', player: null });
       return true;
     }
@@ -137,8 +157,14 @@ export function useRoomFirst<T extends { id: string; name: string }>({ action, s
         onChange={() => { setToast(null); openPicker(all, def || toast.id, true); }} />}
       {pick && <PlayInPicker rooms={pick.rooms} preselect={pick.preselect} action={action}
         onCancel={() => { const t = pick.fromToast; setPick(null); if (!t) onCancel(); }}
-        onPick={r => { const room = pick.byId.get(r.id); setPick(null); if (room) { select(room); setToast(r); } }} />}
+        onPick={r => {
+          const room = pick.byId.get(r.id); setPick(null);
+          if (!room) return;
+          setCloseWanted(false);
+          if (pick.fromToast && current && current !== room.id) setPendingStop({ from: current, to: room.id });
+          setCurrent(room.id); select(room); setToast(r);
+        }} />}
     </>, document.body,
   );
-  return { start, ui: ui || null };
+  return { start, closeAfter, ui: ui || null };
 }

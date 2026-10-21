@@ -360,7 +360,7 @@ export function MobilePlaybackSheet({
         detail: { roomId: room.id, ratingKey: String(activeRatingKey), title },
       }));
       setStep({ type: 'success', roomName });
-      setTimeout(() => onClose(), 2000);
+      roomFirst.closeAfter(2000);   // v225: prod's 2s close, after the Playing in toast / picker
     } catch {
       setStep({ type: 'error', message: 'Network error' });
     }

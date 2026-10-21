@@ -21736,7 +21736,8 @@ from app import movie_settings as _movie_settings  # noqa: E402  v198: Settings 
 app.register_blueprint(_movie_settings.bp)
 from app import rooms_setup as _rooms_setup  # noqa: E402  v224: Settings > Rooms (Option A; reads signed in, writes signed-in owner)
 _rooms_setup.init(settings=settings, get_current_user=lambda: _get_current_user(),
-                  signed_in_owner=_start_flow.require_signed_in_owner)
+                  signed_in_owner=_start_flow.require_signed_in_owner,
+                  can_play=lambda u: user_auth.is_plex_approved(u))
 app.register_blueprint(_rooms_setup.bp)
 from app import movie_watchlist as _movie_watchlist  # noqa: E402  v202: the native movie watchlist (test only)
 app.register_blueprint(_movie_watchlist.bp)

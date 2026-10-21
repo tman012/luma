@@ -37,9 +37,28 @@ _MAC_RE = re.compile(r'^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$')
 _cfg: Dict[str, Any] = {}
 
 
-def init(*, settings, get_current_user: Callable, signed_in_owner: Callable, clients_fn: Optional[Callable] = None) -> None:
+def init(*, settings, get_current_user: Callable, signed_in_owner: Callable, clients_fn: Optional[Callable] = None,
+         can_play: Optional[Callable] = None, stop_fn: Optional[Callable] = None) -> None:
     _cfg.update(settings=settings, get_current_user=get_current_user, signed_in_owner=signed_in_owner,
-                clients_fn=clients_fn or _plex_clients)
+                clients_fn=clients_fn or _plex_clients, can_play=can_play or (lambda u: bool(u)), stop_fn=stop_fn or _plex_stop)
+
+
+def _plex_stop(player: Dict[str, Any]) -> bool:
+    """v225 Change (PM): stop what the room's player is playing, through the Plex server (never the player's own
+    address), matched by machine identifier, else address. A player Plex doesn't list is left alone."""
+    s = _cfg['settings']
+    url, token = s.get('plex.url'), s.get('plex.token')
+    if not url or not token:
+        return False
+    from app.plex_client_service import _plex_server
+    server = _plex_server(url, token)
+    for c in server.clients():
+        if (player.get('machineId') and c.machineIdentifier == player['machineId']) or \
+                (not player.get('machineId') and player.get('host') and getattr(c, 'address', '') == player['host']):
+            c.proxyThroughServer(True, server)
+            c.stop()
+            return True
+    return False
 
 
 def _plex_clients() -> List[Dict[str, Any]]:
@@ -385,6 +404,27 @@ def rooms_put(room_id):
     if room is None:
         return jsonify({'error': 'Room not found'}), 404
     return jsonify(view())
+
+
+@bp.route('/api/rooms/<room_id>/stop', methods=['POST'])
+def rooms_stop(room_id):
+    """v225: Change moved playback to another room and it started there; stop the first room's player.
+    Who may play may stop (the play route's Plex-approved check). Stops playback only; never the library."""
+    user = _cfg['get_current_user']()
+    if not user:
+        return jsonify({'error': 'Sign in first', 'sign_in': True}), 401
+    if not _cfg['can_play'](user):
+        return jsonify({'error': 'Not allowed'}), 403
+    room = next((r for r in _rooms() if r['id'] == room_id), None)
+    dev = next((d for d in (room or {}).get('devices') or [] if isinstance(d, dict)), None)
+    if room is None or dev is None:
+        return jsonify({'error': 'Room not found'}), 404
+    try:
+        ok = bool(_cfg['stop_fn'](dev))
+    except Exception:  # noqa: BLE001 - Plex or the player unreachable: nothing to stop from here
+        logger.warning('Rooms: stop in %s failed', room_id)
+        ok = False
+    return jsonify({'stopped': ok})
 
 
 @bp.route('/api/rooms/<room_id>', methods=['DELETE'])

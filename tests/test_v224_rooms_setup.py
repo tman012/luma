@@ -207,3 +207,44 @@ def test_no_play_or_wake_or_home_assistant_in_module():
     src = open(rooms_setup.__file__).read()
     for bad in ('device_wake', 'harmony_service', 'playqueue', 'player/play', 'adb_shell', 'send_magic', 'requests.'):
         assert bad not in src, bad
+
+
+def test_v225_stop_route_stops_only_that_rooms_player_mocked(rs, monkeypatch):
+    c, _, _ = rs
+    a = _add(c, 'Living Room').get_json()['rooms'][0]['id']
+    stopped = []
+    monkeypatch.setitem(rooms_setup._cfg, 'stop_fn', lambda dev: stopped.append(dev['machineId']) or True)
+    r = _req(c, 'post', f'{API}/{a}/stop')
+    assert r.status_code == 200 and r.get_json() == {'stopped': True} and stopped == ['mid-shield']
+    assert _req(c, 'post', f'{API}/nope/stop').status_code == 404
+    monkeypatch.setitem(rooms_setup._cfg, 'stop_fn', lambda dev: (_ for _ in ()).throw(OSError('down')))
+    assert _req(c, 'post', f'{API}/{a}/stop').get_json() == {'stopped': False}
+    monkeypatch.setitem(rooms_setup._cfg, 'can_play', lambda u: False)
+    assert _req(c, 'post', f'{API}/{a}/stop').status_code == 403
+    assert minimal.path_allowed(f'{API}/{a}/stop', 'POST')
+
+
+def test_v225_plex_stop_matches_by_machine_id_through_the_server(rs, monkeypatch):
+    _, fake, _ = rs
+    fake._settings['plex'] = {'url': 'http://pms.invalid:32400', 'token': 't'}
+    events = []
+
+    class Cl:
+        def __init__(self, mid, addr):
+            self.machineIdentifier, self.address = mid, addr
+
+        def proxyThroughServer(self, on, server):
+            events.append(('proxy', self.machineIdentifier, on))
+
+        def stop(self):
+            events.append(('stop', self.machineIdentifier))
+
+    class Srv:
+        def clients(self):
+            return [Cl('other', '192.168.1.40'), Cl('mid-shield', '192.168.1.99')]
+    from app import plex_client_service
+    monkeypatch.setattr(plex_client_service, '_plex_server', lambda u, t: Srv())
+    assert rooms_setup._plex_stop({'machineId': 'mid-shield', 'host': '192.168.1.40'}) is True
+    assert events == [('proxy', 'mid-shield', True), ('stop', 'mid-shield')]
+    events.clear()
+    assert rooms_setup._plex_stop({'machineId': 'gone', 'host': '192.168.1.40'}) is False and events == []
