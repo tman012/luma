@@ -203,10 +203,49 @@ def wanted(conn, sid: int, today: Optional[str] = None, ids: Optional[Iterable[i
         f' AND NOT {tv_monitor._LINKED}', (sid, today))]
     got = _grabbed(conn, sid, states)
     keep = None if ids is None else {int(i) for i in ids}
+    if any(not e.get('airstamp') for e in rows):
+        hm = usual_times(conn, [sid]).get(sid)
+        for e in rows:
+            e['usual_time'] = hm
     return [e for e in rows if e['id'] not in got and (keep is None or e['id'] in keep)]
 
 
+ET_ZONE = 'America/New_York'
+
+
+def _et():
+    from zoneinfo import ZoneInfo
+    return ZoneInfo(ET_ZONE)
+
+
+def usual_times(conn, sids: Optional[Iterable[int]] = None) -> Dict[int, Tuple[int, int]]:
+    """v233 (PM): each show's usual air time (ET hour, minute): the most common one of its recent airstamps."""
+    q = 'SELECT series_id, airstamp FROM episodes WHERE airstamp IS NOT NULL'
+    args: Tuple[Any, ...] = ()
+    if sids is not None:
+        ids = [int(i) for i in sids]
+        if not ids:
+            return {}
+        q += f" AND series_id IN ({','.join('?' * len(ids))})"
+        args = tuple(ids)
+    seen: Dict[int, List[Tuple[str, Tuple[int, int]]]] = {}
+    for sid, stamp in conn.execute(q, args):
+        try:
+            t = dt.datetime.fromisoformat(str(stamp).replace('Z', '+00:00')).astimezone(_et())
+        except ValueError:
+            continue
+        seen.setdefault(sid, []).append((str(stamp), (t.hour, t.minute)))
+    out = {}
+    for sid, xs in seen.items():
+        recent = [hm for _, hm in sorted(xs, reverse=True)[:10]]
+        out[sid] = max(set(recent), key=lambda hm: (recent.count(hm), recent.index(hm) * -1))
+    return out
+
+
 def aired_at(e: Dict[str, Any]) -> Optional[float]:
+    """When to search an aired episode: its airstamp plus runtime. v233 (PM): with no airstamp (Vanderpump
+    Rules S13E01), the show's usual air time on its air date (e['usual_time'], ET), else the start of the
+    air date in ET, so the search and the 15-min window still run that day."""
     if e.get('airstamp'):
         try:
             return dt.datetime.fromisoformat(str(e['airstamp']).replace('Z', '+00:00')).timestamp() \
@@ -215,10 +254,14 @@ def aired_at(e: Dict[str, Any]) -> Optional[float]:
             pass
     if e.get('air_date'):
         try:
-            d = dt.date.fromisoformat(str(e['air_date'])) + dt.timedelta(days=1)    # its local day is over
-            return dt.datetime(d.year, d.month, d.day).timestamp()
+            d = dt.date.fromisoformat(str(e['air_date']))
         except ValueError:
             return None
+        hm = e.get('usual_time')
+        if hm:
+            start = dt.datetime(d.year, d.month, d.day, int(hm[0]), int(hm[1]), tzinfo=_et())
+            return start.timestamp() + 60 * int(e.get('runtime') or 0)
+        return dt.datetime(d.year, d.month, d.day, tzinfo=_et()).timestamp()
     return None
 
 
@@ -925,10 +968,12 @@ def schedule(now: float) -> int:
     n = 0
     with tv_store.write() as conn:
         rows = [dict(r) for r in conn.execute(
-            'SELECT e.id, e.air_date, e.airstamp, e.runtime, e.next_search_at FROM episodes e JOIN series s ON s.id = e.series_id'
+            'SELECT e.id, e.series_id, e.air_date, e.airstamp, e.runtime, e.next_search_at FROM episodes e JOIN series s ON s.id = e.series_id'
             ' WHERE s.monitored = 1 AND e.monitored = 1 AND e.last_search_at IS NULL'
             f' AND e.air_date IS NOT NULL AND NOT {tv_monitor._LINKED}')]
+        usual = usual_times(conn, {e['series_id'] for e in rows if not e.get('airstamp')})
         for e in rows:
+            e['usual_time'] = usual.get(e['series_id'])
             at = aired_at(e)
             if at is None or not tv_safety.in_floor(e, now):
                 continue                     # v177 (Taylor): no Missing / backlog searches for TV, ever

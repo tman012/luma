@@ -192,3 +192,50 @@ def test_next_retry_rule():
     assert tv_search._next_retry(e, aired + 60, attempts=5) == aired + 60 + tv_search.FAST_S
     late = aired + tv_search.FAST_WINDOW_S + 1
     assert tv_search._next_retry(e, late, attempts=5) == late + tv_search.CATCHUP_S
+
+
+# ------------------------------------------------------------------ 4. episodes with no air time
+
+def _vpr(env, usual_stamp=None, runtime=None):
+    sid, ids = make_show(env, 'Vanderpump Rules', 'standard', 13, (1, 2), '2026-10-21', None, runtime)
+    if usual_stamp:
+        with tv_store.write() as conn:                    # last season aired at the show's usual time
+            for n, day in ((9, '2025-03-11'), (10, '2025-03-18')):
+                conn.execute('INSERT INTO episodes (series_id, season_number, episode_number, air_date, airstamp, monitored)'
+                             ' VALUES (?, 12, ?, ?, ?, 0)', (sid, n, day, f'{day}T{usual_stamp}'))
+    return sid, ids
+
+
+def test_no_air_time_uses_the_shows_usual_air_time(env):
+    sid, ids = _vpr(env, usual_stamp='01:00:00Z', runtime=60)         # 9:00 PM ET in March (EDT): 01:00Z next day
+    with tv_store.connect() as conn:
+        assert tv_search.usual_times(conn, [sid]) == {sid: (21, 0)}
+    tv_search.schedule(ts(2026, 10, 21, 8))
+    got = {r['next_search_at'] for r in rows('SELECT next_search_at FROM episodes WHERE id IN (?, ?)', *ids.values())}
+    assert got == {ts(2026, 10, 21, 22)}                              # 9:00 PM ET + 60 min
+
+
+def test_no_air_time_and_no_usual_time_starts_at_the_air_date_in_et(env):
+    sid, ids = _vpr(env)
+    tv_search.schedule(ts(2026, 10, 21, 8))
+    got = {r['next_search_at'] for r in rows('SELECT next_search_at FROM episodes WHERE id IN (?, ?)', *ids.values())}
+    assert got == {ts(2026, 10, 21, 0)}                               # 12:00 AM ET on 10-21, not the end of the day
+
+
+def test_no_air_time_still_gets_the_15_minute_window_and_a_grab(env, monkeypatch):
+    allow_grabs(monkeypatch)
+    distinct_torrents(env, monkeypatch)
+    sid, ids = _vpr(env)
+    start = ts(2026, 10, 21, 0)
+    names = ['Vanderpump Rules S13E01 1080p WEB h264-EDITH', 'Vanderpump Rules S13E02 1080p WEB h264-EDITH']
+    when = []
+
+    def fake(query, purpose, s, interactive, now, cfgs=None):
+        when.append(now)
+        up = now >= start + 3 * 3600
+        return ([item(n) for n in names] if up and query == 'Vanderpump Rules S13' else []), \
+            [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]
+    monkeypatch.setattr(tv_search, 'query_trackers', fake)
+    _timeline(sid, start - 15 * 60, start + 4 * 3600)
+    assert sorted(set(when)) == [start + i * tv_search.FAST_S for i in range(13)]
+    assert sorted(r['release_title'] for r in rows('SELECT release_title FROM grabs WHERE series_id = ?', sid)) == names
