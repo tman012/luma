@@ -205,16 +205,14 @@ describe('v228 R3 watchlist + on TMDb cards (mocked native watchlist)', () => {
 
 describe('v231 R3 TV + adds the series as Add series does (mocked tv.db)', () => {
   const tvAdd = () => screen.getAllByTestId('r3-wl-add').find(b => b.getAttribute('aria-label')!.includes('TV library'));
-  it('+ opens the Add series picker (Future episodes, default profile); Add posts to /api/settings/tv/shows; then a check', async () => {
+  it('one TV path: + adds at once with Add series defaults (Future episodes, default profile), no picker; then a check', async () => {
     render(<HomeSearchR3 />);
     await type('dune');
     await act(async () => { await Promise.resolve(); });
     fireEvent.click(tvAdd()!);
-    const sheet = screen.getByTestId('r3-tv-add-sheet');
-    expect(sheet.textContent).toContain("Add Frank Herbert's Dune");
-    expect(screen.getByTestId('tv-add-path-line').textContent).toContain('/media/tv');
+    expect(screen.queryByTestId('r3-tv-add-sheet')).toBeNull();
+    expect(screen.queryByTestId('tv-add-picker')).toBeNull();
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
-    fireEvent.click(screen.getByTestId('tv-add-confirm'));
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
     expect(tvPosts).toEqual([{ tmdb_id: 1880, monitor: 'future', profile_id: 3 }]);   // one path: no path_id, as Add series
     expect(screen.queryByTestId('r3-tv-add-sheet')).toBeNull();
@@ -223,12 +221,13 @@ describe('v231 R3 TV + adds the series as Add series does (mocked tv.db)', () =>
     expect(modals.openTv).not.toHaveBeenCalled();
     expect(calls.filter(u => /\/api\/(tv|sonarr|settings\/tv\/(search|downloads))/.test(u))).toEqual([]);   // nothing beyond Add series
   });
-  it('two TV paths: a path pick is required and sent', async () => {
+  it('two TV paths: the Add series picker opens; a path pick is required and sent', async () => {
     tvPaths = [{ id: 'p1', name: 'TV', path: '/media/tv', status: 'ok' }, { id: 'p2', name: 'Anime', path: '/media/anime', status: 'ok' }];
     render(<HomeSearchR3 />);
     await type('dune');
     await act(async () => { await Promise.resolve(); });
     fireEvent.click(tvAdd()!);
+    expect(screen.getByTestId('r3-tv-add-sheet').textContent).toContain("Add Frank Herbert's Dune");
     expect((screen.getByTestId('tv-add-confirm') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getAllByTestId('tv-add-path')[1]!);
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
@@ -245,7 +244,8 @@ describe('v231 R3 TV + adds the series as Add series does (mocked tv.db)', () =>
     expect(screen.getAllByTestId('r3-wl-in').map(e => e.getAttribute('aria-label'))).toEqual(["Frank Herbert's Dune is in your TV library"]);
     expect(tvPosts).toEqual([]);
   });
-  it('Cancel closes the picker without adding', async () => {
+  it('Cancel closes the picker without adding (two paths)', async () => {
+    tvPaths = [{ id: 'p1', name: 'TV', path: '/media/tv', status: 'ok' }, { id: 'p2', name: 'Anime', path: '/media/anime', status: 'ok' }];
     render(<HomeSearchR3 />);
     await type('dune');
     await act(async () => { await Promise.resolve(); });

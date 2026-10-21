@@ -19,7 +19,7 @@ import { isMinimal } from '@/minimal';
 import { fetchNativeWatchlistIdsOrNull } from '@/services/watchlistApi';
 import { PathPicker } from '@/components/library/TvSearch';
 import { loadTv, loadTvLibrary } from '@/components/library/tvLibraryApi';
-import { addShow, type MonitorOption } from '@/components/library/tvCalendarApi';
+import { addShow, loadProfiles, type MonitorOption } from '@/components/library/tvCalendarApi';
 import type { LibPath } from '@/components/library/libraryPathsApi';
 import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { img as homeImg, type Card } from '@/components/home/homeApi';
@@ -86,9 +86,16 @@ export function HomeSearchR3({ recent = [], onOpenCard }: { recent?: Card[]; onO
   }, []);
   const wlFor = (m: SearchMovie) => {
     const t = tvAddId(m);
-    if (t) return tv ? { inList: tv.ids.has(t), onAdd: () => setTvAdd(m), tv: true } : undefined;
+    if (t) return tv ? { inList: tv.ids.has(t), onAdd: () => (tv.paths.length === 1 ? void addTvDirect(m) : setTvAdd(m)), tv: true } : undefined;
     const id = wlId(m);
     return wlIds && id ? { inList: wlIds.has(id), onAdd: () => setWlAdd(m) } : undefined;
+  };
+  // v231b (PM): with exactly one TV path, + adds at once with Add series' defaults (Future episodes, default profile)
+  const addTvDirect = async (m: SearchMovie) => {
+    if (!tv || tvBusy) return;
+    const pr = await loadProfiles();
+    const profile_id = pr.ok ? pr.data.profiles.find(x => x.default)?.id ?? null : null;
+    await addTv(m, tv.paths[0]!.id, { monitor: 'future', profile_id });
   };
   const addTv = async (m: SearchMovie, pathId: string, opts: { monitor?: MonitorOption; profile_id?: number | null }) => {
     const id = tvAddId(m);
