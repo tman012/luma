@@ -11698,10 +11698,7 @@ def _build_hero_movies():
             return [], False
 
     # Parse excluded genres (comma/newline separated, case-insensitive)
-    raw_excluded = settings.get('ui.hero.excluded_genres', [])
-    if isinstance(raw_excluded, str):
-        raw_excluded = [g for g in raw_excluded.replace('\n', ',').split(',')]
-    excluded_genres = {g.strip().lower() for g in raw_excluded if g.strip()} if raw_excluded else set()
+    excluded_genres = {g.lower() for g in _hero_source.excluded(settings.get('ui.hero.excluded_genres', []))}   # v240
     if excluded_genres:
         logger.debug(f"Hero excluded genres: {excluded_genres}")
 
@@ -11743,7 +11740,7 @@ def _build_hero_movies():
         # /recentlyAdded applies its own recency window (it returned 2 items on
         # :5002, so the slideshow had almost nothing to rotate through). Only
         # items with backdrop art can be shown.
-        fetch_limit = max(limit * 3, 30)
+        fetch_limit = max(limit * 3, 30) if not excluded_genres else max(limit * 10, 200)   # v240: fill after exclusions
         try:
             items = (plex.get_all_movies(int(section_id), sort='addedAt:desc', limit=fetch_limit) or {}).get('movies') or []
         except Exception as e:
@@ -11763,9 +11760,12 @@ def _build_hero_movies():
 
     # Filter out excluded genres (applies in both modes)
     if excluded_genres:
+        tmdb_genres = _hero_source.cached_genres(str(section_id))
         filtered = []
         for item in items:
-            item_genres = {g.lower() for g in item.get('genres', [])}
+            # v240: Plex's genres plus the TMDb genres cached by the ranking build
+            item_genres = {g.lower() for g in (item.get('genres') or [])} | {
+                g.lower() for g in tmdb_genres.get(str(item.get('rating_key') or item.get('ratingKey') or ''), [])}
             matched = item_genres & excluded_genres
             if matched:
                 logger.debug(f"Hero excluded: '{item['title']}' matched genre(s): {matched}")

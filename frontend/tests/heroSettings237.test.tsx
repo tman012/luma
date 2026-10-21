@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HeroSettingsRows } from '@/components/home/HeroSettings';
 
 const json = (body: unknown, ok = true) => ({ ok, status: ok ? 200 : 500, json: async () => body }) as Response;
-const BASE = { source: 'newest', section_id: '1', limit: 10, libraries: [{ id: '1', title: 'Movies' }] };
+const BASE = { source: 'newest', section_id: '1', limit: 10, libraries: [{ id: '1', title: 'Movies' }],
+  excluded_genres: [] as string[], genres: ['Comedy', 'Documentary', 'Horror'] };
 
 function api(fail = false) {
   let cur = { ...BASE };
@@ -28,7 +29,7 @@ describe('v237 Settings > Home screen > Hero source and count', () => {
     const n = screen.getByTestId('hero-count') as HTMLInputElement;
     expect(n.value).toBe('10'); expect(n.min).toBe('5'); expect(n.max).toBe('30');
     expect(n.className).not.toContain('font-mono'); expect(n.style.fontFamily).not.toBe('');   // v238: UI font
-    expect(screen.getByTestId('hero-settings').textContent).toBe('HeroRecently addedMost popularNumber of movies');
+    expect(screen.getByTestId('hero-settings').textContent).toBe('HeroRecently addedMost popularNumber of moviesExcluded genresNone');
   });
 
   it('saves the source, and clamps the count to 5-30 on blur', async () => {
@@ -50,5 +51,24 @@ describe('v237 Settings > Home screen > Hero source and count', () => {
     const sel = await screen.findByTestId('hero-source') as HTMLSelectElement;
     fireEvent.change(sel, { target: { value: 'popular' } });
     await waitFor(() => expect(sel.value).toBe('newest'));
+  });
+
+  it('v240: Excluded genres is a multi-select; each pick saves the full list right away', async () => {
+    const f = api(); vi.stubGlobal('fetch', f);
+    render(<HeroSettingsRows />);
+    const btn = await screen.findByTestId('hero-genres');
+    expect(screen.getByTestId('hero-genres-value').textContent).toBe('None');
+    expect(btn.className).toBe((screen.getByTestId('hero-source') as HTMLElement).className.replace('cursor-pointer', '').trim() + ' cursor-pointer flex items-center justify-between text-left');
+    fireEvent.click(btn);
+    const boxes = within(screen.getByTestId('hero-genres-list')).getAllByRole('option') as HTMLInputElement[];
+    expect(boxes.map(b => b.parentElement!.textContent)).toEqual(['Comedy', 'Documentary', 'Horror']);
+    fireEvent.click(boxes[2]!);
+    await waitFor(() => expect(screen.getByTestId('hero-genres-value').textContent).toBe('Horror'));
+    fireEvent.click(within(screen.getByTestId('hero-genres-list')).getAllByRole('option')[1]!);
+    await waitFor(() => expect(screen.getByTestId('hero-genres-value').textContent).toBe('Horror, Documentary'));
+    const bodies = f.mock.calls.map(c => (c[1] as RequestInit)?.body).filter(Boolean);
+    expect(bodies).toEqual(['{"excluded_genres":["Horror"]}', '{"excluded_genres":["Horror","Documentary"]}']);
+    fireEvent.click(within(screen.getByTestId('hero-genres-list')).getAllByRole('option')[2]!);
+    await waitFor(() => expect(screen.getByTestId('hero-genres-value').textContent).toBe('Documentary'));
   });
 });

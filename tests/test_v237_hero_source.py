@@ -114,6 +114,7 @@ def _app():
 def test_settings_get_and_admin_put(env):
     c = _app()
     r = c.get('/api/settings/hero').get_json()
+    assert r.pop('excluded_genres') == [] and r.pop('genres')   # v240
     assert r == {'source': 'newest', 'section_id': '', 'limit': 10,
                  'libraries': [{'id': '1', 'title': 'Movies'}, {'id': '2', 'title': '4K'}]}
     r = c.put('/api/settings/hero', json={'source': 'popular', 'section_id': '2', 'limit': 50}).get_json()
@@ -277,3 +278,73 @@ def test_v239b_failed_refresh_does_not_loop(env):
     for i in range(2, 8):
         hs.ranked_keys('1', now=now + i * (hs.CHECK_S + 1), spawn=spawned.append)
     assert len(spawned) == 2                                         # newest_added updated: no loop
+
+
+# --- v240: genre exclusions -----------------------------------------------------
+
+def test_v240_default_is_no_exclusions_and_genres_fall_back_to_tmdb_list(env):
+    r = _app().get('/api/settings/hero').get_json()
+    assert r['excluded_genres'] == []
+    assert r['genres'] == list(hs.TMDB_MOVIE_GENRES)
+
+
+def test_v240_genres_come_from_the_cached_ranking_build(env, monkeypatch):
+    monkeypatch.setitem(hs._cfg, 'tmdb_details', lambda t: {'popularity': 1, 'genres': [{'id': 1, 'name': 'Horror' if t == 11 else 'Comedy'}]})
+    env['s'].d = {'ui': {'hero': {'library_section_id': 1}}}
+    hs.build('1')
+    assert _app().get('/api/settings/hero').get_json()['genres'] == ['Comedy', 'Horror']
+    assert hs.cached_genres('1')['1'] == ['Horror']
+
+
+def test_v240_save_validates_and_is_admin_only(env):
+    c = _app()
+    r = c.put('/api/settings/hero', json={'excluded_genres': ['Horror', 'horror', 'Documentary']})
+    assert r.status_code == 200 and r.get_json()['excluded_genres'] == ['Horror', 'Documentary']
+    assert env['cleared']                                            # hero cache cleared: applies right away
+    for bad in ('Horror', [1], ['Not A Genre'], [''], ['Drama'] * 51):
+        assert c.put('/api/settings/hero', json={'excluded_genres': bad}).status_code == 400
+    env['user']['u'] = {'id': 2, 'is_admin': False}
+    assert c.put('/api/settings/hero', json={'excluded_genres': []}).status_code == 403
+    assert env['s'].d['ui']['hero']['excluded_genres'] == ['Horror', 'Documentary']
+    assert hs.excluded('Horror, Sport') == ['Horror', 'Sport']       # older comma form still reads
+
+
+def _hero(monkeypatch, source, excluded, plex_movies, ranked=None, cached=None, limit=5):
+    monkeypatch.setenv('LUMA_MINIMAL', '1')
+    import app.main as m
+    vals = {'ui.hero.source': source, 'ui.hero.library_section_id': 1, 'ui.hero.limit': limit,
+            'ui.hero.excluded_genres': excluded, 'apis.tmdb.api_key': ''}
+    orig = m.settings.get
+    monkeypatch.setattr(m.settings, 'get', lambda k, d=None: vals[k] if k in vals else orig(k, d))
+    monkeypatch.setattr(hs, 'current', lambda: {'source': source, 'section_id': '1', 'limit': limit, 'excluded_genres': excluded})
+    monkeypatch.setattr(hs, 'ranked_keys', lambda sid, **k: ranked or [])
+    monkeypatch.setattr(hs, 'cached_genres', lambda sid: cached or {})
+    plex = FakePlex(); plex.movies = plex_movies
+    monkeypatch.setattr(m, 'get_plex_for_request', lambda: plex)
+    m._hero_result_cache.clear()
+    try:
+        return [x['title'] for x in m._build_hero_movies()[0]]
+    finally:
+        m._hero_result_cache.clear()
+
+
+def _mv(i, genres=()):
+    return {'rating_key': str(i), 'title': f'M{i}', 'tmdb_id': i, 'artPath': f'/a{i}', 'added_at': 1000 + i, 'genres': list(genres)}
+
+
+def test_v240_recently_added_excludes_and_fills_the_count(monkeypatch):
+    movies = [_mv(i, ['Horror'] if i % 2 else ['Comedy']) for i in range(20)]
+    out = _hero(monkeypatch, 'newest', ['Horror'], movies)
+    assert out == ['M18', 'M16', 'M14', 'M12', 'M10']                # 5, none of them Horror
+
+
+def test_v240_most_popular_excludes_by_tmdb_genres_and_fills(monkeypatch):
+    movies = [_mv(i) for i in range(10)]                             # no Plex genres: TMDb's from the cache
+    cached = {str(i): (['Documentary'] if i < 4 else ['Action']) for i in range(10)}
+    out = _hero(monkeypatch, 'popular', ['Documentary'], movies, ranked=[str(i) for i in range(10)], cached=cached)
+    assert out == ['M4', 'M5', 'M6', 'M7', 'M8']
+
+
+def test_v240_no_exclusions_changes_nothing(monkeypatch):
+    movies = [_mv(i, ['Horror']) for i in range(10)]
+    assert len(_hero(monkeypatch, 'newest', [], movies)) == 5

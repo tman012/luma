@@ -33,6 +33,11 @@ POOL_MAX = 2000          # movies read from the library per refresh
 FRESH_DAYS = 60          # v239: 'just added' window (Plex addedAt)
 MIN_VOTES = 200          # v239: a just-added movie counts when TMDb has >= this many votes ...
 POP_FLOOR = 40.0         # ... or its TMDb popularity is above this
+# v240: TMDb's movie genre list, the fallback when no ranking has been built yet.
+TMDB_MOVIE_GENRES = ('Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama',
+                     'Family', 'Fantasy', 'History', 'Horror', 'Music', 'Mystery', 'Romance',
+                     'Science Fiction', 'TV Movie', 'Thriller', 'War', 'Western')
+MAX_EXCLUDED = 50
 CHECK_S = 15 * 60        # v239: at most one newest-addedAt check per library per 15 minutes
 
 _cfg: Dict[str, Any] = {}
@@ -74,7 +79,34 @@ def current() -> Dict[str, Any]:
     src = s.get('ui.hero.source', 'newest')
     return {'source': src if src in SOURCES else 'newest',
             'section_id': str(s.get('ui.hero.library_section_id', 0) or ''),
-            'limit': clamp_limit(s.get('ui.hero.limit', LIMIT_DEFAULT))}
+            'limit': clamp_limit(s.get('ui.hero.limit', LIMIT_DEFAULT)),
+            'excluded_genres': excluded(s.get('ui.hero.excluded_genres', []))}
+
+
+def excluded(raw: Any) -> List[str]:
+    """v240: the stored exclusions as a clean list (older builds stored a comma string)."""
+    if isinstance(raw, str):
+        raw = raw.replace('\n', ',').split(',')
+    out: List[str] = []
+    for g in raw if isinstance(raw, list) else []:
+        g = str(g).strip()
+        if g and g.lower() not in {x.lower() for x in out}:
+            out.append(g)
+    return out
+
+
+def library_genres(section_id: str) -> List[str]:
+    """v240: genres of the chosen library's movies from the cached ranking build
+    (no outside call); TMDb's movie genre list until a ranking exists."""
+    data = load(section_id) if section_id else None
+    names = sorted({g for m in (data or {}).get('movies') or [] for g in m.get('genres') or []})
+    return names or list(TMDB_MOVIE_GENRES)
+
+
+def cached_genres(section_id: str) -> Dict[str, List[str]]:
+    """v240: rating_key -> TMDb genre names from the cached ranking build."""
+    data = load(str(section_id)) if section_id else None
+    return {m['rating_key']: m.get('genres') or [] for m in (data or {}).get('movies') or [] if m.get('rating_key')}
 
 
 # --- ranking ------------------------------------------------------------------
@@ -142,6 +174,7 @@ def build(section_id: str) -> List[dict]:
         return {'rating_key': str(m.get('ratingKey') or m.get('rating_key') or ''), 'title': m.get('title'),
                 'year': m.get('year'), 'tmdb_id': m['tmdb_id'],
                 'popularity': float(d.get('popularity') or 0), 'vote_count': int(d.get('vote_count') or 0),
+                'genres': [g.get('name') for g in d.get('genres') or [] if isinstance(g, dict) and g.get('name')],
                 'release_date': d.get('release_date') or '', 'added_at': int(m.get('added_at') or m.get('addedAt') or 0)}
     with ThreadPoolExecutor(max_workers=6) as pool:
         rows = list(pool.map(look, items))
@@ -225,7 +258,12 @@ def get_hero():
     _, err = _user()
     if err:
         return err
-    return jsonify({**current(), 'libraries': _movie_libraries()})
+    return _out()
+
+
+def _out():
+    cur = current()
+    return jsonify({**cur, 'libraries': _movie_libraries(), 'genres': library_genres(cur['section_id'])})
 
 
 @bp.route('/api/settings/hero', methods=['PUT'])
@@ -251,7 +289,15 @@ def put_hero():
         if isinstance(body['limit'], bool) or not isinstance(body['limit'], (int, float)):
             return jsonify({'error': 'Invalid count'}), 400
         hero['limit'] = clamp_limit(body['limit'])
+    if 'excluded_genres' in body:
+        raw = body['excluded_genres']
+        if not isinstance(raw, list) or len(raw) > MAX_EXCLUDED or not all(isinstance(g, str) and 0 < len(g.strip()) <= 64 for g in raw):
+            return jsonify({'error': 'Invalid genres'}), 400
+        known = {g.lower() for g in library_genres(current()['section_id'])} | {g.lower() for g in TMDB_MOVIE_GENRES}
+        if any(g.strip().lower() not in known for g in raw):
+            return jsonify({'error': 'Invalid genres'}), 400
+        hero['excluded_genres'] = excluded(raw)
     if hero:
         _cfg['settings'].update({'ui': {'hero': hero}})
-        _cfg['clear_hero']()
-    return jsonify({**current(), 'libraries': _movie_libraries()})
+        _cfg['clear_hero']()   # v240: exclusions are applied when the hero is served; no rebuild
+    return _out()
