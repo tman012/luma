@@ -88,8 +88,8 @@ describe('v180 owned Play/Watch is display-only in minimal', () => {
     expect(read('components/media/MovieDetailModal/CompactLayout.tsx')).toMatch(/data-owned-watch[\s\S]{0,1200}Watch\s*<\/button>/);
     expect(read('components/media/TvDetailModal/ExpandedLayout.tsx')).toMatch(/data-owned-watch[\s\S]{0,900}label="Watch"/);
   });
-  it('never opens playback in minimal builds', () => {
-    expect(read('components/media/MovieDetailModal/index.tsx')).toMatch(/if \(v && isMinimal\(\)\) return;/);
-    expect(read('components/media/TvDetailModal/index.tsx')).toMatch(/onPlayEpisode: \(rk: number, t: string\) => \{\s*\/\/[^\n]*\n\s*if \(isMinimal\(\)\) return;/);
+  it('v219: playback is on in minimal builds (prod 1b4ea74 handlers, no minimal no-op)', () => {
+    expect(read('components/media/MovieDetailModal/index.tsx')).not.toMatch(/isMinimal\(\)\) return/);
+    expect(read('components/media/TvDetailModal/index.tsx')).not.toMatch(/isMinimal/);
   });
 });

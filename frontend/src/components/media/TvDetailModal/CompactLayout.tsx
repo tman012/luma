@@ -1000,6 +1000,8 @@ export function CompactLayout(props: TvModalViewProps) {
                       )}
 
                       {/* Shuffle — season-level in season detail mode, show-level otherwise */}
+                      {/* v219: data-modal-keep keeps prod 1b4ea74's Shuffle in minimal builds (playback is on). */}
+                      <span data-modal-keep="" data-tv-shuffle="" style={{ display: 'contents' }}>
                       {setShuffleTarget && (
                         activeSeasonData
                           ? (seasonDetailIsOwned && activeSeasonPlexData?.ratingKey && (
@@ -1033,6 +1035,7 @@ export function CompactLayout(props: TvModalViewProps) {
                               />
                             ))
                       )}
+                      </span>
 
                       {/* Series — jump from season detail back to show-level modal */}
                       {activeSeasonData && (

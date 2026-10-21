@@ -83,6 +83,31 @@ OWNERSHIP_READ = (
     ('GET', '/api/plex/tv/<int:rating_key>/seasons'),
     ('GET', '/api/tv/ownership/<int:tvdb_id>/cached'),
 )
+# v219 (PM): prod 1b4ea74's playback (Play/Watch in the movie and TV popups, the TV
+# Shuffle). Exactly the routes PlaybackModal / MobilePlaybackSheet call, each on
+# its one method. None of them writes to the Plex library: rooms and resume info
+# are reads, the play queue is a Plex playback object, and /api/player/play sends
+# a play command to the room device the user picked. Room edits stay closed.
+PLAYBACK_ROUTES = (
+    ('GET', '/api/settings/rooms'),
+    ('GET', '/api/plex/resume_info/'),   # + <rating_key>
+    ('POST', '/api/plex/playqueue'),
+    ('POST', '/api/player/play'),
+)
+
+
+def _playback_allowed(path: str, method: str) -> bool:
+    for m, route in PLAYBACK_ROUTES:
+        if route.endswith('/'):
+            rest = path[len(route):] if path.startswith(route) else None
+            ok = rest is not None and rest.isdigit()
+        else:
+            ok = path == route
+        if ok:
+            return method == m or (m == 'GET' and method == 'HEAD')
+    return False
+
+
 # Inside /static/, these belong to disabled features.
 BLOCKED_PREFIXES = ('/static/request/', '/static/hero_cache/')
 # Under /api/auth/, these belong to disabled features (no self sign-up).
@@ -98,6 +123,8 @@ def enabled() -> bool:
 
 def path_allowed(path: str, method: str = 'GET') -> bool:
     path = path or '/'
+    if _playback_allowed(path, method):
+        return True
     if path.startswith(DETAIL_READ_PREFIXES):
         return method in ('GET', 'HEAD') and '..' not in path
     if len(path) > 1 and path.endswith('/') and path.rstrip('/') in ALLOWED_PATHS:

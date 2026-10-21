@@ -47,12 +47,7 @@ export function MovieDetailModal({
   const [showFullPlot, setShowFullPlot] = useState(false);
   const [showTrailer, setShowTrailer] = useState(false);
   const [showReviews, setShowReviews] = useState(false);
-  const [showPlayback, setShowPlaybackState] = useState(false);
-  // v180: in minimal builds the owned Play/Watch is display-only (no playback).
-  const setShowPlayback = useCallback((v: boolean) => {
-    if (v && isMinimal()) return;
-    setShowPlaybackState(v);
-  }, []);
+  const [showPlayback, setShowPlayback] = useState(false);
   const [showSimilar, setShowSimilar] = useState(restoreSimilar);
   const [showCollection, setShowCollection] = useState(false);
   const [grabToast, setGrabToast] = useState(false);

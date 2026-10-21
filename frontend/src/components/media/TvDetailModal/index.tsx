@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTvDetail } from '@/hooks/useTvDetail';
-import { isMinimal } from '@/minimal';
 import { useEpisodeData } from '@/hooks/useEpisodeData';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { checkSonarrStatus, type SonarrStatus } from '@/services/sonarrApi';
@@ -248,8 +247,6 @@ export function TvDetailModal({
     playbackRatingKey,
     playbackTitle,
     onPlayEpisode: (rk: number, t: string) => {
-      // v180: display-only Watch in minimal builds (no playback).
-      if (isMinimal()) return;
       setPlaybackRatingKey(rk);
       setPlaybackTitle(t);
       setShowPlayback(true);
