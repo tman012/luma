@@ -16,7 +16,11 @@ import {
 import { backdropUrl, sizedPlexImg, tmdbImg } from '@/utils/image';
 import { SearchIcon } from './MinimalSearchHost';
 import { isMinimal } from '@/minimal';
-import { fetchNativeWatchlistIds } from '@/services/watchlistApi';
+import { fetchNativeWatchlistIdsOrNull } from '@/services/watchlistApi';
+import { PathPicker } from '@/components/library/TvSearch';
+import { loadTv, loadTvLibrary } from '@/components/library/tvLibraryApi';
+import { addShow, type MonitorOption } from '@/components/library/tvCalendarApi';
+import type { LibPath } from '@/components/library/libraryPathsApi';
 import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { img as homeImg, type Card } from '@/components/home/homeApi';
 import { DEBOUNCE_MS, MIN_QUERY, SKELETON_DELAY_MS, unownedRows } from './HomeSearchPalette';
@@ -41,17 +45,19 @@ export function buildR3(res: SearchResults | null, q: string): R3View {
   const tmdb = unownedRows(res, 'all', q).map(r => r.item as SearchMovie);
   const owned = res.owned;
   const top = owned[0] ?? tmdb[0] ?? null;
-  const more = owned.length ? tmdb : tmdb.slice(1);
+  const tmdbRest = owned.length ? tmdb : tmdb.slice(1);
   const rest = owned.slice(1, 1 + GRID_MAX);
-  return {
-    top,
-    grid: [...rest, ...more.slice(0, Math.max(0, GRID_MAX - rest.length))],
-    people: [...res.ownedPeople, ...res.unownedPeople],
-    more,
-  };
+  const grid = [...rest, ...tmdbRest.slice(0, Math.max(0, GRID_MAX - rest.length))];
+  // v231 (PM): On TMDb (and Find more's count) lists only titles not already shown above
+  const shown = new Set([top, ...grid].filter(Boolean).map(m => r3Key(m!)));
+  const more = tmdbRest.filter(m => !shown.has(r3Key(m)));
+  return { top, grid, people: [...res.ownedPeople, ...res.unownedPeople], more };
 }
 
 /** The watchlist '+' shows on TMDb movie cards on the test install (the native watchlist is movies only). */
+const r3Key = (m: SearchMovie) => `${m.media_type === 'tv' ? 'tv' : 'movie'}-${m.tmdb_id || m.id}`;
+/** v231 (PM): the TMDb id a TV card adds to the TV library with (not already in your Plex library). */
+export const tvAddId = (m: SearchMovie): number | null => (!m.isOwned && m.media_type === 'tv' && (m.tmdb_id || m.id)) || null;
 export const wlId = (m: SearchMovie): number | null =>
   (!m.isOwned && m.media_type !== 'tv' && (m.tmdb_id || m.id)) || null;
 
@@ -64,10 +70,33 @@ export function HomeSearchR3({ recent = [], onOpenCard }: { recent?: Card[]; onO
   // v228 (PM): the existing native watchlist state and add flow, as KioskSearch (v202): ids, then the profile sheet
   const [wlIds, setWlIds] = useState<Set<number> | null>(null);
   const [wlAdd, setWlAdd] = useState<SearchMovie | null>(null);
-  useEffect(() => { if (isMinimal()) void fetchNativeWatchlistIds().then(setWlIds); }, []);
+  // v231 (Tester): no movie Add until the id lookup succeeds (a 404 or error leaves it hidden)
+  useEffect(() => { if (isMinimal()) void fetchNativeWatchlistIdsOrNull().then(setWlIds); }, []);
+  // v231 (PM): TV cards add the series as Add series does (tv.db); needs the TV paths and the library's ids
+  const [tv, setTv] = useState<{ paths: LibPath[]; ids: Set<number> } | null>(null);
+  const [tvAdd, setTvAdd] = useState<SearchMovie | null>(null);
+  const [tvBusy, setTvBusy] = useState(false);
+  useEffect(() => {
+    if (!isMinimal()) return;
+    let live = true;
+    void Promise.all([loadTv(), loadTvLibrary()]).then(([v, l]) => {
+      if (live && v.ok && l.ok && v.data.paths.length) setTv({ paths: v.data.paths, ids: new Set(l.data.shows.map(x => x.tmdb_id)) });
+    });
+    return () => { live = false; };
+  }, []);
   const wlFor = (m: SearchMovie) => {
+    const t = tvAddId(m);
+    if (t) return tv ? { inList: tv.ids.has(t), onAdd: () => setTvAdd(m), tv: true } : undefined;
     const id = wlId(m);
     return wlIds && id ? { inList: wlIds.has(id), onAdd: () => setWlAdd(m) } : undefined;
+  };
+  const addTv = async (m: SearchMovie, pathId: string, opts: { monitor?: MonitorOption; profile_id?: number | null }) => {
+    const id = tvAddId(m);
+    if (!id || !tv || tvBusy) return;
+    setTvBusy(true);
+    const out = await addShow(id, tv.paths.length >= 2 ? pathId : undefined, opts);
+    setTvBusy(false);
+    if (out.ok) { setTv(p => p && { ...p, ids: new Set([...p.ids, id]) }); setTvAdd(null); }
   };
   const [query, setQuery] = useState('');
   const [res, setRes] = useState<SearchResults | null>(null);
@@ -148,6 +177,14 @@ export function HomeSearchR3({ recent = [], onOpenCard }: { recent?: Card[]; onO
       {wlAdd && wlId(wlAdd) && (
         <WatchlistAddSheet tmdbId={wlId(wlAdd)!} title={getTitle(wlAdd)} year={getYear(wlAdd) || null} onClose={() => setWlAdd(null)}
           onAdded={() => { const id = wlId(wlAdd)!; setWlIds(p => new Set([...(p ?? []), id])); setWlAdd(null); }} />
+      )}
+      {tvAdd && tv && (
+        <div className="r3-tvadd" data-testid="r3-tv-add-sheet">
+          <div className="r3-tvadd-in">
+            <div className="r3-tvadd-t">{`Add ${getTitle(tvAdd)}`}</div>
+            <PathPicker inline paths={tv.paths} onCancel={() => setTvAdd(null)} onAdd={(p, o) => void addTv(tvAdd, p, o)} />
+          </div>
+        </div>
       )}
       <div className="r3-head">
         <h1 className="r3-title">Search</h1>
@@ -263,7 +300,7 @@ function TopCard({ item, onOpen }: { item: SearchMovie; onOpen: () => void }) {
   );
 }
 
-function PosterCard({ item, onOpen, wl }: { item: SearchMovie; onOpen: () => void; wl?: { inList: boolean; onAdd: () => void } }) {
+function PosterCard({ item, onOpen, wl }: { item: SearchMovie; onOpen: () => void; wl?: { inList: boolean; onAdd: () => void; tv?: boolean } }) {
   const img = sizedPlexImg(getPosterUrl(item), 272, 408);
   const title = getTitle(item);
   return (
@@ -277,11 +314,11 @@ function PosterCard({ item, onOpen, wl }: { item: SearchMovie; onOpen: () => voi
         <span className="r3-cm">{metaR3(item)}</span>
       </button>
       {wl && (wl.inList ? (
-        <span className="r3-wl" data-testid="r3-wl-in" role="img" aria-label={`${title} is in your watchlist`}>
+        <span className="r3-wl" data-testid="r3-wl-in" role="img" aria-label={wl.tv ? `${title} is in your TV library` : `${title} is in your watchlist`}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
         </span>
       ) : (
-        <button type="button" className="r3-wl" data-testid="r3-wl-add" aria-label={`Add ${title} to watchlist`} onClick={wl.onAdd}>
+        <button type="button" className="r3-wl" data-testid="r3-wl-add" aria-label={wl.tv ? `Add ${title} to your TV library` : `Add ${title} to watchlist`} onClick={wl.onAdd}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
         </button>
       ))}
@@ -326,6 +363,9 @@ export const r3Css = `
 .r3-cardw{position:relative;min-width:0}
 .r3-wl{position:absolute;top:8px;right:8px;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;padding:0;cursor:pointer;color:#fff;
   background:rgba(21,16,42,.78);border:1px solid rgba(255,255,255,.16);outline:none}
+.r3-tvadd{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:rgba(0,0,0,.5)}
+.r3-tvadd-in{width:380px;max-width:calc(100vw - 32px);padding-top:16px;border-radius:16px;background:rgba(21,16,42,.96);border:1px solid rgba(255,255,255,.08)}
+.r3-tvadd-t{padding:0 24px 12px;font-size:16px;font-weight:600;color:#fff}
 .r3-wl:hover{background:rgba(59,130,246,.85)}
 span.r3-wl{cursor:default;background:#22c55e;border-color:#22c55e}
 .r3-wl:focus-visible{box-shadow:0 0 0 3px rgba(59,130,246,.45)}

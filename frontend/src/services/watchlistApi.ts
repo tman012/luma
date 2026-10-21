@@ -103,6 +103,19 @@ export async function fetchNativeWatchlistIds(): Promise<Set<number>> {
   }
 }
 
+/** v231 (Tester): null when the lookup fails (404, error, unreachable), so callers can hide Add instead of
+ * treating every title as not in the watchlist. */
+export async function fetchNativeWatchlistIdsOrNull(): Promise<Set<number> | null> {
+  try {
+    const resp = await fetchWithTimeout(`${NATIVE_WATCHLIST_URL}/tmdb-ids`);
+    if (!resp.ok) return null;
+    const data = await resp.json() as { tmdb_ids?: unknown };
+    return Array.isArray(data.tmdb_ids) ? new Set(data.tmdb_ids as number[]) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function addToNativeWatchlist(m: { tmdbId: number; title: string; year?: number | null; profileId?: number | null }):
   Promise<{ ok: boolean; error?: string }> {
   try {

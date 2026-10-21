@@ -20,17 +20,27 @@ const TM = { movies: [{ id: 841, title: 'Dune', release_date: '1984-12-14' }, { 
 const calls: string[] = [];
 const posts: { url: string; body: unknown }[] = [];
 let wl: number[] = [];
+let wlStatus = 200;
+let tm: unknown = TM;
+// v231: the TV library (tv.db), mocked; POST /shows is recorded, never sent anywhere
+let tvShows: { tmdb_id: number }[] = [];
+let tvPaths = [{ id: 'p1', name: 'TV', path: '/media/tv', status: 'ok' }];
+const tvPosts: unknown[] = [];
 const fetchMock = vi.fn(async (u: string, init?: RequestInit) => {
   const url = String(u); calls.push(url);
   // the native watchlist and the profile sheet, mocked
-  if (url.includes('/api/movies/watchlist/tmdb-ids')) return json({ tmdb_ids: wl });
+  if (url.includes('/api/movies/watchlist/tmdb-ids')) return wlStatus === 200 ? json({ tmdb_ids: wl }) : new Response('{}', { status: wlStatus });
+  if (url.endsWith('/api/settings/tv/shows') && init?.method === 'POST') { tvPosts.push(JSON.parse(String(init.body))); return json({ ok: true, series_id: 77 }); }
+  if (url.endsWith('/api/settings/tv/profiles')) return json({ profiles: [{ id: 3, name: 'HD', default: true }], qualities: [] });
+  if (url.endsWith('/api/settings/tv/library')) return json({ shows: tvShows, unmatched: [], scan: {} });
+  if (url.endsWith('/api/settings/tv')) return json({ paths: tvPaths, upgrades: { mode: 'off' }, rescan_interval_h: 6 });
   if (url.includes('/api/movies/watchlist') && init?.method === 'POST') { posts.push({ url, body: JSON.parse(String(init.body)) }); return json({ ok: true }); }
   if (url.includes('/api/settings/movies')) return json({ profiles: [{ id: 7, name: 'HD 1080p', default: true }] });
   if (url.includes('/api/library/search')) return json(LIB);
-  if (url.startsWith('/search?') || url.includes('/search?q=')) return json(TM);
+  if (url.startsWith('/search?') || url.includes('/search?q=')) return json(tm);
   return json({});
 });
-beforeEach(() => { calls.length = 0; posts.length = 0; wl = []; window.__LUMA_MINIMAL__ = true; vi.useFakeTimers({ shouldAdvanceTime: true }); vi.stubGlobal('fetch', fetchMock); modals.openMovie.mockReset(); modals.openTv.mockReset(); });
+beforeEach(() => { calls.length = 0; posts.length = 0; wl = []; wlStatus = 200; tm = TM; tvShows = []; tvPosts.length = 0; tvPaths = [{ id: 'p1', name: 'TV', path: '/media/tv', status: 'ok' }]; window.__LUMA_MINIMAL__ = true; vi.useFakeTimers({ shouldAdvanceTime: true }); vi.stubGlobal('fetch', fetchMock); modals.openMovie.mockReset(); modals.openTv.mockReset(); });
 afterEach(() => { delete window.__LUMA_MINIMAL__; cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 const type = async (q: string) => {
@@ -103,60 +113,153 @@ describe('R3: no key badges, no helper text', () => {
   });
 });
 
+// v231: enough TMDb titles to fill the grid, so On TMDb has something new to show
+const MANY = { movies: Array.from({ length: 8 }, (_, i) => ({ id: 900 + i, title: `Dune ${i + 1}`, release_date: `${1990 + i}-01-01` })), tv_shows: [], people: [] };
+
 describe('R3 Find more is TMDb', () => {
-  it('counts and opens the TMDb titles from /search (mocked), word-match filtered, opening the TMDb popup', async () => {
+  it('only the titles not already in the grid: counts and opens them from /search (mocked), word-match filtered', async () => {
+    tm = { ...MANY, tv_shows: [{ id: 1880, name: "Frank Herbert's Dune", first_air_date: '2000-12-03' }],
+      movies: [...MANY.movies, { id: 5, title: 'Unrelated Thing', release_date: '2000-01-01' }] };
     render(<HomeSearchR3 />);
     await type('dune');
     expect(calls.some(u => u.startsWith('/search?q=dune&type=all'))).toBe(true);
+    const grid = screen.getByTestId('r3-grid');
+    const inGrid = [...grid.querySelectorAll('[data-testid="r3-card"]')].map(c => c.getAttribute('aria-label'));
+    expect(inGrid).toHaveLength(6);
     const more = screen.getByTestId('find-more');
-    expect(more.textContent).toBe('Find more for “dune”2 on TMDb');
     fireEvent.click(more);
-    const tm = screen.getByTestId('r3-tmdb');
-    const cards = tm.querySelectorAll('[data-testid="r3-card"]');
-    expect([...cards].map(c => c.textContent)).toEqual(['Dune1984 · Movie', "Frank Herbert's Dune2000 · TV"]);
-    expect(tm.textContent).not.toContain('Unrelated Thing');
-    fireEvent.click(cards[1]!);
-    expect(modals.openTv).toHaveBeenCalledWith({ ratingKey: undefined, tmdbId: 1880, origin: 'search' });
+    const tmS = screen.getByTestId('r3-tmdb');
+    const cards = [...tmS.querySelectorAll('[data-testid="r3-card"]')];
+    const names = cards.map(c => c.getAttribute('aria-label'));
+    expect(names.length).toBeGreaterThan(0);
+    expect(names.filter(n => inGrid.includes(n))).toEqual([]);        // nothing repeats the grid
+    expect(more.textContent).toBe(`Find more for “dune”${names.length} on TMDb`);
+    expect(tmS.querySelector('.r3-count')!.textContent).toBe(String(names.length));
+    expect(tmS.textContent).not.toContain('Unrelated Thing');
+    fireEvent.click(cards[0]!);
+    expect(modals.openMovie.mock.calls[0]![0]).toMatchObject({ origin: 'search' });
   });
-  it('nothing owned: the first TMDb title is the top result and leaves Find more', () => {
-    const v = buildR3({ owned: [], unowned: [{ id: 841, title: 'Dune', year: 1984, media_type: 'movie' }, { id: 9, title: 'Dune World', year: 2001, media_type: 'tv' }],
-      ownedPeople: [], unownedPeople: [], rateLimited: false, failed: false }, 'dune');
-    expect([v.top?.id, v.more.map(m => m.id)]).toEqual([841, [9]]);
+  it('no Find more when every TMDb title is already shown above', async () => {
+    render(<HomeSearchR3 />);
+    await type('dune');
+    expect(screen.getAllByTestId('r3-card').map(c => c.getAttribute('aria-label'))).toContain("Frank Herbert's Dune");
+    expect(screen.queryByTestId('find-more')).toBeNull();
+    expect(screen.queryByTestId('r3-tmdb')).toBeNull();
+  });
+  it('buildR3: nothing owned, the first TMDb title is the top result; more holds only what the grid left out', () => {
+    const rows = Array.from({ length: 9 }, (_, i) => ({ id: 10 + i, title: `Dune ${i}`, year: 2000 + i, media_type: i % 2 ? 'tv' : 'movie' }));
+    const base = { owned: [], ownedPeople: [], unownedPeople: [], rateLimited: false, failed: false };
+    const v = buildR3({ ...base, unowned: rows } as never, 'dune');
+    expect([v.top?.id, v.grid.map(m => m.id), v.more.map(m => m.id)]).toEqual([10, [11, 12, 13, 14, 15, 16], [17, 18]]);
+    const few = buildR3({ ...base, unowned: rows.slice(0, 2) } as never, 'dune');
+    expect([few.top?.id, few.grid.map(m => m.id), few.more]).toEqual([10, [11], []]);
   });
 });
 
 describe('v228 R3 watchlist + on TMDb cards (mocked native watchlist)', () => {
-  it('TMDb movie cards get +, library and TV cards none; + opens the profile sheet and adds; then a check', async () => {
+  it('TMDb movie cards get the watchlist +, library cards none; + opens the profile sheet and adds; then a check', async () => {
     render(<HomeSearchR3 />);
     await type('dune');
     await act(async () => { await Promise.resolve(); });
     const adds = screen.getAllByTestId('r3-wl-add');
-    expect(adds.map(b => b.getAttribute('aria-label'))).toEqual(['Add Dune to watchlist']);
+    expect(adds.map(b => b.getAttribute('aria-label'))).toEqual(['Add Dune to watchlist', "Add Frank Herbert's Dune to your TV library"]);
     fireEvent.click(adds[0]!);
     const confirm = await screen.findByTestId('watchlist-add-confirm');
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
     fireEvent.click(confirm);
     await act(async () => { await new Promise(r => setTimeout(r, 0)); });
     expect(posts).toEqual([{ url: expect.stringContaining('/api/movies/watchlist'), body: { tmdb_id: 841, title: 'Dune', year: 1984, profile_id: 7 } }]);
-    expect(screen.queryByTestId('r3-wl-add')).toBeNull();
+    expect(screen.getAllByTestId('r3-wl-add').map(b => b.getAttribute('aria-label'))).toEqual(["Add Frank Herbert's Dune to your TV library"]);
     expect(screen.getByTestId('r3-wl-in').getAttribute('aria-label')).toBe('Dune is in your watchlist');
     expect(modals.openMovie).not.toHaveBeenCalled();
   });
   it('after Find more too; a title already on the watchlist shows the check', async () => {
-    wl = [841];
+    tm = MANY; wl = [907];
     render(<HomeSearchR3 />);
     await type('dune');
+    await act(async () => { await Promise.resolve(); });
     fireEvent.click(screen.getByTestId('find-more'));
-    const tm = screen.getByTestId('r3-tmdb');
-    expect(tm.querySelectorAll('[data-testid="r3-wl-in"]')).toHaveLength(1);
-    expect(tm.querySelectorAll('[data-testid="r3-wl-add"]')).toHaveLength(0);
+    const tmS = screen.getByTestId('r3-tmdb');
+    expect([...tmS.querySelectorAll('[data-testid="r3-wl-in"]')].map(e => e.getAttribute('aria-label'))).toEqual(['Dune 8 is in your watchlist']);
+    expect(tmS.querySelectorAll('[data-testid="r3-wl-add"]')).toHaveLength(tmS.querySelectorAll('[data-testid="r3-card"]').length - 1);
+  });
+  it.each([404, 500])('v231 (Tester): the id lookup fails (%i): no + anywhere, not even after Find more', async (st) => {
+    tm = MANY; wlStatus = st;
+    render(<HomeSearchR3 />);
+    await type('dune');
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByTestId('r3-wl-add')).toBeNull();
+    fireEvent.click(screen.getByTestId('find-more'));
+    expect(screen.queryByTestId('r3-wl-add')).toBeNull();
+    expect(screen.queryByTestId('r3-wl-in')).toBeNull();
   });
   it('no + outside the test install (no native watchlist)', async () => {
+    tvShows = [];
     delete window.__LUMA_MINIMAL__;
     render(<HomeSearchR3 />);
     await type('dune');
     expect(screen.queryByTestId('r3-wl-add')).toBeNull();
-    expect(calls.some(u => u.includes('/api/movies/watchlist'))).toBe(false);
+    expect(calls.some(u => u.includes('/api/movies/watchlist') || u.includes('/api/settings/tv'))).toBe(false);
+  });
+});
+
+describe('v231 R3 TV + adds the series as Add series does (mocked tv.db)', () => {
+  const tvAdd = () => screen.getAllByTestId('r3-wl-add').find(b => b.getAttribute('aria-label')!.includes('TV library'));
+  it('+ opens the Add series picker (Future episodes, default profile); Add posts to /api/settings/tv/shows; then a check', async () => {
+    render(<HomeSearchR3 />);
+    await type('dune');
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.click(tvAdd()!);
+    const sheet = screen.getByTestId('r3-tv-add-sheet');
+    expect(sheet.textContent).toContain("Add Frank Herbert's Dune");
+    expect(screen.getByTestId('tv-add-path-line').textContent).toContain('/media/tv');
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    fireEvent.click(screen.getByTestId('tv-add-confirm'));
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    expect(tvPosts).toEqual([{ tmdb_id: 1880, monitor: 'future', profile_id: 3 }]);   // one path: no path_id, as Add series
+    expect(screen.queryByTestId('r3-tv-add-sheet')).toBeNull();
+    expect(tvAdd()).toBeUndefined();
+    expect(screen.getAllByTestId('r3-wl-in').map(e => e.getAttribute('aria-label'))).toContain("Frank Herbert's Dune is in your TV library");
+    expect(modals.openTv).not.toHaveBeenCalled();
+    expect(calls.filter(u => /\/api\/(tv|sonarr|settings\/tv\/(search|downloads))/.test(u))).toEqual([]);   // nothing beyond Add series
+  });
+  it('two TV paths: a path pick is required and sent', async () => {
+    tvPaths = [{ id: 'p1', name: 'TV', path: '/media/tv', status: 'ok' }, { id: 'p2', name: 'Anime', path: '/media/anime', status: 'ok' }];
+    render(<HomeSearchR3 />);
+    await type('dune');
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.click(tvAdd()!);
+    expect((screen.getByTestId('tv-add-confirm') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getAllByTestId('tv-add-path')[1]!);
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    fireEvent.click(screen.getByTestId('tv-add-confirm'));
+    await act(async () => { await new Promise(r => setTimeout(r, 0)); });
+    expect(tvPosts).toEqual([{ tmdb_id: 1880, path_id: 'p2', monitor: 'future', profile_id: 3 }]);
+  });
+  it('already in the TV library: a check, no +; Cancel adds nothing', async () => {
+    tvShows = [{ tmdb_id: 1880 }];
+    render(<HomeSearchR3 />);
+    await type('dune');
+    await act(async () => { await Promise.resolve(); });
+    expect(tvAdd()).toBeUndefined();
+    expect(screen.getAllByTestId('r3-wl-in').map(e => e.getAttribute('aria-label'))).toEqual(["Frank Herbert's Dune is in your TV library"]);
+    expect(tvPosts).toEqual([]);
+  });
+  it('Cancel closes the picker without adding', async () => {
+    render(<HomeSearchR3 />);
+    await type('dune');
+    await act(async () => { await Promise.resolve(); });
+    fireEvent.click(tvAdd()!);
+    fireEvent.click(screen.getByTestId('tv-add-cancel'));
+    expect(screen.queryByTestId('r3-tv-add-sheet')).toBeNull();
+    expect(tvPosts).toEqual([]);
+  });
+  it('no TV paths (or not the owner): no TV +', async () => {
+    tvPaths = [];
+    render(<HomeSearchR3 />);
+    await type('dune');
+    await act(async () => { await Promise.resolve(); });
+    expect(tvAdd()).toBeUndefined();
   });
 });
 
