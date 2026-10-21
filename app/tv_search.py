@@ -461,6 +461,12 @@ CATCHUP_S = 24 * 3600
 
 
 def _next_retry(e: Dict[str, Any], now: float, attempts: int = 1) -> float:
+    # v233 (PM): v203c's "air-time search plus one retry, then a day" overrode 0312e53's window, so a new
+    # episode stopped after 2 searches with the next one 24 h out. Inside FAST_WINDOW_S after it aired it is
+    # searched every FAST_S whatever the count; after the window, v203c's rule (feed-only, a daily catch-up).
+    at = aired_at(e)
+    if at is not None and now < at + FAST_WINDOW_S:
+        return now + FAST_S
     if attempts >= AUTO_SEARCHES:
         return now + CATCHUP_S
     return now + FAST_S
