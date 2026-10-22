@@ -450,6 +450,7 @@ describe('v246 D3: filter chips over a 7-column grid', () => {
   });
   it('v247: chips and grid in one centered max-width container; auto-fill columns; D3 chip styles', () => {
     expect(r3Css).toContain('.d3{max-width:1600px;margin:0 auto}');
+    expect(r3Css).toContain('.d3-chips{display:flex;flex-wrap:wrap;justify-content:center;');
     expect(r3Css).toContain('.d3-grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(min(160px, 100%), 1fr));gap:28px clamp(12px, 2.1vw, 30px);');
     expect(r3Css).not.toContain('repeat(7');
     expect(r3Css).toContain('.d3-grid .r3-cardw{width:100%}');

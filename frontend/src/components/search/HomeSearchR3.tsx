@@ -391,7 +391,7 @@ export const r3Css = `
 .r3-cardw{position:relative;min-width:0;width:var(--r3-po);overflow:hidden}
 /* v247 D3: chips and grid share one centered container (equal gutters); auto-fill columns fill it */
 .d3{max-width:1600px;margin:0 auto}
-.d3-chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 24px}
+.d3-chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:0 0 24px}
 .d3-chip{height:36px;padding:0 16px;border-radius:8px;border:1px solid #44474e;background:none;color:#e2e2e9;font:inherit;font-size:14px;cursor:pointer;outline:none}
 .d3-chip[aria-pressed="true"]{background:#3a4458;border-color:#3a4458;color:#d8e2ff}
 .d3-chip:focus-visible{box-shadow:0 0 0 3px rgba(59,130,246,.45)}
