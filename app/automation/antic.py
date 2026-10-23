@@ -238,10 +238,14 @@ def _fill(cur: Any) -> Dict[str, Any]:
 
 
 EXPLICIT = ('no_readd',)       # stored only once the owner sets it, so an unset one follows the default (v259: on)
+OWNER_MARK = 'no_readd_set_by_owner'    # v259: written beside no_readd by an owner save that sets it
+NO_READD_MIGRATION = 'antic_no_readd_v259'
+_no_readd_migrated: set = set()         # db paths this process already checked
 
 
 def _stored(out: Dict[str, Any], raw: Any, body: Any) -> Dict[str, Any]:
-    """*out* as stored: an EXPLICIT key is kept only when it was saved before or *body* sets it."""
+    """*out* as stored: an EXPLICIT key is kept only when it was saved before or *body* sets it; an owner save
+    that sets no_readd marks it (OWNER_MARK), and the mark is kept from then on."""
     raw = raw if isinstance(raw, dict) else {}
     body = body if isinstance(body, dict) else {}
     res = {**out}
@@ -249,18 +253,51 @@ def _stored(out: Dict[str, Any], raw: Any, body: Any) -> Dict[str, Any]:
         was = raw.get(kind) if isinstance(raw.get(kind), dict) else {}
         now = body.get(kind) if isinstance(body.get(kind), dict) else {}
         res[kind] = {k: v for k, v in out[kind].items() if k not in EXPLICIT or k in was or k in now}
+        if 'no_readd' in now or was.get(OWNER_MARK) is True:
+            res[kind][OWNER_MARK] = True
     return res
 
 
+def migrate_no_readd() -> List[str]:
+    """v259, once per store (meta NO_READD_MIGRATION): a stored no_readd false that no owner save set (no
+    OWNER_MARK; ca0bc96's first scheduler check saved the full defaults) becomes true, so 81a139a's default
+    applies. An owner-saved false stays. Never raises. Returns the groups changed."""
+    key = db_path()
+    if key in _no_readd_migrated:
+        return []
+    _no_readd_migrated.add(key)
+    changed: List[str] = []
+    try:
+        with connect() as conn:
+            if _meta(conn, NO_READD_MIGRATION, None) is not None:
+                return []
+            cur = _meta(conn, 'antic_settings', None)
+            if isinstance(cur, dict):
+                for kind in KINDS:
+                    g = cur.get(kind)
+                    if isinstance(g, dict) and g.get('no_readd') is False and g.get(OWNER_MARK) is not True:
+                        g['no_readd'] = True
+                        changed.append(kind)
+                if changed:
+                    _set_meta(conn, 'antic_settings', cur)
+            _set_meta(conn, NO_READD_MIGRATION, {'at': time.time(), 'changed': changed})
+        logger.info("Anticipated: v259 Don't re-add removed migration: %s",
+                    f"unchosen off turned on for {', '.join(changed)}" if changed else 'nothing to change')
+    except Exception:                               # noqa: BLE001 - never blocks settings or the scheduler
+        logger.warning("Anticipated: v259 Don't re-add removed migration failed", exc_info=True)
+    return changed
+
+
 def settings() -> Dict[str, Any]:
+    """The settings; never written here (v259: a read, the scheduler's included, never stores defaults). With
+    nothing saved yet: prod's legacy keys over the defaults, switched off."""
+    migrate_no_readd()
     with connect() as conn:
         cur = _meta(conn, 'antic_settings', None)
-        if cur is None:
-            cur = _legacy()
-            for kind in KINDS:
-                cur[kind]['enabled'] = False
-            cur = _stored(cur, None, None)
-            _set_meta(conn, 'antic_settings', cur)
+    if cur is None:
+        cur = _legacy()
+        for kind in KINDS:
+            cur[kind]['enabled'] = False
     return _fill(cur)
 
 

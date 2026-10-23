@@ -257,7 +257,93 @@ def test_first_load_does_not_freeze_the_readd_default(w):
     antic.settings()
     with antic.connect() as conn:
         raw = antic._meta(conn, 'antic_settings', None)
-    assert 'no_readd' not in raw['shows'] and 'no_readd' not in raw['movies']
+    assert raw is None                                       # v259: a read never stores anything
+
+
+# ------------------------------------------------------------------ v259: no defaults stored by reads; the no_readd migration
+
+def _raw():
+    with antic.connect() as conn:
+        return antic._meta(conn, 'antic_settings', None)
+
+
+def _ca0bc96_store():
+    """What ca0bc96's first scheduler check saved ~75 s after boot: the full defaults, no_readd false."""
+    d = antic.defaults()
+    for kind in antic.KINDS:
+        d[kind]['no_readd'] = False
+    with antic.connect() as conn:
+        antic._set_meta(conn, 'antic_settings', d)
+
+
+def test_the_scheduler_and_status_never_store_defaults(w):
+    assert antic.next_run() is None and not antic.due(NOW) and antic.status()['enabled'] is False
+    antic.history()
+    assert antic.run('scheduled', NOW)['shows'] is None
+    assert _raw() is None
+
+
+def test_a_scheduler_saved_false_becomes_true(w, caplog):
+    import logging
+    _ca0bc96_store()
+    caplog.set_level(logging.INFO, logger=antic.logger.name)
+    s = antic.settings()
+    assert s['shows']['no_readd'] is True and s['movies']['no_readd'] is True
+    assert _raw()['shows']['no_readd'] is True and _raw()['movies']['no_readd'] is True
+    lines = [r for r in caplog.records if 'v259' in r.getMessage()]
+    assert len(lines) == 1 and lines[0].levelno == logging.INFO and 'shows, movies' in lines[0].getMessage()
+
+
+def test_an_owner_saved_false_stays_false(w):
+    _ca0bc96_store()
+    antic.settings()                                         # migrated: both on
+    antic.save({'movies': {'no_readd': False}})              # the owner turns it off
+    assert _raw()['movies'][antic.OWNER_MARK] is True and antic.OWNER_MARK not in _raw()['shows']
+    antic.save({'shows': {'limit': 9}})                      # an unrelated save keeps the mark
+    assert _raw()['movies'][antic.OWNER_MARK] is True
+    with antic.connect() as conn:                            # even if the migration ran again
+        conn.execute('DELETE FROM meta WHERE key = ?', (antic.NO_READD_MIGRATION,))
+    antic._no_readd_migrated.clear()
+    assert antic.migrate_no_readd() == []
+    assert antic.settings()['movies']['no_readd'] is False and antic.settings()['shows']['no_readd'] is True
+
+
+def test_the_marker_cant_be_sent_by_a_client(w):
+    with pytest.raises(antic.Invalid):
+        antic.save({'shows': {antic.OWNER_MARK: True}})
+
+
+def test_the_migration_runs_once(w):
+    _ca0bc96_store()
+    assert antic.migrate_no_readd() == ['shows', 'movies']
+    with antic.connect() as conn:
+        assert antic._meta(conn, antic.NO_READD_MIGRATION, None)['changed'] == ['shows', 'movies']
+    _ca0bc96_store()                                         # false again, no mark
+    antic._no_readd_migrated.clear()                         # a new process
+    assert antic.migrate_no_readd() == []
+    assert antic.settings()['shows']['no_readd'] is False    # once only: left as found
+
+
+def test_a_new_store_is_marked_with_nothing_to_change(w):
+    assert antic.migrate_no_readd() == []
+    with antic.connect() as conn:
+        assert antic._meta(conn, antic.NO_READD_MIGRATION, None)['changed'] == []
+    assert _raw() is None
+
+
+def test_a_failing_migration_never_blocks_settings(w, monkeypatch, caplog):
+    import logging
+    _ca0bc96_store()
+    real = antic._set_meta
+
+    def boom(conn, key, value):
+        if key == antic.NO_READD_MIGRATION:
+            raise RuntimeError('disk')
+        return real(conn, key, value)
+    monkeypatch.setattr(antic, '_set_meta', boom)
+    caplog.set_level(logging.WARNING, logger=antic.logger.name)
+    assert antic.settings()['shows']['limit'] == 20
+    assert 'migration failed' in caplog.text
 
 
 def test_readd_memory_matches_by_tvdb_too(w):
