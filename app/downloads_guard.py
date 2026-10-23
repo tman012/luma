@@ -405,6 +405,22 @@ def preview() -> Dict[str, Any]:
             }
             for e in plan.get('entries', [])
         ],
+        # v260 (PM): the list Preview shows, in deletion order, the kept (Never delete) downloads in place,
+        # excluded. Keep / Unkeep act on `hashes`; `kept_by_tags` can only be lifted in settings.
+        'rows': [
+            {
+                'name': e['name'],
+                'size_bytes': e['size_bytes'],
+                'mtime': e['mtime'],
+                'tracker_label': e.get('tracker_label'),
+                'phase': e.get('phase', 'preferred'),
+                'hashes': list(e.get('hashes') or []),
+                'kept': bool(e.get('kept')),
+                'kept_hashes': list(e.get('kept_hashes') or []),
+                'kept_by_tags': list(e.get('kept_tags') or []),
+            }
+            for e in plan.get('rows', [])
+        ],
     }
 
 

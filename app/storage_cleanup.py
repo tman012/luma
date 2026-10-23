@@ -292,8 +292,9 @@ def _in_use(local: str, playing: List[str]) -> bool:
 
 
 def _units(torrents: List[Dict[str, Any]], cfg: Dict[str, Any], root: str, now: float,
-           playing: List[str]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
-    """Downloads that may be deleted, oldest first, and how many were held back, by reason."""
+           playing: List[str]) -> Tuple[List[Dict[str, Any]], Dict[str, int], List[Dict[str, Any]]]:
+    """Downloads that may be deleted (oldest first), how many were held back by reason, and the kept ones:
+    Never delete downloads that would otherwise be eligible (Preview shows them excluded, with Keep/Unkeep)."""
     from app import file_management as fm
     from app import tracker_files
     store = fm.load()
@@ -312,62 +313,69 @@ def _units(torrents: List[Dict[str, Any]], cfg: Dict[str, Any], root: str, now: 
     min_ratio = float(cfg['min_ratio'] or 0)
     held: Dict[str, int] = {}
     out: List[Dict[str, Any]] = []
+    kept: List[Dict[str, Any]] = []
 
     def hold(why: str) -> None:
         held[why] = held.get(why, 0) + 1
 
-    protected = list(cfg.get('protected_tags') or [])
-    keep_hashes = list(cfg.get('protected_hashes') or [])
-    for local, ts in groups.items():
-        if any(is_protected(t, protected, keep_hashes) for t in ts):    # first, on every path: a cross-seed keeps its twin
-            hold('protected')
-            continue
+    def reason(local: str, ts: List[Dict[str, Any]]) -> Optional[str]:
         if not local.startswith('/') or local == root or not fm._under(local, root):
-            hold('outside folder')
-            continue
+            return 'outside folder'
         if any(fm._under(local, lib) or fm._under(lib, local) for lib in libraries):
-            hold('library')
-            continue
+            return 'library'
         if not all(_finished(t) for t in ts):
-            hold('unfinished')
-            continue
+            return 'unfinished'
         if cfg['scope'] == 'test_tagged' and not all(_is_ours(t) for t in ts):
-            hold('out of scope')
-            continue
+            return 'out of scope'
         done = [_num(t.get('completion_on')) for t in ts]
         if any(d <= 0 for d in done):
-            hold('unknown age')
-            continue
-        newest = max(done)
-        if now - newest < min_age:
-            hold('too new')
-            continue
+            return 'unknown age'
+        if now - max(done) < min_age:
+            return 'too new'
         if min_seed and any(_num(t.get('seeding_time')) < min_seed for t in ts):
-            hold('seed time')
-            continue
+            return 'seed time'
         if min_ratio and any(_num(t.get('ratio')) < min_ratio for t in ts):
-            hold('ratio')
-            continue
+            return 'ratio'
         states = [import_state(str(t['hash']), t) for t in ts]
         if any(s not in ('imported', 'untracked') for s in states):
-            hold('not imported')
-            continue
+            return 'not imported'
         if _in_use(local, playing):
-            hold('playing')
+            return 'playing'
+        return None
+
+    protected = list(cfg.get('protected_tags') or [])
+    keep_hashes = {str(h).lower() for h in cfg.get('protected_hashes') or []}
+    keep_tags = {str(x).strip().lower() for x in protected if str(x).strip()}
+    for local, ts in groups.items():
+        # Never delete first, on every path: a cross-seed keeps its twin. Never selected; listed as kept.
+        prot = any(is_protected(t, protected, list(keep_hashes)) for t in ts)
+        why = reason(local, ts)
+        if prot:
+            hold('protected')
+        elif why:
+            hold(why)
+        if why:
             continue
         keys = [tracker_files.classify(t) for t in ts]
-        out.append({
+        unit = {
             'name': os.path.basename(local),
             'path': local,
             'hashes': [str(t['hash']).lower() for t in ts],
             'size_bytes': int(max(_num(t.get('size')) for t in ts)),
-            'mtime': newest,
+            'mtime': max(_num(t.get('completion_on')) for t in ts),
             'trackers': sorted({k for k in keys if k}),
             'unclassified': any(k is None for k in keys),
             'tracker_label': ' + '.join(tracker_files.label_for(k) for k in sorted({k for k in keys if k})) or 'unknown',
-        })
+        }
+        if prot:
+            by_hash = [h for h in unit['hashes'] if h in keep_hashes]
+            unit['kept_hashes'] = by_hash
+            unit['kept_tags'] = sorted({tag for t in ts for tag in torrent_tags(t) if tag in keep_tags})
+            kept.append(unit)
+        else:
+            out.append(unit)
     out.sort(key=lambda c: (c['mtime'], c['name']))
-    return out, held
+    return out, held, kept
 
 
 def deletion_order(candidates: List[Dict[str, Any]], trackers: List[str]) -> List[Tuple[str, Dict[str, Any]]]:
@@ -392,6 +400,14 @@ def deletion_order(candidates: List[Dict[str, Any]], trackers: List[str]) -> Lis
     return [('preferred' if group(c) < len(order) else 'fallback', c) for c in ranked]
 
 
+def _rows(ordered_all: List[Tuple[str, Dict[str, Any]]], selected: List[Dict[str, Any]],
+          kept_paths: set) -> List[Dict[str, Any]]:
+    """Preview's list, in deletion_order(): what would go, with the kept downloads in place, excluded."""
+    chosen = {c['path'] for c in selected}
+    return [{**c, 'phase': ph, 'kept': c['path'] in kept_paths} for ph, c in ordered_all
+            if c['path'] in chosen or c['path'] in kept_paths]
+
+
 def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, cfg: Optional[Dict[str, Any]] = None,
                  now: Optional[float] = None) -> Dict:
     """Pick downloads in deletion_order() until they reach `target_bytes` (see the module docs). Deletes nothing."""
@@ -400,7 +416,7 @@ def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, cfg: Optional[Dict[st
     target_bytes = max(0, min(int(target_bytes), ceiling))
     base = {'target_bytes': target_bytes, 'planned_bytes': 0, 'entries': [], 'eligible_count': 0, 'short': True,
             'preferred_available': 0, 'preferred_bytes': 0, 'fallback_bytes': 0, 'held': {}, 'error': None,
-            'protected_hashes': None}
+            'protected_hashes': None, 'rows': []}
 
     torrents = fetch_torrents()
     if torrents is None:
@@ -413,8 +429,12 @@ def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, cfg: Optional[Dict[st
 
     protected = protected_hashes(torrents, list(cfg.get('protected_tags') or []), list(cfg.get('protected_hashes') or []))
     root = downloads_root(cfg)
-    candidates, held = _units(torrents, cfg, root, time.time() if now is None else now, playing)
-    ordered = deletion_order(candidates, cfg['trackers'])
+    candidates, held, kept = _units(torrents, cfg, root, time.time() if now is None else now, playing)
+    # One call to the one order: the kept (Never delete) downloads take their place in it for Preview and
+    # are never selected.
+    kept_paths = {c['path'] for c in kept}
+    ordered_all = deletion_order(candidates + kept, cfg['trackers'])
+    ordered = [(p, c) for p, c in ordered_all if c['path'] not in kept_paths]
 
     selected: List[Dict] = []
     total = preferred = 0
@@ -428,7 +448,8 @@ def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, cfg: Optional[Dict[st
     return {**base, 'planned_bytes': total, 'entries': selected, 'eligible_count': len(candidates),
             'short': total < target_bytes, 'preferred_available': sum(1 for p, _ in ordered if p == 'preferred'),
             'preferred_bytes': preferred,
-            'fallback_bytes': total - preferred, 'held': held, 'protected_hashes': protected}
+            'fallback_bytes': total - preferred, 'held': held, 'protected_hashes': protected,
+            'rows': _rows(ordered_all, selected, kept_paths)}
 
 
 # ---------------------------------------------------------------------------

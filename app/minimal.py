@@ -68,7 +68,7 @@ ALLOWED_PATHS = frozenset({
     # The routes check. Deletes go through qBittorrent only, and instance.writes_allowed('downloads_guard').
     '/api/storage/downloads', '/api/storage/downloads/cleanup',
     '/api/downloads-guard/status', '/api/downloads-guard/trackers', '/api/downloads-guard/preview',
-    '/api/downloads-guard/run', '/api/settings/automation/downloads-guard',
+    '/api/downloads-guard/run', '/api/downloads-guard/keep', '/api/downloads-guard/unkeep', '/api/settings/automation/downloads-guard',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/', '/settings/',
                     '/api/trackers/', '/api/settings/library-paths/',

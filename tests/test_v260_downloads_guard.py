@@ -686,3 +686,55 @@ def test_removing_a_protected_hash_needs_the_signed_in_owner(site):
         tv_settings._cfg.pop('signed_in_owner', None)
     assert dg_store.settings()['protected_hashes'] == [AHS.lower(), 'a' * 40]
     assert _req(site, 'put', API, {'protected_hashes': ['nothex']}).status_code == 400
+
+
+# ------------------------------------------------------------------ Preview Keep / Unkeep (PM)
+
+def _rows(c):
+    return [(r['name'], r['kept']) for r in _req(c, 'get', '/api/downloads-guard/preview').get_json()['rows']]
+
+
+def test_preview_rows_show_kept_downloads_in_place_excluded(keep):
+    rows = _req(ordered_site(), 'get', '/api/downloads-guard/preview').get_json()['rows']
+    assert [(r['name'], r['kept']) for r in rows] == [
+        ('BhdNew', False), ('TvOldest', False), ('KeepTwin', True), ('IptOld', False),
+        ('IptNew', False), ('NotQuite', False), ('UnknownOldest', False), ('UnknownNew', False)]
+    # KeepOldestIpt isn't listed: it is also this install's download with no import record (held either way)
+    kept = {r['name']: r for r in rows if r['kept']}
+    assert kept['KeepTwin']['kept_by_tags'] == ['luma-keep'] and kept['KeepTwin']['kept_hashes'] == []
+    assert sorted(kept['KeepTwin']['hashes']) == ['k2', 'k3']
+    assert [e['name'] for e in _req(ordered_site(), 'get', '/api/downloads-guard/preview').get_json()['entries']] == KEEP_ORDER
+
+
+def test_keep_then_unkeep_from_preview(keep, monkeypatch):
+    c = ordered_site()
+    r = _req(c, 'post', '/api/downloads-guard/keep', {'hashes': ['b' * 40]})
+    assert r.status_code == 200 and 'b' * 40 in r.get_json()['protected_hashes']
+    keep.torrents = KEEP_TORRENTS + [tor('b' * 40, 'Oldest', done=NOW - 999 * DAY)]
+    assert ('Oldest', True) in _rows(c)
+    sc.run_cleanup(10 ** 15)
+    assert ['b' * 40] not in keep.deleted                                       # every path skips it
+    keep.deleted.clear()
+    assert _req(c, 'post', '/api/downloads-guard/unkeep', {'hashes': ['B' * 40]}).status_code == 200
+    assert ('Oldest', False) in _rows(c)
+    for bad in ({'hashes': ['nothex']}, {'hashes': []}, {'hashes': 'x'}, None):
+        assert _req(c, 'post', '/api/downloads-guard/keep', bad).status_code == 400, bad
+
+
+def test_keep_is_open_to_anyone_signed_in_unkeep_is_the_owners(site, monkeypatch):
+    from app import start_flow
+    plain = {'id': 7, 'username': 'guest', 'is_admin': False}
+    monkeypatch.setitem(start_flow._cfg, 'get_current_user', lambda: plain)
+    assert _req(site, 'post', '/api/downloads-guard/keep', {'hashes': ['c' * 40]}).status_code == 200
+    r = _req(site, 'post', '/api/downloads-guard/unkeep', {'hashes': ['c' * 40]})
+    assert r.status_code in (401, 403)
+    monkeypatch.setattr(start_flow, 'require_signed_in_owner',
+                        lambda: (None, (jsonify({'error': 'Sign in first', 'sign_in': True}), 401)))
+    r = _req(site, 'post', '/api/downloads-guard/unkeep', {'hashes': ['c' * 40]})
+    assert r.status_code == 401 and r.get_json()['sign_in'] is True
+    assert 'c' * 40 in dg_store.settings()['protected_hashes']
+    monkeypatch.setitem(start_flow._cfg, 'get_current_user', lambda: None)
+    r = _req(site, 'post', '/api/downloads-guard/keep', {'hashes': ['d' * 40]})
+    assert r.status_code == 401 and r.get_json()['sign_in'] is True
+    for p in ('/api/downloads-guard/keep', '/api/downloads-guard/unkeep'):
+        assert minimal.path_allowed(p, 'POST')

@@ -251,6 +251,32 @@ def seed() -> Dict[str, Any]:
         return settings()
 
 
+def keep(hashes: List[str]) -> List[str]:
+    """Preview's Keep: add torrent hashes to Never delete. Raises Invalid on a bad list."""
+    h = _hashes(hashes)
+    if not h:
+        raise Invalid({'hashes': 'Must be a list of torrent hashes'})
+    with _lock:
+        cur = settings()
+        new = cur['protected_hashes'] + [x for x in h if x not in cur['protected_hashes']]
+        if len(new) > MAX_TAGS:
+            raise Invalid({'hashes': 'Too many'})
+        _paths.atomic_write_json(path(), {**cur, 'protected_hashes': new}, mode=0o600)
+        return new
+
+
+def unkeep(hashes: List[str]) -> List[str]:
+    """Preview's Unkeep (signed-in owner only, dg_routes): drop torrent hashes from Never delete."""
+    h = _hashes(hashes)
+    if not h:
+        raise Invalid({'hashes': 'Must be a list of torrent hashes'})
+    with _lock:
+        cur = settings()
+        new = [x for x in cur['protected_hashes'] if x not in h]
+        _paths.atomic_write_json(path(), {**cur, 'protected_hashes': new}, mode=0o600)
+        return new
+
+
 def widens(old: Dict[str, Any], new: Dict[str, Any]) -> List[str]:
     """Settings in *new* that make the guard delete more, sooner, more often or elsewhere than *old*."""
     out: List[str] = []

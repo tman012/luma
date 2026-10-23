@@ -3,6 +3,9 @@
 GET /api/settings/automation/downloads-guard    {settings, defaults, folder, trackers, allowed}
 PUT /api/settings/automation/downloads-guard    partial settings -> the same view (400 {errors})
 
+POST /api/downloads-guard/keep    {hashes} -> {protected_hashes}  anyone signed in (Never delete only protects)
+POST /api/downloads-guard/unkeep  {hashes} -> {protected_hashes}  the owner signed in with a session (401 else)
+
 A change that turns the guard on or makes it delete more, sooner, more often or somewhere else
 (dg_store.widens) needs the owner signed in with a session: the implicit LAN owner gets 401 with
 "sign_in": true. Turning it off or tightening it is open to the owner either way. Status, preview and runs
@@ -69,3 +72,57 @@ def dg_put():
     if wider:
         logger.info('Downloads guard: %s widened by the signed-in owner', ', '.join(wider))
     return _out(view())
+
+
+KEEP = '/api/downloads-guard/keep'
+UNKEEP = '/api/downloads-guard/unkeep'
+
+
+def _signed_in_user():
+    """Keep is open to anyone signed in (it only protects); no user gets 401 with "sign_in": true."""
+    from flask import jsonify
+    from app import start_flow
+    try:
+        user = start_flow._cfg['get_current_user']()
+    except Exception:                                        # noqa: BLE001
+        user = None
+    if not user or not user.get('id'):
+        return None, (jsonify({'error': start_flow.SIGN_IN_FIRST, 'sign_in': True}), 401)
+    return user, None
+
+
+def _hashes_body():
+    body = request.get_json(silent=True)
+    hashes = body.get('hashes') if isinstance(body, dict) else None
+    return hashes if isinstance(hashes, list) else None
+
+
+@bp.route(KEEP, methods=['POST'])
+def dg_keep():
+    user, err = _signed_in_user()
+    if err:
+        resp, status = err
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp, status
+    try:
+        kept = dg_store.keep(_hashes_body() or [])
+    except dg_store.Invalid as e:
+        return _out({'error': 'Invalid', 'errors': e.errors}, 400)
+    logger.info('Downloads guard: kept %s (Never delete)', ', '.join('…' + h[-4:] for h in (_hashes_body() or [])))
+    return _out({'protected_hashes': kept})
+
+
+@bp.route(UNKEEP, methods=['POST'])
+def dg_unkeep():
+    from app import start_flow
+    _user, err = start_flow.require_signed_in_owner()
+    if err:
+        resp, status = err
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp, status
+    try:
+        kept = dg_store.unkeep(_hashes_body() or [])
+    except dg_store.Invalid as e:
+        return _out({'error': 'Invalid', 'errors': e.errors}, 400)
+    logger.info('Downloads guard: unkept %s by the signed-in owner', ', '.join('…' + h[-4:] for h in (_hashes_body() or [])))
+    return _out({'protected_hashes': kept})
