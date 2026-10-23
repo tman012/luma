@@ -52,7 +52,6 @@ ALLOW_ENV = 'LUMA_TEST_ALLOW'
 # job -> what it does (the gated list, reported at boot)
 GATED: Dict[str, str] = {
     'auto_rename': 'auto-rename monitor loop (renames, moves, deletes downloads)',
-    'daily_missing': "What You're Missing (adds to Radarr)",
     'downloads_guard': 'Downloads Guard (deletes/pauses torrents)',
     'franchise_completer': 'Franchise Completer (adds to Radarr)',
     'roulette': 'Genre Roulette (grabs)',
@@ -75,6 +74,18 @@ GATED: Dict[str, str] = {
 }
 # Allowed on test by default (scoped by their own rules, see the module doc).
 TEST_DEFAULT_ALLOWED: FrozenSet[str] = frozenset({'mover', 'tv_link', 'tv_import'})
+# v254 (Taylor): jobs that are not writers, so they run on every instance without the writes gate. Each only
+# reads outside services and writes its own files in the data dir (never Radarr, Sonarr, qBittorrent or a
+# library file). tests/test_v254_whats_missing.py holds daily_missing to that.
+DATA_DIR_ONLY: Dict[str, str] = {
+    'daily_missing': "What you're missing pool (reads Plex, Trakt, TMDb and OMDb; writes only "
+                     "what_youre_missing_*.json in the data dir)",
+}
+
+
+def data_dir_only(job: str) -> bool:
+    """True for a job in DATA_DIR_ONLY: it runs on test as well as prod, outside the writes gate."""
+    return str(job).casefold() in DATA_DIR_ONLY
 
 
 class WritesBlocked(requests.RequestException):
@@ -420,7 +431,7 @@ ENDPOINTS = (
     ('/api/movie-night/run', 'movie_night'), ('/api/genre-roulette/run', 'roulette'),
     ('/api/franchise-completer/run', 'franchise_completer'), ('/api/watchlist-digital-dates/run', 'watchlist_digital_dates'),
     ('/api/downloads-guard/run', 'downloads_guard'), ('/api/storage/downloads/cleanup', 'storage_cleanup'),
-    ('/api/rails/what-youre-missing/refresh', 'daily_missing'), ('/api/collections/refresh', 'movie_collections'),
+    ('/api/collections/refresh', 'movie_collections'),   # v254: What you're missing's Refresh now is DATA_DIR_ONLY
     ('/api/upgrades/auto-grab', 'upgrade_4k'), ('/api/upgrades/batch', 'arr'), ('/api/upgrades/scheduler/trigger', 'upgrade_scheduler'),
     ('/api/automation/trending-watchlist/run', 'trending_watchlist'),
     ('/api/automation/trending-tv-watchlist/run', 'trending_tv_watchlist'),

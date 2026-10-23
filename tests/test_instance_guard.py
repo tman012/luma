@@ -30,7 +30,6 @@ START = {  # module: (start function, job)
     'genre_roulette': ('start_genre_roulette_thread', 'roulette'),
     'franchise_completer': ('start_franchise_completer_thread', 'franchise_completer'),
     'watchlist_digital_dates': ('start_watchlist_digital_dates_thread', 'watchlist_digital_dates'),
-    'daily_missing': ('start_daily_missing_thread', 'daily_missing'),
     'movie_collections': ('start_movie_collections_thread', 'movie_collections'),
     'downloads_guard': ('start_downloads_guard_thread', 'downloads_guard'),
 }
@@ -58,7 +57,9 @@ def test_prod_is_unchanged(monkeypatch):
 
 def test_test_blocks_every_writer_by_default_and_opts_in_by_name(test_instance, monkeypatch):
     assert set(instance.blocked_jobs()) == set(instance.GATED)
-    for j in ('library_mover', 'auto_rename', 'daily_missing', 'downloads_guard', 'franchise_completer', 'roulette',
+    # v254: daily_missing is not a writer (instance.DATA_DIR_ONLY): it runs on test outside this gate
+    assert 'daily_missing' not in instance.GATED and instance.data_dir_only('daily_missing')
+    for j in ('library_mover', 'auto_rename', 'downloads_guard', 'franchise_completer', 'roulette',
               'movie_night', 'anticipated_watchlist', 'now_available_watchlist', 'upgrade_4k', 'arr', 'qbit'):
         if j != 'library_mover':
             assert not instance.writes_allowed(j), j

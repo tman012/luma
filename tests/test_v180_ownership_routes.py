@@ -11,8 +11,8 @@ import app.main
 from app import instance, minimal
 from tests.test_home_rails import REMOTE, _client
 
-GATED_21 = {
-    'auto_rename', 'daily_missing', 'downloads_guard', 'franchise_completer', 'roulette', 'movie_night',
+GATED_20 = {
+    'auto_rename', 'downloads_guard', 'franchise_completer', 'roulette', 'movie_night',
     'anticipated_watchlist', 'now_available_watchlist', 'trending_watchlist', 'trending_tv_watchlist',
     'latest_auto_grab', 'upgrade_4k', 'upgrade_scheduler', 'movie_collections', 'watchlist_digital_dates',
     'arr', 'qbit', 'storage_cleanup', 'tv_delete_files', 'tv_grab', 'movie_grab',
@@ -59,13 +59,13 @@ def test_no_route_is_a_gated_write(method, path):
     assert hit is None, (path, hit.group(0) if hit else None)
 
 
-def test_guard_stays_tv_grab_only_with_21_gated_jobs(monkeypatch):
+def test_guard_stays_tv_grab_only_with_20_gated_jobs(monkeypatch):
     monkeypatch.setenv('LUMA_INSTANCE', 'test')
     monkeypatch.setenv('LUMA_TEST_ALLOW', 'tv_grab')
     monkeypatch.setattr(instance, 'prod_conflict', lambda: [])
-    assert set(instance.GATED) == GATED_21 and len(instance.GATED) == 21
+    assert set(instance.GATED) == GATED_20 and len(instance.GATED) == 20   # v254: daily_missing is DATA_DIR_ONLY
     assert instance.allowed() & set(instance.GATED) == {'tv_grab'}
-    assert set(instance.blocked_jobs()) == GATED_21 - {'tv_grab'}
+    assert set(instance.blocked_jobs()) == GATED_20 - {'tv_grab'}
 
 
 def test_no_write_route_was_opened():

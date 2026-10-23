@@ -35,7 +35,7 @@ def test_an_unrecognized_value_is_test_and_every_gated_job_is_off(monkeypatch, v
         monkeypatch.setenv('PORT', port)
     assert instance.is_test() and instance.name() == 'test'
     assert instance.unrecognized()
-    assert set(instance.blocked_jobs()) == set(instance.GATED) and len(instance.GATED) == 21
+    assert set(instance.blocked_jobs()) == set(instance.GATED) and len(instance.GATED) == 20  # v254: daily_missing is DATA_DIR_ONLY
     assert not any(instance.writes_allowed(j) for j in instance.GATED)
     assert instance.install_write_guard() is True
 
@@ -46,7 +46,7 @@ def test_exactly_test_is_test_without_the_error(monkeypatch, caplog):
     with caplog.at_level(logging.INFO, logger='app.instance'):
         instance.log_blocked_once()
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
-    assert len([r for r in caplog.records if ' is OFF ' in r.getMessage()]) == 21
+    assert len([r for r in caplog.records if ' is OFF ' in r.getMessage()]) == 20
 
 
 @pytest.mark.parametrize('value', [None, 'prod'])        # v175: '' is unknown now (fails closed)
@@ -85,4 +85,4 @@ def test_an_unrecognized_value_logs_an_error_naming_it(monkeypatch, value, caplo
     warn = [r for r in caplog.records if r.levelno == logging.ERROR and 'not recognized' in r.getMessage()]
     assert len(warn) == 1 and repr(value) in warn[0].getMessage() and 'treating it as test' in warn[0].getMessage()
     offs = [r for r in caplog.records if r.getMessage().startswith('Instance test: ') and ' is OFF ' in r.getMessage()]
-    assert len(offs) == 21
+    assert len(offs) == 20

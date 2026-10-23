@@ -17,7 +17,7 @@ BINDS = ['0.0.0.0:05002', 'host:05002', '[::]:+5002', '127.0.0.1:\uff15\uff10\uf
 def _prod_all_off(caplog):
     with caplog.at_level(logging.INFO, logger='app.instance'):
         instance.log_blocked_once()
-    assert instance.is_test() and len(instance.blocked_jobs()) == 21 == len(instance.GATED)
+    assert instance.is_test() and len(instance.blocked_jobs()) == 20 == len(instance.GATED)  # v254: 20
     errs = [r for r in caplog.records if r.levelno == logging.ERROR]
     assert len(errs) == 1 and 'port 5002' in errs[0].getMessage() and 'LUMA_TEST_ALLOW opt-ins are ignored' in errs[0].getMessage()
 
@@ -66,4 +66,4 @@ def test_each_honored_opt_in_is_stated_at_boot(monkeypatch, caplog):
     on = sorted(r.getMessage() for r in caplog.records if 'is ON (test, opt-in)' in r.getMessage())
     assert on == ['Instance test: movie_grab is ON (test, opt-in)', 'Instance test: tv_grab is ON (test, opt-in)']
     assert all(r.levelno == logging.INFO for r in caplog.records if 'is ON' in r.getMessage())
-    assert len(instance.blocked_jobs()) == 19
+    assert len(instance.blocked_jobs()) == 18
