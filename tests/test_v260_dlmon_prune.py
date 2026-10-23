@@ -168,3 +168,103 @@ def test_prune_failure_still_logs(monkeypatch):
     monkeypatch.setattr(storage_cleanup, 'log_never_delete_now', lambda cfg: seen.append(cfg))
     downloads_guard._boot_reads({'a': 1})
     assert seen == [{'a': 1}]
+
+
+# --- Tester BLOCK on e055c3d: a partial qBittorrent list must not prune (sanity limit) ---------------------
+
+def _h(i, tail='0000'):
+    return f'{i:036x}{tail}'
+
+
+def _seed(env, n_entries, listed_present, extra_listed=0):
+    """Monitor with n_entries hash keys (+ 'not-a-hash'); qBit lists the first listed_present of them plus
+    extra_listed torrents the monitor doesn't track."""
+    keys = [_h(i) for i in range(n_entries)]
+    monitor = {k: {'name': f't{i}'} for i, k in enumerate(keys)}
+    monitor['not-a-hash'] = {'name': 'odd'}
+    text = json.dumps(monitor)
+    (env.data / 'download_monitor.json').write_text(text)
+    env.qbit['torrents'] = ([{'hash': k} for k in keys[:listed_present]]
+                            + [{'hash': _h(10_000 + i, 'ffff')} for i in range(extra_listed)])
+    return text
+
+
+def _baks(env):
+    return [p for p in os.listdir(env.data) if p.endswith('.bak')]
+
+
+def test_partial_list_1_of_600_is_refused(env, caplog):
+    text = _seed(env, 600, 1)
+    with caplog.at_level(logging.INFO, logger='app.dlmon_prune'):
+        r = dlmon_prune.run_once()
+    assert r['status'] == 'refused' and r['would_drop'] == 599 and r['listed'] == 1
+    assert (env.data / 'download_monitor.json').read_text() == text          # byte-identical
+    assert not _baks(env) and not (env.data / 'download_monitor.json.tmp').exists()
+    assert dlmon_prune.META_KEY not in env.meta                                # retried next start
+    warns = [m.getMessage() for m in caplog.records if m.levelno == logging.WARNING]
+    assert len(warns) == 1 and 'refused' in warns[0] and '599' in warns[0]
+    assert not [m for m in caplog.records if 'dropped' in m.getMessage()]
+    # next start with qBit's full list goes through (not stuck)
+    env.qbit['torrents'] = [{'hash': _h(i)} for i in range(600)]
+    r = dlmon_prune.run_once()
+    assert r['status'] == 'pruned' and r['dropped'] == [] and env.meta[dlmon_prune.META_KEY]
+
+
+def test_refusal_warns_every_start(env, caplog):
+    _seed(env, 600, 1)
+    with caplog.at_level(logging.INFO, logger='app.dlmon_prune'):
+        dlmon_prune.run_once()
+        dlmon_prune.run_once()
+    assert len([m for m in caplog.records if m.levelno == logging.WARNING]) == 2
+
+
+@pytest.mark.parametrize('n, drop, ok', [
+    (50, 10, True), (50, 11, False),          # under 100 entries the floor is 10
+    (100, 10, True), (100, 11, False),        # 10% of 100 == 10
+    (200, 20, True), (200, 21, False),        # 10% of 200 == 20
+    (5, 5, True),                             # small file: dropping all 5 is within the floor of 10
+])
+def test_threshold_edges(env, n, drop, ok):
+    text = _seed(env, n, n - drop, extra_listed=drop)        # qBit lists enough torrents in total
+    r = dlmon_prune.run_once()
+    if ok:
+        assert r['status'] == 'pruned' and len(r['dropped']) == drop
+        assert len(_monitor(env)) == n - drop + 1
+        assert env.meta[dlmon_prune.META_KEY]
+    else:
+        assert r['status'] == 'refused' and r['would_drop'] == drop
+        assert (env.data / 'download_monitor.json').read_text() == text and not _baks(env)
+        assert dlmon_prune.META_KEY not in env.meta
+
+
+def test_drop_limit():
+    assert [dlmon_prune.drop_limit(n) for n in (0, 1, 99, 100, 109, 110, 600)] == [10, 10, 10, 10, 10, 11, 60]
+
+
+@pytest.mark.parametrize('listed, ok', [(2, False), (3, True)])
+def test_qbit_lists_fewer_torrents_than_would_drop(env, listed, ok):
+    # 6 entries, qBit lists `listed` of them: drop 6 - listed (under the limit of 10 either way), so only the
+    # "fewer torrents listed than would be dropped" rule decides.
+    text = _seed(env, 6, listed)
+    r = dlmon_prune.run_once()
+    if ok:
+        assert r['status'] == 'pruned' and len(r['dropped']) == 3                 # listed 3 == drop 3
+    else:
+        assert r['status'] == 'refused' and r['listed'] == 2 and r['would_drop'] == 4 and r['limit'] == 10
+        assert (env.data / 'download_monitor.json').read_text() == text and not _baks(env)
+        assert dlmon_prune.META_KEY not in env.meta
+
+
+def test_v2_hash_fields_count_as_one_torrent(env):
+    env.qbit['torrents'] = [{'hash': 'f' * 40, 'infohash_v1': 'f' * 40, 'infohash_v2': 'e' * 64}]
+    assert dlmon_prune.known_torrents() == ({'f' * 40, 'e' * 64}, 1)
+
+
+def test_expected_real_case_still_drops_one(env, caplog):
+    """Taylor's real case: only The Manchurian Candidate (…201e) is gone from qBittorrent."""
+    with caplog.at_level(logging.INFO, logger='app.dlmon_prune'):
+        r = dlmon_prune.run_once()
+    assert r['status'] == 'pruned' and r['dropped'] == [H_GONE]
+    assert env.meta[dlmon_prune.META_KEY]
+    assert any('dropped 1 entry: …201e' in m.getMessage() for m in caplog.records)
+    assert not [m for m in caplog.records if m.levelno >= logging.WARNING]

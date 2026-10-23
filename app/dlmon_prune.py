@@ -11,7 +11,10 @@ Manchurian Candidate, …201e). Once, at boot on minimal (test) builds, in the D
 2. Back up download_monitor.json (in the data dir, paths.data_path; LUMA_DATA_DIR respected) to a
    timestamped .bak next to it.
 3. Drop the entries whose torrent hash qBittorrent doesn't list (case-insensitive). Keys that aren't a
-   torrent hash stay.
+   torrent hash stay. Sanity limit first (Tester BLOCK on e055c3d): if the drop would be more than
+   max(10, 10% of the hash entries), or qBittorrent lists fewer torrents than would be dropped, the list is
+   treated as partial (a qBittorrent fault or the wrong instance): nothing is backed up or written, one
+   WARNING, and the migration is tried again on the next start.
 4. One INFO line with the count and the last 4 of each dropped hash; then the meta key is set.
 
 grab_origins.json is never read or written. Everything runs in try/except: a failure logs and boot goes on.
@@ -25,11 +28,13 @@ import re
 import shutil
 import sys
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
 META_KEY = 'dlmon_prune_v260'
+MIN_LIMIT = 10                     # never refuse a drop of this many or fewer
+MAX_SHARE = 0.10                   # ... unless it is more than this share of the hash entries
 MONITOR_FILE = 'download_monitor.json'
 _HASH = re.compile(r'^[0-9a-f]{40}$|^[0-9a-f]{64}$')
 _cfg: Dict[str, Any] = {}          # tests: {'now': callable}
@@ -40,21 +45,32 @@ def monitor_path() -> str:
     return str(paths.data_path(MONITOR_FILE))
 
 
-def known_hashes() -> Optional[Set[str]]:
-    """Lower-case hashes of every torrent qBittorrent lists (read-only torrents/info), or None when it can't
-    be read or lists none (an empty answer is far likelier a fault than no torrents)."""
+def known_torrents() -> Optional[Tuple[Set[str], int]]:
+    """(lower-case hashes, torrent count) of what qBittorrent lists (read-only torrents/info), or None when it
+    can't be read or lists none (an empty answer is far likelier a fault than no torrents)."""
     from app import storage_cleanup
     torrents = storage_cleanup.fetch_torrents()
     if not torrents:
         return None
-    out = set()
+    out: Set[str] = set()
+    count = 0
     for t in torrents:
         if isinstance(t, dict):
-            for k in ('hash', 'infohash_v1', 'infohash_v2'):
-                v = str(t.get(k) or '').strip().lower()
-                if v:
-                    out.add(v)
-    return out or None
+            mine = {str(t.get(k) or '').strip().lower() for k in ('hash', 'infohash_v1', 'infohash_v2')} - {''}
+            if mine:
+                out |= mine
+                count += 1
+    return (out, count) if out else None
+
+
+def known_hashes() -> Optional[Set[str]]:
+    got = known_torrents()
+    return got[0] if got else None
+
+
+def drop_limit(hash_entries: int) -> int:
+    """Most entries one run may drop: max(10, 10% of the hash entries)."""
+    return max(MIN_LIMIT, int(hash_entries * MAX_SHARE))
 
 
 def _now() -> float:
@@ -67,11 +83,12 @@ def run_once() -> Dict[str, Any]:
         from app import tv_store
         if tv_store.get_meta(META_KEY):
             return {'status': 'done before'}
-        have = known_hashes()
-        if have is None:
+        got = known_torrents()
+        if got is None:
             logger.warning("Download monitor prune: qBittorrent couldn't be read or listed no torrents; "
                            "nothing pruned, trying again next start")
             return {'status': 'unreadable'}
+        have, listed = got
         path = monitor_path()
         if not os.path.exists(path):
             tv_store.set_meta(META_KEY, 'no file')
@@ -82,10 +99,18 @@ def run_once() -> Dict[str, Any]:
         if not isinstance(data, dict):
             logger.warning('Download monitor prune: %s is not an object; nothing pruned', MONITOR_FILE)
             return {'status': 'unexpected'}
+        hash_keys = [k for k in data if _HASH.match(str(k).lower())]
+        drop = [k for k in hash_keys if str(k).lower() not in have]
+        limit = drop_limit(len(hash_keys))
+        if len(drop) > limit or listed < len(drop):
+            logger.warning('Download monitor prune: refused, would drop %d of %d entries but qBittorrent listed '
+                           '%d torrents (limit %d); looks like a partial list, nothing pruned, trying again next '
+                           'start', len(drop), len(hash_keys), listed, limit)
+            return {'status': 'refused', 'would_drop': len(drop), 'hash_entries': len(hash_keys),
+                    'listed': listed, 'limit': limit}
         stamp = time.strftime('%Y%m%d-%H%M%S', time.localtime(_now()))
         backup = f'{path}.{stamp}.bak'
         shutil.copy2(path, backup)
-        drop = [k for k in data if _HASH.match(str(k).lower()) and str(k).lower() not in have]
         if drop:
             kept = {k: v for k, v in data.items() if k not in drop}
             tmp = f'{path}.tmp'
