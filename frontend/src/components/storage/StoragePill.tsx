@@ -235,9 +235,9 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
 
         <div style={{ padding: '0 20px' }}>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#fff' }}>Downloads storage</h2>
-          <p style={{ margin: '4px 0 0', fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>
-            {usage?.available ? usage.path : 'Downloads folder unavailable'}
-          </p>
+          {usage && !usage.available && (
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'rgba(255,255,255,0.4)' }}>Downloads folder unavailable</p>
+          )}
 
           {/* Usage bar */}
           {usage?.available && (
@@ -273,17 +273,11 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
                 onClick={() => setStep('confirm')}
                 disabled={!usage?.available}
                 label={`Free up ${targetLabel}`}
-                sublabel="Deletes the oldest files in the downloads folder"
               />
             )}
 
             {step === 'confirm' && (
               <>
-                <p style={{ margin: '0 0 14px', fontSize: 13, lineHeight: 1.5, color: 'rgba(255,255,255,0.65)' }}>
-                  This permanently deletes the oldest {targetLabel} of files in your downloads
-                  folder. It can't be undone. Unfinished downloads and anything touched in the
-                  last {usage?.minAgeHours ?? 48} hours are skipped.
-                </p>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button
                     type="button"
@@ -329,7 +323,6 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
                 <p style={{ margin: '0 0 14px', fontSize: 14, lineHeight: 1.5, color: '#4ade80' }}>
                   Freed {formatBytes(result.freedBytes)} — {result.deletedCount}{' '}
                   {result.deletedCount === 1 ? 'item' : 'items'} deleted.
-                  {result.short && ' No older files left to remove.'}
                   {result.failed.length > 0 && ` ${result.failed.length} could not be deleted.`}
                 </p>
                 <SheetButton onClick={dismiss} label="Done" />

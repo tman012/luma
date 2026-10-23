@@ -62,13 +62,16 @@ describe('v260 phone Home button row (prod 1b4ea74 NavPills)', () => {
     expect(order()).toEqual(['rail-a', 'row', 'rail-b']);
   });
 
-  it("the Storage sheet reads the guard's minimum age, and the implicit owner is asked to sign in", async () => {
+  it('the Storage sheet has only the title, usage, amount and buttons, and the implicit owner is asked to sign in', async () => {
     stub({ min_age_hours: 72 });
     render(<MemoryRouter><HomePills /></MemoryRouter>);
     await waitFor(() => screen.getByText('412 GB free'));
     fireEvent.click(screen.getByText('412 GB free'));
     fireEvent.click(await screen.findByText('Free up 100 GB'));
-    expect(await screen.findByText(/last 72 hours are skipped/)).toBeTruthy();
+    expect(await screen.findByText('Delete 100 GB')).toBeTruthy();
+    const sheet = screen.getByText('Downloads storage').parentElement!;
+    expect(sheet.textContent).not.toMatch(/oldest|hours|undone|skipped|permanently|\/downloads/i);
+    expect(Array.from(sheet.querySelectorAll('p')).map(p => p.textContent)).toEqual([]);
     cleanup();
     auth.implicit = true;
     stub();
