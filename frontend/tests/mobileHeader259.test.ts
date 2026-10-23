@@ -27,4 +27,8 @@ describe('v259 phone header matches prod', () => {
     expect(src).toContain('usePullToRefresh(handleHomeRefresh, !kiosk && ready)')
     expect(src).toContain('luma-ptr-spin')
   })
+  it('first phone rail starts right under the content offset, like prod', () => {
+    expect(src).toContain('<main data-phone-rails>')
+    expect(src).toContain('[data-phone-rails] > * > section:first-child')
+  })
 })

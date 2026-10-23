@@ -174,7 +174,9 @@ export function MinimalHomePage() {
         )}
         <div data-shift-root>
           <div style={phoneContent}>
-            <main>
+            {/* Prod's first rail title sits right at the 16 px gap under the bar: drop the rails' 28 px top margin on the first one. */}
+            <style>{phoneFirstRailCss}</style>
+            <main data-phone-rails>
               {homeView(withMissing(data, wymOverride), failed || slow, () => setAttempt(a => a + 1), openCard, setDismissTarget)}
             </main>
             <div style={{ height: 48 }} />
@@ -331,6 +333,8 @@ export const homePage: React.CSSProperties = {
 };
 /** v213 (Designer): the home page behind the rails is prod 1b4ea74's flat navy, no glow (settings keep homePage's). */
 const page: React.CSSProperties = { ...homePage, background: 'var(--color-kiosk-black)', backgroundAttachment: undefined };
+/** v259: prod 1b4ea74's first phone rail starts at the content offset (no top margin). */
+const phoneFirstRailCss = '[data-phone-rails] > section:first-child, [data-phone-rails] > * > section:first-child { margin-top: 0 !important; }';
 export const homeBar: React.CSSProperties = {
   position: 'sticky', top: 0, zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
   padding: 'calc(env(safe-area-inset-top) + 12px) 20px 12px',
