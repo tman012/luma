@@ -130,7 +130,7 @@ def _complete(t: Dict[str, Any]) -> bool:
 def _series_for(name: str) -> Optional[Dict[str, Any]]:
     """The library show a release name is for (title or alias, year when the name has one)."""
     rel = tv_release.parse(name)
-    want = tv_match.normalize(rel.title or '')
+    want = tv_match.release_key(rel.title or '')
     if not want:
         return None
     paths = {r['id']: os.path.realpath(r['path']) for r in tv_settings.libraries()}
@@ -141,9 +141,9 @@ def _series_for(name: str) -> Optional[Dict[str, Any]]:
     for r in rows:
         if r['path_id'] not in paths:
             continue
-        names = {tv_match.normalize(r['title'])}
+        names = {tv_match.release_key(r['title'])}
         try:
-            names |= {tv_match.normalize(a) for a in json.loads(r['aliases'] or '[]') if isinstance(a, str)}
+            names |= {tv_match.release_key(a) for a in json.loads(r['aliases'] or '[]') if isinstance(a, str)}
         except ValueError:
             pass
         if want in names and (rel.year is None or r['year'] in (None, rel.year)):
