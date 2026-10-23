@@ -17,16 +17,16 @@ Deletion is PERMANENT. A download is a candidate only when all of these hold, fo
   * in scope: every finished torrent ('all', the default) or only the ones this install added
   * its data, as Luma sees the path (Library paths' path map), is inside the guard's folder and inside no
     library folder
-  * finished at least `min_age_hours` ago (prod's 48 h), and seeded and shared enough when those are on
+  * finished at least `min_age_days` ago (prod's 48 h, 2 days), and seeded and shared enough when those are on
   * imported: Luma's movie mover or TV importer has filed it, or Luma never tracked it (prod's own grabs,
     which prod's importer handles, as prod did). Waiting, mid-import, failed or refused imports stay.
   * Plex isn't playing it (read-only /status/sessions, matched by folder or file name); if Plex is set up
     but can't be read, nothing is deleted (PLEX_UNREADABLE)
 
-Selection (prod's plan_cleanup): oldest first; with preferred trackers, in their order: first downloads
-seeded only on the first tracker, then only on the first two, and so on, then everything else. A cross-seed
-counts for a tracker only when every tracker it is seeded on is a chosen one so far. Selection stops at the
-first download that reaches the target. One run at a time (`_run_lock`).
+Selection (deletion_order, the one order for every path and for Preview): the delete-first trackers in the
+owner's order, then everything else, oldest first within each group. A cross-seed counts for a tracker only
+when every tracker it is seeded on is a chosen one so far (prod's rule). Selection stops at the first download
+that reaches the target. One run at a time (`_run_lock`).
 """
 
 import logging
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 GIB = 1024 ** 3
 # Prod's defaults; the live values are Downloads guard settings (app/automation/dg_store).
 DEFAULT_TARGET_BYTES = 100 * GIB
-MIN_AGE_HOURS = 48
+MIN_AGE_HOURS = 48                    # prod; the setting is in days (min_age_days 2)
 MAX_TARGET_BYTES = 2 * 1024 ** 4  # 2 TiB
 
 QBIT_UNREADABLE = "Can't reach qBittorrent, so nothing was deleted"
@@ -265,7 +265,7 @@ def _units(torrents: List[Dict[str, Any]], cfg: Dict[str, Any], root: str, now: 
         local = os.path.normpath(fm.map_path(raw, path_map))
         groups.setdefault(local, []).append(t)
 
-    min_age = cfg['min_age_hours'] * 3600
+    min_age = cfg['min_age_days'] * 86400
     min_seed = cfg['min_seed_hours'] * 3600
     min_ratio = float(cfg['min_ratio'] or 0)
     held: Dict[str, int] = {}
@@ -323,17 +323,34 @@ def _units(torrents: List[Dict[str, Any]], cfg: Dict[str, Any], root: str, now: 
     return out, held
 
 
-def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, prefer_trackers: Optional[List[str]] = None,
-                 cfg: Optional[Dict[str, Any]] = None, now: Optional[float] = None) -> Dict:
-    """Pick the oldest downloads that together reach `target_bytes` (see the module docs). Deletes nothing."""
+def deletion_order(candidates: List[Dict[str, Any]], trackers: List[str]) -> List[Tuple[str, Dict[str, Any]]]:
+    """v260 (Taylor via PM): THE deletion order, shared by scheduled runs, Clean up now and the Storage pill's
+    Free up, and the order Preview lists. The delete-first trackers come first, in the owner's order (a download
+    goes in the group of the last listed tracker it needs, so a cross-seed waits until every tracker it is on has
+    come up), then everything else; oldest first within each group (finished time, then name)."""
+    order: List[str] = []
+    for t in trackers or []:
+        t = str(t).strip()
+        if t and t not in order:
+            order.append(t)
+    rank = {t: i for i, t in enumerate(order)}
+    oldest = sorted(candidates, key=lambda c: (c['mtime'], c['name']))
+
+    def group(c: Dict[str, Any]) -> int:
+        keys = c.get('trackers') or []
+        if c.get('unclassified') or not keys or any(k not in rank for k in keys):
+            return len(order)
+        return max(rank[k] for k in keys)
+    ranked = sorted(oldest, key=group)                        # stable: oldest first inside each group
+    return [('preferred' if group(c) < len(order) else 'fallback', c) for c in ranked]
+
+
+def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, cfg: Optional[Dict[str, Any]] = None,
+                 now: Optional[float] = None) -> Dict:
+    """Pick downloads in deletion_order() until they reach `target_bytes` (see the module docs). Deletes nothing."""
     cfg = cfg if cfg is not None else guard_settings()
     ceiling = int(cfg['max_run_gb']) * GIB
     target_bytes = max(0, min(int(target_bytes), ceiling))
-    prefer = []
-    for t in (prefer_trackers if prefer_trackers is not None else cfg['trackers']) or []:
-        t = str(t).strip()
-        if t and t not in prefer:
-            prefer.append(t)
     base = {'target_bytes': target_bytes, 'planned_bytes': 0, 'entries': [], 'eligible_count': 0, 'short': True,
             'preferred_available': 0, 'preferred_bytes': 0, 'fallback_bytes': 0, 'held': {}, 'error': None}
 
@@ -348,29 +365,20 @@ def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, prefer_trackers: Opti
 
     root = downloads_root(cfg)
     candidates, held = _units(torrents, cfg, root, time.time() if now is None else now, playing)
-
-    groups: List[Tuple[str, List[Dict[str, Any]]]] = []
-    taken: set = set()
-    for i in range(len(prefer)):
-        allowed = set(prefer[:i + 1])
-        g = [c for c in candidates if c['path'] not in taken and not c['unclassified'] and c['trackers']
-             and set(c['trackers']) <= allowed]
-        taken.update(c['path'] for c in g)
-        groups.append(('preferred', g))
-    groups.append(('fallback', [c for c in candidates if c['path'] not in taken]))
+    ordered = deletion_order(candidates, cfg['trackers'])
 
     selected: List[Dict] = []
     total = preferred = 0
-    for phase, group in groups:
-        for c in group:
-            if total >= target_bytes:
-                break
-            selected.append({**c, 'phase': phase})
-            total += c['size_bytes']
-            if phase == 'preferred':
-                preferred += c['size_bytes']
+    for phase, c in ordered:
+        if total >= target_bytes:
+            break
+        selected.append({**c, 'phase': phase})
+        total += c['size_bytes']
+        if phase == 'preferred':
+            preferred += c['size_bytes']
     return {**base, 'planned_bytes': total, 'entries': selected, 'eligible_count': len(candidates),
-            'short': total < target_bytes, 'preferred_available': len(taken), 'preferred_bytes': preferred,
+            'short': total < target_bytes, 'preferred_available': sum(1 for p, _ in ordered if p == 'preferred'),
+            'preferred_bytes': preferred,
             'fallback_bytes': total - preferred, 'held': held}
 
 
@@ -378,15 +386,15 @@ def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, prefer_trackers: Opti
 # Deletion
 # ---------------------------------------------------------------------------
 
-def run_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, prefer_trackers: Optional[List[str]] = None,
-                cfg: Optional[Dict[str, Any]] = None) -> Dict:
-    """PERMANENTLY delete the oldest downloads (with their files, through qBittorrent) until
-    `target_bytes` is freed. One run at a time; a second one gets BUSY_RUN."""
+def run_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, cfg: Optional[Dict[str, Any]] = None) -> Dict:
+    """PERMANENTLY delete downloads in deletion_order() (with their files, through qBittorrent) until
+    `target_bytes` is freed. Every path (the scheduler, Clean up now, the Storage pill) comes through here.
+    One run at a time; a second one gets BUSY_RUN."""
     if not _run_lock.acquire(blocking=False):
         return {'success': False, 'error': BUSY_RUN, 'freed_bytes': 0, 'deleted_count': 0, 'deleted': [],
                 'failed': [], 'short': True}
     try:
-        return _run(target_bytes, prefer_trackers, cfg if cfg is not None else guard_settings())
+        return _run(target_bytes, cfg if cfg is not None else guard_settings())
     finally:
         _run_lock.release()
 
@@ -395,12 +403,12 @@ def running() -> bool:
     return _run_lock.locked()
 
 
-def _run(target_bytes: int, prefer_trackers: Optional[List[str]], cfg: Dict[str, Any]) -> Dict:
+def _run(target_bytes: int, cfg: Dict[str, Any]) -> Dict:
     root = downloads_root(cfg)
     if not os.path.isdir(root):
         return {'success': False, 'error': f'Downloads folder not found: {root}'}
     before = usage(cfg)
-    plan = plan_cleanup(target_bytes, prefer_trackers, cfg)
+    plan = plan_cleanup(target_bytes, cfg)
     if plan.get('error'):
         return {'success': False, 'error': plan['error'], 'before': before, 'after': before, 'freed_bytes': 0,
                 'deleted_count': 0, 'deleted': [], 'failed': [], 'short': True}

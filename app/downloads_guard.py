@@ -381,7 +381,7 @@ def preview() -> Dict[str, Any]:
     settings = _cfg()
     verdict = evaluate(settings)
     target = verdict.get('target_bytes') or reclaim_bytes(settings)
-    plan = plan_cleanup(target, prefer_trackers=preferred_trackers(settings), cfg=settings)
+    plan = plan_cleanup(target, cfg=settings)
 
     return {
         'evaluation': verdict,
@@ -462,11 +462,10 @@ def run_cycle(dry_run: bool = False, force: bool = False) -> Dict[str, Any]:
         return result
 
     target = verdict['target_bytes']
-    prefer = preferred_trackers(settings)
 
     if dry_run:
         from app.storage_cleanup import plan_cleanup
-        plan = plan_cleanup(target, prefer_trackers=prefer, cfg=settings)
+        plan = plan_cleanup(target, cfg=settings)
         result['error'] = plan.get('error')
         result['freed_bytes'] = plan.get('planned_bytes', 0)
         result['freed_preferred_bytes'] = plan.get('preferred_bytes', 0)
@@ -480,7 +479,7 @@ def run_cycle(dry_run: bool = False, force: bool = False) -> Dict[str, Any]:
         return result
 
     # Through qBittorrent (deleteFiles=true) only; no qBittorrent or no Plex, no delete.
-    outcome = run_cleanup(target, prefer_trackers=prefer, cfg=settings)
+    outcome = run_cleanup(target, cfg=settings)
     if not outcome.get('success'):
         result['error'] = outcome.get('error') or 'cleanup failed'
         return result

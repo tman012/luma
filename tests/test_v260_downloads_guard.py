@@ -75,7 +75,7 @@ def test_defaults_match_prod():
     assert d['daily_cap_gb'] == dg._DEFAULT_DAILY_CAP_GB == 500
     assert d['trackers'] == list(dg._DEFAULT_TRACKERS) == ['ipt']
     assert d['pill_gb'] * GIB == sc.DEFAULT_TARGET_BYTES == 100 * GIB
-    assert d['min_age_hours'] == sc.MIN_AGE_HOURS == 48
+    assert d['min_age_days'] == 2 and d['min_age_days'] * 24 == sc.MIN_AGE_HOURS == 48   # stored in days
     assert d['max_run_gb'] * GIB == sc.MAX_TARGET_BYTES == 2 * 1024 ** 4
     assert d['min_seed_hours'] == 0 and d['min_ratio'] == 0
     assert d['scope'] == 'all' and d['folder'] == ''
@@ -178,12 +178,12 @@ def test_scope_only_this_installs_downloads(env):
 def test_age_seed_time_and_ratio(env):
     env.torrents = [tor('a1', 'Fresh', done=NOW - 47 * 3600), tor('a2', 'Old', done=NOW - 49 * 3600, seeding_time=3600,
                                                                  ratio=0.2)]
-    assert names(sc.plan_cleanup(1000 * GIB)) == ['Old']
+    assert names(sc.plan_cleanup(1000 * GIB)) == ['Old']                 # 2 days = 48 h: 47 h stays, 49 h goes
     dg_store.save({'min_seed_hours': 2})
     assert names(sc.plan_cleanup(1000 * GIB)) == []
     dg_store.save({'min_seed_hours': 0, 'min_ratio': 1.0})
     assert names(sc.plan_cleanup(1000 * GIB)) == []
-    dg_store.save({'min_ratio': 0, 'min_age_hours': 1})
+    dg_store.save({'min_ratio': 0, 'min_age_days': 0})
     assert sorted(names(sc.plan_cleanup(1000 * GIB))) == ['Fresh', 'Old']
 
 
@@ -203,12 +203,15 @@ def test_tracker_order_and_cross_seeds(env):
         tor('i1', 'IptOld', done=NOW - 30 * DAY), tor('b1', 'BhdNew', tracker=BHD, done=NOW - 5 * DAY),
         tor('c1', 'Cross', done=NOW - 40 * DAY), tor('c2', 'Cross', tracker=BHD, done=NOW - 40 * DAY),
         tor('u1', 'Unknown', tracker=UNKNOWN, done=NOW - 90 * DAY), tor('i2', 'IptNew', done=NOW - 3 * DAY)]
-    p = sc.plan_cleanup(1000 * GIB, prefer_trackers=['beyondhd', 'ipt'])
+    dg_store.save({'trackers': ['beyondhd', 'ipt']})
+    p = sc.plan_cleanup(1000 * GIB)
     assert names(p) == ['BhdNew', 'Cross', 'IptOld', 'IptNew', 'Unknown']
     assert [x['phase'] for x in p['entries']] == ['preferred'] * 4 + ['fallback']
-    p = sc.plan_cleanup(1000 * GIB, prefer_trackers=['ipt'])
+    dg_store.save({'trackers': ['ipt']})
+    p = sc.plan_cleanup(1000 * GIB)
     assert names(p) == ['IptOld', 'IptNew', 'Unknown', 'Cross', 'BhdNew']
-    assert names(sc.plan_cleanup(1000 * GIB, prefer_trackers=[])) == ['Unknown', 'Cross', 'IptOld', 'BhdNew', 'IptNew']
+    dg_store.save({'trackers': []})
+    assert names(sc.plan_cleanup(1000 * GIB)) == ['Unknown', 'Cross', 'IptOld', 'BhdNew', 'IptNew']
     cross = next(x for x in p['entries'] if x['name'] == 'Cross')
     assert sorted(cross['hashes']) == ['c1', 'c2'] and cross['size_bytes'] == 10 * GIB
 
@@ -316,9 +319,17 @@ def test_scheduler_needs_the_instance_gate(monkeypatch):
 
 # ------------------------------------------------------------------ routes and owner gates
 
+_SITE = {}
+
+
 @pytest.fixture
 def site(env, owner):  # noqa: F811
+    _SITE['c'] = owner
     return owner
+
+
+def ordered_site():
+    return _SITE['c']
 
 
 def _sign_in_401():
@@ -347,7 +358,7 @@ def test_get_and_round_trip(site):
 
 @pytest.mark.parametrize('change', [
     {'enabled': True}, {'reclaim_gb': 101}, {'max_run_gb': 4096}, {'pill_gb': 200}, {'daily_cap_gb': 0},
-    {'daily_cap_gb': 600}, {'min_age_hours': 24}, {'check_interval_minutes': 5}, {'min_free_gb': 200},
+    {'daily_cap_gb': 600}, {'min_age_days': 1}, {'check_interval_minutes': 5}, {'min_free_gb': 200},
     {'trackers': ['ipt', 'beyondhd']}, {'scope': 'test_tagged'}, {'folder': '/tmp'}])
 def test_widening_needs_the_signed_in_owner(site, change):
     _sign_in_401()
@@ -359,7 +370,7 @@ def test_widening_needs_the_signed_in_owner(site, change):
         tv_settings._cfg.pop('signed_in_owner', None)
 
 
-@pytest.mark.parametrize('change', [{'reclaim_gb': 50}, {'daily_cap_gb': 100}, {'min_age_hours': 72},
+@pytest.mark.parametrize('change', [{'reclaim_gb': 50}, {'daily_cap_gb': 100}, {'min_age_days': 3},
                                     {'trackers': []}, {'min_ratio': 1.5}, {'enabled': False}])
 def test_tightening_is_open_to_the_owner(site, change):
     _sign_in_401()
@@ -386,21 +397,21 @@ def test_clean_up_now_and_the_pill_need_the_signed_in_owner(site, monkeypatch):
 
 
 def test_pill_reads_free_space_and_its_settings(site):
-    dg_store.save({'pill_gb': 50, 'min_age_hours': 72})
+    dg_store.save({'pill_gb': 50, 'min_age_days': 3})
     d = _req(site, 'get', '/api/storage/downloads').get_json()
     assert d['available'] and d['free_bytes'] == 100 * GIB
-    assert d['cleanup_target_bytes'] == 50 * GIB and d['min_age_hours'] == 72
+    assert d['cleanup_target_bytes'] == 50 * GIB and d['min_age_days'] == 3 and d['min_age_hours'] == 72
 
 
 def test_pill_cleanup_is_capped_at_the_pill_amount(site, monkeypatch):
     seen = []
-    monkeypatch.setattr(sc, 'run_cleanup', lambda target, **k: seen.append((target, k['prefer_trackers'])) or {'success': True})
+    monkeypatch.setattr(sc, 'run_cleanup', lambda target, **k: seen.append((target, k['cfg']['trackers'])) or {'success': True})
     import app.main as main
     monkeypatch.setattr(main, '_signed_in_owner_only', lambda fn: fn, raising=False)
     from app import start_flow
     monkeypatch.setattr(start_flow, 'require_signed_in_owner', lambda: ({'id': 1}, None))
     r = _req(site, 'post', '/api/storage/downloads/cleanup', {'target_bytes': 10 ** 15})
-    assert r.status_code == 200 and seen == [(100 * GIB, [])]
+    assert r.status_code == 200 and seen == [(100 * GIB, ['ipt'])]       # the guard's trackers, not prod's none
 
 
 def test_off_on_the_test_instance_until_opted_in(site, monkeypatch):
@@ -421,3 +432,83 @@ def test_status_and_trackers_read_qbit_only(site, env):
     p = _req(site, 'get', '/api/downloads-guard/preview').get_json()
     assert [e['name'] for e in p['entries']] == ['A', 'B'] and env.deleted == []
     assert dg_routes.URL == API
+
+
+# ------------------------------------------------------------------ one order for every path (Taylor via PM)
+
+ORDER_TORRENTS = [
+    tor('u1', 'UnknownOldest', tracker=UNKNOWN, done=NOW - 90 * DAY), tor('i1', 'IptOld', done=NOW - 30 * DAY),
+    tor('b1', 'BhdNew', tracker=BHD, done=NOW - 5 * DAY), tor('i2', 'IptNew', done=NOW - 3 * DAY),
+    tor('u2', 'UnknownNew', tracker=UNKNOWN, done=NOW - 4 * DAY),
+    tor('f1', 'IptFresh', done=NOW - 47 * 3600), tor('f2', 'BhdFresh', tracker=BHD, done=NOW - 1 * DAY)]
+ORDER = ['BhdNew', 'IptOld', 'IptNew', 'UnknownOldest', 'UnknownNew']          # trackers in order, then the rest
+
+
+@pytest.fixture
+def ordered(env, site, monkeypatch):
+    env.torrents = list(ORDER_TORRENTS)
+    dg_store.save({'trackers': ['beyondhd', 'ipt'], 'enabled': True})
+    calls = []
+    real = sc.deletion_order
+    monkeypatch.setattr(sc, 'deletion_order', lambda c, t: (calls.append(list(t)), real(c, t))[1])
+
+    class Now:
+        def __init__(self, target=None, **kw):
+            self.target = target
+
+        def start(self):
+            self.target()
+    monkeypatch.setattr(dg.threading, 'Thread', Now)
+    env.calls = calls
+    return env
+
+
+def _deleted_names(env):
+    by_hash = {t['hash']: t['name'] for t in ORDER_TORRENTS}
+    return [by_hash[h[0]] for h in env.deleted]
+
+
+def test_scheduled_runs_follow_the_order(ordered):
+    assert dg.run_cycle()['triggered'] is True
+    assert _deleted_names(ordered) == ORDER and ordered.calls == [['beyondhd', 'ipt']]
+
+
+def test_clean_up_now_follows_the_order(ordered):
+    assert _req(ordered_site(), 'post', '/api/downloads-guard/run', {'dry_run': False}).status_code == 200
+    assert _deleted_names(ordered) == ORDER and ordered.calls == [['beyondhd', 'ipt']]
+
+
+def test_the_storage_pill_follows_the_order(ordered):
+    r = _req(ordered_site(), 'post', '/api/storage/downloads/cleanup', {})
+    assert r.status_code == 200, r.get_json()
+    assert _deleted_names(ordered) == ORDER and ordered.calls == [['beyondhd', 'ipt']]
+
+
+def test_preview_lists_that_exact_order(ordered):
+    p = _req(ordered_site(), 'get', '/api/downloads-guard/preview').get_json()
+    assert [e['name'] for e in p['entries']] == ORDER and ordered.deleted == []
+    assert [e['phase'] for e in p['entries']] == ['preferred'] * 3 + ['fallback'] * 2
+
+
+def test_minimum_age_is_in_days_on_every_path(ordered):
+    dg_store.save({'min_age_days': 6})
+    want = ['IptOld', 'UnknownOldest']                       # 5, 4 and 3 days old and the fresh ones stay
+    assert [e['name'] for e in _req(ordered_site(), 'get', '/api/downloads-guard/preview').get_json()['entries']] == want
+    _req(ordered_site(), 'post', '/api/storage/downloads/cleanup', {})
+    assert _deleted_names(ordered) == want
+    ordered.deleted.clear()
+    _req(ordered_site(), 'post', '/api/downloads-guard/run', {'dry_run': False})
+    assert _deleted_names(ordered) == want
+    ordered.deleted.clear()
+    dg.run_cycle()
+    assert _deleted_names(ordered) == want
+
+
+def test_the_ordering_function_alone():
+    c = lambda n, ts, m, unc=False: {'name': n, 'trackers': ts, 'mtime': m, 'unclassified': unc}
+    units = [c('a', ['ipt'], 5), c('b', ['beyondhd'], 9), c('c', [], 1), c('d', ['ipt'], 2), c('e', ['ipt', 'x'], 0),
+             c('f', ['ipt'], 0, unc=True), c('g', ['beyondhd', 'ipt'], 3)]
+    got = [(p, u['name']) for p, u in sc.deletion_order(units, ['ipt', 'beyondhd'])]
+    assert got == [('preferred', 'd'), ('preferred', 'a'), ('preferred', 'g'), ('preferred', 'b'),
+                   ('fallback', 'e'), ('fallback', 'f'), ('fallback', 'c')]
+    assert [u['name'] for _, u in sc.deletion_order(units, [])] == ['e', 'f', 'c', 'd', 'g', 'a', 'b']

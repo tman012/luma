@@ -4731,7 +4731,8 @@ def get_downloads_storage():
         data = usage(cfg)
         # v260: the pill's amount and minimum age are Downloads guard settings (prod: 100 GB, 48 h)
         data['cleanup_target_bytes'] = int(cfg['pill_gb']) * GIB
-        data['min_age_hours'] = int(cfg['min_age_hours'])
+        data['min_age_days'] = int(cfg['min_age_days'])
+        data['min_age_hours'] = int(cfg['min_age_days']) * 24
         return jsonify(data)
     except Exception as e:
         logger.error(f"Error reading downloads storage: {e}")
@@ -4768,8 +4769,9 @@ def cleanup_downloads_storage():
         if target <= 0:
             return jsonify({'success': False, 'error': 'target_bytes must be positive'}), 400
 
-        # v260: never more than the pill's setting; prod's pill has no tracker preference (oldest first).
-        result = run_cleanup(min(target, pill), prefer_trackers=[], cfg=cfg)
+        # v260: never more than the pill's setting. Prod's pill went oldest first with no tracker preference;
+        # here it follows the guard's deletion order like every other path (Taylor via PM).
+        result = run_cleanup(min(target, pill), cfg=cfg)
         return jsonify(result), (200 if result.get('success') else 500)
     except Exception as e:
         logger.error(f"Error cleaning up downloads storage: {e}")

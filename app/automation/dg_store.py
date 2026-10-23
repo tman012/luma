@@ -2,7 +2,7 @@
 
 Prod 1b4ea74's defaults (app/downloads_guard.py, app/storage_cleanup.py): off (:92), check every 15 minutes
 (:59), free-space floor 150 GB (:57), reclaim 100 GB a run (:58), daily limit 500 GB with 0 for none (:60),
-IPTorrents first (:62), the storage pill's 100 GB (storage_cleanup DEFAULT_TARGET_BYTES), 48 hours minimum age
+IPTorrents first (:62), the storage pill's 100 GB (storage_cleanup DEFAULT_TARGET_BYTES), 48 hours minimum age, here 2 days
 (MIN_AGE_HOURS) and 2 TiB a run (MAX_TARGET_BYTES, here 2048 GB). New on test (PM): the per-run ceiling is a
 setting, the tracker preference is an ordered list, minimum seed time and ratio (off), the scope (every
 finished torrent, or only the ones this install added), and the folder (empty: media.downloads_root, as prod).
@@ -38,7 +38,7 @@ DEFAULTS: Dict[str, Any] = {
     'max_run_gb': 2048,
     'trackers': ['ipt'],
     'pill_gb': 100,
-    'min_age_hours': 48,
+    'min_age_days': 2,                 # prod's 48 h; stored in days (Taylor via PM)
     'min_seed_hours': 0,          # 0: off
     'min_ratio': 0.0,             # 0: off
     'scope': 'all',
@@ -53,7 +53,7 @@ INT_RANGES: Dict[str, tuple] = {
     'daily_cap_gb': (0, 20_000),
     'max_run_gb': (1, 20_480),
     'pill_gb': (1, 2_000),
-    'min_age_hours': (0, 8_760),
+    'min_age_days': (0, 365),
     'min_seed_hours': (0, 87_600),
 }
 RATIO_MAX = 100.0
@@ -196,7 +196,7 @@ def widens(old: Dict[str, Any], new: Dict[str, Any]) -> List[str]:
     old_cap, new_cap = old['daily_cap_gb'], new['daily_cap_gb']
     if old_cap and (new_cap == 0 or new_cap > old_cap):
         out.append('daily_cap_gb')
-    for k in ('check_interval_minutes', 'min_age_hours'):
+    for k in ('check_interval_minutes', 'min_age_days'):
         if new[k] < old[k]:
             out.append(k)
     for k in ('min_seed_hours', 'min_ratio'):
