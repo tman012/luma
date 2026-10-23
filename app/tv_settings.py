@@ -64,9 +64,11 @@ UPGRADE_MODES = ('keep_both', 'replace_verified')
 AUTOMATION_FLAGS = ('enabled', 'feed_enabled', 'backlog_enabled', 'upgrades_enabled', 'import_enabled')
 DEFAULT_AUTOMATION = {'enabled': False, 'feed_enabled': False, 'backlog_enabled': False,
                       'upgrades_enabled': False, 'import_enabled': False, 'first_search_delay_h': 4,
-                      'daily_search_cap': 50}
+                      'daily_search_cap': 50, 'daily_backlog_grab_cap': 20}
 #: v251: background TV search queries per tracker per day (ET); tv_budget.count_search
 DAILY_SEARCH_CAP_MAX = 10000
+#: v253a: automatic grabs of backlog episodes (past the early phase) per day (ET); tv_budget.take_backlog_grab
+DAILY_BACKLOG_GRAB_CAP_MAX = 10000
 INVALID = 'Invalid'
 # v185.2a (Taylor): release groups preferred at the same quality, in the owner's order; empty by default
 # (nothing seeded): an empty list leaves the ranking unchanged
@@ -133,6 +135,9 @@ def _normalize(raw: Any) -> Dict[str, Any]:
     cap = auto.get('daily_search_cap')
     if isinstance(cap, int) and not isinstance(cap, bool) and 1 <= cap <= DAILY_SEARCH_CAP_MAX:
         d['automation']['daily_search_cap'] = cap
+    gcap = auto.get('daily_backlog_grab_cap')
+    if isinstance(gcap, int) and not isinstance(gcap, bool) and 1 <= gcap <= DAILY_BACKLOG_GRAB_CAP_MAX:
+        d['automation']['daily_backlog_grab_cap'] = gcap
     if 'preferred_groups' in raw:
         g = groups(raw.get('preferred_groups'))
         if g is not None:
@@ -187,7 +192,7 @@ def apply_put(data: Dict[str, Any], body: Any) -> Dict[str, str]:
             data['upgrades']['mode'] = u['mode']
     if 'automation' in body:
         a = body['automation']
-        allowed = set(AUTOMATION_FLAGS) | {'first_search_delay_h', 'daily_search_cap'}
+        allowed = set(AUTOMATION_FLAGS) | {'first_search_delay_h', 'daily_search_cap', 'daily_backlog_grab_cap'}
         if not isinstance(a, dict) or not set(a) <= allowed:
             errors['automation'] = INVALID
         else:
@@ -198,6 +203,10 @@ def apply_put(data: Dict[str, Any], body: Any) -> Dict[str, str]:
                         continue
                 elif k == 'daily_search_cap':
                     if not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= DAILY_SEARCH_CAP_MAX:
+                        errors[f'automation.{k}'] = INVALID
+                        continue
+                elif k == 'daily_backlog_grab_cap':
+                    if not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= DAILY_BACKLOG_GRAB_CAP_MAX:
                         errors[f'automation.{k}'] = INVALID
                         continue
                 elif not isinstance(v, bool):

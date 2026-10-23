@@ -231,3 +231,75 @@ def count_search(cfg: Dict[str, Any], now: Optional[float] = None) -> int:
         logger.info('TV search: %s reached its daily cap of %d background searches; skipped until midnight ET',
                     cfg.get('name') or cfg.get('id'), search_cap())
     return n
+
+
+# ------------------------------------------------------------------ v253a: daily backlog auto-grab cap
+# Tester on 8f6ae59: a feed match for an old missing episode grabbed with no cap, so a large backlog could
+# flood qBittorrent. Automatic grabs (origin 'auto': feed matches, scheduled searches, pending retries) of
+# backlog episodes (every covered episode past its early phase) are held to automation.daily_backlog_grab_cap
+# per day (ET, across trackers). Grabs covering an early-phase episode, and the owner's grabs, are not counted.
+DAILY_BACKLOG_GRAB_CAP = 20
+BACKLOG_GRAB_KEY = 'tv_backloggrabday'
+
+
+def backlog_grab_cap() -> int:
+    """The setting; DAILY_BACKLOG_GRAB_CAP when it can't be read or isn't a valid number (fails safe)."""
+    from app import tv_settings
+    try:
+        v = tv_settings.load()['automation'].get('daily_backlog_grab_cap', DAILY_BACKLOG_GRAB_CAP)
+        if isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= tv_settings.DAILY_BACKLOG_GRAB_CAP_MAX:
+            return DAILY_BACKLOG_GRAB_CAP
+        return v
+    except Exception:                       # noqa: BLE001 - unreadable settings: the default
+        return DAILY_BACKLOG_GRAB_CAP
+
+
+def _bump_key(key: str, now: float, delta: int, cap: Optional[int]) -> Optional[int]:
+    """_bump for a fixed meta key: read, check and write today's count in one BEGIN IMMEDIATE transaction."""
+    from app import tv_store
+    day = _et_day(now)
+    with tv_store.write() as conn:
+        row = conn.execute('SELECT value FROM meta WHERE key = ?', (key,)).fetchone()
+        n = _parse_count(row[0] if row else None, day)
+        if cap is not None and n >= cap:
+            return None
+        n = max(0, n + delta)
+        conn.execute('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+                     (key, json.dumps({'day': day, 'n': n})))
+    return n
+
+
+def backlog_grabs_today(now: Optional[float] = None) -> int:
+    from app import tv_store
+    now = time.time() if now is None else now
+    try:
+        raw = tv_store.get_meta(BACKLOG_GRAB_KEY)
+    except Exception:                       # noqa: BLE001
+        return 0
+    return _parse_count(raw, _et_day(now))
+
+
+def take_backlog_grab(now: Optional[float] = None) -> bool:
+    """Reserve one automatic backlog grab today, atomically: False (nothing counted) at the cap. Logs once
+    (INFO) when the cap is reached. Fails open (True, uncounted) if the count can't be stored, as take_search."""
+    now = time.time() if now is None else now
+    cap = backlog_grab_cap()
+    try:
+        n = _bump_key(BACKLOG_GRAB_KEY, now, 1, cap)
+    except Exception:                       # noqa: BLE001 - a count never fails a grab
+        logger.warning('TV grab: daily backlog grab count not stored; grabbing anyway', exc_info=True)
+        return True
+    if n is None:
+        return False
+    if n == cap:
+        logger.info('TV grab: daily backlog grab limit of %d reached; backlog grabs skipped until midnight ET', cap)
+    return True
+
+
+def refund_backlog_grab(now: Optional[float] = None) -> None:
+    """Give back a reserved backlog grab that added nothing to qBittorrent."""
+    now = time.time() if now is None else now
+    try:
+        _bump_key(BACKLOG_GRAB_KEY, now, -1, None)
+    except Exception:                       # noqa: BLE001
+        logger.debug('TV grab: backlog grab refund not stored', exc_info=True)
