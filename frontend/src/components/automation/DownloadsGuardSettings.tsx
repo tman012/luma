@@ -395,7 +395,9 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
           <div>
             <h4 style={group}>What it may delete</h4>
             <div className="gr-f2">
-              <Field id="dg-scope" label="Downloads"><Select id="dg-scope" value={s.scope} options={SCOPES} onChange={v => put({ scope: v })} /></Field>
+              <div data-testid="dg-scope-row" style={{ gridColumn: '1 / -1', minWidth: 0 }}>
+                <Field id="dg-scope" label="Downloads"><Select id="dg-scope" value={s.scope} options={SCOPES} onChange={v => put({ scope: v })} /></Field>
+              </div>
               <Field id="dg-age" label="Keep downloads newer than"><Select id="dg-age" value={s.min_age_days} options={ageOptions(s.min_age_days)} onChange={v => put({ min_age_days: v })} /></Field>
               <Optional id="dg-seed" label="Minimum seed time (hours)" value={s.min_seed_hours} fallback={72} bad={!!bad.min_seed_hours} onChange={v => put({ min_seed_hours: v })} />
               <Optional id="dg-ratio" label="Minimum ratio" value={s.min_ratio} fallback={1} decimals={1} step={0.1} bad={!!bad.min_ratio} onChange={v => put({ min_ratio: v })} />

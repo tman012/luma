@@ -192,6 +192,7 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     const calls = stub();
     view();
     await waitFor(() => screen.getByTestId('downloads-guard'));
+    expect(screen.getByTestId('dg-scope-row').style.gridColumn).toBe('1 / -1');   // its own full-width row: no truncation at 390
     fireEvent.click(screen.getByText('All finished downloads'));
     fireEvent.click(await screen.findByText("Only this install's downloads"));
     await waitFor(() => expect(puts(calls)).toEqual([{ scope: 'test_tagged' }]));
