@@ -204,6 +204,15 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     expect(names).toEqual(['Heat.1995', 'American.Horror.Story.S01', 'Hold', 'Zodiac.2007']);
   });
 
+  it('Preview from the implicit owner asks to sign in', async () => {
+    stub(u => (u.endsWith('/preview') ? json({ error: 'Sign in first', sign_in: true }, 401) : undefined));
+    view();
+    await waitFor(() => screen.getByTestId('downloads-guard'));
+    fireEvent.click(screen.getByTestId('dg-preview'));
+    expect(await screen.findByTestId('dg-sign-in')).toBeTruthy();
+    expect(screen.queryByText("Couldn't preview")).toBeNull();
+  });
+
   it('scope picks only this install\'s downloads', async () => {
     const calls = stub();
     view();

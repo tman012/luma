@@ -394,9 +394,10 @@ def test_clean_up_now_and_the_pill_need_the_signed_in_owner(site, monkeypatch):
     monkeypatch.setattr(main._start_flow, 'require_signed_in_owner', start_flow.require_signed_in_owner)
     assert _req(site, 'post', '/api/storage/downloads/cleanup', {}).status_code == 401
     assert _req(site, 'post', '/api/downloads-guard/run', {'dry_run': False}).status_code == 401
+    assert _req(site, 'post', '/api/downloads-guard/run', {'dry_run': True}).status_code == 401   # v261: dry too
+    for path in ('/api/downloads-guard/status', '/api/downloads-guard/trackers', '/api/downloads-guard/preview'):
+        assert _req(site, 'get', path).status_code == 401, path
     assert calls == []
-    assert _req(site, 'post', '/api/downloads-guard/run', {'dry_run': True}).status_code == 200
-    assert calls == [('run', True)]
 
 
 def test_pill_reads_free_space_and_its_settings(site):

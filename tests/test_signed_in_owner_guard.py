@@ -252,14 +252,47 @@ def test_guard_real_run_plex_approved_viewer_gets_403(guard, monkeypatch):
 
 
 @pytest.mark.parametrize('dry', [True, None])
-def test_guard_dry_run_keeps_todays_access(guard, dry):
-    """Dry runs delete nothing: the implicit LAN owner still may, as today."""
-    _client(guard)
+def test_guard_dry_run_needs_the_signed_in_owner(guard, dry):
+    """v261 (PM): a dry run is the signed-in owner's too, on full builds: implicit LAN 401, others 403."""
+    owner = _client(guard)
     r = _run(guard.test_client(), dry)
+    assert r.status_code == 401 and r.get_json() == {'error': 'Sign in first', 'sign_in': True}
+    assert r.headers['Cache-Control'] == 'no-store'
+    viewer = _client(guard, admin=False, name='viewer')
+    assert _run(viewer, dry).status_code == 403
+    assert guard.runs == []
+    r = _run(owner, dry)
     assert r.status_code == 200 and r.get_json() == {'ok': True, 'dry_run': True}
-    owner = _client(guard, name='owner2')
-    assert _run(owner, dry).status_code == 200
-    assert guard.runs == [True, True]
+    assert guard.runs == [True]
+
+
+GUARD_READS = ('/api/downloads-guard/status', '/api/downloads-guard/trackers', '/api/downloads-guard/preview')
+
+
+@pytest.fixture
+def guard_reads(guard, monkeypatch):
+    from app import downloads_guard, tracker_files
+    monkeypatch.setattr(downloads_guard, 'get_status', lambda: {'running': False})
+    monkeypatch.setattr(downloads_guard, 'get_log', lambda: [])
+    monkeypatch.setattr(downloads_guard, 'preview', lambda: {'error': None, 'rows': []})
+    monkeypatch.setattr(tracker_files, 'summarise', lambda fetch: {'available': True, 'trackers': []})
+    return guard
+
+
+@pytest.mark.parametrize('path', GUARD_READS)
+def test_guard_reads_need_the_signed_in_owner_on_full_builds(guard_reads, path):
+    """v261 (PM): status, trackers and preview: implicit LAN owner and service key 401, other users 403."""
+    from app import minimal
+    assert not minimal.enabled()
+    owner = _client(guard_reads)
+    r = guard_reads.test_client().get(path, environ_base=LAN, headers=HDR)
+    assert r.status_code == 401 and r.get_json()['sign_in'] is True and r.headers['Cache-Control'] == 'no-store'
+    r = guard_reads.test_client().get(path, environ_base=LAN, headers=dict(HDR, **{'X-API-Key': KEY}))
+    assert r.status_code == 401
+    for who in ('admin', 'viewer', 'guest'):
+        c = _client(guard_reads, admin=(who == 'admin'), name=who)
+        assert c.get(path, environ_base=LAN, headers=HDR).status_code == 403, who
+    assert owner.get(path, environ_base=LAN, headers=HDR).status_code == 200
 
 
 def test_guard_dry_run_remote_no_session_is_unchanged(guard):

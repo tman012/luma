@@ -4786,11 +4786,15 @@ def cleanup_downloads_storage():
 
 
 def _dg_read_guard():
-    """v260: on minimal (test) builds the Downloads guard reads are the owner's (Settings > Automation)."""
-    if not _minimal.enabled():
-        return None
-    from app import tv_settings
-    return tv_settings._guard()
+    """v261 (PM): the Downloads guard's status, tracker and preview reads and its runs (dry or real) are the
+    signed-in owner's on every build, full or minimal: the implicit LAN owner, the service key and no session
+    get 401 with "sign_in": true; other admins and plain, guest or Plex-approved users 403."""
+    _user, err = _start_flow.require_signed_in_owner()
+    if err is not None:
+        resp, status = err
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp, status
+    return None
 
 
 @app.route('/api/downloads-guard/status')
@@ -4843,7 +4847,7 @@ def downloads_guard_run():
     """Fire a run now, past the free-space floor.
 
     Defaults to dry_run — pass {"dry_run": false} to actually delete. The daily
-    ceiling and every guard in storage_cleanup still apply either way. A real
+    ceiling and every guard in storage_cleanup still apply either way. Any
     run needs the signed-in owner (start_flow.require_signed_in_owner). A body
     that isn't a JSON object gets 400 {"error": "Invalid request"}.
     """
@@ -4855,16 +4859,7 @@ def downloads_guard_run():
     if bad is not None:
         return bad
     dry = bool(body.get('dry_run', True))
-    if not dry:
-        # A real run deletes files (PM ruling): only the owner signed in with a
-        # session. Implicit LAN owner, service key and no session get 401 with
-        # "sign_in": true; other admins and everyone else 403. A dry run keeps
-        # today's access.
-        _user, err = _start_flow.require_signed_in_owner()
-        if err is not None:
-            resp, status = err
-            resp.headers['Cache-Control'] = 'no-store'
-            return resp, status
+    # Dry or real, only the owner signed in with a session gets here (_dg_read_guard, v261).
     downloads_guard.trigger_manual_run(dry_run=dry)
     return jsonify({'ok': True, 'dry_run': bool(dry)})
 

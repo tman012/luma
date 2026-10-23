@@ -311,6 +311,7 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
     void previewDg().then(r => {
       setBusy(null);
       if (r.ok) setPreview(r.data);
+      else if (r.signIn) setSignIn(true);                 // v261: Preview is the signed-in owner's
       else setError("Couldn't preview");
     });
   };
