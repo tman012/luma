@@ -163,9 +163,11 @@ def test_new_episodes_retry_every_15_minutes_for_6_hours_after_air(env, monkeypa
     assert passes[0] == aired
     in_window = [w for w in passes if w <= aired + tv_search.FAST_WINDOW_S]
     assert in_window == [aired + i * tv_search.FAST_S for i in range(25)]               # every 15 min, 6 h
-    assert [w for w in passes if w > aired + tv_search.FAST_WINDOW_S] == []            # then it falls back
+    # then it falls back: v251, hourly catch-ups inside the 24 h floor (was one a day)
+    after = [w for w in passes if w > aired + tv_search.FAST_WINDOW_S]
+    assert after == [in_window[-1] + k * tv_search.SLOW_S for k in range(1, len(after) + 1)]
     nxt = {r['next_search_at'] for r in rows('SELECT next_search_at FROM episodes WHERE id IN (%s)' % ','.join('?' * len(ids)), *ids.values())}
-    assert nxt == {in_window[-1] + tv_search.CATCHUP_S}
+    assert nxt == {(after or in_window)[-1] + tv_search.SLOW_S}
 
 
 def test_found_mid_window_is_grabbed_and_stops(env, monkeypatch):
@@ -194,7 +196,7 @@ def test_next_retry_rule():
     aired = ts(2026, 10, 21, 4)
     assert tv_search._next_retry(e, aired + 60, attempts=5) == aired + 60 + tv_search.FAST_S
     late = aired + tv_search.FAST_WINDOW_S + 1
-    assert tv_search._next_retry(e, late, attempts=5) == late + tv_search.CATCHUP_S
+    assert tv_search._next_retry(e, late, attempts=5) == late + tv_search.SLOW_S       # v251: hourly in the floor
 
 
 # ------------------------------------------------------------------ 4. episodes with no air time
@@ -317,8 +319,8 @@ def test_no_air_time_no_usual_slot_retries_until_the_end_of_the_air_date_in_et(e
     start, end = ts(2026, 10, 21, 0), ts(2026, 10, 22, 0)
     _timeline(sid, start, end + 3600)
     passes = sorted(set(when))
-    assert passes[0] == start and passes[-1] == end                     # every 15 min through the whole day ET
-    assert passes == [start + i * tv_search.FAST_S for i in range(97)]
+    assert passes[0] == start                                           # every 15 min through the whole day ET
+    assert passes == [start + i * tv_search.FAST_S for i in range(97)] + [end + tv_search.SLOW_S]   # v251: then hourly
     assert tv_search.fast_window_end({'air_date': '2026-10-21'}) == end
 
 

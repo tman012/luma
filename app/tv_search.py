@@ -578,9 +578,10 @@ def _after(sid: int, want: List[Dict[str, Any]], out: Dict[str, Any], now: float
 
 
 #: v203c (PM, Sonarr-style): the air-time search plus one retry; after that the episode is feed-only
-#: (the 15-min feed poll grabs it) with one catch-up search a day (still inside the air-date floor)
+#: (the 15-min feed poll grabs it) with catch-up searches; v251: hourly while inside the air-date floor
 AUTO_SEARCHES = 2
 CATCHUP_S = 24 * 3600
+FLOOR_MARGIN_S = 5 * 60                  # v251: the last hourly catch-up, this long before the floor closes
 
 
 def fast_window_end(e: Dict[str, Any]) -> Optional[float]:
@@ -607,6 +608,17 @@ def _next_retry(e: Dict[str, Any], now: float, attempts: int = 1) -> float:
     if end is not None and now < end:
         return now + FAST_S
     if attempts >= AUTO_SEARCHES:
+        # v251 (PM): a catch-up a day landed past the 24 h air-date floor (v177), so a late upload was never
+        # searched again. Catch-ups run every SLOW_S while the episode is inside the floor (the floor unchanged);
+        # the last one is pulled in to just before the floor closes.
+        start = tv_safety.aired_start(e)
+        if start is not None and tv_safety.in_floor(e, now):
+            nxt = now + SLOW_S
+            if tv_safety.in_floor(e, nxt):
+                return nxt
+            last = start + tv_safety.FLOOR_S - FLOOR_MARGIN_S
+            if last > now + FAST_S and tv_safety.in_floor(e, last):
+                return last
         return now + CATCHUP_S
     return now + FAST_S
 
