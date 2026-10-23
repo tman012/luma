@@ -7,7 +7,7 @@ import { FONT } from '@/components/start/StartUI';
 import { Select, Toggle, SAVE_ERROR, glassBtn, tvEditCss } from '@/components/library/TvEdit';
 import { Chip, Field, NumField, Poster, grCss, when, type ChipState } from './GenreRouletteSettings';
 import {
-  loadWym, loadWymStatus, refreshWym, restoreWym, saveWym,
+  loadWym, loadWymStatus, normalizeStatus, refreshWym, restoreWym, saveWym,
   type Opt, type WymSettings, type WymStatus, type WymView,
 } from './whatsMissingApi';
 
@@ -126,7 +126,7 @@ export function WhatsMissingSettings({ wide = true }: { wide?: boolean } = {}) {
     void loadWym().then(r => { if (r.ok) setD(r.data); else setFailed(true); });
   }, []);
   const live = useCallback(() => {
-    void loadWymStatus().then(r => { if (r.ok) setD(cur => (cur ? { ...cur, status: r.data.status } : cur)); });
+    void loadWymStatus().then(r => { if (r.ok) setD(cur => (cur ? { ...cur, status: normalizeStatus(r.data?.status, cur.status) } : cur)); });
   }, []);
   const fast = !!d?.status.building;
   useEffect(() => {
@@ -157,7 +157,7 @@ export function WhatsMissingSettings({ wide = true }: { wide?: boolean } = {}) {
     setError('');
     void refreshWym().then(r => {
       busy.current = false;
-      if (r.ok) setD(cur => (cur ? { ...cur, status: r.data.status } : cur));
+      if (r.ok) setD(cur => (cur ? { ...cur, status: normalizeStatus(r.data?.status, cur.status) } : cur));
       else if (r.status !== 409) setError("Couldn't start");
       live();
     });
@@ -166,7 +166,7 @@ export function WhatsMissingSettings({ wide = true }: { wide?: boolean } = {}) {
     setRestoring(id);
     void restoreWym(id).then(r => {
       setRestoring(null);
-      if (r.ok) setD(cur => (cur ? { ...cur, dismissed: r.data.dismissed } : cur));
+      if (r.ok) setD(cur => (cur ? { ...cur, dismissed: Array.isArray(r.data?.dismissed) ? r.data.dismissed : cur.dismissed } : cur));
       else setError("Couldn't restore");
     });
   };
