@@ -72,6 +72,9 @@ DEFAULT_AUTOMATION = {'enabled': False, 'feed_enabled': False, 'backlog_enabled'
                       'upgrades_enabled': False, 'import_enabled': False, 'first_search_delay_h': 4,
                       'air_searches': True, 'sweep_enabled': True, 'on_add': 'search_now'}
 INVALID = 'Invalid'
+#: v259: automation keys d3b47ec removed (no daily caps). A save that still carries one ignores it (no 400), and
+#: tv_settings.json drops them on the next save or load
+REMOVED_AUTOMATION = ('daily_search_cap', 'daily_backlog_grab_cap')
 # v185.2a (Taylor): release groups preferred at the same quality, in the owner's order; empty by default
 # (nothing seeded): an empty list leaves the ranking unchanged
 DEFAULT_GROUPS: tuple = ()
@@ -163,7 +166,21 @@ def load() -> Dict[str, Any]:
             logger.error('TV settings unreadable (%s); starting from defaults', type(e).__name__)
             _paths.quarantine(p, 'unreadable', logger)
             return empty()
+        _drop_removed(p, raw)
         return _normalize(raw)
+
+
+def _drop_removed(p: Path, raw: Any) -> None:
+    """v259: rewrite the file without REMOVED_AUTOMATION when it still has any (only those keys go)."""
+    auto = raw.get('automation') if isinstance(raw, dict) else None
+    if not isinstance(auto, dict) or not any(k in auto for k in REMOVED_AUTOMATION):
+        return
+    clean = {**raw, 'automation': {k: v for k, v in auto.items() if k not in REMOVED_AUTOMATION}}
+    try:
+        _paths.atomic_write_json(p, clean, mode=0o600)
+        logger.info('TV settings: dropped the removed keys %s', ', '.join(k for k in REMOVED_AUTOMATION if k in auto))
+    except OSError as e:
+        logger.warning('TV settings: could not drop the removed keys (%s)', type(e).__name__)
 
 
 def save(data: Dict[str, Any]) -> None:
@@ -188,6 +205,9 @@ def apply_put(data: Dict[str, Any], body: Any) -> Dict[str, str]:
             errors['upgrades.mode'] = INVALID
         else:
             data['upgrades']['mode'] = u['mode']
+    if isinstance(body.get('automation'), dict) and any(k in body['automation'] for k in REMOVED_AUTOMATION):
+        # v259: an older page still sending a removed cap: ignored, never a 400
+        body = {**body, 'automation': {k: v for k, v in body['automation'].items() if k not in REMOVED_AUTOMATION}}
     if 'automation' in body:
         a = body['automation']
         allowed = set(AUTOMATION_FLAGS) | {'first_search_delay_h', 'on_add'}

@@ -8,7 +8,9 @@ from app.tracker_guard import LIMITS, TrackerGuard, guard_key
 from app.tracker_http import Response
 from app.tracker_search import ReleaseTokens, TrackerSearch
 from app.tracker_store import TrackerStore
-from tests.test_file_management import store  # noqa: F401
+from tests.test_file_management import HDR, minimal as minimal_app, store  # noqa: F401
+from tests.test_home_rails import REMOTE, _client
+from tests.test_tv_foundations import tvs  # noqa: F401
 from tests.test_tv_libraries import tv_env  # noqa: F401
 
 # ------------------------------------------------------------------ 2. the title fallback takes the guard's bucket
@@ -86,3 +88,48 @@ def test_title_only_trackers_are_held_by_the_same_bucket(real):
     assert len(real['sent']) == LIMITS['burst']
     assert real['sent'].count('search') == LIMITS['burst'] - 1    # minus the caps read
     assert all(t[1:4] == (False, False, None) for t in real['takes'])
+
+
+# ------------------------------------------------------------------ 3. removed TV caps in a save are ignored, then dropped
+
+def test_a_save_with_the_removed_caps_is_ignored_not_a_400(tvs):  # noqa: F811
+    from app import tv_settings
+    d = tv_settings.load()
+    body = {'automation': {'daily_search_cap': 50, 'daily_backlog_grab_cap': 10, 'on_add': 'wait_for_sweep'}}
+    assert tv_settings.apply_put(d, body) == {}
+    assert d['automation']['on_add'] == 'wait_for_sweep'
+    assert not {'daily_search_cap', 'daily_backlog_grab_cap'} & set(d['automation'])
+    assert body['automation']['daily_search_cap'] == 50                  # the caller's body isn't changed
+    assert tv_settings.apply_put(d, {'automation': {'daily_search_cap': 50, 'bogus': 1}}) == {'automation': 'Invalid'}
+
+
+def test_the_put_route_ignores_the_removed_caps(minimal_app, tvs):  # noqa: F811
+    c = _client(minimal_app)
+    r = c.put('/api/settings/tv', json={'automation': {'daily_search_cap': 50, 'daily_backlog_grab_cap': 3,
+                                                       'feed_enabled': True}}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200, r.get_json()
+    a = r.get_json()['automation']
+    assert a['feed_enabled'] is True and 'daily_search_cap' not in a and 'daily_backlog_grab_cap' not in a
+
+
+def test_the_removed_caps_leave_the_file_on_the_next_load_or_save(tvs):  # noqa: F811
+    import json
+    from app import tv_settings
+    p = tv_settings.store_path()
+    raw = tv_settings.empty()
+    raw['automation'].update(daily_search_cap=50, daily_backlog_grab_cap=10, feed_enabled=True)
+    raw['extra_kept'] = 1                                                 # only the removed keys go on load
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(raw))
+    d = tv_settings.load()
+    assert d['automation']['feed_enabled'] is True and 'daily_search_cap' not in d['automation']
+    on_disk = json.loads(p.read_text())
+    assert not {'daily_search_cap', 'daily_backlog_grab_cap'} & set(on_disk['automation'])
+    assert on_disk['automation']['feed_enabled'] is True and on_disk['extra_kept'] == 1
+    m = p.stat().st_mtime_ns
+    tv_settings.load()                                                    # nothing left to drop: no write
+    assert p.stat().st_mtime_ns == m
+    raw2 = dict(on_disk, automation=dict(on_disk['automation'], daily_backlog_grab_cap=4))
+    p.write_text(json.dumps(raw2))
+    tv_settings.save(raw2)                                                # and on a save
+    assert 'daily_backlog_grab_cap' not in json.loads(p.read_text())['automation']

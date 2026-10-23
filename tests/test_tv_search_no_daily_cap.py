@@ -66,7 +66,9 @@ def _meta_keys():
 def test_there_is_no_daily_search_cap_setting_or_accounting(env):
     assert 'daily_search_cap' not in tv_settings.DEFAULT_AUTOMATION
     assert 'daily_search_cap' not in tv_settings.load()['automation']
-    assert tv_settings.apply_put(tv_settings.load(), {'automation': {'daily_search_cap': 50}}) == {'automation': 'Invalid'}
+    d = tv_settings.load()                                              # v259: a removed key is ignored, no 400
+    assert tv_settings.apply_put(d, {'automation': {'daily_search_cap': 50}}) == {}
+    assert 'daily_search_cap' not in d['automation']
     for gone in ('DAILY_SEARCH_CAP', 'search_cap', 'take_search', 'refund_search', 'count_search', 'searches_today',
                  'under_search_cap', 'search_cap_reset', 'backlog_cap', 'BACKLOG_SHARE', '_bump',
                  'take_backlog_grab', 'refund_backlog_grab', 'backlog_grab_cap'):
