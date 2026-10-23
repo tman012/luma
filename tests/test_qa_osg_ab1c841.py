@@ -18,9 +18,12 @@ def test_every_falsy_dry_run_is_a_real_run_and_is_guarded(guard, falsy):
 
 @pytest.mark.parametrize('truthy', [True, 1, 'false', 'no'])
 def test_truthy_dry_run_values_stay_a_dry_run(guard, truthy):
-    """A string "false" is truthy -> a dry run (safe direction): never deletes, LAN access unchanged."""
-    _client(guard)
+    """A string "false" is truthy -> a dry run (safe direction): never deletes. v261 (PM): a dry run is the
+    signed-in owner's too, so the implicit LAN owner gets 401 and the owner's session a dry run."""
+    owner = _client(guard)
     r = guard.test_client().post('/api/downloads-guard/run', json={'dry_run': truthy}, environ_base=LAN, headers=HDR)
+    assert r.status_code == 401 and r.get_json()['sign_in'] is True and guard.runs == []
+    r = owner.post('/api/downloads-guard/run', json={'dry_run': truthy}, environ_base=LAN, headers=HDR)
     assert r.status_code == 200 and r.get_json() == {'ok': True, 'dry_run': True}
     assert guard.runs == [True]
 
@@ -37,9 +40,12 @@ def test_non_json_body_runs_nothing(guard):
     # Adapted from the QA patch (which expected a 200 dry run): since the
     # reviewer's ruling (main._json_object_body, same as sources-followup) a
     # body that isn't a JSON object is a 400 and nothing runs, dry or real.
-    _client(guard)
-    r = guard.test_client().post('/api/downloads-guard/run', data='dry_run=false', environ_base=LAN,
-                                 headers=dict(HDR, **{'Content-Type': 'application/x-www-form-urlencoded'}))
+    # v261: the owner check comes first (implicit LAN 401), then the body check (the owner's session 400).
+    owner = _client(guard)
+    form = dict(HDR, **{'Content-Type': 'application/x-www-form-urlencoded'})
+    r = guard.test_client().post('/api/downloads-guard/run', data='dry_run=false', environ_base=LAN, headers=form)
+    assert r.status_code == 401 and guard.runs == []
+    r = owner.post('/api/downloads-guard/run', data='dry_run=false', environ_base=LAN, headers=form)
     assert r.status_code == 400 and guard.runs == []
 
 
