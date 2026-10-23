@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import threading
+import time
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
@@ -33,6 +34,10 @@ CONTINUE_LIMIT = 20
 RAIL_LIMIT = 20
 POSTER_W = 300
 WIDE_W = 480
+# v251: /api/home answers within this budget (from the request's start) with every rail that is ready; a rail
+# that fails or is still loading is left out, never held for. The phone gives up at 7 s (MinimalHomePage), so
+# 6 s leaves a second for the response to reach it.
+HOME_DEADLINE_S = 6.0
 
 _cfg: Dict[str, Any] = {}
 _lock = threading.Lock()
@@ -284,6 +289,7 @@ def home():
     _, err = _need_user()
     if err:
         return err
+    start = time.monotonic()
     plex = _plex()
     sections = _sections_or_none(plex) if plex is not None else None
     if sections is None:
@@ -297,14 +303,34 @@ def home():
         with flask_app.app_context():
             return fn(*args)
 
-    with ThreadPoolExecutor(max_workers=min(6, len(libs) + 1)) as pool:
+    deadline = start + HOME_DEADLINE_S
+    dropped: List[str] = []
+
+    def take(rid: str, fut):
+        try:
+            return fut.result(timeout=max(0.0, deadline - time.monotonic()))
+        except Exception as e:  # noqa: BLE001 - a failed or slow rail is dropped, never fails Home
+            dropped.append(rid)
+            logger.info('Home: rail %s dropped (%s)', rid, type(e).__name__ or 'error')
+            return None
+
+    pool = ThreadPoolExecutor(max_workers=min(6, len(libs) + 1))
+    try:
         cw = pool.submit(in_app, continue_watching, plex)
         rails = [(l, pool.submit(in_app, trakt_items, l['id']) if l['source'] == 'trakt'
                   else pool.submit(in_app, watchlist_items) if l['source'] == 'watchlist'
                   else pool.submit(in_app, recently_added, plex, l['id'])) for l in libs]
-        out_rails = [{'id': l['id'], 'title': l['title'], 'type': l['type'], 'items': f.result()}
-                     for l, f in rails]
-        cw_items = cw.result()
+        cw_items = take('continue_watching', cw)
+        out_rails = []
+        for l, f in rails:
+            items = take(l['id'], f)
+            if items is not None:
+                out_rails.append({'id': l['id'], 'title': l['title'], 'type': l['type'], 'items': items})
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)     # a slow Plex call finishes in the background
+    if cw_items is None and not out_rails and dropped:
+        return jsonify({'continue_watching': [], 'rails': [], 'plex': False})
+    cw_items = cw_items or []
     resp = jsonify({'continue_watching': cw_items, 'rails': out_rails, 'plex': True})
     resp.headers['Cache-Control'] = 'no-store'
     return resp

@@ -44,10 +44,14 @@ export function MinimalHomePage() {
     setFailed(false);
     setSlow(false);
     setData(null);
-    // A skeleton that's still up after 8 s means Plex isn't answering.
-    const timer = window.setTimeout(() => { if (alive) setSlow(true); }, SKELETON_TIMEOUT_MS);
-    // One request returns every rail, so all of them appear together.
-    fetchHome().then(d => { if (alive) setData(d); }).catch(() => { if (alive) setFailed(true); });
+    // v251: the skeleton stays until every rail is in, then they all swap in at once. One request returns
+    // every ready rail (the server drops a failed or slow one at 6 s); past SKELETON_TIMEOUT_MS the skeleton
+    // gives way to Retry and a late answer is dropped rather than popped in.
+    let done = false;
+    const timer = window.setTimeout(() => { if (alive && !done) { done = true; setSlow(true); } }, SKELETON_TIMEOUT_MS);
+    fetchHome()
+      .then(d => { if (alive && !done) { done = true; setData(d); } })
+      .catch(() => { if (alive && !done) { done = true; setFailed(true); } });
     return () => { alive = false; window.clearTimeout(timer); };
   }, [ready, attempt, kiosk]);
 
@@ -102,7 +106,8 @@ export function MinimalHomePage() {
   );
 }
 
-export const SKELETON_TIMEOUT_MS = 8000;
+/** v251: the server's 6 s rail budget (app/home_rails.HOME_DEADLINE_S) plus 1 s to reach the phone. */
+export const SKELETON_TIMEOUT_MS = 7000;
 
 /** v228 R3 rest (PM): Recently added under the band: the Plex libraries' recently-added rails (not Trakt or
  * the watchlist), interleaved one from each in turn, 12 at most. */

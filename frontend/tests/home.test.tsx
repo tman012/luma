@@ -126,14 +126,57 @@ describe('Home', () => {
     expect(box.textContent).toBe("Can't reach PlexRetry");
   });
 
-  it("gives up on the skeleton after 8 s", async () => {
+  it("gives up on the skeleton after 7 s", async () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
     expect(screen.getByTestId('home-skeleton')).toBeTruthy();
-    await act(async () => { vi.advanceTimersByTime(7900); });
+    await act(async () => { vi.advanceTimersByTime(6900); });
     expect(screen.queryByTestId('home-down')).toBeNull();
     await act(async () => { vi.advanceTimersByTime(200); });
+    expect(screen.getByTestId('home-down')).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it('v251: all rails ready: the skeleton holds, then one swap shows every rail', async () => {
+    const d = deferred<Response>();
+    vi.stubGlobal('fetch', vi.fn(() => d.promise));
+    const seen: string[] = [];
+    const obs = new MutationObserver(() => {
+      const s = screen.queryByTestId('home-skeleton') ? 'skeleton' : `rails:${screen.queryAllByRole('heading', { level: 2 }).length}`;
+      if (seen[seen.length - 1] !== s) seen.push(s);
+    });
+    render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
+    obs.observe(document.body, { childList: true, subtree: true });
+    expect(screen.queryAllByRole('heading', { level: 2 })).toHaveLength(0);
+    await act(async () => { d.resolve(json(HOME)); });
+    await waitFor(() => expect(screen.getByTestId('home-rails')).toBeTruthy());
+    obs.disconnect();
+    expect(seen.filter(x => x !== 'skeleton')).toEqual(['rails:3']);       // never a partial set of rails
+    expect(screen.queryByTestId('home-skeleton')).toBeNull();
+  });
+
+  it('v251: a failed rail is left out and the rest render (no skeleton for it)', async () => {
+    // The server drops a rail that errors (app/home_rails.home); the phone renders what came back.
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ...HOME, rails: [HOME.rails[0]] })));
+    render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
+    await waitFor(() => screen.getByTestId('home-rails'));
+    expect(screen.getAllByRole('heading', { level: 2 }).map(h => h.textContent)).toEqual(['Continue watching', 'Movies']);
+    expect(screen.queryByTestId('home-skeleton')).toBeNull();
+    expect(screen.queryByTestId('rail-2')).toBeNull();
+  });
+
+  it('v251: past the timeout a late answer is dropped, never popped in', async () => {
+    vi.useFakeTimers();
+    const d = deferred<Response>();
+    vi.stubGlobal('fetch', vi.fn(() => d.promise));
+    render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
+    await act(async () => { vi.advanceTimersByTime(7100); });
+    expect(screen.getByTestId('home-down')).toBeTruthy();
+    expect(screen.queryByTestId('home-skeleton')).toBeNull();
+    await act(async () => { d.resolve(json(HOME)); });
+    await act(async () => { vi.advanceTimersByTime(100); });
+    expect(screen.queryByTestId('home-rails')).toBeNull();
     expect(screen.getByTestId('home-down')).toBeTruthy();
     vi.useRealTimers();
   });
