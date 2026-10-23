@@ -32,7 +32,7 @@ export const SKIPPED: Record<string, string> = {
 export const counts = (c: AnCounts | null) => (!c ? '—' : c.error ? c.error : `Added ${c.added} of ${c.checked}`);
 /** "in Plex 4, language 2" */
 export const skips = (c: AnCounts | null) =>
-  (!c ? '' : Object.entries(c.skipped).filter(([, n]) => n > 0).map(([k, n]) => `${SKIPPED[k] || k} ${n}`).join(', '));
+  (!c ? '' : Object.entries(c.skipped && typeof c.skipped === 'object' ? c.skipped : {}).filter(([, n]) => n > 0).map(([k, n]) => `${SKIPPED[k] || k} ${n}`).join(', '));
 
 function Lang({ code, on, onClick }: { code: string; on: boolean; onClick: () => void }) {
   const s: CSSProperties = on
@@ -133,15 +133,33 @@ function StatusPanel({ status, history }: { status: AnStatus; history: AnEntry[]
   );
 }
 
+const arr = <T,>(x: T[] | null | undefined): T[] => (Array.isArray(x) ? x : []);
+const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
+const normHistory = (h: AnEntry[] | null | undefined): AnEntry[] => arr(h).filter(isObj);
+/** A view missing its settings, either group or its status is a failed load ("Couldn't load"), never a crash;
+ * list fields that aren't arrays read as empty (like Genre roulette's normGr). */
+export function normAn(v: unknown): AnView | null {
+  if (!isObj(v) || !isObj(v.settings) || !isObj(v.status) || !isObj(v.settings.shows) || !isObj(v.settings.movies)) return null;
+  const d = v as unknown as AnView;
+  const g = (x: AnGroup): AnGroup => ({ ...x, languages: arr(x.languages) });
+  return { ...d, profiles: arr(d.profiles), movie_profiles: arr(d.movie_profiles), libraries: arr(d.libraries),
+    monitor: arr(d.monitor), languages: arr(d.languages), history: normHistory(d.history),
+    settings: { ...d.settings, shows: g(d.settings.shows), movies: g(d.settings.movies) } };
+}
+
 export function AnticipatedSettings({ wide = true }: { wide?: boolean } = {}) {
   const [d, setD] = useState<AnView | null>(null);
   const [failed, setFailed] = useState(false);
   const [error, setError] = useState('');
   const busy = useRef(false);
 
-  useEffect(() => { void loadAn().then(r => { if (r.ok) setD(r.data); else setFailed(true); }); }, []);
+  useEffect(() => { void loadAn().then(r => { const v = r.ok ? normAn(r.data) : null; if (v) setD(v); else setFailed(true); }); }, []);
   const live = useCallback(() => {
-    void loadAnLive().then(r => { if (r.ok) setD(cur => (cur ? { ...cur, status: r.data.status, history: r.data.history } : cur)); });
+    void loadAnLive().then(r => {
+      if (!r.ok || !isObj(r.data) || !isObj(r.data.status)) return;
+      const { status, history } = r.data;
+      setD(cur => (cur ? { ...cur, status, history: normHistory(history) } : cur));
+    });
   }, []);
   const fast = !!d?.status.running;
   useEffect(() => {
@@ -159,7 +177,8 @@ export function AnticipatedSettings({ wide = true }: { wide?: boolean } = {}) {
     setD({ ...d, settings: { ...s, ...patch, shows: { ...s.shows, ...patch.shows }, movies: { ...s.movies, ...patch.movies } } });
     setError('');
     void saveAn(patch).then(r => {
-      if (r.ok) { setD(r.data); return; }
+      const v = r.ok ? normAn(r.data) : null;
+      if (v) { setD(v); return; }
       setD(before);
       setError(SAVE_ERROR);
     });

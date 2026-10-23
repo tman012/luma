@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { AnticipatedSettings, counts, skips } from '@/components/automation/AnticipatedSettings';
+import { AnticipatedSettings, counts, normAn, skips } from '@/components/automation/AnticipatedSettings';
 
 const G = {
   enabled: false, limit: 20, profile_id: null, search_on_add: true, languages: ['en'], allow_unknown_language: true,
@@ -142,5 +142,30 @@ describe('v253 Settings > Automation > Anticipated', () => {
     expect(counts(null)).toBe('—');
     expect(counts({ checked: 5, added: 1, skipped: {}, errors: [], error: null })).toBe('Added 1 of 5');
     expect(skips({ checked: 5, added: 0, skipped: { grabbed: 2, removed: 1, plex: 0 }, errors: [], error: null })).toBe('already grabbed 2, removed before 1');
+  });
+
+  it.each([
+    ['a non-object', 'oops'],
+    ['no settings', { status: {} }],
+    ['no status', { settings: SETTINGS }],
+    ['a group missing', { settings: { ...SETTINGS, movies: null }, status: {} }],
+    ['an array', []],
+  ])('a malformed view (%s) shows Couldn\'t load, never a crash', async (_n, body) => {
+    stub(url => (url.endsWith('/anticipated') ? ok(body) : undefined));
+    render(<AnticipatedSettings />);
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe("Couldn't load"));
+    expect(screen.queryByTestId('anticipated')).toBeNull();
+  });
+
+  it('list fields that are not arrays read as empty; a bad status poll is ignored', async () => {
+    const bad = { ...view(), profiles: null, movie_profiles: 'x', libraries: {}, languages: null, history: [null, 1, HIST[0]],
+      settings: { ...SETTINGS, shows: { ...SETTINGS.shows, languages: 'en' } } };
+    expect(normAn(bad)!.history).toHaveLength(1);
+    expect(normAn(bad)!.settings.shows.languages).toEqual([]);
+    stub(url => (url.endsWith('/anticipated') ? ok(bad) : url.endsWith('/status') ? ok({ status: 'broken' }) : undefined));
+    render(<AnticipatedSettings />);
+    await waitFor(() => expect(screen.getByTestId('anticipated')).toBeTruthy());
+    expect(screen.getAllByTestId('an-history')).toHaveLength(1);
+    expect(skips({ checked: 1, added: 0, skipped: null as unknown as Record<string, number>, errors: [], error: null })).toBe('');
   });
 });
