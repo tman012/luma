@@ -10,6 +10,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const DEFAULTS = {
   enabled: false, check_interval_minutes: 15, min_free_gb: 150, reclaim_gb: 100, daily_cap_gb: 500, max_run_gb: 2048,
   trackers: ['ipt'], pill_gb: 100, min_age_days: 2, min_seed_hours: 0, min_ratio: 0, scope: 'all', folder: '',
+  protected_tags: ['luma-keep'], protected_hashes: ['7224bfad84076c0a76c36fb891d3b91ac226efb6'],
 };
 const TRACKERS = [['ipt', 'IPTorrents'], ['beyondhd', 'BeyondHD'], ['morethantv', 'MoreThanTV'], ['privatehd', 'PrivateHD'], ['pixelhd', 'PixelHD']]
   .map(([key, label]) => ({ key, label }));
@@ -136,6 +137,28 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     await screen.findByText('Would delete 60 GB of 100 GB');
     expect(screen.getAllByTestId('dg-preview-list-row').map(r => r.textContent?.split('IPTorrents')[0].split('BeyondHD')[0]))
       .toEqual(['Heat.1995', 'Zodiac.2007']);
+  });
+
+  it('Never delete: shows tags and hashes (last 4), adds a tag, and asks to sign in to remove one', async () => {
+    const calls = stub((u, init) => {
+      if (init?.method === 'PUT' && JSON.parse(String(init.body)).protected_tags?.length === 0) return json({ error: 'Sign in', sign_in: true }, 401);
+      return undefined;
+    });
+    view();
+    await waitFor(() => screen.getByTestId('downloads-guard'));
+    expect(screen.getByText('Never delete')).toBeTruthy();
+    expect(screen.getAllByTestId('dg-never-tag').map(t => t.textContent?.replace('×', ''))).toEqual(['luma-keep']);
+    expect(screen.getAllByTestId('dg-never-hash').map(t => t.textContent?.replace('×', ''))).toEqual(['…efb6']);
+    const add = screen.getByTestId('dg-never-add');
+    fireEvent.change(add, { target: { value: 'hold' } });
+    fireEvent.keyDown(add, { key: 'Enter' });
+    await waitFor(() => expect(puts(calls)).toEqual([{ protected_tags: ['luma-keep', 'hold'] }]));
+    fireEvent.change(add, { target: { value: 'LUMA-KEEP' } });
+    fireEvent.keyDown(add, { key: 'Enter' });
+    fireEvent.click(screen.getByTestId('dg-never-remove-hold'));
+    fireEvent.click(screen.getByTestId('dg-never-remove-luma-keep'));
+    await waitFor(() => screen.getByTestId('dg-sign-in'));
+    expect(puts(calls)).toEqual([{ protected_tags: ['luma-keep', 'hold'] }, { protected_tags: ['luma-keep'] }, { protected_tags: [] }]);
   });
 
   it('scope picks only this install\'s downloads', async () => {

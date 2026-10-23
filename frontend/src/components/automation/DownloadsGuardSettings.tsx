@@ -147,6 +147,41 @@ function TrackerList({ order, known, summary, onChange }: {
   );
 }
 
+/** Never delete: qBit tags (any case, exact) and torrent hashes. Adding is open to the owner; removing needs the
+ * signed-in owner (the server answers 401 and the sign-in prompt shows). */
+function NeverDelete({ tags, hashes, onTags, onHashes }: {
+  tags: string[]; hashes: string[]; onTags: (next: string[]) => void; onHashes: (next: string[]) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const add = () => {
+    const t = draft.trim();
+    setDraft('');
+    if (!t || t.includes(',') || tags.some(x => x.toLowerCase() === t.toLowerCase())) return;
+    onTags([...tags, t]);
+  };
+  const chip: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 6px 0 10px', borderRadius: 6,
+    border: '1px solid rgba(255,255,255,0.14)', fontSize: 13, color: W95 };
+  const x = (label: string, onClick: () => void, testid: string) => (
+    <button type="button" className="lp-focus" aria-label={label} data-testid={testid} onClick={onClick}
+      style={{ width: 22, height: 22, border: 'none', borderRadius: 11, background: 'rgba(255,255,255,0.08)', color: W70, cursor: 'pointer', padding: 0 }}>×</button>
+  );
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div role="list" aria-label="Never delete" data-testid="dg-never" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {tags.map(t => (
+          <span role="listitem" key={`t-${t}`} style={chip} data-testid="dg-never-tag">{t}{x(`Remove ${t}`, () => onTags(tags.filter(v => v !== t)), `dg-never-remove-${t}`)}</span>
+        ))}
+        {hashes.map(h => (
+          <span role="listitem" key={`h-${h}`} title={h} style={chip} data-testid="dg-never-hash">{`…${h.slice(-4)}`}{x(`Remove …${h.slice(-4)}`, () => onHashes(hashes.filter(v => v !== h)), `dg-never-remove-${h.slice(-4)}`)}</span>
+        ))}
+        {tags.length + hashes.length === 0 && <span style={{ fontSize: 13, color: W50 }}>None</span>}
+      </div>
+      <input className="tve-in" aria-label="Add a tag" placeholder="Add a tag" value={draft} data-testid="dg-never-add"
+        onChange={e => setDraft(e.target.value)} onBlur={add} onKeyDown={e => { if (e.key === 'Enter') add(); }} style={field} />
+    </div>
+  );
+}
+
 function FolderField({ value, placeholder, bad, onCommit }: { value: string; placeholder: string; bad: boolean; onCommit: (v: string) => void }) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
@@ -345,6 +380,11 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
           <div>
             <h4 style={group}>Delete from these trackers first</h4>
             <TrackerList order={s.trackers} known={d.trackers} summary={summary} onChange={next => put({ trackers: next })} />
+          </div>
+          <div>
+            <h4 style={group}>Never delete</h4>
+            <NeverDelete tags={s.protected_tags ?? []} hashes={s.protected_hashes ?? []}
+              onTags={next => put({ protected_tags: next })} onHashes={next => put({ protected_hashes: next })} />
           </div>
           <div>
             <h4 style={group}>Folder</h4>
