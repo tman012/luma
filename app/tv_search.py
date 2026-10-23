@@ -125,6 +125,14 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': SLOT_BUSY, 'reset_at': reset})
             _log_cap_skip(cfg, purpose, sid, query, now, reset, section)
             continue
+        # v251: the daily background search cap (per tracker, local day ET); feed polls and the owner's
+        # searches are not counted or held
+        background = section == 'tv' and not interactive and purpose != 'feed' and purpose not in MONITOR_PURPOSES
+        if background and not tv_budget.under_search_cap(cfg, now):
+            reset = tv_budget.search_cap_reset(now)
+            statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': SLOT_BUSY, 'reset_at': reset})
+            _log_cap_skip(cfg, purpose, sid, query, now, reset, section)
+            continue
         try:
             raw = engine.search_one(cfg, query, cats, LIMIT, interactive,
                                     # v185.2a (PM): a feed poll is the guard's 'feed' purpose: no cap or slot of
@@ -136,9 +144,13 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
             _log(cfg, purpose, sid, query, 0, 'skipped', now, section)
             continue
         except TrackerError as e:
+            if background:
+                tv_budget.count_search(cfg, now)       # v251: sent (it failed): counted; a guard skip is not
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
             _log(cfg, purpose, sid, query, 0, 'failed', now, section)
             continue
+        if background:
+            tv_budget.count_search(cfg, now)
         if capped and purpose in MONITOR_PURPOSES:
             # v185.2 (PM, Tester FF9): a monitor-ON / manual search on a capped tracker counts toward the
             # per-tracker and daily TV tally so automation backs off; never held to that cap itself

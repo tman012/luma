@@ -10,8 +10,14 @@ to the guard's interactive budget instead.
 
 from __future__ import annotations
 
+import datetime as dt
+import json
+import logging
 import time
 from typing import Any, Dict, Optional
+from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
 
 PURPOSE = 'tv'
 
@@ -90,3 +96,63 @@ def usage(cfg: Dict[str, Any], now: Optional[float] = None, guard=None) -> Dict[
     g = guard or _guard()
     c = g.purpose_counts(guard_key(cfg), PURPOSE, time.time() if now is None else now)
     return {'used': int(c['day']), 'cap': None}
+
+
+# ------------------------------------------------------------------ v251: daily background search cap
+# Every background TV search query (air-time and 15-min searches, the hourly catch-up, retries and each
+# title/alias fallback) counts against a per-tracker cap per local day (America/New_York). Feed polls,
+# the owner's searches (interactive or a monitor click's background lane) and grabs are not counted.
+# At the cap the tracker is skipped until midnight ET. The cap is the TV setting
+# automation.daily_search_cap (tv_settings, default DAILY_SEARCH_CAP).
+DAILY_SEARCH_CAP = 50
+ET = ZoneInfo('America/New_York')
+
+
+def _et_day(now: float) -> str:
+    return dt.datetime.fromtimestamp(now, ET).date().isoformat()
+
+
+def search_cap() -> int:
+    from app import tv_settings
+    try:
+        return int(tv_settings.load()['automation'].get('daily_search_cap', DAILY_SEARCH_CAP))
+    except Exception:                       # noqa: BLE001 - unreadable settings: the default
+        return DAILY_SEARCH_CAP
+
+
+def _count_key(cfg: Dict[str, Any]) -> str:
+    from app.tracker_guard import guard_key
+    return f'tv_searchday:{guard_key(cfg)}'
+
+
+def searches_today(cfg: Dict[str, Any], now: Optional[float] = None) -> int:
+    from app import tv_store
+    now = time.time() if now is None else now
+    try:
+        d = json.loads(tv_store.get_meta(_count_key(cfg)) or '{}')
+    except ValueError:
+        return 0
+    return int(d.get('n') or 0) if d.get('day') == _et_day(now) else 0
+
+
+def under_search_cap(cfg: Dict[str, Any], now: Optional[float] = None) -> bool:
+    return searches_today(cfg, now) < search_cap()
+
+
+def search_cap_reset(now: float) -> float:
+    """The next midnight ET (when the count starts over)."""
+    d = dt.datetime.fromtimestamp(now, ET).date() + dt.timedelta(days=1)
+    return dt.datetime(d.year, d.month, d.day, tzinfo=ET).timestamp()
+
+
+def count_search(cfg: Dict[str, Any], now: Optional[float] = None) -> int:
+    """One background query sent to *cfg* today; the new count. Logs once (INFO) when it reaches the cap."""
+    from app import tv_store
+    now = time.time() if now is None else now
+    n = searches_today(cfg, now) + 1
+    tv_store.set_meta(_count_key(cfg), json.dumps({'day': _et_day(now), 'n': n}))
+    cap = search_cap()
+    if n == cap:
+        logger.info('TV search: %s reached its daily cap of %d background searches; skipped until midnight ET',
+                    cfg.get('name') or cfg.get('id'), cap)
+    return n

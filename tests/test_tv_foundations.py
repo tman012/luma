@@ -323,7 +323,8 @@ def test_defaults_follow_the_pm_rulings(tvs):
     assert d['upgrades'] == {'mode': 'keep_both'}
     assert d['automation']['enabled'] is False and d['automation']['feed_enabled'] is False
     assert d['paths'] == [] and d['rules'] == []
-    assert not any('cap' in k for k in d['automation'])             # caps are code, not settings
+    assert [k for k in d['automation'] if 'cap' in k] == ['daily_search_cap']   # v251 (PM): the one cap setting, default 50
+    assert d['automation']['daily_search_cap'] == 50
     assert not tvs.exists()
 
 
