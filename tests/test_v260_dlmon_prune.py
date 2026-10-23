@@ -143,17 +143,28 @@ def test_monitor_path_uses_data_dir(env):
     assert dlmon_prune.monitor_path() == str(env.data / 'download_monitor.json')
 
 
-def test_startup_calls_prune_before_seed():
-    src = open(os.path.join(os.path.dirname(__file__), '..', 'app', 'main.py')).read()
-    assert 0 < src.index('dlmon_prune.start()') < src.index('startup_seed_and_log()')
-
-
-def test_start_runs_off_the_boot_thread(monkeypatch):
+def test_boot_runs_prune_in_the_guard_boot_thread(monkeypatch):
     import threading
+    from app import downloads_guard, storage_cleanup
+    from app.automation import dg_store
     seen = []
-    monkeypatch.setattr(dlmon_prune, 'run_once', lambda: seen.append(threading.current_thread().name))
-    dlmon_prune.start()
+    monkeypatch.setattr(dg_store, 'seed', lambda: {'protected_tags': ['luma-keep']})
+    monkeypatch.setattr(dlmon_prune, 'run_once', lambda: seen.append(('prune', threading.current_thread().name)))
+    monkeypatch.setattr(storage_cleanup, 'log_never_delete_now', lambda cfg: seen.append(('log', threading.current_thread().name)))
+    downloads_guard.startup_seed_and_log()
     for t in threading.enumerate():
-        if t.name == 'dlmon-prune':
+        if t.name == 'downloads-guard-never-delete':
             t.join(2)
-    assert seen == ['dlmon-prune']
+    assert seen == [('prune', 'downloads-guard-never-delete'), ('log', 'downloads-guard-never-delete')]
+
+
+def test_prune_failure_still_logs(monkeypatch):
+    from app import downloads_guard, storage_cleanup
+    seen = []
+
+    def boom():
+        raise RuntimeError('x')
+    monkeypatch.setattr(dlmon_prune, 'run_once', boom)
+    monkeypatch.setattr(storage_cleanup, 'log_never_delete_now', lambda cfg: seen.append(cfg))
+    downloads_guard._boot_reads({'a': 1})
+    assert seen == [{'a': 1}]

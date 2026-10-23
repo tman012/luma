@@ -1,7 +1,8 @@
 """v260 (PM / Ops): one-time prune of download_monitor.json (meta key dlmon_prune_v260 in tv.db).
 
 auto_rename's download_monitor.json can hold entries for torrents qBittorrent no longer has (today: The
-Manchurian Candidate, …201e). Once, at boot on minimal (test) builds, off the boot thread:
+Manchurian Candidate, …201e). Once, at boot on minimal (test) builds, in the Downloads guard's boot thread
+(downloads_guard.startup_seed_and_log), so boot never waits on qBittorrent:
 
 1. Ask qBittorrent which torrents it has, through the guard's own read-only torrents/info call
    (storage_cleanup.fetch_torrents). If qBittorrent can't be reached, errors, or lists no torrent at all,
@@ -99,12 +100,6 @@ def run_once() -> Dict[str, Any]:
     except Exception as e:                                   # noqa: BLE001
         logger.error('Download monitor prune failed (%s); nothing more done', type(e).__name__)
         return {'status': 'error'}
-
-
-def start() -> None:
-    """run_once off the boot thread (torrents/info can take a while)."""
-    import threading
-    threading.Thread(target=run_once, name='dlmon-prune', daemon=True).start()
 
 
 def _forget_in_memory(hashes: List[str]) -> None:

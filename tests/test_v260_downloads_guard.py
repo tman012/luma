@@ -624,6 +624,8 @@ def test_startup_logs_the_never_delete_torrents_after_the_seed(env, tmp_path, mo
             assert (tmp_path / 'dg.json').exists()                       # after the seed
             self.target()
     monkeypatch.setattr(dg.threading, 'Thread', Now)
+    from app import dlmon_prune
+    monkeypatch.setattr(dlmon_prune, 'run_once', lambda: None)          # its own tests: test_v260_dlmon_prune.py
     caplog.set_level('INFO', logger=sc.logger.name)
     dg.startup_seed_and_log()
     lines = [r.getMessage() for r in caplog.records if 'never-delete' in r.getMessage()]

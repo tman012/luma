@@ -680,13 +680,18 @@ def get_log() -> List[Dict[str, Any]]:
 # ── Scheduler ─────────────────────────────────────────────────────────────
 
 def startup_seed_and_log() -> None:
-    """Boot (minimal builds): seed the settings file (defaults, off) and then log the Never delete torrents.
-    The qBittorrent read runs in the background so boot doesn't wait on it."""
+    """Boot (minimal builds): seed the settings file (defaults, off), then, in the background so boot doesn't
+    wait on qBittorrent, the one-time download_monitor.json prune (dlmon_prune_v260) and the Never delete
+    log line."""
     from app.automation import dg_store
-    from app import storage_cleanup
     cfg = dg_store.seed()
-    threading.Thread(target=lambda: _quiet(storage_cleanup.log_never_delete_now, cfg), daemon=True,
-                     name='downloads-guard-never-delete').start()
+    threading.Thread(target=lambda: _boot_reads(cfg), daemon=True, name='downloads-guard-never-delete').start()
+
+
+def _boot_reads(cfg) -> None:
+    from app import dlmon_prune, storage_cleanup
+    _quiet(dlmon_prune.run_once)
+    _quiet(storage_cleanup.log_never_delete_now, cfg)
 
 
 def _quiet(fn, *a) -> None:
