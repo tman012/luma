@@ -161,7 +161,7 @@ export function HomeRails({ cw, rails, onOpen, onDismiss, afterFirst }: { cw: Ca
   return (
     <div data-testid="home-rails" className="luma-rails-in">
       {cw.length > 0 && (
-        <RailRow title="Continue watching" testId="rail-continue">
+        <RailRow title="Continue Watching" testId="rail-continue">
           {cw.map(c => <WideCard key={c.key} card={c} onOpen={onOpen} />)}
         </RailRow>
       )}

@@ -35,7 +35,7 @@ describe("v254 Home: What you're missing", () => {
     vi.stubGlobal('fetch', vi.fn(async () => json(h)));
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
     await waitFor(() => screen.getByTestId('home-rails'));
-    expect(screen.getAllByRole('heading', { level: 2 }).map(x => x.textContent)).toEqual(['Continue watching', "What you're missing", 'Movies']);
+    expect(screen.getAllByRole('heading', { level: 2 }).map(x => x.textContent)).toEqual(['Continue Watching', "What you're missing", 'Movies']);
   });
 
   it('its posters count in the poster decode hold like any rail', () => {

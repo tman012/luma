@@ -53,7 +53,7 @@ describe('Home', () => {
     await waitFor(() => expect(screen.getByTestId('home-rails')).toBeTruthy());
     expect(screen.queryByTestId('home-skeleton')).toBeNull();
     const titles = screen.getAllByRole('heading', { level: 2 }).map(h => h.textContent);
-    expect(titles).toEqual(['Continue watching', 'Movies', 'TV Shows']);
+    expect(titles).toEqual(['Continue Watching', 'Movies', 'TV Shows']);
     expect((screen.getByTestId('progress') as HTMLElement).style.width).toBe('25%');
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Menu' })).toBeNull();   // logo and avatar only
@@ -163,7 +163,7 @@ describe('Home', () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ ...HOME, rails: [HOME.rails[0]] })));
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
     await waitFor(() => screen.getByTestId('home-rails'));
-    expect(screen.getAllByRole('heading', { level: 2 }).map(h => h.textContent)).toEqual(['Continue watching', 'Movies']);
+    expect(screen.getAllByRole('heading', { level: 2 }).map(h => h.textContent)).toEqual(['Continue Watching', 'Movies']);
     expect(screen.queryByTestId('home-skeleton')).toBeNull();
     expect(screen.queryByTestId('rail-2')).toBeNull();
   });
