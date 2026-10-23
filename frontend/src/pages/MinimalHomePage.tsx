@@ -1,8 +1,9 @@
 /** Main screen of a LUMA_MINIMAL build: the phone-first Home (#11). */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBodyScroll } from '@/hooks/useBodyScroll';
+import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { FONT, LOGO_SRC, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
 import { HomeRails, SkeletonRails, WYM_RAIL_ID, cardIds, railCss } from '@/components/home/Rails';
@@ -43,6 +44,12 @@ export function MinimalHomePage() {
   };
 
   const ready = !loading && authenticated && !startInProgress;
+  // v259: prod 1b4ea74's pull-to-refresh (AuthenticatedHomePage.tsx:815-819), phones only.
+  const handleHomeRefresh = useCallback(() => {
+    // Visual feedback first; soft refetch isn't on fetchHome.
+    window.setTimeout(() => window.location.reload(), 420);
+  }, []);
+  const { pullPx, refreshing: ptrRefreshing, progress: ptrProgress } = usePullToRefresh(handleHomeRefresh, !kiosk && ready);
   useEffect(() => {
     if (!ready || kiosk) return;                // v235: KioskHome loads its own hero and rails (as before v228)
     let alive = true;
@@ -119,8 +126,52 @@ export function MinimalHomePage() {
   // shell around it (:979-1077): a solid fixed bar outside the page wrapper, content 16 px below it, 48 px at the end.
   return (
     <>
-      <div style={page} data-step="home">
+      <div
+        style={{
+          ...page,
+          position: 'relative',
+          transform: pullPx > 0 ? `translateY(${pullPx}px)` : undefined,
+          transition: pullPx > 0 || ptrRefreshing ? 'none' : 'transform 180ms ease-out',
+        }}
+        data-step="home"
+      >
         <style>{railCss}</style>
+        {/* Pull-to-refresh indicator: Luma purple spinner (prod :991-1025) */}
+        {(pullPx > 0 || ptrRefreshing) && (
+          <div
+            aria-hidden={!ptrRefreshing}
+            aria-busy={ptrRefreshing || undefined}
+            data-testid="ptr-indicator"
+            style={{
+              position: 'absolute',
+              top: 'calc(56px + env(safe-area-inset-top, 0px) - 8px)',
+              left: 0,
+              right: 0,
+              height: 40,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 2,
+              pointerEvents: 'none',
+              opacity: ptrRefreshing ? 1 : Math.max(0.25, ptrProgress),
+            }}
+          >
+            <div
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: '50%',
+                border: '3px solid hsla(280, 85%, 65%, 0.22)',
+                borderTopColor: 'hsla(280, 90%, 68%, 1)',
+                boxShadow: '0 0 12px hsla(280, 90%, 55%, 0.35)',
+                animation: (ptrRefreshing || ptrProgress >= 1)
+                  ? 'luma-ptr-spin 0.75s linear infinite'
+                  : undefined,
+                transform: ptrRefreshing ? undefined : `rotate(${pullPx * 2.4}deg)`,
+              }}
+            />
+          </div>
+        )}
         <div data-shift-root>
           <div style={phoneContent}>
             <main>
@@ -130,6 +181,7 @@ export function MinimalHomePage() {
           </div>
         </div>
       </div>
+      <style>{`@keyframes luma-ptr-spin { to { transform: rotate(360deg); } }`}</style>
       {dismissTarget && (
         <DismissMissingSheet
           item={{ title: dismissTarget.title, year: dismissTarget.subtitle || null }}

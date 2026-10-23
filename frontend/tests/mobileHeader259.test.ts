@@ -23,4 +23,8 @@ describe('v259 phone header matches prod', () => {
   it('avatar trigger is prod 42px person glyph', () => {
     expect(menu).toContain('M2.5 16c0-3.314 2.91-6 6.5-6s6.5 2.686 6.5 6')
   })
+  it('has prod pull-to-refresh on phones only', () => {
+    expect(src).toContain('usePullToRefresh(handleHomeRefresh, !kiosk && ready)')
+    expect(src).toContain('luma-ptr-spin')
+  })
 })
