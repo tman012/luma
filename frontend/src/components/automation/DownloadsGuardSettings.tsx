@@ -343,7 +343,7 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
             </div>
           </div>
           <div>
-            <h4 style={group}>Trackers first</h4>
+            <h4 style={group}>Delete from these trackers first</h4>
             <TrackerList order={s.trackers} known={d.trackers} summary={summary} onChange={next => put({ trackers: next })} />
           </div>
           <div>

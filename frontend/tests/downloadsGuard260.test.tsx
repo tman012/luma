@@ -49,7 +49,7 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     await waitFor(() => screen.getByTestId('downloads-guard'));
     for (const t of ['Downloads guard', 'Enabled', 'Floor (GB)', 'Reclaim per run (GB)', 'Check every (minutes)', 'Storage pill amount (GB)',
       'Daily limit (GB)', 'Per-run limit (GB)', 'Downloads', 'Keep downloads newer than', '2 days', 'Minimum seed time (hours)', 'Minimum ratio',
-      'Trackers first', 'Folder', 'Preview', 'Clean up now', 'Status', 'Free space', 'Recent activity']) {
+      'Delete from these trackers first', 'Folder', 'Preview', 'Clean up now', 'Status', 'Free space', 'Recent activity']) {
       expect(screen.getAllByText(t).length, t).toBeGreaterThan(0);
     }
     const val = (id: string) => (screen.getByTestId(`${id}-input`) as HTMLInputElement).value;
