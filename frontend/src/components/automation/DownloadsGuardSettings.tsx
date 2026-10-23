@@ -40,6 +40,8 @@ export function ageOptions(cur: number): { id: number; label: string }[] {
   return days.map(n => ({ id: n, label: dayLabel(n) }));
 }
 const gb = (n: number) => `${n.toLocaleString('en-US')} GB`;
+/** v261: a Never delete hash shows qBit's torrent name, else …last4. */
+export const hashLabel = (h: string, names?: Record<string, string>, name?: string) => name || names?.[h] || `…${h.slice(-4)}`;
 
 function Switch({ id, label, on, onChange }: { id: string; label: string; on: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -82,8 +84,9 @@ function age(mtime?: number): string {
   return d <= 0 ? 'today' : d === 1 ? '1 day' : `${d} days`;
 }
 
-function Entries({ title, entries, testid, action }: {
+function Entries({ title, entries, testid, action, label }: {
   title: string; entries: (DgEntry & { kept?: boolean })[]; testid: string; action?: (e: DgRow) => React.ReactNode;
+  label?: (e: DgRow) => string;
 }) {
   if (!entries.length) return null;
   return (
@@ -93,7 +96,7 @@ function Entries({ title, entries, testid, action }: {
         {entries.slice(0, 40).map(e => (
           <div role="listitem" key={e.name} data-testid={`${testid}-row`} data-kept={e.kept ? 'true' : undefined}
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 36, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 4, paddingBottom: 2 }}>
-            <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: e.kept ? W50 : W95, textDecoration: e.kept ? 'line-through' : undefined, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: e.kept ? W50 : W95, textDecoration: e.kept ? 'line-through' : undefined, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label ? label(e as DgRow) : e.name}</span>
             <span style={{ flex: 'none', fontSize: 12, color: W50 }}>
               {e.kept
                 ? <span data-testid="dg-kept-label" style={{ color: GREEN }}>Kept</span>
@@ -154,8 +157,8 @@ function TrackerList({ order, known, summary, onChange }: {
 
 /** Never delete: qBit tags (any case, exact) and torrent hashes. Adding is open to the owner; removing needs the
  * signed-in owner (the server answers 401 and the sign-in prompt shows). */
-function NeverDelete({ tags, hashes, onTags, onHashes }: {
-  tags: string[]; hashes: string[]; onTags: (next: string[]) => void; onHashes: (next: string[]) => void;
+function NeverDelete({ tags, hashes, names, onTags, onHashes }: {
+  tags: string[]; hashes: string[]; names?: Record<string, string>; onTags: (next: string[]) => void; onHashes: (next: string[]) => void;
 }) {
   const [draft, setDraft] = useState('');
   const add = () => {
@@ -164,8 +167,8 @@ function NeverDelete({ tags, hashes, onTags, onHashes }: {
     if (!t || t.includes(',') || tags.some(x => x.toLowerCase() === t.toLowerCase())) return;
     onTags([...tags, t]);
   };
-  const chip: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 6px 0 10px', borderRadius: 6,
-    border: '1px solid rgba(255,255,255,0.14)', fontSize: 13, color: W95 };
+  const chip: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, minHeight: 32, maxWidth: '100%', padding: '4px 6px 4px 10px', borderRadius: 6,
+    border: '1px solid rgba(255,255,255,0.14)', fontSize: 13, color: W95, boxSizing: 'border-box', overflowWrap: 'anywhere' };
   const x = (label: string, onClick: () => void, testid: string) => (
     <button type="button" className="lp-focus" aria-label={label} data-testid={testid} onClick={onClick}
       style={{ width: 22, height: 22, border: 'none', borderRadius: 11, background: 'rgba(255,255,255,0.08)', color: W70, cursor: 'pointer', padding: 0 }}>×</button>
@@ -177,7 +180,10 @@ function NeverDelete({ tags, hashes, onTags, onHashes }: {
           <span role="listitem" key={`t-${t}`} style={chip} data-testid="dg-never-tag">{t}{x(`Remove ${t}`, () => onTags(tags.filter(v => v !== t)), `dg-never-remove-${t}`)}</span>
         ))}
         {hashes.map(h => (
-          <span role="listitem" key={`h-${h}`} title={h} style={chip} data-testid="dg-never-hash">{`…${h.slice(-4)}`}{x(`Remove …${h.slice(-4)}`, () => onHashes(hashes.filter(v => v !== h)), `dg-never-remove-${h.slice(-4)}`)}</span>
+          <span role="listitem" key={`h-${h}`} title={h} style={chip} data-testid="dg-never-hash">
+            <span style={{ minWidth: 0 }}>{hashLabel(h, names)}</span>
+            {x(`Remove ${hashLabel(h, names)}`, () => onHashes(hashes.filter(v => v !== h)), `dg-never-remove-${h.slice(-4)}`)}
+          </span>
         ))}
         {tags.length + hashes.length === 0 && <span style={{ fontSize: 13, color: W50 }}>None</span>}
       </div>
@@ -327,6 +333,10 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
     : row.kept_hashes.length
       ? <button type="button" className="tve-glass lp-focus" data-testid="dg-unkeep" aria-label={`Unkeep ${row.name}`} onClick={() => keepRow(row, false)} style={rowBtnStyle}>Unkeep</button>
       : <span data-testid="dg-kept-tag" style={{ flex: 'none', fontSize: 12, color: W50 }}>{row.kept_by_tags.join(', ')}</span>);
+  // v261: a row kept by hash (the Unkeep row) shows qBit's torrent name, else …last4
+  const rowLabel = (row: DgRow) => (row.kept && row.kept_hashes?.length
+    ? hashLabel(row.kept_hashes[0]!, d.protected_names, row.torrent_name)
+    : row.name);
   const doRun = () => {
     setBusy('run');
     setError('');
@@ -409,7 +419,7 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
           </div>
           <div>
             <h4 style={group}>Never delete</h4>
-            <NeverDelete tags={s.protected_tags ?? []} hashes={s.protected_hashes ?? []}
+            <NeverDelete tags={s.protected_tags ?? []} hashes={s.protected_hashes ?? []} names={d.protected_names}
               onTags={next => put({ protected_tags: next })} onHashes={next => put({ protected_hashes: next })} />
           </div>
           <div>
@@ -423,7 +433,7 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
           {preview && !preview.error && (
             (preview.rows ?? preview.entries).length
               ? <Entries title={`Would delete ${formatBytes(preview.planned_bytes)} of ${formatBytes(preview.target_bytes)}`}
-                entries={preview.rows ?? preview.entries} testid="dg-preview-list" action={preview.rows ? rowAction : undefined} />
+                entries={preview.rows ?? preview.entries} testid="dg-preview-list" action={preview.rows ? rowAction : undefined} label={rowLabel} />
               : <div data-testid="dg-preview-none" style={{ ...panel, padding: 16, fontSize: 13, color: W70 }}>Nothing to delete</div>
           )}
           <Entries title={status?.last_result?.dry_run ? 'Last preview' : 'Deleted last time'} entries={status?.last_result?.deleted ?? []} testid="dg-last-list" />

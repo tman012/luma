@@ -12,10 +12,12 @@ export interface DgSettings {
 export interface DgTracker { key: string; label: string }
 export interface DgView {
   settings: DgSettings; defaults: DgSettings; folder: string; media_folder: string; trackers: DgTracker[]; allowed: boolean;
+  /** v261: qBit's names of the Never delete hashes (a hash qBit never named is absent). */
+  protected_names?: Record<string, string>;
 }
 export interface DgEntry { name: string; size_bytes: number; mtime?: number; tracker_label?: string | null; phase?: string }
 /** v260 Preview row: deletion order, kept (Never delete) downloads in place and excluded. */
-export interface DgRow extends DgEntry { hashes: string[]; kept: boolean; kept_hashes: string[]; kept_by_tags: string[] }
+export interface DgRow extends DgEntry { hashes: string[]; kept: boolean; kept_hashes: string[]; kept_by_tags: string[]; torrent_name?: string }
 export interface DgResult {
   at?: string; dry_run: boolean; triggered: boolean; reason?: string; error?: string | null; freed_bytes: number;
   freed_preferred_bytes?: number; freed_fallback_bytes?: number; free_after_bytes?: number; short?: boolean;

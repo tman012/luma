@@ -1,6 +1,6 @@
 """v260 Settings > Automation > Downloads guard routes (luma-test builds; owner only).
 
-GET /api/settings/automation/downloads-guard    {settings, defaults, folder, trackers, allowed}
+GET /api/settings/automation/downloads-guard    {settings, defaults, folder, trackers, allowed, protected_names}
 PUT /api/settings/automation/downloads-guard    partial settings -> the same view (400 {errors})
 
 POST /api/downloads-guard/keep    {hashes} -> {protected_hashes}  anyone signed in (Never delete only protects)
@@ -41,12 +41,21 @@ def view() -> Dict[str, Any]:
     return {'settings': cfg, 'defaults': dg_store.defaults(),
             'folder': storage_cleanup.downloads_root(cfg), 'media_folder': storage_cleanup._media_root(),
             'trackers': tracker_files.known_trackers(),
-            'allowed': instance.writes_allowed('downloads_guard')}
+            'allowed': instance.writes_allowed('downloads_guard'),
+            'protected_names': dg_store.names()}     # v261: qBit's names of the Never delete hashes
 
 
 @bp.route(URL, methods=['GET'])
 def dg_get():
-    return _guard() or _out(view())
+    err = _guard()
+    if err:
+        return err
+    try:
+        from app import downloads_guard
+        downloads_guard.fill_names_later()           # a Never delete hash with no name yet: read qBit lazily
+    except Exception as e:                           # noqa: BLE001
+        logger.warning('Downloads guard: name lookup failed (%s)', type(e).__name__)
+    return _out(view())
 
 
 @bp.route(URL, methods=['PUT'])
@@ -104,12 +113,14 @@ def dg_keep():
         resp, status = err
         resp.headers['Cache-Control'] = 'no-store'
         return resp, status
+    from app import downloads_guard
+    hashes = [str(h).lower() for h in (_hashes_body() or []) if isinstance(h, str)]
     try:
-        kept = dg_store.keep(_hashes_body() or [])
+        kept = dg_store.keep(_hashes_body() or [], downloads_guard.known_names(hashes))   # names from Preview's qBit read
     except dg_store.Invalid as e:
         return _out({'error': 'Invalid', 'errors': e.errors}, 400)
     logger.info('Downloads guard: kept %s (Never delete)', ', '.join('…' + h[-4:] for h in (_hashes_body() or [])))
-    return _out({'protected_hashes': kept})
+    return _out({'protected_hashes': kept, 'protected_names': dg_store.names()})
 
 
 @bp.route(UNKEEP, methods=['POST'])

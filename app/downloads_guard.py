@@ -384,6 +384,7 @@ def preview() -> Dict[str, Any]:
     plan = plan_cleanup(target, cfg=settings)
     from app.storage_cleanup import log_never_delete
     log_never_delete(plan.get('protected_hashes'), list(settings.get('protected_tags') or []))   # Ops: every Preview
+    _note_names(plan.get('torrent_names') or {})
 
     return {
         'evaluation': verdict,
@@ -418,6 +419,7 @@ def preview() -> Dict[str, Any]:
                 'kept': bool(e.get('kept')),
                 'kept_hashes': list(e.get('kept_hashes') or []),
                 'kept_by_tags': list(e.get('kept_tags') or []),
+                'torrent_name': e.get('torrent_name') or '',
             }
             for e in plan.get('rows', [])
         ],
@@ -692,6 +694,60 @@ def _boot_reads(cfg) -> None:
     from app import dlmon_prune, storage_cleanup
     _quiet(dlmon_prune.run_once)
     _quiet(storage_cleanup.log_never_delete_now, cfg)
+    _quiet(fill_names)                                   # v261: the seeded hash's name, read lazily from qBit
+
+
+# ── v261: Never delete names (qBit's, read-only; display only, the logs stay last-4) ──
+
+_names_cache: Dict[str, str] = {}
+_names_state = {'running': False, 'at': 0.0}
+_names_lock = threading.Lock()
+NAMES_RETRY_SECONDS = 300
+
+
+def _note_names(found: Dict[str, str]) -> None:
+    """Remember every name qBit just listed (for Keep) and store the Never delete ones."""
+    from app.automation import dg_store
+    if not found:
+        return
+    with _names_lock:
+        _names_cache.clear()
+        _names_cache.update(found)
+    dg_store.remember_names(found)
+
+
+def known_names(hashes: List[str]) -> Dict[str, str]:
+    with _names_lock:
+        return {h: _names_cache[h] for h in hashes if h in _names_cache}
+
+
+def fill_names() -> None:
+    """Read qBit's list (torrents/info, read-only) when a Never delete hash has no name yet."""
+    from app.automation import dg_store
+    from app import storage_cleanup
+    with _names_lock:
+        if _names_state['running']:
+            return
+        _names_state['running'] = True
+        _names_state['at'] = time.time()
+    try:
+        missing = [h for h in dg_store.settings()['protected_hashes'] if h not in dg_store.names()]
+        if missing:
+            _note_names(storage_cleanup.torrent_names(storage_cleanup.fetch_torrents()))
+    finally:
+        with _names_lock:
+            _names_state['running'] = False
+
+
+def fill_names_later() -> None:
+    """Settings view: a missing name is read in the background, at most every NAMES_RETRY_SECONDS."""
+    from app.automation import dg_store
+    with _names_lock:
+        if _names_state['running'] or time.time() - _names_state['at'] < NAMES_RETRY_SECONDS:
+            return
+    hashes = dg_store.settings()['protected_hashes']
+    if hashes and any(h not in dg_store.names() for h in hashes):
+        threading.Thread(target=lambda: _quiet(fill_names), daemon=True, name='downloads-guard-names').start()
 
 
 def _quiet(fn, *a) -> None:

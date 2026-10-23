@@ -142,7 +142,7 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     fireEvent.click(screen.getByTestId('dg-preview'));
     await screen.findByText('Would delete 60 GB of 100 GB');
     expect(screen.getAllByTestId('dg-preview-list-row').map(r => r.querySelector('span')?.textContent))
-      .toEqual(['Heat.1995', 'AHS', 'Hold', 'Zodiac.2007']);
+      .toEqual(['Heat.1995', '…efb6', 'Hold', 'Zodiac.2007']);
   });
 
   it('Never delete: shows tags and hashes (last 4), adds a tag, and asks to sign in to remove one', async () => {
@@ -186,6 +186,22 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     fireEvent.click(screen.getByTestId('dg-unkeep'));
     expect(await screen.findByTestId('dg-sign-in')).toBeTruthy();
     expect(calls.filter(c => c.url.endsWith('/unkeep')).map(c => JSON.parse(String(c.init!.body)))).toEqual([{ hashes: ['7224bfad84076c0a76c36fb891d3b91ac226efb6'] }]);
+  });
+
+  it('Never delete chips and the Unkeep row show the torrent name, else the last 4', async () => {
+    const AHS = '7224bfad84076c0a76c36fb891d3b91ac226efb6';
+    stub((u, init) => (!init?.method && u.endsWith('/downloads-guard')
+      ? json({ ...VIEW(), protected_names: { [AHS]: 'American.Horror.Story.S01' } }) : undefined));
+    view();
+    await waitFor(() => screen.getByTestId('downloads-guard'));
+    const chip = screen.getByTestId('dg-never-hash');
+    expect(chip.textContent?.replace('×', '')).toBe('American.Horror.Story.S01');
+    expect(chip.getAttribute('title')).toBe(AHS);
+    expect(screen.getByLabelText('Remove American.Horror.Story.S01')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('dg-preview'));
+    await screen.findByText('Would delete 60 GB of 100 GB');
+    const names = screen.getAllByTestId('dg-preview-list-row').map(r => r.querySelector('span')!.textContent);
+    expect(names).toEqual(['Heat.1995', 'American.Horror.Story.S01', 'Hold', 'Zodiac.2007']);
   });
 
   it('scope picks only this install\'s downloads', async () => {

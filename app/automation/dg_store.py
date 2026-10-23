@@ -103,6 +103,55 @@ def path() -> str:
     return str(_cfg.get('path') or _paths.data_path(SETTINGS_FILE))
 
 
+NAMES_FILE = 'downloads_guard_names.json'
+NAME_MAX = 300
+
+
+def names_path() -> str:
+    """v261: the qBit names of the Never delete hashes, beside the settings file (display only)."""
+    return os.path.join(os.path.dirname(path()), NAMES_FILE)
+
+
+def names() -> Dict[str, str]:
+    """{hash: torrent name} for the current Never delete hashes; a hash qBit never named is absent."""
+    with _lock:
+        return _names(settings()['protected_hashes'])
+
+
+def _raw_names() -> Dict[str, Any]:
+    try:
+        with open(names_path(), 'r') as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _names(hashes: List[str], raw: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    raw = _raw_names() if raw is None else raw
+    out: Dict[str, str] = {}
+    for h in hashes:
+        v = raw.get(h)
+        if isinstance(v, str) and v.strip():
+            out[h] = v.strip()[:NAME_MAX]
+    return out
+
+
+def remember_names(found: Dict[str, Any]) -> Dict[str, str]:
+    """Store qBit's names for Never delete hashes (others ignored); hashes no longer kept are dropped."""
+    with _lock:
+        hashes = settings()['protected_hashes']
+        raw = _raw_names()
+        new = _names(hashes, raw)
+        for h, n in (found or {}).items():
+            h = str(h).lower()
+            if h in hashes and isinstance(n, str) and n.strip():
+                new[h] = n.strip()[:NAME_MAX]
+        if new != raw and (new or raw):
+            _paths.atomic_write_json(names_path(), new, mode=0o600)
+        return new
+
+
 def defaults() -> Dict[str, Any]:
     return json.loads(json.dumps(DEFAULTS))
 
@@ -251,8 +300,9 @@ def seed() -> Dict[str, Any]:
         return settings()
 
 
-def keep(hashes: List[str]) -> List[str]:
-    """Preview's Keep: add torrent hashes to Never delete. Raises Invalid on a bad list."""
+def keep(hashes: List[str], found_names: Optional[Dict[str, str]] = None) -> List[str]:
+    """Preview's Keep: add torrent hashes to Never delete, with qBit's names when known (found_names, read by
+    the caller from qBit). Raises Invalid on a bad list."""
     h = _hashes(hashes)
     if not h:
         raise Invalid({'hashes': 'Must be a list of torrent hashes'})
@@ -262,7 +312,9 @@ def keep(hashes: List[str]) -> List[str]:
         if len(new) > MAX_TAGS:
             raise Invalid({'hashes': 'Too many'})
         _paths.atomic_write_json(path(), {**cur, 'protected_hashes': new}, mode=0o600)
-        return new
+    if found_names:
+        remember_names(found_names)
+    return new
 
 
 def unkeep(hashes: List[str]) -> List[str]:
@@ -274,7 +326,8 @@ def unkeep(hashes: List[str]) -> List[str]:
         cur = settings()
         new = [x for x in cur['protected_hashes'] if x not in h]
         _paths.atomic_write_json(path(), {**cur, 'protected_hashes': new}, mode=0o600)
-        return new
+    remember_names({})                                   # drops the names of hashes no longer kept
+    return new
 
 
 def widens(old: Dict[str, Any], new: Dict[str, Any]) -> List[str]:

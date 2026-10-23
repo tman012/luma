@@ -366,6 +366,8 @@ def _units(torrents: List[Dict[str, Any]], cfg: Dict[str, Any], root: str, now: 
             'trackers': sorted({k for k in keys if k}),
             'unclassified': any(k is None for k in keys),
             'tracker_label': ' + '.join(tracker_files.label_for(k) for k in sorted({k for k in keys if k})) or 'unknown',
+            # v261: qBit's own name (read-only), for the Unkeep row
+            'torrent_name': next((str(t.get('name')).strip() for t in ts if str(t.get('name') or '').strip()), ''),
         }
         if prot:
             by_hash = [h for h in unit['hashes'] if h in keep_hashes]
@@ -408,6 +410,20 @@ def _rows(ordered_all: List[Tuple[str, Dict[str, Any]]], selected: List[Dict[str
             if c['path'] in chosen or c['path'] in kept_paths]
 
 
+def torrent_names(torrents: Optional[List[Dict[str, Any]]]) -> Dict[str, str]:
+    """v261: {lower-case hash: qBit name} for every torrent qBit listed (display only)."""
+    out: Dict[str, str] = {}
+    for t in torrents or []:
+        if not isinstance(t, dict):
+            continue
+        n = str(t.get('name') or '').strip()
+        for k in ('hash', 'infohash_v1', 'infohash_v2'):
+            h = str(t.get(k) or '').strip().lower()
+            if h and n:
+                out[h] = n
+    return out
+
+
 def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, cfg: Optional[Dict[str, Any]] = None,
                  now: Optional[float] = None) -> Dict:
     """Pick downloads in deletion_order() until they reach `target_bytes` (see the module docs). Deletes nothing."""
@@ -416,7 +432,7 @@ def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, cfg: Optional[Dict[st
     target_bytes = max(0, min(int(target_bytes), ceiling))
     base = {'target_bytes': target_bytes, 'planned_bytes': 0, 'entries': [], 'eligible_count': 0, 'short': True,
             'preferred_available': 0, 'preferred_bytes': 0, 'fallback_bytes': 0, 'held': {}, 'error': None,
-            'protected_hashes': None, 'rows': []}
+            'protected_hashes': None, 'rows': [], 'torrent_names': {}}
 
     torrents = fetch_torrents()
     if torrents is None:
@@ -449,7 +465,7 @@ def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, cfg: Optional[Dict[st
             'short': total < target_bytes, 'preferred_available': sum(1 for p, _ in ordered if p == 'preferred'),
             'preferred_bytes': preferred,
             'fallback_bytes': total - preferred, 'held': held, 'protected_hashes': protected,
-            'rows': _rows(ordered_all, selected, kept_paths)}
+            'rows': _rows(ordered_all, selected, kept_paths), 'torrent_names': torrent_names(torrents)}
 
 
 # ---------------------------------------------------------------------------

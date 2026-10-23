@@ -57,6 +57,8 @@ def env(tmp_path, monkeypatch, store, tv_env):  # noqa: F811
     monkeypatch.setattr(sc, 'plex_playing_files', lambda: e.playing if e.playing is not None else None)
     monkeypatch.setattr(shutil, 'disk_usage', lambda p: Usage(1000 * GIB, 900 * GIB, 100 * GIB))
     monkeypatch.setattr(sc.time, 'time', lambda: NOW)
+    monkeypatch.setattr(dg, '_names_cache', {})                       # v261: Never delete names, per test
+    monkeypatch.setattr(dg, '_names_state', {'running': False, 'at': 0.0})
     return e
 
 
