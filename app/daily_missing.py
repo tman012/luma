@@ -1,83 +1,101 @@
-"""What You're Missing — daily home rail of popular movies the library does not own.
+"""What you're missing — daily home rail of popular movies the library does not own.
 
-Discovery only (NOT an auto-grabber). Builds a large unowned-popular pool from
-Trakt + TMDb, quality-gates for crowd signal, and serves a ~20-title slate that is
-stable for the America/New_York calendar day and reshuffles the next morning.
+Ported from prod 1b4ea74 (app/daily_missing.py). Discovery only (NOT an auto-grabber). Builds a large
+unowned-popular pool from Trakt + TMDb, quality-gates it for crowd signal, and serves a slate that is stable
+for the America/New_York calendar day and reshuffles the next morning, preferring titles not served in the
+last few days.
 
-A 4.7k owned library starves shallow popular lists — dig deep across Trakt/TMDb
-and keep POOL_MIN_HEALTHY large enough that consecutive NY days can look
-different. Primary daily slice also excludes recently served ids (last N NY
-days), filling from the remainder only if needed.
+v254 (Taylor): everything prod hard-codes is a setting (app/automation/wym_store, Settings > Automation,
+prod's values as defaults); the pool plumbing below stays internal. Ownership is the Plex movie sections,
+in-flight grabs (movie_grabs and grab_origin) and the native movie watchlist: no Radarr, no
+upgrade_library.db. Settings that change the pool rebuild it (after a short pause, so a run of edits builds
+once); the slate applies them at once to the pool it has.
 
-Pool gate is intentionally soft (year 1985–2025, English+poster, modest
-TMDb/IMDb signal) so the shelf has hundreds/thousands to rotate through.
+Writes: only what_youre_missing_{pool,dismissed,served,settings}.json in the data dir. It never adds,
+grabs, moves or deletes anything, so on the test instance it runs as an explicit exemption
+(instance.DATA_DIR_ONLY), not through the writes gate.
 """
 from __future__ import annotations
 
 import hashlib
-import re
 import json
 import logging
-import os
+import math
 import random
+import re
 import threading
 import time
-from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 from zoneinfo import ZoneInfo
 
 import requests
+
+from app.automation import wym_store
 
 logger = logging.getLogger(__name__)
 
 NY = ZoneInfo('America/New_York')
 
 RAIL_ID = 'what_youre_missing'
-RAIL_SIZE = 20
+TITLE = "What you're missing"
+RAIL_SIZE = 20                     # prod's default; the setting is Movies shown
+# ---- plumbing (kept internal, prod's values) ----
 POOL_TARGET = 4000
-# Below this, treat pool as unhealthy (tiny pools reshuffle to ~same slate).
-POOL_MIN_HEALTHY = 400
+POOL_MIN_HEALTHY = 400             # below this, dig deeper once (prod :612)
 TRAKT_PAGE_SIZE = 20
-# A large library (~5k films) owns nearly all of the top Trakt pages. Dig deep.
-TRAKT_POPULAR_PAGES = 40
-TRAKT_WATCHED_PAGES = 20
-TRAKT_ANTICIPATED_PAGES = 15
-TRAKT_FAVORITED_PAGES = 15
-TRAKT_BOXOFFICE_PAGES = 1
-TRAKT_TRENDING_PAGES = 10
-TRAKT_WATCHED_ALL_PAGES = 15
-TRAKT_FAVORITED_ALL_PAGES = 15
-IMDB_MIN_VOTES = 5_000  # pool soft prefer; not a hard starve bar
-IMDB_HARD_REJECT = 1_000  # known tiny-vote junk only; pool must stay huge
-TMDB_VOTE_FALLBACK = 150  # pool inclusion: modest crowd signal + poster/English/year
-POOL_MAX_AGE_SEC = 8 * 3600
-REFRESH_INTERVAL_SEC = 8 * 3600
-ENGLISH = 'en'
-YEAR_MIN = 1985
-YEAR_MAX = 2025  # through last complete-ish year; skip unreleased future
-TMDB_DISCOVER_PAGES = 45
+TRAKT_PATHS = {
+    'popular': '/movies/popular', 'trending': '/movies/trending', 'anticipated': '/movies/anticipated',
+    'boxoffice': '/movies/boxoffice', 'watched_yearly': '/movies/watched/yearly', 'watched_all': '/movies/watched/all',
+    'favorited_yearly': '/movies/favorited/yearly', 'favorited_all': '/movies/favorited/all',
+}
+TRAKT_PAGES = {'popular': 40, 'watched_yearly': 20, 'watched_all': 15, 'anticipated': 15, 'favorited_yearly': 15,
+               'favorited_all': 15, 'boxoffice': 1, 'trending': 10}
+TRAKT_EXPAND = {'popular': 50, 'watched_all': 40, 'favorited_all': 30, 'watched_yearly': 30}
 TMDB_POPULAR_PAGES = 40
 TMDB_TOP_RATED_PAGES = 25
-# How many prior NY calendar days' served ids to exclude from today's primary pick.
-EXCLUDE_RECENT_DAYS = 3
+TMDB_DISCOVER_PAGES = 45
+GENRE_PAGES = 10
+YEAR_VOTE_PAGES = 12
+YEAR_POP_PAGES = 5
+HIGHEST_RATED_VOTES = 2000         # prod :518
+EXPAND_MIN_VOTES = 800             # prod :638
+IMDB_SOFT_VOTES = 5_000            # prod IMDB_MIN_VOTES: enough IMDb votes admit a film on their own
+TRAKT_VOTES_PER_WATCHER = 10       # prod: 500 Trakt votes stand in for 50 watchers
+TMDB_SOFT_SHARE = 3                # prod: a third of the TMDb minimum (50 of 150) still admits a film
+OMDB_MAX = 900                     # OMDb lookups per build (prod :593)
+OMDB_WORKERS = 8
+TMDB_WORKERS = 12
+TRAKT_TIMEOUT_S, TMDB_TIMEOUT_S, TMDB_DETAIL_TIMEOUT_S = 15, 12, 6
+TRAKT_SLEEP_S, TMDB_SLEEP_S = 0.12, 0.08
 SERVED_HISTORY_KEEP_DAYS = 14
+STARTUP_DELAY_S = 8
+CHECK_S = 300                      # the scheduler looks every 5 minutes (and at once on a settings change)
+SETTLE_S = 30                      # a pool-changing edit waits this long for the next one before rebuilding
+RETRY_S = 1800                     # after a failed rebuild, try again in 30 minutes (or on the next edit)
 
 _lock = threading.RLock()
+_build_lock = threading.Lock()
+_wake = threading.Event()
 _thread_started = False
 _mem_pool: Optional[Dict[str, Any]] = None
-_mem_day: Optional[str] = None
+_mem_key: Optional[Tuple[Any, ...]] = None
 _mem_seed_ids: List[int] = []
+_state: Dict[str, Any] = {'building': False, 'last_attempt': 0.0, 'last_error': None}
+_start = {'fn': lambda target: threading.Thread(target=target, name='daily-missing-build', daemon=True).start()}
+
+# Trakt genre slugs -> TMDb genre ids (Trakt extended=full lists genres by slug).
+TRAKT_GENRES = {
+    'action': 28, 'adventure': 12, 'animation': 16, 'comedy': 35, 'crime': 80, 'documentary': 99, 'drama': 18,
+    'family': 10751, 'fantasy': 14, 'history': 36, 'horror': 27, 'music': 10402, 'musical': 10402,
+    'mystery': 9648, 'romance': 10749, 'science-fiction': 878, 'thriller': 53, 'war': 10752, 'western': 37,
+}
 
 
 def _data_dir() -> Path:
-    docker_data = Path('/app/data')
-    if docker_data.is_dir():
-        return docker_data
-    db_path = os.environ.get('DATABASE_PATH', '')
-    if db_path:
-        return Path(db_path).parent
-    return Path(__file__).resolve().parent.parent / 'data'
+    return wym_store.data_dir()
 
 
 def _pool_path() -> Path:
@@ -101,6 +119,102 @@ def _settings():
     return SettingsManager()
 
 
+# ------------------------------------------------------------------ outside services (mocked in tests)
+
+def trakt_client_id() -> str:
+    """The Trakt client ID while Trakt is connected (Settings > Connectors), else ''."""
+    try:
+        s = _settings()
+        if not s.get('apis.trakt.enabled', False):
+            return ''
+        return str(s.get('apis.trakt.client_id', '') or '').strip()
+    except Exception:                                    # noqa: BLE001
+        return ''
+
+
+def tmdb_key() -> str:
+    """Settings > Connectors' TMDb key; full builds also take TMDB_API_KEY (prod :454)."""
+    import os
+    try:
+        key = str(_settings().get('apis.tmdb.api_key', '') or '').strip()
+    except Exception:                                    # noqa: BLE001
+        key = ''
+    if key:
+        return key
+    from app import minimal
+    return '' if minimal.enabled() else (os.environ.get('TMDB_API_KEY') or '').strip()
+
+
+def omdb_on() -> bool:
+    from app import omdb
+    return bool(omdb.api_key())
+
+
+def omdb_ratings(imdb_id: str) -> Optional[Dict[str, Any]]:
+    """IMDb rating and votes (app/omdb: cached 90 days, fail open)."""
+    from app import omdb
+    return omdb.get_ratings(imdb_id)
+
+
+def http_get(url: str, params: Dict[str, Any], headers: Optional[Dict[str, str]] = None, timeout: float = 12):
+    return requests.get(url, params=params, headers=headers, timeout=timeout)
+
+
+def plex_index(cached_only: bool = False) -> Optional[Dict[str, Any]]:
+    """Plex's ownership index (every movie section). cached_only: the last one built, never a fresh scan
+    (the Home rail stays inside its time budget); a stale one is refreshed in the background."""
+    from app.plex_service import plex_service
+    if not cached_only:
+        return plex_service.build_ownership_index()
+    idx = getattr(plex_service, '_ownership_index', None)
+    age = time.time() - float(getattr(plex_service, '_ownership_index_ts', 0) or 0)
+    if not idx or age >= getattr(plex_service, '_OWNERSHIP_TTL', 300):
+        _refresh_plex_index_async()
+    return idx or None
+
+
+_plex_refresh = {'on': False}
+
+
+def _refresh_plex_index_async() -> None:
+    with _lock:
+        if _plex_refresh['on']:
+            return
+        _plex_refresh['on'] = True
+
+    def go():
+        try:
+            from app.plex_service import plex_service
+            plex_service.build_ownership_index()
+        except Exception as e:                           # noqa: BLE001
+            logger.warning("What you're missing: Plex index refresh failed: %s", type(e).__name__)
+        finally:
+            _plex_refresh['on'] = False
+    threading.Thread(target=go, name='daily-missing-plex', daemon=True).start()
+
+
+def in_flight() -> Set[int]:
+    """tmdb ids with an active movie grab (movies.db) or a movie in the grab_origin store."""
+    from app.automation import gr_select
+    return gr_select.in_flight()
+
+
+def watchlist_ids() -> Set[int]:
+    """The native movie watchlist (test installs only)."""
+    from app import instance
+    if not instance.is_test():
+        return set()
+    from app import movie_watchlist
+    return {int(x) for x in movie_watchlist.tmdb_ids()}
+
+
+def _norm(title: str) -> str:
+    from app import tv_match
+    return tv_match.normalize(title)
+
+
+# ------------------------------------------------------------------ fetching
+
 def _trakt_headers(client_id: str) -> Dict[str, str]:
     from app import trakt_http
     return trakt_http.headers(client_id)
@@ -109,23 +223,14 @@ def _trakt_headers(client_id: str) -> Dict[str, str]:
 def _fetch_trakt_list(path: str, client_id: str, pages: int) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for page in range(1, pages + 1):
+        params = {'page': page, 'limit': TRAKT_PAGE_SIZE, 'extended': 'full'}
         try:
-            resp = requests.get(
-                f'https://api.trakt.tv{path}',
-                headers=_trakt_headers(client_id),
-                params={'page': page, 'limit': TRAKT_PAGE_SIZE, 'extended': 'full'},
-                timeout=15,
-            )
+            resp = http_get(f'https://api.trakt.tv{path}', params, _trakt_headers(client_id), TRAKT_TIMEOUT_S)
             if resp.status_code == 429:
                 retry = int(resp.headers.get('Retry-After', '20'))
                 logger.warning('Trakt rate-limited on %s page %s — sleeping %ss', path, page, retry)
                 time.sleep(min(retry, 60))
-                resp = requests.get(
-                    f'https://api.trakt.tv{path}',
-                    headers=_trakt_headers(client_id),
-                    params={'page': page, 'limit': TRAKT_PAGE_SIZE, 'extended': 'full'},
-                    timeout=15,
-                )
+                resp = http_get(f'https://api.trakt.tv{path}', params, _trakt_headers(client_id), TRAKT_TIMEOUT_S)
             if not resp.ok:
                 logger.warning('Trakt %s page %s -> %s', path, page, resp.status_code)
                 break
@@ -133,9 +238,9 @@ def _fetch_trakt_list(path: str, client_id: str, pages: int) -> List[Dict[str, A
             if not batch:
                 break
             out.extend(batch)
-            time.sleep(0.12)
-        except Exception as e:
-            logger.warning('Trakt fetch failed %s page %s: %s', path, page, e)
+            time.sleep(TRAKT_SLEEP_S)
+        except Exception as e:                           # noqa: BLE001
+            logger.warning('Trakt fetch failed %s page %s: %s', path, page, type(e).__name__)
             break
     return out
 
@@ -152,6 +257,7 @@ def _normalize_trakt_entry(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         tmdb_id = int(tmdb_id)
     except (TypeError, ValueError):
         return None
+    genres = [TRAKT_GENRES[g] for g in (movie.get('genres') or []) if isinstance(g, str) and g in TRAKT_GENRES]
     return {
         'tmdb_id': tmdb_id,
         'trakt_id': ids.get('trakt'),
@@ -162,6 +268,7 @@ def _normalize_trakt_entry(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         'trakt_rating': movie.get('rating'),
         'trakt_votes': movie.get('votes') or 0,
         'watchers': entry.get('watchers') or entry.get('watcher_count') or 0,
+        'genre_ids': genres,
         'media_type': 'movie',
         'owned': False,
         'source': 'trakt',
@@ -178,7 +285,7 @@ def _fetch_tmdb_list(api_key: str, path: str, pages: int, extra: Optional[Dict[s
         if extra:
             params.update(extra)
         try:
-            resp = requests.get(f'https://api.themoviedb.org/3{path}', params=params, timeout=12)
+            resp = http_get(f'https://api.themoviedb.org/3{path}', params, None, TMDB_TIMEOUT_S)
             if not resp.ok:
                 logger.warning('TMDb %s page %s -> %s', path, page, resp.status_code)
                 break
@@ -205,97 +312,85 @@ def _fetch_tmdb_list(api_key: str, path: str, pages: int, extra: Optional[Dict[s
                     'original_language': (m.get('original_language') or '').lower(),
                     'tmdb_vote_count': m.get('vote_count') or 0,
                     'tmdb_vote_average': m.get('vote_average'),
+                    'genre_ids': [int(g) for g in (m.get('genre_ids') or []) if isinstance(g, int)],
+                    'adult': bool(m.get('adult')),
                     'media_type': 'movie',
                     'owned': False,
                     'source': 'tmdb',
                 })
-            time.sleep(0.08)
-        except Exception as e:
-            logger.warning('TMDb fetch failed %s page %s: %s', path, page, e)
+            if int(data.get('total_pages') or page) <= page:
+                break
+            time.sleep(TMDB_SLEEP_S)
+        except Exception as e:                           # noqa: BLE001
+            logger.warning('TMDb fetch failed %s page %s: %s', path, page, type(e).__name__)
             break
     return out
 
 
-def _owned_tmdb_ids() -> Set[int]:
-    owned: Set[int] = set()
+# ------------------------------------------------------------------ ownership
+
+def _owned(cached_only: bool = False) -> Dict[str, Any]:
+    """{'ids', 'title_years', 'plex_ok'}: every Plex movie section, plus in-flight grabs and the watchlist."""
+    ids: Set[int] = set()
+    tys: Set[Tuple[str, int]] = set()
     try:
-        from app.plex_service import plex_service
-        index = plex_service.build_ownership_index()
-        for tid in (index.get('movies_by_tmdb') or {}):
-            try:
-                owned.add(int(tid))
-            except (TypeError, ValueError):
-                pass
-        for entry in (index.get('movies') or {}).values():
-            tid = entry.get('tmdb_id') if isinstance(entry, dict) else None
-            if tid:
-                try:
-                    owned.add(int(tid))
-                except (TypeError, ValueError):
-                    pass
-    except Exception as e:
-        logger.warning('daily_missing: ownership index unavailable: %s', e)
+        index = plex_index(cached_only) or {}
+    except Exception as e:                               # noqa: BLE001
+        logger.warning("What you're missing: Plex ownership unavailable: %s", type(e).__name__)
+        index = {}
 
-    try:
-        from app import canon_index
-        for tid in canon_index.owned_tmdb_ids() or []:
-            try:
-                owned.add(int(tid))
-            except (TypeError, ValueError):
-                pass
-    except Exception as e:
-        logger.debug('daily_missing: canon owned lookup skipped: %s', e)
+    def add(e: Any) -> None:
+        if not isinstance(e, dict):
+            return
+        tid = e.get('tmdb_id')
+        if tid is not None and str(tid).isdigit():
+            ids.add(int(tid))
+        if e.get('title') and str(e.get('year') or '').isdigit():
+            tys.add((_norm(e['title']), int(e['year'])))
 
-    try:
-        settings = _settings()
-        radarr_url = (settings.get('radarr.url') or '').rstrip('/')
-        radarr_key = settings.get('radarr.api_key') or ''
-        if radarr_url and radarr_key:
-            resp = requests.get(
-                f'{radarr_url}/api/v3/movie',
-                headers={'X-Api-Key': radarr_key},
-                timeout=20,
-            )
-            if resp.ok:
-                for m in resp.json() or []:
-                    tid = m.get('tmdbId')
-                    if tid:
-                        try:
-                            owned.add(int(tid))
-                        except (TypeError, ValueError):
-                            pass
-    except Exception as e:
-        logger.warning('daily_missing: Radarr catalog unavailable: %s', e)
+    for tid, e in (index.get('movies_by_tmdb') or {}).items():
+        if str(tid).isdigit():
+            ids.add(int(tid))
+        add(e)
+    for e in (index.get('movies') or {}).values():
+        add(e)
+    for entries in (index.get('movies_by_title') or {}).values():
+        for e in entries or []:
+            add(e)
+    plex_ok = bool(ids or tys)
+    for name, fn in (('in-flight grabs', in_flight), ('watchlist', watchlist_ids)):
+        try:
+            ids |= set(fn() or ())
+        except Exception as e:                           # noqa: BLE001
+            logger.warning("What you're missing: %s unreadable: %s", name, type(e).__name__)
+    return {'ids': ids, 'title_years': tys, 'plex_ok': plex_ok}
 
-    return owned
 
+def _is_owned(item: Dict[str, Any], own: Dict[str, Any]) -> bool:
+    tid = item.get('tmdb_id')
+    if tid is not None and int(tid) in own['ids']:
+        return True
+    y = item.get('year')
+    return bool(own['title_years']) and isinstance(y, int) and (_norm(item.get('title') or ''), y) in own['title_years']
+
+
+# ------------------------------------------------------------------ enrichment
 
 def _tmdb_enrich(candidates: List[Dict[str, Any]], api_key: str) -> None:
     if not api_key or not candidates:
         return
-    from concurrent.futures import ThreadPoolExecutor
 
     def one(item: Dict[str, Any]) -> None:
         tid = item.get('tmdb_id')
         if not tid:
             return
-        # Skip if we already have poster + language + votes from list endpoint
-        if item.get('poster_path') and item.get('original_language') and item.get('tmdb_vote_count'):
-            if item.get('imdb_id'):
-                return
         try:
-            resp = requests.get(
-                f'https://api.themoviedb.org/3/movie/{tid}',
-                params={'api_key': api_key},
-                timeout=6,
-            )
+            resp = http_get(f'https://api.themoviedb.org/3/movie/{tid}', {'api_key': api_key}, None, TMDB_DETAIL_TIMEOUT_S)
             if not resp.ok:
                 return
             data = resp.json() or {}
-            item.setdefault('poster_path', data.get('poster_path'))
             if not item.get('poster_path'):
                 item['poster_path'] = data.get('poster_path')
-            item.setdefault('backdrop_path', data.get('backdrop_path'))
             if not item.get('backdrop_path'):
                 item['backdrop_path'] = data.get('backdrop_path')
             lang = (data.get('original_language') or '').lower()
@@ -311,19 +406,48 @@ def _tmdb_enrich(candidates: List[Dict[str, Any]], api_key: str) -> None:
                     item['year'] = int(str(data['release_date'])[:4])
                 except ValueError:
                     pass
-            tmdb_imdb = data.get('imdb_id')
-            if tmdb_imdb and not item.get('imdb_id'):
-                item['imdb_id'] = tmdb_imdb
-        except Exception:
+            if data.get('imdb_id') and not item.get('imdb_id'):
+                item['imdb_id'] = data.get('imdb_id')
+            g = [x.get('id') for x in (data.get('genres') or []) if isinstance(x, dict) and isinstance(x.get('id'), int)]
+            if g:
+                item['genre_ids'] = g
+            if 'adult' in data:
+                item['adult'] = bool(data.get('adult'))
+        except Exception:                                # noqa: BLE001
             pass
 
-    # Only enrich items missing critical fields (Trakt-sourced)
+    # Only items missing critical fields (Trakt-sourced, or list rows without an IMDb id)
     need = [c for c in candidates if not c.get('poster_path') or not c.get('original_language') or not c.get('imdb_id')]
     if not need:
         return
-    with ThreadPoolExecutor(max_workers=12) as pool:
+    with ThreadPoolExecutor(max_workers=TMDB_WORKERS) as pool:
         list(pool.map(one, need))
 
+
+def _imdb_enrich(candidates: List[Dict[str, Any]]) -> None:
+    """IMDb rating and votes from OMDb (only with an OMDb key; capped per build, fail open)."""
+    if not omdb_on():
+        for c in candidates:
+            c['imdb_rating'] = None
+            c['imdb_votes'] = None
+        return
+    targets = [c for c in candidates if c.get('imdb_id')][:OMDB_MAX]
+
+    def one(item: Dict[str, Any]) -> None:
+        try:
+            r = omdb_ratings(str(item['imdb_id'])) or {}
+        except Exception:                                # noqa: BLE001
+            r = {}
+        item['imdb_rating'] = r.get('rating')
+        item['imdb_votes'] = r.get('votes')
+    with ThreadPoolExecutor(max_workers=OMDB_WORKERS) as pool:
+        list(pool.map(one, targets))
+    for c in candidates:
+        c.setdefault('imdb_rating', None)
+        c.setdefault('imdb_votes', None)
+
+
+# ------------------------------------------------------------------ filters (pool and slate)
 
 _NON_LATIN_RE = re.compile(
     r'[\u0400-\u04FF\u0500-\u052F'  # Cyrillic
@@ -335,13 +459,12 @@ _NON_LATIN_RE = re.compile(
 
 
 def _title_has_strong_non_latin(title: str) -> bool:
-    """True if title is dominated by non-Latin script (skip for English shelf)."""
+    """True if title is dominated by non-Latin script (skip for a Latin-script shelf)."""
     if not title:
         return False
     hits = _NON_LATIN_RE.findall(title)
     if not hits:
         return False
-    # Strong signal: several non-Latin chars, or most of the alphabetic content
     non_latin = sum(len(h) for h in hits)
     letters = sum(1 for ch in title if ch.isalpha())
     if non_latin >= 3:
@@ -350,9 +473,7 @@ def _title_has_strong_non_latin(title: str) -> bool:
 
 
 def _coerce_imdb_votes(raw: Any) -> Optional[int]:
-    if raw is None:
-        return None
-    if isinstance(raw, bool):
+    if raw is None or isinstance(raw, bool):
         return None
     if isinstance(raw, int):
         return raw
@@ -367,67 +488,69 @@ def _coerce_imdb_votes(raw: Any) -> Optional[int]:
         return None
 
 
-def _year_ok(item: Dict[str, Any]) -> bool:
-    """Theatrical-ish window: ~1985 through YEAR_MAX (skip future/unreleased)."""
+def _int0(v: Any) -> int:
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _year_ok(item: Dict[str, Any], cfg: Dict[str, Any], today: Optional[date] = None) -> bool:
+    """Year window (Earliest year .. Latest year); an unknown year is allowed (enrich may fill it)."""
     y = item.get('year')
     try:
         y = int(y) if y is not None else None
     except (TypeError, ValueError):
         y = None
     if y is None:
-        return True  # allow unknowns; enrich may fill later
-    return YEAR_MIN <= y <= YEAR_MAX
+        return True
+    return int(cfg['year_from']) <= y <= wym_store.year_to(cfg, today)
 
 
-def _passes_quality_gate(item: Dict[str, Any]) -> bool:
-    """Pool gate — inclusive. Rail still feels fresh because the pool is huge.
-
-    Require poster + English-shelf script + year window. Reject only tiny known
-    IMDb junk. Accept modest TMDb/Trakt signal so a 4.7k library still yields
-    hundreds/thousands of unowned candidates (1985–2025).
-    """
-    if not item.get('poster_path'):
-        return False
-    if _title_has_strong_non_latin(item.get('title') or ''):
-        return False
-    if not _year_ok(item):
-        return False
-
+def _crowd_ok(item: Dict[str, Any], cfg: Dict[str, Any]) -> bool:
+    """Prod's pool gate (:385-428) with its numbers as settings: reject a film with too few IMDb votes (only
+    known with an OMDb key); otherwise any one crowd signal is enough: IMDb votes, TMDb votes (the minimum,
+    or a third of it as prod's soft tier), Trakt watchers or Trakt votes."""
     votes = _coerce_imdb_votes(item.get('imdb_votes'))
-    if votes is not None and votes < IMDB_HARD_REJECT:
+    if votes is not None and votes < int(cfg['min_imdb_votes']):
         return False
-
-    tmdb_votes = item.get('tmdb_vote_count') or 0
-    try:
-        tmdb_votes = int(tmdb_votes)
-    except (TypeError, ValueError):
-        tmdb_votes = 0
-    watchers = item.get('watchers') or 0
-    try:
-        watchers = int(watchers)
-    except (TypeError, ValueError):
-        watchers = 0
-    trakt_votes = item.get('trakt_votes') or 0
-    try:
-        trakt_votes = int(trakt_votes)
-    except (TypeError, ValueError):
-        trakt_votes = 0
-
-    if votes is not None and votes >= IMDB_MIN_VOTES:
+    if votes is not None and votes >= max(IMDB_SOFT_VOTES, int(cfg['min_imdb_votes'])):
         return True
-    if tmdb_votes >= TMDB_VOTE_FALLBACK:
+    tmdb_min = int(cfg['min_tmdb_votes'])
+    if _int0(item.get('tmdb_vote_count')) >= min(tmdb_min, math.ceil(tmdb_min / TMDB_SOFT_SHARE)):
         return True
-    if watchers >= 50 or trakt_votes >= 500:
-        return True
-    # Poster+English+year with *some* TMDb signal still OK for deep pool
-    if tmdb_votes >= 50:
+    w = int(cfg['min_trakt_watchers'])
+    if w > 0 and (_int0(item.get('watchers')) >= w or _int0(item.get('trakt_votes')) >= w * TRAKT_VOTES_PER_WATCHER):
         return True
     return False
 
 
-def _merge_candidate(by_tmdb: Dict[int, Dict[str, Any]], item: Dict[str, Any], owned: Set[int]) -> None:
+def keep(item: Dict[str, Any], cfg: Dict[str, Any], today: Optional[date] = None) -> bool:
+    """Every filter setting, for the pool and again for the slate (so a change applies at once)."""
+    return basic_ok(item, cfg, today) and _crowd_ok(item, cfg)
+
+
+def basic_ok(item: Dict[str, Any], cfg: Dict[str, Any], today: Optional[date] = None) -> bool:
+    """Poster, language (and prod's Latin-script shelf), years, adult and excluded genres (prod :575-581)."""
+    if cfg['require_poster'] and not item.get('poster_path'):
+        return False
+    langs = cfg['languages']
+    lang = (item.get('original_language') or '').lower()
+    if (lang or 'en') not in langs:
+        return False
+    if all(x in wym_store.LATIN_LANGUAGES for x in langs) and _title_has_strong_non_latin(item.get('title') or ''):
+        return False
+    if not _year_ok(item, cfg, today):
+        return False
+    if not cfg['include_adult'] and item.get('adult'):
+        return False
+    out = {wym_store.GENRES[g] for g in cfg['exclude_genres']}
+    return not (out and out & set(item.get('genre_ids') or []))
+
+
+def _merge_candidate(by_tmdb: Dict[int, Dict[str, Any]], item: Dict[str, Any], own: Dict[str, Any]) -> None:
     tid = item.get('tmdb_id')
-    if not tid or tid in owned:
+    if not tid or _is_owned(item, own):
         return
     prev = by_tmdb.get(tid)
     if not prev:
@@ -436,279 +559,158 @@ def _merge_candidate(by_tmdb: Dict[int, Dict[str, Any]], item: Dict[str, Any], o
     prev['watchers'] = max(prev.get('watchers') or 0, item.get('watchers') or 0)
     prev['trakt_votes'] = max(prev.get('trakt_votes') or 0, item.get('trakt_votes') or 0)
     prev['tmdb_vote_count'] = max(prev.get('tmdb_vote_count') or 0, item.get('tmdb_vote_count') or 0)
-    for k in ('poster_path', 'backdrop_path', 'imdb_id', 'overview', 'original_language', 'year'):
+    for k in ('poster_path', 'backdrop_path', 'imdb_id', 'overview', 'original_language', 'year', 'genre_ids'):
         if not prev.get(k) and item.get(k):
             prev[k] = item[k]
+    if item.get('adult'):
+        prev['adult'] = True
 
 
-def build_pool(force: bool = False) -> Dict[str, Any]:
-    """Rebuild the unowned-popular candidate pool and persist it."""
-    global _mem_pool, _mem_day, _mem_seed_ids
+# ------------------------------------------------------------------ the pool
 
-    settings = _settings()
-    enabled = settings.get('apis.trakt.enabled', False)
-    client_id = settings.get('apis.trakt.client_id', '')
-    tmdb_key = settings.get('apis.tmdb.api_key', '') or os.environ.get('TMDB_API_KEY', '')
+class PoolError(Exception):
+    pass
 
-    if not force:
-        cached = _read_pool()
-        if cached and (time.time() - float(cached.get('built_at') or 0)) < POOL_MAX_AGE_SEC:
-            if len(cached.get('candidates') or []) >= POOL_MIN_HEALTHY:
-                with _lock:
-                    _mem_pool = cached
-                return cached
 
-    logger.info('daily_missing: building candidate pool…')
-    owned = _owned_tmdb_ids()
-    logger.info('daily_missing: owned/grabbed ids = %d', len(owned))
+def sources_sig() -> Dict[str, bool]:
+    return {'trakt': bool(trakt_client_id()), 'tmdb': bool(tmdb_key()), 'omdb': omdb_on()}
 
-    by_tmdb: Dict[int, Dict[str, Any]] = {}
 
-    if enabled and client_id:
-        trakt_sources = [
-            ('/movies/popular', TRAKT_POPULAR_PAGES),
-            ('/movies/watched/yearly', TRAKT_WATCHED_PAGES),
-            ('/movies/watched/all', TRAKT_WATCHED_ALL_PAGES),
-            ('/movies/anticipated', TRAKT_ANTICIPATED_PAGES),
-            ('/movies/favorited/yearly', TRAKT_FAVORITED_PAGES),
-            ('/movies/favorited/all', TRAKT_FAVORITED_ALL_PAGES),
-            ('/movies/boxoffice', TRAKT_BOXOFFICE_PAGES),
-            ('/movies/trending', TRAKT_TRENDING_PAGES),
-        ]
-        for path, pages in trakt_sources:
+def current_sig(cfg: Optional[Dict[str, Any]] = None) -> str:
+    return wym_store.pool_sig(cfg or wym_store.settings(), sources_sig())
+
+
+def tmdb_queries(cfg: Dict[str, Any], today: Optional[date] = None, expand: bool = False) -> List[Tuple[str, int, Optional[Dict[str, Any]]]]:
+    """The TMDb lists the settings switch on (prod :493-562; the expand pass :631-646)."""
+    on = set(cfg['tmdb_lists'])
+    v = int(cfg['min_tmdb_votes'])
+    yf, yt = int(cfg['year_from']), wym_store.year_to(cfg, today)
+    base = {'include_adult': 'true' if cfg['include_adult'] else 'false',
+            'with_original_language': '|'.join(cfg['languages'])}
+    q: List[Tuple[str, int, Optional[Dict[str, Any]]]] = []
+    if expand:
+        vv = max(EXPAND_MIN_VOTES, v // 2)
+        if 'popular' in on:
+            q.append(('/movie/popular', TMDB_POPULAR_PAGES + 20, None))
+        if 'top_rated' in on:
+            q.append(('/movie/top_rated', TMDB_TOP_RATED_PAGES + 15, None))
+        if 'most_voted' in on:
+            q.append(('/discover/movie', TMDB_DISCOVER_PAGES + 30, {'sort_by': 'vote_count.desc', **base, 'vote_count.gte': vv}))
+        if 'most_popular' in on:
+            q.append(('/discover/movie', 25, {'sort_by': 'popularity.desc', **base, 'vote_count.gte': vv}))
+        return q
+    if 'popular' in on:
+        q.append(('/movie/popular', TMDB_POPULAR_PAGES, None))
+    if 'top_rated' in on:
+        q.append(('/movie/top_rated', TMDB_TOP_RATED_PAGES, None))
+    if 'most_voted' in on:
+        q.append(('/discover/movie', TMDB_DISCOVER_PAGES, {'sort_by': 'vote_count.desc', **base, 'vote_count.gte': v}))
+    if 'most_popular' in on:
+        q.append(('/discover/movie', max(20, TMDB_DISCOVER_PAGES // 2), {'sort_by': 'popularity.desc', **base, 'vote_count.gte': v}))
+    if 'highest_grossing' in on:
+        q.append(('/discover/movie', max(15, TMDB_DISCOVER_PAGES // 3), {'sort_by': 'revenue.desc', **base, 'vote_count.gte': v}))
+    if 'highest_rated' in on:
+        q.append(('/discover/movie', max(15, TMDB_DISCOVER_PAGES // 3),
+                  {'sort_by': 'vote_average.desc', **base, 'vote_count.gte': max(v, HIGHEST_RATED_VOTES)}))
+    if 'by_genre' in on:
+        for name, gid in wym_store.GENRES.items():
+            if name in cfg['exclude_genres']:
+                continue
+            q.append(('/discover/movie', GENRE_PAGES, {
+                'sort_by': 'vote_count.desc', **base, 'vote_count.gte': v, 'with_genres': str(gid),
+                'primary_release_date.gte': f'{yf}-01-01', 'primary_release_date.lte': f'{yt}-12-31'}))
+    if 'by_year' in on:
+        for y0 in range(yf, yt + 1, 2):
+            y1 = min(y0 + 1, yt)
+            window = {'primary_release_date.gte': f'{y0}-01-01', 'primary_release_date.lte': f'{y1}-12-31'}
+            q.append(('/discover/movie', YEAR_VOTE_PAGES, {'sort_by': 'vote_count.desc', **base, 'vote_count.gte': v, **window}))
+            q.append(('/discover/movie', YEAR_POP_PAGES, {'sort_by': 'popularity.desc', **base,
+                                                          'vote_count.gte': max(50, v // 2), **window}))
+    return q
+
+
+def trakt_sources(cfg: Dict[str, Any], expand: bool = False) -> List[Tuple[str, int]]:
+    on = cfg['trakt_lists']
+    if expand:
+        return [(TRAKT_PATHS[k], TRAKT_PAGES[k] + n) for k, n in TRAKT_EXPAND.items() if k in on]
+    return [(TRAKT_PATHS[k], TRAKT_PAGES[k]) for k in wym_store.TRAKT_LISTS if k in on]
+
+
+def _collect(cfg: Dict[str, Any], own: Dict[str, Any], client_id: str, key: str, expand: bool,
+             into: Optional[Dict[int, Dict[str, Any]]] = None) -> Dict[int, Dict[str, Any]]:
+    by_tmdb: Dict[int, Dict[str, Any]] = into if into is not None else {}
+    if client_id:
+        for path, pages in trakt_sources(cfg, expand):
             raw = _fetch_trakt_list(path, client_id, pages)
-            logger.info('daily_missing: Trakt %s → %d raw', path, len(raw))
+            logger.info("What you're missing: Trakt %s → %d raw", path, len(raw))
             for entry in raw:
                 norm = _normalize_trakt_entry(entry)
                 if norm:
-                    _merge_candidate(by_tmdb, norm, owned)
-    else:
-        logger.info('daily_missing: Trakt not connected; using TMDB lists only')
-
-    # TMDb deep coverage — popular / top_rated / multi-sort discover
-    if tmdb_key:
-        tmdb_queries = [
-            ('/movie/popular', TMDB_POPULAR_PAGES, None),
-            ('/movie/top_rated', TMDB_TOP_RATED_PAGES, None),
-            ('/discover/movie', TMDB_DISCOVER_PAGES, {
-                'sort_by': 'vote_count.desc',
-                'include_adult': 'false',
-                'with_original_language': 'en',
-                'vote_count.gte': TMDB_VOTE_FALLBACK,
-            }),
-            ('/discover/movie', max(20, TMDB_DISCOVER_PAGES // 2), {
-                'sort_by': 'popularity.desc',
-                'include_adult': 'false',
-                'with_original_language': 'en',
-                'vote_count.gte': TMDB_VOTE_FALLBACK,
-            }),
-            ('/discover/movie', max(15, TMDB_DISCOVER_PAGES // 3), {
-                'sort_by': 'revenue.desc',
-                'include_adult': 'false',
-                'with_original_language': 'en',
-                'vote_count.gte': TMDB_VOTE_FALLBACK,
-            }),
-            ('/discover/movie', max(15, TMDB_DISCOVER_PAGES // 3), {
-                'sort_by': 'vote_average.desc',
-                'include_adult': 'false',
-                'with_original_language': 'en',
-                'vote_count.gte': max(TMDB_VOTE_FALLBACK, 2000),
-            }),
-        ]
-        # Genre buckets diversify past the owned-heavy head of global lists.
-        for genre_id in (28, 35, 18, 27, 878, 53, 10749, 16, 80, 12, 14, 36, 9648, 10751):
-            tmdb_queries.append((
-                '/discover/movie',
-                10,
-                {
-                    'sort_by': 'vote_count.desc',
-                    'include_adult': 'false',
-                    'with_original_language': 'en',
-                    'vote_count.gte': TMDB_VOTE_FALLBACK,
-                    'with_genres': str(genre_id),
-                    'primary_release_date.gte': f'{YEAR_MIN}-01-01',
-                    'primary_release_date.lte': f'{YEAR_MAX}-12-31',
-                },
-            ))
-        # Year windows 1985–2025 — this is where a big library still leaves tons missing.
-        for y0 in range(YEAR_MIN, YEAR_MAX + 1, 2):
-            y1 = min(y0 + 1, YEAR_MAX)
-            tmdb_queries.append((
-                '/discover/movie',
-                12,
-                {
-                    'sort_by': 'vote_count.desc',
-                    'include_adult': 'false',
-                    'with_original_language': 'en',
-                    'vote_count.gte': TMDB_VOTE_FALLBACK,
-                    'primary_release_date.gte': f'{y0}-01-01',
-                    'primary_release_date.lte': f'{y1}-12-31',
-                },
-            ))
-            tmdb_queries.append((
-                '/discover/movie',
-                5,
-                {
-                    'sort_by': 'popularity.desc',
-                    'include_adult': 'false',
-                    'with_original_language': 'en',
-                    'vote_count.gte': max(50, TMDB_VOTE_FALLBACK // 2),
-                    'primary_release_date.gte': f'{y0}-01-01',
-                    'primary_release_date.lte': f'{y1}-12-31',
-                },
-            ))
-        for path, pages, extra in tmdb_queries:
-            raw = _fetch_tmdb_list(tmdb_key, path, pages, extra)
-            label = path if not extra else f"{path}:{extra.get('sort_by') or extra.get('with_genres')}"
-            logger.info('daily_missing: TMDb %s → %d raw', label, len(raw))
+                    _merge_candidate(by_tmdb, norm, own)
+    if key:
+        for path, pages, extra in tmdb_queries(cfg, expand=expand):
+            raw = _fetch_tmdb_list(key, path, pages, extra)
             for item in raw:
-                _merge_candidate(by_tmdb, item, owned)
+                _merge_candidate(by_tmdb, item, own)
+    return by_tmdb
 
-    candidates = list(by_tmdb.values())
-    logger.info('daily_missing: %d unique unowned after dedupe', len(candidates))
 
-    _tmdb_enrich(candidates, tmdb_key)
+def _gate(cands: List[Dict[str, Any]], cfg: Dict[str, Any], key: str) -> List[Dict[str, Any]]:
+    _tmdb_enrich(cands, key)
+    pre = [c for c in cands if basic_ok(c, cfg)]
+    _imdb_enrich(pre)
+    gated = [c for c in pre if keep(c, cfg)]
+    gated.sort(key=lambda c: (_coerce_imdb_votes(c.get('imdb_votes')) or 0, c.get('tmdb_vote_count') or 0,
+                              c.get('watchers') or 0), reverse=True)
+    return gated[:POOL_TARGET]
 
-    candidates = [
-        c for c in candidates
-        if (c.get('original_language') or ENGLISH) == ENGLISH
-        and c.get('poster_path')
-        and not _title_has_strong_non_latin(c.get('title') or '')
-        and _year_ok(c)
-    ]
-    logger.info(
-        'daily_missing: %d after English+poster(+script)+year[%s-%s] filter',
-        len(candidates), YEAR_MIN, YEAR_MAX,
-    )
 
-    try:
-        from app.imdb_ratings import enrich_imdb_ratings
-        # Cap OMDb calls — free tier is tight; gate still has TMDb fallback
-        enrich_imdb_ratings(
-            candidates,
-            settings=settings,
-            max_items=min(len(candidates), 900),
-            replace_rating=True,
-            workers=8,
-        )
-    except Exception as e:
-        logger.warning('daily_missing: IMDb enrich failed: %s', e)
-
-    gated = [c for c in candidates if _passes_quality_gate(c)]
-    gated.sort(
-        key=lambda c: (
-            _coerce_imdb_votes(c.get('imdb_votes')) or 0,
-            c.get('tmdb_vote_count') or 0,
-            c.get('watchers') or 0,
-        ),
-        reverse=True,
-    )
-    if len(gated) > POOL_TARGET:
-        gated = gated[:POOL_TARGET]
-
-    # If the gate left a tiny/unhealthy pool, dig deeper once so days can rotate.
-    if len(gated) < POOL_MIN_HEALTHY and tmdb_key:
-        logger.warning(
-            'daily_missing: gated pool only %d (< %d) — expanding TMDb/Trakt pages once',
-            len(gated), POOL_MIN_HEALTHY,
-        )
-        extra_by: Dict[int, Dict[str, Any]] = {int(c['tmdb_id']): c for c in gated if c.get('tmdb_id')}
-        if enabled and client_id:
-            for path, pages in [
-                ('/movies/popular', TRAKT_POPULAR_PAGES + 50),
-                ('/movies/watched/all', TRAKT_WATCHED_ALL_PAGES + 40),
-                ('/movies/favorited/all', TRAKT_FAVORITED_ALL_PAGES + 30),
-                ('/movies/watched/yearly', TRAKT_WATCHED_PAGES + 30),
-            ]:
-                raw = _fetch_trakt_list(path, client_id, pages)
-                for entry in raw:
-                    norm = _normalize_trakt_entry(entry)
-                    if norm:
-                        _merge_candidate(extra_by, norm, owned)
-        for path, pages, extra in [
-            ('/movie/popular', TMDB_POPULAR_PAGES + 20, None),
-            ('/movie/top_rated', TMDB_TOP_RATED_PAGES + 15, None),
-            ('/discover/movie', TMDB_DISCOVER_PAGES + 30, {
-                'sort_by': 'vote_count.desc',
-                'include_adult': 'false',
-                'with_original_language': 'en',
-                'vote_count.gte': max(800, TMDB_VOTE_FALLBACK // 2),
-            }),
-            ('/discover/movie', 25, {
-                'sort_by': 'popularity.desc',
-                'include_adult': 'false',
-                'with_original_language': 'en',
-                'vote_count.gte': max(800, TMDB_VOTE_FALLBACK // 2),
-            }),
-        ]:
-            raw = _fetch_tmdb_list(tmdb_key, path, pages, extra)
-            for item in raw:
-                _merge_candidate(extra_by, item, owned)
-        more = list(extra_by.values())
-        _tmdb_enrich(more, tmdb_key)
-        more = [
-            c for c in more
-            if (c.get('original_language') or ENGLISH) == ENGLISH
-            and c.get('poster_path')
-            and not _title_has_strong_non_latin(c.get('title') or '')
-            and _year_ok(c)
-        ]
-        try:
-            from app.imdb_ratings import enrich_imdb_ratings
-            enrich_imdb_ratings(
-                more,
-                settings=settings,
-                max_items=min(len(more), 900),
-                replace_rating=True,
-                workers=8,
-            )
-        except Exception as e:
-            logger.warning('daily_missing: expand IMDb enrich failed: %s', e)
-        gated = [c for c in more if _passes_quality_gate(c)]
-        gated.sort(
-            key=lambda c: (
-                _coerce_imdb_votes(c.get('imdb_votes')) or 0,
-                c.get('tmdb_vote_count') or 0,
-                c.get('watchers') or 0,
-            ),
-            reverse=True,
-        )
-        if len(gated) > POOL_TARGET:
-            gated = gated[:POOL_TARGET]
-        logger.info('daily_missing: after expand — %d gated', len(gated))
-
+def build_pool(force: bool = False) -> Dict[str, Any]:
+    """Rebuild the unowned-popular candidate pool and persist it. Raises PoolError when it can't (the old
+    pool stays)."""
+    global _mem_pool, _mem_key, _mem_seed_ids
+    cfg = wym_store.settings()
+    client_id, key = trakt_client_id(), tmdb_key()
+    sig = wym_store.pool_sig(cfg, sources_sig())
+    if not force:
+        cached = _read_pool()
+        if cached and cached.get('sig') == sig and (time.time() - float(cached.get('built_at') or 0)) < int(cfg['rebuild_hours']) * 3600:
+            return cached
+    if not client_id and not key:
+        raise PoolError('No TMDb key or Trakt client ID')
+    own = _owned()
+    if not own['plex_ok']:
+        raise PoolError("Can't reach Plex")
+    logger.info("What you're missing: building the pool (owned or grabbing: %d)", len(own['ids']))
+    by_tmdb = _collect(cfg, own, client_id, key, expand=False)
+    gated = _gate(list(by_tmdb.values()), cfg, key)
+    if len(gated) < POOL_MIN_HEALTHY and key:
+        logger.warning("What you're missing: pool only %d (< %d), digging deeper once", len(gated), POOL_MIN_HEALTHY)
+        extra = _collect(cfg, own, client_id, key, expand=True, into={int(c['tmdb_id']): c for c in gated})
+        gated = _gate(list(extra.values()), cfg, key)
+    now = time.time()
     payload = {
-        'built_at': time.time(),
-        'built_at_iso': datetime.now(NY).isoformat(),
-        'imdb_min_votes': IMDB_MIN_VOTES,
-        'tmdb_vote_fallback': TMDB_VOTE_FALLBACK,
-        'owned_excluded': len(owned),
+        'built_at': now,
+        'built_at_iso': datetime.fromtimestamp(now, NY).isoformat(),
+        'sig': sig,
+        'owned_excluded': len(own['ids']),
         'candidates': gated,
-        'note': (
-            f'Pool gate soft: year {YEAR_MIN}-{YEAR_MAX}, English+poster; '
-            f'reject known IMDb <{IMDB_HARD_REJECT}; TMDb votes>={TMDB_VOTE_FALLBACK} '
-            f'or IMDb>={IMDB_MIN_VOTES}. Huge pool → daily 20 rotates.'
-        ),
-        'imdb_hard_reject': IMDB_HARD_REJECT,
     }
     _write_pool(payload)
     with _lock:
         _mem_pool = payload
-        _mem_day = None
+        _mem_key = None
         _mem_seed_ids = []
-    logger.info('daily_missing: pool ready — %d candidates', len(gated))
+    logger.info("What you're missing: pool ready — %d candidates", len(gated))
     return payload
 
 
 def _write_pool(payload: Dict[str, Any]) -> None:
     path = _pool_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix('.tmp')
-        tmp.write_text(json.dumps(payload, ensure_ascii=False))
-        tmp.replace(path)
-    except Exception as e:
-        logger.error('daily_missing: failed to write pool: %s', e)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix('.tmp')
+    tmp.write_text(json.dumps(payload, ensure_ascii=False))
+    tmp.replace(path)
 
 
 def _read_pool() -> Optional[Dict[str, Any]]:
@@ -725,44 +727,191 @@ def _read_pool() -> Optional[Dict[str, Any]]:
             with _lock:
                 _mem_pool = data
             return data
-    except Exception as e:
-        logger.warning('daily_missing: pool read failed: %s', e)
+    except Exception as e:                               # noqa: BLE001
+        logger.warning("What you're missing: pool read failed: %s", type(e).__name__)
     return None
 
 
-def _day_seed(day: str) -> int:
-    digest = hashlib.sha256(f'what_youre_missing:{day}'.encode()).hexdigest()
-    return int(digest[:16], 16)
+def _forget_memory() -> None:
+    """Tests: drop the in-memory pool and slate."""
+    global _mem_pool, _mem_key, _mem_seed_ids
+    with _lock:
+        _mem_pool, _mem_key, _mem_seed_ids = None, None, []
 
+
+# ------------------------------------------------------------------ scheduler
+
+def rail_on() -> bool:
+    """The one switch is Home screen settings (home_rails' show/hide); the pool idles while it is hidden."""
+    try:
+        from app import home_rails
+        return home_rails.WYM_ID not in set(home_rails.load_prefs().get('hidden') or [])
+    except Exception:                                    # noqa: BLE001
+        return True
+
+
+def _backoff_until(now: float) -> float:
+    if _state['last_error'] and wym_store.changed_at() <= _state['last_attempt']:
+        return _state['last_attempt'] + RETRY_S
+    return 0.0
+
+
+def next_rebuild(cfg: Optional[Dict[str, Any]] = None, pool: Optional[Dict[str, Any]] = None,
+                 now: Optional[float] = None) -> Optional[float]:
+    """When the scheduler rebuilds next (epoch seconds), None while off or building."""
+    cfg = cfg or wym_store.settings()
+    if not rail_on() or _state['building']:
+        return None
+    now = time.time() if now is None else now
+    pool = _read_pool() if pool is None else pool
+    hold = _backoff_until(now)
+    if not pool or pool.get('sig') != current_sig(cfg):
+        return max(now, wym_store.changed_at() + SETTLE_S, hold)
+    return max(float(pool.get('built_at') or 0) + int(cfg['rebuild_hours']) * 3600, hold)
+
+
+def due(now: Optional[float] = None) -> bool:
+    nxt = next_rebuild(now=now)
+    return nxt is not None and nxt <= (time.time() if now is None else now)
+
+
+def rebuild(force: bool = True) -> Optional[Dict[str, Any]]:
+    """One rebuild (single flight). Records the outcome for the status; never raises."""
+    if not _build_lock.acquire(blocking=False):
+        return None
+    _state['building'] = True
+    _state['last_attempt'] = time.time()
+    try:
+        payload = build_pool(force=force)
+        _state['last_error'] = None
+        return payload
+    except PoolError as e:
+        _state['last_error'] = str(e)
+        logger.warning("What you're missing: rebuild skipped: %s", e)
+    except Exception as e:                               # noqa: BLE001
+        _state['last_error'] = "Couldn't rebuild"
+        logger.error("What you're missing: rebuild failed: %s", type(e).__name__)
+    finally:
+        _state['building'] = False
+        _build_lock.release()
+    return None
+
+
+def rebuild_async() -> bool:
+    """Refresh now: start a rebuild in the background. False when one is already running."""
+    if _state['building'] or _build_lock.locked():
+        return False
+    _start['fn'](lambda: rebuild(force=True))
+    return True
+
+
+def tick(now: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """Rebuild if due. Returns the new pool, or None."""
+    if not due(now):
+        return None
+    return rebuild(force=True)
+
+
+def sleep_s(now: Optional[float] = None) -> float:
+    try:
+        nxt = next_rebuild(now=now)
+        if nxt is not None:
+            delta = nxt - (time.time() if now is None else now)
+            if 0 < delta < CHECK_S:
+                return delta + 1
+    except Exception:                                    # noqa: BLE001
+        logger.exception("What you're missing: next rebuild unknown")
+    return CHECK_S
+
+
+def wake() -> None:
+    """A settings change or Refresh now: look again now instead of at the next 5-minute check."""
+    _wake.set()
+
+
+def status(now: Optional[float] = None) -> Dict[str, Any]:
+    cfg = wym_store.settings()
+    pool = _read_pool()
+    nxt = next_rebuild(cfg, pool, now)
+    built = float(pool.get('built_at') or 0) if pool else 0.0
+    return {
+        'on_home': rail_on(),
+        'building': bool(_state['building']),
+        'last_rebuilt': datetime.fromtimestamp(built, NY).isoformat() if built else None,
+        'pool_size': len(pool.get('candidates') or []) if pool else 0,
+        'next_rebuild': datetime.fromtimestamp(nxt, NY).isoformat() if nxt else None,
+        'error': _state['last_error'],
+    }
+
+
+def start_daily_missing_thread() -> bool:
+    """The pool refresher. Runs on every instance, minimal builds included: it only reads Plex, Trakt,
+    TMDb and OMDb and writes its own JSON in the data dir (instance.DATA_DIR_ONLY)."""
+    global _thread_started
+    from app import instance
+    if _thread_started or not instance.data_dir_only('daily_missing'):
+        return False
+    _thread_started = True
+
+    def loop():
+        time.sleep(STARTUP_DELAY_S)
+        while True:
+            try:
+                tick()
+            except Exception:                            # noqa: BLE001
+                logger.exception("What you're missing: scheduler pass failed")
+            _wake.wait(sleep_s())
+            _wake.clear()
+
+    threading.Thread(target=loop, name='daily-missing-pool', daemon=True).start()
+    logger.info("What you're missing: pool refresher started (every %sh, Settings > Automation)",
+                wym_store.settings()['rebuild_hours'])
+    return True
+
+
+def refresh_now() -> Dict[str, Any]:
+    """Prod's synchronous rebuild (full builds' POST /refresh)."""
+    return build_pool(force=True)
+
+
+# ------------------------------------------------------------------ dismissed
+
+def _read_dismissed_doc() -> Dict[str, Any]:
+    path = _dismissed_path()
+    if not path.exists():
+        return {'tmdb_ids': [], 'items': {}}
+    try:
+        data = json.loads(path.read_text())
+    except Exception as e:                               # noqa: BLE001
+        logger.warning("What you're missing: dismissed read failed: %s", type(e).__name__)
+        return {'tmdb_ids': [], 'items': {}}
+    if isinstance(data, list):                           # a bare list of ids
+        data = {'tmdb_ids': data}
+    if not isinstance(data, dict):
+        return {'tmdb_ids': [], 'items': {}}
+    items = data.get('items') if isinstance(data.get('items'), dict) else {}
+    return {'tmdb_ids': data.get('tmdb_ids') or [], 'items': items}
 
 
 def _read_dismissed() -> Set[int]:
-    """Permanent tmdb_id dismissals for What You're Missing (survive restarts/rotation)."""
-    path = _dismissed_path()
-    if not path.exists():
-        return set()
-    try:
-        data = json.loads(path.read_text())
-        raw = data.get('tmdb_ids') if isinstance(data, dict) else data
-        out: Set[int] = set()
-        for x in (raw or []):
-            try:
-                tid = int(x)
-            except (TypeError, ValueError):
-                continue
-            if tid > 0:
-                out.add(tid)
-        return out
-    except Exception as e:
-        logger.warning('daily_missing: dismissed read failed: %s', e)
-        return set()
+    """Permanent tmdb_id dismissals (survive restarts/rotation)."""
+    out: Set[int] = set()
+    for x in _read_dismissed_doc()['tmdb_ids']:
+        try:
+            tid = int(x)
+        except (TypeError, ValueError):
+            continue
+        if tid > 0:
+            out.add(tid)
+    return out
 
 
-def _write_dismissed(ids: Set[int]) -> None:
+def _write_dismissed(ids: Set[int], items: Dict[str, Any]) -> None:
     path = _dismissed_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         'tmdb_ids': sorted(int(x) for x in ids),
+        'items': {k: v for k, v in items.items() if k.isdigit() and int(k) in ids},
         'updated_at_iso': datetime.now(NY).isoformat(),
     }
     tmp = path.with_suffix('.tmp')
@@ -770,36 +919,86 @@ def _write_dismissed(ids: Set[int]) -> None:
     tmp.replace(path)
 
 
-def list_dismissed() -> Dict[str, Any]:
-    ids = sorted(_read_dismissed())
-    return {
-        'tmdb_ids': ids,
-        'count': len(ids),
-        'path': str(_dismissed_path()),
-    }
+def _pool_item(tid: int) -> Optional[Dict[str, Any]]:
+    pool = _read_pool() or {}
+    return next((c for c in pool.get('candidates') or [] if c.get('tmdb_id') == tid), None)
 
 
 def dismiss(tmdb_id: int) -> Dict[str, Any]:
-    """Permanently hide a title from What You're Missing by tmdb_id."""
+    """Permanently hide a title from What you're missing by tmdb_id."""
     global _mem_seed_ids
     tid = int(tmdb_id)
     if tid <= 0:
         raise ValueError('tmdb_id must be a positive int')
     with _lock:
+        doc = _read_dismissed_doc()
         ids = _read_dismissed()
         already = tid in ids
         ids.add(tid)
-        _write_dismissed(ids)
+        items = dict(doc['items'])
+        meta = _pool_item(tid) or {}
+        items.setdefault(str(tid), {'title': meta.get('title') or '', 'year': meta.get('year'),
+                                    'poster_path': meta.get('poster_path'), 'at': time.time()})
+        _write_dismissed(ids, items)
         if _mem_seed_ids:
             _mem_seed_ids = [x for x in _mem_seed_ids if x != tid]
-    logger.info('daily_missing: dismissed tmdb_id=%s (already=%s, total=%d)', tid, already, len(ids))
-    return {
-        'ok': True,
-        'tmdb_id': tid,
-        'already': already,
-        'dismissed_count': len(ids),
-    }
+    logger.info("What you're missing: dismissed tmdb_id=%s (already=%s, total=%d)", tid, already, len(ids))
+    return {'ok': True, 'tmdb_id': tid, 'already': already, 'dismissed_count': len(ids)}
 
+
+def restore(tmdb_id: int) -> Dict[str, Any]:
+    """Undo a dismissal (Settings > Automation > Dismissed movies)."""
+    global _mem_key
+    tid = int(tmdb_id)
+    if tid <= 0:
+        raise ValueError('tmdb_id must be a positive int')
+    with _lock:
+        doc = _read_dismissed_doc()
+        ids = _read_dismissed()
+        was = tid in ids
+        ids.discard(tid)
+        items = {k: v for k, v in doc['items'].items() if k != str(tid)}
+        _write_dismissed(ids, items)
+        _mem_key = None                                  # it may come back in today's slate
+    return {'ok': True, 'tmdb_id': tid, 'restored': was, 'dismissed_count': len(ids)}
+
+
+def tmdb_title(tid: int) -> Dict[str, Any]:
+    """Title, year and poster of a dismissed film the pool no longer has (TMDb)."""
+    key = tmdb_key()
+    if not key:
+        return {}
+    try:
+        r = http_get(f'https://api.themoviedb.org/3/movie/{tid}', {'api_key': key}, None, TMDB_DETAIL_TIMEOUT_S)
+        d = r.json() if r.ok else {}
+    except Exception:                                    # noqa: BLE001
+        return {}
+    rd = str(d.get('release_date') or '')
+    return {'title': d.get('title') or '', 'year': int(rd[:4]) if rd[:4].isdigit() else None,
+            'poster_path': d.get('poster_path')}
+
+
+def list_dismissed(lookups: int = 20) -> Dict[str, Any]:
+    """Dismissed films, newest first, with title, year and poster."""
+    doc = _read_dismissed_doc()
+    ids = _read_dismissed()
+    out = []
+    for tid in ids:
+        meta = dict(doc['items'].get(str(tid)) or {})
+        if not meta.get('title'):
+            p = _pool_item(tid)
+            if p:
+                meta.update(title=p.get('title'), year=p.get('year'), poster_path=p.get('poster_path'))
+            elif lookups > 0:
+                lookups -= 1
+                meta.update(tmdb_title(tid))
+        out.append({'tmdb_id': tid, 'title': meta.get('title') or '', 'year': meta.get('year'),
+                    'poster_path': meta.get('poster_path'), 'at': meta.get('at') or 0})
+    out.sort(key=lambda m: (-(m['at'] or 0), m['tmdb_id']))
+    return {'tmdb_ids': sorted(ids), 'count': len(ids), 'items': out}
+
+
+# ------------------------------------------------------------------ served history and the slate
 
 def _read_served_history() -> Dict[str, List[int]]:
     """NY-day -> list of tmdb_ids shown that day (persisted across restarts)."""
@@ -811,19 +1010,12 @@ def _read_served_history() -> Dict[str, List[int]]:
         days = (data.get('days') if isinstance(data, dict) else None) or {}
         out: Dict[str, List[int]] = {}
         for day, ids in days.items():
-            cleaned: List[int] = []
-            for x in (ids or []):
-                try:
-                    tid = int(x)
-                except (TypeError, ValueError):
-                    continue
-                if tid > 0:
-                    cleaned.append(tid)
+            cleaned = [int(x) for x in (ids or []) if str(x).isdigit() and int(x) > 0]
             if cleaned:
                 out[str(day)] = cleaned
         return out
-    except Exception as e:
-        logger.warning('daily_missing: served history read failed: %s', e)
+    except Exception as e:                               # noqa: BLE001
+        logger.warning("What you're missing: served history read failed: %s", type(e).__name__)
         return {}
 
 
@@ -831,22 +1023,17 @@ def _write_served_history(days: Dict[str, List[int]]) -> None:
     path = _served_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Keep only recent calendar days
         keep_after = (datetime.now(NY).date() - timedelta(days=SERVED_HISTORY_KEEP_DAYS)).isoformat()
         pruned = {d: ids for d, ids in days.items() if d >= keep_after}
-        payload = {
-            'days': pruned,
-            'updated_at_iso': datetime.now(NY).isoformat(),
-            'exclude_recent_days': EXCLUDE_RECENT_DAYS,
-        }
+        payload = {'days': pruned, 'updated_at_iso': datetime.now(NY).isoformat()}
         tmp = path.with_suffix('.tmp')
         tmp.write_text(json.dumps(payload, indent=2) + chr(10))
         tmp.replace(path)
-    except Exception as e:
-        logger.error('daily_missing: served history write failed: %s', e)
+    except Exception as e:                               # noqa: BLE001
+        logger.error("What you're missing: served history write failed: %s", type(e).__name__)
 
 
-def _recent_served_ids(before_day: str, n_days: int = EXCLUDE_RECENT_DAYS) -> Set[int]:
+def _recent_served_ids(before_day: str, n_days: int) -> Set[int]:
     """Union of served ids for the n NY calendar days strictly before before_day."""
     if n_days <= 0:
         return set()
@@ -856,11 +1043,7 @@ def _recent_served_ids(before_day: str, n_days: int = EXCLUDE_RECENT_DAYS) -> Se
         return set()
     wanted = {(anchor - timedelta(days=i)).isoformat() for i in range(1, n_days + 1)}
     hist = _read_served_history()
-    out: Set[int] = set()
-    for day in wanted:
-        for tid in hist.get(day) or []:
-            out.add(int(tid))
-    return out
+    return {int(t) for day in wanted for t in hist.get(day) or []}
 
 
 def _record_served(day: str, ids: List[int]) -> None:
@@ -868,31 +1051,23 @@ def _record_served(day: str, ids: List[int]) -> None:
         return
     with _lock:
         hist = _read_served_history()
+        if hist.get(day) == [int(x) for x in ids]:
+            return
         hist[day] = [int(x) for x in ids]
         _write_served_history(hist)
 
 
-def _daily_slice(
-    candidates: List[Dict[str, Any]],
-    day: str,
-    owned: Set[int],
-    limit: int,
-    dismissed: Optional[Set[int]] = None,
-    exclude_ids: Optional[Set[int]] = None,
-) -> List[Dict[str, Any]]:
+def _day_seed(day: str) -> int:
+    digest = hashlib.sha256(f'what_youre_missing:{day}'.encode()).hexdigest()
+    return int(digest[:16], 16)
+
+
+def _daily_slice(candidates: List[Dict[str, Any]], day: str, banned: Set[int], limit: int,
+                 exclude_ids: Optional[Set[int]] = None) -> List[Dict[str, Any]]:
     """Date-seeded shuffle. Prefer titles not in exclude_ids; fill from excluded if short."""
-    banned = set(owned) | (dismissed or set())
     exclude = set(exclude_ids or set()) - banned
-    primary = [
-        c for c in candidates
-        if int(c.get('tmdb_id') or 0) not in banned
-        and int(c.get('tmdb_id') or 0) not in exclude
-    ]
-    secondary = [
-        c for c in candidates
-        if int(c.get('tmdb_id') or 0) not in banned
-        and int(c.get('tmdb_id') or 0) in exclude
-    ]
+    primary = [c for c in candidates if int(c.get('tmdb_id') or 0) not in banned | exclude]
+    secondary = [c for c in candidates if int(c.get('tmdb_id') or 0) in exclude]
     rng = random.Random(_day_seed(day))
     order = list(primary)
     rng.shuffle(order)
@@ -903,83 +1078,60 @@ def _daily_slice(
     return order[:limit]
 
 
-def get_rail(limit: int = RAIL_SIZE, refresh_owned: bool = True) -> Dict[str, Any]:
-    """Return today's What You're Missing slate (TMDb-shaped, owned:false)."""
-    global _mem_day, _mem_seed_ids
+def _empty(day: str, error: Optional[str] = None) -> Dict[str, Any]:
+    out = {'rail_id': RAIL_ID, 'title': TITLE, 'day': day, 'movies': [], 'enabled': True, 'empty': True}
+    if error:
+        out['error'] = error
+    return out
 
+
+def kick() -> None:
+    """No pool yet: build one in the background when the schedule allows (never inside a request)."""
+    try:
+        if due():
+            rebuild_async()
+    except Exception:                                    # noqa: BLE001
+        logger.exception("What you're missing: background build not started")
+
+
+def get_rail(limit: Optional[int] = None, refresh_owned: bool = True, cached_owned: bool = False) -> Dict[str, Any]:
+    """Today's What you're missing slate (TMDb-shaped, owned:false)."""
+    global _mem_key, _mem_seed_ids
+    cfg = wym_store.settings()
+    limit = int(limit or cfg['movies_shown'])
     day = _today_ny()
+    if not rail_on():
+        return {**_empty(day), 'enabled': False}
     pool = _read_pool()
     if not pool or not pool.get('candidates'):
-        try:
-            pool = build_pool(force=False)
-        except Exception as e:
-            logger.error('daily_missing: lazy build failed: %s', e)
-            return {
-                'rail_id': RAIL_ID,
-                'title': "What you're missing",
-                'day': day,
-                'movies': [],
-                'enabled': True,
-                'empty': True,
-                'error': str(e),
-            }
+        kick()
+        return _empty(day)
 
-    candidates = list(pool.get('candidates') or [])
-    owned = _owned_tmdb_ids() if refresh_owned else set()
+    candidates = [c for c in pool.get('candidates') or [] if c.get('tmdb_id') and keep(c, cfg)]
+    own = _owned(cached_only=cached_owned) if refresh_owned else {'ids': set(), 'title_years': set()}
     dismissed = _read_dismissed()
-    by_id = {int(c['tmdb_id']): c for c in candidates if c.get('tmdb_id')}
-
-    exclude_ids = _recent_served_ids(day, EXCLUDE_RECENT_DAYS)
+    banned = {int(c['tmdb_id']) for c in candidates if _is_owned(c, own)} | dismissed
+    by_id = {int(c['tmdb_id']): c for c in candidates}
+    exclude_ids = _recent_served_ids(day, int(cfg['no_repeat_days']))
+    slate_key = (day, pool.get('built_at'), current_slate_sig(cfg), tuple(sorted(exclude_ids)))
 
     with _lock:
-        if _mem_day != day or not _mem_seed_ids:
-            seeded = _daily_slice(
-                candidates,
-                day,
-                owned,
-                limit=max(limit * 4, 80),
-                dismissed=dismissed,
-                exclude_ids=exclude_ids,
-            )
+        if _mem_key != slate_key or not _mem_seed_ids:
+            seeded = _daily_slice(candidates, day, banned, limit=len(candidates), exclude_ids=exclude_ids)
             _mem_seed_ids = [int(m['tmdb_id']) for m in seeded]
-            _mem_day = day
-
+            _mem_key = slate_key
         movies: List[Dict[str, Any]] = []
         for tid in _mem_seed_ids:
-            if tid in owned or tid in dismissed:
+            if tid in banned or tid not in by_id:
                 continue
-            item = by_id.get(tid)
-            if not item:
-                continue
-            movies.append(dict(item))
+            movies.append(dict(by_id[tid]))
             if len(movies) >= limit:
                 break
 
-        if len(movies) < limit:
-            have = {int(m['tmdb_id']) for m in movies}
-            for item in _daily_slice(
-                candidates,
-                day,
-                owned,
-                limit=max(limit * 5, 100),
-                dismissed=dismissed,
-                exclude_ids=exclude_ids,
-            ):
-                tid = int(item['tmdb_id'])
-                if tid in have or tid in dismissed:
-                    continue
-                movies.append(dict(item))
-                have.add(tid)
-                if tid not in _mem_seed_ids:
-                    _mem_seed_ids.append(tid)
-                if len(movies) >= limit:
-                    break
-
-    # Persist today's served slate so tomorrow's primary pick can exclude it.
     try:
-        _record_served(day, [int(m['tmdb_id']) for m in movies if m.get('tmdb_id')])
-    except Exception as e:
-        logger.warning('daily_missing: record served failed: %s', e)
+        _record_served(day, [int(m['tmdb_id']) for m in movies])
+    except Exception as e:                               # noqa: BLE001
+        logger.warning("What you're missing: record served failed: %s", type(e).__name__)
 
     for m in movies:
         m['owned'] = False
@@ -989,87 +1141,19 @@ def get_rail(limit: int = RAIL_SIZE, refresh_owned: bool = True) -> Dict[str, An
 
     return {
         'rail_id': RAIL_ID,
-        'title': "What you're missing",
+        'title': TITLE,
         'subtitle': f"Popular blind spots · refreshes {day}",
         'day': day,
         'movies': movies,
         'enabled': True,
         'empty': len(movies) == 0,
-        'pool_size': len(candidates),
+        'pool_size': len(pool.get('candidates') or []),
         'dismissed_count': len(dismissed),
         'excluded_recent': len(exclude_ids),
-        'imdb_min_votes': IMDB_MIN_VOTES,
         'built_at_iso': pool.get('built_at_iso'),
-        'note': pool.get('note'),
     }
 
 
-def verify_day_rotation() -> Dict[str, Any]:
-    """Prove consecutive NY days yield substantially different id sets."""
-    pool = _read_pool() or {'candidates': []}
-    cands = list(pool.get('candidates') or [])
-    owned: Set[int] = set()
-    dismissed = _read_dismissed()
-    day_a = '2026-09-09'
-    day_b = '2026-09-10'
-    day_c = '2026-09-11'
-    a = [m['tmdb_id'] for m in _daily_slice(cands, day_a, owned, RAIL_SIZE, dismissed=dismissed)]
-    # Simulate persistence: day B excludes day A's served ids
-    b = [
-        m['tmdb_id']
-        for m in _daily_slice(
-            cands, day_b, owned, RAIL_SIZE, dismissed=dismissed, exclude_ids=set(a),
-        )
-    ]
-    c = [
-        m['tmdb_id']
-        for m in _daily_slice(
-            cands, day_c, owned, RAIL_SIZE, dismissed=dismissed, exclude_ids=set(a) | set(b),
-        )
-    ]
-    # Also show pure seed shuffle without exclusion (pool-size sanity)
-    a0 = [m['tmdb_id'] for m in _daily_slice(cands, day_a, owned, RAIL_SIZE, dismissed=dismissed)]
-    b0 = [m['tmdb_id'] for m in _daily_slice(cands, day_b, owned, RAIL_SIZE, dismissed=dismissed)]
-    return {
-        'day_a': day_a,
-        'day_b': day_b,
-        'day_c': day_c,
-        'pool_size': len(cands),
-        'ids_a': a,
-        'ids_b': b,
-        'ids_c': c,
-        'differ_ab': a != b,
-        'differ_bc': b != c,
-        'overlap_ab': len(set(a) & set(b)),
-        'overlap_bc': len(set(b) & set(c)),
-        'new_in_b': len(set(b) - set(a)),
-        'new_in_c': len(set(c) - set(b)),
-        'overlap_ab_no_exclude': len(set(a0) & set(b0)),
-        'healthy_pool': len(cands) >= POOL_MIN_HEALTHY,
-    }
-
-
-def start_daily_missing_thread() -> None:
-    from app import instance as _instance
-    if not _instance.writes_allowed('daily_missing'):   # LUMA_INSTANCE=test: off unless opted in
-        return None
-    global _thread_started
-    if _thread_started:
-        return
-    _thread_started = True
-
-    def loop():
-        time.sleep(8)
-        while True:
-            try:
-                build_pool(force=False)
-            except Exception as e:
-                logger.error('daily_missing: refresh error: %s', e)
-            time.sleep(REFRESH_INTERVAL_SEC)
-
-    threading.Thread(target=loop, name='daily-missing-pool', daemon=True).start()
-    logger.info('daily_missing: background pool refresh started (every %sh)', REFRESH_INTERVAL_SEC // 3600)
-
-
-def refresh_now() -> Dict[str, Any]:
-    return build_pool(force=True)
+def current_slate_sig(cfg: Dict[str, Any]) -> str:
+    """The settings the slate applies itself (so a change re-deals today's order)."""
+    return wym_store.pool_sig(cfg, {'no_repeat_days': cfg['no_repeat_days']})

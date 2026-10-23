@@ -680,7 +680,7 @@ def start_services(app_instance):
     # LUMA_MINIMAL=1: no caches, automations, schedulers or tunnel; only the
     # library search index (it reads Plex, and TMDB only with a Connectors key).
     if _minimal.enabled():
-        logger.warning('LUMA_MINIMAL is set: background threads are NOT started (except the search index, the library mover and the TV rescan)')
+        logger.warning('LUMA_MINIMAL is set: background threads are NOT started (except the search index, the library mover, the TV rescan and What you\'re missing)')
         if not skip_bg:
             try:
                 fast_search_index.start()
@@ -700,6 +700,13 @@ def start_services(app_instance):
                 tv_scan.start_scheduler()
             except Exception as e:
                 logger.error(f"Failed to start the TV rescan: {type(e).__name__}")
+            # v254: What you're missing's pool refresher. Reads Plex, Trakt, TMDb and OMDb, writes only its JSON
+            # in the data dir (instance.DATA_DIR_ONLY); idle while the rail is hidden (Settings > Home screen).
+            try:
+                from app.daily_missing import start_daily_missing_thread
+                start_daily_missing_thread()
+            except Exception as e:
+                logger.error(f"Failed to start What you're missing: {type(e).__name__}")
         return
 
     # Initialize library caches
@@ -856,14 +863,13 @@ def start_services(app_instance):
         except Exception as e:
             logger.error(f"❌ Failed to start Watchlist Digital Dates scheduler: {e}")
         
-        # What You're Missing pool refresher
+        # What you're missing pool refresher (v254: not a writer; instance.DATA_DIR_ONLY, no writes gate)
         try:
             from app.daily_missing import start_daily_missing_thread
-            if _instance.writes_allowed('daily_missing'):
-                start_daily_missing_thread()
-                logger.info("✅ What You're Missing pool refresher started")
+            if start_daily_missing_thread() is True:
+                logger.info("✅ What you're missing pool refresher started")
         except Exception as e:
-            logger.error(f"❌ Failed to start What You're Missing refresher: {e}")
+            logger.error(f"❌ Failed to start What you're missing refresher: {type(e).__name__}")
         
         # Movie Collections refresher
         try:
