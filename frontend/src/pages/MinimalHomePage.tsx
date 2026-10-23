@@ -180,6 +180,9 @@ export function MinimalHomePage() {
             <main data-phone-rails>
               {homeView(withMissing(data, wymOverride), failed || slow, () => setAttempt(a => a + 1), openCard, setDismissTarget)}
             </main>
+            {/* v259 Tester LOW: prod's last rail keeps its 28 px bottom margin (Rail <section style={{ marginBottom: 28 }}>,
+                AuthenticatedHomePage.tsx:272) above the 48 px spacer; test's rails have top margins only. */}
+            <div style={{ height: 28 }} data-testid="phone-last-rail-gap" />
             <div style={{ height: 48 }} />
           </div>
         </div>
