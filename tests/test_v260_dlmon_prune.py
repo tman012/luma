@@ -268,3 +268,27 @@ def test_expected_real_case_still_drops_one(env, caplog):
     assert env.meta[dlmon_prune.META_KEY]
     assert any('dropped 1 entry: …201e' in m.getMessage() for m in caplog.records)
     assert not [m for m in caplog.records if m.levelno >= logging.WARNING]
+
+
+# --- Tester LOW: qBit down warns on the first start only, INFO after -------------------------------------
+
+def test_qbit_down_warns_once_then_info(env, caplog):
+    env.qbit['torrents'] = None
+    with caplog.at_level(logging.INFO, logger='app.dlmon_prune'):
+        for _ in range(3):
+            assert dlmon_prune.run_once()['status'] == 'unreadable'
+    levels = [m.levelno for m in caplog.records]
+    assert levels == [logging.WARNING, logging.INFO, logging.INFO]
+    assert env.meta[dlmon_prune.RETRY_KEY] == 'unreadable'
+    assert dlmon_prune.META_KEY not in env.meta and _monitor(env) == env.monitor
+
+
+def test_new_reason_warns_again(env, caplog):
+    env.qbit['torrents'] = None
+    dlmon_prune.run_once()
+    env.qbit['torrents'] = [{'hash': H_KEEP}]
+    (env.data / 'download_monitor.json').write_text('[]')
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger='app.dlmon_prune'):
+        assert dlmon_prune.run_once()['status'] == 'unexpected'
+    assert [m.levelno for m in caplog.records] == [logging.WARNING]

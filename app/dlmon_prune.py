@@ -17,6 +17,9 @@ Manchurian Candidate, …201e). Once, at boot on minimal (test) builds, in the D
    WARNING, and the migration is tried again on the next start.
 4. One INFO line with the count and the last 4 of each dropped hash; then the meta key is set.
 
+While qBittorrent stays unreadable, only the first start in a row warns; later ones log INFO (meta key
+dlmon_prune_v260_retry holds the reason already warned about).
+
 grab_origins.json is never read or written. Everything runs in try/except: a failure logs and boot goes on.
 """
 from __future__ import annotations
@@ -33,6 +36,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 logger = logging.getLogger(__name__)
 
 META_KEY = 'dlmon_prune_v260'
+RETRY_KEY = 'dlmon_prune_v260_retry'
 MIN_LIMIT = 10                     # never refuse a drop of this many or fewer
 MAX_SHARE = 0.10                   # ... unless it is more than this share of the hash entries
 MONITOR_FILE = 'download_monitor.json'
@@ -73,6 +77,18 @@ def drop_limit(hash_entries: int) -> int:
     return max(MIN_LIMIT, int(hash_entries * MAX_SHARE))
 
 
+def _retry_log(reason: str, msg: str, *args: Any) -> None:
+    """WARNING the first start in a row that hits this reason, INFO on later ones (Tester LOW)."""
+    from app import tv_store
+    try:
+        seen = tv_store.get_meta(RETRY_KEY) == reason
+        if not seen:
+            tv_store.set_meta(RETRY_KEY, reason)
+    except Exception:                                        # noqa: BLE001
+        seen = False
+    logger.log(logging.INFO if seen else logging.WARNING, msg + ('' if seen else '; trying again next start'), *args)
+
+
 def _now() -> float:
     return (_cfg.get('now') or time.time)()
 
@@ -85,8 +101,8 @@ def run_once() -> Dict[str, Any]:
             return {'status': 'done before'}
         got = known_torrents()
         if got is None:
-            logger.warning("Download monitor prune: qBittorrent couldn't be read or listed no torrents; "
-                           "nothing pruned, trying again next start")
+            _retry_log('unreadable', "Download monitor prune: qBittorrent couldn't be read or listed no torrents; "
+                       "nothing pruned")
             return {'status': 'unreadable'}
         have, listed = got
         path = monitor_path()
@@ -97,7 +113,7 @@ def run_once() -> Dict[str, Any]:
         with open(path, 'r') as f:
             data = json.load(f)
         if not isinstance(data, dict):
-            logger.warning('Download monitor prune: %s is not an object; nothing pruned', MONITOR_FILE)
+            _retry_log('unexpected', 'Download monitor prune: %s is not an object; nothing pruned', MONITOR_FILE)
             return {'status': 'unexpected'}
         hash_keys = [k for k in data if _HASH.match(str(k).lower())]
         drop = [k for k in hash_keys if str(k).lower() not in have]
@@ -123,7 +139,10 @@ def run_once() -> Dict[str, Any]:
                     (': ' + ', '.join('…' + str(h)[-4:].lower() for h in drop)) if drop else '', os.path.basename(backup))
         return {'status': 'pruned', 'dropped': drop, 'backup': backup}
     except Exception as e:                                   # noqa: BLE001
-        logger.error('Download monitor prune failed (%s); nothing more done', type(e).__name__)
+        try:
+            _retry_log('error', 'Download monitor prune failed (%s); nothing more done', type(e).__name__)
+        except Exception:                                    # noqa: BLE001
+            pass
         return {'status': 'error'}
 
 
