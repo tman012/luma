@@ -82,8 +82,10 @@ def _log(cfg, purpose: str, sid: Optional[int], query: str, n: int, outcome: str
          section: str = 'tv') -> None:
     from app.tracker_guard import guard_key
     # v251b: search_log's purpose CHECK (tv_store schema, never migrated) allows feed/episode/season/backlog/
-    # manual; a monitor click's background lane is the owner's search, so it is logged as 'manual'
-    purpose = 'manual' if purpose == MANUAL_BACKGROUND else purpose
+    # manual; a monitor click's background lane is the owner's search, so it is logged as 'manual'.
+    # v252: an automation's search (Genre roulette) is logged as 'backlog' (in its own section); only the
+    # log label is shared: its cap accounting is its own (see query_trackers)
+    purpose = LOG_PURPOSE.get(purpose, purpose)
     with tv_store.write() as conn:
         conn.execute('INSERT INTO search_log (ts, section, tracker_key, purpose, series_id, query, results, outcome)'
                      ' VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (now, section, guard_key(cfg), purpose, sid, query, n, outcome))
@@ -93,7 +95,7 @@ def _log_cap_skip(cfg, purpose: str, sid: Optional[int], query: str, now: float,
                   section: str = 'tv') -> None:
     """v201 (PM): a daily-cap skip is logged at most once per tracker per reset window (not every pass)."""
     from app.tracker_guard import guard_key
-    key = f'tv_capskip:{guard_key(cfg)}' + (':backlog' if purpose == BACKLOG else '')
+    key = f'tv_capskip:{guard_key(cfg)}' + (':backlog' if purpose == BACKLOG else ':automation' if purpose == AUTOMATION else '')
     if float(tv_store.get_meta(key) or 0) > now:
         return
     tv_store.set_meta(key, str(reset))
@@ -108,6 +110,12 @@ MONITOR_PURPOSES = ('manual', MANUAL_BACKGROUND)
 #: v253: run_due's hourly searches for episodes past the early phase (search_log purpose 'backlog'); they
 #: may use only tv_budget.backlog_cap() of a tracker's daily cap
 BACKLOG = 'backlog'
+#: v252: Settings > Automation's automatic searches (Genre roulette). They count toward a tracker's daily
+#: background search cap (take_search/refund_search) in any section, but never use the TV backlog's share
+#: (BACKLOG_SHARE) and are not part of TV's early-phase ordering (run_due)
+AUTOMATION = 'automation'
+#: search_log labels for purposes its CHECK constraint doesn't list (no table rebuild: the label is mapped)
+LOG_PURPOSE = {MANUAL_BACKGROUND: 'manual', AUTOMATION: 'backlog'}
 
 
 def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bool, now: float,
@@ -134,7 +142,8 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
             continue
         # v251: the daily background search cap (per tracker, local day ET); feed polls and the owner's
         # searches are not counted or held
-        background = section == 'tv' and not interactive and purpose != 'feed' and purpose not in MONITOR_PURPOSES
+        background = ((section == 'tv' or purpose == AUTOMATION) and not interactive and purpose != 'feed'
+                      and purpose not in MONITOR_PURPOSES)
         # v253: a backlog search stops at the backlog share, keeping the rest for newly aired episodes
         if background and not tv_budget.take_search(cfg, now, backlog=purpose == BACKLOG):
             reset = tv_budget.search_cap_reset(now)
