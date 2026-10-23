@@ -52,6 +52,9 @@ _PREEXISTING = {
     ('POST', '/api/plex/match/<int:rating_key>/unmatch'),
     ('POST', '/api/settings/tv/scan'),
     ('POST', '/api/settings/tv/unmatched/<int:uid>/match'),
+    # v260 (PM): the Storage pill's Free up. Not a library write: deletes finished downloads only through
+    # qBittorrent (deleteFiles=true), never inside a library path; the signed-in owner only.
+    ('POST', '/api/storage/downloads/cleanup'),
     # v254: What you're missing's Refresh now rebuilds its own pool (reads Plex, Trakt, TMDb, OMDb; writes only
     # its JSON in the data dir: instance.DATA_DIR_ONLY); the signed-in owner only. Not a library write.
     ('POST', '/api/rails/what-youre-missing/refresh'),
