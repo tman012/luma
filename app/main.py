@@ -21775,6 +21775,8 @@ from app import movie_watchlist as _movie_watchlist  # noqa: E402  v202: the nat
 app.register_blueprint(_movie_watchlist.bp)
 from app.automation import gr_routes as _gr_routes  # noqa: E402  v252: Settings > Automation > Genre Roulette
 app.register_blueprint(_gr_routes.bp)
+from app.automation import antic_routes as _antic_routes  # noqa: E402  v253: Settings > Automation > Anticipated
+app.register_blueprint(_antic_routes.bp)
 from app import movie_import as _movie_import  # noqa: E402  v204: movie import and rename (test only)
 app.register_blueprint(_movie_import.bp)
 try:
@@ -21837,6 +21839,11 @@ try:
         _gr_scheduler.start()      # v252: Genre Roulette (native, no Radarr; test install only; off until turned on)
     except Exception:
         logger.exception('Genre Roulette scheduler did not start')
+    try:
+        from app.automation import antic as _antic
+        _antic.start()             # v253: Anticipated shows and movies (native; test install only; off until turned on)
+    except Exception:
+        logger.exception('Anticipated scheduler did not start')
 except Exception as _e:  # noqa: BLE001
     logger.error('TV search not started: %s', type(_e).__name__)
 from app import tv_scan as _tv_scan_boot  # noqa: E402

@@ -25,7 +25,7 @@ export interface GrLive { status: GrStatus; history: GrRun[]; preview: GrPreview
 export type R<T> = { ok: true; data: T } | { ok: false; status: number; errors?: Record<string, string> };
 export const URL = '/api/settings/automation/genre-roulette';
 
-async function call<T>(url: string, init?: RequestInit): Promise<R<T>> {
+export async function call<T>(url: string, init?: RequestInit): Promise<R<T>> {
   try {
     const res = await apiFetch(url, init);
     const data = await res.json().catch(() => ({}));
@@ -34,7 +34,7 @@ async function call<T>(url: string, init?: RequestInit): Promise<R<T>> {
     return { ok: false, status: 0 };
   }
 }
-const json = (method: string, body: unknown): RequestInit => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+export const json = (method: string, body: unknown): RequestInit => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 export const loadGr = () => call<GrView>(URL);
 export const saveGr = (patch: Partial<GrSettings>) => call<GrView>(URL, json('PUT', patch));

@@ -220,7 +220,7 @@ def _aliases(raw) -> List[str]:
 
 @tv_scan._locked
 def add(tmdb_id: int, path_id: Optional[str], now: Optional[float] = None, monitor: Optional[str] = None,
-        profile_id: Optional[int] = None) -> Dict[str, Any]:
+        profile_id: Optional[int] = None, search: bool = True) -> Dict[str, Any]:
     """Add from Search: the show goes into tv.db for *path_id* (one of the
     selected TV libraries; optional when there's only one) and onto the
     calendar. No folder or file is created and nothing is downloaded. A show
@@ -257,13 +257,15 @@ def add(tmdb_id: int, path_id: Optional[str], now: Optional[float] = None, monit
             conn.execute('INSERT INTO history (ts, series_id, episode_ids, event, detail) VALUES (?, ?, ?, ?, ?)',
                          (now, known['id'], '[]', 'added', __import__('json').dumps(
                              {'via': 'search', 'path_id': path_id, 'tmdb_id': tmdb_id})))
-        _search_on_add(known['id'], now)
+        if search:
+            _search_on_add(known['id'], now)
         return {'ok': True, 'series_id': known['id']}
     sid = tv_scan.store_show(path_id, None, tmdb_id, now, via='search', event='added', data=data,
                              monitor=monitor, profile_id=profile_id)
     if sid is None:
         return {'ok': False, 'error': ALREADY, 'status': 409}
-    _search_on_add(sid, now)
+    if search:                            # v253: Anticipated shows' Search when added (on by default)
+        _search_on_add(sid, now)
     return {'ok': True, 'series_id': sid}
 
 

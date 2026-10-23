@@ -70,12 +70,12 @@ const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
 // ---------------------------------------------------------------- controls
 
-function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+export function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
   return <div style={{ minWidth: 0 }}><label htmlFor={id} id={`${id}-label`} style={lab}>{label}</label>{children}</div>;
 }
 
 /** A number field that saves on blur or Enter; a bad value goes back to the saved one. */
-function NumField({ id, value, onCommit, step = 1, bad, disabled, decimals = 0, grouped = false, style }: {
+export function NumField({ id, value, onCommit, step = 1, bad, disabled, decimals = 0, grouped = false, style }: {
   id: string; value: number; onCommit: (n: number) => void; step?: number; bad?: boolean; disabled?: boolean; decimals?: number; grouped?: boolean; style?: CSSProperties;
 }) {
   const show = (n: number) => (grouped ? n.toLocaleString('en-US') : decimals ? n.toFixed(decimals) : String(n));
@@ -95,7 +95,7 @@ function NumField({ id, value, onCommit, step = 1, bad, disabled, decimals = 0, 
   );
 }
 
-function Stepper({ id, value, min, max, onChange }: { id: string; value: number; min: number; max: number; onChange: (n: number) => void }) {
+export function Stepper({ id, value, min, max, onChange }: { id: string; value: number; min: number; max: number; onChange: (n: number) => void }) {
   const b = (label: string, d: number, text: string) => (
     <button type="button" className="gr-step lp-focus" aria-label={label} disabled={value + d < min || value + d > max}
       onClick={() => onChange(value + d)} data-testid={`${id}-${d < 0 ? 'minus' : 'plus'}`}
