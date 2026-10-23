@@ -28,7 +28,7 @@ export const LANGUAGES: Record<string, string> = {
 };
 const DAYS = [{ id: 'daily' as const, label: 'Every day' }, { id: 'weekdays' as const, label: 'Weekdays' }, { id: 'weekends' as const, label: 'Weekends' }];
 
-const css = `
+export const grCss = `
 .gr-grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(280px,1fr);gap:16px;align-items:start}
 .gr-f4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
 .gr-f3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
@@ -109,8 +109,8 @@ export function Stepper({ id, value, min, max, onChange }: { id: string; value: 
   );
 }
 
-type ChipState = 'on' | 'off' | 'out';
-function Chip({ name, state, onClick }: { name: string; state: ChipState; onClick: () => void }) {
+export type ChipState = 'on' | 'off' | 'out';
+export function Chip({ name, state, onClick }: { name: string; state: ChipState; onClick: () => void }) {
   const label = DISPLAY[name] || name;
   const s: CSSProperties = state === 'on'
     ? { background: 'rgba(110,134,180,0.38)', borderColor: 'rgba(140,165,215,0.45)', color: W95 }
@@ -126,7 +126,7 @@ function Chip({ name, state, onClick }: { name: string; state: ChipState; onClic
   );
 }
 
-function Poster({ path, title }: { path: string | null; title: string }) {
+export function Poster({ path, title }: { path: string | null; title: string }) {
   const box: CSSProperties = { width: 20, height: 30, borderRadius: 3, flex: 'none', background: 'rgba(255,255,255,0.08)', objectFit: 'cover' };
   return path ? <img src={apiUrl(`/api/img/tmdb?path=${encodeURIComponent(path)}&size=w92`)} alt="" aria-label={title} style={box} loading="lazy" /> : <span style={box} />;
 }
@@ -290,7 +290,7 @@ export function GenreRouletteSettings({ wide = true }: { wide?: boolean } = {}) 
 
   return (
     <div data-testid="genre-roulette" style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, color: W95, padding: wide ? 0 : '8px 16px 24px' }}>
-      <style>{tvEditCss}{css}</style>
+      <style>{tvEditCss}{grCss}</style>
       <section className="gr-head" aria-label="Genre roulette" style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
         <Toggle id="gr-enabled" on={s.enabled} onChange={v => put({ enabled: v })} label="Genre roulette" />
         <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 12, rowGap: 2, flex: 1, minWidth: 0 }}>
