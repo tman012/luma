@@ -29,6 +29,7 @@ import { LibraryPathsSettings } from '@/components/library/LibraryPathsSettings'
 import { SectionTrackersList } from '@/components/settings/SectionTrackersList';
 import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
 import { MoviesSettings } from '@/components/movies/MoviesSettings';
+import { GenreRouletteSettings } from '@/components/automation/GenreRouletteSettings';
 import { RoomsSettings } from '@/components/rooms/RoomsSettings';
 import { isMinimal } from '@/minimal';
 import { HeroSettingsRows } from '@/components/home/HeroSettings';
@@ -43,6 +44,7 @@ export const SETTINGS_SECTIONS = [
   { slug: 'library-paths', label: 'Library paths' },   // owner only
   { slug: 'movies', label: 'Movies' },   // v200: owner only, luma-test builds
   { slug: 'tv', label: 'TV' },   // owner only, luma-test builds
+  { slug: 'automation', label: 'Automation' },   // v252: owner only, luma-test builds (Genre Roulette)
 ] as const;
 const DEFAULT_SECTION = SETTINGS_SECTIONS[0].slug;
 export { SAVE_FAILED };
@@ -66,14 +68,14 @@ export function SettingsPage() {
   if (!authenticated) return <Navigate to="/login" replace />;
   const known = SETTINGS_SECTIONS.find(s => s.slug === section);
   if (section && !known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
-  const ownerOnly = (slug: string) => slug === 'plex' || slug === 'connectors' || slug === 'library-paths' || slug === 'tv' || slug === 'movies' || slug === 'rooms';
+  const ownerOnly = (slug: string) => slug === 'plex' || slug === 'connectors' || slug === 'library-paths' || slug === 'tv' || slug === 'movies' || slug === 'rooms' || slug === 'automation';
   if (known && ownerOnly(known.slug) && owner === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   if (known?.slug === 'trackers' && trackersOk === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   // Library paths: the API exists only on minimal (luma-test) builds.
-  if ((known?.slug === 'library-paths' || known?.slug === 'tv' || known?.slug === 'movies') && !isMinimal()) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
+  if ((known?.slug === 'library-paths' || known?.slug === 'tv' || known?.slug === 'movies' || known?.slug === 'automation') && !isMinimal()) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   const admin = !!user?.is_admin;
   const sections = SETTINGS_SECTIONS.filter(s => (s.slug === 'trackers' ? trackersOk
-    : s.slug === 'library-paths' || s.slug === 'tv' || s.slug === 'movies' ? owner && isMinimal() : !ownerOnly(s.slug) || owner));
+    : s.slug === 'library-paths' || s.slug === 'tv' || s.slug === 'movies' || s.slug === 'automation' ? owner && isMinimal() : !ownerOnly(s.slug) || owner));
   const content = (slug: string) => slug === 'plex'
     ? (owner ? <PlexSettings /> : null)
     : slug === 'connectors'
@@ -84,6 +86,8 @@ export function SettingsPage() {
           ? (owner ? <LibraryPathsSettings wide={wide} /> : null)
           : slug === 'movies'
             ? (owner ? <MoviesSettings wide={wide} /> : null)
+          : slug === 'automation'
+            ? (owner ? <GenreRouletteSettings wide={wide} /> : null)
           : slug === 'rooms'
             ? (owner ? <RoomsSettings wide={wide} onExit={() => navigate('/settings')} /> : null)
           : slug === 'tv'
@@ -125,7 +129,7 @@ export function SettingsPage() {
               })}
             </ul>
           </nav>
-          <main data-testid="settings-main" style={{ flex: 1, minWidth: 0, maxWidth: known.slug === 'tv' || known.slug === 'rooms' ? undefined : 720 }}>
+          <main data-testid="settings-main" style={{ flex: 1, minWidth: 0, maxWidth: known.slug === 'tv' || known.slug === 'rooms' ? undefined : known.slug === 'automation' ? 1120 : 720 }}>
             {!ownChrome && <h2 style={deskTitle}>{known.label}</h2>}
             {content(known.slug)}
           </main>

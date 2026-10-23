@@ -78,6 +78,13 @@ describe('desktop Settings layout', () => {
     await waitFor(() => expect(screen.getByTestId('settings-main').style.maxWidth).toBe('720px'));
   });
 
+  it('v252: Automation is wider (settings and status side by side, GR5)', async () => {
+    setup(true);
+    at('/settings/automation');
+    await screen.findByTestId('settings-nav');
+    await waitFor(() => expect(screen.getByTestId('settings-main').style.maxWidth).toBe('1120px'));
+  });
+
   it('Rooms takes the freed width too (cards 3 per row), as TV', async () => {
     setup(true);
     at('/settings/rooms');

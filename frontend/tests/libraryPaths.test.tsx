@@ -448,7 +448,7 @@ describe('Settings wiring for Library paths', () => {
     (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__ = true;
     renderAt('/settings/library-paths');
     const nav = screen.getByTestId('settings-nav');
-    await waitFor(() => expect(within(nav).getAllByRole('link').map(a => a.textContent).slice(-3)).toEqual(['Library paths', 'Movies', 'TV']));
+    await waitFor(() => expect(within(nav).getAllByRole('link').map(a => a.textContent).slice(-4)).toEqual(['Library paths', 'Movies', 'TV', 'Automation']));
     expect(within(nav).getByRole('link', { name: 'Library paths' }).getAttribute('aria-current')).toBe('page');
     expect(screen.getByRole('heading', { level: 2, name: 'Library paths' })).toBeTruthy();
     expect(await screen.findByTestId('library-paths-section')).toBeTruthy();
