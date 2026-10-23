@@ -10,6 +10,8 @@ export interface MovieTracker { id: number; name: string; enabled: boolean }
 export interface MovieSettings {
   monitoring: boolean; preferred_groups: string[]; trackers: MovieTracker[]; profiles: MovieProfile[]; qualities: MovieQuality[];
   picker_profiles: number[];
+  /** v256: when a movie may be grabbed or searched (minimum availability) */
+  availability?: 'announced' | 'in_cinemas' | 'released';
 }
 export type R<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -28,7 +30,7 @@ async function call<T>(url: string, init?: RequestInit): Promise<R<T>> {
 const json = (method: string, body: unknown): RequestInit => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 export const loadMovieSettings = () => call<MovieSettings>(URL);
-export const saveMovieSettings = (body: Partial<Pick<MovieSettings, 'monitoring' | 'preferred_groups' | 'picker_profiles'>> & { trackers?: { id: number; enabled: boolean }[] }) =>
+export const saveMovieSettings = (body: Partial<Pick<MovieSettings, 'monitoring' | 'preferred_groups' | 'picker_profiles' | 'availability'>> & { trackers?: { id: number; enabled: boolean }[] }) =>
   call<MovieSettings>(URL, json('PUT', body));
 export const saveMovieProfile = (p: Omit<MovieProfile, 'id'>, id?: number) =>
   call<MovieProfile>(id == null ? `${URL}/profiles` : `${URL}/profiles/${id}`, json(id == null ? 'POST' : 'PUT', p));

@@ -3,7 +3,7 @@
  * so Back works), Search under it, and the view. Calendar (the default) shows
  * the week's episodes by air date; Search finds library shows and TMDB shows
  * (Add); Import is the Import card, Review and the shows; Libraries is the TV
- * libraries selector; Options holds Upgrades and Trackers. Importing only reads
+ * libraries selector; Options holds Upgrades, Search (v256) and Trackers. Importing only reads
  * the library folders and Add only writes tv.db. */
 import { useCallback, useEffect, useRef, useState, type ReactNode, type CSSProperties } from 'react';
 import { useSearchParams } from 'react-router';
@@ -31,10 +31,11 @@ import { SAVE_FAILED } from './libraryPathsApi';
 import type { Candidate } from './tvLibraryApi';
 import {
   TV_LIBRARIES_URL, importAll, importedText, showSubtitle, loadTv, loadTvLibrary, needsReview, rematchShow,
-  saveUpgrades, savePreferredGroups, showLabel, startImport,
+  saveAutomation, saveUpgrades, savePreferredGroups, showLabel, startImport,
   type ImportProgress, type Show, type TvLibrary, type TvSettingsView, type UpgradeMode,
 } from './tvLibraryApi';
 import { isDay, localDay, weekStart } from './tvCalendarApi';
+import { TvSearchSettings } from './SearchSettings';
 
 /** Space between sections (Import, Review, Shows; Upgrades, Trackers), as on Library paths. */
 export const SECTION_GAP = 28;
@@ -231,6 +232,11 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
           <NamingSettings value={settingsView.naming} say={say}
             onSaved={n => setSettingsView(v => (v ? { ...v, naming: n } : v))} />
         )}
+        <TvSearchSettings value={settingsView.automation ?? {}} onChange={patch => {
+          const before = settingsView;
+          setSettingsView({ ...settingsView, automation: { ...settingsView.automation, ...patch } });
+          saveAutomation(patch).then(r => { if (r.ok) setSettingsView(r.data); else { setSettingsView(before); say(r.error); } });
+        }} />
         {options}
       </div>
     );

@@ -25,12 +25,12 @@ function stub(puts: { url: string; body: unknown }[]) {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('v220 Settings > Movies cleanup', () => {
-  it('shows Monitoring first, then Quality profiles, Watchlist picker, Trackers, Preferred groups, Naming', async () => {
+  it('shows Monitoring first, then Quality profiles, Watchlist picker, Search (v256), Trackers, Preferred groups, Naming', async () => {
     stub([]);
     render(<MoviesSettings />);
     await waitFor(() => expect(screen.getByTestId('movie-naming-settings')).toBeTruthy());
     const heads = Array.from(screen.getByTestId('movies-settings').querySelectorAll('h3')).map(h => h.textContent);
-    expect(heads).toEqual(['Quality profiles', 'Watchlist picker', 'Trackers', 'Preferred groups', 'Naming']);
+    expect(heads).toEqual(['Quality profiles', 'Watchlist picker', 'Search', 'Trackers', 'Preferred groups', 'Naming']);
     const root = screen.getByTestId('movies-settings');
     const sw = screen.getByRole('switch', { name: 'Monitoring' });
     const firstCard = Array.from(root.children).find(c => c.tagName !== 'STYLE' && c.getAttribute('role') !== 'alert')!;

@@ -1,4 +1,4 @@
-/** v200 Settings > Movies (the native movie watchlist, piece 1): monitoring, quality profiles, watchlist picker, trackers,
+/** v200 Settings > Movies (the native movie watchlist, piece 1): monitoring, quality profiles, watchlist picker, search (v256: availability), trackers,
  * preferred groups and naming (v220: Import card removed; its stored values are untouched), in TV Settings' visual style. Stored in movies.db; nothing reads Radarr. */
 import { useEffect, useState, type CSSProperties } from 'react';
 import { FONT } from '@/components/start/StartUI';
@@ -7,6 +7,7 @@ const W70 = 'rgba(255,255,255,0.7)';
 import { Modal, Row, Select, Toggle, SAVE_ERROR, field, glassBtn, primaryBtn, tvEditCss } from '@/components/library/TvEdit';
 import { PreferredGroups } from '@/components/library/TvLibrarySettings';
 import { sectionLabel } from '@/components/library/LibraryPathsSettings';
+import { MovieSearchSettings } from '@/components/library/SearchSettings';
 import {
   deleteMovieProfile, loadMovieSettings, saveMovieProfile, saveMovieSettings,
   type MovieProfile, type MovieQuality, type MovieSettings,
@@ -106,6 +107,8 @@ export function MoviesSettings({ wide = true }: { wide?: boolean } = {}) {
           })}
         </div>
       </div>
+
+      <MovieSearchSettings value={d.availability ?? 'released'} onChange={v => put({ availability: v }, { ...d, availability: v })} />
 
       <div data-testid="movie-trackers">
         <h3 style={sectionLabel}>Trackers</h3>
