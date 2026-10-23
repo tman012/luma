@@ -69,14 +69,15 @@ def test_others_never_delete(full, monkeypatch):
     assert full.calls == []
 
 
-def test_minimal_builds_have_no_cleanup_route(test_app, monkeypatch):
+def test_minimal_builds_cleanup_route_needs_a_session(test_app, monkeypatch):
+    """v260: minimal builds offer the cleanup (the storage pill); LAN access without a session gets 401."""
     monkeypatch.setenv('LUMA_MINIMAL', '1')
     calls = []
     monkeypatch.setattr(storage_cleanup, 'run_cleanup', lambda target, **kw: calls.append(target) or {})
     _client(test_app)
     _auth('disabled_local')
     r = test_app.test_client().post(CLEANUP, json={}, environ_base=LAN, headers=HDR)
-    assert r.status_code == 404 and calls == []      # minimal builds don't offer it, LAN or not
+    assert r.status_code == 401 and calls == []      # v260: offered on minimal, the signed-in owner only
 
 
 def test_the_cleanup_message_never_names_the_test_install():

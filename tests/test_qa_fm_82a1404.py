@@ -292,26 +292,7 @@ def test_backoff_stops_after_3_rejections_and_connector_save_releases(env):
     assert len(logins) == 4
 
 
-def test_guard_keeps_tagged_and_still_deletes_untagged(tmp_path, monkeypatch):
-    from app import storage_cleanup, tracker_files
-    from tests.test_downloads_guard_test_install import _entry, _t
-    root = tmp_path / 'downloads'
-    root.mkdir()
-    monkeypatch.setattr(storage_cleanup, 'downloads_root', lambda: str(root))
-    monkeypatch.setattr(storage_cleanup, '_forget_torrents', lambda names: 0)
-    monkeypatch.delenv('LUMA_TEST_QBIT_TAG', raising=False)
-    _entry(root, 'Old.Prod.1999.mkv', size=4096)
-    _entry(root, 'Old.Test.1998.mkv', size=4096)           # older than prod's, finished, tagged
-    monkeypatch.setattr(tracker_files, 'fetch_torrents', lambda: [
-        _t('Old.Prod.1999.mkv', '/downloads/Old.Prod.1999.mkv'),
-        _t('Old.Test.1998.mkv', '/downloads/Old.Test.1998.mkv', tags='luma-test')])
-    out = storage_cleanup.run_cleanup(target_bytes=1, require_qbit=True)
-    assert out.get('success'), out
-    assert (root / 'Old.Test.1998.mkv').exists()
-    assert not (root / 'Old.Prod.1999.mkv').exists()
 
-
-# Reviewer r2 (82a1404) ------------------------------------------------------
 def _fails_session(log):
     class S:
         trust_env = True
@@ -355,53 +336,5 @@ def _dl_entry(root, rel, age_h=100):
     os.utime(p, (t, t))
     return p
 
-
-def test_F2_manual_cleanup_with_qbit_down_deletes_nothing(tmp_path, monkeypatch):
-    from app import storage_cleanup as sc, tracker_files
-    root = tmp_path / 'dl'
-    root.mkdir()
-    _dl_entry(root, 'Old.Test.Grab')
-    monkeypatch.setattr(tracker_files, 'fetch_torrents', lambda *a, **k: None)
-    monkeypatch.setattr(sc, 'downloads_root', lambda: str(root))
-    monkeypatch.setattr(sc, '_forget_torrents', lambda names: 0)
-    out = sc.run_cleanup(10)                        # the manual pill's call (no require_qbit)
-    assert out.get('deleted_count', 0) == 0 and (root / 'Old.Test.Grab').exists(), out
-
-
-def test_F2_cleanup_routes_and_guard_are_unreachable_in_minimal(minimal):
-    from app import minimal as mn
-    for p, m in (('/api/storage/downloads/cleanup', 'POST'), ('/api/storage/downloads', 'GET'),
-                 ('/api/downloads-guard/run', 'POST'), ('/api/downloads-guard/preview', 'GET'),
-                 ('/api/downloads-guard/status', 'GET')):
-        assert not mn.path_allowed(p, m), p
-    c = _client(minimal)
-    assert c.post('/api/storage/downloads/cleanup', json={'target_bytes': 1}, environ_base=REMOTE, headers=HDR).status_code == 404
-    assert c.post('/api/downloads-guard/run', json={}, environ_base=REMOTE, headers=HDR).status_code == 404
-
-
-def test_F3_tagged_in_category_folder_does_not_protect_untagged_siblings(tmp_path, monkeypatch):
-    from app import storage_cleanup as sc, tracker_files
-    monkeypatch.delenv('LUMA_TEST_QBIT_TAG', raising=False)
-    root = tmp_path / 'dl'
-    root.mkdir()
-    _dl_entry(root, 'radarr/Test.Movie.2020')
-    _dl_entry(root, 'radarr/Prod.Movie.2001')
-    os.utime(root / 'radarr', (0, 0))
-    torrents = [{'hash': '1' * 40, 'name': 'Prod.Movie.2001', 'content_path': '/downloads/radarr/Prod.Movie.2001', 'tags': '', 'category': 'radarr', 'progress': 1, 'state': 'stalledUP'},
-                {'hash': '2' * 40, 'name': 'Test.Movie.2020', 'content_path': '/downloads/radarr/Test.Movie.2020', 'tags': 'luma-test', 'category': 'radarr', 'progress': 1, 'state': 'stalledUP'}]
-    monkeypatch.setattr(tracker_files, 'fetch_torrents', lambda *a, **k: torrents)
-    names = sc.luma_test_entry_names(torrents)
-    assert 'Test.Movie.2020' in names
-    assert 'radarr' not in names and 'downloads' not in names, sorted(names)
-
-
-def test_item5_tag_luma_does_not_claim_prods_luma_category(tmp_path, monkeypatch):
-    from app import qbit_owner, storage_cleanup as sc, tracker_files
-    monkeypatch.setenv('LUMA_TEST_QBIT_TAG', 'luma')
-    prod = {'hash': '1' * 40, 'name': 'Prod.Movie', 'content_path': '/downloads/Prod.Movie', 'tags': '', 'category': 'luma', 'progress': 1, 'state': 'stalledUP'}
-    assert not qbit_owner.is_test_torrent(prod)
-    root = tmp_path / 'dl'
-    root.mkdir()
-    _dl_entry(root, 'Prod.Movie')
-    monkeypatch.setattr(tracker_files, 'fetch_torrents', lambda *a, **k: [prod])
-    assert [c['name'] for c in sc.scan_candidates(str(root))] == ['Prod.Movie']
+# v260 (PM): the test install deletes through qBittorrent (deleteFiles=true) with a scope setting instead of
+# protecting tagged torrents; the cleanup routes are reachable in minimal mode. tests/test_v260_downloads_guard.py.

@@ -155,7 +155,8 @@ def _started(fakes):
 
 
 def test_minimal_mode_starts_no_background_threads(test_app, patched_start, minimal):
-    """Only the library search index, the library mover, the TV rescan and (v254) What you're missing start."""
+    """Only the library search index, the library mover, the TV rescan, (v254) What you're missing and
+    (v260) the Downloads guard start."""
     from app.main import start_services
     test_app.config['START_BACKGROUND_THREADS'] = True
     start_services(test_app)
@@ -168,7 +169,9 @@ def test_minimal_mode_starts_no_background_threads(test_app, patched_start, mini
     p['tv_rescan'].assert_called_once()
     for k in ('hero', 'explore', 'tunnel'):
         p[k].assert_not_called()
-    assert _started(p['fakes']) == ['app.daily_missing']     # v254: instance.DATA_DIR_ONLY, not a writer
+    # v254: What you're missing (instance.DATA_DIR_ONLY); v260: the Downloads guard, which the instance gate
+    # decides (on here: not the test instance; tests/test_v260_downloads_guard.py covers test)
+    assert _started(p['fakes']) == ['app.daily_missing', 'app.downloads_guard']
 
 
 def test_flag_unset_starts_background_threads(test_app, patched_start, monkeypatch):

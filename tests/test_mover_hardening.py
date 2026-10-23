@@ -484,4 +484,5 @@ def test_F2_cleanup_route_is_owner_only_and_needs_qbit(test_app, monkeypatch):
     assert other.post(url, json={}, environ_base=REMOTE, headers=HDR).status_code == 403
     assert calls == []
     r = owner.post(url, json={'target_bytes': 5}, environ_base=REMOTE, headers=HDR)
-    assert r.status_code == 200 and calls == [(5, {'require_qbit': True})]
+    # v260: qBittorrent only (deleteFiles=true), the pill's amount at most, no tracker preference (prod)
+    assert r.status_code == 200 and [(t, kw['prefer_trackers']) for t, kw in calls] == [(5, [])]
