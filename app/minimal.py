@@ -53,6 +53,8 @@ ALLOWED_PATHS = frozenset({
     '/api/settings/hero',
     # v202 the native movie watchlist (test instance only; the routes check).
     '/api/movies/watchlist',
+    # v252 Settings > Automation > Genre Roulette (owner only; changes and runs the signed-in owner; the routes check).
+    '/api/settings/automation/genre-roulette',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/', '/settings/',
                     '/api/trackers/', '/api/settings/library-paths/',
@@ -61,7 +63,9 @@ ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts
                     # TV library paths, scan, shows and fix-match (owner only; the routes check).
                     '/api/settings/tv/', '/api/settings/movies/', '/api/movies/watchlist/', '/api/rooms/',
                     # v216: the file-info sheet's Fix Match (admin only; the routes check).
-                    '/api/plex/match/')
+                    '/api/plex/match/',
+                    # v252 Genre Roulette status, run and preview (owner only; the routes check).
+                    '/api/settings/automation/genre-roulette/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).
 # GET only, sign-in required like everything else in minimal mode.
 DETAIL_READ_PREFIXES = (

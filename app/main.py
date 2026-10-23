@@ -21788,6 +21788,8 @@ _rooms_setup.init(settings=settings, get_current_user=lambda: _get_current_user(
 app.register_blueprint(_rooms_setup.bp)
 from app import movie_watchlist as _movie_watchlist  # noqa: E402  v202: the native movie watchlist (test only)
 app.register_blueprint(_movie_watchlist.bp)
+from app.automation import gr_routes as _gr_routes  # noqa: E402  v252: Settings > Automation > Genre Roulette
+app.register_blueprint(_gr_routes.bp)
 from app import movie_import as _movie_import  # noqa: E402  v204: movie import and rename (test only)
 app.register_blueprint(_movie_import.bp)
 try:
