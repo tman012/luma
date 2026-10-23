@@ -32,6 +32,7 @@ import datetime as dt
 import json
 import logging
 import os
+import re
 import threading
 import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -52,6 +53,7 @@ FAST_S = 15 * 60
 FAST_WINDOW_S = 6 * 3600
 SLOW_S = 3600
 MAX_QUERIES = 4                          # per show per search
+MAX_ALT_TITLES = 2                       # v251: fallback titles tried when a query finds nothing
 LIMIT = 100
 DEFAULT_RUNTIME = 45
 ACTIVE_GRABS = ('downloading', 'importing', 'imported')
@@ -163,9 +165,9 @@ def _show(conn, sid: int) -> Optional[Dict[str, Any]]:
     if not r:
         return None
     s = dict(r)
-    names = {tv_match.normalize(s['title'])}
+    names = {tv_match.release_key(s['title'])}
     try:
-        names |= {tv_match.normalize(a) for a in json.loads(s['aliases'] or '[]') if isinstance(a, str)}
+        names |= {tv_match.release_key(a) for a in json.loads(s['aliases'] or '[]') if isinstance(a, str)}
     except ValueError:
         pass
     s['names'] = {n for n in names if n}
@@ -312,7 +314,7 @@ def candidates(items: List[Dict[str, Any]], show: Dict[str, Any], want: List[Dic
             _rej(title, 'blocklisted' if title else 'no title')
             continue
         rel = tv_release.parse(title)
-        if tv_match.normalize(rel.title or '') not in show['names']:
+        if tv_match.release_key(rel.title or '') not in show['names']:
             _rej(title, 'title does not match the show')
             continue
         if rel.year and show.get('year') and rel.year != show['year'] and str(rel.year) not in {str(e.get('air_date') or '')[:4] for e in want}:
@@ -388,8 +390,51 @@ def _numbered(e: Dict[str, Any]) -> bool:
     return isinstance(e.get('season_number'), int) and isinstance(e.get('episode_number'), int)
 
 
+def _qtitle(show: Dict[str, Any]) -> str:
+    """v251: the title as sent to a tracker, Sonarr clean-title style (IPT finds nothing for
+    "Special Forces: World's Toughest Test S05E05" and 9 for 'Special Forces Worlds Toughest Test S05E05')."""
+    return tv_match.query_title(show['title']) or str(show['title'])
+
+
+def _alt_titles(show: Dict[str, Any]) -> List[str]:
+    """Fallback query titles when the clean title finds nothing: the title without a trailing year or
+    country, then the aliases (each clean-title style), at most MAX_ALT_TITLES."""
+    main = _qtitle(show)
+    raw = [re.sub(r'\s*\((?:\d{4}|[A-Za-z]{2,3})\)\s*$', '', str(show['title'])).strip()]
+    try:
+        raw += [a for a in json.loads(show.get('aliases') or '[]') if isinstance(a, str)]
+    except (ValueError, TypeError):
+        pass
+    out: List[str] = []
+    for t in raw:
+        q = tv_match.query_title(t)
+        if q and q.casefold() != main.casefold() and q.casefold() not in {o.casefold() for o in out}:
+            out.append(q)
+    return out[:MAX_ALT_TITLES]
+
+
 def _sxe(show: Dict[str, Any], e: Dict[str, Any]) -> str:
-    return f"{show['title']} S{e['season_number']:02d}E{e['episode_number']:02d}"
+    return f"{_qtitle(show)} S{e['season_number']:02d}E{e['episode_number']:02d}"
+
+
+def _ask(show: Dict[str, Any], q: str, purpose: str, sid: int, interactive: bool, now: float,
+         cfgs: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], int]:
+    """One planned query; when a tracker answered with nothing, the same query under each fallback title
+    until one finds something. (items, statuses, queries sent)."""
+    got, st = query_trackers(q, purpose, sid, interactive, now, cfgs)
+    n = 1
+    main = _qtitle(show)
+    if got or not any(x['status'] == 'ok' for x in st) or not q.startswith(main + ' '):
+        return got, st, n
+    tail = q[len(main):]
+    for alt in _alt_titles(show):
+        got, more = query_trackers(alt + tail, purpose, sid, interactive, now, cfgs)
+        n += 1
+        st = st + more
+        if got:
+            logger.info('TV search: %r found nothing; %r found %d', q, alt + tail, len(got))
+            break
+    return got, st, n
 
 
 def _missed_ids(sid: int) -> set:
@@ -409,7 +454,7 @@ def _set_missed(sid: int, ids: Iterable[int]) -> None:
 def _queries(show: Dict[str, Any], want: List[Dict[str, Any]]) -> List[Tuple[str, str]]:
     """(purpose, query) for the wanted episodes: a season query when a season has 2+ wanted,
     else one per episode (daily shows by date and, when numbered, SxxEyy). At most MAX_QUERIES."""
-    title = show['title']
+    title = _qtitle(show)
     out: List[Tuple[str, str]] = []
     by_season: Dict[int, List[Dict[str, Any]]] = {}
     daily = show.get('series_type') == 'daily'
@@ -471,8 +516,8 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
     plan_q = queries if queries is not None else _queries(show, rest)
     ep_q = [('episode', _sxe(show, e)) for e in want if e['id'] in marked and _numbered(e)]
     for p, q in (plan_q if queries is not None else (plan_q + ep_q)[:MAX_QUERIES]):
-        got, st = query_trackers(q, purpose or p, sid, interactive, now, cfgs)
-        out['searched'] += 1
+        got, st, n = _ask(show, q, purpose or p, sid, interactive, now, cfgs)
+        out['searched'] += n
         out['statuses'] += st
         answered |= any(s['status'] == 'ok' for s in st)
         items += got
@@ -483,8 +528,8 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
         covered = {i for c in candidates(items, show, want, blocked) for i in c['covers']}
         missed = [e for e in rest if _numbered(e) and e['season_number'] in seasons and e['id'] not in covered]
         for e in missed[:MAX_QUERIES]:
-            got, st = query_trackers(_sxe(show, e), purpose or 'episode', sid, interactive, now, cfgs)
-            out['searched'] += 1
+            got, st, n = _ask(show, _sxe(show, e), purpose or 'episode', sid, interactive, now, cfgs)
+            out['searched'] += n
             out['statuses'] += st
             answered |= any(x['status'] == 'ok' for x in st)
             items += got
@@ -669,7 +714,7 @@ def _one(sid: int, season: int, kind: str, ids: List[int], now: Optional[float] 
     if not show or not ids:
         return {'ok': True, 'searched': 0, 'results': 0, 'picks': [], 'statuses': [], 'error': None, 'wanted': 0}
     if kind == 'pack':
-        q = [('season', f"{show['title']} S{season:02d}")]
+        q = [('season', f"{_qtitle(show)} S{season:02d}")]
         return search_show(sid, ids, origin='manual', purpose='manual' if interactive else MANUAL_BACKGROUND,
                            interactive=interactive, now=now, queries=q, packs=True, states=OPEN_GRABS)
     return search_show(sid, ids, origin='manual', purpose='manual' if interactive else MANUAL_BACKGROUND,
@@ -849,7 +894,7 @@ def covers(title: str, show: Dict[str, Any], eps: List[Dict[str, Any]]) -> Tuple
     """What a release title covers among the show's episodes: (why not, episode ids, season). A season pack
     covers every episode of that season (with a file or not: rule 2 then refuses it)."""
     rel = tv_release.parse(title)
-    if tv_match.normalize(rel.title or '') not in show['names']:
+    if tv_match.release_key(rel.title or '') not in show['names']:
         return WRONG_SHOW, [], None
     if rel.year and show.get('year') and rel.year != show['year']:
         return WRONG_YEAR, [], None
@@ -944,7 +989,7 @@ def interactive(sid: int, season: Optional[int] = None, episode_id: Optional[int
         out.update(ok=False, error=NO_TRACKERS)
         return out
     if season is not None and show.get('series_type') != 'daily':
-        queries = [f"{show['title']} S{season:02d}"]
+        queries = [f"{_qtitle(show)} S{season:02d}"]
     else:
         queries = [q for _, q in _queries(show, targets)]
     items: List[Dict[str, Any]] = []
@@ -1102,7 +1147,7 @@ def feed(now: float) -> Dict[str, int]:
                 names.setdefault(n, []).append(sid)
         hits: Dict[int, List[Dict[str, Any]]] = {}
         for it in items:
-            t = tv_match.normalize(tv_release.parse(str(it.get('title') or '')).title or '')
+            t = tv_match.release_key(tv_release.parse(str(it.get('title') or '')).title or '')
             for sid in names.get(t, []):
                 hits.setdefault(sid, []).append(it)
         for sid, its in hits.items():

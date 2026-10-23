@@ -78,6 +78,22 @@ def normalize(title: Any) -> str:
     return re.sub(r'\s+', ' ', s).strip()
 
 
+def query_title(title: Any) -> str:
+    """A tracker query title, Sonarr clean-title style: accents and apostrophes dropped (World's ->
+    Worlds), '&' read as 'and', colons and other punctuation as spaces, whitespace collapsed. Case kept."""
+    s = unicodedata.normalize('NFKD', str(title or ''))
+    s = ''.join(c for c in s if not unicodedata.combining(c))
+    s = re.sub(r"['\u2018\u2019`\u00b4]", '', s.replace('&', ' and '))
+    s = re.sub(r'[\W_]+', ' ', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
+
+def release_key(title: Any) -> str:
+    """normalize(), with a lone 's' joined to the word before it, so a release named 'Grey s Anatomy'
+    (the apostrophe turned into a space) matches "Grey's Anatomy" / 'Greys Anatomy'."""
+    return re.sub(r'\b([0-9a-z]+) s\b', r'\1s', normalize(title))
+
+
 def _colons(s: str) -> str:
     """' - ', '- ' and ' -' between words read as ':'."""
     s = re.sub(r'\s+-\s+|(?<=\w)-\s+|\s+-(?=\w)', ': ', s)
