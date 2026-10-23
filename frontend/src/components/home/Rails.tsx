@@ -4,6 +4,7 @@ import { FONT } from '@/components/start/StartUI';
 import { useEffect, useRef } from 'react';
 import { scheduleWarm, warmDetail } from '@/services/modalPrefetch';
 import { OwnedOrb, useRailOwnership, type CardOwnership } from './railOwnership';
+import { LONG_PRESS_STYLE, useLongPress } from './useLongPress';
 
 export const GLASS: React.CSSProperties = {
   background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
@@ -56,25 +57,34 @@ function useWarmWhenVisible(ref: React.RefObject<HTMLElement | null>, card: Card
   }, [ref, card, on]);
 }
 
-/** A card is a plain button when it can open the detail popup. */
-function CardShell({ card, onOpen, style, children }: { card: Card; onOpen: OnOpen; style: React.CSSProperties; children: React.ReactNode }) {
+type OnLongPress = ((card: Card) => void) | undefined;
+
+/** A card is a plain button when it can open the detail popup. v254: with *onLongPress* (What you're missing),
+ * a long press opens the dismiss sheet instead (prod's MobilePosterCard gesture, useLongPress). */
+function CardShell({ card, onOpen, onLongPress, style, children }: { card: Card; onOpen: OnOpen; onLongPress?: OnLongPress; style: React.CSSProperties; children: React.ReactNode }) {
   const ref = useRef<HTMLButtonElement>(null);
   useWarmWhenVisible(ref, card, !!onOpen);
-  if (!onOpen) return <div style={style}>{children}</div>;
+  const lp = useLongPress(onLongPress ? () => onLongPress(card) : undefined);
+  if (!onOpen && !lp) return <div style={style}>{children}</div>;
   const warm = () => { void warmCard(card); };
   return (
-    <button ref={ref} type="button" onClick={(e) => onOpen(card, e.currentTarget)} aria-label={card.title}
-      onPointerEnter={warm} onPointerDown={warm} onTouchStart={warm} onFocus={warm}
-      data-testid={`card-${card.key}`} className="luma-pressable" style={{ ...cardButton, ...style }}>
+    <button ref={ref} type="button" aria-label={card.title}
+      onClick={(e) => { if (lp?.consumeClick()) return; onOpen?.(card, e.currentTarget); }}
+      onPointerEnter={warm} onPointerDown={warm} onFocus={warm}
+      onTouchStart={(e) => { warm(); lp?.onTouchStart(e); }}
+      onTouchMove={lp?.onTouchMove} onTouchEnd={lp?.onTouchEnd} onTouchCancel={lp?.onTouchCancel}
+      onContextMenu={lp?.onContextMenu}
+      data-testid={`card-${card.key}`} className={lp ? 'luma-pressable longpress-poster' : 'luma-pressable'}
+      style={{ ...cardButton, ...style, ...(lp ? LONG_PRESS_STYLE : null) }}>
       {children}
     </button>
   );
 }
 
-export function PosterCard({ card, onOpen, own }: { card: Card; onOpen?: OnOpen; own?: CardOwnership }) {
+export function PosterCard({ card, onOpen, own, onLongPress }: { card: Card; onOpen?: OnOpen; own?: CardOwnership; onLongPress?: OnLongPress }) {
   const src = img(card.poster);
   return (
-    <CardShell card={card} onOpen={onOpen} style={posterCard}>
+    <CardShell card={card} onOpen={onOpen} onLongPress={onLongPress} style={posterCard}>
       <div style={{ ...posterImg, ...GLASS }}>
         {src && <img src={src} alt="" loading="lazy" style={fill} draggable={false} />}
         <OwnedOrb own={own} />
@@ -141,7 +151,10 @@ export function SkeletonRails({ rails = 3 }: { rails?: number }) {
   );
 }
 
-export function HomeRails({ cw, rails, onOpen }: { cw: Card[]; rails: Rail[]; onOpen?: (card: Card, el?: HTMLElement | null) => void }) {
+/** v254: What you're missing (app/daily_missing), a regular Home rail; its cards long-press to dismiss. */
+export const WYM_RAIL_ID = 'what_youre_missing';
+
+export function HomeRails({ cw, rails, onOpen, onDismiss }: { cw: Card[]; rails: Rail[]; onOpen?: (card: Card, el?: HTMLElement | null) => void; onDismiss?: (card: Card) => void }) {
   // v181: prod's rule: no orb on all-owned library rails (Continue watching, every Plex library rail);
   // the orb only on mixed rails (Trakt), resolved by prod's batch check.
   const own = useRailOwnership(rails.flatMap(r => r.items).filter(c => c.tmdb_id));
@@ -154,7 +167,8 @@ export function HomeRails({ cw, rails, onOpen }: { cw: Card[]; rails: Rail[]; on
       )}
       {rails.filter(r => r.items.length > 0).map(r => (
         <RailRow key={r.id} title={r.title} testId={`rail-${r.id}`} prod={r.id === 'watchlist'}>
-          {r.id === 'watchlist' ? r.items.map(c => <WatchlistPosterCard key={c.key} card={c} onOpen={onOpen} />) : r.items.map(c => <PosterCard key={c.key} card={c} onOpen={onOpen} own={c.tmdb_id && !c.label && !c.key.startsWith('watchlist-') ? own[c.key] : undefined} />)}
+          {r.id === 'watchlist' ? r.items.map(c => <WatchlistPosterCard key={c.key} card={c} onOpen={onOpen} />) : r.items.map(c => <PosterCard key={c.key} card={c} onOpen={onOpen} own={c.tmdb_id && !c.label && !c.key.startsWith('watchlist-') ? own[c.key] : undefined}
+            onLongPress={r.id === WYM_RAIL_ID && r.dismiss && onDismiss ? onDismiss : undefined} />)}
         </RailRow>
       ))}
     </div>

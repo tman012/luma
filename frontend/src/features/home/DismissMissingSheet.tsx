@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { NormalizedMediaItem } from '@/types/media';
 
 /**
- * Light confirm sheet for permanently dismissing a What You're Missing title.
+ * Light confirm sheet for permanently dismissing a What you're missing title (prod 1b4ea74; v254 also on the
+ * luma-test Home, which passes a Home card's title and year).
  */
 export function DismissMissingSheet({
   item,
   onConfirm,
   onClose,
 }: {
-  item: NormalizedMediaItem;
+  item: { title: string; year?: number | string | null };
   onConfirm: () => void;
   onClose: () => void;
 }) {
@@ -90,7 +90,7 @@ export function DismissMissingSheet({
           }}
         />
         <p style={{ margin: '0 0 4px', fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>
-          What You&apos;re Missing
+          What you&apos;re missing
         </p>
         <p
           style={{

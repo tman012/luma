@@ -3,7 +3,7 @@ import { posterUrl, backdropUrl } from '@/utils/image';
 import { fetchWithTimeout } from '@/utils/fetchWithTimeout';
 import { apiFetch } from '../../apiClient';
 
-/** Map What You're Missing API movies → home rail items. */
+/** Map What you're missing API movies → home rail items. */
 export function mapWhatYoureMissingMovies(movies: Record<string, unknown>[]): NormalizedMediaItem[] {
   return movies.map((m) => ({
     id: `missing-${m.tmdb_id ?? m.title}`,

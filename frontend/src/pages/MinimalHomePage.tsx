@@ -5,13 +5,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { FONT, LOGO_SRC, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
-import { HomeRails, SkeletonRails, cardIds, railCss } from '@/components/home/Rails';
+import { HomeRails, SkeletonRails, WYM_RAIL_ID, cardIds, railCss } from '@/components/home/Rails';
 import { img } from '@/components/home/homeApi';
 import { openWhenReady } from '@/services/modalPrefetch';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import type { Card } from '@/components/home/homeApi';
 import { LUMA_BLUE } from '@/ui/lumaButton';
-import { fetchHome, type HomeData } from '@/components/home/homeApi';
+import { dismissMissing, fetchHome, type HomeData } from '@/components/home/homeApi';
+import { DismissMissingSheet } from '@/features/home/DismissMissingSheet';
 import { KioskHome, useKioskWidth } from '@/components/home/KioskHome';
 import { UserMenu } from '@/components/nav/UserMenu';
 import { openSearch, SearchIcon } from '@/components/search/MinimalSearchHost';
@@ -31,6 +32,9 @@ export function MinimalHomePage() {
   const [attempt, setAttempt] = useState(0);
   const [slow, setSlow] = useState(false);
   const modals = useModalHost();
+  // v254 What you're missing: prod's long-press dismiss (MobileHomePage confirmDismissMissing).
+  const [dismissTarget, setDismissTarget] = useState<Card | null>(null);
+  const [wymOverride, setWymOverride] = useState<Card[] | null>(null);
   // Phone rails: the popup opens only once it can show fully composed (the
   // tapped poster shows a pressed state meanwhile, 600 ms cap).
   const openCard = (c: Card, el?: HTMLElement | null) => {
@@ -45,6 +49,7 @@ export function MinimalHomePage() {
     setFailed(false);
     setSlow(false);
     setData(null);
+    setWymOverride(null);
     // v251: the skeleton stays until every rail is in, then they all swap in at once. One request returns
     // every ready rail (the server drops a failed or slow one at 6 s); past SKELETON_TIMEOUT_MS the skeleton
     // gives way to Retry and a late answer is dropped rather than popped in.
@@ -68,6 +73,21 @@ export function MinimalHomePage() {
   if (loading) return null;
   if (!authenticated) return <Navigate to={needsStart ? '/start' : pinUnlock ? '/unlock' : '/login'} replace />;
   if (startInProgress) return <Navigate to="/start" replace />;
+
+  const confirmDismiss = async () => {
+    const card = dismissTarget;
+    setDismissTarget(null);
+    if (!card?.tmdb_id) return;
+    const tid = card.tmdb_id;
+    const base = wymOverride ?? data?.rails.find(r => r.id === WYM_RAIL_ID)?.items ?? [];
+    setWymOverride(base.filter(c => c.tmdb_id !== tid));
+    try {
+      const result = await dismissMissing(tid);
+      if (result.ok) setWymOverride(result.items);
+    } catch {
+      // Keep the optimistic removal.
+    }
+  };
 
   const signOut = async () => {
     setBusy(true);
@@ -109,9 +129,16 @@ export function MinimalHomePage() {
         </header>
         <div style={{ height: 'calc(env(safe-area-inset-top) + 56px)' }} aria-hidden="true" />
         <main style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
-          {homeView(data, failed || slow, () => setAttempt(a => a + 1), openCard)}
+          {homeView(withMissing(data, wymOverride), failed || slow, () => setAttempt(a => a + 1), openCard, setDismissTarget)}
         </main>
       </div>
+      {dismissTarget && (
+        <DismissMissingSheet
+          item={{ title: dismissTarget.title, year: dismissTarget.subtitle || null }}
+          onConfirm={() => { void confirmDismiss(); }}
+          onClose={() => setDismissTarget(null)}
+        />
+      )}
     </div>
   );
 }
@@ -200,12 +227,19 @@ export function homeParts(data: Partial<HomeData> | null | undefined): HomeParts
   return { cw, rails };
 }
 
-function homeView(data: HomeData | null, down: boolean, retry: () => void, onOpen: (c: Card) => void) {
+/** v254: the What you're missing rail after a dismiss (the optimistic removal, then the server's top-up). */
+export function withMissing(data: HomeData | null, items: Card[] | null): HomeData | null {
+  if (!data || !items || !Array.isArray(data.rails)) return data;
+  return { ...data, rails: data.rails.map(r => (r && r.id === WYM_RAIL_ID ? { ...r, items } : r)) };
+}
+
+function homeView(data: HomeData | null, down: boolean, retry: () => void, onOpen: (c: Card) => void,
+                  onDismiss: (c: Card) => void) {
   if (data && data.plex !== false) {
     // Tester LOW: /api/home answering {} (or without rails / continue_watching) shows the empty state, not a crash
     const { cw, rails } = homeParts(data);
     const any = cw.length > 0 || rails.some(r => r.items.length > 0);
-    if (any) return <HomeRails cw={cw} rails={rails} onOpen={onOpen} />;
+    if (any) return <HomeRails cw={cw} rails={rails} onOpen={onOpen} onDismiss={onDismiss} />;
     return <div style={emptyBox} data-testid="home-empty"><p style={emptyLine}>Nothing here yet</p></div>;
   }
   if (data || down) {
