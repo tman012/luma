@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DownloadsGuardSettings, SIGN_IN_TO_CHANGE, describe as describeRun } from '@/components/automation/DownloadsGuardSettings';
+import { DownloadsGuardSettings, SIGN_IN_TO_CHANGE, ageOptions, describe as describeRun } from '@/components/automation/DownloadsGuardSettings';
 
 const GIB = 1024 ** 3;
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -9,7 +9,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const DEFAULTS = {
   enabled: false, check_interval_minutes: 15, min_free_gb: 150, reclaim_gb: 100, daily_cap_gb: 500, max_run_gb: 2048,
-  trackers: ['ipt'], pill_gb: 100, min_age_hours: 48, min_seed_hours: 0, min_ratio: 0, scope: 'all', folder: '',
+  trackers: ['ipt'], pill_gb: 100, min_age_days: 2, min_seed_hours: 0, min_ratio: 0, scope: 'all', folder: '',
 };
 const TRACKERS = [['ipt', 'IPTorrents'], ['beyondhd', 'BeyondHD'], ['morethantv', 'MoreThanTV'], ['privatehd', 'PrivateHD'], ['pixelhd', 'PixelHD']]
   .map(([key, label]) => ({ key, label }));
@@ -48,13 +48,14 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     view();
     await waitFor(() => screen.getByTestId('downloads-guard'));
     for (const t of ['Downloads guard', 'Enabled', 'Floor (GB)', 'Reclaim per run (GB)', 'Check every (minutes)', 'Storage pill amount (GB)',
-      'Daily limit (GB)', 'Per-run limit (GB)', 'Downloads', 'Minimum age (hours)', 'Minimum seed time (hours)', 'Minimum ratio',
+      'Daily limit (GB)', 'Per-run limit (GB)', 'Downloads', 'Keep downloads newer than', '2 days', 'Minimum seed time (hours)', 'Minimum ratio',
       'Trackers first', 'Folder', 'Preview', 'Clean up now', 'Status', 'Free space', 'Recent activity']) {
       expect(screen.getAllByText(t).length, t).toBeGreaterThan(0);
     }
     const val = (id: string) => (screen.getByTestId(`${id}-input`) as HTMLInputElement).value;
-    expect([val('dg-floor'), val('dg-reclaim'), val('dg-interval'), val('dg-pill'), val('dg-daily-value'), val('dg-max-run'), val('dg-age')])
-      .toEqual(['150', '100', '15', '100', '500', '2,048', '48']);
+    expect([val('dg-floor'), val('dg-reclaim'), val('dg-interval'), val('dg-pill'), val('dg-daily-value'), val('dg-max-run')])
+      .toEqual(['150', '100', '15', '100', '500', '2,048']);
+    expect(screen.queryByText(/Minimum age/)).toBeNull();
     expect(screen.getByTestId('dg-enabled-toggle').getAttribute('aria-checked')).toBe('false');
     expect(screen.getByTestId('dg-seed-toggle').getAttribute('aria-checked')).toBe('false');
     expect(screen.getByTestId('dg-ratio-toggle').getAttribute('aria-checked')).toBe('false');
@@ -114,6 +115,27 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     fireEvent.click(screen.getByTestId('dg-run'));
     fireEvent.click(screen.getByTestId('dg-confirm'));
     expect(await screen.findByTestId('dg-sign-in')).toBeTruthy();
+  });
+
+  it('Keep downloads newer than is in days', async () => {
+    const calls = stub();
+    view();
+    await waitFor(() => screen.getByTestId('downloads-guard'));
+    fireEvent.click(screen.getByText('2 days'));
+    fireEvent.click(await screen.findByText('7 days'));
+    await waitFor(() => expect(puts(calls)).toEqual([{ min_age_days: 7 }]));
+    expect(ageOptions(45).map(o => o.label)).toContain('45 days');
+    expect(ageOptions(0)[0]).toEqual({ id: 0, label: 'Off' });
+  });
+
+  it('Preview keeps the server order (delete-first trackers, then the rest)', async () => {
+    stub();
+    view();
+    await waitFor(() => screen.getByTestId('downloads-guard'));
+    fireEvent.click(screen.getByTestId('dg-preview'));
+    await screen.findByText('Would delete 60 GB of 100 GB');
+    expect(screen.getAllByTestId('dg-preview-list-row').map(r => r.textContent?.split('IPTorrents')[0].split('BeyondHD')[0]))
+      .toEqual(['Heat.1995', 'Zodiac.2007']);
   });
 
   it('scope picks only this install\'s downloads', async () => {

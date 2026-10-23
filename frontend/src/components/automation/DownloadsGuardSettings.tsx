@@ -32,6 +32,13 @@ export const SCOPES: { id: Scope; label: string }[] = [
   { id: 'all', label: 'All finished downloads' },
   { id: 'test_tagged', label: "Only this install's downloads" },
 ];
+/** Keep downloads newer than: days (prod's 48 hours is the 2-day default); 0 keeps none back. */
+export const AGE_DAYS = [0, 1, 2, 3, 4, 5, 6, 7, 10, 14, 21, 30, 60, 90];
+export const dayLabel = (n: number) => (n === 0 ? 'Off' : n === 1 ? '1 day' : `${n} days`);
+export function ageOptions(cur: number): { id: number; label: string }[] {
+  const days = AGE_DAYS.includes(cur) ? AGE_DAYS : [...AGE_DAYS, cur].sort((a, b) => a - b);
+  return days.map(n => ({ id: n, label: dayLabel(n) }));
+}
 const gb = (n: number) => `${n.toLocaleString('en-US')} GB`;
 
 function Switch({ id, label, on, onChange }: { id: string; label: string; on: boolean; onChange: (v: boolean) => void }) {
@@ -330,7 +337,7 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
             <h4 style={group}>What it may delete</h4>
             <div className="gr-f2">
               <Field id="dg-scope" label="Downloads"><Select id="dg-scope" value={s.scope} options={SCOPES} onChange={v => put({ scope: v })} /></Field>
-              <Field id="dg-age" label="Minimum age (hours)"><NumField id="dg-age" value={s.min_age_hours} bad={!!bad.min_age_hours} onCommit={v => put({ min_age_hours: v })} /></Field>
+              <Field id="dg-age" label="Keep downloads newer than"><Select id="dg-age" value={s.min_age_days} options={ageOptions(s.min_age_days)} onChange={v => put({ min_age_days: v })} /></Field>
               <Optional id="dg-seed" label="Minimum seed time (hours)" value={s.min_seed_hours} fallback={72} bad={!!bad.min_seed_hours} onChange={v => put({ min_seed_hours: v })} />
               <Optional id="dg-ratio" label="Minimum ratio" value={s.min_ratio} fallback={1} decimals={1} step={0.1} bad={!!bad.min_ratio} onChange={v => put({ min_ratio: v })} />
             </div>

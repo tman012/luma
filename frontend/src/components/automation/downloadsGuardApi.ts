@@ -5,7 +5,7 @@ import { apiFetch } from '@/apiClient';
 export type Scope = 'all' | 'test_tagged';
 export interface DgSettings {
   enabled: boolean; check_interval_minutes: number; min_free_gb: number; reclaim_gb: number; daily_cap_gb: number;
-  max_run_gb: number; trackers: string[]; pill_gb: number; min_age_hours: number; min_seed_hours: number;
+  max_run_gb: number; trackers: string[]; pill_gb: number; min_age_days: number; min_seed_hours: number;
   min_ratio: number; scope: Scope; folder: string;
 }
 export interface DgTracker { key: string; label: string }
