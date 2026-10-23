@@ -204,8 +204,8 @@ def check(body: Any, cur: Dict[str, Any]) -> Dict[str, Any]:
 def _legacy() -> Dict[str, Any]:
     """Prod's automation.anticipated_watchlist keys, when this install has them (first load only; imported off)."""
     try:
-        from app.settings_manager import SettingsManager
-        s = SettingsManager()
+        from app.settings_manager import SettingsFile      # v259: read as on disk; no rewrite of settings.json
+        s = SettingsFile()
         get = lambda k: s.get(k, None)              # noqa: E731
     except Exception:                               # noqa: BLE001
         return {}

@@ -1652,6 +1652,41 @@ def _minimal_gated(data: dict, dotted_path: str):
     return False, None
 
 
+def settings_file_path() -> Path:
+    """settings.json where SettingsManager finds it (_infer_data_dir), never creating a directory."""
+    from app.paths import data_dir
+    d = data_dir()
+    if d.is_dir():
+        return d / "settings.json"
+    db_path = os.environ.get("DATABASE_PATH", "")
+    if db_path and Path(db_path).parent.is_dir():
+        return Path(db_path).parent / "settings.json"
+    return Path(__file__).resolve().parent.parent / "data" / "settings.json"
+
+
+class SettingsFile:
+    """v259 (Tester LOW): settings.json read exactly as it is on disk, for readers that only look up a few
+    keys (Genre roulette's and Anticipated's one-time prod import, What you're missing's connector keys).
+    Unlike SettingsManager() it never bootstraps, migrates, merges defaults or writes, so a sparse
+    settings.json is never rewritten by a read. Missing or unreadable: empty. get() applies the minimal
+    build's connector gate as SettingsManager.get does."""
+
+    def __init__(self, settings_path: Optional[str] = None):
+        p = Path(settings_path) if settings_path else settings_file_path()
+        try:
+            with open(p, "r") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            data = {}
+        self._settings: Dict[str, Any] = data if isinstance(data, dict) else {}
+
+    def get(self, dotted_path: str, default: Any = None) -> Any:
+        locked, blank = _minimal_gated(self._settings, dotted_path)
+        if locked:
+            return blank
+        return _get_nested(self._settings, dotted_path, default)
+
+
 class SettingsVeto(Exception):
     """SettingsManager.update(veto=...) refused the write; ``answer`` is what
     the veto returned (for a route, its error response)."""

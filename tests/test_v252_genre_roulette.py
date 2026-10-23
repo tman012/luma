@@ -183,7 +183,7 @@ def test_prod_keys_are_imported_once_and_off(world, monkeypatch):
         def get(self, k, d=None):
             return vals.get(k, d)
     import app.settings_manager as smod
-    monkeypatch.setattr(smod, 'SettingsManager', SM)
+    monkeypatch.setattr(smod, 'SettingsFile', SM)
     d = gs.settings()
     assert d['enabled'] is False and d['time'] == '22:50' and d['include_genres'] == ['Action', 'Comedy']
     assert d['imdb_min_votes'] == 250000 and d['profile_id'] is None

@@ -133,3 +133,83 @@ def test_the_removed_caps_leave_the_file_on_the_next_load_or_save(tvs):  # noqa:
     p.write_text(json.dumps(raw2))
     tv_settings.save(raw2)                                                # and on a save
     assert 'daily_backlog_grab_cap' not in json.loads(p.read_text())['automation']
+
+
+# ------------------------------------------------------------------ 5. GR, WYM (and Anticipated) read settings.json without rewriting it
+
+SPARSE = {'automation': {'genre_roulette': {'hour': 21, 'minute': 15, 'genres': 'Action,Comedy'},
+                         'anticipated_watchlist': {'limit': 12}},
+          'apis': {'trakt': {'enabled': True, 'client_id': 'cid-1', 'connector_saved': True},
+                   'tmdb': {'api_key': 'tk-1', 'connector_saved': True}}}
+
+
+@pytest.fixture
+def sparse(tmp_path, monkeypatch):
+    import json
+    from app.automation import gr_store
+    d = tmp_path / 'data'
+    d.mkdir()
+    monkeypatch.setenv('LUMA_DATA_DIR', str(d))
+    monkeypatch.setitem(gr_store._cfg, 'db_path', str(tmp_path / 'automation.db'))
+    p = d / 'settings.json'
+    p.write_text(json.dumps(SPARSE))
+    return p
+
+
+def _same(p, before):
+    return p.read_bytes() == before[0] and p.stat().st_mtime_ns == before[1]
+
+
+def test_genre_roulette_first_load_reads_settings_json_without_rewriting_it(sparse):
+    from app.automation import gr_store
+    before = (sparse.read_bytes(), sparse.stat().st_mtime_ns)
+    s = gr_store.settings()
+    assert s['time'] == '21:15' and s['include_genres'] == ['Action', 'Comedy'] and s['enabled'] is False
+    assert _same(sparse, before) and sorted(x.name for x in sparse.parent.iterdir()) == ['settings.json']
+
+
+def test_anticipated_first_load_reads_settings_json_without_rewriting_it(sparse):
+    from app.automation import antic
+    before = (sparse.read_bytes(), sparse.stat().st_mtime_ns)
+    s = antic.settings()
+    assert s['shows']['limit'] == 12 and s['movies']['limit'] == 12
+    assert _same(sparse, before)
+
+
+def test_whats_missing_connector_reads_never_rewrite_settings_json(sparse):
+    from app import daily_missing
+    before = (sparse.read_bytes(), sparse.stat().st_mtime_ns)
+    assert daily_missing.trakt_client_id() == 'cid-1' and daily_missing.tmdb_key() == 'tk-1'
+    assert _same(sparse, before)
+
+
+def test_no_settings_json_is_created_by_a_read(tmp_path, monkeypatch):
+    from app.automation import gr_store
+    from app import daily_missing
+    d = tmp_path / 'empty'
+    d.mkdir()
+    monkeypatch.setenv('LUMA_DATA_DIR', str(d))
+    monkeypatch.setitem(gr_store._cfg, 'db_path', str(tmp_path / 'automation.db'))
+    assert gr_store.settings()['enabled'] is False and daily_missing.trakt_client_id() == ''
+    assert list(d.iterdir()) == []
+
+
+def test_the_minimal_gate_still_applies(sparse, monkeypatch):
+    import json
+    from app import minimal
+    from app.settings_manager import SettingsFile
+    monkeypatch.setattr(minimal, 'enabled', lambda: True)
+    raw = json.loads(sparse.read_text())
+    raw['apis']['trakt']['connector_saved'] = False
+    sparse.write_text(json.dumps(raw))
+    s = SettingsFile()
+    assert s.get('apis.trakt.client_id') == '' and s.get('apis.trakt.enabled') is False
+    assert s.get('apis.tmdb.api_key') == 'tk-1'
+
+
+def test_the_old_loader_did_rewrite_the_sparse_file(sparse):
+    """Why: SettingsManager() migrates and saves a sparse settings.json (the Tester's LOW)."""
+    from app.settings_manager import SettingsManager
+    before = sparse.read_bytes()
+    SettingsManager()
+    assert sparse.read_bytes() != before

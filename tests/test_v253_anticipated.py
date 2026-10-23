@@ -120,7 +120,7 @@ def test_legacy_prod_keys_import_off(tmp_path, monkeypatch):
         def get(self, k, d=None):
             return self.vals.get(k, d)
     import app.settings_manager as sm
-    monkeypatch.setattr(sm, 'SettingsManager', S)
+    monkeypatch.setattr(sm, 'SettingsFile', S)
     s = antic.settings()
     assert s['shows']['limit'] == 12 and s['movies']['limit'] == 12 and s['shows']['search_on_add'] is False
     assert s['shows']['languages'] == ['en', 'fr'] and s['interval_hours'] == 6

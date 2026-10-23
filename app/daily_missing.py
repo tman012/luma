@@ -115,8 +115,9 @@ def _today_ny() -> str:
 
 
 def _settings():
-    from app.settings_manager import SettingsManager
-    return SettingsManager()
+    """v259: settings.json as on disk (SettingsFile): reading the connector keys never rewrites it."""
+    from app.settings_manager import SettingsFile
+    return SettingsFile()
 
 
 # ------------------------------------------------------------------ outside services (mocked in tests)

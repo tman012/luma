@@ -203,8 +203,8 @@ _LEGACY = 'automation.genre_roulette.'
 def _legacy() -> Dict[str, Any]:
     """Prod's settings keys, when this install has them (one time, at first load). Imported off."""
     try:
-        from app.settings_manager import SettingsManager
-        s = SettingsManager()
+        from app.settings_manager import SettingsFile      # v259: read as on disk; no rewrite of settings.json
+        s = SettingsFile()
         get = lambda k: s.get(_LEGACY + k, None)       # noqa: E731
     except Exception:                                   # noqa: BLE001
         return {}
