@@ -17,7 +17,8 @@ Rules:
 * background searches: token bucket, burst 5, one token per 180 s (20/h);
 * AvistaZ family (AvistaZ, PrivateHD, PixelHD, CinemaZ, ExoticaZ): every request,
   user or background, goes through the bucket, so 20/h with a burst of 5;
-* 300 per tracker per rolling 24 h, 120 per hour across all trackers;
+* 120 per hour across all trackers (v256: there is no per-day cap; the
+  "300 per tracker per rolling 24 h" listed here before was never enforced);
 * at least 2 s between requests to one tracker;
 * backoff after a failure, longer on each consecutive failure:
   429/rate limit: 1 h (doubling, max 6 h), or its Retry-After when longer (v170: never shorter);
@@ -28,9 +29,10 @@ Rules:
   network/timeouts/5xx: 5 min (doubling, max 1 h); bad answers: 15 min.
 
 Purpose budgets: a background request may name a purpose ('tv'); it is then
-also held to that purpose's caps (PURPOSE_LIMITS: per tracker per day and per
-hour, across trackers per day, and a minimum gap per tracker), on top of all
-the limits above. The log records it as 'b:<purpose>'.
+also held to that purpose's limits (tv_budget.GUARD_LIMITS: since v204a only a
+minimum gap per tracker, no daily cap), on top of all the limits above. The
+log records it as 'b:<purpose>'. A feed poll (purpose 'feed') takes no cap,
+bucket or slot; only the pause and the tracker's backoff stop it.
 
 State persists in $LUMA_DATA_DIR/tracker_guard.json so a restart can't reset
 the counters. An unreadable state file is moved aside and searches pause for
