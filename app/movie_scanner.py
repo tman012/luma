@@ -278,8 +278,10 @@ def next_retry(m: Dict[str, Any], now: float) -> float:
 # ------------------------------------------------------------------ grab
 
 def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] = None, session_factory=None,
-         fetch=None) -> Dict[str, Any]:
-    """Send *item* to qBittorrent with the movie category and tag, through TV's client path. Never twice."""
+         fetch=None, movie: Optional[Dict[str, Any]] = None, pending: bool = True) -> Dict[str, Any]:
+    """Send *item* to qBittorrent with the movie category and tag, through TV's client path. Never twice.
+    v252: *movie* ({title, year}) for a film not on the watchlist (Genre Roulette); *pending* False: a
+    rate-limited link fails now instead of being queued for grab_retry."""
     import requests
     from app import library_mover as mover, tracker_sources, tv_grab
     now = time.time() if now is None else now
@@ -290,7 +292,7 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
     from app import movie_grabs
     if any(g['state'] in ACTIVE for g in movie_grabs.for_movie(tmdb_id)):
         return {'ok': False, 'error': 'Already grabbed', 'existing': True}
-    m = _movie(tmdb_id) or {}
+    m = movie or _movie(tmdb_id) or {}
     from app import movie_dupes               # v204c (PM): never grab a movie the library or qBittorrent already has
     dup = movie_dupes.check(m.get('title'), m.get('year'), session_factory or requests.Session, now)   # v206: no title fails closed
     if dup:
@@ -299,7 +301,7 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
         kind, payload = (fetch or (lambda u: tv_grab.fetch_link(u, automatic=origin == 'auto',
                                                                 tokens_only=origin != 'auto')))(item.get('downloadUrl'))
     except tracker_sources.GrabError as e:
-        if origin == 'auto' and getattr(e, 'retry_at', None):
+        if origin == 'auto' and pending and getattr(e, 'retry_at', None):
             from app import grab_retry               # v204b (PM): rate-limited automatic grab: pending, retried
             grab_retry.add('movie', item, e.retry_at, tmdb_id=tmdb_id)
             return {'ok': False, 'error': str(e), 'link': True, 'pending': True, 'blocked': True}

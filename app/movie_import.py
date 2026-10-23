@@ -214,7 +214,10 @@ def _video(content: str) -> str:
 def _watch(tmdb_id: int) -> Optional[Dict[str, Any]]:
     with ms.connect() as conn:
         r = conn.execute('SELECT * FROM watchlist WHERE tmdb_id = ?', (tmdb_id,)).fetchone()
-        return dict(r) if r else None
+        if r:
+            return dict(r)
+    from app.automation import gr_store       # v252: a Genre Roulette grab is not on the watchlist
+    return gr_store.title_for(tmdb_id)
 
 
 def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[str], str]] = None,
