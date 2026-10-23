@@ -194,3 +194,44 @@ def test_a_cadence_turned_back_on_revives_the_episode(env, monkeypatch, flag):
         assert tv_search.schedule(now) == 1 and _ep(ids[3])['next_search_at'] == now
     else:
         assert tv_search.schedule(now) == 0                     # air-time searches alone: its window is long over
+
+
+# ------------------------------------------------------------------ the migration
+
+def test_the_migration_moves_everything_once_and_spreads_the_backlog(env, monkeypatch):
+    now = at(2026, 10, 23, 12)
+    sids = _shows(12, now)                                    # 12 shows due now on the old hourly cadence
+    sid, ids = make_show(env, "Grey's Anatomy", 'standard', 23, (2,), '2026-10-23', '2026-10-24T01:00:00Z', 60)
+    aired_at = tv_search.aired_at(E)
+    with tv_store.write() as conn:
+        conn.execute('UPDATE series SET monitored = 1 WHERE id = ?', (sid,))
+        conn.execute('UPDATE episodes SET next_search_at = ?, last_search_at = ? WHERE id = ?',
+                     (aired_at + 900, aired_at, ids[2]))          # old 15-min retry inside the air window
+        recent = conn.execute('INSERT INTO episodes (series_id, season_number, episode_number, air_date, monitored,'
+                              " next_search_at, last_search_at) VALUES (?, 1, 2, '2026-10-21', 1, ?, ?)",
+                              (sids[0], now + 600, now - 3000)).lastrowid
+    t = aired_at + 600
+    assert tv_search.migrate_cadence(t) > 0
+    assert _ep(ids[2])['next_search_at'] == aired_at + 3600                        # its next air-time search
+    by_show = {r['series_id']: r['next_search_at'] for r in rows(
+        'SELECT series_id, next_search_at FROM episodes WHERE series_id IN (%s) AND id != ?' % ','.join('?' * 12),
+        *sids, recent)}
+    # last searched 1..12 days ago, aired long ago: weekly. Searched under 7 days ago: a week after that search;
+    # the 6 overdue ones are due now, spread at the sweep's pace (5 shows an hour), oldest-searched first
+    for k, s in enumerate(sids):
+        if k < 6:
+            assert by_show[s] == now - (k + 1) * DAY + 7 * DAY
+    assert [by_show[s] for s in sids[::-1][:6]] == [t + k * 720 for k in range(6)]
+    # no air time: its window ends 9 PM ET on its air date; W + 2 days (10-23 9 PM) has passed: due, and its
+    # show (searched most recently) is spread last
+    assert _ep(recent)['next_search_at'] == t + 6 * 720 and t > at(2026, 10, 23, 21)
+    assert tv_search.migrate_cadence(t + 60) == 0                                  # once
+
+
+def test_the_migration_clears_search_times_when_both_cadences_are_off(env):
+    _set(air_searches=False, sweep_enabled=False)
+    now = at(2026, 10, 23, 12)
+    sids = _shows(2, now)
+    tv_search.migrate_cadence(now)
+    assert rows('SELECT next_search_at FROM episodes WHERE series_id IN (?, ?)', *sids) == \
+        [{'next_search_at': None}, {'next_search_at': None}]

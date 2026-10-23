@@ -1360,6 +1360,48 @@ def schedule(now: float) -> int:
     return n
 
 
+MIGRATED_KEY = 'tv_cadence_v256'
+
+
+def migrate_cadence(now: float) -> int:
+    """v256, once: every episode with a search time is moved onto the new cadence. One in its air-time
+    searches keeps its next air-time search; every other one gets its next sweep step after its last search
+    (never searched: due now), and the ones due now are spread out, show by show, oldest-searched first, at
+    the sweep's own pace (SWEEP_BATCH shows a SWEEP_PASS_S), so a deploy never searches every backlog
+    episode at once. With both cadences off their search times are cleared. Returns how many moved."""
+    if tv_store.get_meta(MIGRATED_KEY):
+        return 0
+    c = cadence()
+    moved: Dict[int, Optional[float]] = {}
+    with tv_store.connect() as conn:
+        rows = [dict(r) for r in conn.execute(
+            'SELECT id, series_id, air_date, airstamp, runtime, next_search_at, last_search_at FROM episodes'
+            ' WHERE next_search_at IS NOT NULL')]
+        usual = usual_times(conn, {e['series_id'] for e in rows if not e.get('airstamp')})
+    due: Dict[int, List[Dict[str, Any]]] = {}
+    for e in rows:
+        e['usual_time'] = usual.get(e['series_id'])
+        if aired_at(e) is None:
+            continue
+        last = e['last_search_at']
+        want = first_search(e, now, c) if last is None else _next_retry(e, float(last), c=c)
+        if want is not None and want <= now and not early(e, now, c):
+            due.setdefault(e['series_id'], []).append(e)
+        else:
+            moved[e['id']] = want
+    gap = SWEEP_PASS_S / SWEEP_BATCH
+    order = sorted(due, key=lambda sid: (min(float(e['last_search_at'] or 0) for e in due[sid]), sid))
+    for k, sid in enumerate(order):
+        for e in due[sid]:
+            moved[e['id']] = now + k * gap
+    with tv_store.write() as conn:
+        conn.executemany('UPDATE episodes SET next_search_at = ? WHERE id = ?', [(v, i) for i, v in moved.items()])
+    tv_store.set_meta(MIGRATED_KEY, str(now))
+    logger.info('TV search: %d episode(s) moved to the v256 cadence; %d show(s) due spread over %.1f h',
+                len(moved), len(order), len(order) * gap / 3600)
+    return len(moved)
+
+
 def run_due(now: float, max_shows: int = 10) -> Dict[str, int]:
     """Search the shows with episodes due (next_search_at passed). v253: due episodes no longer wanted
     (unmonitored, a file, grabbed) stop (their search time is cleared). v256: shows with an episode in its
@@ -1485,6 +1527,7 @@ def tick(now: Optional[float] = None) -> Dict[str, Any]:
     if not _lock.acquire(blocking=False):
         return out
     try:
+        migrate_cadence(now)                         # v256, once
         if auto_on():                                # v196b: searches first; a long TMDB refresh never delays them
             out['scheduled'] = schedule(now)
             if automation().get('feed_enabled') and now - float(tv_store.get_meta('tv_feed_at') or 0) >= FEED_S:
