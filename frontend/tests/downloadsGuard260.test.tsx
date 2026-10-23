@@ -50,11 +50,11 @@ const puts = (calls: { init?: RequestInit }[]) => calls.filter(c => c.init?.meth
 const view = () => render(<MemoryRouter><DownloadsGuardSettings /></MemoryRouter>);
 
 describe('v260 Settings > Automation > Downloads guard', () => {
-  it("shows every setting with prod's defaults, sentence case, no helper text", async () => {
+  it("shows every setting with prod's defaults, prod's text where ported, sentence case otherwise, no helper text", async () => {
     stub();
     view();
     await waitFor(() => screen.getByTestId('downloads-guard'));
-    for (const t of ['Downloads guard', 'Enabled', 'Floor (GB)', 'Reclaim per run (GB)', 'Check every (minutes)', 'Storage pill amount (GB)',
+    for (const t of ['Downloads Guard', 'Enabled', 'Floor (GB)', 'Reclaim per run (GB)', 'Check every (minutes)', 'Storage pill amount (GB)',
       'Daily limit (GB)', 'Per-run limit (GB)', 'Downloads', 'Keep downloads newer than', '2 days', 'Minimum seed time (hours)', 'Minimum ratio',
       'Delete from these trackers first', 'Folder', 'Preview', 'Clean up now', 'Status', 'Free space', 'Recent activity']) {
       expect(screen.getAllByText(t).length, t).toBeGreaterThan(0);
@@ -69,7 +69,7 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     expect(screen.getByText('All finished downloads')).toBeTruthy();
     expect(screen.getAllByTestId('dg-tracker-row').map(r => r.textContent)).toEqual([expect.stringContaining('IPTorrents · 12 · 300 GB')]);
     expect((screen.getByTestId('dg-folder-input') as HTMLInputElement).placeholder).toBe('/downloads');
-    expect(document.body.textContent).not.toMatch(/Downloads Guard|default 150|cannot be undone/);
+    expect(document.body.textContent).not.toMatch(/Downloads guard|default 150|cannot be undone/);   // v261: prod's title casing
   });
 
   it('turns on, sets numbers, toggles the daily limit off, and reorders trackers', async () => {

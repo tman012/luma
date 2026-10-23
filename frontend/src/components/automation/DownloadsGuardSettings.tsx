@@ -356,9 +356,9 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
   return (
     <div data-testid="downloads-guard" style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, color: W95, padding: wide ? 0 : '8px 16px 24px' }}>
       <style>{tvEditCss}{grCss}</style>
-      <section className="gr-head" aria-label="Downloads guard" style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
+      <section className="gr-head" aria-label="Downloads Guard" style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', columnGap: 12, rowGap: 2, flex: 1, minWidth: 0 }}>
-          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Downloads guard</h3>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Downloads Guard</h3>
           <span data-testid="dg-sub" style={{ fontSize: 12, color: W70 }}>{sub}</span>
         </div>
         <div className="gr-actions" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

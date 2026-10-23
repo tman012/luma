@@ -36,7 +36,7 @@ describe('v260 phone Home button row (prod 1b4ea74 NavPills)', () => {
     const row = screen.getByTestId('home-pills');
     await waitFor(() => within(row).getByText('412 GB free'));
     const labels = within(row).getAllByRole('button').map(b => b.textContent);
-    expect(labels).toEqual(['412 GB free', 'TV calendar']);
+    expect(labels).toEqual(['412 GB free', 'TV Calendar']);
     expect(HOME_PILLS.map(p => p.id)).toEqual(['tv-calendar']);
     for (const gone of ['Latest', 'Activity', 'Luma AI', 'Library', 'Watchlist', 'Collections', 'Rooms', 'Upgrades']) {
       expect(within(row).queryByText(gone)).toBeNull();
