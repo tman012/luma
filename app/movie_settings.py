@@ -8,7 +8,8 @@ order; no secrets or URLs) or, without it, gets one 'Any' profile.
 
 Routes (luma-test builds, owner only; writes need the signed-in owner):
 GET  /api/settings/movies                {monitoring, preferred_groups, trackers, profiles, qualities}
-PUT  /api/settings/movies                {monitoring?, preferred_groups?, trackers?: [{id, enabled}] in order}
+PUT  /api/settings/movies                {monitoring?, preferred_groups?, trackers?: [{id, enabled}] in order,
+                                         availability?: announced | in_cinemas | released}
 POST /api/settings/movies/profiles       PUT|DELETE /api/settings/movies/profiles/<id>
 """
 from __future__ import annotations
@@ -311,6 +312,23 @@ def trackers(conn=None) -> List[Dict[str, Any]]:
         return go(c)
 
 
+#: v256 (PM, the arr-style minimum availability): when a watchlist movie may be grabbed by the feed or searched.
+#: announced: always; in_cinemas: from its cinema date; released: the earlier of its digital and physical dates,
+#: or its cinema date + 90 days when it has neither (movie_scanner.available_at)
+AVAILABILITY = ('announced', 'in_cinemas', 'released')
+DEFAULT_AVAILABILITY = 'released'
+
+
+def availability(conn=None) -> str:
+    def go(c):
+        v = _meta(c, 'availability', DEFAULT_AVAILABILITY)
+        return v if v in AVAILABILITY else DEFAULT_AVAILABILITY
+    if conn is not None:
+        return go(conn)
+    with connect() as c:
+        return go(c)
+
+
 def view() -> Dict[str, Any]:
     with connect() as conn:
         return {'monitoring': bool(_meta(conn, 'monitoring', instance.is_test() and instance.opt_ins_honored())),   # v203: on by default on test
@@ -318,11 +336,13 @@ def view() -> Dict[str, Any]:
                 'trackers': trackers(conn),
                 'profiles': [_profile(r) for r in conn.execute('SELECT * FROM profiles ORDER BY name COLLATE NOCASE')],
                 'qualities': qualities(),
-                'picker_profiles': list(_meta(conn, 'picker_profiles', []))}   # v204: [] = every profile
+                'picker_profiles': list(_meta(conn, 'picker_profiles', [])),   # v204: [] = every profile
+                'availability': availability(conn)}
 
 
 def apply_put(body: Any) -> Dict[str, str]:
-    if not isinstance(body, dict) or not body or set(body) - {'monitoring', 'preferred_groups', 'trackers', 'picker_profiles'}:
+    if not isinstance(body, dict) or not body or set(body) - {'monitoring', 'preferred_groups', 'trackers', 'picker_profiles',
+                                                              'availability'}:
         return {'_': 'Invalid'}
     errors: Dict[str, str] = {}
     vals: Dict[str, Any] = {}
@@ -347,6 +367,11 @@ def apply_put(body: Any) -> Dict[str, str]:
             vals['trackers'] = [{'id': x['id'], 'enabled': bool(x.get('enabled'))} for x in t]
         else:
             errors['trackers'] = 'Invalid'
+    if 'availability' in body:
+        if isinstance(body['availability'], str) and body['availability'] in AVAILABILITY:
+            vals['availability'] = body['availability']
+        else:
+            errors['availability'] = 'Invalid'
     if 'picker_profiles' in body:
         v = body['picker_profiles']
         with connect() as conn:

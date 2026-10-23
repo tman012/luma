@@ -3,9 +3,10 @@
 Every TICK_S, when LUMA_INSTANCE is test and Settings > Movies monitoring is on (on by default on test):
   * feed: every FEED_S, each movie-enabled tracker's newest movie releases (the guard's 'feed' purpose: no cap
     or slot, backoff and 429/Retry-After only, like TV). A release matching a watchlist movie is grabbed when
-    it passes the movie's profile, and marks the movie released (its searches start).
-  * searches: a watchlist movie is due once released (its US digital or physical date reached, from TMDB, or a
-    feed match); then every FAST_S for FAST_WINDOW_S after release, then every SLOW_S, like TV. Automatic
+    it passes the movie's profile and the movie is available (v256: Settings > Movies availability, Radarr's
+    minimum availability: announced, in cinemas, or released, the default; see available_at).
+  * searches: a watchlist movie is due once available; then every FAST_S for FAST_WINDOW_S, then every
+    SLOW_S, like TV. Automatic
     searches share TV's budget and guard (tv_search.query_trackers, purpose 'tv' in the guard): the per-tracker
     daily cap, skipped until the reset, the skip logged once per reset window. Every tracker capped: the movie
     waits for the earliest reset.
@@ -66,6 +67,9 @@ CREATE TABLE IF NOT EXISTS movie_scan (
 def ensure(conn) -> None:
     from app.movie_grabs import SCHEMA as GRABS     # piece 4's movie_grabs (one table, shared)
     conn.executescript(GRABS + SCHEMA)
+    # v256: the cinema date (Radarr's In cinemas), for the availability setting; filled by refresh_dates
+    if 'cinema_date' not in {r[1] for r in conn.execute('PRAGMA table_info(movie_scan)')}:
+        conn.execute('ALTER TABLE movie_scan ADD COLUMN cinema_date TEXT')
 
 
 def on_test() -> bool:
@@ -186,8 +190,9 @@ def _tmdb(tmdb_id: int) -> Optional[Dict[str, Any]]:
 
 
 def dates_of(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """{runtime, digital_date, physical_date}: the earliest US type 4 (digital) and 5 (physical) dates."""
-    out: Dict[str, Any] = {'runtime': None, 'digital_date': None, 'physical_date': None}
+    """{runtime, digital_date, physical_date, cinema_date}: the earliest US type 4 (digital), 5 (physical)
+    and 2/3 (limited or wide theatrical) dates; the cinema date falls back to TMDB's release date."""
+    out: Dict[str, Any] = {'runtime': None, 'digital_date': None, 'physical_date': None, 'cinema_date': None}
     if not payload:
         return out
     if isinstance(payload.get('runtime'), int) and payload['runtime'] > 0:
@@ -197,9 +202,13 @@ def dates_of(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
             continue
         for d in c.get('release_dates') or []:
             day = str(d.get('release_date') or '')[:10]
-            k = {4: 'digital_date', 5: 'physical_date'}.get(d.get('type'))
+            k = {2: 'cinema_date', 3: 'cinema_date', 4: 'digital_date', 5: 'physical_date'}.get(d.get('type'))
             if k and len(day) == 10 and (out[k] is None or day < out[k]):
                 out[k] = day
+    if out['cinema_date'] is None:
+        day = str(payload.get('release_date') or '')[:10]
+        if len(day) == 10 and _day_start(day) is not None:
+            out['cinema_date'] = day
     return out
 
 
@@ -216,6 +225,31 @@ def released_at(row: Dict[str, Any]) -> Optional[float]:
     return min(got) if got else None
 
 
+CINEMA_TO_RELEASE_S = 90 * 86400                  # Radarr: no digital or physical date: cinema + 90 days
+
+
+def available_at(row: Dict[str, Any], mode: Optional[str] = None) -> Optional[float]:
+    """v256 (PM, Radarr's minimum availability): when the movie may be grabbed or searched under *mode*
+    (Settings > Movies availability). announced: always (0); released: the earlier of its digital and
+    physical dates, else its cinema date + 90 days, else never (None); in_cinemas: its cinema date, or the
+    released rule when that is earlier."""
+    mode = mode or ms.availability()
+    if mode == 'announced':
+        return 0.0
+    rel = released_at(row)
+    cinema = _day_start(row.get('cinema_date'))
+    released = rel if rel is not None else (cinema + CINEMA_TO_RELEASE_S if cinema is not None else None)
+    if mode == 'in_cinemas':
+        got = [t for t in (cinema, released) if t is not None]
+        return min(got) if got else None
+    return released
+
+
+def available(row: Dict[str, Any], now: float, mode: Optional[str] = None) -> bool:
+    at = available_at(row, mode)
+    return at is not None and at <= now
+
+
 def refresh_dates(now: float, fetch=None, limit: int = 20) -> int:
     """Read each watchlist movie's dates and runtime again every DATES_S (a few per pass)."""
     fetch = fetch or _tmdb
@@ -230,8 +264,9 @@ def refresh_dates(now: float, fetch=None, limit: int = 20) -> int:
         with ms.connect() as conn:
             conn.execute('INSERT INTO movie_scan (tmdb_id) VALUES (?) ON CONFLICT(tmdb_id) DO NOTHING', (r['tmdb_id'],))
             conn.execute('UPDATE movie_scan SET runtime = COALESCE(?, runtime), digital_date = COALESCE(?, digital_date),'
-                         ' physical_date = COALESCE(?, physical_date), dates_at = ? WHERE tmdb_id = ?',
-                         (d['runtime'], d['digital_date'], d['physical_date'], now, r['tmdb_id']))
+                         ' physical_date = COALESCE(?, physical_date), cinema_date = COALESCE(?, cinema_date),'
+                         ' dates_at = ? WHERE tmdb_id = ?',
+                         (d['runtime'], d['digital_date'], d['physical_date'], d['cinema_date'], now, r['tmdb_id']))
             row = dict(conn.execute('SELECT * FROM movie_scan WHERE tmdb_id = ?', (r['tmdb_id'],)).fetchone())
             at = released_at(row)
             if at is not None and (row['released_at'] is None or at < row['released_at']):
@@ -246,7 +281,8 @@ def wanted(conn, ids: Optional[List[int]] = None) -> List[Dict[str, Any]]:
     """Watchlist movies with no active grab (with their scan row)."""
     ensure(conn)
     rows = [dict(r) for r in conn.execute(
-        'SELECT w.*, s.runtime, s.digital_date, s.physical_date, s.released_at, s.next_search_at, s.last_search_at,'
+        'SELECT w.*, s.runtime, s.digital_date, s.physical_date, s.cinema_date, s.released_at, s.next_search_at,'
+        ' s.last_search_at,'
         ' s.search_attempts FROM watchlist w LEFT JOIN movie_scan s ON s.tmdb_id = w.tmdb_id'
         f" WHERE NOT EXISTS (SELECT 1 FROM movie_grabs g WHERE g.tmdb_id = w.tmdb_id AND g.state IN ({','.join('?' * len(ACTIVE))}))",
         ACTIVE)]
@@ -259,13 +295,15 @@ def _set(conn, tid: int, **vals: Any) -> None:
 
 
 def schedule(now: float) -> int:
-    """A released, never-searched movie is due now."""
+    """An available (v256: Settings > Movies availability, available_at), never-searched movie is due now.
+    One scheduled under an earlier rule keeps its time; run_due skips it until it is available."""
     n = 0
+    mode = ms.availability()
     with ms.connect() as conn:
         for m in wanted(conn):
-            if m['released_at'] is not None and m['released_at'] <= now and m['last_search_at'] is None \
-                    and m['next_search_at'] is None:
-                _set(conn, m['tmdb_id'], next_search_at=max(m['released_at'], now - FAST_S))
+            at = available_at(m, mode)
+            if at is not None and at <= now and m['last_search_at'] is None and m['next_search_at'] is None:
+                _set(conn, m['tmdb_id'], next_search_at=max(at, now - FAST_S))
                 n += 1
     return n
 
@@ -402,7 +440,9 @@ def _after(m: Dict[str, Any], out: Dict[str, Any], now: float, automatic: bool) 
 
 def run_due(now: float, max_movies: int = 5) -> Dict[str, int]:
     with ms.connect() as conn:
-        due = [m for m in wanted(conn) if m['next_search_at'] is not None and m['next_search_at'] <= now]
+        mode = ms.availability(conn)
+        due = [m for m in wanted(conn) if m['next_search_at'] is not None and m['next_search_at'] <= now
+               and available(m, now, mode)]                 # v256: never searched before it is available
     due.sort(key=lambda m: m['next_search_at'])
     out = {'movies': 0, 'grabbed': 0}
     for m in due[:max_movies]:
@@ -417,7 +457,8 @@ def run_due(now: float, max_movies: int = 5) -> Dict[str, int]:
 # ------------------------------------------------------------------ feed
 
 def feed(now: float) -> Dict[str, int]:
-    """Every FEED_S per tracker (guard purpose 'feed': no cap or slot). Matches mark a movie released and are grabbed."""
+    """Every FEED_S per tracker (guard purpose 'feed': no cap or slot). A match is grabbed only when the movie
+    is available (v256: Settings > Movies availability; a feed release no longer marks it released)."""
     from app import tv_search
     out = {'trackers': 0, 'grabbed': 0}
     cfgs = trackers()
@@ -436,15 +477,14 @@ def feed(now: float) -> Dict[str, int]:
             movies = wanted(conn)
             profs = {m['tmdb_id']: _profile(conn, m['profile_id']) for m in movies}
             blocked = {m['tmdb_id']: _blocked(conn, m['tmdb_id']) for m in movies}
+            mode = ms.availability(conn)
         out['trackers'] += 1
         for m in movies:
             hits = [it for it in items if matches(str(it.get('title') or ''), m)]
             if not hits:
                 continue
-            if m['released_at'] is None or m['released_at'] > now:
-                with ms.connect() as conn:                   # a feed release: the movie is out
-                    _set(conn, m['tmdb_id'], released_at=now)
-                m['released_at'] = now
+            if not available(m, now, mode):
+                continue
             for c in candidates(hits, m, profs[m['tmdb_id']], blocked[m['tmdb_id']], order):
                 g = grab(c['item'], m['tmdb_id'], 'auto', now)
                 if g.get('ok'):

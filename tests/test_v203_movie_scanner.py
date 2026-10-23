@@ -2,6 +2,7 @@
 (digital/physical date or a feed match), 15 min for 6 h then hourly, TV's budget (daily cap, skip until reset,
 skip logged once), the best release by profile/size/tracker priority/preferred groups/blocklist, grabs through
 TV's client path with the movie category, recorded in movies.db movie_grabs (never twice); never on prod."""
+from datetime import datetime
 import sqlite3
 
 import pytest
@@ -91,7 +92,9 @@ def _fill():                                                       # IPT's daily
 def _released(tid=693134, at=NOW - 60):
     with movie_settings.connect() as conn:
         sc.ensure(conn)
-        sc._set(conn, tid, released_at=at, runtime=166)
+        # v256: available by its digital date (Settings > Movies availability, released by default)
+        day = datetime.fromtimestamp(at, sc.TZ).strftime('%Y-%m-%d')
+        sc._set(conn, tid, released_at=at, runtime=166, digital_date=day)
 
 
 def _scan(tid=693134):
@@ -122,7 +125,7 @@ def test_dates_from_tmdb_release_dates_mark_it_released():
         {'iso_3166_1': 'US', 'release_dates': [{'type': 3, 'release_date': '2024-03-01T00:00:00.000Z'},
                                                {'type': 4, 'release_date': '2024-04-16T00:00:00.000Z'},
                                                {'type': 5, 'release_date': '2024-05-14T00:00:00.000Z'}]}]}})
-    assert d == {'runtime': 166, 'digital_date': '2024-04-16', 'physical_date': '2024-05-14'}
+    assert d == {'runtime': 166, 'digital_date': '2024-04-16', 'physical_date': '2024-05-14', 'cinema_date': '2024-03-01'}
     assert sc.released_at(d) == sc._day_start('2024-04-16')
 
 
