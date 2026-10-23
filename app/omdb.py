@@ -32,8 +32,8 @@ _lock = threading.Lock()
 def api_key() -> str:
     """The saved OMDb key ('' when none). Minimal builds count only a key saved in Settings."""
     try:
-        from app.settings_manager import SettingsManager
-        key = str(SettingsManager().get('apis.omdb.api_key') or '').strip()
+        from app.settings_manager import SettingsFile      # v259: read as on disk; never rewrites settings.json
+        key = str(SettingsFile().get('apis.omdb.api_key') or '').strip()
     except Exception:                  # noqa: BLE001 - no settings: no key
         key = ''
     if key:

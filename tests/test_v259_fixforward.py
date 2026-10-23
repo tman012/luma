@@ -140,7 +140,8 @@ def test_the_removed_caps_leave_the_file_on_the_next_load_or_save(tvs):  # noqa:
 SPARSE = {'automation': {'genre_roulette': {'hour': 21, 'minute': 15, 'genres': 'Action,Comedy'},
                          'anticipated_watchlist': {'limit': 12}},
           'apis': {'trakt': {'enabled': True, 'client_id': 'cid-1', 'connector_saved': True},
-                   'tmdb': {'api_key': 'tk-1', 'connector_saved': True}}}
+                   'tmdb': {'api_key': 'tk-1', 'connector_saved': True},
+                   'omdb': {'api_key': 'ok-1', 'connector_saved': True}}}
 
 
 @pytest.fixture
@@ -183,6 +184,16 @@ def test_whats_missing_connector_reads_never_rewrite_settings_json(sparse):
     assert _same(sparse, before)
 
 
+def test_whats_missing_omdb_read_never_rewrites_settings_json(sparse):
+    """v259 (Tester LOW): the OMDb key behind WYM's status, rebuild and Settings view (omdb_on -> omdb.api_key)."""
+    from app import daily_missing, omdb
+    before = (sparse.read_bytes(), sparse.stat().st_mtime_ns)
+    assert omdb.api_key() == 'ok-1' and daily_missing.omdb_on() is True
+    assert daily_missing.sources_sig() == {'trakt': True, 'tmdb': True, 'omdb': True}
+    daily_missing.current_sig()
+    assert _same(sparse, before) and sorted(x.name for x in sparse.parent.iterdir()) == ['settings.json']
+
+
 def test_no_settings_json_is_created_by_a_read(tmp_path, monkeypatch):
     from app.automation import gr_store
     from app import daily_missing
@@ -190,7 +201,10 @@ def test_no_settings_json_is_created_by_a_read(tmp_path, monkeypatch):
     d.mkdir()
     monkeypatch.setenv('LUMA_DATA_DIR', str(d))
     monkeypatch.setitem(gr_store._cfg, 'db_path', str(tmp_path / 'automation.db'))
+    from app import omdb
     assert gr_store.settings()['enabled'] is False and daily_missing.trakt_client_id() == ''
+    omdb.api_key()
+    daily_missing.sources_sig()
     assert list(d.iterdir()) == []
 
 
