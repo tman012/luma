@@ -6430,12 +6430,6 @@ def _fetch_trakt_movie_related(imdb_id=None, tmdb_id=None, limit: int = 24):
     if not enabled or not client_id:
         return []
 
-    headers = {
-        'Content-Type': 'application/json',
-        'trakt-api-version': '2',
-        'trakt-api-key': client_id,
-    }
-
     ident = None
     if imdb_id:
         ident = imdb_id if str(imdb_id).startswith('tt') else f'tt{imdb_id}'
@@ -6446,9 +6440,8 @@ def _fetch_trakt_movie_related(imdb_id=None, tmdb_id=None, limit: int = 24):
             ident = cached[1]
         else:
             try:
-                resp = requests.get(
-                    f'https://api.trakt.tv/search/tmdb/{int(tmdb_id)}',
-                    headers=headers,
+                resp = _trakt_http.get(
+                    f'https://api.trakt.tv/search/tmdb/{int(tmdb_id)}', client_id,
                     params={'type': 'movie'},
                     timeout=10,
                 )
@@ -6473,9 +6466,8 @@ def _fetch_trakt_movie_related(imdb_id=None, tmdb_id=None, limit: int = 24):
         return cached[1]
 
     try:
-        resp = requests.get(
-            f'https://api.trakt.tv/movies/{ident}/related',
-            headers=headers,
+        resp = _trakt_http.get(
+            f'https://api.trakt.tv/movies/{ident}/related', client_id,
             params={'limit': limit, 'extended': 'full'},
             timeout=10,
         )
@@ -6832,6 +6824,9 @@ _TRAKT_CACHE_TTL = 15 * 60            # 15 minutes
 _TRAKT_CACHE_MAX = 1000               # cap total entries (per-tmdb image keys never expire otherwise)
 
 
+from app import trakt_http as _trakt_http  # noqa: E402  Trakt's headers (User-Agent) and failure logging
+
+
 def _set_trakt_cache(key: str, value) -> None:
     _trakt_cache[key] = (time.time(), value)
     if len(_trakt_cache) > _TRAKT_CACHE_MAX:
@@ -6861,13 +6856,8 @@ def trakt_trending_shows():
         _trakt_cache.pop(cache_key, None)
 
     try:
-        resp = requests.get(
-            'https://api.trakt.tv/shows/trending',
-            headers={
-                'Content-Type': 'application/json',
-                'trakt-api-version': '2',
-                'trakt-api-key': client_id,
-            },
+        resp = _trakt_http.get(
+            'https://api.trakt.tv/shows/trending', client_id,
             params={'page': page, 'limit': limit, 'extended': 'full'},
             timeout=10,
         )
@@ -7112,13 +7102,8 @@ def trakt_trending_movies():
         _trakt_cache.pop(cache_key, None)
 
     try:
-        resp = requests.get(
-            'https://api.trakt.tv/movies/trending',
-            headers={
-                'Content-Type': 'application/json',
-                'trakt-api-version': '2',
-                'trakt-api-key': client_id,
-            },
+        resp = _trakt_http.get(
+            'https://api.trakt.tv/movies/trending', client_id,
             params={'page': page, 'limit': limit, 'extended': 'full'},
             timeout=10,
         )
@@ -7271,13 +7256,8 @@ def _fetch_trakt_anticipated(media):
         return tmdb_id, None, None
 
     try:
-        resp = requests.get(
-            f'https://api.trakt.tv/{media}/anticipated',
-            headers={
-                'Content-Type': 'application/json',
-                'trakt-api-version': '2',
-                'trakt-api-key': client_id,
-            },
+        resp = _trakt_http.get(
+            f'https://api.trakt.tv/{media}/anticipated', client_id,
             params={'page': page, 'limit': limit, 'extended': 'full'},
             timeout=10,
         )
@@ -21072,13 +21052,8 @@ def test_trakt_connection():
         if not client_id:
             return jsonify({'success': False, 'message': 'Trakt client ID is required'}), 400
 
-        resp = requests.get(
-            'https://api.trakt.tv/shows/trending',
-            headers={
-                'Content-Type': 'application/json',
-                'trakt-api-version': '2',
-                'trakt-api-key': client_id,
-            },
+        resp = _trakt_http.get(
+            'https://api.trakt.tv/shows/trending', client_id,
             params={'limit': 1},
             timeout=5,
         )
@@ -21683,6 +21658,8 @@ def _on_tmdb_key(key: str) -> None:
 def _on_trakt_change() -> None:
     """A Connectors save or remove: drop cached Trakt rails at once."""
     _trakt_cache.clear()
+    from app import home_rails
+    home_rails.clear_trakt_last()
 
 
 _TRAKT_VIEWS = {
@@ -21702,10 +21679,18 @@ def _fetch_trakt_rail(rail_id: str) -> list:
     with app.test_request_context('/', query_string={'limit': '20', 'page': '1'}):
         rv = view()
     resp, code = (rv if isinstance(rv, tuple) else (rv, 200))
-    if code != 200:
-        return []
     data = resp.get_json(silent=True) or {}
+    if code != 200:
+        # never silent: the rail would otherwise show nothing with no trace (the error text holds no key)
+        logger.warning('Home: Trakt rail %s got HTTP %s (%s)', rail_id, code, str(data.get('error') or '')[:120])
+        raise TraktRailFailed(f'HTTP {code}')
+    if data.get('enabled') is False:
+        logger.warning('Home: Trakt rail %s: Trakt is not enabled or has no client ID', rail_id)
     return data.get('movies') or data.get('shows') or []
+
+
+class TraktRailFailed(Exception):
+    """A Home Trakt rail's fetch didn't answer 200 (home_rails keeps its last good cards)."""
 
 
 from app import connectors as _connectors

@@ -22,7 +22,8 @@ export const img = (p: string | null | undefined) => tmdbImg(p);
 export async function fetchHome(): Promise<HomeData> {
   const res = await apiFetch('/api/home');
   if (!res.ok) throw new Error(String(res.status));
-  return res.json();
+  const d = await res.json();
+  return (d && typeof d === 'object' ? d : {}) as HomeData;   // a null body reads as {} (the empty state)
 }
 
 export async function fetchLibraries(): Promise<Library[]> {

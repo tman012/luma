@@ -135,8 +135,8 @@ def test_tmdb_key(key: str) -> Optional[str]:
 def test_trakt_client_id(client_id: str) -> Optional[str]:
     """None when Trakt accepts *client_id* (prod's check), else a short error."""
     try:
-        r = _test_get(TRAKT_TEST_URL, params={'limit': 1}, headers={
-            'Content-Type': 'application/json', 'trakt-api-version': '2', 'trakt-api-key': client_id})
+        from app import trakt_http
+        r = _test_get(TRAKT_TEST_URL, params={'limit': 1}, headers=trakt_http.headers(client_id))
     except requests.exceptions.Timeout:
         return 'Timed out'
     except Exception:

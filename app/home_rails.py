@@ -38,6 +38,9 @@ WIDE_W = 480
 # that fails or is still loading is left out, never held for. The phone gives up at 7 s (MinimalHomePage), so
 # 6 s leaves a second for the response to reach it.
 HOME_DEADLINE_S = 6.0
+# Rail fetches run side by side, one worker each (with fewer workers, the network-bound Trakt rails queued
+# behind the Plex rails and missed the 6 s budget); more rails than this share workers.
+HOME_MAX_WORKERS = 12
 
 _cfg: Dict[str, Any] = {}
 _lock = threading.Lock()
@@ -113,9 +116,27 @@ def trakt_rails() -> List[Dict[str, Any]]:
     return [{'id': rid, 'title': title, 'type': kind, 'source': 'trakt'} for rid, title, kind, _ in TRAKT_RAILS]
 
 
+# Each Trakt rail's last good cards (this process): served when a fetch fails or is still running at the
+# Home deadline, so a Trakt hiccup or a slow cold fetch doesn't empty the rail.
+_trakt_last: Dict[str, List[Dict[str, Any]]] = {}
+
+
+def clear_trakt_last() -> None:
+    """A Connectors save or remove: no old cards survive a changed or removed client ID."""
+    with _lock:
+        _trakt_last.clear()
+
+
+def trakt_last(rail_id: str) -> Optional[List[Dict[str, Any]]]:
+    with _lock:
+        got = _trakt_last.get(rail_id)
+    return list(got) if got else None
+
+
 def trakt_items(rail_id: str) -> List[Dict[str, Any]]:
     """Cards for a Trakt rail from prod's endpoint output. Tapping one opens the
-    TMDB detail popup (tmdb_id); no Plex rating key."""
+    TMDB detail popup (tmdb_id); no Plex rating key. A failed fetch is logged and
+    answers the rail's last good cards (none yet: empty)."""
     fetch = _cfg.get('fetch_trakt')
     kind = next((k for rid, _, k, _ in TRAKT_RAILS if rid == rail_id), None)
     if not fetch or not kind:
@@ -123,8 +144,13 @@ def trakt_items(rail_id: str) -> List[Dict[str, Any]]:
     try:
         raw = fetch(rail_id) or []
     except Exception as e:  # noqa: BLE001 - a rail failing must not break Home
-        logger.warning('Trakt rail %s failed: %s', rail_id, type(e).__name__)
-        return []
+        last = trakt_last(rail_id)
+        logger.warning('Trakt rail %s failed: %s%s', rail_id, type(e).__name__,
+                       f'; showing its last {len(last)} cards' if last else '')
+        return last or []
+    if not isinstance(raw, list):
+        logger.warning('Trakt rail %s: unexpected answer (%s)', rail_id, type(raw).__name__)
+        raw = []
     out = []
     for it in raw[:RAIL_LIMIT]:
         tmdb_id = it.get('tmdb_id') if isinstance(it, dict) else None
@@ -134,6 +160,11 @@ def trakt_items(rail_id: str) -> List[Dict[str, Any]]:
         out.append({'key': f'tmdb-{kind}-{tmdb_id}', 'type': kind, 'title': str(it.get('title') or ''),
                     'subtitle': str(it.get('year') or ''), 'tmdb_id': tmdb_id,
                     'poster': f'{TMDB_POSTER}{poster}' if isinstance(poster, str) and poster.startswith('/') else None})
+    if out:
+        with _lock:
+            _trakt_last[rail_id] = list(out)
+    elif raw:
+        logger.warning('Trakt rail %s: %d item(s), none with a TMDB id', rail_id, len(raw))
     return out
 
 
@@ -306,15 +337,19 @@ def home():
     deadline = start + HOME_DEADLINE_S
     dropped: List[str] = []
 
-    def take(rid: str, fut):
+    def take(rid: str, fut, source: str = 'plex'):
         try:
             return fut.result(timeout=max(0.0, deadline - time.monotonic()))
         except Exception as e:  # noqa: BLE001 - a failed or slow rail is dropped, never fails Home
+            last = trakt_last(rid) if source == 'trakt' else None
+            if last:                                        # a slow Trakt fetch: its last good cards
+                logger.info('Home: rail %s still loading (%s); showing its last cards', rid, type(e).__name__ or 'error')
+                return last
             dropped.append(rid)
             logger.info('Home: rail %s dropped (%s)', rid, type(e).__name__ or 'error')
             return None
 
-    pool = ThreadPoolExecutor(max_workers=min(6, len(libs) + 1))
+    pool = ThreadPoolExecutor(max_workers=min(HOME_MAX_WORKERS, len(libs) + 1))
     try:
         cw = pool.submit(in_app, continue_watching, plex)
         rails = [(l, pool.submit(in_app, trakt_items, l['id']) if l['source'] == 'trakt'
@@ -323,7 +358,7 @@ def home():
         cw_items = take('continue_watching', cw)
         out_rails = []
         for l, f in rails:
-            items = take(l['id'], f)
+            items = take(l['id'], f, l['source'])
             if items is not None:
                 out_rails.append({'id': l['id'], 'title': l['title'], 'type': l['type'], 'items': items})
     finally:

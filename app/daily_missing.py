@@ -102,11 +102,8 @@ def _settings():
 
 
 def _trakt_headers(client_id: str) -> Dict[str, str]:
-    return {
-        'Content-Type': 'application/json',
-        'trakt-api-version': '2',
-        'trakt-api-key': client_id,
-    }
+    from app import trakt_http
+    return trakt_http.headers(client_id)
 
 
 def _fetch_trakt_list(path: str, client_id: str, pages: int) -> List[Dict[str, Any]]:

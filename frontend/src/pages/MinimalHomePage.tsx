@@ -139,9 +139,9 @@ export function firstPosterUrls(data: HomeData | null, vw: number): string[] {
       if (u && !urls.includes(u)) urls.push(u);
     }
   };
-  add(data.continue_watching || [], fits(vw, clamp(240, vw * 0.72, 320), 20), true);
-  for (const r of Array.isArray(data.rails) ? data.rails : []) {
-    if (!r || !Array.isArray(r.items)) continue;
+  const { cw, rails } = homeParts(data);
+  add(cw, fits(vw, clamp(240, vw * 0.72, 320), 20), true);
+  for (const r of rails) {
     add(r.items, r.id === 'watchlist' ? fits(vw, 116, 12) : fits(vw, clamp(112, vw * 0.3, 160), 20), false);
   }
   return urls;
@@ -192,10 +192,20 @@ export function openDetail(modals: { openMovie: (o: object) => void; openTv: (o:
   modals.openTv({ ratingKey: show, origin: 'recently_added_tv' });
 }
 
+/** The parts of a /api/home answer Home renders, tolerating {} or a missing / malformed field. */
+type HomeParts = { cw: HomeData['continue_watching']; rails: HomeData['rails'] };
+export function homeParts(data: Partial<HomeData> | null | undefined): HomeParts {
+  const cw = Array.isArray(data?.continue_watching) ? data!.continue_watching.filter(Boolean) : [];
+  const rails = Array.isArray(data?.rails) ? data!.rails.filter(r => r && Array.isArray(r.items)) : [];
+  return { cw, rails };
+}
+
 function homeView(data: HomeData | null, down: boolean, retry: () => void, onOpen: (c: Card) => void) {
   if (data && data.plex !== false) {
-    const any = data.continue_watching.length > 0 || data.rails.some(r => r.items.length > 0);
-    if (any) return <HomeRails cw={data.continue_watching} rails={data.rails} onOpen={onOpen} />;
+    // Tester LOW: /api/home answering {} (or without rails / continue_watching) shows the empty state, not a crash
+    const { cw, rails } = homeParts(data);
+    const any = cw.length > 0 || rails.some(r => r.items.length > 0);
+    if (any) return <HomeRails cw={cw} rails={rails} onOpen={onOpen} />;
     return <div style={emptyBox} data-testid="home-empty"><p style={emptyLine}>Nothing here yet</p></div>;
   }
   if (data || down) {

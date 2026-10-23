@@ -367,3 +367,12 @@ def _tv_background_isolated():
     tmdb = sys.modules.get('app.tv_tmdb')
     if tmdb is not None:
         tmdb._local = threading.local()
+
+
+@pytest.fixture(autouse=True)
+def _clear_home_trakt_last():
+    """Home's last-good Trakt cards are process state: no test sees another's."""
+    from app import home_rails
+    home_rails.clear_trakt_last()
+    yield
+    home_rails.clear_trakt_last()
