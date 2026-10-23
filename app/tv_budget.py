@@ -125,14 +125,35 @@ def _count_key(cfg: Dict[str, Any]) -> str:
     return f'tv_searchday:{guard_key(cfg)}'
 
 
+def _parse_count(raw: Optional[str], day: str) -> int:
+    """Today's count from a stored {"day", "n"} record. v251b: fail OPEN on anything unreadable (missing,
+    invalid JSON, wrong shape or types): it reads as 0 for today, is logged, and the next counted search
+    writes a clean record. A corrupt record must never raise out of a search or stop TV searching for good;
+    the tracker guard's spacing and backoff still hold."""
+    if not raw:
+        return 0
+    try:
+        d = json.loads(raw)
+        if not isinstance(d, dict) or d.get('day') != day:
+            return 0
+        n = d.get('n')
+        if isinstance(n, bool) or not isinstance(n, int) or n < 0:
+            raise ValueError('bad count')
+        return n
+    except (ValueError, TypeError) as e:
+        logger.warning('TV search: unreadable daily search count (%s); counting from 0 today', type(e).__name__)
+        return 0
+
+
 def searches_today(cfg: Dict[str, Any], now: Optional[float] = None) -> int:
     from app import tv_store
     now = time.time() if now is None else now
     try:
-        d = json.loads(tv_store.get_meta(_count_key(cfg)) or '{}')
-    except ValueError:
+        raw = tv_store.get_meta(_count_key(cfg))
+    except Exception:                       # noqa: BLE001 - fail open (see _parse_count)
+        logger.warning('TV search: daily search count unavailable; counting from 0', exc_info=True)
         return 0
-    return int(d.get('n') or 0) if d.get('day') == _et_day(now) else 0
+    return _parse_count(raw, _et_day(now))
 
 
 def under_search_cap(cfg: Dict[str, Any], now: Optional[float] = None) -> bool:
@@ -145,14 +166,55 @@ def search_cap_reset(now: float) -> float:
     return dt.datetime(d.year, d.month, d.day, tzinfo=ET).timestamp()
 
 
-def count_search(cfg: Dict[str, Any], now: Optional[float] = None) -> int:
-    """One background query sent to *cfg* today; the new count. Logs once (INFO) when it reaches the cap."""
+def _bump(cfg: Dict[str, Any], now: float, delta: int, cap: Optional[int]) -> Optional[int]:
+    """Read, check and write today's count in ONE write transaction (tv_store.write: the process lock plus
+    BEGIN IMMEDIATE, so other threads and processes wait). None when *cap* would be exceeded."""
     from app import tv_store
+    key, day = _count_key(cfg), _et_day(now)
+    with tv_store.write() as conn:
+        row = conn.execute('SELECT value FROM meta WHERE key = ?', (key,)).fetchone()
+        n = _parse_count(row[0] if row else None, day)
+        if cap is not None and n >= cap:
+            return None
+        n = max(0, n + delta)
+        conn.execute('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+                     (key, json.dumps({'day': day, 'n': n})))
+    return n
+
+
+def take_search(cfg: Dict[str, Any], now: Optional[float] = None) -> bool:
+    """v251b: reserve one background search for *cfg* today, atomically: False (nothing counted) at the cap,
+    so parallel searches can neither overshoot nor undercount. Logs once (INFO) when it reaches the cap.
+    Fails open (True, uncounted) if the count can't be stored."""
     now = time.time() if now is None else now
-    n = searches_today(cfg, now) + 1
-    tv_store.set_meta(_count_key(cfg), json.dumps({'day': _et_day(now), 'n': n}))
     cap = search_cap()
+    try:
+        n = _bump(cfg, now, 1, cap)
+    except Exception:                       # noqa: BLE001 - a count never fails a search
+        logger.warning('TV search: daily search count not stored; searching anyway', exc_info=True)
+        return True
+    if n is None:
+        return False
     if n == cap:
         logger.info('TV search: %s reached its daily cap of %d background searches; skipped until midnight ET',
                     cfg.get('name') or cfg.get('id'), cap)
+    return True
+
+
+def refund_search(cfg: Dict[str, Any], now: Optional[float] = None) -> None:
+    """Give back a reserved search that was never sent (the tracker guard held it)."""
+    now = time.time() if now is None else now
+    try:
+        _bump(cfg, now, -1, None)
+    except Exception:                       # noqa: BLE001
+        logger.debug('TV search: refund not stored', exc_info=True)
+
+
+def count_search(cfg: Dict[str, Any], now: Optional[float] = None) -> int:
+    """One background search counted today (no cap check); the new count."""
+    now = time.time() if now is None else now
+    n = _bump(cfg, now, 1, None) or 0
+    if n == search_cap():
+        logger.info('TV search: %s reached its daily cap of %d background searches; skipped until midnight ET',
+                    cfg.get('name') or cfg.get('id'), search_cap())
     return n

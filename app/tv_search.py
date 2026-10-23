@@ -80,6 +80,9 @@ def trackers() -> List[Dict[str, Any]]:
 def _log(cfg, purpose: str, sid: Optional[int], query: str, n: int, outcome: str, now: float,
          section: str = 'tv') -> None:
     from app.tracker_guard import guard_key
+    # v251b: search_log's purpose CHECK (tv_store schema, never migrated) allows feed/episode/season/backlog/
+    # manual; a monitor click's background lane is the owner's search, so it is logged as 'manual'
+    purpose = 'manual' if purpose == MANUAL_BACKGROUND else purpose
     with tv_store.write() as conn:
         conn.execute('INSERT INTO search_log (ts, section, tracker_key, purpose, series_id, query, results, outcome)'
                      ' VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (now, section, guard_key(cfg), purpose, sid, query, n, outcome))
@@ -128,7 +131,7 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
         # v251: the daily background search cap (per tracker, local day ET); feed polls and the owner's
         # searches are not counted or held
         background = section == 'tv' and not interactive and purpose != 'feed' and purpose not in MONITOR_PURPOSES
-        if background and not tv_budget.under_search_cap(cfg, now):
+        if background and not tv_budget.take_search(cfg, now):     # v251b: reserved atomically before sending
             reset = tv_budget.search_cap_reset(now)
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': SLOT_BUSY, 'reset_at': reset})
             _log_cap_skip(cfg, purpose, sid, query, now, reset, section)
@@ -140,17 +143,15 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
                                     purpose='feed' if purpose == 'feed' and not interactive else
                                     'tv' if not interactive and capped and not bg_manual else None)
         except TrackerSkipped as e:
+            if background:
+                tv_budget.refund_search(cfg, now)      # v251b: the guard held it: not sent, not counted
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
             _log(cfg, purpose, sid, query, 0, 'skipped', now, section)
             continue
-        except TrackerError as e:
-            if background:
-                tv_budget.count_search(cfg, now)       # v251: sent (it failed): counted; a guard skip is not
+        except TrackerError as e:                  # sent (it failed): stays counted
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
             _log(cfg, purpose, sid, query, 0, 'failed', now, section)
             continue
-        if background:
-            tv_budget.count_search(cfg, now)
         if capped and purpose in MONITOR_PURPOSES:
             # v185.2 (PM, Tester FF9): a monitor-ON / manual search on a capped tracker counts toward the
             # per-tracker and daily TV tally so automation backs off; never held to that cap itself

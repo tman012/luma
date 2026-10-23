@@ -170,3 +170,95 @@ def test_a_guard_skip_is_not_counted(eng, monkeypatch):
     monkeypatch.setattr(eng, 'search_one', skip)
     _q('D S01E01', now)
     assert tv_budget.searches_today(IPT, now) == 0
+
+
+# ------------------------------------------------------------------ v251b fix-forward
+
+def test_manual_background_logs_against_the_real_schema(eng):
+    """(3) The real tv.db schema (tv_store DDL, no migration touches search_log) has the purpose CHECK;
+    a monitor click's background lane is logged as 'manual' instead of failing the INSERT."""
+    with tv_store.connect() as conn:
+        ddl = conn.execute("SELECT sql FROM sqlite_master WHERE name = 'search_log'").fetchone()[0]
+    assert "purpose IN ('feed', 'episode', 'season', 'backlog', 'manual')" in ddl
+    now = at(2026, 10, 23, 10)
+    items, st = _q('E S01E01', now, purpose=tv_search.MANUAL_BACKGROUND)
+    assert all(s['status'] == 'ok' for s in st)
+    got = rows('SELECT purpose, query FROM search_log WHERE query = ?', 'E S01E01')
+    assert [r['purpose'] for r in got] == ['manual', 'manual']
+    assert tv_budget.searches_today(IPT, now) == 0                       # still the owner's: not counted
+
+
+@pytest.mark.parametrize('raw', ['{', '[]', '"x"', '{"day": "2026-10-23", "n": "x"}', '{"day": "2026-10-23", "n": -3}',
+                                 '{"day": "2026-10-23", "n": true}', '{"day": "2026-10-23"}', 'null', '7'])
+def test_a_corrupt_count_fails_open_and_never_raises(eng, raw):
+    """(1) Fail open: anything unreadable counts as 0 today; the search goes ahead and the next count
+    writes a clean record."""
+    now = at(2026, 10, 23, 10)
+    tv_store.set_meta(tv_budget._count_key(IPT), raw)
+    assert tv_budget.searches_today(IPT, now) == 0
+    _, st = _q('F S01E01', now)
+    assert all(s['status'] == 'ok' for s in st)
+    assert tv_budget.searches_today(IPT, now) == 1
+    assert tv_store.get_meta(tv_budget._count_key(IPT)) == '{"day": "2026-10-23", "n": 1}'
+
+
+def test_a_count_store_failure_never_fails_the_search(eng, monkeypatch):
+    now = at(2026, 10, 23, 10)
+
+    def boom(*a, **k):
+        raise RuntimeError('db locked')
+    monkeypatch.setattr(tv_budget, '_bump', boom)
+    monkeypatch.setattr(tv_store, 'get_meta', boom)
+    _, st = _q('G S01E01', now)
+    assert all(s['status'] == 'ok' for s in st)
+    assert tv_budget.searches_today(IPT, now) == 0
+
+
+def test_parallel_takes_hit_the_cap_exactly(eng):
+    """(2) 16 threads x 10 takes against a cap of 50: exactly 50 granted, the stored count is 50."""
+    import threading
+    _cap(50)
+    now = at(2026, 10, 23, 10)
+    granted, lock = [], threading.Lock()
+
+    def worker():
+        for _ in range(10):
+            ok = tv_budget.take_search(IPT, now)
+            with lock:
+                granted.append(ok)
+    ts_ = [threading.Thread(target=worker) for _ in range(16)]
+    for t in ts_:
+        t.start()
+    for t in ts_:
+        t.join()
+    assert granted.count(True) == 50 and granted.count(False) == 110
+    assert tv_budget.searches_today(IPT, now) == 50
+
+
+def test_parallel_counts_never_undercount(eng):
+    import threading
+    now = at(2026, 10, 23, 10)
+    ts_ = [threading.Thread(target=lambda: [tv_budget.count_search(MTV_CFG, now) for _ in range(25)]) for _ in range(8)]
+    for t in ts_:
+        t.start()
+    for t in ts_:
+        t.join()
+    assert tv_budget.searches_today(MTV_CFG, now) == 200
+
+
+def test_parallel_query_trackers_never_overshoot(eng):
+    import threading
+    _cap(20)
+    now = at(2026, 10, 23, 10)
+    ts_ = [threading.Thread(target=lambda i=i: [_q(f'H S01E{i:02d}{j}', now) for j in range(5)]) for i in range(10)]
+    for t in ts_:
+        t.start()
+    for t in ts_:
+        t.join()
+    by = {}
+    for name, _, _ in eng.sent:
+        by[name] = by.get(name, 0) + 1
+    assert by == {'IPTorrents': 20, 'MoreThanTV': 20}
+
+
+MTV_CFG = TL
