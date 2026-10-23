@@ -56,7 +56,10 @@ TRAKT_RAILS = (
 TRAKT_IDS = frozenset(r[0] for r in TRAKT_RAILS)
 # v208: prod's Home Watchlist rail (homeRails.ts 'Watchlist'), from the native watchlist on test.
 WATCHLIST_ID = 'watchlist'
-KEEP_IDS = TRAKT_IDS | {WATCHLIST_ID}
+# v254: What you're missing (app/daily_missing), a regular rail: same switch, same drag order, last by default.
+WYM_ID = 'what_youre_missing'
+WYM_TITLE = "What you're missing"
+KEEP_IDS = TRAKT_IDS | {WATCHLIST_ID, WYM_ID}
 WATCHLIST_LIMIT = 25  # prod useHomeRails: slice(0, 25)
 TMDB_POSTER = 'https://image.tmdb.org/t/p/w342'
 
@@ -70,12 +73,44 @@ def init(*, get_plex: Callable[[], Any], get_current_user: Callable[[], Optional
 
 
 def extra_rails() -> List[Dict[str, Any]]:
-    """Trakt rails plus, on test, the native Watchlist rail."""
+    """Trakt rails plus, on test, the native Watchlist rail and (v254) What you're missing, which comes last so
+    a saved arrangement picks it up at the end without moving the other rails."""
     from app import instance
     out = trakt_rails()
     if instance.is_test():
         out.append({'id': WATCHLIST_ID, 'title': 'Watchlist', 'type': 'movie', 'source': 'watchlist'})
+        out.append({'id': WYM_ID, 'title': WYM_TITLE, 'type': 'movie', 'source': 'wym'})
     return out
+
+
+def wym_items() -> List[Dict[str, Any]]:
+    """Today's What you're missing slate as Home cards (the pool is built in the background, never here; the
+    Plex ownership check uses its cached index so the rail fits the Home budget)."""
+    try:
+        from app import daily_missing
+        rail = daily_missing.get_rail(cached_owned=True)
+    except Exception as e:  # noqa: BLE001 - a rail failing must not break Home
+        logger.warning("What you're missing rail failed: %s", type(e).__name__)
+        return []
+    out = []
+    for m in rail.get('movies') or []:
+        tid = m.get('tmdb_id')
+        if not isinstance(tid, int) or tid <= 0:
+            continue
+        poster = m.get('poster_path')
+        out.append({'key': f'missing-{tid}', 'type': 'movie', 'title': str(m.get('title') or ''),
+                    'subtitle': str(m.get('year') or ''), 'tmdb_id': tid,
+                    'poster': f'{TMDB_POSTER}{poster}' if isinstance(poster, str) and poster.startswith('/') else None})
+    return out
+
+
+def _can_dismiss() -> bool:
+    """The rail's long-press dismiss is the signed-in owner's (the implicit LAN owner gets 401 from the route)."""
+    try:
+        from app import tv_settings
+        return tv_settings._signed_in_owner() is None
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def watchlist_items() -> List[Dict[str, Any]]:
@@ -354,13 +389,17 @@ def home():
         cw = pool.submit(in_app, continue_watching, plex)
         rails = [(l, pool.submit(in_app, trakt_items, l['id']) if l['source'] == 'trakt'
                   else pool.submit(in_app, watchlist_items) if l['source'] == 'watchlist'
+                  else pool.submit(in_app, wym_items) if l['source'] == 'wym'
                   else pool.submit(in_app, recently_added, plex, l['id'])) for l in libs]
         cw_items = take('continue_watching', cw)
         out_rails = []
         for l, f in rails:
             items = take(l['id'], f, l['source'])
             if items is not None:
-                out_rails.append({'id': l['id'], 'title': l['title'], 'type': l['type'], 'items': items})
+                rail = {'id': l['id'], 'title': l['title'], 'type': l['type'], 'items': items}
+                if l['source'] == 'wym' and items and _can_dismiss():
+                    rail['dismiss'] = True
+                out_rails.append(rail)
     finally:
         pool.shutdown(wait=False, cancel_futures=True)     # a slow Plex call finishes in the background
     if cw_items is None and not out_rails and dropped:
@@ -410,5 +449,12 @@ def save_libraries():
         order = [s for s in order if s in known or s in KEEP_IDS]
         hidden = [s for s in hidden if s in known or s in KEEP_IDS]
     with _lock:
+        before = WYM_ID in set(load_prefs().get('hidden') or [])
         save_prefs({'order': order, 'hidden': hidden})
+    if before != (WYM_ID in hidden):
+        try:
+            from app import daily_missing
+            daily_missing.wake()        # shown again: the pool refresher looks now, not at its next check
+        except Exception:  # noqa: BLE001
+            pass
     return jsonify({'libraries': arrange(_sections(plex) if plex else [], load_prefs(), extra_rails())})

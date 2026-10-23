@@ -6967,76 +6967,7 @@ def trakt_trending_shows():
         return jsonify({'shows': [], 'enabled': True, 'error': str(e)}), 500
 
 
-@app.route('/api/rails/what-youre-missing')
-def rails_what_youre_missing():
-    """Daily 'What You're Missing' shelf — popular unowned movies (manual grab only)."""
-    try:
-        from app import daily_missing
-        limit = request.args.get('limit', daily_missing.RAIL_SIZE, type=int)
-        limit = max(1, min(limit or daily_missing.RAIL_SIZE, 40))
-        return jsonify(daily_missing.get_rail(limit=limit))
-    except Exception as e:
-        logger.error(f"what-youre-missing rail error: {e}")
-        return jsonify({
-            'rail_id': 'what_youre_missing',
-            'title': "What You're Missing",
-            'movies': [],
-            'enabled': True,
-            'empty': True,
-            'error': str(e),
-        }), 500
-
-
-@app.route('/api/rails/what-youre-missing/refresh', methods=['POST'])
-def rails_what_youre_missing_refresh():
-    """Force rebuild the candidate pool (ops / smoke)."""
-    try:
-        from app import daily_missing
-        payload = daily_missing.refresh_now()
-        return jsonify({
-            'ok': True,
-            'pool_size': len(payload.get('candidates') or []),
-            'built_at_iso': payload.get('built_at_iso'),
-            'note': payload.get('note'),
-        })
-    except Exception as e:
-        logger.error(f"what-youre-missing refresh error: {e}")
-        return jsonify({'ok': False, 'error': str(e)}), 500
-
-
-@app.route('/api/rails/what-youre-missing/dismiss', methods=['POST'])
-def rails_what_youre_missing_dismiss():
-    """Permanently dismiss a title from What You're Missing (by tmdb_id)."""
-    try:
-        from app import daily_missing
-        body = request.get_json(silent=True) or {}
-        raw = body.get('tmdb_id')
-        if raw is None:
-            return jsonify({'ok': False, 'error': 'tmdb_id required'}), 400
-        try:
-            tmdb_id = int(raw)
-        except (TypeError, ValueError):
-            return jsonify({'ok': False, 'error': 'tmdb_id must be an int'}), 400
-        if tmdb_id <= 0:
-            return jsonify({'ok': False, 'error': 'tmdb_id must be positive'}), 400
-        result = daily_missing.dismiss(tmdb_id)
-        # Return refreshed slate so clients can top-up immediately.
-        rail = daily_missing.get_rail(limit=daily_missing.RAIL_SIZE)
-        return jsonify({**result, 'rail': rail})
-    except Exception as e:
-        logger.error(f"what-youre-missing dismiss error: {e}")
-        return jsonify({'ok': False, 'error': str(e)}), 500
-
-
-@app.route('/api/rails/what-youre-missing/dismissed')
-def rails_what_youre_missing_dismissed():
-    """Debug: list permanently dismissed What You're Missing tmdb_ids."""
-    try:
-        from app import daily_missing
-        return jsonify(daily_missing.list_dismissed())
-    except Exception as e:
-        logger.error(f"what-youre-missing dismissed list error: {e}")
-        return jsonify({'tmdb_ids': [], 'count': 0, 'error': str(e)}), 500
+# v254: What you're missing's routes live in app/automation/wym_routes.py (registered below).
 
 
 @app.route('/api/collections/incomplete')
@@ -21783,6 +21714,8 @@ from app.automation import gr_routes as _gr_routes  # noqa: E402  v252: Settings
 app.register_blueprint(_gr_routes.bp)
 from app.automation import antic_routes as _antic_routes  # noqa: E402  v253: Settings > Automation > Anticipated
 app.register_blueprint(_antic_routes.bp)
+from app.automation import wym_routes as _wym_routes  # noqa: E402  v254: What you're missing (rail + Settings > Automation)
+app.register_blueprint(_wym_routes.bp)
 from app import movie_import as _movie_import  # noqa: E402  v204: movie import and rename (test only)
 app.register_blueprint(_movie_import.bp)
 try:

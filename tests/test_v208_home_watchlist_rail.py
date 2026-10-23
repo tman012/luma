@@ -40,7 +40,10 @@ def test_at_most_25(wl, monkeypatch):
 
 
 def test_listed_only_on_test(wl, monkeypatch):
-    assert home_rails.extra_rails() == [{'id': 'watchlist', 'title': 'Watchlist', 'type': 'movie', 'source': 'watchlist'}]
+    assert home_rails.extra_rails() == [{'id': 'watchlist', 'title': 'Watchlist', 'type': 'movie', 'source': 'watchlist'},
+                                        # v254: What you're missing, last
+                                        {'id': 'what_youre_missing', 'title': "What you're missing", 'type': 'movie',
+                                         'source': 'wym'}]
     monkeypatch.setattr(instance, 'is_test', lambda: False)
     assert home_rails.extra_rails() == []
 
@@ -48,7 +51,7 @@ def test_listed_only_on_test(wl, monkeypatch):
 def test_settings_switch_order_and_home(wl, plex, test_app):  # noqa: F811
     c = _client(test_app)
     libs = c.get('/api/home/libraries', environ_base=REMOTE).get_json()['libraries']
-    assert libs[-1] == {**libs[-1], 'id': 'watchlist', 'title': 'Watchlist', 'enabled': True}
+    assert libs[-2] == {**libs[-2], 'id': 'watchlist', 'title': 'Watchlist', 'enabled': True}   # v254: WYM is last
     rails = c.get('/api/home', environ_base=REMOTE).get_json()['rails']
     wr = next(r for r in rails if r['id'] == 'watchlist')
     assert wr['title'] == 'Watchlist' and wr['items'][0]['label'] == 'Nov 3'

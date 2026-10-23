@@ -1,7 +1,8 @@
 """LUMA_MINIMAL=1: a fresh-install test build with only the core turned on.
 
 With the flag set, Luma runs Get Started, sign-in and the main screen only.
-No background threads start (caches, automations, schedulers, tunnel), and
+No background threads start (caches, automations, schedulers, tunnel) beyond the
+few start_services names (search index, mover, TV rescan, What you're missing), and
 every other route answers 404. Nothing is removed: with the flag unset,
 Luma behaves exactly as before. The flag is read at call time.
 """
@@ -57,6 +58,11 @@ ALLOWED_PATHS = frozenset({
     '/api/settings/automation/genre-roulette',
     # v253 Settings > Automation > Anticipated (owner only; changes and Run now the signed-in owner; the routes check).
     '/api/settings/automation/anticipated',
+    # v254 What you're missing: the Home rail (signed in), dismiss, restore and refresh (the signed-in owner),
+    # and Settings > Automation (owner only; changes the signed-in owner). The routes check. Not /dismissed (debug).
+    '/api/rails/what-youre-missing', '/api/rails/what-youre-missing/dismiss',
+    '/api/rails/what-youre-missing/restore', '/api/rails/what-youre-missing/refresh',
+    '/api/settings/automation/what-youre-missing', '/api/settings/automation/what-youre-missing/status',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/', '/settings/',
                     '/api/trackers/', '/api/settings/library-paths/',
