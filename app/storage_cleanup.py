@@ -18,6 +18,8 @@ Deletion is PERMANENT. A download is a candidate only when all of these hold, fo
   * its data, as Luma sees the path (Library paths' path map), is inside the guard's folder and inside no
     library folder
   * finished at least `min_age_days` ago (prod's 48 h, 2 days), and seeded and shared enough when those are on
+  * not tagged Never delete (cfg protected_tags, default luma-keep; qBit's comma-separated tags, exact and
+    case-insensitive); a protected torrent keeps every torrent sharing its data
   * imported: Luma's movie mover or TV importer has filed it, or Luma never tracked it (prod's own grabs,
     which prod's importer handles, as prod did). Waiting, mid-import, failed or refused imports stay.
   * Plex isn't playing it (read-only /status/sessions, matched by folder or file name); if Plex is set up
@@ -214,6 +216,46 @@ def import_state(h: str, torrent: Dict[str, Any]) -> str:
     return 'untracked'
 
 
+def torrent_tags(t: Dict[str, Any]) -> List[str]:
+    """qBit's tags field: comma-separated, trimmed, lower case."""
+    return [x.strip().lower() for x in str((t or {}).get('tags') or '').split(',') if x.strip()]
+
+
+def is_protected(t: Dict[str, Any], protected: List[str], hashes: Optional[List[str]] = None) -> bool:
+    """v260 Never delete: the torrent carries one of the protected tags (exact match, any case), or its hash
+    is a protected one (any case)."""
+    if hashes and str((t or {}).get('hash') or '').strip().lower() in {str(h).strip().lower() for h in hashes}:
+        return True
+    keep = {str(x).strip().lower() for x in protected or [] if str(x).strip()}
+    return bool(keep) and any(tag in keep for tag in torrent_tags(t))
+
+
+def log_never_delete(hashes: Optional[List[str]], tags: List[str]) -> str:
+    """Ops: one INFO line naming the Never delete torrents by the last 4 of their hash, and the tags.
+    hashes None: qBittorrent couldn't be read."""
+    tag_text = ', '.join(tags) or 'none'
+    if hashes is None:
+        line = f'Downloads guard: never-delete unknown, qBittorrent unreadable (tags: {tag_text})'
+    else:
+        shown = ''.join(f', …{str(h)[-4:].lower()}' for h in sorted(hashes, key=lambda h: (str(h)[-4:].lower(), str(h).lower())))
+        line = f'Downloads guard: never-delete {len(hashes)} torrent(s){":" + shown[1:] if shown else ""} (tags: {tag_text})'
+    logger.info(line)
+    return line
+
+
+def protected_hashes(torrents: List[Dict[str, Any]], tags: List[str], hashes: Optional[List[str]] = None) -> List[str]:
+    return [str(t.get('hash')) for t in torrents if t and t.get('hash') and is_protected(t, tags, hashes)]
+
+
+def log_never_delete_now(cfg: Optional[Dict[str, Any]] = None) -> str:
+    """Boot (after dg_store.seed): read qBittorrent once and log the Never delete torrents."""
+    cfg = cfg if cfg is not None else guard_settings()
+    tags = list(cfg.get('protected_tags') or [])
+    torrents = fetch_torrents()
+    hashes = list(cfg.get('protected_hashes') or [])
+    return log_never_delete(None if torrents is None else protected_hashes(torrents, tags, hashes), tags)
+
+
 def _is_ours(t: Dict[str, Any]) -> bool:
     from app import qbit_owner, tv_downloads
     try:
@@ -274,7 +316,12 @@ def _units(torrents: List[Dict[str, Any]], cfg: Dict[str, Any], root: str, now: 
     def hold(why: str) -> None:
         held[why] = held.get(why, 0) + 1
 
+    protected = list(cfg.get('protected_tags') or [])
+    keep_hashes = list(cfg.get('protected_hashes') or [])
     for local, ts in groups.items():
+        if any(is_protected(t, protected, keep_hashes) for t in ts):    # first, on every path: a cross-seed keeps its twin
+            hold('protected')
+            continue
         if not local.startswith('/') or local == root or not fm._under(local, root):
             hold('outside folder')
             continue
@@ -352,7 +399,8 @@ def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, cfg: Optional[Dict[st
     ceiling = int(cfg['max_run_gb']) * GIB
     target_bytes = max(0, min(int(target_bytes), ceiling))
     base = {'target_bytes': target_bytes, 'planned_bytes': 0, 'entries': [], 'eligible_count': 0, 'short': True,
-            'preferred_available': 0, 'preferred_bytes': 0, 'fallback_bytes': 0, 'held': {}, 'error': None}
+            'preferred_available': 0, 'preferred_bytes': 0, 'fallback_bytes': 0, 'held': {}, 'error': None,
+            'protected_hashes': None}
 
     torrents = fetch_torrents()
     if torrents is None:
@@ -363,6 +411,7 @@ def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, cfg: Optional[Dict[st
         logger.warning('storage_cleanup: Plex sessions unreadable; nothing is deleted')
         return {**base, 'error': PLEX_UNREADABLE}
 
+    protected = protected_hashes(torrents, list(cfg.get('protected_tags') or []), list(cfg.get('protected_hashes') or []))
     root = downloads_root(cfg)
     candidates, held = _units(torrents, cfg, root, time.time() if now is None else now, playing)
     ordered = deletion_order(candidates, cfg['trackers'])
@@ -379,7 +428,7 @@ def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, cfg: Optional[Dict[st
     return {**base, 'planned_bytes': total, 'entries': selected, 'eligible_count': len(candidates),
             'short': total < target_bytes, 'preferred_available': sum(1 for p, _ in ordered if p == 'preferred'),
             'preferred_bytes': preferred,
-            'fallback_bytes': total - preferred, 'held': held}
+            'fallback_bytes': total - preferred, 'held': held, 'protected_hashes': protected}
 
 
 # ---------------------------------------------------------------------------

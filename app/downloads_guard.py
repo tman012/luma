@@ -382,6 +382,8 @@ def preview() -> Dict[str, Any]:
     verdict = evaluate(settings)
     target = verdict.get('target_bytes') or reclaim_bytes(settings)
     plan = plan_cleanup(target, cfg=settings)
+    from app.storage_cleanup import log_never_delete
+    log_never_delete(plan.get('protected_hashes'), list(settings.get('protected_tags') or []))   # Ops: every Preview
 
     return {
         'evaluation': verdict,
@@ -660,6 +662,23 @@ def get_log() -> List[Dict[str, Any]]:
 
 
 # ── Scheduler ─────────────────────────────────────────────────────────────
+
+def startup_seed_and_log() -> None:
+    """Boot (minimal builds): seed the settings file (defaults, off) and then log the Never delete torrents.
+    The qBittorrent read runs in the background so boot doesn't wait on it."""
+    from app.automation import dg_store
+    from app import storage_cleanup
+    cfg = dg_store.seed()
+    threading.Thread(target=lambda: _quiet(storage_cleanup.log_never_delete_now, cfg), daemon=True,
+                     name='downloads-guard-never-delete').start()
+
+
+def _quiet(fn, *a) -> None:
+    try:
+        fn(*a)
+    except Exception as e:                                   # noqa: BLE001
+        logger.warning('Downloads guard: never-delete check failed (%s)', type(e).__name__)
+
 
 def start_downloads_guard_thread() -> None:
     from app import instance as _instance

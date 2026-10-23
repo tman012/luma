@@ -710,6 +710,11 @@ def start_services(app_instance):
             # v260 Downloads guard: the instance gate decides whether the scheduler runs at all
             # (LUMA_INSTANCE=test: off unless LUMA_TEST_ALLOW names downloads_guard); then each pass
             # does anything only while Settings > Automation > Downloads guard is on.
+            try:
+                from app.downloads_guard import startup_seed_and_log
+                startup_seed_and_log()           # defaults (off) if new, then the never-delete INFO line
+            except Exception as e:
+                logger.error(f"Downloads guard seed failed: {type(e).__name__}")
             if not _AUTOMATIONS_DISABLED:
                 try:
                     from app.downloads_guard import start_downloads_guard_thread

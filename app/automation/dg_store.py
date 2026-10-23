@@ -17,7 +17,7 @@ import math
 import os
 import re
 import threading
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app import paths as _paths
 
@@ -43,7 +43,13 @@ DEFAULTS: Dict[str, Any] = {
     'min_ratio': 0.0,             # 0: off
     'scope': 'all',
     'folder': '',                 # '': media.downloads_root (storage_cleanup.downloads_root)
+    'protected_tags': ['luma-keep'],  # v260 (Ops/PM): Never delete. A torrent with any of these qBit tags is skipped
+    'protected_hashes': [],           # Never delete by hash; seed() adds SEED_NEVER_DELETE once
 }
+# Ops: the seed migration's Never delete hashes (AHS, until Ops tags it luma-keep). Lowercase; compared any case.
+SEED_NEVER_DELETE = ('7224bfad84076c0a76c36fb891d3b91ac226efb6',)
+_HASH_RE = re.compile(r'^[0-9a-f]{40}$|^[0-9a-f]{64}$')
+MAX_TAGS = 50
 
 # (low, high) for the whole-number settings
 INT_RANGES: Dict[str, tuple] = {
@@ -63,6 +69,34 @@ class Invalid(Exception):
     def __init__(self, errors: Dict[str, str]):
         super().__init__('invalid')
         self.errors = errors
+
+
+def _hashes(v: Any) -> Optional[List[str]]:
+    if not isinstance(v, list) or len(v) > MAX_TAGS:
+        return None
+    out: List[str] = []
+    for h in v:
+        if not isinstance(h, str) or not _HASH_RE.match(h.strip().lower()):
+            return None
+        if h.strip().lower() not in out:
+            out.append(h.strip().lower())
+    return out
+
+
+def _tags(v: Any) -> Optional[List[str]]:
+    """Never delete tags: qBit tags (no commas), unique ignoring case, at most MAX_TAGS. None if invalid."""
+    if not isinstance(v, list) or len(v) > MAX_TAGS:
+        return None
+    out: List[str] = []
+    for t in v:
+        if not isinstance(t, str):
+            return None
+        t = t.strip()
+        if not t or ',' in t or len(t) > 64:
+            return None
+        if t.lower() not in (x.lower() for x in out):
+            out.append(t)
+    return out
 
 
 def path() -> str:
@@ -135,6 +169,18 @@ def check(body: Any, cur: Dict[str, Any]) -> Dict[str, Any]:
                 errors[k] = 'Must be a list of trackers'
             else:
                 out[k] = t
+        elif k == 'protected_tags':
+            t = _tags(v)
+            if t is None:
+                errors[k] = 'Must be a list of tags'
+            else:
+                out[k] = t
+        elif k == 'protected_hashes':
+            h = _hashes(v)
+            if h is None:
+                errors[k] = 'Must be a list of torrent hashes'
+            else:
+                out[k] = h
         elif k == 'scope':
             if v in SCOPES:
                 out[k] = v
@@ -185,6 +231,26 @@ def save(body: Any) -> Dict[str, Any]:
         return new
 
 
+def seed() -> Dict[str, Any]:
+    """Boot, the seed migration: a new file gets the defaults (off) plus SEED_NEVER_DELETE; a file from before
+    protected_hashes existed gets SEED_NEVER_DELETE added and nothing else changed. Never reads prod's
+    settings.json (automation.downloads_guard.* copied over from prod may say enabled) and never touches
+    `enabled`, so the guard ships off and only the signed-in owner turns it on (Ops)."""
+    with _lock:
+        try:
+            with open(path(), 'r') as f:
+                raw = json.load(f)
+        except FileNotFoundError:
+            raw = None
+        except (OSError, ValueError):
+            return settings()            # unreadable: reads as defaults (off); left for the owner to fix
+        if raw is None:
+            _paths.atomic_write_json(path(), {**defaults(), 'protected_hashes': list(SEED_NEVER_DELETE)}, mode=0o600)
+        elif isinstance(raw, dict) and 'protected_hashes' not in raw:
+            _paths.atomic_write_json(path(), {**raw, 'protected_hashes': list(SEED_NEVER_DELETE)}, mode=0o600)
+        return settings()
+
+
 def widens(old: Dict[str, Any], new: Dict[str, Any]) -> List[str]:
     """Settings in *new* that make the guard delete more, sooner, more often or elsewhere than *old*."""
     out: List[str] = []
@@ -207,6 +273,11 @@ def widens(old: Dict[str, Any], new: Dict[str, Any]) -> List[str]:
     kept_new = [t for t in new['trackers'] if t in old['trackers']]
     if added or kept_old != kept_new:
         out.append('trackers')
+    keep = {t.lower() for t in new['protected_tags']}
+    if any(t.lower() not in keep for t in old['protected_tags']):
+        out.append('protected_tags')        # removing a Never delete tag; adding one is fine
+    if any(h not in new['protected_hashes'] for h in old['protected_hashes']):
+        out.append('protected_hashes')
     if new['scope'] != old['scope']:
         out.append('scope')
     if new['folder'] != old['folder']:

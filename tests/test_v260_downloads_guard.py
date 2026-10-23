@@ -79,6 +79,7 @@ def test_defaults_match_prod():
     assert d['max_run_gb'] * GIB == sc.MAX_TARGET_BYTES == 2 * 1024 ** 4
     assert d['min_seed_hours'] == 0 and d['min_ratio'] == 0
     assert d['scope'] == 'all' and d['folder'] == ''
+    assert d['protected_tags'] == ['luma-keep']                     # PM: not luma-test-tv (test grabs all TV)
 
 
 def test_unreadable_settings_file_reads_as_defaults(env, tmp_path):
@@ -512,3 +513,176 @@ def test_the_ordering_function_alone():
     assert got == [('preferred', 'd'), ('preferred', 'a'), ('preferred', 'g'), ('preferred', 'b'),
                    ('fallback', 'e'), ('fallback', 'f'), ('fallback', 'c')]
     assert [u['name'] for _, u in sc.deletion_order(units, [])] == ['e', 'f', 'c', 'd', 'g', 'a', 'b']
+
+
+# ------------------------------------------------------------------ Never delete (Ops / PM)
+
+KEEP_TORRENTS = ORDER_TORRENTS + [
+    tor('k1', 'KeepOldestIpt', done=NOW - 400 * DAY, tags='luma-test, LUMA-KEEP'),       # oldest, delete-first tracker
+    tor('k2', 'KeepTwin', tracker=BHD, done=NOW - 300 * DAY),                              # cross-seed of k3's data
+    tor('k3', 'KeepTwin', done=NOW - 300 * DAY, tags='luma-keep'),
+    tor('n1', 'NotQuite', tracker=UNKNOWN, done=NOW - 200 * DAY, tags='luma-keeper,keep'),  # exact match only
+    tor('tv', 'TvOldest', done=NOW - 500 * DAY, tags='luma-test-tv')]                      # eligible by default
+KEEP_ORDER = ['BhdNew', 'TvOldest', 'IptOld', 'IptNew', 'NotQuite', 'UnknownOldest', 'UnknownNew']   # BeyondHD, then IPT
+
+
+@pytest.fixture
+def keep(ordered):
+    ordered.torrents = list(KEEP_TORRENTS)
+    return ordered
+
+
+def _names_by_hash(env):
+    by_hash = {t['hash']: t['name'] for t in KEEP_TORRENTS}
+    return [by_hash[h[0]] for h in env.deleted]
+
+
+def test_tags_are_comma_separated_exact_and_any_case():
+    assert sc.torrent_tags({'tags': ' a, LUMA-Keep ,,b'}) == ['a', 'luma-keep', 'b']
+    assert sc.is_protected({'tags': 'x,Luma-Keep'}, ['luma-keep'])
+    assert not sc.is_protected({'tags': 'luma-keeper'}, ['luma-keep'])
+    assert not sc.is_protected({'tags': 'luma-test-tv'}, dg_store.defaults()['protected_tags'])
+    assert not sc.is_protected({'tags': 'luma-keep'}, [])
+
+
+def test_never_delete_on_the_scheduled_path(keep):
+    dg.run_cycle()
+    assert _names_by_hash(keep) == KEEP_ORDER
+
+
+def test_never_delete_on_clean_up_now(keep):
+    _req(ordered_site(), 'post', '/api/downloads-guard/run', {'dry_run': False})
+    assert _names_by_hash(keep) == KEEP_ORDER
+
+
+def test_never_delete_on_the_pill(keep):
+    _req(ordered_site(), 'post', '/api/storage/downloads/cleanup', {})
+    assert _names_by_hash(keep) == KEEP_ORDER
+
+
+def test_preview_leaves_out_never_delete(keep):
+    p = _req(ordered_site(), 'get', '/api/downloads-guard/preview').get_json()
+    assert [e['name'] for e in p['entries']] == KEEP_ORDER
+    assert not {'KeepOldestIpt', 'KeepTwin'} & {e['name'] for e in p['entries']}
+    assert sc.plan_cleanup(10 ** 15)['held']['protected'] == 2
+
+
+def test_a_tag_added_to_never_delete_protects_at_once(keep, site):
+    assert _req(site, 'put', API, {'protected_tags': ['luma-keep', 'LUMA-TEST-TV']}).status_code == 200
+    p = _req(site, 'get', '/api/downloads-guard/preview').get_json()
+    assert 'TvOldest' not in [e['name'] for e in p['entries']]
+
+
+def test_never_delete_validation(site):
+    for bad in ({'protected_tags': 'luma-keep'}, {'protected_tags': ['a,b']}, {'protected_tags': ['']},
+                {'protected_tags': [1]}, {'protected_tags': ['x'] * 0 + [f't{i}' for i in range(51)]}):
+        assert _req(site, 'put', API, bad).status_code == 400, bad
+    r = _req(site, 'put', API, {'protected_tags': ['luma-keep', 'Luma-Keep', 'hold']})
+    assert r.get_json()['settings']['protected_tags'] == ['luma-keep', 'hold']
+
+
+def test_removing_a_never_delete_tag_needs_the_signed_in_owner(site):
+    _sign_in_401()
+    try:
+        assert _req(site, 'put', API, {'protected_tags': ['luma-keep', 'hold']}).status_code == 200   # adding is fine
+        r = _req(site, 'put', API, {'protected_tags': ['hold']})
+        assert r.status_code == 401 and r.get_json()['sign_in'] is True
+        assert _req(site, 'put', API, {'protected_tags': []}).status_code == 401
+        assert dg_store.settings()['protected_tags'] == ['luma-keep', 'hold']
+        assert _req(site, 'put', API, {'protected_tags': ['LUMA-KEEP', 'Hold']}).status_code == 200   # same tags, any case
+    finally:
+        tv_settings._cfg.pop('signed_in_owner', None)
+    assert _req(site, 'put', API, {'protected_tags': ['hold']}).status_code == 200                    # the owner may
+
+
+# ------------------------------------------------------------------ ships off; the never-delete log line (Ops)
+
+def test_seed_ships_off_and_never_flips_enabled(env, tmp_path, monkeypatch):
+    # prod's settings.json copied over says the guard is on: the seed never reads it
+    monkeypatch.setattr('app.settings_manager.SettingsFile.get',
+                        lambda self, k, d=None: True if k.endswith('downloads_guard.enabled') else d)
+    assert not (tmp_path / 'dg.json').exists()
+    assert dg_store.seed()['enabled'] is False and dg_store.settings()['enabled'] is False
+    assert (tmp_path / 'dg.json').stat().st_mode & 0o777 == 0o600
+    assert dg_store.seed()['enabled'] is False                         # again: still off
+    dg_store.save({'enabled': True})                                     # the owner turned it on
+    before = (tmp_path / 'dg.json').read_text()
+    assert dg_store.seed()['enabled'] is True and (tmp_path / 'dg.json').read_text() == before   # untouched
+    dg_store.save({'enabled': False})
+    assert dg_store.seed()['enabled'] is False
+
+
+def test_startup_logs_the_never_delete_torrents_after_the_seed(env, tmp_path, monkeypatch, caplog):
+    env.torrents = [tor('aaaaEFB6', 'AHS', tags='luma-test-tv,luma-keep'), tor('bbbb1a2b', 'Other', tags='Luma-Keep'),
+                    tor('cccc9999', 'Free', tags='luma-test-tv')]
+
+    class Now:
+        def __init__(self, target=None, **kw):
+            self.target = target
+
+        def start(self):
+            assert (tmp_path / 'dg.json').exists()                       # after the seed
+            self.target()
+    monkeypatch.setattr(dg.threading, 'Thread', Now)
+    caplog.set_level('INFO', logger=sc.logger.name)
+    dg.startup_seed_and_log()
+    lines = [r.getMessage() for r in caplog.records if 'never-delete' in r.getMessage()]
+    assert lines == ['Downloads guard: never-delete 2 torrent(s): …1a2b, …efb6 (tags: luma-keep)']
+    assert all(r.levelname == 'INFO' for r in caplog.records if 'never-delete' in r.getMessage())
+    assert 'aaaa' not in lines[0] and 'EFB6' not in lines[0]             # last 4 only
+
+
+def test_every_preview_logs_the_never_delete_line(env, site, caplog):
+    env.torrents = [tor('aaaaefb6', 'AHS', tags='luma-keep'), tor('dddd0001', 'Old')]
+    caplog.set_level('INFO', logger=sc.logger.name)
+    for _ in range(2):
+        p = _req(site, 'get', '/api/downloads-guard/preview').get_json()
+        assert [e['name'] for e in p['entries']] == ['Old']
+    lines = [r.getMessage() for r in caplog.records if 'never-delete' in r.getMessage()]
+    assert lines == ['Downloads guard: never-delete 1 torrent(s): …efb6 (tags: luma-keep)'] * 2
+
+
+def test_never_delete_line_when_none_or_qbit_down(env, caplog):
+    caplog.set_level('INFO', logger=sc.logger.name)
+    env.torrents = [tor('dddd0001', 'Old')]
+    assert sc.log_never_delete_now() == 'Downloads guard: never-delete 0 torrent(s) (tags: luma-keep)'
+    env.qbit_ok = False
+    assert sc.log_never_delete_now() == 'Downloads guard: never-delete unknown, qBittorrent unreadable (tags: luma-keep)'
+
+
+AHS = '7224BFAD84076C0A76C36FB891D3B91AC226EFB6'      # as qBit might show it; the seed is lowercase
+
+
+def test_the_seed_migration_protects_ahs_by_hash(env, tmp_path):
+    assert dg_store.SEED_NEVER_DELETE == ('7224bfad84076c0a76c36fb891d3b91ac226efb6',)
+    assert dg_store.defaults()['protected_hashes'] == []
+    s = dg_store.seed()
+    assert s['protected_hashes'] == ['7224bfad84076c0a76c36fb891d3b91ac226efb6'] and s['enabled'] is False
+    env.torrents = [tor(AHS, 'American Horror Story S01', done=NOW - 900 * DAY, tags='luma-test-tv'), tor('dddd0001', 'Old')]
+    assert names(sc.plan_cleanup(10 ** 15)) == ['Old']
+    sc.run_cleanup(10 ** 15)
+    assert env.deleted == [['dddd0001']]
+
+
+def test_the_seed_migration_on_an_older_file_keeps_enabled(env, tmp_path):
+    import json as _json
+    raw = {**dg_store.defaults(), 'enabled': True, 'reclaim_gb': 80}
+    del raw['protected_hashes']                                            # a file from before the key existed
+    (tmp_path / 'dg.json').write_text(_json.dumps(raw))
+    s = dg_store.seed()
+    assert s['enabled'] is True and s['reclaim_gb'] == 80                 # unchanged, never flipped
+    assert s['protected_hashes'] == list(dg_store.SEED_NEVER_DELETE)
+    dg_store.save({'protected_hashes': []})                                # the owner removed it later
+    assert dg_store.seed()['protected_hashes'] == []                       # the migration runs once
+
+
+def test_removing_a_protected_hash_needs_the_signed_in_owner(site):
+    dg_store.seed()
+    _sign_in_401()
+    try:
+        assert _req(site, 'put', API, {'protected_hashes': []}).status_code == 401
+        assert _req(site, 'put', API, {'protected_hashes': [AHS, 'a' * 40]}).status_code == 200    # adding is fine
+    finally:
+        tv_settings._cfg.pop('signed_in_owner', None)
+    assert dg_store.settings()['protected_hashes'] == [AHS.lower(), 'a' * 40]
+    assert _req(site, 'put', API, {'protected_hashes': ['nothex']}).status_code == 400
