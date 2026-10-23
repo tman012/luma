@@ -10,7 +10,6 @@ import {
   type SearchMovie,
   type SearchPerson,
   type SearchResults,
-  TMDB_BUSY_TEXT,
 } from '@/services/searchApi';
 import { tmdbImg } from '@/utils/image';
 
@@ -287,7 +286,7 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
         {/* Result count */}
         {!loading && results && query.length >= 2 && (
           <div style={{ padding: '8px 20px 4px', fontSize: 13, color: 'rgba(255,255,255,0.35)' }}>
-            {resultCount} {resultCount === 1 ? 'result' : 'results'}
+            {resultCount} {resultCount === 1 ? 'Result' : 'Results'}
           </div>
         )}
 
@@ -297,7 +296,7 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
           </div>
         )}
         {!loading && resultCount === 0 && query.length >= 2 && (
-          <p style={{ padding: '32px 24px', textAlign: 'center', color: 'rgba(255,255,255,0.35)', fontSize: 15, margin: 0 }}>{results?.rateLimited ? TMDB_BUSY_TEXT : 'No results found'}</p>
+          <p style={{ padding: '32px 24px', textAlign: 'center', color: 'rgba(255,255,255,0.35)', fontSize: 15, margin: 0 }}>No results found</p>
         )}
 
         {!loading && filtered.map((entry, i) => {
@@ -310,7 +309,7 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
           const typeLabel = isPerson
             ? 'Person'
             : media?.media_type === 'tv'
-              ? 'TV show'
+              ? 'TV Show'
               : 'Movie';
           const subtitle = year ? `${year} \u00B7 ${typeLabel}` : typeLabel;
           const department = isPerson && person?.known_for_department ? person.known_for_department : null;

@@ -48,19 +48,19 @@ describe('v261 phone search is prod 1b4ea74 SearchShelf', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('every result, owned first and deduped, then people; sentence-case count; filters; proxied art', async () => {
+  it('every result, owned first and deduped, then people; prod Title Case count; filters; proxied art', async () => {
     render(<SearchShelf onClose={() => {}} />);
     await type('inter');
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     const rows = await screen.findAllByTestId('search-result');
     expect(rows.map((r) => r.textContent)).toEqual([
-      'Interstellar2014 · Movie', 'Inter Milan2020 · TV show', 'Interstate 602002 · Movie', 'Matthew McConaugheyActing',
+      'Interstellar2014 · Movie', 'Inter Milan2020 · TV Show', 'Interstate 602002 · Movie', 'Matthew McConaugheyActing',
     ]);
-    expect(screen.getByText('4 results')).toBeTruthy();
+    expect(screen.getByText('4 Results')).toBeTruthy();
     expect(rows[2]!.querySelector('img')!.getAttribute('src')).toContain('/api/img/tmdb');
     fireEvent.click(screen.getByRole('button', { name: 'People' }));
     expect(screen.getAllByTestId('search-result')).toHaveLength(1);
-    expect(screen.getByText('1 result')).toBeTruthy();
+    expect(screen.getByText('1 Result')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'TV' }));
     expect(screen.getAllByTestId('search-result')[0]!.textContent).toContain('Inter Milan');
   });
@@ -86,7 +86,7 @@ describe('v261 phone search is prod 1b4ea74 SearchShelf', () => {
     expect(host.openPerson).toHaveBeenCalledWith({ personId: 3, personName: 'Matthew McConaughey' });
   });
 
-  it('empty and TMDb-busy states', async () => {
+  it('empty state; TMDb rate limiting shows the same "No results found"', async () => {
     fetchMock.mockImplementation(async (u: string) => json(String(u).includes('/api/library') ? { movies: [], tv_shows: [], people: [] }
       : { movies: [], tv_shows: [], people: [] }));
     render(<SearchShelf onClose={() => {}} />);
@@ -97,7 +97,8 @@ describe('v261 phone search is prod 1b4ea74 SearchShelf', () => {
       : { movies: [], tv_shows: [], people: [], rate_limited: true }));
     await type('zzzz');
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
-    expect(await screen.findByText(/TMDB is busy/)).toBeTruthy();
+    expect(await screen.findByText('No results found')).toBeTruthy();
+    expect(screen.queryByText(/TMDB is busy/)).toBeNull();
   });
 
   it('scrolling the results dismisses the keyboard', async () => {
@@ -128,5 +129,18 @@ describe('v261 phone search is prod 1b4ea74 SearchShelf', () => {
     act(() => cast('Jessica Chastain', 83002));
     await act(async () => { await vi.advanceTimersByTimeAsync(330); });
     expect(host.openPerson).toHaveBeenCalledWith({ personId: 83002, personName: 'Jessica Chastain' });
+  });
+});
+
+describe('v262 PM: every shelf string is prod 1b4ea74 verbatim', () => {
+  it('copy matches prod', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../src/components/search/SearchShelf.tsx'), 'utf8');
+    for (const t of ["'All'", "'Movies'", "'TV'", "'People'", '>Search</span>', 'aria-label="Close"',
+      'placeholder="Search for titles, people, and more..."', "'Result' : 'Results'", '>No results found</p>',
+      "'Person'", "'TV Show'", "'Movie'"]) expect(src).toContain(t);
+    expect(src).not.toContain('TMDB_BUSY_TEXT');
+    expect(src).not.toMatch(/'TV show'|'results'/);
   });
 });
