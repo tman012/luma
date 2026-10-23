@@ -710,10 +710,10 @@ def start_services(app_instance):
             # v260 Downloads guard: the instance gate decides whether the scheduler runs at all
             # (LUMA_INSTANCE=test: off unless LUMA_TEST_ALLOW names downloads_guard); then each pass
             # does anything only while Settings > Automation > Downloads guard is on.
-            # v260 (PM / Ops): one-time download_monitor.json prune against qBittorrent's BT_backup (read-only).
+            # v260 (PM / Ops): one-time download_monitor.json prune against qBittorrent's torrent list (read-only).
             try:
                 from app import dlmon_prune
-                dlmon_prune.run_once()
+                dlmon_prune.start()
             except Exception as e:
                 logger.error(f"Download monitor prune failed: {type(e).__name__}")
             try:
