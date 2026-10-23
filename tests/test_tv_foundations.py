@@ -323,9 +323,7 @@ def test_defaults_follow_the_pm_rulings(tvs):
     assert d['upgrades'] == {'mode': 'keep_both'}
     assert d['automation']['enabled'] is False and d['automation']['feed_enabled'] is False
     assert d['paths'] == [] and d['rules'] == []
-    # v251 (PM): the search cap, default 50; v253a (PM): the backlog auto-grab cap, default 20
-    assert [k for k in d['automation'] if 'cap' in k] == ['daily_search_cap', 'daily_backlog_grab_cap']
-    assert d['automation']['daily_search_cap'] == 50 and d['automation']['daily_backlog_grab_cap'] == 20
+    assert not any('cap' in k for k in d['automation'])             # no search or grab cap settings (Taylor)
     assert not tvs.exists()
 
 

@@ -49,7 +49,7 @@ REFRESH_S = 12 * 3600
 BACKOFF_H = (3, 6, 12, 24, 48, 96, 168)
 # v185.2a (Taylor): an aired, missing episode is searched every FAST_S for the first FAST_WINDOW_S after
 # it aired (the early phase), then every SLOW_S; v253 (Taylor): every SLOW_S for as long as it stays
-# monitored and missing (no 24 h floor, no end), under the daily search cap
+# monitored and missing (no 24 h floor, no end); no daily search cap, only the guard's pacing
 FAST_S = 15 * 60
 FAST_WINDOW_S = 6 * 3600
 SLOW_S = 3600
@@ -83,8 +83,7 @@ def _log(cfg, purpose: str, sid: Optional[int], query: str, n: int, outcome: str
     from app.tracker_guard import guard_key
     # v251b: search_log's purpose CHECK (tv_store schema, never migrated) allows feed/episode/season/backlog/
     # manual; a monitor click's background lane is the owner's search, so it is logged as 'manual'.
-    # v252: an automation's search (Genre roulette) is logged as 'backlog' (in its own section); only the
-    # log label is shared: its cap accounting is its own (see query_trackers)
+    # v252: an automation's search (Genre roulette) is logged as 'backlog' (in its own section)
     purpose = LOG_PURPOSE.get(purpose, purpose)
     with tv_store.write() as conn:
         conn.execute('INSERT INTO search_log (ts, section, tracker_key, purpose, series_id, query, results, outcome)'
@@ -95,7 +94,7 @@ def _log_cap_skip(cfg, purpose: str, sid: Optional[int], query: str, now: float,
                   section: str = 'tv') -> None:
     """v201 (PM): a daily-cap skip is logged at most once per tracker per reset window (not every pass)."""
     from app.tracker_guard import guard_key
-    key = f'tv_capskip:{guard_key(cfg)}' + (':backlog' if purpose == BACKLOG else ':automation' if purpose == AUTOMATION else '')
+    key = f'tv_capskip:{guard_key(cfg)}'
     if float(tv_store.get_meta(key) or 0) > now:
         return
     tv_store.set_meta(key, str(reset))
@@ -107,12 +106,11 @@ def _log_cap_skip(cfg, purpose: str, sid: Optional[int], query: str, now: float,
 MANUAL_BACKGROUND = 'manual-background'
 #: v185.2: the owner's searches that count toward the TV tally (not its caps)
 MONITOR_PURPOSES = ('manual', MANUAL_BACKGROUND)
-#: v253: run_due's hourly searches for episodes past the early phase (search_log purpose 'backlog'); they
-#: may use only tv_budget.backlog_cap() of a tracker's daily cap
+#: v253: run_due's hourly searches for episodes past the early phase (search_log purpose 'backlog'). No daily
+#: search cap (Taylor): only the guard's pacing (spacing, hourly limits, 429 backoff) holds them
 BACKLOG = 'backlog'
-#: v252: Settings > Automation's automatic searches (Genre roulette). They count toward a tracker's daily
-#: background search cap (take_search/refund_search) in any section, but never use the TV backlog's share
-#: (BACKLOG_SHARE) and are not part of TV's early-phase ordering (run_due)
+#: v252: Settings > Automation's automatic searches (Genre roulette). No daily search cap (Taylor): only the
+#: guard's pacing holds them; not part of TV's early-phase ordering (run_due)
 AUTOMATION = 'automation'
 #: search_log labels for purposes its CHECK constraint doesn't list (no table rebuild: the label is mapped)
 LOG_PURPOSE = {MANUAL_BACKGROUND: 'manual', AUTOMATION: 'backlog'}
@@ -140,16 +138,6 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': SLOT_BUSY, 'reset_at': reset})
             _log_cap_skip(cfg, purpose, sid, query, now, reset, section)
             continue
-        # v251: the daily background search cap (per tracker, local day ET); feed polls and the owner's
-        # searches are not counted or held
-        background = ((section == 'tv' or purpose == AUTOMATION) and not interactive and purpose != 'feed'
-                      and purpose not in MONITOR_PURPOSES)
-        # v253: a backlog search stops at the backlog share, keeping the rest for newly aired episodes
-        if background and not tv_budget.take_search(cfg, now, backlog=purpose == BACKLOG):
-            reset = tv_budget.search_cap_reset(now)
-            statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': SLOT_BUSY, 'reset_at': reset})
-            _log_cap_skip(cfg, purpose, sid, query, now, reset, section)
-            continue
         try:
             raw = engine.search_one(cfg, query, cats, LIMIT, interactive,
                                     # v185.2a (PM): a feed poll is the guard's 'feed' purpose: no cap or slot of
@@ -157,12 +145,10 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
                                     purpose='feed' if purpose == 'feed' and not interactive else
                                     'tv' if not interactive and capped and not bg_manual else None)
         except TrackerSkipped as e:
-            if background:
-                tv_budget.refund_search(cfg, now)      # v251b: the guard held it: not sent, not counted
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
             _log(cfg, purpose, sid, query, 0, 'skipped', now, section)
             continue
-        except TrackerError as e:                  # sent (it failed): stays counted
+        except TrackerError as e:
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
             _log(cfg, purpose, sid, query, 0, 'failed', now, section)
             continue
@@ -1115,8 +1101,8 @@ def schedule(now: float) -> int:
 def run_due(now: float, max_shows: int = 10) -> Dict[str, int]:
     """Search the shows with episodes due (next_search_at passed), a few per pass. v253: due episodes no
     longer wanted (unmonitored, a file, grabbed) stop (their search time is cleared). Shows with an
-    episode in its early phase go first and search as before; the rest search as BACKLOG (hourly, held to
-    tv_budget.backlog_cap) so old missing episodes can't use up the cap newly aired ones need."""
+    episode in its early phase go first and search as before; the rest search as BACKLOG (hourly), so newly aired
+    episodes get the guard's slots first."""
     with tv_store.connect() as conn:
         due = [dict(r) for r in conn.execute(
             'SELECT series_id AS sid, id, next_search_at, last_search_at FROM episodes WHERE next_search_at IS NOT NULL'
@@ -1137,7 +1123,7 @@ def run_due(now: float, max_shows: int = 10) -> Dict[str, int]:
         if eps:
             backlog = not any(early(e, now) for e in eps.values())
             # early-phase shows first, by due time; then the backlog, longest unsearched first (so a backlog
-            # held to midnight rotates through every show rather than the same few each day)
+            # rotates through every show rather than the same few each pass)
             shows.append((backlog, min(last[e] for e in eps) if backlog else 0, i, sid, list(eps)))
     shows.sort()
     out = {'shows': 0, 'grabbed': 0}

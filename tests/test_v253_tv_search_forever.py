@@ -1,14 +1,14 @@
 """v253 (Taylor): a monitored, missing TV episode is searched until it is grabbed. The air-time search and
 the 15-min retries through the early phase (6 h after air) stay; then hourly, forever, under the per-tracker
-daily cap (feed polls exempt), with newly aired episodes ahead of the backlog. The 24 h floor is gone.
+guard's pacing (no daily search cap: Taylor), with newly aired episodes ahead of the backlog. The 24 h floor is gone.
 Every tracker, the search engine and qBittorrent are mocked."""
 import json
 
-from app import tv_budget, tv_safety, tv_search, tv_store
+from app import tv_safety, tv_search, tv_store
 from tests.test_tv_search_v158b import allow_grabs, env, item, rows  # noqa: F401
 from tests.test_tv_search_v158b import aired, owner, scanned, store, tv_env, lib, fake_tmdb, minimal_app  # noqa: F401
 from tests.test_v233_tv_audit import _timeline, distinct_torrents, make_show
-from tests.test_v251_tv_daily_search_cap import IPT, TL, _cap, at, eng  # noqa: F401
+from tests.test_tv_search_no_daily_cap import at
 
 # Grey's Anatomy S23E02: Thursday 9:00 PM ET (01:00Z Friday), 60 min
 E = {'air_date': '2026-10-23', 'airstamp': '2026-10-24T01:00:00Z', 'runtime': 60}
@@ -140,38 +140,6 @@ def test_unmonitored_stops_and_monitored_again_resumes(env, monkeypatch):
         sent.clear()
         with tv_store.write() as conn:
             conn.execute('UPDATE episodes SET next_search_at = ?, last_search_at = ? WHERE id = ?', (now - 60, now - 3660, ids[3]))
-
-
-def test_backlog_searches_stop_at_their_share_and_leave_the_rest_for_new_episodes(eng):
-    _cap(50)
-    now = at(2026, 10, 23, 10)
-    assert tv_budget.backlog_cap() == 30
-    for i in range(40):
-        _, st = tv_search.query_trackers(f'Old S01E{i:02d}', tv_search.BACKLOG, None, False, now + i, [IPT])
-    assert len(eng.sent) == 30 and st[0]['status'] == tv_search.SLOT_BUSY
-    assert st[0]['reset_at'] == at(2026, 10, 24)
-    for i in range(25):                                                     # newly aired: the remaining 20
-        tv_search.query_trackers(f'New S01E{i:02d}', 'episode', None, False, now + 100 + i, [IPT])
-    assert len(eng.sent) == 50 and tv_budget.searches_today(IPT, now) == 50
-    for i in range(5):                                                      # feed polls are never held or counted
-        tv_search.query_trackers('', 'feed', None, False, now + 200 + i, [IPT])
-    assert len(eng.sent) == 55 and tv_budget.searches_today(IPT, now) == 50
-    tv_search.query_trackers('Old S01E01', tv_search.BACKLOG, None, False, at(2026, 10, 24, 0, 1), [IPT])
-    assert len(eng.sent) == 56                                              # a new day ET
-
-
-def test_a_held_backlog_search_waits_for_midnight(eng, env):
-    _cap(10)
-    sid, ids = make_show(env, 'Ghosts', 'standard', 5, (3,), '2026-10-01', '2026-10-02T00:00:00Z', 30)
-    _only(sid)
-    now = at(2026, 10, 23, 10)
-    for t in (IPT, TL):
-        for _ in range(6):
-            tv_budget.count_search(t, now - 60)                             # 6 of 10: past the backlog share
-    with tv_store.write() as conn:
-        conn.execute('UPDATE episodes SET next_search_at = ?, last_search_at = ? WHERE id = ?', (now - 1, now - 3600, ids[3]))
-    assert tv_search.run_due(now)['shows'] == 1 and eng.sent == []
-    assert _ep(ids[3])['next_search_at'] == at(2026, 10, 24)
 
 
 def test_early_phase_shows_go_ahead_of_the_backlog(env, monkeypatch):

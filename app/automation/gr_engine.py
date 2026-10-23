@@ -73,7 +73,7 @@ def grabs_allowed() -> bool:
 
 def search(film: Dict[str, Any], cfgs: List[Dict[str, Any]], now: float):
     from app import movie_scanner as sc, tv_search
-    # its own purpose: counted toward each tracker's daily background search cap, not the TV backlog share
+    # its own purpose (logged as 'backlog' in the movies section); no daily search cap, only the guard's pacing
     return tv_search.query_trackers(f"{film['title']} {film['year']}", tv_search.AUTOMATION, None, False, now, cfgs,
                                     categories=sc.MOVIE_CATEGORIES, section=sc.SECTION)
 

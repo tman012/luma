@@ -223,64 +223,15 @@ def _job_clear(h: str) -> None:
         conn.execute('DELETE FROM meta WHERE key = ?', (JOB_KEY + h,))
 
 
-#: v253a: an automatic backlog grab skipped at automation.daily_backlog_grab_cap (the episode stays on its cadence)
-BACKLOG_CAPPED = 'Daily backlog grab limit reached'
-
-
-def backlog(series_id: int, episode_ids: List[int], now: float) -> bool:
-    """v253a: a backlog grab: no covered episode is in its early phase (tv_search.early). Counted when unsure
-    (no episodes, or they can't be read), so an unclassified automatic grab can't skip the cap."""
-    try:
-        from app import tv_search
-        ids = [int(i) for i in episode_ids or []]
-        if not ids:
-            return True
-        with tv_store.connect() as conn:
-            rows = [dict(r) for r in conn.execute(
-                f'SELECT id, air_date, airstamp, runtime FROM episodes WHERE series_id = ? AND id IN ({",".join("?" * len(ids))})',
-                (series_id, *ids))]
-            if any(not e.get('airstamp') for e in rows):
-                hm = tv_search.usual_times(conn, [series_id]).get(series_id)
-                for e in rows:
-                    e['usual_time'] = hm
-        return not any(tv_search.early(e, now) for e in rows)
-    except Exception:                                        # noqa: BLE001 - unsure: counted
-        logger.debug('TV grab: backlog check failed; counted as backlog', exc_info=True)
-        return True
-
-
 def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_ids: List[int], origin: str,
          now: Optional[float] = None, session_factory: Callable = requests.Session,
          fetch: Optional[Callable] = None, tokens_only: bool = False) -> Dict[str, Any]:
     """Send *item* (a search result: title, downloadUrl, indexerId, size, quality) to qBittorrent.
-    {'ok': True, 'hash'} or {'ok': False, 'error'}. Never raises for an expected failure.
-
-    v253a: an automatic grab of backlog episodes (see backlog) first reserves one of today's backlog grabs
-    (tv_budget.take_backlog_grab, atomic); at the cap it is skipped ({'capped': True}) and nothing else
-    happens. The reservation is given back when nothing new reached qBittorrent (refused, link failed or
-    pending, no client, qBittorrent refused it, or the release was already grabbed). The owner's grabs and
-    upgrades are never counted."""
+    {'ok': True, 'hash'} or {'ok': False, 'error'}. Never raises for an expected failure."""
+    from app import library_mover as mover, tracker_sources
     now = time.time() if now is None else now
     if origin not in ORIGINS:
         raise ValueError('origin')
-    if origin != 'auto' or not backlog(series_id, episode_ids, now):
-        return _send(item, series_id, season, episode_ids, origin, now, session_factory, fetch, tokens_only)
-    from app import tv_budget
-    if not tv_budget.take_backlog_grab(now):
-        logger.debug('TV grab: %s skipped (%s)', item.get('title'), BACKLOG_CAPPED)
-        return {'ok': False, 'error': BACKLOG_CAPPED, 'capped': True}
-    g: Dict[str, Any] = {}
-    try:
-        g = _send(item, series_id, season, episode_ids, origin, now, session_factory, fetch, tokens_only)
-    finally:
-        if not g.get('ok') or g.get('existing'):
-            tv_budget.refund_backlog_grab(now)
-    return g
-
-
-def _send(item: Dict[str, Any], series_id: int, season: Optional[int], episode_ids: List[int], origin: str,
-          now: float, session_factory: Callable, fetch: Optional[Callable], tokens_only: bool) -> Dict[str, Any]:
-    from app import library_mover as mover, tracker_sources
     if not allowed():
         logger.info('TV grab: %s not sent (%s)', item.get('title'), OFF)
         return {'ok': False, 'error': OFF, 'blocked': True}
