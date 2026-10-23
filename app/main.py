@@ -21845,6 +21845,11 @@ try:
         _movie_scanner.start()     # v203: the movie scanner (test install only; never prod)
     except Exception:
         logger.exception('Movie scanner did not start')
+    try:
+        from app.automation import gr_scheduler as _gr_scheduler
+        _gr_scheduler.start()      # v252: Genre Roulette (native, no Radarr; test install only; off until turned on)
+    except Exception:
+        logger.exception('Genre Roulette scheduler did not start')
 except Exception as _e:  # noqa: BLE001
     logger.error('TV search not started: %s', type(_e).__name__)
 from app import tv_scan as _tv_scan_boot  # noqa: E402
