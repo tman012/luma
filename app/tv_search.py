@@ -47,12 +47,18 @@ FEED_S = 15 * 60
 SLOT_BUSY = 'tv slot'
 REFRESH_S = 12 * 3600
 BACKOFF_H = (3, 6, 12, 24, 48, 96, 168)
-# v185.2a (Taylor): an aired, missing episode is searched every FAST_S for the first FAST_WINDOW_S after
-# it aired (the early phase), then every SLOW_S; v253 (Taylor): every SLOW_S for as long as it stays
-# monitored and missing (no 24 h floor, no end); no daily search cap, only the guard's pacing
-FAST_S = 15 * 60
-FAST_WINDOW_S = 6 * 3600
-SLOW_S = 3600
+# v256 (PM, Sonarr-style): an aired, missing episode is searched at air, +1 h and +3 h (Settings: Air-time
+# searches; AIR_STEPS_S), then by the slow sweep (Settings: Slow sweep for missing episodes) 1, 2 and 4 days
+# after that window (SWEEP_STEPS_S), then weekly (SWEEP_WEEK_S) until it is grabbed. The sweep searches
+# SWEEP_BATCH shows a pass, oldest-searched first, a pass every SWEEP_PASS_S. With no air time, the air
+# searches run from the start of the air date (ET), then every AIR_NO_TIME_EVERY_S to the day's end.
+# No daily search cap (v253), only the guard's pacing. (Replaces v253's every 15 min for 6 h, then hourly.)
+AIR_STEPS_S = (0, 3600, 3 * 3600)
+AIR_NO_TIME_EVERY_S = 3 * 3600
+SWEEP_STEPS_S = (86400, 2 * 86400, 4 * 86400)
+SWEEP_WEEK_S = 7 * 86400
+SWEEP_BATCH = 5
+SWEEP_PASS_S = 3600
 MAX_QUERIES = 4                          # per show per search
 MAX_ALT_TITLES = 2                       # v251: fallback titles tried when a query finds nothing
 LIMIT = 100
@@ -745,6 +751,7 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
 def _after(sid: int, want: List[Dict[str, Any]], out: Dict[str, Any], now: float, automatic: bool) -> None:
     """Episode search state: grabbed ones stop; the rest back off (only when a tracker answered)."""
     grabbed = {i for p in out['picks'] if p['grabbed'] for i in p['episodes']}
+    c = cadence() if automatic else None
     with tv_store.write() as conn:
         for e in want:
             if e['id'] in grabbed:
@@ -756,42 +763,98 @@ def _after(sid: int, want: List[Dict[str, Any]], out: Dict[str, Any], now: float
                 # only) leaves this cap-reset time alone instead of pulling it back to air time next pass
                 conn.execute('UPDATE episodes SET next_search_at = ?, last_search_at = COALESCE(last_search_at, ?)'
                              ' WHERE id = ?', (max(reset, now), now, e['id']))
-            elif out.get('answered'):
-                nxt = _next_retry(e, now, int(e.get('search_attempts') or 0) + 1) if automatic else None
+            elif out.get('answered') and automatic:
+                # v256: the next air-time search or sweep step; none when both are off (the feed alone)
                 conn.execute('UPDATE episodes SET last_search_at = ?, search_attempts = search_attempts + 1,'
-                             ' next_search_at = COALESCE(?, next_search_at) WHERE id = ?', (now, nxt, e['id']))
+                             ' next_search_at = ? WHERE id = ?', (now, _next_retry(e, now, c=c), e['id']))
+            elif out.get('answered'):
+                conn.execute('UPDATE episodes SET last_search_at = ?, search_attempts = search_attempts + 1'
+                             ' WHERE id = ?', (now, e['id']))
 
 
-#: v253 (Taylor): the air-time search, every FAST_S through the early phase (fast_window_end), then every
-#: SLOW_S for as long as the episode stays monitored and missing (v203c's daily catch-up, v251's hourly
-#: catch-ups inside the 24 h floor and the floor itself are gone)
+def cadence(auto: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """v256: the search cadence settings (TV settings' automation): air_searches, sweep_enabled, on_add."""
+    a = automation() if auto is None else auto
+    return {'air_searches': a.get('air_searches', True) is not False,
+            'sweep_enabled': a.get('sweep_enabled', True) is not False,
+            'on_add': a.get('on_add') if a.get('on_add') in tv_settings.ON_ADD_OPTIONS else 'search_now'}
 
 
-def fast_window_end(e: Dict[str, Any]) -> Optional[float]:
-    """When the 15-min retries stop: FAST_WINDOW_S after it aired. v233.7 (Tester FF2): an episode with no air
-    time and no usual slot is searched from the start of its air date in ET, so its window runs to the end of
-    that day in ET (not midnight to 6 AM)."""
+def air_times(e: Dict[str, Any]) -> List[float]:
+    """v256: the air-time searches: at air, +1 h, +3 h. An episode with no air time and no usual slot (searched
+    from the start of its air date in ET, v233.7) is also searched every AIR_NO_TIME_EVERY_S to the day's end."""
     at = aired_at(e)
     if at is None:
-        return None
+        return []
+    out = [at + d for d in AIR_STEPS_S]
     if not e.get('airstamp') and not e.get('usual_time'):
         try:
             d = dt.date.fromisoformat(str(e['air_date'])) + dt.timedelta(days=1)
-            return max(at + FAST_WINDOW_S, dt.datetime(d.year, d.month, d.day, tzinfo=_et()).timestamp())
+            end = dt.datetime(d.year, d.month, d.day, tzinfo=_et()).timestamp()
+            t = out[-1] + AIR_NO_TIME_EVERY_S
+            while t < end:
+                out.append(t)
+                t += AIR_NO_TIME_EVERY_S
         except (KeyError, ValueError):
             pass
-    return at + FAST_WINDOW_S
+    return out
 
 
-def early(e: Dict[str, Any], now: float) -> bool:
-    """v253: inside the early phase (the 15-min retries): before fast_window_end."""
-    end = fast_window_end(e)
-    return end is not None and now < end
+def fast_window_end(e: Dict[str, Any], c: Optional[Dict[str, Any]] = None) -> Optional[float]:
+    """When the air-time searches end (the last one), or the air time when they are off: the sweep counts
+    its 1, 2 and 4 days from here."""
+    c = cadence() if c is None else c
+    if c['air_searches']:
+        t = air_times(e)
+        return t[-1] if t else None
+    return aired_at(e)
 
 
-def _next_retry(e: Dict[str, Any], now: float, attempts: int = 1) -> float:
-    """v253 (Taylor): FAST_S in the early phase, then SLOW_S forever (*attempts* no longer matters)."""
-    return now + (FAST_S if early(e, now) else SLOW_S)
+def early(e: Dict[str, Any], now: float, c: Optional[Dict[str, Any]] = None) -> bool:
+    """Inside the air-time searches (Air-time searches on, before the last one has run)."""
+    c = cadence() if c is None else c
+    if not c['air_searches']:
+        return False
+    end = fast_window_end(e, c)
+    return end is not None and now < end + 60
+
+
+def _next_retry(e: Dict[str, Any], now: float, attempts: int = 1,
+                c: Optional[Dict[str, Any]] = None) -> Optional[float]:
+    """v256: the next search after one at *now*: the next air-time search, else the next sweep step (1, 2 and
+    4 days after the air window), else a week on; None when neither is on (the feed alone looks for it).
+    *attempts* doesn't matter."""
+    c = cadence() if c is None else c
+    if c['air_searches']:
+        nxt = [t for t in air_times(e) if t > now]
+        if nxt:
+            return nxt[0]
+    if not c['sweep_enabled']:
+        return None
+    w = fast_window_end(e, c)
+    if w is None:
+        return now + SWEEP_WEEK_S
+    for d in SWEEP_STEPS_S:
+        if w + d > now:
+            return w + d
+    return now + SWEEP_WEEK_S
+
+
+def first_search(e: Dict[str, Any], now: float, c: Optional[Dict[str, Any]] = None) -> Optional[float]:
+    """v256: when a never-searched episode is first searched: its air time (air-time searches on and the
+    window not over); else its first sweep step, or now when that has passed; None when neither is on."""
+    c = cadence() if c is None else c
+    at = aired_at(e)
+    if at is None:
+        return None
+    if c['air_searches'] and now < (fast_window_end(e, c) or at):
+        return at
+    if not c['sweep_enabled']:
+        return None
+    w = fast_window_end(e, c) or at
+    if not c['air_searches'] and now < w + SWEEP_STEPS_S[0]:
+        return w + SWEEP_STEPS_S[0]                  # no air-time searches: the sweep's first step
+    return now                                       # the sweep: due now (oldest-searched first)
 
 
 def manual(sid: int, season: Optional[int] = None, episode_id: Optional[int] = None,
@@ -1224,28 +1287,48 @@ def auto_on() -> bool:
     return bool(automation().get('enabled')) and tv_grab.allowed()
 
 
+ADD_NOW_KEY = 'tv_add_now'                    # v256: shows added with "Search now", searched on the next pass
+
+
+def _add_now() -> List[int]:
+    try:
+        v = json.loads(tv_store.get_meta(ADD_NOW_KEY) or '[]')
+    except ValueError:
+        return []
+    return [int(x) for x in v if isinstance(x, int) and not isinstance(x, bool)] if isinstance(v, list) else []
+
+
+def _set_add_now(sids: Iterable[int]) -> None:
+    sids = list(dict.fromkeys(int(x) for x in sids))
+    tv_store.set_meta(ADD_NOW_KEY, json.dumps(sids) if sids else None)
+
+
 def on_added(sid: int, now: Optional[float] = None) -> int:
-    """A show added from Search: its wanted episodes (from its Monitor option) are searched on the
-    next pass. Returns how many were queued."""
+    """A show added from Search. v256 (Settings: On add): "Search now" queues its wanted episodes (its
+    Monitor option) for the next pass, ahead of the sweep (the automatic plan: a season query first where a
+    season has 2+ wanted, then the episodes it missed); "Wait for sweep" leaves them to schedule() and the
+    sweep. Returns how many were queued now."""
     now = time.time() if now is None else now
-    if not auto_on():
+    if not auto_on() or cadence()['on_add'] != 'search_now':
         return 0
     with tv_store.write() as conn:
         ids = [e['id'] for e in wanted(conn, sid)]   # v253: every wanted episode, however old
         for i in ids:
             conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (now, i))
     if ids:
+        _set_add_now(_add_now() + [sid])
         logger.info('TV search: %d episode(s) of a new show queued', len(ids))
     return len(ids)
 
 
 def schedule(now: float) -> int:
-    """Gives every monitored, missing episode a search time. A never-searched one: its air time (v196a: no
-    first-search delay; an older build's later time is moved up). v253 (Taylor): one searched before with
-    no search time (dropped past the old 24 h floor, unmonitored and monitored again, or a grab that
-    failed) goes back on its cadence: its next retry after its last search, or now if that has passed.
-    Grabbed episodes (downloading, importing, imported) are left alone. backlog_enabled is ignored."""
+    """Gives every monitored, missing episode a search time (v256: first_search, _next_retry). A never-searched
+    one: its air time while the air-time searches run, else the sweep. One searched before with no search time
+    (unmonitored and monitored again, a grab that failed, a cadence turned back on): its next air-time search
+    while those run, else it joins the sweep (due now; the sweep goes oldest-searched first). Grabbed episodes
+    (downloading, importing, imported) are left alone. With both cadences off, nothing is scheduled (the feed alone). backlog_enabled is ignored."""
     n = 0
+    c = cadence()
     with tv_store.write() as conn:
         rows = [dict(r) for r in conn.execute(
             'SELECT e.id, e.series_id, e.air_date, e.airstamp, e.runtime, e.next_search_at, e.last_search_at'
@@ -1256,27 +1339,33 @@ def schedule(now: float) -> int:
         got = {sid: _grabbed(conn, sid) for sid in {e['series_id'] for e in rows}}
         for e in rows:
             e['usual_time'] = usual.get(e['series_id'])
-            at = aired_at(e)
-            if at is None:
+            if aired_at(e) is None:
                 continue
             if e['id'] in got.get(e['series_id'], ()):
                 continue                     # v253: grabbed: searching stopped
             if e['last_search_at'] is None:
-                want = at
+                want = first_search(e, now, c)
+                if want is None:
+                    continue
                 if e.get('next_search_at') is not None and float(e['next_search_at']) <= want:
                     continue
             else:
-                want = max(_next_retry(e, float(e['last_search_at'])), now)
+                nxt = _next_retry(e, float(e['last_search_at']), c=c)
+                if nxt is None:
+                    continue
+                # revived (monitored again, a failed grab): its next air-time search, else it joins the sweep now
+                want = max(nxt, now) if early(e, now, c) else now
             conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (want, e['id']))
             n += 1
     return n
 
 
 def run_due(now: float, max_shows: int = 10) -> Dict[str, int]:
-    """Search the shows with episodes due (next_search_at passed), a few per pass. v253: due episodes no
-    longer wanted (unmonitored, a file, grabbed) stop (their search time is cleared). Shows with an
-    episode in its early phase go first and search as before; the rest search as BACKLOG (hourly), so newly aired
-    episodes get the guard's slots first."""
+    """Search the shows with episodes due (next_search_at passed). v253: due episodes no longer wanted
+    (unmonitored, a file, grabbed) stop (their search time is cleared). v256: shows with an episode in its
+    air-time searches, or added with "Search now", go every pass (up to *max_shows*); the rest are the slow
+    sweep (purpose BACKLOG): SWEEP_BATCH shows a pass, every SWEEP_PASS_S, oldest-searched first."""
+    c = cadence()
     with tv_store.connect() as conn:
         due = [dict(r) for r in conn.execute(
             'SELECT series_id AS sid, id, next_search_at, last_search_at FROM episodes WHERE next_search_at IS NOT NULL'
@@ -1292,21 +1381,32 @@ def run_due(now: float, max_shows: int = 10) -> Dict[str, int]:
             conn.executemany('UPDATE episodes SET next_search_at = NULL WHERE id = ?', [(i,) for i in stale])
         logger.info('TV search: %d due episode(s) no longer wanted (unmonitored, a file or grabbed); not searched', len(stale))
     last = {r['id']: r['last_search_at'] or 0 for r in due}
-    shows = []
+    added = set(_add_now())
+    fast, sweep = [], []
     for i, (sid, eps) in enumerate(live.items()):
-        if eps:
-            backlog = not any(early(e, now) for e in eps.values())
-            # early-phase shows first, by due time; then the backlog, longest unsearched first (so a backlog
-            # rotates through every show rather than the same few each pass)
-            shows.append((backlog, min(last[e] for e in eps) if backlog else 0, i, sid, list(eps)))
-    shows.sort()
-    out = {'shows': 0, 'grabbed': 0}
-    for backlog, _, _, sid, ids in shows[:max_shows]:
+        if not eps:
+            continue
+        if sid in added or any(early(e, now, c) for e in eps.values()):
+            fast.append((i, sid, list(eps)))
+        else:
+            # oldest-searched first (never searched before any), so the sweep rotates through every show
+            sweep.append((min(last[e] for e in eps), i, sid, list(eps)))
+    out = {'shows': 0, 'grabbed': 0, 'swept': 0}
+    batch: List[Tuple[bool, int, List[int]]] = [(False, sid, ids) for _, sid, ids in fast[:max_shows]]
+    if sweep and now - float(tv_store.get_meta('tv_sweep_at') or 0) >= SWEEP_PASS_S:
+        tv_store.set_meta('tv_sweep_at', str(now))
+        sweep.sort()
+        batch += [(True, sid, ids) for _, _, sid, ids in sweep[:SWEEP_BATCH]]
+    for backlog, sid, ids in batch:
         res = search_show(sid, ids, origin='auto', now=now, purpose=BACKLOG if backlog else None)
         out['shows'] += 1
+        out['swept'] += int(backlog)
         out['grabbed'] += sum(1 for p in res.get('picks', []) if p['grabbed'])
         if res.get('error') == NO_TRACKERS:
             break
+    if added:                                        # searched, or nothing due any more: done
+        waiting = {sid for _, sid, _ in fast[max_shows:]}
+        _set_add_now(x for x in _add_now() if x in waiting or x not in added)
     return out
 
 

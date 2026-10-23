@@ -61,9 +61,16 @@ UPGRADE_MODES = ('keep_both', 'replace_verified')
 # v185: naming is Sonarr-style (app/tv_naming), seeded from Taylor's Sonarr NamingConfig
 # import_enabled: the TV download watch on prod (off by default; on test it follows the instance's
 # tv_import job, see tv_downloads.watch_enabled).
-AUTOMATION_FLAGS = ('enabled', 'feed_enabled', 'backlog_enabled', 'upgrades_enabled', 'import_enabled')
+# v256 (PM, Sonarr-style searching): air_searches: an aired episode is searched at air, +1 h and +3 h;
+# sweep_enabled: a missing one is then searched 1, 2 and 4 days after that window, then weekly, until it is
+# grabbed (tv_search._next_retry); on_add: a show added from Search is searched on the next pass
+# ('search_now') or left to the sweep ('wait_for_sweep')
+AUTOMATION_FLAGS = ('enabled', 'feed_enabled', 'backlog_enabled', 'upgrades_enabled', 'import_enabled',
+                    'air_searches', 'sweep_enabled')
+ON_ADD_OPTIONS = ('search_now', 'wait_for_sweep')
 DEFAULT_AUTOMATION = {'enabled': False, 'feed_enabled': False, 'backlog_enabled': False,
-                      'upgrades_enabled': False, 'import_enabled': False, 'first_search_delay_h': 4}
+                      'upgrades_enabled': False, 'import_enabled': False, 'first_search_delay_h': 4,
+                      'air_searches': True, 'sweep_enabled': True, 'on_add': 'search_now'}
 INVALID = 'Invalid'
 # v185.2a (Taylor): release groups preferred at the same quality, in the owner's order; empty by default
 # (nothing seeded): an empty list leaves the ranking unchanged
@@ -124,6 +131,8 @@ def _normalize(raw: Any) -> Dict[str, Any]:
     for k in AUTOMATION_FLAGS:
         if isinstance(auto.get(k), bool):
             d['automation'][k] = auto[k]
+    if auto.get('on_add') in ON_ADD_OPTIONS:
+        d['automation']['on_add'] = auto['on_add']
     delay = auto.get('first_search_delay_h')
     if isinstance(delay, int) and not isinstance(delay, bool) and 0 <= delay <= 72:
         d['automation']['first_search_delay_h'] = delay
@@ -181,13 +190,17 @@ def apply_put(data: Dict[str, Any], body: Any) -> Dict[str, str]:
             data['upgrades']['mode'] = u['mode']
     if 'automation' in body:
         a = body['automation']
-        allowed = set(AUTOMATION_FLAGS) | {'first_search_delay_h'}
+        allowed = set(AUTOMATION_FLAGS) | {'first_search_delay_h', 'on_add'}
         if not isinstance(a, dict) or not set(a) <= allowed:
             errors['automation'] = INVALID
         else:
             for k, v in a.items():
                 if k == 'first_search_delay_h':
                     if not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 72:
+                        errors[f'automation.{k}'] = INVALID
+                        continue
+                elif k == 'on_add':
+                    if not isinstance(v, str) or v not in ON_ADD_OPTIONS:
                         errors[f'automation.{k}'] = INVALID
                         continue
                 elif not isinstance(v, bool):

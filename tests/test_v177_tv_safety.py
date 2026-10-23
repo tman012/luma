@@ -156,7 +156,7 @@ def test_a_due_search_past_the_old_floor_is_searched_and_grabbed(env, monkeypatc
     with tv_store.write() as conn:
         conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (now - 60, env.e2[3]))
     env.results = [item('Severance.S02E03.1080p.WEB-DL-B')]
-    assert tv_search.run_due(now) == {'shows': 1, 'grabbed': 1}
+    assert tv_search.run_due(now) == {'shows': 1, 'grabbed': 1, 'swept': 1}      # v256: the sweep's pass
     assert len(adds(env)) == 1
     assert rows('SELECT next_search_at FROM episodes WHERE id = ?', env.e2[3])[0]['next_search_at'] is None
 

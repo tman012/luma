@@ -225,7 +225,7 @@ def test_after_air_search_waits_the_delay_and_backs_off(env, monkeypatch):
     env.results = []
     assert tv_search.run_due(nxt + 1)['shows'] == 1
     r = rows('SELECT next_search_at, search_attempts FROM episodes WHERE id = ?', e3)[0]
-    assert r['search_attempts'] == 1 and r['next_search_at'] == pytest.approx(nxt + 1 + 15 * 60)   # v185.2a: 15 min in the first 6 h
+    assert r['search_attempts'] == 1 and r['next_search_at'] == pytest.approx(aired + 3600)   # v256: at air, then +1 h
     env.results = [item('Severance.S02E03.1080p.WEB-DL-B')]
     assert tv_search.run_due(r['next_search_at'] + 1)['grabbed'] >= 1
     assert rows('SELECT next_search_at FROM episodes WHERE id = ?', e3)[0]['next_search_at'] is None

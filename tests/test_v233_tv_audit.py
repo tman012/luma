@@ -153,7 +153,7 @@ def _timeline(sid, start, end, step=15 * 60):
     ('Love Is Blind', 11, (6, 8), '2026-10-21T07:00:00Z', 60),          # 3:00 AM ET, Netflix
     ('Dancing with the Stars', 35, (7,), '2026-10-21T00:00:00Z', 120),  # 8:00 PM ET 10-20
 ])
-def test_new_episodes_retry_every_15_minutes_for_6_hours_after_air(env, monkeypatch, title, season, numbers, stamp, runtime):
+def test_new_episodes_are_searched_at_air_then_1_and_3_hours_later(env, monkeypatch, title, season, numbers, stamp, runtime):
     sid, ids = make_show(env, title, 'standard', season, numbers, stamp[:10] if stamp[11:13] >= '04' else
                          (dt.date.fromisoformat(stamp[:10]) - dt.timedelta(days=1)).isoformat(), stamp, runtime)
     when = []
@@ -162,14 +162,10 @@ def test_new_episodes_retry_every_15_minutes_for_6_hours_after_air(env, monkeypa
     aired = dt.datetime.fromisoformat(stamp.replace('Z', '+00:00')).timestamp() + 60 * runtime
     _timeline(sid, aired - 30 * 60, aired + 7 * 3600)
     passes = sorted({w for w in when})
-    assert passes[0] == aired
-    in_window = [w for w in passes if w <= aired + tv_search.FAST_WINDOW_S]
-    assert in_window == [aired + i * tv_search.FAST_S for i in range(25)]               # every 15 min, 6 h
-    # then it falls back: hourly (v253: forever, no 24 h floor)
-    after = [w for w in passes if w > aired + tv_search.FAST_WINDOW_S]
-    assert after == [in_window[-1] + k * tv_search.SLOW_S for k in range(1, len(after) + 1)]
+    # v256 (PM): at air, +1 h and +3 h (was every 15 min for 6 h, then hourly)
+    assert passes == [aired, aired + 3600, aired + 3 * 3600]
     nxt = {r['next_search_at'] for r in rows('SELECT next_search_at FROM episodes WHERE id IN (%s)' % ','.join('?' * len(ids)), *ids.values())}
-    assert nxt == {(after or in_window)[-1] + tv_search.SLOW_S}
+    assert nxt == {aired + 3 * 3600 + 86400}                                             # then the sweep: a day on
 
 
 def test_found_mid_window_is_grabbed_and_stops(env, monkeypatch):
@@ -191,16 +187,21 @@ def test_found_mid_window_is_grabbed_and_stops(env, monkeypatch):
     _timeline(sid, aired, aired + 4 * 3600)
     g = rows('SELECT release_title, grabbed_at FROM grabs WHERE series_id = ? ORDER BY release_title', sid)
     assert [r['release_title'] for r in g] == release['Love Is Blind S11']
-    assert {r['grabbed_at'] for r in g} == {aired + 10 * tv_search.FAST_S}
+    assert {r['grabbed_at'] for r in g} == {aired + 3 * 3600}                          # v256: the +3 h search
     assert all(r['next_search_at'] is None for r in rows('SELECT next_search_at FROM episodes WHERE id IN (?, ?)', *ids.values()))
 
 
 def test_next_retry_rule():
     e = {'airstamp': '2026-10-21T07:00:00Z', 'runtime': 60, 'air_date': '2026-10-21'}
     aired = ts(2026, 10, 21, 4)
-    assert tv_search._next_retry(e, aired + 60, attempts=5) == aired + 60 + tv_search.FAST_S
-    late = aired + tv_search.FAST_WINDOW_S + 1
-    assert tv_search._next_retry(e, late, attempts=5) == late + tv_search.SLOW_S       # v253: hourly, forever
+    c = tv_search.cadence({})                                                           # v256 defaults
+    assert tv_search._next_retry(e, aired + 60, attempts=5, c=c) == aired + 3600
+    assert tv_search._next_retry(e, aired + 3600 + 5, c=c) == aired + 3 * 3600
+    w = aired + 3 * 3600
+    assert [tv_search._next_retry(e, t, c=c) for t in (w + 1, w + 86400 + 1, w + 2 * 86400 + 1)] == \
+        [w + 86400, w + 2 * 86400, w + 4 * 86400]                                       # the sweep: 1, 2, 4 days
+    late = w + 4 * 86400 + 1
+    assert tv_search._next_retry(e, late, attempts=5, c=c) == late + 7 * 86400           # then weekly, forever
 
 
 # ------------------------------------------------------------------ 4. episodes with no air time
@@ -231,7 +232,7 @@ def test_no_air_time_and_no_usual_time_starts_at_the_air_date_in_et(env):
     assert got == {ts(2026, 10, 21, 0)}                               # 12:00 AM ET on 10-21, not the end of the day
 
 
-def test_no_air_time_still_gets_the_15_minute_window_and_a_grab(env, monkeypatch):
+def test_no_air_time_still_gets_the_air_searches_and_a_grab(env, monkeypatch):
     allow_grabs(monkeypatch)
     distinct_torrents(env, monkeypatch)
     sid, ids = _vpr(env)
@@ -249,7 +250,7 @@ def test_no_air_time_still_gets_the_15_minute_window_and_a_grab(env, monkeypatch
             [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]
     monkeypatch.setattr(tv_search, 'query_trackers', fake)
     _timeline(sid, start - 15 * 60, start + 4 * 3600)
-    assert sorted(set(when)) == [start + i * tv_search.FAST_S for i in range(13)]
+    assert sorted(set(when)) == [start, start + 3600, start + 3 * 3600]                # v256
     assert sorted(r['release_title'] for r in rows('SELECT release_title FROM grabs WHERE series_id = ?', sid)) == names
 
 
@@ -291,12 +292,12 @@ def test_retries_search_only_the_missed_episodes_no_repeat_season_query(env, mon
         return ([item(t) for t in capped] if query == 'Love Is Blind S11' else []), [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]
     monkeypatch.setattr(tv_search, 'query_trackers', fake)
     aired = ts(2026, 10, 21, 4)
-    _timeline(sid, aired, aired + tv_search.FAST_WINDOW_S)
+    _timeline(sid, aired, aired + 6 * 3600)
     first = [q for t, q in log if t == aired]
     assert first == ['Love Is Blind S11', 'Love Is Blind S11E06', 'Love Is Blind S11E08']
     later = [q for t, q in log if t > aired]
     assert later and set(later) == {'Love Is Blind S11E06', 'Love Is Blind S11E08'}      # no season query again
-    assert len(later) == 2 * 24 and len(log) == 3 + 48                                     # was ~75
+    assert len(later) == 2 * 2 and len(log) == 3 + 4                                       # v256: +1 h and +3 h
 
 
 def test_a_new_episode_still_gets_its_own_query_next_to_the_missed_ones(env, monkeypatch):
@@ -327,16 +328,17 @@ def test_no_air_time_no_usual_slot_retries_until_the_end_of_the_air_date_in_et(e
     start, end = ts(2026, 10, 21, 0), ts(2026, 10, 22, 0)
     _timeline(sid, start, end + 3600)
     passes = sorted(set(when))
-    assert passes[0] == start                                           # every 15 min through the whole day ET
-    assert passes == [start + i * tv_search.FAST_S for i in range(97)] + [end + tv_search.SLOW_S]   # v251: then hourly
-    assert tv_search.fast_window_end({'air_date': '2026-10-21'}) == end
+    # v256: the air-date start, +1 h, +3 h, then every 3 h through the rest of the day ET; then the sweep
+    assert passes == [start, start + 3600] + [start + k * 3 * 3600 for k in range(1, 8)]
+    assert tv_search.fast_window_end({'air_date': '2026-10-21'}, tv_search.cadence({})) == start + 21 * 3600 < end
 
 
-def test_a_usual_slot_keeps_the_6_hour_window():
+def test_a_usual_slot_keeps_the_air_window():
+    c = tv_search.cadence({})
     e = {'air_date': '2026-10-21', 'usual_time': (21, 0), 'runtime': 60}
-    assert tv_search.fast_window_end(e) == ts(2026, 10, 21, 22) + tv_search.FAST_WINDOW_S
+    assert tv_search.fast_window_end(e, c) == ts(2026, 10, 21, 22) + 3 * 3600
     e = {'air_date': '2026-10-21', 'airstamp': '2026-10-21T07:00:00Z', 'runtime': 60}
-    assert tv_search.fast_window_end(e) == ts(2026, 10, 21, 4) + tv_search.FAST_WINDOW_S
+    assert tv_search.fast_window_end(e, c) == ts(2026, 10, 21, 4) + 3 * 3600
 
 
 # ------------------------------------------------------------------ v233.8 (Reviewer): every window search is charged
@@ -371,16 +373,16 @@ def test_each_search_in_the_6h_window_is_charged_to_the_background_budget(env, m
     sid, ids = make_show(env, 'Love Is Blind', 'standard', 11, (6, 8), '2026-10-21', '2026-10-21T07:00:00Z', 60)
     aired = ts(2026, 10, 21, 4)
     t = aired
-    while t <= aired + tv_search.FAST_WINDOW_S:
+    while t <= aired + 6 * 3600:
         clock['t'] = t
         tv_search.schedule(t)
         tv_search.run_due(t)
-        t += tv_search.FAST_S
+        t += 15 * 60
     # every request asks the guard first, as a background 'tv' request (never the interactive budget)
     assert takes and all(tk[:3] == (guard_key(ipt), False, 'tv') for tk in takes)
     ok = [tk for tk in takes if tk[3] is None]
     assert len(sent) == len(ok)                                     # nothing is sent without a charge
     assert len(guard.log.get(guard_key(ipt), [])) == len(sent)      # and each one sent is recorded
-    # each 15-min pass sends at least one search through the whole window (the 60 s gap holds the rest back)
-    assert len(sent) >= 25
+    # each air-time search (v256: at air, +1 h, +3 h) sends at least one (the 60 s gap holds the rest back)
+    assert len(sent) >= 3
 

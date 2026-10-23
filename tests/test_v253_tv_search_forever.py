@@ -1,7 +1,7 @@
-"""v253 (Taylor): a monitored, missing TV episode is searched until it is grabbed. The air-time search and
-the 15-min retries through the early phase (6 h after air) stay; then hourly, forever, under the per-tracker
+"""v253 (Taylor): a monitored, missing TV episode is searched until it is grabbed, under the per-tracker
 guard's pacing (no daily search cap: Taylor), with newly aired episodes ahead of the backlog. The 24 h floor is gone.
-Every tracker, the search engine and qBittorrent are mocked."""
+v256 (PM): the cadence is now at air, +1 h, +3 h, then the slow sweep (1, 2, 4 days, then weekly) instead of
+every 15 min for 6 h, then hourly. Every tracker, the search engine and qBittorrent are mocked."""
 import json
 
 from app import tv_safety, tv_search, tv_store
@@ -25,22 +25,23 @@ def _ep(eid):
     return rows('SELECT next_search_at, last_search_at, search_attempts FROM episodes WHERE id = ?', eid)[0]
 
 
-def test_the_cadence_15_min_early_then_hourly_forever():
+def test_the_cadence_air_searches_then_the_sweep_then_weekly_forever():
     aired_at = tv_search.aired_at(E)
-    assert tv_search.FAST_S == 15 * 60 and tv_search.SLOW_S == 3600 and tv_search.FAST_WINDOW_S == 6 * 3600
-    assert tv_search.fast_window_end(E) == aired_at + 6 * 3600              # the early phase is unchanged
-    for t in (aired_at, aired_at + 3600, aired_at + 6 * 3600 - 1):
-        assert tv_search._next_retry(E, t, attempts=1) == t + tv_search.FAST_S
-        assert tv_search._next_retry(E, t, attempts=40) == t + tv_search.FAST_S
-    for t in (aired_at + 6 * 3600, aired_at + 23 * 3600, aired_at + 25 * 3600, aired_at + 30 * 86400):
-        assert tv_search._next_retry(E, t, attempts=1) == t + tv_search.SLOW_S
-        assert tv_search._next_retry(E, t, attempts=99) == t + tv_search.SLOW_S
-    for gone in ('AUTO_SEARCHES', 'CATCHUP_S', 'FLOOR_MARGIN_S'):
+    c = tv_search.cadence({})
+    w = aired_at + 3 * 3600
+    assert tv_search.fast_window_end(E, c) == w
+    for t, nxt in ((aired_at, aired_at + 3600), (aired_at + 3600, w), (w, w + 86400), (w + 86400, w + 2 * 86400),
+                   (w + 2 * 86400, w + 4 * 86400)):
+        assert tv_search._next_retry(E, t, attempts=1, c=c) == nxt
+        assert tv_search._next_retry(E, t, attempts=40, c=c) == nxt
+    for t in (w + 4 * 86400, w + 30 * 86400, w + 400 * 86400):                    # weekly, forever
+        assert tv_search._next_retry(E, t, attempts=99, c=c) == t + 7 * 86400
+    for gone in ('AUTO_SEARCHES', 'CATCHUP_S', 'FLOOR_MARGIN_S', 'FAST_S', 'SLOW_S', 'FAST_WINDOW_S'):
         assert not hasattr(tv_search, gone)
     assert not hasattr(tv_safety, 'OLD')
 
 
-def test_15_min_early_then_hourly_past_24h_and_never_stops(env, monkeypatch):
+def test_air_searches_then_the_sweep_past_24h_and_never_stops(env, monkeypatch):
     sid, ids = make_show(env, "Grey's Anatomy", 'standard', 23, (2,), '2026-10-23', '2026-10-24T01:00:00Z', 60)
     _only(sid)
     when = []
@@ -48,16 +49,13 @@ def test_15_min_early_then_hourly_past_24h_and_never_stops(env, monkeypatch):
     aired_at = tv_search.aired_at(E)
     _timeline(sid, aired_at - 30 * 60, aired_at + 72 * 3600)
     passes = sorted(set(when))
-    early = [w for w in passes if w <= aired_at + tv_search.FAST_WINDOW_S]
-    assert early == [aired_at + i * tv_search.FAST_S for i in range(25)]   # air time, then every 15 min for 6 h
-    late = [w for w in passes if w > aired_at + tv_search.FAST_WINDOW_S]
-    assert late == [early[-1] + k * tv_search.SLOW_S for k in range(1, len(late) + 1)]
-    assert max(passes) >= aired_at + 71 * 3600                              # well past the old 24 h floor
-    assert _ep(ids[2])['next_search_at'] == max(passes) + tv_search.SLOW_S
+    w = aired_at + 3 * 3600
+    assert passes == [aired_at, aired_at + 3600, w, w + 86400, w + 2 * 86400]   # well past the old 24 h floor
+    assert _ep(ids[2])['next_search_at'] == w + 4 * 86400
 
 
 def test_greys_late_upload_past_24h_grabs_on_its_own(env, monkeypatch):
-    """Up on the tracker 30 h after air (past the old 24 h floor): the hourly search grabs it, then stops."""
+    """Up on the tracker 30 h after air (past the old 24 h floor): the sweep's 2-day search grabs it, then stops."""
     allow_grabs(monkeypatch)
     distinct_torrents(env, monkeypatch)
     sid, ids = make_show(env, "Grey's Anatomy", 'standard', 23, (2,), '2026-10-23', '2026-10-24T01:00:00Z', 60)
@@ -72,9 +70,10 @@ def test_greys_late_upload_past_24h_grabs_on_its_own(env, monkeypatch):
         when.append(now)
         return ([item(name)] if now >= up_at and query == 'Greys Anatomy S23E02' else []), OK
     monkeypatch.setattr(tv_search, 'query_trackers', fake)
-    _timeline(sid, tv_safety.aired_start(E), up_at + 6 * 3600)
+    _timeline(sid, tv_safety.aired_start(E), up_at + 30 * 3600)
     g = rows('SELECT release_title, grabbed_at FROM grabs WHERE series_id = ?', sid)
-    assert [r['release_title'] for r in g] == [name] and up_at <= g[0]['grabbed_at'] <= up_at + tv_search.SLOW_S
+    assert [r['release_title'] for r in g] == [name]
+    assert g[0]['grabbed_at'] == tv_search.aired_at(E) + 3 * 3600 + 2 * 86400      # the sweep's second step
     assert not tv_safety.in_floor(E, g[0]['grabbed_at'])                    # it was past the old floor
     assert max(when) == g[0]['grabbed_at']                                  # stops once grabbed
     assert _ep(ids[2])['next_search_at'] is None
@@ -95,7 +94,7 @@ def test_an_episode_dropped_by_the_old_floor_is_searched_again(env, monkeypatch)
     assert tv_search.schedule(now) == 1 and _ep(ids[5])['next_search_at'] == now
     assert tv_search.run_due(now)['shows'] == 1
     assert seen == [('Special Forces Worlds Toughest Test S05E05', tv_search.BACKLOG)]
-    assert _ep(ids[5])['next_search_at'] == now + tv_search.SLOW_S
+    assert _ep(ids[5])['next_search_at'] == now + 7 * 86400                    # v256: then weekly
 
 
 def test_grabbed_or_imported_stops_and_a_failed_grab_searches_again(env, monkeypatch):
@@ -138,7 +137,8 @@ def test_unmonitored_stops_and_monitored_again_resumes(env, monkeypatch):
             conn.execute(f'UPDATE {table} SET {col} = 1 WHERE id = ?', (ids[3] if table == 'episodes' else sid,))
         assert tv_search.schedule(now) == 1 and _ep(ids[3])['next_search_at'] == now
         assert tv_search.run_due(now)['shows'] == 1 and len(sent) == 1
-        assert _ep(ids[3])['next_search_at'] == now + tv_search.SLOW_S       # back on its hourly cadence
+        assert _ep(ids[3])['next_search_at'] == now + 7 * 86400              # v256: back on the sweep (weekly)
+        tv_store.set_meta('tv_sweep_at', None)                              # the next sweep pass
         sent.clear()
         with tv_store.write() as conn:
             conn.execute('UPDATE episodes SET next_search_at = ?, last_search_at = ? WHERE id = ?', (now - 60, now - 3660, ids[3]))
@@ -156,10 +156,13 @@ def test_early_phase_shows_go_ahead_of_the_backlog(env, monkeypatch):
         conn.execute('UPDATE episodes SET next_search_at = ?, last_search_at = ? WHERE id = ?', (now - 60, now - 960, fresh))
     calls = []
     monkeypatch.setattr(tv_search, 'search_show', lambda s, i, **k: calls.append((s, k.get('purpose'))) or {'picks': []})
-    tv_search.run_due(now, max_shows=1)                                     # one slot: the new episode gets it
+    tv_search.run_due(now, max_shows=1)                       # the new episode first; then the sweep's pass
+    assert calls == [(new, None), (sid, tv_search.BACKLOG)]
+    calls.clear()
+    tv_search.run_due(now + 60, max_shows=5)                  # v256: the sweep passes once an hour
     assert calls == [(new, None)]
     calls.clear()
-    tv_search.run_due(now, max_shows=5)
+    tv_search.run_due(now + 3600, max_shows=5)
     assert calls == [(new, None), (sid, tv_search.BACKLOG)]
 
 
@@ -177,4 +180,4 @@ def test_the_backlog_rotates_longest_unsearched_first(env, monkeypatch):
     calls = []
     monkeypatch.setattr(tv_search, 'search_show', lambda s, i, **k: calls.append(s) or {'picks': []})
     tv_search.run_due(now, max_shows=1)
-    assert calls == [old]
+    assert calls == [old, sid]                                # v256: one sweep pass, oldest-searched first
