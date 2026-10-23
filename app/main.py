@@ -6872,6 +6872,29 @@ _TRAKT_CACHE_MAX = 1000               # cap total entries (per-tmdb image keys n
 from app import trakt_http as _trakt_http  # noqa: E402  Trakt's headers (User-Agent) and failure logging
 
 
+def _prefetch_imdb_ratings(raw_items, item_key: str):
+    """v263: start the OMDb (IMDb rating) lookups for a Trakt list now, beside the TMDb poster lookups, rather
+    than after them. Same enrich_imdb_ratings call (its own 8 workers and its cache) on the Trakt ids/title/year;
+    the rail's later enrich_imdb_ratings then answers from that cache. Returns a future to wait on."""
+    rows = []
+    for entry in raw_items or []:
+        obj = (entry or {}).get(item_key) or {}
+        ids = obj.get('ids') or {}
+        rows.append({'imdb_id': ids.get('imdb'), 'title': obj.get('title', ''), 'year': obj.get('year')})
+    ex = ThreadPoolExecutor(max_workers=1)
+    try:
+        return ex.submit(enrich_imdb_ratings, rows, settings=settings, max_items=40, replace_rating=True)
+    finally:
+        ex.shutdown(wait=False)
+
+
+def _await_prefetch(fut) -> None:
+    try:
+        fut.result()
+    except Exception as e:                       # noqa: BLE001 - the rail's own enrich call still runs
+        logger.debug('IMDb prefetch failed: %s', type(e).__name__)
+
+
 def _set_trakt_cache(key: str, value) -> None:
     _trakt_cache[key] = (time.time(), value)
     if len(_trakt_cache) > _TRAKT_CACHE_MAX:
@@ -6947,6 +6970,7 @@ def trakt_trending_shows():
                 pass
             return tmdb_id, None, None
 
+        _omdb = _prefetch_imdb_ratings(raw_items, 'show')     # v263: OMDb beside TMDb, not after
         # Collect IDs that need fetching, skip cache hits
         img_map = {}  # tmdb_id → (poster, backdrop)
         ids_to_fetch = []
@@ -6989,6 +7013,7 @@ def trakt_trending_shows():
                 'media_type': 'tv',
             })
 
+        _await_prefetch(_omdb)
         enrich_imdb_ratings(shows, settings=settings, max_items=40, replace_rating=True)
 
         payload = {'shows': shows, 'enabled': True, 'total': len(shows)}
@@ -7122,6 +7147,7 @@ def trakt_trending_movies():
                 pass
             return tmdb_id, None, None
 
+        _omdb = _prefetch_imdb_ratings(raw_items, 'movie')    # v263: OMDb beside TMDb, not after
         img_map = {}
         ids_to_fetch = []
         for entry in raw_items:
@@ -7162,6 +7188,7 @@ def trakt_trending_movies():
                 'media_type': 'movie',
             })
 
+        _await_prefetch(_omdb)
         enrich_imdb_ratings(movies, settings=settings, max_items=40, replace_rating=True)
 
         payload = {'movies': movies, 'enabled': True, 'total': len(movies)}
@@ -7245,6 +7272,7 @@ def _fetch_trakt_anticipated(media):
         resp.raise_for_status()
         raw_items = resp.json()  # [{list_count, movie/show: {...}}]
 
+        _omdb = _prefetch_imdb_ratings(raw_items, item_key)   # v263: OMDb beside TMDb, not after
         # Resolve TMDb images in parallel, skipping cache hits
         img_map = {}
         ids_to_fetch = []
@@ -7289,6 +7317,7 @@ def _fetch_trakt_anticipated(media):
                 item['tvdb_id'] = ids.get('tvdb')
             results.append(item)
 
+        _await_prefetch(_omdb)
         enrich_imdb_ratings(results, settings=settings, max_items=40, replace_rating=True)
 
         payload = {key: results, 'enabled': True, 'total': len(results)}
