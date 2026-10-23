@@ -44,7 +44,11 @@ describe('v175 static guards', () => {
     const bad: string[] = [];
     for (const [f, s] of FILES) {
       const code = stripComments(s);
-      for (const m of code.matchAll(/Movie Night|Genre Roulette|Franchise Completer|Downloads Guard|Auto-Grab/g)) bad.push(`${f}: ${m[0]}`);
+      // v261 PM ruling: the v260 Downloads Guard card is prod 1b4ea74's, so its title matches prod exactly
+      const prodPorted = f.endsWith('components/automation/DownloadsGuardSettings.tsx');
+      for (const m of code.matchAll(/Movie Night|Genre Roulette|Franchise Completer|Downloads Guard|Auto-Grab/g)) {
+        if (!(prodPorted && m[0] === 'Downloads Guard')) bad.push(`${f}: ${m[0]}`);
+      }
     }
     expect(bad).toEqual([]);
   });
