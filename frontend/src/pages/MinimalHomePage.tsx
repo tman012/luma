@@ -6,6 +6,7 @@ import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { FONT, LOGO_SRC, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
 import { HomeRails, SkeletonRails, cardIds, railCss } from '@/components/home/Rails';
+import { img } from '@/components/home/homeApi';
 import { openWhenReady } from '@/services/modalPrefetch';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import type { Card } from '@/components/home/homeApi';
@@ -47,10 +48,19 @@ export function MinimalHomePage() {
     // v251: the skeleton stays until every rail is in, then they all swap in at once. One request returns
     // every ready rail (the server drops a failed or slow one at 6 s); past SKELETON_TIMEOUT_MS the skeleton
     // gives way to Retry and a late answer is dropped rather than popped in.
+    // v251: then it holds until the first on-screen posters of every rail have decoded (POSTER_HOLD_MS cap,
+    // never past SKELETON_TIMEOUT_MS), so they don't fill in after the swap.
     let done = false;
+    const t0 = Date.now();
     const timer = window.setTimeout(() => { if (alive && !done) { done = true; setSlow(true); } }, SKELETON_TIMEOUT_MS);
     fetchHome()
-      .then(d => { if (alive && !done) { done = true; setData(d); } })
+      .then(d => {
+        if (!alive || done) return;
+        done = true;
+        window.clearTimeout(timer);
+        const cap = Math.max(0, Math.min(POSTER_HOLD_MS, SKELETON_TIMEOUT_MS - (Date.now() - t0)));
+        void decodeAll(firstPosterUrls(d, window.innerWidth), cap).then(() => { if (alive) setData(d); });
+      })
       .catch(() => { if (alive && !done) { done = true; setFailed(true); } });
     return () => { alive = false; window.clearTimeout(timer); };
   }, [ready, attempt, kiosk]);
@@ -108,6 +118,49 @@ export function MinimalHomePage() {
 
 /** v251: the server's 6 s rail budget (app/home_rails.HOME_DEADLINE_S) plus 1 s to reach the phone. */
 export const SKELETON_TIMEOUT_MS = 7000;
+
+/** v251: after /api/home answers, the skeleton waits at most this long for the first posters to decode. */
+export const POSTER_HOLD_MS = 1500;
+
+/** How many cards of a rail fit the first screen width (Rails.tsx sizes: padding, clamp() widths, 12px gap). */
+function fits(vw: number, card: number, pad: number): number {
+  return Math.max(1, Math.ceil((vw - pad) / (card + 12)));
+}
+
+/** v251: the image URLs the first on-screen tiles of every rail will show, exactly as the tiles build them
+ * (img(art || poster) for Continue watching, img(poster) otherwise), so the decoded copies are the ones used. */
+export function firstPosterUrls(data: HomeData | null, vw: number): string[] {
+  if (!data || data.plex === false) return [];
+  const clamp = (lo: number, v: number, hi: number) => Math.min(hi, Math.max(lo, v));
+  const urls: string[] = [];
+  const add = (cards: Card[], n: number, wide: boolean) => {
+    for (const c of cards.slice(0, n)) {
+      const u = img(wide ? (c.art || c.poster) : c.poster);
+      if (u && !urls.includes(u)) urls.push(u);
+    }
+  };
+  add(data.continue_watching || [], fits(vw, clamp(240, vw * 0.72, 320), 20), true);
+  for (const r of Array.isArray(data.rails) ? data.rails : []) {
+    if (!r || !Array.isArray(r.items)) continue;
+    add(r.items, r.id === 'watchlist' ? fits(vw, 116, 12) : fits(vw, clamp(112, vw * 0.3, 160), 20), false);
+  }
+  return urls;
+}
+
+/** Load and decode each URL (an error counts as done); resolves when all are done or after *capMs*. */
+export function decodeAll(urls: string[], capMs: number): Promise<void> {
+  if (!urls.length || typeof Image === 'undefined') return Promise.resolve();
+  const each = urls.map(u => {
+    const im = new Image();
+    im.decoding = 'async';
+    im.src = u;
+    return typeof im.decode === 'function' ? im.decode().catch(() => {}) : Promise.resolve();
+  });
+  return new Promise<void>(resolve => {
+    const t = window.setTimeout(resolve, capMs);
+    void Promise.all(each).then(() => { window.clearTimeout(t); resolve(); });
+  });
+}
 
 /** v228 R3 rest (PM): Recently added under the band: the Plex libraries' recently-added rails (not Trakt or
  * the watchlist), interleaved one from each in turn, 12 at most. */

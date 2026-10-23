@@ -166,6 +166,93 @@ describe('Home', () => {
     expect(screen.queryByTestId('rail-2')).toBeNull();
   });
 
+  describe('v251 poster decode hold', () => {
+    const POSTERS = {
+      ...HOME,
+      continue_watching: [{ ...HOME.continue_watching[0], art: '/api/img/plex?url=art10' }],
+      rails: [
+        { id: '1', title: 'Movies', type: 'movie', items: [1, 2, 3, 4, 5, 6, 7, 8].map(i => ({ key: `m${i}`, type: 'movie', title: `M${i}`, subtitle: '', poster: `/api/img/plex?url=m${i}` })) },
+        { id: '2', title: 'TV Shows', type: 'show', items: [{ key: 't1', type: 'show', title: 'T1', subtitle: '', poster: '/api/img/plex?url=t1' }] },
+      ],
+    };
+    type Pending = { src: string; resolve: () => void; reject: () => void };
+    let made: Pending[] = [];
+    let mode: 'hold' | 'hang' | 'error' = 'hold';
+    class FakeImage {
+      decoding = '';
+      src = '';
+      decode() {
+        return new Promise<void>((resolve, reject) => {
+          made.push({ src: this.src, resolve, reject });
+          if (mode === 'error') reject(new Error('404'));
+        });
+      }
+    }
+    beforeEach(() => { made = []; mode = 'hold'; vi.stubGlobal('Image', FakeImage); });
+
+    it('waits for the first posters to decode, using the tiles\' own URLs', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => json(POSTERS)));
+      render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
+      await waitFor(() => expect(made.length).toBeGreaterThan(0));
+      await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+      expect(screen.getByTestId('home-skeleton')).toBeTruthy();
+      expect(screen.queryByTestId('home-rails')).toBeNull();
+      const srcs = made.map(m => m.src);
+      expect(srcs).toContain('/api/img/plex?url=art10');          // Continue watching decodes its art (what WideCard shows)
+      expect(srcs).toContain('/api/img/plex?url=t1');
+      expect(srcs).not.toContain('/api/img/plex?url=m8');         // past the first screen width
+      await act(async () => { made.forEach(m => m.resolve()); });
+      await waitFor(() => expect(screen.getByTestId('home-rails')).toBeTruthy());
+      const tileSrcs = [...document.querySelectorAll('[data-testid="home-rails"] img')].map(i => i.getAttribute('src'));
+      for (const u of srcs) expect(tileSrcs).toContain(u);         // same URL: the tile reads the decoded copy from cache
+    });
+
+    it('reveals at the 1.5 s cap when a decode hangs', async () => {
+      vi.useFakeTimers();
+      mode = 'hang';
+      vi.stubGlobal('fetch', vi.fn(async () => json(POSTERS)));
+      render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
+      await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+      expect(made.length).toBeGreaterThan(0);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1480); });
+      expect(screen.getByTestId('home-skeleton')).toBeTruthy();
+      await act(async () => { await vi.advanceTimersByTimeAsync(30); });
+      expect(screen.getByTestId('home-rails')).toBeTruthy();
+      expect(screen.queryByTestId('home-skeleton')).toBeNull();
+      vi.useRealTimers();
+    });
+
+    it('an errored poster counts as done', async () => {
+      mode = 'error';
+      vi.stubGlobal('fetch', vi.fn(async () => json(POSTERS)));
+      const t0 = Date.now();
+      render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
+      await waitFor(() => expect(screen.getByTestId('home-rails')).toBeTruthy());
+      expect(Date.now() - t0).toBeLessThan(1000);
+    });
+
+    it('one fade: skeleton, then every rail at once', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => json(POSTERS)));
+      const seen: string[] = [];
+      const obs = new MutationObserver(() => {
+        const st = screen.queryByTestId('home-skeleton') ? 'skeleton' : `rails:${screen.queryAllByRole('heading', { level: 2 }).length}`;
+        if (seen[seen.length - 1] !== st) seen.push(st);
+      });
+      render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
+      obs.observe(document.body, { childList: true, subtree: true });
+      await waitFor(() => expect(made.length).toBeGreaterThan(0));
+      // decode one rail's posters at a time: nothing may show until the last one is done
+      for (const m of made) {
+        await act(async () => { m.resolve(); });
+        if (m !== made[made.length - 1]) expect(screen.queryByTestId('home-rails')).toBeNull();
+      }
+      await waitFor(() => expect(screen.getByTestId('home-rails')).toBeTruthy());
+      obs.disconnect();
+      expect(seen.filter(x => x !== 'skeleton')).toEqual(['rails:3']);
+      expect(document.querySelectorAll('.luma-rails-in')).toHaveLength(1);   // one container, one fade
+    });
+  });
+
   it('v251: past the timeout a late answer is dropped, never popped in', async () => {
     vi.useFakeTimers();
     const d = deferred<Response>();
