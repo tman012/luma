@@ -470,3 +470,32 @@ def test_an_unavailable_movie_is_never_searched_early(tmp_path, monkeypatch):
     searched = []
     monkeypatch.setattr(movie_scanner, 'search_movie', lambda tid, origin='auto', now=None: searched.append(tid) or {})
     assert movie_scanner.run_due(NOW + 1)['movies'] == 0 and searched == []
+
+
+def test_trakt_goes_through_trakt_http(monkeypatch):
+    """v255: every Trakt call uses app/trakt_http (headers, identifying User-Agent, logged failures)."""
+    import requests
+    from app import trakt_http
+    seen = {}
+
+    class R:
+        def __init__(self, code, body=None):
+            self.status_code, self._b = code, body
+
+        def json(self):
+            return self._b
+
+    def fake(url, headers=None, params=None, timeout=None, **kw):
+        seen.update(url=url, headers=headers, params=params, timeout=timeout)
+        return R(200, [show(1)])
+    monkeypatch.setattr(requests, 'get', fake)
+    out = antic.fetch_trakt('movies', 'cid', 2, 7)
+    assert out == [show(1)] and seen['url'] == 'https://api.trakt.tv/movies/anticipated'
+    assert seen['headers'] == trakt_http.headers('cid') and seen['headers']['User-Agent'] == trakt_http.USER_AGENT
+    assert seen['params'] == {'page': '2', 'limit': '7', 'extended': 'full'}
+    monkeypatch.setattr(requests, 'get', lambda *a, **k: R(429))
+    with pytest.raises(antic.Busy):
+        antic.fetch_trakt('shows', 'cid', 1, 20)
+    monkeypatch.setattr(requests, 'get', lambda *a, **k: R(500))
+    with pytest.raises(RuntimeError):
+        antic.fetch_trakt('shows', 'cid', 1, 20)

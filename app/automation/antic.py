@@ -307,10 +307,10 @@ def trakt_client_id() -> str:
 def fetch_trakt(media: str, client_id: str, page: int, limit: int) -> List[Dict[str, Any]]:
     """Trakt's anticipated shows or movies (extended=full). Raises Busy on 429, RuntimeError on any other failure."""
     import requests
+    from app import trakt_http                      # v255: Trakt's headers + User-Agent, a WARNING on any failure
     try:
-        r = requests.get(TRAKT_URL.format(media=media),
-                         headers={'Content-Type': 'application/json', 'trakt-api-version': '2', 'trakt-api-key': client_id},
-                         params={'page': str(page), 'limit': str(limit), 'extended': 'full'}, timeout=TRAKT_TIMEOUT_S)
+        r = trakt_http.get(TRAKT_URL.format(media=media), client_id,
+                           params={'page': str(page), 'limit': str(limit), 'extended': 'full'}, timeout=TRAKT_TIMEOUT_S)
     except requests.RequestException as e:
         raise RuntimeError(type(e).__name__) from None
     if r.status_code == 429:
