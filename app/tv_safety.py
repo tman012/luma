@@ -1,15 +1,13 @@
 """v177 (Taylor's TV grab safety rules, before TV opt-ins go on). One central check, server-side, run
 by tv_grab.grab before anything is fetched or sent to qBittorrent:
 
-1. Air-date floor (automatic grabs): every episode a release covers must have aired at or after the
-   floor, floor_at(now) = the earlier of the start of today in America/New_York and now - 24 h (so
-   everything that aired today ET counts), or be still to come, by its airstamp (its start); with no airstamp, the end of its
-   air date in this server's local time (America/New_York on the boxes). No air date: never. Monitor
-   state doesn't matter. Old episodes are never grabbed by the feed, post-air search or search on add.
+1. (v253, Taylor: replaces v177's 24 h air-date floor) Automatic grabs: every episode a release covers
+   must be in a monitored show, be monitored itself and have an air date. A monitored, missing
+   episode is searched and grabbed however long ago it aired (tv_search: until it is grabbed).
+   floor_at / in_floor are kept for the dry run's report only; nothing refuses by them now.
 2. No quality-cutoff upgrades (every grab, manual too): an episode that already has a linked file is
    never grabbed, nor a release that covers one.
-3. No Missing / backlog search jobs for TV (tv_search: backlog_enabled is ignored; nothing older than
-   the floor is ever scheduled, and search on add queues only episodes inside the floor).
+3. (v253) Missing episodes are searched automatically (tv_search); backlog_enabled is still ignored.
 4. (v204b, PM: removed) No daily ceiling on automatic grabs; only the tracker guard's burst bucket,
    120/h total and backoff hold a grab back, and a grab they hold is retried (app.grab_retry).
 
@@ -36,7 +34,7 @@ ET = ZoneInfo('America/New_York')
 WINDOW_S = 24 * 3600            # the ceiling's window: rolling 24 h
 AUTOMATIC = ('auto', 'upgrade')
 
-OLD = 'aired before the floor (start of today ET or 24 hours ago, whichever is earlier)'
+UNMONITORED = 'not monitored'
 NO_DATE = 'no air date'
 HAS_FILE = 'already has a file'
 UPGRADES_OFF = 'upgrades are off'
@@ -121,7 +119,8 @@ def _why(series_id: Any, episode_ids: Iterable[Any], origin: str, now: float) ->
         return UPGRADES_OFF                  # Ops: the switch is read (and rule 2 refuses upgrades anyway)
     with tv_store.connect() as conn:
         rows = [dict(r) for r in conn.execute(
-            f'SELECT e.id, e.series_id, e.air_date, e.airstamp, {_LINKED} AS has_file FROM episodes e'
+            f'SELECT e.id, e.series_id, e.air_date, e.airstamp, e.monitored AS ep_monitored, s.monitored AS show_monitored,'
+            f' {_LINKED} AS has_file FROM episodes e JOIN series s ON s.id = e.series_id'
             f" WHERE e.id IN ({','.join('?' * len(ids))})", ids)]
         if len(rows) != len(set(ids)) or any(r['series_id'] != series_id for r in rows):
             return UNKNOWN
@@ -130,14 +129,14 @@ def _why(series_id: Any, episode_ids: Iterable[Any], origin: str, now: float) ->
         if auto:
             if any(not r['air_date'] and not r['airstamp'] for r in rows):
                 return NO_DATE
-            if not all(in_floor(r, now) for r in rows):
-                return OLD
+            if not all(r['show_monitored'] and r['ep_monitored'] for r in rows):
+                return UNMONITORED          # v253: replaces the 24 h floor (OLD); age no longer refuses
     return None
 
 
 def eligible(conn, now: float, until: float) -> List[Dict[str, Any]]:
-    """Episodes an automatic grab could take between now and *until*: monitored show and episode, no
-    file, aired at or after floor_at(now) and starting before *until*. Reads only."""
+    """Episodes an automatic grab could take by *until*: monitored show and episode, no file, an air
+    date, starting before *until* (v253: however long ago). Reads only."""
     return [r for r in _all(conn) if not explain(r, now, until)]
 
 
@@ -155,13 +154,11 @@ def _all(conn) -> List[Dict[str, Any]]:
 
 
 def explain(r: Dict[str, Any], now: float, until: float) -> Optional[str]:
-    """None when an automatic grab could take *r* (a row from _all) in [floor, until], else why not."""
+    """None when an automatic grab could take *r* (a row from _all) by *until*, else why not."""
     if r.get('start') is None:
         return NO_DATE
     if r['has_file']:
         return HAS_FILE
-    if r['start'] < floor_at(now):
-        return OLD
     if r['start'] > until:
         return 'airs after the window'
     if not r['show_monitored']:

@@ -118,7 +118,7 @@ def test_hourly_catchup_counts(eng, env):
     sid, ids = make_show(env, 'Ghosts', 'standard', 5, (3,), '2026-10-21', '2026-10-22T00:00:00Z', 30)
     with tv_store.write() as conn:
         conn.execute('UPDATE episodes SET search_attempts = 5 WHERE series_id = ?', (sid,))
-    now = at(2026, 10, 21, 20) + tv_search.FAST_WINDOW_S + 3600         # past the fast window, inside the floor
+    now = at(2026, 10, 21, 20) + tv_search.FAST_WINDOW_S + 3600         # past the fast window (backlog cadence)
     tv_search.search_show(sid, list(ids.values()), origin='auto', now=now, do_grab=False)
     assert tv_budget.searches_today(IPT, now) == 1
 

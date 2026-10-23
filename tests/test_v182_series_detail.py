@@ -171,33 +171,20 @@ def test_grab_with_grabs_off_sends_nothing(owner, env, known_token, frozen):  # 
     assert out == {'ok': False, 'error': tv_grab.OFF, 'blocked': True} and adds(env) == []
 
 
-# ------------------------------------------------------------------ the automatic paths stay floored
+# ------------------------------------------------------------------ the automatic paths after manual grabs
 
-def test_after_manual_grabs_the_automatic_paths_are_still_floored(owner, env, monkeypatch, known_token, frozen):  # noqa: F811
+def test_after_manual_grabs_the_automatic_paths_still_follow_the_rules(owner, env, monkeypatch, known_token, frozen):  # noqa: F811
+    # v253 (Taylor): the 24 h floor is gone; an automatic grab of an old episode needs it monitored
     allow_grabs(monkeypatch)
     _auto()
     for n in (3, 4, 6):
         air(env.e2[n], NOW - 10 * 86400)                                         # all old
     assert _grab(owner, env.sid, 'Severance.S02E03.1080p.WEB-DL-B').get_json()['ok'] is True
     n_adds = len(adds(env))
-    # a direct automatic grab of an old episode: refused by the floor
-    assert tv_grab.grab(item('Severance.S02E04.1080p.WEB-DL-B'), env.sid, 2, [env.e2[4]], 'auto', NOW)['refused'] == tv_safety.OLD
-    # an automatic search asks for nothing past the floor
-    env.results = [item('Severance.S02E04.1080p.WEB-DL-B'), item('Severance.S02E06.1080p.WEB-DL-B')]
-    env.sent.clear()
-    out = tv_search.search_show(env.sid, origin='auto', now=NOW)
-    assert out['wanted'] == 0 and env.sent == []
-    # the scheduler queues no backlog and a due entry past the floor is dropped
     with tv_store.write() as conn:
-        conn.execute('UPDATE episodes SET next_search_at = NULL')
-    tv_search.schedule(NOW)
-    assert rows('SELECT COUNT(*) AS n FROM episodes WHERE next_search_at IS NOT NULL')[0]['n'] == 0
-    with tv_store.write() as conn:
-        conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (NOW - 60, env.e2[4]))
-    assert tv_search.run_due(NOW) == {'shows': 0, 'grabbed': 0}
-    # on Add: only in-floor episodes queue
-    assert tv_search.on_added(env.sid, NOW) == 0
-    assert len(adds(env)) == n_adds and rows("SELECT COUNT(*) AS n FROM grabs WHERE origin = 'auto'")[0]['n'] == 0
+        conn.execute('UPDATE episodes SET monitored = 0 WHERE id = ?', (env.e2[4],))
+    assert tv_grab.grab(item('Severance.S02E04.1080p.WEB-DL-B'), env.sid, 2, [env.e2[4]], 'auto', NOW)['refused'] == tv_safety.UNMONITORED
+    assert len(adds(env)) == n_adds
 
 
 def test_monitor_toggles_on_the_page_never_search(owner, env, spies, monkeypatch):  # noqa: F811

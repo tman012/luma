@@ -13,8 +13,8 @@ and searched as needed, held to the guard's own limits only. Manual searches are
 guard's interactive budget, never the TV one.
 
 Automatic searching runs only when TV settings' automation is on (enabled; the feed also needs
-feed_enabled; v177: no backlog, see tv_safety for the floor, the no-upgrade rule and the daily
-ceiling), and only where a grab could follow
+feed_enabled; see tv_safety for the no-upgrade rule; v253: a monitored, missing episode is searched
+until it is grabbed, however long ago it aired), and only where a grab could follow
 (tv_grab.allowed(): on test the 'tv_grab' job, off by default), so the shared tracker accounts
 aren't spent on answers nobody can use. Manual searches always search and show what they'd pick;
 the grab itself is refused while grabs are off.
@@ -48,7 +48,8 @@ SLOT_BUSY = 'tv slot'
 REFRESH_S = 12 * 3600
 BACKOFF_H = (3, 6, 12, 24, 48, 96, 168)
 # v185.2a (Taylor): an aired, missing episode is searched every FAST_S for the first FAST_WINDOW_S after
-# it aired, then every SLOW_S (the 24 h floor, the no-backlog rule and every cap unchanged)
+# it aired (the early phase), then every SLOW_S; v253 (Taylor): every SLOW_S for as long as it stays
+# monitored and missing (no 24 h floor, no end), under the daily search cap
 FAST_S = 15 * 60
 FAST_WINDOW_S = 6 * 3600
 SLOW_S = 3600
@@ -92,7 +93,7 @@ def _log_cap_skip(cfg, purpose: str, sid: Optional[int], query: str, now: float,
                   section: str = 'tv') -> None:
     """v201 (PM): a daily-cap skip is logged at most once per tracker per reset window (not every pass)."""
     from app.tracker_guard import guard_key
-    key = f'tv_capskip:{guard_key(cfg)}'
+    key = f'tv_capskip:{guard_key(cfg)}' + (':backlog' if purpose == BACKLOG else '')
     if float(tv_store.get_meta(key) or 0) > now:
         return
     tv_store.set_meta(key, str(reset))
@@ -104,6 +105,9 @@ def _log_cap_skip(cfg, purpose: str, sid: Optional[int], query: str, now: float,
 MANUAL_BACKGROUND = 'manual-background'
 #: v185.2: the owner's searches that count toward the TV tally (not its caps)
 MONITOR_PURPOSES = ('manual', MANUAL_BACKGROUND)
+#: v253: run_due's hourly searches for episodes past the early phase (search_log purpose 'backlog'); they
+#: may use only tv_budget.backlog_cap() of a tracker's daily cap
+BACKLOG = 'backlog'
 
 
 def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bool, now: float,
@@ -131,7 +135,8 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
         # v251: the daily background search cap (per tracker, local day ET); feed polls and the owner's
         # searches are not counted or held
         background = section == 'tv' and not interactive and purpose != 'feed' and purpose not in MONITOR_PURPOSES
-        if background and not tv_budget.take_search(cfg, now):     # v251b: reserved atomically before sending
+        # v253: a backlog search stops at the backlog share, keeping the rest for newly aired episodes
+        if background and not tv_budget.take_search(cfg, now, backlog=purpose == BACKLOG):
             reset = tv_budget.search_cap_reset(now)
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': SLOT_BUSY, 'reset_at': reset})
             _log_cap_skip(cfg, purpose, sid, query, now, reset, section)
@@ -509,8 +514,6 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
         if show is None:
             return {'ok': False, 'error': 'Not found'}
         want = wanted(conn, sid, ids=episode_ids, states=states if origin == 'manual' else ACTIVE_GRABS)
-        if origin != 'manual':               # v177: an automatic search never asks for anything past the floor
-            want = [e for e in want if tv_safety.in_floor(e, now)]
         blocked = {r['release_title'] for r in conn.execute('SELECT release_title FROM blocklist WHERE series_id = ?', (sid,))}
     out: Dict[str, Any] = {'ok': True, 'searched': 0, 'results': 0, 'picks': [], 'statuses': [], 'error': None,
                            'wanted': len(want)}
@@ -590,11 +593,9 @@ def _after(sid: int, want: List[Dict[str, Any]], out: Dict[str, Any], now: float
                              ' next_search_at = COALESCE(?, next_search_at) WHERE id = ?', (now, nxt, e['id']))
 
 
-#: v203c (PM, Sonarr-style): the air-time search plus one retry; after that the episode is feed-only
-#: (the 15-min feed poll grabs it) with catch-up searches; v251: hourly while inside the air-date floor
-AUTO_SEARCHES = 2
-CATCHUP_S = 24 * 3600
-FLOOR_MARGIN_S = 5 * 60                  # v251: the last hourly catch-up, this long before the floor closes
+#: v253 (Taylor): the air-time search, every FAST_S through the early phase (fast_window_end), then every
+#: SLOW_S for as long as the episode stays monitored and missing (v203c's daily catch-up, v251's hourly
+#: catch-ups inside the 24 h floor and the floor itself are gone)
 
 
 def fast_window_end(e: Dict[str, Any]) -> Optional[float]:
@@ -613,27 +614,15 @@ def fast_window_end(e: Dict[str, Any]) -> Optional[float]:
     return at + FAST_WINDOW_S
 
 
-def _next_retry(e: Dict[str, Any], now: float, attempts: int = 1) -> float:
-    # v233 (PM): v203c's "air-time search plus one retry, then a day" overrode 0312e53's window, so a new
-    # episode stopped after 2 searches with the next one 24 h out. Inside FAST_WINDOW_S after it aired it is
-    # searched every FAST_S whatever the count; after the window, v203c's rule (feed-only, a daily catch-up).
+def early(e: Dict[str, Any], now: float) -> bool:
+    """v253: inside the early phase (the 15-min retries): before fast_window_end."""
     end = fast_window_end(e)
-    if end is not None and now < end:
-        return now + FAST_S
-    if attempts >= AUTO_SEARCHES:
-        # v251 (PM): a catch-up a day landed past the 24 h air-date floor (v177), so a late upload was never
-        # searched again. Catch-ups run every SLOW_S while the episode is inside the floor (the floor unchanged);
-        # the last one is pulled in to just before the floor closes.
-        start = tv_safety.aired_start(e)
-        if start is not None and tv_safety.in_floor(e, now):
-            nxt = now + SLOW_S
-            if tv_safety.in_floor(e, nxt):
-                return nxt
-            last = start + tv_safety.FLOOR_S - FLOOR_MARGIN_S
-            if last > now + FAST_S and tv_safety.in_floor(e, last):
-                return last
-        return now + CATCHUP_S
-    return now + FAST_S
+    return end is not None and now < end
+
+
+def _next_retry(e: Dict[str, Any], now: float, attempts: int = 1) -> float:
+    """v253 (Taylor): FAST_S in the early phase, then SLOW_S forever (*attempts* no longer matters)."""
+    return now + (FAST_S if early(e, now) else SLOW_S)
 
 
 def manual(sid: int, season: Optional[int] = None, episode_id: Optional[int] = None,
@@ -1073,7 +1062,7 @@ def on_added(sid: int, now: Optional[float] = None) -> int:
     if not auto_on():
         return 0
     with tv_store.write() as conn:
-        ids = [e['id'] for e in wanted(conn, sid) if tv_safety.in_floor(e, now)]   # v177: inside the floor only
+        ids = [e['id'] for e in wanted(conn, sid)]   # v253: every wanted episode, however old
         for i in ids:
             conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (now, i))
     if ids:
@@ -1082,57 +1071,69 @@ def on_added(sid: int, now: Optional[float] = None) -> int:
 
 
 def schedule(now: float) -> int:
-    """After an episode airs: its search is set for first_search_delay_h after it aired. v177 (Taylor):
-    only episodes inside the air-date floor (tv_safety); backlog_enabled is ignored, older missing episodes
-    are never searched automatically. Episodes already scheduled or searched are kept."""
-    auto = automation()
+    """Gives every monitored, missing episode a search time. A never-searched one: its air time (v196a: no
+    first-search delay; an older build's later time is moved up). v253 (Taylor): one searched before with
+    no search time (dropped past the old 24 h floor, unmonitored and monitored again, or a grab that
+    failed) goes back on its cadence: its next retry after its last search, or now if that has passed.
+    Grabbed episodes (downloading, importing, imported) are left alone. backlog_enabled is ignored."""
     n = 0
     with tv_store.write() as conn:
         rows = [dict(r) for r in conn.execute(
-            'SELECT e.id, e.series_id, e.air_date, e.airstamp, e.runtime, e.next_search_at FROM episodes e JOIN series s ON s.id = e.series_id'
-            ' WHERE s.monitored = 1 AND e.monitored = 1 AND e.last_search_at IS NULL'
+            'SELECT e.id, e.series_id, e.air_date, e.airstamp, e.runtime, e.next_search_at, e.last_search_at'
+            ' FROM episodes e JOIN series s ON s.id = e.series_id'
+            ' WHERE s.monitored = 1 AND e.monitored = 1 AND (e.last_search_at IS NULL OR e.next_search_at IS NULL)'
             f' AND e.air_date IS NOT NULL AND NOT {tv_monitor._LINKED}')]
         usual = usual_times(conn, {e['series_id'] for e in rows if not e.get('airstamp')})
+        got = {sid: _grabbed(conn, sid) for sid in {e['series_id'] for e in rows}}
         for e in rows:
             e['usual_time'] = usual.get(e['series_id'])
             at = aired_at(e)
-            if at is None or not tv_safety.in_floor(e, now):
-                continue                     # v177 (Taylor): no Missing / backlog searches for TV, ever
-            # v185.2a (Taylor): an episode with no runtime is searched at air time (no delay). A never-searched
-            # episode already scheduled later than this rule (an older build's time) is moved up, so it is
-            # picked up on the next pass (Judy Justice, Line of Fire S01E05)
-            want = at                        # v196a (Taylor): no first-search delay for any episode: air + runtime
-            #   (or air time with no runtime), then 15-min retries for 6 h, then hourly; first_search_delay_h is ignored
-            if e.get('next_search_at') is not None and float(e['next_search_at']) <= want:
+            if at is None:
                 continue
+            if e['id'] in got.get(e['series_id'], ()):
+                continue                     # v253: grabbed: searching stopped
+            if e['last_search_at'] is None:
+                want = at
+                if e.get('next_search_at') is not None and float(e['next_search_at']) <= want:
+                    continue
+            else:
+                want = max(_next_retry(e, float(e['last_search_at'])), now)
             conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (want, e['id']))
             n += 1
     return n
 
 
 def run_due(now: float, max_shows: int = 10) -> Dict[str, int]:
-    """Search the shows with episodes due (next_search_at passed), a few per pass."""
+    """Search the shows with episodes due (next_search_at passed), a few per pass. v253: due episodes no
+    longer wanted (unmonitored, a file, grabbed) stop (their search time is cleared). Shows with an
+    episode in its early phase go first and search as before; the rest search as BACKLOG (hourly, held to
+    tv_budget.backlog_cap) so old missing episodes can't use up the cap newly aired ones need."""
     with tv_store.connect() as conn:
-        rows = [dict(r) for r in conn.execute(
-            'SELECT e.series_id AS sid, e.id, e.air_date FROM episodes e WHERE e.next_search_at IS NOT NULL'
-            ' AND e.next_search_at <= ? ORDER BY e.next_search_at', (now,))]
-    by: Dict[int, List[int]] = {}
-    stale = []
-    with tv_store.connect() as conn:
-        floor = {r['id']: tv_safety.in_floor(dict(r), now) for r in conn.execute(
-            'SELECT id, air_date, airstamp FROM episodes WHERE next_search_at IS NOT NULL AND next_search_at <= ?', (now,))}
-    for r in rows:
-        if not floor.get(r['id']):
-            stale.append(r['id'])            # v177: past the floor (or a backlog entry from before): never searched
-            continue
-        by.setdefault(r['sid'], []).append(r['id'])
+        due = [dict(r) for r in conn.execute(
+            'SELECT series_id AS sid, id, next_search_at, last_search_at FROM episodes WHERE next_search_at IS NOT NULL'
+            ' AND next_search_at <= ? ORDER BY next_search_at', (now,))]
+        live: Dict[int, Dict[int, Dict[str, Any]]] = {}
+        for sid in dict.fromkeys(r['sid'] for r in due):
+            # any air date: one whose date hasn't come yet (an overseas airstamp) waits in search_show as before
+            live[sid] = {e['id']: e for e in wanted(conn, sid, today='9999-12-31',
+                                                    ids=[r['id'] for r in due if r['sid'] == sid])}
+    stale = [r['id'] for r in due if r['id'] not in live.get(r['sid'], {})]
     if stale:
         with tv_store.write() as conn:
             conn.executemany('UPDATE episodes SET next_search_at = NULL WHERE id = ?', [(i,) for i in stale])
-        logger.info('TV search: %d due episode(s) past the 24 h air-date floor dropped, not searched', len(stale))
+        logger.info('TV search: %d due episode(s) no longer wanted (unmonitored, a file or grabbed); not searched', len(stale))
+    last = {r['id']: r['last_search_at'] or 0 for r in due}
+    shows = []
+    for i, (sid, eps) in enumerate(live.items()):
+        if eps:
+            backlog = not any(early(e, now) for e in eps.values())
+            # early-phase shows first, by due time; then the backlog, longest unsearched first (so a backlog
+            # held to midnight rotates through every show rather than the same few each day)
+            shows.append((backlog, min(last[e] for e in eps) if backlog else 0, i, sid, list(eps)))
+    shows.sort()
     out = {'shows': 0, 'grabbed': 0}
-    for sid, ids in list(by.items())[:max_shows]:
-        res = search_show(sid, ids, origin='auto', now=now)
+    for backlog, _, _, sid, ids in shows[:max_shows]:
+        res = search_show(sid, ids, origin='auto', now=now, purpose=BACKLOG if backlog else None)
         out['shows'] += 1
         out['grabbed'] += sum(1 for p in res.get('picks', []) if p['grabbed'])
         if res.get('error') == NO_TRACKERS:
@@ -1177,7 +1178,7 @@ def feed(now: float) -> Dict[str, int]:
                 hits.setdefault(sid, []).append(it)
         for sid, its in hits.items():
             with tv_store.connect() as conn:
-                want = [e for e in wanted(conn, sid) if tv_safety.in_floor(e, now)]   # v177: the floor
+                want = wanted(conn, sid)     # v253: every wanted episode, however long ago it aired
                 blocked = {r['release_title'] for r in conn.execute('SELECT release_title FROM blocklist WHERE series_id = ?', (sid,))}
             for c in choose(candidates(its, shows[sid], want, blocked)):
                 season = next((e['season_number'] for e in want if e['id'] == c['covers'][0]), None)

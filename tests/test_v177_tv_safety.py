@@ -1,7 +1,7 @@
-"""v177 (Taylor's TV grab safety rules): one central check in tv_grab.grab. 1) automatic grabs only for
-episodes that aired within the last 24 h or are still to come (no air date: never), whatever the monitor
-state; 2) never an episode that already has a file (manual too); 3) no backlog / Missing searches;
-4) at most 30 automatic grabs in a rolling 24 h; 5) the read-only dry run."""
+"""v177 (Taylor's TV grab safety rules): one central check in tv_grab.grab. 1) v253 (Taylor, replaces the
+24 h floor): automatic grabs for monitored episodes with an air date, however long ago they aired; 2) never
+an episode that already has a file (manual too); 3) v253: missing episodes are searched until grabbed;
+4) (removed) the daily ceiling; 5) the read-only dry run."""
 import datetime as dt
 import logging
 import os
@@ -41,18 +41,11 @@ def grab(env, n, origin='auto', title='Severance.S02E03.1080p.WEB-DL-B', ids=Non
     return tv_grab.grab(item(title), env.sid, 2, ids or [env.e2[n]], origin, NOW)
 
 
-@pytest.mark.parametrize('ago,ok', [(23 * 3600, True), (3600, True), (-6 * 3600, True), (24 * 3600 + 60, False), (30 * 86400, False)])
-def test_the_24h_air_date_floor(env, monkeypatch, ago, ok, caplog):
-    allow_grabs(monkeypatch)
+@pytest.mark.parametrize('ago', [23 * 3600, 3600, -6 * 3600, 24 * 3600 + 60, 30 * 86400, 400 * 86400])
+def test_no_air_date_floor_any_age_is_grabbed(env, monkeypatch, ago):
+    allow_grabs(monkeypatch)                                     # v253: the 24 h floor is gone
     air(env.e2[3], NOW - ago)
-    with caplog.at_level(logging.INFO, logger='app.tv_safety'):
-        g = grab(env, 3)
-    assert bool(g.get('ok')) is ok
-    if not ok:
-        assert g['refused'] == tv_safety.OLD and adds(env) == []
-        assert any('TV grab refused (auto)' in r.getMessage() and r.levelno == logging.INFO for r in caplog.records)
-    else:
-        assert len(adds(env)) == 1
+    assert grab(env, 3).get('ok') and len(adds(env)) == 1
 
 
 def test_no_air_date_is_never_grabbed(env, monkeypatch):
@@ -63,31 +56,35 @@ def test_no_air_date_is_never_grabbed(env, monkeypatch):
     assert grab(env, 3)['refused'] == tv_safety.NO_DATE and adds(env) == []
 
 
-def test_the_floor_ignores_the_monitor_state(env, monkeypatch):
+def test_an_automatic_grab_needs_a_monitored_show_and_episode(env, monkeypatch, caplog):
     allow_grabs(monkeypatch)
     air(env.e2[3], NOW - 3 * 86400)
-    for on in (1, 0):
+    for show, ep in ((1, 0), (0, 1)):
         with tv_store.write() as conn:
-            conn.execute('UPDATE episodes SET monitored = ? WHERE id = ?', (on, env.e2[3]))
-        assert grab(env, 3)['refused'] == tv_safety.OLD
+            conn.execute('UPDATE episodes SET monitored = ? WHERE id = ?', (ep, env.e2[3]))
+            conn.execute('UPDATE series SET monitored = ? WHERE id = ?', (show, env.sid))
+        with caplog.at_level(logging.INFO, logger='app.tv_safety'):
+            assert grab(env, 3)['refused'] == tv_safety.UNMONITORED
     assert adds(env) == []
+    assert any('TV grab refused (auto)' in r.getMessage() and r.levelno == logging.INFO for r in caplog.records)
+    assert grab(env, 3, origin='manual').get('ok')               # the owner's grab isn't held to it
 
 
-def test_a_pack_with_one_old_episode_is_refused(env, monkeypatch):
+def test_a_pack_with_one_old_episode_is_grabbed(env, monkeypatch):
     allow_grabs(monkeypatch)
     air(env.e2[3], NOW - 3600)
     air(env.e2[4], NOW - 5 * 86400)
     g = grab(env, 3, title='Severance.S02.1080p.WEB-DL-B', ids=[env.e2[3], env.e2[4]])
-    assert g['refused'] == tv_safety.OLD and adds(env) == []
+    assert g.get('ok') and len(adds(env)) == 1
 
 
-def test_a_date_only_episode_counts_from_the_end_of_its_air_date(env, monkeypatch):
+def test_a_date_only_episode_of_any_age_is_grabbed(env, monkeypatch):
     allow_grabs(monkeypatch)
     today = dt.datetime.fromtimestamp(NOW).date()
-    air(env.e2[3], None, date=(today - dt.timedelta(days=1)).isoformat())   # ended at midnight: inside
+    air(env.e2[3], None, date=(today - dt.timedelta(days=1)).isoformat())
     assert grab(env, 3).get('ok')
     air(env.e2[4], None, date=(today - dt.timedelta(days=3)).isoformat())
-    assert grab(env, 4, title='Severance.S02E04.1080p.WEB-DL-B')['refused'] == tv_safety.OLD
+    assert grab(env, 4, title='Severance.S02E04.1080p.WEB-DL-B').get('ok')
 
 
 def _linked_episode(sid):
@@ -138,45 +135,46 @@ def test_the_daily_ceiling_is_30_automatic_grabs_in_a_rolling_24h(env, monkeypat
     assert grab(env, 4, origin='manual', title='Severance.S02E04.1080p.WEB-DL-B').get('ok')   # manual still works
 
 
-def test_no_backlog_search_jobs_even_with_backlog_on(env, monkeypatch):
+def test_old_missing_episodes_are_scheduled_too(env, monkeypatch):
     allow_grabs(monkeypatch)
-    _auto(backlog=True)
-    air(env.e2[3], NOW - 3 * 86400)                              # old missing: never scheduled
-    air(env.e2[4], NOW - 3600)                                   # inside the floor: after-air search
+    _auto(backlog=False)                                         # backlog_enabled is ignored
+    air(env.e2[3], NOW - 3 * 86400)                              # v253: old missing: scheduled too
+    air(env.e2[4], NOW - 3600)
     with tv_store.write() as conn:
         conn.execute('UPDATE episodes SET next_search_at = NULL, last_search_at = NULL')
     tv_search.schedule(NOW)
     due = {r['id'] for r in rows('SELECT id FROM episodes WHERE next_search_at IS NOT NULL')}
-    assert env.e2[3] not in due and env.e2[4] in due
+    assert env.e2[3] in due and env.e2[4] in due
 
 
-def test_a_due_search_past_the_floor_is_dropped_without_searching(env, monkeypatch):
-    allow_grabs(monkeypatch)
-    _auto()
-    air(env.e2[3], NOW - 3 * 86400)
-    with tv_store.write() as conn:                               # a backlog entry from before v177
-        conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (NOW - 60, env.e2[3]))
-    env.results = [item('Severance.S02E03.1080p.WEB-DL-B')]
-    assert tv_search.run_due(NOW) == {'shows': 0, 'grabbed': 0}
-    assert env.sent == [] and adds(env) == []
-    assert rows('SELECT next_search_at FROM episodes WHERE id = ?', env.e2[3])[0]['next_search_at'] is None
-
-
-def test_an_automatic_search_asks_only_for_episodes_inside_the_floor(env, monkeypatch):
+def test_a_due_search_past_the_old_floor_is_searched_and_grabbed(env, monkeypatch):
     import time
     now = time.time()                                            # wanted() compares air dates with today
     allow_grabs(monkeypatch)
+    _auto()
+    air(env.e2[3], now - 3 * 86400)
+    with tv_store.write() as conn:
+        conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (now - 60, env.e2[3]))
+    env.results = [item('Severance.S02E03.1080p.WEB-DL-B')]
+    assert tv_search.run_due(now) == {'shows': 1, 'grabbed': 1}
+    assert len(adds(env)) == 1
+    assert rows('SELECT next_search_at FROM episodes WHERE id = ?', env.e2[3])[0]['next_search_at'] is None
+
+
+def test_an_automatic_search_asks_for_old_episodes_too(env, monkeypatch):
+    import time
+    now = time.time()                                            # wanted() compares air dates with today
+    allow_grabs(monkeypatch)
+    before = tv_search.search_show(env.sid, origin='auto', now=now, do_grab=False)['wanted']
     for n in (3, 4, 6):
         air(env.e2[n], now - 10 * 86400)
+    env.results = [item('Severance.S02E03.1080p.WEB-DL-B')]
     out = tv_search.search_show(env.sid, origin='auto', now=now)
-    assert out['wanted'] == 0 and env.sent == []                 # no tracker search at all
-    air(env.e2[6], now - 3600)
-    env.results = [item('Severance.S02E06.1080p.WEB-DL-B'), item('Severance.S02E03.1080p.WEB-DL-B')]
-    out = tv_search.search_show(env.sid, origin='auto', now=now)
-    assert out['wanted'] == 1 and [p['episodes'] for p in out['picks'] if p['grabbed']] == [[env.e2[6]]]
+    assert out['wanted'] >= 3 and out['wanted'] >= before and env.sent != []
+    assert [p['episodes'] for p in out['picks'] if p['grabbed']] == [[env.e2[3]]]
 
 
-def test_search_on_add_queues_only_episodes_inside_the_floor(env, monkeypatch):
+def test_search_on_add_queues_every_wanted_episode(env, monkeypatch):
     import time
     now = time.time()
     allow_grabs(monkeypatch)
@@ -187,15 +185,17 @@ def test_search_on_add_queues_only_episodes_inside_the_floor(env, monkeypatch):
         conn.execute('UPDATE episodes SET next_search_at = NULL')
     tv_search.on_added(env.sid, now)
     due = {r['id'] for r in rows('SELECT id FROM episodes WHERE next_search_at IS NOT NULL')}
-    assert due == {env.e2[4]}
+    assert {env.e2[3], env.e2[4], env.e2[6]} <= due
 
 
-def test_the_feed_never_grabs_an_old_episode(env, monkeypatch):
+def test_the_feed_grabs_an_old_missing_episode(env, monkeypatch):
+    import time
+    now = time.time()                                            # wanted() compares air dates with today
     allow_grabs(monkeypatch)
     _auto(feed=True)
-    air(env.e2[4], NOW - 5 * 86400)
+    air(env.e2[4], now - 5 * 86400)                              # v253: no floor for the feed either
     env.results = [item('Severance.S02E04.1080p.WEB-DL-B')]
-    assert tv_search.feed(NOW) == {'trackers': 1, 'grabbed': 0} and adds(env) == []
+    assert tv_search.feed(now) == {'trackers': 1, 'grabbed': 1} and len(adds(env)) == 1
 
 
 # ------------------------------------------------------------------ the dry run
@@ -219,9 +219,9 @@ def test_the_dry_run_lists_tonight_read_only(env, tmp_path):
         return r.stdout
     out = run()
     assert 'S02E04' in out and 'S02E06' in out                   # aired an hour ago; airs tonight (5 AM ET)
-    assert 'S02E03' not in out and 'S02E05' not in out           # too old; has a file
+    assert 'S02E03' in out and 'S02E05' not in out               # v253: old is eligible; has a file
     assert 'Automatic grabs in the last 24 h: 0' in out
-    assert 'Eligible episodes (monitored, no file): 2' in out
+    assert 'Eligible episodes (monitored, no file): 3' in out
     assert 'TV automation (no tv_settings.json: defaults): enabled=False, feed_enabled=False' in out
     assert 'TV trackers enabled: none yet (0 switched on' in out
     import json as _j
@@ -231,9 +231,9 @@ def test_the_dry_run_lists_tonight_read_only(env, tmp_path):
     assert 'TV automation (tv_settings.json): enabled=True, feed_enabled=True, backlog_enabled=False' in out2
     assert 'TV trackers enabled: yes, 2 switched on in Settings > TV > Trackers (ids 3, 1;' in out2
     assert 'Fri Jan 15, 2:00 AM ET' in out and 'through Fri Jan 15, 6:00 AM ET' in out
-    assert 'Window: Thu Jan 14, 3:00 AM ET (floor:' in out
+    assert 'Window: through Fri Jan 15, 6:00 AM ET (no air-date floor)' in out
     out = run('--until', dt.datetime.fromtimestamp(NOW + 3600, dt.timezone.utc).isoformat())
-    assert 'S02E04' in out and 'S02E06' not in out
+    assert 'S02E04' in out and 'S02E06' not in out and 'S02E03' in out
     assert (os.stat(copy).st_mtime_ns, open(copy, 'rb').read()) == before
     assert not os.path.exists(str(copy) + '-wal')
 

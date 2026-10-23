@@ -1,6 +1,7 @@
 """v181 (Taylor): the Series bulk editor and the episode select. Signed-in owner only, tv.db only,
-and never a search or grab: a bulk All on 600+ shows enqueues no search and no grab, and the
-floor / no-file / no-backlog rules still decide what automatic search may look at."""
+and never a search or grab: a bulk All on 600+ shows enqueues no search and no grab itself. v253
+(Taylor): the scheduler then searches every monitored, missing episode (as backlog, a few shows a pass,
+held to its share of the daily cap); the no-file rule still decides what it may look at."""
 import time
 
 import pytest
@@ -71,21 +72,25 @@ def test_bulk_all_on_650_shows_enqueues_no_search_and_no_grab(owner, many, spies
     assert rows('SELECT COUNT(*) AS n FROM grabs')[0]['n'] == 0
     assert rows("SELECT COUNT(*) AS n FROM series WHERE monitor = 'all' AND monitored = 1")[0]['n'] == N
     assert rows('SELECT COUNT(*) AS n FROM episodes WHERE monitored = 0')[0]['n'] == 0
-    # the rules still govern: the next scheduler pass queues no backlog (all aired before the floor)
+    # v253: the next scheduler pass queues the missing episodes (never one with a file); no trackers here,
+    # so the backlog pass sends nothing and grabs nothing
     spies.clear()
-    assert tv_search.schedule(time.time()) == 0
-    assert _queued() == 0
-    assert tv_search.run_due(time.time()) == {'shows': 0, 'grabbed': 0}
+    assert tv_search.schedule(time.time()) == N * 4 == _queued()
+    assert rows('SELECT COUNT(*) AS n FROM episodes e WHERE e.next_search_at IS NOT NULL AND EXISTS (SELECT 1 FROM'
+                ' episode_file_links l WHERE l.episode_id = e.id)')[0]['n'] == 0
+    assert tv_search.run_due(time.time())['grabbed'] == 0
+    assert 'grab' not in spies and rows('SELECT COUNT(*) AS n FROM grabs')[0]['n'] == 0
 
 
-def test_bulk_missing_starts_no_backlog_search(owner, many, spies):  # noqa: F811
+def test_bulk_missing_starts_no_search_itself(owner, many, spies):  # noqa: F811
     r = _req(owner, 'put', URL, {'ids': many[:300], 'changes': {'monitor': 'missing'}})
     assert r.status_code == 200 and r.get_json()['updated'] == 300
     assert spies == [] and _queued() == 0
     on = rows('SELECT season_number AS s, episode_number AS e, monitored AS m FROM episodes WHERE series_id = 1')
     assert {(x['s'], x['e']): x['m'] for x in on} == {(1, 1): 0, (1, 2): 0, (1, 3): 1, (2, 1): 1, (2, 2): 1, (2, 3): 1}
     with tv_store.connect() as conn:
-        assert tv_search.wanted(conn, 1) != [] and tv_search.schedule(time.time()) == 0
+        assert tv_search.wanted(conn, 1) != []
+    assert tv_search.schedule(time.time()) > 0                                  # v253: the scheduler's job
 
 
 def test_every_field_and_monitor_option(owner, many):  # noqa: F811

@@ -163,7 +163,7 @@ def test_new_episodes_retry_every_15_minutes_for_6_hours_after_air(env, monkeypa
     assert passes[0] == aired
     in_window = [w for w in passes if w <= aired + tv_search.FAST_WINDOW_S]
     assert in_window == [aired + i * tv_search.FAST_S for i in range(25)]               # every 15 min, 6 h
-    # then it falls back: v251, hourly catch-ups inside the 24 h floor (was one a day)
+    # then it falls back: hourly (v253: forever, no 24 h floor)
     after = [w for w in passes if w > aired + tv_search.FAST_WINDOW_S]
     assert after == [in_window[-1] + k * tv_search.SLOW_S for k in range(1, len(after) + 1)]
     nxt = {r['next_search_at'] for r in rows('SELECT next_search_at FROM episodes WHERE id IN (%s)' % ','.join('?' * len(ids)), *ids.values())}
@@ -196,7 +196,7 @@ def test_next_retry_rule():
     aired = ts(2026, 10, 21, 4)
     assert tv_search._next_retry(e, aired + 60, attempts=5) == aired + 60 + tv_search.FAST_S
     late = aired + tv_search.FAST_WINDOW_S + 1
-    assert tv_search._next_retry(e, late, attempts=5) == late + tv_search.SLOW_S       # v251: hourly in the floor
+    assert tv_search._next_retry(e, late, attempts=5) == late + tv_search.SLOW_S       # v253: hourly, forever
 
 
 # ------------------------------------------------------------------ 4. episodes with no air time

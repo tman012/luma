@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """v177 TV grab dry run (read-only). Lists the episodes an automatic TV grab could take tonight under
-tv_safety's rules: monitored show and episode, no linked file, aired at or after the floor (the start of
-today ET or 24 h ago, whichever is earlier) or still to come, through 6 AM Eastern tomorrow (or
---until). Also prints the automatic grabs counted toward the daily ceiling (rolling 24 h).
+tv_safety's rules: monitored show and episode, no linked file, an air date (v253: however long ago),
+through 6 AM Eastern tomorrow (or --until). Also prints the automatic grabs counted toward the daily ceiling (rolling 24 h).
 
 Read-only: tv.db is opened with SQLite mode=ro (immutable when there is no -wal beside it, so no
 -wal/-shm files are created either). tv_settings.json and section_trackers.json beside it are read as
@@ -97,8 +96,7 @@ def main(argv=None) -> int:
     se = lambda r: f"S{int(r['season_number'] or 0):02d}E{int(r['episode_number'] or 0):02d}"  # noqa: E731
     when = lambda r: fmt(r['start']) + ('' if r['airstamp'] else ' (date only: end of air date)')  # noqa: E731
     print(f'TV grab dry run (read-only) of {db}')
-    print(f'Window: {fmt(tv_safety.floor_at(now))} (floor: start of today ET or 24 h ago, whichever is earlier)'
-          f' through {fmt(until)}; now {fmt(now)}')
+    print(f'Window: through {fmt(until)} (no air-date floor); now {fmt(now)}')
     print(f'Automatic grabs in the last 24 h: {done}')
     print(f'Eligible episodes (monitored, no file): {len(rows)}')
     for r in rows:
@@ -140,7 +138,7 @@ def _settings_report(data_dir: str) -> None:
         'tv_settings.json unreadable' if st else 'no tv_settings.json: defaults')
     print(f'TV automation ({src}): ' + ', '.join(f'{k}={auto[k]}' for k in
           ('enabled', 'feed_enabled', 'backlog_enabled', 'upgrades_enabled', 'import_enabled', 'first_search_delay_h')))
-    print('  (v177: backlog_enabled is ignored; upgrades still refuse any episode with a file)')
+    print('  (backlog_enabled is ignored: v253 searches every monitored, missing episode; upgrades still refuse any episode with a file)')
     sec = _read_json(os.path.join(data_dir, 'section_trackers.json'))
     ids = []
     try:

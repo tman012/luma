@@ -182,12 +182,25 @@ def _bump(cfg: Dict[str, Any], now: float, delta: int, cap: Optional[int]) -> Op
     return n
 
 
-def take_search(cfg: Dict[str, Any], now: Optional[float] = None) -> bool:
+#: v253 (Taylor: missing episodes are searched until grabbed): hourly backlog searches (past the early
+#: phase) may use only this share of a tracker's daily cap, so the rest is kept for newly aired episodes
+BACKLOG_SHARE = 0.6
+
+
+def backlog_cap(cap: Optional[int] = None) -> int:
+    """How many of today's searches backlog searches may use (60% of the cap, rounded down: 30 of 50)."""
+    cap = search_cap() if cap is None else cap
+    return max(0, int(cap * BACKLOG_SHARE))
+
+
+def take_search(cfg: Dict[str, Any], now: Optional[float] = None, backlog: bool = False) -> bool:
     """v251b: reserve one background search for *cfg* today, atomically: False (nothing counted) at the cap,
     so parallel searches can neither overshoot nor undercount. Logs once (INFO) when it reaches the cap.
-    Fails open (True, uncounted) if the count can't be stored."""
+    Fails open (True, uncounted) if the count can't be stored. v253: a *backlog* search stops at
+    backlog_cap() instead, leaving the rest of the day's cap to early-phase searches."""
     now = time.time() if now is None else now
-    cap = search_cap()
+    full = search_cap()
+    cap = backlog_cap(full) if backlog else full
     try:
         n = _bump(cfg, now, 1, cap)
     except Exception:                       # noqa: BLE001 - a count never fails a search
@@ -195,7 +208,7 @@ def take_search(cfg: Dict[str, Any], now: Optional[float] = None) -> bool:
         return True
     if n is None:
         return False
-    if n == cap:
+    if n == full:
         logger.info('TV search: %s reached its daily cap of %d background searches; skipped until midnight ET',
                     cfg.get('name') or cfg.get('id'), cap)
     return True
