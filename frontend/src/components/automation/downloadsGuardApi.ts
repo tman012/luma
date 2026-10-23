@@ -14,6 +14,8 @@ export interface DgView {
   settings: DgSettings; defaults: DgSettings; folder: string; media_folder: string; trackers: DgTracker[]; allowed: boolean;
 }
 export interface DgEntry { name: string; size_bytes: number; mtime?: number; tracker_label?: string | null; phase?: string }
+/** v260 Preview row: deletion order, kept (Never delete) downloads in place and excluded. */
+export interface DgRow extends DgEntry { hashes: string[]; kept: boolean; kept_hashes: string[]; kept_by_tags: string[] }
 export interface DgResult {
   at?: string; dry_run: boolean; triggered: boolean; reason?: string; error?: string | null; freed_bytes: number;
   freed_preferred_bytes?: number; freed_fallback_bytes?: number; free_after_bytes?: number; short?: boolean;
@@ -30,7 +32,7 @@ export interface DgStatus {
 export interface DgLogEntry { at: string; outcome: string; summary: string }
 export interface DgPreview {
   error?: string | null; target_bytes: number; planned_bytes: number; preferred_bytes: number; fallback_bytes: number;
-  preferred_available: number; eligible_count: number; short: boolean; entries: DgEntry[];
+  preferred_available: number; eligible_count: number; short: boolean; entries: DgEntry[]; rows?: DgRow[];
 }
 export interface DgTrackerSummary { available: boolean; trackers: { key: string; label: string; count: number; size_bytes: number }[] }
 
@@ -57,3 +59,5 @@ export const loadDgStatus = () => call<{ status: DgStatus; log: DgLogEntry[] }>(
 export const loadDgTrackers = () => call<DgTrackerSummary>(`${GUARD}/trackers`);
 export const previewDg = () => call<DgPreview>(`${GUARD}/preview`);
 export const runDg = () => call<{ started: boolean }>(`${GUARD}/run`, json('POST', { dry_run: false }));
+export const keepDg = (hashes: string[]) => call<{ protected_hashes: string[] }>(`${GUARD}/keep`, json('POST', { hashes }));
+export const unkeepDg = (hashes: string[]) => call<{ protected_hashes: string[] }>(`${GUARD}/unkeep`, json('POST', { hashes }));

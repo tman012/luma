@@ -33,7 +33,13 @@ function stub(handler?: (url: string, init?: RequestInit) => Response | undefine
     if (url.endsWith('/preview')) {
       return json({ target_bytes: 100 * GIB, planned_bytes: 60 * GIB, preferred_bytes: 60 * GIB, fallback_bytes: 0, preferred_available: 2,
         eligible_count: 2, short: true, entries: [{ name: 'Heat.1995', size_bytes: 40 * GIB, tracker_label: 'IPTorrents', phase: 'preferred' },
-          { name: 'Zodiac.2007', size_bytes: 20 * GIB, tracker_label: 'BeyondHD', phase: 'fallback' }] });
+          { name: 'Zodiac.2007', size_bytes: 20 * GIB, tracker_label: 'BeyondHD', phase: 'fallback' }],
+        rows: [
+          { name: 'Heat.1995', size_bytes: 40 * GIB, tracker_label: 'IPTorrents', phase: 'preferred', hashes: ['a'.repeat(40)], kept: false, kept_hashes: [], kept_by_tags: [] },
+          { name: 'AHS', size_bytes: 30 * GIB, tracker_label: 'IPTorrents', phase: 'preferred', hashes: ['7224bfad84076c0a76c36fb891d3b91ac226efb6'], kept: true,
+            kept_hashes: ['7224bfad84076c0a76c36fb891d3b91ac226efb6'], kept_by_tags: [] },
+          { name: 'Hold', size_bytes: 5 * GIB, tracker_label: 'IPTorrents', phase: 'preferred', hashes: ['c'.repeat(40)], kept: true, kept_hashes: [], kept_by_tags: ['luma-keep'] },
+          { name: 'Zodiac.2007', size_bytes: 20 * GIB, tracker_label: 'BeyondHD', phase: 'fallback', hashes: ['b'.repeat(40)], kept: false, kept_hashes: [], kept_by_tags: [] }] });
     }
     if (url.endsWith('/run')) return json({ ok: true, dry_run: false });
     return json(cur);
@@ -100,7 +106,7 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     await waitFor(() => screen.getByTestId('downloads-guard'));
     fireEvent.click(screen.getByTestId('dg-preview'));
     expect(await screen.findByText('Would delete 60 GB of 100 GB')).toBeTruthy();
-    expect(screen.getAllByTestId('dg-preview-list-row').length).toBe(2);
+    expect(screen.getAllByTestId('dg-preview-list-row').length).toBe(4);
     fireEvent.click(screen.getByTestId('dg-run'));
     expect(calls.some(c => c.url.endsWith('/run'))).toBe(false);
     fireEvent.click(screen.getByTestId('dg-cancel'));
@@ -135,8 +141,8 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     await waitFor(() => screen.getByTestId('downloads-guard'));
     fireEvent.click(screen.getByTestId('dg-preview'));
     await screen.findByText('Would delete 60 GB of 100 GB');
-    expect(screen.getAllByTestId('dg-preview-list-row').map(r => r.textContent?.split('IPTorrents')[0].split('BeyondHD')[0]))
-      .toEqual(['Heat.1995', 'Zodiac.2007']);
+    expect(screen.getAllByTestId('dg-preview-list-row').map(r => r.querySelector('span')?.textContent))
+      .toEqual(['Heat.1995', 'AHS', 'Hold', 'Zodiac.2007']);
   });
 
   it('Never delete: shows tags and hashes (last 4), adds a tag, and asks to sign in to remove one', async () => {
@@ -159,6 +165,27 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     fireEvent.click(screen.getByTestId('dg-never-remove-luma-keep'));
     await waitFor(() => screen.getByTestId('dg-sign-in'));
     expect(puts(calls)).toEqual([{ protected_tags: ['luma-keep', 'hold'] }, { protected_tags: ['luma-keep'] }, { protected_tags: [] }]);
+  });
+
+  it('Preview shows kept rows excluded, with Keep and Unkeep; Unkeep from the implicit owner asks to sign in', async () => {
+    const calls = stub((u) => (u.endsWith('/unkeep') ? json({ error: 'Sign in first', sign_in: true }, 401)
+      : u.endsWith('/keep') ? json({ protected_hashes: ['a'.repeat(40)] }) : undefined));
+    view();
+    await waitFor(() => screen.getByTestId('downloads-guard'));
+    fireEvent.click(screen.getByTestId('dg-preview'));
+    await screen.findByText('Would delete 60 GB of 100 GB');
+    const rows = screen.getAllByTestId('dg-preview-list-row');
+    expect(rows.map(r => r.getAttribute('data-kept'))).toEqual([null, 'true', 'true', null]);
+    expect(screen.getAllByTestId('dg-kept-label').length).toBe(2);
+    expect(screen.getAllByTestId('dg-keep').length).toBe(2);
+    expect(screen.getAllByTestId('dg-unkeep').length).toBe(1);                // AHS: kept by hash
+    expect(screen.getByTestId('dg-kept-tag').textContent).toBe('luma-keep');   // kept by a tag: settings only
+    fireEvent.click(screen.getAllByTestId('dg-keep')[0]!);
+    await waitFor(() => expect(calls.filter(c => c.url.endsWith('/keep')).map(c => JSON.parse(String(c.init!.body)))).toEqual([{ hashes: ['a'.repeat(40)] }]));
+    await waitFor(() => expect(calls.filter(c => c.url.endsWith('/preview')).length).toBe(2));   // re-previewed
+    fireEvent.click(screen.getByTestId('dg-unkeep'));
+    expect(await screen.findByTestId('dg-sign-in')).toBeTruthy();
+    expect(calls.filter(c => c.url.endsWith('/unkeep')).map(c => JSON.parse(String(c.init!.body)))).toEqual([{ hashes: ['7224bfad84076c0a76c36fb891d3b91ac226efb6'] }]);
   });
 
   it('scope picks only this install\'s downloads', async () => {

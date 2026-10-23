@@ -9,8 +9,8 @@ import { Select, Toggle, SAVE_ERROR, field, glassBtn, tvEditCss } from '@/compon
 import { formatBytes } from '@/services/storageApi';
 import { Field, NumField, grCss, when } from './GenreRouletteSettings';
 import {
-  loadDg, loadDgStatus, loadDgTrackers, previewDg, runDg, saveDg,
-  type DgEntry, type DgLogEntry, type DgPreview, type DgResult, type DgSettings, type DgStatus,
+  keepDg, loadDg, loadDgStatus, loadDgTrackers, previewDg, runDg, saveDg, unkeepDg,
+  type DgEntry, type DgRow, type DgLogEntry, type DgPreview, type DgResult, type DgSettings, type DgStatus,
   type DgTrackerSummary, type DgView, type Scope,
 } from './downloadsGuardApi';
 
@@ -82,20 +82,25 @@ function age(mtime?: number): string {
   return d <= 0 ? 'today' : d === 1 ? '1 day' : `${d} days`;
 }
 
-function Entries({ title, entries, testid }: { title: string; entries: DgEntry[]; testid: string }) {
+function Entries({ title, entries, testid, action }: {
+  title: string; entries: (DgEntry & { kept?: boolean })[]; testid: string; action?: (e: DgRow) => React.ReactNode;
+}) {
   if (!entries.length) return null;
   return (
     <section aria-label={title} data-testid={testid} style={{ ...panel, padding: '16px 16px 10px' }}>
       <h3 style={{ margin: '0 0 10px', fontSize: 16, fontWeight: 600, color: W95 }}>{title}</h3>
       <div role="list">
         {entries.slice(0, 40).map(e => (
-          <div role="listitem" key={e.name} data-testid={`${testid}-row`}
-            style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, minHeight: 32, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 6 }}>
-            <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: W95, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
+          <div role="listitem" key={e.name} data-testid={`${testid}-row`} data-kept={e.kept ? 'true' : undefined}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 36, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 4, paddingBottom: 2 }}>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 13, color: e.kept ? W50 : W95, textDecoration: e.kept ? 'line-through' : undefined, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
             <span style={{ flex: 'none', fontSize: 12, color: W50 }}>
-              <span style={{ color: e.phase === 'fallback' ? AMBER : W70 }}>{e.tracker_label || 'Unknown'}</span>
+              {e.kept
+                ? <span data-testid="dg-kept-label" style={{ color: GREEN }}>Kept</span>
+                : <span style={{ color: e.phase === 'fallback' ? AMBER : W70 }}>{e.tracker_label || 'Unknown'}</span>}
               {' · '}{formatBytes(e.size_bytes)}{e.mtime ? ` · ${age(e.mtime)}` : ''}
             </span>
+            {action && action(e as DgRow)}
           </div>
         ))}
         {entries.length > 40 && <div style={{ padding: '6px 0', fontSize: 12, color: W50 }}>{`${entries.length - 40} more`}</div>}
@@ -303,6 +308,25 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
       else setError("Couldn't preview");
     });
   };
+  const rowBtnStyle: CSSProperties = { ...glassBtn, height: 28, padding: '0 12px', borderRadius: 14, fontSize: 12, flex: 'none' };
+  const keepRow = (row: DgRow, on: boolean) => {
+    setError('');
+    setSignIn(false);
+    void (on ? keepDg(row.hashes) : unkeepDg(row.kept_hashes)).then(r => {
+      if (!r.ok) {
+        if (r.signIn) setSignIn(true);
+        else setError(SAVE_ERROR);
+        return;
+      }
+      void loadDg().then(v => { if (v.ok) setD(v.data); });
+      void previewDg().then(p => { if (p.ok) setPreview(p.data); });
+    });
+  };
+  const rowAction = (row: DgRow) => (!row.kept
+    ? <button type="button" className="tve-glass lp-focus" data-testid="dg-keep" aria-label={`Keep ${row.name}`} onClick={() => keepRow(row, true)} style={rowBtnStyle}>Keep</button>
+    : row.kept_hashes.length
+      ? <button type="button" className="tve-glass lp-focus" data-testid="dg-unkeep" aria-label={`Unkeep ${row.name}`} onClick={() => keepRow(row, false)} style={rowBtnStyle}>Unkeep</button>
+      : <span data-testid="dg-kept-tag" style={{ flex: 'none', fontSize: 12, color: W50 }}>{row.kept_by_tags.join(', ')}</span>);
   const doRun = () => {
     setBusy('run');
     setError('');
@@ -395,8 +419,9 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
           <StatusPanel status={status} allowed={d.allowed} />
           {preview?.error && <div role="alert" data-testid="dg-preview-error" style={{ fontSize: 13, color: AMBER }}>{preview.error}</div>}
           {preview && !preview.error && (
-            preview.entries.length
-              ? <Entries title={`Would delete ${formatBytes(preview.planned_bytes)} of ${formatBytes(preview.target_bytes)}`} entries={preview.entries} testid="dg-preview-list" />
+            (preview.rows ?? preview.entries).length
+              ? <Entries title={`Would delete ${formatBytes(preview.planned_bytes)} of ${formatBytes(preview.target_bytes)}`}
+                entries={preview.rows ?? preview.entries} testid="dg-preview-list" action={preview.rows ? rowAction : undefined} />
               : <div data-testid="dg-preview-none" style={{ ...panel, padding: 16, fontSize: 13, color: W70 }}>Nothing to delete</div>
           )}
           <Entries title={status?.last_result?.dry_run ? 'Last preview' : 'Deleted last time'} entries={status?.last_result?.deleted ?? []} testid="dg-last-list" />
