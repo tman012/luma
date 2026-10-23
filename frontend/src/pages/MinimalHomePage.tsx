@@ -15,7 +15,7 @@ import { dismissMissing, fetchHome, type HomeData } from '@/components/home/home
 import { DismissMissingSheet } from '@/features/home/DismissMissingSheet';
 import { KioskHome, useKioskWidth } from '@/components/home/KioskHome';
 import { UserMenu } from '@/components/nav/UserMenu';
-import { openSearch, SearchIcon } from '@/components/search/MinimalSearchHost';
+import { openSearch } from '@/components/search/MinimalSearchHost';
 import { HomeSearchR3 } from '@/components/search/HomeSearchR3';
 
 export function MinimalHomePage() {
@@ -96,9 +96,10 @@ export function MinimalHomePage() {
   };
 
   // Home has only the logo and the avatar; the avatar menu holds Settings (admins) and Sign out.
-  const menu = (size: number) => !implicit ? (
-    <UserMenu name={user?.name || ''} admin={!!user?.is_admin} busy={busy} onSignOut={signOut} size={size} />
-  ) : <span style={{ width: size }} />;
+  const menu = (size: number, prodTrigger = false) => !implicit ? (
+    <UserMenu name={user?.name || ''} admin={!!user?.is_admin} busy={busy} onSignOut={signOut} size={size}
+      prodTrigger={prodTrigger} />
+  ) : <span style={{ width: size, flexShrink: 0 }} />;
 
   if (kiosk) {
     return (
@@ -114,23 +115,20 @@ export function MinimalHomePage() {
     );
   }
 
+  // v259 (Taylor): the phone header is prod 1b4ea74's TopBar (AuthenticatedHomePage.tsx:394-428) and the page
+  // shell around it (:979-1077): a solid fixed bar outside the page wrapper, content 16 px below it, 48 px at the end.
   return (
-    <div style={page} data-step="home">
-      <style>{railCss}</style>
-      <div data-shift-root>
-        <header style={phoneBar}>
-          <img src={assetUrl(LOGO_SRC)} alt="Luma" style={{ height: 30, width: 'auto' }} draggable={false} />
-          <div style={headRight}>
-            <button type="button" style={searchBtn} aria-label="Search" onClick={openSearch} data-testid="search-button">
-              <SearchIcon size={20} />
-            </button>
-            {menu(40)}
+    <>
+      <div style={page} data-step="home">
+        <style>{railCss}</style>
+        <div data-shift-root>
+          <div style={phoneContent}>
+            <main>
+              {homeView(withMissing(data, wymOverride), failed || slow, () => setAttempt(a => a + 1), openCard, setDismissTarget)}
+            </main>
+            <div style={{ height: 48 }} />
           </div>
-        </header>
-        <div style={{ height: 'calc(env(safe-area-inset-top) + 56px)' }} aria-hidden="true" />
-        <main style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 32px)' }}>
-          {homeView(withMissing(data, wymOverride), failed || slow, () => setAttempt(a => a + 1), openCard, setDismissTarget)}
-        </main>
+        </div>
       </div>
       {dismissTarget && (
         <DismissMissingSheet
@@ -139,7 +137,18 @@ export function MinimalHomePage() {
           onClose={() => setDismissTarget(null)}
         />
       )}
-    </div>
+      {/* TopBar: z 50 (prod) */}
+      <header style={phoneBar} data-shift-root data-testid="phone-header">
+        <div style={phoneRow}>
+          <img src={assetUrl(PHONE_LOGO_SRC)} alt="Luma" style={phoneLogo} draggable={false} data-testid="phone-logo" />
+          <div style={{ flex: 1 }} />
+          <button type="button" style={searchBtn} aria-label="Search" onClick={openSearch} data-testid="search-button">
+            <ProdSearchIcon />
+          </button>
+          {menu(42, true)}
+        </div>
+      </header>
+    </>
   );
 }
 
@@ -276,14 +285,20 @@ export const homeBar: React.CSSProperties = {
   background: 'rgba(21,16,42,0.55)', backdropFilter: 'blur(20px) saturate(160%)', WebkitBackdropFilter: 'blur(20px) saturate(160%)',
   borderBottom: '1px solid rgba(255,255,255,0.06)',
 };
-/** Phone header: 56px + safe area; logo left, avatar right. */
+/** v259: prod 1b4ea74's phone TopBar (AuthenticatedHomePage.tsx:394-428): fixed, z 50, solid kiosk black, the safe
+ * area above a 56 px row (6 px left, 12 px right). No blur, border, shadow or scroll-driven state. */
 export const phoneBar: React.CSSProperties = {
-  ...homeBar, height: 'calc(env(safe-area-inset-top) + 56px)', boxSizing: 'border-box',
-  padding: 'env(safe-area-inset-top) 12px 0 16px',
-  // Pinned while scrolling; navy solid at the top fading out, no line or shadow.
-  position: 'fixed', top: 0, left: 0, right: 0, zIndex: 20,
-  background: 'linear-gradient(to bottom, var(--color-kiosk-black) 0%, var(--color-kiosk-black) 35%, transparent 100%)',
-  backdropFilter: 'none', WebkitBackdropFilter: 'none', borderBottom: 'none', boxShadow: 'none',
+  position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50, margin: 0,
+  paddingTop: 'env(safe-area-inset-top, 0px)',
+  background: 'var(--color-kiosk-black)',
+};
+const phoneRow: React.CSSProperties = { height: 56, display: 'flex', alignItems: 'center', paddingLeft: 6, paddingRight: 12 };
+/** Prod's text logo: luma_text.webp, 100 px tall in the 56 px row, 2 px up. */
+export const PHONE_LOGO_SRC = '/static/images/luma_text.webp';
+const phoneLogo: React.CSSProperties = { height: 100, objectFit: 'contain', marginTop: -2 };
+/** Prod's content offset (:1026): the bar plus 16 px. */
+const phoneContent: React.CSSProperties = {
+  position: 'relative', zIndex: 1, paddingTop: 'calc(56px + env(safe-area-inset-top, 0px) + 16px)',
 };
 /** Web kiosk header: overlays the slideshow, top gradient, no glass. */
 export const kioskBar: React.CSSProperties = {
@@ -291,13 +306,21 @@ export const kioskBar: React.CSSProperties = {
   justifyContent: 'space-between', padding: '20px 60px 20px 44px',
   // v245: no top scrim or shadow (closed or open)
 };
-const headRight: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 12 };
-/** 44px circular search button, left of the avatar. */
+/** Prod's search button (:411-421): a bare 46 px button, 28 px icon, 85 % white, 10 px before the avatar. */
 const searchBtn: React.CSSProperties = {
-  width: 44, height: 44, borderRadius: 22, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-  background: 'rgba(255,255,255,0.10)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', cursor: 'pointer',
-  backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', padding: 0,
+  display: 'flex', alignItems: 'center', justifyContent: 'center', width: 46, height: 46, marginRight: 10,
+  background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, color: 'rgba(255,255,255,0.85)',
+  touchAction: 'manipulation',
 };
+function ProdSearchIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" />
+      <line x1="16.5" y1="16.5" x2="21" y2="21" />
+    </svg>
+  );
+}
 export const iconBtn: React.CSSProperties = {
   width: 40, height: 40, borderRadius: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
   background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', cursor: 'pointer',

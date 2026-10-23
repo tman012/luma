@@ -9,7 +9,11 @@ import { FONT, NAVY_BG } from '@/components/start/StartUI';
 import { useKioskWidth } from '@/components/home/KioskHome';
 import { GearIcon, LogOutIcon, PersonIcon } from '@/components/nav/AppNav';
 
-interface Props { name: string; admin: boolean; busy: boolean; onSignOut: () => void; size?: number }
+interface Props {
+  name: string; admin: boolean; busy: boolean; onSignOut: () => void; size?: number;
+  /** v259: the phone Home header's trigger is prod 1b4ea74's user button (components/UserMenu.tsx). */
+  prodTrigger?: boolean;
+}
 
 export function UserMenu(props: Props) {
   const wide = useKioskWidth();
@@ -24,6 +28,24 @@ function Avatar({ name, size, ...rest }: { name: string; size: number } & React.
     : <PersonIcon size={Math.round(size * 0.45)} />;
   if (!rest.onClick) return <span style={style} aria-hidden="true">{inner}</span>;
   return <button type="button" {...rest} style={style}>{inner}</button>;
+}
+
+/** Prod 1b4ea74's user button (components/UserMenu.tsx): 42 px circle, white 10 % (15 % while open), person glyph. */
+function ProdUserButton({ open, ...rest }: { open: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button type="button" {...rest} data-testid="user-button"
+      style={{
+        flexShrink: 0, width: 42, height: 42, borderRadius: '50%',
+        background: open ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.1)', border: 'none', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.15s', padding: 0,
+      }}>
+      <svg width="22" height="22" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+        <circle cx="9" cy="7" r="3" stroke="rgba(255,255,255,0.85)" strokeWidth="1.4" />
+        <path d="M2.5 16c0-3.314 2.91-6 6.5-6s6.5 2.686 6.5 6" stroke="rgba(255,255,255,0.85)" strokeWidth="1.4"
+          strokeLinecap="round" />
+      </svg>
+    </button>
+  );
 }
 
 function Dropdown({ name, admin, busy, onSignOut, size = 48 }: Props) {
@@ -65,7 +87,7 @@ function Dropdown({ name, admin, busy, onSignOut, size = 48 }: Props) {
   );
 }
 
-function AccountPanel({ name, admin, busy, onSignOut, size = 40 }: Props) {
+function AccountPanel({ name, admin, busy, onSignOut, size = 40, prodTrigger }: Props) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [shown, setShown] = useState(false);
@@ -95,8 +117,11 @@ function AccountPanel({ name, admin, busy, onSignOut, size = 40 }: Props) {
   return (
     <>
       <style>{css}</style>
-      <Avatar name={name} size={size} aria-label="Account" aria-haspopup="dialog" aria-expanded={open}
-        onClick={() => setOpen(true)} />
+      {prodTrigger
+        ? <ProdUserButton open={open} aria-label="Account" aria-haspopup="dialog" aria-expanded={open}
+            onClick={() => setOpen(true)} />
+        : <Avatar name={name} size={size} aria-label="Account" aria-haspopup="dialog" aria-expanded={open}
+            onClick={() => setOpen(true)} />}
       {mounted && createPortal(
         <div style={{ position: 'fixed', inset: 0, zIndex: 300 }}>
           <div data-testid="account-scrim" onClick={() => setOpen(false)}
