@@ -67,7 +67,9 @@ def env(scanned, monkeypatch):  # noqa: F811
     monkeypatch.setattr(tv_search, 'trackers', lambda: [CFG])
     sent = []
 
-    def fake_query(query, purpose, sid, interactive, now, cfgs=None):
+    def fake_query(query, purpose, sid, interactive, now, cfgs=None, tv_ids=None, **k):
+        if tv_ids:          # v256: this fake tracker has no id search (test_v256_id_first covers the ID tier)
+            return [], [{'id': 7, 'name': 'MyTracker', 'status': tv_search.NO_ID}]
         sent.append((query, purpose, interactive))
         return list(env.results), [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]
     monkeypatch.setattr(tv_search, 'query_trackers', fake_query)

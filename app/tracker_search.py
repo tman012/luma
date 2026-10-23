@@ -306,10 +306,12 @@ class TrackerSearch:
 
     def search_one(self, cfg: Dict[str, Any], query: str, categories: List[int], limit: int,
                    interactive: bool, imdb_id: str = '', tmdb_id: str = '', media_type: str = '',
-                   refresh: bool = False, purpose: Optional[str] = None, offset: int = 0) -> List[Dict[str, Any]]:
+                   refresh: bool = False, purpose: Optional[str] = None, offset: int = 0,
+                   tv_ids: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Guarded, cached search of one tracker; raw client results.
         v256: a feed poll (purpose 'feed') is never answered from either cache (each poll must see the
-        tracker's newest releases), and *offset* pages a Torznab/Newznab feed back.
+        tracker's newest releases), and *offset* pages a Torznab/Newznab feed back. *tv_ids* is the ID
+        tier of an automatic TV search (tracker_clients.search); NoIdSearch is raised as is.
         Raises TrackerSkipped (guard) or TrackerError (the tracker failed).
         A background search with a *purpose* ('tv') is also held to that
         purpose's budget in the guard (every page it sends is counted).
@@ -322,9 +324,9 @@ class TrackerSearch:
         if not tt.searches_by_id(cfg.get('type')):
             tmdb_id, media_type = '', ''
         ckey = (cfg['id'], (query or '').strip().lower(), tuple(categories), imdb_id or '', int(limit),
-                str(tmdb_id or ''), media_type or '', int(offset or 0))
+                str(tmdb_id or ''), media_type or '', int(offset or 0), json.dumps(tv_ids or {}, sort_keys=True))
         nkey = (cfg['id'], query or '', tuple(categories), imdb_id or '', int(limit),
-                str(tmdb_id or ''), media_type or '', int(offset or 0))
+                str(tmdb_id or ''), media_type or '', int(offset or 0), json.dumps(tv_ids or {}, sort_keys=True))
         live = purpose == 'feed'
         ttl = 0 if live else TTL_INTERACTIVE if interactive else TTL_BACKGROUND
         now = time.time()
@@ -377,7 +379,8 @@ class TrackerSearch:
                 with scope:
                     items = tracker_clients.search(cfg, query, categories, limit, charged, imdb_id=imdb_id,
                                                    tmdb_id=str(tmdb_id or ''), media_type=media_type or '',
-                                                   offset=int(offset or 0))
+                                                   offset=int(offset or 0),
+                                                   **({'tv_ids': tv_ids} if tv_ids else {}))
             except tracker_clients.OutOfBudget as e:
                 self._log_steps(cfg, tracker_clients.last_stats())
                 self._log_once((gk, 'skip'), int(time.time() // 900),
@@ -386,6 +389,8 @@ class TrackerSearch:
                 if hit:
                     return hit[1]
                 raise TrackerSkipped(e.reason) from None
+            except tracker_clients.NoIdSearch:
+                raise
             except TrackerError as e:
                 st = tracker_clients.last_stats()
                 self._log_steps(cfg, st)

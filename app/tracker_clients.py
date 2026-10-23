@@ -207,6 +207,107 @@ def torznab_search(cfg, query, categories, limit, request: Request = http_reques
     return parse_torznab(root, proto, limit)
 
 
+class NoIdSearch(Exception):
+    """v256: this tracker can't search TV by any id the show has (its caps, or a site with no id search):
+    the caller searches by title instead. Nothing but a caps request was sent."""
+
+
+#: v256: a Torznab/Newznab tracker's tv-search params (t=caps), per tracker: a day when read, 6 h when unreadable
+CAPS_TTL_S = 24 * 3600
+CAPS_FAIL_TTL_S = 6 * 3600
+_caps: Dict[Tuple[Any, str], Tuple[float, frozenset]] = {}
+_caps_lock = threading.Lock()
+
+
+def clear_caps() -> None:
+    with _caps_lock:
+        _caps.clear()
+
+
+def torznab_tv_params(cfg, request: Request = http_request) -> frozenset:
+    """The params the tracker's tv-search supports (lowercase), from its caps; read once a day.
+    A rate limit, ban or rejected key is raised (the guard backs off); any other bad answer means
+    "no id search" for CAPS_FAIL_TTL_S."""
+    key = (cfg.get('id'), torznab_endpoint(cfg))
+    now = time.time()
+    with _caps_lock:
+        hit = _caps.get(key)
+    if hit and now < hit[0]:
+        return hit[1]
+    try:
+        root = _parse_xml(request('GET', torznab_endpoint(cfg), params=_torznab_params(cfg, t='caps'),
+                                  headers={'Accept': 'application/xml'}))
+        el = root.find('searching/tv-search')
+        params: frozenset = frozenset()
+        if el is not None and str(el.get('available') or '').strip().lower() == 'yes':
+            params = frozenset(p.strip().lower() for p in str(el.get('supportedParams') or 'q').split(',')
+                               if p.strip())
+        until = now + CAPS_TTL_S
+    except TrackerError as e:
+        if e.kind in ('rate', 'banned', 'auth'):
+            raise
+        params, until = frozenset(), now + CAPS_FAIL_TTL_S
+    with _caps_lock:
+        _caps[key] = (until, params)
+    return params
+
+
+#: v256 (Sonarr's ID tier): the one id sent, best first, when the tracker supports it and the show has it
+TV_ID_PARAMS = (('tvdbid', 'tvdb_id'), ('imdbid', 'imdb_id'), ('tmdbid', 'tmdb_id'))
+
+
+def tv_id_token(tv_ids: Dict[str, Any]) -> str:
+    """'S05' or 'S05E03' for a season or episode id search."""
+    out = f"S{int(tv_ids['season']):02d}"
+    if tv_ids.get('episode') is not None:
+        out += f"E{int(tv_ids['episode']):02d}"
+    return out
+
+
+def tv_id_possible(cfg, tv_ids: Dict[str, Any]) -> bool:
+    """False when the id tier can't be sent to *cfg*: a type with no id search, a show with no id that
+    type takes, or Torznab caps already read that allow none (no guard token spent on it)."""
+    client = (tt.get_type(cfg.get('type')) or {}).get('client')
+    has = {f for _, f in TV_ID_PARAMS if str(tv_ids.get(f) or '').strip()}
+    if client == 'beyondhd':
+        return 'tmdb_id' in has
+    if client == 'avistaz':
+        return bool(has & {'imdb_id', 'tmdb_id'})
+    if client != 'torznab':
+        return False
+    with _caps_lock:
+        hit = _caps.get((cfg.get('id'), torznab_endpoint(cfg)))
+    if not hit or time.time() >= hit[0]:
+        return bool(has)                     # caps not read yet: the search reads them
+    sup = hit[1]
+    return (any(p in sup and f in has for p, f in TV_ID_PARAMS) and 'season' in sup
+            and (tv_ids.get('episode') is None or 'ep' in sup))
+
+
+def torznab_tv_id_search(cfg, tv_ids: Dict[str, Any], categories, limit, request: Request = http_request):
+    """t=tvsearch by the show's id (tvdbid, else imdbid, else tmdbid: the first the caps allow) with
+    season and ep; NoIdSearch when the caps allow none of them."""
+    sup = torznab_tv_params(cfg, request)
+    pick = None
+    for param, field in TV_ID_PARAMS:
+        v = str(tv_ids.get(field) or '').strip()
+        if v and param in sup:
+            pick = (param, v[2:] if param == 'imdbid' and v.lower().startswith('tt') else v)
+            break
+    if pick is None or 'season' not in sup or (tv_ids.get('episode') is not None and 'ep' not in sup):
+        raise NoIdSearch()
+    params = _torznab_params(cfg, t='tvsearch', cat=','.join(str(c) for c in categories),
+                             limit=min(int(limit), SEARCH_LIMIT_MAX), extended=1, season=int(tv_ids['season']),
+                             ep=int(tv_ids['episode']) if tv_ids.get('episode') is not None else None,
+                             **{pick[0]: pick[1]})
+    proto = (tt.get_type(cfg.get('type')) or {}).get('protocol', 'torrent')
+    root = _parse_xml(request('GET', torznab_endpoint(cfg), params=params,
+                              headers={'Accept': 'application/rss+xml, application/xml'}))
+    out = parse_torznab(root, proto, limit)
+    _set_stats(by_id=True)
+    return out
+
+
 def torznab_test(cfg, request: Request = http_request):
     root = _parse_xml(request('GET', torznab_endpoint(cfg), params=_torznab_params(cfg, t='caps'),
                               headers={'Accept': 'application/xml'}))
@@ -281,7 +382,7 @@ def bhd_tmdb_param(tmdb_id: str, media_type: str) -> str:
 
 
 def beyondhd_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id='',
-                    media_type=''):
+                    media_type='', id_only: bool = False):
     """BHD's own API, text first exactly as before (the query as given),
     then, only while nothing was found: the punctuation-stripped text, for
     movies the title without the year, and last the TMDB id
@@ -387,6 +488,10 @@ def beyondhd_search(cfg, query, categories, limit, request: Request = http_reque
         if ep:
             b['search'] = ep.group(0).upper()
         add('id', b)
+    if id_only:                     # v256: the ID tier of an automatic search: the TMDB id attempt alone
+        attempts = [a for a in attempts if a[0] == 'id']
+        if not attempts:
+            raise NoIdSearch()
 
     started = _monotonic()
     errors: List[TrackerError] = []
@@ -548,7 +653,8 @@ def _avz_get(cfg, request: Request, params: Dict[str, Any]):
     return resp
 
 
-def avistaz_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id=''):
+def avistaz_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id='',
+                   id_only: bool = False):
     q, imdb = _split_imdb(query, imdb_id)
     params: Dict[str, Any] = {'in': 1, 'search': q}
     kind = media_kind(categories)
@@ -557,6 +663,8 @@ def avistaz_search(cfg, query, categories, limit, request: Request = http_reques
     which, value = ('imdb', imdb) if imdb else ('tmdb', str(tmdb_id)) if tmdb_id else ('', '')
     if which and avz_id_rejected(cfg, which, value, q):
         which = ''                   # this site said the id is invalid for this title: title search only
+    if id_only and not which:
+        raise NoIdSearch()          # v256: no id this site takes for this show: the title search instead
     if which:
         params[which] = value
     resp = _avz_get(cfg, request, params)
@@ -567,7 +675,7 @@ def avistaz_search(cfg, query, categories, limit, request: Request = http_reques
             _avz_rejected[_avz_rejected_key(cfg, which, value, q)] = time.time()
         logger.info('AvistaZ-family search: the site rejected the %s id; searching by title', which)
         params.pop(which, None)
-        if not q:
+        if not q or id_only:
             return []
         resp = _avz_get(cfg, request, params)
     if resp.status == 404:          # the API answers 404 for no results
@@ -890,8 +998,22 @@ def test(cfg: Dict[str, Any], request: Request = http_request) -> None:
 
 def search(cfg: Dict[str, Any], query: str, categories: List[int], limit: int = 100,
            request: Request = http_request, imdb_id: str = '', tmdb_id: str = '',
-           media_type: str = '', offset: int = 0) -> List[Dict[str, Any]]:
-    """*offset* (v256, feed paging) is sent only to clients that page by offset (tracker_types.pages_feed)."""
+           media_type: str = '', offset: int = 0, tv_ids: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """*offset* (v256, feed paging) is sent only to clients that page by offset (tracker_types.pages_feed).
+    *tv_ids* (v256, the ID tier of an automatic TV search: tvdb_id/imdb_id/tmdb_id, season, episode)
+    searches by id alone; NoIdSearch when this tracker can't."""
+    if tv_ids:
+        client = (tt.get_type(cfg['type']) or {}).get('client')
+        token = tv_id_token(tv_ids)
+        if client == 'torznab':
+            return torznab_tv_id_search(cfg, tv_ids, categories, limit, request)
+        if client == 'beyondhd':
+            return beyondhd_search(cfg, token, categories, limit, request, tmdb_id=str(tv_ids.get('tmdb_id') or ''),
+                                   media_type='tv', id_only=True)
+        if client == 'avistaz':
+            return avistaz_search(cfg, token, categories, limit, request, imdb_id=str(tv_ids.get('imdb_id') or ''),
+                                  tmdb_id=str(tv_ids.get('tmdb_id') or ''), id_only=True)
+        raise NoIdSearch()
     if offset:
         if not tt.pages_feed(cfg['type']):
             raise TrackerError('response')

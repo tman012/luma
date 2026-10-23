@@ -61,6 +61,7 @@ ACTIVE_GRABS = ('downloading', 'importing', 'imported')
 FALLBACK_ORDER = ('1080p-web', '1080p-bluray', '720p-web', '1080p-hdtv', '720p-bluray', '720p-hdtv',
                   '2160p-web', '2160p-bluray', 'sd-web', 'sd-bluray', 'sd-hdtv')
 NO_TRACKERS = 'No TV trackers are on'
+NO_ID = 'no id search'                   # v256: a tracker that can't search this show by id (title search next)
 
 _lock = threading.Lock()
 
@@ -118,9 +119,12 @@ LOG_PURPOSE = {MANUAL_BACKGROUND: 'manual', AUTOMATION: 'backlog'}
 
 def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bool, now: float,
                    cfgs: Optional[List[Dict[str, Any]]] = None, categories: Optional[List[int]] = None,
-                   section: str = 'tv') -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+                   section: str = 'tv', tv_ids: Optional[Dict[str, Any]] = None
+                   ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Search each TV tracker once; (items, statuses). Items are search results with a release
-    link (tracker_search.to_item). Automatic searches are charged to the TV budget."""
+    link (tracker_search.to_item). Automatic searches are charged to the TV budget. *tv_ids* (v256):
+    the ID tier (tracker_clients.search); a tracker that can't search by id gets status NO_ID."""
+    from app.tracker_clients import NoIdSearch
     from app.tracker_search import TrackerError, TrackerSkipped, _match_categories, _secret_values, get_search, search_status
     from app import tv_budget
     engine = get_search()
@@ -148,7 +152,11 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
                                     # v185.2a (PM): a feed poll is the guard's 'feed' purpose: no cap or slot of
                                     # any kind (Sonarr-style 15-min RSS); backoff and 429/Retry-After still apply
                                     purpose='feed' if purpose == 'feed' and not interactive else
-                                    'tv' if not interactive and capped and not bg_manual else None)
+                                    'tv' if not interactive and capped and not bg_manual else None,
+                                    **({'tv_ids': tv_ids} if tv_ids else {}))
+        except NoIdSearch:
+            statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': NO_ID})
+            continue
         except TrackerSkipped as e:
             statuses.append({'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)})
             _log(cfg, purpose, sid, query, 0, 'skipped', now, section)
@@ -285,7 +293,8 @@ def query_feed(cfg: Dict[str, Any], now: float, categories: Optional[List[int]] 
 # ------------------------------------------------------------------ what is wanted
 
 def _show(conn, sid: int) -> Optional[Dict[str, Any]]:
-    r = conn.execute('SELECT id, title, year, aliases, series_type, profile_id, monitored FROM series WHERE id = ?',
+    r = conn.execute('SELECT id, title, year, aliases, series_type, profile_id, monitored, tmdb_id, tvdb_id, imdb_id'
+                     ' FROM series WHERE id = ?',
                      (sid,)).fetchone()
     if not r:
         return None
@@ -542,10 +551,63 @@ def _sxe(show: Dict[str, Any], e: Dict[str, Any]) -> str:
     return f"{_qtitle(show)} S{e['season_number']:02d}E{e['episode_number']:02d}"
 
 
+_ID_TAIL_RE = re.compile(r' S(\d{2,4})(?:E(\d{2,4}))?$')
+
+
+def _tv_ids(show: Dict[str, Any], q: str) -> Optional[Dict[str, Any]]:
+    """v256: the ID tier for a planned season (Sxx) or episode (SxxEyy) query: the show's ids with the
+    season and episode. None for a daily show's date query or a show with no id."""
+    m = _ID_TAIL_RE.search(q)
+    if not m or show.get('series_type') == 'daily':
+        return None
+    ids: Dict[str, Any] = {k: show.get(k) for k in ('tvdb_id', 'imdb_id', 'tmdb_id') if show.get(k)}
+    if not ids:
+        return None
+    ids['season'] = int(m.group(1))
+    if m.group(2):
+        ids['episode'] = int(m.group(2))
+    return ids
+
+
+def _ask_auto(show: Dict[str, Any], q: str, purpose: str, sid: int, now: float,
+              cfgs: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], int]:
+    """v256 (PM, Sonarr's tiers): an automatic search asks each tracker by the show's id first (where its
+    caps allow), and by title only where the id search answered with nothing or wasn't possible. No
+    alternative titles."""
+    from app import tracker_clients
+    ids = _tv_ids(show, q)
+    id_cfgs = [c for c in cfgs if ids and tracker_clients.tv_id_possible(c, ids)]
+    by_id = {c['id']: c for c in cfgs}
+    items: List[Dict[str, Any]] = []
+    st: List[Dict[str, Any]] = []
+    n = 0
+    retry = {c['id'] for c in cfgs if c not in id_cfgs}
+    if id_cfgs:
+        got, s1 = query_trackers(q, purpose, sid, False, now, id_cfgs, tv_ids=ids)
+        n += int(any(x['status'] != NO_ID for x in s1))      # nothing is sent to a tracker with no id search
+        items += got
+        found = {it.get('indexerId') for it in got}
+        for x in s1:
+            if x['status'] == NO_ID or (x['status'] == 'ok' and x['id'] not in found):
+                retry.add(x['id'])
+            else:
+                st.append(x)
+    title_cfgs = [by_id[c['id']] for c in cfgs if c['id'] in retry]
+    if title_cfgs:
+        got, s2 = query_trackers(q, purpose, sid, False, now, title_cfgs)
+        n += 1
+        items += got
+        st += s2
+    return items, st, n
+
+
 def _ask(show: Dict[str, Any], q: str, purpose: str, sid: int, interactive: bool, now: float,
          cfgs: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], int]:
-    """One planned query; when a tracker answered with nothing, the same query under each fallback title
-    until one finds something. (items, statuses, queries sent)."""
+    """One planned query; (items, statuses, queries sent). Automatic (v256): ID first, then title
+    (_ask_auto). The owner's searches (manual, monitor): by title, and when a tracker answered with
+    nothing, the same query under each fallback title until one finds something."""
+    if not interactive and purpose not in MONITOR_PURPOSES:
+        return _ask_auto(show, q, purpose, sid, now, cfgs)
     got, st = query_trackers(q, purpose, sid, interactive, now, cfgs)
     n = 1
     main = _qtitle(show)

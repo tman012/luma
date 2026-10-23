@@ -97,7 +97,9 @@ def _per_query(env, monkeypatch, answers):
     """query_trackers mocked per query (the fixture's mock answers every query the same)."""
     sent = []
 
-    def fake(query, purpose, sid, interactive, now, cfgs=None):
+    def fake(query, purpose, sid, interactive, now, cfgs=None, tv_ids=None, **k):
+        if tv_ids:                              # v256: no id search on this fake tracker
+            return [], [{'id': 7, 'name': 'MyTracker', 'status': tv_search.NO_ID}]
         sent.append(query)
         return [item(t) for t in answers.get(query, [])], [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]
     monkeypatch.setattr(tv_search, 'query_trackers', fake)
@@ -155,7 +157,7 @@ def test_new_episodes_retry_every_15_minutes_for_6_hours_after_air(env, monkeypa
     sid, ids = make_show(env, title, 'standard', season, numbers, stamp[:10] if stamp[11:13] >= '04' else
                          (dt.date.fromisoformat(stamp[:10]) - dt.timedelta(days=1)).isoformat(), stamp, runtime)
     when = []
-    monkeypatch.setattr(tv_search, 'query_trackers', lambda q, p, s, i, now, cfgs=None: (
+    monkeypatch.setattr(tv_search, 'query_trackers', lambda q, p, s, i, now, cfgs=None, **k: (
         when.append(now), ([], [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]))[1])
     aired = dt.datetime.fromisoformat(stamp.replace('Z', '+00:00')).timestamp() + 60 * runtime
     _timeline(sid, aired - 30 * 60, aired + 7 * 3600)
@@ -178,7 +180,9 @@ def test_found_mid_window_is_grabbed_and_stops(env, monkeypatch):
     clock = {'t': 0}
     release = {'Love Is Blind S11': ['Love Is Blind S11E06 1080p WEB h264-HOTDOGWATER', 'Love Is Blind S11E08 1080p WEB h264-HOTDOGWATER']}
 
-    def fake(query, purpose, s, interactive, now, cfgs=None):
+    def fake(query, purpose, s, interactive, now, cfgs=None, tv_ids=None, **k):
+        if tv_ids:                              # v256: no id search on this fake tracker
+            return [], [{'id': 7, 'name': 'MyTracker', 'status': tv_search.NO_ID}]
         up = now >= aired + 2 * 3600 + 30 * 60                  # on IPT 2.5 h after air
         # on IPT both ways: the season query and each SxxEyy (v233.6 retries only the SxxEyy ones)
         hit = [t for t in release['Love Is Blind S11'] if query == 'Love Is Blind S11' or t.startswith(query + ' ')]
@@ -235,7 +239,9 @@ def test_no_air_time_still_gets_the_15_minute_window_and_a_grab(env, monkeypatch
     names = ['Vanderpump Rules S13E01 1080p WEB h264-EDITH', 'Vanderpump Rules S13E02 1080p WEB h264-EDITH']
     when = []
 
-    def fake(query, purpose, s, interactive, now, cfgs=None):
+    def fake(query, purpose, s, interactive, now, cfgs=None, tv_ids=None, **k):
+        if tv_ids:                              # v256: no id search on this fake tracker
+            return [], [{'id': 7, 'name': 'MyTracker', 'status': tv_search.NO_ID}]
         when.append(now)
         up = now >= start + 3 * 3600
         hit = [n for n in names if query == 'Vanderpump Rules S13' or n.startswith(query + ' ')]
@@ -278,7 +284,9 @@ def test_retries_search_only_the_missed_episodes_no_repeat_season_query(env, mon
     capped = [f'Love Is Blind S{s:02d}E{e:02d} 1080p WEB h264-OTHER' for s in (8, 9, 10) for e in range(1, 17)][:50]
     log = []
 
-    def fake(query, purpose, s, interactive, now, cfgs=None):
+    def fake(query, purpose, s, interactive, now, cfgs=None, tv_ids=None, **k):
+        if tv_ids:                              # v256: no id search on this fake tracker
+            return [], [{'id': 7, 'name': 'MyTracker', 'status': tv_search.NO_ID}]
         log.append((now, query))
         return ([item(t) for t in capped] if query == 'Love Is Blind S11' else []), [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]
     monkeypatch.setattr(tv_search, 'query_trackers', fake)
@@ -314,7 +322,7 @@ def test_manual_queries_ignore_the_missed_marks(env, monkeypatch):
 def test_no_air_time_no_usual_slot_retries_until_the_end_of_the_air_date_in_et(env, monkeypatch):
     sid, ids = _vpr(env)
     when = []
-    monkeypatch.setattr(tv_search, 'query_trackers', lambda q, p, s, i, now, cfgs=None: (
+    monkeypatch.setattr(tv_search, 'query_trackers', lambda q, p, s, i, now, cfgs=None, **k: (
         when.append(now), ([], [{'id': 7, 'name': 'MyTracker', 'status': 'ok'}]))[1])
     start, end = ts(2026, 10, 21, 0), ts(2026, 10, 22, 0)
     _timeline(sid, start, end + 3600)

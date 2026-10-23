@@ -44,7 +44,7 @@ def test_15_min_early_then_hourly_past_24h_and_never_stops(env, monkeypatch):
     sid, ids = make_show(env, "Grey's Anatomy", 'standard', 23, (2,), '2026-10-23', '2026-10-24T01:00:00Z', 60)
     _only(sid)
     when = []
-    monkeypatch.setattr(tv_search, 'query_trackers', lambda q, p, s, i, now, cfgs=None: (when.append(now), ([], OK))[1])
+    monkeypatch.setattr(tv_search, 'query_trackers', lambda q, p, s, i, now, cfgs=None, **k: (k.get('tv_ids') or when.append(now), ([], OK))[1])
     aired_at = tv_search.aired_at(E)
     _timeline(sid, aired_at - 30 * 60, aired_at + 72 * 3600)
     passes = sorted(set(when))
@@ -66,7 +66,9 @@ def test_greys_late_upload_past_24h_grabs_on_its_own(env, monkeypatch):
     name = 'Grey s Anatomy S23E02 1080p WEB H264-MeGusta'
     when = []
 
-    def fake(query, purpose, s, interactive, now, cfgs=None):
+    def fake(query, purpose, s, interactive, now, cfgs=None, tv_ids=None, **k):
+        if tv_ids:                              # v256: no id search on this fake tracker
+            return [], [{'id': 7, 'name': 'MyTracker', 'status': tv_search.NO_ID}]
         when.append(now)
         return ([item(name)] if now >= up_at and query == 'Greys Anatomy S23E02' else []), OK
     monkeypatch.setattr(tv_search, 'query_trackers', fake)
@@ -89,7 +91,7 @@ def test_an_episode_dropped_by_the_old_floor_is_searched_again(env, monkeypatch)
         conn.execute('UPDATE episodes SET next_search_at = NULL, last_search_at = ?, search_attempts = 30 WHERE id = ?',
                      (at(2026, 10, 15, 19), ids[5]))
     seen = []
-    monkeypatch.setattr(tv_search, 'query_trackers', lambda q, p, s, i, t, cfgs=None: (seen.append((q, p)), ([], OK))[1])
+    monkeypatch.setattr(tv_search, 'query_trackers', lambda q, p, s, i, t, cfgs=None, **k: (k.get('tv_ids') or seen.append((q, p)), ([], OK))[1])
     assert tv_search.schedule(now) == 1 and _ep(ids[5])['next_search_at'] == now
     assert tv_search.run_due(now)['shows'] == 1
     assert seen == [('Special Forces Worlds Toughest Test S05E05', tv_search.BACKLOG)]
@@ -111,7 +113,7 @@ def test_grabbed_or_imported_stops_and_a_failed_grab_searches_again(env, monkeyp
     with tv_store.write() as conn:                                          # a grab already due is dropped too
         conn.execute('UPDATE episodes SET next_search_at = ? WHERE id = ?', (now - 60, ids[3]))
     sent = []
-    monkeypatch.setattr(tv_search, 'query_trackers', lambda *a, **k: (sent.append(a), ([], OK))[1])
+    monkeypatch.setattr(tv_search, 'query_trackers', lambda *a, **k: (k.get('tv_ids') or sent.append(a), ([], OK))[1])
     assert tv_search.run_due(now)['shows'] == 0 and sent == [] and _ep(ids[3])['next_search_at'] is None
     with tv_store.write() as conn:
         conn.execute("UPDATE grabs SET state = 'failed'")
@@ -123,7 +125,7 @@ def test_unmonitored_stops_and_monitored_again_resumes(env, monkeypatch):
     _only(sid)
     now = at(2026, 10, 23, 10)
     sent = []
-    monkeypatch.setattr(tv_search, 'query_trackers', lambda *a, **k: (sent.append(a), ([], OK))[1])
+    monkeypatch.setattr(tv_search, 'query_trackers', lambda *a, **k: (k.get('tv_ids') or sent.append(a), ([], OK))[1])
     with tv_store.write() as conn:
         conn.execute('UPDATE episodes SET next_search_at = ?, last_search_at = ? WHERE id = ?', (now - 60, now - 3660, ids[3]))
     for col, table in (('monitored', 'episodes'), ('monitored', 'series')):

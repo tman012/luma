@@ -161,6 +161,12 @@ def pages_feed(type_id: str) -> bool:
     return (get_type(type_id) or {}).get('client') == 'torznab'
 
 
+def tv_id_search(type_id: str) -> bool:
+    """v256: types that can search TV by an id (Torznab/Newznab when its caps allow, BeyondHD by TMDB,
+    the AvistaZ network by IMDb/TMDB). IPTorrents searches by title only."""
+    return (get_type(type_id) or {}).get('client') in ('torznab', 'beyondhd', 'avistaz')
+
+
 def is_rate_strict(type_id: str) -> bool:
     return (get_type(type_id) or {}).get('family') == 'avistaz'
 

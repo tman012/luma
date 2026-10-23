@@ -60,20 +60,26 @@ def test_fallback_to_the_stripped_title_then_aliases_only_when_nothing_is_found(
     with tv_store.write() as conn:
         conn.execute('UPDATE series SET aliases = ? WHERE id = ?', ('["Ghosts US", "Ghosts: Américain"]', sid))
     sent = _per_query(env, monkeypatch, {'Ghosts Americain S05E03': ['Ghosts.S05E03.1080p.WEB.h264-EDITH']})
+    # v256 (PM): an automatic search never retries under alternative titles
     out = tv_search.search_show(sid, list(ids.values()), origin='auto', now=ts(2026, 10, 21, 21), do_grab=False)
-    # clean title, then the stripped title, then the aliases (the duplicate 'Ghosts US' is skipped)
+    assert sent == ['Ghosts US S05E03'] and out['searched'] == 1
+    sent.clear()
+    # the owner's manual search: clean title, then the stripped title, then the aliases (the duplicate 'Ghosts US'
+    # is skipped)
+    out = tv_search.search_show(sid, list(ids.values()), origin='manual', interactive=True, now=ts(2026, 10, 21, 21),
+                                do_grab=False)
     assert sent == ['Ghosts US S05E03', 'Ghosts S05E03', 'Ghosts Americain S05E03']
     assert out['searched'] == 3
-    sent.clear()
     sent2 = _per_query(env, monkeypatch, {'Ghosts US S05E03': ['Ghosts.US.S05E03.1080p.WEB.h264-EDITH']})
-    tv_search.search_show(sid, list(ids.values()), origin='auto', now=ts(2026, 10, 21, 21, 15), do_grab=False)
+    tv_search.search_show(sid, list(ids.values()), origin='manual', interactive=True, now=ts(2026, 10, 21, 21, 15),
+                          do_grab=False)
     assert sent2 == ['Ghosts US S05E03']                                    # found: no fallback
 
 
 def test_no_fallback_when_no_tracker_answered(env, monkeypatch):
     sid, ids = make_show(env, 'Ghosts (US)', 'standard', 5, (3,), '2026-10-21', '2026-10-22T00:00:00Z', 30)
     sent = []
-    monkeypatch.setattr(tv_search, 'query_trackers', lambda q, p, s, i, now, cfgs=None: (
+    monkeypatch.setattr(tv_search, 'query_trackers', lambda q, p, s, i, now, cfgs=None, **k: (
         sent.append(q) or [], [{'id': 7, 'name': 'MyTracker', 'status': 'error'}]))
     tv_search.search_show(sid, list(ids.values()), origin='auto', now=ts(2026, 10, 21, 21), do_grab=False)
     assert sent == ['Ghosts US S05E03']
