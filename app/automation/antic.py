@@ -6,8 +6,10 @@ once it is available under Settings > Movies availability (v256), by search or f
 Every value prod hard-codes is a setting here, with prod's value as the default: shows per run 20 (:246), every
 2 hours (:33, :160), page 1 (:213), monitor All episodes (:379), search on add (:249), English originals (:250),
 unknown language allowed (:367), Plex-owned skipped (:370), the run skipped when Plex can't be read (:259-272),
-shows without a TVDB ID skipped (:365), removed titles re-added (no memory, prod), a busy Trakt skips the run
-(:216-218), 200 history entries (:35). Movies: no language gate in prod (only shows had one), so none = any.
+shows without a TVDB ID skipped (:365), a busy Trakt skips the run
+(:216-218), 200 history entries (:35). One PM ruling departs from prod (v259): Don't re-add removed is on by
+default for shows and movies (prod re-added them, with no memory); a saved choice is kept, and settings saved
+before the key existed read it as on. Movies: no language gate in prod (only shows had one), so none = any.
 Off on a new install (settings_manager.py:379). Run now ignores the switches (:136-139). Shows already in tv.db
 and movies already on the watchlist or with a grab are always skipped (prod: already in Sonarr/Radarr, :308, :373).
 
@@ -103,7 +105,7 @@ def _set_meta(conn, key: str, value: Any) -> None:
 def _group(kind: str) -> Dict[str, Any]:
     g = {'enabled': False, 'limit': 20, 'profile_id': None, 'search_on_add': True,
          'languages': ['en'] if kind == 'shows' else [], 'allow_unknown_language': True, 'skip_plex': True,
-         'skip_if_plex_unreadable': True, 'no_readd': False, 'page': 1}
+         'skip_if_plex_unreadable': True, 'no_readd': True, 'page': 1}
     if kind == 'shows':
         g.update(path_id=None, monitor='all', require_tvdb=True)
     return g
@@ -235,6 +237,21 @@ def _fill(cur: Any) -> Dict[str, Any]:
     return out
 
 
+EXPLICIT = ('no_readd',)       # stored only once the owner sets it, so an unset one follows the default (v259: on)
+
+
+def _stored(out: Dict[str, Any], raw: Any, body: Any) -> Dict[str, Any]:
+    """*out* as stored: an EXPLICIT key is kept only when it was saved before or *body* sets it."""
+    raw = raw if isinstance(raw, dict) else {}
+    body = body if isinstance(body, dict) else {}
+    res = {**out}
+    for kind in KINDS:
+        was = raw.get(kind) if isinstance(raw.get(kind), dict) else {}
+        now = body.get(kind) if isinstance(body.get(kind), dict) else {}
+        res[kind] = {k: v for k, v in out[kind].items() if k not in EXPLICIT or k in was or k in now}
+    return res
+
+
 def settings() -> Dict[str, Any]:
     with connect() as conn:
         cur = _meta(conn, 'antic_settings', None)
@@ -242,6 +259,7 @@ def settings() -> Dict[str, Any]:
             cur = _legacy()
             for kind in KINDS:
                 cur[kind]['enabled'] = False
+            cur = _stored(cur, None, None)
             _set_meta(conn, 'antic_settings', cur)
     return _fill(cur)
 
@@ -249,7 +267,7 @@ def settings() -> Dict[str, Any]:
 def save(body: Any) -> Dict[str, Any]:
     out = check(body, settings())
     with connect() as conn:
-        _set_meta(conn, 'antic_settings', out)
+        _set_meta(conn, 'antic_settings', _stored(out, _meta(conn, 'antic_settings', None), body))
     return out
 
 

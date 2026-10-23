@@ -92,7 +92,7 @@ def test_defaults_are_prods_values(w):
     sh, mv = s['shows'], s['movies']
     assert sh == {'enabled': False, 'limit': 20, 'profile_id': None, 'search_on_add': True, 'languages': ['en'],
                   'allow_unknown_language': True, 'skip_plex': True, 'skip_if_plex_unreadable': True,
-                  'no_readd': False, 'page': 1, 'path_id': None, 'monitor': 'all', 'require_tvdb': True}
+                  'no_readd': True, 'page': 1, 'path_id': None, 'monitor': 'all', 'require_tvdb': True}
     assert mv['enabled'] is False and mv['limit'] == 20 and mv['languages'] == [] and 'monitor' not in mv
     assert 'require_tvdb' not in mv and 'path_id' not in mv
 
@@ -125,6 +125,7 @@ def test_legacy_prod_keys_import_off(tmp_path, monkeypatch):
     assert s['shows']['limit'] == 12 and s['movies']['limit'] == 12 and s['shows']['search_on_add'] is False
     assert s['shows']['languages'] == ['en', 'fr'] and s['interval_hours'] == 6
     assert s['shows']['enabled'] is False and s['movies']['enabled'] is False
+    assert s['shows']['no_readd'] is True and s['movies']['no_readd'] is True      # v259 PM ruling
 
 
 # ------------------------------------------------------------------ shows
@@ -186,7 +187,7 @@ def test_rules_switched_off(w):
 def test_languages_none_means_any_and_unknown(w):
     w.trakt['shows'] = [show(1), show(2), show(3)]
     w.lang = {1: 'en', 2: 'ko'}                              # 3: unknown
-    on(shows={'languages': ['en']})
+    on(shows={'languages': ['en'], 'no_readd': False})        # re-runs below re-add
     r = antic.run('scheduled', NOW)['shows']
     assert [a[0] for a in w.tv_adds] == [1, 3] and r['skipped']['language'] == 1
     w.tv_db.clear(); w.tv_adds.clear()
@@ -202,15 +203,61 @@ def test_languages_none_means_any_and_unknown(w):
 def test_readd_toggle(w):
     w.trakt['shows'] = [show(1)]
     w.lang = {1: 'en'}
-    on(shows={})
+    on(shows={'no_readd': False})
     antic.run('scheduled', NOW)
     w.tv_db.clear()                                          # the owner deleted it
     antic.run('scheduled', NOW + 10)
-    assert [a[0] for a in w.tv_adds] == [1, 1]               # prod: re-added
+    assert [a[0] for a in w.tv_adds] == [1, 1]               # off (prod's behaviour): re-added
     w.tv_db.clear()
     antic.save({'shows': {'no_readd': True}})
     r = antic.run('scheduled', NOW + 20)['shows']
     assert len(w.tv_adds) == 2 and r['skipped']['removed'] == 1
+
+
+def test_dont_readd_removed_is_on_by_default(w):
+    w.trakt['shows'] = [show(1)]
+    w.trakt['movies'] = [movie(2)]
+    w.lang = {1: 'en'}
+    on(shows={}, movies={})
+    antic.run('scheduled', NOW)
+    w.tv_db.clear(); w.watchlist.clear()                     # the owner removed both
+    r = antic.run('scheduled', NOW + 10)
+    assert len(w.tv_adds) == 1 and len(w.movie_adds) == 1
+    assert r['shows']['skipped']['removed'] == 1 and r['movies']['skipped']['removed'] == 1
+
+
+def test_saved_settings_without_the_key_read_on_and_an_explicit_value_is_kept(w):
+    import json as _json
+    d = antic.defaults()
+    for kind in antic.KINDS:
+        del d[kind]['no_readd']                              # saved before the key existed
+    d['shows']['limit'] = 7
+    with antic.connect() as conn:
+        antic._set_meta(conn, 'antic_settings', d)
+    s = antic.settings()
+    assert s['shows']['no_readd'] is True and s['movies']['no_readd'] is True and s['shows']['limit'] == 7
+    antic.save({'shows': {'limit': 8}})                      # an unrelated save doesn't freeze the default
+    with antic.connect() as conn:
+        raw = antic._meta(conn, 'antic_settings', None)
+    assert 'no_readd' not in raw['shows'] and 'no_readd' not in raw['movies']
+    antic.save({'movies': {'no_readd': False}})              # explicit off
+    antic.save({'shows': {'limit': 9}, 'interval_hours': 4})
+    s = antic.settings()
+    assert s['movies']['no_readd'] is False and s['shows']['no_readd'] is True
+    with antic.connect() as conn:
+        raw = antic._meta(conn, 'antic_settings', None)
+    assert raw['movies']['no_readd'] is False and 'no_readd' not in raw['shows']
+    antic.save({'shows': {'no_readd': True}})                # explicit on is kept too
+    with antic.connect() as conn:
+        assert antic._meta(conn, 'antic_settings', None)['shows']['no_readd'] is True
+    assert _json.dumps(antic.settings())
+
+
+def test_first_load_does_not_freeze_the_readd_default(w):
+    antic.settings()
+    with antic.connect() as conn:
+        raw = antic._meta(conn, 'antic_settings', None)
+    assert 'no_readd' not in raw['shows'] and 'no_readd' not in raw['movies']
 
 
 def test_readd_memory_matches_by_tvdb_too(w):
@@ -311,7 +358,7 @@ def test_movies_go_to_the_native_watchlist(w):
 def test_movie_languages_default_any(w):
     w.trakt['movies'] = [movie(1), movie(2)]
     w.lang = {1: 'en', 2: 'ja'}
-    on(movies={})
+    on(movies={'no_readd': False})                           # the re-run below re-adds
     antic.run('scheduled', NOW)
     assert [a[0] for a in w.movie_adds] == [1, 2]
     w.watchlist.clear(); w.movie_adds.clear()
