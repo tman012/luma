@@ -22,9 +22,11 @@ isn't enough to clear the floor (space was already far below it), the next check
 simply takes another — the loop is self-correcting rather than trying to compute
 the perfect single delete.
 
-Deletion is PERMANENT. The guards live in `storage_cleanup` (48h minimum age,
-in-flight torrents skipped, path-escape refused, downloads-root only) and are
-not repeated here. What this module adds on top:
+Deletion is PERMANENT. v260 (test install): every delete is qBittorrent's
+torrents/delete with deleteFiles=true (the downloads mount is read-only), and the
+guards live in `storage_cleanup` (finished only, minimum age, scope, imported,
+not playing in Plex, never a library folder, nothing at all while qBittorrent or
+Plex can't be read) and are not repeated here. Settings: app/automation/dg_store. What this module adds on top:
 
   * disabled by default, like every other automation here
   * a daily ceiling on total bytes deleted, so a wrong setting or a runaway
@@ -75,9 +77,10 @@ _last_status: Dict[str, Any] = {
 
 
 # ── Settings ──────────────────────────────────────────────────────────────
+# v260: the Downloads guard settings live in app/automation/dg_store (Settings > Automation), with prod's
+# defaults; `settings` below is that dict (dg_store.settings()).
 
-def _int_setting(settings, key: str, default: int,
-                 low: int, high: int) -> int:
+def _int_setting(settings, key: str, default: int, low: int, high: int) -> int:
     try:
         v = int(settings.get(key, default))
     except (TypeError, ValueError):
@@ -85,62 +88,64 @@ def _int_setting(settings, key: str, default: int,
     return max(low, min(v, high))
 
 
+def _legacy(settings) -> Dict[str, Any]:
+    """Prod's settings.json keys (automation.downloads_guard.*), read with prod's clamping. Only
+    auto_delete_guard (the full app's /api/settings widening check) still reads these."""
+    from app.automation import dg_store
+    p = 'automation.downloads_guard.'
+    raw = settings.get(p + 'trackers', None)
+    if isinstance(raw, str):
+        raw = raw.split(',')
+    trackers = [str(t).strip() for t in raw if str(t).strip()] if isinstance(raw, (list, tuple)) else ['ipt']
+    return {**dg_store.defaults(),
+            'enabled': bool(settings.get(p + 'enabled', False)),
+            'min_free_gb': _int_setting(settings, p + 'min_free_gb', 150, 1, 10_000),
+            'reclaim_gb': _int_setting(settings, p + 'reclaim_gb', 100, 1, 2_000),
+            'daily_cap_gb': _int_setting(settings, p + 'daily_cap_gb', 500, 0, 20_000),
+            'check_interval_minutes': _int_setting(settings, p + 'check_interval_minutes', 15, 1, 1_440),
+            'trackers': trackers}
+
+
+def _cfg(settings=None) -> Dict[str, Any]:
+    if isinstance(settings, dict):
+        return settings
+    if settings is not None and hasattr(settings, 'get'):
+        return _legacy(settings)
+    from app.automation import dg_store
+    return dg_store.settings()
+
+
 def enabled(settings=None) -> bool:
-    if settings is None:
-        from app.settings_manager import SettingsManager
-        settings = SettingsManager()
-    return bool(settings.get('automation.downloads_guard.enabled', False))
+    return bool(_cfg(settings)['enabled'])
 
 
 def min_free_bytes(settings) -> int:
-    return _int_setting(settings, 'automation.downloads_guard.min_free_gb',
-                        _DEFAULT_MIN_FREE_GB, 1, 10_000) * GIB
+    return int(_cfg(settings)['min_free_gb']) * GIB
 
 
 def reclaim_bytes(settings) -> int:
-    return _int_setting(settings, 'automation.downloads_guard.reclaim_gb',
-                        _DEFAULT_RECLAIM_GB, 1, 2_000) * GIB
+    return int(_cfg(settings)['reclaim_gb']) * GIB
 
 
 def daily_cap_bytes(settings) -> int:
     """Bytes this automation may delete per calendar day. 0 disables the cap."""
-    return _int_setting(settings, 'automation.downloads_guard.daily_cap_gb',
-                        _DEFAULT_DAILY_CAP_GB, 0, 20_000) * GIB
+    return int(_cfg(settings)['daily_cap_gb']) * GIB
 
 
 def check_interval_seconds(settings) -> int:
-    return _int_setting(settings, 'automation.downloads_guard.check_interval_minutes',
-                        _DEFAULT_CHECK_MINUTES, 1, 1_440) * 60
+    return int(_cfg(settings)['check_interval_minutes']) * 60
 
 
 def preferred_trackers(settings) -> List[str]:
-    """Tracker keys to spend first. Empty means "no preference — pure oldest".
-
-    Unlike the tracker pickers on the acquisition automations, empty here does
-    NOT mean "all of them": with no preference there is only one pass, straight
-    oldest-first across the whole folder. Both readings delete something; this
-    one is what the setting literally says.
-    """
-    raw = settings.get('automation.downloads_guard.trackers', None)
-    if raw is None:
-        return list(_DEFAULT_TRACKERS)
-    if isinstance(raw, str):
-        raw = raw.split(',')
-    if not isinstance(raw, (list, tuple)):
-        return list(_DEFAULT_TRACKERS)
-    return [str(t).strip() for t in raw if str(t).strip()]
+    """Tracker keys to spend first, in order. Empty means "no preference — pure oldest"."""
+    return list(_cfg(settings)['trackers'])
 
 
 # ── State / log ───────────────────────────────────────────────────────────
 
 def _data_dir() -> Path:
-    docker_data = Path('/app/data')
-    if docker_data.is_dir():
-        return docker_data
-    db_path = os.environ.get('DATABASE_PATH', '')
-    if db_path:
-        return Path(db_path).parent
-    return Path(__file__).resolve().parent.parent / 'data'
+    from app import paths as _paths
+    return Path(_paths.data_dir())
 
 
 def _state_path() -> Path:
@@ -259,8 +264,8 @@ def pending_bytes(torrents: Optional[List[Dict[str, Any]]] = None,
             # better part of a minute under load, and the status endpoint that
             # backs the settings card must not block on it.
             return _pending_cache.get('bytes')
-        from app import tracker_files
-        torrents = tracker_files.fetch_torrents()
+        from app import storage_cleanup
+        torrents = storage_cleanup.fetch_torrents()
     if torrents is None:
         return None
 
@@ -295,12 +300,10 @@ def evaluate(settings=None, allow_fetch: bool = True) -> Dict[str, Any]:
     exactly what the scheduler is about to conclude, rather than the user having
     to infer it from two numbers.
     """
-    if settings is None:
-        from app.settings_manager import SettingsManager
-        settings = SettingsManager()
+    settings = _cfg(settings)
     from app.storage_cleanup import usage
 
-    use = usage()
+    use = usage(settings)
     floor = min_free_bytes(settings)
     want = reclaim_bytes(settings)
     cap = daily_cap_bytes(settings)
@@ -373,13 +376,12 @@ def preview() -> Dict[str, Any]:
     can see what the automation *would* take before trusting it with the
     decision. `evaluate` is what says whether it would fire.
     """
-    from app.settings_manager import SettingsManager
     from app.storage_cleanup import plan_cleanup
 
-    settings = SettingsManager()
+    settings = _cfg()
     verdict = evaluate(settings)
     target = verdict.get('target_bytes') or reclaim_bytes(settings)
-    plan = plan_cleanup(target, prefer_trackers=preferred_trackers(settings), require_qbit=True)
+    plan = plan_cleanup(target, prefer_trackers=preferred_trackers(settings), cfg=settings)
 
     return {
         'evaluation': verdict,
@@ -413,10 +415,9 @@ def run_cycle(dry_run: bool = False, force: bool = False) -> Dict[str, Any]:
     still respects the daily ceiling and every guard in `storage_cleanup`. There
     is deliberately no way to bypass those from the UI.
     """
-    from app.settings_manager import SettingsManager
     from app.storage_cleanup import run_cleanup
 
-    settings = SettingsManager()
+    settings = _cfg()
     verdict = evaluate(settings)
 
     result: Dict[str, Any] = {
@@ -465,7 +466,7 @@ def run_cycle(dry_run: bool = False, force: bool = False) -> Dict[str, Any]:
 
     if dry_run:
         from app.storage_cleanup import plan_cleanup
-        plan = plan_cleanup(target, prefer_trackers=prefer, require_qbit=True)
+        plan = plan_cleanup(target, prefer_trackers=prefer, cfg=settings)
         result['error'] = plan.get('error')
         result['freed_bytes'] = plan.get('planned_bytes', 0)
         result['freed_preferred_bytes'] = plan.get('preferred_bytes', 0)
@@ -478,9 +479,8 @@ def run_cycle(dry_run: bool = False, force: bool = False) -> Dict[str, Any]:
         ]
         return result
 
-    # require_qbit: no qBittorrent, no delete (test-install downloads, see
-    # storage_cleanup.test_install_names).
-    outcome = run_cleanup(target, prefer_trackers=prefer, require_qbit=True)
+    # Through qBittorrent (deleteFiles=true) only; no qBittorrent or no Plex, no delete.
+    outcome = run_cleanup(target, prefer_trackers=prefer, cfg=settings)
     if not outcome.get('success'):
         result['error'] = outcome.get('error') or 'cleanup failed'
         return result
@@ -632,6 +632,8 @@ def get_status() -> Dict[str, Any]:
     _hydrate_status()
     with _lock:
         out = dict(_last_status)
+    from app import storage_cleanup
+    out['running'] = bool(out['running'] or storage_cleanup.running())
     try:
         # allow_fetch=False: serve the scheduler's cached pending figure rather
         # than making the settings card wait on torrents/info.
@@ -679,8 +681,7 @@ def _scheduler_loop() -> None:
     while True:
         interval = _DEFAULT_CHECK_MINUTES * 60
         try:
-            from app.settings_manager import SettingsManager
-            settings = SettingsManager()
+            settings = _cfg()
             interval = check_interval_seconds(settings)
             if enabled(settings):
                 _guarded()

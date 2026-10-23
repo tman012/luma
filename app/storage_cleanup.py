@@ -1,497 +1,433 @@
 """
-storage_cleanup — downloads-folder disk usage + oldest-first space reclaim.
+storage_cleanup — downloads-folder disk usage + oldest-first space reclaim, through qBittorrent.
 
-Backs the compact-home storage pill:
+Backs the Home storage pill and the Downloads guard:
     GET  /api/storage/downloads          -> free/used/total snapshot
-    POST /api/storage/downloads/cleanup  -> permanently delete oldest entries
+    POST /api/storage/downloads/cleanup  -> permanently delete the oldest downloads
                                             until `target_bytes` is reclaimed
 
-Deletion is PERMANENT — there is no trash/undo. Guards, applied in order:
-  * only paths inside DOWNLOADS_ROOT are ever considered (realpath-checked;
-    symlinks are unlinked, never followed out of the tree)
-  * qBittorrent staging dirs ("incomplete"/"complete") and dotfiles are skipped
-  * entries newer than MIN_AGE_HOURS are skipped — an in-flight download or one
-    the auto-renamer has not imported yet
-  * entries backing an UNFINISHED qBittorrent torrent are skipped, matched by
-    name so container path mapping can't produce a false negative
+v260 (PM): ported from prod 1b4ea74 to the test install, whose downloads folder is mounted read-only.
+Nothing here deletes a file itself: every delete is qBittorrent's torrents/delete with deleteFiles=true, so
+only data qBittorrent tracks can go (files qBittorrent doesn't know about are out of scope). The unit is a
+download: every torrent whose data sits at the same path (a cross-seed is one unit, deleted together).
 
-Sizing/ordering treats each TOP-LEVEL entry as one unit: a torrent folder is
-deleted whole, and its age is the NEWEST mtime anywhere inside it (so a folder
-with recent activity is never mistaken for an old one).
+Deletion is PERMANENT. A download is a candidate only when all of these hold, for every torrent in it:
+  * qBittorrent can be read (if not, nothing is deleted: QBIT_UNREADABLE)
+  * finished: progress 1 and not in a busy state (tracker_files.BUSY_STATES)
+  * in scope: every finished torrent ('all', the default) or only the ones this install added
+  * its data, as Luma sees the path (Library paths' path map), is inside the guard's folder and inside no
+    library folder
+  * finished at least `min_age_hours` ago (prod's 48 h), and seeded and shared enough when those are on
+  * imported: Luma's movie mover or TV importer has filed it, or Luma never tracked it (prod's own grabs,
+    which prod's importer handles, as prod did). Waiting, mid-import, failed or refused imports stay.
+  * Plex isn't playing it (read-only /status/sessions, matched by folder or file name); if Plex is set up
+    but can't be read, nothing is deleted (PLEX_UNREADABLE)
 
-Selection can be biased toward particular trackers via `prefer_trackers`, which
-spends a tracker's back catalogue first and only widens to everything else once
-that tracker is exhausted (see `plan_cleanup`). Attribution comes from
-`tracker_files`; when a preference is asked for and attribution is unavailable,
-the run is refused rather than quietly widened — see `plan_cleanup`'s note.
+Selection (prod's plan_cleanup): oldest first; with preferred trackers, in their order: first downloads
+seeded only on the first tracker, then only on the first two, and so on, then everything else. A cross-seed
+counts for a tracker only when every tracker it is seeded on is a chosen one so far. Selection stops at the
+first download that reaches the target. One run at a time (`_run_lock`).
 """
 
+import logging
 import os
 import shutil
-import logging
+import threading
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+import requests
 
 logger = logging.getLogger(__name__)
 
-# Default reclaim target: 100 GB (binary GiB, matching how free space is shown).
-DEFAULT_TARGET_BYTES = 100 * 1024 ** 3
-
-# Never delete an entry touched more recently than this.
+GIB = 1024 ** 3
+# Prod's defaults; the live values are Downloads guard settings (app/automation/dg_store).
+DEFAULT_TARGET_BYTES = 100 * GIB
 MIN_AGE_HOURS = 48
-
-# qBittorrent staging directories — deleting these breaks in-flight downloads.
-PROTECTED_NAMES = {'incomplete', 'complete', 'temp', '.recycle'}
-
-# Partial-download suffixes written by qBittorrent / other clients.
-PARTIAL_SUFFIXES = ('.!qb', '.part', '.parts', '.tmp', '.downloading')
-
-# Shown on prod and test builds alike, so it names neither install.
-QBIT_UNREADABLE = "Can't reach qBittorrent, so nothing was deleted"
-
-# Hard ceiling on a single run so a bad target can't empty the folder.
 MAX_TARGET_BYTES = 2 * 1024 ** 4  # 2 TiB
 
+QBIT_UNREADABLE = "Can't reach qBittorrent, so nothing was deleted"
+PLEX_UNREADABLE = "Can't reach Plex, so nothing was deleted"
+BUSY_RUN = 'A cleanup is already running'
+DELETE_FAILED = "qBittorrent didn't delete them"
 
-def downloads_root() -> str:
-    """The downloads folder: LUMA_DOWNLOADS_ROOT when set (the same folder the
-    library mover reads, any path), else settings, else Config."""
-    if (os.environ.get('LUMA_DOWNLOADS_ROOT') or '').strip().startswith('/'):
-        from app import file_management as _fm
+_INFO_TIMEOUT = 90
+_run_lock = threading.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Settings and folder
+# ---------------------------------------------------------------------------
+
+def guard_settings() -> Dict[str, Any]:
+    from app.automation import dg_store
+    try:
+        return dg_store.settings()
+    except Exception:                                    # noqa: BLE001 - unreadable reads as prod's defaults
+        logger.exception('storage_cleanup: Downloads guard settings unreadable')
+        return dg_store.defaults()
+
+
+def _media_root() -> str:
+    """media.downloads_root (LUMA_DOWNLOADS_ROOT when set, else settings, else /downloads)."""
+    from app import file_management as _fm
+    if (os.environ.get(_fm.DOWNLOADS_ROOT_ENV) or '').strip().startswith('/'):
         return _fm.downloads_root()
     root = None
     try:
-        from app.settings_manager import SettingsManager
-        root = SettingsManager().get('media.downloads_root')
-    except Exception:
+        from app.settings_manager import SettingsFile      # read as on disk; never rewrites settings.json
+        root = SettingsFile().get('media.downloads_root')
+    except Exception:                                   # noqa: BLE001
         root = None
-    if not root:
-        try:
-            from app.config import Config
-            root = Config.DOWNLOADS_ROOT
-        except Exception:
-            from app import file_management as _fm
-            root = _fm.DEFAULT_DOWNLOADS_ROOT
+    if not isinstance(root, str) or not root.strip().startswith('/'):
+        root = _fm.DEFAULT_DOWNLOADS_ROOT
     return os.path.realpath(root)
 
 
-def usage() -> Dict:
-    """Return a disk-usage snapshot for the downloads filesystem."""
-    root = downloads_root()
+def downloads_root(cfg: Optional[Dict[str, Any]] = None) -> str:
+    """The guard's folder: the Downloads guard Folder setting, else media.downloads_root."""
+    cfg = cfg if cfg is not None else guard_settings()
+    folder = str(cfg.get('folder') or '').strip()
+    return os.path.realpath(folder) if folder.startswith('/') else _media_root()
+
+
+def usage(cfg: Optional[Dict[str, Any]] = None) -> Dict:
+    """Disk-usage snapshot for the downloads filesystem (read-only)."""
+    root = downloads_root(cfg)
     if not os.path.isdir(root):
-        return {
-            'path': root,
-            'available': False,
-            'total_bytes': 0,
-            'used_bytes': 0,
-            'free_bytes': 0,
-        }
+        return {'path': root, 'available': False, 'total_bytes': 0, 'used_bytes': 0, 'free_bytes': 0}
     st = shutil.disk_usage(root)
-    return {
-        'path': root,
-        'available': True,
-        'total_bytes': st.total,
-        'used_bytes': st.used,
-        'free_bytes': st.free,
-    }
+    return {'path': root, 'available': True, 'total_bytes': st.total, 'used_bytes': st.used, 'free_bytes': st.free}
 
 
 # ---------------------------------------------------------------------------
-# Candidate scanning
+# Outside services (each replaced in tests)
 # ---------------------------------------------------------------------------
 
-def _entry_stats(path: str) -> tuple:
-    """Return (size_bytes, newest_mtime) for a file or directory tree."""
+def _session():
+    from app import library_mover
+    if 'settings' not in library_mover._cfg:
+        return None, ''
+    return library_mover._qbit_session(requests.Session)
+
+
+def fetch_torrents() -> Optional[List[Dict[str, Any]]]:
+    """Every torrent qBittorrent lists, or None when it can't be read."""
+    from app import library_mover
+    sess, url = _session()
+    if sess is None:
+        return None
     try:
-        st = os.lstat(path)
-    except OSError:
-        return (0, 0.0)
-
-    if not os.path.isdir(path) or os.path.islink(path):
-        return (st.st_size, st.st_mtime)
-
-    total = 0
-    newest = st.st_mtime
-    for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
-        for name in dirnames + filenames:
-            try:
-                child = os.lstat(os.path.join(dirpath, name))
-            except OSError:
-                continue
-            if not os.path.isdir(os.path.join(dirpath, name)) or os.path.islink(os.path.join(dirpath, name)):
-                total += child.st_size
-            if child.st_mtime > newest:
-                newest = child.st_mtime
-    return (total, newest)
+        r = sess.get(f'{url}/api/v2/torrents/info', timeout=_INFO_TIMEOUT, allow_redirects=False)
+        data = r.json() if r.status_code == 200 else None
+    except (requests.RequestException, ValueError) as e:
+        logger.warning('storage_cleanup: torrents/info failed (%s)', type(e).__name__)
+        data = None
+    finally:
+        library_mover._close(sess)
+    return data if isinstance(data, list) else None
 
 
-def _qbit_snapshot() -> Tuple[Optional[Dict[str, Dict[str, Any]]], Set[str]]:
-    """One qBittorrent read, serving both guards: (attribution, protected names).
-
-    They come from the same payload but are keyed differently on purpose.
-
-    Attribution is keyed strictly on where the data actually lives
-    (``content_path``), because mis-keying it would attribute an entry to a
-    tracker it doesn't belong to and delete the wrong file.
-
-    Protection is keyed on the torrent's ``name`` *as well*, which is broader
-    than the data's real location. That asymmetry is deliberate: an extra
-    protected name can only ever skip a deletion, never cause one, so erring
-    wide here is free while erring wide in attribution is not.
-
-    Attribution is None when qBittorrent is unreachable; protection degrades to
-    an empty set, leaving the mtime guard — which is what the manual pill has
-    always relied on.
-    """
-    from app import tracker_files
-
-    torrents = tracker_files.fetch_torrents()
-    if torrents is None:
-        logger.warning("storage_cleanup: qBittorrent unreachable — relying on age guard only")
-        return None, set()
-
-    protected: Set[str] = set(luma_test_entry_names(torrents))
-    for t in torrents:
-        if not ((t.get('progress') or 0) < 1.0 or t.get('state') in tracker_files.BUSY_STATES):
-            continue
-        for key in ('name', 'content_path', 'root_path'):
-            val = t.get(key)
-            if val:
-                protected.add(os.path.basename(str(val).rstrip('/')))
-
-    return tracker_files.by_entry(torrents), protected
-
-
-def luma_test_entry_names(torrents: List[Dict[str, Any]]) -> Set[str]:
-    """Entry names that hold data of torrents the test install added.
-
-    Production and the test install (LUMA_MINIMAL, :5002) can share one
-    qBittorrent; the test install tags its torrents (app/qbit_owner) and copies
-    them into its own library some time after they finish. Their data is never
-    a cleanup candidate here, finished or not. Only each torrent's own entry is
-    named (the last part of its data path): a category folder that holds it is
-    not, so its other downloads stay cleanable. scan_candidates never offers a
-    folder holding a protected entry whole; it offers that folder's other
-    entries one by one instead.
-    """
-    from app.qbit_owner import is_test_torrent
-
-    names: Set[str] = set()
-    for t in torrents:
-        if not is_test_torrent(t):
-            continue
-        for key in ('name', 'content_path', 'root_path'):
-            val = t.get(key)
-            if not val:
-                continue
-            part = os.path.basename(str(val).replace('\\', '/').rstrip('/'))
-            if part and part not in ('.', '..'):
-                names.add(part)
-    return names
-
-
-HOLD_DEPTH = 4   # how deep a folder is searched for a protected entry
-
-
-def _holds(path: str, protected: Set[str], depth: int = HOLD_DEPTH) -> bool:
-    """True when a protected name sits anywhere within *depth* levels under
-    *path* (a folder). Unreadable means True: never delete what can't be seen."""
-    if not protected or depth <= 0:
-        return depth <= 0 and bool(protected)
-    try:
-        with os.scandir(path) as it:
-            entries = list(it)
-    except OSError:
+def delete_with_files(hashes: List[str]) -> bool:
+    """qBittorrent's torrents/delete with deleteFiles=true for exactly these hashes."""
+    from app import instance, library_mover
+    if not hashes:
         return True
-    for e in entries:
-        if e.name in protected:
-            return True
-    for e in entries:
-        try:
-            if e.is_dir(follow_symlinks=False) and _holds(e.path, protected, depth - 1):
-                return True
-        except OSError:
+    sess, url = _session()
+    if sess is None:
+        return False
+    try:
+        with instance.scoped_delete('downloads_guard', hashes):
+            r = sess.post(f'{url}/api/v2/torrents/delete',
+                          data={'hashes': '|'.join(hashes), 'deleteFiles': 'true'},
+                          timeout=30, allow_redirects=False)
+        return r.status_code == 200
+    except Exception as e:                              # noqa: BLE001 - WritesBlocked, network errors
+        logger.error('storage_cleanup: torrents/delete failed (%s)', type(e).__name__)
+        return False
+    finally:
+        library_mover._close(sess)
+
+
+def plex_playing_files() -> Optional[List[str]]:
+    """File paths Plex is playing now ([] when Plex isn't set up), or None when it can't be read. Read only."""
+    try:
+        from app.settings_manager import SettingsFile
+        s = SettingsFile()
+        url = str(s.get('plex.url') or '').rstrip('/')
+        token = str(s.get('plex.token') or '')
+    except Exception:                                   # noqa: BLE001
+        return None
+    if not url or not token:
+        return []
+    try:
+        r = requests.get(f'{url}/status/sessions', headers={'X-Plex-Token': token, 'Accept': 'application/json'},
+                         timeout=10, allow_redirects=False)
+        if r.status_code != 200:
+            return None
+        mc = (r.json() or {}).get('MediaContainer') or {}
+    except (requests.RequestException, ValueError, AttributeError):
+        return None
+    files: List[str] = []
+    for item in mc.get('Metadata') or []:
+        for media in (item or {}).get('Media') or []:
+            for part in (media or {}).get('Part') or []:
+                f = (part or {}).get('file')
+                if isinstance(f, str) and f:
+                    files.append(f)
+    return files
+
+
+MOVER_IMPORTED = ('done', 'exists')
+TV_OPEN = ('downloading', 'importing')
+
+
+def import_state(h: str, torrent: Dict[str, Any]) -> str:
+    """'imported', 'untracked' (Luma never tracked it), 'pending' (waiting or mid-import) or 'not_imported'."""
+    from app import file_management as fm
+    h = (h or '').lower()
+    job = (fm.load().get('jobs') or {}).get(h)
+    tv_handoff = False
+    if job:
+        st = job.get('state')
+        if st in MOVER_IMPORTED:
+            return 'imported'
+        if st == 'skipped' and job.get('error') == 'tv':
+            tv_handoff = True
+        else:
+            return 'pending' if st == 'waiting' else 'not_imported'
+    try:
+        from app import tv_downloads, tv_store
+        st = tv_downloads.status(h)
+        if st:
+            return 'imported' if st.get('state') == 'imported' else 'pending'
+        with tv_store.connect() as conn:
+            row = conn.execute('SELECT state FROM grabs WHERE hash = ?', (h,)).fetchone()
+    except Exception:                                   # noqa: BLE001 - unreadable: never treat as imported
+        logger.exception('storage_cleanup: TV import state unreadable')
+        return 'pending'
+    if row is not None:
+        state = row[0]
+        return 'imported' if state == 'imported' else 'pending' if state in TV_OPEN else 'not_imported'
+    if tv_handoff or _is_ours(torrent):
+        return 'pending'        # this install's download with no import record: never assume it was filed
+    return 'untracked'
+
+
+def _is_ours(t: Dict[str, Any]) -> bool:
+    from app import qbit_owner, tv_downloads
+    try:
+        return qbit_owner.is_test_torrent(t) or tv_downloads.is_mine(t)
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Candidates
+# ---------------------------------------------------------------------------
+
+def _num(v: Any) -> float:
+    try:
+        return float(v or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _finished(t: Dict[str, Any]) -> bool:
+    from app import tracker_files
+    return _num(t.get('progress')) >= 1.0 and t.get('state') not in tracker_files.BUSY_STATES
+
+
+def _in_use(local: str, playing: List[str]) -> bool:
+    """Plex plays it: the download's folder or file name is a part of a playing file's path."""
+    name = os.path.basename(local.rstrip('/'))
+    if not name:
+        return True
+    for f in playing:
+        if name in f.replace('\\', '/').split('/'):
             return True
     return False
 
 
-def scan_candidates(root: Optional[str] = None,
-                    snapshot: Optional[Tuple] = None) -> List[Dict]:
-    """List deletable top-level entries, oldest first.
-
-    Each candidate: {name, path, size_bytes, mtime, is_dir, trackers,
-    tracker_label, attributed}. `snapshot` lets a caller reuse one qBittorrent
-    read across the scan and its own checks instead of asking twice.
-    """
+def _units(torrents: List[Dict[str, Any]], cfg: Dict[str, Any], root: str, now: float,
+           playing: List[str]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    """Downloads that may be deleted, oldest first, and how many were held back, by reason."""
+    from app import file_management as fm
     from app import tracker_files
-
-    root = root or downloads_root()
-    if not os.path.isdir(root):
-        return []
-
-    attribution, protected = snapshot if snapshot is not None else _qbit_snapshot()
-    cutoff = time.time() - MIN_AGE_HOURS * 3600
-    candidates: List[Dict] = []
-
-    def eligible(name: str) -> bool:
-        return not (name.startswith('.') or name.lower() in PROTECTED_NAMES
-                    or name.lower().endswith(PARTIAL_SUFFIXES) or name in protected)
-
-    entries: List[Tuple[str, str, str]] = []     # (shown name, path, entry name)
-    for name in os.listdir(root):
-        if not eligible(name):
+    store = fm.load()
+    path_map = store.get('path_map') or []
+    libraries = [os.path.realpath(p['path']) for p in store.get('paths') or [] if isinstance(p, dict) and p.get('path')]
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+    for t in torrents:
+        raw = str((t or {}).get('content_path') or '').replace('\\', '/').rstrip('/')
+        if not raw or not t.get('hash'):
             continue
-        path = os.path.join(root, name)
-        if protected and os.path.isdir(path) and not os.path.islink(path) and _holds(path, protected):
-            # A folder (a category, say) holding the test install's data: its
-            # other entries are candidates one by one, never the folder.
-            try:
-                children = os.listdir(path)
-            except OSError:
-                continue
-            for child in children:
-                cpath = os.path.join(path, child)
-                if not eligible(child):
-                    continue
-                if os.path.isdir(cpath) and not os.path.islink(cpath) and _holds(cpath, protected):
-                    continue
-                entries.append((f'{name}/{child}', cpath, child))
-            continue
-        entries.append((name, path, name))
+        local = os.path.normpath(fm.map_path(raw, path_map))
+        groups.setdefault(local, []).append(t)
 
-    for name, path, entry in entries:
-        # Refuse anything that resolves outside the downloads tree.
-        if not os.path.realpath(path).startswith(root + os.sep):
-            continue
+    min_age = cfg['min_age_hours'] * 3600
+    min_seed = cfg['min_seed_hours'] * 3600
+    min_ratio = float(cfg['min_ratio'] or 0)
+    held: Dict[str, int] = {}
+    out: List[Dict[str, Any]] = []
 
-        size, mtime = _entry_stats(path)
-        if mtime > cutoff:
-            continue
-        if size <= 0:
-            continue
+    def hold(why: str) -> None:
+        held[why] = held.get(why, 0) + 1
 
-        record = (attribution or {}).get(entry)
-        trackers = sorted(tracker_files.entry_trackers(record))
-        candidates.append({
-            'name': name,
-            'path': path,
-            'size_bytes': size,
-            'mtime': mtime,
-            'is_dir': os.path.isdir(path) and not os.path.islink(path),
-            'trackers': trackers,
-            # A list, because a cross-seeded entry belongs to more than one.
-            'tracker_label': ' + '.join(tracker_files.label_for(t) for t in trackers)
-                             or ('unknown' if attribution is not None else 'unavailable'),
-            # False for an entry qBittorrent has no torrent for (an orphan the
-            # client forgot) and for one whose announce host isn't recognised.
-            'attributed': bool(trackers) and not (record or {}).get('unclassified'),
+    for local, ts in groups.items():
+        if not local.startswith('/') or local == root or not fm._under(local, root):
+            hold('outside folder')
+            continue
+        if any(fm._under(local, lib) or fm._under(lib, local) for lib in libraries):
+            hold('library')
+            continue
+        if not all(_finished(t) for t in ts):
+            hold('unfinished')
+            continue
+        if cfg['scope'] == 'test_tagged' and not all(_is_ours(t) for t in ts):
+            hold('out of scope')
+            continue
+        done = [_num(t.get('completion_on')) for t in ts]
+        if any(d <= 0 for d in done):
+            hold('unknown age')
+            continue
+        newest = max(done)
+        if now - newest < min_age:
+            hold('too new')
+            continue
+        if min_seed and any(_num(t.get('seeding_time')) < min_seed for t in ts):
+            hold('seed time')
+            continue
+        if min_ratio and any(_num(t.get('ratio')) < min_ratio for t in ts):
+            hold('ratio')
+            continue
+        states = [import_state(str(t['hash']), t) for t in ts]
+        if any(s not in ('imported', 'untracked') for s in states):
+            hold('not imported')
+            continue
+        if _in_use(local, playing):
+            hold('playing')
+            continue
+        keys = [tracker_files.classify(t) for t in ts]
+        out.append({
+            'name': os.path.basename(local),
+            'path': local,
+            'hashes': [str(t['hash']).lower() for t in ts],
+            'size_bytes': int(max(_num(t.get('size')) for t in ts)),
+            'mtime': newest,
+            'trackers': sorted({k for k in keys if k}),
+            'unclassified': any(k is None for k in keys),
+            'tracker_label': ' + '.join(tracker_files.label_for(k) for k in sorted({k for k in keys if k})) or 'unknown',
         })
+    out.sort(key=lambda c: (c['mtime'], c['name']))
+    return out, held
 
-    candidates.sort(key=lambda c: c['mtime'])
-    return candidates
 
+def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, prefer_trackers: Optional[List[str]] = None,
+                 cfg: Optional[Dict[str, Any]] = None, now: Optional[float] = None) -> Dict:
+    """Pick the oldest downloads that together reach `target_bytes` (see the module docs). Deletes nothing."""
+    cfg = cfg if cfg is not None else guard_settings()
+    ceiling = int(cfg['max_run_gb']) * GIB
+    target_bytes = max(0, min(int(target_bytes), ceiling))
+    prefer = []
+    for t in (prefer_trackers if prefer_trackers is not None else cfg['trackers']) or []:
+        t = str(t).strip()
+        if t and t not in prefer:
+            prefer.append(t)
+    base = {'target_bytes': target_bytes, 'planned_bytes': 0, 'entries': [], 'eligible_count': 0, 'short': True,
+            'preferred_available': 0, 'preferred_bytes': 0, 'fallback_bytes': 0, 'held': {}, 'error': None}
 
-def plan_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, root: Optional[str] = None,
-                 prefer_trackers: Optional[List[str]] = None,
-                 snapshot: Optional[Tuple] = None,
-                 require_qbit: bool = True) -> Dict:
-    """Pick the oldest entries that together reach `target_bytes`.
+    torrents = fetch_torrents()
+    if torrents is None:
+        logger.warning('storage_cleanup: qBittorrent unreadable; nothing is deleted')
+        return {**base, 'error': QBIT_UNREADABLE}
+    playing = plex_playing_files()
+    if playing is None:
+        logger.warning('storage_cleanup: Plex sessions unreadable; nothing is deleted')
+        return {**base, 'error': PLEX_UNREADABLE}
 
-    Selection stops at the first entry that meets or exceeds the target, so the
-    final total is >= target (never short by design, unless the folder runs out
-    of eligible entries).
+    root = downloads_root(cfg)
+    candidates, held = _units(torrents, cfg, root, time.time() if now is None else now, playing)
 
-    With `prefer_trackers`, selection runs in two passes: oldest-first through
-    entries belonging *only* to those trackers, then — if the target still isn't
-    met — oldest-first through everything else. So a tracker's back catalogue is
-    spent before anything else is touched, and running that tracker dry widens
-    the net instead of stalling.
-
-    If a preference is asked for but qBittorrent can't be reached, the plan is
-    refused with an `error` rather than falling through to pass two. "Spend the
-    other trackers because this one is empty" and "spend them because I couldn't
-    tell them apart" are different situations that would look identical in the
-    log, and only the first is what a tracker preference asked for.
-    """
-    target_bytes = max(0, min(int(target_bytes), MAX_TARGET_BYTES))
-    prefer = {str(t).strip() for t in (prefer_trackers or []) if str(t).strip()}
-
-    if snapshot is None:
-        snapshot = _qbit_snapshot()
-    attribution = snapshot[0]
-
-    # The unattended guard (require_qbit) deletes nothing while qBittorrent
-    # can't be read: without it, the test install's downloads can't be told
-    # apart from production's, and they may not be copied yet.
-    if require_qbit and attribution is None:
-        return {
-            'target_bytes': target_bytes, 'planned_bytes': 0, 'entries': [],
-            'eligible_count': 0, 'short': True,
-            'preferred_bytes': 0, 'fallback_bytes': 0,
-            'error': QBIT_UNREADABLE,
-        }
-
-    if prefer and attribution is None:
-        return {
-            'target_bytes': target_bytes, 'planned_bytes': 0, 'entries': [],
-            'eligible_count': 0, 'short': True,
-            'preferred_bytes': 0, 'fallback_bytes': 0,
-            'error': 'qBittorrent unreachable — cannot tell which tracker a file '
-                     'belongs to, so a tracker-scoped cleanup was not attempted',
-        }
-
-    candidates = scan_candidates(root, snapshot=snapshot)
-
-    from app import tracker_files
-    if prefer:
-        first = [c for c in candidates
-                 if tracker_files.belongs_only_to(
-                     (attribution or {}).get(c['name']), prefer)]
-        chosen_names = {c['name'] for c in first}
-        second = [c for c in candidates if c['name'] not in chosen_names]
-    else:
-        first, second = candidates, []
+    groups: List[Tuple[str, List[Dict[str, Any]]]] = []
+    taken: set = set()
+    for i in range(len(prefer)):
+        allowed = set(prefer[:i + 1])
+        g = [c for c in candidates if c['path'] not in taken and not c['unclassified'] and c['trackers']
+             and set(c['trackers']) <= allowed]
+        taken.update(c['path'] for c in g)
+        groups.append(('preferred', g))
+    groups.append(('fallback', [c for c in candidates if c['path'] not in taken]))
 
     selected: List[Dict] = []
-    total = 0
-    preferred_bytes = 0
-    for phase, group in (('preferred', first), ('fallback', second)):
+    total = preferred = 0
+    for phase, group in groups:
         for c in group:
             if total >= target_bytes:
                 break
             selected.append({**c, 'phase': phase})
             total += c['size_bytes']
             if phase == 'preferred':
-                preferred_bytes += c['size_bytes']
-
-    return {
-        'target_bytes': target_bytes,
-        'planned_bytes': total,
-        'entries': selected,
-        'eligible_count': len(candidates),
-        'short': total < target_bytes,
-        # Split out so the log can say whether the preference actually covered
-        # the target or the run had to reach past it.
-        'preferred_available': len(first) if prefer else 0,
-        'preferred_bytes': preferred_bytes,
-        'fallback_bytes': total - preferred_bytes,
-        'error': None,
-    }
+                preferred += c['size_bytes']
+    return {**base, 'planned_bytes': total, 'entries': selected, 'eligible_count': len(candidates),
+            'short': total < target_bytes, 'preferred_available': len(taken), 'preferred_bytes': preferred,
+            'fallback_bytes': total - preferred, 'held': held}
 
 
 # ---------------------------------------------------------------------------
 # Deletion
 # ---------------------------------------------------------------------------
 
-def _delete_entry(entry: Dict) -> bool:
-    path = entry['path']
+def run_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES, prefer_trackers: Optional[List[str]] = None,
+                cfg: Optional[Dict[str, Any]] = None) -> Dict:
+    """PERMANENTLY delete the oldest downloads (with their files, through qBittorrent) until
+    `target_bytes` is freed. One run at a time; a second one gets BUSY_RUN."""
+    if not _run_lock.acquire(blocking=False):
+        return {'success': False, 'error': BUSY_RUN, 'freed_bytes': 0, 'deleted_count': 0, 'deleted': [],
+                'failed': [], 'short': True}
     try:
-        if entry['is_dir']:
-            shutil.rmtree(path)
-        else:
-            os.remove(path)
-        return True
-    except Exception as e:
-        logger.error("storage_cleanup: failed to delete %s: %s", path, e)
-        return False
+        return _run(target_bytes, prefer_trackers, cfg if cfg is not None else guard_settings())
+    finally:
+        _run_lock.release()
 
 
-def _forget_torrents(names: List[str]) -> int:
-    """Drop qBittorrent entries whose data we just deleted (files already gone).
-
-    Best-effort: leaving stale entries only makes qBit show "missing files",
-    so a failure here is logged and ignored.
-    """
-    if not names:
-        return 0
-    try:
-        from app.auto_rename import auto_renamer
-        session = auto_renamer.get_authenticated_session()
-        if not session:
-            return 0
-        url = auto_renamer._qbit_settings()[0]
-        resp = session.get(f"{url}/api/v2/torrents/info", timeout=10)
-        if resp.status_code != 200:
-            return 0
-        wanted = set(names)
-        hashes = [
-            t['hash'] for t in resp.json()
-            if t.get('hash') and (
-                t.get('name') in wanted
-                or os.path.basename(str(t.get('content_path') or '').rstrip('/')) in wanted
-            )
-        ]
-        if not hashes:
-            return 0
-        session.post(
-            f"{url}/api/v2/torrents/delete",
-            data={'hashes': '|'.join(hashes), 'deleteFiles': 'false'},
-            timeout=15,
-        )
-        return len(hashes)
-    except Exception as e:
-        logger.warning("storage_cleanup: could not remove qBittorrent entries: %s", e)
-        return 0
+def running() -> bool:
+    return _run_lock.locked()
 
 
-def run_cleanup(target_bytes: int = DEFAULT_TARGET_BYTES,
-                prefer_trackers: Optional[List[str]] = None,
-                require_qbit: bool = True) -> Dict:
-    """PERMANENTLY delete the oldest downloads until `target_bytes` is freed.
-
-    With `prefer_trackers`, spends those trackers' oldest entries first and only
-    widens to the rest once they run out — see `plan_cleanup`.
-
-    Returns before/after usage plus what was removed. Never raises for a single
-    failed delete — it moves on and reports the shortfall.
-    """
-    root = downloads_root()
+def _run(target_bytes: int, prefer_trackers: Optional[List[str]], cfg: Dict[str, Any]) -> Dict:
+    root = downloads_root(cfg)
     if not os.path.isdir(root):
-        return {
-            'success': False,
-            'error': f'Downloads directory not found: {root}',
-        }
-
-    before = usage()
-    plan = plan_cleanup(target_bytes, root, prefer_trackers=prefer_trackers,
-                        require_qbit=require_qbit)
+        return {'success': False, 'error': f'Downloads folder not found: {root}'}
+    before = usage(cfg)
+    plan = plan_cleanup(target_bytes, prefer_trackers, cfg)
     if plan.get('error'):
-        return {'success': False, 'error': plan['error'], 'before': before,
-                'after': before, 'freed_bytes': 0, 'deleted_count': 0,
-                'deleted': [], 'failed': [], 'short': True}
+        return {'success': False, 'error': plan['error'], 'before': before, 'after': before, 'freed_bytes': 0,
+                'deleted_count': 0, 'deleted': [], 'failed': [], 'short': True}
 
     deleted: List[Dict] = []
     failed: List[str] = []
     freed = 0
-    freed_by_phase = {'preferred': 0, 'fallback': 0}
+    by_phase = {'preferred': 0, 'fallback': 0}
     for entry in plan['entries']:
-        if _delete_entry(entry):
-            deleted.append({'name': entry['name'], 'size_bytes': entry['size_bytes'],
-                            'mtime': entry['mtime'],
-                            'tracker_label': entry.get('tracker_label'),
-                            'phase': entry.get('phase', 'preferred')})
+        if delete_with_files(entry['hashes']):
+            deleted.append({'name': entry['name'], 'size_bytes': entry['size_bytes'], 'mtime': entry['mtime'],
+                            'tracker_label': entry.get('tracker_label'), 'phase': entry.get('phase', 'preferred')})
             freed += entry['size_bytes']
-            freed_by_phase[entry.get('phase', 'preferred')] += entry['size_bytes']
+            by_phase[entry.get('phase', 'preferred')] += entry['size_bytes']
         else:
             failed.append(entry['name'])
-
-    forgotten = _forget_torrents([os.path.basename(d['name']) for d in deleted])
-    after = usage()
-
-    logger.info(
-        "storage_cleanup: freed %.1f GB across %d entries "
-        "(%.1f GB preferred + %.1f GB other, target %.1f GB, %d failed, %d qBit entries removed)",
-        freed / 1024 ** 3, len(deleted),
-        freed_by_phase['preferred'] / 1024 ** 3, freed_by_phase['fallback'] / 1024 ** 3,
-        plan['target_bytes'] / 1024 ** 3, len(failed), forgotten,
-    )
-
+    after = usage(cfg)
+    logger.info('storage_cleanup: deleted %d downloads through qBittorrent, %.1f GB '
+                '(%.1f GB chosen trackers + %.1f GB other, target %.1f GB, %d failed)',
+                len(deleted), freed / GIB, by_phase['preferred'] / GIB, by_phase['fallback'] / GIB,
+                plan['target_bytes'] / GIB, len(failed))
     return {
         'success': True,
         'target_bytes': plan['target_bytes'],
         'freed_bytes': freed,
-        'freed_preferred_bytes': freed_by_phase['preferred'],
-        'freed_fallback_bytes': freed_by_phase['fallback'],
+        'freed_preferred_bytes': by_phase['preferred'],
+        'freed_fallback_bytes': by_phase['fallback'],
         'deleted_count': len(deleted),
         'deleted': deleted,
         'failed': failed,

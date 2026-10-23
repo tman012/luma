@@ -295,7 +295,7 @@ def belongs_only_to(record: Optional[Dict[str, Any]], wanted: Set[str]) -> bool:
 # Reporting
 # ---------------------------------------------------------------------------
 
-def summarise() -> Dict[str, Any]:
+def summarise(fetch=None) -> Dict[str, Any]:
     """Per-tracker torrent counts and sizes, plus what went unclassified.
 
     Backs the settings picker, so the trackers offered are the ones actually
@@ -304,7 +304,7 @@ def summarise() -> Dict[str, Any]:
     half: a tracker that has moved to a new announce domain shows up there
     instead of quietly dropping out of its own row.
     """
-    torrents = fetch_torrents()
+    torrents = (fetch or fetch_torrents)()        # v260: the guard passes storage_cleanup.fetch_torrents
     if torrents is None:
         return {'available': False, 'trackers': [], 'unknown_hosts': [],
                 'unclassified_count': 0, 'unclassified_bytes': 0, 'total_count': 0}

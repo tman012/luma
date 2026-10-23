@@ -319,6 +319,41 @@ class scoped_add:
         return False
 
 
+class scoped_delete:
+    """v260 Downloads guard: inside this, on this thread, qBittorrent's torrents/delete may pass the write
+    gate for exactly these hashes with deleteFiles=true, while *job* itself is allowed. Nothing else."""
+
+    def __init__(self, job: str, hashes):
+        self.job, self.hashes = job, frozenset(str(h).lower() for h in hashes)
+
+    def __enter__(self):
+        self.prev = getattr(_scope, 'd', None)
+        _scope.d = (self.job, self.hashes)
+        return self
+
+    def __exit__(self, *exc):
+        _scope.d = self.prev
+        return False
+
+
+def _scoped_delete_ok(request) -> bool:
+    v = getattr(_scope, 'd', None)
+    if not v or not writes_allowed(v[0]) or (request.method or '').upper() != 'POST':
+        return False
+    u = urlsplit(request.url or '')
+    m = _QBIT.search(u.path or '')
+    if not m or m.group(1) != 'delete' or u.query or u.fragment:
+        return False
+    fields = _fields(request)
+    if fields is None or sorted(k for k, _ in fields) != ['deleteFiles', 'hashes']:
+        return False
+    exact = dict(fields)
+    if exact.get('deleteFiles') != 'true':
+        return False
+    asked = {h.strip().lower() for h in str(exact.get('hashes') or '').split('|')}
+    return bool(asked) and '' not in asked and 'all' not in asked and asked <= v[1]
+
+
 def _fields(request) -> Optional[List[Tuple[str, str]]]:
     """A prepared request's form fields in order, duplicates kept (urlencoded or multipart; a file
     part is listed with value None). None: a body we can't read as a form."""
@@ -406,7 +441,8 @@ def install_write_guard() -> bool:
 
         def send(self, request, **kw):
             kind = write_kind(request.method, request.url)
-            if kind and not writes_allowed(kind) and not (kind == 'qbit' and _scoped_ok(request)):
+            if kind and not writes_allowed(kind) and not (kind == 'qbit' and (_scoped_ok(request)
+                                                                             or _scoped_delete_ok(request))):
                 logger.warning('Instance test: blocked %s %s (%s write)', request.method, urlsplit(request.url).path, kind)
                 raise WritesBlocked(f'{kind} writes are off on the test instance')
             return orig(self, request, **kw)
@@ -430,7 +466,7 @@ def uninstall_write_guard() -> None:
 ENDPOINTS = (
     ('/api/movie-night/run', 'movie_night'), ('/api/genre-roulette/run', 'roulette'),
     ('/api/franchise-completer/run', 'franchise_completer'), ('/api/watchlist-digital-dates/run', 'watchlist_digital_dates'),
-    ('/api/downloads-guard/run', 'downloads_guard'), ('/api/storage/downloads/cleanup', 'storage_cleanup'),
+    ('/api/downloads-guard/run', 'downloads_guard'), ('/api/storage/downloads/cleanup', 'downloads_guard'),   # v260: one opt-in for the guard and the pill
     ('/api/collections/refresh', 'movie_collections'),   # v254: What you're missing's Refresh now is DATA_DIR_ONLY
     ('/api/upgrades/auto-grab', 'upgrade_4k'), ('/api/upgrades/batch', 'arr'), ('/api/upgrades/scheduler/trigger', 'upgrade_scheduler'),
     ('/api/automation/trending-watchlist/run', 'trending_watchlist'),
