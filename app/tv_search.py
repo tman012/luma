@@ -1527,7 +1527,15 @@ def tick(now: Optional[float] = None) -> Dict[str, Any]:
     if not _lock.acquire(blocking=False):
         return out
     try:
-        migrate_cadence(now)                         # v256, once
+        try:
+            migrate_cadence(now)                     # v256, once
+        except Exception:                            # noqa: BLE001 - v259: one bad row never blocks every tick
+            logger.exception('TV search: the v256 cadence migration failed; marked done so scheduling and the '
+                             'feed run (episodes keep their search times)')
+            try:
+                tv_store.set_meta(MIGRATED_KEY, str(now))
+            except Exception:                        # noqa: BLE001
+                logger.warning('TV search: could not mark the v256 cadence migration done', exc_info=True)
         if auto_on():                                # v196b: searches first; a long TMDB refresh never delays them
             out['scheduled'] = schedule(now)
             if automation().get('feed_enabled') and now - float(tv_store.get_meta('tv_feed_at') or 0) >= FEED_S:
