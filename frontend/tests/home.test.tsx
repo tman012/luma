@@ -45,8 +45,10 @@ describe('Home', () => {
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
     expect(screen.getByTestId('home-skeleton')).toBeTruthy();
     expect(screen.queryByTestId('home-rails')).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain('/api/home');
+    // v260: the Home row's Storage pill reads /api/storage/downloads too; Home itself asks once.
+    const homeCalls = () => fetchMock.mock.calls.filter(c => String((c as unknown[])[0]).includes('/api/home'));
+    expect(homeCalls()).toHaveLength(1);
+    expect(fetchMock.mock.calls.every(c => /\/api\/(home|storage\/downloads)/.test(String((c as unknown[])[0])))).toBe(true);
     await act(async () => { d.resolve(json(HOME)); });
     await waitFor(() => expect(screen.getByTestId('home-rails')).toBeTruthy());
     expect(screen.queryByTestId('home-skeleton')).toBeNull();

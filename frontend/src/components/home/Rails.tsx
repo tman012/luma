@@ -1,7 +1,7 @@
 /** Phone-first rails on Luma's purple-navy glass. */
 import { img, type Card, type Rail } from './homeApi';
 import { FONT } from '@/components/start/StartUI';
-import { useEffect, useRef } from 'react';
+import { Fragment, useEffect, useRef } from 'react';
 import { scheduleWarm, warmDetail } from '@/services/modalPrefetch';
 import { OwnedOrb, useRailOwnership, type CardOwnership } from './railOwnership';
 import { LONG_PRESS_STYLE, useLongPress } from './useLongPress';
@@ -154,7 +154,7 @@ export function SkeletonRails({ rails = 3 }: { rails?: number }) {
 /** v254: What you're missing (app/daily_missing), a regular Home rail; its cards long-press to dismiss. */
 export const WYM_RAIL_ID = 'what_youre_missing';
 
-export function HomeRails({ cw, rails, onOpen, onDismiss }: { cw: Card[]; rails: Rail[]; onOpen?: (card: Card, el?: HTMLElement | null) => void; onDismiss?: (card: Card) => void }) {
+export function HomeRails({ cw, rails, onOpen, onDismiss, afterFirst }: { cw: Card[]; rails: Rail[]; onOpen?: (card: Card, el?: HTMLElement | null) => void; onDismiss?: (card: Card) => void; afterFirst?: React.ReactNode }) {
   // v181: prod's rule: no orb on all-owned library rails (Continue watching, every Plex library rail);
   // the orb only on mixed rails (Trakt), resolved by prod's batch check.
   const own = useRailOwnership(rails.flatMap(r => r.items).filter(c => c.tmdb_id));
@@ -165,11 +165,16 @@ export function HomeRails({ cw, rails, onOpen, onDismiss }: { cw: Card[]; rails:
           {cw.map(c => <WideCard key={c.key} card={c} onOpen={onOpen} />)}
         </RailRow>
       )}
-      {rails.filter(r => r.items.length > 0).map(r => (
-        <RailRow key={r.id} title={r.title} testId={`rail-${r.id}`} prod={r.id === 'watchlist'}>
+      {/* v260: prod's Home row goes after Continue watching, else after the first rail. */}
+      {cw.length > 0 && afterFirst}
+      {rails.filter(r => r.items.length > 0).map((r, i) => (
+        <Fragment key={r.id}>
+        <RailRow title={r.title} testId={`rail-${r.id}`} prod={r.id === 'watchlist'}>
           {r.id === 'watchlist' ? r.items.map(c => <WatchlistPosterCard key={c.key} card={c} onOpen={onOpen} />) : r.items.map(c => <PosterCard key={c.key} card={c} onOpen={onOpen} own={c.tmdb_id && !c.label && !c.key.startsWith('watchlist-') ? own[c.key] : undefined}
             onLongPress={r.id === WYM_RAIL_ID && r.dismiss && onDismiss ? onDismiss : undefined} />)}
         </RailRow>
+        {cw.length === 0 && i === 0 && afterFirst}
+        </Fragment>
       ))}
     </div>
   );

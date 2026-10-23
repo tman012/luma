@@ -18,6 +18,7 @@ import { KioskHome, useKioskWidth } from '@/components/home/KioskHome';
 import { UserMenu } from '@/components/nav/UserMenu';
 import { openSearch } from '@/components/search/MinimalSearchHost';
 import { HomeSearchR3 } from '@/components/search/HomeSearchR3';
+import { HomePills } from '@/components/home/HomePills';
 
 export function MinimalHomePage() {
   const { authenticated, loading, needsStart, startInProgress, pinUnlock, user, implicit, logout } = useAuth();
@@ -302,18 +303,22 @@ function homeView(data: HomeData | null, down: boolean, retry: () => void, onOpe
     // Tester LOW: /api/home answering {} (or without rails / continue_watching) shows the empty state, not a crash
     const { cw, rails } = homeParts(data);
     const any = cw.length > 0 || rails.some(r => r.items.length > 0);
-    if (any) return <HomeRails cw={cw} rails={rails} onOpen={onOpen} onDismiss={onDismiss} />;
-    return <div style={emptyBox} data-testid="home-empty"><p style={emptyLine}>Nothing here yet</p></div>;
+    if (any) return <HomeRails cw={cw} rails={rails} onOpen={onOpen} onDismiss={onDismiss} afterFirst={<HomePills after />} />;
+    return <><HomePills /><div style={emptyBox} data-testid="home-empty"><p style={emptyLine}>Nothing here yet</p></div></>;
   }
+  // v260: with no rails yet, prod shows its Home row at the top.
   if (data || down) {
     return (
-      <div style={emptyBox} role="alert" data-testid="home-down">
-        <p style={emptyLine}>Can't reach Plex</p>
-        <button type="button" onClick={retry} style={retryBtn}>Retry</button>
-      </div>
+      <>
+        <HomePills />
+        <div style={emptyBox} role="alert" data-testid="home-down">
+          <p style={emptyLine}>Can't reach Plex</p>
+          <button type="button" onClick={retry} style={retryBtn}>Retry</button>
+        </div>
+      </>
     );
   }
-  return <SkeletonRails />;
+  return <><HomePills /><SkeletonRails /></>;
 }
 
 // Centered in the space under the header: one muted line, optional Retry pill.
