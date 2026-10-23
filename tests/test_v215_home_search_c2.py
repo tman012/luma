@@ -9,7 +9,8 @@ HOST = (SRC / 'components' / 'search' / 'MinimalSearchHost.tsx').read_text()
 
 
 def test_kiosk_header_is_logo_and_avatar_only():
-    kiosk = HOME.split('if (kiosk) {', 1)[1].split('return (\n    <div style={page}', 1)[0]
+    # v259: the phone branch (prod 1b4ea74's TopBar) starts at its comment
+    kiosk = HOME.split('if (kiosk) {', 1)[1].split('// v259 (Taylor): the phone header', 1)[0]
     header = kiosk.split('<header', 1)[1].split('</header>', 1)[0]
     assert 'kiosk-logo' in header and 'menu(48)' in header
     assert 'button' not in header and 'kioskSearchBtn' not in HOME and 'headLeft' not in HOME
@@ -18,8 +19,9 @@ def test_kiosk_header_is_logo_and_avatar_only():
 
 
 def test_phone_branch_keeps_round_search_button():
-    phone = HOME.split('return (\n    <div style={page}', 1)[1]
-    assert 'data-testid="search-button"' in phone
+    # v259: the phone search button is prod 1b4ea74's bare 46 px button (no longer the round glass one)
+    phone = HOME.split('// v259 (Taylor): the phone header', 1)[1]
+    assert 'data-testid="search-button"' in phone and 'onClick={openSearch}' in phone
 
 
 def test_pill_is_gone():
