@@ -10,7 +10,9 @@ import {
   type SearchMovie,
   type SearchPerson,
   type SearchResults,
+  TMDB_BUSY_TEXT,
 } from '@/services/searchApi';
+import { tmdbImg } from '@/utils/image';
 
 // ---------------------------------------------------------------------------
 // Search shelf — slides up from bottom like Plex
@@ -27,7 +29,13 @@ const FILTER_PILLS: { id: SearchFilter; label: string }[] = [
   { id: 'people', label: 'People' },
 ];
 
-export function SearchShelf({ onClose, initialQuery }: { onClose: () => void; initialQuery?: string }) {
+/** v261: `onPersonSearch` is prod's Home handler (AuthenticatedHomePage.tsx:854-862), handed to the popups the
+ * shelf opens so a cast tap with only a name still searches (FLAG 2 in luma-qa/v261/search-diff.md). */
+export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
+  onClose: () => void;
+  initialQuery?: string;
+  onPersonSearch?: (name: string, personId?: number) => void;
+}) {
   const [query, setQuery] = useState(initialQuery ?? '');
   const [results, setResults] = useState<SearchResults | null>(null);
   const [loading, setLoading] = useState(false);
@@ -123,10 +131,10 @@ export function SearchShelf({ onClose, initialQuery }: { onClose: () => void; in
           ratingKey: (item.isOwned && rk) ? rk : undefined,
         },
         'search',
-        { searchQuery: query.trim() || undefined },
+        { searchQuery: query.trim() || undefined, ...(onPersonSearch ? { onPersonSearch } : {}) },
       );
     }, 320);
-  }, [handleClose, modalHost, query]);
+  }, [handleClose, modalHost, query, onPersonSearch]);
 
   // Build deduped lists by type
   type ResultEntry =
@@ -174,7 +182,9 @@ export function SearchShelf({ onClose, initialQuery }: { onClose: () => void; in
   }, []);
 
   // Resolve poster/profile image for a result entry
-  const getThumb = (entry: ResultEntry): string | null => {
+  // v261: through tmdbImg so the minimal build loads TMDb art via /api/img/tmdb (a no-op elsewhere).
+  const getThumb = (entry: ResultEntry): string | null => tmdbImg(rawThumb(entry));
+  const rawThumb = (entry: ResultEntry): string | null => {
     if (entry.kind === 'person') {
       const p = entry.item as SearchPerson;
       if (p.profile_url) return p.profile_url;
@@ -190,6 +200,7 @@ export function SearchShelf({ onClose, initialQuery }: { onClose: () => void; in
 
   return (
     <div
+      data-testid="search-shelf"
       style={{
         position: 'fixed', inset: 0, zIndex: 10000,
         background: 'var(--color-kiosk-black)',
@@ -276,7 +287,7 @@ export function SearchShelf({ onClose, initialQuery }: { onClose: () => void; in
         {/* Result count */}
         {!loading && results && query.length >= 2 && (
           <div style={{ padding: '8px 20px 4px', fontSize: 13, color: 'rgba(255,255,255,0.35)' }}>
-            {resultCount} {resultCount === 1 ? 'Result' : 'Results'}
+            {resultCount} {resultCount === 1 ? 'result' : 'results'}
           </div>
         )}
 
@@ -286,7 +297,7 @@ export function SearchShelf({ onClose, initialQuery }: { onClose: () => void; in
           </div>
         )}
         {!loading && resultCount === 0 && query.length >= 2 && (
-          <p style={{ padding: '32px 24px', textAlign: 'center', color: 'rgba(255,255,255,0.35)', fontSize: 15, margin: 0 }}>No results found</p>
+          <p style={{ padding: '32px 24px', textAlign: 'center', color: 'rgba(255,255,255,0.35)', fontSize: 15, margin: 0 }}>{results?.rateLimited ? TMDB_BUSY_TEXT : 'No results found'}</p>
         )}
 
         {!loading && filtered.map((entry, i) => {
@@ -308,6 +319,7 @@ export function SearchShelf({ onClose, initialQuery }: { onClose: () => void; in
             <button
               key={`result-${i}`}
               type="button"
+              data-testid="search-result"
               onClick={() => {
                 if (!isPerson) {
                   handleResultClick(media!);
@@ -373,8 +385,8 @@ export function SearchShelf({ onClose, initialQuery }: { onClose: () => void; in
           );
         })}
 
-        {/* Bottom padding for safe area */}
-        <div style={{ height: 'calc(24px + env(safe-area-inset-bottom, 0px))' }} />
+        {/* End spacer (Luma: no bottom safe-area padding) */}
+        <div style={{ height: 24 }} />
       </div>
     </div>
   );
