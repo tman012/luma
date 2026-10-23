@@ -54,7 +54,7 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     stub();
     view();
     await waitFor(() => screen.getByTestId('downloads-guard'));
-    for (const t of ['Downloads Guard', 'Enabled', 'Floor (GB)', 'Reclaim per run (GB)', 'Check every (minutes)', 'Storage pill amount (GB)',
+    for (const t of ['Downloads Guard', 'Enable Downloads Guard', 'Free-space floor (GB)', 'Reclaim per run (GB)', 'Check every (minutes)', 'Storage pill amount (GB)',
       'Daily limit (GB)', 'Per-run limit (GB)', 'Downloads', 'Keep downloads newer than', '2 days', 'Minimum seed time (hours)', 'Minimum ratio',
       'Delete from these trackers first', 'Folder', 'Preview', 'Clean up now', 'Status', 'Free space', 'Recent activity']) {
       expect(screen.getAllByText(t).length, t).toBeGreaterThan(0);
@@ -63,6 +63,10 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     expect([val('dg-floor'), val('dg-reclaim'), val('dg-interval'), val('dg-pill'), val('dg-daily-value'), val('dg-max-run')])
       .toEqual(['150', '100', '15', '100', '500', '2,048']);
     expect(screen.queryByText(/Minimum age/)).toBeNull();
+    // v262 PM: prod's text, except Clean up now keeps no '(deletes for real)'
+    expect(screen.queryByText('Enabled')).toBeNull();
+    expect(screen.queryByText('Floor (GB)')).toBeNull();
+    expect(screen.queryByText(/deletes for real/)).toBeNull();
     expect(screen.getByTestId('dg-enabled-toggle').getAttribute('aria-checked')).toBe('false');
     expect(screen.getByTestId('dg-seed-toggle').getAttribute('aria-checked')).toBe('false');
     expect(screen.getByTestId('dg-ratio-toggle').getAttribute('aria-checked')).toBe('false');
@@ -238,4 +242,18 @@ describe('v260 Settings > Automation > Downloads guard', () => {
     expect(describeRun({ dry_run: false, triggered: true, error: "Can't reach Plex, so nothing was deleted", freed_bytes: 0, deleted: [], failed: [] }))
       .toBe("Can't reach Plex, so nothing was deleted");
   });
+});
+
+describe('v262 PM: Downloads Guard last-run list titles are prod 1b4ea74', () => {
+  const entry = { name: 'Heat.1995', size_bytes: 40 * GIB, tracker_label: 'IPTorrents', phase: 'preferred' };
+  for (const [dry, title] of [[true, 'Last preview would have deleted'], [false, 'Deleted in the last run']] as const) {
+    it(title, async () => {
+      stub((url) => url.endsWith('/status')
+        ? json({ status: { ...STATUS, last_result: { dry_run: dry, deleted: [entry] } }, log: [] }) : undefined);
+      view();
+      const list = await screen.findByTestId('dg-last-list');
+      expect(list.getAttribute('aria-label')).toBe(title);
+      expect(screen.queryByText(/^Last preview$|^Deleted last time$/)).toBeNull();
+    });
+  }
 });

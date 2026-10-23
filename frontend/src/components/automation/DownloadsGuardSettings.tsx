@@ -386,11 +386,11 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
 
       <div className="gr-grid">
         <section aria-label="Settings" style={{ ...panel, padding: 16, display: 'flex', flexDirection: 'column', gap: 18 }}>
-          <Switch id="dg-enabled" label="Enabled" on={s.enabled} onChange={v => put({ enabled: v })} />
+          <Switch id="dg-enabled" label="Enable Downloads Guard" on={s.enabled} onChange={v => put({ enabled: v })} />
           <div>
             <h4 style={group}>Free space</h4>
             <div className="gr-f2">
-              <Field id="dg-floor" label="Floor (GB)"><NumField id="dg-floor" value={s.min_free_gb} bad={!!bad.min_free_gb} onCommit={v => put({ min_free_gb: v })} /></Field>
+              <Field id="dg-floor" label="Free-space floor (GB)"><NumField id="dg-floor" value={s.min_free_gb} bad={!!bad.min_free_gb} onCommit={v => put({ min_free_gb: v })} /></Field>
               <Field id="dg-reclaim" label="Reclaim per run (GB)"><NumField id="dg-reclaim" value={s.reclaim_gb} bad={!!bad.reclaim_gb} onCommit={v => put({ reclaim_gb: v })} /></Field>
               <Field id="dg-interval" label="Check every (minutes)"><NumField id="dg-interval" value={s.check_interval_minutes} bad={!!bad.check_interval_minutes} onCommit={v => put({ check_interval_minutes: v })} /></Field>
               <Field id="dg-pill" label="Storage pill amount (GB)"><NumField id="dg-pill" value={s.pill_gb} bad={!!bad.pill_gb} onCommit={v => put({ pill_gb: v })} /></Field>
@@ -437,7 +437,7 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
                 entries={preview.rows ?? preview.entries} testid="dg-preview-list" action={preview.rows ? rowAction : undefined} label={rowLabel} />
               : <div data-testid="dg-preview-none" style={{ ...panel, padding: 16, fontSize: 13, color: W70 }}>Nothing to delete</div>
           )}
-          <Entries title={status?.last_result?.dry_run ? 'Last preview' : 'Deleted last time'} entries={status?.last_result?.deleted ?? []} testid="dg-last-list" />
+          <Entries title={status?.last_result?.dry_run ? 'Last preview would have deleted' : 'Deleted in the last run'} entries={status?.last_result?.deleted ?? []} testid="dg-last-list" />
           <Activity log={log} />
         </div>
       </div>
