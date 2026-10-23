@@ -155,6 +155,12 @@ def searches_by_id(type_id: str) -> bool:
     return (get_type(type_id) or {}).get('client') == 'beyondhd'
 
 
+def pages_feed(type_id: str) -> bool:
+    """v256: Torznab/Newznab APIs page by offset, so the feed can page back to the last release seen.
+    The site clients answer one page (their newest) and are never paged."""
+    return (get_type(type_id) or {}).get('client') == 'torznab'
+
+
 def is_rate_strict(type_id: str) -> bool:
     return (get_type(type_id) or {}).get('family') == 'avistaz'
 

@@ -130,6 +130,11 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
         cats = _match_categories(cfg, categories or TV_CATEGORIES)   # v203: the movie scanner passes its own
         if not cats:
             continue
+        if purpose == 'feed' and not interactive:      # v256: paged back to the last release seen
+            got, st = query_feed(cfg, now, categories, section)
+            items += got
+            statuses += st
+            continue
         capped = tv_budget.capped(cfg)
         bg_manual = purpose == MANUAL_BACKGROUND        # v185: the owner's click, past its burst (guard background bucket)
         # v196c (Taylor): post-air searches every 15 min for 6 h need only the daily cap, not a 3 h slot
@@ -168,6 +173,113 @@ def query_trackers(query: str, purpose: str, sid: Optional[int], interactive: bo
         _log(cfg, purpose, sid, query, len(got), 'ok', now, section)
     engine.tokens.flush()
     return items, statuses
+
+
+#: v256 (PM, Sonarr's RSS sync): a feed poll pages back (Torznab/Newznab offset) until it reaches the last
+#: release it saw on that tracker, at most FEED_MAX_PAGES pages of LIMIT. A site tracker answers one page.
+FEED_MAX_PAGES = 10
+
+
+def _row_mark(r: Dict[str, Any]) -> Tuple[str, Optional[float]]:
+    """A raw release's identity for the feed's last-seen marker: a hash of its guid or link (never the link
+    itself, which can carry a passkey) and its publish time when the tracker gave one."""
+    import hashlib
+    from email.utils import parsedate_to_datetime
+    ident = str(r.get('guid') or r.get('download_url') or r.get('magnet_url') or r.get('title') or '')
+    ts: Optional[float] = None
+    pub = str(r.get('pub_date') or '').strip()
+    if pub:
+        when: Optional[dt.datetime] = None
+        try:
+            when = parsedate_to_datetime(pub)
+        except (TypeError, ValueError, IndexError, OverflowError):
+            try:
+                when = dt.datetime.fromisoformat(pub.replace('Z', '+00:00'))
+            except ValueError:
+                when = None
+        if when is not None:
+            if when.tzinfo is None:                     # '-0000' or no zone: UTC, never the box's zone
+                when = when.replace(tzinfo=dt.timezone.utc)
+            ts = when.timestamp()
+    return hashlib.sha256(ident.encode('utf-8')).hexdigest()[:32], ts
+
+
+def _feed_mark_key(cfg: Dict[str, Any], section: str) -> str:
+    return f"{section}_feed_last:{cfg['id']}"
+
+
+def _reached(raw: List[Dict[str, Any]], last: Dict[str, Any]) -> bool:
+    """True once a page holds the last release seen (same guid), or one published at or before it."""
+    lts = last.get('ts')
+    for r in raw:
+        h, ts = _row_mark(r)
+        if h == last.get('id'):
+            return True
+        if lts is not None and ts is not None and ts <= float(lts):
+            return True
+    return False
+
+
+def query_feed(cfg: Dict[str, Any], now: float, categories: Optional[List[int]] = None,
+               section: str = 'tv') -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """v256: one tracker's feed poll (guard purpose 'feed': no cap, back-off still applies), paged back to
+    the last release seen there (tracker_types.pages_feed; FEED_MAX_PAGES). The first poll reads one page.
+    When the pages run out before that release, the gap is logged: releases in between may be missed
+    until a search finds them. Returns (items, statuses) like query_trackers."""
+    from app import tracker_types
+    from app.tracker_search import TrackerError, TrackerSkipped, _match_categories, _secret_values, get_search, search_status
+    engine = get_search()
+    cats = _match_categories(cfg, categories or TV_CATEGORIES)
+    if not cats:
+        return [], []
+    mkey = _feed_mark_key(cfg, section)
+    try:
+        last = json.loads(tv_store.get_meta(mkey) or 'null')
+    except ValueError:
+        last = None
+    if not isinstance(last, dict):
+        last = None
+    pages = FEED_MAX_PAGES if tracker_types.pages_feed(cfg.get('type')) else 1
+    raw_all: List[Dict[str, Any]] = []
+    reached = last is None
+    page, cut = 0, ''
+    while page < pages:
+        try:
+            raw = engine.search_one(cfg, '', cats, LIMIT, False, purpose='feed',
+                                    **({'offset': page * LIMIT} if page else {}))
+        except (TrackerSkipped, TrackerError) as e:
+            if not page:
+                _log(cfg, 'feed', None, '', 0, 'skipped' if isinstance(e, TrackerSkipped) else 'failed', now, section)
+                return [], [{'id': cfg['id'], 'name': cfg['name'], 'status': search_status(e)}]
+            cut = search_status(e)
+            break
+        raw_all += raw
+        page += 1
+        if not reached and _reached(raw, last):
+            reached = True
+        if reached or len(raw) < LIMIT:
+            break
+    seen, uniq = set(), []
+    for r in raw_all:
+        h = _row_mark(r)[0]
+        if h not in seen:
+            seen.add(h)
+            uniq.append(r)
+    gap = not reached and bool(last) and bool(raw_all) and (bool(cut) or page >= pages)
+    if gap:
+        logger.warning('%s feed for tracker %s (id %s) did not reach the last release seen (%d page(s)%s): '
+                       'releases in between may be missed', 'Movie' if section == 'movies' else 'TV',
+                       cfg['name'], cfg['id'], page, f', stopped: {cut}' if cut else '')
+    if uniq:
+        newest = max(uniq, key=lambda r: _row_mark(r)[1] or 0) if any(_row_mark(r)[1] for r in uniq) else uniq[0]
+        h, ts = _row_mark(newest)
+        if not last or ts is None or last.get('ts') is None or ts >= float(last['ts']):
+            tv_store.set_meta(mkey, json.dumps({'id': h, 'ts': ts}))
+    sv = _secret_values(cfg)
+    items = [it for it in (engine.to_item(cfg, r, sv) for r in uniq) if it]
+    _log(cfg, 'feed', None, '', len(items), 'ok', now, section)
+    engine.tokens.flush()
+    return items, [{'id': cfg['id'], 'name': cfg['name'], 'status': 'ok', 'pages': page, 'gap': gap}]
 
 
 # ------------------------------------------------------------------ what is wanted

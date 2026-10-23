@@ -186,7 +186,8 @@ def parse_torznab(root: ET.Element, protocol: str, limit: int) -> List[Dict[str,
     return out
 
 
-def torznab_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id=''):
+def torznab_search(cfg, query, categories, limit, request: Request = http_request, imdb_id='', tmdb_id='',
+                   offset: int = 0):
     q, imdb = _split_imdb(query, imdb_id)
     kind = media_kind(categories)
     t = 'search'
@@ -196,7 +197,8 @@ def torznab_search(cfg, query, categories, limit, request: Request = http_reques
         t = 'tvsearch'
     params = _torznab_params(cfg, t=t, q=q or None, cat=','.join(str(c) for c in categories),
                              limit=min(int(limit), SEARCH_LIMIT_MAX), extended=1,
-                             imdbid=imdb[2:] if imdb and t != 'search' else None)
+                             imdbid=imdb[2:] if imdb and t != 'search' else None,
+                             offset=int(offset) if offset and int(offset) > 0 else None)
     if imdb and t == 'search':
         params['q'] = ' '.join(x for x in (q, imdb) if x)
     proto = (tt.get_type(cfg.get('type')) or {}).get('protocol', 'torrent')
@@ -888,7 +890,13 @@ def test(cfg: Dict[str, Any], request: Request = http_request) -> None:
 
 def search(cfg: Dict[str, Any], query: str, categories: List[int], limit: int = 100,
            request: Request = http_request, imdb_id: str = '', tmdb_id: str = '',
-           media_type: str = '') -> List[Dict[str, Any]]:
+           media_type: str = '', offset: int = 0) -> List[Dict[str, Any]]:
+    """*offset* (v256, feed paging) is sent only to clients that page by offset (tracker_types.pages_feed)."""
+    if offset:
+        if not tt.pages_feed(cfg['type']):
+            raise TrackerError('response')
+        return torznab_search(cfg, query, categories, limit, request, imdb_id=imdb_id, tmdb_id=tmdb_id,
+                              offset=offset)
     if (tt.get_type(cfg['type']) or {}).get('client') == 'beyondhd':
         return beyondhd_search(cfg, query, categories, limit, request, imdb_id=imdb_id, tmdb_id=tmdb_id,
                                media_type=media_type)

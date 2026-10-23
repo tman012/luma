@@ -306,8 +306,10 @@ class TrackerSearch:
 
     def search_one(self, cfg: Dict[str, Any], query: str, categories: List[int], limit: int,
                    interactive: bool, imdb_id: str = '', tmdb_id: str = '', media_type: str = '',
-                   refresh: bool = False, purpose: Optional[str] = None) -> List[Dict[str, Any]]:
+                   refresh: bool = False, purpose: Optional[str] = None, offset: int = 0) -> List[Dict[str, Any]]:
         """Guarded, cached search of one tracker; raw client results.
+        v256: a feed poll (purpose 'feed') is never answered from either cache (each poll must see the
+        tracker's newest releases), and *offset* pages a Torznab/Newznab feed back.
         Raises TrackerSkipped (guard) or TrackerError (the tracker failed).
         A background search with a *purpose* ('tv') is also held to that
         purpose's budget in the guard (every page it sends is counted).
@@ -320,14 +322,15 @@ class TrackerSearch:
         if not tt.searches_by_id(cfg.get('type')):
             tmdb_id, media_type = '', ''
         ckey = (cfg['id'], (query or '').strip().lower(), tuple(categories), imdb_id or '', int(limit),
-                str(tmdb_id or ''), media_type or '')
+                str(tmdb_id or ''), media_type or '', int(offset or 0))
         nkey = (cfg['id'], query or '', tuple(categories), imdb_id or '', int(limit),
-                str(tmdb_id or ''), media_type or '')
-        ttl = TTL_INTERACTIVE if interactive else TTL_BACKGROUND
+                str(tmdb_id or ''), media_type or '', int(offset or 0))
+        live = purpose == 'feed'
+        ttl = 0 if live else TTL_INTERACTIVE if interactive else TTL_BACKGROUND
         now = time.time()
         with self._cache_lock:
             neg = self._neg_store()
-            if refresh:
+            if refresh or live:
                 neg.pop(nkey, None)
             else:
                 ts = neg.get(nkey)
@@ -336,7 +339,7 @@ class TrackerSearch:
                     return []
                 if ts is not None:
                     neg.pop(nkey, None)
-            hit = self._cache.get(ckey)
+            hit = None if live else self._cache.get(ckey)
         if hit and now - hit[0] < ttl:
             logger.info('Tracker %s (id %s) search: cached answer, %d results', cfg['name'], cfg['id'], len(hit[1]))
             return hit[1]
@@ -373,7 +376,8 @@ class TrackerSearch:
             try:
                 with scope:
                     items = tracker_clients.search(cfg, query, categories, limit, charged, imdb_id=imdb_id,
-                                                   tmdb_id=str(tmdb_id or ''), media_type=media_type or '')
+                                                   tmdb_id=str(tmdb_id or ''), media_type=media_type or '',
+                                                   offset=int(offset or 0))
             except tracker_clients.OutOfBudget as e:
                 self._log_steps(cfg, tracker_clients.last_stats())
                 self._log_once((gk, 'skip'), int(time.time() // 900),
@@ -420,7 +424,7 @@ class TrackerSearch:
         # time budget cut short, is not a clean "nothing here": never cached.
         chain_clean = (not any(x.get('error') for x in (st.get('steps') or []))
                        and not st.get('stopped'))
-        if not items and not st.get('rows') and chain_clean:
+        if not items and not st.get('rows') and chain_clean and not live:
             # Signed in (no auth error) and zero raw rows: remember it briefly.
             with self._cache_lock:
                 neg = self._neg_store()
@@ -428,7 +432,7 @@ class TrackerSearch:
                 if len(neg) > CACHE_MAX:
                     for k, _ in sorted(neg.items(), key=lambda kv: kv[1])[:100]:
                         neg.pop(k, None)
-        if items:          # an empty answer is never cached as a positive one
+        if items and not live:          # an empty answer is never cached as a positive one
             with self._cache_lock:
                 self._cache[ckey] = (time.time(), items)
                 if len(self._cache) > CACHE_MAX:
