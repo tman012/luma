@@ -80,6 +80,8 @@ TEST_DEFAULT_ALLOWED: FrozenSet[str] = frozenset({'mover', 'tv_link', 'tv_import
 DATA_DIR_ONLY: Dict[str, str] = {
     'daily_missing': "What you're missing pool (reads Plex, Trakt, TMDb and OMDb; writes only "
                      "what_youre_missing_*.json in the data dir)",
+    'home_trakt_rails': "Home's Trakt rails warm-up (reads Trakt, TMDb and OMDb; writes only "
+                        "home_trakt_rails.json in the data dir)",
 }
 
 

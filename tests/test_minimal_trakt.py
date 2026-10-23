@@ -22,7 +22,9 @@ def minimal(test_app, monkeypatch, tmp_path):
     old = dict(home_rails._cfg)
     home_rails._cfg['get_plex'] = lambda: fake
     home_rails.save_prefs({'order': [], 'hidden': []})
+    home_rails.clear_trakt_last()           # v263: saved Trakt cards (memory and disk) never cross tests
     yield test_app
+    home_rails.clear_trakt_last()
     home_rails._cfg.update(old)
     try:
         home_rails._prefs_path().unlink()

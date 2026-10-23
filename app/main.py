@@ -680,7 +680,7 @@ def start_services(app_instance):
     # LUMA_MINIMAL=1: no caches, automations, schedulers or tunnel; only the
     # library search index (it reads Plex, and TMDB only with a Connectors key).
     if _minimal.enabled():
-        logger.warning('LUMA_MINIMAL is set: background threads are NOT started (except the search index, the library mover, the TV rescan and What you\'re missing)')
+        logger.warning('LUMA_MINIMAL is set: background threads are NOT started (except the search index, the library mover, the TV rescan, What you\'re missing and the Trakt rails warm-up)')
         if not skip_bg:
             try:
                 fast_search_index.start()
@@ -707,6 +707,13 @@ def start_services(app_instance):
                 start_daily_missing_thread()
             except Exception as e:
                 logger.error(f"Failed to start What you're missing: {type(e).__name__}")
+            # v263: Home's Trakt rails warm up after the same startup delay (reads Trakt, TMDb and OMDb, writes
+            # only home_trakt_rails.json in the data dir; instance.DATA_DIR_ONLY)
+            try:
+                from app import home_rails as _home_rails_warm
+                _home_rails_warm.start_trakt_warm()
+            except Exception as e:
+                logger.error(f"Failed to start the Trakt rails warm-up: {type(e).__name__}")
             # v260 Downloads guard: the instance gate decides whether the scheduler runs at all
             # (LUMA_INSTANCE=test: off unless LUMA_TEST_ALLOW names downloads_guard); then each pass
             # does anything only while Settings > Automation > Downloads guard is on.

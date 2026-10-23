@@ -145,9 +145,11 @@ def patched_start(test_app, monkeypatch):
             mock.patch('app.main.tunnel_auto_start') as tunnel, \
             mock.patch('app.library_mover.start') as mover, \
             mock.patch('app.tv_scan.start_scheduler') as tv_rescan, \
+            mock.patch('app.home_rails.start_trakt_warm') as trakt_warm, \
             mock.patch('threading.Thread') as thread:
         yield dict(init_db=init_db, ua_init=ua_init, search=search_start, hero=hero_start,
-                   explore=explore, tunnel=tunnel, thread=thread, mover=mover, tv_rescan=tv_rescan, fakes=fakes)
+                   explore=explore, tunnel=tunnel, thread=thread, mover=mover, tv_rescan=tv_rescan,
+                   trakt_warm=trakt_warm, fakes=fakes)
 
 
 def _started(fakes):
@@ -167,6 +169,7 @@ def test_minimal_mode_starts_no_background_threads(test_app, patched_start, mini
     p['search'].assert_called_once()
     p['mover'].assert_called_once()
     p['tv_rescan'].assert_called_once()
+    p['trakt_warm'].assert_called_once()    # v263: Home's Trakt rails warm-up (gated in home_rails)
     for k in ('hero', 'explore', 'tunnel'):
         p[k].assert_not_called()
     # v254: What you're missing (instance.DATA_DIR_ONLY); v260: the Downloads guard, which the instance gate
@@ -184,6 +187,7 @@ def test_flag_unset_starts_background_threads(test_app, patched_start, monkeypat
     p['search'].assert_called_once()
     p['mover'].assert_not_called()          # production keeps its own auto-rename monitor
     p['tv_rescan'].assert_not_called()      # TV is luma-test only
+    p['trakt_warm'].assert_not_called()     # v263: Home's Trakt rails are minimal-only
     assert sorted(_started(p['fakes'])) == sorted(AUTOMATION_MODULES)
 
 

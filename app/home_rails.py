@@ -18,7 +18,7 @@ import os
 import threading
 import time
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import quote
 
@@ -151,38 +151,87 @@ def trakt_rails() -> List[Dict[str, Any]]:
     return [{'id': rid, 'title': title, 'type': kind, 'source': 'trakt'} for rid, title, kind, _ in TRAKT_RAILS]
 
 
-# Each Trakt rail's last good cards (this process): served when a fetch fails or is still running at the
-# Home deadline, so a Trakt hiccup or a slow cold fetch doesn't empty the rail.
-_trakt_last: Dict[str, List[Dict[str, Any]]] = {}
+# v263: each Trakt rail's cards live on disk (home_trakt_rails.json in the data dir), so a restart or a cold Trakt
+# cache never starts Home from nothing. Fresh for RAIL_FRESH_S (prod's 15-minute Trakt cache); after that the
+# saved cards are still served at once while one background refresh per rail fetches new ones. A rail with no
+# saved cards yet is fetched in the background too: Home waits for it only up to its 6 s budget, and a fetch
+# that misses the budget keeps going and fills the rail for the next load. Cards only; never the client ID.
+RAIL_FRESH_S = 15 * 60
+TRAKT_FILE = 'home_trakt_rails.json'
+WARM_DELAY_S = 8                    # boot: the same startup delay as What you're missing's pool refresher
+
+_trakt_saved: Dict[str, Dict[str, Any]] = {}       # rail id -> {'at': epoch seconds, 'cards': [...]}
+_trakt_state = {'loaded': False, 'gen': 0, 'warm_started': False}
+_trakt_inflight: Dict[str, Future] = {}
+
+
+def _trakt_path():
+    return first_run.data_dir() / TRAKT_FILE
+
+
+def _load_trakt_locked() -> None:
+    if _trakt_state['loaded']:
+        return
+    _trakt_state['loaded'] = True
+    try:
+        raw = json.loads(_trakt_path().read_text())
+    except (FileNotFoundError, ValueError, OSError):
+        return
+    if not isinstance(raw, dict):
+        return
+    for rid, entry in raw.items():
+        if rid not in TRAKT_IDS or not isinstance(entry, dict):
+            continue
+        cards, at = entry.get('cards'), entry.get('at')
+        if isinstance(cards, list) and cards and isinstance(at, (int, float)):
+            _trakt_saved[rid] = {'at': float(at), 'cards': [c for c in cards if isinstance(c, dict)]}
+
+
+def _save_trakt_locked() -> None:
+    p = _trakt_path()
+    tmp = p.with_suffix('.tmp')
+    try:
+        tmp.write_text(json.dumps(_trakt_saved))
+        os.chmod(tmp, 0o600)
+        tmp.replace(p)
+    except OSError as e:
+        logger.warning('Home: Trakt rails not saved (%s)', type(e).__name__)
 
 
 def clear_trakt_last() -> None:
-    """A Connectors save or remove: no old cards survive a changed or removed client ID."""
+    """A Connectors save or remove: no old cards survive a changed or removed client ID (memory and disk); a
+    refresh still running for the old ID is discarded."""
     with _lock:
-        _trakt_last.clear()
+        _trakt_state['gen'] += 1
+        _trakt_state['loaded'] = True
+        _trakt_saved.clear()
+        _trakt_inflight.clear()
+        try:
+            _trakt_path().unlink()
+        except OSError:
+            pass
+
+
+def _entry(rail_id: str) -> Optional[Dict[str, Any]]:
+    with _lock:
+        _load_trakt_locked()
+        got = _trakt_saved.get(rail_id)
+        return {'at': got['at'], 'cards': list(got['cards'])} if got else None
 
 
 def trakt_last(rail_id: str) -> Optional[List[Dict[str, Any]]]:
-    with _lock:
-        got = _trakt_last.get(rail_id)
-    return list(got) if got else None
+    got = _entry(rail_id)
+    return got['cards'] if got else None
 
 
-def trakt_items(rail_id: str) -> List[Dict[str, Any]]:
-    """Cards for a Trakt rail from prod's endpoint output. Tapping one opens the
-    TMDB detail popup (tmdb_id); no Plex rating key. A failed fetch is logged and
-    answers the rail's last good cards (none yet: empty)."""
+def _fetch_cards(rail_id: str) -> List[Dict[str, Any]]:
+    """Cards for a Trakt rail from prod's endpoint output. Tapping one opens the TMDB detail popup (tmdb_id);
+    no Plex rating key. Raises when the fetch fails."""
     fetch = _cfg.get('fetch_trakt')
     kind = next((k for rid, _, k, _ in TRAKT_RAILS if rid == rail_id), None)
     if not fetch or not kind:
         return []
-    try:
-        raw = fetch(rail_id) or []
-    except Exception as e:  # noqa: BLE001 - a rail failing must not break Home
-        last = trakt_last(rail_id)
-        logger.warning('Trakt rail %s failed: %s%s', rail_id, type(e).__name__,
-                       f'; showing its last {len(last)} cards' if last else '')
-        return last or []
+    raw = fetch(rail_id) or []
     if not isinstance(raw, list):
         logger.warning('Trakt rail %s: unexpected answer (%s)', rail_id, type(raw).__name__)
         raw = []
@@ -195,12 +244,113 @@ def trakt_items(rail_id: str) -> List[Dict[str, Any]]:
         out.append({'key': f'tmdb-{kind}-{tmdb_id}', 'type': kind, 'title': str(it.get('title') or ''),
                     'subtitle': str(it.get('year') or ''), 'tmdb_id': tmdb_id,
                     'poster': f'{TMDB_POSTER}{poster}' if isinstance(poster, str) and poster.startswith('/') else None})
-    if out:
-        with _lock:
-            _trakt_last[rail_id] = list(out)
-    elif raw:
+    if not out and raw:
         logger.warning('Trakt rail %s: %d item(s), none with a TMDB id', rail_id, len(raw))
     return out
+
+
+def refresh_trakt(rail_id: str) -> Future:
+    """One background fetch per rail at a time (a second caller gets the same future). Good cards are saved
+    (memory and disk); a failure is logged and keeps the saved cards. The future answers the new cards, or
+    raises the fetch's error."""
+    with _lock:
+        running = _trakt_inflight.get(rail_id)
+        if running is not None and not running.done():
+            return running
+        fut: Future = Future()
+        _trakt_inflight[rail_id] = fut
+        gen = _trakt_state['gen']
+
+    def done() -> None:
+        with _lock:
+            if _trakt_inflight.get(rail_id) is fut:
+                _trakt_inflight.pop(rail_id, None)
+
+    def work():
+        try:
+            cards = _fetch_cards(rail_id)
+        except Exception as e:  # noqa: BLE001 - a rail failing must not break Home
+            last = trakt_last(rail_id)
+            logger.warning('Trakt rail %s failed: %s%s', rail_id, type(e).__name__,
+                           f'; showing its last {len(last)} cards' if last else '')
+            done()
+            fut.set_exception(e)
+            return
+        if cards:
+            with _lock:
+                if _trakt_state['gen'] == gen:                  # not from a client ID removed meanwhile
+                    _load_trakt_locked()
+                    _trakt_saved[rail_id] = {'at': time.time(), 'cards': list(cards)}
+                    _save_trakt_locked()
+        done()
+        fut.set_result(cards)
+
+    threading.Thread(target=work, name=f'trakt-rail-{rail_id}', daemon=True).start()
+    return fut
+
+
+def trakt_for_home(rail_id: str):
+    """(cards, None) when the rail has saved cards (a stale set also starts a background refresh), else
+    (None, future) for the background fetch Home may wait on until its deadline."""
+    got = _entry(rail_id)
+    if got and time.time() - got['at'] < RAIL_FRESH_S:
+        return got['cards'], None
+    fut = refresh_trakt(rail_id)
+    if got:
+        return got['cards'], None
+    return None, fut
+
+
+def trakt_items(rail_id: str) -> List[Dict[str, Any]]:
+    """A Trakt rail's cards, waiting for a fetch when nothing is saved yet. A failed fetch answers the rail's
+    last good cards (none yet: empty)."""
+    cards, fut = trakt_for_home(rail_id)
+    if cards is not None:
+        return cards
+    try:
+        return fut.result()
+    except Exception:  # noqa: BLE001 - logged by refresh_trakt
+        return trakt_last(rail_id) or []
+
+
+def warm_trakt() -> List[str]:
+    """Boot: start a background refresh for each shown Trakt rail with no fresh saved cards."""
+    try:
+        on = bool(_cfg.get('trakt_connected', lambda: False)())
+    except Exception:  # noqa: BLE001
+        on = False
+    if not on or not _cfg.get('fetch_trakt'):
+        return []
+    hidden = set(load_prefs().get('hidden') or [])
+    started = []
+    for rid, _, _, _ in TRAKT_RAILS:
+        got = _entry(rid)
+        if rid in hidden or (got and time.time() - got['at'] < RAIL_FRESH_S):
+            continue
+        refresh_trakt(rid)
+        started.append(rid)
+    if started:
+        logger.info('Home: warming Trakt rails %s', ', '.join(started))
+    return started
+
+
+def start_trakt_warm() -> bool:
+    """Once per process, after WARM_DELAY_S: warm_trakt(). Reads Trakt, TMDb and OMDb and writes only its JSON
+    in the data dir (instance.DATA_DIR_ONLY), like What you're missing's pool refresher."""
+    from app import instance
+    with _lock:
+        if _trakt_state['warm_started'] or not instance.data_dir_only('home_trakt_rails'):
+            return False
+        _trakt_state['warm_started'] = True
+
+    def run():
+        time.sleep(WARM_DELAY_S)
+        try:
+            warm_trakt()
+        except Exception as e:  # noqa: BLE001
+            logger.warning('Home: Trakt warm-up failed: %s', type(e).__name__)
+    threading.Thread(target=run, name='home-trakt-warm', daemon=True).start()
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +527,8 @@ def home():
             return fut.result(timeout=max(0.0, deadline - time.monotonic()))
         except Exception as e:  # noqa: BLE001 - a failed or slow rail is dropped, never fails Home
             last = trakt_last(rid) if source == 'trakt' else None
+            if source == 'trakt' and not isinstance(e, TimeoutError):
+                return last or []                           # a failed Trakt fetch (logged): last cards or empty
             if last:                                        # a slow Trakt fetch: its last good cards
                 logger.info('Home: rail %s still loading (%s); showing its last cards', rid, type(e).__name__ or 'error')
                 return last
@@ -384,10 +536,19 @@ def home():
             logger.info('Home: rail %s dropped (%s)', rid, type(e).__name__ or 'error')
             return None
 
+    def _trakt_future(rid: str) -> Future:
+        # v263: saved cards at once (a stale set refreshes in the background); none saved: the background
+        # fetch, which keeps going past the deadline and fills the rail for the next load
+        cards, fut = trakt_for_home(rid)
+        if fut is None:
+            fut = Future()
+            fut.set_result(cards)
+        return fut
+
     pool = ThreadPoolExecutor(max_workers=min(HOME_MAX_WORKERS, len(libs) + 1))
     try:
         cw = pool.submit(in_app, continue_watching, plex)
-        rails = [(l, pool.submit(in_app, trakt_items, l['id']) if l['source'] == 'trakt'
+        rails = [(l, _trakt_future(l['id']) if l['source'] == 'trakt'
                   else pool.submit(in_app, watchlist_items) if l['source'] == 'watchlist'
                   else pool.submit(in_app, wym_items) if l['source'] == 'wym'
                   else pool.submit(in_app, recently_added, plex, l['id'])) for l in libs]
