@@ -707,6 +707,17 @@ def start_services(app_instance):
                 start_daily_missing_thread()
             except Exception as e:
                 logger.error(f"Failed to start What you're missing: {type(e).__name__}")
+            # v260 Downloads guard: the instance gate decides whether the scheduler runs at all
+            # (LUMA_INSTANCE=test: off unless LUMA_TEST_ALLOW names downloads_guard); then each pass
+            # does anything only while Settings > Automation > Downloads guard is on.
+            if not _AUTOMATIONS_DISABLED:
+                try:
+                    from app.downloads_guard import start_downloads_guard_thread
+                    if _instance.writes_allowed('downloads_guard'):
+                        start_downloads_guard_thread()
+                        logger.info("✅ Downloads guard scheduler started")
+                except Exception as e:
+                    logger.error(f"Failed to start the Downloads guard: {type(e).__name__}")
         return
 
     # Initialize library caches
@@ -4715,9 +4726,12 @@ def update_watchlist_quality_profile(tmdb_id):
 def get_downloads_storage():
     """Free/used/total bytes for the downloads filesystem (compact-home pill)."""
     try:
-        from app.storage_cleanup import usage, DEFAULT_TARGET_BYTES
-        data = usage()
-        data['cleanup_target_bytes'] = DEFAULT_TARGET_BYTES
+        from app.storage_cleanup import GIB, guard_settings, usage
+        cfg = guard_settings()
+        data = usage(cfg)
+        # v260: the pill's amount and minimum age are Downloads guard settings (prod: 100 GB, 48 h)
+        data['cleanup_target_bytes'] = int(cfg['pill_gb']) * GIB
+        data['min_age_hours'] = int(cfg['min_age_hours'])
         return jsonify(data)
     except Exception as e:
         logger.error(f"Error reading downloads storage: {e}")
@@ -4740,11 +4754,13 @@ def cleanup_downloads_storage():
     "sign_in": true; other admins and plain, guest or Plex-approved users 403.
     """
     try:
-        from app.storage_cleanup import run_cleanup, DEFAULT_TARGET_BYTES
+        from app.storage_cleanup import GIB, guard_settings, run_cleanup
         body, bad = _json_object_body()
         if bad is not None:
             return bad
-        target = body.get('target_bytes') or DEFAULT_TARGET_BYTES
+        cfg = guard_settings()
+        pill = int(cfg['pill_gb']) * GIB
+        target = body.get('target_bytes') or pill
         try:
             target = int(target)
         except (TypeError, ValueError):
@@ -4752,7 +4768,8 @@ def cleanup_downloads_storage():
         if target <= 0:
             return jsonify({'success': False, 'error': 'target_bytes must be positive'}), 400
 
-        result = run_cleanup(target, require_qbit=True)
+        # v260: never more than the pill's setting; prod's pill has no tracker preference (oldest first).
+        result = run_cleanup(min(target, pill), prefer_trackers=[], cfg=cfg)
         return jsonify(result), (200 if result.get('success') else 500)
     except Exception as e:
         logger.error(f"Error cleaning up downloads storage: {e}")
@@ -4761,9 +4778,20 @@ def cleanup_downloads_storage():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _dg_read_guard():
+    """v260: on minimal (test) builds the Downloads guard reads are the owner's (Settings > Automation)."""
+    if not _minimal.enabled():
+        return None
+    from app import tv_settings
+    return tv_settings._guard()
+
+
 @app.route('/api/downloads-guard/status')
 def downloads_guard_status():
     """Current free space, the trigger verdict, and the run history."""
+    err = _dg_read_guard()
+    if err:
+        return err
     from app import downloads_guard
     return jsonify({'status': downloads_guard.get_status(),
                     'log': downloads_guard.get_log()})
@@ -4778,9 +4806,12 @@ def downloads_guard_trackers():
     a tracker that has moved domain shows up there rather than silently
     dropping out of its own row.
     """
-    from app import tracker_files
+    err = _dg_read_guard()
+    if err:
+        return err
+    from app import storage_cleanup, tracker_files
     try:
-        return jsonify(tracker_files.summarise())
+        return jsonify(tracker_files.summarise(storage_cleanup.fetch_torrents))
     except Exception as e:
         logger.error(f'Downloads Guard tracker summary failed: {e}', exc_info=True)
         return jsonify({'available': False, 'trackers': [], 'error': str(e)}), 500
@@ -4789,6 +4820,9 @@ def downloads_guard_trackers():
 @app.route('/api/downloads-guard/preview')
 def downloads_guard_preview():
     """What a cleanup would delete right now. Deletes nothing."""
+    err = _dg_read_guard()
+    if err:
+        return err
     from app import downloads_guard
     try:
         return jsonify(downloads_guard.preview())
@@ -4806,6 +4840,9 @@ def downloads_guard_run():
     run needs the signed-in owner (start_flow.require_signed_in_owner). A body
     that isn't a JSON object gets 400 {"error": "Invalid request"}.
     """
+    err = _dg_read_guard()
+    if err:
+        return err
     from app import downloads_guard
     body, bad = _json_object_body()
     if bad is not None:
@@ -21716,6 +21753,8 @@ from app.automation import antic_routes as _antic_routes  # noqa: E402  v253: Se
 app.register_blueprint(_antic_routes.bp)
 from app.automation import wym_routes as _wym_routes  # noqa: E402  v254: What you're missing (rail + Settings > Automation)
 app.register_blueprint(_wym_routes.bp)
+from app.automation import dg_routes as _dg_routes  # noqa: E402  v260: Settings > Automation > Downloads guard
+app.register_blueprint(_dg_routes.bp)
 from app import movie_import as _movie_import  # noqa: E402  v204: movie import and rename (test only)
 app.register_blueprint(_movie_import.bp)
 try:
