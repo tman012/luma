@@ -15,6 +15,8 @@ export interface StorageUsage {
   freeBytes: number;
   /** Default reclaim size the backend will use (bytes). */
   cleanupTargetBytes: number;
+  /** v260: the guard's minimum age; the sheet's "last N hours" (prod: 48). */
+  minAgeHours: number;
 }
 
 export interface CleanupResult {
@@ -38,6 +40,7 @@ interface RawUsage {
   used_bytes?: number;
   free_bytes?: number;
   cleanup_target_bytes?: number;
+  min_age_hours?: number;
 }
 
 const GIB = 1024 ** 3;
@@ -50,6 +53,7 @@ function mapUsage(raw: RawUsage | null | undefined): StorageUsage {
     usedBytes: raw?.used_bytes ?? 0,
     freeBytes: raw?.free_bytes ?? 0,
     cleanupTargetBytes: raw?.cleanup_target_bytes ?? 100 * GIB,
+    minAgeHours: raw?.min_age_hours ?? 48,
   };
 }
 

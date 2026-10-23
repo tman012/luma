@@ -282,7 +282,7 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
                 <p style={{ margin: '0 0 14px', fontSize: 13, lineHeight: 1.5, color: 'rgba(255,255,255,0.65)' }}>
                   This permanently deletes the oldest {targetLabel} of files in your downloads
                   folder. It can't be undone. Unfinished downloads and anything touched in the
-                  last 48 hours are skipped.
+                  last {usage?.minAgeHours ?? 48} hours are skipped.
                 </p>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button
