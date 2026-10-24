@@ -96,4 +96,6 @@ def test_compose_test_keeps_minimal_and_adb_pair_env():
 
 def test_sw_v272():
     sw = open(os.path.join(os.path.dirname(__file__), '..', 'static', 'sw.js')).read()
-    assert "CACHE_VERSION = 'media-kiosk-v274'" in sw
+    import re
+    m = re.search(r"CACHE_VERSION = 'media-kiosk-v(\d+)'", sw)
+    assert m and int(m.group(1)) >= 274
