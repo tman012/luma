@@ -70,6 +70,10 @@ ALLOWED_PATHS = frozenset({
     '/api/storage/downloads', '/api/storage/downloads/cleanup',
     '/api/downloads-guard/status', '/api/downloads-guard/trackers', '/api/downloads-guard/preview',
     '/api/downloads-guard/run', '/api/downloads-guard/keep', '/api/downloads-guard/unkeep', '/api/settings/automation/downloads-guard',
+    # v267 Activity (Home pill → ActivitySheet): live queue + last-30 history from the
+    # Connectors qBittorrent client (same settings keys as Downloads Guard / storage cleanup).
+    # Remove stays gated by instance.writes_allowed('qbit') and the owner session check.
+    '/api/downloads/queue', '/api/downloads/history',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/', '/settings/',
                     '/api/trackers/', '/api/settings/library-paths/',
@@ -150,6 +154,8 @@ def enabled() -> bool:
 _ROOMS_LEGACY = re.compile(r'^/api/rooms/[^/]+/(?:devices/[^/]+/)?(?:test|pair)/?$')
 # v265: prod's Rooms sheet (Now Playing: a Plex read) and its remote (the route checks the signed-in owner).
 _ROOM_REMOTE = re.compile(r'^/api/room/[^/]+/remote$')
+# v267: Activity delete/remove torrent (route checks owner + instance qbit write).
+_DOWNLOADS_REMOVE = re.compile(r'^/api/downloads/remove/[^/]+/?$')
 
 
 def path_allowed(path: str, method: str = 'GET') -> bool:
@@ -160,6 +166,8 @@ def path_allowed(path: str, method: str = 'GET') -> bool:
         return method in ('GET', 'HEAD')
     if _ROOM_REMOTE.match(path):
         return method == 'POST'
+    if _DOWNLOADS_REMOVE.match(path):
+        return method in ('DELETE', 'POST')
     if _playback_allowed(path, method):
         return True
     if path.startswith(DETAIL_READ_PREFIXES):

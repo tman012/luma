@@ -18,6 +18,8 @@ function stub(over: Record<string, unknown> = {}) {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     calls.push({ url, init });
     if (String(url).includes('/api/storage/downloads/cleanup')) return json({ error: 'Sign in', sign_in: true }, 401);
+    if (String(url).includes('/api/downloads/queue')) return json({ downloads: [] });
+    if (String(url).includes('/api/downloads/history')) return json({ history: [] });
     if (String(url).includes('/api/storage/downloads')) {
       return json({ path: '/downloads', available: true, total_bytes: 4000 * GIB, used_bytes: 3588 * GIB, free_bytes: 412 * GIB,
         cleanup_target_bytes: 100 * GIB, min_age_hours: 48, ...over });
@@ -36,9 +38,9 @@ describe('v260 phone Home button row (prod 1b4ea74 NavPills)', () => {
     const row = screen.getByTestId('home-pills');
     await waitFor(() => within(row).getByText('412 GB free'));
     const labels = within(row).getAllByRole('button').map(b => b.textContent);
-    expect(labels).toEqual(['412 GB free', 'TV Calendar', 'Rooms']);
-    expect(HOME_PILLS.map(p => p.id)).toEqual(['tv-calendar', 'rooms']);
-    for (const gone of ['Latest', 'Activity', 'Luma AI', 'Library', 'Watchlist', 'Collections', 'Upgrades']) {
+    expect(labels).toEqual(['412 GB free', 'Activity', 'TV Calendar', 'Rooms']);
+    expect(HOME_PILLS.map(p => p.id)).toEqual(['activity', 'tv-calendar', 'rooms']);
+    for (const gone of ['Latest', 'Luma AI', 'Library', 'Watchlist', 'Collections', 'Upgrades']) {
       expect(within(row).queryByText(gone)).toBeNull();
     }
   });
