@@ -363,7 +363,7 @@ export function ServicesTab() {
           }
         >
           <FormField label="URL" path="homeassistant.url" placeholder="http://homeassistant.local:8123" />
-          <FormField label="Access token" path="homeassistant.access_token" type="password" placeholder="Long-lived access token" />
+          <FormField label="Access Token" path="homeassistant.access_token" type="password" placeholder="Long-lived access token" />
         </SettingsCard>
       ),
     },
