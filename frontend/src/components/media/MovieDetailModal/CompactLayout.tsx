@@ -1,4 +1,3 @@
-import { isMinimal } from '@/minimal';
 import { sheetBase } from '@/utils/posterColors';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
@@ -137,8 +136,8 @@ export function CompactLayout(props: MovieModalViewProps) {
   // Phone: the sheet stays off-screen until it can show fully composed
   // (details, backdrop, logo and colors, or the 600 ms cap), then slides in.
   const composed = !!error || (!loading && !!detail && titleState !== 'hold');
-  // v207 (PM): on test the phone movie sheet is plain navy, as prod shows; no poster tint, no TMDb sample
-  const ultraBlurColors = isMinimal() ? null : paletteColors;
+  // v276 (Taylor): restore prod colorblur on phone movie sheets — never flatten to navy on minimal.
+  const ultraBlurColors = paletteColors;
   const sheetBg = sheetBase(ultraBlurColors) ?? '#15102a';
   useEffect(() => {
     if (composed) window.dispatchEvent(new Event(REVEALED_EVENT));

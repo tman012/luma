@@ -183,7 +183,7 @@ _CHECK_INTERVAL_SECONDS = 5 * 60
 _DEFAULT_HOUR = 3
 _DEFAULT_MINUTE = 0
 _DEFAULT_GENRES_PER_NIGHT = 3
-_DEFAULT_MOVIES_PER_NIGHT = 2
+_DEFAULT_MOVIES_PER_NIGHT = 3  # v276 (Taylor/prod): one movie from each of 3 genres
 # No TMDb rating floor at all. It was 6.5, which demonstrably excluded famous,
 # well-regarded films (The Dictator, TMDb 6.24 / IMDb 6.5 with 363k votes; Safe
 # House, TMDb 6.49 / IMDb 6.7 with 249k votes) — but the reason it is now zero

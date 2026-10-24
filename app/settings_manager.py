@@ -471,6 +471,23 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
             "quality_profile_id":     {"type": "integer", "default": 0,     "sensitive": False, "description": "Radarr quality profile to use for 4K grabs (must accept 2160p Remux)", "min": 0},
             "plex_4k_section_id":     {"type": "integer", "default": 0,     "sensitive": False, "description": "Plex library section that contains your 4K movies — movies in this section are skipped", "min": 0},
         },
+        "genre_roulette": {
+            "_type": "object",
+            "enabled":              {"type": "boolean", "default": False, "sensitive": False, "description": "Nightly Genre Roulette: one well-known film from each spun genre"},
+            "hour":                 {"type": "integer", "default": 3,     "sensitive": False, "description": "Hour (0-23, server clock) for nightly Genre Roulette run", "min": 0, "max": 23},
+            "minute":               {"type": "integer", "default": 0,     "sensitive": False, "description": "Minute (0-59) for nightly Genre Roulette run", "min": 0, "max": 59},
+            "genres_per_night":     {"type": "integer", "default": 3,     "sensitive": False, "description": "How many genres to spin each night", "min": 1, "max": 18},
+            "movies_per_night":     {"type": "integer", "default": 3,     "sensitive": False, "description": "How many movies to grab each night (prod: one per spun genre)", "min": 1, "max": 20},
+            "year_from":            {"type": "integer", "default": 0,     "sensitive": False, "description": "Earliest release year (0 = this year - 40)", "min": 0, "max": 2100},
+            "year_to":              {"type": "integer", "default": 0,     "sensitive": False, "description": "Latest release year (0 = this year - 3)", "min": 0, "max": 2100},
+            "min_votes":            {"type": "integer", "default": 800,   "sensitive": False, "description": "TMDb votes prefilter", "min": 0, "max": 1000000},
+            "imdb_min_votes":       {"type": "integer", "default": 120000,"sensitive": False, "description": "IMDb vote fame floor", "min": 0, "max": 10000000},
+            "imdb_min_rating":      {"type": "number",  "default": 0.0,   "sensitive": False, "description": "IMDb rating floor (0 = none)", "min": 0, "max": 10},
+            "min_seeders":          {"type": "integer", "default": 5,     "sensitive": False, "description": "Minimum seeders required to grab", "min": 0, "max": 1000},
+            "quality_profile_id":   {"type": "integer", "default": 0,     "sensitive": False, "description": "Radarr quality profile (0 = first available)", "min": 0},
+            "genres":               {"type": "array",   "default": [],    "sensitive": False, "description": "Genres in play (empty = all)"},
+            "trackers":             {"type": "array",   "default": [],    "sensitive": False, "description": "Tracker names to search (empty = all movie trackers)"},
+        },
         "movie_night": {
             "_type": "object",
             "enabled":              {"type": "boolean", "default": False, "sensitive": False, "description": "Weekly canon film grab in 2160p Remux"},
@@ -1347,6 +1364,29 @@ def _migrate_automation_features(data: dict) -> bool:
     return True
 
 
+def _migrate_genre_roulette_block(data: dict) -> bool:
+    """v276: ensure automation.genre_roulette exists on disk (Settings card + legacy engine).
+
+    The block was never in SETTINGS_SCHEMA, so sparse installs never persisted it and the
+    nightly engine fell through to code defaults (movies_per_night was wrongly 2). Seed the
+    schema defaults once when missing; do not overwrite an existing block.
+    """
+    auto = data.get("automation")
+    if not isinstance(auto, dict):
+        return False
+    if isinstance(auto.get("genre_roulette"), dict):
+        return False
+    defaults = _build_defaults(SETTINGS_SCHEMA).get("automation", {}).get("genre_roulette")
+    if not isinstance(defaults, dict):
+        return False
+    auto["genre_roulette"] = copy.deepcopy(defaults)
+    logger.info(
+        "automation.genre_roulette seeded (movies_per_night=%s, genres_per_night=%s)",
+        defaults.get("movies_per_night"), defaults.get("genres_per_night"),
+    )
+    return True
+
+
 def _migrate_rename_requests_to_portal(data: dict) -> bool:
     """Rename top-level 'requests' section to 'request_portal'."""
     if 'requests' in data:
@@ -1610,6 +1650,7 @@ def _run_all_migrations(data: dict, data_dir=None, existing: bool = False) -> bo
     changed |= _migrate_hero_schema(data)
     changed |= _migrate_remove_dead_plex_fields(data)
     changed |= _migrate_automation_features(data)
+    changed |= _migrate_genre_roulette_block(data)
     changed |= _migrate_legacy_request_excludes(data, existing)
     changed |= _migrate_legacy_qbit_category(data, existing)
     changed |= _migrate_rename_requests_to_portal(data)

@@ -142,9 +142,11 @@ export function SettingsPage() {
   }
 
   // Phone: the Settings sheet; /settings lists the sections, a section pushes in.
+  // v276 (Taylor): match Home's full-bleed bottom — in-flow minHeight 100dvh + document
+  // scroll (useBodyScroll). Fixed overflow-y:auto sheets clip at the iOS home indicator
+  // (see useBodyScroll.ts); v266 luma-fullscreen height mocks passed, real phone did not.
   return (
-    <div className="luma-fullscreen" style={sheetBackdrop} data-step="settings" data-layout="phone">
-      <GlowLayer />
+    <div style={sheetPage} data-step="settings" data-layout="phone">
       <style>{css}</style>
       <div role="dialog" aria-modal="true" aria-label="Settings" data-testid="settings-sheet" className="luma-sheet" style={sheet}>
         {!known ? (
@@ -401,24 +403,30 @@ const bar: React.CSSProperties = {
 const deskTitle: React.CSSProperties = {
   margin: '0 0 8px', fontSize: 20, fontWeight: 600, fontFamily: FONT, color: 'rgba(255,255,255,0.95)', lineHeight: '40px',
 };
-/** v266 (Designer/Taylor): match Home. Home is minHeight 100dvh (in flow), not fixed inset:0.
- * Do not spread homePage (it brings backgroundAttachment:fixed — the seam StartUI abandoned).
- * Size the backdrop by --luma-screen-h via .luma-fullscreen; paint flat NAVY_BASE + GlowLayer
- * like desktop Settings. Sheet panel fills to the bottom; SHEET_SCROLL_PAD stays in scroll content. */
-const sheetBackdrop: React.CSSProperties = {
-  ...glowPage, position: 'fixed', top: 0, left: 0, right: 0,
-  color: '#fff', fontFamily: FONT, WebkitFontSmoothing: 'antialiased',
-  backgroundImage: 'linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55))',
+/** v276 (Taylor): copy Home's phone shell (MinimalHomePage `page`) — in-flow minHeight
+ * 100dvh, flat kiosk-black, document scroll. Do not use position:fixed or overflowY:auto
+ * on the page/sheet (iOS clips fixed overflow at the home indicator → dark band).
+ * Do not spread homePage (backgroundAttachment:fixed seam). SHEET_SCROLL_PAD stays in
+ * scroll content only; never on the wrapper. */
+const sheetPage: React.CSSProperties = {
+  minHeight: '100dvh',
+  position: 'relative',
+  background: 'var(--color-kiosk-black)',
+  color: '#fff',
+  fontFamily: FONT,
+  WebkitFontSmoothing: 'antialiased',
 };
 /** Bottom padding of the sheet's scroll content: the reach past the edge, the home indicator inset, and 24px. */
 export const SHEET_SCROLL_PAD = 'calc(var(--luma-end-pad) + 24px)';
 const sheet: React.CSSProperties = {
-  position: 'absolute', top: 'calc(env(safe-area-inset-top) + 8px)', left: 0, right: 0, bottom: 0,
+  // In-flow under the status bar; background runs to the page bottom (Home match).
+  marginTop: 'calc(env(safe-area-inset-top) + 8px)',
+  minHeight: 'calc(100dvh - env(safe-area-inset-top) - 8px)',
   // App navy token (#15102a = --color-kiosk-black) + white 4% + the StartUI navy glow at top.
   backgroundColor: 'var(--color-kiosk-black)',
   backgroundImage: `linear-gradient(rgba(255,255,255,0.04), rgba(255,255,255,0.04)), ${NAVY_BG}`,
-  borderRadius: '20px 20px 0 0', overflowX: 'hidden', overflowY: 'auto',
-  fontFamily: FONT, color: '#fff', overscrollBehavior: 'contain',
+  borderRadius: '20px 20px 0 0',
+  fontFamily: FONT, color: '#fff',
 };
 const sheetHeader: React.CSSProperties = {
   position: 'relative', height: 56, display: 'flex', alignItems: 'center', padding: '0 12px', touchAction: 'pan-x',

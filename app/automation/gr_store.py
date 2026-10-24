@@ -219,6 +219,11 @@ def _legacy() -> Dict[str, Any]:
         v = get(old)
         if v is not None:
             out[new] = v
+    # v276: movies_per_night (total) → movies_per_genre when it matches one-per-genre
+    mpn, gpn = get('movies_per_night'), out.get('genres_per_run') or get('genres_per_night')
+    if isinstance(mpn, int) and mpn >= 1:
+        g = gpn if isinstance(gpn, int) and gpn >= 1 else 3
+        out['movies_per_genre'] = max(1, min(5, mpn // g if mpn >= g else mpn))
     g = get('genres')
     if isinstance(g, str):
         g = [x.strip() for x in g.split(',') if x.strip()]
@@ -246,7 +251,49 @@ def save(body: Any) -> Dict[str, Any]:
     new = check(body, settings())
     with connect() as conn:
         _set_meta(conn, 'settings', new)
+    _mirror_legacy_settings(new)
     return new
+
+
+def _mirror_legacy_settings(cfg: Dict[str, Any]) -> None:
+    """v276: keep automation.genre_roulette in settings.json in sync with the native card.
+
+    Legacy genre_roulette.py and GenreRouletteCard read settings.json. The native
+    Settings > Automation card stores in automation.db; without this mirror the
+    settings.json block stayed missing after boot (Tester: roulette OFF, defaults lost).
+    """
+    try:
+        from app.settings_manager import SettingsManager
+        hh, mm = 22, 50
+        raw = str(cfg.get('time') or '22:50')
+        parts = raw.split(':')
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            hh, mm = int(parts[0]), int(parts[1])
+        gpr = int(cfg.get('genres_per_run') or 3)
+        mpg = int(cfg.get('movies_per_genre') or 1)
+        SettingsManager().update({
+            'automation': {
+                'genre_roulette': {
+                    'enabled': bool(cfg.get('enabled')),
+                    'hour': hh,
+                    'minute': mm,
+                    'genres_per_night': gpr,
+                    # prod/Taylor: one movie from each spun genre → total = genres * per-genre
+                    'movies_per_night': max(1, gpr * mpg),
+                    'year_from': int(cfg.get('year_from') or 0),
+                    'year_to': int(cfg.get('year_to') or 0),
+                    'min_votes': int(cfg.get('min_votes') or 800),
+                    'imdb_min_votes': int(cfg.get('imdb_min_votes') or 120000),
+                    'imdb_min_rating': float(cfg.get('imdb_min_rating') or 0.0),
+                    'min_seeders': int(cfg.get('min_seeders') or 5),
+                    'quality_profile_id': int(cfg.get('profile_id') or 0),
+                    'genres': list(cfg.get('include_genres') or []),
+                },
+            },
+        })
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).exception('Genre Roulette: settings.json mirror failed')
 
 
 # ------------------------------------------------------------------ engine state

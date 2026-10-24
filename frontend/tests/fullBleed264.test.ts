@@ -16,7 +16,7 @@ const ALLOW: Record<string, string> = {
   'components/libraries/LibrariesSheet.tsx': 'transparent tap-catcher behind a filter menu',
   'components/search/KioskSearch.tsx': 'wall kiosk search',
   'pages/VibeEnginePage.tsx': 'z-0 decorative layer under a page with its own background',
-  'pages/LibrariesPage.tsx': 'settings backdrop uses className luma-fullscreen (style top/left/right)',
+  // LibrariesPage phone Settings is in-flow like Home (no fixed root) — v276
   'components/calendar/TvCalendarSheet.tsx': 'uses className luma-fullscreen (style top/left/right)',
   'components/start/StartUI.tsx': 'uses className luma-fullscreen (style top/left/right)',
 };
@@ -80,15 +80,22 @@ describe('v266 full-bleed phone surfaces (Home match)', () => {
     expect(css).not.toMatch(/\.luma-bleed-down\s*\{[^}]*top:\s*0\s*!important/);
     expect(css).not.toMatch(/\.luma-bleed-down\s*\{[^}]*height:\s*var\(--luma-screen-h\)/);
   });
-  it('phone Settings does not spread homePage (no backgroundAttachment:fixed); uses luma-fullscreen + GlowLayer', () => {
+  it('phone Settings matches Home shell (in-flow minHeight 100dvh; no fixed overflow sheet)', () => {
     const lib = readFileSync(join(SRC, 'pages/LibrariesPage.tsx'), 'utf8');
-    expect(lib).toMatch(/className="luma-fullscreen"/);
-    const bd = lib.match(/const sheetBackdrop:[\s\S]*?};/)?.[0] ?? '';
-    expect(bd).toMatch(/\.\.\.glowPage/);
-    expect(bd).not.toMatch(/\.\.\.homePage/);
-    expect(bd).not.toMatch(/backgroundAttachment/);
+    const page = lib.match(/const sheetPage:[\s\S]*?};/)?.[0] ?? '';
+    expect(page).toMatch(/minHeight:\s*'100dvh'/);
+    expect(page).toMatch(/position:\s*'relative'/);
+    expect(page).toMatch(/background:\s*'var\(--color-kiosk-black\)'/);
+    expect(page).not.toMatch(/position:\s*'fixed'/);
+    expect(page).not.toMatch(/backgroundAttachment/);
+    const sheet = lib.match(/const sheet: React\.CSSProperties = \{[\s\S]*?\n\};/)?.[0] ?? '';
+    expect(sheet).not.toMatch(/overflowY:\s*'auto'/);
+    expect(sheet).not.toMatch(/position:\s*'absolute'/);
+    expect(sheet).not.toMatch(/position:\s*'fixed'/);
     expect(lib).toMatch(/SHEET_SCROLL_PAD = 'calc\(var\(--luma-end-pad\) \+ 24px\)'/);
-    expect(lib).toMatch(/<GlowLayer \/>/);
+    // phone root must not use luma-fullscreen (that is the failed v266 approach)
+    expect(lib).toMatch(/style=\{sheetPage\}/);
+    expect(lib).not.toMatch(/data-layout="phone"[^>]*luma-fullscreen/);
     expect(lib).not.toMatch(/bottom: 'calc\(-1 \* var\(--luma-bleed\)\)'/);
   });
   it('TV calendar, search shelf and account menu use luma-fullscreen', () => {
