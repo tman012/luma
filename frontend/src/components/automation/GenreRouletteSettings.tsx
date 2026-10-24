@@ -149,8 +149,36 @@ function Picks({ run }: { run: Partial<GrRun> }) {
   );
 }
 
+/** Flat history rows: every pick (and genre miss) visible — no collapsed "N of M" run groups. */
+export type HistRow =
+  | { kind: 'pick'; key: string; at: number; dry: boolean; pick: NonNullable<GrRun['picks']>[number] }
+  | { kind: 'failure'; key: string; at: number; dry: boolean; genre: string; reason: string }
+  | { kind: 'error'; key: string; at: number; dry: boolean; error: string }
+  | { kind: 'empty'; key: string; at: number; dry: boolean; grabbed: number; wanted: number; status: string };
+
+export function flattenHistory(history: GrRun[]): HistRow[] {
+  const rows: HistRow[] = [];
+  for (const r of history) {
+    const at = r.started_at;
+    const dry = !!r.dry;
+    let n = 0;
+    for (const p of r.picks || []) {
+      rows.push({ kind: 'pick', key: `${r.id}-p-${p.tmdb_id}-${n++}`, at, dry, pick: p });
+    }
+    for (const f of r.failures || []) {
+      rows.push({ kind: 'failure', key: `${r.id}-f-${f.genre}`, at, dry, genre: f.genre, reason: f.reason });
+    }
+    if (r.error) {
+      rows.push({ kind: 'error', key: `${r.id}-e`, at, dry, error: r.error });
+    }
+    if (!(r.picks || []).length && !(r.failures || []).length && !r.error) {
+      rows.push({ kind: 'empty', key: `${r.id}-x`, at, dry, grabbed: r.grabbed, wanted: r.wanted, status: r.status });
+    }
+  }
+  return rows;
+}
+
 function StatusPanel({ status, history }: { status: GrStatus; history: GrRun[] }) {
-  const [open, setOpen] = useState<number | null>(null);
   const last = status.last_run;
   const state = status.running ? { text: 'Running', color: '#60a5fa' } : status.enabled ? { text: 'Idle', color: '#4ade80' } : { text: 'Off', color: W50 };
   const tiles: [string, string][] = [
@@ -159,6 +187,7 @@ function StatusPanel({ status, history }: { status: GrStatus; history: GrRun[] }
     ['Last result', last ? result(last) : '—'],
     ['Failures (7 days)', String(status.failures_7d)],
   ];
+  const rows = flattenHistory(history);
   return (
     <section aria-label="Status" data-testid="gr-status" style={{ ...panel, padding: '16px 16px 8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
@@ -174,27 +203,35 @@ function StatusPanel({ status, history }: { status: GrStatus; history: GrRun[] }
         ))}
       </div>
       <h4 style={group}>History</h4>
-      <div role="list">
-        {history.length === 0 && <div style={{ padding: '12px 0', fontSize: 13, color: W50 }}>No runs yet</div>}
-        {history.map(r => {
-          const on = open === r.id;
-          const detail = r.picks.length > 0 || r.failures.length > 0 || !!r.error;
-          return (
-            <div role="listitem" key={r.id} style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }} data-testid="gr-history-run">
-              <button type="button" className="gr-hist lp-focus" aria-expanded={detail ? on : undefined} disabled={!detail}
-                onClick={() => setOpen(on ? null : r.id)}
-                style={{ width: '100%', minHeight: 44, display: 'flex', alignItems: 'center', gap: 10, padding: '0 4px', background: 'none', border: 'none',
-                  color: W95, fontFamily: FONT, fontSize: 13, fontWeight: 600, cursor: detail ? 'pointer' : 'default', textAlign: 'left' }}>
-                <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: dot(r), flex: 'none' }} />
-                <span style={{ flex: 1, minWidth: 0 }}>{stamp(new Date(r.started_at * 1000))}{r.dry && <span style={{ marginLeft: 8, fontWeight: 400, color: W50 }}>Dry run</span>}</span>
-                <span style={{ fontWeight: 400, fontSize: 12, color: W70 }}>{r.status === 'running' ? 'Running' : `${r.grabbed} of ${r.wanted}`}</span>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={detail ? W70 : 'transparent'} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-                  style={{ transform: on ? 'rotate(180deg)' : undefined }}><path d="M6 9l6 6 6-6" /></svg>
-              </button>
-              {on && <Picks run={r} />}
-            </div>
-          );
-        })}
+      <div role="list" data-testid="gr-history">
+        {rows.length === 0 && <div style={{ padding: '12px 0', fontSize: 13, color: W50 }}>No runs yet</div>}
+        {rows.map(row => (
+          <div role="listitem" key={row.key} data-testid="gr-history-row" data-kind={row.kind}
+            style={{ borderTop: '1px solid rgba(255,255,255,0.06)', minHeight: 44, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 4px', fontSize: 13, minWidth: 0 }}>
+            {row.kind === 'pick' && (
+              <>
+                <Poster path={row.pick.poster_path} title={row.pick.title} />
+                <span data-testid="gr-pick" style={{ color: W95, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0, fontWeight: 600 }}>{row.pick.title}</span>
+                <span style={{ color: W50, fontSize: 12, flex: 'none' }}>{[row.pick.year, DISPLAY[row.pick.genre] || row.pick.genre].filter(Boolean).join(' · ')}</span>
+              </>
+            )}
+            {row.kind === 'failure' && (
+              <span data-testid="gr-failure" style={{ flex: 1, fontSize: 12, color: RED }}>⚠ {DISPLAY[row.genre] || row.genre}: {lower(row.reason)}</span>
+            )}
+            {row.kind === 'error' && (
+              <span data-testid="gr-history-error" style={{ flex: 1, fontSize: 12, color: RED }}>⚠ {row.error}</span>
+            )}
+            {row.kind === 'empty' && (
+              <span data-testid="gr-history-empty" style={{ flex: 1, color: W50, fontWeight: 500 }}>
+                {row.status === 'running' ? 'Running' : 'Nothing added'}
+              </span>
+            )}
+            <span style={{ flex: 'none', fontSize: 12, color: W50, textAlign: 'right' }}>
+              {stamp(new Date(row.at * 1000))}
+              {row.dry && <span style={{ display: 'block' }}>Dry run</span>}
+            </span>
+          </div>
+        ))}
       </div>
     </section>
   );

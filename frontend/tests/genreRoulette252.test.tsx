@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { GenreRouletteSettings, clock, dot, result, stamp, when } from '@/components/automation/GenreRouletteSettings';
+import { GenreRouletteSettings, clock, dot, flattenHistory, result, stamp, when } from '@/components/automation/GenreRouletteSettings';
 
 const GENRES = ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Family', 'Fantasy', 'History',
   'Horror', 'Music', 'Mystery', 'Romance', 'Science Fiction', 'Thriller', 'War', 'Western'];
@@ -64,9 +64,13 @@ describe('v252 Settings > Automation > Genre roulette', () => {
     expect(chips.find(c => c.textContent?.endsWith('Horror'))!.style.textDecoration).toBe('line-through');
     expect(screen.getByTestId('gr-state').textContent).toBe('● Off');
     expect(screen.getAllByTestId('gr-tile').map(t => t.textContent)).toContain('Last resultAdded 2 of 3');
-    fireEvent.click(screen.getByText(/Tue Oct 20, 3:00 AM/));
-    expect(screen.getAllByTestId('gr-pick').map(p => p.textContent)).toEqual(['Prisoners2013 · Thriller', 'Zodiac2007 · Mystery']);
+    // Flat history: every pick and genre miss visible — no click-into-run, no "N of M" row chrome
+    expect(screen.queryByTestId('gr-history-run')).toBeNull();
+    expect(screen.getByTestId('gr-history').textContent || '').not.toMatch(/\d+ of \d+/);
+    expect(screen.getAllByTestId('gr-pick').map(p => p.textContent)).toEqual(['Prisoners', 'Zodiac']);
+    expect(screen.getAllByTestId('gr-history-row').map(r => r.dataset.kind)).toEqual(['pick', 'pick', 'failure']);
     expect(screen.getByTestId('gr-failure').textContent).toBe('⚠ Action: no release found');
+    expect(screen.getAllByText(/Tue Oct 20, 3:00 AM/).length).toBeGreaterThanOrEqual(2);
     expect(document.body.textContent || '').not.toMatch(/radarr|colour|favourite/i);
   });
 
@@ -147,5 +151,14 @@ describe('v252 Settings > Automation > Genre roulette', () => {
     expect(result({ error: "qBittorrent couldn't be reached" })).toBe("qBittorrent couldn't be reached");
     const r = { status: 'done', error: null };
     expect([dot({ ...r, grabbed: 3, wanted: 3 }), dot({ ...r, grabbed: 2, wanted: 3 }), dot({ ...r, grabbed: 0, wanted: 3 })]).toEqual(['#4ade80', '#fbbf24', '#f87171']);
+  });
+
+  it('flattens history so every pick is a row (no collapsed run grouping)', () => {
+    const rows = flattenHistory([RUN as never, {
+      ...RUN, id: 8, grabbed: 0, wanted: 3, picks: [], failures: [], error: "Trackers couldn't be reached",
+    } as never]);
+    expect(rows.map(r => r.kind)).toEqual(['pick', 'pick', 'failure', 'error']);
+    expect(rows.filter(r => r.kind === 'pick').map(r => r.kind === 'pick' && r.pick.title)).toEqual(['Prisoners', 'Zodiac']);
+    expect(flattenHistory([{ ...RUN, id: 9, picks: [], failures: [], error: null, grabbed: 0, wanted: 3, status: 'done' } as never]).map(r => r.kind)).toEqual(['empty']);
   });
 });
