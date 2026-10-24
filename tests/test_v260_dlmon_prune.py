@@ -210,12 +210,15 @@ def test_partial_list_1_of_600_is_refused(env, caplog):
     assert r['status'] == 'pruned' and r['dropped'] == [] and env.meta[dlmon_prune.META_KEY]
 
 
-def test_refusal_warns_every_start(env, caplog):
+def test_refusal_warns_once_then_info(env, caplog):
+    # v264 (Tester LOW): a refused prune uses warn-once too
     _seed(env, 600, 1)
     with caplog.at_level(logging.INFO, logger='app.dlmon_prune'):
-        dlmon_prune.run_once()
-        dlmon_prune.run_once()
-    assert len([m for m in caplog.records if m.levelno == logging.WARNING]) == 2
+        for _ in range(3):
+            assert dlmon_prune.run_once()['status'] == 'refused'
+    assert [m.levelno for m in caplog.records] == [logging.WARNING, logging.INFO, logging.INFO]
+    assert env.meta[dlmon_prune.RETRY_KEY] == 'refused'
+    assert dlmon_prune.META_KEY not in env.meta
 
 
 @pytest.mark.parametrize('n, drop, ok', [
@@ -292,3 +295,54 @@ def test_new_reason_warns_again(env, caplog):
     with caplog.at_level(logging.INFO, logger='app.dlmon_prune'):
         assert dlmon_prune.run_once()['status'] == 'unexpected'
     assert [m.levelno for m in caplog.records] == [logging.WARNING]
+
+
+# --- v264 (Tester LOW): refused shares warn-once; the memory follows each start --------------------------
+
+def _levels(caplog):
+    return [m.levelno for m in caplog.records]
+
+
+def test_unreadable_refused_unreadable_warns_each_time(env, caplog):
+    _seed(env, 600, 1)
+    full = env.qbit['torrents']
+    with caplog.at_level(logging.INFO, logger='app.dlmon_prune'):
+        env.qbit['torrents'] = None
+        assert dlmon_prune.run_once()['status'] == 'unreadable'
+        assert env.meta[dlmon_prune.RETRY_KEY] == 'unreadable'
+        env.qbit['torrents'] = full
+        assert dlmon_prune.run_once()['status'] == 'refused'
+        assert env.meta[dlmon_prune.RETRY_KEY] == 'refused'
+        env.qbit['torrents'] = None
+        assert dlmon_prune.run_once()['status'] == 'unreadable'
+        assert env.meta[dlmon_prune.RETRY_KEY] == 'unreadable'
+    assert _levels(caplog) == [logging.WARNING] * 3
+
+
+def test_successful_prune_clears_the_warned_reason(env, caplog):
+    env.qbit['torrents'] = None
+    dlmon_prune.run_once()
+    assert env.meta[dlmon_prune.RETRY_KEY] == 'unreadable'
+    env.qbit['torrents'] = [{'hash': H_KEEP}, {'hash': H_UPPER}]
+    assert dlmon_prune.run_once()['status'] == 'pruned'
+    assert not env.meta[dlmon_prune.RETRY_KEY]
+
+
+def test_no_file_start_clears_the_warned_reason(env):
+    _seed(env, 600, 1)
+    dlmon_prune.run_once()
+    assert env.meta[dlmon_prune.RETRY_KEY] == 'refused'
+    (env.data / 'download_monitor.json').unlink()
+    assert dlmon_prune.run_once()['status'] == 'no file'
+    assert not env.meta[dlmon_prune.RETRY_KEY]
+
+
+def test_refused_after_refused_after_success_is_new(env, caplog):
+    """Memory cleared by a successful start: a later refusal (after the meta key is reset) warns again."""
+    _seed(env, 600, 1)
+    dlmon_prune.run_once()
+    env.meta[dlmon_prune.RETRY_KEY] = ''           # as a successful start leaves it
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger='app.dlmon_prune'):
+        assert dlmon_prune.run_once()['status'] == 'refused'
+    assert _levels(caplog) == [logging.WARNING]

@@ -17,8 +17,10 @@ Manchurian Candidate, …201e). Once, at boot on minimal (test) builds, in the D
    WARNING, and the migration is tried again on the next start.
 4. One INFO line with the count and the last 4 of each dropped hash; then the meta key is set.
 
-While qBittorrent stays unreadable, only the first start in a row warns; later ones log INFO (meta key
-dlmon_prune_v260_retry holds the reason already warned about).
+While qBittorrent stays unreadable, or the list stays partial (refused), only the first start in a row with
+that reason warns; later ones log INFO (meta key dlmon_prune_v260_retry holds the reason already warned
+about). A start with a different reason warns again and records it (unreadable, then refused, then
+unreadable warns three times); a start that prunes clears it (v264, Tester LOW).
 
 grab_origins.json is never read or written. Everything runs in try/except: a failure logs and boot goes on.
 """
@@ -89,6 +91,16 @@ def _retry_log(reason: str, msg: str, *args: Any) -> None:
     logger.log(logging.INFO if seen else logging.WARNING, msg + ('' if seen else '; trying again next start'), *args)
 
 
+def _clear_retry() -> None:
+    """A start that prunes forgets the reason already warned about."""
+    from app import tv_store
+    try:
+        if tv_store.get_meta(RETRY_KEY):
+            tv_store.set_meta(RETRY_KEY, '')
+    except Exception:                                        # noqa: BLE001
+        pass
+
+
 def _now() -> float:
     return (_cfg.get('now') or time.time)()
 
@@ -107,6 +119,7 @@ def run_once() -> Dict[str, Any]:
         have, listed = got
         path = monitor_path()
         if not os.path.exists(path):
+            _clear_retry()
             tv_store.set_meta(META_KEY, 'no file')
             logger.info('Download monitor prune: dropped 0 entries (no %s)', MONITOR_FILE)
             return {'status': 'no file', 'dropped': []}
@@ -119,9 +132,9 @@ def run_once() -> Dict[str, Any]:
         drop = [k for k in hash_keys if str(k).lower() not in have]
         limit = drop_limit(len(hash_keys))
         if len(drop) > limit or listed < len(drop):
-            logger.warning('Download monitor prune: refused, would drop %d of %d entries but qBittorrent listed '
-                           '%d torrents (limit %d); looks like a partial list, nothing pruned, trying again next '
-                           'start', len(drop), len(hash_keys), listed, limit)
+            _retry_log('refused', 'Download monitor prune: refused, would drop %d of %d entries but qBittorrent '
+                       'listed %d torrents (limit %d); looks like a partial list, nothing pruned',
+                       len(drop), len(hash_keys), listed, limit)
             return {'status': 'refused', 'would_drop': len(drop), 'hash_entries': len(hash_keys),
                     'listed': listed, 'limit': limit}
         stamp = time.strftime('%Y%m%d-%H%M%S', time.localtime(_now()))
@@ -134,6 +147,7 @@ def run_once() -> Dict[str, Any]:
                 json.dump(kept, f, indent=2)
             os.replace(tmp, path)
             _forget_in_memory(drop)
+        _clear_retry()
         tv_store.set_meta(META_KEY, stamp)
         logger.info('Download monitor prune: dropped %d entr%s%s (backup %s)', len(drop), 'y' if len(drop) == 1 else 'ies',
                     (': ' + ', '.join('…' + str(h)[-4:].lower() for h in drop)) if drop else '', os.path.basename(backup))
