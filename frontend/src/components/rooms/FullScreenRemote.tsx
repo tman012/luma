@@ -310,7 +310,7 @@ function DpadSection({ onCommand }: { onCommand: (cmd: Command) => void }) {
             ? 'inset 0 4px 8px rgba(0,0,0,0.7), inset 0 -1px 1px rgba(255,255,255,0.03), 0 0 16px rgba(120,160,255,0.15)'
             : 'inset 0 2px 4px rgba(0,0,0,0.5), inset 0 -1px 2px rgba(255,255,255,0.08), 0 2px 8px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06)',
         }}
-        aria-label="OK / select"
+        aria-label="OK / Select"
       >
         <span
           className="text-[13px] font-semibold tracking-wide"
@@ -394,7 +394,7 @@ function NowPlayingBackdrop({ room }: { room: Room }) {
   if (!hasPlayback) {
     return (
       <div className="flex items-center justify-center rounded-xl bg-white/5" style={{ height: 190 }}>
-        <span className="text-[13px] text-white/20">Nothing playing</span>
+        <span className="text-[13px] text-white/20">Nothing Playing</span>
       </div>
     );
   }
@@ -606,7 +606,7 @@ export function FullScreenRemote({ room, deviceId, onClose }: FullScreenRemotePr
         <div className="flex items-center justify-center gap-4 shrink-0 pt-4 pb-4">
           {/* Volume rocker */}
           <div className="flex flex-col items-center gap-[3px]">
-            <span className="mb-1.5 text-[9px] font-semibold" style={{ color: 'rgba(255,255,255,0.25)' }}>
+            <span className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.15em]" style={{ color: 'rgba(255,255,255,0.25)' }}>
               Vol
             </span>
             <RockerButton label="Volume up" position="top" onFire={() => send('vol_up')}>
@@ -626,7 +626,7 @@ export function FullScreenRemote({ room, deviceId, onClose }: FullScreenRemotePr
 
           {/* Channel rocker */}
           <div className="flex flex-col items-center gap-[3px]">
-            <span className="mb-1.5 text-[9px] font-semibold" style={{ color: 'rgba(255,255,255,0.25)' }}>
+            <span className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.15em]" style={{ color: 'rgba(255,255,255,0.25)' }}>
               Ch
             </span>
             <RockerButton label="Channel up" position="top" onFire={() => send('channel_up')}>
@@ -651,7 +651,7 @@ export function FullScreenRemote({ room, deviceId, onClose }: FullScreenRemotePr
                 <path d="M20 20v-7a4 4 0 0 0-4-4H4" />
               </svg>
             </PremiumButton>
-            <PremiumButton label="Play / pause" onClick={() => send('play_pause')} size={64}>
+            <PremiumButton label="Play / Pause" onClick={() => send('play_pause')} size={64}>
               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="none" className="text-white/65">
                 <path d="M6 4l12 8-12 8z" />
               </svg>

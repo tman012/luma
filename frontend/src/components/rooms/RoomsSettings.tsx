@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Reac
 import { FONT } from '@/components/start/StartUI';
 import { Modal, Toggle, field, glassBtn, primaryBtn, tvEditCss } from '@/components/library/TvEdit';
 import {
-  badge, createRoom, loadPlayers, loadRooms, removeRoom, updateRoom, WAKE_LABEL,
+  badge, createRoom, loadPlayers, loadRooms, pairRoom, removeRoom, updateRoom, WAKE_LABEL,
   type FoundPlayer, type Room, type RoomPatch, type RoomsView, type Wake,
 } from './roomsApi';
 import { Badge, StatusDot } from './PlayIn';
@@ -64,7 +64,7 @@ export function RoomsSettings({ wide = true, onExit }: { wide?: boolean; onExit?
   } else if (view.k === 'edit' && room(view.id)) {
     const r = room(view.id)!;
     flow = { title: r.name, back: toList, action: <HeaderSave dirty={editSave.dirty} onSave={editSave.save} />, body: (
-      <EditRoom key={r.id} room={r} error={error} onSaveState={onSaveState} onChangePlayer={() => setView({ k: 'repick', id: r.id })}
+      <EditRoom key={r.id} room={r} error={error} onSaveState={onSaveState} onPaired={load} onChangePlayer={() => setView({ k: 'repick', id: r.id })}
         onSave={patch => void updateRoom(r.id, patch).then(x => take(x, toList))}
         onRemove={() => void removeRoom(r.id).then(x => take(x, toList))} />) };
   } else if (view.k === 'repick' && room(view.id)) {
@@ -308,8 +308,8 @@ function PickStep({ cta, current, error, onPick }: { cta: string; current?: stri
   );
 }
 
-function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer, onSaveState }: {
-  room: Room; error: string; onSave: (p: RoomPatch) => void; onRemove: () => void; onChangePlayer: () => void;
+function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer, onSaveState, onPaired }: {
+  room: Room; error: string; onSave: (p: RoomPatch) => void; onRemove: () => void; onChangePlayer: () => void; onPaired?: () => void;
   onSaveState: (dirty: boolean, save: () => void) => void;
 }) {
   const p = r.player;
@@ -333,6 +333,9 @@ function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer, onSaveStat
   if (def !== r.default) patch.default = def;
   const dirty = Object.keys(patch).length > 0 && !!name.trim();
   const patchKey = JSON.stringify(patch);
+  // v265 Pair (prod's ADB flow): the TV asks "Allow network debugging?"; the server waits for Allow.
+  const [pairMsg, setPairMsg] = useState<'' | 'busy' | 'ok' | 'fail'>('');
+  const pair = () => { setPairMsg('busy'); void pairRoom(r.id).then(x => { setPairMsg(x.ok ? 'ok' : 'fail'); if (x.ok) onPaired?.(); }); };
   const saveRef = useRef(onSave);
   saveRef.current = onSave;
   useEffect(() => { onSaveState(dirty, () => saveRef.current(JSON.parse(patchKey) as RoomPatch)); }, [dirty, patchKey, onSaveState]);
@@ -377,7 +380,14 @@ function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer, onSaveStat
           {wake === 'adb' && (
             <div style={{ ...row(1), justifyContent: 'space-between' }}>
               <span style={{ fontSize: 14 }}>Pairing</span>
-              <span data-testid="room-paired" style={{ fontSize: 13, color: W50, display: 'inline-flex', alignItems: 'center', gap: 6 }}><StatusDot online={!!p?.paired} />{p?.paired ? 'Paired' : 'Not paired'}</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+                <span data-testid="room-paired" style={{ fontSize: 13, color: W50, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <StatusDot online={pairMsg === 'ok' || (!pairMsg && !!p?.paired)} />
+                  {pairMsg === 'busy' ? 'Pairing…' : pairMsg === 'ok' ? 'Paired and connected' : pairMsg === 'fail' ? 'Pairing failed' : p?.paired ? 'Paired' : 'Not paired'}
+                </span>
+                <button type="button" data-testid="room-pair" disabled={pairMsg === 'busy' || dirty || !r.player?.host} onClick={pair} className="lp-focus tve-glass"
+                  style={{ ...glassBtn, height: 32, padding: '0 14px', fontSize: 13, opacity: pairMsg === 'busy' || dirty || !r.player?.host ? 0.4 : 1 }}>Pair</button>
+              </span>
             </div>
           )}
           {wake === 'wol' && fieldRow('MAC address', 'mac', mac, setMac)}

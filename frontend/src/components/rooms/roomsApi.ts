@@ -36,6 +36,17 @@ export const createRoom = (name: string, player: Partial<FoundPlayer>) => call<R
 export type RoomPatch = Partial<{ name: string; player: Partial<FoundPlayer>; wake: Wake; host: string; port: number | string; mac: string;
   harmony_hub: string; harmony_activity: string; default: boolean }>;
 export const updateRoom = (id: string, patch: RoomPatch) => call<RoomsView>(`${ROOMS_URL}/${encodeURIComponent(id)}`, json('PUT', patch), okView);
+/** v265 Pair: prod's ADB flow (connect, then wait for Allow on the TV). Signed-in owner. */
+export type PairResult = { ok: boolean; state: 'connected' | 'unauthorized' | 'failed'; hint?: string };
+export async function pairRoom(id: string): Promise<PairResult> {
+  try {
+    const res = await apiFetch(`${ROOMS_URL}/${encodeURIComponent(id)}/connect`, json('POST', {}));
+    const d = await res.json().catch(() => ({}));
+    return { ok: res.ok && !!d.ok, state: d.state === 'connected' || d.state === 'unauthorized' ? d.state : 'failed', hint: d.hint };
+  } catch {
+    return { ok: false, state: 'failed' };
+  }
+}
 export const removeRoom = (id: string) => call<RoomsView>(`${ROOMS_URL}/${encodeURIComponent(id)}`, json('DELETE'), okView);
 
 /** A player's two- or three-letter badge, as the A mocks: ATV for Android TV, tv for Apple TV, else the initial. */
