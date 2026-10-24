@@ -9,7 +9,7 @@ import { Select, Toggle, SAVE_ERROR, field, glassBtn, tvEditCss } from '@/compon
 import { formatBytes } from '@/services/storageApi';
 import { Field, NumField, grCss, when } from './GenreRouletteSettings';
 import {
-  keepDg, loadDg, loadDgStatus, loadDgTrackers, previewDg, runDg, saveDg, unkeepDg,
+  keepDg, loadDg, loadDgStatus, loadDgTrackers, normalizeDgStatus, normalizeDgView, previewDg, runDg, saveDg, unkeepDg,
   type DgEntry, type DgRow, type DgLogEntry, type DgPreview, type DgResult, type DgSettings, type DgStatus,
   type DgTrackerSummary, type DgView, type Scope,
 } from './downloadsGuardApi';
@@ -271,10 +271,10 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
   const started = useRef(false);
 
   const refresh = useCallback(() => {
-    void loadDgStatus().then(r => { if (r.ok) { setStatus(r.data.status); setLog(Array.isArray(r.data.log) ? r.data.log : []); } });
+    void loadDgStatus().then(r => { if (r.ok) { const n = normalizeDgStatus(r.data); setStatus(n.status); setLog(n.log); } });
   }, []);
   useEffect(() => {
-    void loadDg().then(r => { if (r.ok) setD(r.data); else setFailed(true); });
+    void loadDg().then(r => { const v = r.ok ? normalizeDgView(r.data) : null; if (v) setD(v); else setFailed(true); });
     void loadDgTrackers().then(r => { if (r.ok) setSummary(r.data); });
     refresh();
   }, [refresh]);
@@ -298,7 +298,7 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
     setSignIn(false);
     setBad(b => { const n = { ...b }; Object.keys(patch).forEach(k => delete n[k]); return n; });
     void saveDg(patch).then(r => {
-      if (r.ok) { setD(r.data); refresh(); return; }
+      if (r.ok) { const next = { ...before, settings: { ...s, ...patch } }; setD(normalizeDgView(r.data, next) ?? next); refresh(); return; }
       setD(before);
       if (r.signIn) { setSignIn(true); return; }
       if (r.errors) setBad(r.errors);
@@ -325,7 +325,7 @@ export function DownloadsGuardSettings({ wide = true }: { wide?: boolean } = {})
         else setError(SAVE_ERROR);
         return;
       }
-      void loadDg().then(v => { if (v.ok) setD(v.data); });
+      void loadDg().then(v => { const n = v.ok ? normalizeDgView(v.data, d) : null; if (n) setD(n); });
       void previewDg().then(p => { if (p.ok) setPreview(p.data); });
     });
   };
