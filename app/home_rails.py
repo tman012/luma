@@ -267,15 +267,19 @@ def refresh_trakt(rail_id: str) -> Future:
                 _trakt_inflight.pop(rail_id, None)
 
     def work():
+        t0 = time.monotonic()
         try:
             cards = _fetch_cards(rail_id)
         except Exception as e:  # noqa: BLE001 - a rail failing must not break Home
+            logger.debug('Trakt rail %s: fetch failed after %.0f ms (%s)', rail_id, (time.monotonic() - t0) * 1000,
+                         type(e).__name__)
             last = trakt_last(rail_id)
             logger.warning('Trakt rail %s failed: %s%s', rail_id, type(e).__name__,
                            f'; showing its last {len(last)} cards' if last else '')
             done()
             fut.set_exception(e)
             return
+        logger.debug('Trakt rail %s: fetched %d cards in %.0f ms', rail_id, len(cards), (time.monotonic() - t0) * 1000)
         if cards:
             with _lock:
                 if _trakt_state['gen'] == gen:                  # not from a client ID removed meanwhile
@@ -293,11 +297,16 @@ def trakt_for_home(rail_id: str):
     """(cards, None) when the rail has saved cards (a stale set also starts a background refresh), else
     (None, future) for the background fetch Home may wait on until its deadline."""
     got = _entry(rail_id)
-    if got and time.time() - got['at'] < RAIL_FRESH_S:
+    age = time.time() - got['at'] if got else None
+    if got and age < RAIL_FRESH_S:
+        logger.debug('Trakt rail %s: cache hit (%d cards, %.0f s old)', rail_id, len(got['cards']), age)
         return got['cards'], None
     fut = refresh_trakt(rail_id)
     if got:
+        logger.debug('Trakt rail %s: cache stale (%d cards, %.0f s old); refreshing in the background',
+                     rail_id, len(got['cards']), age)
         return got['cards'], None
+    logger.debug('Trakt rail %s: cache miss; fetching', rail_id)
     return None, fut
 
 
@@ -563,6 +572,9 @@ def home():
                 out_rails.append(rail)
     finally:
         pool.shutdown(wait=False, cancel_futures=True)     # a slow Plex call finishes in the background
+    logger.debug('Home: /api/home rails assembled in %.0f ms (%d rails, %d dropped%s)',
+                 (time.monotonic() - start) * 1000, len(out_rails), len(dropped),
+                 (': ' + ', '.join(dropped)) if dropped else '')
     if cw_items is None and not out_rails and dropped:
         return jsonify({'continue_watching': [], 'rails': [], 'plex': False})
     cw_items = cw_items or []
