@@ -11,8 +11,10 @@ Routes (reads: any signed-in user; writes: the owner signed in with a real sessi
     POST   /api/rooms               {name, player, wake?}
     PUT    /api/rooms/<id>          {name?, player?, wake?, host?, port?, mac?, harmony_hub?, harmony_activity?, default?}
     DELETE /api/rooms/<id>
+    POST   /api/rooms/<id>/connect  v265 Pair (owner): prod's ADB flow, `adb connect` then wait for Allow on
+                                    the TV; with {pair_port, pair_code} it runs prod's `adb pair` first
 
-Nothing here starts playback, wakes, pairs with or connects to a device; the only outside call is
+Nothing else here starts playback, wakes, pairs with or connects to a device; the only outside call is
 the read-only PMS /clients list (``clients_fn``), which tests replace. No Home Assistant: a stored
 ``powerMethod: homeassistant`` is shown as None and is left as is unless the wake method is changed.
 """
@@ -38,8 +40,9 @@ _cfg: Dict[str, Any] = {}
 
 
 def init(*, settings, get_current_user: Callable, signed_in_owner: Callable, clients_fn: Optional[Callable] = None,
-         can_play: Optional[Callable] = None, stop_fn: Optional[Callable] = None) -> None:
-    _cfg.update(settings=settings, get_current_user=get_current_user, signed_in_owner=signed_in_owner,
+         can_play: Optional[Callable] = None, stop_fn: Optional[Callable] = None,
+         pair_fn: Optional[Callable] = None, wait_fn: Optional[Callable] = None) -> None:
+    _cfg.update(pair_fn=pair_fn, wait_fn=wait_fn, settings=settings, get_current_user=get_current_user, signed_in_owner=signed_in_owner,
                 clients_fn=clients_fn or _plex_clients, can_play=can_play or (lambda u: bool(u)), stop_fn=stop_fn or _plex_stop)
 
 
@@ -449,3 +452,46 @@ def rooms_delete(room_id):
     if not delete(room_id):
         return jsonify({'error': 'Room not found'}), 404
     return jsonify(view())
+
+
+PAIR_WAIT_S = 30.0
+
+
+@bp.route('/api/rooms/<room_id>/connect', methods=['POST'])
+def rooms_connect(room_id):
+    """v265 Pair (signed-in owner). Prod 1b4ea74 pairs over ADB: `adb connect host:port` makes the TV show
+    "Allow network debugging?"; this waits up to PAIR_WAIT_S for Allow. Google TV wireless debugging
+    (prod's Pair form) sends pair_port + pair_code: `adb pair` runs first. The key pair lives in adb's
+    HOME (LUMA_ADB_HOME), 0600; the code is never stored or logged."""
+    err = _writer()
+    if err:
+        return err
+    from app import adb_utils
+    rooms = _rooms()
+    room = next((r for r in rooms if r['id'] == room_id), None)
+    dev = next((d for d in (room or {}).get('devices') or [] if isinstance(d, dict)), None)
+    if room is None or dev is None:
+        return jsonify({'error': 'Room not found'}), 404
+    host = (dev.get('host') or '').strip()
+    port = dev.get('connectPort') or 5555
+    if not adb_utils.adb_target(host, port, {host.lower()}):
+        return jsonify({'ok': False, 'state': 'failed', 'hint': 'unreachable'}), 400
+    body = _json()
+    body = body if isinstance(body, dict) else {}
+    code = str(body.get('pair_code') or '').strip()
+    if code:
+        try:
+            pport = int(body.get('pair_port') or 0)
+        except (TypeError, ValueError):
+            pport = 0
+        if not (1 <= pport <= 65535) or not re.fullmatch(r'\d{6}', code):
+            return jsonify({'ok': False, 'state': 'failed', 'hint': 'pair_failed'}), 400
+        pr = (_cfg.get('pair_fn') or adb_utils.adb_pair)(host, pport, code)
+        if not pr.get('ok'):
+            return jsonify({'ok': False, 'state': 'failed', 'hint': pr.get('hint', 'pair_failed')})
+    res = (_cfg.get('wait_fn') or adb_utils.wait_for_authorization)(host, int(port), timeout=PAIR_WAIT_S)
+    if res.get('ok'):
+        dev = {**dev, 'paired': True, **({'pairPort': pport} if code else {})}
+        _cfg['settings'].update_room(room_id, {'devices': [dev, *room['devices'][1:]]})
+    logger.info('Rooms: pair %s -> %s', room_id, res.get('state'))
+    return jsonify({'ok': bool(res.get('ok')), 'state': res.get('state', 'failed'), 'hint': res.get('hint', 'unknown')})

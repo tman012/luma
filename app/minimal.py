@@ -10,6 +10,7 @@ Luma behaves exactly as before. The flag is read at call time.
 from __future__ import annotations
 
 import os
+import re
 
 _TRUE = ('1', 'true', 'yes', 'on')
 
@@ -144,8 +145,21 @@ def enabled() -> bool:
     return os.environ.get('LUMA_MINIMAL', '').strip().lower() in _TRUE
 
 
+# v265: prod's legacy room/device test and pair routes (main.py) have no owner check; test's Pair is
+# rooms_setup's owner-only POST /api/rooms/<id>/connect, so these stay closed.
+_ROOMS_LEGACY = re.compile(r'^/api/rooms/[^/]+/(?:devices/[^/]+/)?(?:test|pair)/?$')
+# v265: prod's Rooms sheet (Now Playing: a Plex read) and its remote (the route checks the signed-in owner).
+_ROOM_REMOTE = re.compile(r'^/api/room/[^/]+/remote$')
+
+
 def path_allowed(path: str, method: str = 'GET') -> bool:
     path = path or '/'
+    if _ROOMS_LEGACY.match(path):
+        return False
+    if path == '/api/plex/sessions/active':
+        return method in ('GET', 'HEAD')
+    if _ROOM_REMOTE.match(path):
+        return method == 'POST'
     if _playback_allowed(path, method):
         return True
     if path.startswith(DETAIL_READ_PREFIXES):

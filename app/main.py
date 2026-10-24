@@ -20369,6 +20369,10 @@ def room_remote(room_id):
     - all other commands → ADB keyevent
     """
     from app.adb_utils import send_key_event
+    if _minimal.enabled():
+        _u, _err = _start_flow.require_signed_in_owner()   # v265: test's remote is the signed-in owner's
+        if _err:
+            return _err
     try:
         room = settings.get_room_by_id(room_id)
         if not room:

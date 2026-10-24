@@ -34,7 +34,10 @@ services:
       - TZ=${TZ:-UTC}
       - FLASK_ENV=production
       - LUMA_MINIMAL=1
-      - LUMA_DISABLE_ADB=1
+      # v265 Pair: adb may only connect, disconnect, list and pair (no shell, so no key presses or
+      # playback from test); its key pair lives on the data volume (/app/data/adb/.android, 0600).
+      - LUMA_ADB_HOME=/app/data/adb
+      - LUMA_ADB_COMMANDS=connect,disconnect,devices,pair
       - LUMA_NO_RESTART=1
       - DATABASE_PATH=/app/data/media.db
       - LUMA_DATA_DIR=/app/data
