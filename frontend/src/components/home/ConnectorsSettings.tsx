@@ -1,5 +1,5 @@
 /** Settings > Connectors (owner only): the TMDB API key, the OMDb API key, the Trakt client
- * ID, TheTVDB (API key and optional subscriber PIN) and qBittorrent. Keys stay on the server; the browser only learns
+ * ID, TheTVDB (API key and optional subscriber PIN), Home Assistant and qBittorrent. Keys stay on the server; the browser only learns
  * whether one is saved and its last 4 (never any of the qBittorrent password). */
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/apiClient';
@@ -8,6 +8,7 @@ import { LUMA_BLUE } from '@/ui/lumaButton';
 import { NoticeToast } from '@/components/start/SetupToast';
 import { useKioskWidth } from '@/components/home/KioskHome';
 import { QbitConnector } from '@/components/home/QbitConnector';
+import { HaConnector } from '@/components/home/HaConnector';
 
 type Masked = { set: boolean; last4: string; pin_set?: boolean };
 interface View { tmdb: Masked; omdb?: Masked; trakt?: Masked; tvdb?: Masked }
@@ -51,6 +52,7 @@ export function ConnectorsSettings() {
         <ConnectorGroup key={g.id} group={g} masked={view[g.id] || { set: false, last4: '' }}
           onSaved={(v, removed) => { setView(v); setToast(removed ? 'Removed' : 'Saved'); }} />
       ))}
+      <HaConnector onSaved={setToast} />
       <QbitConnector onSaved={setToast} />
     </section>
   );

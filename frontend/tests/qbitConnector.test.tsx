@@ -33,6 +33,7 @@ function server() {
         password: { set: qbit.password.set || typeof body!.password === 'string' } };
       return res(qbit);
     }
+    if (url.endsWith('/api/settings/connectors/homeassistant')) return res({ url: '', access_token: { set: false, last4: '' } });
     if (url.endsWith('/api/settings/connectors')) return res({ tmdb: { set: false, last4: '' }, trakt: { set: false, last4: '' } });
     return res({ error: 'Not found' }, 404);
   });
@@ -55,7 +56,7 @@ describe('Settings > Connectors > qBittorrent', () => {
     render(<ConnectorsSettings />);
     const card = await screen.findByTestId('connector-qbittorrent');
     const groups = [...document.querySelectorAll('[data-testid^="connector-"]')].map(e => e.getAttribute('data-testid'));
-    expect(groups).toEqual(['connector-tmdb', 'connector-omdb', 'connector-tvdb', 'connector-trakt', 'connector-qbittorrent']);
+    expect(groups).toEqual(['connector-tmdb', 'connector-omdb', 'connector-tvdb', 'connector-trakt', 'connector-homeassistant', 'connector-qbittorrent']);
     expect(field('url').value).toBe('http://qbit.local:8080');
     expect(field('username').value).toBe('admin');
     expect(field('category').value).toBe('luma-test');
