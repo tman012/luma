@@ -130,6 +130,40 @@ body,
   background: var(--color-kiosk-black);
 }
 
+/* v264 (Taylor): every phone page, sheet and modal runs to the very bottom of the screen like Home.
+   An installed iPhone PWA can stop a fixed full-screen layer short of the bottom edge (by the home
+   indicator inset, and some iOS builds report that inset as 0), which showed the html color as a band.
+   --luma-bleed is how far a layer reaches past its bottom edge: the inset, and never less than 48px.
+   .luma-bleed repaints a fixed layer's own background below its edge (layout unchanged);
+   .luma-bleed-down moves a scrolling layer's edge down instead, so its scroll content runs under the
+   home indicator; its scroll content ends with --luma-end-pad so the last row scrolls clear. */
+:root {
+  --luma-bleed: max(env(safe-area-inset-bottom, 0px), 48px);
+  --luma-end-pad: calc(var(--luma-bleed) + env(safe-area-inset-bottom, 0px));
+}
+.luma-bleed::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: var(--luma-bleed);
+  background: inherit;
+  pointer-events: none;
+}
+.luma-bleed-flat::after {
+  background-image: none;
+}
+/* A bottom sheet panel that clips its overflow: a hard shadow one --luma-bleed tall in its color
+   (--luma-panel-bg, default the app navy). A panel with its own shadow lists var(--luma-bleed-shadow). */
+.luma-bleed-panel {
+  --luma-bleed-shadow: 0 var(--luma-bleed) 0 0 var(--luma-panel-bg, var(--color-kiosk-black));
+  box-shadow: var(--luma-bleed-shadow);
+}
+.luma-bleed-down {
+  bottom: calc(-1 * var(--luma-bleed)) !important;
+}
+
 /* Kill iOS PWA tap highlight and focus rings on interactive elements */
 button,
 [role="button"] {

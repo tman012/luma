@@ -404,14 +404,14 @@ const deskTitle: React.CSSProperties = {
  * as prod's Settings does. iOS standalone stops a `position: fixed; bottom: 0` layer at the top of the bottom
  * safe-area inset, which left an empty html-colored band under the sheet; the backdrop (and the sheet pinned
  * to it) now reaches one inset past the edge, and the inset is padding only inside the scroll content
- * (SHEET_SCROLL_PAD). */
+ * (SHEET_SCROLL_PAD). v264: the reach is --luma-bleed (the inset, at least 48px), since some iOS builds
+ * report a 0 inset while still stopping the layer short, which left Taylor a dark strip under the sheet. */
 const sheetBackdrop: React.CSSProperties = {
-  ...homePage, position: 'fixed', inset: 0, bottom: 'calc(-1 * env(safe-area-inset-bottom, 0px))',
+  ...homePage, position: 'fixed', inset: 0, bottom: 'calc(-1 * var(--luma-bleed))',
   minHeight: undefined, backgroundImage: 'linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55))',
 };
-/** Bottom padding of the sheet's scroll content: the inset the sheet extends past the edge, the home
- * indicator inset, and 24px. */
-export const SHEET_SCROLL_PAD = 'calc(env(safe-area-inset-bottom, 0px) * 2 + 24px)';
+/** Bottom padding of the sheet's scroll content: the reach past the edge, the home indicator inset, and 24px. */
+export const SHEET_SCROLL_PAD = 'calc(var(--luma-end-pad) + 24px)';
 const sheet: React.CSSProperties = {
   position: 'absolute', top: 'calc(env(safe-area-inset-top) + 8px)', left: 0, right: 0, bottom: 0,
   // App navy token (#15102a = --color-kiosk-black) + white 4% + the StartUI navy glow at top.
