@@ -16461,6 +16461,14 @@ def get_unseen_notifications():
                 if item.get('completed_timestamp', 0) > seen_at
             ]
 
+        # --- Source 2b: Luma library_notify local buffer (when the bell hook was unset) ---
+        try:
+            from app import library_notify as _ln
+            for item in _ln.local_records(seen_at):
+                webhook_items.append(item)
+        except Exception:
+            pass
+
         # Build unified list from renamer items
         unified = []
         seen_keys: set = set()  # (title_lower, year) for dedup
@@ -21726,6 +21734,14 @@ app.register_blueprint(_qbit_connector.bp)
 from app import ha_connector as _ha_connector
 _ha_connector.init(settings=settings, owner_or_error=_start_flow._owner_or_error)
 app.register_blueprint(_ha_connector.bp)
+from app import library_notify as _library_notify
+_library_notify.set_bell_hook(_add_webhook_notification)
+from app import webpush_connector as _webpush_connector
+_webpush_connector.init(settings=settings, owner_or_error=_start_flow._owner_or_error)
+app.register_blueprint(_webpush_connector.bp)
+from app import telegram_connector as _telegram_connector
+_telegram_connector.init(owner_or_error=_start_flow._owner_or_error)
+app.register_blueprint(_telegram_connector.bp)
 
 # Settings > Library paths and the library mover (LUMA_MINIMAL builds only).
 from app import file_management as _file_management

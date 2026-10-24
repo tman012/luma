@@ -17,7 +17,8 @@ and "Title (Year)/Title (Year).ext" naming. Rulings for luma-test:
 * A copy that won't fit in the library folder is skipped and recorded as
   'insufficient space', never retried.
 * Files 664, created folders 775; when running as root, both are chowned to
-  the owner of the library path. No chmod 777, no Telegram.
+  the owner of the library path. No chmod 777. On a successful file into the
+  library (state 'done'), library_notify fires prod AutoRenamer's push/Telegram/bell.
 * Anything under <downloads>/incomplete/ or named *.!qB is never processed.
 * A tracked torrent that is gone from qBittorrent is dropped after a few
   checks; one that isn't ours is dropped at once.
@@ -1124,6 +1125,20 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
     summary['filed'] += 1
     logger.info('Library mover: %s -> %s (%s)', job.get('title'), fields['dest'],
                 ', '.join(r['result'] for r in fields['files']))
+    # Import-complete only (state 'done' = newly filed). 'exists' means already in the library.
+    if fields.get('state') == 'done':
+        try:
+            from app import library_notify
+            library_notify.notify_library_added(
+                media_type='movie',
+                title=str(job.get('title') or ''),
+                year=job.get('year') or '',
+                tmdb_id=job.get('tmdb_id'),
+                dest_path=str(fields.get('dest') or ''),
+                source='library_mover',
+            )
+        except Exception:
+            logger.exception('Library mover: notify failed for %s', job.get('title'))
 
 
 def _free_or_none(path: str) -> Optional[int]:

@@ -37,6 +37,12 @@ ALLOWED_PATHS = frozenset({
     '/api/settings/connectors/qbittorrent', '/api/settings/connectors/qbittorrent/test',
     # Settings > Connectors: Home Assistant (URL + long-lived access token).
     '/api/settings/connectors/homeassistant', '/api/settings/connectors/homeassistant/test',
+    # v270: Web Push + Telegram channel settings (owner only; the routes check).
+    '/api/settings/connectors/webpush', '/api/settings/connectors/webpush/test',
+    '/api/settings/connectors/telegram', '/api/settings/connectors/telegram/test',
+    # v270: push subscribe + in-app bell (import-complete notifies need these on minimal).
+    '/api/push/vapid-key', '/api/push/subscribe', '/api/push/unsubscribe', '/api/push/test',
+    '/api/notifications/unseen', '/api/notifications/mark-seen',
     # Search and the detail popup: TMDB images through prod's proxy (works when
     # the browser can't reach image.tmdb.org) and the read-only ownership check.
     '/api/img/tmdb', '/api/check-ownership-batch',

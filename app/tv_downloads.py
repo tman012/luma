@@ -535,6 +535,44 @@ def _no_import(h: str, name: Optional[str]) -> Optional[str]:
     return None
 
 
+
+def _notify_imported(res: Dict[str, Any]) -> None:
+    """Prod AutoRenamer-style notify once the file is in the library (import-complete)."""
+    from app import library_notify
+    sid = res.get('series_id')
+    title, year, tmdb_id = '', '', None
+    season = episode = None
+    episode_title = None
+    if sid is not None:
+        with tv_store.connect() as conn:
+            row = conn.execute('SELECT title, year, tmdb_id FROM series WHERE id = ?', (sid,)).fetchone()
+            if row:
+                title = row['title'] or ''
+                year = row['year'] or ''
+                tmdb_id = row['tmdb_id']
+            eids = list(res.get('episode_ids') or [])
+            if len(eids) == 1:
+                ep = conn.execute(
+                    'SELECT season_number, episode_number, title FROM episodes WHERE id = ?', (eids[0],)
+                ).fetchone()
+                if ep:
+                    season, episode, episode_title = ep['season_number'], ep['episode_number'], ep['title']
+            elif eids:
+                seasons = {r['season_number'] for r in conn.execute(
+                    f"SELECT season_number FROM episodes WHERE id IN ({','.join('?' * len(eids))})", eids)}
+                if len(seasons) == 1:
+                    season = next(iter(seasons))
+    dest = ''
+    files = res.get('files') or []
+    if files and isinstance(files[0], dict):
+        dest = str(files[0].get('path') or '')
+    library_notify.notify_library_added(
+        media_type='tv', title=title or str(res.get('name') or ''), year=year,
+        tmdb_id=tmdb_id, dest_path=dest, season=season, episode=episode,
+        episode_title=episode_title, source='tv_downloads',
+    )
+
+
 def tick(now: Optional[float] = None, session_factory: Callable = requests.Session) -> Dict[str, int]:
     """One pass. Never contacts qBittorrent without a TV library or a downloads folder."""
     now = time.time() if now is None else now
@@ -609,6 +647,10 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
                         finish_grab(h, t.get('name'), res.get('series_id'), res.get('episode_ids'), len(res['files']), now)
                     except Exception:                          # noqa: BLE001 - reconcile() repairs it next pass
                         logger.exception('TV import: %s imported, grab row not updated', t.get('name'))
+                    try:
+                        _notify_imported(res)
+                    except Exception:                          # noqa: BLE001 - notify never fails the import
+                        logger.exception('TV import: notify failed for %s', t.get('name'))
                 except mover.InsufficientSpace as e:
                     _save(h, state='failed', error=mover.INSUFFICIENT_SPACE, at=now, finished=now, name=t.get('name'),
                           space={'path': e.path, 'need': e.need, 'free': mover._free_or_none(e.path)})
