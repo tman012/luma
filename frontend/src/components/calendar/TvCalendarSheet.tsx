@@ -111,10 +111,10 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
   return createPortal(
     <div
       data-sheet="TvCalendarSheet"
+      className="luma-fullscreen"
       style={{
-        // v211 (as v210's Settings sheet): iOS standalone stops a fixed bottom:0 layer at the bottom inset, so
-        // the backdrop (and the sheet pinned to it) reaches one inset past the edge; no empty band below
-        position: 'fixed', inset: 0, bottom: 'calc(-1 * var(--luma-bleed))',
+        // v266: size by --luma-screen-h like Home (negative-bottom / ::after stay clipped on iPhone PWA)
+        position: 'fixed', top: 0, left: 0, right: 0,
         zIndex: behindModal ? 9999 : 10001,
         display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
         backgroundColor: behindModal ? 'rgba(0,0,0,0)' : phase === 'visible' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0)',

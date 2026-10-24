@@ -25,7 +25,7 @@ const css = `
 
 export function StartShell({ step, children }: { step: string; children: React.ReactNode }) {
   return (
-    <div style={page} data-step={step}>
+    <div className="luma-fullscreen" style={page} data-step={step}>
       <style>{css}</style>
       {children}
     </div>
@@ -167,11 +167,11 @@ export const NAVY_BASE = T.navyBase;
  * seam where the gradient restarted. Put it first inside a page styled with
  * glowPage (flat NAVY_BASE, its own stacking context). */
 export function GlowLayer() {
-  return <div aria-hidden="true" data-testid="glow-layer" style={glowLayer} />;
+  return <div aria-hidden="true" data-testid="glow-layer" className="luma-fullscreen" style={glowLayer} />;
 }
 export const glowLayer: React.CSSProperties = {
-  // v264: reaches --luma-bleed past the bottom edge (an installed iPhone PWA can stop fixed layers short)
-  position: 'fixed', inset: 0, bottom: 'calc(-1 * var(--luma-bleed))', background: NAVY_BG, pointerEvents: 'none', zIndex: -1,
+  // v266: size by --luma-screen-h like Home (negative-bottom was clipped on device)
+  position: 'fixed', top: 0, left: 0, right: 0, background: NAVY_BG, pointerEvents: 'none', zIndex: -1,
 };
 export const glowPage: React.CSSProperties = { background: NAVY_BASE, isolation: 'isolate', position: 'relative' };
 
@@ -180,13 +180,13 @@ export const glowPage: React.CSSProperties = { background: NAVY_BASE, isolation:
 export const START_GLOW = 'radial-gradient(ellipse at 50% 30%, #262a66 0%, #15102a 55%, #0a0818 100%)';
 
 const page: React.CSSProperties = {
-  // v264: the scrolling page reaches --luma-bleed past the bottom edge; center keeps its content where it was
-  position: 'fixed', inset: 0, bottom: 'calc(-1 * var(--luma-bleed))', overflow: 'auto', zIndex: 100,
+  // v266: size by --luma-screen-h via .luma-fullscreen on the root
+  position: 'fixed', top: 0, left: 0, right: 0, overflow: 'auto', zIndex: 100,
   background: START_GLOW,
   color: '#fff', fontFamily: FONT, WebkitFontSmoothing: 'antialiased',
 };
 const center: React.CSSProperties = {
-  minHeight: 'calc(100% - var(--luma-bleed))', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+  minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
   padding: 'calc(env(safe-area-inset-top) + 32px) 24px calc(env(safe-area-inset-bottom) + 32px)', boxSizing: 'border-box',
 };
 const bottom: React.CSSProperties = {

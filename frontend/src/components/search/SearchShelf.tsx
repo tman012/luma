@@ -198,10 +198,10 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
   };
 
   return (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-testid="search-shelf"
       style={{
-        position: 'fixed', inset: 0, zIndex: 10000,
+        position: 'fixed', top: 0, left: 0, right: 0, zIndex: 10000,
         background: 'var(--color-kiosk-black)',
         opacity: phase === 'visible' ? 1 : 0,
         transition: 'opacity 0.2s ease',

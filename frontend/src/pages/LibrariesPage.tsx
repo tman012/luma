@@ -143,7 +143,8 @@ export function SettingsPage() {
 
   // Phone: the Settings sheet; /settings lists the sections, a section pushes in.
   return (
-    <div style={sheetBackdrop} data-step="settings" data-layout="phone">
+    <div className="luma-fullscreen" style={sheetBackdrop} data-step="settings" data-layout="phone">
+      <GlowLayer />
       <style>{css}</style>
       <div role="dialog" aria-modal="true" aria-label="Settings" data-testid="settings-sheet" className="luma-sheet" style={sheet}>
         {!known ? (
@@ -400,15 +401,14 @@ const bar: React.CSSProperties = {
 const deskTitle: React.CSSProperties = {
   margin: '0 0 8px', fontSize: 20, fontWeight: 600, fontFamily: FONT, color: 'rgba(255,255,255,0.95)', lineHeight: '40px',
 };
-/** v210 (PM, Taylor): the phone Settings sheet runs full-bleed to the bottom edge of an installed iPhone PWA,
- * as prod's Settings does. iOS standalone stops a `position: fixed; bottom: 0` layer at the top of the bottom
- * safe-area inset, which left an empty html-colored band under the sheet; the backdrop (and the sheet pinned
- * to it) now reaches one inset past the edge, and the inset is padding only inside the scroll content
- * (SHEET_SCROLL_PAD). v264: the reach is --luma-bleed (the inset, at least 48px), since some iOS builds
- * report a 0 inset while still stopping the layer short, which left Taylor a dark strip under the sheet. */
+/** v266 (Designer/Taylor): match Home. Home is minHeight 100dvh (in flow), not fixed inset:0.
+ * Do not spread homePage (it brings backgroundAttachment:fixed — the seam StartUI abandoned).
+ * Size the backdrop by --luma-screen-h via .luma-fullscreen; paint flat NAVY_BASE + GlowLayer
+ * like desktop Settings. Sheet panel fills to the bottom; SHEET_SCROLL_PAD stays in scroll content. */
 const sheetBackdrop: React.CSSProperties = {
-  ...homePage, position: 'fixed', inset: 0, bottom: 'calc(-1 * var(--luma-bleed))',
-  minHeight: undefined, backgroundImage: 'linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55))',
+  ...glowPage, position: 'fixed', top: 0, left: 0, right: 0,
+  color: '#fff', fontFamily: FONT, WebkitFontSmoothing: 'antialiased',
+  backgroundImage: 'linear-gradient(rgba(0,0,0,0.55), rgba(0,0,0,0.55))',
 };
 /** Bottom padding of the sheet's scroll content: the reach past the edge, the home indicator inset, and 24px. */
 export const SHEET_SCROLL_PAD = 'calc(var(--luma-end-pad) + 24px)';

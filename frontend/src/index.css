@@ -130,38 +130,35 @@ body,
   background: var(--color-kiosk-black);
 }
 
-/* v264 (Taylor): every phone page, sheet and modal runs to the very bottom of the screen like Home.
-   An installed iPhone PWA can stop a fixed full-screen layer short of the bottom edge (by the home
-   indicator inset, and some iOS builds report that inset as 0), which showed the html color as a band.
-   --luma-bleed is how far a layer reaches past its bottom edge: the inset, and never less than 48px.
-   .luma-bleed repaints a fixed layer's own background below its edge (layout unchanged);
-   .luma-bleed-down moves a scrolling layer's edge down instead, so its scroll content runs under the
-   home indicator; its scroll content ends with --luma-end-pad so the last row scrolls clear. */
+/* v266 (Taylor/Designer): Home reaches the bottom because it sizes by 100dvh (in flow), not
+   position:fixed + inset:0. Fixed inset:0 / negative-bottom / bleed ::after paint stay clipped on a
+   real iPhone PWA (WebKit mocks passed; Taylor's shot did not). Size full-screen fixed layers by
+   the large viewport — same edge as Home. Keep --luma-end-pad for scroll-content clearance only.
+   Do not put background-attachment:fixed on these layers (homePage spread). */
 :root {
+  --luma-screen-h: 100dvh;
   --luma-bleed: max(env(safe-area-inset-bottom, 0px), 48px);
   --luma-end-pad: calc(var(--luma-bleed) + env(safe-area-inset-bottom, 0px));
 }
-.luma-bleed::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 100%;
-  height: var(--luma-bleed);
-  background: inherit;
-  pointer-events: none;
+@supports (height: 100lvh) {
+  :root { --luma-screen-h: 100lvh; }
 }
-.luma-bleed-flat::after {
-  background-image: none;
+.luma-fullscreen,
+.luma-bleed-down {
+  top: 0 !important;
+  bottom: auto !important;
+  height: var(--luma-screen-h) !important;
 }
-/* A bottom sheet panel that clips its overflow: a hard shadow one --luma-bleed tall in its color
-   (--luma-panel-bg, default the app navy). A panel with its own shadow lists var(--luma-bleed-shadow). */
+/* Tailwind fixed+inset-0 roots that still carry the v264 class. */
+.luma-bleed.fixed {
+  top: 0 !important;
+  bottom: auto !important;
+  height: var(--luma-screen-h) !important;
+}
+/* Clipped bottom-sheet cards (not viewport roots): hard shadow in their color. */
 .luma-bleed-panel {
   --luma-bleed-shadow: 0 var(--luma-bleed) 0 0 var(--luma-panel-bg, var(--color-kiosk-black));
   box-shadow: var(--luma-bleed-shadow);
-}
-.luma-bleed-down {
-  bottom: calc(-1 * var(--luma-bleed)) !important;
 }
 
 /* Kill iOS PWA tap highlight and focus rings on interactive elements */
@@ -1378,9 +1375,11 @@ input[type="search"]::-webkit-search-cancel-button {
   cursor: not-allowed;
 }
 
-/* iOS PWA resume bug: fixed inset:0 layers come back short. Size detail sheets to the large viewport. */
-@supports (height: 100lvh) {
-  [data-modal="MovieDetailModal"], [data-modal="TvDetailModal"] { bottom: auto !important; height: 100lvh !important; }
+/* iOS PWA resume + v266: detail sheets use the same large-viewport height as .luma-fullscreen. */
+[data-modal="MovieDetailModal"], [data-modal="TvDetailModal"] {
+  top: 0 !important;
+  bottom: auto !important;
+  height: var(--luma-screen-h) !important;
 }
 
 /* LUMA_MINIMAL: the movie/TV popup is display-only (no play, request, grab,
