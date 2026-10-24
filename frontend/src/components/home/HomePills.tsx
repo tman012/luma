@@ -8,6 +8,7 @@ import React, { useState } from 'react';
 import { StoragePill } from '@/components/storage/StoragePill';
 import { TvCalendarSheet } from '@/components/calendar/TvCalendarSheet';
 import { RoomsSheet } from '@/components/rooms/RoomsSheet';
+import { RoomsSessionsProvider } from '@/contexts/NotificationsContext';
 
 interface PillDef {
   label: string;
@@ -63,7 +64,7 @@ export function HomePills({ after = false }: { after?: boolean }) {
         ))}
       </div>
       <TvCalendarSheet open={calendarOpen} onClose={() => setCalendarOpen(false)} />
-      <RoomsSheet open={roomsOpen} onClose={() => setRoomsOpen(false)} />
+      <RoomsSessionsProvider active={roomsOpen}><RoomsSheet open={roomsOpen} onClose={() => setRoomsOpen(false)} /></RoomsSessionsProvider>
     </>
   );
 }

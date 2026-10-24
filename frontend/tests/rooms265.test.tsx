@@ -21,6 +21,7 @@ function stub(pair: { ok: boolean; state: string }) {
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method || 'GET';
     calls.push({ url: String(url), method });
+    if (String(url).includes('/api/plex/sessions/active')) return json({ rooms: [{ roomId: 'lr', roomName: 'Living Room', deviceCount: 1, session: null, activity: null }], unmatched: [] });
     if (String(url).endsWith('/connect')) { paired = pair.ok; return json({ ...pair, hint: pair.state }); }
     if (String(url).includes('/api/rooms')) return json({ rooms: [{ ...LR, player: { ...P, paired } }], default_room_id: 'lr' });
     return json({});
@@ -49,11 +50,14 @@ describe('v265 Pair', () => {
 });
 
 describe('v265 Rooms button and sheet (prod 1b4ea74)', () => {
-  it('Home rail has Rooms and it opens the Rooms sheet', async () => {
-    stub({ ok: true, state: 'connected' });
+  it('Home rail has Rooms; it opens the Rooms sheet, which polls sessions only while open', async () => {
+    const calls = stub({ ok: true, state: 'connected' });
     render(<MemoryRouter><HomePills /></MemoryRouter>);
+    expect(calls.some(c => c.url.includes('/sessions/active'))).toBe(false);
     fireEvent.click(screen.getByTestId('pill-rooms'));
-    await waitFor(() => expect(document.body.textContent).toContain('Rooms'));
+    await waitFor(() => expect(document.body.textContent).toContain('Nothing Playing'));
+    expect(document.body.textContent).toContain('Living Room');
+    expect(calls.filter(c => c.method === 'POST')).toEqual([]);
   });
   it("sheet and remote text match prod's Title Case", () => {
     const sheet = readFileSync('src/components/rooms/RoomsSheet.tsx', 'utf8');

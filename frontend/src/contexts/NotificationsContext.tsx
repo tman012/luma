@@ -11,7 +11,9 @@
  * provided so consumers rendered on public routes don't poll or crash.
  */
 
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { apiFetch } from '@/services/api';
+import type { Room, SessionData } from '@/hooks/useNotifications';
 import { useNotifications } from '@/hooks/useNotifications';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -56,4 +58,32 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
 
 export function useNotificationsContext(): NotificationsValue {
   return useContext(NotificationsContext);
+}
+
+/** v265 minimal build: prod's Rooms sheet reads rooms from this context, but the minimal app runs no
+ * notification pollers. This provides only prod's sessions poll (GET /api/plex/sessions/active every 3 s,
+ * as useNotifications does), mounted while the sheet is open. */
+export function RoomsSessionsProvider({ active, children }: { active: boolean; children: ReactNode }) {
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [unmatchedSessions, setUnmatched] = useState<SessionData[]>([]);
+  const [roomsLoading, setLoading] = useState(true);
+  useEffect(() => {
+    if (!active) return;
+    let live = true;
+    const load = async () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      try {
+        const d = await apiFetch<{ rooms?: Room[]; unmatched?: SessionData[] }>(`/api/plex/sessions/active?_t=${Date.now()}`);
+        if (live) { setRooms(d.rooms ?? []); setUnmatched(d.unmatched ?? []); }
+      } catch { /* keep last known state, as prod */ } finally { if (live) setLoading(false); }
+    };
+    void load();
+    const t = setInterval(load, 3_000);
+    return () => { live = false; clearInterval(t); };
+  }, [active]);
+  return (
+    <NotificationsContext.Provider value={{ ...EMPTY_VALUE, rooms, roomsLoading, unmatchedSessions }}>
+      {children}
+    </NotificationsContext.Provider>
+  );
 }
