@@ -64,7 +64,33 @@ def shell_command(*args: str) -> str:
 
 ADB_TIMEOUT = 10  # seconds for connect/pair
 TCP_TIMEOUT = 1.5  # seconds for TCP probe
-ADB_ENV = {**os.environ, "HOME": "/app/home"}
+# v265: LUMA_ADB_HOME moves adb's HOME (and so its key pair, HOME/.android/adbkey) onto a mounted volume;
+# test sets it inside its data volume so an accepted "Allow network debugging?" prompt survives restarts.
+ADB_HOME = os.environ.get("LUMA_ADB_HOME", "").strip() or "/app/home"
+ADB_ENV = {**os.environ, "HOME": ADB_HOME}
+# v265: LUMA_ADB_COMMANDS (comma list) limits which adb subcommands may run; unset means all (prod).
+_ADB_ALLOWED = frozenset(c.strip() for c in os.environ.get("LUMA_ADB_COMMANDS", "").split(",") if c.strip())
+
+
+def secure_adb_keys(home: Optional[str] = None) -> None:
+    """HOME/.android 0700 and every file in it 0600 (adbkey is the private key). Never reads or logs them."""
+    d = os.path.join(home or ADB_HOME, ".android")
+    try:
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        os.chmod(d, 0o700)
+        for name in os.listdir(d):
+            f = os.path.join(d, name)
+            if os.path.isfile(f) and not os.path.islink(f):
+                os.chmod(f, 0o600)
+    except OSError as e:
+        logger.warning("adb key dir permissions: %s", type(e).__name__)
+
+
+def _subcommand(args: list[str]) -> str:
+    i = 1
+    while i < len(args) and args[i] == "-s":
+        i += 2
+    return args[i] if i < len(args) else ""
 
 # ---------------------------------------------------------------------------
 # Low-level helpers
@@ -84,6 +110,8 @@ def run_adb(args: list[str], timeout: int = ADB_TIMEOUT,
     """
     if os.environ.get("LUMA_DISABLE_ADB", "").strip().lower() in ("1", "true", "yes", "on"):
         return {"ok": False, "stdout": "", "stderr": "ADB disabled (LUMA_DISABLE_ADB)", "returncode": -1}
+    if _ADB_ALLOWED and _subcommand(args) not in _ADB_ALLOWED:
+        return {"ok": False, "stdout": "", "stderr": "ADB command not allowed (LUMA_ADB_COMMANDS)", "returncode": -1}
     try:
         result = subprocess.run(
             args,
@@ -93,6 +121,8 @@ def run_adb(args: list[str], timeout: int = ADB_TIMEOUT,
             env=ADB_ENV,
             input=input_text,
         )
+        if _subcommand(args) in ("connect", "pair", "devices"):
+            secure_adb_keys()
         return {
             "ok": result.returncode == 0,
             "stdout": result.stdout,
@@ -525,3 +555,31 @@ def test_room_connection(host: str, connect_port: int, platform: str = "android_
         "message": f"Connected! Device model: {model}" if all_ok else "Partial connection — see steps for details.",
         "steps": steps,
     }
+
+
+def wait_for_authorization(host: str, connect_port: int, timeout: float = 30.0, interval: float = 1.0,
+                           sleep=None, clock=None) -> dict:
+    """v265 Pair: `adb connect`, then wait (up to *timeout* s) for the user to tap Allow on the TV's
+    "Allow network debugging?" prompt, i.e. for `adb devices` to list host:port as `device`.
+    Returns {"ok", "state": connected|unauthorized|failed, "hint", "detail"}."""
+    import time as _time
+    sleep = sleep or _time.sleep
+    clock = clock or _time.monotonic
+    conn = adb_connect(host, connect_port)
+    if not conn["ok"] and conn.get("hint") not in ("unauthorized", "needs_pairing"):
+        return {"ok": False, "state": "failed", "hint": conn.get("hint", "unknown"), "detail": conn.get("detail", "")}
+    target = f"{host}:{connect_port}"
+    end = clock() + timeout
+    state = ""
+    while True:
+        entry = next((d for d in adb_devices() if d.get("serial") == target), None)
+        state = entry["state"] if entry else ""
+        if state == "device":
+            secure_adb_keys()
+            return {"ok": True, "state": "connected", "hint": "connected", "detail": ""}
+        if clock() >= end:
+            break
+        sleep(interval)
+    if state == "unauthorized":
+        return {"ok": False, "state": "unauthorized", "hint": "unauthorized", "detail": ""}
+    return {"ok": False, "state": "failed", "hint": "timeout", "detail": ""}
