@@ -21723,6 +21723,10 @@ from app import qbit_connector as _qbit_connector
 _qbit_connector.init(settings=settings, owner_or_error=_start_flow._owner_or_error)
 app.register_blueprint(_qbit_connector.bp)
 
+from app import ha_connector as _ha_connector
+_ha_connector.init(settings=settings, owner_or_error=_start_flow._owner_or_error)
+app.register_blueprint(_ha_connector.bp)
+
 # Settings > Library paths and the library mover (LUMA_MINIMAL builds only).
 from app import file_management as _file_management
 from app import library_mover as _library_mover
