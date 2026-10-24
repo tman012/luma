@@ -1,6 +1,7 @@
 /** Settings > Connectors (owner only): the TMDB API key, the OMDb API key, the Trakt client
- * ID, TheTVDB (API key and optional subscriber PIN), Home Assistant and qBittorrent. Keys stay on the server; the browser only learns
- * whether one is saved and its last 4 (never any of the qBittorrent password). */
+ * ID, TheTVDB (API key and optional subscriber PIN), Home Assistant, Web Push, Telegram and qBittorrent.
+ * Keys stay on the server; the browser only learns whether one is saved and its last 4
+ * (never any of the qBittorrent password or Telegram bot token). */
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '@/apiClient';
 import { FONT } from '@/components/start/StartUI';
@@ -9,6 +10,8 @@ import { NoticeToast } from '@/components/start/SetupToast';
 import { useKioskWidth } from '@/components/home/KioskHome';
 import { QbitConnector } from '@/components/home/QbitConnector';
 import { HaConnector } from '@/components/home/HaConnector';
+import { WebPushConnector } from '@/components/home/WebPushConnector';
+import { TelegramConnector } from '@/components/home/TelegramConnector';
 
 type Masked = { set: boolean; last4: string; pin_set?: boolean };
 interface View { tmdb: Masked; omdb?: Masked; trakt?: Masked; tvdb?: Masked }
@@ -54,6 +57,8 @@ export function ConnectorsSettings() {
       ))}
       <HaConnector onSaved={setToast} />
       <QbitConnector onSaved={setToast} />
+      <WebPushConnector onSaved={setToast} />
+      <TelegramConnector onSaved={setToast} />
     </section>
   );
 }
