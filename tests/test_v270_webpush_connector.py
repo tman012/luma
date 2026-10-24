@@ -1,4 +1,4 @@
-"""v270: Settings > Connectors Web Push. Owner only; Test mocked (no real push)."""
+"""v273: Settings > Connectors Web Push (prod 1b4ea74 Services keys). Owner only; Test mocked."""
 import pytest
 
 import app.main

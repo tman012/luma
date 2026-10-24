@@ -52,9 +52,6 @@ function server() {
     if (url.includes('/api/settings/connectors/webpush')) {
       return res({ enabled: false, vapid_email: '' });
     }
-    if (url.includes('/api/settings/connectors/telegram')) {
-      return res({ bot_token: { set: false, last4: '' }, chat_id: '' });
-    }
     return res({ error: 'Not found' }, 404);
   });
 }
@@ -78,7 +75,7 @@ describe('Settings > Connectors > Home Assistant', () => {
     expect(groups).toEqual([
       'connector-tmdb', 'connector-omdb', 'connector-tvdb', 'connector-trakt',
       'connector-homeassistant', 'connector-qbittorrent',
-      'connector-webpush', 'connector-telegram',
+      'connector-webpush',
     ]);
     expect(field('url').value).toBe('http://ha.example:8123');
     expect(field('access-token').value).toBe('');

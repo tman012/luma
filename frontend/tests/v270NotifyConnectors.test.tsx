@@ -6,7 +6,6 @@ const res = (body: unknown, status = 200) =>
   ({ ok: status >= 200 && status < 300, status, json: async () => body }) as Response;
 
 let webpush = { enabled: false, vapid_email: '' };
-let telegram = { bot_token: { set: false, last4: '' }, chat_id: '' };
 let calls: { url: string; method: string; body: Record<string, unknown> | null }[] = [];
 
 function stubMatchMedia() {
@@ -34,52 +33,39 @@ function server() {
       webpush = { enabled: !!body!.enabled, vapid_email: String(body!.vapid_email || '') };
       return res(webpush);
     }
-    if (url.endsWith('/telegram/test') && method === 'POST') return res({ ok: true, message: 'Connected' });
-    if (url.endsWith('/telegram') && method === 'GET') return res(telegram);
-    if (url.endsWith('/telegram') && method === 'PUT') {
-      const tok = String(body!.bot_token || '');
-      if (!tok) {
-        telegram = { bot_token: { set: false, last4: '' }, chat_id: '' };
-        return res(telegram);
-      }
-      telegram = {
-        bot_token: { set: true, last4: tok.slice(-4) },
-        chat_id: String(body!.chat_id || ''),
-      };
-      return res(telegram);
-    }
+    if (url.includes('/telegram')) return res({ error: 'Not found' }, 404);
     return res({ error: 'Not found' }, 404);
   });
 }
 
 beforeEach(() => {
   webpush = { enabled: false, vapid_email: '' };
-  telegram = { bot_token: { set: false, last4: '' }, chat_id: '' };
   calls = [];
   stubMatchMedia();
   vi.stubGlobal('fetch', server());
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-describe('v270 Notify Connectors', () => {
-  it('shows Web Push and Telegram after qBittorrent with prod Title Case labels', async () => {
+describe('v273 Web Push Connectors (no Telegram)', () => {
+  it('shows Web Push after qBittorrent with prod Title Case labels; no Telegram card', async () => {
     render(<ConnectorsSettings />);
     await screen.findByTestId('connector-webpush');
-    await screen.findByTestId('connector-telegram');
+    expect(screen.queryByTestId('connector-telegram')).toBeNull();
     const groups = [...document.querySelectorAll('[data-testid^="connector-"]')].map(e => e.getAttribute('data-testid'));
     expect(groups).toEqual([
       'connector-tmdb', 'connector-omdb', 'connector-tvdb', 'connector-trakt',
       'connector-homeassistant', 'connector-qbittorrent',
-      'connector-webpush', 'connector-telegram',
+      'connector-webpush',
     ]);
     expect(screen.getByText('Web Push Notifications')).toBeTruthy();
     expect(screen.getByText('Enable Push Sending')).toBeTruthy();
     expect(screen.getByText('Contact Email')).toBeTruthy();
-    expect(screen.getByText('Bot Token')).toBeTruthy();
-    expect(screen.getByText('Chat ID')).toBeTruthy();
+    expect(screen.queryByText('Bot Token')).toBeNull();
+    expect(screen.queryByText('Chat ID')).toBeNull();
+    expect(screen.queryByText('Telegram')).toBeNull();
   });
 
-  it('saves Web Push enable + email', async () => {
+  it('saves Web Push enable + Contact Email (VAPID; not an email notify channel)', async () => {
     render(<ConnectorsSettings />);
     await screen.findByTestId('connector-webpush');
     fireEvent.click(screen.getByTestId('webpush-enabled'));
@@ -87,17 +73,6 @@ describe('v270 Notify Connectors', () => {
     fireEvent.click(screen.getByTestId('webpush-save'));
     await waitFor(() => expect(webpush.enabled).toBe(true));
     expect(webpush.vapid_email).toBe('mailto:a@b.co');
-  });
-
-  it('Telegram token field is password and never shows a typed value after save', async () => {
-    render(<ConnectorsSettings />);
-    const input = await screen.findByTestId('telegram-bot-token') as HTMLInputElement;
-    expect(input.type).toBe('password');
-    fireEvent.change(input, { target: { value: '123456789:AAHsecret' } });
-    fireEvent.change(screen.getByTestId('telegram-chat-id'), { target: { value: '42' } });
-    fireEvent.click(screen.getByTestId('telegram-save'));
-    await waitFor(() => expect(telegram.bot_token.set).toBe(true));
-    expect((screen.getByTestId('telegram-bot-token') as HTMLInputElement).value).toBe('');
-    expect((screen.getByTestId('telegram-bot-token') as HTMLInputElement).placeholder).toBe('••••cret');
+    expect(calls.every(c => !c.url.includes('telegram'))).toBe(true);
   });
 });

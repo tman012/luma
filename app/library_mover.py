@@ -18,7 +18,7 @@ and "Title (Year)/Title (Year).ext" naming. Rulings for luma-test:
   'insufficient space', never retried.
 * Files 664, created folders 775; when running as root, both are chowned to
   the owner of the library path. No chmod 777. On a successful file into the
-  library (state 'done'), library_notify fires prod AutoRenamer's push/Telegram/bell.
+  library (state 'done'), library_notify fires prod AutoRenamer's Web Push + bell.
 * Anything under <downloads>/incomplete/ or named *.!qB is never processed.
 * A tracked torrent that is gone from qBittorrent is dropped after a few
   checks; one that isn't ours is dropped at once.

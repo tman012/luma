@@ -1,4 +1,4 @@
-"""Luma-side library/import notifications (prod AutoRenamer path).
+"""Luma-side library/import notifications (prod AutoRenamer Web Push path).
 
 Fires only when Luma's own pipeline has placed a file in the library
 (library_mover for movies, tv_downloads for TV) — never on grab/download, and
@@ -7,13 +7,12 @@ never from Sonarr/Radarr webhooks. Copy matches prod AutoRenamer:
   title: "{Title} ({Year}) added!"   (year omitted when empty)
   body:  "Tap to view details"
 
-Also: pending-request Telegram (check_and_notify) and an in-app bell record.
+Channels: PWA Web Push + in-app bell only (v273 PM: no Telegram, no email).
 Tokens are never logged.
 """
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
@@ -71,24 +70,6 @@ def _push(title: str, body: str, tag: str, url: str, image: str) -> None:
         logger.warning('Library notify: web push failed (%s)', type(e).__name__)
 
 
-def _telegram_pending(media_type: str, tmdb_id: Optional[int],
-                      season: Optional[int], episode: Optional[int],
-                      episode_title: Optional[str]) -> None:
-    if not tmdb_id:
-        return
-    try:
-        from app.pending_requests import check_and_notify
-        check_and_notify(
-            media_type=media_type,
-            tmdb_id=int(tmdb_id),
-            season=season,
-            episode=episode,
-            episode_title=episode_title,
-        )
-    except Exception as e:
-        logger.warning('Library notify: pending Telegram check failed (%s)', type(e).__name__)
-
-
 def _bell(record: dict) -> None:
     hook = _bell_hook
     if hook is not None:
@@ -143,7 +124,6 @@ def notify_library_added(
     image = _backdrop(tmdb_id, kind)
 
     _push(push_title, push_body, tag, modal_url, image)
-    _telegram_pending(kind, tmdb_id, season, episode, episode_title)
 
     record = {
         'title': (title or 'Unknown').strip() or 'Unknown',

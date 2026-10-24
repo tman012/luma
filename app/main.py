@@ -21739,9 +21739,6 @@ _library_notify.set_bell_hook(_add_webhook_notification)
 from app import webpush_connector as _webpush_connector
 _webpush_connector.init(settings=settings, owner_or_error=_start_flow._owner_or_error)
 app.register_blueprint(_webpush_connector.bp)
-from app import telegram_connector as _telegram_connector
-_telegram_connector.init(owner_or_error=_start_flow._owner_or_error)
-app.register_blueprint(_telegram_connector.bp)
 
 # Settings > Library paths and the library mover (LUMA_MINIMAL builds only).
 from app import file_management as _file_management
