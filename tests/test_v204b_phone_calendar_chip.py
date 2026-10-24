@@ -54,13 +54,14 @@ def test_compact_watchlist_buttons_and_confirm_are_prods():
         i = s.index(a)
         return s[i:s.index(b, i)]
     import re
-    strip = lambda s: re.sub(r'\s+data-(testid|modal-keep)="[^"]*"|\s*/\*.*?\*/|\s+onClick=\{[^\n]*\n', '', s, flags=re.S)
+    strip = lambda s: re.sub(r'\s+data-(testid|modal-keep)="[^"]*"|\s+className="luma-bleed"|\s*/\*.*?\*/|\s+onClick=\{[^\n]*\n', '', s, flags=re.S)
     p_in = block(prod, "borderRadius: '50px',\n                          background: 'rgba(74,222,128,0.12)'", 'In Watchlist')
     assert _norm(p_in) in test
     p_add = block(prod, "width: 'calc(100% - 32px)',\n                        margin: '20px 16px 0',\n                        padding: '14px 20px',\n                        background: '#ffffff',\n                        color: '#000000',", '}}')
     assert test.count(p_add) >= 2            # Watch and Add to watchlist are prod's same white pill
     p_conf = block(prod, '{showRemoveConfirm && (', "'Remove from Watchlist'}")
-    assert _norm(p_conf) in test
+    # v264: the confirm dialog carries luma-bleed (full-bleed on phone); strip it for the prod match
+    assert strip(_norm(p_conf)) in strip(test)
     assert "removeFromWatchlist(id)" in test and 'onClick={handleUpgradeToggle}' in test   # prod's picker step
 
 
@@ -105,8 +106,7 @@ def test_v205_prod_capitalization_and_guard_exemption():
 
 def test_v211_tv_calendar_sheet_runs_to_the_bottom_edge():
     """Designer: like v210's Settings sheet, the backdrop reaches one inset past the edge and the inset is
-    only inside the scroll content (no band below the sheet)."""
-    assert "position: 'fixed', inset: 0, bottom: 'calc(-1 * env(safe-area-inset-bottom, 0px))'" in SHEET
+    only inside the scroll content (no band below the sheet). v264: the reach is --luma-bleed."""
+    assert "position: 'fixed', inset: 0, bottom: 'calc(-1 * var(--luma-bleed))'" in SHEET
     i = SHEET.index('data-scroll-container')
-    assert SHEET.index("env(safe-area-inset-bottom, 0px) * 2 + 12px", i) > i
-    assert SHEET.count('safe-area-inset-bottom') == 2
+    assert SHEET.index("var(--luma-end-pad) + 12px", i) > i

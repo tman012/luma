@@ -8,9 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_settings_sheet_full_bleed():
     t = (ROOT / 'frontend/src/pages/LibrariesPage.tsx').read_text()
-    assert "bottom: 'calc(-1 * env(safe-area-inset-bottom, 0px))'" in t
+    assert "bottom: 'calc(-1 * var(--luma-bleed))'" in t  # v264: the reach is --luma-bleed
     assert 'data-scroll-content style={{ paddingBottom: SHEET_SCROLL_PAD }}>{content(known.slug)}' in t
     assert "'calc(env(safe-area-inset-bottom) + 24px)'" not in t
+    assert "SHEET_SCROLL_PAD = 'calc(var(--luma-end-pad) + 24px)'" in t
 
 
 def test_guard_present():
