@@ -92,7 +92,8 @@ describe('safe-area bottom guard (full-screen pages and sheets run to the bottom
   it('the phone Settings sheet keeps the inset inside its scroll content', () => {
     const t = readFileSync(join(SRC, 'pages', 'LibrariesPage.tsx'), 'utf8');
     expect(t).toMatch(/data-scroll-content style=\{\{ paddingBottom: SHEET_SCROLL_PAD \}\}>\{content/);
-    // v264: the reach is --luma-bleed (the inset, at least 48px)
-    expect(t).toMatch(/bottom: 'calc\(-1 \* var\(--luma-bleed\)\)'/);
+    // v266: height via luma-fullscreen; no negative-bottom stretch
+    expect(t).toMatch(/className="luma-fullscreen"/);
+    expect(t).not.toMatch(/bottom: 'calc\(-1 \* var\(--luma-bleed\)\)'/);
   });
 });

@@ -1,7 +1,7 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`desktop Settings layout > phone is unchanged > phone library paths 1`] = `
-"<div style="color: rgb(255, 255, 255); font-family: -apple-system, BlinkMacSystemFont, &quot;SF Pro Text&quot;, &quot;Segoe UI&quot;, Roboto, Helvetica, Arial, sans-serif; background: radial-gradient(at 50% 30%, rgb(38, 42, 102) 0%, rgb(21, 16, 42) 55%, rgb(10, 8, 24) 100%); position: fixed; inset: 0px; bottom: calc(-1 * var(--luma-bleed));" data-step="settings" data-layout="phone"><style>
+"<div class="luma-fullscreen" style="background: var(--color-kiosk-black); isolation: isolate; position: fixed; top: 0px; left: 0px; right: 0px; color: rgb(255, 255, 255); font-family: -apple-system, BlinkMacSystemFont, &quot;SF Pro Text&quot;, &quot;Segoe UI&quot;, Roboto, Helvetica, Arial, sans-serif; background-image: linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.55));" data-step="settings" data-layout="phone"><div aria-hidden="true" data-testid="glow-layer" class="luma-fullscreen" style="position: fixed; top: 0px; left: 0px; right: 0px; background: radial-gradient(at 50% 30%, rgb(38, 42, 102) 0%, rgb(21, 16, 42) 55%, rgb(10, 8, 24) 100%); pointer-events: none; z-index: -1;"></div><style>
 .luma-section-item:hover{background:rgba(255,255,255,.06)}
 .luma-section-item[aria-current="page"]:hover{background:rgba(59,130,246,.14)}
 .luma-sheet-row:active{background:rgba(255,255,255,.06)}
@@ -16,7 +16,7 @@ exports[`desktop Settings layout > phone is unchanged > phone library paths 1`] 
 `;
 
 exports[`desktop Settings layout > phone is unchanged > phone list 1`] = `
-"<div style="color: rgb(255, 255, 255); font-family: -apple-system, BlinkMacSystemFont, &quot;SF Pro Text&quot;, &quot;Segoe UI&quot;, Roboto, Helvetica, Arial, sans-serif; background: radial-gradient(at 50% 30%, rgb(38, 42, 102) 0%, rgb(21, 16, 42) 55%, rgb(10, 8, 24) 100%); position: fixed; inset: 0px; bottom: calc(-1 * var(--luma-bleed));" data-step="settings" data-layout="phone"><style>
+"<div class="luma-fullscreen" style="background: var(--color-kiosk-black); isolation: isolate; position: fixed; top: 0px; left: 0px; right: 0px; color: rgb(255, 255, 255); font-family: -apple-system, BlinkMacSystemFont, &quot;SF Pro Text&quot;, &quot;Segoe UI&quot;, Roboto, Helvetica, Arial, sans-serif; background-image: linear-gradient(rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.55));" data-step="settings" data-layout="phone"><div aria-hidden="true" data-testid="glow-layer" class="luma-fullscreen" style="position: fixed; top: 0px; left: 0px; right: 0px; background: radial-gradient(at 50% 30%, rgb(38, 42, 102) 0%, rgb(21, 16, 42) 55%, rgb(10, 8, 24) 100%); pointer-events: none; z-index: -1;"></div><style>
 .luma-section-item:hover{background:rgba(255,255,255,.06)}
 .luma-section-item[aria-current="page"]:hover{background:rgba(59,130,246,.14)}
 .luma-sheet-row:active{background:rgba(255,255,255,.06)}
