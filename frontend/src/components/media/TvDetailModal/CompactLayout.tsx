@@ -458,7 +458,7 @@ export function CompactLayout(props: TvModalViewProps) {
   if (phase === 'gone') return null;
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       data-modal="TvDetailModal"
       data-variant="mobile"
       data-composed={composed ? "true" : "false"}
@@ -475,7 +475,7 @@ export function CompactLayout(props: TvModalViewProps) {
       }}
     >
       {/* Modal card — rounded top, extends to bottom of wrapper */}
-      <div
+      <div className="luma-bleed-down"
         style={{
           position: 'absolute',
           top: 'max(env(safe-area-inset-top, 0px), 6px)',
@@ -1216,7 +1216,7 @@ export function CompactLayout(props: TvModalViewProps) {
                 {/* Bottom spacing — extends past safe area */}
                 <div
                   style={{
-                    height: 'calc(env(safe-area-inset-bottom, 0px) + 40px)',
+                    height: 'calc(var(--luma-end-pad) + 40px)',
                   }}
                 />
 
@@ -1445,7 +1445,7 @@ export function CompactLayout(props: TvModalViewProps) {
 
       {/* Auto-search popup — portaled to body so it's always on top of action sheets */}
       {autoSearchToast && createPortal(
-        <div
+        <div className="luma-bleed"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1624,7 +1624,7 @@ function SeasonActionSheet({
   ].filter((a) => a.key !== 'sources' || !!onBrowseSources);
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,
@@ -1637,7 +1637,7 @@ function SeasonActionSheet({
       }}
       onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
     >
-      <div
+      <div className="luma-bleed-panel"
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
@@ -1936,7 +1936,7 @@ function SeasonsShelf({
   const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,
@@ -1949,7 +1949,7 @@ function SeasonsShelf({
       }}
       onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
     >
-      <div
+      <div className="luma-bleed-panel"
         onTouchStart={onSheetTouchStart}
         onTouchMove={onSheetTouchMove}
         onTouchEnd={onSheetTouchEnd}
@@ -2217,7 +2217,7 @@ function EpisodesBrowsingSheet({
   const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,
@@ -2230,7 +2230,7 @@ function EpisodesBrowsingSheet({
       }}
       onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
     >
-      <div
+      <div className="luma-bleed-panel"
         onTouchStart={onSheetTouchStart}
         onTouchMove={onSheetTouchMove}
         onTouchEnd={onSheetTouchEnd}

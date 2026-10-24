@@ -198,7 +198,7 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
   };
 
   return (
-    <div
+    <div className="luma-bleed"
       data-testid="search-shelf"
       style={{
         position: 'fixed', inset: 0, zIndex: 10000,
@@ -282,7 +282,7 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
       </div>
 
       {/* Results — scrollable area under fixed header */}
-      <div ref={resultsRef} data-scroll-container className="luma-scroll-y" style={{ position: 'absolute', top: headerH, left: 0, right: 0, bottom: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y' }}>
+      <div ref={resultsRef} data-scroll-container className="luma-scroll-y luma-bleed-down" style={{ position: 'absolute', top: headerH, left: 0, right: 0, bottom: 0, overflowY: 'auto', WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y' }}>
         {/* Result count */}
         {!loading && results && query.length >= 2 && (
           <div style={{ padding: '8px 20px 4px', fontSize: 13, color: 'rgba(255,255,255,0.35)' }}>
@@ -384,8 +384,8 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
           );
         })}
 
-        {/* End spacer (Luma: no bottom safe-area padding) */}
-        <div style={{ height: 24 }} />
+        {/* End spacer: the list runs under the home indicator; the last row scrolls clear */}
+        <div style={{ height: 'calc(var(--luma-end-pad) + 24px)' }} />
       </div>
     </div>
   );

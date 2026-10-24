@@ -198,13 +198,13 @@ export function MobileHomePage() {
     <div
       ref={scrollRef}
       data-scroll-container
-      className="luma-scroll-y mobile-page-enter fixed inset-0 bg-kiosk-black text-white"
+      className="luma-scroll-y luma-bleed-down mobile-page-enter fixed inset-0 bg-kiosk-black text-white"
       style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y', animation: 'mobilePageEnter 0.25s ease-out' }}
     >
       <MobileHeader scrollRef={scrollRef} />
 
       {/* Spacer for fixed header + content area */}
-      <div className="pt-20 pb-8">
+      <div className="pt-20" style={{ paddingBottom: 'calc(32px + var(--luma-end-pad))' }}>
 
       <MobilePushBanner />
 

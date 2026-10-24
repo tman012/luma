@@ -123,8 +123,8 @@ function AccountPanel({ name, admin, busy, onSignOut, size = 40, prodTrigger }: 
         : <Avatar name={name} size={size} aria-label="Account" aria-haspopup="dialog" aria-expanded={open}
             onClick={() => setOpen(true)} />}
       {mounted && createPortal(
-        <div style={{ position: 'fixed', inset: 0, zIndex: 300 }}>
-          <div data-testid="account-scrim" onClick={() => setOpen(false)}
+        <div className="luma-bleed" style={{ position: 'fixed', inset: 0, zIndex: 300 }}>
+          <div className="luma-bleed" data-testid="account-scrim" onClick={() => setOpen(false)}
             style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', opacity: shown ? 1 : 0, transition: `opacity ${MS}ms` }} />
           <div role="dialog" aria-modal="true" aria-label="Account" data-testid="account-panel"
             onPointerDown={e => { startX.current = e.clientX; }}
@@ -181,9 +181,9 @@ const dropItem: React.CSSProperties = {
 };
 const dropIcon: React.CSSProperties = { display: 'inline-flex', color: 'rgba(255,255,255,0.7)' };
 const panel: React.CSSProperties = {
-  position: 'absolute', top: 0, right: 0, bottom: 0, width: '82vw', maxWidth: 340, boxSizing: 'border-box',
+  position: 'absolute', top: 0, right: 0, width: '82vw', maxWidth: 340, boxSizing: 'border-box',
   display: 'flex', flexDirection: 'column', fontFamily: FONT, color: '#fff',
-  padding: 'env(safe-area-inset-top) 24px env(safe-area-inset-bottom)',
+  padding: 'env(safe-area-inset-top) 24px var(--luma-end-pad)', bottom: 'calc(-1 * var(--luma-bleed))',
   // App navy only (navy-audit.md): the --color-kiosk-black base with the NAVY_BG glow, plus white 4%.
   backgroundColor: 'var(--color-kiosk-black)',
   backgroundImage: `linear-gradient(rgba(255,255,255,0.04), rgba(255,255,255,0.04)), ${NAVY_BG}`,

@@ -355,14 +355,14 @@ export function MobileExplorePage() {
   return (
     <div
       data-scroll-container
-      className="luma-scroll-y mobile-page-enter fixed inset-0 bg-kiosk-black text-white"
+      className="luma-scroll-y luma-bleed-down mobile-page-enter fixed inset-0 bg-kiosk-black text-white"
       style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y', animation: 'mobilePageEnter 0.25s ease-out' }}
     >
       {/* MobileHeader measures its own offsetHeight via ResizeObserver and reports it up */}
       <MobileHeader onHeightChange={setHeaderHeight} />
 
       {/* paddingTop = measured header height + 20px buffer — guaranteed to clear the fixed header */}
-      <div className="pb-8 px-4" style={{ paddingTop: headerHeight + 20 }}>
+      <div className="px-4" style={{ paddingTop: headerHeight + 20, paddingBottom: 'calc(32px + var(--luma-end-pad))' }}>
         {/* Anticipated rails (Trakt — hidden when disabled/empty) */}
         <MobilePosterRail title="Anticipated movies" items={anticipatedMovies?.items} onCardClick={handleCardClick} />
         <MobilePosterRail title="Anticipated shows" items={anticipatedShows?.items} onCardClick={handleCardClick} />

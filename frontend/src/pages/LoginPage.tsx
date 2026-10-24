@@ -262,7 +262,7 @@ export function LoginPage() {
 // ---------------------------------------------------------------------------
 
 const columnStyle: React.CSSProperties = {
-  minHeight: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+  minHeight: 'calc(100% - var(--luma-bleed))', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
   padding: 'calc(env(safe-area-inset-top) + 32px) 24px calc(env(safe-area-inset-bottom) + 32px)', boxSizing: 'border-box',
   fontFamily: FONT,
 };

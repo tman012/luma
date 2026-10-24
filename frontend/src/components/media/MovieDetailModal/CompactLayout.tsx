@@ -382,7 +382,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   if (phase === 'gone') return null;
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       data-modal="MovieDetailModal"
       data-variant="mobile"
       data-composed={composed ? "true" : "false"}
@@ -400,7 +400,7 @@ export function CompactLayout(props: MovieModalViewProps) {
       }}
     >
       {/* Modal card — rounded top, extends to bottom of wrapper */}
-      <div
+      <div className="luma-bleed-down"
         style={{
           position: 'absolute',
           top: 'max(env(safe-area-inset-top, 0px), 6px)',
@@ -1129,7 +1129,7 @@ export function CompactLayout(props: MovieModalViewProps) {
                 )}
 
                 {/* Bottom spacing — content padding keeps last items above home indicator */}
-                <div style={{ height: 'calc(env(safe-area-inset-bottom, 0px) + 40px)' }} />
+                <div style={{ height: 'calc(var(--luma-end-pad) + 40px)' }} />
 
                 </div>{/* end stage 3 details wrapper */}
               </div>
@@ -1375,7 +1375,7 @@ export function CompactLayout(props: MovieModalViewProps) {
 
       {/* Remove from Watchlist confirm sheet */}
       {showRemoveConfirm && (
-        <div
+        <div className="luma-bleed"
           role="dialog"
           aria-modal="true"
           aria-label="Remove from Watchlist"
