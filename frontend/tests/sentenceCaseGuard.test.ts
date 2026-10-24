@@ -74,7 +74,9 @@ export const PROD_MATCHED = ['Add to Watchlist', 'In Watchlist', 'Select Quality
   // v262 PM ruling: the Downloads Guard card's prod 1b4ea74 toggle label
   'Enable Downloads Guard',
   // v262 PM ruling: phone Home's first rail title as prod 1b4ea74
-  'Continue Watching'];
+  'Continue Watching',
+  // v268 PM ruling: Home Assistant Connectors / Services fields as prod 1b4ea74
+  'Access Token'];
 /** v212 prod 1b4ea74-matched Home Watchlist rail date label ('NOV 3'): prod upper-cases it by CSS, so test does too
  * (PM: test matches prod's capitalization). Only this file's wlLabel style (v213) may do it. */
 export const PROD_MATCHED_UPPERCASE = ["components/home/Rails.tsx: textTransform: 'uppercase'"];
@@ -84,7 +86,7 @@ const prodShelf = (h: string) => /^components\/search\/SearchShelf\.tsx:\d+: "TV
  * and only these strings ('Nothing Playing', 'Friends & Family', 'OK / Select', 'Play / Pause', the rocker labels' uppercase). */
 const prodRooms = (h: string) => /^components\/rooms\/(RoomsSheet|FullScreenRemote)\.tsx:\d+: (?:"(?:Nothing Playing|Friends & Family|OK \/ Select|Play \/ Pause)" \(\w+\)|.*text-\[9px\] font-semibold uppercase tracking-\[0\.15em\].*)$/.test(h);
 const prodUpper = (h: string) => /^components\/home\/Rails\.tsx:\d+: margin: '0 0 2px', fontSize: 10, fontWeight: 600, letterSpacing: '0\.04em', textTransform: 'uppercase',$/.test(h);
-const DATA_RE = /^(Add to Watchlist$|Find More$|TV Calendar$|Downloads Guard$|Enable Downloads Guard$|Continue Watching$|In Watchlist$|Cast & Reviews$|Remove from Watchlist\??$|Select Quality$|Upgrade Quality$|Watchlist$|Not Configured$|BBC News|NPR News|GPT-|e\.g\. |Sport, Sports$|Recently Released$|Watch Shield$|"|.*"$|A (blue )?banner will appear|-apple-system|ui-monospace|Amazon Ember|Your download is complete|I've added|Here are some movies)/;
+const DATA_RE = /^(Add to Watchlist$|Find More$|TV Calendar$|Downloads Guard$|Enable Downloads Guard$|Continue Watching$|Access Token$|In Watchlist$|Cast & Reviews$|Remove from Watchlist\??$|Select Quality$|Upgrade Quality$|Watchlist$|Not Configured$|BBC News|NPR News|GPT-|e\.g\. |Sport, Sports$|Recently Released$|Watch Shield$|"|.*"$|A (blue )?banner will appear|-apple-system|ui-monospace|Amazon Ember|Your download is complete|I've added|Here are some movies)/;
 const PROPS = '(?:label|aria-label|ariaLabel|title|placeholder|heading|subtitle|eyebrow|description|emptyText|buttonLabel|confirmLabel|cancelLabel|actionLabel|text|name|header|caption|tooltip|alt|cta)';
 const LABEL_RES = [
   new RegExp(PROPS + '=\\s*"([^"{}]+)"', 'g'),
