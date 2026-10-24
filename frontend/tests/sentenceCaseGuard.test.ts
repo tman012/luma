@@ -11,7 +11,6 @@ import { getBadgeColor as movieBadge } from '@/components/media/MovieDetailModal
 import { getBadgeColor as tvBadge } from '@/components/media/TvDetailModal/tvSourcesUtils';
 import { NEUTRAL_GLASS } from '@/components/media/chipGlass';
 import { sourceTypeLabel } from '@/components/media/sourcesShared';
-import { activeEdge, EDGE_NO_DESTINATION } from '@/components/activity/ActivityFeed';
 import { sentenceCase } from '@/utils/sentenceCase';
 
 const SRC = join(__dirname, '..', 'src');
@@ -88,6 +87,8 @@ const prodShelf = (h: string) => /^components\/search\/SearchShelf\.tsx:\d+: "TV
 /** v265 PM ruling: prod 1b4ea74's RoomsSheet and FullScreenRemote, copy and styles verbatim; only those two files
  * and only these strings ('Nothing Playing', 'Friends & Family', 'OK / Select', 'Play / Pause', the rocker labels' uppercase). */
 const prodRooms = (h: string) => /^components\/rooms\/(RoomsSheet|FullScreenRemote)\.tsx:\d+: (?:"(?:Nothing Playing|Friends & Family|OK \/ Select|Play \/ Pause)" \(\w+\)|.*text-\[9px\] font-semibold uppercase tracking-\[0\.15em\].*)$/.test(h);
+/** v269 PM: ActivityFeed is prod 1b4ea74 verbatim (section + origin + tracker uppercase). */
+const prodActivity = (h: string) => /^components\/activity\/ActivityFeed\.tsx:\d+: .*\buppercase\b/.test(h);
 const prodUpper = (h: string) => /^components\/home\/Rails\.tsx:\d+: margin: '0 0 2px', fontSize: 10, fontWeight: 600, letterSpacing: '0\.04em', textTransform: 'uppercase',$/.test(h);
 const DATA_RE = /^(Add to Watchlist$|Find More$|TV Calendar$|Downloads Guard$|Enable Downloads Guard$|Continue Watching$|Access Token$|Web Push Notifications$|Enable Push Sending$|Contact Email$|In Watchlist$|Cast & Reviews$|Remove from Watchlist\??$|Select Quality$|Upgrade Quality$|Watchlist$|Not Configured$|BBC News|NPR News|GPT-|e\.g\. |Sport, Sports$|Recently Released$|Watch Shield$|"|.*"$|A (blue )?banner will appear|-apple-system|ui-monospace|Amazon Ember|Your download is complete|I've added|Here are some movies)/;
 const PROPS = '(?:label|aria-label|ariaLabel|title|placeholder|heading|subtitle|eyebrow|description|emptyText|buttonLabel|confirmLabel|cancelLabel|actionLabel|text|name|header|caption|tooltip|alt|cta)';
@@ -145,7 +146,7 @@ function titleCaseHits(): string[] {
 
 describe('sentence case guard', () => {
   it('no CSS upper-casing anywhere in the app', () => {
-    expect(hits(/(^|['"`\s])uppercase(?=['"`\s]|$)/).filter((h) => !prodUpper(h) && !prodRooms(h))).toEqual([]);
+    expect(hits(/(^|['"`\s])uppercase(?=['"`\s]|$)/).filter((h) => !prodUpper(h) && !prodRooms(h) && !prodActivity(h))).toEqual([]);
     expect(hits(/textTransform:\s*['"]uppercase['"]/).filter((h) => !prodUpper(h) && !prodRooms(h))).toEqual([]);
     expect(hits(/text-transform:\s*uppercase/)).toEqual([]);
   });
@@ -187,15 +188,11 @@ describe('neutral glass chips', () => {
     expect(NEUTRAL_GLASS).toEqual({ bg: 'rgba(255,255,255,0.08)', fg: 'rgba(255,255,255,0.7)', border: 'rgba(255,255,255,0.1)' });
   });
 
-  it('no per-origin tint is left (Genre Roulette violet)', () => {
+  it('v269 PM: ActivityFeed keeps prod Genre Roulette violet tint', () => {
     const feed = readFileSync(join(SRC, 'components/activity/ActivityFeed.tsx'), 'utf8');
-    expect(feed).not.toMatch(/167,\s*139,\s*250|196,\s*181,\s*253/);
-  });
-
-  it("'No destination' is amber #f59e0b, edge and text", () => {
-    expect(EDGE_NO_DESTINATION).toBe('#f59e0b');
-    expect(activeEdge('no_destination')).toBe('#f59e0b');
-    expect(activeEdge('stalled')).toBe('#fbbf24');
+    expect(feed).toMatch(/167,\s*139,\s*250/);
+    expect(feed).toMatch(/196,\s*181,\s*253/);
+    expect(feed).toContain("badge === 'Genre Roulette'");
   });
 
   it('v174: no Title Case labels anywhere in the app', () => {

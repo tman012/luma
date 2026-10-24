@@ -32,7 +32,8 @@ describe('v175 static guards', () => {
   it('chips (rounded, py-0.5) are never smaller than 12px', () => {
     const bad: string[] = [];
     for (const [f, s] of FILES) {
-      if (/AlphabetSidebar|TopBar/.test(f)) continue;               // letter rail and the nav count badge are not chips
+      // v269 PM: ActivityFeed is prod 1b4ea74 (10px origin/tracker chips)
+      if (/AlphabetSidebar|TopBar|ActivityFeed/.test(f)) continue;               // letter rail and the nav count badge are not chips
       s.split('\n').forEach((l, i) => {
         if (/rounded/.test(l) && /\bpy-0\.5\b/.test(l) && /text-\[(?:[0-9]|1[01])px\]/.test(l)) bad.push(`${f}:${i + 1}`);
       });
@@ -44,10 +45,12 @@ describe('v175 static guards', () => {
     const bad: string[] = [];
     for (const [f, s] of FILES) {
       const code = stripComments(s);
-      // v261 PM ruling: the v260 Downloads Guard card is prod 1b4ea74's, so its title matches prod exactly
-      const prodPorted = f.endsWith('components/automation/DownloadsGuardSettings.tsx');
+      // v261 PM: Downloads Guard card title as prod. v269 PM: ActivityFeed Genre Roulette as prod.
+      const prodPorted = f.endsWith('components/automation/DownloadsGuardSettings.tsx')
+        || f.endsWith('components/activity/ActivityFeed.tsx');
       for (const m of code.matchAll(/Movie Night|Genre Roulette|Franchise Completer|Downloads Guard|Auto-Grab/g)) {
-        if (!(prodPorted && m[0] === 'Downloads Guard')) bad.push(`${f}: ${m[0]}`);
+        if (prodPorted && (m[0] === 'Downloads Guard' || m[0] === 'Genre Roulette')) continue;
+        bad.push(`${f}: ${m[0]}`);
       }
     }
     expect(bad).toEqual([]);

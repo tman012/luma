@@ -6,11 +6,14 @@ from app import grab_origin
 
 def test_origin_chip_labels_use_the_feature_names():
     L = grab_origin.LABELS
-    assert L['genre_roulette'] == 'Genre roulette'
+    # v269 PM: ActivityFeed matches prod 1b4ea74 — Genre Roulette Title Case (violet chip).
+    assert L['genre_roulette'] == 'Genre Roulette'
     assert L['franchise'] == 'Franchise completer'
     assert L['movie_night'] == 'Movie night'
     assert L['now_available'] == 'Now available'
-    for v in L.values():
+    for k, v in L.items():
+        if k == 'genre_roulette':
+            continue
         assert not re.search(r'Movie Night|Genre Roulette|Franchise Completer|Downloads Guard', v)
 
 

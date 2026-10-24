@@ -166,8 +166,9 @@ describe('legacy Settings sources', () => {
   it('12px minimum', () => {
     for (const f of LEGACY) expect([f, readFileSync(f, 'utf8').match(/text-\[(9|10|11)px\]/g)]).toEqual([f, null]);
   });
-  it('the Downloads progress line is 12px', () => {
+  it('v269 PM: ActivityFeed progress status line is prod 11px (not the legacy 12px restyle)', () => {
     const t = readFileSync(join(SRC, 'components/activity/ActivityFeed.tsx'), 'utf8');
-    expect(t).toMatch(/data-testid="download-progress-line" className="[^"]*text-\[12px\]/);
+    expect(t).toMatch(/className="mt-2 flex items-center justify-between gap-3 text-\[11px\] text-white\/35"/);
+    expect(t).not.toContain('data-testid="download-progress-line"');
   });
 });
