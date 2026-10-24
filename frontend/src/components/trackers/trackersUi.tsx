@@ -169,7 +169,7 @@ export function Modal({ wide, width, label, onClose, children, testId }: {
 }) {
   useEscape(onClose);
   return (
-    <div className="luma-bleed lt-fade" style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.55)', display: 'flex',
+    <div className="luma-fullscreen luma-bleed lt-fade" style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.55)', display: 'flex',
       alignItems: wide ? 'center' : 'flex-end', justifyContent: 'center', padding: wide ? 20 : 0 }}
       onClick={onClose} data-testid={testId ? `${testId}-scrim` : undefined}>
       <div role="dialog" aria-modal="true" aria-label={label} data-testid={testId}

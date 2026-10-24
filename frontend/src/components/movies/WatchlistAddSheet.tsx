@@ -29,7 +29,7 @@ export function WatchlistAddSheet({ tmdbId, title, year, onClose, onAdded }: {
     onAdded();
   };
   return createPortal(
-    <div className="luma-bleed" data-testid="watchlist-add-sheet" onClick={() => { if (!busy) onClose(); }}
+    <div className="luma-fullscreen luma-bleed" data-testid="watchlist-add-sheet" onClick={() => { if (!busy) onClose(); }}
       style={{ position: 'fixed', inset: 0, zIndex: 10090, background: 'rgba(21,16,42,0.72)', backdropFilter: 'blur(8px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT }}>
       <div role="dialog" aria-modal="true" aria-label="Add to watchlist" onClick={e => e.stopPropagation()}

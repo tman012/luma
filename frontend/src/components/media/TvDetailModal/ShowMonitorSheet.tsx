@@ -203,7 +203,7 @@ export function ShowMonitorSheet({ onClose }: { onClose: () => void }) {
   );
 
   const backdrop = (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       onClick={(e) => { e.stopPropagation(); dismiss(); }}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
@@ -216,7 +216,7 @@ export function ShowMonitorSheet({ onClose }: { onClose: () => void }) {
 
   if (phone) {
     return createPortal(
-      <div className="luma-bleed" data-show-monitor-sheet style={{ position: 'fixed', inset: 0, zIndex: 10040 }} onClick={stop} onTouchStart={stop} onTouchEnd={stop}>
+      <div className="luma-fullscreen luma-bleed" data-show-monitor-sheet style={{ position: 'fixed', inset: 0, zIndex: 10040 }} onClick={stop} onTouchStart={stop} onTouchEnd={stop}>
         {backdrop}
         <div className="luma-bleed-panel"
           onTouchStart={(e) => {
@@ -254,7 +254,7 @@ export function ShowMonitorSheet({ onClose }: { onClose: () => void }) {
   }
 
   return createPortal(
-    <div className="luma-bleed" data-show-monitor-sheet style={{ position: 'fixed', inset: 0, zIndex: 10040, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={stop}>
+    <div className="luma-fullscreen luma-bleed" data-show-monitor-sheet style={{ position: 'fixed', inset: 0, zIndex: 10040, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={stop}>
       {backdrop}
       <div style={{
         position: 'relative', width: 'min(420px, 92vw)', background: NAVY, borderRadius: 20,

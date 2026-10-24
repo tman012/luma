@@ -143,7 +143,7 @@ export function MobileUpgradeSheet({
   const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
 
   return (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,

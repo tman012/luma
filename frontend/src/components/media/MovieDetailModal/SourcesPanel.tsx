@@ -122,7 +122,7 @@ function SourcesScreen({ children, zIndex, onBack, backdropUrl, clearLogoUrl, mo
   isWeb?: boolean;
 }) {
   return (
-    <div className="luma-bleed luma-bleed-flat"
+    <div className="luma-fullscreen luma-bleed luma-bleed-flat"
       style={{
         position: 'fixed', inset: 0, backgroundColor: 'var(--color-kiosk-black)', backgroundImage: START_GLOW, zIndex,
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -1310,7 +1310,7 @@ function CompactSourcesView({
 
   return (
     <>
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,

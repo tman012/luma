@@ -370,7 +370,7 @@ export function FixMatchSheet({ ratingKey, title, year, variant, onClose, onMatc
   const keyframes = <style>{`@keyframes fixMatchSpin { to { transform: rotate(360deg); } }`}</style>;
 
   const content = isCompact ? (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-fix-match-sheet
       role="dialog"
       aria-modal="true"
@@ -403,7 +403,7 @@ export function FixMatchSheet({ ratingKey, title, year, variant, onClose, onMatc
       {keyframes}
     </div>
   ) : (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-fix-match-sheet
       role="dialog"
       aria-modal="true"

@@ -393,7 +393,7 @@ export function MobilePlaybackSheet({
   const canDismiss = true;
 
   return (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,

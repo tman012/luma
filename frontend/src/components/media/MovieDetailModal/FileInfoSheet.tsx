@@ -580,7 +580,7 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
   const scrimVisible = entered && !dismissing;
 
   const content = isCompact ? (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-file-info-sheet
       role="dialog"
       aria-modal="true"
@@ -626,7 +626,7 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
       <style>{`@keyframes fileInfoSpin { to { transform: rotate(360deg); } }`}</style>
     </div>
   ) : (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-file-info-sheet
       role="dialog"
       aria-modal="true"

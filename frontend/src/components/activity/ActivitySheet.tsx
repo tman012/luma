@@ -89,7 +89,7 @@ export function ActivitySheet({ open, onClose }: ActivitySheetProps) {
         : `transform ${ENTER_DURATION}ms ${SPRING}`;
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-sheet="ActivitySheet"
       style={{
         position: 'fixed', inset: 0,

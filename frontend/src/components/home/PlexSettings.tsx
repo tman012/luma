@@ -180,7 +180,7 @@ export function ConfirmDialog({ title, confirm, onCancel, onConfirm }: {
     return () => { document.removeEventListener('keydown', onKey); back?.focus?.(); };
   }, [onCancel]);
   return (
-    <div className="luma-bleed" style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+    <div className="luma-fullscreen luma-bleed" style={{ position: 'fixed', inset: 0, zIndex: 300, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
       <div className="luma-bleed" data-testid="confirm-scrim" onClick={onCancel} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)' }} />
       <div ref={box} role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" style={dialog}>
         <h2 id="confirm-title" style={{ margin: 0, fontSize: 17, fontWeight: 600, fontFamily: FONT, color: 'rgba(255,255,255,0.95)' }}>{title}</h2>

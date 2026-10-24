@@ -331,7 +331,7 @@ export function SimilarPanel({ tmdbId, ratingKey, title, onClose }: SimilarPanel
     const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
 
     return (
-      <div className="luma-bleed"
+      <div className="luma-fullscreen luma-bleed"
         data-similar-panel
         role="dialog"
         aria-modal="true"
@@ -399,7 +399,7 @@ export function SimilarPanel({ tmdbId, ratingKey, title, onClose }: SimilarPanel
   // TABLET / WEB: full-screen overlay
   // =========================================================================
   return (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-similar-panel
       role="dialog"
       aria-modal="true"

@@ -414,8 +414,8 @@ export function ShowPicker({ wide, anchor, initial, year, suggestions, current, 
   );
   if (!wide) {
     return createPortal(
-      <div className="luma-bleed" data-testid="tv-picker-sheet-backdrop" style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,0.45)' }}>
-        <div className="luma-bleed" ref={panel} role="dialog" aria-label="Choose show" data-testid="tv-picker"
+      <div className="luma-fullscreen luma-bleed" data-testid="tv-picker-sheet-backdrop" style={{ position: 'fixed', inset: 0, zIndex: 900, background: 'rgba(0,0,0,0.45)' }}>
+        <div className="luma-bleed-panel" ref={panel} role="dialog" aria-label="Choose show" data-testid="tv-picker"
           style={{
             position: 'absolute', left: 0, right: 0, bottom: 0, maxHeight: '70vh', display: 'flex', flexDirection: 'column', gap: 12,
             padding: '16px 16px calc(16px + env(safe-area-inset-bottom, 0px))', boxSizing: 'border-box',

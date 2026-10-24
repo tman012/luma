@@ -68,7 +68,7 @@ export function VibeEngineModal({ onClose }: Props) {
   const cardOpacity = phase === 'visible' ? 1 : 0;
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-modal="VibeEngineModal"
       ref={overlayRef}
       onClick={(e) => {

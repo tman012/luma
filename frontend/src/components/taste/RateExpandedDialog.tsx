@@ -50,7 +50,7 @@ export function RateExpandedDialog({
   const visible = phase === 'visible';
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-modal="RateExpandedDialog"
       style={{
         position: 'fixed', inset: 0,

@@ -450,7 +450,7 @@ export function CollectionsSheet({ open, onClose, initialCollectionId = null, ov
   return createPortal(
     <div
       data-sheet="CollectionsSheet"
-      className="luma-bleed fixed inset-0"
+      className="luma-fullscreen luma-bleed fixed inset-0"
       style={{
         zIndex: overlayZIndex,
         pointerEvents: behindModal ? 'none' : 'auto',

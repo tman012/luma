@@ -309,7 +309,7 @@ function EpisodeGridModal({
   }, [onClose]);
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 200,
@@ -566,7 +566,7 @@ function SeasonGridModal({
   const posterH = Math.round(posterW * 1.5);
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 200,
@@ -801,7 +801,7 @@ function SeasonDetailModal({
     : 'scale(0.97) translateY(10px)';
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       onClick={handleClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 200,
@@ -1313,7 +1313,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
     <LumaMonitorContext.Provider value={lumaMon}>
     <>
     {createPortal(
-      <div className="luma-bleed"
+      <div className="luma-fullscreen luma-bleed"
         data-modal="TvDetailModal"
         data-variant="web-cinema"
         ref={overlayRef}
@@ -1922,7 +1922,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
           onClose={() => setShowSeasonGrid(false)}
         />
       ) : (
-        <div className="luma-bleed"
+        <div className="luma-fullscreen luma-bleed"
           style={{
             position: 'fixed', inset: 0, zIndex: 10001,
             display: 'flex', alignItems: 'center', justifyContent: 'center',

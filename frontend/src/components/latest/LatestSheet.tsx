@@ -603,7 +603,7 @@ export function LatestSheet({ open, onClose }: LatestSheetProps) {
       : `transform ${ENTER_DUR}ms ${springBezier}`;
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-modal="LatestSheet"
       style={{
         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,

@@ -642,7 +642,7 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
       : `transform ${ENTER_DUR}ms ${springBezier}`;
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-modal="UpgradesSheet"
       style={{
         position: 'fixed',

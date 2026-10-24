@@ -183,7 +183,7 @@ export function AddToSonarrModal({ tvdbId, title, seasons, onClose, onAdded }: A
   });
 
   return (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.98)', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >

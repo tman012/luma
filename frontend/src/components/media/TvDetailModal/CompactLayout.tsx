@@ -458,7 +458,7 @@ export function CompactLayout(props: TvModalViewProps) {
   if (phase === 'gone') return null;
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-modal="TvDetailModal"
       data-variant="mobile"
       data-composed={composed ? "true" : "false"}
@@ -1445,7 +1445,7 @@ export function CompactLayout(props: TvModalViewProps) {
 
       {/* Auto-search popup — portaled to body so it's always on top of action sheets */}
       {autoSearchToast && createPortal(
-        <div className="luma-bleed"
+        <div className="luma-fullscreen luma-bleed"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1624,7 +1624,7 @@ function SeasonActionSheet({
   ].filter((a) => a.key !== 'sources' || !!onBrowseSources);
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,
@@ -1936,7 +1936,7 @@ function SeasonsShelf({
   const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,
@@ -2217,7 +2217,7 @@ function EpisodesBrowsingSheet({
   const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,

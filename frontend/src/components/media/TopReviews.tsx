@@ -457,7 +457,7 @@ export function ReviewSheet({ review, variant, onClose }: { review: TopReview; v
   );
 
   const content = isCompact ? (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-review-sheet
       role="dialog"
       aria-modal="true"
@@ -488,7 +488,7 @@ export function ReviewSheet({ review, variant, onClose }: { review: TopReview; v
       </div>
     </div>
   ) : (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-review-sheet
       role="dialog"
       aria-modal="true"

@@ -67,7 +67,7 @@ export function PageModal({ children, variant = 'default' }: Props) {
   const cardOpacity = phase === 'visible' ? 1 : 0;
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-modal="PageModal"
       ref={overlayRef}
       onClick={(e) => {

@@ -382,7 +382,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   if (phase === 'gone') return null;
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-modal="MovieDetailModal"
       data-variant="mobile"
       data-composed={composed ? "true" : "false"}
@@ -1375,7 +1375,7 @@ export function CompactLayout(props: MovieModalViewProps) {
 
       {/* Remove from Watchlist confirm sheet */}
       {showRemoveConfirm && (
-        <div className="luma-bleed"
+        <div className="luma-fullscreen luma-bleed"
           role="dialog"
           aria-modal="true"
           aria-label="Remove from Watchlist"

@@ -676,7 +676,7 @@ export function VoiceAssistantSheet({ open, onClose }: VoiceAssistantSheetProps)
 
   // Mini orb overlay — Alfred speaking over a modal when sheet is closed
   const miniOrbPortal = (!open && miniOrbVisible) ? createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       onClick={() => { setMiniOrbVisible(false); openVoice(); }}
       style={{
         position: 'fixed',
@@ -706,7 +706,7 @@ export function VoiceAssistantSheet({ open, onClose }: VoiceAssistantSheetProps)
   // Hidden via visibility+pointer-events when closed so the animation loop
   // keeps running and opening is instant with zero jank.
   const mainPortal = createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,

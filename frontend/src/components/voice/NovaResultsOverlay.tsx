@@ -88,7 +88,7 @@ export function NovaResultsOverlay({ open, title, items, onClose }: Props) {
   const overlayOpacity = visible ? 1 : 0;
 
   const node = (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       ref={overlayRef}
       onClick={(e) => {
         if (e.target === overlayRef.current) onClose();

@@ -335,7 +335,7 @@ export function LibrariesSheet({ open, onClose }: LibrariesSheetProps) {
   const activeSortLabel = SORT_OPTIONS.find(s => s.key === sortKey)!.label;
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-sheet="LibrariesSheet"
       style={{
         position: 'fixed', inset: 0,

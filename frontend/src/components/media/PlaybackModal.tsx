@@ -1272,7 +1272,7 @@ export function PlaybackModal({
   const showClose = true;
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-modal="PlaybackModal"
       style={{
         position: 'fixed',

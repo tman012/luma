@@ -124,7 +124,7 @@ export function DescribeResultsCarousel({
   const cardOpacity = phase === 'visible' ? 1 : 0;
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-carousel-overlay
       ref={overlayRef}
       onClick={(e) => { if (e.target === overlayRef.current) handleClose(); }}

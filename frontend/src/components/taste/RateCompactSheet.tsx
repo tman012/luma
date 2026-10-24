@@ -84,7 +84,7 @@ export function RateCompactSheet({
         : `transform ${ENTER_DURATION}ms ${SPRING}`;
 
   return createPortal(
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       data-sheet="RateCompactSheet"
       style={{
         position: 'fixed', inset: 0,

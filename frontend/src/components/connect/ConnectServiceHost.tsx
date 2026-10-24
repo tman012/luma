@@ -67,7 +67,7 @@ export function ConnectServiceHost() {
   };
 
   return (
-    <div className="luma-bleed"
+    <div className="luma-fullscreen luma-bleed"
       role="dialog" aria-modal="true" aria-label={`Connect ${name}`}
       onClick={close}
       style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(5,4,15,0.55)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
