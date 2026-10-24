@@ -10,17 +10,10 @@
  */
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { getBadgeColor } from '@/components/media/TvDetailModal/tvSourcesUtils';
-import { NEUTRAL_GLASS } from '@/components/media/chipGlass';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import { openModalForItem } from '@/utils/modalNavigation';
 import { posterUrl } from '@/utils/image';
 import { apiFetch } from '../../apiClient';
-import { T } from '@/theme/tokens';
-import { useLocation, useNavigate } from 'react-router';
-import { useAuth } from '@/contexts/AuthContext';
-
-/** Shown instead of the delete when the owner must sign in first (sentence case, no helper text). */
-export const SIGN_IN_TO_DELETE = 'Sign in to delete files';
 
 /** A single completed download, badged by its origin. */
 interface ActivityEntry {
@@ -30,14 +23,12 @@ interface ActivityEntry {
   mediaType: 'movie' | 'tv';
   ts: number;           // completion time (ms)
   tracker: string | null;
-  badge: string;        // server origin label: Manual | Genre roulette | Requested | Auto | Upgrade | Other | automation name
+  badge: string;        // server origin label: Manual | Genre Roulette | Requested | Auto | Upgrade | Other | automation name
   season: number | null;
   episode: number | null;
   episodeTitle: string | null;
   fileName: string | null;   // raw torrent/release file name
   posterPath: string | null; // TMDb poster path — thumb + row wash
-  imported: boolean;         // v170: the library mover handled it (green edge)
-  failed: boolean;           // v170: the import failed (amber edge)
 }
 
 /** A torrent currently downloading in qBittorrent (any origin, incl. manual). */
@@ -48,7 +39,7 @@ interface ActiveDownload {
   mediaType: 'movie' | 'tv';
   progress: number;      // 0..1
   eta: string | null;
-  status: string;        // 'downloading' | 'stalled' | 'copying' | 'importing' | 'not_mapped' | 'no_writable' | 'no_destination'
+  status: string;        // 'downloading' | 'stalled' | 'copying' | 'importing'
   tracker: string | null;
   name: string;
   hash: string;          // qBittorrent info-hash (for remove / delete+files)
@@ -63,44 +54,6 @@ interface ActiveDownload {
 // ---------------------------------------------------------------------------
 
 const THUMB_W = 78;
-/** Navy glass tokens (Designer): card, its border, the no-art tile, and the
- * sign-in button (the storage sheet's button glass). */
-export const CARD_BG = T.glass;                         // rgba(255,255,255,0.06)
-export const CARD_BORDER = '1px solid rgba(255,255,255,0.08)';   // white 8% (--color-glass-8)
-export const PATH_NOT_MAPPED = 'Path not mapped';
-/** v169 (Reviewer, PM): the only Movies destination is read-only; shown on the item, no helper text. */
-export const NO_WRITABLE_DEST = 'No writable destination';
-/** v171 (Tester): no rule matched and no fallback is chosen; the real reason, not a read-only path. */
-export const NO_DESTINATION = 'No destination';
-export const NO_ART_BG = 'rgba(255,255,255,0.04)';
-/** v170 (Designer): the row's left edge follows its state, never the tracker (the chip shows that). */
-export const EDGE_ATTENTION = '#fbbf24';
-/** v173 (Designer): 'No destination' reads amber, its text and its edge. */
-export const EDGE_NO_DESTINATION = '#f59e0b';
-export const EDGE_DOWNLOADING = '#3b82f6';
-export const EDGE_IMPORTED = '#22c55e';
-export const EDGE_NEUTRAL = 'rgba(255,255,255,0.18)';
-export function activeEdge(status: string): string {
-  if (status === 'no_destination') return EDGE_NO_DESTINATION;
-  if (status === 'stalled' || status === 'not_mapped' || status === 'no_writable') return EDGE_ATTENTION;
-  if (status === 'downloading') return EDGE_DOWNLOADING;
-  return EDGE_NEUTRAL;            // copying/importing: done downloading, not in the library yet
-}
-export function historyEdge(e: { imported: boolean; failed: boolean }): string {
-  if (e.failed) return EDGE_ATTENTION;
-  return e.imported ? EDGE_IMPORTED : EDGE_NEUTRAL;
-}
-/** v170: the no-art tile shows a muted film icon, no text. */
-function FilmIcon() {
-  return (
-    <svg data-testid="no-art-icon" aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none"
-      stroke="rgba(255,255,255,0.25)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="4" width="18" height="16" rx="2" />
-      <path d="M7 4v16M17 4v16M3 8h4M3 12h4M3 16h4M17 8h4M17 12h4M17 16h4" />
-    </svg>
-  );
-}
-export const SIGN_IN_BUTTON = { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.1)' };
 const THUMB_H = 117;
 
 /**
@@ -113,14 +66,12 @@ const THUMB_H = 117;
  */
 
 /** DELETE /api/downloads/remove/<hash>?deleteFiles=… — qBit remove / delete+files. */
-export async function removeDownload(hash: string, deleteFiles: boolean): Promise<{ ok: boolean; error?: string; signIn?: boolean }> {
+async function removeDownload(hash: string, deleteFiles: boolean): Promise<{ ok: boolean; error?: string }> {
   if (!hash) return { ok: false, error: 'Missing torrent hash' };
   try {
     const q = deleteFiles ? '?deleteFiles=true' : '?deleteFiles=false';
     const resp = await apiFetch(`/api/downloads/remove/${encodeURIComponent(hash)}${q}`, { method: 'DELETE' });
-    const data = await resp.json().catch(() => ({})) as { success?: boolean; error?: string; message?: string; sign_in?: boolean };
-    // Deleting files needs the owner signed in with a session, even on the LAN.
-    if (resp.status === 401 && deleteFiles) return { ok: false, signIn: true };
+    const data = await resp.json().catch(() => ({})) as { success?: boolean; error?: string; message?: string };
     if (!resp.ok || data.success === false) {
       return { ok: false, error: data.error || `Remove failed (${resp.status})` };
     }
@@ -191,7 +142,7 @@ function RowThumb({ posterPath, title, progress }: {
         position: 'relative', flexShrink: 0,
         width: THUMB_W, height: THUMB_H,
         borderRadius: 9, overflow: 'hidden',
-        background: src ? 'rgba(255,255,255,0.06)' : NO_ART_BG,
+        background: 'rgba(255,255,255,0.06)',
         boxShadow: '0 2px 10px rgba(0,0,0,0.5)',
       }}
     >
@@ -230,11 +181,12 @@ function RowThumb({ posterPath, title, progress }: {
           )}
         </>
       ) : (
-        <div data-testid="no-art" aria-label={title || undefined} role={title ? 'img' : undefined} style={{
+        <div style={{
           width: '100%', height: '100%', display: 'flex',
           alignItems: 'center', justifyContent: 'center',
+          fontSize: 11, color: 'rgba(255,255,255,0.25)',
         }}>
-          <FilmIcon />
+          No art
         </div>
       )}
     </div>
@@ -255,8 +207,6 @@ function fmtSpeed(bps: number): string {
 }
 
 interface HistoryApiItem {
-  success?: boolean;
-  imported?: boolean;
   tmdb_title?: string;
   tmdb_year?: number | string;
   media_type?: string;
@@ -273,25 +223,12 @@ interface HistoryApiItem {
   origin_label?: string;
 }
 
-const NEUTRAL_CHIP: React.CSSProperties = {
-  background: NEUTRAL_GLASS.bg, color: NEUTRAL_GLASS.fg, border: `1px solid ${NEUTRAL_GLASS.border}`,
-};
-
-/** Origin chip: neutral glass, the tracker chip's look, for every origin (v173: Genre Roulette too). */
-function originChipStyle(_badge: string): React.CSSProperties {
-  return NEUTRAL_CHIP;
-}
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-/** v171 (Designer): 'Oct 17, 4:20 AM'; no leading zeros; the year only when it isn't this year
- *  ('Dec 31, 2025, 11:05 PM'). Local time, American English. */
-export function fmtCompleted(ts: number, now: number = Date.now()): string {
-  const d = new Date(ts);
-  const h = d.getHours();
-  const time = `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
-  const year = d.getFullYear() !== new Date(now).getFullYear() ? `, ${d.getFullYear()}` : '';
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}${year}, ${time}`;
+/** Origin chip: one neutral gray pill; Genre Roulette gets a faint violet tint. */
+function originChipStyle(badge: string): React.CSSProperties | undefined {
+  if (badge === 'Genre Roulette') {
+    return { background: 'rgba(167,139,250,0.12)', color: 'rgba(196,181,253,0.8)' };
+  }
+  return undefined;
 }
 
 export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean; onOpen?: () => void }) {
@@ -302,15 +239,6 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
   const [confirmHash, setConfirmHash] = useState<string | null>(null);
   const [busyHash, setBusyHash] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  // Rows whose delete came back 401 (sign in first); the implicit LAN owner gets
-  // the sign-in prompt on every row up front.
-  const [signInHash, setSignInHash] = useState<string | null>(null);
-  const { implicit } = useAuth();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const signIn = useCallback(() => {
-    navigate('/login', { state: { from: location.pathname + location.search, signIn: true } });
-  }, [navigate, location.pathname, location.search]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [reloadTick, setReloadTick] = useState(0);
@@ -341,8 +269,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
     const res = await removeDownload(dl.hash, deleteFiles);
     setBusyHash(null);
     if (!res.ok) {
-      if (res.signIn) setSignInHash(dl.hash);
-      else setActionError(res.error || 'Remove failed');
+      setActionError(res.error || 'Remove failed');
       // Force a refresh so a failed optimistic remove comes back.
       setReloadTick((t) => t + 1);
       // Also re-trigger active poll by bumping — loadActive is interval-bound;
@@ -461,8 +388,6 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
             episodeTitle: d.episode_title ?? null,
             fileName: d.torrent_name ?? null,
             posterPath: d.poster_path ?? null,
-            imported: d.imported === true,
-            failed: d.success === false,
           };
         }).sort((a, b) => b.ts - a.ts);
         setEntries(list);
@@ -491,7 +416,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
     <div style={{ marginBottom: '26px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px', paddingLeft: '2px' }}>
         <span className="animate-pulse" style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#3b82f6', boxShadow: '0 0 8px rgba(59,130,246,0.7)' }} />
-        <span className="text-[13px] font-semibold text-white/50" data-testid="section-header">
+        <span className="text-[13px] font-semibold uppercase tracking-wide text-white/50">
           Downloading now ({active.length})
         </span>
       </div>
@@ -499,20 +424,14 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
         {active.map((dl, i) => {
           const c = dl.tracker ? getBadgeColor(dl.tracker) : null;
           const pct = Math.round(dl.progress * 100);
-          const notMapped = dl.status === 'not_mapped';
-          const noWritable = dl.status === 'no_writable' || dl.status === 'no_destination';
-          const noDest = dl.status === 'no_destination';
-          const stalled = dl.status === 'stalled' || notMapped || noWritable;
+          const stalled = dl.status === 'stalled';
           const copying = dl.status === 'copying';
           const importing = dl.status === 'importing';
-          const accent = copying || importing ? '#4ade80' : noDest ? EDGE_NO_DESTINATION : stalled ? '#fbbf24' : '#60a5fa';
+          const accent = copying || importing ? '#4ade80' : stalled ? '#fbbf24' : '#60a5fa';
           const barColor = copying || importing ? '#22c55e' : stalled ? '#f59e0b' : '#3b82f6';
           const statusLabel = importing
             ? 'Processing…'
             : copying ? `Copying to library… ${pct}%`
-            : notMapped ? PATH_NOT_MAPPED
-            : noDest ? NO_DESTINATION
-            : noWritable ? NO_WRITABLE_DEST
             : stalled ? 'Stalled'
             : dl.eta ? `${dl.eta} left` : 'Downloading…';
           const speedStr = dl.status === 'downloading' && dl.speed > 0 ? fmtSpeed(dl.speed) : null;
@@ -528,11 +447,11 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
               style={{
                 position: 'relative',
                 overflow: 'hidden',
-                background: CARD_BG,
+                background: '#111112',
                 borderRadius: '18px',
                 padding: '18px 20px',
-                border: CARD_BORDER,
-                borderLeft: `3px solid ${activeEdge(dl.status)}`,
+                border: `1px solid ${c ? c.border.replace('0.3)', '0.15)') : 'rgba(255,255,255,0.06)'}`,
+                borderLeft: `3px solid ${c ? c.fg : '#3b82f6'}`,
               }}
             >
               <RowWash posterPath={dl.posterPath} />
@@ -567,7 +486,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                 })()}
                 {dl.tracker && (
                   <span style={{ background: c!.bg, color: c!.fg, border: `1px solid ${c!.border}` }}
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[12px] font-semibold">
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold">
                     {dl.tracker}
                   </span>
                 )}
@@ -589,32 +508,16 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                 <div className="h-full rounded-full transition-[width] duration-500"
                   style={{ width: `${pct}%`, background: barColor }} />
               </div>
-              <div data-testid="download-progress-line" className="mt-2 flex items-center justify-between gap-3 text-[12px] text-white/35">
-                <span className={`min-w-0 ${notMapped || noWritable ? 'text-[12px] leading-tight' : 'truncate'}`} data-testid="download-status"
-                  style={{ color: copying || importing || stalled ? accent : undefined }}>
+              <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-white/35">
+                <span className="min-w-0 truncate" style={{ color: copying || importing || stalled ? accent : undefined }}>
                   {statusLabel}{speedStr ? ` · ↓ ${speedStr}` : ''}
                 </span>
-                <span className="shrink-0 tabular-nums">
-                  {/* Done downloading: one size, so the 12px path states fit a 390px row unclipped. */}
-                  {dl.sizeRemaining === 0 && dl.sizeTotal > 0
-                    ? fmtGb(dl.sizeTotal)
-                    : `${fmtGb(dl.sizeTotal - dl.sizeRemaining)} / ${fmtGb(dl.sizeTotal)}`}
-                </span>
+                <span className="shrink-0 tabular-nums">{fmtGb(dl.sizeTotal - dl.sizeRemaining)} / {fmtGb(dl.sizeTotal)}</span>
               </div>
               {/* Remove actions — only inside the expanded filename panel (tap name to open). */}
               {dl.hash && nameOpen ? (
                 <div className="mt-2.5" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                  {implicit || signInHash === dl.hash ? (
-                    <button
-                      type="button"
-                      data-testid="activity-sign-in"
-                      onClick={signIn}
-                      className="w-full rounded-lg px-3 py-2 text-left text-[12px] font-medium text-white/90 active:bg-white/10"
-                      style={SIGN_IN_BUTTON}
-                    >
-                      {SIGN_IN_TO_DELETE}
-                    </button>
-                  ) : confirmHash === dl.hash ? (
+                  {confirmHash === dl.hash ? (
                     <div
                       className="rounded-xl px-3 py-2.5"
                       style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)' }}
@@ -652,11 +555,11 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                       style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.28)' }}
                     >
                       Delete torrent + files
-                      <span className="mt-0.5 block text-[12px] font-normal text-red-300/50">Removes transfer and deletes files</span>
+                      <span className="mt-0.5 block text-[10px] font-normal text-red-300/50">Removes transfer and deletes files</span>
                     </button>
                   )}
                   {actionError && confirmHash !== dl.hash ? (
-                    <p className="mt-1.5 text-[12px] text-red-400/90">{actionError}</p>
+                    <p className="mt-1.5 text-[11px] text-red-400/90">{actionError}</p>
                   ) : null}
                 </div>
               ) : null}
@@ -700,7 +603,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
         }}
       >
         <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: 'rgba(74,222,128,0.85)', boxShadow: '0 0 8px rgba(74,222,128,0.45)' }} />
-        <span className="text-[13px] font-semibold text-white/50" data-testid="section-header">
+        <span className="text-[13px] font-semibold uppercase tracking-wide text-white/50">
           Completed ({entries.length})
         </span>
       </div>
@@ -716,7 +619,7 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: '5px',
                   padding: '6px 12px', borderRadius: '10px',
-                  fontSize: '12px', fontWeight: 700,
+                  fontSize: '11px', fontWeight: 700,
                   background: c.bg, color: c.fg, border: `1px solid ${c.border}`,
                   lineHeight: 1.4,
                 }}
@@ -740,11 +643,11 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
               style={{
                 position: 'relative',
                 overflow: 'hidden',
-                background: CARD_BG,
+                background: '#111112',
                 borderRadius: '18px',
                 padding: '18px 20px',
-                border: CARD_BORDER,
-                borderLeft: `3px solid ${historyEdge(entry)}`,
+                border: `1px solid ${c ? c.border.replace('0.3)', '0.15)') : 'rgba(255,255,255,0.06)'}`,
+                borderLeft: `3px solid ${c ? c.fg : 'rgba(255,255,255,0.18)'}`,
               }}
             >
               <RowWash posterPath={entry.posterPath} />
@@ -756,6 +659,14 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                     {entry.title}
                     {entry.year ? <span className="text-white/30 ml-1">({entry.year})</span> : null}
                   </p>
+                  {/* Origin badge — was a 92px text column, now a chip, so the
+                      poster costs no horizontal room from the title. */}
+                  <span
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-white/[0.06] text-white/50 whitespace-nowrap"
+                    style={originChipStyle(entry.badge)}
+                  >
+                    {entry.badge}
+                  </span>
                 </div>
                 {entry.mediaType === 'tv' && entry.season != null && (
                   <p className="text-[12.5px] text-white/45 mt-1 truncate">
@@ -778,22 +689,20 @@ export function ActivityFeed({ embedded = false, onOpen }: { embedded?: boolean;
                     </p>
                   );
                 })()}
-                {/* v171 (Designer): the same tracker chip as the active rows, then the origin as a neutral
-                    chip ('Manual'), then the date. Sentence case throughout, no all caps. */}
-                <div className="flex flex-wrap items-center gap-1.5 mt-1.5 text-[12px] text-white/30">
+                <p className="text-[12px] text-white/30 mt-1.5">
                   {entry.tracker && (
-                    <span data-testid="history-tracker" style={{ background: c!.bg, color: c!.fg, border: `1px solid ${c!.border}` }}
-                      className="shrink-0 rounded px-1.5 py-0.5 text-[12px] font-semibold whitespace-nowrap">
-                      {entry.tracker}
-                    </span>
+                    <>
+                      <span className="font-semibold uppercase tracking-wide" style={{ color: c!.fg }}>
+                        {entry.tracker}
+                      </span>
+                      <span className="mx-1.5 text-white/20">·</span>
+                    </>
                   )}
-                  <span data-testid="history-origin"
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[12px] font-semibold whitespace-nowrap"
-                    style={originChipStyle(entry.badge)}>
-                    {entry.badge}
-                  </span>
-                  {entry.ts ? <span data-testid="history-date" className="whitespace-nowrap">{fmtCompleted(entry.ts)}</span> : null}
-                </div>
+                  {entry.ts ? new Date(entry.ts).toLocaleDateString(undefined, {
+                    month: 'short', day: 'numeric', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit',
+                  } as Intl.DateTimeFormatOptions) : ''}
+                </p>
               </div>
               </div>
             </div>

@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 LABELS = {
     'manual': 'Manual',
-    'genre_roulette': 'Genre roulette',      # v175 (Designer): one name everywhere
+    'genre_roulette': 'Genre Roulette',      # v269 PM: ActivityFeed matches prod 1b4ea74 Title Case
     'movie_night': 'Movie night',
     'latest_feed': 'Latest feed',
     'upgrade_4k': '4K Remux',
