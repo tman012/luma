@@ -5,17 +5,22 @@ its first device; any other devices and services in the room are kept untouched.
 is ``devices.defaultRoomId`` (prod already clears it when that room is deleted); when unset or
 stale the first room is the default, as prod's ``defaultPlaybackTarget`` always was.
 
+v272 (Taylor): a room is created empty. Pair is part of Add device — the player is persisted only
+after ADB Pair succeeds (Allow on the TV). Offline orphans are never saved from a failed Pair.
+
 Routes (reads: any signed-in user; writes: the owner signed in with a real session):
     GET    /api/rooms               rooms with their player, wake method and online state
-    GET    /api/rooms/players       players Plex can see now (PMS /clients) plus the configured ones
-    POST   /api/rooms               {name, player, wake?}
-    PUT    /api/rooms/<id>          {name?, player?, wake?, host?, port?, mac?, harmony_hub?, harmony_activity?, default?}
+    GET    /api/rooms/players       players Plex can see now (PMS /clients only; no Offline seeds)
+    POST   /api/rooms               {name} — empty room (no player)
+    PUT    /api/rooms/<id>          {name?, wake?, host?, port?, mac?, harmony_hub?, harmony_activity?, default?}
+                                    (player changes go through Pair / connect)
     DELETE /api/rooms/<id>
-    POST   /api/rooms/<id>/connect  v265 Pair (owner): prod's ADB flow, `adb connect` then wait for Allow on
-                                    the TV; with {pair_port, pair_code} it runs prod's `adb pair` first
+    POST   /api/rooms/<id>/connect  Pair (owner): optional player body adds the device only on Pair
+                                    success; re-pair uses the stored host. {pair_port, pair_code} runs
+                                    prod's `adb pair` first.
 
-Nothing else here starts playback, wakes, pairs with or connects to a device; the only outside call is
-the read-only PMS /clients list (``clients_fn``), which tests replace. No Home Assistant: a stored
+Nothing else here starts playback or wakes a device; the only outside call besides Pair is the
+read-only PMS /clients list (``clients_fn``), which tests replace. No Home Assistant: a stored
 ``powerMethod: homeassistant`` is shown as None and is left as is unless the wake method is changed.
 """
 import copy
@@ -166,7 +171,8 @@ def view() -> Dict[str, Any]:
 
 
 def players() -> List[Dict[str, Any]]:
-    """Plex players online now, then configured players Plex can't see (Offline)."""
+    """Plex players online now (PMS /clients). v272: never list configured Offline hosts — that seeded
+    orphan ATV rows (e.g. 192.168.1.108) into Add device before Pair succeeded."""
     out, seen = [], set()
     for c in _clients():
         mid = str(c.get('machineIdentifier') or '')
@@ -176,15 +182,6 @@ def players() -> List[Dict[str, Any]]:
         out.append({'machine_id': mid, 'name': str(c.get('name') or c.get('title') or 'Player'),
                     'product': str(c.get('product') or ''), 'platform': str(c.get('platform') or ''),
                     'host': str(c.get('address') or ''), 'online': True})
-    for r in _rooms():
-        for d in r.get('devices') or []:
-            mid = d.get('machineId') or ''
-            key = mid or f"host:{d.get('host')}"
-            if key in seen or not (mid or d.get('host')):
-                continue
-            seen.add(key)
-            out.append({'machine_id': mid, 'name': d.get('name') or 'Player', 'product': d.get('product') or '',
-                        'platform': d.get('platform') or '', 'host': d.get('host') or '', 'online': False})
     return out
 
 
@@ -271,17 +268,15 @@ def _wake_in(v: Any) -> str:
 # ---------------------------------------------------------------- writes
 
 def create(body: Any) -> Dict[str, Any]:
+    """v272: create an empty room only. Players are added through Pair (POST .../connect)."""
     if not isinstance(body, dict):
         raise Invalid({'_': 'Invalid'})
+    if body.get('player') not in (None, ''):
+        raise Invalid({'player': 'Pair the player to add it'})
     s = _cfg['settings']
     name = _name(body.get('name'), _rooms())
-    p = _player(body.get('player'))
-    wake = _wake_in(body.get('wake') or ('adb' if p['platform'] in ('android_tv', 'chromecast_gtv') and p['host'] else 'none'))
-    dev = {'id': uuid.uuid4().hex[:8], **p, 'connectPort': 5555 if wake == 'adb' else None, 'pairPort': None, 'paired': False,
-           'macAddress': '', 'powerMethod': _POWER[wake], 'harmonyActivity': '',
-           'services': [{'id': uuid.uuid4().hex[:8], 'type': 'plex'}]}
-    room = s.add_room({'name': name, 'useHarmonyHub': wake == 'harmony', 'harmonyHubIp': '', 'harmonyVolumeDevice': '',
-                       'devices': [dev]})
+    room = s.add_room({'name': name, 'useHarmonyHub': False, 'harmonyHubIp': '', 'harmonyVolumeDevice': '',
+                       'devices': []})
     return room
 
 
@@ -300,14 +295,13 @@ def update(room_id: str, body: Any) -> Optional[Dict[str, Any]]:
     if 'name' in body:
         patch['name'] = _name(body['name'], rooms, room_id)
     devs = [d for d in room.get('devices') or [] if isinstance(d, dict)]
+    if not devs and any(k in body for k in ('host', 'port', 'mac', 'wake', 'harmony_activity', 'player')):
+        raise Invalid({'player': 'Pair the player to add it'})
     dev = dict(devs[0]) if devs else {'id': uuid.uuid4().hex[:8], 'services': [{'id': uuid.uuid4().hex[:8], 'type': 'plex'}]}
     dchanged = False
     if 'player' in body:
-        p = _player(body['player'])
-        if p['machineId'] != dev.get('machineId') or p['host'] != dev.get('host'):
-            dev['paired'] = False                    # another player: pair again
-        dev.update(p)
-        dchanged = True
+        # v272: Add/Change player goes through Pair (POST .../connect) so Offline orphans are never saved.
+        raise Invalid({'player': 'Pair the player to add it'})
     if 'host' in body:
         dev['host'] = _host(body['host']); dchanged = True
     if 'port' in body:
@@ -455,43 +449,126 @@ def rooms_delete(room_id):
 
 
 PAIR_WAIT_S = 30.0
+ADB_PLATFORMS = frozenset({'android_tv', 'shield', 'chromecast_gtv', 'android'})
+
+
+def _needs_adb(platform: str, host: str) -> bool:
+    """Android TV / Shield with a host: Pair (ADB Allow) is required before persist."""
+    return bool(host) and (platform or '').lower() in ADB_PLATFORMS
+
+
+def _pair_response(ok: bool, state: str, hint: str, detail: str = ''):
+    """Always a JSON body (live :5002 logged connect as 200 with 0 bytes once — keep Content-Type JSON)."""
+    body = {'ok': bool(ok), 'state': state or 'failed', 'hint': hint or 'unknown'}
+    if detail:
+        body['detail'] = detail
+    return jsonify(body)
+
+
+def _persist_paired_device(room: Dict[str, Any], room_id: str, p: Dict[str, Any], port: int,
+                          pair_port: Optional[int] = None) -> Dict[str, Any]:
+    """Write the room's first device after Pair succeeded. Replaces device[0]; keeps extras."""
+    devs = [d for d in room.get('devices') or [] if isinstance(d, dict)]
+    wake = 'adb' if _needs_adb(p.get('platform') or '', p.get('host') or '') else 'none'
+    if wake == 'none' and p.get('platform'):
+        wake = 'adb' if (p.get('host') and (p.get('platform') or '').lower() in ADB_PLATFORMS) else 'none'
+    base = dict(devs[0]) if devs else {'id': uuid.uuid4().hex[:8],
+                                       'services': [{'id': uuid.uuid4().hex[:8], 'type': 'plex'}]}
+    base.update(p)
+    base['connectPort'] = port
+    base['paired'] = True
+    base['powerMethod'] = base.get('powerMethod') or _POWER['adb' if p.get('host') else 'none']
+    if _needs_adb(base.get('platform') or '', base.get('host') or ''):
+        base['powerMethod'] = 'adb'
+        base['connectPort'] = port or 5555
+    if pair_port:
+        base['pairPort'] = pair_port
+    base.setdefault('macAddress', '')
+    base.setdefault('harmonyActivity', '')
+    base.setdefault('services', [])
+    if not any(isinstance(x, dict) and x.get('type') == 'plex' for x in base['services']):
+        base['services'] = [*base['services'], {'id': uuid.uuid4().hex[:8], 'type': 'plex'}]
+    _cfg['settings'].update_room(room_id, {'devices': [base, *devs[1:]], 'useHarmonyHub': False})
+    return base
 
 
 @bp.route('/api/rooms/<room_id>/connect', methods=['POST'])
 def rooms_connect(room_id):
-    """v265 Pair (signed-in owner). Prod 1b4ea74 pairs over ADB: `adb connect host:port` makes the TV show
-    "Allow network debugging?"; this waits up to PAIR_WAIT_S for Allow. Google TV wireless debugging
-    (prod's Pair form) sends pair_port + pair_code: `adb pair` runs first. The key pair lives in adb's
-    HOME (LUMA_ADB_HOME), 0600; the code is never stored or logged."""
+    """v272 Pair (signed-in owner). Optional player body = Add device: Pair first, persist only on
+    success. Re-pair uses the stored host. Prod ADB: `adb connect` → Allow on TV (wait PAIR_WAIT_S);
+    Google TV sends pair_port + pair_code first. Key pair in LUMA_ADB_HOME, 0600; code never logged."""
     err = _writer()
     if err:
         return err
     from app import adb_utils
     rooms = _rooms()
     room = next((r for r in rooms if r['id'] == room_id), None)
-    dev = next((d for d in (room or {}).get('devices') or [] if isinstance(d, dict)), None)
-    if room is None or dev is None:
+    if room is None:
         return jsonify({'error': 'Room not found'}), 404
-    host = (dev.get('host') or '').strip()
-    port = dev.get('connectPort') or 5555
-    if not adb_utils.adb_target(host, port, {host.lower()}):
-        return jsonify({'ok': False, 'state': 'failed', 'hint': 'unreachable'}), 400
     body = _json()
     body = body if isinstance(body, dict) else {}
+    existing = next((d for d in (room.get('devices') or []) if isinstance(d, dict)), None)
+    incoming = None
+    if body.get('player') is not None or body.get('host') or body.get('machine_id'):
+        raw = body.get('player') if isinstance(body.get('player'), dict) else {
+            'host': body.get('host'), 'machine_id': body.get('machine_id'), 'name': body.get('name'),
+            'product': body.get('product'), 'platform': body.get('platform')}
+        try:
+            incoming = _player(raw)
+        except Invalid as e:
+            return jsonify({'errors': e.errors, 'ok': False, 'state': 'failed', 'hint': 'unreachable'}), 400
+    if incoming is None and existing is None:
+        return _pair_response(False, 'failed', 'unreachable', 'Add a player IP or pick a Plex player'), 400
+
+    p = incoming or {
+        'name': existing.get('name') or '', 'machineId': existing.get('machineId') or '',
+        'product': existing.get('product') or '', 'platform': existing.get('platform') or 'android_tv',
+        'host': existing.get('host') or ''}
+    host = (p.get('host') or '').strip()
+    try:
+        port = int(body.get('port') or (existing or {}).get('connectPort') or 5555)
+    except (TypeError, ValueError):
+        port = 5555
+    if not 1 <= port <= 65535:
+        return _pair_response(False, 'failed', 'wrong_port', 'Enter a port'), 400
+
+    # Non-ADB players (Apple TV, etc.): persist on Add without ADB.
+    if not _needs_adb(p.get('platform') or '', host):
+        if not (p.get('machineId') or host):
+            return _pair_response(False, 'failed', 'unreachable'), 400
+        _persist_paired_device(room, room_id, p, port)
+        logger.info('Rooms: pair %s -> connected (no ADB)', room_id)
+        return _pair_response(True, 'connected', 'connected')
+
+    if not adb_utils.adb_target(host, port, {host.lower()}):
+        return _pair_response(False, 'failed', 'unreachable', 'Enter an IP address'), 400
+
+    # adb_disabled is enforced inside wait_for_authorization (real path). Tests inject wait_fn.
+
     code = str(body.get('pair_code') or '').strip()
+    pport = None
     if code:
         try:
             pport = int(body.get('pair_port') or 0)
         except (TypeError, ValueError):
             pport = 0
         if not (1 <= pport <= 65535) or not re.fullmatch(r'\d{6}', code):
-            return jsonify({'ok': False, 'state': 'failed', 'hint': 'pair_failed'}), 400
+            return _pair_response(False, 'failed', 'pair_failed'), 400
         pr = (_cfg.get('pair_fn') or adb_utils.adb_pair)(host, pport, code)
         if not pr.get('ok'):
-            return jsonify({'ok': False, 'state': 'failed', 'hint': pr.get('hint', 'pair_failed')})
+            return _pair_response(False, 'failed', pr.get('hint', 'pair_failed'), pr.get('detail', ''))
+
     res = (_cfg.get('wait_fn') or adb_utils.wait_for_authorization)(host, int(port), timeout=PAIR_WAIT_S)
     if res.get('ok'):
-        dev = {**dev, 'paired': True, **({'pairPort': pport} if code else {})}
-        _cfg['settings'].update_room(room_id, {'devices': [dev, *room['devices'][1:]]})
-    logger.info('Rooms: pair %s -> %s', room_id, res.get('state'))
-    return jsonify({'ok': bool(res.get('ok')), 'state': res.get('state', 'failed'), 'hint': res.get('hint', 'unknown')})
+        _persist_paired_device(room, room_id, p, int(port), pair_port=pport)
+    else:
+        # v272: never persist / keep an Offline orphan from a failed Add. Re-pair of an existing
+        # device leaves it unpaired (paired flag cleared only when we had written success before).
+        if incoming is not None and existing is None:
+            pass  # room stays empty
+        elif incoming is not None and existing is not None:
+            # Failed Change: do not swap in the new host
+            pass
+    logger.info('Rooms: pair %s -> %s hint=%s', room_id, res.get('state'), res.get('hint'))
+    return _pair_response(bool(res.get('ok')), res.get('state', 'failed'), res.get('hint', 'unknown'),
+                          res.get('detail', ''))

@@ -35,7 +35,12 @@ def test_pair_waits_for_allow_then_marks_paired(rs, monkeypatch):
 
 def test_pair_not_allowed_in_time_stays_unpaired(rs, monkeypatch):
     c, fake, _ = rs
-    rid = _room(c)
+    # Seed an unpaired device (legacy / re-pair); failed Pair must not flip paired True
+    rid = _req(c, 'post', API, {'name': 'Living Room'}).get_json()['rooms'][0]['id']
+    fake._settings['devices']['rooms'][0]['devices'] = [{
+        'id': 'd1', 'name': 'Living Room TV', 'host': '192.168.1.41', 'platform': 'android_tv',
+        'connectPort': 5555, 'paired': False, 'machineId': 'mid-lrtv', 'powerMethod': 'adb',
+        'services': [{'id': 's1', 'type': 'plex'}]}]
     monkeypatch.setitem(rooms_setup._cfg, 'wait_fn', lambda *a, **k: {'ok': False, 'state': 'unauthorized', 'hint': 'unauthorized'})
     d = _req(c, 'post', f'{API}/{rid}/connect').get_json()
     assert d['ok'] is False and d['state'] == 'unauthorized'

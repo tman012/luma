@@ -22,7 +22,7 @@ function stub(pair: { ok: boolean; state: string }) {
     const method = init?.method || 'GET';
     calls.push({ url: String(url), method });
     if (String(url).includes('/api/plex/sessions/active')) return json({ rooms: [{ roomId: 'lr', roomName: 'Living Room', deviceCount: 1, session: null, activity: null }], unmatched: [] });
-    if (String(url).endsWith('/connect')) { paired = pair.ok; return json({ ...pair, hint: pair.state }); }
+    if (String(url).endsWith('/connect')) { paired = pair.ok; return json({ ...pair, hint: (pair as { hint?: string }).hint || pair.state }); }
     if (String(url).includes('/api/rooms')) return json({ rooms: [{ ...LR, player: { ...P, paired } }], default_room_id: 'lr' });
     return json({});
   }));
@@ -40,12 +40,26 @@ describe('v265 Pair', () => {
     await waitFor(() => expect(screen.getByTestId('room-paired').textContent).toBe('Paired and connected'));
     expect(calls.filter(c => c.method === 'POST').map(c => c.url)).toEqual(['/api/rooms/lr/connect']);
   });
-  it('shows Pairing failed when the TV is not allowed in time', async () => {
+  it('shows Allow network debugging when unauthorized (exact fail string)', async () => {
     stub({ ok: false, state: 'unauthorized' });
     render(<RoomsSettings wide={false} />);
     fireEvent.click(await screen.findByTestId('room-row'));
     fireEvent.click(screen.getByTestId('room-pair'));
-    await waitFor(() => expect(screen.getByTestId('room-paired').textContent).toBe('Pairing failed'));
+    await waitFor(() => expect(screen.getByTestId('room-paired').textContent).toBe('Allow network debugging on the TV'));
+  });
+  it('shows wrong_port fail string from live :5002 pair failure', async () => {
+    const calls: { url: string; method: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      const method = init?.method || 'GET';
+      calls.push({ url: String(url), method });
+      if (String(url).endsWith('/connect')) return json({ ok: false, state: 'failed', hint: 'wrong_port' });
+      if (String(url).includes('/api/rooms')) return json({ rooms: [{ ...LR, player: { ...P, paired: false } }], default_room_id: 'lr' });
+      return json({});
+    }));
+    render(<RoomsSettings wide={false} />);
+    fireEvent.click(await screen.findByTestId('room-row'));
+    fireEvent.click(screen.getByTestId('room-pair'));
+    await waitFor(() => expect(screen.getByTestId('room-paired').textContent).toBe("Couldn't reach ADB on that port"));
   });
 });
 

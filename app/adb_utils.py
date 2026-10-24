@@ -77,6 +77,11 @@ def adb_allowlist_active() -> bool:
     return bool(_ADB_ALLOWED)
 
 
+def adb_disabled() -> bool:
+    """True when LUMA_DISABLE_ADB is on — Pair/Connect must fail clearly (hint=adb_disabled)."""
+    return os.environ.get("LUMA_DISABLE_ADB", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def secure_adb_keys(home: Optional[str] = None) -> None:
     """HOME/.android 0700 and every file in it 0600 (adbkey is the private key). Never reads or logs them."""
     d = os.path.join(home or ADB_HOME, ".android")
@@ -113,7 +118,7 @@ def run_adb(args: list[str], timeout: int = ADB_TIMEOUT,
 
     Returns: {"ok": bool, "stdout": str, "stderr": str, "returncode": int}
     """
-    if os.environ.get("LUMA_DISABLE_ADB", "").strip().lower() in ("1", "true", "yes", "on"):
+    if adb_disabled():
         return {"ok": False, "stdout": "", "stderr": "ADB disabled (LUMA_DISABLE_ADB)", "returncode": -1}
     if _ADB_ALLOWED and _subcommand(args) not in _ADB_ALLOWED:
         return {"ok": False, "stdout": "", "stderr": "ADB command not allowed (LUMA_ADB_COMMANDS)", "returncode": -1}
@@ -196,6 +201,10 @@ def _classify_adb_output(stdout: str, stderr: str) -> dict:
     Returns: {"ok": bool, "hint": str, "detail": str, "needsPairing": bool}
     """
     combined = (stdout + " " + stderr).lower()
+
+    if "adb disabled" in combined or "luma_disable_adb" in combined:
+        return {"ok": False, "hint": "adb_disabled", "needsPairing": False,
+                "detail": "ADB is disabled on this install (LUMA_DISABLE_ADB)."}
 
     if "already connected" in combined or "connected to" in combined:
         return {"ok": True, "hint": "connected", "detail": stdout.strip(), "needsPairing": False}
@@ -571,6 +580,9 @@ def wait_for_authorization(host: str, connect_port: int, timeout: float = 30.0, 
     import time as _time
     sleep = sleep or _time.sleep
     clock = clock or _time.monotonic
+    if adb_disabled():
+        return {"ok": False, "state": "failed", "hint": "adb_disabled",
+                "detail": "ADB is disabled on this install (LUMA_DISABLE_ADB)."}
     conn = adb_connect(host, connect_port)
     if not conn["ok"] and conn.get("hint") not in ("unauthorized", "needs_pairing"):
         return {"ok": False, "state": "failed", "hint": conn.get("hint", "unknown"), "detail": conn.get("detail", "")}

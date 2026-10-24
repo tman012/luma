@@ -21,8 +21,14 @@ function stub(rooms: Room[], calls: Call[]) {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
     calls.push({ url: String(url), method, body });
     if (String(url).endsWith('/players')) return new Response(JSON.stringify({ players: PLAYERS }), { status: 200 });
+    if (method === 'POST' && String(url).endsWith('/connect')) {
+      const pid = String(url).split('/').slice(-2)[0];
+      const player = P({ name: body?.player?.name || body?.player?.host || 'Player', machine_id: body?.player?.machine_id || '', host: body?.player?.host || '', paired: true });
+      view = { ...view, rooms: view.rooms.map(r => r.id === pid ? { ...r, player } : r) };
+      return new Response(JSON.stringify({ ok: true, state: 'connected', hint: 'connected' }));
+    }
     if (method === 'POST') {
-      const r: Room = { id: 'new', name: body.name, default: !view.rooms.length, harmony_hub: '', player: P({ name: body.player.name || body.player.host, machine_id: body.player.machine_id || '' }) };
+      const r: Room = { id: 'new', name: body.name, default: !view.rooms.length, harmony_hub: '', player: null };
       view = { rooms: [...view.rooms, r], default_room_id: view.default_room_id || 'new' };
       return new Response(JSON.stringify(view), { status: 201 });
     }
@@ -111,7 +117,7 @@ describe('Settings > Rooms', () => {
     await waitFor(() => expect(screen.getAllByTestId('room-card')).toHaveLength(1));
     expect(writes(calls)[1]).toEqual({ url: '/api/rooms/lr', method: 'DELETE', body: undefined });
   });
-  it('phone empty: No rooms yet, then New room -> pick a player -> Add room', async () => {
+  it('phone empty: No rooms yet, then New room -> empty Add room', async () => {
     const calls: Call[] = []; stub([], calls);
     render(<RoomsSettings wide={false} />);
     await waitFor(() => expect(screen.getByTestId('rooms-empty')).toBeTruthy());
@@ -121,28 +127,23 @@ describe('Settings > Rooms', () => {
     expect(screen.getAllByTestId('room-chip').map(c => c.textContent)).toEqual(['Living Room', 'Bedroom', 'Office', 'Den', 'Kids room']);
     expect((screen.getByTestId('room-name') as HTMLInputElement).value).toBe('Living Room');
     fireEvent.click(screen.getByTestId('room-next'));
-    await waitFor(() => expect(screen.getAllByTestId('room-player')).toHaveLength(2));
-    expect(screen.getAllByTestId('room-player')[0]!.getAttribute('aria-checked')).toBe('true');
-    expect(screen.getAllByTestId('room-player')[1]!.textContent).toContain('Offline · Plex for Apple TV');
-    fireEvent.click(screen.getByTestId('room-pick-go'));
-    await waitFor(() => expect(screen.getAllByTestId('room-row')).toHaveLength(1));
-    expect(writes(calls)).toEqual([{ url: '/api/rooms', method: 'POST', body: { name: 'Living Room',
-      player: { machine_id: 'mid-shield', name: 'SHIELD Android TV', product: 'Plex for Android (TV)', platform: 'Android', host: '192.168.1.40' } } }]);
+    await waitFor(() => expect(screen.getByTestId('room-edit')).toBeTruthy());
+    expect(screen.getByTestId('room-add-player')).toBeTruthy();
+    expect(writes(calls)).toEqual([{ url: '/api/rooms', method: 'POST', body: { name: 'Living Room' } }]);
   });
-  it('phone: Add by IP', async () => {
-    const calls: Call[] = []; stub([LR], calls);
+  it('phone: Add player by IP pairs then lists', async () => {
+    const empty: Room = { id: 'fr', name: 'Family Room', default: true, harmony_hub: '', player: null };
+    const calls: Call[] = []; stub([empty], calls);
     render(<RoomsSettings wide={false} />);
     await waitFor(() => expect(screen.getAllByTestId('room-row')).toHaveLength(1));
-    fireEvent.click(screen.getByRole('button', { name: 'Add room' }));
-    expect((screen.getByTestId('room-name') as HTMLInputElement).value).toBe('Bedroom');   // taken names leave the chips
-    fireEvent.click(screen.getByTestId('room-next'));
+    fireEvent.click(screen.getAllByTestId('room-row')[0]!);
+    fireEvent.click(screen.getByTestId('room-add-player'));
     fireEvent.click(screen.getByTestId('room-by-ip'));
-    const go = screen.getByTestId('room-pick-go') as HTMLButtonElement;
-    expect(go.disabled).toBe(true);
     fireEvent.change(screen.getByTestId('room-ip'), { target: { value: '192.168.1.77' } });
-    fireEvent.click(go);
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]!.body).toEqual({ name: 'Bedroom', player: { host: '192.168.1.77' } });
+    fireEvent.click(screen.getByTestId('room-pick-go'));
+    await waitFor(() => expect(writes(calls).some(c => c.url.endsWith('/connect'))).toBe(true));
+    const connect = writes(calls).find(c => String(c.url).endsWith('/connect'))!;
+    expect(connect).toMatchObject({ method: 'POST', body: { player: { host: '192.168.1.77' } } });
   });
   it('phone edit: wake segments, fields per method, Default room, Save sends only changes', async () => {
     const calls: Call[] = []; stub([LR, BR], calls);
@@ -183,18 +184,16 @@ describe('Settings > Rooms', () => {
     fireEvent.click(screen.getByTestId('room-remove-go'));
     await waitFor(() => expect(screen.getAllByTestId('room-row')).toHaveLength(1));
   });
-  it('change player from the edit page', async () => {
+  it('change player from the edit page pairs via connect', async () => {
     const calls: Call[] = []; stub([LR], calls);
     render(<RoomsSettings wide={false} />);
     await waitFor(() => expect(screen.getAllByTestId('room-row')).toHaveLength(1));
     fireEvent.click(screen.getAllByTestId('room-row')[0]!);
     fireEvent.click(screen.getByTestId('room-change-player'));
-    await waitFor(() => expect(screen.getAllByTestId('room-player')).toHaveLength(2));
-    expect(screen.getAllByTestId('room-player')[0]!.getAttribute('aria-checked')).toBe('true');   // the current player
-    fireEvent.click(screen.getAllByTestId('room-player')[1]!);
+    await waitFor(() => expect(screen.getAllByTestId('room-player').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getAllByTestId('room-player')[0]!);
     fireEvent.click(screen.getByTestId('room-pick-go'));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0]).toMatchObject({ url: '/api/rooms/lr', method: 'PUT', body: { player: { machine_id: 'mid-atv', name: 'Apple TV 4K' } } });
+    await waitFor(() => expect(writes(calls).some(c => String(c.url).endsWith('/connect'))).toBe(true));
     await waitFor(() => expect(screen.getByTestId('room-edit')).toBeTruthy());
   });
   it('no helper text and sentence case labels (the A mocks)', async () => {

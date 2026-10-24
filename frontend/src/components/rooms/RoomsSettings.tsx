@@ -1,13 +1,12 @@
 /** v224 Settings > Rooms (Taylor's Option A, room first; docs: /workspace/design/rooms/option-A-*).
  * Desktop: room cards in a grid, + Add room, a ⋯ menu (Edit, Make default, Remove).
- * Phone: the room list, then pushed pages: New room (name) -> pick a player (Add by IP) -> Add room; a room's
- * page edits its name, player, wake method (ADB, Wake-on-LAN, Harmony, None) and Default room, with Remove room.
- * Writes need the signed-in owner (the API checks). Nothing here plays, wakes or pairs a device. */
+ * Phone: New room (name) -> empty room; Add player runs Pair and only lists the device on success (v272).
+ * Writes need the signed-in owner (the API checks). Nothing here plays or wakes a device. */
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { Modal, Toggle, field, glassBtn, primaryBtn, tvEditCss } from '@/components/library/TvEdit';
 import {
-  badge, createRoom, loadPlayers, loadRooms, pairRoom, removeRoom, updateRoom, WAKE_LABEL,
+  badge, createRoom, loadPlayers, loadRooms, pairFailLabel, pairRoom, removeRoom, updateRoom, WAKE_LABEL,
   type FoundPlayer, type Room, type RoomPatch, type RoomsView, type Wake,
 } from './roomsApi';
 import { Badge, StatusDot } from './PlayIn';
@@ -23,7 +22,7 @@ const label: CSSProperties = { margin: '0 4px 8px', fontSize: 12, fontWeight: 60
 export const NAME_CHIPS = ['Living Room', 'Bedroom', 'Office', 'Den', 'Kids room'];
 const WAKES: { id: Wake; label: string }[] = [{ id: 'adb', label: 'ADB' }, { id: 'wol', label: 'Wake-on-LAN' }, { id: 'harmony', label: 'Harmony' }, { id: 'none', label: 'None' }];
 
-type View = { k: 'list' } | { k: 'name' } | { k: 'pick'; name: string } | { k: 'edit'; id: string } | { k: 'repick'; id: string };
+type View = { k: 'list' } | { k: 'name' } | { k: 'edit'; id: string } | { k: 'add'; id: string };
 
 export function playerLine(r: Room, long = false): string {
   const p = r.player;
@@ -57,21 +56,33 @@ export function RoomsSettings({ wide = true, onExit }: { wide?: boolean; onExit?
   // ---- flows (phone: pushed pages; desktop: a modal over the grid)
   let flow: { title: string; body: ReactNode; action?: ReactNode; back: () => void } | null = null;
   if (view.k === 'name') {
-    flow = { title: 'New room', back: toList, body: <NameStep taken={rooms.map(r => r.name)} onNext={name => setView({ k: 'pick', name })} /> };
-  } else if (view.k === 'pick') {
-    flow = { title: view.name, back: () => setView({ k: 'name' }), body: (
-      <PickStep cta="Add room" error={error} onPick={p => void createRoom(view.name, p).then(r => take(r, toList))} />) };
+    flow = { title: 'New room', back: toList, body: (
+      <NameStep taken={rooms.map(r => r.name)} error={error} onNext={name => {
+        void createRoom(name).then(r => {
+          if (!r.ok) { setError(Object.values(r.errors)[0] || "Couldn't save"); return; }
+          setData(r.data); setError('');
+          const created = r.data.rooms.find(x => x.name === name) || r.data.rooms[r.data.rooms.length - 1];
+          if (created) setView({ k: 'edit', id: created.id });
+          else toList();
+        });
+      }} />) };
   } else if (view.k === 'edit' && room(view.id)) {
     const r = room(view.id)!;
     flow = { title: r.name, back: toList, action: <HeaderSave dirty={editSave.dirty} onSave={editSave.save} />, body: (
-      <EditRoom key={r.id} room={r} error={error} onSaveState={onSaveState} onPaired={load} onChangePlayer={() => setView({ k: 'repick', id: r.id })}
+      <EditRoom key={r.id} room={r} error={error} onSaveState={onSaveState} onPaired={load}
+        onChangePlayer={() => setView({ k: 'add', id: r.id })}
         onSave={patch => void updateRoom(r.id, patch).then(x => take(x, toList))}
         onRemove={() => void removeRoom(r.id).then(x => take(x, toList))} />) };
-  } else if (view.k === 'repick' && room(view.id)) {
+  } else if (view.k === 'add' && room(view.id)) {
     const r = room(view.id)!;
     flow = { title: r.name, back: () => setView({ k: 'edit', id: r.id }), body: (
-      <PickStep cta="Use player" current={r.player?.machine_id || r.player?.host} error={error}
-        onPick={p => void updateRoom(r.id, { player: p }).then(x => take(x, () => setView({ k: 'edit', id: r.id })))} />) };
+      <PickStep cta="Add player" current={r.player?.machine_id || r.player?.host} error={error}
+        onPick={async p => {
+          setError('');
+          const x = await pairRoom(r.id, p);
+          if (!x.ok) { setError(pairFailLabel(x.hint)); return; }
+          await load(); setView({ k: 'edit', id: r.id });
+        }} />) };
   }
 
   if (!wide) {
@@ -217,16 +228,18 @@ function ConfirmRemove({ name, onCancel, onRemove }: { name: string; onCancel: (
   );
 }
 
-function NameStep({ taken, onNext }: { taken: string[]; onNext: (name: string) => void }) {
+function NameStep({ taken, error, onNext }: { taken: string[]; error?: string; onNext: (name: string) => void }) {
   const free = NAME_CHIPS.filter(c => !taken.some(t => t.toLowerCase() === c.toLowerCase()));
   const [name, setName] = useState(free[0] || '');
+  const [busy, setBusy] = useState(false);
   const clash = taken.some(t => t.toLowerCase() === name.trim().toLowerCase());
-  const ok = !!name.trim() && name.trim().length <= 40 && !clash;
+  const ok = !busy && !!name.trim() && name.trim().length <= 40 && !clash;
+  const go = () => { setBusy(true); onNext(name.trim()); };
   return (
     <div data-testid="room-name-step">
       <div style={label}>Name</div>
       <input aria-label="Name" data-testid="room-name" className="tve-in" value={name} maxLength={40} autoFocus onChange={e => setName(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' && ok) onNext(name.trim()); }} style={field} />
+        onKeyDown={e => { if (e.key === 'Enter' && ok) go(); }} style={field} />
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
         {free.map(c => (
           <button key={c} type="button" data-testid="room-chip" onClick={() => setName(c)} className="lp-focus tve-glass"
@@ -234,8 +247,9 @@ function NameStep({ taken, onNext }: { taken: string[]; onNext: (name: string) =
         ))}
       </div>
       {clash && <div role="alert" style={{ color: '#fca5a5', fontSize: 13, marginTop: 8 }}>A room has this name</div>}
-      <button type="button" data-testid="room-next" disabled={!ok} onClick={() => onNext(name.trim())} className="lp-focus tve-primary"
-        style={{ ...primaryBtn(ok), width: '100%', marginTop: 16 }}>Next</button>
+      {error && <div role="alert" style={{ color: '#fca5a5', fontSize: 13, marginTop: 8 }}>{error}</div>}
+      <button type="button" data-testid="room-next" disabled={!ok} onClick={go} className="lp-focus tve-primary"
+        style={{ ...primaryBtn(ok), width: '100%', marginTop: 16 }}>Add room</button>
     </div>
   );
 }
@@ -252,7 +266,7 @@ function PickStep({ cta, current, error, onPick }: { cta: string; current?: stri
     void loadPlayers().then(r => {
       const ps = r.ok ? r.data.players : [];
       setList(ps);
-      const first = ps.find(p => !!current && (p.machine_id === current || p.host === current)) || ps.find(p => p.online) || ps[0];
+      const first = ps.find(p => !!current && (p.machine_id === current || p.host === current)) || ps.find(p => p.online);
       setSel(s => s || (first ? key(first) : ''));
     });
   }, [current]);
@@ -335,7 +349,15 @@ function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer, onSaveStat
   const patchKey = JSON.stringify(patch);
   // v265 Pair (prod's ADB flow): the TV asks "Allow network debugging?"; the server waits for Allow.
   const [pairMsg, setPairMsg] = useState<'' | 'busy' | 'ok' | 'fail'>('');
-  const pair = () => { setPairMsg('busy'); void pairRoom(r.id).then(x => { setPairMsg(x.ok ? 'ok' : 'fail'); if (x.ok) onPaired?.(); }); };
+  const [pairHint, setPairHint] = useState('');
+  const pair = () => {
+    setPairMsg('busy'); setPairHint('');
+    void pairRoom(r.id).then(x => {
+      setPairMsg(x.ok ? 'ok' : 'fail');
+      setPairHint(x.ok ? '' : pairFailLabel(x.hint));
+      if (x.ok) onPaired?.();
+    });
+  };
   const saveRef = useRef(onSave);
   saveRef.current = onSave;
   useEffect(() => { onSaveState(dirty, () => saveRef.current(JSON.parse(patchKey) as RoomPatch)); }, [dirty, patchKey, onSaveState]);
@@ -354,15 +376,22 @@ function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer, onSaveStat
       </div>
       <div>
         <div style={label}>Player</div>
-        <div style={{ ...card, ...row(0), padding: '0 8px 0 12px' }}>
-          <Badge text={badge(p)} />
-          <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 14, fontWeight: 600 }}>{p?.name || 'No player'}</span>
-            <span style={{ fontSize: 12, color: W50, display: 'inline-flex', alignItems: 'center', gap: 6 }}><StatusDot online={!!p?.online} />{[p?.online ? 'Online' : 'Offline', p?.host].filter(Boolean).join(' · ')}</span>
-          </span>
-          <button type="button" data-testid="room-change-player" onClick={onChangePlayer} className="lp-focus tve-glass" style={{ ...glassBtn, height: 36, padding: '0 14px', fontSize: 13 }}>Change</button>
-        </div>
+        {p ? (
+          <div style={{ ...card, ...row(0), padding: '0 8px 0 12px' }}>
+            <Badge text={badge(p)} />
+            <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>{p.name}</span>
+              <span style={{ fontSize: 12, color: W50, display: 'inline-flex', alignItems: 'center', gap: 6 }}><StatusDot online={!!p.online} />{[p.online ? 'Online' : 'Offline', p.host].filter(Boolean).join(' · ')}</span>
+            </span>
+            <button type="button" data-testid="room-change-player" onClick={onChangePlayer} className="lp-focus tve-glass" style={{ ...glassBtn, height: 36, padding: '0 14px', fontSize: 13 }}>Change</button>
+          </div>
+        ) : (
+          <button type="button" data-testid="room-add-player" onClick={onChangePlayer} className="lp-focus tve-primary"
+            style={{ ...primaryBtn(true), width: '100%' }}>Add player</button>
+        )}
       </div>
+{p && (
+      <>
       <div>
         <div style={label}>Wake with</div>
         <div role="radiogroup" aria-label="Wake with" style={{ ...card, display: 'flex', padding: 4, gap: 4 }}>
@@ -383,7 +412,7 @@ function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer, onSaveStat
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
                 <span data-testid="room-paired" style={{ fontSize: 13, color: W50, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   <StatusDot online={pairMsg === 'ok' || (!pairMsg && !!p?.paired)} />
-                  {pairMsg === 'busy' ? 'Pairing…' : pairMsg === 'ok' ? 'Paired and connected' : pairMsg === 'fail' ? 'Pairing failed' : p?.paired ? 'Paired' : 'Not paired'}
+                  {pairMsg === 'busy' ? 'Pairing…' : pairMsg === 'ok' ? 'Paired and connected' : pairMsg === 'fail' ? (pairHint || 'Pairing failed') : p?.paired ? 'Paired' : 'Not paired'}
                 </span>
                 <button type="button" data-testid="room-pair" disabled={pairMsg === 'busy' || dirty || !r.player?.host} onClick={pair} className="lp-focus tve-glass"
                   style={{ ...glassBtn, height: 32, padding: '0 14px', fontSize: 13, opacity: pairMsg === 'busy' || dirty || !r.player?.host ? 0.4 : 1 }}>Pair</button>
@@ -395,7 +424,9 @@ function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer, onSaveStat
           {wake === 'harmony' && fieldRow('Activity', 'activity', act, setAct)}
         </div>
       )}
-      <div style={{ ...card, ...row(0), justifyContent: 'space-between' }}>
+      </>
+      )}
+            <div style={{ ...card, ...row(0), justifyContent: 'space-between' }}>
         <span style={{ fontSize: 14 }}>Default room</span>
         <Toggle id="room-default-toggle" label="Default room" on={def} onChange={setDef} />
       </div>

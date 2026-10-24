@@ -1,4 +1,5 @@
-/** v224 Settings > Rooms (Option A): /api/rooms (reads signed in; writes the signed-in owner). */
+/** v224 Settings > Rooms (Option A): /api/rooms (reads signed in; writes the signed-in owner).
+ * v272: create is empty-room only; Pair (POST .../connect) persists the player on success. */
 import { apiFetch } from '@/apiClient';
 
 export type Wake = 'adb' | 'wol' | 'harmony' | 'none';
@@ -32,25 +33,52 @@ const json = (method: string, body?: unknown): RequestInit =>
 
 export const loadRooms = () => call<RoomsView>(ROOMS_URL, undefined, okView);
 export const loadPlayers = () => call<{ players: FoundPlayer[] }>(`${ROOMS_URL}/players`, undefined, d => !!d && Array.isArray((d as { players: unknown }).players));
-export const createRoom = (name: string, player: Partial<FoundPlayer>) => call<RoomsView>(ROOMS_URL, json('POST', { name, player }), okView);
-export type RoomPatch = Partial<{ name: string; player: Partial<FoundPlayer>; wake: Wake; host: string; port: number | string; mac: string;
+/** v272: empty room — name only. */
+export const createRoom = (name: string) => call<RoomsView>(ROOMS_URL, json('POST', { name }), okView);
+export type RoomPatch = Partial<{ name: string; wake: Wake; host: string; port: number | string; mac: string;
   harmony_hub: string; harmony_activity: string; default: boolean }>;
 export const updateRoom = (id: string, patch: RoomPatch) => call<RoomsView>(`${ROOMS_URL}/${encodeURIComponent(id)}`, json('PUT', patch), okView);
-/** v265 Pair: prod's ADB flow (connect, then wait for Allow on the TV). Signed-in owner. */
-export type PairResult = { ok: boolean; state: 'connected' | 'unauthorized' | 'failed'; hint?: string };
-export async function pairRoom(id: string): Promise<PairResult> {
+
+/** v265/v272 Pair: prod's ADB flow. Optional player = Add device (persists only on success). */
+export type PairResult = { ok: boolean; state: 'connected' | 'unauthorized' | 'failed'; hint?: string; detail?: string };
+/** UI strings for connect hints (Taylor saw only "Pairing failed" — surface the real cause). */
+export const PAIR_FAIL: Record<string, string> = {
+  wrong_port: "Couldn't reach ADB on that port",
+  unreachable: "Couldn't reach that player",
+  unauthorized: 'Allow network debugging on the TV',
+  timeout: 'Pairing timed out',
+  adb_disabled: 'ADB is disabled on this install',
+  adb_missing: 'ADB is not available',
+  pair_failed: 'Pairing failed',
+  needs_pairing: 'Allow network debugging on the TV',
+  refused: "Couldn't reach ADB on that port",
+  unknown: 'Pairing failed',
+};
+export function pairFailLabel(hint?: string): string {
+  if (hint && Object.prototype.hasOwnProperty.call(PAIR_FAIL, hint)) {
+    return PAIR_FAIL[hint] as string;
+  }
+  return 'Pairing failed';
+}
+
+export async function pairRoom(id: string, player?: Partial<FoundPlayer>, port?: number | string): Promise<PairResult> {
   try {
-    const res = await apiFetch(`${ROOMS_URL}/${encodeURIComponent(id)}/connect`, json('POST', {}));
+    const body: Record<string, unknown> = {};
+    if (player) body.player = player;
+    if (port != null && port !== '') body.port = port;
+    const res = await apiFetch(`${ROOMS_URL}/${encodeURIComponent(id)}/connect`, json('POST', body));
     const d = await res.json().catch(() => ({}));
-    return { ok: res.ok && !!d.ok, state: d.state === 'connected' || d.state === 'unauthorized' ? d.state : 'failed', hint: d.hint };
+    const state = d.state === 'connected' || d.state === 'unauthorized' ? d.state : 'failed';
+    return { ok: res.ok && !!d.ok, state, hint: d.hint, detail: d.detail };
   } catch {
-    return { ok: false, state: 'failed' };
+    return { ok: false, state: 'failed', hint: 'unknown' };
   }
 }
 export const removeRoom = (id: string) => call<RoomsView>(`${ROOMS_URL}/${encodeURIComponent(id)}`, json('DELETE'), okView);
 
 /** A player's two- or three-letter badge, as the A mocks: ATV for Android TV, tv for Apple TV, else the initial. */
 export function badge(p: { product?: string; platform?: string; name?: string } | null | undefined): string {
+  if (!p) return '?';
   const s = (p?.product || `${p?.platform || ''} ${p?.name || ''}`).toLowerCase();   // the Plex product wins
   if (s.includes('android') || s.includes('shield')) return 'ATV';
   if (s.includes('apple') || s.includes('tvos')) return 'tv';

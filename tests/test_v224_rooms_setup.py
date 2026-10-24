@@ -54,12 +54,34 @@ def rs(owner, monkeypatch):  # noqa: F811
         return copy.deepcopy(CLIENTS)
     monkeypatch.setitem(rooms_setup._cfg, 'settings', fake)
     monkeypatch.setitem(rooms_setup._cfg, 'clients_fn', clients)
+    monkeypatch.delenv('LUMA_DISABLE_ADB', raising=False)
+    # v272: _add pairs through connect; default wait succeeds (tests that need fail override it)
+    monkeypatch.setitem(rooms_setup._cfg, 'wait_fn', lambda *a, **k: {'ok': True, 'state': 'connected', 'hint': 'connected'})
     return owner, fake, calls
 
 
+def _create_empty(c, name):
+    return _req(c, 'post', API, {'name': name})
+
+
 def _add(c, name, mid='mid-shield', host='192.168.1.40', **kw):
-    return _req(c, 'post', API, {'name': name, 'player': {'machine_id': mid, 'name': 'SHIELD Android TV',
-                                                          'product': 'Plex for Android (TV)', 'platform': 'Android', 'host': host}, **kw})
+    """v272 helper: empty create + Pair/connect (wait_fn mocked to success) so tests keep a player.
+    Returns the create response (201) after the player is paired, matching the old helper's status."""
+    r = _create_empty(c, name)
+    assert r.status_code == 201, r.get_json()
+    rid = next(x['id'] for x in r.get_json()['rooms'] if x['name'] == name)
+    body = {'player': {'machine_id': mid, 'name': 'SHIELD Android TV',
+                       'product': 'Plex for Android (TV)', 'platform': 'Android', 'host': host}}
+    cr = _req(c, 'post', f'{API}/{rid}/connect', body)
+    assert cr.status_code == 200 and cr.get_json().get('ok'), cr.get_json()
+    if 'wake' in kw:
+        _req(c, 'put', f'{API}/{rid}', {'wake': kw['wake']})
+    # Re-fetch as 201-shaped response for callers that check status_code / get_json rooms
+    class _R:
+        status_code = 201
+        def get_json(self_inner):
+            return _req(c, 'get', API).get_json()
+    return _R()
 
 
 def test_routes_allowlisted_in_minimal():
@@ -70,41 +92,56 @@ def test_routes_allowlisted_in_minimal():
 def test_empty_then_create_first_room_is_default_with_plex_service(rs):
     c, fake, _ = rs
     assert _req(c, 'get', API).get_json() == {'rooms': [], 'default_room_id': ''}
-    r = _add(c, 'Living Room')
+    r = _create_empty(c, 'Living Room')
     assert r.status_code == 201, r.get_json()
     d = r.get_json()
     room = d['rooms'][0]
     assert room['name'] == 'Living Room' and room['default'] is True and d['default_room_id'] == room['id']
+    assert room.get('player') in (None, {}) or room['player'] is None
+    assert fake._settings['devices']['rooms'][0]['devices'] == []
+    # Pair/add player
+    rid = room['id']
+    assert _req(c, 'post', f'{API}/{rid}/connect', {'player': {'machine_id': 'mid-shield', 'name': 'SHIELD Android TV',
+        'product': 'Plex for Android (TV)', 'platform': 'Android', 'host': '192.168.1.40'}}).get_json()['ok']
+    d = _req(c, 'get', API).get_json()
+    room = d['rooms'][0]
     assert room['player']['online'] is True and room['player']['wake'] == 'adb' and room['player']['port'] == 5555
     stored = fake._settings['devices']['rooms'][0]
     dev = stored['devices'][0]
-    assert dev['machineId'] == 'mid-shield' and dev['platform'] == 'android_tv' and dev['powerMethod'] == 'adb'
+    assert dev['machineId'] == 'mid-shield' and dev['platform'] == 'android_tv' and dev['powerMethod'] == 'adb' and dev['paired'] is True
     assert [s['type'] for s in dev['services']] == ['plex']
     assert 'homeassistant' not in str(stored).lower()
 
 
 def test_validation(rs):
     c, _, _ = rs
-    assert _add(c, 'Living Room').status_code == 201
-    for body in ({'name': '', 'player': {'machine_id': 'x'}}, {'name': 'x' * 41, 'player': {'machine_id': 'x'}},
-                 {'name': 'living room', 'player': {'machine_id': 'x'}}, {'name': 'Den'}, {'name': 'Den', 'player': {}},
-                 {'name': 'Den', 'player': {'host': 'not a host!'}}, {'name': 'Den', 'player': {'host': '10.0.0.9'}, 'wake': 'homeassistant'},
+    assert _create_empty(c, 'Living Room').status_code == 201
+    # player on create is rejected (Pair adds it); empty name / clash / junk
+    for body in ({'name': ''}, {'name': 'x' * 41}, {'name': 'living room'},
+                 {'name': 'Den', 'player': {'host': '10.0.0.9'}}, {'name': 'Den', 'player': {}},
                  [1, 2]):
         assert _req(c, 'post', API, body).status_code == 400, body
     rid = _req(c, 'get', API).get_json()['rooms'][0]['id']
+    # empty room: host/wake without a paired player rejected
+    assert _req(c, 'put', f'{API}/{rid}', {'host': '10.0.0.9'}).status_code == 400
+    assert _req(c, 'put', f'{API}/{rid}', {'player': {'host': '10.0.0.9'}}).status_code == 400
+    _add(c, 'Office')
+    oid = next(r['id'] for r in _req(c, 'get', API).get_json()['rooms'] if r['name'] == 'Office')
     for body in ({'port': 0}, {'port': 70000}, {'mac': 'zz'}, {'wake': 'ha'}, {'default': 'yes'}, {'devices': []}, {}):
-        assert _req(c, 'put', f'{API}/{rid}', body).status_code == 400, body
+        assert _req(c, 'put', f'{API}/{oid}', body).status_code == 400, body
     assert _req(c, 'put', f'{API}/nope', {'name': 'X'}).status_code == 404
     assert _req(c, 'delete', f'{API}/nope').status_code == 404
 
 
 def test_add_by_ip_offline_and_wake_methods(rs):
     c, fake, _ = rs
-    r = _req(c, 'post', API, {'name': 'Office', 'player': {'host': '192.168.1.77'}})
+    r = _create_empty(c, 'Office')
     assert r.status_code == 201, r.get_json()
-    room = r.get_json()['rooms'][0]
-    assert room['player']['online'] is False and room['player']['name'] == '192.168.1.77'
-    rid = room['id']
+    rid = r.get_json()['rooms'][0]['id']
+    # Pair by IP (wait mocked ok) — device persists only after Pair
+    assert _req(c, 'post', f'{API}/{rid}/connect', {'player': {'host': '192.168.1.77'}}).get_json()['ok']
+    room = _req(c, 'get', API).get_json()['rooms'][0]
+    assert room['player']['online'] is False and room['player']['name'] == '192.168.1.77' and room['player']['paired'] is True
     d = _req(c, 'put', f'{API}/{rid}', {'wake': 'wol', 'mac': 'aa-bb-cc-dd-ee-ff'}).get_json()
     p = d['rooms'][0]['player']
     assert p['wake'] == 'wol' and p['mac'] == 'AA:BB:CC:DD:EE:FF'
@@ -123,9 +160,12 @@ def test_default_room_rename_change_player_and_remove(rs):
     assert d['default_room_id'] == b and fake._settings['devices']['defaultRoomId'] == b
     assert [r['name'] for r in d['rooms']] == ['Living Room', 'Main Bedroom']
     fake._settings['devices']['rooms'][0]['devices'][0]['paired'] = True
-    d = _req(c, 'put', f'{API}/{a}', {'player': {'machine_id': 'mid-lrtv', 'name': 'Living Room TV', 'host': '192.168.1.41'}}).get_json()
-    pa = d['rooms'][0]['player']
-    assert pa['name'] == 'Living Room TV' and pa['paired'] is False      # another player pairs again
+    # v272: Change player is Pair/connect; success replaces and marks paired
+    assert _req(c, 'put', f'{API}/{a}', {'player': {'machine_id': 'mid-lrtv', 'name': 'Living Room TV', 'host': '192.168.1.41'}}).status_code == 400
+    assert _req(c, 'post', f'{API}/{a}/connect', {'player': {'machine_id': 'mid-lrtv', 'name': 'Living Room TV',
+        'product': 'Plex for Android (TV)', 'platform': 'Android', 'host': '192.168.1.41'}}).get_json()['ok']
+    pa = _req(c, 'get', API).get_json()['rooms'][0]['player']
+    assert pa['name'] == 'Living Room TV' and pa['paired'] is True and pa['host'] == '192.168.1.41'
     d = _req(c, 'put', f'{API}/{b}', {'default': False}).get_json()
     assert d['default_room_id'] == a
     _req(c, 'put', f'{API}/{b}', {'default': True})
@@ -133,11 +173,17 @@ def test_default_room_rename_change_player_and_remove(rs):
     assert [r['name'] for r in d['rooms']] == ['Living Room'] and d['default_room_id'] == a
 
 
-def test_players_discovery_merges_configured_offline(rs):
+def test_players_discovery_online_only_no_offline_orphans(rs):
+    """v272: configured Offline hosts must not appear in the pick list (phantom .108 root cause)."""
     c, _, _ = rs
-    _req(c, 'post', API, {'name': 'Bedroom', 'player': {'host': '192.168.1.90', 'name': 'Apple TV 4K', 'product': 'Plex for Apple TV'}})
+    _create_empty(c, 'Bedroom')
+    rid = next(r['id'] for r in _req(c, 'get', API).get_json()['rooms'] if r['name'] == 'Bedroom')
+    # Apple TV (no ADB host platform) persists without ADB wait
+    assert _req(c, 'post', f'{API}/{rid}/connect', {'player': {
+        'host': '', 'name': 'Apple TV 4K', 'product': 'Plex for Apple TV', 'platform': 'tvOS', 'machine_id': 'mid-atv'}}).get_json()['ok']
     ps = _req(c, 'get', API + '/players').get_json()['players']
-    assert [(p['name'], p['online']) for p in ps] == [('SHIELD Android TV', True), ('Living Room TV', True), ('Apple TV 4K', False)]
+    assert [(p['name'], p['online']) for p in ps] == [('SHIELD Android TV', True), ('Living Room TV', True)]
+    assert not any(p.get('host') == '192.168.1.90' for p in ps)
 
 
 def test_plex_unreachable_reads_offline(rs, monkeypatch):
@@ -146,7 +192,8 @@ def test_plex_unreachable_reads_offline(rs, monkeypatch):
     monkeypatch.setitem(rooms_setup._cfg, 'clients_fn', lambda: (_ for _ in ()).throw(OSError('down')))
     d = _req(c, 'get', API).get_json()
     assert d['rooms'][0]['player']['online'] is False
-    assert [(p['name'], p['online']) for p in _req(c, 'get', API + '/players').get_json()['players']] == [('SHIELD Android TV', False)]
+    # v272: players endpoint is Plex-online only (no configured Offline orphans)
+    assert _req(c, 'get', API + '/players').get_json()['players'] == []
 
 
 def test_legacy_flat_room_reads_and_writes_back_nested(rs):
@@ -290,7 +337,7 @@ def test_rooms_get_non_owner_sees_only_id_name_default_online(rs, monkeypatch):
         assert secret not in raw
     # writes and player discovery stay owner-only
     assert _req(c, 'get', f'{API}/players').status_code == 403
-    assert _add(c, 'Den').status_code == 403
+    assert _req(c, 'post', API, {'name': 'Den'}).status_code == 403
 
 
 def test_rooms_get_signed_out_is_401(rs, monkeypatch):
