@@ -139,3 +139,180 @@ def test_test_compose_keeps_the_adb_key_on_the_data_volume():
     y = open(os.path.join(os.path.dirname(__file__), '..', 'docker-compose.test.yml')).read()
     assert 'LUMA_ADB_HOME=/app/data/adb' in y and 'luma-test-data:/app/data' in y
     assert 'LUMA_ADB_COMMANDS=connect,disconnect,devices,pair' in y and 'LUMA_DISABLE_ADB=1' not in y
+
+
+# ---------------------------------------------------------------- Remote side channels under ADB allowlist (Tester MED)
+
+def test_remote_skips_harmony_kodi_ha_wol_when_allowlist_active(minimal_app, owner, monkeypatch):
+    """When LUMA_ADB_COMMANDS is set, Remote must not fire Harmony / Kodi / HA / WoL.
+    Pair/Connect stays (covered elsewhere). Prod (empty allowlist) is unchanged."""
+    import subprocess
+    import app.main as M
+    from app import wol, harmony_service, ha_service, kodi_service
+    from tests.test_home_rails import REMOTE
+
+    calls = []
+    monkeypatch.setattr(wol, 'send_wol', lambda mac: calls.append(('WOL', mac)) or {'ok': True, 'detail': 'sent'})
+    monkeypatch.setattr(harmony_service, 'get_current_activity', lambda ip: calls.append(('HARMONY get', ip)) or 'Watch TV')
+    monkeypatch.setattr(harmony_service, 'power_off', lambda ip: calls.append(('HARMONY power_off', ip)) or True)
+    monkeypatch.setattr(harmony_service, 'send_command', lambda ip, d, c: calls.append(('HARMONY cmd', d, c)) or True)
+    monkeypatch.setattr(ha_service, 'fire_entity', lambda u, t, e: calls.append(('HA fire', e)) or {'ok': True})
+
+    class K:
+        def __init__(s, *a, **k):
+            calls.append(('KODI conn',) + a[:2])
+
+        def get_active_player(s):
+            return {'playerid': 1}
+
+        def pause_toggle(s, i):
+            calls.append(('KODI pause_toggle', i))
+
+        def stop(s, i):
+            calls.append(('KODI stop', i))
+
+    monkeypatch.setattr(kodi_service, 'KodiService', K)
+    monkeypatch.setattr(subprocess, 'run', lambda args, **k: calls.append(('SUBPROCESS', ' '.join(str(a) for a in args))) or subprocess.CompletedProcess(args, 0, 'connected', ''))
+    monkeypatch.setattr(adb_utils, '_ADB_ALLOWED', frozenset({'connect', 'disconnect', 'devices', 'pair'}))
+    monkeypatch.delenv('LUMA_DISABLE_ADB', raising=False)
+    monkeypatch.setattr(adb_utils, '_has_adb', lambda: True)
+    assert adb_utils.adb_allowlist_active() is True
+
+    room = {
+        'id': 'fr', 'name': 'Family Room', 'useHarmonyHub': True, 'harmonyHubIp': '10.0.0.9',
+        'harmonyVolumeDevice': 'AVR',
+        'devices': [{
+            'id': 'd1', 'host': '10.0.0.50', 'connectPort': 5555, 'macAddress': 'AA:BB:CC:DD:EE:FF',
+            'powerMethod': 'homeassistant', 'haPowerEntity': 'switch.tv',
+            'services': [{'type': 'kodi', 'kodi_host': '10.0.0.50'}],
+        }],
+    }
+    monkeypatch.setattr(M.settings, 'get_room_by_id', lambda rid: room)
+    _orig_get = M.settings.get
+    def _get(key, default=None):
+        if key == 'homeassistant.url':
+            return 'http://ha.local'
+        if key == 'homeassistant.access_token':
+            return 'tok'
+        return _orig_get(key, default)
+    monkeypatch.setattr(M.settings, 'get', _get)
+
+    def _side_channel_calls():
+        out = []
+        for c in calls:
+            if c[0] in ('WOL', 'HARMONY get', 'HARMONY power_off', 'HARMONY cmd', 'HA fire',
+                        'KODI conn', 'KODI pause_toggle', 'KODI stop'):
+                out.append(c)
+            elif c[0] == 'SUBPROCESS' and ' shell' in f' {c[1]} ':
+                out.append(c)
+        return out
+
+    c = owner
+    for cmd in ('power', 'vol_up', 'play_pause', 'home'):
+        r = c.post('/api/room/fr/remote', json={'command': cmd}, environ_base=REMOTE, headers=HDR)
+        assert r.status_code == 200, (cmd, r.status_code, r.get_json())
+        body = r.get_json()
+        assert body.get('ok') is False, (cmd, body)
+        assert 'LUMA_ADB_COMMANDS' in (body.get('detail') or ''), (cmd, body)
+        assert _side_channel_calls() == [], (cmd, calls)
+        # adb connect may still run (it is on the allowlist); shell must not
+        assert not any(c[0] == 'SUBPROCESS' and 'shell' in c[1] for c in calls), (cmd, calls)
+        calls.clear()
+
+    # HA-only power (no Harmony): still no fire
+    room['useHarmonyHub'] = False
+    room['devices'][0]['services'] = []
+    r = c.post('/api/room/fr/remote', json={'command': 'power'}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and r.get_json().get('ok') is False
+    assert _side_channel_calls() == [], calls
+
+
+def test_remote_side_channels_open_when_allowlist_unset(minimal_app, owner, monkeypatch):
+    """Prod: empty allowlist — Harmony / Kodi / HA / WoL still fire from Remote."""
+    import subprocess
+    import app.main as M
+    from app import wol, harmony_service, ha_service, kodi_service
+    from tests.test_home_rails import REMOTE
+
+    calls = []
+    monkeypatch.setattr(wol, 'send_wol', lambda mac: calls.append(('WOL', mac)) or {'ok': True, 'detail': 'sent'})
+    monkeypatch.setattr(harmony_service, 'get_current_activity', lambda ip: calls.append(('HARMONY get', ip)) or 'Watch TV')
+    monkeypatch.setattr(harmony_service, 'power_off', lambda ip: calls.append(('HARMONY power_off', ip)) or True)
+    monkeypatch.setattr(harmony_service, 'send_command', lambda ip, d, c: calls.append(('HARMONY cmd', d, c)) or True)
+    monkeypatch.setattr(ha_service, 'fire_entity', lambda u, t, e: calls.append(('HA fire', e)) or {'ok': True})
+
+    class K:
+        def __init__(s, *a, **k):
+            calls.append(('KODI conn',) + a[:2])
+
+        def get_active_player(s):
+            return {'playerid': 1}
+
+        def pause_toggle(s, i):
+            calls.append(('KODI pause_toggle', i))
+
+        def stop(s, i):
+            calls.append(('KODI stop', i))
+
+    monkeypatch.setattr(kodi_service, 'KodiService', K)
+    monkeypatch.setattr(subprocess, 'run', lambda args, **k: calls.append(('SUBPROCESS', ' '.join(str(a) for a in args))) or subprocess.CompletedProcess(args, 0, '', ''))
+    monkeypatch.setattr(adb_utils, '_ADB_ALLOWED', frozenset())
+    monkeypatch.delenv('LUMA_DISABLE_ADB', raising=False)
+    monkeypatch.setattr(adb_utils, '_has_adb', lambda: True)
+    assert adb_utils.adb_allowlist_active() is False
+
+    room = {
+        'id': 'fr', 'name': 'Family Room', 'useHarmonyHub': True, 'harmonyHubIp': '10.0.0.9',
+        'harmonyVolumeDevice': 'AVR',
+        'devices': [{
+            'id': 'd1', 'host': '10.0.0.50', 'connectPort': 5555, 'macAddress': 'AA:BB:CC:DD:EE:FF',
+            'powerMethod': 'homeassistant', 'haPowerEntity': 'switch.tv',
+            'services': [{'type': 'kodi', 'kodi_host': '10.0.0.50'}],
+        }],
+    }
+    monkeypatch.setattr(M.settings, 'get_room_by_id', lambda rid: room)
+    _orig_get = M.settings.get
+    def _get(key, default=None):
+        if key == 'homeassistant.url':
+            return 'http://ha.local'
+        if key == 'homeassistant.access_token':
+            return 'tok'
+        return _orig_get(key, default)
+    monkeypatch.setattr(M.settings, 'get', _get)
+
+    c = owner
+    r = c.post('/api/room/fr/remote', json={'command': 'power'}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and ('HARMONY get', '10.0.0.9') in calls and ('HARMONY power_off', '10.0.0.9') in calls
+    calls.clear()
+
+    r = c.post('/api/room/fr/remote', json={'command': 'vol_up'}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and ('HARMONY cmd', 'AVR', 'VolumeUp') in calls
+    calls.clear()
+
+    r = c.post('/api/room/fr/remote', json={'command': 'play_pause'}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and any(x[0] == 'KODI pause_toggle' for x in calls)
+    calls.clear()
+
+    # HA power when Harmony is off
+    room['useHarmonyHub'] = False
+    room['devices'][0]['services'] = []
+    r = c.post('/api/room/fr/remote', json={'command': 'power'}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and ('HA fire', 'switch.tv') in calls
+    calls.clear()
+
+    # No Harmony / no Kodi / no HA → WoL then ADB
+    room['devices'][0]['powerMethod'] = ''
+    r = c.post('/api/room/fr/remote', json={'command': 'home'}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and ('WOL', 'AA:BB:CC:DD:EE:FF') in calls
+
+
+def test_pair_still_works_with_allowlist_active(rs, monkeypatch):
+    """Pair/Connect must keep working when the ADB allowlist (test safety) is on."""
+    monkeypatch.setattr(adb_utils, '_ADB_ALLOWED', frozenset({'connect', 'disconnect', 'devices', 'pair'}))
+    assert adb_utils.adb_allowlist_active() is True
+    c, fake, _ = rs
+    rid = _room(c)
+    monkeypatch.setitem(rooms_setup._cfg, 'wait_fn', lambda *a, **k: {'ok': True, 'state': 'connected', 'hint': 'connected'})
+    r = _req(c, 'post', f'{API}/{rid}/connect')
+    assert r.status_code == 200 and r.get_json() == {'ok': True, 'state': 'connected', 'hint': 'connected'}
+    assert fake._settings['devices']['rooms'][0]['devices'][0]['paired'] is True

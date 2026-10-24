@@ -72,6 +72,11 @@ ADB_ENV = {**os.environ, "HOME": ADB_HOME}
 _ADB_ALLOWED = frozenset(c.strip() for c in os.environ.get("LUMA_ADB_COMMANDS", "").split(",") if c.strip())
 
 
+def adb_allowlist_active() -> bool:
+    """True when LUMA_ADB_COMMANDS is set (test). Unset means prod — every adb subcommand and Remote side channel is open."""
+    return bool(_ADB_ALLOWED)
+
+
 def secure_adb_keys(home: Optional[str] = None) -> None:
     """HOME/.android 0700 and every file in it 0600 (adbkey is the private key). Never reads or logs them."""
     d = os.path.join(home or ADB_HOME, ".android")
@@ -276,8 +281,9 @@ def send_key_event(host: str, port: int, key_name: str, mac_address: str = '') -
     """
     import time
 
-    # Wake-on-LAN: send magic packet before ADB connect
-    if mac_address:
+    # Wake-on-LAN: send magic packet before ADB connect.
+    # v265b: skip when LUMA_ADB_COMMANDS is set (test Remote must not wake TVs).
+    if mac_address and not adb_allowlist_active():
         from app.wol import is_valid_mac, send_wol
         if is_valid_mac(mac_address):
             wol_result = send_wol(mac_address)

@@ -20368,7 +20368,7 @@ def room_remote(room_id):
     - play, pause, stop → Kodi JSON-RPC (if device has Kodi service) or ADB
     - all other commands → ADB keyevent
     """
-    from app.adb_utils import send_key_event
+    from app.adb_utils import send_key_event, adb_allowlist_active
     if _minimal.enabled():
         _u, _err = _start_flow.require_signed_in_owner()   # v265: test's remote is the signed-in owner's
         if _err:
@@ -20395,6 +20395,11 @@ def room_remote(room_id):
         host = (device.get('host', '') if device else '') or room.get('host') or room.get('ip') or ''
         port = (device.get('connectPort') if device else None) or room.get('connectPort') or room.get('adb_port', 5555)
 
+        # v265b: when LUMA_ADB_COMMANDS is set (test), skip Harmony / Kodi / HA / WoL side
+        # channels so Remote cannot power, volume, pause, or wake a TV. Pair/Connect stays.
+        # Prod leaves LUMA_ADB_COMMANDS unset, so this is a no-op there.
+        _remote_side_channels = not adb_allowlist_active()
+
         # --- Kodi JSON-RPC direct path (takes priority for playback + nav commands) ---
         # For devices with a Kodi service, route commands directly via Kodi's
         # JSON-RPC API instead of Harmony or ADB.  This is more reliable
@@ -20402,7 +20407,7 @@ def room_remote(room_id):
         _KODI_PLAYBACK_CMDS = ('play', 'pause', 'stop', 'play_pause')
         _KODI_NAV_CMDS = ('up', 'down', 'left', 'right', 'select', 'home', 'back')
         _KODI_ALL_CMDS = _KODI_PLAYBACK_CMDS + _KODI_NAV_CMDS
-        if command in _KODI_ALL_CMDS and device:
+        if _remote_side_channels and command in _KODI_ALL_CMDS and device:
             kodi_svc = next(
                 (s for s in (device.get('services') or [])
                  if isinstance(s, dict) and s.get('type') == 'kodi'),
@@ -20476,7 +20481,7 @@ def room_remote(room_id):
             'stop': 'Stop',
         }
         harmony_commands = {'power'} | set(_HARMONY_VOLUME_CMDS) | set(_HARMONY_NAV_CMDS)
-        if command in harmony_commands and room.get('useHarmonyHub'):
+        if _remote_side_channels and command in harmony_commands and room.get('useHarmonyHub'):
             hub_ip = room.get('harmonyHubIp', '')
             volume_device = room.get('harmonyVolumeDevice', '')
             nav_device = (device.get('harmonyNavigationDevice', '') if device else '') or room.get('harmonyNavigationDevice', '')
@@ -20519,7 +20524,7 @@ def room_remote(room_id):
         # --- Home Assistant power path ---
         # When device.powerMethod is 'homeassistant' and command is 'power',
         # fire the HA entity directly (toggle behavior for remote control).
-        if command == 'power' and device and device.get('powerMethod') == 'homeassistant':
+        if _remote_side_channels and command == 'power' and device and device.get('powerMethod') == 'homeassistant':
             entity_id = device.get('haPowerEntity', '')
             if entity_id:
                 ha_url = settings.get('homeassistant.url', '')
@@ -20536,7 +20541,7 @@ def room_remote(room_id):
         # on which device is actually playing.  If no explicit device_id was
         # provided, check if any device has an active Plex session — if so,
         # route to that device via ADB (not to a Kodi device that isn't playing).
-        if command in ('play', 'pause', 'stop', 'play_pause') and device:
+        if _remote_side_channels and command in ('play', 'pause', 'stop', 'play_pause') and device:
             playback_device = device
             if not req_device_id and len(devs) > 1:
                 # No explicit device — check if a Plex device has an active session
