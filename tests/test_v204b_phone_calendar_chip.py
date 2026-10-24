@@ -54,7 +54,8 @@ def test_compact_watchlist_buttons_and_confirm_are_prods():
         i = s.index(a)
         return s[i:s.index(b, i)]
     import re
-    strip = lambda s: re.sub(r'\s+data-(testid|modal-keep)="[^"]*"|\s+className="luma-bleed"|\s*/\*.*?\*/|\s+onClick=\{[^\n]*\n', '', s, flags=re.S)
+    # v266: confirm dialog may carry className="luma-fullscreen luma-bleed" (or luma-bleed alone)
+    strip = lambda s: re.sub(r'\s+data-(testid|modal-keep)="[^"]*"|\s+className="(?:luma-fullscreen(?: luma-bleed)?|luma-bleed)"|\s*/\*.*?\*/|\s+onClick=\{[^\n]*\n', '', s, flags=re.S)
     p_in = block(prod, "borderRadius: '50px',\n                          background: 'rgba(74,222,128,0.12)'", 'In Watchlist')
     assert _norm(p_in) in test
     p_add = block(prod, "width: 'calc(100% - 32px)',\n                        margin: '20px 16px 0',\n                        padding: '14px 20px',\n                        background: '#ffffff',\n                        color: '#000000',", '}}')
@@ -105,8 +106,10 @@ def test_v205_prod_capitalization_and_guard_exemption():
 
 
 def test_v211_tv_calendar_sheet_runs_to_the_bottom_edge():
-    """Designer: like v210's Settings sheet, the backdrop reaches one inset past the edge and the inset is
-    only inside the scroll content (no band below the sheet). v264: the reach is --luma-bleed."""
-    assert "position: 'fixed', inset: 0, bottom: 'calc(-1 * var(--luma-bleed))'" in SHEET
+    """Designer: like v210's Settings sheet, the backdrop fills the screen and the inset is
+    only inside the scroll content (no band below the sheet). v266: .luma-fullscreen / --luma-screen-h."""
+    assert 'className="luma-fullscreen"' in SHEET
+    assert "bottom: 'calc(-1 * var(--luma-bleed))'" not in SHEET
+    assert "position: 'fixed', top: 0, left: 0, right: 0," in SHEET
     i = SHEET.index('data-scroll-container')
     assert SHEET.index("var(--luma-end-pad) + 12px", i) > i

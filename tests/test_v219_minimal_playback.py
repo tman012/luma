@@ -58,6 +58,10 @@ _PREEXISTING = {
     # v254: What you're missing's Refresh now rebuilds its own pool (reads Plex, Trakt, TMDb, OMDb; writes only
     # its JSON in the data dir: instance.DATA_DIR_ONLY); the signed-in owner only. Not a library write.
     ('POST', '/api/rails/what-youre-missing/refresh'),
+    # v267 Activity (Home pill): delete/remove a torrent through qBittorrent. Not a library write; the signed-in
+    # owner + instance.writes_allowed('qbit') only (same gate as Downloads Guard / storage cleanup).
+    ('DELETE', '/api/downloads/remove/<torrent_hash>'),
+    ('POST', '/api/downloads/remove/<torrent_hash>'),
 }
 
 
