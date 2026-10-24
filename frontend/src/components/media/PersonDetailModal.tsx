@@ -260,7 +260,7 @@ export function PersonDetailModal({
   const pad = isCompact ? '16px' : '48px';
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       data-modal="PersonDetailModal"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       style={{
@@ -780,7 +780,7 @@ export function PersonDetailModal({
 
       {/* Bio modal overlay */}
       {bioOpen && person?.biography && (
-        <div
+        <div className="luma-bleed"
           onClick={() => setBioOpen(false)}
           style={{
             position: 'fixed',

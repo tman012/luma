@@ -67,15 +67,15 @@ export function ConnectServiceHost() {
   };
 
   return (
-    <div
+    <div className="luma-bleed"
       role="dialog" aria-modal="true" aria-label={`Connect ${name}`}
       onClick={close}
       style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(5,4,15,0.55)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}
     >
       <div
         onClick={e => e.stopPropagation()}
-        className="luma-connect-sheet"
-        style={{ width: '100%', maxWidth: 460, margin: '0 auto', background: '#1d1838', borderRadius: '22px 22px 0 0', padding: '10px 22px calc(26px + env(safe-area-inset-bottom))', boxShadow: '0 -10px 40px rgba(0,0,0,0.45)', color: '#fff', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}
+        className="luma-bleed-panel luma-connect-sheet"
+        style={{ width: '100%', maxWidth: 460, margin: '0 auto', background: '#1d1838', ['--luma-panel-bg' as string]: '#1d1838', borderRadius: '22px 22px 0 0', padding: '10px 22px calc(26px + env(safe-area-inset-bottom))', boxShadow: '0 -10px 40px rgba(0,0,0,0.45), var(--luma-bleed-shadow)', color: '#fff', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif' }}
       >
         <style>{`.luma-connect-sheet{animation:lumaSheet .28s cubic-bezier(.16,1,.3,1) both}@keyframes lumaSheet{from{transform:translateY(100%)}to{transform:none}}`}</style>
         <div style={{ width: 36, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.25)', margin: '0 auto 18px' }} />

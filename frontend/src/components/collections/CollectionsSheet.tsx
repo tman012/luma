@@ -450,7 +450,7 @@ export function CollectionsSheet({ open, onClose, initialCollectionId = null, ov
   return createPortal(
     <div
       data-sheet="CollectionsSheet"
-      className="fixed inset-0"
+      className="luma-bleed fixed inset-0"
       style={{
         zIndex: overlayZIndex,
         pointerEvents: behindModal ? 'none' : 'auto',
@@ -460,7 +460,7 @@ export function CollectionsSheet({ open, onClose, initialCollectionId = null, ov
     >
       {/* Scrim */}
       <div
-        className="absolute inset-0 bg-black/60"
+        className="luma-bleed absolute inset-0 bg-black/60"
         style={{
           opacity: phase === 'visible' && dragOffset === 0 ? 1 : Math.max(0, 1 - dragOffset / 300),
           transition: dragOffset > 0 ? 'none' : `opacity ${EXIT_DURATION}ms ${SPRING}`,
@@ -470,9 +470,10 @@ export function CollectionsSheet({ open, onClose, initialCollectionId = null, ov
 
       {/* Sheet — same purple as Watchlist / Similar / Reviews */}
       <div
-        className="absolute inset-x-0 bottom-0 flex max-h-[92vh] flex-col overflow-hidden rounded-t-2xl shadow-2xl"
+        className="luma-bleed-panel absolute inset-x-0 bottom-0 flex max-h-[92vh] flex-col overflow-hidden rounded-t-2xl"
         style={{
           background: 'var(--color-kiosk-black)',
+          boxShadow: '0 25px 50px -12px rgb(0 0 0 / 0.25), var(--luma-bleed-shadow)',
           transform: sheetTransform,
           transition: dragOffset > 0 ? 'none' : `transform ${phase === 'exiting' ? EXIT_DURATION : 500}ms ${SPRING}`,
           paddingBottom: 'env(safe-area-inset-bottom, 0px)',

@@ -644,7 +644,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   return (
     <>
     {createPortal(
-    <div
+    <div className="luma-bleed"
       data-modal="MovieDetailModal"
       data-variant="web-v2"
       ref={overlayRef}
@@ -1631,7 +1631,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
             onClose={() => setShowNativeAdd(false)} onAdded={() => { setShowNativeAdd(false); props.onUpgradeAdded?.(); }} />
         )}
         {showAlreadyInWatchlist && (
-          <div
+          <div className="luma-bleed"
             onClick={() => { if (!removingWatchlist) setShowAlreadyInWatchlist(false); }}
             style={{
               position: 'fixed',

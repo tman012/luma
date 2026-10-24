@@ -393,7 +393,7 @@ export function MobilePlaybackSheet({
   const canDismiss = true;
 
   return (
-    <div
+    <div className="luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,
@@ -409,7 +409,7 @@ export function MobilePlaybackSheet({
       }}
     >
       {/* Bottom sheet */}
-      <div
+      <div className="luma-bleed-panel"
         onTouchStart={canDismiss ? onTouchStart : undefined}
         onTouchMove={canDismiss ? onTouchMove : undefined}
         onTouchEnd={canDismiss ? onTouchEnd : undefined}

@@ -207,7 +207,7 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
     : 0;
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       style={{
         position: 'fixed', inset: 0, zIndex: 10001,
         display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
@@ -217,7 +217,7 @@ function StorageSheet({ open, usage, onClose, onUsageChange }: {
       onClick={(e) => { if (e.target === e.currentTarget) dismiss(); }}
     >
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      <div
+      <div className="luma-bleed-panel"
         style={{
           background: 'var(--color-kiosk-black)',
           borderRadius: '20px 20px 0 0',

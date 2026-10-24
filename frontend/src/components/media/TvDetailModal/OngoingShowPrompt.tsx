@@ -98,7 +98,7 @@ export function OngoingShowPrompt({
           : 'Monitor & fetch latest episodes';
 
   return (
-    <div
+    <div className="luma-bleed"
       style={{ position: 'fixed', inset: 0, background: '#05050a', zIndex: 100000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >

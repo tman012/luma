@@ -40,7 +40,7 @@ export function DismissMissingSheet({
   const translate = dismissing ? '100%' : entered ? '0%' : '100%';
 
   return (
-    <div
+    <div className="luma-bleed"
       role="dialog"
       aria-modal="true"
       aria-label="Remove from what you're missing"
@@ -66,7 +66,7 @@ export function DismissMissingSheet({
           cursor: 'pointer',
         }}
       />
-      <div
+      <div className="luma-bleed"
         style={{
           position: 'relative',
           background: 'rgba(22, 18, 28, 0.98)',

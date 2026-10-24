@@ -61,7 +61,7 @@ export function TrailerModal({ title, youtubeKey, onClose }: TrailerModalProps) 
   const embedUrl = `https://www.youtube.com/embed/${youtubeKey}?autoplay=1&rel=0&modestbranding=1&playsinline=1&controls=1`;
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       ref={backdropRef}
       tabIndex={-1}
       onClick={(e) => {

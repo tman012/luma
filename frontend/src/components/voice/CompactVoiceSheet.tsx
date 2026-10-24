@@ -280,7 +280,7 @@ function CompactVoiceSheetInner({ open, onClose }: CompactVoiceSheetProps) {
   }
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,
@@ -308,7 +308,7 @@ function CompactVoiceSheetInner({ open, onClose }: CompactVoiceSheetProps) {
       />
 
       {/* Sheet */}
-      <div
+      <div className="luma-bleed-panel"
         style={{
           position: 'relative',
           width: '100%',
@@ -318,7 +318,8 @@ function CompactVoiceSheetInner({ open, onClose }: CompactVoiceSheetProps) {
             hsla(${hue - 10}, 35%, 6%, 0.98) 100%)`,
           borderTopLeftRadius: 28,
           borderTopRightRadius: 28,
-          boxShadow: '0 -20px 60px rgba(0,0,0,0.6)',
+          boxShadow: '0 -20px 60px rgba(0,0,0,0.6), var(--luma-bleed-shadow)',
+          ['--luma-panel-bg' as string]: `hsla(${hue - 10}, 35%, 6%, 0.98)`,
           paddingTop: 10,
           paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 32px)',
           transform: entered && open ? 'translateY(0)' : 'translateY(100%)',

@@ -12,7 +12,7 @@ export function LandingPage() {
   const { signupOpen } = useAuth();
 
   return (
-    <div
+    <div className="luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,

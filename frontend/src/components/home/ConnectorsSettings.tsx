@@ -148,7 +148,7 @@ function ConnectorGroup({ group, masked, onSaved }: {
         </div>
       </div>
       {confirmRemove && saved && !trimmed && (
-        <div role="dialog" aria-modal="true" style={dialogBack} onClick={() => setConfirmRemove(false)}>
+        <div role="dialog" aria-modal="true" className="luma-bleed" style={dialogBack} onClick={() => setConfirmRemove(false)}>
           <div style={dialog} onClick={e => e.stopPropagation()}>
             <p style={{ margin: '0 0 20px', fontSize: 17, fontWeight: 600 }}>{group.removeTitle}</p>
             <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>

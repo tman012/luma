@@ -169,14 +169,14 @@ export function Modal({ wide, width, label, onClose, children, testId }: {
 }) {
   useEscape(onClose);
   return (
-    <div className="lt-fade" style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.55)', display: 'flex',
+    <div className="luma-bleed lt-fade" style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(0,0,0,0.55)', display: 'flex',
       alignItems: wide ? 'center' : 'flex-end', justifyContent: 'center', padding: wide ? 20 : 0 }}
       onClick={onClose} data-testid={testId ? `${testId}-scrim` : undefined}>
       <div role="dialog" aria-modal="true" aria-label={label} data-testid={testId}
-        className={wide ? 'lt-pop' : 'lt-up'} onClick={e => e.stopPropagation()}
+        className={wide ? 'lt-pop' : 'lt-up luma-bleed-panel'} onClick={e => e.stopPropagation()}
         style={{ width: '100%', maxWidth: wide ? width : 'none', boxSizing: 'border-box', fontFamily: FONT, color: TEXT,
           backgroundColor: NAVY, backgroundImage: `linear-gradient(${GLASS}, ${GLASS})`, border: GLASS_BORDER,
-          borderRadius: wide ? 20 : '20px 20px 0 0', boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
+          borderRadius: wide ? 20 : '20px 20px 0 0', boxShadow: wide ? '0 24px 64px rgba(0,0,0,0.5)' : '0 24px 64px rgba(0,0,0,0.5), var(--luma-bleed-shadow)', ['--luma-panel-bg' as string]: NAVY,
           paddingBottom: wide ? 0 : 'env(safe-area-inset-bottom)', maxHeight: wide ? 'calc(100vh - 40px)' : '90vh',
           display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {children}

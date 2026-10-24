@@ -39,11 +39,11 @@ export function RealRunConfirm({ open, onRun, onCancel }: { open: boolean; onRun
   }, [open, onCancel]);
   if (!open) return null;
   return createPortal(
-    <div data-testid="real-run-scrim" onClick={onCancel}
+    <div className="luma-bleed" data-testid="real-run-scrim" onClick={onCancel}
       style={{ position: 'fixed', inset: 0, zIndex: 400, display: 'flex', justifyContent: 'center',
         alignItems: wide ? 'center' : 'flex-end', padding: wide ? 20 : 0, background: LEGACY.scrim,
         backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}>
-      <div role="alertdialog" aria-modal="true" aria-labelledby="real-run-title" data-testid="real-run-confirm"
+      <div role="alertdialog" aria-modal="true" aria-labelledby="real-run-title" data-testid="real-run-confirm" className={wide ? undefined : 'luma-bleed'}
         onClick={e => e.stopPropagation()}
         style={{ width: '100%', maxWidth: wide ? 400 : 'none', boxSizing: 'border-box', padding: 24,
           paddingBottom: wide ? 24 : 'calc(24px + env(safe-area-inset-bottom))',

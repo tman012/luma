@@ -85,7 +85,7 @@ export function ManualMatchPicker({
   // Portaled to <body> above every Sources screen (z 10001-10005) and the
   // desktop modal, so it is never stuck behind them.
   return createPortal(
-    <div
+    <div className="luma-bleed"
       role="dialog"
       aria-label="Match title"
       data-match-picker=""

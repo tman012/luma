@@ -335,7 +335,7 @@ export function LibrariesSheet({ open, onClose }: LibrariesSheetProps) {
   const activeSortLabel = SORT_OPTIONS.find(s => s.key === sortKey)!.label;
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       data-sheet="LibrariesSheet"
       style={{
         position: 'fixed', inset: 0,
@@ -348,7 +348,7 @@ export function LibrariesSheet({ open, onClose }: LibrariesSheetProps) {
       }}
       onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
     >
-      <div
+      <div className="luma-bleed-panel"
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}

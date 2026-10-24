@@ -84,7 +84,7 @@ export function RateCompactSheet({
         : `transform ${ENTER_DURATION}ms ${SPRING}`;
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       data-sheet="RateCompactSheet"
       style={{
         position: 'fixed', inset: 0,
@@ -99,7 +99,7 @@ export function RateCompactSheet({
       }}
       onClick={(e) => { if (e.target === e.currentTarget) dismiss(); }}
     >
-      <div
+      <div className="luma-bleed-panel"
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}

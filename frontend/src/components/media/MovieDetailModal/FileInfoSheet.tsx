@@ -580,7 +580,7 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
   const scrimVisible = entered && !dismissing;
 
   const content = isCompact ? (
-    <div
+    <div className="luma-bleed"
       data-file-info-sheet
       role="dialog"
       aria-modal="true"
@@ -597,7 +597,7 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
         transition: 'background 0.25s ease',
       }}
     >
-      <div
+      <div className="luma-bleed-panel"
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
@@ -607,7 +607,7 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
           flexDirection: 'column',
           background: 'var(--color-kiosk-black, #15102a)',
           borderRadius: '20px 20px 0 0',
-          boxShadow: '0 -12px 40px rgba(0,0,0,0.45)',
+          boxShadow: '0 -12px 40px rgba(0,0,0,0.45), var(--luma-bleed-shadow)',
           overflow: 'hidden',
           transform: `translateY(${dismissing ? '100%' : entered ? `${dragOffset}px` : '100%'})`,
           transition: dragOffset > 0 ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
@@ -626,7 +626,7 @@ export function FileInfoSheet({ title, ratingKey, copies, variant, onClose, onFi
       <style>{`@keyframes fileInfoSpin { to { transform: rotate(360deg); } }`}</style>
     </div>
   ) : (
-    <div
+    <div className="luma-bleed"
       data-file-info-sheet
       role="dialog"
       aria-modal="true"

@@ -146,7 +146,7 @@ export function AutoDialog({ auto, sub, onClose, onInteractive }: { auto: Auto; 
     </>);
   }
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(21,16,42,0.72)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+    <div className="luma-bleed" style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(21,16,42,0.72)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div role="dialog" aria-modal="true" data-testid="tv-auto-dialog" data-state={auto.k}
         style={{ width: '100%', maxWidth: 360, boxSizing: 'border-box', borderRadius: 20, padding: 20, textAlign: 'center', fontFamily: FONT,

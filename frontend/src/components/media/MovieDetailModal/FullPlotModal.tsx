@@ -35,7 +35,7 @@ export function FullPlotModal({ text, onClose }: FullPlotModalProps) {
   }, [onClose]);
 
   return (
-    <div
+    <div className="luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,

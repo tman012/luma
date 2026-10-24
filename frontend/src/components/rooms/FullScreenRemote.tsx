@@ -525,7 +525,7 @@ export function FullScreenRemote({ room, deviceId, onClose }: FullScreenRemotePr
   const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,
@@ -540,7 +540,7 @@ export function FullScreenRemote({ room, deviceId, onClose }: FullScreenRemotePr
         if (e.target === e.currentTarget) handleDismiss();
       }}
     >
-      <div
+      <div className="luma-bleed-panel"
         ref={sheetRef}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}

@@ -186,7 +186,7 @@ export function KioskScreensaver({
   if (!enabled || !isIdle) return null;
 
   return (
-    <div
+    <div className="luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,

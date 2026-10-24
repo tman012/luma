@@ -518,7 +518,7 @@ export function EpisodeSheet({ heading, title, sub, monitored, onClose, onSearch
   const act: React.CSSProperties = { height: 56, width: '100%', borderRadius: 14, border: '1px solid rgba(255,255,255,0.08)', background: GLASS,
     color: W95, fontFamily: FONT, fontSize: 16, fontWeight: 600, textAlign: 'left', padding: '0 16px', cursor: 'pointer' };
   return (
-    <div data-testid="tv-episode-sheet-scrim" onClick={onClose}
+    <div className="luma-bleed" data-testid="tv-episode-sheet-scrim" onClick={onClose}
       style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(21,16,42,0.72)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
         opacity: swipe.backdropOpacity, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
       <div ref={ref} role="dialog" aria-modal="true" aria-label={title} data-testid="tv-episode-sheet" onClick={ev => ev.stopPropagation()} {...swipe.handlers}
@@ -564,7 +564,7 @@ function PhoneInteractive({ heading, title, res, error, off, grabs, onClose, onG
   const segBtn = (on: boolean): React.CSSProperties => ({ flex: 1, height: 36, borderRadius: 10, border: 'none', fontFamily: FONT, fontSize: 14, fontWeight: 600, cursor: 'pointer',
     background: on ? '#3b82f6' : 'transparent', color: on ? '#fff' : W70 });
   return (
-    <div data-testid="tv-interactive-scrim" onClick={onClose}
+    <div className="luma-bleed" data-testid="tv-interactive-scrim" onClick={onClose}
       style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(21,16,42,0.72)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', opacity: swipe.backdropOpacity }}>
       <div ref={ref} role="dialog" aria-modal="true" aria-label={title} data-testid="tv-interactive" onClick={ev => ev.stopPropagation()} {...swipe.handlers}
         style={{ position: 'absolute', top: 47, left: 0, right: 0, bottom: 0, overflowY: 'auto', borderRadius: '20px 20px 0 0', padding: '8px 0 22px', fontFamily: FONT,

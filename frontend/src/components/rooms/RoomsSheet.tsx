@@ -463,7 +463,7 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
   return createPortal(
     <>
       {/* Backdrop */}
-      <div
+      <div className="luma-bleed"
         style={{
           position: 'fixed',
           inset: 0,
@@ -479,7 +479,7 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
         }}
       >
         {/* Sheet */}
-        <div
+        <div className="luma-bleed-panel"
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}

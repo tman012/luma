@@ -45,7 +45,7 @@ export function PlayInPicker({ rooms, preselect, action = 'Play', onPick, onCanc
   }, [onCancel]);
   const room = rooms.find(r => r.id === sel);
   return (
-    <div data-testid="play-in-scrim" onPointerDown={e => { if (e.target === e.currentTarget) onCancel(); }}
+    <div className="luma-bleed" data-testid="play-in-scrim" onPointerDown={e => { if (e.target === e.currentTarget) onCancel(); }}
       style={{ position: 'fixed', inset: 0, zIndex: 10010, background: 'rgba(10,8,24,.6)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT, padding: 16 }}>
       <div role="dialog" aria-modal="true" aria-label={`${action} in`} data-testid="play-in"

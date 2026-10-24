@@ -397,7 +397,7 @@ export function DescribeItPage() {
 
   if (isMobile) {
     return createPortal(
-      <div
+      <div className="luma-bleed"
         style={{
           position: 'fixed', inset: 0, zIndex: 10001,
           display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
@@ -406,7 +406,7 @@ export function DescribeItPage() {
         }}
         onClick={(e) => { if (e.target === e.currentTarget && phase === 'input') handleDismiss(); }}
       >
-        <div
+        <div className="luma-bleed-panel"
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}

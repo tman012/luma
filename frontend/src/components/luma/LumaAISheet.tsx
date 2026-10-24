@@ -128,7 +128,7 @@ export function LumaAISheet({ open, onClose }: LumaAISheetProps) {
         : `transform ${ENTER_DURATION}ms ${SPRING}`;
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       data-sheet="LumaAISheet"
       style={{
         position: 'fixed', inset: 0,
@@ -141,7 +141,7 @@ export function LumaAISheet({ open, onClose }: LumaAISheetProps) {
       }}
       onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
     >
-      <div
+      <div className="luma-bleed-panel"
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}

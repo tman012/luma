@@ -204,7 +204,7 @@ function RoomCard({ room: r, onEdit, onDefault, onRemove }: { room: Room; onEdit
 
 function ConfirmRemove({ name, onCancel, onRemove }: { name: string; onCancel: () => void; onRemove: () => void }) {
   return (
-    <div data-testid="room-remove-scrim" onPointerDown={e => { if (e.target === e.currentTarget) onCancel(); }}
+    <div className="luma-bleed" data-testid="room-remove-scrim" onPointerDown={e => { if (e.target === e.currentTarget) onCancel(); }}
       style={{ position: 'fixed', inset: 0, zIndex: 1200, background: 'rgba(10,8,24,.6)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, fontFamily: FONT }}>
       <div role="alertdialog" aria-label={`Remove ${name}?`} data-testid="room-remove" style={{ width: 360, maxWidth: '100%', boxSizing: 'border-box', padding: 16, borderRadius: 16, background: 'rgba(21,16,42,0.96)', border: '1px solid rgba(255,255,255,0.08)' }}>
         <h2 style={{ margin: '0 0 14px', fontSize: 16, fontWeight: 600, color: W95 }}>Remove {name}?</h2>

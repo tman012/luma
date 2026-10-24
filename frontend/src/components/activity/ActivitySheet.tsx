@@ -89,7 +89,7 @@ export function ActivitySheet({ open, onClose }: ActivitySheetProps) {
         : `transform ${ENTER_DURATION}ms ${SPRING}`;
 
   return createPortal(
-    <div
+    <div className="luma-bleed"
       data-sheet="ActivitySheet"
       style={{
         position: 'fixed', inset: 0,
@@ -102,7 +102,7 @@ export function ActivitySheet({ open, onClose }: ActivitySheetProps) {
       }}
       onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
     >
-      <div
+      <div className="luma-bleed-panel"
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}

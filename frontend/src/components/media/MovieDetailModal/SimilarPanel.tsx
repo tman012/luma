@@ -331,7 +331,7 @@ export function SimilarPanel({ tmdbId, ratingKey, title, onClose }: SimilarPanel
     const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
 
     return (
-      <div
+      <div className="luma-bleed"
         data-similar-panel
         role="dialog"
         aria-modal="true"
@@ -344,7 +344,7 @@ export function SimilarPanel({ tmdbId, ratingKey, title, onClose }: SimilarPanel
         }}
         onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
       >
-        <div
+        <div className="luma-bleed-panel"
           onTouchStart={onSheetTouchStart}
           onTouchMove={onSheetTouchMove}
           onTouchEnd={onSheetTouchEnd}
@@ -399,7 +399,7 @@ export function SimilarPanel({ tmdbId, ratingKey, title, onClose }: SimilarPanel
   // TABLET / WEB: full-screen overlay
   // =========================================================================
   return (
-    <div
+    <div className="luma-bleed"
       data-similar-panel
       role="dialog"
       aria-modal="true"

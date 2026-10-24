@@ -114,7 +114,7 @@ function SourcesScreen({ children, zIndex, onBack, headerText, large }: {
   large?: boolean;
 }) {
   return (
-    <div
+    <div className="luma-bleed luma-bleed-flat"
       style={{
         position: 'fixed', inset: 0, backgroundColor: 'var(--color-kiosk-black)', backgroundImage: START_GLOW, zIndex,
         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -1169,7 +1169,7 @@ function CompactTvSourcesView({
 
   return (
     <>
-    <div
+    <div className="luma-bleed"
       style={{
         position: 'fixed',
         inset: 0,
@@ -1184,7 +1184,7 @@ function CompactTvSourcesView({
         if (e.target === e.currentTarget) handleDismiss();
       }}
     >
-      <div
+      <div className="luma-bleed-panel"
         ref={sheetRef}
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}

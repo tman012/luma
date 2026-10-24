@@ -203,7 +203,7 @@ export function ShowMonitorSheet({ onClose }: { onClose: () => void }) {
   );
 
   const backdrop = (
-    <div
+    <div className="luma-bleed"
       onClick={(e) => { e.stopPropagation(); dismiss(); }}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
@@ -216,9 +216,9 @@ export function ShowMonitorSheet({ onClose }: { onClose: () => void }) {
 
   if (phone) {
     return createPortal(
-      <div data-show-monitor-sheet style={{ position: 'fixed', inset: 0, zIndex: 10040 }} onClick={stop} onTouchStart={stop} onTouchEnd={stop}>
+      <div className="luma-bleed" data-show-monitor-sheet style={{ position: 'fixed', inset: 0, zIndex: 10040 }} onClick={stop} onTouchStart={stop} onTouchEnd={stop}>
         {backdrop}
-        <div
+        <div className="luma-bleed-panel"
           onTouchStart={(e) => {
             const t = e.target as HTMLElement;
             if (t.closest('[data-season-checklist]')) return;
@@ -235,9 +235,9 @@ export function ShowMonitorSheet({ onClose }: { onClose: () => void }) {
           }}
           style={{
             position: 'absolute', left: 0, right: 0, bottom: 0,
-            background: NAVY, borderRadius: '18px 18px 0 0',
+            background: NAVY, borderRadius: '18px 18px 0 0', ['--luma-panel-bg' as string]: NAVY,
             padding: '8px 16px calc(env(safe-area-inset-bottom, 0px) + 20px)',
-            boxShadow: '0 -12px 40px rgba(0,0,0,0.5)',
+            boxShadow: '0 -12px 40px rgba(0,0,0,0.5), var(--luma-bleed-shadow)',
             transform: visible ? `translateY(${drag}px)` : 'translateY(100%)',
             transition: dragStart.current != null ? 'none' : 'transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1)',
             maxHeight: '88vh', overflowY: 'auto',
@@ -254,7 +254,7 @@ export function ShowMonitorSheet({ onClose }: { onClose: () => void }) {
   }
 
   return createPortal(
-    <div data-show-monitor-sheet style={{ position: 'fixed', inset: 0, zIndex: 10040, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={stop}>
+    <div className="luma-bleed" data-show-monitor-sheet style={{ position: 'fixed', inset: 0, zIndex: 10040, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={stop}>
       {backdrop}
       <div style={{
         position: 'relative', width: 'min(420px, 92vw)', background: NAVY, borderRadius: 20,

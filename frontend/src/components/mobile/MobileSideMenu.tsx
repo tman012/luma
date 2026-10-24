@@ -76,7 +76,7 @@ export function MobileSideMenu({ open, onClose, onRoomsOpen, onVibeOpen, onLibra
       {/* Overlay */}
       {open && (
         <div
-          className="fixed inset-0 z-[999] bg-black/50"
+          className="luma-bleed fixed inset-0 z-[999] bg-black/50"
           onClick={onClose}
         />
       )}

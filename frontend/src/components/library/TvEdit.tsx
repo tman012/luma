@@ -43,7 +43,7 @@ export function Modal({ title, onClose, children, footer, testid, width = 560, a
     return () => document.removeEventListener('keydown', k, true);
   }, [onClose]);
   return createPortal(
-    <div data-testid={`${testid}-scrim`} onPointerDown={e => { if (e.target === e.currentTarget) onClose(); }}
+    <div className="luma-bleed" data-testid={`${testid}-scrim`} onPointerDown={e => { if (e.target === e.currentTarget) onClose(); }}
       style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(10,8,24,.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT }}>
       <style>{tvEditCss}</style>
       <div role="dialog" aria-modal="true" aria-label={title} data-testid={testid}

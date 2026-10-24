@@ -457,7 +457,7 @@ export function ReviewSheet({ review, variant, onClose }: { review: TopReview; v
   );
 
   const content = isCompact ? (
-    <div
+    <div className="luma-bleed"
       data-review-sheet
       role="dialog"
       aria-modal="true"
@@ -468,14 +468,14 @@ export function ReviewSheet({ review, variant, onClose }: { review: TopReview; v
         background: visible ? 'rgba(0,0,0,0.45)' : 'transparent', transition: 'background 0.25s ease',
       }}
     >
-      <div
+      <div className="luma-bleed-panel"
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         style={{
           maxHeight: 'calc(100% - max(env(safe-area-inset-top, 0px), 20px) - 24px)',
           display: 'flex', flexDirection: 'column', background: 'var(--color-kiosk-black, #15102a)',
-          borderRadius: '20px 20px 0 0', boxShadow: '0 -12px 40px rgba(0,0,0,0.45)', overflow: 'hidden',
+          borderRadius: '20px 20px 0 0', boxShadow: '0 -12px 40px rgba(0,0,0,0.45), var(--luma-bleed-shadow)', overflow: 'hidden',
           transform: `translateY(${dismissing ? '100%' : entered ? `${dragOffset}px` : '100%'})`,
           transition: dragOffset > 0 ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
           willChange: 'transform',
@@ -488,7 +488,7 @@ export function ReviewSheet({ review, variant, onClose }: { review: TopReview; v
       </div>
     </div>
   ) : (
-    <div
+    <div className="luma-bleed"
       data-review-sheet
       role="dialog"
       aria-modal="true"

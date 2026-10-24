@@ -328,7 +328,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
   const inPersonMode = personView || personLoading;
 
   return (
-    <div className="fixed inset-0 z-[100] bg-kiosk-black flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+    <div className="luma-bleed fixed inset-0 z-[100] bg-kiosk-black flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
       {/* Header: search bar OR person header — stays fixed above scroll */}
       {inPersonMode ? (
         /* Person header */
