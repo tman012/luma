@@ -65,7 +65,7 @@ export function MovieSearchActions({ tmdbId, title, year }: { tmdbId: number; ti
         <AutoDialog auto={auto} sub={sub} onClose={() => { run.current++; setAuto(null); }}
           onInteractive={() => { setAuto(null); setInter(true); }} />, document.body)}
       {inter && createPortal(
-        <div className="luma-bleed-down" data-testid="movie-interactive-overlay" style={{ position: 'fixed', inset: 0, zIndex: 1000, overflowY: 'auto', padding: '16px 16px calc(32px + var(--luma-end-pad))',
+        <div className="luma-fullscreen luma-bleed-down" data-testid="movie-interactive-overlay" style={{ position: 'fixed', inset: 0, zIndex: 1000, overflowY: 'auto', padding: '16px 16px calc(32px + var(--luma-end-pad))',
           background: 'rgba(21,16,42,0.96)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)' }}>
           <div style={{ maxWidth: 720, margin: '0 auto' }}>
             <InteractiveScreen title={title} sub={year ? String(year) : 'Movie'} load={() => interactiveMovie(tmdbId)}

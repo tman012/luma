@@ -69,11 +69,16 @@ describe('v266 full-bleed phone surfaces (Home match)', () => {
     const css = readFileSync(join(SRC, 'index.css'), 'utf8');
     expect(css).toMatch(/--luma-screen-h:\s*100dvh/);
     expect(css).toMatch(/@supports \(height: 100lvh\)\s*\{\s*:root\s*\{\s*--luma-screen-h:\s*100lvh/);
-    expect(css).toMatch(/\.luma-fullscreen[\s\S]*?height:\s*var\(--luma-screen-h\)\s*!important/);
+    expect(css).toMatch(/\.luma-fullscreen\s*\{[\s\S]*?height:\s*var\(--luma-screen-h\)\s*!important/);
     expect(css).toMatch(/--luma-end-pad:\s*calc\(var\(--luma-bleed\) \+ env\(safe-area-inset-bottom, 0px\)\)/);
     // no negative-bottom / ::after workarounds
     expect(css).not.toMatch(/\.luma-bleed::after/);
     expect(css).not.toMatch(/\.luma-bleed-down\s*\{[^}]*bottom:\s*calc\(-1 \* var\(--luma-bleed\)\)/);
+    // bleed-down must NOT share the fullscreen top:0 / height override (search + compact card)
+    expect(css).not.toMatch(/\.luma-fullscreen\s*,\s*\.luma-bleed-down/);
+    expect(css).not.toMatch(/\.luma-bleed-down\s*,\s*\.luma-fullscreen/);
+    expect(css).not.toMatch(/\.luma-bleed-down\s*\{[^}]*top:\s*0\s*!important/);
+    expect(css).not.toMatch(/\.luma-bleed-down\s*\{[^}]*height:\s*var\(--luma-screen-h\)/);
   });
   it('phone Settings does not spread homePage (no backgroundAttachment:fixed); uses luma-fullscreen + GlowLayer', () => {
     const lib = readFileSync(join(SRC, 'pages/LibrariesPage.tsx'), 'utf8');
@@ -108,6 +113,27 @@ describe('v266 full-bleed phone surfaces (Home match)', () => {
       const t = readFileSync(join(SRC, f), 'utf8');
       expect(t).toMatch(/className="[^"]*luma-bleed-down[^"]*"/);
       expect(t).toMatch(/var\(--luma-end-pad\) \+ 40px/);
+    }
+  });
+  it('SearchShelf results keep top: headerH (not forced to 0 by .luma-bleed-down)', () => {
+    const s = readFileSync(join(SRC, 'components/search/SearchShelf.tsx'), 'utf8');
+    // results scroller is absolute under the measured header — must keep top: headerH
+    expect(s).toMatch(/data-scroll-container className="luma-scroll-y luma-bleed-down"/);
+    expect(s).toMatch(/top:\s*headerH/);
+    expect(s).toMatch(/position:\s*'absolute'/);
+    // must NOT also carry luma-fullscreen (that class forces top:0)
+    const scroller = s.match(/data-scroll-container className="([^"]+)"/)?.[1] ?? '';
+    expect(scroller).toMatch(/luma-bleed-down/);
+    expect(scroller).not.toMatch(/luma-fullscreen/);
+  });
+  it('CompactLayout cards keep safe-area top (not forced to 0 by .luma-bleed-down)', () => {
+    for (const f of ['components/media/MovieDetailModal/CompactLayout.tsx', 'components/media/TvDetailModal/CompactLayout.tsx']) {
+      const t = readFileSync(join(SRC, f), 'utf8');
+      expect(t).toMatch(/className="luma-bleed-down"/);
+      expect(t).toMatch(/top:\s*'max\(env\(safe-area-inset-top, 0px\), 6px\)'/);
+      // card itself must not also be luma-fullscreen
+      expect(t).not.toMatch(/className="[^"]*luma-fullscreen[^"]*luma-bleed-down[^"]*"/);
+      expect(t).not.toMatch(/className="[^"]*luma-bleed-down[^"]*luma-fullscreen[^"]*"/);
     }
   });
 });

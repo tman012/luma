@@ -355,7 +355,7 @@ export function MobileExplorePage() {
   return (
     <div
       data-scroll-container
-      className="luma-scroll-y luma-bleed-down mobile-page-enter fixed inset-0 bg-kiosk-black text-white"
+      className="luma-fullscreen luma-scroll-y luma-bleed-down mobile-page-enter fixed inset-0 bg-kiosk-black text-white"
       style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y', animation: 'mobilePageEnter 0.25s ease-out' }}
     >
       {/* MobileHeader measures its own offsetHeight via ResizeObserver and reports it up */}

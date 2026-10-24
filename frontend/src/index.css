@@ -143,8 +143,7 @@ body,
 @supports (height: 100lvh) {
   :root { --luma-screen-h: 100lvh; }
 }
-.luma-fullscreen,
-.luma-bleed-down {
+.luma-fullscreen {
   top: 0 !important;
   bottom: auto !important;
   height: var(--luma-screen-h) !important;
@@ -155,6 +154,10 @@ body,
   bottom: auto !important;
   height: var(--luma-screen-h) !important;
 }
+/* .luma-bleed-down is a marker for offset children (SearchShelf results under header,
+   CompactLayout card below safe-area). Do NOT give it top:0 / height:--luma-screen-h —
+   that hid search results under the header and pinned detail cards under the notch.
+   Those keep their own top + bottom:0. Full-viewport roots use .luma-fullscreen. */
 /* Clipped bottom-sheet cards (not viewport roots): hard shadow in their color. */
 .luma-bleed-panel {
   --luma-bleed-shadow: 0 var(--luma-bleed) 0 0 var(--luma-panel-bg, var(--color-kiosk-black));

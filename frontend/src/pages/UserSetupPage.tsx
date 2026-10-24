@@ -93,7 +93,7 @@ export function UserSetupPage() {
   // Pending state — waiting for admin approval
   if (submitted || plexAccessStatus === 'pending') {
     return (
-      <div className="luma-bleed-down" style={pageStyle}>
+      <div className="luma-fullscreen luma-bleed-down" style={pageStyle}>
         <div style={cardStyle}>
           <div style={{ textAlign: 'center' }}>
             <h1 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: '#fff' }}>
@@ -128,7 +128,7 @@ export function UserSetupPage() {
   // Denied state
   if (plexAccessStatus === 'denied') {
     return (
-      <div className="luma-bleed-down" style={pageStyle}>
+      <div className="luma-fullscreen luma-bleed-down" style={pageStyle}>
         <div style={cardStyle}>
           <div style={{ textAlign: 'center' }}>
             <h1 style={{ margin: '0 0 8px', fontSize: 20, fontWeight: 700, color: '#fff' }}>
@@ -155,7 +155,7 @@ export function UserSetupPage() {
   }
 
   return (
-    <div className="luma-bleed-down" style={pageStyle}>
+    <div className="luma-fullscreen luma-bleed-down" style={pageStyle}>
       <div style={cardStyle}>
         {/* Header */}
         <h1 style={{ margin: '0 0 6px', fontSize: 22, fontWeight: 700, color: '#fff', textAlign: 'center' }}>
