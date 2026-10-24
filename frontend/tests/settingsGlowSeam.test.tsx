@@ -19,7 +19,8 @@ describe('settings background', () => {
   });
 
   it('one fixed glow layer covers the viewport behind the content', () => {
-    expect(glowLayer).toEqual({ position: 'fixed', inset: 0, background: NAVY_BG, pointerEvents: 'none', zIndex: -1 });
+    // v264: reaches --luma-bleed past the bottom edge (full-bleed on an installed iPhone PWA)
+    expect(glowLayer).toEqual({ position: 'fixed', inset: 0, bottom: 'calc(-1 * var(--luma-bleed))', background: NAVY_BG, pointerEvents: 'none', zIndex: -1 });
     const { getByTestId } = render(<GlowLayer />);
     const el = getByTestId('glow-layer');
     expect(el.getAttribute('aria-hidden')).toBe('true');
