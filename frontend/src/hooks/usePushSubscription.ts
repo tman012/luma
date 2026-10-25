@@ -18,12 +18,52 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
+/** Sync capability for first paint — never leave Settings stuck on unsupported
+ * before the effect runs when Push is actually available. */
+function readPushCapability(): 'unsupported' | 'denied' | 'ready' {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return 'unsupported';
+  }
+  // Push + SW require a secure context (HTTPS / localhost). HTTP LAN origins
+  // (e.g. test :5002) have no PushManager on iOS even in an installed PWA.
+  if (typeof window.isSecureContext === 'boolean' && !window.isSecureContext) {
+    return 'unsupported';
+  }
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return 'unsupported';
+  }
+  try {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+      return 'denied';
+    }
+  } catch {
+    // Notification API missing — still allow subscribe attempt
+  }
+  return 'ready';
+}
+
+function initialPushState(): PushState {
+  const cap = readPushCapability();
+  if (cap === 'unsupported') return 'unsupported';
+  if (cap === 'denied') return 'denied';
+  try {
+    if (typeof localStorage !== 'undefined' && localStorage.getItem(SUBSCRIBED_KEY) === '1') {
+      return 'subscribed';
+    }
+  } catch {
+    // private mode / blocked storage
+  }
+  // Capable: start as prompt so Enable is tappable on first paint (Settings).
+  // Home banner still gates on compact via the effect + showPrompt.
+  return 'prompt';
+}
+
 /** Mobile home banner stays compact-only (prod). Settings > Notifications passes
  * anyLayout so Enable Notifications works on kiosk / desktop PWAs too. */
 export function usePushSubscription(opts?: { anyLayout?: boolean }) {
   const anyLayout = !!opts?.anyLayout;
   const { mode } = useLayoutMode();
-  const [state, setState] = useState<PushState>('unsupported');
+  const [state, setState] = useState<PushState>(initialPushState);
   const [dismissed, setDismissed] = useState(() =>
     localStorage.getItem(DISMISS_KEY) === '1'
   );
@@ -39,21 +79,14 @@ export function usePushSubscription(opts?: { anyLayout?: boolean }) {
       return;
     }
 
-    // Check browser support — PushManager is the essential API
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    const cap = readPushCapability();
+    if (cap === 'unsupported') {
       setState('unsupported');
       return;
     }
-
-    // Check current permission (Notification may not exist on all iOS versions
-    // in standalone mode before first permission request)
-    try {
-      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
-        setState('denied');
-        return;
-      }
-    } catch {
-      // Notification API not available — still allow subscribe attempt
+    if (cap === 'denied') {
+      setState('denied');
+      return;
     }
 
     // If we previously completed subscription, start as 'subscribed' to

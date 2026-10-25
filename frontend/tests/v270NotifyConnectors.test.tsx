@@ -46,8 +46,9 @@ beforeEach(() => {
   calls = [];
   stubMatchMedia();
   vi.stubGlobal('fetch', server());
-  // jsdom has no PushManager — subscribe button stays unsupported/disabled; UI still mounts.
+  // jsdom has no PushManager by default — button shows Unavailable (disabled).
   Object.defineProperty(window, 'PushManager', { value: undefined, configurable: true });
+  Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -67,7 +68,7 @@ describe('v273 Connectors without Web Push / Telegram', () => {
 });
 
 describe('v280 Settings > Notifications Web Push subscribe UX', () => {
-  it('shows Web Push with prod Title Case labels and Enable Notifications', async () => {
+  it('shows Web Push with prod Title Case labels; unsupported → Unavailable not Enable Notifications', async () => {
     render(
       <LayoutModeProvider>
         <NotificationsSettings />
@@ -78,8 +79,30 @@ describe('v280 Settings > Notifications Web Push subscribe UX', () => {
     expect(screen.getByText('Web Push Notifications')).toBeTruthy();
     expect(screen.getByText('Enable Push Sending')).toBeTruthy();
     expect(screen.getByText('Contact Email')).toBeTruthy();
-    expect(screen.getByTestId('webpush-enable-notifications')).toBeTruthy();
+    const btn = screen.getByTestId('webpush-enable-notifications') as HTMLButtonElement;
+    expect(btn).toBeTruthy();
+    expect(btn.textContent).toBe('Unavailable');
+    expect(btn.disabled).toBe(true);
+    expect(screen.queryByText('Enable Notifications')).toBeNull();
     expect(screen.queryByText('Telegram')).toBeNull();
+  });
+
+  it('Enable Notifications is tappable when PushManager exists (not stuck unsupported)', async () => {
+    // Minimal PushManager stub — capability sync must leave state at prompt.
+    Object.defineProperty(window, 'PushManager', { value: function PushManager() {}, configurable: true });
+    Object.defineProperty(navigator, 'serviceWorker', {
+      value: { ready: new Promise(() => {}) },
+      configurable: true,
+    });
+    render(
+      <LayoutModeProvider>
+        <NotificationsSettings />
+      </LayoutModeProvider>,
+    );
+    await screen.findByTestId('connector-webpush');
+    const btn = screen.getByTestId('webpush-enable-notifications') as HTMLButtonElement;
+    expect(btn.textContent).toBe('Enable Notifications');
+    expect(btn.disabled).toBe(false);
   });
 
   it('saves Web Push enable + Contact Email (VAPID; not an email notify channel)', async () => {

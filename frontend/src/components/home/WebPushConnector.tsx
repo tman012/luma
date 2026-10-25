@@ -60,7 +60,7 @@ function WebPushForm({ view, onSaved }: { view: View; onSaved: (v: View) => void
   const subDone = state === 'subscribed';
   const subDenied = state === 'denied';
   const subUnsupported = state === 'unsupported';
-  const enableLabel = subBusy ? 'Enabling…' : subDone ? 'Enabled' : subDenied ? 'Blocked' : 'Enable Notifications';
+  const enableLabel = subBusy ? 'Enabling…' : subDone ? 'Enabled' : subDenied ? 'Blocked' : subUnsupported ? 'Unavailable' : 'Enable Notifications';
 
   const test = async () => {
     setTesting(true);

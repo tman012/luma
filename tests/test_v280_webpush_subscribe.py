@@ -42,6 +42,9 @@ def test_minimal_home_mounts_mobile_push_banner():
     assert 'MobilePushBanner' in src
 
 
-def test_sw_is_v280():
+def test_sw_is_above_v279():
+    """v280 tip asserted v280; v281+ keeps SW above the pre-subscribe baseline."""
+    import re
     sw = (ROOT / 'static/sw.js').read_text()
-    assert "CACHE_VERSION = 'media-kiosk-v280'" in sw
+    m = re.search(r"CACHE_VERSION = 'media-kiosk-v(\d+)'", sw)
+    assert m and int(m.group(1)) >= 280
