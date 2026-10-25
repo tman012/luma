@@ -19,6 +19,7 @@ import { UserMenu } from '@/components/nav/UserMenu';
 import { openSearch } from '@/components/search/MinimalSearchHost';
 import { HomeSearchR3 } from '@/components/search/HomeSearchR3';
 import { HomePills } from '@/components/home/HomePills';
+import { MobilePushBanner } from '@/components/mobile/MobilePushBanner';
 
 export function MinimalHomePage() {
   const { authenticated, loading, needsStart, startInProgress, pinUnlock, user, implicit, logout } = useAuth();
@@ -177,6 +178,8 @@ export function MinimalHomePage() {
           <div style={phoneContent}>
             {/* Prod's first rail title sits right at the 16 px gap under the bar: drop the rails' 28 px top margin on the first one. */}
             <style>{phoneFirstRailCss}</style>
+            {/* v280: prod MobilePushBanner — permission + push subscribe on MINIMAL phone Home. */}
+            <MobilePushBanner />
             <main data-phone-rails>
               {homeView(withMissing(data, wymOverride), failed || slow, () => setAttempt(a => a + 1), openCard, setDismissTarget)}
             </main>

@@ -24,6 +24,7 @@ import { UserMenu } from '@/components/nav/UserMenu';
 import { NoticeToast } from '@/components/start/SetupToast';
 import { PlexSettings, usePlexOwner } from '@/components/home/PlexSettings';
 import { ConnectorsSettings } from '@/components/home/ConnectorsSettings';
+import { NotificationsSettings } from '@/components/home/NotificationsSettings';
 import { TrackersSettings, useTrackersAccess } from '@/components/trackers/TrackersSettings';
 import { LibraryPathsSettings } from '@/components/library/LibraryPathsSettings';
 import { SectionTrackersList } from '@/components/settings/SectionTrackersList';
@@ -44,6 +45,7 @@ export const SETTINGS_SECTIONS = [
   { slug: 'plex', label: 'Plex' },   // owner only
   { slug: 'rooms', label: 'Rooms' },   // v224: owner only (Option A)
   { slug: 'connectors', label: 'Connectors' },   // owner only
+  { slug: 'notifications', label: 'Notifications' },   // v280: owner only, Web Push (prod Services)
   { slug: 'trackers', label: 'Trackers' },   // owner with a session only
   { slug: 'library-paths', label: 'Library paths' },   // owner only
   { slug: 'movies', label: 'Movies' },   // v200: owner only, luma-test builds
@@ -72,7 +74,7 @@ export function SettingsPage() {
   if (!authenticated) return <Navigate to="/login" replace />;
   const known = SETTINGS_SECTIONS.find(s => s.slug === section);
   if (section && !known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
-  const ownerOnly = (slug: string) => slug === 'plex' || slug === 'connectors' || slug === 'library-paths' || slug === 'tv' || slug === 'movies' || slug === 'rooms' || slug === 'automation';
+  const ownerOnly = (slug: string) => slug === 'plex' || slug === 'connectors' || slug === 'notifications' || slug === 'library-paths' || slug === 'tv' || slug === 'movies' || slug === 'rooms' || slug === 'automation';
   if (known && ownerOnly(known.slug) && owner === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   if (known?.slug === 'trackers' && trackersOk === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   // Library paths: the API exists only on minimal (luma-test) builds.
@@ -84,6 +86,8 @@ export function SettingsPage() {
     ? (owner ? <PlexSettings /> : null)
     : slug === 'connectors'
       ? (owner ? <ConnectorsSettings /> : null)
+      : slug === 'notifications'
+        ? (owner ? <NotificationsSettings /> : null)
       : slug === 'trackers'
         ? (trackersOk ? <TrackersSettings wide={wide} onExit={() => navigate('/settings')} /> : null)
         : slug === 'library-paths'

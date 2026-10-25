@@ -37,7 +37,9 @@ ALLOWED_PATHS = frozenset({
     '/api/settings/connectors/qbittorrent', '/api/settings/connectors/qbittorrent/test',
     # Settings > Connectors: Home Assistant (URL + long-lived access token).
     '/api/settings/connectors/homeassistant', '/api/settings/connectors/homeassistant/test',
-    # v273: Web Push channel settings only (prod 1b4ea74 Services; no Telegram Connectors).
+    # v273/v280: Web Push channel settings (prod 1b4ea74 Services; no Telegram).
+    # v280: Settings > Notifications page (subscribe UX); APIs stay under connectors/webpush.
+    '/settings/notifications',
     '/api/settings/connectors/webpush', '/api/settings/connectors/webpush/test',
     # v270: push subscribe + in-app bell (import-complete notifies need these on minimal).
     '/api/push/vapid-key', '/api/push/subscribe', '/api/push/unsubscribe', '/api/push/test',

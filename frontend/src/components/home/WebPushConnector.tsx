@@ -1,11 +1,13 @@
-/** Settings > Connectors > Web Push (owner only): Enable Push Sending, Contact Email,
- * Test and Save. Same notifications.web_push.* keys as prod Services. No helper text. */
+/** Settings > Notifications > Web Push (owner only): Enable Push Sending, Contact Email,
+ * Enable Notifications (permission + /api/push/subscribe), Test and Save.
+ * Same notifications.web_push.* keys as prod Services. No helper text. */
 import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { apiFetch } from '@/apiClient';
 import { FONT } from '@/components/start/StartUI';
 import { LUMA_BLUE } from '@/ui/lumaButton';
 import { T } from '@/theme/tokens';
+import { usePushSubscription } from '@/hooks/usePushSubscription';
 
 const API = '/api/settings/connectors/webpush';
 
@@ -44,6 +46,7 @@ function WebPushForm({ view, onSaved }: { view: View; onSaved: (v: View) => void
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
   const alive = useRef(true);
+  const { state, subscribe } = usePushSubscription({ anyLayout: true });
   useEffect(() => () => { alive.current = false; }, []);
   useEffect(() => {
     if (!result) return;
@@ -53,6 +56,11 @@ function WebPushForm({ view, onSaved }: { view: View; onSaved: (v: View) => void
 
   const dirty = enabled !== !!view.enabled || email.trim() !== (view.vapid_email || '');
   const canSave = dirty && !saving;
+  const subBusy = state === 'loading';
+  const subDone = state === 'subscribed';
+  const subDenied = state === 'denied';
+  const subUnsupported = state === 'unsupported';
+  const enableLabel = subBusy ? 'Enabling…' : subDone ? 'Enabled' : subDenied ? 'Blocked' : 'Enable Notifications';
 
   const test = async () => {
     setTesting(true);
@@ -107,6 +115,15 @@ function WebPushForm({ view, onSaved }: { view: View; onSaved: (v: View) => void
             value={email} onChange={e => setEmail(e.target.value)}
           />
         </div>
+        <button
+          type="button"
+          style={{ ...primary, opacity: subBusy || subDone || subDenied || subUnsupported ? 0.5 : 1, alignSelf: 'flex-start' }}
+          disabled={subBusy || subDone || subDenied || subUnsupported}
+          onClick={() => { void subscribe(); }}
+          data-testid="webpush-enable-notifications"
+        >
+          {enableLabel}
+        </button>
         <div style={actions}>
           <button type="button" style={ghostBtn} disabled={testing}
             aria-busy={testing} onClick={test} data-testid="webpush-test">

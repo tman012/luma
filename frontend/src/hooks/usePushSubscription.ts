@@ -18,7 +18,10 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
-export function usePushSubscription() {
+/** Mobile home banner stays compact-only (prod). Settings > Notifications passes
+ * anyLayout so Enable Notifications works on kiosk / desktop PWAs too. */
+export function usePushSubscription(opts?: { anyLayout?: boolean }) {
+  const anyLayout = !!opts?.anyLayout;
   const { mode } = useLayoutMode();
   const [state, setState] = useState<PushState>('unsupported');
   const [dismissed, setDismissed] = useState(() =>
@@ -30,8 +33,8 @@ export function usePushSubscription() {
     // superseded (e.g. layout mode flips on rotate/resize) or the hook unmounts.
     let cancelled = false;
 
-    // Only activate on mobile
-    if (mode !== 'compact') {
+    // Home banner: mobile only. Settings subscribe: any layout.
+    if (!anyLayout && mode !== 'compact') {
       setState('unsupported');
       return;
     }
@@ -110,7 +113,7 @@ export function usePushSubscription() {
     })();
 
     return () => { cancelled = true; };
-  }, [mode]);
+  }, [mode, anyLayout]);
 
   const subscribe = useCallback(async () => {
     setState('loading');
