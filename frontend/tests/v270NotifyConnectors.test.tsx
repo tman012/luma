@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectorsSettings } from '@/components/home/ConnectorsSettings';
+import { NotificationsSettings } from '@/components/home/NotificationsSettings';
+import { LayoutModeProvider } from '@/contexts/LayoutModeContext';
 
 const res = (body: unknown, status = 200) =>
   ({ ok: status >= 200 && status < 300, status, json: async () => body }) as Response;
@@ -34,6 +36,7 @@ function server() {
       return res(webpush);
     }
     if (url.includes('/telegram')) return res({ error: 'Not found' }, 404);
+    if (url.endsWith('/api/push/vapid-key')) return res({ publicKey: 'BAAAA' });
     return res({ error: 'Not found' }, 404);
   });
 }
@@ -43,30 +46,48 @@ beforeEach(() => {
   calls = [];
   stubMatchMedia();
   vi.stubGlobal('fetch', server());
+  // jsdom has no PushManager — subscribe button stays unsupported/disabled; UI still mounts.
+  Object.defineProperty(window, 'PushManager', { value: undefined, configurable: true });
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-describe('v273 Web Push Connectors (no Telegram)', () => {
-  it('shows Web Push after qBittorrent with prod Title Case labels; no Telegram card', async () => {
+describe('v273 Connectors without Web Push / Telegram', () => {
+  it('lists connectors through qBittorrent; no Web Push or Telegram card', async () => {
     render(<ConnectorsSettings />);
-    await screen.findByTestId('connector-webpush');
+    await screen.findByTestId('connector-qbittorrent');
+    expect(screen.queryByTestId('connector-webpush')).toBeNull();
     expect(screen.queryByTestId('connector-telegram')).toBeNull();
     const groups = [...document.querySelectorAll('[data-testid^="connector-"]')].map(e => e.getAttribute('data-testid'));
     expect(groups).toEqual([
       'connector-tmdb', 'connector-omdb', 'connector-tvdb', 'connector-trakt',
       'connector-homeassistant', 'connector-qbittorrent',
-      'connector-webpush',
     ]);
+    expect(screen.queryByText('Telegram')).toBeNull();
+  });
+});
+
+describe('v280 Settings > Notifications Web Push subscribe UX', () => {
+  it('shows Web Push with prod Title Case labels and Enable Notifications', async () => {
+    render(
+      <LayoutModeProvider>
+        <NotificationsSettings />
+      </LayoutModeProvider>,
+    );
+    await screen.findByTestId('connector-webpush');
+    expect(screen.getByTestId('notifications-section')).toBeTruthy();
     expect(screen.getByText('Web Push Notifications')).toBeTruthy();
     expect(screen.getByText('Enable Push Sending')).toBeTruthy();
     expect(screen.getByText('Contact Email')).toBeTruthy();
-    expect(screen.queryByText('Bot Token')).toBeNull();
-    expect(screen.queryByText('Chat ID')).toBeNull();
+    expect(screen.getByTestId('webpush-enable-notifications')).toBeTruthy();
     expect(screen.queryByText('Telegram')).toBeNull();
   });
 
   it('saves Web Push enable + Contact Email (VAPID; not an email notify channel)', async () => {
-    render(<ConnectorsSettings />);
+    render(
+      <LayoutModeProvider>
+        <NotificationsSettings />
+      </LayoutModeProvider>,
+    );
     await screen.findByTestId('connector-webpush');
     fireEvent.click(screen.getByTestId('webpush-enabled'));
     fireEvent.change(screen.getByTestId('webpush-email'), { target: { value: 'mailto:a@b.co' } });
