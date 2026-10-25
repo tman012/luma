@@ -33,6 +33,7 @@ import { GenreRouletteSettings } from '@/components/automation/GenreRouletteSett
 import { AnticipatedSettings } from '@/components/automation/AnticipatedSettings';
 import { WhatsMissingSettings } from '@/components/automation/WhatsMissingSettings';
 import { DownloadsGuardSettings } from '@/components/automation/DownloadsGuardSettings';
+import { TrendingTvSettings } from '@/components/automation/TrendingTvSettings';
 import { RoomsSettings } from '@/components/rooms/RoomsSettings';
 import { isMinimal } from '@/minimal';
 import { HeroSettingsRows } from '@/components/home/HeroSettings';
@@ -90,7 +91,7 @@ export function SettingsPage() {
           : slug === 'movies'
             ? (owner ? <MoviesSettings wide={wide} /> : null)
           : slug === 'automation'
-            ? (owner ? <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}><GenreRouletteSettings wide={wide} /><AnticipatedSettings wide={wide} /><WhatsMissingSettings wide={wide} /><DownloadsGuardSettings wide={wide} /></div> : null)
+            ? (owner ? <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}><GenreRouletteSettings wide={wide} /><AnticipatedSettings wide={wide} /><TrendingTvSettings wide={wide} /><WhatsMissingSettings wide={wide} /><DownloadsGuardSettings wide={wide} /></div> : null)
           : slug === 'rooms'
             ? (owner ? <RoomsSettings wide={wide} onExit={() => navigate('/settings')} /> : null)
           : slug === 'tv'

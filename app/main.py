@@ -21815,6 +21815,8 @@ from app.automation import gr_routes as _gr_routes  # noqa: E402  v252: Settings
 app.register_blueprint(_gr_routes.bp)
 from app.automation import antic_routes as _antic_routes  # noqa: E402  v253: Settings > Automation > Anticipated
 app.register_blueprint(_antic_routes.bp)
+from app.automation import ttv_routes as _ttv_routes  # noqa: E402  v279: Settings > Automation > Trending TV
+app.register_blueprint(_ttv_routes.bp)
 from app.automation import wym_routes as _wym_routes  # noqa: E402  v254: What you're missing (rail + Settings > Automation)
 app.register_blueprint(_wym_routes.bp)
 from app.automation import dg_routes as _dg_routes  # noqa: E402  v260: Settings > Automation > Downloads guard
@@ -21886,6 +21888,11 @@ try:
         _antic.start()             # v253: Anticipated shows and movies (native; test install only; off until turned on)
     except Exception:
         logger.exception('Anticipated scheduler did not start')
+    try:
+        from app.automation import ttv as _ttv
+        _ttv.start()               # v279: Trending TV (native; test install only; on by default)
+    except Exception:
+        logger.exception('Trending TV scheduler did not start')
 except Exception as _e:  # noqa: BLE001
     logger.error('TV search not started: %s', type(_e).__name__)
 from app import tv_scan as _tv_scan_boot  # noqa: E402

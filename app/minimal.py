@@ -66,6 +66,8 @@ ALLOWED_PATHS = frozenset({
     '/api/settings/automation/genre-roulette',
     # v253 Settings > Automation > Anticipated (owner only; changes and Run now the signed-in owner; the routes check).
     '/api/settings/automation/anticipated',
+    # v279 Settings > Automation > Trending TV (owner only; changes and Run now the signed-in owner; the routes check).
+    '/api/settings/automation/trending-tv',
     # v254 What you're missing: the Home rail (signed in), dismiss, restore and refresh (the signed-in owner),
     # and Settings > Automation (owner only; changes the signed-in owner). The routes check. Not /dismissed (debug).
     '/api/rails/what-youre-missing', '/api/rails/what-youre-missing/dismiss',
@@ -81,6 +83,9 @@ ALLOWED_PATHS = frozenset({
     # Connectors qBittorrent client (same settings keys as Downloads Guard / storage cleanup).
     # Remove stays gated by instance.writes_allowed('qbit') and the owner session check.
     '/api/downloads/queue', '/api/downloads/history',
+    # v279: legacy trending-tv-watchlist status/run/log (Sonarr job; native UI uses /api/settings/automation/trending-tv).
+    '/api/automation/trending-tv-watchlist/status', '/api/automation/trending-tv-watchlist/run',
+    '/api/automation/trending-tv-watchlist/log',
 })
 ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts/', '/settings/',
                     '/api/trackers/', '/api/settings/library-paths/',
@@ -93,7 +98,9 @@ ALLOWED_PREFIXES = ('/api/auth/', '/api/start/', '/static/', '/assets/', '/fonts
                     # v252 Genre Roulette status, run and preview (owner only; the routes check).
                     '/api/settings/automation/genre-roulette/',
                     # v253 Anticipated status and Run now (owner only; the routes check).
-                    '/api/settings/automation/anticipated/')
+                    '/api/settings/automation/anticipated/',
+                    # v279 Trending TV status and Run now (owner only; the routes check).
+                    '/api/settings/automation/trending-tv/')
 # Read-only data for main's movie/TV detail popup (tapping a Home card).
 # GET only, sign-in required like everything else in minimal mode.
 DETAIL_READ_PREFIXES = (
