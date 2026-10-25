@@ -227,8 +227,10 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
                           "enum": ["disabled_local", "enabled"]},
         "session_secret": {"type": "string", "default": "", "sensitive": True,
                           "description": "Secret key for session signing (auto-generated on first run)"},
-        "trusted_proxies": {"type": "string", "default": "", "sensitive": False,
-                            "description": "Reverse proxies whose X-Forwarded-For and X-Forwarded-Proto headers are believed (comma-separated IPs or CIDRs)"},
+        "trusted_proxies": {"type": "string",
+                            "default": "127.0.0.1/32, ::1/128, 172.16.0.0/12, 192.168.32.0/20",
+                            "sensitive": False,
+                            "description": "Reverse proxies whose X-Forwarded-For and X-Forwarded-Proto headers are believed (comma-separated IPs or CIDRs). Default covers loopback and Docker bridges used when Caddy (host network) reverse_proxies to a published container port."},
         "hostnames": {"type": "string", "default": "", "sensitive": False,
                       "description": "Host names Luma is reached by besides IP addresses and localhost (comma-separated). Needed for no-sign-in LAN access by name and for a trusted proxy's X-Forwarded-Host"},
         "allow_signup": {"type": "boolean", "default": False, "sensitive": False,
@@ -1628,6 +1630,38 @@ def _migrate_tracker_search_settings(data: dict) -> bool:
     return True
 
 
+
+# Prod Caddy-on-host trusts loopback; Docker publishes the app on a bridge
+# (default 172.16/12, this host also uses 192.168.32.0/20). Empty trusted_proxies
+# left Flask scheme=http behind HTTPS Caddy → CSRF Origin mismatch on POST
+# /api/push/subscribe (and every other cookie-auth state-changing API).
+_DEFAULT_TRUSTED_PROXIES = '127.0.0.1/32, ::1/128, 172.16.0.0/12, 192.168.32.0/20'
+
+
+def _migrate_seed_trusted_proxies(data: dict, existing: bool = False) -> bool:
+    """Seed empty security.trusted_proxies so HTTPS reverse proxies work.
+
+    Runs once (marker under _migrations). Never overwrites a non-empty value
+    (prod already sets loopback; Ops may have set a workaround). Fresh and
+    upgraded installs with an empty string get the Caddy/Docker default.
+    """
+    done = data.setdefault('_migrations', {})
+    if done.get('seed_trusted_proxies_v282'):
+        return False
+    security = data.setdefault('security', {})
+    if not isinstance(security, dict):
+        done['seed_trusted_proxies_v282'] = True
+        return True
+    current = security.get('trusted_proxies')
+    if current is None or (isinstance(current, str) and not str(current).strip()):
+        security['trusted_proxies'] = _DEFAULT_TRUSTED_PROXIES
+        done['seed_trusted_proxies_v282'] = True
+        logger.info("Seeded security.trusted_proxies for Caddy/Docker reverse proxy")
+        return True
+    done['seed_trusted_proxies_v282'] = True
+    return True
+
+
 def _run_all_migrations(data: dict, data_dir=None, existing: bool = False) -> bool:
     """Run all migrations on *data* (mutated in place).
     *existing* is True when *data* came from a settings file on disk (an
@@ -1658,6 +1692,7 @@ def _run_all_migrations(data: dict, data_dir=None, existing: bool = False) -> bo
     changed |= _migrate_remove_remote_lock(data)
     changed |= _migrate_access_mode_to_auth_required(data)
     changed |= _migrate_seed_hostnames(data, data_dir)
+    changed |= _migrate_seed_trusted_proxies(data, existing)
     changed |= _migrate_tracker_search_settings(data)
     return changed
 
