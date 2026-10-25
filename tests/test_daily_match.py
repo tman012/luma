@@ -1,5 +1,5 @@
-"""PM: date-named daily releases (Raw, Judy Justice) import by air date, the way Sonarr's daily type does;
-a torrent refused under the old matcher is looked at once more; a non-daily refused one (Time) is not."""
+"""PM: date-named releases import by air date (Raw/Judy daily type, and standard shows like SmackDown);
+a torrent refused under an older matcher is looked at once more; an SxxExx refused one (Time) is not."""
 import json
 import time
 
@@ -95,15 +95,46 @@ def test_daily_no_match_stays_refused_and_is_not_retried_again(dl):
     assert dl.tick() == {'checked': 0, 'imported': 0}                                   # once, not every pass
 
 
-def test_standard_show_never_matches_by_date_and_is_not_retried(dl):
+def test_standard_show_dated_release_matches_and_refused_is_retried(dl):
+    """v278: standard (non-daily) show + dated name (no SxxExx) resolves/imports by air date; MATCHER retry."""
     with tv_store.connect() as conn:
         sid = _sev(conn, 'standard')
     _date(sid, 2, 3, '2031-01-02')
-    assert tv_downloads._episodes(sid, 'X 2031 01 02.mkv', 'X 2031 01 02.mkv') == (None, [])
+    assert tv_downloads._episodes(sid, 'X 2031 01 02.mkv', 'X 2031 01 02.mkv') == (2, [3])
     name = 'Severance 2031 01 02 1080p WEBRip h264-GRP'
+    eid = _ep_id(sid, 2, 3)
     grab(dl, H1, name, [name + '.mkv'])
-    _seed(sid, H1, name, [_ep_id(sid, 2, 3)])
+    dl.q.torrents[0]['state'] = 'stalledUP'
+    _seed(sid, H1, name, [eid])
+    # Seeded as refused under MATCHER=2 (NO_EPISODES); MATCHER=3 + dropped daily gate retries it.
+    out = dl.tick()
+    assert out == {'checked': 1, 'imported': 1}
+    assert tv_downloads.status(H1)['state'] == 'imported'
+    assert tv_downloads.status(H1)['episode_ids'] == [eid]
+    assert rows('SELECT state FROM grabs WHERE hash = ?', H1)[0]['state'] == 'imported'
     assert dl.tick() == {'checked': 0, 'imported': 0}
+
+
+def test_smackdown_shape_standard_dated_release_imports(dl):
+    """WWE SmackDown Fri miss shape: standard series + dated release, no SxxExx."""
+    with tv_store.connect() as conn:
+        sid = _sev(conn, 'standard')
+    with tv_store.write() as conn:
+        conn.execute("UPDATE series SET title = 'WWE SmackDown', aliases = '[]', year = NULL WHERE id = ?", (sid,))
+        conn.execute("UPDATE episodes SET air_date = NULL WHERE series_id = ? AND air_date = '2026-10-23'", (sid,))
+    # Fixture has S02E03, not S28E43 — air-date path only needs the date on one episode in one season.
+    _date(sid, 2, 3, '2026-10-23')
+    eid = _ep_id(sid, 2, 3)
+    name = 'WWE SmackDown 2026 10 23 NF iNT 1080p WEB h265-HEEL'
+    assert tv_release.parse(name).kind == 'daily' and tv_release.parse(name).air_date == '2026-10-23'
+    assert tv_downloads._episodes(sid, name + '.mkv', name + '.mkv') == (2, [3])
+    grab(dl, H1, name, [name + '.mkv'])
+    dl.q.torrents[0]['state'] = 'stalledUP'
+    _seed(sid, H1, name, [eid])
+    out = dl.tick()
+    assert out == {'checked': 1, 'imported': 1}, tv_downloads.status(H1)
+    assert tv_downloads.status(H1)['episode_ids'] == [eid]
+    assert rows('SELECT state FROM grabs WHERE hash = ?', H1)[0]['state'] == 'imported'
 
 
 def test_migration_sets_date_named_shows_daily_only(dl):

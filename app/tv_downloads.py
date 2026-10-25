@@ -47,8 +47,8 @@ NOT_WRITABLE = 'library folder not writable'
 NO_SHOW = 'no show in the library'
 NO_EPISODES = 'no episodes of this show in the download'
 #: bumped when episode matching learns a new kind of name: a torrent refused NO_EPISODES under an older
-#: matcher is looked at once more (daily: date-named releases refused before air-date matching).
-MATCHER = 2
+#: matcher is looked at once more (v278: dated releases on standard shows, not only series_type=daily).
+MATCHER = 3
 _DONE = ('imported', 'refused')
 _lock = threading.Lock()
 
@@ -160,7 +160,9 @@ def _episodes(sid: int, name: str, rel_path: str) -> Tuple[Optional[int], List[i
                 r = pr
                 break
     if r.season is None and r.air_date and not r.episodes:
-        return _daily_episodes(sid, r.air_date) if _is_daily(sid) else (None, [])          # daily shows (Sonarr's daily type): match by air date
+        # Dated release with no SxxExx: match by air date for any show type (SmackDown is standard).
+        # _daily_episodes accepts only when the date maps to episode(s) in a single season.
+        return _daily_episodes(sid, r.air_date)
     if r.season is None or not r.episodes:
         return None, []
     with tv_store.connect() as conn:
@@ -616,8 +618,7 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
                 st = status(h) or {}
                 if st.get('state') in _DONE and not (st.get('state') == 'refused' and st.get('error') == NO_EPISODES
                                                      and int(st.get('matcher') or 1) < MATCHER
-                                                     and tv_release.parse(str(t.get('name') or '')).kind == 'daily'
-                                                     and _is_daily((_series_for(str(t.get('name') or '')) or {}).get('id'))):
+                                                     and tv_release.parse(str(t.get('name') or '')).kind == 'daily'):
                     continue
                 if st.get('state') == 'waiting' and float(st.get('next_try') or 0) > now:
                     continue                                  # hotfix: an OSError backoff is running
