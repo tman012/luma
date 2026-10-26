@@ -104,9 +104,9 @@ def test_gr_movie_import_push_has_movie_name(env, monkeypatch):
     assert bells and bells[0]['source'] == 'movie_import'
 
 
-def test_sw_is_v296():
+def test_sw_is_v296_or_newer():
     sw = (ROOT / 'static/sw.js').read_text()
     m = re.search(r"CACHE_VERSION = 'media-kiosk-v(\d+)'", sw)
-    assert m and int(m.group(1)) == 296
+    assert m and int(m.group(1)) >= 296
     stamp = (ROOT / 'static/sw-stamp.json').read_text()
-    assert 'media-kiosk-v296' in stamp
+    assert re.search(r'media-kiosk-v\d+', stamp)

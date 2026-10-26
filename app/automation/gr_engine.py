@@ -354,7 +354,10 @@ def _run(cfg, dry, kind, now, rng, run_id, sleep, clock) -> Dict[str, Any]:
         items, sts = search(film, cfgs, now)
         if not any(s.get('status') == 'ok' for s in sts):
             from app import tv_search
-            if sts and all(s.get('status') == tv_search.SLOT_BUSY for s in sts):
+            # Slot/daily cap, purpose spacing, and rate backoff are pacing — never
+            # "Trackers couldn't be reached" (v297). Real hard fails still abort as unreachable.
+            paced = {tv_search.SLOT_BUSY, 'rate'}
+            if sts and all(s.get('status') in paced for s in sts):
                 abort[0] = 'trackers_capped'
                 return 'abort'
             ctr['search_fail'] += 1

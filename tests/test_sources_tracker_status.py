@@ -18,6 +18,7 @@ from tests.test_tracker_negative_cache import Mock, R, SIGNED_IN_EMPTY, _engine
     (TrackerSkipped('backoff (timeout)'), 'unavailable'),
     (TrackerSkipped('hourly cap 30'), 'rate'),
     (TrackerSkipped('rate limit (bucket empty)'), 'rate'),
+    (TrackerSkipped('tv spacing'), 'rate'),
     (TrackerSkipped('paused'), 'unavailable'),
     (TrackerError('auth'), 'auth'),
     (TrackerError('banned'), 'auth'),

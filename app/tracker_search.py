@@ -52,14 +52,14 @@ class TrackerSkipped(Exception):
 
 def search_status(err: Exception) -> str:
     """Short per-tracker status for the Sources UI: 'auth' (sign-in failed,
-    banned, or in an auth/ban backoff), 'rate' (rate limit, caps, rate backoff)
-    or 'unavailable' (anything else)."""
+    banned, or in an auth/ban backoff), 'rate' (rate limit, caps, rate backoff,
+    purpose spacing), or 'unavailable' (anything else)."""
     if isinstance(err, TrackerSkipped):
         reason = str(err)
         if reason.startswith('backoff ('):
             kind = reason[len('backoff ('):].rstrip(')')
-        elif 'cap' in reason or 'rate limit' in reason:
-            kind = 'rate'
+        elif 'cap' in reason or 'rate limit' in reason or 'spacing' in reason:
+            kind = 'rate'                            # purpose spacing (tv spacing) is pacing, not an outage
         else:
             kind = 'unavailable'
     else:
