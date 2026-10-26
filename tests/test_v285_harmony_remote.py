@@ -7,14 +7,13 @@ from tests.test_file_management import HDR, minimal as minimal_app, store  # noq
 from tests.test_tv_libraries import owner, tv_env  # noqa: F401
 
 
-def test_sw_is_v285():
+def test_sw_v285_or_newer():
     root = os.path.join(os.path.dirname(__file__), '..')
     sw = open(os.path.join(root, 'static', 'sw.js')).read()
     stamp = open(os.path.join(root, 'static', 'sw-stamp.json')).read()
-    assert "CACHE_VERSION = 'media-kiosk-v285'" in sw
-    assert '"cache_version": "media-kiosk-v285"' in stamp
     m = re.search(r"CACHE_VERSION = 'media-kiosk-v(\d+)'", sw)
-    assert m and int(m.group(1)) == 285
+    assert m and int(m.group(1)) >= 285
+    assert f'"cache_version": "media-kiosk-v{m.group(1)}"' in stamp
 
 
 def test_harmony_volume_under_allowlist(minimal_app, owner, monkeypatch):

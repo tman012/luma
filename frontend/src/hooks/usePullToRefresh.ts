@@ -54,8 +54,11 @@ export function clearStaleModalLock(doc: Document = document): boolean {
     || doc.body.style.overflow === 'hidden'
     || doc.documentElement.style.overflow === 'hidden';
   root?.removeAttribute('data-modal-open');
-  if (doc.body.style.overflow === 'hidden') doc.body.style.overflow = '';
-  if (doc.documentElement.style.overflow === 'hidden') doc.documentElement.style.overflow = '';
+  // Restore document scroll (useBodyScroll), not ''. Empty inline style lets
+  // index.css `html, body { overflow: hidden }` win again — iOS then rubber-bands
+  // the visual viewport so the fixed Home header slides with the page.
+  if (doc.body.style.overflow === 'hidden') doc.body.style.overflow = 'auto';
+  if (doc.documentElement.style.overflow === 'hidden') doc.documentElement.style.overflow = 'auto';
   return stale;
 }
 

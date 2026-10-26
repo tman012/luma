@@ -15,7 +15,7 @@ d.body.style.overflow = 'hidden';
 const cleared = clearStaleModalLock(d as any);
 console.log(JSON.stringify({ cleared, attr: d.root.hasAttribute('data-modal-open'), body: d.body.style.overflow }));
 ''')
-    assert out == {'cleared': True, 'attr': False, 'body': ''}
+    assert out == {'cleared': True, 'attr': False, 'body': 'auto'}
 
 
 @needs_ts

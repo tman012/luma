@@ -199,7 +199,7 @@ export function MinimalHomePage() {
         />
       )}
       {/* TopBar: z 50 (prod) */}
-      <header style={phoneBar} data-shift-root data-testid="phone-header">
+      <header style={phoneBar} data-testid="phone-header">
         <div style={phoneRow}>
           <img src={assetUrl(PHONE_LOGO_SRC)} alt="Luma" style={phoneLogo} draggable={false} data-testid="phone-logo" />
           <div style={{ flex: 1 }} />
