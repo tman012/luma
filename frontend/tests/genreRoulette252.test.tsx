@@ -183,6 +183,15 @@ describe('v252 Settings > Automation > Genre roulette', () => {
     const d = runDetails(withSkips as never)!;
     expect(d.skips.map(s => s.title)).toEqual(['Duped']);
     expect(d.failures.map(f => f.genre)).toEqual(['Action']);
+    // PM: summary-only incomplete night — no chevron (nothing to expand)
+    const summaryOnly = {
+      ...RUN, id: 10, grabbed: 1, wanted: 3, failures: [], error: null, skips: {},
+      picks: [{ ...RUN.picks[0], grabbed: true }],
+    };
+    const so = flattenHistory([summaryOnly as never]);
+    expect(so.map(r => r.kind)).toEqual(['grab']);
+    expect(so[0].kind === 'grab' && so[0].disclose).toBe(false);
+    expect(runDetails(summaryOnly as never)).toBeNull();
   });
 
   it('dry-run would-grabs appear as grab rows with Dry run stamp', async () => {

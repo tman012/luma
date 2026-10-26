@@ -191,14 +191,10 @@ export function runDetails(r: GrRun): HistDetail | null {
   }
   const failures = (r.failures || []).map(f => ({ genre: f.genre, reason: f.reason }));
   const error = r.error || null;
+  // PM fold-in: chevron only when there is something to expand (skips / failures / error).
+  // Summary alone (Added N of M) never opens a disclosure.
+  if (!skips.length && !failures.length && !error) return null;
   const summary = (r.grabbed || r.wanted) ? result(r) : null;
-  if (!skips.length && !failures.length && !error && !summary) return null;
-  // Only offer disclosure when there is something beyond the grab rows themselves.
-  if (!skips.length && !failures.length && !error) {
-    // Summary alone (Added N of M) is optional; show when grab count incomplete or dry.
-    if (r.status === 'running') return null;
-    if ((r.grabbed ?? 0) >= (r.wanted ?? 0) && !r.dry) return null;
-  }
   return { skips, failures, error, summary };
 }
 
@@ -209,8 +205,7 @@ export function flattenHistory(history: GrRun[]): HistRow[] {
     const dry = !!r.dry;
     const grabs = (r.picks || []).filter(p => isGrabPick(r, p));
     const details = runDetails(r);
-    const disclose = !!details && (details.skips.length > 0 || details.failures.length > 0 || !!details.error
-      || (!!details.summary && grabs.length > 0));
+    const disclose = !!details && (details.skips.length > 0 || details.failures.length > 0 || !!details.error);
     if (grabs.length) {
       grabs.forEach((p, i) => {
         rows.push({
