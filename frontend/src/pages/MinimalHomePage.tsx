@@ -312,7 +312,7 @@ function homeView(data: HomeData | null, down: boolean, retry: () => void, onOpe
     if (any) return <HomeRails cw={cw} rails={rails} onOpen={onOpen} onDismiss={onDismiss} afterFirst={<HomePills after />} />;
     return <><HomePills /><div style={emptyBox} data-testid="home-empty"><p style={emptyLine}>Nothing here yet</p></div></>;
   }
-  // v260: with no rails yet, prod shows its Home row at the top.
+  // Down / unreachable: no CW rail — pills at top (same as empty).
   if (data || down) {
     return (
       <>
@@ -324,7 +324,8 @@ function homeView(data: HomeData | null, down: boolean, retry: () => void, onOpe
       </>
     );
   }
-  return <><HomePills /><SkeletonRails /></>;
+  // v289: match prod — pills under the first (CW) skeleton rail, not above it (avoids top→under-CW jump).
+  return <SkeletonRails afterFirst={<HomePills after />} />;
 }
 
 // Centered in the space under the header: one muted line, optional Retry pill.

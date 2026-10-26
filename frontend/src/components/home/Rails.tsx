@@ -132,20 +132,24 @@ export function WideCard({ card, onOpen, own }: { card: Card; onOpen?: OnOpen; o
   );
 }
 
-export function SkeletonRails({ rails = 3 }: { rails?: number }) {
+/** v289: afterFirst sits under the first (CW-shaped) skeleton rail — same slot as loaded HomeRails — so pills do not paint at the top then jump. */
+export function SkeletonRails({ rails = 3, afterFirst }: { rails?: number; afterFirst?: React.ReactNode }) {
   return (
     <div data-testid="home-skeleton" aria-busy="true">
       {Array.from({ length: rails }, (_, r) => (
-        <section key={r} style={railWrap}>
-          <div className="luma-shimmer" style={{ ...skel, width: 140, height: 18, borderRadius: 6, marginLeft: 20 }} />
-          <div style={scroller}>
-            {Array.from({ length: 6 }, (_, i) => (
-              <div key={i} style={r === 0 ? wideCard : posterCard}>
-                <div className="luma-shimmer" style={{ ...skel, ...(r === 0 ? wideImg : posterImg) }} />
-              </div>
-            ))}
-          </div>
-        </section>
+        <Fragment key={r}>
+          <section style={railWrap}>
+            <div className="luma-shimmer" style={{ ...skel, width: 140, height: 18, borderRadius: 6, marginLeft: 20 }} />
+            <div style={scroller}>
+              {Array.from({ length: 6 }, (_, i) => (
+                <div key={i} style={r === 0 ? wideCard : posterCard}>
+                  <div className="luma-shimmer" style={{ ...skel, ...(r === 0 ? wideImg : posterImg) }} />
+                </div>
+              ))}
+            </div>
+          </section>
+          {r === 0 && afterFirst}
+        </Fragment>
       ))}
     </div>
   );
