@@ -312,6 +312,11 @@ def update(room_id: str, body: Any) -> Optional[Dict[str, Any]]:
         dev['harmonyActivity'] = _text(body['harmony_activity'], 'harmony_activity'); dchanged = True
     if 'harmony_hub' in body:
         patch['harmonyHubIp'] = _host(body['harmony_hub'])
+        # v285: saving a Hub IP enables direct Harmony for remote keys (wake may already).
+        if patch['harmonyHubIp'] and 'wake' not in body:
+            patch['useHarmonyHub'] = True
+        elif not patch['harmonyHubIp'] and 'wake' not in body:
+            patch['useHarmonyHub'] = False
     if 'wake' in body:
         w = _wake_in(body['wake'])
         dev['powerMethod'] = _POWER[w]

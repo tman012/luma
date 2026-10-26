@@ -148,9 +148,9 @@ def test_test_compose_keeps_the_adb_key_on_the_data_volume():
 
 # ---------------------------------------------------------------- Remote side channels under ADB allowlist (Tester MED)
 
-def test_remote_skips_harmony_kodi_ha_wol_when_allowlist_active(minimal_app, owner, monkeypatch):
-    """When LUMA_ADB_COMMANDS is set, Remote must not fire Harmony / Kodi / HA / WoL.
-    Pair/Connect stays (covered elsewhere). Prod (empty allowlist) is unchanged."""
+def test_remote_skips_kodi_ha_wol_when_allowlist_active_but_harmony_opens(minimal_app, owner, monkeypatch):
+    """v285: LUMA_ADB_COMMANDS still blocks Kodi / HA / WoL / ADB shell; Harmony Hub
+    by room IP stays open so volume / transport work on LIVE. Pair/Connect unchanged."""
     import subprocess
     import app.main as M
     from app import wol, harmony_service, ha_service, kodi_service
@@ -189,6 +189,7 @@ def test_remote_skips_harmony_kodi_ha_wol_when_allowlist_active(minimal_app, own
         'devices': [{
             'id': 'd1', 'host': '10.0.0.50', 'connectPort': 5555, 'macAddress': 'AA:BB:CC:DD:EE:FF',
             'powerMethod': 'homeassistant', 'haPowerEntity': 'switch.tv',
+            'harmonyNavigationDevice': 'Shield',
             'services': [{'type': 'kodi', 'kodi_host': '10.0.0.50'}],
         }],
     }
@@ -202,34 +203,60 @@ def test_remote_skips_harmony_kodi_ha_wol_when_allowlist_active(minimal_app, own
         return _orig_get(key, default)
     monkeypatch.setattr(M.settings, 'get', _get)
 
-    def _side_channel_calls():
+    def _blocked_side_channels():
         out = []
         for c in calls:
-            if c[0] in ('WOL', 'HARMONY get', 'HARMONY power_off', 'HARMONY cmd', 'HA fire',
-                        'KODI conn', 'KODI pause_toggle', 'KODI stop'):
+            if c[0] in ('WOL', 'HA fire', 'KODI conn', 'KODI pause_toggle', 'KODI stop'):
                 out.append(c)
             elif c[0] == 'SUBPROCESS' and ' shell' in f' {c[1]} ':
                 out.append(c)
         return out
 
     c = owner
-    for cmd in ('power', 'vol_up', 'play_pause', 'home'):
-        r = c.post('/api/room/fr/remote', json={'command': cmd}, environ_base=REMOTE, headers=HDR)
-        assert r.status_code == 200, (cmd, r.status_code, r.get_json())
-        body = r.get_json()
-        assert body.get('ok') is False, (cmd, body)
-        assert 'LUMA_ADB_COMMANDS' in (body.get('detail') or ''), (cmd, body)
-        assert _side_channel_calls() == [], (cmd, calls)
-        # adb connect may still run (it is on the allowlist); shell must not
-        assert not any(c[0] == 'SUBPROCESS' and 'shell' in c[1] for c in calls), (cmd, calls)
-        calls.clear()
+    # Harmony power / volume / play_pause / home open under allowlist when Hub IP set
+    r = c.post('/api/room/fr/remote', json={'command': 'power'}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and r.get_json().get('ok') is True
+    assert ('HARMONY get', '10.0.0.9') in calls and ('HARMONY power_off', '10.0.0.9') in calls
+    assert _blocked_side_channels() == [], calls
+    calls.clear()
 
-    # HA-only power (no Harmony): still no fire
+    r = c.post('/api/room/fr/remote', json={'command': 'vol_up'}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and r.get_json().get('ok') is True
+    assert ('HARMONY cmd', 'AVR', 'VolumeUp') in calls
+    assert _blocked_side_channels() == [], calls
+    calls.clear()
+
+    r = c.post('/api/room/fr/remote', json={'command': 'play_pause'}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and r.get_json().get('ok') is True
+    assert ('HARMONY cmd', 'Shield', 'Pause') in calls
+    assert _blocked_side_channels() == [], calls
+    calls.clear()
+
+    r = c.post('/api/room/fr/remote', json={'command': 'home'}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and r.get_json().get('ok') is True
+    assert ('HARMONY cmd', 'Shield', 'Home') in calls
+    assert _blocked_side_channels() == [], calls
+    calls.clear()
+
+    # HA-only power (no Hub IP): still no fire under allowlist
     room['useHarmonyHub'] = False
+    room['harmonyHubIp'] = ''
     room['devices'][0]['services'] = []
     r = c.post('/api/room/fr/remote', json={'command': 'power'}, environ_base=REMOTE, headers=HDR)
     assert r.status_code == 200 and r.get_json().get('ok') is False
-    assert _side_channel_calls() == [], calls
+    assert 'LUMA_ADB_COMMANDS' in (r.get_json().get('detail') or '')
+    assert _blocked_side_channels() == [], calls
+    assert not any(c[0].startswith('HARMONY') for c in calls), calls
+    calls.clear()
+
+    # No Hub IP + Harmony flag with empty IP: volume must not reach Hub; ADB shell blocked
+    room['useHarmonyHub'] = True
+    room['harmonyHubIp'] = ''
+    r = c.post('/api/room/fr/remote', json={'command': 'vol_up'}, environ_base=REMOTE, headers=HDR)
+    assert r.status_code == 200 and r.get_json().get('ok') is False
+    assert 'LUMA_ADB_COMMANDS' in (r.get_json().get('detail') or '')
+    assert not any(c[0].startswith('HARMONY') for c in calls), calls
+    assert _blocked_side_channels() == [], calls
 
 
 def test_remote_side_channels_open_when_allowlist_unset(minimal_app, owner, monkeypatch):
@@ -298,8 +325,9 @@ def test_remote_side_channels_open_when_allowlist_unset(minimal_app, owner, monk
     assert r.status_code == 200 and any(x[0] == 'KODI pause_toggle' for x in calls)
     calls.clear()
 
-    # HA power when Harmony is off
+    # HA power when Hub IP is cleared (Harmony path inactive)
     room['useHarmonyHub'] = False
+    room['harmonyHubIp'] = ''
     room['devices'][0]['services'] = []
     r = c.post('/api/room/fr/remote', json={'command': 'power'}, environ_base=REMOTE, headers=HDR)
     assert r.status_code == 200 and ('HA fire', 'switch.tv') in calls

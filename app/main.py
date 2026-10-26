@@ -20403,9 +20403,11 @@ def room_remote(room_id):
         host = (device.get('host', '') if device else '') or room.get('host') or room.get('ip') or ''
         port = (device.get('connectPort') if device else None) or room.get('connectPort') or room.get('adb_port', 5555)
 
-        # v265b: when LUMA_ADB_COMMANDS is set (test), skip Harmony / Kodi / HA / WoL side
-        # channels so Remote cannot power, volume, pause, or wake a TV. Pair/Connect stays.
-        # Prod leaves LUMA_ADB_COMMANDS unset, so this is a no-op there.
+        # v265b / v285: when LUMA_ADB_COMMANDS is set (test), skip Kodi / HA / WoL side
+        # channels so Remote cannot wake a TV via those paths. Pair/Connect stays.
+        # v285: Harmony Hub is direct local API by room IP — keep it open whenever the
+        # room has a Hub configured (do not leave volume / transport inert on LIVE).
+        # Prod leaves LUMA_ADB_COMMANDS unset, so Kodi/HA/WoL stay open there.
         _remote_side_channels = not adb_allowlist_active()
 
         # --- Kodi JSON-RPC direct path (takes priority for playback + nav commands) ---
@@ -20489,7 +20491,9 @@ def room_remote(room_id):
             'stop': 'Stop',
         }
         harmony_commands = {'power'} | set(_HARMONY_VOLUME_CMDS) | set(_HARMONY_NAV_CMDS)
-        if _remote_side_channels and command in harmony_commands and room.get('useHarmonyHub'):
+        # Direct Hub path: open when the room has a Hub IP (v285). useHarmonyHub alone
+        # without an IP is not enough. Not gated by LUMA_ADB_COMMANDS (ADB Pair safety).
+        if command in harmony_commands and room.get('harmonyHubIp'):
             hub_ip = room.get('harmonyHubIp', '')
             volume_device = room.get('harmonyVolumeDevice', '')
             nav_device = (device.get('harmonyNavigationDevice', '') if device else '') or room.get('harmonyNavigationDevice', '')

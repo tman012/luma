@@ -4,11 +4,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_sw_v284():
+def test_sw_v284_or_newer():
+    import re
     sw = (ROOT / 'static' / 'sw.js').read_text()
     stamp = (ROOT / 'static' / 'sw-stamp.json').read_text()
-    assert "CACHE_VERSION = 'media-kiosk-v284'" in sw
-    assert '"cache_version": "media-kiosk-v284"' in stamp
+    m = re.search(r"CACHE_VERSION = 'media-kiosk-v(\d+)'", sw)
+    assert m and int(m.group(1)) >= 284
+    assert f'"cache_version": "media-kiosk-v{m.group(1)}"' in stamp
 
 
 def test_rooms_sheet_mirrors_activity_height():
