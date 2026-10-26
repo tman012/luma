@@ -235,9 +235,14 @@ def _search(c, title='The Nut Job', media_type='movie'):
     return r.get_json()['releases']
 
 
-def _grab(c, url, tmdb=TMDB, name='The.Nut.Job.2014.1080p'):
+def _grab(c, url, tmdb=TMDB, name='The.Nut.Job.2014.1080p', season=None, episode=None):
+    body = {'torrent_url': url, 'torrent_name': name, 'tmdb_data': tmdb}
+    if season is not None:
+        body['season'] = season
+    if episode is not None:
+        body['episode'] = episode
     return c.post('/api/downloads/add', headers=ORIGIN, content_type='application/json',
-                  data=json.dumps({'torrent_url': url, 'torrent_name': name, 'tmdb_data': tmdb}))
+                  data=json.dumps(body))
 
 
 DL = f'https://t.example/dl/555?passkey={PASSKEY}'
@@ -281,13 +286,60 @@ def test_grab_from_sources_sends_the_torrent_to_qbittorrent(signed_in, env):
     assert env['qbit'].fetched == []
 
 
-def test_tv_grab_from_sources(signed_in, env):
+def test_tv_grab_from_sources(signed_in, env, monkeypatch, tmp_path):
+    """v300: Sources TV → /api/downloads/add routes through tv_grab (season + luma-test-tv), never library_mover."""
+    from app import library_mover as lm, tv_grab, tv_store
+    from tests.test_library_mover import Settings
+    from tests.test_tv_v158c import FakeQbit as TvFakeQbit
+
     torznab(env['store'])
     env['mock'].set('t.example', R(body=rss(('Severance S02 1080p WEB-DL', DL))), R(body=torrent_bytes()))
     rel = _search(signed_in, 'Severance', 'tv')[0]
-    r = _grab(signed_in, rel['download_url'], tmdb={'tmdb_id': 95396, 'media_type': 'tv', 'title': 'Severance'})
-    assert r.status_code == 200
-    assert env['tracked'][0][1]['media_type'] == 'tv'
+
+    monkeypatch.setitem(tv_store._cfg, 'path', str(tmp_path / 'tv.db'))
+    tv_store._ready.clear()
+    monkeypatch.setenv('LUMA_INSTANCE', 'test')
+    monkeypatch.setenv('LUMA_TEST_ALLOW', 'tv_grab')
+    monkeypatch.delenv('LUMA_TEST_TV_TAG', raising=False)
+    monkeypatch.delenv('LUMA_TV_CATEGORY', raising=False)
+    lm.init(settings=Settings())
+    tv_grab._have_category.clear()
+    with tv_store.write() as conn:
+        conn.execute(
+            "INSERT INTO series (id, tmdb_id, title, path_id, folder, added_at, monitored) "
+            "VALUES (1, 95396, 'Severance', 'p1', 'Severance (2022)', 0, 1)")
+        for ep in range(1, 11):
+            conn.execute(
+                "INSERT INTO episodes (series_id, season_number, episode_number, title, monitored) "
+                "VALUES (1, 2, ?, ?, 1)", (ep, f'Episode {ep}'))
+
+    q = TvFakeQbit()
+    payload = torrent_bytes(name=b'Severance.S02.1080p')
+    real = tv_grab.grab
+    monkeypatch.setattr(
+        tv_grab, 'grab',
+        lambda it, sid, season, ids, origin, now=None, **k: real(
+            it, sid, season, ids, origin, now,
+            session_factory=q.factory,
+            fetch=lambda u: ('torrent', payload),
+            tokens_only=k.get('tokens_only', False)))
+    tracked_lm = []
+    monkeypatch.setattr(lm, 'track', lambda *a, **k: tracked_lm.append(a))
+
+    r = _grab(
+        signed_in, rel['download_url'],
+        tmdb={'tmdb_id': 95396, 'media_type': 'tv', 'title': 'Severance'},
+        name=rel['title'], season=2)
+    assert r.status_code == 200, r.get_json()
+    body = r.get_json()
+    assert body['success'] is True and body.get('tv') is True
+    assert q.torrents[0]['category'] == q.torrents[0]['tags'] == 'luma-test-tv'
+    with tv_store.connect() as conn:
+        g = dict(conn.execute('SELECT * FROM grabs').fetchone())
+    assert (g['series_id'], g['origin'], g['season_number']) == (1, 'manual', 2)
+    assert tracked_lm == []
+    assert env['tracked'] == []  # auto_renamer / library_mover never tracked TV
+    tv_store._ready.clear()
 
 
 def test_ipt_cookie_goes_to_its_saved_base_url_only(signed_in, env):
