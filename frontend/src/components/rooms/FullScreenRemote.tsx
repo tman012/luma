@@ -64,13 +64,31 @@ function formatDuration(ms: number): string {
 function useHoldRepeat(onFire: () => void) {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activePointerRef = useRef<number | null>(null);
 
-  const clear = useCallback(() => {
+  const clearTimers = useCallback(() => {
     if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
     if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
   }, []);
 
-  const start = useCallback(() => {
+  const stop = useCallback((e?: React.PointerEvent) => {
+    if (activePointerRef.current === null) return;
+    if (e && e.pointerId !== activePointerRef.current) return;
+    const pid = activePointerRef.current;
+    activePointerRef.current = null;
+    if (e?.currentTarget) {
+      try { e.currentTarget.releasePointerCapture(pid); } catch { /* already released */ }
+    }
+    clearTimers();
+  }, [clearTimers]);
+
+  const start = useCallback((e: React.PointerEvent) => {
+    // One pointerId → one start(); ignores iOS Safari ghost mouse after touch.
+    if (activePointerRef.current !== null) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    activePointerRef.current = e.pointerId;
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
     onFire();
     navigator.vibrate?.(10);
     timeoutRef.current = setTimeout(() => {
@@ -81,15 +99,13 @@ function useHoldRepeat(onFire: () => void) {
     }, 400);
   }, [onFire]);
 
-  useEffect(() => clear, [clear]);
+  useEffect(() => clearTimers, [clearTimers]);
 
   return {
-    onTouchStart: (e: React.TouchEvent) => { e.preventDefault(); start(); },
-    onTouchEnd: clear,
-    onTouchCancel: clear,
-    onMouseDown: start,
-    onMouseUp: clear,
-    onMouseLeave: clear,
+    onPointerDown: start,
+    onPointerUp: stop,
+    onPointerCancel: stop,
+    onLostPointerCapture: stop,
   };
 }
 
@@ -354,10 +370,22 @@ function RockerButton({
       className={`flex w-[56px] h-[78px] items-center justify-center transition-transform duration-100 active:scale-[0.97] ${radiusClass}`}
       style={pressed ? rockerActive : baseStyle}
       aria-label={label}
-      onPointerDown={() => setPressed(true)}
-      onPointerUp={() => setPressed(false)}
-      onPointerLeave={() => setPressed(false)}
-      {...hold}
+      onPointerDown={(e) => {
+        setPressed(true);
+        hold.onPointerDown(e);
+      }}
+      onPointerUp={(e) => {
+        setPressed(false);
+        hold.onPointerUp(e);
+      }}
+      onPointerCancel={(e) => {
+        setPressed(false);
+        hold.onPointerCancel(e);
+      }}
+      onLostPointerCapture={(e) => {
+        setPressed(false);
+        hold.onLostPointerCapture(e);
+      }}
     >
       <span className={pressed ? 'text-white/90' : 'text-white/60'}>
         {children}
