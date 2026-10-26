@@ -7,11 +7,20 @@ export interface GrSettings {
   year_from: number; year_to: number; language: string; min_votes: number; imdb_min_rating: number; imdb_min_votes: number;
   profile_id: number | null; min_seeders: number; skip_same_collection: boolean;
 }
-export interface GrPick { tmdb_id: number; title: string; year: number | null; genre: string; poster_path: string | null }
+export interface GrPick {
+  tmdb_id: number; title: string; year: number | null; genre: string; poster_path: string | null;
+  /** Live grab = true; dry would-grab = false; legacy rows may omit (treat as grab). */
+  grabbed?: boolean; detail?: string | null;
+}
+export interface GrSkip {
+  tmdb_id?: number; title?: string; year?: number | null; genre?: string; detail?: string;
+}
 export interface GrRun {
   id: number; started_at: number; finished_at: number | null; kind: string; dry: boolean; status: string;
   wanted: number; grabbed: number; stop_reason: string | null; genres: string[]; picks: GrPick[];
   failures: { genre: string; reason: string }[]; error: string | null;
+  /** Non-grab attempts keyed by reason (same_collection, no_release, …). */
+  skips?: Record<string, GrSkip[]>;
 }
 export interface GrStatus {
   running: boolean; enabled: boolean; next_run: string | null; failures_7d: number;

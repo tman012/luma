@@ -149,33 +149,122 @@ function Picks({ run }: { run: Partial<GrRun> }) {
   );
 }
 
-/** Flat history rows: every pick (and genre miss) visible — no collapsed "N of M" run groups. */
+/** Skip reason labels (AmEng) — short refuse lines only. */
+const SKIP_REASON: Record<string, string> = {
+  same_collection: 'Same collection',
+  owned_collection: 'Same collection',
+  owned: 'Already in the library',
+  no_release: 'No release found',
+  refused: 'No release found',
+};
+
+/** Grabbed (or dry would-grab) titles belong in the default list. */
+export function isGrabPick(run: Pick<GrRun, 'dry'>, pick: { grabbed?: boolean }): boolean {
+  if (run.dry) return true;
+  return pick.grabbed !== false;
+}
+
+export type HistDetail = {
+  skips: { key: string; title: string; meta: string; reason: string }[];
+  failures: { genre: string; reason: string }[];
+  error: string | null;
+  summary: string | null;
+};
+
+/** Default (collapsed) history rows: grabbed titles + compact zero-grab rows. Attempts behind disclosure. */
 export type HistRow =
-  | { kind: 'pick'; key: string; at: number; dry: boolean; pick: NonNullable<GrRun['picks']>[number] }
-  | { kind: 'failure'; key: string; at: number; dry: boolean; genre: string; reason: string }
-  | { kind: 'error'; key: string; at: number; dry: boolean; error: string }
-  | { kind: 'empty'; key: string; at: number; dry: boolean; grabbed: number; wanted: number; status: string };
+  | { kind: 'grab'; key: string; runId: number; at: number; dry: boolean; pick: NonNullable<GrRun['picks']>[number]; disclose: boolean }
+  | { kind: 'compact'; key: string; runId: number; at: number; dry: boolean; label: 'Running' | 'Nothing added'; error: string | null; disclose: boolean };
+
+export function runDetails(r: GrRun): HistDetail | null {
+  const skips: HistDetail['skips'] = [];
+  const bag = r.skips && typeof r.skips === 'object' && !Array.isArray(r.skips) ? r.skips : {};
+  for (const [why, list] of Object.entries(bag)) {
+    if (!Array.isArray(list)) continue;
+    const reason = SKIP_REASON[why] || why.replace(/_/g, ' ');
+    list.forEach((s, i) => {
+      const title = String(s?.title || 'Untitled');
+      const meta = [s?.year, DISPLAY[String(s?.genre || '')] || s?.genre].filter(Boolean).join(' · ');
+      const detail = s?.detail ? String(s.detail) : '';
+      skips.push({ key: `${r.id}-s-${why}-${s?.tmdb_id ?? i}`, title, meta, reason: detail || reason });
+    });
+  }
+  const failures = (r.failures || []).map(f => ({ genre: f.genre, reason: f.reason }));
+  const error = r.error || null;
+  const summary = (r.grabbed || r.wanted) ? result(r) : null;
+  if (!skips.length && !failures.length && !error && !summary) return null;
+  // Only offer disclosure when there is something beyond the grab rows themselves.
+  if (!skips.length && !failures.length && !error) {
+    // Summary alone (Added N of M) is optional; show when grab count incomplete or dry.
+    if (r.status === 'running') return null;
+    if ((r.grabbed ?? 0) >= (r.wanted ?? 0) && !r.dry) return null;
+  }
+  return { skips, failures, error, summary };
+}
 
 export function flattenHistory(history: GrRun[]): HistRow[] {
   const rows: HistRow[] = [];
   for (const r of history) {
     const at = r.started_at;
     const dry = !!r.dry;
-    let n = 0;
-    for (const p of r.picks || []) {
-      rows.push({ kind: 'pick', key: `${r.id}-p-${p.tmdb_id}-${n++}`, at, dry, pick: p });
+    const grabs = (r.picks || []).filter(p => isGrabPick(r, p));
+    const details = runDetails(r);
+    const disclose = !!details && (details.skips.length > 0 || details.failures.length > 0 || !!details.error
+      || (!!details.summary && grabs.length > 0));
+    if (grabs.length) {
+      grabs.forEach((p, i) => {
+        rows.push({
+          kind: 'grab', key: `${r.id}-p-${p.tmdb_id}-${i}`, runId: r.id, at, dry, pick: p,
+          disclose: disclose && i === grabs.length - 1,
+        });
+      });
+      continue;
     }
-    for (const f of r.failures || []) {
-      rows.push({ kind: 'failure', key: `${r.id}-f-${f.genre}`, at, dry, genre: f.genre, reason: f.reason });
+    if (r.status === 'running') {
+      rows.push({ kind: 'compact', key: `${r.id}-x`, runId: r.id, at, dry, label: 'Running', error: null, disclose: false });
+      continue;
     }
-    if (r.error) {
-      rows.push({ kind: 'error', key: `${r.id}-e`, at, dry, error: r.error });
-    }
-    if (!(r.picks || []).length && !(r.failures || []).length && !r.error) {
-      rows.push({ kind: 'empty', key: `${r.id}-x`, at, dry, grabbed: r.grabbed, wanted: r.wanted, status: r.status });
-    }
+    // Zero-grab night: compact row (Nothing added / error), disclosure when attempts exist.
+    const hasAttempt = !!(details && (details.skips.length || details.failures.length || details.error));
+    rows.push({
+      kind: 'compact', key: `${r.id}-x`, runId: r.id, at, dry,
+      label: 'Nothing added', error: r.error || null,
+      disclose: hasAttempt,
+    });
   }
   return rows;
+}
+
+function HistChevron({ open }: { open: boolean }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      style={{ transition: 'transform 150ms', transform: open ? 'rotate(180deg)' : 'none', color: 'rgba(255,255,255,0.3)' }}
+      aria-hidden>
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+function HistDetails({ run }: { run: GrRun }) {
+  const d = runDetails(run);
+  if (!d) return null;
+  return (
+    <div data-testid="gr-history-details" style={{ borderTop: '1px solid rgba(255,255,255,0.04)', padding: '8px 4px 12px 34px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {d.summary && <div data-testid="gr-history-summary" style={{ fontSize: 12, color: W50 }}>{d.summary}</div>}
+      {d.skips.map(s => (
+        <div key={s.key} data-testid="gr-history-skip" style={{ fontSize: 12, color: W70, display: 'flex', gap: 8, minWidth: 0 }}>
+          <span style={{ color: W95, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.title}</span>
+          {s.meta ? <span style={{ color: W50, flex: 'none' }}>{s.meta}</span> : null}
+          <span style={{ color: RED, flex: 'none' }}>{s.reason}</span>
+        </div>
+      ))}
+      {d.failures.map(f => (
+        <div key={f.genre} data-testid="gr-failure" style={{ fontSize: 12, color: RED }}>⚠ {DISPLAY[f.genre] || f.genre}: {lower(f.reason)}</div>
+      ))}
+      {d.error && <div data-testid="gr-history-error" style={{ fontSize: 12, color: RED }}>⚠ {d.error}</div>}
+    </div>
+  );
 }
 
 function StatusPanel({ status, history }: { status: GrStatus; history: GrRun[] }) {
@@ -188,6 +277,9 @@ function StatusPanel({ status, history }: { status: GrStatus; history: GrRun[] }
     ['Failures (7 days)', String(status.failures_7d)],
   ];
   const rows = flattenHistory(history);
+  const byId = new Map(history.map(r => [r.id, r]));
+  const [open, setOpen] = useState<Record<number, boolean>>({});
+  const toggle = (id: number) => setOpen(cur => ({ ...cur, [id]: !cur[id] }));
   return (
     <section aria-label="Status" data-testid="gr-status" style={{ ...panel, padding: '16px 16px 8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
@@ -205,33 +297,41 @@ function StatusPanel({ status, history }: { status: GrStatus; history: GrRun[] }
       <h4 style={group}>History</h4>
       <div role="list" data-testid="gr-history">
         {rows.length === 0 && <div style={{ padding: '12px 0', fontSize: 13, color: W50 }}>No runs yet</div>}
-        {rows.map(row => (
-          <div role="listitem" key={row.key} data-testid="gr-history-row" data-kind={row.kind}
-            style={{ borderTop: '1px solid rgba(255,255,255,0.06)', minHeight: 44, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 4px', fontSize: 13, minWidth: 0 }}>
-            {row.kind === 'pick' && (
-              <>
-                <Poster path={row.pick.poster_path} title={row.pick.title} />
-                <span data-testid="gr-pick" style={{ color: W95, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0, fontWeight: 600 }}>{row.pick.title}</span>
-                <span style={{ color: W50, fontSize: 12, flex: 'none' }}>{[row.pick.year, DISPLAY[row.pick.genre] || row.pick.genre].filter(Boolean).join(' · ')}</span>
-              </>
-            )}
-            {row.kind === 'failure' && (
-              <span data-testid="gr-failure" style={{ flex: 1, fontSize: 12, color: RED }}>⚠ {DISPLAY[row.genre] || row.genre}: {lower(row.reason)}</span>
-            )}
-            {row.kind === 'error' && (
-              <span data-testid="gr-history-error" style={{ flex: 1, fontSize: 12, color: RED }}>⚠ {row.error}</span>
-            )}
-            {row.kind === 'empty' && (
-              <span data-testid="gr-history-empty" style={{ flex: 1, color: W50, fontWeight: 500 }}>
-                {row.status === 'running' ? 'Running' : 'Nothing added'}
-              </span>
-            )}
-            <span style={{ flex: 'none', fontSize: 12, color: W50, textAlign: 'right' }}>
-              {stamp(new Date(row.at * 1000))}
-              {row.dry && <span style={{ display: 'block' }}>Dry run</span>}
-            </span>
-          </div>
-        ))}
+        {rows.map(row => {
+          const isOpen = !!open[row.runId];
+          const run = byId.get(row.runId);
+          return (
+            <div key={row.key} role="listitem" data-testid="gr-history-row" data-kind={row.kind} data-run={row.runId}
+              style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+              <div style={{ minHeight: 44, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 4px', fontSize: 13, minWidth: 0 }}>
+                {row.kind === 'grab' && (
+                  <>
+                    <Poster path={row.pick.poster_path} title={row.pick.title} />
+                    <span data-testid="gr-pick" style={{ color: W95, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0, fontWeight: 600 }}>{row.pick.title}</span>
+                    <span style={{ color: W50, fontSize: 12, flex: 'none' }}>{[row.pick.year, DISPLAY[row.pick.genre] || row.pick.genre].filter(Boolean).join(' · ')}</span>
+                  </>
+                )}
+                {row.kind === 'compact' && (
+                  row.error
+                    ? <span data-testid="gr-history-error" style={{ flex: 1, fontSize: 12, color: RED }}>⚠ {row.error}</span>
+                    : <span data-testid="gr-history-empty" style={{ flex: 1, color: W50, fontWeight: 500 }}>{row.label}</span>
+                )}
+                <span style={{ flex: 'none', fontSize: 12, color: W50, textAlign: 'right' }}>
+                  {stamp(new Date(row.at * 1000))}
+                  {row.dry && <span style={{ display: 'block' }}>Dry run</span>}
+                </span>
+                {row.disclose && (
+                  <button type="button" className="lp-focus" data-testid="gr-history-disclose" aria-expanded={isOpen}
+                    aria-label={isOpen ? 'Hide details' : 'Show details'} onClick={() => toggle(row.runId)}
+                    style={{ flex: 'none', width: 44, height: 44, margin: '-4px', border: 'none', background: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
+                    <HistChevron open={isOpen} />
+                  </button>
+                )}
+              </div>
+              {row.disclose && isOpen && run && <HistDetails run={run} />}
+            </div>
+          );
+        })}
       </div>
     </section>
   );
@@ -250,7 +350,12 @@ export function normGr(v: unknown): GrView | null {
     settings: { ...s, include_genres: arr(s.include_genres), exclude_genres: arr(s.exclude_genres) } };
 }
 const normHistory = (h: GrRun[] | null | undefined): GrRun[] =>
-  arr(h).filter(isObj).map(r => ({ ...r, picks: arr(r.picks), failures: arr(r.failures) }));
+  arr(h).filter(isObj).map(r => ({
+    ...r,
+    picks: arr(r.picks),
+    failures: arr(r.failures),
+    skips: isObj(r.skips) ? r.skips as GrRun['skips'] : {},
+  }));
 
 export function GenreRouletteSettings({ wide = true }: { wide?: boolean } = {}) {
   const [d, setD] = useState<GrView | null>(null);

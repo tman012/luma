@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { GenreRouletteSettings, clock, dot, flattenHistory, result, stamp, when } from '@/components/automation/GenreRouletteSettings';
+import { GenreRouletteSettings, clock, dot, flattenHistory, isGrabPick, result, runDetails, stamp, when } from '@/components/automation/GenreRouletteSettings';
 
 const GENRES = ['Action', 'Adventure', 'Animation', 'Comedy', 'Crime', 'Documentary', 'Drama', 'Family', 'Fantasy', 'History',
   'Horror', 'Music', 'Mystery', 'Romance', 'Science Fiction', 'Thriller', 'War', 'Western'];
@@ -64,12 +64,16 @@ describe('v252 Settings > Automation > Genre roulette', () => {
     expect(chips.find(c => c.textContent?.endsWith('Horror'))!.style.textDecoration).toBe('line-through');
     expect(screen.getByTestId('gr-state').textContent).toBe('● Off');
     expect(screen.getAllByTestId('gr-tile').map(t => t.textContent)).toContain('Last resultAdded 2 of 3');
-    // Flat history: every pick and genre miss visible — no click-into-run, no "N of M" row chrome
+    // Compact history (v298): grabbed titles only by default; failures behind per-run disclosure
     expect(screen.queryByTestId('gr-history-run')).toBeNull();
     expect(screen.getByTestId('gr-history').textContent || '').not.toMatch(/\d+ of \d+/);
     expect(screen.getAllByTestId('gr-pick').map(p => p.textContent)).toEqual(['Prisoners', 'Zodiac']);
-    expect(screen.getAllByTestId('gr-history-row').map(r => r.dataset.kind)).toEqual(['pick', 'pick', 'failure']);
+    expect(screen.getAllByTestId('gr-history-row').map(r => r.dataset.kind)).toEqual(['grab', 'grab']);
+    expect(screen.queryByTestId('gr-failure')).toBeNull();
+    expect(screen.getByTestId('gr-history-disclose')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('gr-history-disclose'));
     expect(screen.getByTestId('gr-failure').textContent).toBe('⚠ Action: no release found');
+    expect(screen.getByTestId('gr-history-summary').textContent).toBe('Added 2 of 3');
     expect(screen.getAllByText(/Tue Oct 20, 3:00 AM/).length).toBeGreaterThanOrEqual(2);
     expect(document.body.textContent || '').not.toMatch(/radarr|colour|favourite/i);
   });
@@ -153,12 +157,44 @@ describe('v252 Settings > Automation > Genre roulette', () => {
     expect([dot({ ...r, grabbed: 3, wanted: 3 }), dot({ ...r, grabbed: 2, wanted: 3 }), dot({ ...r, grabbed: 0, wanted: 3 })]).toEqual(['#4ade80', '#fbbf24', '#f87171']);
   });
 
-  it('flattens history so every pick is a row (no collapsed run grouping)', () => {
-    const rows = flattenHistory([RUN as never, {
+  it('defaults history to grabbed titles; attempts stay behind disclosure', () => {
+    const withSkips = {
+      ...RUN,
+      picks: [
+        { ...RUN.picks[0], grabbed: true },
+        { ...RUN.picks[1], grabbed: true },
+      ],
+      skips: { same_collection: [{ tmdb_id: 1, title: 'Duped', year: 2010, genre: 'Action' }] },
+    };
+    const rows = flattenHistory([withSkips as never, {
       ...RUN, id: 8, grabbed: 0, wanted: 3, picks: [], failures: [], error: "Trackers couldn't be reached",
     } as never]);
-    expect(rows.map(r => r.kind)).toEqual(['pick', 'pick', 'failure', 'error']);
-    expect(rows.filter(r => r.kind === 'pick').map(r => r.kind === 'pick' && r.pick.title)).toEqual(['Prisoners', 'Zodiac']);
-    expect(flattenHistory([{ ...RUN, id: 9, picks: [], failures: [], error: null, grabbed: 0, wanted: 3, status: 'done' } as never]).map(r => r.kind)).toEqual(['empty']);
+    expect(rows.map(r => r.kind)).toEqual(['grab', 'grab', 'compact']);
+    expect(rows.filter(r => r.kind === 'grab').map(r => r.kind === 'grab' && r.pick.title)).toEqual(['Prisoners', 'Zodiac']);
+    expect(rows[1].kind === 'grab' && rows[1].disclose).toBe(true);
+    expect(rows[2].kind === 'compact' && rows[2].error).toBe("Trackers couldn't be reached");
+    expect(rows[2].kind === 'compact' && rows[2].disclose).toBe(true);
+    const empty = flattenHistory([{ ...RUN, id: 9, picks: [], failures: [], error: null, grabbed: 0, wanted: 3, status: 'done' } as never]);
+    expect(empty.map(r => r.kind)).toEqual(['compact']);
+    expect(empty[0].kind === 'compact' && empty[0].label).toBe('Nothing added');
+    expect(isGrabPick({ dry: true }, { grabbed: false })).toBe(true);
+    expect(isGrabPick({ dry: false }, { grabbed: false })).toBe(false);
+    expect(isGrabPick({ dry: false }, {})).toBe(true);
+    const d = runDetails(withSkips as never)!;
+    expect(d.skips.map(s => s.title)).toEqual(['Duped']);
+    expect(d.failures.map(f => f.genre)).toEqual(['Action']);
+  });
+
+  it('dry-run would-grabs appear as grab rows with Dry run stamp', async () => {
+    const dryRun = {
+      ...RUN, id: 11, dry: true, grabbed: 2, picks: RUN.picks.map(p => ({ ...p, grabbed: false })), failures: [],
+    };
+    stub((url, init) => (!init?.method && !url.endsWith('/status')
+      ? ok({ ...view(), history: [dryRun] }) : undefined));
+    render(<GenreRouletteSettings />);
+    await waitFor(() => expect(screen.getByTestId('genre-roulette')).toBeTruthy());
+    expect(screen.getAllByTestId('gr-history-row').map(r => r.dataset.kind)).toEqual(['grab', 'grab']);
+    expect(screen.getAllByText('Dry run').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByTestId('gr-failure')).toBeNull();
   });
 });

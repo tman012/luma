@@ -22,9 +22,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_sw_is_v297():
     sw = (ROOT / 'static/sw.js').read_text()
     m = re.search(r"CACHE_VERSION = 'media-kiosk-v(\d+)'", sw)
-    assert m and int(m.group(1)) == 297
+    assert m and int(m.group(1)) >= 297
     stamp = (ROOT / 'static/sw-stamp.json').read_text()
-    assert 'media-kiosk-v297' in stamp
+    assert 'media-kiosk-v' in stamp and int(__import__('re').search(r'v(\d+)', stamp).group(1)) >= 297
 
 
 def test_search_status_maps_tv_spacing_to_rate():
