@@ -13,6 +13,9 @@ import { apiUrl } from '@/urlHelpers';
 // ---------------------------------------------------------------------------
 
 const DISMISS_THRESHOLD = 120;
+const ENTER_DURATION = 600;
+const EXIT_DURATION = 400;
+const SPRING = 'cubic-bezier(0.16, 1, 0.3, 1)';
 
 // ---------------------------------------------------------------------------
 // Helpers (moved from RoomsPage)
@@ -335,6 +338,8 @@ function UnmatchedSessionCard({ session }: { session: SessionData }) {
 
 // ---------------------------------------------------------------------------
 // RoomsSheet — bottom sheet portal
+// Mirrors ActivitySheet chrome: near-full height, phase enter/exit, grab-handle
+// drag-to-dismiss, tap-outside to close. Rooms content unchanged.
 // ---------------------------------------------------------------------------
 
 interface RoomsSheetProps {
@@ -348,23 +353,25 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
   const [remoteTarget, setRemoteTarget] = useState<{ roomId: string; deviceId: string } | null>(null);
   const [deviceMap, setDeviceMap] = useState<Record<string, DeviceData[]>>({});
 
-  // Sheet animation state
   const dragRef = useRef({ active: false, startY: 0, currentY: 0 });
   const [dragOffset, setDragOffset] = useState(0);
-  const [dismissing, setDismissing] = useState(false);
-  const [entered, setEntered] = useState(false);
+  const [phase, setPhase] = useState<'entering' | 'visible' | 'exiting' | 'gone'>('gone');
 
-  // Paint html background + body scroll lock when sheet is open
+  useEffect(() => {
+    if (open) {
+      setPhase('entering');
+      setDragOffset(0);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => setPhase('visible'));
+      });
+    }
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
-    const prevBg = document.documentElement.style.background;
-    const prev = document.body.style.overflow;
-    document.documentElement.style.background = '#000';
+    const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    return () => {
-      document.documentElement.style.background = prevBg;
-      document.body.style.overflow = prev;
-    };
+    return () => { document.body.style.overflow = prevOverflow; };
   }, [open]);
 
   // Fetch device config when sheet opens
@@ -381,31 +388,6 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
       .catch(() => {});
   }, [open]);
 
-  // Animate in when open changes to true
-  useEffect(() => {
-    if (open) {
-      setDismissing(false);
-      setDragOffset(0);
-      requestAnimationFrame(() => setEntered(true));
-    } else {
-      setEntered(false);
-    }
-  }, [open]);
-
-  // ESC to close (capture phase)
-  useEffect(() => {
-    if (!open) return;
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        handleDismiss();
-      }
-    }
-    window.addEventListener('keydown', handleKey, true);
-    return () => window.removeEventListener('keydown', handleKey, true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, onClose]);
-
   const toggleRoom = useCallback((roomId: string) => {
     setExpandedRoom((prev) => (prev === roomId ? null : roomId));
   }, []);
@@ -421,109 +403,113 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
       setDragOffset(0);
       return;
     }
-    setDismissing(true);
-    setTimeout(() => {
-      onClose();
-      setExpandedRoom(null);
-      setRemoteTarget(null);
-    }, 250);
+    setDragOffset(0);
+    requestAnimationFrame(() => {
+      setPhase('exiting');
+      setTimeout(() => {
+        setPhase('gone');
+        setExpandedRoom(null);
+        setRemoteTarget(null);
+        onClose();
+      }, EXIT_DURATION);
+    });
   }, [onClose, remoteTarget]);
 
-  // Drag-to-dismiss (touch on grab handle)
+  // ESC to close (capture phase)
+  useEffect(() => {
+    if (!open) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        handleDismiss();
+      }
+    }
+    window.addEventListener('keydown', handleKey, true);
+    return () => window.removeEventListener('keydown', handleKey, true);
+  }, [open, handleDismiss]);
+
   const onTouchStart = useCallback((e: React.TouchEvent) => {
     const target = e.target as HTMLElement;
-    const isHandle = target.closest('[data-sheet-handle]');
-    if (isHandle && e.touches.length > 0) {
+    if (target.closest('[data-sheet-handle]') && e.touches.length > 0) {
       dragRef.current = { active: true, startY: e.touches[0]!.clientY, currentY: e.touches[0]!.clientY };
     }
   }, []);
-
   const onTouchMove = useCallback((e: React.TouchEvent) => {
     if (!dragRef.current.active || !e.touches.length) return;
     dragRef.current.currentY = e.touches[0]!.clientY;
-    const dy = Math.max(0, dragRef.current.currentY - dragRef.current.startY);
-    setDragOffset(dy);
+    setDragOffset(Math.max(0, dragRef.current.currentY - dragRef.current.startY));
   }, []);
-
   const onTouchEnd = useCallback(() => {
-    if (!dragRef.current.active) return; // Ignore touch-ends from non-handle interactions
+    if (!dragRef.current.active) return;
     const dy = dragRef.current.currentY - dragRef.current.startY;
     dragRef.current.active = false;
-    if (dy > DISMISS_THRESHOLD) {
-      handleDismiss();
-    } else {
-      setDragOffset(0);
-    }
+    if (dy > DISMISS_THRESHOLD) handleDismiss();
+    else setDragOffset(0);
   }, [handleDismiss]);
 
-  if (!open) return null;
+  if (phase === 'gone' && !open) return null;
 
-  const sheetTranslate = dismissing ? '100%' : entered ? `${dragOffset}px` : '100%';
+  const sheetTransform =
+    dragOffset > 0 ? `translate3d(0, ${dragOffset}px, 0)`
+      : phase === 'visible' ? 'translate3d(0, 0, 0)'
+        : 'translate3d(0, 100%, 0)';
+
+  const sheetTransition =
+    dragOffset > 0 ? 'none'
+      : phase === 'exiting' ? `transform ${EXIT_DURATION}ms cubic-bezier(0.4, 0, 1, 1)`
+        : `transform ${ENTER_DURATION}ms ${SPRING}`;
 
   return createPortal(
     <>
-      {/* Backdrop */}
       <div className="luma-fullscreen luma-bleed"
+        data-sheet="RoomsSheet"
         style={{
-          position: 'fixed',
-          inset: 0,
+          position: 'fixed', inset: 0,
           zIndex: 10001,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'flex-end',
-          background: entered && !dismissing ? 'rgba(0,0,0,0.4)' : 'transparent',
-          transition: 'background 0.25s ease',
+          display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+          backgroundColor: phase === 'visible' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0)',
+          transition: phase === 'exiting'
+            ? `background-color ${EXIT_DURATION}ms ease`
+            : `background-color ${ENTER_DURATION}ms ease`,
         }}
-        onClick={(e) => {
-          if (e.target === e.currentTarget) handleDismiss();
-        }}
+        onClick={(e) => { if (e.target === e.currentTarget) handleDismiss(); }}
       >
-        {/* Sheet */}
         <div className="luma-bleed-panel"
           onTouchStart={onTouchStart}
           onTouchMove={onTouchMove}
           onTouchEnd={onTouchEnd}
           style={{
-            maxHeight: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
-            display: 'flex',
-            flexDirection: 'column',
+            height: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
+            display: 'flex', flexDirection: 'column',
             background: 'var(--color-kiosk-black)',
             borderRadius: '20px 20px 0 0',
             overflow: 'hidden',
-            transform: `translateY(${sheetTranslate})`,
-            transition: dragOffset > 0 ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1), filter 0.3s ease',
+            transform: sheetTransform,
+            transition: remoteTarget
+              ? `${sheetTransition}, filter 0.3s ease`
+              : sheetTransition,
             willChange: 'transform',
+            backfaceVisibility: 'hidden',
             filter: remoteTarget ? 'brightness(0.15)' : 'none',
           }}
         >
           {/* Grab handle */}
-          <div
-            data-sheet-handle
-            style={{
-              flexShrink: 0,
-              display: 'flex',
-              justifyContent: 'center',
-              padding: '12px 0 8px',
-              cursor: 'grab',
-            }}
+          <div data-sheet-handle
+            style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '12px 0 8px', cursor: 'grab' }}
           >
-            <div style={{
-              width: '40px',
-              height: '5px',
-              borderRadius: '3px',
-              background: 'rgba(255,255,255,0.3)',
-            }} />
+            <div style={{ width: 40, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.3)' }} />
           </div>
 
-          {/* Title */}
+          {/* Title — same chrome as Activity (h2 / 18px); Rooms label kept */}
           <div className="shrink-0 px-4 pb-3">
-            <h1 className="text-[22px] font-bold text-white">Rooms</h1>
+            <h2 className="text-[18px] font-bold text-white">Rooms</h2>
           </div>
 
           {/* Scrollable content */}
           <div
-            className="flex-1 overflow-y-auto px-4 pb-4"
-            style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}
+            data-scroll-container
+            className="luma-scroll-y flex-1 px-3 pb-2"
+            style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y' }}
           >
             {roomsLoading ? (
               <div className="flex flex-col gap-3">
@@ -567,7 +553,6 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
               </div>
             )}
 
-            {/* Safe area bottom spacer */}
             <div className="shrink-0" style={{ height: 'env(safe-area-inset-bottom, 12px)' }} />
           </div>
         </div>

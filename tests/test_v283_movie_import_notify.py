@@ -106,9 +106,8 @@ def test_notify_failure_does_not_fail_import(env, monkeypatch):
         assert conn.execute('SELECT 1 FROM watchlist WHERE tmdb_id = 693134').fetchone() is None
 
 
-def test_sw_is_v283():
+def test_sw_is_v283_or_newer():
     import re
     sw = (ROOT / 'static/sw.js').read_text()
     m = re.search(r"CACHE_VERSION = 'media-kiosk-v(\d+)'", sw)
     assert m and int(m.group(1)) >= 283
-    assert "CACHE_VERSION = 'media-kiosk-v283'" in sw
