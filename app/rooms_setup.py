@@ -13,7 +13,7 @@ Routes (reads: any signed-in user; writes: the owner signed in with a real sessi
     GET    /api/rooms/players       players Plex can see now (PMS /clients only; no Offline seeds)
     POST   /api/rooms               {name} — empty room (no player)
     PUT    /api/rooms/<id>          {name?, wake?, host?, port?, mac?, harmony_hub?, harmony_activity?,
-                                    harmony_volume_device?, harmony_nav_device?, default?}
+                                    harmony_volume_device?, harmony_nav_device?, ha_power_entity?, default?}
                                     (player changes go through Pair / connect)
     DELETE /api/rooms/<id>
     POST   /api/rooms/<id>/connect  Pair (owner): optional player body adds the device only on Pair
@@ -21,8 +21,8 @@ Routes (reads: any signed-in user; writes: the owner signed in with a real sessi
                                     prod's `adb pair` first.
 
 Nothing else here starts playback or wakes a device; the only outside call besides Pair is the
-read-only PMS /clients list (``clients_fn``), which tests replace. No Home Assistant: a stored
-``powerMethod: homeassistant`` is shown as None and is left as is unless the wake method is changed.
+read-only PMS /clients list (``clients_fn``), which tests replace. v299: wake ``homeassistant`` maps
+to ``powerMethod: homeassistant`` with ``haPowerEntity`` (Connectors HA URL+token used at wake time).
 """
 import copy
 import ipaddress
@@ -36,8 +36,8 @@ from flask import Blueprint, jsonify, request
 logger = logging.getLogger(__name__)
 bp = Blueprint('rooms_setup', __name__)
 
-WAKES = ('adb', 'wol', 'harmony', 'none')
-_POWER = {'adb': 'adb', 'wol': 'wol', 'harmony': 'harmony', 'none': 'none'}
+WAKES = ('adb', 'wol', 'harmony', 'homeassistant', 'none')
+_POWER = {'adb': 'adb', 'wol': 'wol', 'harmony': 'harmony', 'homeassistant': 'homeassistant', 'none': 'none'}
 MAX_NAME = 40
 _HOST_RE = re.compile(r'^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$')
 _MAC_RE = re.compile(r'^[0-9A-Fa-f]{2}([:-][0-9A-Fa-f]{2}){5}$')
@@ -125,6 +125,8 @@ def _wake(room: Dict[str, Any], dev: Dict[str, Any]) -> str:
         return 'harmony'
     if pm in ('wol', 'wake_on_lan', 'wakeonlan'):
         return 'wol'
+    if pm in ('homeassistant', 'ha'):
+        return 'homeassistant'
     if pm == 'none':
         return 'none'
     if pm == 'adb' or (pm == '' and dev.get('platform') in ('android_tv', 'shield', 'chromecast_gtv') and dev.get('host')):
@@ -213,6 +215,7 @@ def view_room(room: Dict[str, Any], default_id: str, clients: List[Dict[str, Any
                   'harmony_activity': dev.get('harmonyActivity') or '',
                   # v288: device first, then room (matches remote path in main.py)
                   'harmony_nav_device': (dev.get('harmonyNavigationDevice') or room.get('harmonyNavigationDevice') or ''),
+                  'ha_power_entity': dev.get('haPowerEntity') or '',
                   'paired': bool(dev.get('paired')),
                   'online': _online(dev, clients, room), 'wake': _wake(room, dev)}
     return {'id': room['id'], 'name': room.get('name') or '', 'default': room['id'] == default_id,
@@ -352,7 +355,7 @@ def update(room_id: str, body: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(body, dict) or not body:
         raise Invalid({'_': 'Invalid'})
     allowed = {'name', 'player', 'wake', 'host', 'port', 'mac', 'harmony_hub', 'harmony_activity',
-               'harmony_volume_device', 'harmony_nav_device', 'default'}
+               'harmony_volume_device', 'harmony_nav_device', 'ha_power_entity', 'default'}
     if set(body) - allowed:
         raise Invalid({'_': 'Invalid'})
     s = _cfg['settings']
@@ -364,7 +367,7 @@ def update(room_id: str, body: Any) -> Optional[Dict[str, Any]]:
     if 'name' in body:
         patch['name'] = _name(body['name'], rooms, room_id)
     devs = [d for d in room.get('devices') or [] if isinstance(d, dict)]
-    if not devs and any(k in body for k in ('host', 'port', 'mac', 'wake', 'harmony_activity', 'harmony_nav_device', 'player')):
+    if not devs and any(k in body for k in ('host', 'port', 'mac', 'wake', 'harmony_activity', 'harmony_nav_device', 'ha_power_entity', 'player')):
         raise Invalid({'player': 'Pair the player to add it'})
     dev = dict(devs[0]) if devs else {'id': uuid.uuid4().hex[:8], 'services': [{'id': uuid.uuid4().hex[:8], 'type': 'plex'}]}
     dchanged = False
@@ -382,6 +385,9 @@ def update(room_id: str, body: Any) -> Optional[Dict[str, Any]]:
     if 'harmony_nav_device' in body:
         # primary device (Settings RoomAccordion); remote falls back to room
         dev['harmonyNavigationDevice'] = _text(body['harmony_nav_device'], 'harmony_nav_device'); dchanged = True
+    if 'ha_power_entity' in body:
+        # v299: HA power entity for wake=homeassistant (stored as haPowerEntity for power path)
+        dev['haPowerEntity'] = _text(body['ha_power_entity'], 'ha_power_entity', 120); dchanged = True
     if 'harmony_volume_device' in body:
         patch['harmonyVolumeDevice'] = _text(body['harmony_volume_device'], 'harmony_volume_device')
     if 'harmony_hub' in body:

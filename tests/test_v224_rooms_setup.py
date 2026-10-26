@@ -217,7 +217,7 @@ def test_v3_room_extra_devices_and_kodi_services_untouched(rs):
         {'id': 'd1', 'name': 'Shield', 'host': '192.168.1.40', 'platform': 'android_tv', 'powerMethod': 'homeassistant', 'services': [kodi]},
         {'id': 'd2', 'name': 'Other', 'host': '10.0.0.3', 'services': []}]}]}
     r = _req(c, 'get', API).get_json()['rooms'][0]
-    assert r['player']['wake'] == 'none'                        # no Home Assistant: shown as None
+    assert r['player']['wake'] == 'homeassistant'               # v299: HA wake exposed
     assert _req(c, 'put', f'{API}/r1', {'port': 5556}).status_code == 200
     devs = fake._settings['devices']['rooms'][0]['devices']
     assert devs[0]['powerMethod'] == 'homeassistant' and devs[0]['connectPort'] == 5556   # left as is unless wake changes

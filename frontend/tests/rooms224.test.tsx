@@ -117,19 +117,20 @@ describe('Settings > Rooms', () => {
     await waitFor(() => expect(screen.getAllByTestId('room-card')).toHaveLength(1));
     expect(writes(calls)[1]).toEqual({ url: '/api/rooms/lr', method: 'DELETE', body: undefined });
   });
-  it('phone empty: No rooms yet, then New room -> empty Add room', async () => {
+  it('phone empty: No rooms yet, then Add Room wizard (blank name, no chips)', async () => {
     const calls: Call[] = []; stub([], calls);
     render(<RoomsSettings wide={false} />);
     await waitFor(() => expect(screen.getByTestId('rooms-empty')).toBeTruthy());
     expect(screen.getByText('No rooms yet')).toBeTruthy();
     fireEvent.click(screen.getByTestId('rooms-empty-add'));
-    expect(screen.getByRole('heading', { name: 'New room' })).toBeTruthy();
-    expect(screen.getAllByTestId('room-chip').map(c => c.textContent)).toEqual(['Living Room', 'Bedroom', 'Office', 'Den', 'Kids room']);
-    expect((screen.getByTestId('room-name') as HTMLInputElement).value).toBe('Living Room');
+    expect(screen.getByRole('heading', { name: 'Add Room' })).toBeTruthy();
+    expect(screen.queryByTestId('room-chip')).toBeNull();
+    expect((screen.getByTestId('room-name') as HTMLInputElement).value).toBe('');
+    expect((screen.getByTestId('room-next') as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByTestId('room-name'), { target: { value: 'Family Room' } });
     fireEvent.click(screen.getByTestId('room-next'));
-    await waitFor(() => expect(screen.getByTestId('room-edit')).toBeTruthy());
-    expect(screen.getByTestId('room-add-player')).toBeTruthy();
-    expect(writes(calls)).toEqual([{ url: '/api/rooms', method: 'POST', body: { name: 'Living Room' } }]);
+    await waitFor(() => expect(screen.getByTestId('wiz-adb-howto')).toBeTruthy());
+    expect(writes(calls)).toEqual([{ url: '/api/rooms', method: 'POST', body: { name: 'Family Room' } }]);
   });
   it('phone: Add player by IP pairs then lists', async () => {
     const empty: Room = { id: 'fr', name: 'Family Room', default: true, harmony_hub: '', player: null };
@@ -151,7 +152,7 @@ describe('Settings > Rooms', () => {
     await waitFor(() => expect(screen.getAllByTestId('room-row')).toHaveLength(2));
     fireEvent.click(screen.getAllByTestId('room-row')[1]!);
     expect(screen.getByRole('heading', { name: 'Bedroom' })).toBeTruthy();
-    expect(['ADB', 'Wake-on-LAN', 'Harmony', 'None'].every(l => screen.getByRole('radio', { name: l }))).toBe(true);
+    expect(['ADB', 'Wake-on-LAN', 'Harmony', 'Home Assistant', 'None'].every(l => screen.getByRole('radio', { name: l }))).toBe(true);
     expect(screen.getByTestId('room-port')).toBeTruthy();
     expect(screen.getByTestId('room-paired').textContent).toBe('Paired');
     const save = screen.getByTestId('room-save') as HTMLButtonElement;
@@ -203,6 +204,6 @@ describe('Settings > Rooms', () => {
     fireEvent.click(screen.getAllByTestId('room-row')[0]!);
     const text = screen.getByTestId('room-edit').textContent || '';
     for (const s of ['Wake with', 'IP address', 'Default room', 'Remove room']) expect(text).toContain(s);
-    expect(text.toLowerCase()).not.toContain('home assistant');
+    expect(screen.getByTestId('room-wake-homeassistant')).toBeTruthy();
   });
 });

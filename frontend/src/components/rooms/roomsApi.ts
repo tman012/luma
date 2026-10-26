@@ -1,11 +1,13 @@
 /** v224 Settings > Rooms (Option A): /api/rooms (reads signed in; writes the signed-in owner).
- * v272: create is empty-room only; Pair (POST .../connect) persists the player on success. */
+ * v272: create is empty-room only; Pair (POST .../connect) persists the player on success.
+ * v299: wake homeassistant + ha_power_entity; wizard uses Connectors HA API when needed. */
 import { apiFetch } from '@/apiClient';
 
-export type Wake = 'adb' | 'wol' | 'harmony' | 'none';
+export type Wake = 'adb' | 'wol' | 'harmony' | 'homeassistant' | 'none';
 export type RoomPlayer = {
   id: string; name: string; product: string; platform: string; machine_id: string; host: string;
-  port: number | null; mac: string; harmony_activity: string; harmony_nav_device?: string; paired: boolean; online: boolean; wake: Wake;
+  port: number | null; mac: string; harmony_activity: string; harmony_nav_device?: string;
+  ha_power_entity?: string; paired: boolean; online: boolean; wake: Wake;
 };
 /** v231 (Reviewer): a signed-in non-owner gets only id, name, default and online (no harmony_hub or player). */
 export type Room = { id: string; name: string; default: boolean; online?: boolean; harmony_hub?: string; harmony_volume_device?: string; player?: RoomPlayer | null };
@@ -15,6 +17,7 @@ export type FoundPlayer = { machine_id: string; name: string; product: string; p
 export type R<T> = { ok: true; data: T } | { ok: false; status: number; errors: Record<string, string> };
 
 export const ROOMS_URL = '/api/rooms';
+export const HA_CONNECTOR_URL = '/api/settings/connectors/homeassistant';
 export const SAVE_FAILED = "Couldn't save";
 const okView = (d: unknown): d is RoomsView => !!d && Array.isArray((d as RoomsView).rooms);
 
@@ -36,7 +39,8 @@ export const loadPlayers = () => call<{ players: FoundPlayer[] }>(`${ROOMS_URL}/
 /** v272: empty room — name only. */
 export const createRoom = (name: string) => call<RoomsView>(ROOMS_URL, json('POST', { name }), okView);
 export type RoomPatch = Partial<{ name: string; wake: Wake; host: string; port: number | string; mac: string;
-  harmony_hub: string; harmony_activity: string; harmony_volume_device: string; harmony_nav_device: string; default: boolean }>;
+  harmony_hub: string; harmony_activity: string; harmony_volume_device: string; harmony_nav_device: string;
+  ha_power_entity: string; default: boolean }>;
 export const updateRoom = (id: string, patch: RoomPatch) => call<RoomsView>(`${ROOMS_URL}/${encodeURIComponent(id)}`, json('PUT', patch), okView);
 
 /** v265/v272 Pair: prod's ADB flow. Optional player = Add device (persists only on success). */
@@ -76,6 +80,16 @@ export async function pairRoom(id: string, player?: Partial<FoundPlayer>, port?:
 }
 export const removeRoom = (id: string) => call<RoomsView>(`${ROOMS_URL}/${encodeURIComponent(id)}`, json('DELETE'), okView);
 
+export type HaConnectorView = { url: string; access_token: { set: boolean; last4: string } };
+export async function loadHaConnector(): Promise<R<HaConnectorView>> {
+  return call<HaConnectorView>(HA_CONNECTOR_URL, undefined, d => !!d && typeof (d as HaConnectorView).url === 'string');
+}
+export async function saveHaConnector(url: string, accessToken?: string): Promise<R<HaConnectorView>> {
+  const body: Record<string, string> = { url };
+  if (accessToken != null && accessToken !== '') body.access_token = accessToken;
+  return call<HaConnectorView>(HA_CONNECTOR_URL, json('PUT', body), d => !!d && typeof (d as HaConnectorView).url === 'string');
+}
+
 /** A player's two- or three-letter badge, as the A mocks: ATV for Android TV, tv for Apple TV, else the initial. */
 export function badge(p: { product?: string; platform?: string; name?: string } | null | undefined): string {
   if (!p) return '?';
@@ -84,4 +98,6 @@ export function badge(p: { product?: string; platform?: string; name?: string } 
   if (s.includes('apple') || s.includes('tvos')) return 'tv';
   return ((p?.name || '?').trim()[0] || '?').toUpperCase();
 }
-export const WAKE_LABEL: Record<Wake, string> = { adb: 'Wake with ADB', wol: 'Wake-on-LAN', harmony: 'Harmony', none: '' };
+export const WAKE_LABEL: Record<Wake, string> = {
+  adb: 'Wake with ADB', wol: 'Wake-on-LAN', harmony: 'Harmony', homeassistant: 'Home Assistant', none: '',
+};
