@@ -16695,13 +16695,90 @@ def _safe_magnet(uri: str) -> Optional[str]:
 def _track_grab(torrent_hash, tmdb_data, torrent_name=None):
     """Hand a confirmed grab to whatever files it into the library: the
     library mover in minimal builds (never prod's auto-rename monitor), prod's
-    AutoRenamer otherwise."""
+    AutoRenamer otherwise.
+
+    v300: never hand TV to library_mover / AutoRenamer — that path hard-skips
+    TV (error=tv) and leaves packs orphaned under the movie tag. TV grabs go
+    through tv_grab (luma-test-tv / luma-tv) instead.
+    """
+    mt = ((tmdb_data or {}).get('media_type') or '').lower()
+    if mt in ('tv', 'show', 'series'):
+        logger.warning('Refusing to track a TV grab on the movie library path (hash %s)', torrent_hash)
+        return
     if _minimal.enabled():
         from app import library_mover
         library_mover.track(torrent_hash, tmdb_data, torrent_name)
         return
     from app.auto_rename import auto_renamer
     auto_renamer.track_download(torrent_hash, tmdb_data)
+
+
+def _downloads_add_tv(data):
+    """Route a Sources TV grab that landed on /api/downloads/add through tv_grab.
+
+    Sets qBit category+tag to this instance's TV name (luma-test-tv on test),
+    ensures the series exists, writes a tv.db grabs row. Never calls
+    library_mover (which would skip with error=tv).
+    """
+    import time as _time
+    from app import tv_grab, tv_store
+    from app.tv_monitor_routes import _series_for_tmdb
+
+    tmdb_data = data.get('tmdb_data') or {}
+    try:
+        tmdb_id = int(tmdb_data.get('tmdb_id') or tmdb_data.get('id') or 0)
+    except (TypeError, ValueError):
+        tmdb_id = 0
+    torrent_url = (data.get('torrent_url') or '').strip()
+    title = (data.get('torrent_name') or tmdb_data.get('title') or '').strip()
+    season, episode = data.get('season'), data.get('episode')
+    ok_int = lambda v: isinstance(v, int) and not isinstance(v, bool) and v >= 0  # noqa: E731
+
+    if not tmdb_id or not torrent_url:
+        return jsonify({'error': 'Missing show or download link'}), 400
+    if not ok_int(season):
+        return jsonify({'error': 'Pick a season before downloading this show'}), 400
+    if episode is not None and not ok_int(episode):
+        return jsonify({'error': 'Invalid episode'}), 400
+    if not tv_grab.allowed():
+        return jsonify({'error': tv_grab.OFF}), 403
+
+    now = _time.time()
+    sid, why = _series_for_tmdb(tmdb_id, now)
+    if sid is None:
+        return jsonify({'error': why or 'Add this show to TV first'}), 400
+
+    with tv_store.connect() as conn:
+        if episode is None:
+            ids = [r['id'] for r in conn.execute(
+                'SELECT id FROM episodes WHERE series_id = ? AND season_number = ?',
+                (sid, season))]
+        else:
+            ids = [r['id'] for r in conn.execute(
+                'SELECT id FROM episodes WHERE series_id = ? AND season_number = ?'
+                ' AND episode_number = ?', (sid, season, episode))]
+
+    size = data.get('size')
+    item = {
+        'title': title or f'TV S{season:02d}',
+        'downloadUrl': torrent_url,
+        'indexer': str(data.get('indexer') or '')[:200] or None,
+        'quality': str(data.get('quality') or '')[:100] or None,
+        'size': size if ok_int(size) else 0,
+        'indexerId': None,
+    }
+    # tokens_only=False: this endpoint historically accepted magnets/Sources links
+    # like the movie path; popup_grab keeps tokens_only=True for the TV sheet.
+    g = tv_grab.grab(item, sid, season, ids, 'manual', now, tokens_only=False)
+    if g.get('ok'):
+        msg = 'Already downloading' if g.get('existing') else 'Download added successfully'
+        return jsonify({'success': True, 'message': msg, 'hash': g.get('hash'), 'tv': True})
+    if g.get('blocked'):
+        return jsonify({'error': g.get('error') or tv_grab.OFF}), 403
+    status = g.get('status')
+    if isinstance(status, int) and status >= 400:
+        return jsonify({'error': g.get('error') or "Couldn't add download"}), status
+    return jsonify({'error': g.get('error') or "Couldn't add download"}), 502
 
 
 @app.route('/api/downloads/add', methods=['POST'])
@@ -16735,6 +16812,11 @@ def add_torrent_to_qbittorrent():
 
         if not torrent_url:
             return jsonify({'error': 'Missing torrent_url'}), 400
+        # v300: TV titles must use tv_grab (luma-test-tv), never the movie tag + library_mover
+        # skip path (error=tv). Route here when Sources still posts TV to this endpoint.
+        mt = ((tmdb_data or {}).get('media_type') or '').lower()
+        if mt in ('tv', 'show', 'series'):
+            return _downloads_add_tv(data)
         # v171+ (Reviewer, test must not steal from prod): on the test instance a movie add is the
         # 'movie_grab' job and goes through instance.scoped_add with the test tag as category and
         # tag, like TV grabs, so it can only ever create a luma-test torrent. Prod: unchanged.

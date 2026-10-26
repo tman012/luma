@@ -12,7 +12,8 @@ import { apiFetch } from '../apiClient';
  *   GET  /api/sources/all-results?title=&media_type=&year=&tmdb_id=
  *       (title may be a plain-text override; tmdb_id is identity-only)
  *   GET  /api/tmdb/match-search?query=&media_type=
- *   POST /api/downloads/add
+ *   POST /api/downloads/add          (movies)
+ *   POST /api/settings/tv/grab       (TV → tv_grab / luma-test-tv)
  */
 
 export type MediaType = 'movie' | 'tv';
@@ -166,12 +167,18 @@ export interface GrabToLibraryArgs {
   title: string;
   year?: number | null;
   imdbId?: string;
+  /** Required for TV: season pack / episode scope for tv_grab. */
+  season?: number;
+  episode?: number | null;
 }
 
 /**
  * Grab a release into the library. Requires a tmdbId — without a media identity
  * the backend renamer cannot place the file (risk R8), so we refuse rather than
  * downloading something that lands unnamed.
+ *
+ * v300: TV goes to /api/settings/tv/grab (tv_grab → luma-test-tv), never the
+ * movie /api/downloads/add path (that tagged luma-test and library_mover skipped error=tv).
  */
 export async function grabToLibrary(
   args: GrabToLibraryArgs,
@@ -183,6 +190,30 @@ export async function grabToLibrary(
     return { success: false, error: 'This release has no download link.' };
   }
   try {
+    if (args.mediaType === 'tv') {
+      if (args.season == null || args.season < 0 || !Number.isInteger(args.season)) {
+        return { success: false, error: 'Pick a season before downloading this show' };
+      }
+      const resp = await apiFetch('/api/settings/tv/grab', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tmdb_id: args.tmdbId,
+          season: args.season,
+          episode: args.episode ?? null,
+          download_url: args.downloadUrl,
+          title: args.torrentName || args.title,
+        }),
+      });
+      const data = await resp.json().catch(() => ({} as Record<string, unknown>));
+      if (!resp.ok || data.ok === false) {
+        return { success: false, error: (data.error as string) || "Couldn't add download" };
+      }
+      return {
+        success: true,
+        message: data.existing ? 'Already downloading' : 'Download added successfully',
+      };
+    }
     const resp = await apiFetch('/api/downloads/add', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

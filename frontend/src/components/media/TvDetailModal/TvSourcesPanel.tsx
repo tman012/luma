@@ -28,8 +28,8 @@ import {
 } from '@/components/media/sourcesShared';
 
 /**
- * TV: every Sonarr row (accepted or rejected) is grabbed through Sonarr so it
- * handles download + import; only raw indexer rows use grab-to-library.
+ * TV: Sonarr rows grab through Sonarr; raw indexer rows use grabToLibrary which
+ * (v300) posts to /api/settings/tv/grab → tv_grab / luma-test-tv, not movie add.
  */
 function tvNeedsLibraryGrab(release: TvProcessedRelease): boolean {
   return release.origin === 'indexer' && needsLibraryGrab(release);
@@ -210,6 +210,7 @@ function ExpandedTvSourcesView({
   ) => {
     setConfirmLoading(true);
     setGrabError(null);
+    // v300: TV grabToLibrary → /api/settings/tv/grab (tv_grab / luma-test-tv), never movie add.
     const result = await grabToLibrary({
       downloadUrl: release.downloadUrl ?? '',
       torrentName: release.title,
@@ -217,6 +218,8 @@ function ExpandedTvSourcesView({
       mediaType: 'tv',
       title: identity.title,
       year: identity.year,
+      season: target.season,
+      episode: target.type === 'episode' && typeof target.episode === 'number' ? target.episode : null,
     });
     setConfirmLoading(false);
     if (result.success) {
@@ -227,7 +230,7 @@ function ExpandedTvSourcesView({
       return;
     }
     setGrabError(result.error || 'Failed to add download');
-  }, [onGrabbed]);
+  }, [onGrabbed, target]);
 
   const handleConfirmDownload = useCallback(async () => {
     if (!confirmTarget) return;
@@ -1003,6 +1006,7 @@ function CompactTvSourcesView({
     setGrabbingGuid(rk);
     setGrabErrorMsg(null);
     try {
+      // v300: TV grabToLibrary → /api/settings/tv/grab (tv_grab / luma-test-tv), never movie add.
       const result = await grabToLibrary({
         downloadUrl: release.downloadUrl ?? '',
         torrentName: release.title,
@@ -1010,6 +1014,8 @@ function CompactTvSourcesView({
         mediaType: 'tv',
         title: identity.title,
         year: identity.year,
+        season: target.season,
+        episode: target.type === 'episode' && typeof target.episode === 'number' ? target.episode : null,
       });
       if (result.success) {
         setGrabbedGuids(prev => new Set(prev).add(rk));
@@ -1023,7 +1029,7 @@ function CompactTvSourcesView({
       setGrabbingGuid(null);
       grabInFlightRef.current = false;
     }
-  }, [onGrabbed]);
+  }, [onGrabbed, target]);
 
   // Grab handler — routes rejected / indexer rows through grab-to-library.
   const onGrabRelease = useCallback(async (release: TvProcessedRelease) => {
