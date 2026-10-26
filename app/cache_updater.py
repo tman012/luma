@@ -2,6 +2,7 @@
 Cache Updater Module - Background tasks to update library cache
 """
 
+import hashlib
 import threading
 import time
 import logging
@@ -188,6 +189,72 @@ def update_library_stats_cache():
         logger.error(f"Failed to update library stats cache: {e}")
 
 
+
+def collapse_recent_tv_episodes(items: List[Dict], *, limit: int = 30) -> List[Dict]:
+    """Episode-only; one card per show = newest added_at.
+
+    Dedupe key: truthy show_rating_key, else stable show_title.
+    Never keys on episode rating_key. Skips rows with neither identity.
+    Poster uses the show rating key when present (else showThumbPath).
+    Title-only rows get a stable negative synthetic PK so the cache table
+    (INTEGER PRIMARY KEY on show_rating_key) can store them uniquely.
+    """
+    episodes = [i for i in items if i.get('type') == 'episode']
+    episodes.sort(
+        key=lambda x: x.get('added_at') or x.get('addedAt') or 0,
+        reverse=True,
+    )
+    shows: List[Dict] = []
+    seen = set()
+    for item in episodes:
+        show_rk = item.get('show_rating_key')
+        if not show_rk:  # None / 0 / ''
+            show_rk = None
+        else:
+            show_rk = int(show_rk)
+        show_title = (item.get('show_title') or item.get('title') or '').strip()
+        if show_rk is not None:
+            dedupe = ('rk', show_rk)
+        elif show_title:
+            dedupe = ('title', show_title.casefold())
+        else:
+            continue
+        if dedupe in seen:
+            continue
+        seen.add(dedupe)
+
+        added_at = item.get('added_at') or item.get('addedAt') or 0
+        if show_rk is not None:
+            store_rk = show_rk
+            poster_url = f"/api/img/plex?url=/library/metadata/{store_rk}/thumb&r=2"
+        else:
+            digest = hashlib.md5(show_title.casefold().encode('utf-8')).hexdigest()
+            store_rk = -int(digest[:8], 16) or -1
+            if item.get('showThumbPath'):
+                poster_url = f"/api/img/plex?url={item['showThumbPath']}"
+            else:
+                poster_url = 'https://via.placeholder.com/200x300/1a1a1a/808080?text=No+Poster'
+
+        show = {
+            'show_rating_key': store_rk,
+            'show_title': show_title,
+            'show_year': item.get('show_year') or item.get('year'),
+            'latest_added_at': added_at,
+            'poster_url': poster_url,
+        }
+        if added_at:
+            try:
+                show['added_date'] = datetime.fromtimestamp(added_at).strftime('%Y-%m-%d')
+            except (ValueError, OSError):
+                show['added_date'] = None
+        else:
+            show['added_date'] = None
+        shows.append(show)
+        if len(shows) >= limit:
+            break
+    return shows
+
+
 def update_recent_tv_episodes_cache():
     """Update the recent TV episodes cache via Plex HTTP API
     (shows sorted by most recent episode added)"""
@@ -198,7 +265,7 @@ def update_recent_tv_episodes_cache():
         sections = plex_service.get_sections_lean()
         tv_sections = [s for s in sections if s['type'] == 'show']
 
-        # Collect recently added episodes across all TV sections
+        # Collect recently added items across all TV sections
         all_episodes = []
         for section in tv_sections:
             items = plex_service.get_recently_added(section_id=section['id'], limit=50)
@@ -206,39 +273,9 @@ def update_recent_tv_episodes_cache():
                 item['library_name'] = section['title']
                 all_episodes.append(item)
 
-        # Sort by addedAt descending
-        all_episodes.sort(key=lambda x: x.get('added_at', x.get('addedAt', 0)), reverse=True)
+        # Episode-only; one card per show (never key on episode rating_key)
+        shows = collapse_recent_tv_episodes(all_episodes, limit=30)
 
-        # Deduplicate by show — keep the most recent episode per show
-        shows = []
-        seen_show_ids = set()
-
-        for item in all_episodes:
-            # Episodes have show_rating_key; shows themselves have rating_key
-            show_rk = item.get('show_rating_key') or item.get('rating_key')
-            if show_rk in seen_show_ids:
-                continue
-            seen_show_ids.add(show_rk)
-
-            added_at = item.get('added_at', item.get('addedAt', 0))
-            show = {
-                'show_rating_key': show_rk,
-                'show_title': item.get('show_title') or item.get('title', ''),
-                'show_year': item.get('show_year') or item.get('year'),
-                'latest_added_at': added_at,
-                'poster_url': f"/api/img/plex?url=/library/metadata/{show_rk}/thumb&r=2",
-            }
-            if added_at:
-                try:
-                    show['added_date'] = datetime.fromtimestamp(added_at).strftime('%Y-%m-%d')
-                except (ValueError, OSError):
-                    show['added_date'] = None
-
-            shows.append(show)
-            if len(shows) >= 30:
-                break
-
-        # Update cache
         library_cache.update_recent_tv_episodes(shows)
         logger.info(f"Updated recent TV episodes cache with {len(shows)} shows")
 

@@ -27,6 +27,7 @@ import {
   type HomeRailDefinition,
   HOME_RAILS,
 } from './homeRails';
+import { dedupeRecentTvRows } from './recentTvDedupe';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -199,29 +200,9 @@ async function fetchRecentTv(): Promise<NormalizedMediaItem[]> {
   const resp = await fetchWithTimeout('/api/library/episodes/cached?limit=20');
   if (!resp.ok) return [];
   const data = await resp.json();
-  // The endpoint returns individual episodes (newest first), so several
-  // episodes of the same show collapse to one tile — dedupe by show so we
-  // don't render duplicate tiles with colliding React keys.
-  const seen = new Set<number>();
-  const out: NormalizedMediaItem[] = [];
-  for (const ep of ((data.episodes ?? []) as Record<string, unknown>[])) {
-    const rk = ep.show_rating_key as number | undefined;
-    if (rk != null && seen.has(rk)) continue;
-    if (rk != null) seen.add(rk);
-    out.push({
-      id: `recent-tv-${ep.show_rating_key}`,
-      title: (ep.show_title as string) ?? '',
-      year: (ep.show_year as number) ?? null,
-      posterUrl: (ep.poster_url as string) ?? null,
-      mediaType: 'tv' as const,
-      tmdbId: (ep.tmdb_id as number) ?? null,
-      ratingKey: (ep.show_rating_key as number) ?? null,
-      showRatingKey: (ep.show_rating_key as number) ?? null,
-      owned: true,
-      inWatchlist: false,
-    });
-  }
-  return out;
+  // Cache is show-level, but belt-and-suspenders: one card per show_rating_key
+  // or show_title; skip rows with neither (never push on null key alone).
+  return dedupeRecentTvRows((data.episodes ?? []) as Record<string, unknown>[]);
 }
 
 async function fetchRecentlyWatched(): Promise<NormalizedMediaItem[]> {

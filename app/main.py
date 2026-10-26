@@ -49,7 +49,7 @@ from app.upgrade_finder import UpgradeFinder, BATCH_SIZE
 
 # Import library cache
 from app.library_cache import library_cache
-from app.cache_updater import initialize_caches, update_continue_watching_cache, update_library_browse_cache, update_recent_items_cache, update_recent_tv_episodes_cache, update_library_stats_cache
+from app.cache_updater import initialize_caches, update_continue_watching_cache, update_library_browse_cache, update_recent_items_cache, update_recent_tv_episodes_cache, update_library_stats_cache, collapse_recent_tv_episodes
 
 # Import RT scraper
 from app.rt_scraper import rt_scraper
@@ -8526,40 +8526,11 @@ def library_recent_episodes():
         for section in tv_sections:
             items = plex.get_recently_added(section_id=section['id'], limit=50)
             for item in items:
-                if item.get('type') == 'episode':
-                    item['_library'] = section['title']
-                    all_episodes.append(item)
+                item['_library'] = section['title']
+                all_episodes.append(item)
 
-        # Sort by addedAt descending
-        all_episodes.sort(key=lambda x: x.get('addedAt', 0), reverse=True)
-
-        # Deduplicate by show (keep most recent episode per show)
-        shows = []
-        seen_show_keys = set()
-        for ep in all_episodes:
-            show_rk = ep.get('show_rating_key', 0)
-            show_title = ep.get('show_title', ep.get('title', ''))
-            key = show_rk or show_title
-            if key in seen_show_keys:
-                continue
-            seen_show_keys.add(key)
-
-            poster_url = None
-            if show_rk:
-                poster_url = f"/api/img/plex?url=/library/metadata/{show_rk}/thumb&r=2"
-            elif ep.get('showThumbPath'):
-                poster_url = f"/api/img/plex?url={ep['showThumbPath']}"
-
-            shows.append({
-                'show_rating_key': show_rk,
-                'show_title': show_title,
-                'show_year': ep.get('show_year', ep.get('year')),
-                'latest_added_at': ep.get('addedAt', 0),
-                'added_date': datetime.fromtimestamp(ep.get('addedAt', 0)).strftime('%Y-%m-%d') if ep.get('addedAt') else None,
-                'poster_url': poster_url or 'https://via.placeholder.com/200x300/1a1a1a/808080?text=No+Poster',
-            })
-            if len(shows) >= 20:
-                break
+        # Same collapse as cache path (episode-only; never key on episode rating_key)
+        shows = collapse_recent_tv_episodes(all_episodes, limit=20)
 
         return jsonify({'episodes': shows})
 

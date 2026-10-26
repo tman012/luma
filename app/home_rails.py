@@ -485,10 +485,48 @@ def continue_watching(plex) -> List[Dict[str, Any]]:
                   wide=True)
 
 
-def recently_added(plex, section_id: str) -> List[Dict[str, Any]]:
-    return _items(plex._get(f'/library/sections/{quote(str(section_id), safe="")}/recentlyAdded',
-                            params={'X-Plex-Container-Start': 0, 'X-Plex-Container-Size': RAIL_LIMIT},
-                            timeout=10))
+def _one_card_per_show(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Library TV rail: one card per show (newest first). Never one card per episode.
+
+    Episodes group by show_key (grandparentRatingKey) if truthy, else title.
+    Non-episode cards (movie / season / show) pass through uniquely by key.
+    """
+    out: List[Dict[str, Any]] = []
+    seen = set()
+    for c in items:
+        if c.get('type') == 'episode':
+            sk = c.get('show_key')
+            title = (c.get('title') or '').strip()
+            if sk:
+                key = ('rk', str(sk))
+            elif title:
+                key = ('title', title.casefold())
+            else:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(c)
+        else:
+            k = ('item', c.get('key'))
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(c)
+        if len(out) >= RAIL_LIMIT:
+            break
+    return out
+
+
+def recently_added(plex, section_id: str, section_type: str = '') -> List[Dict[str, Any]]:
+    # Show libraries: pull a wider window then collapse to one card per show.
+    size = 50 if section_type == 'show' else RAIL_LIMIT
+    items = _items(plex._get(f'/library/sections/{quote(str(section_id), safe="")}/recentlyAdded',
+                             params={'X-Plex-Container-Start': 0, 'X-Plex-Container-Size': size},
+                             timeout=10))
+    if section_type == 'show':
+        return _one_card_per_show(items)
+    return items[:RAIL_LIMIT]
 
 
 def _plex():
@@ -560,7 +598,7 @@ def home():
         rails = [(l, _trakt_future(l['id']) if l['source'] == 'trakt'
                   else pool.submit(in_app, watchlist_items) if l['source'] == 'watchlist'
                   else pool.submit(in_app, wym_items) if l['source'] == 'wym'
-                  else pool.submit(in_app, recently_added, plex, l['id'])) for l in libs]
+                  else pool.submit(in_app, recently_added, plex, l['id'], l.get('type') or '')) for l in libs]
         cw_items = take('continue_watching', cw)
         out_rails = []
         for l, f in rails:
