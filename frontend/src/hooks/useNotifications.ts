@@ -59,6 +59,7 @@ export interface ActivityData {
   thumb?: string | null;  // Poster image URL (e.g. TMDb proxy)
   art?: string | null;    // Backdrop image URL (e.g. Plex or TMDb proxy)
   deviceId?: string;      // Device that is playing (for targeted remote commands)
+  mediaType?: string;     // optional 'live' / etc. when backend sends it (v290 Live TV art)
 }
 
 export interface Room {

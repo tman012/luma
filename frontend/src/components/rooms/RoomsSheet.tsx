@@ -4,6 +4,7 @@ import { type Room, type SessionData } from '@/hooks/useNotifications';
 import { useNotificationsContext } from '@/contexts/NotificationsContext';
 import { useInterpolatedProgress } from '@/hooks/useInterpolatedProgress';
 import { FullScreenRemote } from '@/components/rooms/FullScreenRemote';
+import { isLiveTvNoArt, liveTvDisplayTitle, LiveTvGlyph } from '@/components/rooms/liveTvArt';
 import { fetchRooms, type DeviceData } from '@/services/settingsApi';
 import { cn } from '@/utils/cn';
 import { apiUrl } from '@/urlHelpers';
@@ -46,6 +47,7 @@ const APP_COLORS: Record<string, { badge: string; dot: string; bar: string }> = 
   Kodi: { badge: 'bg-sky-600 text-white', dot: 'bg-sky-500', bar: 'bg-sky-500' },
   'Disney+': { badge: 'bg-blue-800 text-white', dot: 'bg-blue-600', bar: 'bg-blue-600' },
   TiViMate: { badge: 'bg-purple-600 text-white', dot: 'bg-purple-500', bar: 'bg-purple-500' },
+  'Live TV': { badge: 'bg-sky-600 text-white', dot: 'bg-sky-500', bar: 'bg-sky-500' },
   Spotify: { badge: 'bg-green-600 text-white', dot: 'bg-green-500', bar: 'bg-green-500' },
   Hulu: { badge: 'bg-green-700 text-white', dot: 'bg-green-600', bar: 'bg-green-600' },
 };
@@ -110,6 +112,7 @@ function RoomCard({
   const poster = plexThumb
     ? apiUrl(`/api/img/plex?url=${encodeURIComponent(plexThumb)}`)
     : a?.thumb || null;
+  const liveNoArt = isLiveTvNoArt(a, !!s);
   const isPlaying = s ? s.state === 'playing' : a?.state === 'playing';
 
   const serverOffset = s ? s.viewOffset : (a?.position ?? 0);
@@ -119,6 +122,9 @@ function RoomCard({
   const appColors = a ? (APP_COLORS[a.appName] ?? DEFAULT_APP_COLOR) : null;
   const autoDeviceId = resolveActiveDeviceId(room, roomDevices);
   const needsDevicePicker = !hasPlayback && roomDevices && roomDevices.length > 1 && !autoDeviceId;
+  const activityTitle = a
+    ? (liveNoArt ? liveTvDisplayTitle(a) : a.title)
+    : null;
 
   return (
     <div className="rounded-2xl bg-white/5 overflow-hidden">
@@ -127,10 +133,23 @@ function RoomCard({
         onClick={onToggle}
         className="flex w-full items-center gap-4 p-4 text-left transition-colors active:bg-white/5"
       >
-        {(s || poster) ? (
-          <div className="h-[90px] w-[60px] shrink-0 overflow-hidden rounded-lg bg-white/5">
+        {(s || poster || liveNoArt) ? (
+          <div
+            className={cn(
+              'relative h-[90px] w-[60px] shrink-0 overflow-hidden rounded-lg',
+              liveNoArt && !poster ? 'bg-sky-950' : 'bg-white/5',
+            )}
+            data-live-tv-poster={liveNoArt && !poster ? '1' : undefined}
+          >
+            {liveNoArt && !poster && (
+              <div className="absolute inset-0 bg-sky-500/15" />
+            )}
             {poster ? (
-              <img src={poster} alt="" className="h-full w-full object-cover" />
+              <img src={poster} alt="" className="relative h-full w-full object-cover" />
+            ) : liveNoArt ? (
+              <div className="relative flex h-full w-full items-center justify-center text-white/70">
+                <LiveTvGlyph size={28} />
+              </div>
             ) : (
               <PosterPlaceholder />
             )}
@@ -181,10 +200,10 @@ function RoomCard({
             </>
           ) : a ? (
             <>
-              {a.title && (
+              {activityTitle && (
                 <p className="mt-0.5 text-[16px] font-semibold leading-snug text-white">
-                  {a.title}
-                  {a.year && (
+                  {activityTitle}
+                  {a.year && !liveNoArt && (
                     <span className="ml-1.5 font-normal text-white/40">({a.year})</span>
                   )}
                 </p>

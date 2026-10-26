@@ -5,6 +5,7 @@ import { useInterpolatedProgress } from '@/hooks/useInterpolatedProgress';
 import { cn } from '@/utils/cn';
 import { apiFetch } from '../../apiClient';
 import { apiUrl } from '@/urlHelpers';
+import { isLiveTvNoArt, liveTvDisplayTitle, LiveTvGlyph } from '@/components/rooms/liveTvArt';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -378,6 +379,7 @@ function NowPlayingBackdrop({ room }: { room: Room }) {
   const backdrop = backdropPath
     ? apiUrl(`/api/img/plex?url=${encodeURIComponent(backdropPath)}`)
     : a?.art || a?.thumb || null;
+  const liveNoArt = isLiveTvNoArt(a, !!s) && !backdrop;
   const isPlaying = s ? s.state === 'playing' : a?.state === 'playing';
 
   const serverOffset = s ? s.viewOffset : (a?.position ?? 0);
@@ -386,10 +388,10 @@ function NowPlayingBackdrop({ room }: { room: Room }) {
 
   const title = s
     ? (isTV ? s.grandparentTitle : s.title)
-    : a?.title;
+    : (a ? (liveNoArt ? liveTvDisplayTitle(a) : a.title) : undefined);
   const year = s
     ? (isTV ? null : s.year)
-    : a?.year;
+    : (liveNoArt ? null : a?.year);
 
   if (!hasPlayback) {
     return (
@@ -408,9 +410,17 @@ function NowPlayingBackdrop({ room }: { room: Room }) {
           height: 190,
           boxShadow: '0 4px 20px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04)',
         }}
+        data-live-tv-hero={liveNoArt ? '1' : undefined}
       >
         {backdrop ? (
           <img src={backdrop} alt="" className="h-full w-full object-cover" />
+        ) : liveNoArt ? (
+          <div
+            className="flex h-full w-full items-center justify-center text-white/25"
+            style={{ background: 'linear-gradient(180deg, #0b1220 0%, #0c4a6e 100%)' }}
+          >
+            <LiveTvGlyph size={72} />
+          </div>
         ) : (
           <div className="h-full w-full bg-white/3" />
         )}
@@ -433,7 +443,7 @@ function NowPlayingBackdrop({ room }: { room: Room }) {
         </div>
       </div>
 
-      {/* Progress bar underneath */}
+      {/* Progress bar underneath — only when duration exists */}
       {timeTotal > 0 && (
         <div className="mt-2 px-1">
           <div className="h-[3px] w-full overflow-hidden rounded-full bg-white/10">
