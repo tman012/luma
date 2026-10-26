@@ -1,7 +1,7 @@
 """Luma-side library/import notifications (prod AutoRenamer Web Push path).
 
 Fires only when Luma's own pipeline has placed a file in the library
-(library_mover for movies, tv_downloads for TV) — never on grab/download, and
+(library_mover / movie_import for movies, tv_downloads for TV) — never on grab/download, and
 never from Sonarr/Radarr webhooks. Copy matches prod AutoRenamer:
 
   title: "{Title} ({Year}) added!"   (year omitted when empty)

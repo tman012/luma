@@ -10,6 +10,7 @@ from Luma's Movies library path (Radarr's root folder isn't in the export).
 The copy goes to a temporary name in the movie folder, is verified (size and sha256 against the source), then
 linked into place with an exclusive create, so an existing file is never overwritten (a different file
 already there: refused). Only after that is the grab marked 'imported' and the movie taken off the watchlist.
+v283: library_notify (Web Push + bell) fires on that import-complete — never on grab.
 
 Routes (test only, else 404; reading needs the owner, changes and a manual run need the signed-in owner):
 GET  /api/settings/movies/import        {root, naming, grabs}
@@ -266,6 +267,20 @@ def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[st
     with ms.connect() as conn:
         conn.execute('DELETE FROM watchlist WHERE tmdb_id = ?', (g['tmdb_id'],))
     logger.info('Movie import: %s -> %s (%s)', t.get('name'), dest, how)
+    # v283: prod AutoRenamer fires Web Push on import-complete; GR/watchlist movies
+    # use this path (not library_mover). Grab stays silent — notify only here.
+    try:
+        from app import library_notify
+        library_notify.notify_library_added(
+            media_type='movie',
+            title=title or '',
+            year=year or '',
+            tmdb_id=g.get('tmdb_id'),
+            dest_path=dest,
+            source='movie_import',
+        )
+    except Exception:
+        logger.exception('Movie import: notify failed for %s', title)
     return {'state': 'imported', 'path': dest, 'how': how}
 
 

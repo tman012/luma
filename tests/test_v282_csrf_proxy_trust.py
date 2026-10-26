@@ -102,6 +102,8 @@ def test_empty_trusted_proxies_keeps_http_scheme_behind_caddy_headers(test_app):
         assert is_same_origin('http://192.168.1.62:5463')
 
 
-def test_sw_is_v282():
+def test_sw_is_v282_or_above():
+    import re
     sw = (ROOT / 'static/sw.js').read_text()
-    assert "CACHE_VERSION = 'media-kiosk-v282'" in sw
+    m = re.search(r"CACHE_VERSION = 'media-kiosk-v(\d+)'", sw)
+    assert m and int(m.group(1)) >= 282

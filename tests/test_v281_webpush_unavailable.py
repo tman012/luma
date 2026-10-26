@@ -24,6 +24,8 @@ def test_push_hook_sync_capability_avoids_stuck_unsupported():
     assert "useState<PushState>('unsupported')" not in src
 
 
-def test_sw_is_v281():
+def test_sw_is_v281_or_above():
+    import re
     sw = (ROOT / 'static/sw.js').read_text()
-    assert "CACHE_VERSION = 'media-kiosk-v281'" in sw
+    m = re.search(r"CACHE_VERSION = 'media-kiosk-v(\d+)'", sw)
+    assert m and int(m.group(1)) >= 281
