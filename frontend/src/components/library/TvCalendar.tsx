@@ -7,7 +7,7 @@ import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
 import { Poster } from './TvImport';
 import {
-  STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, setEpisodeMonitored, shortDate, timeRangeParts, weekLabel, weekStart,
+  STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, setEpisodeMonitored, shortDate, timeRangeParts, weekDays, weekLabel, weekStart,
   type CalEpisode, type CalendarData, type Day,
 } from './tvCalendarApi';
 
@@ -83,12 +83,13 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, ph
 
   return (
     <div data-testid="tv-calendar" style={{ fontFamily: FONT, width: '100%', containerType: 'inline-size', containerName: 'tvcal' }}>
-      {phone ? <DayHeader day={day} today={today} onStep={step} /> : toolbar && <WeekControls today={today} week={week} onWeek={onWeek} />}
+      {/* v301/v222: while phone is loading, PhonePlaceholder owns the week strip (no DayHeader / no desktop grid). */}
+      {phone ? (loading ? null : <DayHeader day={day} today={today} onStep={step} />) : toolbar && <WeekControls today={today} week={week} onWeek={onWeek} />}
       <div style={{ marginTop: toolbar || phone ? 16 : 0 }}>
         {failed === key ? (
           <div role="alert" style={emptyCard}>{"Couldn't load calendar"}</div>
         ) : loading ? (
-          phone ? <PhonePlaceholder /> : <Placeholder />
+          phone ? <PhonePlaceholder week={week} day={day} today={today} /> : <Placeholder />
         ) : phone ? (
           <PhoneDay eps={eps} day={day} today={today} />
         ) : !eps.length ? (
@@ -353,16 +354,50 @@ function Placeholder() {
   );
 }
 
-/** v222: phone loading in the agenda's shape (a count line and U3-height rows), so a phone never paints
- * the desktop week grid first. */
-function PhonePlaceholder() {
+/** v222/v301: phone loading never paints the desktop week grid. v301 (Designer / SPEC-v187): week strip
+ * without dots + 5 Home-style skeleton-shimmer cards with a neutral edge (variant-B 20-calendar-loading). */
+function PhonePlaceholder({ week, day, today }: { week: Day; day: Day; today: Day }) {
+  const days = weekDays(week);
+  const sel = days.includes(day) ? day : days.includes(today) ? today : week;
+  const dayLabel = new Date(`${sel}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+  const widths = [
+    ['70%', '50%'], ['55%', '35%'], ['80%', '60%'], ['62%', '42%'], ['74%', '54%'],
+  ] as const;
   return (
     <div data-testid="tv-cal-loading-phone" aria-busy="true">
-      <span aria-hidden="true" style={{ display: 'block', width: 96, height: 18, margin: '0 4px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.04)' }} />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {[0, 1, 2].map(i => (
-          <span key={i} data-testid="tv-cal-loading-row" style={{ display: 'block', height: 82, borderRadius: 12,
-            border: '1px solid rgba(255,255,255,0.04)', background: 'rgba(255,255,255,0.04)' }} />
+      <div data-testid="tv-cal-loading-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+        {days.map(d => {
+          const on = d === sel;
+          const dt = new Date(`${d}T12:00:00`);
+          return (
+            <div key={d} data-testid="tv-cal-loading-chip" aria-hidden="true"
+              style={{ height: 68, minWidth: 0, borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
+                background: on ? '#3b82f6' : 'rgba(255,255,255,0.06)', color: on ? '#fff' : W95,
+                border: !on && d === today ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.08)' }}>
+              <span style={{ fontSize: 12, fontWeight: 500, color: on ? '#fff' : W70 }}>{dt.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+              <span style={{ fontSize: 17, fontWeight: 700 }}>{dt.getDate()}</span>
+              {/* SPEC-v187 loading: strip without dots — reserve the dots row height, leave empty */}
+              <span style={{ display: 'block', height: 5 }} />
+            </div>
+          );
+        })}
+      </div>
+      <div data-testid="tv-cal-loading-daylabel" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '16px 4px 8px' }}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: W95 }}>{dayLabel}</span>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {widths.map(([w1, w2], i) => (
+          <div key={i} data-testid="tv-cal-loading-row" style={{ display: 'flex', borderRadius: 12, background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.08)', minHeight: 56, overflow: 'hidden',
+            boxShadow: 'inset 4px 0 0 rgba(255,255,255,0.14)' }}>
+            <span aria-hidden="true" style={{ width: 76, flex: 'none', padding: '14px 0 0 16px', boxSizing: 'border-box' }}>
+              <span className="skeleton-shimmer" style={{ display: 'block', width: 48, height: 12, borderRadius: 6 }} />
+            </span>
+            <span aria-hidden="true" style={{ flex: 1, minWidth: 0, padding: '12px 14px 12px 0' }}>
+              <span className="skeleton-shimmer" style={{ display: 'block', width: w1, height: 15, borderRadius: 6 }} />
+              <span className="skeleton-shimmer" style={{ display: 'block', width: w2, height: 12, borderRadius: 6, marginTop: 8 }} />
+            </span>
+          </div>
         ))}
       </div>
     </div>
