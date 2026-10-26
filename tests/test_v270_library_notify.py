@@ -80,7 +80,7 @@ def test_tv_single_episode_modal_deep_link(captured):
         media_type='tv', title='Severance', year='2022', tmdb_id=95396,
         season=1, episode=4, episode_title='The You You Are',
     )
-    assert pushes[0]['title'] == 'Severance (2022) added!'
+    assert pushes[0]['title'] == 'Severance (2022) · S01E04 · The You You Are added!'
     assert pushes[0]['body'] == 'Tap to view details'
     assert pushes[0]['url'] == '/?modal=tv&tmdb=95396&season=1&episode=4'
 

@@ -539,12 +539,14 @@ def _no_import(h: str, name: Optional[str]) -> Optional[str]:
 
 
 def _notify_imported(res: Dict[str, Any]) -> None:
-    """Prod AutoRenamer-style notify once the file is in the library (import-complete)."""
+    """Notify once the file is in the library (import-complete). v302: pass episode
+    detail for single-ep and small contiguous multi-ep; season packs stay show-level."""
     from app import library_notify
     sid = res.get('series_id')
     title, year, tmdb_id = '', '', None
     season = episode = None
     episode_title = None
+    episodes = None  # multi-ep small range (≤3 contiguous, same season)
     if sid is not None:
         with tv_store.connect() as conn:
             row = conn.execute('SELECT title, year, tmdb_id FROM series WHERE id = ?', (sid,)).fetchone()
@@ -560,10 +562,17 @@ def _notify_imported(res: Dict[str, Any]) -> None:
                 if ep:
                     season, episode, episode_title = ep['season_number'], ep['episode_number'], ep['title']
             elif eids:
-                seasons = {r['season_number'] for r in conn.execute(
-                    f"SELECT season_number FROM episodes WHERE id IN ({','.join('?' * len(eids))})", eids)}
+                rows = list(conn.execute(
+                    f"SELECT season_number, episode_number, title FROM episodes WHERE id IN "
+                    f"({','.join('?' * len(eids))})", eids))
+                seasons = {r['season_number'] for r in rows}
                 if len(seasons) == 1:
                     season = next(iter(seasons))
+                    nums = sorted({int(r['episode_number']) for r in rows
+                                   if r['episode_number'] is not None})
+                    # Small contiguous same-season set → episode-range push; many / pack → show-level.
+                    if 1 < len(nums) <= 3 and nums == list(range(nums[0], nums[-1] + 1)):
+                        episodes = nums
     dest = ''
     files = res.get('files') or []
     if files and isinstance(files[0], dict):
@@ -571,7 +580,7 @@ def _notify_imported(res: Dict[str, Any]) -> None:
     library_notify.notify_library_added(
         media_type='tv', title=title or str(res.get('name') or ''), year=year,
         tmdb_id=tmdb_id, dest_path=dest, season=season, episode=episode,
-        episode_title=episode_title, source='tv_downloads',
+        episode_title=episode_title, episodes=episodes, source='tv_downloads',
     )
 
 
