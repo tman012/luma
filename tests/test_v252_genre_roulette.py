@@ -463,15 +463,17 @@ def test_language_is_sent_to_discover_unless_any(world):
 
 
 def test_notifies_admins_only_on_failure_by_default(world):
+    """v296: grab/run-finish Web Push is off (import-only). Setting may still be stored."""
     three_genre_world(world)
     go(world, cfg(**ONLY3))
     assert world.pushes == []
     for i in world.cat:
         world.releases[i] = []
     go(world, cfg(**ONLY3), seed=7)
-    assert world.pushes and world.pushes[0][0] == 'Genre Roulette'
-    world.pushes.clear()
-    go(world, cfg(notify='off', **ONLY3), seed=8)
+    assert world.pushes == []
+    go(world, cfg(notify='finish', **ONLY3), seed=8)
+    assert world.pushes == []
+    go(world, cfg(notify='off', **ONLY3), seed=9)
     assert world.pushes == []
 
 

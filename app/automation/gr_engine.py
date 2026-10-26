@@ -96,7 +96,11 @@ def note_origin(info_hash: str, film: Dict[str, Any], item: Dict[str, Any]) -> N
 
 
 def notify(title: str, body: str) -> None:
-    """Web push to every admin (failure or finish, per the setting). Never raises."""
+    """Legacy admin Web Push hook (kept for tests/monkeypatches).
+
+    v296: Genre Roulette no longer pushes at run finish/grab. Movie-name Web Push
+    matches prod AutoRenamer via library_notify on movie_import (import-complete only).
+    """
     try:
         from app import user_auth
         from app.push_service import send_push_to_user
@@ -105,6 +109,33 @@ def notify(title: str, body: str) -> None:
                 send_push_to_user(int(u['id']), title, body, tag='genre-roulette', url='/settings/automation')
     except Exception as e:                       # noqa: BLE001
         logger.warning('Genre Roulette: push failed: %s', type(e).__name__)
+
+
+def push_body(r: Dict[str, Any]) -> str:
+    """Movie-name body for a run (Title (Year) list). Kept for logs/cards; not sent at grab.
+
+    Grabbed picks only. Year omitted when empty. Shortfall appends " · N of M".
+    Errors / zero grabs keep the reason text (same ideas as summary()).
+    """
+    if r.get('error'):
+        return str(r['error'])
+    picks = r.get('picks') or []
+    got = [p for p in picks if p.get('grabbed')]
+    wanted = int(r.get('wanted') or 0)
+    grabbed = int(r.get('grabbed') or 0)
+    if got:
+        names = ', '.join(
+            f"{p['title']} ({p['year']})" if p.get('year') not in (None, '') else str(p.get('title') or 'Unknown')
+            for p in got
+        )
+        if wanted and grabbed < wanted:
+            return f'{names} · {grabbed} of {wanted}'
+        return names
+    stop = r.get('stop_reason')
+    reason = STOP_TEXT.get(stop, '') if stop else ''
+    if reason:
+        return f'Nothing added · {reason}'
+    return summary(r)
 
 
 # ------------------------------------------------------------------ the run
@@ -149,11 +180,11 @@ def run(kind: str = 'manual', dry: Optional[bool] = None, cfg: Optional[Dict[str
             gr_store.prune(int(cfg.get('history_days') or 90), now)
         except Exception:                        # noqa: BLE001
             logger.exception('Genre Roulette: history prune failed')
-    if record and not dry:
-        short = result.get('error') or int(result.get('grabbed') or 0) < int(result.get('wanted') or 0)
-        mode = cfg.get('notify') or 'failure'
-        if mode == 'finish' or (mode == 'failure' and short):
-            notify('Genre Roulette', summary(result))
+    # v296: no Web Push at grab/run-finish (standing rule: library import only).
+    # Movie names go out via library_notify on movie_import import-complete (prod copy).
+    # push_body() keeps a movie-name line for logs when picks exist; summary() stays counts.
+    if record and not dry and (result.get('picks') or result.get('error')):
+        logger.info('Genre Roulette push_body: %s', push_body(result))
     logger.info('Genre Roulette: %s', summary(result))
     return result
 
