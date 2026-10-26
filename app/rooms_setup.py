@@ -47,9 +47,11 @@ _cfg: Dict[str, Any] = {}
 
 def init(*, settings, get_current_user: Callable, signed_in_owner: Callable, clients_fn: Optional[Callable] = None,
          can_play: Optional[Callable] = None, stop_fn: Optional[Callable] = None,
-         pair_fn: Optional[Callable] = None, wait_fn: Optional[Callable] = None) -> None:
+         pair_fn: Optional[Callable] = None, wait_fn: Optional[Callable] = None,
+         adb_online_fn: Optional[Callable] = None) -> None:
     _cfg.update(pair_fn=pair_fn, wait_fn=wait_fn, settings=settings, get_current_user=get_current_user, signed_in_owner=signed_in_owner,
-                clients_fn=clients_fn or _plex_clients, can_play=can_play or (lambda u: bool(u)), stop_fn=stop_fn or _plex_stop)
+                clients_fn=clients_fn or _plex_clients, can_play=can_play or (lambda u: bool(u)), stop_fn=stop_fn or _plex_stop,
+                adb_online_fn=adb_online_fn)
 
 
 def _plex_stop(player: Dict[str, Any]) -> bool:
@@ -130,14 +132,74 @@ def _wake(room: Dict[str, Any], dev: Dict[str, Any]) -> str:
     return 'none'
 
 
-def _online(dev: Dict[str, Any], clients: List[Dict[str, Any]]) -> bool:
+def _client_machine_id(c: Dict[str, Any]) -> str:
+    """Plex client machine id. LIVE get_active_clients uses machine_id; some callers use machineIdentifier."""
+    return str(c.get('machineIdentifier') or c.get('machine_id') or '')
+
+
+def _plex_online(dev: Dict[str, Any], clients: List[Dict[str, Any]]) -> bool:
     mid, host = dev.get('machineId') or '', dev.get('host') or ''
     for c in clients:
-        if mid and c.get('machineIdentifier') == mid:
+        if mid and _client_machine_id(c) == mid:
             return True
         if host and c.get('address') == host:
             return True
     return False
+
+
+def _adb_online_default(dev: Dict[str, Any]) -> Optional[bool]:
+    """True when ADB is reachable and authorized; False when unauthorized/unreachable; None if probe unavailable."""
+    host = (dev.get('host') or '').strip()
+    if not host:
+        return None
+    try:
+        port = int(dev.get('connectPort') or 5555)
+    except (TypeError, ValueError):
+        port = 5555
+    try:
+        from app.adb_utils import adb_disabled, adb_devices, run_adb, _has_adb
+        if adb_disabled() or not _has_adb():
+            return None
+        target = f'{host}:{port}'
+        # Status poll: short connect, no disconnect (must not flap an active remote session).
+        run_adb(['adb', 'connect', target], timeout=2)
+        entry = next((d for d in adb_devices() if d.get('serial') == target), None)
+        state = (entry or {}).get('state') or ''
+        if state == 'device':
+            return True
+        # unauthorized / offline / missing after connect → Offline (paired=true alone is not enough)
+        return False
+    except Exception:  # noqa: BLE001 - rooms list must not 500 if ADB probe fails
+        logger.warning('Rooms: ADB online probe failed for %s', host)
+        return None
+
+
+def _adb_online(dev: Dict[str, Any]) -> Optional[bool]:
+    fn = _cfg.get('adb_online_fn')
+    if fn is not None:
+        try:
+            return fn(dev)
+        except Exception:  # noqa: BLE001
+            logger.warning('Rooms: adb_online_fn failed')
+            return None
+    return _adb_online_default(dev)
+
+
+def _online(dev: Dict[str, Any], clients: List[Dict[str, Any]], room: Optional[Dict[str, Any]] = None) -> bool:
+    """Online badge. Plex /clients match (machine_id or machineIdentifier, or host).
+
+    v292: when wake is ADB, Online only if ADB is reachable+authorized (even if Plex misses);
+    Offline if ADB unauthorized/unreachable. paired=true alone never sets Online. When the ADB
+    probe is unavailable (no binary / disabled), fall back to Plex match.
+    """
+    plex_hit = _plex_online(dev, clients)
+    if room is not None and _wake(room, dev) == 'adb':
+        adb = _adb_online(dev)
+        if adb is True:
+            return True
+        if adb is False:
+            return False
+    return plex_hit
 
 
 def view_room(room: Dict[str, Any], default_id: str, clients: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -152,7 +214,7 @@ def view_room(room: Dict[str, Any], default_id: str, clients: List[Dict[str, Any
                   # v288: device first, then room (matches remote path in main.py)
                   'harmony_nav_device': (dev.get('harmonyNavigationDevice') or room.get('harmonyNavigationDevice') or ''),
                   'paired': bool(dev.get('paired')),
-                  'online': _online(dev, clients), 'wake': _wake(room, dev)}
+                  'online': _online(dev, clients, room), 'wake': _wake(room, dev)}
     return {'id': room['id'], 'name': room.get('name') or '', 'default': room['id'] == default_id,
             'online': bool(player and player['online']), 'harmony_hub': room.get('harmonyHubIp') or '',
             'harmony_volume_device': room.get('harmonyVolumeDevice') or '', 'player': player}
@@ -177,10 +239,11 @@ def view() -> Dict[str, Any]:
 
 def players() -> List[Dict[str, Any]]:
     """Plex players online now (PMS /clients). v272: never list configured Offline hosts — that seeded
-    orphan ATV rows (e.g. 192.168.1.108) into Add device before Pair succeeded."""
+    orphan ATV rows (e.g. 192.168.1.108) into Add device before Pair succeeded.
+    v292: accept machine_id (LIVE get_active_clients) or machineIdentifier."""
     out, seen = [], set()
     for c in _clients():
-        mid = str(c.get('machineIdentifier') or '')
+        mid = _client_machine_id(c)
         if not mid or mid in seen:
             continue
         seen.add(mid)
