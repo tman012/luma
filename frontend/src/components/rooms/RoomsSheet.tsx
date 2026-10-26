@@ -371,6 +371,7 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
   const [expandedRoom, setExpandedRoom] = useState<string | null>(null);
   const [remoteTarget, setRemoteTarget] = useState<{ roomId: string; deviceId: string } | null>(null);
   const [deviceMap, setDeviceMap] = useState<Record<string, DeviceData[]>>({});
+  const [hubMap, setHubMap] = useState<Record<string, string>>({});
 
   const dragRef = useRef({ active: false, startY: 0, currentY: 0 });
   const [dragOffset, setDragOffset] = useState(0);
@@ -399,10 +400,13 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
     fetchRooms()
       .then((data) => {
         const map: Record<string, DeviceData[]> = {};
+        const hubs: Record<string, string> = {};
         for (const r of data.rooms) {
           map[r.id] = r.devices || [];
+          hubs[r.id] = (r.harmonyHubIp || '').trim();
         }
         setDeviceMap(map);
+        setHubMap(hubs);
       })
       .catch(() => {});
   }, [open]);
@@ -584,6 +588,7 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
           <FullScreenRemote
             room={liveRoom}
             deviceId={remoteTarget.deviceId}
+            harmonyHubIp={hubMap[remoteTarget.roomId]}
             onClose={() => setRemoteTarget(null)}
           />
         ) : null;

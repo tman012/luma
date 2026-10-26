@@ -170,6 +170,8 @@ def enabled() -> bool:
 _ROOMS_LEGACY = re.compile(r'^/api/rooms/[^/]+/(?:devices/[^/]+/)?(?:test|pair)/?$')
 # v265: prod's Rooms sheet (Now Playing: a Plex read) and its remote (the route checks the signed-in owner).
 _ROOM_REMOTE = re.compile(r'^/api/room/[^/]+/remote$')
+# v291: Harmony pool warmup when FullScreenRemote mounts (owner-checked route).
+_ROOM_HARMONY_ENSURE = re.compile(r'^/api/room/[^/]+/harmony/ensure$')
 # v267: Activity delete/remove torrent (route checks owner + instance qbit write).
 _DOWNLOADS_REMOVE = re.compile(r'^/api/downloads/remove/[^/]+/?$')
 
@@ -182,6 +184,8 @@ def path_allowed(path: str, method: str = 'GET') -> bool:
         return method in ('GET', 'HEAD')
     if _ROOM_REMOTE.match(path):
         return method == 'POST'
+    if _ROOM_HARMONY_ENSURE.match(path):
+        return method in ('GET', 'POST')
     if _DOWNLOADS_REMOVE.match(path):
         return method in ('DELETE', 'POST')
     if _playback_allowed(path, method):

@@ -20614,6 +20614,31 @@ def room_remote(room_id):
         return jsonify({'ok': False, 'detail': str(e)}), 500
 
 
+@app.route('/api/room/<room_id>/harmony/ensure', methods=['GET', 'POST'])
+def room_harmony_ensure(room_id):
+    """Warm the Harmony Hub pool for this room so the first remote key is snappy.
+
+    Owner-auth'd (same as /remote). No-op when the room has no Hub IP.
+    """
+    if _minimal.enabled():
+        _u, _err = _start_flow.require_signed_in_owner()
+        if _err:
+            return _err
+    try:
+        room = settings.get_room_by_id(room_id)
+        if not room:
+            return jsonify({'ok': False, 'detail': 'Room not found'}), 404
+        hub_ip = (room.get('harmonyHubIp') or '').strip()
+        if not hub_ip:
+            return jsonify({'ok': True, 'warmed': False})
+        from app import harmony_service
+        ok = harmony_service.ensure_connected(hub_ip)
+        return jsonify({'ok': ok, 'warmed': bool(ok)})
+    except Exception as e:
+        logger.error(f"/api/room/{room_id}/harmony/ensure error: {e}")
+        return jsonify({'ok': False, 'detail': str(e)}), 500
+
+
 @app.route('/api/plex/playqueue', methods=['POST'])
 def create_plex_playqueue():
     """Create a Plex play queue (e.g. for shuffle-play mode)."""

@@ -8,7 +8,7 @@ Architecture: a single background thread runs a persistent asyncio event
 loop with a long-lived WebSocket connection per hub IP.  Public functions
 submit work to that loop via run_coroutine_threadsafe() and block on the
 future — no connect/disconnect overhead per call.  The connection auto-
-reconnects if it drops and idles out after 5 minutes of inactivity.
+reconnects if it drops and idles out after a long idle window.
 """
 
 import asyncio
@@ -22,7 +22,7 @@ from aioharmony.harmonyapi import HarmonyAPI, SendCommandDevice
 logger = logging.getLogger(__name__)
 
 _CONNECT_TIMEOUT = 15   # seconds
-_IDLE_TIMEOUT = 300     # close connection after 5 min idle
+_IDLE_TIMEOUT = 7200    # close connection after 2 h idle (keep warm across watch sessions)
 _CMD_TIMEOUT = 10       # per-command timeout
 
 
@@ -78,13 +78,18 @@ async def _get_api(hub_ip: str) -> HarmonyAPI:
                 pass
             del _pool[hub_ip]
 
-        # New connection
-        api = HarmonyAPI(ip_address=hub_ip)
+        # New connection — WEBSOCKETS only (avoid aioharmony's 5s XMPP fallback cliff)
+        api = HarmonyAPI(ip_address=hub_ip, protocol="WEBSOCKETS")
+        t0 = time.monotonic()
         connected = await asyncio.wait_for(api.connect(), timeout=_CONNECT_TIMEOUT)
+        connect_ms = int((time.monotonic() - t0) * 1000)
         if not connected:
             raise ConnectionError(f"Could not connect to Harmony Hub at {hub_ip}")
         _pool[hub_ip] = {"api": api, "last_used": time.monotonic()}
-        logger.info("Harmony Hub %s: connected (pool size=%d)", hub_ip, len(_pool))
+        logger.info(
+            "Harmony Hub %s: connected connect_ms=%d (pool size=%d)",
+            hub_ip, connect_ms, len(_pool),
+        )
         return api
 
 
@@ -147,7 +152,7 @@ def _run_oneshot(hub_ip: str, action):
     loop = _ensure_loop()
 
     async def _wrapper():
-        api = HarmonyAPI(ip_address=hub_ip)
+        api = HarmonyAPI(ip_address=hub_ip, protocol="WEBSOCKETS")
         try:
             connected = await asyncio.wait_for(api.connect(), timeout=_CONNECT_TIMEOUT)
             if not connected:
@@ -185,6 +190,20 @@ def get_current_activity(hub_ip: str) -> str:
     except Exception as e:
         logger.error("get_current_activity(%s) failed: %s", hub_ip, e)
         return "unknown"
+
+
+def ensure_connected(hub_ip: str) -> bool:
+    """Warm the hub pool (connect only). Used when the remote UI opens."""
+    async def _action(api: HarmonyAPI):
+        # Touch last_used via _get_api; cheap read keeps the session warm.
+        _ = api.current_activity
+        return True
+
+    try:
+        return bool(_run_on_hub(hub_ip, _action))
+    except Exception as e:
+        logger.error("ensure_connected(%s) failed: %s", hub_ip, e)
+        return False
 
 
 def start_activity(hub_ip: str, activity_name: str) -> bool:

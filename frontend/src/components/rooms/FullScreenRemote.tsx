@@ -15,6 +15,8 @@ interface FullScreenRemoteProps {
   room: Room;
   deviceId: string;
   onClose: () => void;
+  /** When set, warm the Harmony hub pool on mount so the first key is snappy. */
+  harmonyHubIp?: string;
 }
 
 type Command =
@@ -468,7 +470,7 @@ function NowPlayingBackdrop({ room }: { room: Room }) {
 // Main component — bottom sheet pattern
 // ---------------------------------------------------------------------------
 
-export function FullScreenRemote({ room, deviceId, onClose }: FullScreenRemoteProps) {
+export function FullScreenRemote({ room, deviceId, onClose, harmonyHubIp }: FullScreenRemoteProps) {
   // Sheet animation state
   const sheetRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({ active: false, startY: 0, currentY: 0 });
@@ -482,6 +484,13 @@ export function FullScreenRemote({ room, deviceId, onClose }: FullScreenRemotePr
     document.documentElement.style.background = '#000';
     return () => { document.documentElement.style.background = prev; };
   }, []);
+
+  // Warm Harmony pool when remote opens (hub IP from Rooms sheet config).
+  useEffect(() => {
+    const hub = (harmonyHubIp || '').trim();
+    if (!hub) return;
+    apiFetch(`/api/room/${room.roomId}/harmony/ensure`, { method: 'POST' }).catch(() => {});
+  }, [room.roomId, harmonyHubIp]);
 
   // ESC to close
   useEffect(() => {
