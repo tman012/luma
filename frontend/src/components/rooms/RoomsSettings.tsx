@@ -1,7 +1,8 @@
 /** v224 Settings > Rooms (Taylor's Option A, room first; docs: /workspace/design/rooms/option-A-*).
  * v299: Add Room wizard — Name → Network debugging → IP Pair → smart home (HA | Harmony).
  * Pair is part of Add: empty room on create; devices only after Pair success (v272). Cancel/Back
- * before Pair deletes the empty room. Desktop uses the same wizard steps in a modal. */
+ * before Pair deletes the empty room; after Pair, Back/close never DELETE. Desktop uses the same
+ * wizard steps in a modal. */
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { FONT } from '@/components/start/StartUI';
 import { Modal, Toggle, field, glassBtn, primaryBtn, tvEditCss } from '@/components/library/TvEdit';
@@ -64,10 +65,13 @@ export function RoomsSettings({ wide = true, onExit }: { wide?: boolean; onExit?
   const room = (id: string) => rooms.find(r => r.id === id);
   const toList = () => { setView({ k: 'list' }); setError(''); };
 
-  /** Cancel/Back before Pair OK: delete the empty room shell (PM LOCKED). */
+  /** Cancel/Back before Pair OK: delete the empty room shell (PM LOCKED).
+   * Never DELETE once a player is present (Pair success) — defense in depth. */
   const abandonEmpty = (id: string) => {
-    void removeRoom(id).then(r => {
-      if (r.ok) setData(r.data);
+    const r = room(id);
+    if (r?.player) { toList(); return; }
+    void removeRoom(id).then(res => {
+      if (res.ok) setData(res.data);
       toList();
     });
   };
@@ -93,7 +97,11 @@ export function RoomsSettings({ wide = true, onExit }: { wide?: boolean; onExit?
   } else if (view.k === 'wiz-adb' && room(view.id)) {
     const id = view.id;
     flow = {
-      title: 'Network debugging', back: () => abandonEmpty(id), body: (
+      title: 'Network debugging', back: () => {
+        const r = room(id);
+        if (r && !r.player) abandonEmpty(id);
+        else toList();
+      }, body: (
         <WizAdbHowto onContinue={() => { setError(''); setView({ k: 'wiz-player', id }); }} />),
     };
   } else if (view.k === 'wiz-player' && room(view.id)) {

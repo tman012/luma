@@ -1,5 +1,5 @@
 /** v299 Rooms Add wizard: empty name, no chips, Pair-before-persist, Cancel deletes empty room,
- * HA/Harmony branches, helper text only on Network debugging. */
+ * Pair→Back→Back keeps paired room, HA/Harmony branches, helper text only on Network debugging. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { RoomsSettings } from '@/components/rooms/RoomsSettings';
@@ -185,6 +185,23 @@ describe('v299 Rooms Add wizard', () => {
     await waitFor(() => expect(writes(calls).some(c => c.method === 'DELETE')).toBe(true));
     expect(writes(calls).find(c => c.method === 'DELETE')!.url).toBe('/api/rooms/new');
     await waitFor(() => expect(screen.getByTestId('rooms-empty')).toBeTruthy());
+  });
+
+  it('Pair then Back then Back does not DELETE paired room', async () => {
+    const calls: Call[] = []; stub([], calls);
+    await startWizard('Family Room');
+    fireEvent.click(screen.getByTestId('wiz-adb-continue'));
+    fireEvent.change(screen.getByTestId('room-ip'), { target: { value: '192.168.1.50' } });
+    fireEvent.click(screen.getByTestId('room-pair'));
+    await waitFor(() => expect(screen.getByTestId('wiz-pair-ok')).toBeTruthy());
+    // Back from player → Network debugging howto
+    fireEvent.click(screen.getByLabelText('Back'));
+    await waitFor(() => expect(screen.getByTestId('wiz-adb-howto')).toBeTruthy());
+    // Back from howto — must navigate without DELETE (player present)
+    fireEvent.click(screen.getByLabelText('Back'));
+    await waitFor(() => expect(screen.getByTestId('rooms-list')).toBeTruthy());
+    expect(writes(calls).some(c => c.method === 'DELETE')).toBe(false);
+    expect(screen.getByTestId('room-row').textContent).toContain('Family Room');
   });
 
   it('Smart home No finishes with wake=adb', async () => {
