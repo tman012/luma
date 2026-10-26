@@ -96,13 +96,17 @@ function RoomCard({
   expanded,
   onToggle,
   onOpenRemote,
+  onNeedDevice,
   roomDevices,
+  hasHub,
 }: {
   room: Room;
   expanded: boolean;
   onToggle: () => void;
   onOpenRemote: (deviceId: string) => void;
+  onNeedDevice: () => void;
   roomDevices: DeviceData[] | undefined;
+  hasHub: boolean;
 }) {
   const s = room.session;
   const a = room.activity;
@@ -276,8 +280,15 @@ function RoomCard({
             <button
               type="button"
               onClick={() => {
-                const devId = autoDeviceId || roomDevices?.[0]?.id;
-                if (devId) onOpenRemote(devId);
+                // v294: never silent no-op. Prefer activity/session resolve, else first
+                // configured device, else still open for Harmony (empty deviceId — backend
+                // falls back to devices[0] / hub fields). No devices + no Hub → toast.
+                const devId = autoDeviceId || roomDevices?.[0]?.id || '';
+                if (devId || hasHub) {
+                  onOpenRemote(devId);
+                } else {
+                  onNeedDevice();
+                }
               }}
               className="flex w-full items-center justify-center gap-2.5 rounded-xl py-3.5 text-[15px] font-medium transition-all duration-150 active:scale-[0.98]"
               style={remoteButtonStyle}
@@ -372,6 +383,13 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
   const [remoteTarget, setRemoteTarget] = useState<{ roomId: string; deviceId: string } | null>(null);
   const [deviceMap, setDeviceMap] = useState<Record<string, DeviceData[]>>({});
   const [hubMap, setHubMap] = useState<Record<string, string>>({});
+  const [deviceNotice, setDeviceNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!deviceNotice) return;
+    const t = window.setTimeout(() => setDeviceNotice(null), 3200);
+    return () => window.clearTimeout(t);
+  }, [deviceNotice]);
 
   const dragRef = useRef({ active: false, startY: 0, currentY: 0 });
   const [dragOffset, setDragOffset] = useState(0);
@@ -415,6 +433,7 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
     setExpandedRoom((prev) => (prev === roomId ? null : roomId));
   }, []);
 
+  // v294: deviceId may be '' for Harmony rooms (backend falls back to devices[0] / hub).
   const openRemote = useCallback((room: Room, deviceId: string) => {
     setRemoteTarget({ roomId: room.roomId, deviceId });
   }, []);
@@ -559,7 +578,9 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
                     expanded={expandedRoom === room.roomId}
                     onToggle={() => toggleRoom(room.roomId)}
                     onOpenRemote={(deviceId) => openRemote(room, deviceId)}
+                    onNeedDevice={() => setDeviceNotice('Add a device in Settings.')}
                     roomDevices={deviceMap[room.roomId]}
+                    hasHub={!!(hubMap[room.roomId] || '').trim()}
                   />
                 ))}
               </div>
@@ -580,6 +601,17 @@ export function RoomsSheet({ open, onClose }: RoomsSheetProps) {
           </div>
         </div>
       </div>
+
+      {deviceNotice && (
+        <div
+          role="status"
+          data-testid="rooms-device-notice"
+          className="fixed left-1/2 z-[10003] -translate-x-1/2 rounded-xl border border-white/10 bg-[rgba(21,16,42,0.96)] px-4 py-2.5 text-[13px] text-white/90 shadow-lg"
+          style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)', width: 'min(420px, calc(100vw - 24px))' }}
+        >
+          {deviceNotice}
+        </div>
+      )}
 
       {/* FullScreenRemote layers above at z-10002 */}
       {remoteTarget && (() => {
