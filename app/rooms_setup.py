@@ -12,7 +12,8 @@ Routes (reads: any signed-in user; writes: the owner signed in with a real sessi
     GET    /api/rooms               rooms with their player, wake method and online state
     GET    /api/rooms/players       players Plex can see now (PMS /clients only; no Offline seeds)
     POST   /api/rooms               {name} — empty room (no player)
-    PUT    /api/rooms/<id>          {name?, wake?, host?, port?, mac?, harmony_hub?, harmony_activity?, default?}
+    PUT    /api/rooms/<id>          {name?, wake?, host?, port?, mac?, harmony_hub?, harmony_activity?,
+                                    harmony_volume_device?, harmony_nav_device?, default?}
                                     (player changes go through Pair / connect)
     DELETE /api/rooms/<id>
     POST   /api/rooms/<id>/connect  Pair (owner): optional player body adds the device only on Pair
@@ -147,10 +148,14 @@ def view_room(room: Dict[str, Any], default_id: str, clients: List[Dict[str, Any
         player = {'id': dev.get('id'), 'name': dev.get('name') or '', 'product': dev.get('product') or '',
                   'platform': dev.get('platform') or '', 'machine_id': dev.get('machineId') or '',
                   'host': dev.get('host') or '', 'port': dev.get('connectPort'), 'mac': dev.get('macAddress') or '',
-                  'harmony_activity': dev.get('harmonyActivity') or '', 'paired': bool(dev.get('paired')),
+                  'harmony_activity': dev.get('harmonyActivity') or '',
+                  # v288: device first, then room (matches remote path in main.py)
+                  'harmony_nav_device': (dev.get('harmonyNavigationDevice') or room.get('harmonyNavigationDevice') or ''),
+                  'paired': bool(dev.get('paired')),
                   'online': _online(dev, clients), 'wake': _wake(room, dev)}
     return {'id': room['id'], 'name': room.get('name') or '', 'default': room['id'] == default_id,
-            'online': bool(player and player['online']), 'harmony_hub': room.get('harmonyHubIp') or '', 'player': player}
+            'online': bool(player and player['online']), 'harmony_hub': room.get('harmonyHubIp') or '',
+            'harmony_volume_device': room.get('harmonyVolumeDevice') or '', 'player': player}
 
 
 PUBLIC_ROOM_KEYS = ('id', 'name', 'default', 'online')
@@ -283,7 +288,8 @@ def create(body: Any) -> Dict[str, Any]:
 def update(room_id: str, body: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(body, dict) or not body:
         raise Invalid({'_': 'Invalid'})
-    allowed = {'name', 'player', 'wake', 'host', 'port', 'mac', 'harmony_hub', 'harmony_activity', 'default'}
+    allowed = {'name', 'player', 'wake', 'host', 'port', 'mac', 'harmony_hub', 'harmony_activity',
+               'harmony_volume_device', 'harmony_nav_device', 'default'}
     if set(body) - allowed:
         raise Invalid({'_': 'Invalid'})
     s = _cfg['settings']
@@ -295,7 +301,7 @@ def update(room_id: str, body: Any) -> Optional[Dict[str, Any]]:
     if 'name' in body:
         patch['name'] = _name(body['name'], rooms, room_id)
     devs = [d for d in room.get('devices') or [] if isinstance(d, dict)]
-    if not devs and any(k in body for k in ('host', 'port', 'mac', 'wake', 'harmony_activity', 'player')):
+    if not devs and any(k in body for k in ('host', 'port', 'mac', 'wake', 'harmony_activity', 'harmony_nav_device', 'player')):
         raise Invalid({'player': 'Pair the player to add it'})
     dev = dict(devs[0]) if devs else {'id': uuid.uuid4().hex[:8], 'services': [{'id': uuid.uuid4().hex[:8], 'type': 'plex'}]}
     dchanged = False
@@ -310,6 +316,11 @@ def update(room_id: str, body: Any) -> Optional[Dict[str, Any]]:
         dev['macAddress'] = _mac(body['mac']); dchanged = True
     if 'harmony_activity' in body:
         dev['harmonyActivity'] = _text(body['harmony_activity'], 'harmony_activity'); dchanged = True
+    if 'harmony_nav_device' in body:
+        # primary device (Settings RoomAccordion); remote falls back to room
+        dev['harmonyNavigationDevice'] = _text(body['harmony_nav_device'], 'harmony_nav_device'); dchanged = True
+    if 'harmony_volume_device' in body:
+        patch['harmonyVolumeDevice'] = _text(body['harmony_volume_device'], 'harmony_volume_device')
     if 'harmony_hub' in body:
         patch['harmonyHubIp'] = _host(body['harmony_hub'])
         # v285: saving a Hub IP enables direct Harmony for remote keys (wake may already).

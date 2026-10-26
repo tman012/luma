@@ -5,10 +5,10 @@ import { apiFetch } from '@/apiClient';
 export type Wake = 'adb' | 'wol' | 'harmony' | 'none';
 export type RoomPlayer = {
   id: string; name: string; product: string; platform: string; machine_id: string; host: string;
-  port: number | null; mac: string; harmony_activity: string; paired: boolean; online: boolean; wake: Wake;
+  port: number | null; mac: string; harmony_activity: string; harmony_nav_device?: string; paired: boolean; online: boolean; wake: Wake;
 };
 /** v231 (Reviewer): a signed-in non-owner gets only id, name, default and online (no harmony_hub or player). */
-export type Room = { id: string; name: string; default: boolean; online?: boolean; harmony_hub?: string; player?: RoomPlayer | null };
+export type Room = { id: string; name: string; default: boolean; online?: boolean; harmony_hub?: string; harmony_volume_device?: string; player?: RoomPlayer | null };
 export const roomOnline = (r: Pick<Room, 'online' | 'player'>) => !!(r.online ?? r.player?.online);
 export type RoomsView = { rooms: Room[]; default_room_id: string };
 export type FoundPlayer = { machine_id: string; name: string; product: string; platform: string; host: string; online: boolean };
@@ -36,7 +36,7 @@ export const loadPlayers = () => call<{ players: FoundPlayer[] }>(`${ROOMS_URL}/
 /** v272: empty room — name only. */
 export const createRoom = (name: string) => call<RoomsView>(ROOMS_URL, json('POST', { name }), okView);
 export type RoomPatch = Partial<{ name: string; wake: Wake; host: string; port: number | string; mac: string;
-  harmony_hub: string; harmony_activity: string; default: boolean }>;
+  harmony_hub: string; harmony_activity: string; harmony_volume_device: string; harmony_nav_device: string; default: boolean }>;
 export const updateRoom = (id: string, patch: RoomPatch) => call<RoomsView>(`${ROOMS_URL}/${encodeURIComponent(id)}`, json('PUT', patch), okView);
 
 /** v265/v272 Pair: prod's ADB flow. Optional player = Add device (persists only on success). */

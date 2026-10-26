@@ -334,6 +334,8 @@ function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer, onSaveStat
   const [mac, setMac] = useState(p?.mac || '');
   const [hub, setHub] = useState(r.harmony_hub || '');
   const [act, setAct] = useState(p?.harmony_activity || '');
+  const [vol, setVol] = useState(r.harmony_volume_device || '');
+  const [nav, setNav] = useState(p?.harmony_nav_device || '');
   const [def, setDef] = useState(r.default);
   const [confirm, setConfirm] = useState(false);
   const patch: RoomPatch = {};
@@ -344,6 +346,8 @@ function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer, onSaveStat
   if (wake === 'wol' && mac.trim() !== (p?.mac || '')) patch.mac = mac.trim();
   if (wake === 'harmony' && hub.trim() !== (r.harmony_hub || '')) patch.harmony_hub = hub.trim();
   if (wake === 'harmony' && act.trim() !== (p?.harmony_activity || '')) patch.harmony_activity = act.trim();
+  if (wake === 'harmony' && vol.trim() !== (r.harmony_volume_device || '')) patch.harmony_volume_device = vol.trim();
+  if (wake === 'harmony' && nav.trim() !== (p?.harmony_nav_device || '')) patch.harmony_nav_device = nav.trim();
   if (def !== r.default) patch.default = def;
   const dirty = Object.keys(patch).length > 0 && !!name.trim();
   const patchKey = JSON.stringify(patch);
@@ -422,6 +426,8 @@ function EditRoom({ room: r, error, onSave, onRemove, onChangePlayer, onSaveStat
           {wake === 'wol' && fieldRow('MAC address', 'mac', mac, setMac)}
           {wake === 'harmony' && fieldRow('Hub IP address', 'hub', hub, setHub, 'decimal')}
           {wake === 'harmony' && fieldRow('Activity', 'activity', act, setAct)}
+          {wake === 'harmony' && fieldRow('Volume device', 'volume-device', vol, setVol)}
+          {wake === 'harmony' && fieldRow('Harmony nav device', 'nav-device', nav, setNav)}
         </div>
       )}
       </>

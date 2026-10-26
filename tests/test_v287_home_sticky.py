@@ -5,13 +5,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_sw_is_v287():
+def test_sw_is_v287_or_newer():
     sw = (ROOT / 'static' / 'sw.js').read_text()
     stamp = (ROOT / 'static' / 'sw-stamp.json').read_text()
-    assert "CACHE_VERSION = 'media-kiosk-v287'" in sw
-    assert '"cache_version": "media-kiosk-v287"' in stamp
     m = re.search(r"CACHE_VERSION = 'media-kiosk-v(\d+)'", sw)
-    assert m and int(m.group(1)) == 287
+    assert m and int(m.group(1)) >= 287
+    assert f'"cache_version": "media-kiosk-v{m.group(1)}"' in stamp
 
 
 def test_phone_header_is_fixed_outside_ptr_shell():
