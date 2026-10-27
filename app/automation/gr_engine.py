@@ -35,6 +35,11 @@ MAX_SEARCH_FAILURES = 3
 IMDB_MAX_LOOKUPS = 200
 IMDB_MAX_FAILURES = 3
 FILL_EXTRA_GENRES = 3
+# v303: when every tracker is paced (tv spacing / SLOT_BUSY / rate), wait for the
+# next Luma spacing slot (~AUTO_MIN_GAP_S) and keep searching remaining films
+# instead of aborting the night at 1/3. Cap waits so a real long rate backoff
+# still ends the run as trackers_capped (label kept from v297).
+MAX_PACE_WAITS = 12            # ~12 min of pure spacing waits; enough for movies_per_night=3 overnight
 PICK_KEYS = ('tmdb_id', 'title', 'year', 'genre', 'poster_path', 'votes')
 
 STOP_TEXT = {
@@ -43,6 +48,28 @@ STOP_TEXT = {
     'trackers_capped': 'Tracker limits reached', 'qbit_unreachable': "qBittorrent couldn't be reached",
     'grabs_off': 'Grabs are off', 'error': 'Error', 'interrupted': 'Interrupted',
 }
+
+
+def pace_wait_seconds(sts: List[Dict[str, Any]], now: float, cfgs: Optional[List[Dict[str, Any]]] = None) -> float:
+    """How long to sleep when every tracker is paced.
+
+    Prefers the earliest status ``reset_at`` when present. Otherwise waits a full
+    ``AUTO_MIN_GAP_S`` (Luma tv spacing). Returns > AUTO_MIN_GAP_S when reset_at is
+    farther out so the caller aborts as trackers_capped instead of sleeping through
+    a multi-hour rate/ban backoff. ``cfgs`` kept for call-site compatibility.
+    """
+    from app import tv_budget
+    gap = float(tv_budget.AUTO_MIN_GAP_S)
+    resets = [float(s['reset_at']) for s in sts if s.get('reset_at') is not None]
+    if not resets:
+        return gap
+    raw = min(resets) - now
+    if raw > gap:
+        return raw
+    if raw <= 0:
+        return 1.0
+    return max(1.0, min(gap, raw))
+
 
 _status: Dict[str, Any] = {'running': False, 'run_id': None, 'kind': None}
 _lock = threading.Lock()
@@ -279,6 +306,8 @@ def _run(cfg, dry, kind, now, rng, run_id, sleep, clock) -> Dict[str, Any]:
     recent = set(int(x) for x in (st.get('grabbed_tmdb_ids') or []) if str(x).lstrip('-').isdigit()) \
         | gr_store.grabbed_ids()
     abort: List[Optional[str]] = [None]
+    pace_waits = {'n': 0}   # v303: spacing waits this run (not a hard fail counter)
+    now_box = [now]         # advanced after a pace wait so the next search sees a fresh slot
 
     def note(genre: str, what: str) -> None:
         genre_notes.setdefault(genre, {}).setdefault(what, 0)
@@ -350,16 +379,37 @@ def _run(cfg, dry, kind, now, rng, run_id, sleep, clock) -> Dict[str, Any]:
         if film.get('runtime') is None:
             d = sel.details(tid, details_cache)
             film['runtime'] = (d or {}).get('runtime')
-        ctr['attempts'] += 1
-        items, sts = search(film, cfgs, now)
-        if not any(s.get('status') == 'ok' for s in sts):
-            from app import tv_search
+        from app import tv_search
+        paced = {tv_search.SLOT_BUSY, 'rate'}
+        items: List[Dict[str, Any]] = []
+        sts: List[Dict[str, Any]] = []
+        while True:
+            if budget_left():
+                return 'abort' if abort[0] else 'none'
+            ctr['attempts'] += 1
+            items, sts = search(film, cfgs, now_box[0])
+            if any(s.get('status') == 'ok' for s in sts):
+                break
             # Slot/daily cap, purpose spacing, and rate backoff are pacing — never
-            # "Trackers couldn't be reached" (v297). Real hard fails still abort as unreachable.
-            paced = {tv_search.SLOT_BUSY, 'rate'}
+            # "Trackers couldn't be reached" (v297). v303: wait for next_slot and
+            # continue the same run instead of aborting mid-night when films remain.
             if sts and all(s.get('status') in paced for s in sts):
-                abort[0] = 'trackers_capped'
-                return 'abort'
+                from app import tv_budget as _tvb
+                wait_s = pace_wait_seconds(sts, now_box[0], cfgs)
+                remaining = time_budget - (clock() - started)
+                if (wait_s > float(_tvb.AUTO_MIN_GAP_S)
+                        or pace_waits['n'] >= MAX_PACE_WAITS
+                        or wait_s > remaining):
+                    abort[0] = 'trackers_capped'
+                    return 'abort'
+                pace_waits['n'] += 1
+                logger.info(
+                    'Genre Roulette: all trackers paced; waiting %.0fs for next slot (%s/%s)',
+                    wait_s, pace_waits['n'], MAX_PACE_WAITS,
+                )
+                sleep(wait_s)
+                now_box[0] = now_box[0] + wait_s
+                continue
             ctr['search_fail'] += 1
             if ctr['search_fail'] >= MAX_SEARCH_FAILURES:
                 abort[0] = 'tracker_unreachable'

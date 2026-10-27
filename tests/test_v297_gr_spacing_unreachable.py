@@ -32,22 +32,32 @@ def test_search_status_maps_tv_spacing_to_rate():
     assert search_status(TrackerSkipped('feed spacing')) == 'rate'
 
 
-def test_spacing_aborts_as_trackers_capped_not_unreachable(world):
+def test_spacing_aborts_as_trackers_capped_not_unreachable(world, monkeypatch):
     three_genre_world(world)
     world.search_status = 'rate'  # purpose spacing / rate backoff after search_status()
-    r = go(world, cfg(**ONLY3))
+    # v303: waits then still ends as trackers_capped (never unreachable)
+    monkeypatch.setattr(eng, 'MAX_PACE_WAITS', 2)
+    r = eng.run(
+        'manual', cfg=cfg(**ONLY3), now=2e9,
+        rng=__import__('random').Random(1),
+        sleep=lambda s: None,
+    )
     assert r['stop_reason'] == 'trackers_capped'
     assert r['error'] == eng.STOP_TEXT['trackers_capped']
     assert "couldn't be reached" not in (r.get('error') or '').lower()
     assert r['grabbed'] == 0
-    # immediate paced abort (same as SLOT_BUSY) — one film attempted
-    assert len(world.searches) == 1
+    assert len(world.searches) == 1 + 2  # initial + retries after waits
 
 
-def test_slot_busy_still_trackers_capped(world):
+def test_slot_busy_still_trackers_capped(world, monkeypatch):
     three_genre_world(world)
     world.search_status = tv_search.SLOT_BUSY
-    r = go(world, cfg(**ONLY3))
+    monkeypatch.setattr(eng, 'MAX_PACE_WAITS', 2)
+    r = eng.run(
+        'manual', cfg=cfg(**ONLY3), now=2e9,
+        rng=__import__('random').Random(1),
+        sleep=lambda s: None,
+    )
     assert r['stop_reason'] == 'trackers_capped'
     assert r['error'] == eng.STOP_TEXT['trackers_capped']
 
@@ -62,7 +72,7 @@ def test_real_hard_failures_still_tracker_unreachable(world):
 
 
 def test_short_night_spacing_after_one_grab_is_not_unreachable(world, monkeypatch):
-    """Pattern from dig: grabbed 1 of 3, then spacing aborted the rest as unreachable."""
+    """v297 label + v303 wait: after 1 grab, persistent spacing still ends trackers_capped (never unreachable)."""
     three_genre_world(world)
     n = {'i': 0}
 
@@ -79,7 +89,12 @@ def test_short_night_spacing_after_one_grab_is_not_unreachable(world, monkeypatc
         ]
 
     monkeypatch.setattr(eng, 'search', search)
-    r = go(world, cfg(**ONLY3))
+    monkeypatch.setattr(eng, 'MAX_PACE_WAITS', 2)
+    r = eng.run(
+        'manual', cfg=cfg(**ONLY3), now=2e9,
+        rng=__import__('random').Random(1),
+        sleep=lambda s: None,
+    )
     assert r['grabbed'] == 1
     assert r['wanted'] == 3
     assert r['stop_reason'] == 'trackers_capped'
