@@ -32,56 +32,31 @@ describe('calendar time line', () => {
   });
 });
 
-describe('Downloads job row on a phone', () => {
-  const since = Math.floor(new Date(2026, 9, 15, 9, 5).getTime() / 1000);
-  let phone = true;
+describe('Downloads section (v320)', () => {
   beforeEach(() => {
-    phone = true;
     (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__ = true;
-    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(max-width: 599px)' ? phone : false, media: q,
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: false, media: q,
       addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {}, onchange: null, dispatchEvent: () => false }));
     const res = (b: unknown) => ({ ok: true, status: 200, json: async () => b }) as Response;
     vi.stubGlobal('fetch', vi.fn(async (u: string) => {
       const url = String(u);
       if (url.endsWith('/api/settings/library-paths')) return res({ paths: [], rules: [], fallback_path_id: null, path_map: [], transfer: 'copy',
-        downloads: { path: '/downloads', status: 'ok' }, failed: [{ hash: 'f'.repeat(40), title: 'Heat (1995)', since, reason: 'no_space' }] });
+        downloads: { path: '/downloads', status: 'ok' },
+        failed: [{ hash: 'f'.repeat(40), title: 'Heat (1995)', since: 1, reason: 'no_space' }],
+        not_found: [{ title: 'Ronin', since: 1 }] });
       if (url.endsWith('/api/settings/tv/downloads')) return res({ failed: [
-        { hash: '1'.repeat(40), name: 'Severance.S02E03.1080p.WEB-DL.DDP5.1.H.264-GRP', state: 'failed', error: 'insufficient space', at: since, retry: true },
-        { hash: '2'.repeat(40), name: 'Slow.Horses.S05E04.1080p', state: 'grab_failed', error: "Couldn't create the qBittorrent category luma-tv", at: since - 2 * 86400, retry: false }] });
+        { hash: '1'.repeat(40), name: 'Severance', state: 'failed', error: 'insufficient space', at: 1, retry: true }] });
       return res({});
     }));
   });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); delete (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__; });
 
-  it('name alone on line 1 (one line, ellipsis); red status with the real failure date on line 2; Retry on the right', async () => {
+  it('shows only the Downloads folder control — no history rows', async () => {
     render(<LibraryPathsSettings wide={false} />);
-    const tv = await screen.findAllByTestId('lp-tv-job');
-    const movie = screen.getByTestId('lp-failed');
-    for (const row of [movie, ...tv]) expect(row.getAttribute('data-layout')).toBe('phone');
-    const name = within(tv[0]!).getByTestId('lp-tv-job-name');
-    expect([name.textContent, name.style.whiteSpace, name.style.overflow, name.style.textOverflow]).toEqual(
-      ['Severance.S02E03.1080p.WEB-DL.DDP5.1.H.264-GRP', 'nowrap', 'hidden', 'ellipsis']);
-    const status = within(tv[0]!).getByTestId('lp-tv-job-status');
-    expect(status.textContent).toBe('Not enough space \u00b7 Since Oct 15');
-    expect(status.style.color).toBe('var(--color-danger)');
-    const sinceEl = within(tv[0]!).getByTestId('lp-tv-job-since');             // v166: 'Since Oct 15' never splits
-    expect([sinceEl.textContent, sinceEl.style.whiteSpace]).toEqual(['Since Oct 15', 'nowrap']);
-    expect(within(movie).getByTestId('lp-failed-since').style.whiteSpace).toBe('nowrap');
-    expect(within(movie).getByTestId('lp-failed-status').textContent).toBe('Not enough space \u00b7 Since Oct 15');
-    expect(within(tv[1]!).getByTestId('lp-tv-job-status').textContent).toBe("Couldn't create the qBittorrent category luma-tv \u00b7 Since Oct 13");
-    // Retry is the row's last child (right), only on no-space rows
-    expect(tv[0]!.lastElementChild!.getAttribute('data-testid')).toBe('lp-tv-job-retry');
-    expect(movie.lastElementChild!.getAttribute('data-testid')).toBe('lp-failed-retry');
-    expect(within(tv[1]!).queryByTestId('lp-tv-job-retry')).toBeNull();
-    expect(movie.textContent).toBe('Heat (1995)Not enough space \u00b7 Since Oct 15Retry');
-  });
-
-  it('desktop is unchanged: name and date on the left, status, then Retry', async () => {
-    phone = false;
-    render(<LibraryPathsSettings wide />);
-    const tv = await screen.findAllByTestId('lp-tv-job');
-    expect(tv[0]!.getAttribute('data-layout')).toBeNull();
-    expect(tv[0]!.textContent).toBe('Severance.S02E03.1080p.WEB-DL.DDP5.1.H.264-GRPSince Oct 15Not enough spaceRetry');
-    expect(screen.getByTestId('lp-failed').textContent).toBe('Heat (1995)Since Oct 15Not enough spaceRetry');
+    const box = await screen.findByTestId('lp-downloads');
+    expect((within(box).getByTestId('lp-downloads-path') as HTMLInputElement).value).toBe('/downloads');
+    expect(within(box).queryByTestId('lp-tv-job')).toBeNull();
+    expect(within(box).queryByTestId('lp-failed')).toBeNull();
+    expect(within(box).queryByTestId('lp-not-found')).toBeNull();
   });
 });

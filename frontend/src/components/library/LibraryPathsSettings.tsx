@@ -10,10 +10,8 @@ import { CheckIcon, ChevronIcon, GripIcon, XIcon } from '@/components/nav/AppNav
 import { move } from '@/components/home/homeApi';
 import { CategoryChip, PlusIcon, Switch, trackersCss } from '@/components/trackers/trackersUi';
 import { FolderBrowser } from './FolderBrowser';
-import { isMinimal } from '@/minimal';
-import { loadTvJobs, retryTvJob, tvJobStatus, type TvJob } from './tvCalendarApi';
 import {
-  RESOLUTIONS, SAVE_FAILED, SOURCES, addPath, deletePath, editPath, loadLibrary, moviePaths, retryJob, ruleSummary, saveMapping, saveRules, sinceText,
+  RESOLUTIONS, SAVE_FAILED, SOURCES, addPath, deletePath, editPath, loadLibrary, moviePaths, ruleSummary, saveDownloadsRoot, saveMapping, saveRules,
   type Errors, type LibPath, type LibraryView, type PathMapRow, type Result, type Rule, type Transfer, type Unit,
 } from './libraryPathsApi';
 
@@ -76,7 +74,7 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
       <style>{trackersCss}</style>
       {toast && <NoticeToast key={toast + seq.current} text={toast} onDone={() => setToast('')} />}
 
-      <DownloadsStatus view={view} onView={setView} />
+      <DownloadsStatus view={view} onView={setView} onToast={setToast} />
 
       <div data-testid="lp-paths">
         <h3 style={sectionLabel}>Paths</h3>
@@ -157,124 +155,59 @@ export function LibraryPathsSettings({ wide }: { wide: boolean }) {
 
 // ---------------------------------------------------------------- downloads
 
-/** The downloads folder the mover reads, and grabs whose files it can't find. */
-function DownloadsStatus({ view, onView }: { view: LibraryView; onView?: (v: LibraryView) => void }) {
-  const wide = useContext(WideCtx);
+/** Editable Downloads folder (media.downloads_root). History list removed (v320). */
+function DownloadsStatus({ view, onView, onToast }: {
+  view: LibraryView; onView: (v: LibraryView) => void; onToast: (t: string) => void;
+}) {
   const dl = view.downloads;
-  const lost = view.not_found || [];
-  const failed = view.failed || [];
-  const [busy, setBusy] = useState<string | null>(null);
-  // v158c: the TV download jobs that failed, each with its error; no-space ones get Retry
-  // (the existing TV retry endpoint). No TV (404) or unreachable: no rows.
-  const [tvJobs, setTvJobs] = useState<TvJob[]>([]);
-  const loadTv = useCallback(() => {
-    if (!isMinimal()) return undefined;                 // TV lives in the minimal app only
-    let live = true;
-    void loadTvJobs().then(r => { if (live) setTvJobs(r.ok ? r.data.failed : []); });
-    return () => { live = false; };
-  }, []);
-  useEffect(loadTv, [loadTv]);
-  if (!dl && !lost.length && !failed.length && !tvJobs.length) return null;
-  const s = STATUS[dl?.status === 'missing' ? 'missing' : 'ok'];
+  const [path, setPath] = useState(dl?.path || '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { setPath(dl?.path || ''); setError(''); }, [dl?.path]);
+  if (!dl) return null;
+  const trimmed = path.trim();
+  const dirty = trimmed !== (dl.path || '');
+  const canSave = dirty && trimmed.startsWith('/') && !busy;
+  const s = STATUS[dl.status === 'missing' ? 'missing' : 'ok'];
+  const save = async () => {
+    if (!canSave) {
+      if (!trimmed.startsWith('/')) setError('Invalid path');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    const r = await saveDownloadsRoot(trimmed);
+    if (!r.ok) { setBusy(false); setError(r.error); return; }
+    const loaded = await loadLibrary();
+    setBusy(false);
+    if (loaded.ok) { onView(loaded.view); onToast('Saved'); }
+    else onToast(loaded.error || SAVE_FAILED);
+  };
   return (
     <div data-testid="lp-downloads">
       <h3 style={sectionLabel}>Downloads</h3>
       <div style={card}>
-        {dl && (
-          <div data-testid="lp-downloads-folder" data-status={dl.status} style={{ ...rowBtn, cursor: 'default' }}>
+        <form data-testid="lp-downloads-folder" data-status={dl.status} style={{ ...formBox }}
+          onSubmit={e => { e.preventDefault(); void save(); }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
             <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: s.color, flex: 'none' }} />
-            <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={titleText(wide)}>Downloads folder</span>
-              <span style={subText(wide)} title={dl.path}>{dl.path}</span>
-            </span>
-            {s.text && (
+            <label htmlFor="lp-downloads-path" style={{ ...labelStyle, margin: 0, flex: 1 }}>Downloads folder</label>
+            {s.text ? (
               <span data-testid="lp-downloads-status" style={{ fontSize: 13, fontWeight: 500, color: s.color, flex: 'none' }}>{s.text}</span>
-            )}
+            ) : null}
           </div>
-        )}
-        {lost.map((j, i) => (
-          <div key={`${j.title}\u0000${j.since}`} data-testid="lp-not-found" style={{ ...rowBtn, cursor: 'default', ...(dl || i > 0 ? topBorder : null) }}>
-            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: T.danger, flex: 'none' }} />
-            <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={titleText(wide)}>{j.title || 'Untitled'}</span>
-              <span style={subText(wide)}>{sinceText(j.since)}</span>
-            </span>
-            <span data-testid="lp-not-found-status" style={{ fontSize: 13, fontWeight: 500, color: T.danger, flex: 'none' }}>
-              {j.reason === 'not_mapped' ? 'Path not mapped' : 'Files not found'}
-            </span>
+          <input id="lp-downloads-path" data-testid="lp-downloads-path" value={path}
+            autoComplete="off" autoCapitalize="off" autoCorrect="off" spellCheck={false}
+            aria-invalid={error ? true : undefined} aria-describedby={error ? 'lp-downloads-path-error' : undefined}
+            onChange={e => { setPath(e.target.value); setError(''); }}
+            style={{ ...inputStyle, fontFamily: MONO, fontSize: 15, ...(error ? invalid : null) }} />
+          {error ? <span id="lp-downloads-path-error" data-testid="lp-downloads-path-error" style={fieldError}>{error}</span> : null}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+            <button type="submit" disabled={!canSave} className="lp-focus" data-testid="lp-downloads-save"
+              style={{ ...primary, opacity: canSave ? 1 : 0.5, cursor: canSave ? 'pointer' : 'default' }}>Save</button>
           </div>
-        ))}
-        {failed.map((j, i) => (
-          <JobRow key={j.hash} testId="lp-failed" title={j.title || 'Untitled'} since={j.since} status="Not enough space"
-            top={!!(dl || lost.length || i > 0)} busy={busy === j.hash}
-            onRetry={() => { setBusy(j.hash); void retryJob(j.hash).then(r => { setBusy(null); if (r.ok) onView?.(r.view); }); }} />
-        ))}
-        {tvJobs.map((j, i) => (
-          <JobRow key={`tv:${j.hash}`} testId="lp-tv-job" state={j.state} title={j.name || 'Untitled'} since={j.at} status={tvJobStatus(j)}
-            top={!!(dl || lost.length || failed.length || i > 0)} busy={busy === `tv:${j.hash}`}
-            onRetry={j.retry ? () => { setBusy(`tv:${j.hash}`); void retryTvJob(j.hash).then(r => { setBusy(null); if (r.ok) loadTv(); }); } : undefined} />
-        ))}
+        </form>
       </div>
-    </div>
-  );
-}
-
-/** v165 (Designer): a phone (under 600px) gives the job's name the whole first line (ellipsis) and puts
- * the status and its real failure date on the second, in red: 'Not enough space · Since Oct 15'. */
-export const PHONE_Q = '(max-width: 599px)';
-export function usePhone(): boolean {
-  const get = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(PHONE_Q).matches;
-  const [phone, setPhone] = useState(get);
-  useEffect(() => {
-    if (typeof window.matchMedia !== 'function') return undefined;
-    const m = window.matchMedia(PHONE_Q);
-    const on = () => setPhone(m.matches);
-    on();
-    m.addEventListener?.('change', on);
-    return () => m.removeEventListener?.('change', on);
-  }, []);
-  return phone;
-}
-
-/** One failed download job (Movies mover or TV): name, failure date, status, Retry when offered. */
-function JobRow({ testId, state, title, since, status, top, busy, onRetry }: {
-  testId: string; state?: string; title: string; since: number | null | undefined; status: string; top: boolean; busy: boolean; onRetry?: () => void;
-}) {
-  const wide = useContext(WideCtx);
-  const phone = usePhone();
-  const retry = onRetry && (
-    <button type="button" data-testid={`${testId}-retry`} className="lp-focus" disabled={busy} aria-label={`Retry ${title}`} onClick={onRetry}
-      style={{ flex: 'none', padding: '6px 12px', borderRadius: 999, border: '1px solid rgba(255,255,255,0.16)', background: 'rgba(255,255,255,0.06)',
-        color: 'rgba(255,255,255,0.95)', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: busy ? 0.4 : 1 }}>Retry</button>
-  );
-  const dot = <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 4, background: T.danger, flex: 'none' }} />;
-  if (phone) {
-    const line2 = since ? `${status} \u00b7 ${sinceText(since)}` : status;
-    return (
-      <div data-testid={testId} data-state={state} data-layout="phone" style={{ ...rowBtn, cursor: 'default', ...(top ? topBorder : null) }}>
-        {dot}
-        <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span data-testid={`${testId}-name`} title={title} style={{ ...titleText(wide), display: 'block' }}>{title}</span>
-          <span data-testid={`${testId}-status`} title={line2}
-            style={{ fontSize: 13, fontWeight: 500, color: T.danger, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-            {status}{since ? <>{' \u00b7 '}<span data-testid={`${testId}-since`} style={{ whiteSpace: 'nowrap' }}>{sinceText(since)}</span></> : null}
-          </span>
-        </span>
-        {retry}
-      </div>
-    );
-  }
-  return (
-    <div data-testid={testId} data-state={state} style={{ ...rowBtn, cursor: 'default', ...(top ? topBorder : null) }}>
-      {dot}
-      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <span data-testid={`${testId}-name`} style={titleText(wide)} title={title}>{title}</span>
-        {since ? <span style={subText(wide)}>{sinceText(since)}</span> : null}
-      </span>
-      <span data-testid={`${testId}-status`} title={status}
-        style={{ fontSize: 13, fontWeight: 500, color: T.danger, flex: '0 1 auto', minWidth: 0, maxWidth: wide ? 320 : 160, textAlign: 'right',
-          overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: wide ? 2 : 3, WebkitBoxOrient: 'vertical' }}>{status}</span>
-      {retry}
     </div>
   );
 }

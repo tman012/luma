@@ -184,7 +184,20 @@ def _under(path: str, root: str) -> bool:
 
 
 def downloads_root() -> str:
-    """Real path of the downloads folder (LUMA_DOWNLOADS_ROOT, else /downloads)."""
+    """Real path of the downloads folder.
+
+    Settings ``media.downloads_root`` wins when set to a non-empty absolute
+    path; otherwise ``LUMA_DOWNLOADS_ROOT`` (compose ``LUMA_TEST_DOWNLOADS_DIR``
+    mounts into the container as that path); else ``/downloads``.
+    Does not use ``LUMA_REMOTE_DOWNLOADS_ROOT`` (remote mover host map).
+    """
+    try:
+        from app.settings_manager import SettingsFile
+        raw = SettingsFile().get('media.downloads_root')
+    except Exception:  # noqa: BLE001 — missing/unreadable settings → env/default
+        raw = None
+    if isinstance(raw, str) and raw.strip().startswith('/'):
+        return os.path.realpath(raw.strip())
     raw = (os.environ.get(DOWNLOADS_ROOT_ENV) or '').strip()
     if not raw.startswith('/'):
         raw = DEFAULT_DOWNLOADS_ROOT

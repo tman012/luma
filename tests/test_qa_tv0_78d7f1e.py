@@ -26,6 +26,10 @@ MI = {'tmdb_id': 954, 'media_type': 'movie', 'title': 'Mission Impossible', 'yea
 
 def test_downloads_root_unset_defaults_to_slash_downloads(monkeypatch):
     monkeypatch.delenv('LUMA_DOWNLOADS_ROOT', raising=False)
+    class Empty:
+        def get(self, k, default=None):
+            return default
+    monkeypatch.setattr('app.settings_manager.SettingsFile', Empty)
     assert fm.downloads_root() == os.path.realpath('/downloads')
     monkeypatch.setenv('LUMA_DOWNLOADS_ROOT', 'relative/dir')          # not absolute: default
     assert fm.downloads_root() == os.path.realpath('/downloads')

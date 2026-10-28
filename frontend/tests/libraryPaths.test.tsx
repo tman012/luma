@@ -484,88 +484,72 @@ describe('Settings wiring for Library paths', () => {
 });
 
 describe('Settings > Library paths > Downloads (QA-UI1)', () => {
-  it('a missing downloads folder and grabs whose files are not found show at the top', async () => {
-    const since = Math.floor(new Date(2026, 9, 16, 9, 5).getTime() / 1000);
-    state = { ...base(), downloads: { path: '/downloads', status: 'missing' },
-      not_found: [{ title: 'Heat', since }, { title: 'Ronin', since: since + 60 }] };
+  it('shows an editable Downloads folder and no history list', async () => {
+    state = { ...base(), downloads: { path: '/storage/downloads', status: 'ok' },
+      not_found: [{ title: 'Heat', since: 1, reason: 'not_found' }],
+      failed: [{ hash: 'a'.repeat(40), title: 'Ronin', since: 2, reason: 'no_space' }] };
+    (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__ = true;
+    answer = c => {
+      if (c.url.endsWith('/api/settings/tv/downloads')) return res({ failed: [
+        { hash: '1'.repeat(40), name: 'Show', state: 'failed', error: 'insufficient space', at: 1, retry: true },
+      ], category: 'luma-tv' });
+      return null;
+    };
     render(<LibraryPathsSettings wide />);
     const box = await screen.findByTestId('lp-downloads');
     const sections = Array.from(screen.getByTestId('library-paths-section').querySelectorAll('h3')).map(h => h.textContent);
     expect(sections[0]).toBe('Downloads');
     const folder = within(box).getByTestId('lp-downloads-folder');
     expect(folder.textContent).toContain('Downloads folder');
-    expect(folder.textContent).toContain('/downloads');
+    expect((within(box).getByTestId('lp-downloads-path') as HTMLInputElement).value).toBe('/storage/downloads');
+    expect(within(box).queryByTestId('lp-downloads-status')).toBeNull();
+    expect(within(box).queryByTestId('lp-not-found')).toBeNull();
+    expect(within(box).queryByTestId('lp-failed')).toBeNull();
+    expect(within(box).queryByTestId('lp-tv-job')).toBeNull();
+    // history endpoints are not fetched for the Downloads section anymore
+    expect(calls.some(c => c.url.includes('/api/settings/tv/downloads'))).toBe(false);
+  });
+
+  it('a missing downloads folder shows Missing on the editable field', async () => {
+    state = { ...base(), downloads: { path: '/downloads', status: 'missing' }, not_found: [] };
+    render(<LibraryPathsSettings wide />);
+    const box = await screen.findByTestId('lp-downloads');
+    expect((within(box).getByTestId('lp-downloads-path') as HTMLInputElement).value).toBe('/downloads');
     expect(within(box).getByTestId('lp-downloads-status').textContent).toBe('Missing');
     expect(within(box).getByTestId('lp-downloads-status').style.color).toBe('var(--color-danger)');
-    const lost = within(box).getAllByTestId('lp-not-found');
-    expect(lost.map(r => r.textContent)).toEqual(['HeatSince Oct 16Files not found', 'RoninSince Oct 16Files not found']);
   });
 
-  it('a grab whose save path does not map under the downloads folder says Path not mapped', async () => {
-    const since = Math.floor(new Date(2026, 9, 16, 9, 5).getTime() / 1000);
-    state = { ...base(), downloads: { path: '/storage/downloads', status: 'ok' },
-      not_found: [{ title: 'Heat', since, reason: 'not_mapped' }, { title: 'Ronin', since: since + 60, reason: 'not_found' }] };
-    render(<LibraryPathsSettings wide />);
-    const box = await screen.findByTestId('lp-downloads');
-    expect(within(box).getByTestId('lp-downloads-folder').textContent).toContain('/storage/downloads');
-    const lost = within(box).getAllByTestId('lp-not-found');
-    expect(lost.map(r => r.textContent)).toEqual(['HeatSince Oct 16Path not mapped', 'RoninSince Oct 16Files not found']);
-  });
-
-  it('a grab the mover failed for space says Not enough space with Retry (no auto-retry); Retry requeues it', async () => {
-    const since = Math.floor(new Date(2026, 9, 16, 9, 5).getTime() / 1000);
-    const h = 'a'.repeat(40);
-    state = { ...base(), downloads: { path: '/downloads', status: 'ok' }, failed: [{ hash: h, title: 'Heat', since, reason: 'no_space' }] };
-    answer = c => (c.url.endsWith(`/jobs/${h}/retry`) && c.method === 'POST' ? res({ ...state, failed: [] }) : null);
-    render(<LibraryPathsSettings wide />);
-    const box = await screen.findByTestId('lp-downloads');
-    const row = within(box).getByTestId('lp-failed');
-    expect(within(row).getByTestId('lp-failed-status').textContent).toBe('Not enough space');
-    expect(row.textContent).toBe('HeatSince Oct 16Not enough spaceRetry');
-    fireEvent.click(within(row).getByTestId('lp-failed-retry'));
-    await waitFor(() => expect(screen.queryByTestId('lp-failed')).toBeNull());
-    expect(calls.filter(c => c.method === 'POST').map(c => c.url)).toEqual([`/api/settings/library-paths/jobs/${h}/retry`]);
-  });
-
-  it('v158c: TV download jobs: no-space rows get Retry (the TV retry endpoint, no helper text); others show their error', async () => {
-    (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__ = true;
-    const since = Math.floor(new Date(2026, 9, 16, 9, 5).getTime() / 1000);
-    const h1 = '1'.repeat(40), h2 = '2'.repeat(40), h3 = '3'.repeat(40);
-    let tv = [
-      { hash: h1, name: 'Severance.S02E03.1080p', state: 'failed', error: 'insufficient space', at: since, retry: true },
-      { hash: h2, name: 'Dark.S01E01.1080p', state: 'grab_failed', error: "Couldn't create the qBittorrent category luma-tv", at: since, retry: false },
-      { hash: h3, name: 'Bluey.S03E01.1080p', state: 'refused', error: 'the file changed since it was checked', at: since, retry: false },
-    ];
+  it('Save PUTs media.downloads_root then reloads library-paths', async () => {
+    state = { ...base(), downloads: { path: '/storage/downloads', status: 'ok' } };
+    let saved = false;
     answer = c => {
-      if (c.url.endsWith('/api/settings/tv/downloads') && c.method === 'GET') return res({ failed: tv, category: 'luma-tv' });
-      if (c.url.endsWith(`/api/settings/tv/downloads/${h1}/retry`) && c.method === 'POST') { tv = tv.slice(1); return res({ ok: true }); }
+      if (c.url.endsWith('/api/settings') && c.method === 'PUT') {
+        expect(c.body).toEqual({ media: { downloads_root: '/mnt/qbittorrent/downloads' } });
+        saved = true;
+        state = { ...state, downloads: { path: '/mnt/qbittorrent/downloads', status: 'ok' } };
+        return res({ success: true, settings: {} });
+      }
       return null;
     };
     render(<LibraryPathsSettings wide />);
     const box = await screen.findByTestId('lp-downloads');
-    const rows = await within(box).findAllByTestId('lp-tv-job');
-    expect(rows.map(r => r.textContent)).toEqual([
-      'Severance.S02E03.1080pSince Oct 16Not enough spaceRetry',
-      "Dark.S01E01.1080pSince Oct 16Couldn't create the qBittorrent category luma-tv",
-      'Bluey.S03E01.1080pSince Oct 16The file changed since it was checked']);
-    expect(rows.map(r => within(r).queryAllByTestId('lp-tv-job-retry').length)).toEqual([1, 0, 0]);
-    fireEvent.click(within(rows[0]!).getByTestId('lp-tv-job-retry'));
-    await waitFor(() => expect(screen.getAllByTestId('lp-tv-job')).toHaveLength(2));
-    expect(calls.filter(c => c.method === 'POST').map(c => c.url)).toEqual([`/api/settings/tv/downloads/${h1}/retry`]);
+    expect((within(box).getByTestId('lp-downloads-path') as HTMLInputElement).value).toBe('/storage/downloads');
+    fireEvent.change(within(box).getByTestId('lp-downloads-path'), { target: { value: '/mnt/qbittorrent/downloads' } });
+    fireEvent.click(within(box).getByTestId('lp-downloads-save'));
+    await waitFor(() => expect(saved).toBe(true));
+    await waitFor(() => expect((within(box).getByTestId('lp-downloads-path') as HTMLInputElement).value).toBe('/mnt/qbittorrent/downloads'));
+    expect(calls.filter(c => c.url.endsWith('/api/settings') && c.method === 'PUT')).toHaveLength(1);
+    expect(await toastText()).toBe('Saved');
   });
 
-  it('v158c: without TV (not the minimal app) no TV jobs are asked for', async () => {
-    render(<LibraryPathsSettings wide />);
-    await screen.findByTestId('library-paths-section');
-    expect(calls.some(c => c.url.includes('/api/settings/tv/'))).toBe(false);
-    expect(screen.queryByTestId('lp-tv-job')).toBeNull();
-  });
-
-  it('a readable downloads folder shows no status and no list when nothing is lost', async () => {
-    state = { ...base(), downloads: { path: '/downloads', status: 'ok' }, not_found: [] };
+  it('rejects a relative path without calling settings', async () => {
+    state = { ...base(), downloads: { path: '/storage/downloads', status: 'ok' } };
     render(<LibraryPathsSettings wide />);
     const box = await screen.findByTestId('lp-downloads');
-    expect(within(box).queryByTestId('lp-downloads-status')).toBeNull();
-    expect(within(box).queryAllByTestId('lp-not-found')).toHaveLength(0);
+    fireEvent.change(within(box).getByTestId('lp-downloads-path'), { target: { value: 'relative/dir' } });
+    // Save stays disabled for relative paths; force submit via form
+    fireEvent.submit(within(box).getByTestId('lp-downloads-folder'));
+    await waitFor(() => expect(within(box).getByTestId('lp-downloads-path-error').textContent).toBe('Invalid path'));
+    expect(calls.some(c => c.url.endsWith('/api/settings') && c.method === 'PUT')).toBe(false);
   });
 });

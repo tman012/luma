@@ -71,19 +71,9 @@ def guard_settings() -> Dict[str, Any]:
 
 
 def _media_root() -> str:
-    """media.downloads_root (LUMA_DOWNLOADS_ROOT when set, else settings, else /downloads)."""
+    """media.downloads_root via file_management (settings win, else env, else /downloads)."""
     from app import file_management as _fm
-    if (os.environ.get(_fm.DOWNLOADS_ROOT_ENV) or '').strip().startswith('/'):
-        return _fm.downloads_root()
-    root = None
-    try:
-        from app.settings_manager import SettingsFile      # read as on disk; never rewrites settings.json
-        root = SettingsFile().get('media.downloads_root')
-    except Exception:                                   # noqa: BLE001
-        root = None
-    if not isinstance(root, str) or not root.strip().startswith('/'):
-        root = _fm.DEFAULT_DOWNLOADS_ROOT
-    return os.path.realpath(root)
+    return _fm.downloads_root()
 
 
 def downloads_root(cfg: Optional[Dict[str, Any]] = None) -> str:

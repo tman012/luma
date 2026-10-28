@@ -66,6 +66,25 @@ export const saveRules = (rules: Rule[], fallback_path_id: string | null) => sen
 export const retryJob = (hash: string) => send(`${LP_URL}/jobs/${encodeURIComponent(hash)}/retry`, 'POST');
 export const saveMapping = (body: { path_map?: PathMapRow[]; transfer?: Transfer }) => send(MAP_URL, 'PUT', body);
 
+/** Persist media.downloads_root via PUT /api/settings (settings win over env). */
+export async function saveDownloadsRoot(path: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await apiFetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ media: { downloads_root: path } }),
+    });
+    const data = await res.json().catch(() => ({})) as { success?: boolean; errors?: string[]; error?: string; sign_in?: boolean };
+    if (res.status === 401 || data.sign_in) return { ok: false, error: 'Sign in first' };
+    if (res.status === 403) return { ok: false, error: 'Only the owner can change this' };
+    if (res.ok && data.success) return { ok: true };
+    const err = (Array.isArray(data.errors) && data.errors[0]) || data.error || SAVE_FAILED;
+    return { ok: false, error: String(err) };
+  } catch {
+    return { ok: false, error: UNREACHABLE };
+  }
+}
+
 /** "Past 2 years · 2160p · Remux", or "All movies". */
 export function ruleSummary(r: Rule): string {
   const parts: string[] = [];

@@ -130,6 +130,10 @@ def test_library_path_holding_downloads_is_refused(tmp_path, monkeypatch):
 
 def test_downloads_root_default_and_env(monkeypatch, tmp_path):
     monkeypatch.delenv('LUMA_DOWNLOADS_ROOT', raising=False)
+    class Empty:
+        def get(self, k, default=None):
+            return default
+    monkeypatch.setattr('app.settings_manager.SettingsFile', Empty)
     assert fm.downloads_root() == os.path.realpath('/downloads')
     monkeypatch.setenv('LUMA_DOWNLOADS_ROOT', 'relative/path')
     assert fm.downloads_root() == os.path.realpath('/downloads')

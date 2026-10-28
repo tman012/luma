@@ -270,7 +270,7 @@ export function MediaPathsTab() {
           }
         >
           <FormField
-            label="Downloads root"
+            label="Downloads folder"
             path="media.downloads_root"
             placeholder="/downloads"
           />

@@ -305,7 +305,7 @@ SETTINGS_SCHEMA: Dict[str, Any] = {
                 "required": ["id", "label", "media_category"],
             },
         },
-        "downloads_root":   {"type": "string", "default": "/downloads",     "sensitive": False, "description": "Root download directory"},
+        "downloads_root":   {"type": "string", "default": "",               "sensitive": False, "description": "Downloads folder (in-container path); empty uses LUMA_DOWNLOADS_ROOT or /downloads"},
         "database_path":    {"type": "string", "default": "", "sensitive": False, "description": "Application SQLite database path (blank: media.db in the data folder)"},
         "video_extensions":  {
             "type": "array",
@@ -2319,7 +2319,9 @@ class SettingsManager:
             "SONARR_API_KEY":      "sonarr.api_key",
             "RADARR_URL":          "radarr.url",
             "RADARR_API_KEY":      "radarr.api_key",
-            "DOWNLOADS_ROOT":      "media.downloads_root",
+            # media.downloads_root is not seeded from Config.DOWNLOADS_ROOT (/downloads):
+            # empty settings fall back to LUMA_DOWNLOADS_ROOT (v320). Explicit DOWNLOADS_ROOT
+            # env still migrates via _ENV_VAR_MIGRATION_MAP.
             "DATABASE_PATH":       "media.database_path",
             "RADARR_QBIT_CATEGORY": "qbittorrent.radarr_category",
             "RADARR_MONITORING_ENABLED": "radarr.monitoring_enabled",
