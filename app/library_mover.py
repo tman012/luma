@@ -780,7 +780,8 @@ def _open_root(lib_root: str) -> int:
     if os.path.realpath(_fd_path(rfd)) != lib_root:
         os.close(rfd)
         raise Refused('destination folder resolves elsewhere')
-    if not os.access(lib_root, os.W_OK | os.X_OK):        # v167: Library paths may be read-only
+    from app import remote_mover
+    if not remote_mover.enabled() and not os.access(lib_root, os.W_OK | os.X_OK):  # v167; v318 remote skips
         os.close(rfd)
         raise Pending(NOT_WRITABLE)
     return rfd
@@ -792,20 +793,38 @@ def _ensure_folder(rfd: int, lib_root: str, folder: str, owner) -> Tuple[int, bo
     if not folder or '/' in folder or folder in ('.', '..'):
         raise Refused('unsafe file name')
     created = False
+    full = os.path.join(lib_root, folder)
+    from app import remote_mover
+    if remote_mover.enabled():
+        # Create on .72 first (Unraid /media lives there); local mkdir is best-effort.
+        try:
+            remote_mover.mkdir_p(full)
+        except remote_mover.RemoteMoverError as e:
+            raise Refused(str(e)) from e
     try:
         os.mkdir(folder, 0o775, dir_fd=rfd)
         created = True
     except FileExistsError:
         pass
+    except OSError as e:
+        if not (remote_mover.enabled() and e.errno in (errno.EROFS, errno.EACCES, errno.EPERM)):
+            raise
     try:
         dfd = os.open(folder, _O_DIR, dir_fd=rfd)
     except OSError as e:
         if e.errno in (errno.ELOOP, errno.ENOTDIR, errno.EMLINK):
             raise Refused('destination folder is not a plain folder')
+        if remote_mover.enabled() and e.errno == errno.ENOENT:
+            # Mount lag: remote dir exists on Unraid; retry next pass.
+            raise Pending('library folder not available')
         raise
     if created:
-        _finish_fd(dfd, 0o775, owner)
-    return dfd, created, os.path.join(lib_root, folder)
+        try:
+            _finish_fd(dfd, 0o775, owner)
+        except OSError:
+            if not remote_mover.enabled():
+                raise
+    return dfd, created, full
 
 
 PARTIAL_SUFFIX = '.luma-partial'
@@ -852,6 +871,16 @@ def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root:
         raise Refused('transfer must be copy or hardlink')
     if _lexists_at(dfd, name):
         return 'exists'
+    # v318: remote push-import — .72 copies downloads→/media over SSH (no byte
+    # copy through the Luma container). Hardlink falls back to remote copy.
+    from app import remote_mover
+    if remote_mover.enabled():
+        if not _real_under(src, root):
+            raise Refused('outside the downloads folder')
+        try:
+            return remote_mover.transfer(src, os.path.join(folder, name))
+        except remote_mover.RemoteMoverError as e:
+            raise Refused(str(e)) from e
     sfd, st = _open_source(src, root, expect)
     try:
         if mode == 'hardlink':

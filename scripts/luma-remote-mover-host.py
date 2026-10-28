@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Optional reference host helper (Ops owns production).
+
+Ops FINAL (preferred):
+  CLI:  /home/tbosley02/bin/luma-host-remote-mover.sh cp|mv SRC DEST
+  Sock: host /home/tbosley02/luma-mover/mover.sock
+        bind-mount → container /run/luma-mover/mover.sock
+  HTTP over AF_UNIX:
+    POST /move  {"mode":"cp|mv","src":"...","dest":"..."}
+         → {"ok": bool, "rc": N, "output": "..."}
+    GET  /health → {"ok": true}
+
+TCP 127.0.0.1:18772 is HOST ONLY — containers must use the Unix socket
+(LUMA_REMOTE_MOVER_SOCK=/run/luma-mover/mover.sock). Never 172.17.0.1.
+
+This script can listen on a Unix socket for local/dev; production uses Ops' wrapper.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import socket
+import subprocess
+import sys
+from http.server import BaseHTTPRequestHandler
+from pathlib import Path
+from socketserver import ThreadingMixIn
+from urllib.parse import urlparse
+
+SOCK = os.environ.get('LUMA_HOST_MOVER_SOCK', os.path.expanduser('~/luma-mover/mover.sock'))
+CLI = os.environ.get(
+    'LUMA_HOST_MOVER_CLI',
+    os.path.expanduser('~/bin/luma-host-remote-mover.sh'))
+DOWNLOADS_ROOT = os.environ.get('LUMA_REMOTE_DOWNLOADS_ROOT', '/scratch/downloads').rstrip('/')
+MEDIA_ROOT = os.environ.get('LUMA_REMOTE_MEDIA_ROOT', '/media').rstrip('/')
+TIMEOUT_S = int(os.environ.get('LUMA_REMOTE_MOVER_TIMEOUT_S', '3600'))
+EXISTS = 17
+
+
+def _under(path: str, root: str) -> bool:
+    return path == root or path.startswith(root + '/')
+
+
+def run_move(mode: str, src: str, dest: str) -> tuple[int, str]:
+    if mode not in ('cp', 'mv'):
+        return 2, f'mode must be cp|mv, got {mode!r}'
+    if not _under(src, DOWNLOADS_ROOT):
+        return 2, f'src must be under {DOWNLOADS_ROOT}'
+    if not _under(dest, MEDIA_ROOT):
+        return 2, f'dest must be under {MEDIA_ROOT}'
+    cmd = [CLI, mode, src, dest]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_S, check=False)
+    except FileNotFoundError:
+        return 127, f'CLI not found: {CLI}'
+    except subprocess.TimeoutExpired:
+        return 124, f'timed out after {TIMEOUT_S}s'
+    out = ((p.stdout or '') + (p.stderr or '')).strip()
+    return p.returncode, out
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = 'luma-remote-mover-host/2'
+
+    def log_message(self, fmt, *args):
+        sys.stderr.write('%s - %s\n' % (self.address_string(), fmt % args))
+
+    def _json(self, code: int, payload: dict):
+        body = json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if urlparse(self.path).path == '/health':
+            self._json(200, {'ok': True})
+            return
+        self._json(404, {'ok': False, 'rc': 404, 'output': 'not found'})
+
+    def do_POST(self):
+        if urlparse(self.path).path != '/move':
+            self._json(404, {'ok': False, 'rc': 404, 'output': 'not found'})
+            return
+        length = int(self.headers.get('Content-Length') or 0)
+        raw = self.rfile.read(length) if length else b'{}'
+        try:
+            data = json.loads(raw.decode() or '{}')
+        except json.JSONDecodeError:
+            self._json(400, {'ok': False, 'rc': 2, 'output': 'invalid json'})
+            return
+        # Prefer "mode"; accept legacy "op".
+        mode = str(data.get('mode') or data.get('op') or 'cp').strip()
+        src = str(data.get('src') or '').strip()
+        dest = str(data.get('dest') or '').strip()
+        if not src or not dest:
+            self._json(400, {'ok': False, 'rc': 2, 'output': 'src and dest required'})
+            return
+        rc, output = run_move(mode, src, dest)
+        ok = rc == 0
+        code = 200 if ok else (409 if rc == EXISTS else 500)
+        self._json(code, {'ok': ok, 'rc': rc, 'output': output})
+
+
+class ThreadingUnixServer(ThreadingMixIn, object):
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, sock_path: str, handler):
+        self.address_family = socket.AF_UNIX
+        Path(sock_path).parent.mkdir(parents=True, exist_ok=True)
+        if os.path.exists(sock_path):
+            os.unlink(sock_path)
+        self.server_address = sock_path
+        self.RequestHandlerClass = handler
+        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.socket.bind(sock_path)
+        os.chmod(sock_path, 0o660)
+        self.socket.listen(32)
+        self.__is_shut_down = __import__('threading').Event()
+        self.__shutdown_request = False
+
+    def serve_forever(self, poll_interval=0.5):
+        self.__is_shut_down.clear()
+        try:
+            while not self.__shutdown_request:
+                r = __import__('select').select([self.socket], [], [], poll_interval)[0]
+                if r:
+                    self._handle_request_noblock()
+        finally:
+            self.__shutdown_request = False
+            self.__is_shut_down.set()
+
+    def _handle_request_noblock(self):
+        try:
+            request, client_address = self.socket.accept()
+        except OSError:
+            return
+        try:
+            self.RequestHandlerClass(request, client_address, self)
+        finally:
+            try:
+                request.close()
+            except Exception:
+                pass
+
+    def fileno(self):
+        return self.socket.fileno()
+
+    def server_close(self):
+        try:
+            self.socket.close()
+        finally:
+            if os.path.exists(self.server_address):
+                os.unlink(self.server_address)
+
+
+def main() -> int:
+    if not Path(CLI).is_file():
+        sys.stderr.write(f'WARN: CLI not found: {CLI}\n')
+    httpd = ThreadingUnixServer(SOCK, Handler)
+    sys.stderr.write(f'listening unix:{SOCK}  CLI={CLI}\n')
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        sys.stderr.write('\nbye\n')
+    finally:
+        httpd.server_close()
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

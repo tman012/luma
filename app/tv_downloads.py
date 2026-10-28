@@ -230,7 +230,8 @@ def import_torrent(t: Dict[str, Any], data: Dict[str, Any], now: float,
     if fm.blocked(lib_root) or not os.path.isdir(lib_root) or fm.overlaps_downloads(lib_root) \
             or fm._under(root, lib_root) or fm._under(lib_root, root):
         raise mover.Pending('library folder not available')
-    if not os.access(lib_root, os.W_OK | os.X_OK):
+    from app import remote_mover as _rm
+    if not _rm.enabled() and not os.access(lib_root, os.W_OK | os.X_OK):
         raise mover.Pending(NOT_WRITABLE)
     added = float(t.get('added_on') or now)
     if os.path.realpath(content) == save_real:

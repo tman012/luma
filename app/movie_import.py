@@ -162,6 +162,18 @@ def _sha256(path: str) -> str:
 def copy_verified(src: str, dest: str) -> str:
     """Copy *src* to *dest* without ever overwriting: 'copied', or 'exists' when the same file is already there.
     The source is only read. A different file at *dest* raises Refused."""
+    # v318: remote push-import — .72 performs cp -a (no bytes through Luma).
+    from app import remote_mover
+    if remote_mover.enabled():
+        if os.path.lexists(dest):
+            if os.path.isfile(dest) and not os.path.islink(dest) and os.path.getsize(dest) == os.path.getsize(src) \
+                    and _sha256(dest) == _sha256(src):
+                return 'exists'
+            raise Refused('a different file is already there')
+        try:
+            return remote_mover.transfer(src, dest)
+        except remote_mover.RemoteMoverError as e:
+            raise Refused(str(e)) from e
     if os.path.lexists(dest):
         if os.path.isfile(dest) and not os.path.islink(dest) and os.path.getsize(dest) == os.path.getsize(src) \
                 and _sha256(dest) == _sha256(src):
@@ -243,7 +255,9 @@ def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[st
     cfg = naming()
     release = str(g['release_title'] or t.get('name') or '')
     lib_root = route(lib_root, release, os.path.basename(src), title, year, cfg, now)
-    if not lib_root or not os.path.isdir(lib_root) or not os.access(lib_root, os.W_OK | os.X_OK):
+    from app import remote_mover as _rm
+    if not lib_root or not os.path.isdir(lib_root) or (
+            not _rm.enabled() and not os.access(lib_root, os.W_OK | os.X_OK)):
         raise Skip('movies folder not available')
     rr, sr = os.path.realpath(lib_root), os.path.realpath(src)
     if sr.startswith(rr + os.sep) or rr.startswith(os.path.realpath(os.path.dirname(sr)) + os.sep):
@@ -259,7 +273,17 @@ def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[st
     if os.path.realpath(os.path.dirname(dest_dir)) != rr:
         raise Refused('unsafe file name')
     movie_grabs.set_state(h, 'importing', now=now)
-    os.makedirs(dest_dir, exist_ok=True)
+    if _rm.enabled():
+        try:
+            _rm.mkdir_p(dest_dir)
+        except _rm.RemoteMoverError as e:
+            raise Refused(str(e)) from e
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+        except OSError:
+            pass
+    else:
+        os.makedirs(dest_dir, exist_ok=True)
     dest = os.path.join(dest_dir, fname)
     how = copy_verified(src, dest)
     # verified: only now is the grab imported and the movie off the watchlist
