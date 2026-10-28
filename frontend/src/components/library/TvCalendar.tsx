@@ -7,8 +7,8 @@ import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
 import { Poster } from './TvImport';
 import {
-  STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, setEpisodeMonitored, shortDate, timeRangeParts, weekDays, weekLabel, weekStart,
-  type CalEpisode, type CalendarData, type Day,
+  STATE_COLOR, STATE_HEX, STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, setEpisodeMonitored, shortDate, timeRangeParts, weekDays, weekLabel, weekStart,
+  type CalEpisode, type CalendarData, type Day, type EpisodeState,
 } from './tvCalendarApi';
 
 export const CAL_MAX_W = 720;
@@ -92,10 +92,15 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, ph
           phone ? <PhonePlaceholder week={week} day={day} today={today} /> : <Placeholder />
         ) : phone ? (
           <PhoneDay eps={eps} day={day} today={today} />
-        ) : !eps.length ? (
-          <div data-testid="tv-cal-empty" style={emptyCard}>No episodes this week</div>
         ) : (
-          <WeekGrid eps={eps} week={week} today={today} />
+          <>
+            <WeekHero eps={eps} week={week} today={today} />
+            {!eps.length ? (
+              <div data-testid="tv-cal-empty" style={emptyCard}>No episodes this week</div>
+            ) : (
+              <WeekGrid eps={eps} week={week} today={today} />
+            )}
+          </>
         )}
       </div>
     </div>
@@ -162,6 +167,52 @@ function Toolbar({ label, showToday, onPrev, onNext, onToday }: {
 }
 
 /** The week grid (default): 7 columns, Sunday first, one text-only glass card per episode with a 4px state edge. */
+/** v321 Designer D: This week count strip + Today pill above the week grid (desktop only). */
+export function WeekHero({ eps, week, today }: { eps: CalEpisode[]; week: Day; today: Day }) {
+  const counts = weekCounts(eps, today);
+  const current = week === weekStart(today);
+  const todayLabel = (() => {
+    const [y = 1970, m = 1, dd = 1] = today.split('-').map(Number);
+    const dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(y, m - 1, dd).getDay()];
+    return `${dow} ${dd} · Today`;
+  })();
+  return (
+    <div data-testid="tv-cal-hero" style={{ display: 'flex', alignItems: 'center', gap: 10, height: 40, marginBottom: 14, flex: 'none' }}>
+      <div data-testid="tv-cal-this-week" style={{
+        display: 'flex', alignItems: 'center', gap: 16, height: 40, padding: '0 16px', borderRadius: 12,
+        background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.08)',
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,.85)' }}>This week</span>
+        <CountChip color={STATE_HEX.downloaded} n={counts.downloaded} />
+        <CountChip color={STATE_HEX.missing} n={counts.missing} />
+        <CountChip color={STATE_HEX.unaired} n={counts.unaired} />
+      </div>
+      {current && (
+        <div data-testid="tv-cal-today-pill" style={{
+          height: 40, padding: '0 14px', borderRadius: 12, display: 'inline-flex', alignItems: 'center',
+          background: 'rgba(59,130,246,.16)', border: '1px solid rgba(59,130,246,.35)',
+          fontSize: 13, fontWeight: 600, color: '#60a5fa',
+        }}>{todayLabel}</div>
+      )}
+    </div>
+  );
+}
+
+function CountChip({ color, n }: { color: string; n: number }) {
+  return (
+    <span data-testid="tv-cal-count" data-color={color} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color }}>
+      <i aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: color, display: 'inline-block' }} />
+      {n}
+    </span>
+  );
+}
+
+export function weekCounts(eps: CalEpisode[], today: Day): Record<EpisodeState, number> {
+  const out: Record<EpisodeState, number> = { downloaded: 0, missing: 0, unaired: 0 };
+  for (const e of eps) out[episodeState(e, today)] += 1;
+  return out;
+}
+
 export function WeekGrid({ eps: all, week, today }: { eps: CalEpisode[]; week: Day; today: Day }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(week, i));
   const [gone, setGone] = useState<Set<number>>(new Set());
@@ -176,9 +227,26 @@ export function WeekGrid({ eps: all, week, today }: { eps: CalEpisode[]; week: D
         const list = sortDay(eps.filter(e => e.air_date === d));
         const isToday = d === today;
         return (
-          <section key={d} data-testid="tv-grid-day" data-day={d} style={gridCol}>
-            <h4 style={{ ...gridHead, background: isToday ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.04)', color: isToday ? '#3b82f6' : W50 }}>
+          <section key={d} data-testid="tv-grid-day" data-day={d} data-today={isToday ? 'true' : undefined}
+            style={{
+              ...gridCol,
+              ...(isToday ? {
+                boxShadow: 'inset 0 0 0 1px rgba(59,130,246,.35)',
+                background: 'rgba(59,130,246,.05)',
+                borderRadius: 10,
+                padding: 6,
+              } : { padding: 6 }),
+            }}>
+            <h4 style={{
+              ...gridHead,
+              background: isToday ? 'rgba(59,130,246,.22)' : 'rgba(255,255,255,0.04)',
+              color: isToday ? '#60a5fa' : W50,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', height: 28, boxSizing: 'border-box',
+            }}>
               {dayHeader(d)}
+              {isToday && <span aria-hidden="true" data-testid="tv-today-dot" style={{
+                display: 'inline-block', width: 4, height: 4, borderRadius: '50%', background: '#3b82f6', marginLeft: 6,
+              }} />}
             </h4>
             {list.map(e => <GridCard key={e.episode_id} e={e} today={today} />)}
           </section>
@@ -190,9 +258,10 @@ export function WeekGrid({ eps: all, week, today }: { eps: CalEpisode[]; week: D
 }
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+/** v321 Designer D: `Sun 25` (weekday + day-of-month). */
 const dayHeader = (d: Day) => {
   const [y = 1970, m = 1, dd = 1] = d.split('-').map(Number);
-  return `${DOW[new Date(y, m - 1, dd).getDay()]} ${m}/${dd}`;
+  return `${DOW[new Date(y, m - 1, dd).getDay()]} ${dd}`;
 };
 
 /** Click or Enter/Space: the show's detail, at that season and episode (no-op without a TMDB id or a modal host). */
@@ -249,30 +318,52 @@ export function Bookmark({ e, on, onToggle }: { e: CalEpisode; on: boolean; onTo
 /** Unmonitored cards render at ~0.5 opacity; the state edge stays full strength. */
 export const DIM = 0.5;
 
+/** v321 Designer D: glass card, 10px corners, 3px status stripe, 28×42 poster (or initial), show / SxxExx · title / air time. */
 function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
   const st = episodeState(e, today);
   const open = useOpenEpisode(e);
   const [mon, flip] = useMonitored(e);
-  // v179 (Designer): the bottom line is the start time in the viewer's local time ('9:00 PM') for every
-  // state, never the date again (the column header has it); no air time known: no line
   const air = airLine(e);
+  const initial = (e.show.trim()[0] || '?').toUpperCase();
   return (
     <div data-testid="tv-agenda-row" data-state={st} data-monitored={mon ? 'true' : 'false'} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
       className={`tvc-card ${open.className || ''}`.trim()}
-      style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', flex: 'none', paddingLeft: EDGE_W, borderRadius: 8, background: 'rgba(255,255,255,0.06)',
-        border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+      style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', flex: 'none', borderRadius: 10, background: 'rgba(255,255,255,0.06)',
+        border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden', padding: '8px 8px 8px 11px' }}>
+      <Stripe color={STATE_COLOR[st]} w={3} />
       <Bookmark e={e} on={mon} onToggle={flip} />
-      <div data-testid="tv-card-body" style={{ opacity: mon ? 1 : DIM, transition: 'opacity 150ms' }}>
-        <div className="tvc-text" style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 1 }}>
-          <span data-testid="tv-card-show" title={e.show} style={{ ...clamp2, WebkitLineClamp: NAME_LINES, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
-          <span data-testid="tv-card-title" title={epLine(e)} style={{ ...clamp2, WebkitLineClamp: EP_LINES, lineHeight: '16px', fontSize: 12, color: W70 }}>{epLine(e)}</span>
+      <div data-testid="tv-card-body" style={{ opacity: mon ? 1 : DIM, transition: 'opacity 150ms', display: 'flex', gap: 8 }}>
+        {e.poster_path ? (
+          <span data-testid="tv-card-poster" style={{ flex: 'none' }}><Poster path={e.poster_path} w={28} h={42} /></span>
+        ) : (
+          <span aria-hidden="true" data-testid="tv-poster-initial" style={{
+            width: 28, height: 42, borderRadius: 6, flex: 'none', display: 'grid', placeItems: 'center',
+            background: 'linear-gradient(160deg, rgba(59,130,246,.35), rgba(15,23,42,.9))',
+            border: '1px solid rgba(255,255,255,.1)', fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,.55)',
+          }}>{initial}</span>
+        )}
+        <div className="tvc-text" style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <span data-testid="tv-card-show" title={e.show} style={{ ...one, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
+          <span data-testid="tv-card-title" title={epLine(e)} style={{ ...one, fontSize: 12, color: W70 }}>{epLine(e)}</span>
           {air && (
-            <span data-testid="tv-air" style={{ display: 'block', fontSize: AIR_SIZE, lineHeight: '16px', color: W50, whiteSpace: 'nowrap' }}>{air}</span>
+            <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 1, fontSize: AIR_SIZE, lineHeight: '16px', color: W50, whiteSpace: 'nowrap' }}>
+              {st === 'downloaded' && <GreenCheck />}
+              {air}
+            </span>
           )}
           <QualityChip e={e} style={{ alignSelf: 'flex-start', marginTop: 2 }} />
         </div>
       </div>
     </div>
+  );
+}
+
+/** 12px green check before a downloaded episode's air time (Designer D / spec §2). */
+function GreenCheck() {
+  return (
+    <svg data-testid="tv-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 6 9 17l-5-5" />
+    </svg>
   );
 }
 
@@ -333,8 +424,7 @@ export function QualityChip({ e, style }: { e: Pick<CalEpisode, 'downloaded' | '
 export const Stripe = ({ color, w = 3 }: { color: string; w?: number }) => (
   <span aria-hidden="true" data-testid="tv-stripe" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: w, background: color, zIndex: 1 }} />
 );
-/** The week-grid card's state edge: full card height, beside the text (v178: text-only cards). */
-const EDGE_W = 4;
+/** v321: status edge is Stripe (3px); EDGE_W retired with text-only cards. */
 /** Quiet loading that mirrors the week grid: 7 day-header strips and 2–3 glass .04
  * cards per column at a text-only card's height; no spinner, no motion. */
 const LOADING_CARDS = [3, 2, 3, 2, 3, 2, 2];
@@ -345,7 +435,7 @@ function Placeholder() {
         <div key={c} data-testid="tv-cal-loading-day" style={gridCol}>
           <span aria-hidden="true" style={{ ...gridHead, display: 'block', background: 'rgba(255,255,255,0.04)' }}>{'\u00a0'}</span>
           {Array.from({ length: n }, (_, i) => (
-            <span key={i} data-testid="tv-cal-loading-card" style={{ display: 'block', height: CARD_TEXT_H, borderRadius: 8,
+            <span key={i} data-testid="tv-cal-loading-card" style={{ display: 'block', height: CARD_TEXT_H, borderRadius: 10,
               border: '1px solid rgba(255,255,255,0.04)', background: 'rgba(255,255,255,0.04)' }} />
           ))}
         </div>
@@ -424,11 +514,10 @@ export const tvCalendarCss = `
 /** v179: rows and columns never stretch a card: the grid starts every day column at its content height
  * (align-items start), and a column is a plain flex stack of cards that keep their text height (flex none). */
 const gridWrap: React.CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', alignItems: 'start', gap: 8 };
-const gridCol: React.CSSProperties = { display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', gap: 6, minWidth: 0 };
-const gridHead: React.CSSProperties = { margin: 0, padding: '6px 8px', borderRadius: 8, fontSize: 12, fontWeight: 600, lineHeight: '16px' };
-/** v178: a text-only card: 6 + name 17 + 1 + episode 16 + 1 + time 16 + 6 (one line each), plus 2 border
- * (v179: 48 without an air time, which has no line). */
-export const CARD_TEXT_H = 65;
+const gridCol: React.CSSProperties = { display: 'flex', flexDirection: 'column', justifyContent: 'flex-start', gap: 8, minWidth: 0, boxSizing: 'border-box' };
+const gridHead: React.CSSProperties = { margin: 0, padding: '0 8px', borderRadius: 8, fontSize: 12, fontWeight: 600, lineHeight: '16px' };
+/** v321 Designer D: poster row ~8+42+8; loading skeletons match card height. */
+export const CARD_TEXT_H = 74;
 const one: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 /** v158c: week-grid captions wrap instead of clipping: the show name up to NAME_LINES, the episode line
  * up to EP_LINES, then an ellipsis. On a phone (calendar under 600px: day columns ~55px) they stay at 2 and 1
@@ -437,10 +526,6 @@ const one: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', tex
  * the longest fixture titles fit the ~76px day columns at 1100. */
 export const NAME_LINES = 8;
 export const EP_LINES = 6;
-/** At most 2 lines, then an ellipsis (week-grid show names). */
-const clamp2: React.CSSProperties = {
-  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', overflowWrap: 'anywhere', lineHeight: '17px',
-};
 export const glassCard: React.CSSProperties = {
   borderRadius: 16, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden',
 };

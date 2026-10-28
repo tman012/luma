@@ -9,7 +9,7 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
 import { SEARCH_DEBOUNCE_MS } from '@/components/library/TvSearch';
-import { CAL_MAX_W, CARD_TEXT_H, POLL_MS, WeekGrid, airLine, keepIfSame, tvCalendarCss } from '@/components/library/TvCalendar';
+import { CAL_MAX_W, CARD_TEXT_H, POLL_MS, WeekGrid, WeekHero, airLine, keepIfSame, tvCalendarCss, weekCounts } from '@/components/library/TvCalendar';
 import { ModalHostContext, type ModalHostContextValue } from '@/contexts/ModalHostContext';
 import {
   addDays, agendaLabel, byDay, episodeState, isDay, localDay, seasonsText, shortDate, weekDays, weekLabel, weekStart, type CalEpisode,
@@ -80,20 +80,26 @@ const calCalls = () => calls.filter(c => c.url.startsWith('/api/settings/tv/cale
 
 // ---------------------------------------------------------------- dates
 
-describe('text-only cards (v178)', () => {
+describe('Designer D week cards (v321)', () => {
   const ep = (o: Partial<CalEpisode>): CalEpisode => ({ episode_id: 1, series_id: 1, show: 'Severance', year: 2022, poster_path: '/p.jpg',
     season: 2, episode: 1, title: 'Hello', air_date: '2026-10-12', downloaded: false, ...o });
-  it('no image of any kind: show name, episode code and title, air time, the 4px edge and the bookmark', () => {
+  it('poster or initial, 3px status stripe, show / SxxExx · title / air time, bookmark', () => {
     render(<WeekGrid eps={[ep({ airstamp: '2026-10-12T21:00:00-04:00', runtime: 60 } as Partial<CalEpisode>)]} week={'2026-10-11' as Day} today={'2026-10-12' as Day} />);
     const card = screen.getByTestId('tv-agenda-row');
-    expect(card.querySelector('img, picture, [data-testid=tv-still]')).toBeNull();
-    expect(card.querySelector('[style*="aspect-ratio"]')).toBeNull();
+    expect(within(card).getByTestId('tv-card-poster')).toBeTruthy();
+    expect(within(card).getByTestId('tv-stripe')).toBeTruthy();
     expect(within(card).getByTestId('tv-card-show').textContent).toBe('Severance');
     expect(within(card).getByTestId('tv-card-title').textContent).toBe('S02E01 \u00b7 Hello');
     expect(within(card).getByTestId('tv-air').textContent).not.toBe('');
-    expect(within(card).queryByTestId('tv-stripe')).toBeNull();   // v197: no state edge
     expect(within(card).getByTestId('tv-card-bookmark')).toBeTruthy();
-    expect((card.querySelector('.tvc-text') as HTMLElement).style.padding).toBe('6px 8px');
+    expect(card.style.borderRadius).toBe('10px');
+  });
+  it('no poster: initial tile; downloaded air time gets a green check', () => {
+    render(<WeekGrid eps={[ep({ poster_path: null, downloaded: true, airstamp: '2026-10-12T21:00:00-04:00' } as Partial<CalEpisode>)]} week={'2026-10-11' as Day} today={'2026-10-12' as Day} />);
+    const card = screen.getByTestId('tv-agenda-row');
+    expect(within(card).getByTestId('tv-poster-initial').textContent).toBe('S');
+    expect(within(card).getByTestId('tv-check')).toBeTruthy();
+    expect(card.getAttribute('data-state')).toBe('downloaded');
   });
 });
 
@@ -108,37 +114,33 @@ describe('cards collapse to their text (v179)', () => {
     ep({ episode_id: 3, episode: 3, air_date: '2026-10-14' }),                                      // no air time
     ep({ episode_id: 4, episode: 4, air_date: '2026-10-17', airstamp: '2026-10-17T20:00:00Z' } as Partial<CalEpisode>),
   ];
-  it('no image box, no reserved height: nothing on a card or its parts sizes it but its text', () => {
+  it('D cards: poster+text row, content-height columns, no stretch', () => {
     render(<WeekGrid eps={week} week={'2026-10-11' as Day} today={'2026-10-15' as Day} />);
     const cards = screen.getAllByTestId('tv-agenda-row');
     expect(cards).toHaveLength(4);
     for (const card of cards) {
-      expect(card.querySelector('img, picture, video, svg image, [data-testid=tv-still], [class*=still], [class*=skel]')).toBeNull();
-      for (const el of [card, ...card.querySelectorAll<HTMLElement>('*')]) {
-        if (el.getAttribute('data-testid') === 'tv-card-bookmark' || el.closest('[data-testid=tv-card-bookmark]')) continue;   // absolute, 24px
-        if (el.getAttribute('data-testid') === 'tv-stripe') continue;                                                         // absolute edge
-        if (el.getAttribute('data-testid') === 'tv-quality-chip') continue;                                                   // v211: a 24px chip, 'Downloaded' when quality unknown
-        expect(el.getAttribute('style') || '').not.toMatch(SIZING);
-      }
-      expect(card.style.flex).toBe('0 0 auto');                                          // a day column never grows a card
+      expect(within(card).getByTestId('tv-stripe')).toBeTruthy();
+      expect(within(card).queryByTestId('tv-card-poster') || within(card).queryByTestId('tv-poster-initial')).toBeTruthy();
+      expect(card.style.flex).toBe('0 0 auto');
       const body = within(card).getByTestId('tv-card-body');
-      expect([...body.children].map(c => (c as HTMLElement).className)).toEqual(['tvc-text']);   // the text, nothing above it
+      expect(body.children).toHaveLength(2);
+      expect((body.lastElementChild as HTMLElement).className).toBe('tvc-text');
     }
-    // the grid rows and the day columns: content height, no stretch, no row sizing
     const grid = screen.getByTestId('tv-cal-grid');
     expect([grid.style.alignItems, grid.style.gridAutoRows, grid.style.gridTemplateRows]).toEqual(['start', '', '']);
     for (const d of screen.getAllByTestId('tv-grid-day')) {
-      expect([d.style.minHeight, d.style.height, d.style.flex, d.style.justifyContent]).toEqual(['', '', '', 'flex-start']);
+      expect(d.style.justifyContent).toBe('flex-start');
+      expect(d.style.minHeight).toBe('');
     }
-    // and the stylesheet carries no image or skeleton sizing for the calendar
-    expect(tvCalendarCss).not.toMatch(/aspect-ratio|min-height|tvc-still|skel|(^|[{;])height\s*:/i);
+    expect(tvCalendarCss).not.toMatch(/tvc-still|skel/i);
   });
   it('the bottom line is the start time in the viewer zone for every state, never the date; no air time, no line', () => {
     render(<WeekGrid eps={week} week={'2026-10-11' as Day} today={'2026-10-15' as Day} />);
     const [c1, c2, c3, c4] = screen.getAllByTestId('tv-agenda-row');
     expect([c1, c2, c3, c4].map(c => c!.getAttribute('data-state'))).toEqual(['missing', 'downloaded', 'missing', 'unaired']);
     expect(within(c1!).getByTestId('tv-air').textContent).toBe('9:00 PM');          // a start time, no range
-    expect(within(c2!).getByTestId('tv-air').textContent).toBe('10:00 PM');
+    expect(within(c2!).getByTestId('tv-air').textContent).toContain('10:00 PM');
+    expect(within(c2!).getByTestId('tv-check')).toBeTruthy();
     expect(within(c3!).queryByTestId('tv-air')).toBeNull();                         // no air time: the line is gone
     expect(within(c4!).getByTestId('tv-air').textContent).toBe('4:00 PM');
     for (const c of [c1, c2, c4]) expect(within(c!).getByTestId('tv-air').textContent).not.toMatch(/Oct|\d+\/\d+/);
@@ -218,6 +220,29 @@ describe('week math', () => {
 
 // ---------------------------------------------------------------- calendar
 
+
+describe('Designer D WeekHero (v321)', () => {
+  const mk = (id: number, air_date: string, downloaded: boolean): CalEpisode => ({
+    episode_id: id, series_id: 1, show: 'Severance', year: 2022, poster_path: null,
+    season: 2, episode: id, title: `Episode ${id}`, air_date, downloaded,
+  });
+  it('This week strip shows count chips only; Today pill when viewing the current week', () => {
+    const eps = [mk(1, '2026-10-12', true), mk(2, '2026-10-13', false), mk(3, '2026-10-20', false)];
+    render(<WeekHero eps={eps} week={'2026-10-11' as Day} today={'2026-10-17' as Day} />);
+    const strip = screen.getByTestId('tv-cal-this-week');
+    expect(strip.textContent).toContain('This week');
+    expect(strip.textContent).not.toMatch(/Downloaded|Missing|Unaired|Upcoming/i);
+    expect([...strip.querySelectorAll('[data-testid=tv-cal-count]')].map(c => c.textContent)).toEqual(['1', '1', '1']);
+    expect(screen.getByTestId('tv-cal-today-pill').textContent).toBe('Sat 17 · Today');
+    expect(weekCounts(eps, '2026-10-17' as Day)).toEqual({ downloaded: 1, missing: 1, unaired: 1 });
+  });
+  it('hides the Today pill when the visible week is not the current week', () => {
+    render(<WeekHero eps={[]} week={'2026-10-18' as Day} today={'2026-10-17' as Day} />);
+    expect(screen.queryByTestId('tv-cal-today-pill')).toBeNull();
+    expect(screen.getByTestId('tv-cal-this-week')).toBeTruthy();
+  });
+});
+
 describe('Calendar', () => {
   it('opens by default: this week as a 7-column grid, Sunday first, with states and air dates; no Today on this week', async () => {
     page(true);
@@ -226,27 +251,28 @@ describe('Calendar', () => {
     expect(calCalls()).toEqual(['start=2026-10-11&days=7']);
     expect(screen.getByTestId('tv-cal-label').textContent).toBe('Oct 11 \u2013 17');
     expect(screen.queryByTestId('tv-cal-today')).toBeNull();
+    expect(screen.getByTestId('tv-cal-hero')).toBeTruthy();
+    expect(screen.getByTestId('tv-cal-today-pill')).toBeTruthy();
     expect(screen.getAllByTestId('tv-grid-day').map(d => d.firstElementChild!.textContent)).toEqual(
-      ['Sun 10/11', 'Mon 10/12', 'Tue 10/13', 'Wed 10/14', 'Thu 10/15', 'Fri 10/16', 'Sat 10/17']);
+      ['Sun 11', 'Mon 12', 'Tue 13', 'Wed 14', 'Thu 15', 'Fri 16', 'Sat 17']);
     expect(rows.map(r => r.getAttribute('aria-label'))).toEqual([
       'Downloaded: Severance S02E01', 'Missing: Severance S02E02', 'Unaired: Severance S02E03']);
-    // the edge: 4px, full card height, colors from CSS vars (Designer's defaults); the state is in aria-label only
-    // v197 (Taylor, Q2): no state color on calendar rows
-    expect(rows.some(r => within(r).queryByTestId('tv-stripe'))).toBe(false);
-    expect(rows.some(r => within(r).queryByTestId('tv-check'))).toBe(false);          // no check: the time line stays put
+    // v321 Designer D: 3px status stripe on every card
+    expect(rows.every(r => within(r).queryByTestId('tv-stripe'))).toBe(true);
+    expect(rows.every(r => within(r).queryByTestId('tv-check'))).toBe(false);  // fixtures have no airstamp
     // nothing on screen but v211's chip ('Downloaded' for a downloaded episode of unknown quality)
     expect(rows.some(r => /Missing|Unaired/.test(r.textContent || ''))).toBe(false);
     expect(rows.map(r => within(r).queryByTestId('tv-quality-chip')?.textContent ?? null)).toEqual(['Downloaded', null, null]);
     expect(rows[0]!.textContent).toContain('Episode 1');
-    const name = within(rows[0]!).getByTestId('tv-card-show');                     // up to 2 lines, 13/600
-    expect([name.style.webkitLineClamp, name.style.display, name.style.fontSize, name.style.fontWeight]).toEqual(['8', '-webkit-box', '13px', '600']);   // v158c: wraps (v164: up to 8)
-    expect(name.getAttribute('title')).toBe(name.textContent);                     // line 1: the show name only, full width
-    const title = within(rows[0]!).getByTestId('tv-card-title');                   // line 2: SxxEyy · title, 12px, 70%, 1 line
+    const name = within(rows[0]!).getByTestId('tv-card-show');                     // 13/600, one line
+    expect([name.style.fontSize, name.style.fontWeight, name.style.whiteSpace]).toEqual(['13px', '600', 'nowrap']);
+    expect(name.getAttribute('title')).toBe(name.textContent);
+    const title = within(rows[0]!).getByTestId('tv-card-title');                   // SxxEyy · title, 12px, 70%
     expect(name.nextElementSibling).toBe(title);
     expect(title.textContent).toMatch(/^S\d\dE\d\d \u00b7 /);
-    expect([title.style.webkitLineClamp, title.style.display, title.style.fontSize, title.style.color])
-      .toEqual(['6', '-webkit-box', '12px', 'rgba(255, 255, 255, 0.7)']);                        // v158c: wraps (v164: up to 6 lines)
-    expect(title.nextElementSibling?.getAttribute('data-testid') ?? null).toBe('tv-quality-chip');   // v179: no air line; v211: the 'Downloaded' chip
+    expect([title.style.fontSize, title.style.color, title.style.whiteSpace])
+      .toEqual(['12px', 'rgba(255, 255, 255, 0.7)', 'nowrap']);
+    expect(within(rows[0]!).getByTestId('tv-quality-chip').textContent).toBe('Downloaded');
     // the top row: ‹ range › together in the true center (a 1fr auto 1fr grid), no separate toolbar
     const center = screen.getByTestId('tv-cal-center');
     expect(center.contains(screen.getByTestId('tv-cal-prev')) && center.contains(screen.getByTestId('tv-cal-next'))).toBe(true);

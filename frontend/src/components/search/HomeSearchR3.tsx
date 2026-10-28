@@ -232,6 +232,9 @@ export function HomeSearchR3() {
           <button type="button" className="a1-tb" onClick={() => go('/explore')} aria-label="Explore">
             <svg width={20} height={20} viewBox="0 0 24 24" fill="#adc7ff" aria-hidden="true"><path d="M12 10.9c-.6 0-1.1.5-1.1 1.1s.5 1.1 1.1 1.1 1.1-.5 1.1-1.1-.5-1.1-1.1-1.1zM12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm2.2 12.2L6 18l3.8-8.2L18 6l-3.8 8.2z" /></svg>
             <span className="a1-tl">Explore</span></button>
+          <button type="button" className="a1-tb" data-testid="a1-tv-calendar" onClick={() => go('/settings/tv')} aria-label="TV Calendar">
+            <svg width={20} height={20} viewBox="0 0 24 24" fill="#adc7ff" aria-hidden="true"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zM5 8V6h14v2H5z"/></svg>
+            <span className="a1-tl">TV Calendar</span></button>
         </div>
         <label className="r3-field" data-focus-ring>
           <span className="r3-icon"><H2SearchIcon /></span>

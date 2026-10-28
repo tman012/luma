@@ -289,13 +289,13 @@ describe('v243 A1: the top bar opens from a bare chevron', () => {
     expect(chev.querySelector('svg')!.getAttribute('width')).toBe('48');
     expect(r3Css).toContain('.a1-chev{position:fixed;z-index:56;top:28px;left:50%;transform:translateX(-50%);width:48px;height:48px;padding:0;border:0;background:none;box-shadow:none;');
   });
-  it('the chevron opens the glass bar with the search and Watchlist, Library, Explore; the chevron closes it', () => {
+  it('the chevron opens the glass bar with the search and Watchlist, Library, Explore, TV Calendar; the chevron closes it', () => {
     render(<HomeSearchR3 />);
     fireEvent.click(screen.getByTestId('a1-chevron'));
     expect(bar()).toBeTruthy();
     expect(head().hidden).toBe(false);
     expect(screen.getByTestId('a1-chevron').getAttribute('aria-expanded')).toBe('true');
-    expect([...screen.getByTestId('a1-nav').querySelectorAll('button')].map(b => b.textContent)).toEqual(['Watchlist', 'Library', 'Explore']);
+    expect([...screen.getByTestId('a1-nav').querySelectorAll('button')].map(b => b.textContent)).toEqual(['Watchlist', 'Library', 'Explore', 'TV Calendar']);
     expect(r3Css).toContain('.a1-bar{position:fixed;z-index:49;top:0;left:0;right:0;height:152px;background:rgba(17,19,24,.55);backdrop-filter:blur(24px)');
     expect(r3Css).not.toMatch(/a1-in|animation:a1/);   // v245: no separate, later backdrop animation
     fireEvent.click(screen.getByTestId('a1-chevron'));
@@ -326,16 +326,16 @@ describe('v243 A1: the top bar opens from a bare chevron', () => {
     expect(window.location.pathname).toBe(before);
     expect(bar()).toBeTruthy();
   });
-  it('outside the test install they go to /watchlist, /browse and /explore', () => {
+  it('outside the test install they go to /watchlist, /browse, /explore and /settings/tv', () => {
     delete window.__LUMA_MINIMAL__;
     render(<HomeSearchR3 />);
     const seen: string[] = [];
-    for (const name of ['Watchlist', 'Library', 'Explore']) {
+    for (const name of ['Watchlist', 'Library', 'Explore', 'TV Calendar']) {
       fireEvent.click(screen.getByTestId('a1-chevron'));
       fireEvent.click(screen.getByRole('button', { name }));
       seen.push(window.location.pathname);
     }
-    expect(seen).toEqual(['/watchlist', '/browse', '/explore']);
+    expect(seen).toEqual(['/watchlist', '/browse', '/explore', '/settings/tv']);
     window.history.pushState({}, '', '/');
   });
 });
