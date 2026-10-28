@@ -34,10 +34,12 @@ class R:
 
 
 class FakeQbit:
-    """qBittorrent's Web API: login (Ok./Fails.), app/version, torrents."""
+    """qBittorrent's Web API: login (Ok./Fails./204), app/version, torrents."""
 
-    def __init__(self, user='admin', password=PW, version='v4.6.5', login_code=200):
-        self.user, self.password, self.version, self.login_code = user, password, version, login_code
+    def __init__(self, user='admin', password=PW, version='v4.6.5', login_code=200,
+                 version_code=200):
+        self.user, self.password, self.version = user, password, version
+        self.login_code, self.version_code = login_code, version_code
         self.calls = []
         self.exc = None
 
@@ -53,16 +55,25 @@ class FakeQbit:
                 if fake.exc:
                     raise fake.exc
                 if url.endswith('/api/v2/auth/login'):
+                    creds_ok = ((data or {}).get('username') == fake.user
+                                and (data or {}).get('password') == fake.password)
+                    if fake.login_code == 204 and creds_ok:
+                        self.ok = True
+                        return R(204, '')
                     if fake.login_code != 200:
                         return R(fake.login_code, 'Forbidden')
-                    self.ok = (data or {}).get('username') == fake.user and (data or {}).get('password') == fake.password
+                    self.ok = creds_ok
                     return R(200, 'Ok.' if self.ok else 'Fails.')
                 return R(404)
 
             def get(self, url, **kw):
                 fake.calls.append(('GET', url, None, kw))
                 if url.endswith('/api/v2/app/version'):
-                    return R(200, fake.version) if self.ok else R(403, 'Forbidden')
+                    if not self.ok:
+                        return R(403, 'Forbidden')
+                    if fake.version_code == 204:
+                        return R(204, fake.version)
+                    return R(fake.version_code, fake.version)
                 return R(404)
 
             def close(self):
@@ -298,3 +309,58 @@ def test_add_paused_is_saved_and_shown_and_defaults_off(minimal):
     r = _put(c, {'url': 'http://qbit.local:8080', 'username': 'admin', 'category': 'a', 'add_paused': 'yes'})
     assert r.status_code == 400
     assert _put(c, {'url': 'http://qbit.local:8080', 'username': 'admin', 'category': 'a'}).get_json()['add_paused'] is True
+
+
+# ------------------------------------------------------------------ HTTP 204
+
+def test_ok_status_accepts_2xx_including_204():
+    assert qbit_connector.ok_status(200) and qbit_connector.ok_status(204)
+    assert qbit_connector.ok_status(201) and qbit_connector.ok_status(299)
+    assert not qbit_connector.ok_status(199) and not qbit_connector.ok_status(300)
+    assert not qbit_connector.ok_status(403) and not qbit_connector.ok_status(502)
+    assert not qbit_connector.ok_status('nope') and not qbit_connector.ok_status(None)
+
+
+def test_login_ok_accepts_200_ok_and_204_empty():
+    assert qbit_connector.login_ok(R(200, 'Ok.'))
+    assert qbit_connector.login_ok(R(204, ''))
+    assert qbit_connector.login_ok(R(204, 'Ok.'))
+    assert not qbit_connector.login_ok(R(200, 'Fails.'))
+    assert not qbit_connector.login_ok(R(200, ''))          # bare 200+empty stays not-qBit
+    assert not qbit_connector.login_ok(R(204, 'Fails.'))
+    assert not qbit_connector.login_ok(R(502, 'Ok.'))
+    assert not qbit_connector.login_ok(R(403, ''))
+
+
+def test_test_accepts_login_http_204(minimal, qbit):
+    qbit.login_code = 204
+    c = _client(minimal)
+    r = _test(c, {'url': 'http://qbit.local:8080', 'username': 'admin', 'password': PW})
+    assert r.get_json() == {'ok': True, 'message': 'Connected', 'version': 'v4.6.5'}
+
+
+def test_test_accepts_version_http_204(minimal, qbit):
+    qbit.version_code = 204
+    c = _client(minimal)
+    r = _test(c, {'url': 'http://qbit.local:8080', 'username': 'admin', 'password': PW})
+    assert r.get_json() == {'ok': True, 'message': 'Connected', 'version': 'v4.6.5'}
+
+
+def test_check_login_204_then_version_200():
+    """Direct check(): 204 login + 200 version is Connected."""
+    class Sess:
+        def post(self, *a, **k):
+            return R(204, '')
+        def get(self, *a, **k):
+            return R(200, 'v5.0.0')
+        def close(self):
+            pass
+    import app.qbit_connector as qc
+    # bypass new_session
+    orig = qc.new_session
+    qc.new_session = lambda factory=None: Sess()
+    try:
+        problem, version = qc.check('http://qbit.local:8080', 'admin', PW)
+    finally:
+        qc.new_session = orig
+    assert problem is None and version == 'v5.0.0'

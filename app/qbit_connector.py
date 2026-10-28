@@ -190,6 +190,37 @@ def _text_of(r) -> str:
 text_of = _text_of
 
 
+def ok_status(code) -> bool:
+    """True for HTTP 2xx. Some qBittorrent installs and reverse proxies
+    answer 204 No Content on success instead of 200."""
+    try:
+        return 200 <= int(code) < 300
+    except (TypeError, ValueError):
+        return False
+
+
+def login_ok(response) -> bool:
+    """True when auth/login succeeded.
+
+    Classic qBittorrent: HTTP 200 with body ``Ok.``. Some reverse proxies
+    (and a few WebUI builds) answer 204 No Content with an empty body —
+    treat that as signed in too. A bare 200 with an empty body stays a
+    non-qBit answer so a random HTTP server is still rejected.
+    """
+    try:
+        code = int(getattr(response, 'status_code', 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    if not (200 <= code < 300):
+        return False
+    body = _text_of(response).strip()
+    if body == 'Fails.':
+        return False
+    if body == 'Ok.':
+        return True
+    return code == 204 or (code != 200 and body == '')
+
+
 def new_session(factory: Optional[Callable] = None):
     """A session for qBittorrent: never via an environment proxy and never
     following a redirect, whatever the caller passes. Every request on it
@@ -267,7 +298,6 @@ def check(url: str, username: str, password: str) -> Tuple[Optional[str], str]:
             return TIMED_OUT, ''
         except requests.exceptions.RequestException:
             return UNREACHABLE, ''
-        body = _text_of(r)
         if 300 <= r.status_code < 400:
             return REDIRECTED, ''               # a redirect is never a sign-in
         if r.status_code == 403:
@@ -276,11 +306,12 @@ def check(url: str, username: str, password: str) -> Tuple[Optional[str], str]:
             return BAD_LOGIN, ''
         if r.status_code == 404:
             return NOT_QBIT, ''
-        if r.status_code != 200:
-            return f'qBittorrent answered HTTP {int(r.status_code)}', ''
+        body = _text_of(r)
         if body == 'Fails.':
             return BAD_LOGIN, ''
-        if body != 'Ok.':
+        if not login_ok(r):
+            if not ok_status(r.status_code):
+                return f'qBittorrent answered HTTP {int(r.status_code)}', ''
             return NOT_QBIT, ''
         try:
             v = session.get(f'{url}/api/v2/app/version', timeout=TIMEOUT_S, allow_redirects=False)
@@ -290,7 +321,7 @@ def check(url: str, username: str, password: str) -> Tuple[Optional[str], str]:
             return UNREACHABLE, ''
         if v.status_code == 403:
             return BAD_LOGIN, ''
-        if v.status_code != 200:
+        if not ok_status(v.status_code):
             return UNEXPECTED, ''
         version = _text_of(v)
         return None, version if VERSION_RE.match(version) else ''

@@ -200,7 +200,8 @@ def ensure_category(sess, url: str, name: str, job: str = JOB) -> Optional[str]:
         except requests.RequestException as e:
             logger.warning('TV grab: creating category %s failed (%s)', name, type(e).__name__)
             return CATEGORY_FAILED.format(name)
-        if r.status_code != 200:
+        from app.qbit_connector import ok_status
+        if not ok_status(r.status_code):
             again = _categories(sess, url)                   # 409: made meanwhile, or refused
             if again is None or name not in again:
                 logger.warning('TV grab: qBittorrent refused category %s (HTTP %s)', name, r.status_code)
@@ -298,11 +299,12 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
         return {'ok': False, 'error': NO_CLIENT, 'client': True}
     finally:
         mover._close(sess)
-    from app.qbit_connector import text_of
-    if reopen and r.status_code == 200 and text_of(r).strip() == 'Fails.':
+    from app.qbit_connector import text_of, ok_status
+    if reopen and ok_status(r.status_code) and text_of(r).strip() == 'Fails.':
         pass                                                 # still in the client: the watcher imports it again
-    elif r.status_code != 200 or text_of(r).strip() not in ('Ok.', ''):
-        err = f'qBittorrent returned HTTP {r.status_code}' if r.status_code != 200 else 'qBittorrent refused the torrent'
+    elif not ok_status(r.status_code) or text_of(r).strip() not in ('Ok.', ''):
+        err = (f'qBittorrent returned HTTP {r.status_code}' if not ok_status(r.status_code)
+               else 'qBittorrent refused the torrent')
         _job_failed(h, item, series_id, err, now)
         return {'ok': False, 'error': err}
     if reopen:

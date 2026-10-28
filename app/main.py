@@ -3467,7 +3467,7 @@ def radarr_queue():
                         'username': settings.get('qbittorrent.username'),
                         'password': settings.get('qbittorrent.password'),
                     }, timeout=8, allow_redirects=False)
-                    if lr.status_code == 200 and lr.text.strip() == 'Ok.':
+                    if _qbit_login_ok(lr):
                         tr = qs.get(f"{qbit_url}/api/v2/torrents/info", timeout=8)
                         if tr.status_code == 200:
                             for t in tr.json():
@@ -4888,7 +4888,7 @@ def get_active_downloads_count():
             timeout=10, allow_redirects=False
         )
 
-        if login_response.status_code != 200 or _qbit_body(login_response) != 'Ok.':
+        if not _qbit_login_ok(login_response):
             return jsonify({'count': 0})
 
         # Get torrents
@@ -4993,7 +4993,7 @@ def get_downloads_queue():
             'username': settings.get('qbittorrent.username'),
             'password': settings.get('qbittorrent.password'),
         }, timeout=8, allow_redirects=False)
-        if lr.status_code != 200 or lr.text.strip() != 'Ok.':
+        if not _qbit_login_ok(lr):
             return jsonify({'downloads': []})
         tr = qs.get(f"{qbit_url}/api/v2/torrents/info", timeout=8)
         if tr.status_code != 200:
@@ -9632,6 +9632,18 @@ def _qbit_body(resp) -> str:
     no charset, and requests' guess can misread them (see qbit_connector)."""
     from app.qbit_connector import text_of
     return text_of(resp)
+
+
+def _qbit_ok(resp) -> bool:
+    """True for HTTP 2xx from qBittorrent (includes 204 No Content)."""
+    from app.qbit_connector import ok_status
+    return ok_status(getattr(resp, 'status_code', None))
+
+
+def _qbit_login_ok(resp) -> bool:
+    """True when auth/login succeeded (200+Ok. or 204)."""
+    from app.qbit_connector import login_ok
+    return login_ok(resp)
 
 
 def _download_client_unavailable():
@@ -15756,7 +15768,7 @@ def get_download_history():
                 },
                 timeout=10, allow_redirects=False,
             )
-            if login_resp.status_code == 200 and _qbit_body(login_resp) == 'Ok.':
+            if _qbit_login_ok(login_resp):
                 torrents_resp = session.get(
                     f"{settings.get('qbittorrent.url')}/api/v2/torrents/info",
                     timeout=10,
@@ -16581,7 +16593,7 @@ def remove_from_tracking(torrent_hash):
             },
             timeout=8, allow_redirects=False,
         )
-        if lr.status_code != 200 or lr.text.strip() != 'Ok.':
+        if not _qbit_login_ok(lr):
             return jsonify({'success': False, 'error': 'qBittorrent login failed'}), 502
 
         dr = qs.post(
@@ -16592,7 +16604,7 @@ def remove_from_tracking(torrent_hash):
             },
             timeout=15,
         )
-        if dr.status_code != 200:
+        if not _qbit_ok(dr):
             return jsonify({
                 'success': False,
                 'error': f'qBittorrent delete failed ({dr.status_code})',
@@ -16948,7 +16960,7 @@ def add_torrent_to_qbittorrent():
             from app.qbit_connector import REDIRECTED
             logger.error(f"qBittorrent login redirected: {login_response.status_code}")
             return jsonify({'error': REDIRECTED}), 502
-        if login_response.status_code != 200 or _qbit_body(login_response) != 'Ok.':
+        if not _qbit_login_ok(login_response):
             logger.error(f"qBittorrent login failed: {login_response.status_code}")
             return jsonify({'error': 'Download client sign-in failed'}), 502
 
@@ -17014,7 +17026,7 @@ def add_torrent_to_qbittorrent():
             return _download_client_unavailable()
 
         logger.info(f"qBittorrent add response: status={add_response.status_code}, text='{_qbit_body(add_response)[:80]}'")
-        if add_response.status_code != 200:
+        if not _qbit_ok(add_response):
             return jsonify({'error': f'qBittorrent returned HTTP {add_response.status_code}'}), 502
 
         # Verify the torrent ACTUALLY landed. qBit's 'Ok.' proves nothing about

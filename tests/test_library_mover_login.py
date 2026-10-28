@@ -203,3 +203,11 @@ def test_no_paths_or_nothing_waiting_never_signs_in(env):
     c = Client(lambda: Resp(200, 'Ok.'))
     run(c, range(0, 300, 30))
     assert c.logins == []
+
+
+def test_login_http_204_counts_as_success(waiting):
+    """Some reverse proxies answer 204 No Content on a successful sign-in."""
+    c = Client(lambda: Resp(204, ''))
+    run(c, [0])
+    assert lm.login_state()['failures'] == 0 and lm.login_state()['held'] is False
+    assert len(c.logins) == 1

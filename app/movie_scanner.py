@@ -375,9 +375,9 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
         return {'ok': False, 'error': tv_grab.NO_CLIENT, 'client': True}
     finally:
         mover._close(sess)
-    from app.qbit_connector import text_of
-    if r.status_code != 200 or text_of(r).strip() not in ('Ok.', ''):
-        return {'ok': False, 'error': f'qBittorrent returned HTTP {r.status_code}' if r.status_code != 200
+    from app.qbit_connector import text_of, ok_status
+    if not ok_status(r.status_code) or text_of(r).strip() not in ('Ok.', ''):
+        return {'ok': False, 'error': f'qBittorrent returned HTTP {r.status_code}' if not ok_status(r.status_code)
                 else 'qBittorrent refused the torrent'}
     with ms.connect() as conn:
         _set(conn, tmdb_id, next_search_at=None, last_search_at=now)

@@ -272,7 +272,7 @@ def _creds_key(url: str, user: str, password: str) -> str:
 
 
 def _qbit_session(session_factory, now: Optional[float] = None) -> Tuple[Optional[Any], str]:
-    from app.qbit_connector import new_session, normalize_url, text_of
+    from app.qbit_connector import new_session, normalize_url, text_of, login_ok
     now = time.time() if now is None else now
     s = _cfg['settings']
     url = normalize_url(s.get('qbittorrent.url') or '')
@@ -302,7 +302,7 @@ def _qbit_session(session_factory, now: Optional[float] = None) -> Tuple[Optiona
         _close(sess)
         return None, url
     body = text_of(r).strip()
-    if r.status_code == 200 and body == 'Ok.':
+    if login_ok(r):
         with _login_lock:
             dirty = _login['failures'] or _login['next_at'] or _login['held']
             _login.update(failures=0, unreachable=0, next_at=0.0, held=False)
@@ -313,7 +313,7 @@ def _qbit_session(session_factory, now: Optional[float] = None) -> Tuple[Optiona
     # A redirect counts as a rejected sign-in too: the session never follows it,
     # so retrying it forever would only resend the password to the same 3xx.
     rejected = (r.status_code in (401, 403) or 300 <= r.status_code < 400
-                or (r.status_code == 200 and body == 'Fails.'))
+                or body == 'Fails.')
     with _login_lock:
         _login['unreachable'] = 0
         if rejected:
