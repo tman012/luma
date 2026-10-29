@@ -7,7 +7,8 @@ bind-mounted Unix socket to the Ops host helper, which runs:
 
 Locked call (HTTP over AF_UNIX):
   POST /move
-  {"mode":"cp|mv","src":"/scratch/downloads/...","dest":"/media/..."}
+  {"mode":"cp|mv","src":"/scratch/downloads/...","dest":"/media/...",
+   "tmp":"/media/.../.luma-<hex16>.luma-partial"}     (v324: tmp, same dir as dest)
 
 Socket (in luma-test): host /home/tbosley02/luma-mover/mover.sock mounted
 under /run/luma-mover. Defaults try:
@@ -28,6 +29,7 @@ import json
 import logging
 import os
 import socket
+import time
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -44,6 +46,24 @@ DEFAULT_SOCK_CANDIDATES = (DEFAULT_SOCK,)
 DEFAULT_DOWNLOADS = '/scratch/downloads'
 DEFAULT_MEDIA = '/media'
 DEFAULT_TIMEOUT_S = 3600
+
+# v324 remote import safety — temp naming is owned by LUMA and is the exact
+# local-copy rule: library_mover.partial_name() → '.luma-<hex16>.luma-partial'
+# in the SAME folder as the final name (no title in it). Luma sends it as
+# "tmp" (absolute, remote-mapped); the .72 script copies SRC→tmp, checks size,
+# renames tmp→dest without replacing, and removes tmp on any failure. The
+# script must NOT add a suffix of its own. Luma never suffixes "dest".
+# Explicit script failures (usage / bounds / src missing / copy-verify-rename
+# failed): real failures, reported immediately.
+_SCRIPT_FAIL_RCS = frozenset({2, 3, 4, 5, 6})
+# Wait-out policy when the helper gives up before the copy does (.62 helper
+# timeout=600 → HTTP 500 rc=124 while cp keeps running on .72).
+POLL_INTERVAL_S = 15.0
+STALL_S = 600.0            # partial must grow at least once per 10 min
+MIN_WAIT_S = 1800.0        # floor for the size-based overall deadline
+MIN_RATE_BPS = 5 * 1024 * 1024   # deadline = max(MIN_WAIT_S, 2 * size / 5 MiB/s)
+_sleep = time.sleep
+_now = time.monotonic
 
 _DOWNLOADS_ALIASES = ('/storage/downloads', '/downloads')
 
@@ -216,22 +236,140 @@ def _http_post_unix(sock_path: str, path: str, body: bytes, timeout: int) -> Tup
             pass
 
 
-def transfer(src_container: str, dest_container: str, mode: str = 'cp') -> str:
+def _size_of(path: str) -> Optional[int]:
+    try:
+        if os.path.isdir(path) and not os.path.islink(path):
+            total = 0
+            for dp, _dn, fns in os.walk(path):
+                for fn in fns:
+                    try:
+                        total += os.lstat(os.path.join(dp, fn)).st_size
+                    except OSError:
+                        pass
+            return total
+        return os.lstat(path).st_size
+    except OSError:
+        return None
+
+
+def _dest_observable(dest_container: str) -> bool:
+    """True when Luma can see the dest folder through its own /media mount."""
+    return os.path.isdir(os.path.dirname(dest_container) or '/')
+
+
+def _deadline_for(src_size: Optional[int]) -> float:
+    size = max(0, int(src_size or 0))
+    return max(MIN_WAIT_S, 2.0 * size / MIN_RATE_BPS)
+
+
+def remote_temp_for(dest_container: str) -> str:
+    """Container path of the temp file for *dest_container*: same folder,
+    library_mover.partial_name() (the local copy's rule)."""
+    from app import library_mover
+    return os.path.join(os.path.dirname(dest_container), library_mover.partial_name())
+
+
+def _is_partial_name(path: str) -> bool:
+    from app import library_mover
+    b = os.path.basename(path)
+    return b.endswith((library_mover.PARTIAL_SUFFIX, '.luma.partial', '.lumapart'))
+
+
+def wait_for_remote_copy(src_container: str, dest_container: str, tmp_container: str) -> str:
+    """The helper stopped waiting but .72 may still be copying. Watch the final
+    name and the script's partial through the /media mount. 'copied' once the
+    final name has the source size and no partial is left; RemoteMoverError when
+    the partial vanished without a final, stalled, or the deadline passed."""
+    src_size = _size_of(src_container)
+    part = tmp_container
+    start = _now()
+    deadline = start + _deadline_for(src_size)
+    last_part = None
+    last_growth = start
+    while True:
+        final = _size_of(dest_container)
+        psize = _size_of(part)
+        if final is not None and psize is None:
+            if src_size is None or final == src_size:
+                logger.info('Remote mover: copy finished after helper wait: %s', dest_container)
+                return 'copied'
+            if final > src_size:
+                raise RemoteMoverError(
+                    f'remote copy size mismatch at {dest_container}: {final} != {src_size}')
+            # smaller final with no partial: a pre-partial script still copying in place.
+        if psize is None and final is None and last_part is not None:
+            raise RemoteMoverError(
+                f'remote copy failed: partial removed without final ({dest_container})')
+        progress = psize if psize is not None else final
+        t = _now()
+        if progress is not None and progress != last_part:
+            last_part = progress
+            last_growth = t
+        elif progress is None and last_part is None and t - start >= STALL_S:
+            raise RemoteMoverError(
+                f'remote copy never started (no partial/final after {int(STALL_S)}s): {dest_container}')
+        if progress is not None and t - last_growth >= STALL_S:
+            raise RemoteMoverError(f'remote copy stalled at {progress} B: {dest_container}')
+        if t >= deadline:
+            raise RemoteMoverError(f'remote copy did not finish by deadline: {dest_container}')
+        _sleep(POLL_INTERVAL_S)
+
+
+def _verify_final(src_container: str, dest_container: str, tmp_container: str) -> None:
+    if not _dest_observable(dest_container):
+        return   # mount not visible here (e.g. unit tests / odd layouts): trust script verify
+    src_size = _size_of(src_container)
+    final = _size_of(dest_container)
+    if final is None:
+        # helper said OK but the final name is not visible yet (CIFS cache): wait it out.
+        wait_for_remote_copy(src_container, dest_container, tmp_container)
+        return
+    if src_size is not None and final != src_size:
+        raise RemoteMoverError(
+            f'remote copy size mismatch at {dest_container}: {final} != {src_size}')
+
+
+def transfer(src_container: str, dest_container: str, mode: str = 'cp',
+             tmp_container: Optional[str] = None) -> str:
     """POST /move over the host Unix socket. Prefer mode=cp (keeps seeding).
+
+    *dest_container* is the FINAL name. The temp is remote_temp_for(dest)
+    (library_mover.partial_name(), same folder) and goes out as "tmp"; the
+    .72 script copies to it, verifies, renames, cleans up. A helper timeout
+    (rc 124 / HTTP 5xx without an explicit script rc / socket timeout) is not a
+    failure: Luma waits for the copy via its /media mount.
 
     Returns 'copied' / 'moved' / 'exists'.
     """
+    if _is_partial_name(dest_container):
+        raise RemoteMoverError(f'dest must be the final name, not a partial: {dest_container}')
     cfg = config()
     op = 'mv' if mode in ('mv', 'move') else 'cp'
     rsrc = to_remote(src_container, cfg)
     rdest = to_remote(dest_container, cfg)
     _assert_remote_bounds(rsrc, rdest, cfg)
+    tmp_container = tmp_container or remote_temp_for(dest_container)
+    rtmp = to_remote(tmp_container, cfg)
+    if os.path.dirname(rtmp) != os.path.dirname(rdest):
+        raise RemoteMoverError(f'temp must sit next to dest: {rtmp} vs {rdest}')
+    observable = _dest_observable(dest_container)
+    # Size-based socket timeout so Luma itself never gives up first.
+    timeout = max(int(cfg['timeout']), int(_deadline_for(_size_of(src_container))))
     # Locked Ops JSON: field name is "mode" (not "op").
-    payload = json.dumps({'mode': op, 'src': rsrc, 'dest': rdest}).encode()
-    status, raw = _http_post_unix(str(cfg['sock']), '/move', payload, int(cfg['timeout']))
+    payload = json.dumps({'mode': op, 'src': rsrc, 'dest': rdest, 'tmp': rtmp}).encode()
+    try:
+        status, raw = _http_post_unix(str(cfg['sock']), '/move', payload, timeout)
+    except RemoteMoverError as e:
+        if observable and op == 'cp' and isinstance(e.__cause__, (socket.timeout, TimeoutError)):
+            logger.warning('Remote mover: socket timeout, waiting for copy: %s', rdest)
+            return wait_for_remote_copy(src_container, dest_container, tmp_container)
+        raise
     try:
         data = json.loads(raw) if raw.strip() else {}
     except json.JSONDecodeError as e:
+        if observable and op == 'cp' and status >= 500:
+            logger.warning('Remote mover: HTTP %s non-JSON, waiting for copy: %s', status, rdest)
+            return wait_for_remote_copy(src_container, dest_container, tmp_container)
         raise RemoteMoverError(
             f'host mover bad JSON HTTP {status}: {raw[:200]!r} '
             f'({op} {rsrc} -> {rdest})') from e
@@ -251,10 +389,18 @@ def transfer(src_container: str, dest_container: str, mode: str = 'cp') -> str:
         err = output or f'HTTP {status} rc={rc_i}'
         if 'exist' in err.lower():
             return 'exists'
+        helper_gave_up = rc_i == 124 or 'timed out' in err.lower() or 'timeout' in err.lower() \
+            or (status >= 500 and rc_i not in _SCRIPT_FAIL_RCS)
+        if observable and op == 'cp' and helper_gave_up:
+            logger.warning('Remote mover: helper gave up (HTTP %s rc=%s), waiting for copy: %s',
+                           status, rc_i, rdest)
+            return wait_for_remote_copy(src_container, dest_container, tmp_container)
         raise RemoteMoverError(
             f'host mover failed HTTP {status} rc={rc_i}: {err} '
             f'({op} {rsrc} -> {rdest})')
     if ok is True or (status == 200 and rc_i == 0):
+        if op == 'cp':
+            _verify_final(src_container, dest_container, tmp_container)
         how = 'moved' if op == 'mv' else 'copied'
         logger.info('Remote mover via unix socket: %s %s -> %s', op, rsrc, rdest)
         return how

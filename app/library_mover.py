@@ -830,16 +830,25 @@ def _ensure_folder(rfd: int, lib_root: str, folder: str, owner) -> Tuple[int, bo
 PARTIAL_SUFFIX = '.luma-partial'
 
 
+def partial_name() -> str:
+    """Temp name for one copy into a library folder: '.luma-<hex16>.luma-partial',
+    hidden, fixed length, never derived from the title. Created in the SAME
+    folder as the final name and renamed into place. Shared by the local copy
+    (_new_partial) and the v324 remote hop (remote_mover.transfer) so both use
+    one naming rule."""
+    import secrets
+    return f'.luma-{secrets.token_hex(8)}{PARTIAL_SUFFIX}'
+
+
 def _new_partial(dfd: int, name: str) -> Tuple[str, int, Tuple[int, int]]:
     """(name, write fd, (dev, ino)) of a new, uniquely named partial file,
     created here (O_EXCL, never through a symlink). A partial that is already
     there belongs to someone else and is never touched."""
-    import secrets
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW | _O_CLOEXEC
     for _ in range(8):
         # Hotfix (Reviewer, REQUIRED): short and fixed-length, never derived from *name*: a long final name
         # ('.<name>.<hex8>.luma-partial') no longer hits ENAMETOOLONG before the rename
-        tmp = f'.luma-{secrets.token_hex(8)}{PARTIAL_SUFFIX}'
+        tmp = partial_name()
         try:
             fd = os.open(tmp, flags, 0o600, dir_fd=dfd)
         except FileExistsError:
@@ -878,6 +887,8 @@ def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root:
         if not _real_under(src, root):
             raise Refused('outside the downloads folder')
         try:
+            # v324: final name; remote_mover picks the temp via partial_name() (same rule as
+            # the local copy) and the .72 script copies to it, checks size, renames, cleans up.
             return remote_mover.transfer(src, os.path.join(folder, name))
         except remote_mover.RemoteMoverError as e:
             raise Refused(str(e)) from e

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from unittest import mock
 
 import pytest
@@ -67,6 +68,8 @@ def test_transfer_posts_mode_over_unix(remote_env, monkeypatch):
     assert rm.transfer(str(src), '/media/Movies/a.mkv') == 'copied'
     assert seen['sock'] == str(remote_env['sock'])
     assert seen['path'] == '/move'
+    tmp = seen['body'].pop('tmp')   # v324: Luma-chosen temp, same dir as dest
+    assert re.fullmatch(r'/media/Movies/\.luma-[0-9a-f]{16}\.luma-partial', tmp)
     assert seen['body'] == {
         'mode': 'cp',
         'src': '/scratch/downloads/a.mkv',

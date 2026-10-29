@@ -6,7 +6,10 @@ Ops FINAL (preferred):
   Sock: host /home/tbosley02/luma-mover/mover.sock
         bind-mount → container /run/luma-mover/mover.sock
   HTTP over AF_UNIX:
-    POST /move  {"mode":"cp|mv","src":"...","dest":"..."}
+    POST /move  {"mode":"cp|mv","src":"...","dest":"...","tmp":"<dest dir>/.luma-<hex16>.luma-partial"}
+         v324: tmp is chosen by Luma (library_mover.partial_name()); passed as
+         4th CLI arg. The CLI copies SRC→tmp, checks size, renames tmp→dest
+         (no replace), removes tmp on failure, and adds NO suffix of its own.
          → {"ok": bool, "rc": N, "output": "..."}
     GET  /health → {"ok": true}
 
@@ -20,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import socket
 import subprocess
@@ -37,13 +41,14 @@ DOWNLOADS_ROOT = os.environ.get('LUMA_REMOTE_DOWNLOADS_ROOT', '/scratch/download
 MEDIA_ROOT = os.environ.get('LUMA_REMOTE_MEDIA_ROOT', '/media').rstrip('/')
 TIMEOUT_S = int(os.environ.get('LUMA_REMOTE_MOVER_TIMEOUT_S', '3600'))
 EXISTS = 17
+TMP_RE = re.compile(r'^\.luma-[0-9a-f]{16}\.luma-partial$')
 
 
 def _under(path: str, root: str) -> bool:
     return path == root or path.startswith(root + '/')
 
 
-def run_move(mode: str, src: str, dest: str) -> tuple[int, str]:
+def run_move(mode: str, src: str, dest: str, tmp: str = '') -> tuple[int, str]:
     if mode not in ('cp', 'mv'):
         return 2, f'mode must be cp|mv, got {mode!r}'
     if not _under(src, DOWNLOADS_ROOT):
@@ -51,6 +56,10 @@ def run_move(mode: str, src: str, dest: str) -> tuple[int, str]:
     if not _under(dest, MEDIA_ROOT):
         return 2, f'dest must be under {MEDIA_ROOT}'
     cmd = [CLI, mode, src, dest]
+    if tmp:
+        if os.path.dirname(tmp) != os.path.dirname(dest) or not TMP_RE.match(os.path.basename(tmp)):
+            return 2, 'tmp must be <dest dir>/.luma-<hex16>.luma-partial'
+        cmd.append(tmp)
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_S, check=False)
     except FileNotFoundError:
@@ -99,7 +108,8 @@ class Handler(BaseHTTPRequestHandler):
         if not src or not dest:
             self._json(400, {'ok': False, 'rc': 2, 'output': 'src and dest required'})
             return
-        rc, output = run_move(mode, src, dest)
+        tmp = str(data.get('tmp') or '').strip()
+        rc, output = run_move(mode, src, dest, tmp)
         ok = rc == 0
         code = 200 if ok else (409 if rc == EXISTS else 500)
         self._json(code, {'ok': ok, 'rc': rc, 'output': output})

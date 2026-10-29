@@ -171,6 +171,7 @@ def copy_verified(src: str, dest: str) -> str:
                 return 'exists'
             raise Refused('a different file is already there')
         try:
+            # v324: final name; temp = library_mover.partial_name() in dest dir (see remote_mover).
             return remote_mover.transfer(src, dest)
         except remote_mover.RemoteMoverError as e:
             raise Refused(str(e)) from e
