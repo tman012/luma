@@ -62,7 +62,28 @@ class Refused(Exception):
 # ------------------------------------------------------------------ settings
 
 def category() -> str:
+    """The legacy movie category/tag ('movie'; LUMA_MOVIE_CATEGORY): still watched so older grabs import."""
     return (os.environ.get(CATEGORY_ENV) or '').strip() or DEFAULT_CATEGORY
+
+
+def categories() -> List[str]:
+    """v324c: every name a movie grab can carry: the luma-test tag (movie_scanner.category(), v324b) and the
+    legacy 'movie'. Only torrents with a movie_grabs row are ever imported here."""
+    from app import qbit_owner
+    out: List[str] = []
+    for n in (qbit_owner.tag_name(), category()):
+        if n and n.casefold() not in {x.casefold() for x in out}:
+            out.append(n)
+    return out
+
+
+def _mover_owns(h: str) -> bool:
+    """v324c: a /api/downloads/add job in library_mover files this hash itself (it marks the row)."""
+    try:
+        from app import file_management as fm
+        return h in (fm.load().get('jobs') or {})
+    except Exception:                                  # noqa: BLE001
+        return False
 
 
 def luma_movies_root() -> str:
@@ -244,6 +265,8 @@ def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[st
         raise Skip('no movie grab for this download')
     if g['state'] == 'imported':
         return {'state': 'imported', 'path': g['path'], 'how': 'done'}
+    if _mover_owns(h):
+        raise Skip('filed by the library mover')
     m = _watch(g['tmdb_id'])
     title, year = (m['title'], m['year']) if m else (None, None)
     if not title:
@@ -288,12 +311,14 @@ def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[st
     dest = os.path.join(dest_dir, fname)
     how = copy_verified(src, dest)
     # verified: only now is the grab imported and the movie off the watchlist
-    movie_grabs.set_state(h, 'imported', path=dest, now=now)
+    first = movie_grabs.mark_imported(h, path=dest, now=now)
     with ms.connect() as conn:
         conn.execute('DELETE FROM watchlist WHERE tmdb_id = ?', (g['tmdb_id'],))
     logger.info('Movie import: %s -> %s (%s)', t.get('name'), dest, how)
     # v283: prod AutoRenamer fires Web Push on import-complete; GR/watchlist movies
     # use this path (not library_mover). Grab stays silent — notify only here.
+    if not first:                                    # v324c: someone else marked it; they notified
+        return {'state': 'imported', 'path': dest, 'how': how}
     try:
         from app import library_notify
         library_notify.notify_library_added(
@@ -365,8 +390,9 @@ def _torrents(session_factory: Callable = requests.Session, now: Optional[float]
     if not sess:
         return None
     try:
-        name, seen, out = category(), set(), []
-        for params in ({'category': name, 'filter': 'completed'}, {'tag': name, 'filter': 'completed'}):
+        seen, out = set(), []
+        for params in [p for n in categories() for p in ({'category': n, 'filter': 'completed'},
+                                                         {'tag': n, 'filter': 'completed'})]:
             try:
                 r = sess.get(f'{url}/api/v2/torrents/info', params=params, timeout=10, allow_redirects=False)
                 got = r.json() if r.status_code == 200 else None
@@ -385,9 +411,9 @@ def _torrents(session_factory: Callable = requests.Session, now: Optional[float]
 
 
 def _is_movie(t: Dict[str, Any]) -> bool:
-    name = category().casefold()
+    names = {n.casefold() for n in categories()}
     tags = {x.strip().casefold() for x in str(t.get('tags') or '').split(',') if x.strip()}
-    return str(t.get('category') or '').casefold() == name or name in tags
+    return str(t.get('category') or '').casefold() in names or bool(names & tags)
 
 
 def _complete(t: Dict[str, Any]) -> bool:

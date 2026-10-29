@@ -96,6 +96,20 @@ def all_rows(limit: int = 100) -> List[Dict[str, Any]]:
         return [dict(r) for r in conn.execute('SELECT * FROM movie_grabs ORDER BY grabbed_at DESC LIMIT ?', (limit,))]
 
 
+def mark_imported(download_hash: str, path: Optional[str] = None, now: Optional[float] = None) -> bool:
+    """v324c: mark the grab imported once. True only for the caller that flipped it (the one that notifies);
+    False when it is already imported or there is no row. Shared by movie_import and library_mover."""
+    try:
+        h = _hash(download_hash)
+    except ValueError:
+        return False
+    now = time.time() if now is None else now
+    with _Db() as conn:
+        cur = conn.execute("UPDATE movie_grabs SET state = 'imported', path = COALESCE(?, path), error = NULL,"
+                           " updated_at = ? WHERE hash = ? AND state != 'imported'", (path, now, h))
+        return cur.rowcount > 0
+
+
 def set_state(download_hash: str, state: str, path: Optional[str] = None, error: Optional[str] = None,
               now: Optional[float] = None) -> bool:
     if state not in STATES:

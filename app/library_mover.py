@@ -1166,7 +1166,7 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
     logger.info('Library mover: %s -> %s (%s)', job.get('title'), fields['dest'],
                 ', '.join(r['result'] for r in fields['files']))
     # Import-complete only (state 'done' = newly filed). 'exists' means already in the library.
-    if fields.get('state') == 'done':
+    if fields.get('state') == 'done' and _claim_movie_grab(h, job, str(fields.get('dest') or ''), now):
         try:
             from app import library_notify
             library_notify.notify_library_added(
@@ -1179,6 +1179,29 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
             )
         except Exception:
             logger.exception('Library mover: notify failed for %s', job.get('title'))
+
+
+def _claim_movie_grab(h: str, job: Dict[str, Any], dest: str, now: float) -> bool:
+    """v324c: a filed torrent with a movies.db movie_grabs row (matched by qBit hash, the only key that row
+    has) is marked imported the way movie_import does (state, path, off the watchlist). True when this call
+    should notify: no row at all, or this call flipped it. False when it was already imported (no double push)."""
+    try:
+        from app import movie_grabs
+        g = movie_grabs.by_hash(h)
+        if not g:
+            return True
+        if not movie_grabs.mark_imported(h, path=dest or None, now=now):
+            return False
+        try:
+            from app import movie_settings as ms
+            with ms.connect() as conn:
+                conn.execute('DELETE FROM watchlist WHERE tmdb_id = ?', (g['tmdb_id'],))
+        except Exception:                            # noqa: BLE001
+            logger.exception('Library mover: watchlist cleanup failed for %s', job.get('title'))
+        return True
+    except Exception:                                # noqa: BLE001 - never blocks the notify
+        logger.exception('Library mover: movie_grabs mark failed for %s', job.get('title'))
+        return True
 
 
 def _free_or_none(path: str) -> Optional[int]:
