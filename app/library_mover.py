@@ -1138,6 +1138,12 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
         return
     if not (t.get('progress') == 1 and t.get('state') in COMPLETED_STATES):
         return
+    row = _movie_grab(h)
+    if row and row.get('state') == 'importing' and not _stale(row, now):
+        return                              # v324: movie_import is filing it this moment; look again next pass
+    if row and row.get('state') == 'imported':
+        _set_job(h, state='skipped', error='already imported', finished=now)   # v324: never filed (or notified) twice
+        return
     try:
         fields = process(dict(job), t, data, now, list_files)
     except Pending as e:
@@ -1162,13 +1168,16 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
     summary['filed'] += 1
     logger.info('Library mover: %s -> %s (%s)', job.get('title'), fields['dest'],
                 ', '.join(r['result'] for r in fields['files']))
+    # v324: a grab with a movie_grabs row (e.g. Genre Roulette) is marked imported here; only the caller
+    # that wins the once-only mark notifies, so movie_import and library_mover never both push.
+    claimed = _claim_movie_grab(h, str(fields.get('dest') or ''), now) if fields.get('state') in ('done', 'exists') else None
     # Import-complete only (state 'done' = newly filed). 'exists' means already in the library.
-    if fields.get('state') == 'done':
+    if fields.get('state') == 'done' and claimed is not False:
         try:
             from app import library_notify
             library_notify.notify_library_added(
                 media_type='movie',
-                title=str(job.get('title') or ''),
+                title=str(job.get('title') or '') or _grab_title(job),
                 year=job.get('year') or '',
                 tmdb_id=job.get('tmdb_id'),
                 dest_path=str(fields.get('dest') or ''),
@@ -1176,6 +1185,53 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
             )
         except Exception:
             logger.exception('Library mover: notify failed for %s', job.get('title'))
+
+
+def _movie_grab(h: str) -> Optional[Dict[str, Any]]:
+    try:
+        from app import movie_grabs
+        return movie_grabs.by_hash(h)
+    except Exception:                                     # noqa: BLE001
+        return None
+
+
+def _stale(row: Dict[str, Any], now: float) -> bool:
+    from app import movie_grabs
+    try:
+        return float(row.get('updated_at') or 0) < now - movie_grabs.STALE_IMPORTING_S
+    except (TypeError, ValueError):
+        return True
+
+
+def _claim_movie_grab(h: str, dest: str, now: float) -> Optional[bool]:
+    """v324: mark this hash's movie_grabs row imported. None: no row (plain /api/downloads/add grab).
+    True: this call marked it (and may notify). False: someone already had."""
+    row = _movie_grab(h)
+    if not row:
+        return None
+    try:
+        from app import movie_grabs
+        won = movie_grabs.mark_imported(h, dest or None, now=now)
+    except Exception:                                     # noqa: BLE001
+        logger.exception('Library mover: could not mark movie grab %s imported', h[:8])
+        return None
+    if won:
+        try:
+            from app import movie_settings as ms
+            with ms.connect() as conn:
+                conn.execute('DELETE FROM watchlist WHERE tmdb_id = ?', (row['tmdb_id'],))
+        except Exception:                                 # noqa: BLE001
+            logger.exception('Library mover: watchlist cleanup failed for %s', h[:8])
+    return won
+
+
+def _grab_title(job: Dict[str, Any]) -> str:
+    try:
+        from app import movie_import
+        m = movie_import._watch(int(job.get('tmdb_id')))
+        return str((m or {}).get('title') or '')
+    except Exception:                                     # noqa: BLE001
+        return ''
 
 
 def _free_or_none(path: str) -> Optional[int]:

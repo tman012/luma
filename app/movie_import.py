@@ -55,6 +55,10 @@ class Skip(Exception):
     """Not now (left for a later pass)."""
 
 
+class Busy(Exception):
+    """v324: another pass holds the row ('importing'); leave it untouched."""
+
+
 class Refused(Exception):
     """Never (the grab is marked failed with the reason)."""
 
@@ -62,7 +66,30 @@ class Refused(Exception):
 # ------------------------------------------------------------------ settings
 
 def category() -> str:
+    """The legacy movie category/tag ('movie'; LUMA_MOVIE_CATEGORY). v324: still watched so grabs made
+    before v324 are not stranded; new grabs carry the test tag (see watch_names())."""
     return (os.environ.get(CATEGORY_ENV) or '').strip() or DEFAULT_CATEGORY
+
+
+def watch_names() -> List[str]:
+    """v324: the qBittorrent categories/tags this importer watches: the test tag (qbit_owner.tag_name(),
+    'luma-test', what movie_scanner grabs under) and the legacy 'movie'. Row-gated: only a hash with a
+    movie_grabs row is ever imported, so production's or library_mover's torrents are never picked up."""
+    from app import qbit_owner
+    out: List[str] = []
+    for n in (qbit_owner.tag_name(), category()):
+        if n and n.casefold() not in {x.casefold() for x in out}:
+            out.append(n)
+    return out
+
+
+def _mover_owns(h: str) -> bool:
+    """v324: library_mover has a job for this hash (a /api/downloads/add grab): it files and notifies it."""
+    try:
+        from app import file_management as fm
+        return str(h or '').lower() in (fm.load().get('jobs') or {})
+    except Exception:                                     # noqa: BLE001
+        return True                                       # can't tell: leave it to library_mover (fail safe)
 
 
 def luma_movies_root() -> str:
@@ -272,7 +299,12 @@ def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[st
     dest_dir = os.path.join(rr, folder)
     if os.path.realpath(os.path.dirname(dest_dir)) != rr:
         raise Refused('unsafe file name')
-    movie_grabs.set_state(h, 'importing', now=now)
+    # v324: atomic claim, then re-check library_mover: whichever side is second backs off.
+    if not movie_grabs.claim_importing(h, now=now):
+        raise Busy('import already in progress')
+    if _mover_owns(h):
+        movie_grabs.set_state(h, 'grabbed', error='filed by library mover', now=now)
+        raise Skip('filed by library mover')
     if _rm.enabled():
         try:
             _rm.mkdir_p(dest_dir)
@@ -287,12 +319,15 @@ def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[st
     dest = os.path.join(dest_dir, fname)
     how = copy_verified(src, dest)
     # verified: only now is the grab imported and the movie off the watchlist
-    movie_grabs.set_state(h, 'imported', path=dest, now=now)
+    won = movie_grabs.mark_imported(h, dest, now=now)
     with ms.connect() as conn:
         conn.execute('DELETE FROM watchlist WHERE tmdb_id = ?', (g['tmdb_id'],))
     logger.info('Movie import: %s -> %s (%s)', t.get('name'), dest, how)
     # v283: prod AutoRenamer fires Web Push on import-complete; GR/watchlist movies
     # use this path (not library_mover). Grab stays silent — notify only here.
+    # v324: only the caller that won mark_imported notifies (never twice).
+    if not won:
+        return {'state': 'imported', 'path': dest, 'how': how}
     try:
         from app import library_notify
         library_notify.notify_library_added(
@@ -364,8 +399,10 @@ def _torrents(session_factory: Callable = requests.Session, now: Optional[float]
     if not sess:
         return None
     try:
-        name, seen, out = category(), set(), []
-        for params in ({'category': name, 'filter': 'completed'}, {'tag': name, 'filter': 'completed'}):
+        seen, out = set(), []
+        queries = [q for n in watch_names() for q in ({'category': n, 'filter': 'completed'},
+                                                      {'tag': n, 'filter': 'completed'})]
+        for params in queries:
             try:
                 r = sess.get(f'{url}/api/v2/torrents/info', params=params, timeout=10, allow_redirects=False)
                 got = r.json() if r.status_code == 200 else None
@@ -384,9 +421,9 @@ def _torrents(session_factory: Callable = requests.Session, now: Optional[float]
 
 
 def _is_movie(t: Dict[str, Any]) -> bool:
-    name = category().casefold()
+    names = {n.casefold() for n in watch_names()}
     tags = {x.strip().casefold() for x in str(t.get('tags') or '').split(',') if x.strip()}
-    return str(t.get('category') or '').casefold() == name or name in tags
+    return str(t.get('category') or '').casefold() in names or bool(names & tags)
 
 
 def _complete(t: Dict[str, Any]) -> bool:
@@ -421,10 +458,14 @@ def tick(now: Optional[float] = None, fetch: Optional[Callable[[], Optional[List
             g = movie_grabs.by_hash(str(t.get('hash') or ''))
             if not g or g['state'] in ('imported', 'failed'):
                 continue
+            if _mover_owns(g['hash']):                    # v324: library_mover files (and notifies) its own jobs
+                continue
             out['checked'] += 1
             try:
                 if import_one(t, lib, path_map, now)['state'] == 'imported':
                     out['imported'] += 1
+            except Busy:
+                continue
             except Refused as e:
                 movie_grabs.set_state(g['hash'], 'failed', error=str(e), now=now)
                 logger.info('Movie import: %s refused (%s)', t.get('name'), e)

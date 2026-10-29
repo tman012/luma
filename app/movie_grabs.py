@@ -12,6 +12,10 @@ API (all take an optional now; nothing here talks to a download client or touche
   for_movie(tmdb_id) -> list[dict]                                  newest first
   pending() -> list[dict]                                           rows not yet imported
   set_state(download_hash, state, path=None, error=None, now=None) -> bool
+  claim_importing(download_hash, now=None) -> bool                v324: atomic 'grabbed' -> 'importing' (a stale
+                                                                    'importing' older than STALE_IMPORTING_S too)
+  mark_imported(download_hash, path, now=None) -> bool             v324: atomic, once only: True for exactly one
+                                                                    caller, the one that fires notify_library_added
 """
 from __future__ import annotations
 
@@ -22,6 +26,7 @@ from typing import Any, Dict, List, Optional
 from app import movie_settings as ms
 
 STATES = ('grabbed', 'importing', 'imported', 'failed')
+STALE_IMPORTING_S = 12 * 3600
 _HASH_RE = re.compile(r'^([0-9a-f]{40}|[0-9a-f]{64})$')
 
 SCHEMA = """
@@ -106,3 +111,24 @@ def set_state(download_hash: str, state: str, path: Optional[str] = None, error:
         cur = conn.execute('UPDATE movie_grabs SET state = ?, path = COALESCE(?, path), error = ?, updated_at = ? WHERE hash = ?',
                            (state, path, error, now, h))
         return cur.rowcount > 0
+
+
+def claim_importing(download_hash: str, now: Optional[float] = None) -> bool:
+    """v324: take the row for one import pass. True only for the caller that moved it to 'importing'."""
+    h = _hash(download_hash)
+    now = time.time() if now is None else now
+    with _Db() as conn:
+        cur = conn.execute("UPDATE movie_grabs SET state = 'importing', error = NULL, updated_at = ? WHERE hash = ?"
+                           " AND (state = 'grabbed' OR (state = 'importing' AND updated_at < ?))",
+                           (now, h, now - STALE_IMPORTING_S))
+        return cur.rowcount == 1
+
+
+def mark_imported(download_hash: str, path: Optional[str], now: Optional[float] = None) -> bool:
+    """v324: once-only. True for exactly one caller (that caller, and only it, notifies)."""
+    h = _hash(download_hash)
+    now = time.time() if now is None else now
+    with _Db() as conn:
+        cur = conn.execute("UPDATE movie_grabs SET state = 'imported', path = COALESCE(?, path), error = NULL,"
+                           " updated_at = ? WHERE hash = ? AND state != 'imported'", (path, now, h))
+        return cur.rowcount == 1
