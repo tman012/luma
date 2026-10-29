@@ -66,7 +66,7 @@ def test_test_blocks_every_writer_by_default_and_opts_in_by_name(test_instance, 
     assert instance.writes_allowed('mover') and instance.writes_allowed('tv_link')     # allowed by default (scoped)
     monkeypatch.setenv('LUMA_TEST_ALLOW', 'mover, Roulette, movie_night')
     assert instance.writes_allowed('movie_night')
-    assert not instance.writes_allowed('roulette')      # v198 (Taylor): movie automations never opt in on test
+    assert instance.writes_allowed('roulette')          # 2026-10-29: Roulette opts in like any job
     monkeypatch.setenv('LUMA_TEST_ALLOW', 'mover')
     with pytest.raises(instance.WritesBlocked):
         instance.require('movie_night')

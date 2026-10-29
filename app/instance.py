@@ -210,8 +210,9 @@ def allowed() -> FrozenSet[str]:
     return requested() if opt_ins_honored() else frozenset()
 
 
-#: v198 (Taylor): movie automations are always off on the test instance (no opt-in)
-MOVIE_AUTOMATIONS: FrozenSet[str] = frozenset({'roulette', 'upgrade_4k', 'franchise_completer'})
+#: v198 (Taylor): these movie automations are always off on the test instance (no opt-in).
+#: 2026-10-29 (Taylor): Genre Roulette unlocked; it follows LUMA_TEST_ALLOW like other jobs.
+MOVIE_AUTOMATIONS: FrozenSet[str] = frozenset({'upgrade_4k', 'franchise_completer'})
 
 
 def writes_allowed(job: str) -> bool:

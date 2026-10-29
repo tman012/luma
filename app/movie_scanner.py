@@ -16,8 +16,8 @@ Every TICK_S, when LUMA_INSTANCE is test and Settings > Movies monitoring is on 
     qBittorrent add) with the movie category and tag ('movie'; LUMA_MOVIE_CATEGORY). Recorded in movies.db
     movie_grabs; a movie with a grab is never grabbed again.
 
-Only test's own watchlist (movies.db) is read; Radarr is never read or written. Roulette, 4K and Franchise
-Completer stay off (instance.MOVIE_AUTOMATIONS). No import or rename here (piece 4).
+Only test's own watchlist (movies.db) is read; Radarr is never read or written. 4K and Franchise Completer
+stay off (instance.MOVIE_AUTOMATIONS); Roulette follows LUMA_TEST_ALLOW. No import or rename here (piece 4).
 """
 from __future__ import annotations
 
@@ -379,8 +379,8 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
         return {'ok': False, 'error': tv_grab.NO_CLIENT, 'client': True}
     finally:
         mover._close(sess)
-    from app.qbit_connector import text_of, ok_status
-    if not ok_status(r.status_code) or text_of(r).strip() not in ('Ok.', ''):
+    from app.qbit_connector import ok_status, add_ok
+    if not add_ok(r):
         return {'ok': False, 'error': f'qBittorrent returned HTTP {r.status_code}' if not ok_status(r.status_code)
                 else 'qBittorrent refused the torrent'}
     with ms.connect() as conn:

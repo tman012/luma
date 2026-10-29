@@ -87,7 +87,15 @@ def test_nothing_reads_radarr():
     assert 'radarr' not in src and 'requests' not in src
 
 
-@pytest.mark.parametrize('job', ['roulette', 'upgrade_4k', 'franchise_completer'])
+def test_roulette_follows_opt_in_on_test(monkeypatch):            # 2026-10-29 (Taylor): Roulette unlocked
+    monkeypatch.setenv('LUMA_INSTANCE', 'test')
+    monkeypatch.setenv('LUMA_TEST_ALLOW', 'movie_night')
+    assert instance.writes_allowed('roulette') is False
+    monkeypatch.setenv('LUMA_TEST_ALLOW', 'roulette')
+    assert instance.writes_allowed('roulette') is True
+
+
+@pytest.mark.parametrize('job', ['upgrade_4k', 'franchise_completer'])
 def test_movie_automations_are_off_on_test_even_when_opted_in(monkeypatch, job):
     monkeypatch.setenv('LUMA_INSTANCE', 'test')
     monkeypatch.setenv('LUMA_TEST_ALLOW', job)

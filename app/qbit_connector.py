@@ -190,6 +190,25 @@ def _text_of(r) -> str:
 text_of = _text_of
 
 
+def add_ok(r) -> bool:
+    """True when a torrents/add reply means the torrent was taken: HTTP 2xx and a body of 'Ok.', empty, or
+    (qBittorrent 5.2.0+, WebAPI 2.14.0) JSON with failure_count == 0. Anything else ('Fails.', failure_count > 0) is a refusal."""
+    if not ok_status(getattr(r, 'status_code', None)):
+        return False
+    body = _text_of(r).strip()
+    if body in ('Ok.', ''):
+        return True
+    if body.startswith('{'):
+        import json
+        try:
+            data = json.loads(body)
+        except ValueError:
+            return False
+        fc = data.get('failure_count') if isinstance(data, dict) else None
+        return isinstance(fc, int) and not isinstance(fc, bool) and fc == 0
+    return False
+
+
 def ok_status(code) -> bool:
     """True for HTTP 2xx. Some qBittorrent installs and reverse proxies
     answer 204 No Content on success instead of 200."""

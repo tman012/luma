@@ -299,10 +299,10 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
         return {'ok': False, 'error': NO_CLIENT, 'client': True}
     finally:
         mover._close(sess)
-    from app.qbit_connector import text_of, ok_status
+    from app.qbit_connector import text_of, ok_status, add_ok
     if reopen and ok_status(r.status_code) and text_of(r).strip() == 'Fails.':
         pass                                                 # still in the client: the watcher imports it again
-    elif not ok_status(r.status_code) or text_of(r).strip() not in ('Ok.', ''):
+    elif not add_ok(r):
         err = (f'qBittorrent returned HTTP {r.status_code}' if not ok_status(r.status_code)
                else 'qBittorrent refused the torrent')
         _job_failed(h, item, series_id, err, now)
