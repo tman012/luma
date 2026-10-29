@@ -53,11 +53,12 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('Settings > Connectors > qBittorrent', () => {
-  it('sits after TMDB and Trakt, pre-filled from the server; the password shows only as dots', async () => {
+  it('premium pass: the Downloads row opens the form, pre-filled from the server; the password shows only as dots', async () => {
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-qbittorrent'));
     const card = await screen.findByTestId('connector-qbittorrent');
-    const groups = [...document.querySelectorAll('[data-testid^="connector-"]')].map(e => e.getAttribute('data-testid'));
-    expect(groups).toEqual(['connector-tmdb', 'connector-omdb', 'connector-tvdb', 'connector-trakt', 'connector-homeassistant', 'connector-qbittorrent', 'connector-webpush']);
+    const rows = [...document.querySelectorAll('[data-testid^="connector-row-"]')].map(e => e.getAttribute('data-testid')!.slice(14));
+    expect(rows).toEqual(['plex', 'qbittorrent', 'homeassistant', 'tmdb', 'omdb', 'tvdb', 'trakt']);
     expect(field('url').value).toBe('http://qbit.local:8080');
     expect(field('username').value).toBe('admin');
     expect(field('category').value).toBe('luma-test');
@@ -66,12 +67,13 @@ describe('Settings > Connectors > qBittorrent', () => {
     expect(field('password').placeholder).toBe('••••••••');
     expect((screen.getByTestId('qbit-save') as HTMLButtonElement).disabled).toBe(true);
     // Labels and buttons only: no helper or explanatory text.
-    expect(card.textContent).toBe('qBittorrentURLUsernamePasswordShowCategoryAdd pausedTestSave');
+    expect(card.textContent).toBe('URLUsernamePasswordShowCategoryAdd pausedTestSave');
   });
 
   it('a fresh install starts empty', async () => {
     qbit = { url: '', username: '', category: '', password: { set: false } };
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-qbittorrent'));
     await screen.findByTestId('connector-qbittorrent');
     for (const id of ['url', 'username', 'password', 'category']) expect(field(id).value).toBe('');
     expect(field('password').placeholder).toBe('');
@@ -79,6 +81,7 @@ describe('Settings > Connectors > qBittorrent', () => {
 
   it('Test sends the form without the stored password and shows Connected with the version', async () => {
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-qbittorrent'));
     await screen.findByTestId('connector-qbittorrent');
     fireEvent.click(screen.getByTestId('qbit-test'));
     await waitFor(() => expect(screen.getByTestId('qbit-result').textContent).toBe('Connected (v4.6.5)'));
@@ -89,6 +92,7 @@ describe('Settings > Connectors > qBittorrent', () => {
   it('a failed Test shows the specific error until the next edit', async () => {
     testAnswer = { ok: false, error: 'Wrong username or password' };
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-qbittorrent'));
     await screen.findByTestId('connector-qbittorrent');
     vi.useFakeTimers({ shouldAdvanceTime: true });
     fireEvent.click(screen.getByTestId('qbit-test'));
@@ -102,6 +106,7 @@ describe('Settings > Connectors > qBittorrent', () => {
 
   it('Save writes URL, username, category and a typed password, then shows Saved', async () => {
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-qbittorrent'));
     await screen.findByTestId('connector-qbittorrent');
     type('category', 'movies');
     type('password', PW);
@@ -115,6 +120,7 @@ describe('Settings > Connectors > qBittorrent', () => {
 
   it('Save without retyping the password leaves it out of the body', async () => {
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-qbittorrent'));
     await screen.findByTestId('connector-qbittorrent');
     type('username', 'taylor');
     fireEvent.click(screen.getByTestId('qbit-save'));
@@ -125,6 +131,7 @@ describe('Settings > Connectors > qBittorrent', () => {
   it('a new URL drops the dots and shows the server field error', async () => {
     saveAnswer = () => res({ error: 'Invalid', fields: { password: 'Required' } }, 400);
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-qbittorrent'));
     await screen.findByTestId('connector-qbittorrent');
     type('url', 'http://other.local:8080');
     expect(field('password').placeholder).toBe('');
@@ -137,6 +144,7 @@ describe('Settings > Connectors > qBittorrent', () => {
 
   it('Show reveals only what was typed', async () => {
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-qbittorrent'));
     await screen.findByTestId('connector-qbittorrent');
     fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
     expect(field('password').type).toBe('text');
@@ -146,6 +154,7 @@ describe('Settings > Connectors > qBittorrent', () => {
   it('phone: 44px inputs and buttons, 16px text', async () => {
     wide = false; stubMatchMedia();
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-qbittorrent'));
     await screen.findByTestId('connector-qbittorrent');
     for (const id of ['url', 'username', 'password', 'category']) {
       expect(field(id).style.height).toBe('44px');
@@ -158,6 +167,7 @@ describe('Settings > Connectors > qBittorrent', () => {
 
   it('Add paused: a switch with no helper text, off by default; toggling it enables Save and is sent', async () => {
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-qbittorrent'));
     await screen.findByTestId('connector-qbittorrent');
     const sw = screen.getByRole('switch', { name: 'Add paused' });
     expect(sw.getAttribute('aria-checked')).toBe('false');

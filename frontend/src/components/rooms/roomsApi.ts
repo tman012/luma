@@ -10,7 +10,7 @@ export type RoomPlayer = {
   ha_power_entity?: string; paired: boolean; online: boolean; wake: Wake;
 };
 /** v231 (Reviewer): a signed-in non-owner gets only id, name, default and online (no harmony_hub or player). */
-export type Room = { id: string; name: string; default: boolean; online?: boolean; harmony_hub?: string; harmony_volume_device?: string; player?: RoomPlayer | null };
+export type Room = { id: string; name: string; icon?: string; default: boolean; online?: boolean; harmony_hub?: string; harmony_volume_device?: string; player?: RoomPlayer | null };
 export const roomOnline = (r: Pick<Room, 'online' | 'player'>) => !!(r.online ?? r.player?.online);
 export type RoomsView = { rooms: Room[]; default_room_id: string };
 export type FoundPlayer = { machine_id: string; name: string; product: string; platform: string; host: string; online: boolean };
@@ -40,7 +40,7 @@ export const loadPlayers = () => call<{ players: FoundPlayer[] }>(`${ROOMS_URL}/
 export const createRoom = (name: string) => call<RoomsView>(ROOMS_URL, json('POST', { name }), okView);
 export type RoomPatch = Partial<{ name: string; wake: Wake; host: string; port: number | string; mac: string;
   harmony_hub: string; harmony_activity: string; harmony_volume_device: string; harmony_nav_device: string;
-  ha_power_entity: string; default: boolean }>;
+  ha_power_entity: string; default: boolean; icon: string }>;
 export const updateRoom = (id: string, patch: RoomPatch) => call<RoomsView>(`${ROOMS_URL}/${encodeURIComponent(id)}`, json('PUT', patch), okView);
 
 /** v265/v272 Pair: prod's ADB flow. Optional player = Add device (persists only on success). */
@@ -101,3 +101,20 @@ export function badge(p: { product?: string; platform?: string; name?: string } 
 export const WAKE_LABEL: Record<Wake, string> = {
   adb: 'Wake with ADB', wol: 'Wake-on-LAN', harmony: 'Harmony', homeassistant: 'Home Assistant', none: '',
 };
+
+/** Premium pass pickers (owner only): HA TV-power entities, a Harmony hub's activities/devices, ARP MAC. */
+export type HaEntity = { id: string; name: string };
+export async function loadHaEntities(): Promise<HaEntity[]> {
+  const r = await call<{ entities: HaEntity[] }>(`${ROOMS_URL}/options/ha`, undefined, d => !!d && Array.isArray((d as { entities: unknown }).entities));
+  return r.ok ? r.data.entities : [];
+}
+export type HarmonyOptions = { ok: boolean; activities: string[]; devices: string[] };
+export async function loadHarmonyOptions(hub: string): Promise<HarmonyOptions> {
+  const r = await call<HarmonyOptions>(`${ROOMS_URL}/options/harmony?hub=${encodeURIComponent(hub)}`, undefined,
+    d => !!d && Array.isArray((d as HarmonyOptions).activities));
+  return r.ok ? r.data : { ok: false, activities: [], devices: [] };
+}
+export async function detectMac(id: string): Promise<string> {
+  const r = await call<{ mac: string }>(`${ROOMS_URL}/${encodeURIComponent(id)}/mac`, undefined, d => !!d && typeof (d as { mac: unknown }).mac === 'string');
+  return r.ok ? r.data.mac : '';
+}

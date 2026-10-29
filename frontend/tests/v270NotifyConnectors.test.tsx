@@ -53,22 +53,20 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('v273 Connectors without Web Push / Telegram', () => {
-  it('lists connectors through qBittorrent; no Web Push or Telegram card', async () => {
+  it('premium pass: lists exactly the 7 real connectors; no Web Push or Telegram', async () => {
     render(<ConnectorsSettings />);
-    await screen.findByTestId('connector-qbittorrent');
+    await screen.findByTestId('connector-row-qbittorrent');
     expect(screen.queryByTestId('connector-webpush')).toBeNull();
     expect(screen.queryByTestId('connector-telegram')).toBeNull();
-    const groups = [...document.querySelectorAll('[data-testid^="connector-"]')].map(e => e.getAttribute('data-testid'));
-    expect(groups).toEqual([
-      'connector-tmdb', 'connector-omdb', 'connector-tvdb', 'connector-trakt',
-      'connector-homeassistant', 'connector-qbittorrent',
-    ]);
+    const rows = [...document.querySelectorAll('[data-testid^="connector-row-"]')].map(e => e.getAttribute('data-testid'));
+    expect(rows).toEqual(['plex', 'qbittorrent', 'homeassistant', 'tmdb', 'omdb', 'tvdb', 'trakt'].map(id => `connector-row-${id}`));
     expect(screen.queryByText('Telegram')).toBeNull();
+    expect(screen.queryByText('Web Push')).toBeNull();
   });
 });
 
 describe('v280 Settings > Notifications Web Push subscribe UX', () => {
-  it('shows Web Push with prod Title Case labels; unsupported → Unavailable not Enable Notifications', async () => {
+  it('premium pass: Push notifications toggle + This browser; no Contact Email; unsupported → Unavailable', async () => {
     render(
       <LayoutModeProvider>
         <NotificationsSettings />
@@ -76,18 +74,18 @@ describe('v280 Settings > Notifications Web Push subscribe UX', () => {
     );
     await screen.findByTestId('connector-webpush');
     expect(screen.getByTestId('notifications-section')).toBeTruthy();
-    expect(screen.getByText('Web Push Notifications')).toBeTruthy();
-    expect(screen.getByText('Enable Push Sending')).toBeTruthy();
-    expect(screen.getByText('Contact Email')).toBeTruthy();
-    const btn = screen.getByTestId('webpush-enable-notifications') as HTMLButtonElement;
-    expect(btn).toBeTruthy();
-    expect(btn.textContent).toBe('Unavailable');
-    expect(btn.disabled).toBe(true);
-    expect(screen.queryByText('Enable Notifications')).toBeNull();
+    expect(screen.getByText('Push notifications')).toBeTruthy();
+    expect(screen.getByText('This browser')).toBeTruthy();
+    expect(screen.queryByText('Contact Email')).toBeNull();
+    expect(screen.queryByTestId('webpush-email')).toBeNull();
+    expect(document.querySelector('input[type="email"]')).toBeNull();
+    expect(screen.getByTestId('webpush-browser-blocked').textContent).toBe('Unavailable');
+    expect(screen.queryByTestId('webpush-enable-notifications')).toBeNull();
+    expect(screen.getByTestId('webpush-test').textContent).toBe('Send test');
     expect(screen.queryByText('Telegram')).toBeNull();
   });
 
-  it('Enable Notifications is tappable when PushManager exists (not stuck unsupported)', async () => {
+  it('Turn on is tappable when PushManager exists (not stuck unsupported)', async () => {
     // Minimal PushManager stub — capability sync must leave state at prompt.
     Object.defineProperty(window, 'PushManager', { value: function PushManager() {}, configurable: true });
     Object.defineProperty(navigator, 'serviceWorker', {
@@ -101,22 +99,25 @@ describe('v280 Settings > Notifications Web Push subscribe UX', () => {
     );
     await screen.findByTestId('connector-webpush');
     const btn = screen.getByTestId('webpush-enable-notifications') as HTMLButtonElement;
-    expect(btn.textContent).toBe('Enable Notifications');
+    expect(btn.textContent).toBe('Turn on');
     expect(btn.disabled).toBe(false);
   });
 
-  it('saves Web Push enable + Contact Email (VAPID; not an email notify channel)', async () => {
+  it('the Push notifications toggle saves at once and never sends vapid_email', async () => {
     render(
       <LayoutModeProvider>
         <NotificationsSettings />
       </LayoutModeProvider>,
     );
     await screen.findByTestId('connector-webpush');
-    fireEvent.click(screen.getByTestId('webpush-enabled'));
-    fireEvent.change(screen.getByTestId('webpush-email'), { target: { value: 'mailto:a@b.co' } });
-    fireEvent.click(screen.getByTestId('webpush-save'));
+    const sw = screen.getByTestId('webpush-enabled');
+    expect(sw.getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(sw);
     await waitFor(() => expect(webpush.enabled).toBe(true));
-    expect(webpush.vapid_email).toBe('mailto:a@b.co');
+    const put = calls.find(c => c.method === 'PUT')!;
+    expect(put.body).toEqual({ enabled: true });
+    expect(calls.every(c => !c.body || !('vapid_email' in (c.body as object)))).toBe(true);
+    await waitFor(() => expect(screen.getByTestId('webpush-enabled').getAttribute('aria-checked')).toBe('true'));
     expect(calls.every(c => !c.url.includes('telegram'))).toBe(true);
   });
 });

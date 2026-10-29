@@ -30,7 +30,8 @@ const send = <T,>(url: string, method: string, body: unknown) =>
 /** Normalized for the "changed" check: trimmed, no trailing slash. */
 const normUrl = (u: string) => u.trim().replace(/\/+$/, '');
 
-export function QbitConnector({ onSaved }: { onSaved: (text: string) => void }) {
+/** bare: inside the Connectors modal (the modal shows the title). */
+export function QbitConnector({ onSaved, bare = false }: { onSaved: (text: string) => void; bare?: boolean }) {
   const [view, setView] = useState<QbitView | null>(null);
   useEffect(() => {
     let alive = true;
@@ -38,10 +39,11 @@ export function QbitConnector({ onSaved }: { onSaved: (text: string) => void }) 
     return () => { alive = false; };
   }, []);
   if (!view) return null;
-  return <QbitForm key={JSON.stringify(view)} view={view} onSaved={v => { setView(v); onSaved('Saved'); }} />;
+  return <QbitForm key={JSON.stringify(view)} bare={bare} view={view} onSaved={v => { setView(v); onSaved('Saved'); }} />;
 }
 
-function QbitForm({ view, onSaved }: { view: QbitView; onSaved: (v: QbitView) => void }) {
+function QbitForm({ view, onSaved, bare = false }: {
+  bare?: boolean; view: QbitView; onSaved: (v: QbitView) => void }) {
   const [url, setUrl] = useState(view.url);
   const [username, setUsername] = useState(view.username);
   const [category, setCategory] = useState(view.category);
@@ -122,9 +124,11 @@ function QbitForm({ view, onSaved }: { view: QbitView; onSaved: (v: QbitView) =>
 
   return (
     <div data-testid="connector-qbittorrent">
-      <h2 style={{ ...groupHeader, display: 'flex', alignItems: 'center', gap: 8 }}>
-        qBittorrent<span style={dot(!!view.url)} aria-hidden="true" data-testid="qbit-status" />
-      </h2>
+      {!bare && (
+        <h2 style={{ ...groupHeader, display: 'flex', alignItems: 'center', gap: 8 }}>
+          qBittorrent<span style={dot(!!view.url)} aria-hidden="true" data-testid="qbit-status" />
+        </h2>
+      )}
       <form style={card} noValidate onSubmit={e => { e.preventDefault(); save(); }}>
         {input('url', 'URL', url, edit('url', setUrl), { type: 'url', inputMode: 'url' })}
         {input('username', 'Username', username, edit('username', setUsername))}

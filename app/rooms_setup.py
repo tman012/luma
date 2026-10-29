@@ -112,6 +112,17 @@ def _rooms() -> List[Dict[str, Any]]:
     return [nested(copy.deepcopy(r), i) for i, r in enumerate(_cfg['settings'].get('devices.rooms') or []) if isinstance(r, dict)]
 
 
+ROOM_ICONS = ('sofa', 'bed', 'kitchen', 'dining', 'office', 'theater', 'game', 'kids', 'bath', 'gym',
+              'music', 'library', 'patio', 'garage', 'home')
+DEFAULT_ICON = 'home'
+
+
+def room_icon(room: Dict[str, Any]) -> str:
+    """Settings premium pass: the room's stored icon, or the default when missing or unknown."""
+    v = room.get('icon')
+    return v if v in ROOM_ICONS else DEFAULT_ICON
+
+
 def default_room_id(rooms: Optional[List[Dict[str, Any]]] = None) -> str:
     rooms = _rooms() if rooms is None else rooms
     want = _cfg['settings'].get('devices.defaultRoomId') or ''
@@ -218,7 +229,7 @@ def view_room(room: Dict[str, Any], default_id: str, clients: List[Dict[str, Any
                   'ha_power_entity': dev.get('haPowerEntity') or '',
                   'paired': bool(dev.get('paired')),
                   'online': _online(dev, clients, room), 'wake': _wake(room, dev)}
-    return {'id': room['id'], 'name': room.get('name') or '', 'default': room['id'] == default_id,
+    return {'id': room['id'], 'name': room.get('name') or '', 'icon': room_icon(room), 'default': room['id'] == default_id,
             'online': bool(player and player['online']), 'harmony_hub': room.get('harmonyHubIp') or '',
             'harmony_volume_device': room.get('harmonyVolumeDevice') or '', 'player': player}
 
@@ -346,7 +357,7 @@ def create(body: Any) -> Dict[str, Any]:
         raise Invalid({'player': 'Pair the player to add it'})
     s = _cfg['settings']
     name = _name(body.get('name'), _rooms())
-    room = s.add_room({'name': name, 'useHarmonyHub': False, 'harmonyHubIp': '', 'harmonyVolumeDevice': '',
+    room = s.add_room({'name': name, 'icon': DEFAULT_ICON, 'useHarmonyHub': False, 'harmonyHubIp': '', 'harmonyVolumeDevice': '',
                        'devices': []})
     return room
 
@@ -355,7 +366,7 @@ def update(room_id: str, body: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(body, dict) or not body:
         raise Invalid({'_': 'Invalid'})
     allowed = {'name', 'player', 'wake', 'host', 'port', 'mac', 'harmony_hub', 'harmony_activity',
-               'harmony_volume_device', 'harmony_nav_device', 'ha_power_entity', 'default'}
+               'harmony_volume_device', 'harmony_nav_device', 'ha_power_entity', 'default', 'icon'}
     if set(body) - allowed:
         raise Invalid({'_': 'Invalid'})
     s = _cfg['settings']
@@ -366,6 +377,10 @@ def update(room_id: str, body: Any) -> Optional[Dict[str, Any]]:
     patch: Dict[str, Any] = {}
     if 'name' in body:
         patch['name'] = _name(body['name'], rooms, room_id)
+    if 'icon' in body:
+        if body['icon'] not in ROOM_ICONS:
+            raise Invalid({'icon': 'Invalid'})
+        patch['icon'] = body['icon']
     devs = [d for d in room.get('devices') or [] if isinstance(d, dict)]
     if not devs and any(k in body for k in ('host', 'port', 'mac', 'wake', 'harmony_activity', 'harmony_nav_device', 'ha_power_entity', 'player')):
         raise Invalid({'player': 'Pair the player to add it'})
@@ -657,3 +672,4 @@ def rooms_connect(room_id):
     logger.info('Rooms: pair %s -> %s hint=%s', room_id, res.get('state'), res.get('hint'))
     return _pair_response(bool(res.get('ok')), res.get('state', 'failed'), res.get('hint', 'unknown'),
                           res.get('detail', ''))
+

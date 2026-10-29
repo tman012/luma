@@ -8,10 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_webpush_unsupported_label_is_unavailable_not_enable():
     src = (ROOT / 'frontend/src/components/home/WebPushConnector.tsx').read_text()
-    assert "subUnsupported ? 'Unavailable'" in src
-    assert 'Enable Notifications' in src
-    # Must not fall through unsupported → Enable Notifications while disabled
-    assert "subDenied ? 'Blocked' : subUnsupported ? 'Unavailable' : 'Enable Notifications'" in src
+    # Settings premium pass: Blocked / Unavailable is a chip; only a supported, allowed browser gets 'Turn on'
+    assert "subDenied || subUnsupported ? (" in src
+    assert "{subDenied ? 'Blocked' : 'Unavailable'}" in src
+    assert "'Turn on'" in src
 
 
 def test_push_hook_sync_capability_avoids_stuck_unsupported():

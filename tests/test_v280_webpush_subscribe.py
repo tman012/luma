@@ -31,7 +31,8 @@ def test_settings_nav_has_notifications_not_under_connectors_only():
 
 def test_webpush_connector_has_enable_notifications_subscribe():
     src = (ROOT / 'frontend/src/components/home/WebPushConnector.tsx').read_text()
-    assert 'Enable Notifications' in src
+    # Settings premium pass: the This browser row's action is 'Turn on' (was Enable Notifications)
+    assert "'Turn on'" in src
     assert 'webpush-enable-notifications' in src
     assert 'usePushSubscription' in src
     assert 'anyLayout: true' in src

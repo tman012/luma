@@ -21903,6 +21903,8 @@ _rooms_setup.init(settings=settings, get_current_user=lambda: _get_current_user(
                   signed_in_owner=_start_flow.require_signed_in_owner,
                   can_play=lambda u: user_auth.is_plex_approved(u))
 app.register_blueprint(_rooms_setup.bp)
+from app import rooms_options as _rooms_options  # noqa: E402  premium pass: Rooms pickers (HA entities, Harmony, MAC)
+app.register_blueprint(_rooms_options.bp)
 from app import movie_watchlist as _movie_watchlist  # noqa: E402  v202: the native movie watchlist (test only)
 app.register_blueprint(_movie_watchlist.bp)
 from app.automation import gr_routes as _gr_routes  # noqa: E402  v252: Settings > Automation > Genre Roulette

@@ -43,6 +43,9 @@ function stub(rooms: Room[], calls: Call[]) {
       };
       return new Response(JSON.stringify(view), { status: 200 });
     }
+    if (method === 'GET' && String(url).includes('/options/harmony')) {
+      return new Response(JSON.stringify({ ok: true, activities: ['Watch TV', 'SHIELD TV'], devices: ['AV Receiver', 'NVIDIA Shield'] }), { status: 200 });
+    }
     if (method === 'GET') return new Response(JSON.stringify(view), { status: 200 });
     return new Response(JSON.stringify({ errors: { _: 'no' } }), { status: 400 });
   }));
@@ -53,7 +56,7 @@ const writes = (calls: Call[]) => calls.filter(c => c.method !== 'GET');
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('v288 Rooms sheet Harmony devices', () => {
-  it('shows Volume device + Harmony nav device when wake=Harmony and saves them', async () => {
+  it('premium pass: Harmony shows Hub + Activity/Volume pickers (and Navigation under Advanced) fed by the hub, and saves them', async () => {
     const calls: Call[] = [];
     stub([{ ...LR, player: P() }], calls);
     render(<RoomsSettings wide={false} />);
@@ -63,10 +66,14 @@ describe('v288 Rooms sheet Harmony devices', () => {
     expect(screen.getByTestId('room-hub')).toBeTruthy();
     expect(screen.getByTestId('room-activity')).toBeTruthy();
     expect(screen.getByTestId('room-volume-device')).toBeTruthy();
-    expect(screen.getByTestId('room-nav-device')).toBeTruthy();
-    expect(screen.getByLabelText('Volume device')).toBeTruthy();
-    expect(screen.getByLabelText('Harmony nav device')).toBeTruthy();
+    expect(screen.getByTestId('room-activity').tagName).toBe('SELECT');      // pickers, not raw text
+    expect(screen.getByTestId('room-volume-device').tagName).toBe('SELECT');
+    expect(screen.getByLabelText('Volume')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('room-advanced-toggle'));
+    expect(screen.getByLabelText('Navigation')).toBeTruthy();
     fireEvent.change(screen.getByTestId('room-hub'), { target: { value: '192.168.1.19' } });
+    await waitFor(() => expect(screen.getByTestId('room-activity').querySelectorAll('option').length).toBeGreaterThan(2), { timeout: 2000 });
+    expect(calls.some(c => c.url === '/api/rooms/options/harmony?hub=192.168.1.19')).toBe(true);
     fireEvent.change(screen.getByTestId('room-activity'), { target: { value: 'SHIELD TV' } });
     fireEvent.change(screen.getByTestId('room-volume-device'), { target: { value: 'AV Receiver' } });
     fireEvent.change(screen.getByTestId('room-nav-device'), { target: { value: 'NVIDIA Shield' } });

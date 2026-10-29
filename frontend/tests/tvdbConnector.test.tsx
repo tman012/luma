@@ -32,6 +32,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 describe('TheTVDB connector', () => {
   it('a masked key and optional PIN; Test reports success or a short error; Save sends both', async () => {
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-tvdb'));
     const key = await screen.findByTestId('tvdb-key') as HTMLInputElement;
     const pin = screen.getByTestId('tvdb-pin') as HTMLInputElement;
     expect([key.type, pin.type]).toEqual(['password', 'password']);
@@ -52,13 +53,15 @@ describe('TheTVDB connector', () => {
 });
 
 describe('v248 OMDb connector', () => {
-  it('a row right after TMDB, styled like the others: masked key, Test shows success or failure, Save', async () => {
+  it('a Metadata row right after TMDB (OMDb wordmark tile); its modal: masked key, Test shows success or failure, Save', async () => {
     render(<ConnectorsSettings />);
+    const rows = [...(await screen.findByTestId('connectors-section')).querySelectorAll('[data-testid^="connector-row-"]')].map(e => e.getAttribute('data-testid'));
+    expect(rows.slice(3, 5)).toEqual(['connector-row-tmdb', 'connector-row-omdb']);
+    expect(screen.getByTestId('connector-logo-omdb').textContent).toBe('OMDb');
+    fireEvent.click(screen.getByTestId('connector-row-omdb'));
     const key = await screen.findByTestId('omdb-key') as HTMLInputElement;
     expect(key.type).toBe('password');
-    const rows = [...screen.getByTestId('connectors-section').querySelectorAll('[data-testid^="connector-"]')].map(e => e.getAttribute('data-testid'));
-    expect(rows.slice(0, 2)).toEqual(['connector-tmdb', 'connector-omdb']);
-    expect(screen.getByTestId('connector-omdb').querySelector('h2')!.textContent).toBe('OMDb');
+    expect(screen.getByTestId('connector-modal-omdb').querySelector('h2')!.textContent).toBe('OMDb');
     expect((screen.getByTestId('omdb-test') as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(key, { target: { value: 'bad' } });
     fireEvent.click(screen.getByTestId('omdb-test'));
@@ -76,10 +79,11 @@ describe('v249 OMDb Remove', () => {
   it('pressing Remove clears an earlier Connected at once', async () => {
     view = { ...view, omdb: { set: true, last4: 'om99' } };
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-omdb'));
     fireEvent.click(await screen.findByTestId('omdb-test'));
     await waitFor(() => expect(screen.getByTestId('omdb-result').textContent).toBe('Connected'));
     fireEvent.click(screen.getByTestId('omdb-remove'));
-    fireEvent.click(screen.getByRole('dialog').querySelectorAll('button')[1]!);
+    fireEvent.click(screen.getAllByRole('dialog').at(-1)!.querySelectorAll('button')[1]!);
     expect(screen.queryByTestId('omdb-result')).toBeNull();
     await waitFor(() => expect((screen.getByTestId('omdb-key') as HTMLInputElement).placeholder).toBe(''));
   });

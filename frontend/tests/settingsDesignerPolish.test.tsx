@@ -24,6 +24,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 describe('Designer polish: Settings', () => {
   it('qBit Save is blue at 40% until there are changes, then full blue', async () => {
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-qbittorrent'));
     await screen.findByTestId('connector-qbittorrent');
     const save = screen.getByTestId('qbit-save') as HTMLButtonElement;
     expect(save.style.background).toBe('var(--color-accent)');
@@ -36,8 +37,9 @@ describe('Designer polish: Settings', () => {
     expect(trackersCss).toContain('.lt-primary:disabled{opacity:.4}');
   });
 
-  it('Connectors labels: sections 13px/600 white 50%, fields 13px/500 white 70%', async () => {
+  it('Connectors labels: group headers 13px/600 white 50%, fields 13px/500 white 70%', async () => {
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-qbittorrent'));
     await screen.findByTestId('connector-qbittorrent');
     for (const l of document.querySelectorAll('label')) {
       const s = (l as HTMLElement).style;

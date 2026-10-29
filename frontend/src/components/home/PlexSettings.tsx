@@ -1,7 +1,8 @@
 import { useKioskWidth } from '@/components/home/KioskHome';
 /** Settings > Plex (owner only): connect a Plex server after setup (or
  * switch to another one). Same Plex sign-in as Get Started: a pop-up when
- * possible, else this tab, which Plex returns to /settings/plex. */
+ * possible, else this tab, which Plex returns to /settings/plex (now redirected to
+ * /settings/connectors#plex, which reopens this in the Plex modal). */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '@/apiClient';
 import { openPlexPopup, plexAuthMode } from '@/utils/plexAuth';
@@ -39,7 +40,8 @@ export function usePlexOwner(admin: boolean): boolean | null {
 
 type Phase = 'idle' | 'waiting' | 'servers' | 'connecting';
 
-export function PlexSettings() {
+/** bare: inside Settings > Connectors' Plex modal (premium pass; no separate Plex section). */
+export function PlexSettings({ bare = false }: { bare?: boolean } = {}) {
   const wide = useKioskWidth();
   const [status, setStatus] = useState<Status | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
@@ -114,8 +116,8 @@ export function PlexSettings() {
   const cancel = () => { stop(); closePopup(); setPhase('idle'); setError(''); };
 
   return (
-    <section data-testid="plex-settings" style={{ padding: wide ? 0 : '0 20px' }}>
-      <h2 style={sectionTitle}>Server</h2>
+    <section data-testid="plex-settings" style={{ padding: wide || bare ? 0 : '0 20px' }}>
+      <h2 style={bare ? { ...sectionTitle, marginTop: 0 } : sectionTitle}>Server</h2>
       {error && <p role="alert" style={{ color: '#ff8a8a', fontSize: 14, margin: '0 0 12px' }}>{error}</p>}
       {status === null ? (
         <div style={card}><div className="luma-shimmer" style={{ height: 60 }} /></div>

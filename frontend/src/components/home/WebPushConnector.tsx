@@ -1,17 +1,17 @@
-/** Settings > Notifications > Web Push (owner only): Enable Push Sending, Contact Email,
- * Enable Notifications (permission + /api/push/subscribe), Test and Save.
+/** Settings > Notifications > Web Push (owner only). Settings premium pass: one group —
+ * Push notifications toggle (saves at once), This browser (On / Turn on / Blocked) and Send test.
+ * No Contact Email: the client never sends vapid_email (the server keeps its default subject).
  * Same notifications.web_push.* keys as prod Services. No helper text. */
 import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { apiFetch } from '@/apiClient';
 import { FONT } from '@/components/start/StartUI';
-import { LUMA_BLUE } from '@/ui/lumaButton';
 import { T } from '@/theme/tokens';
 import { usePushSubscription } from '@/hooks/usePushSubscription';
 
 const API = '/api/settings/connectors/webpush';
 
-type View = { enabled: boolean; vapid_email: string };
+type View = { enabled: boolean };
 
 async function call<T>(url: string, init?: RequestInit): Promise<{ ok: boolean; status: number; data: T }> {
   try {
@@ -30,18 +30,16 @@ export function WebPushConnector({ onSaved }: { onSaved: (text: string) => void 
     let alive = true;
     (async () => {
       const r = await call<View>(API);
-      if (alive && r.ok) setView(r.data);
+      if (alive && r.ok) setView({ enabled: !!r.data.enabled });
     })();
     return () => { alive = false; };
   }, []);
   if (!view) return null;
-  return <WebPushForm key={`${view.enabled}:${view.vapid_email}`} view={view}
-    onSaved={(v) => { setView(v); onSaved('Saved'); }} />;
+  return <WebPushForm view={view} onSaved={(v) => { setView(v); onSaved('Saved'); }} />;
 }
 
 function WebPushForm({ view, onSaved }: { view: View; onSaved: (v: View) => void }) {
   const [enabled, setEnabled] = useState(!!view.enabled);
-  const [email, setEmail] = useState(view.vapid_email || '');
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
@@ -54,13 +52,24 @@ function WebPushForm({ view, onSaved }: { view: View; onSaved: (v: View) => void
     return () => window.clearTimeout(t);
   }, [result]);
 
-  const dirty = enabled !== !!view.enabled || email.trim() !== (view.vapid_email || '');
-  const canSave = dirty && !saving;
   const subBusy = state === 'loading';
   const subDone = state === 'subscribed';
   const subDenied = state === 'denied';
   const subUnsupported = state === 'unsupported';
-  const enableLabel = subBusy ? 'Enabling…' : subDone ? 'Enabled' : subDenied ? 'Blocked' : subUnsupported ? 'Unavailable' : 'Enable Notifications';
+
+  /** The toggle saves at once; a failed save flips it back. */
+  const toggle = async (on: boolean) => {
+    if (saving) return;
+    setEnabled(on);
+    setSaving(true);
+    setResult(null);
+    const r = await send<View & { error?: string }>(API, 'PUT', { enabled: on });
+    if (!alive.current) return;
+    setSaving(false);
+    if (r.ok && typeof r.data.enabled === 'boolean') { setEnabled(r.data.enabled); onSaved({ enabled: r.data.enabled }); return; }
+    setEnabled(!on);
+    setResult({ ok: false, text: r.data.error || "Couldn't save" });
+  };
 
   const test = async () => {
     setTesting(true);
@@ -73,99 +82,76 @@ function WebPushForm({ view, onSaved }: { view: View; onSaved: (v: View) => void
       : { ok: false, text: r.data.error || 'Unexpected response' });
   };
 
-  const save = async () => {
-    if (!canSave) return;
-    setSaving(true);
-    setResult(null);
-    const r = await send<View & { error?: string }>(API, 'PUT', {
-      enabled, vapid_email: email.trim(),
-    });
-    if (!alive.current) return;
-    setSaving(false);
-    if (r.ok && typeof r.data.enabled === 'boolean') {
-      onSaved({ enabled: r.data.enabled, vapid_email: r.data.vapid_email || '' });
-      return;
-    }
-    setResult({ ok: false, text: r.data.error || "Couldn't save" });
-  };
-
   return (
     <div data-testid="connector-webpush">
-      <h2 style={{ ...groupHeader, display: 'flex', alignItems: 'center', gap: 8 }}>
-        Web Push Notifications
-        <span style={dot(enabled)} aria-hidden="true" data-testid="webpush-status" />
-      </h2>
-      <form style={card} noValidate onSubmit={e => { e.preventDefault(); save(); }}>
-        <label style={{ ...labelStyle, display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-          <input
-            type="checkbox" data-testid="webpush-enabled"
-            checked={enabled}
-            onChange={e => setEnabled(e.target.checked)}
-            style={{ width: 18, height: 18 }}
-          />
-          Enable Push Sending
-        </label>
-        <div>
-          <label htmlFor="webpush-email" style={labelStyle}>Contact Email</label>
-          <input
-            id="webpush-email" data-testid="webpush-email"
-            style={inputStyle}
-            type="email" autoComplete="email" spellCheck={false}
-            placeholder="mailto:you@example.com"
-            value={email} onChange={e => setEmail(e.target.value)}
-          />
+      <div style={card}>
+        <div style={rowStyle}>
+          <span style={rowLabel}>Push notifications</span>
+          <Toggle on={enabled} disabled={saving} onChange={on => { void toggle(on); }} />
         </div>
-        <button
-          type="button"
-          style={{ ...primary, opacity: subBusy || subDone || subDenied || subUnsupported ? 0.5 : 1, alignSelf: 'flex-start' }}
-          disabled={subBusy || subDone || subDenied || subUnsupported}
-          onClick={() => { void subscribe(); }}
-          data-testid="webpush-enable-notifications"
-        >
-          {enableLabel}
+        <div style={{ ...rowStyle, borderTop: `1px solid ${T.glass8}` }}>
+          <span style={rowLabel}>This browser</span>
+          {subDone ? (
+            <span style={chip(true)} data-testid="webpush-browser-on"><span style={dotS(true)} aria-hidden="true" />On</span>
+          ) : subDenied || subUnsupported ? (
+            <span style={chip(false)} data-testid="webpush-browser-blocked">{subDenied ? 'Blocked' : 'Unavailable'}</span>
+          ) : (
+            <button type="button" style={{ ...pill, opacity: subBusy ? 0.5 : 1 }} disabled={subBusy}
+              onClick={() => { void subscribe(); }} data-testid="webpush-enable-notifications">
+              {subBusy ? 'Turning on…' : 'Turn on'}
+            </button>
+          )}
+        </div>
+      </div>
+      <div style={actions}>
+        <span role="status" aria-live="polite" data-testid="webpush-result"
+          style={{ fontSize: 13, minWidth: 0, overflowWrap: 'anywhere', flex: 1, textAlign: 'right',
+            color: result ? (result.ok ? T.success : T.dangerText) : 'transparent' }}>
+          {result?.text}
+        </span>
+        <button type="button" style={pill} disabled={testing}
+          aria-busy={testing} onClick={test} data-testid="webpush-test">
+          {testing ? 'Sending…' : 'Send test'}
         </button>
-        <div style={actions}>
-          <button type="button" style={ghostBtn} disabled={testing}
-            aria-busy={testing} onClick={test} data-testid="webpush-test">
-            {testing ? 'Testing…' : 'Test'}
-          </button>
-          <button type="submit" style={{ ...primary, opacity: canSave ? 1 : 0.4 }}
-            disabled={!canSave} data-testid="webpush-save">Save</button>
-          <span role="status" aria-live="polite" data-testid="webpush-result"
-            style={{ fontSize: 13, minWidth: 0, overflowWrap: 'anywhere',
-              color: result ? (result.ok ? T.success : T.dangerText) : 'transparent' }}>
-            {result?.text}
-          </span>
-        </div>
-      </form>
+      </div>
     </div>
   );
 }
 
-const groupHeader: React.CSSProperties = {
-  margin: '0 4px 8px', fontSize: 13, fontWeight: 600, color: T.text3, fontFamily: FONT,
-};
+/** 51×31 switch (same look as Settings switches); role=switch, saves on change. */
+function Toggle({ on, disabled, onChange }: { on: boolean; disabled?: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} aria-label="Push notifications" disabled={disabled}
+      data-testid="webpush-enabled" onClick={() => onChange(!on)}
+      style={{ width: 59, height: 44, display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', border: 'none',
+        background: 'none', padding: 0, cursor: disabled ? 'default' : 'pointer', flex: 'none' }}>
+      <span style={{ position: 'relative', display: 'block', width: 51, height: 31, borderRadius: 16,
+        background: on ? '#3b82f6' : 'rgba(255,255,255,0.18)', transition: 'background .2s' }}>
+        <span style={{ position: 'absolute', top: 2, left: 2, width: 27, height: 27, borderRadius: 14, background: '#fff',
+          transition: 'transform .2s', transform: on ? 'translateX(20px)' : 'none', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
+      </span>
+    </button>
+  );
+}
+
 const card: React.CSSProperties = {
-  borderRadius: 16, padding: 20, background: T.glass,
-  border: `1px solid ${T.glass8}`, display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, margin: 0,
+  borderRadius: 16, background: T.glass, border: `1px solid ${T.glass8}`, fontFamily: FONT, overflow: 'hidden',
 };
-const labelStyle: React.CSSProperties = {
-  display: 'block', margin: '0 0 6px', fontSize: 13, fontWeight: 500, color: T.text2, fontFamily: FONT,
+const rowStyle: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 12, minHeight: 60, padding: '0 16px 0 20px', boxSizing: 'border-box',
 };
-const dot = (on: boolean): React.CSSProperties => ({
-  width: 8, height: 8, borderRadius: 4, background: on ? T.success : T.text4,
+const rowLabel: React.CSSProperties = { flex: 1, fontSize: 16, color: T.white, fontFamily: FONT };
+const chip = (on: boolean): React.CSSProperties => ({
+  height: 30, padding: '0 12px', borderRadius: 999, display: 'inline-flex', alignItems: 'center', gap: 7,
+  fontSize: 13, fontWeight: 600, fontFamily: FONT,
+  background: on ? 'rgba(34,197,94,0.14)' : 'rgba(255,255,255,0.08)', color: on ? '#86efac' : T.text3,
 });
-const inputStyle: React.CSSProperties = {
-  width: '100%', boxSizing: 'border-box', height: 44, padding: '0 14px', borderRadius: 10,
-  background: T.glass, border: `1px solid ${T.glass12}`, color: T.white,
-  fontSize: 16, fontFamily: FONT, outline: 'none',
-};
-const actions: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 12, marginTop: 2, flexWrap: 'wrap' };
-const primary: React.CSSProperties = {
-  minHeight: 44, padding: '0 22px', borderRadius: 10, border: 'none', background: LUMA_BLUE, color: '#fff',
-  fontSize: 15, fontWeight: 600, fontFamily: FONT, cursor: 'pointer',
-};
-const ghostBtn: React.CSSProperties = {
-  minHeight: 44, padding: '0 18px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.12)',
-  background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.95)', fontSize: 15, fontFamily: FONT, cursor: 'pointer',
+const dotS = (on: boolean): React.CSSProperties => ({
+  width: 7, height: 7, borderRadius: 4, background: on ? T.success : T.text4,
+});
+const actions: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 };
+const pill: React.CSSProperties = {
+  minHeight: 40, padding: '0 20px', borderRadius: 999, border: `1px solid ${T.glass12}`,
+  background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.95)', fontSize: 14, fontWeight: 600,
+  fontFamily: FONT, cursor: 'pointer', flex: 'none',
 };

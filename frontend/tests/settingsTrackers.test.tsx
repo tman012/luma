@@ -60,7 +60,7 @@ describe('Settings > Trackers wiring', () => {
     wide = true; stubMatchMedia();
     renderAt('/settings/trackers');
     const nav = screen.getByTestId('settings-nav');
-    await waitFor(() => expect(within(nav).getAllByRole('link').map(a => a.textContent)).toEqual(['Home screen', 'Plex', 'Rooms', 'Connectors', 'Trackers']));
+    await waitFor(() => expect(within(nav).getAllByRole('link').map(a => a.textContent)).toEqual(['Home screen', 'Rooms', 'Connectors', 'Notifications', 'Trackers']));
     expect(within(nav).getByRole('link', { name: 'Trackers' }).getAttribute('aria-current')).toBe('page');
     await screen.findByText('Idx');
     expect(screen.getAllByRole('heading', { level: 2, name: 'Trackers' })).toHaveLength(1);

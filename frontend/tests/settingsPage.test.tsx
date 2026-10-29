@@ -122,10 +122,11 @@ describe('Settings', () => {
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/'));
   });
 
-  it('phone: owners also get a Plex row', async () => {
+  it('phone: owners get Connectors and no separate Plex row (premium pass)', async () => {
     wide = false; stubMatchMedia(); vi.stubGlobal('fetch', api());
     renderAt('/settings');
-    expect(await screen.findByRole('link', { name: 'Plex' })).toBeTruthy();
+    expect(await screen.findByRole('link', { name: 'Connectors' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Plex' })).toBeNull();
   });
 
   it('non-admins get no kiosk picker on web', async () => {
@@ -143,18 +144,20 @@ describe('Settings', () => {
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/settings/home-screen'));
   });
 
-  it('Plex: an owner-only sub-item under Settings; Not connected + Connect Plex', async () => {
+  it('premium pass: /settings/plex opens Connectors with the Plex modal; Not connected + Connect Plex', async () => {
     wide = true; stubMatchMedia(); vi.stubGlobal('fetch', api());
     renderAt('/settings/plex');
-    const item = await screen.findByRole('link', { name: 'Plex' });
+    const item = await screen.findByRole('link', { name: 'Connectors' });
     expect(item.getAttribute('aria-current')).toBe('page');
-    expect(screen.getByRole('heading', { level: 2, name: 'Plex' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Plex' })).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/settings/connectors'));
+    expect(await screen.findByTestId('connector-modal-plex')).toBeTruthy();
     expect((await screen.findByTestId('plex-server-name')).textContent).toBe('Not connected');
     const btn = await screen.findByRole('button', { name: 'Connect Plex' });
     expect(parseInt(btn.style.minHeight, 10)).toBeGreaterThanOrEqual(44);
   });
 
-  it('non-owners: no Plex sub-item, and /settings/plex goes to Home screen', async () => {
+  it('non-owners: no Plex or Connectors sub-item, and /settings/plex goes to Home screen', async () => {
     wide = true; stubMatchMedia(); plexOwner = false; vi.stubGlobal('fetch', api());
     renderAt('/settings/plex');
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/settings/home-screen'));

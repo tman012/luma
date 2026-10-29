@@ -91,31 +91,54 @@ describe('PlayInPicker and PlayingToast', () => {
 });
 
 describe('Settings > Rooms', () => {
-  it('desktop: cards with Default pill and status lines, + Add room', async () => {
-    const calls: Call[] = []; stub([LR, BR, OF], calls);
+  it('premium pass desktop: centered Rooms, bubbly tiles with icon, pencil and TV chip, then the Add room tile', async () => {
+    const calls: Call[] = []; stub([LR, { ...BR, icon: 'bed' }, { ...OF, player: null }], calls);
     render(<RoomsSettings wide />);
     await waitFor(() => expect(screen.getAllByTestId('room-card')).toHaveLength(3));
     const cards = screen.getAllByTestId('room-card');
-    expect(within(cards[0]!).getByTestId('room-default')).toBeTruthy();
-    expect(cards[0]!.textContent).toContain('Online · Wake with ADB');
-    expect(cards[1]!.textContent).toContain('Offline');
-    expect(cards[2]!.textContent).toContain('Online · Wake-on-LAN');
-    expect(screen.getByTestId('rooms-add').textContent).toBe('+ Add room');
+    expect(cards.map(c => c.getAttribute('data-icon'))).toEqual(['home', 'bed', 'home']);   // missing icon → home
+    expect(cards.map(c => within(c).getByTestId('room-tv-chip').textContent)).toEqual(['SHIELD Android TV', 'Apple TV 4K', 'No TV']);
+    expect(screen.getAllByTestId('room-icon-edit')).toHaveLength(3);
+    expect(screen.getByRole('heading', { level: 2, name: 'Rooms' }).style.textAlign).toBe('center');
+    const grid = screen.getByTestId('rooms-grid');
+    expect(grid.lastElementChild!.getAttribute('data-testid')).toBe('rooms-add');
+    expect(screen.getByTestId('rooms-add').textContent).toBe('Add room');
+    expect(screen.queryByTestId('room-menu')).toBeNull();
     expect(writes(calls)).toEqual([]);
   });
-  it('desktop ⋯ menu: Make default and Remove (confirmed)', async () => {
+  it('premium pass: the pencil opens the icon picker; Cancel saves nothing, Done saves the icon', async () => {
     const calls: Call[] = []; stub([LR, BR], calls);
     render(<RoomsSettings wide />);
     await waitFor(() => expect(screen.getAllByTestId('room-card')).toHaveLength(2));
-    fireEvent.click(screen.getAllByTestId('room-menu')[1]!);
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Make default' }));
-    await waitFor(() => expect(writes(calls)).toEqual([{ url: '/api/rooms/br', method: 'PUT', body: { default: true } }]));
-    fireEvent.click(screen.getAllByTestId('room-menu')[0]!);
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Remove' }));
+    fireEvent.click(screen.getAllByTestId('room-icon-edit')[1]!);
+    const picker = screen.getByTestId('icon-picker');
+    expect(within(picker).getAllByRole('radio')).toHaveLength(15);
+    expect(within(picker).getByTestId('icon-home').getAttribute('aria-checked')).toBe('true');
+    expect(picker.textContent).toBe('BedroomCancelDone');                  // no text besides the room name
+    fireEvent.click(within(picker).getByTestId('icon-bed'));
+    fireEvent.click(screen.getByTestId('icon-picker-cancel'));
+    expect(screen.queryByTestId('icon-picker')).toBeNull();
+    expect(writes(calls)).toEqual([]);
+    fireEvent.click(screen.getAllByTestId('room-icon-edit')[1]!);
+    fireEvent.click(screen.getByTestId('icon-bed'));
+    fireEvent.click(screen.getByTestId('icon-picker-done'));
+    await waitFor(() => expect(writes(calls)).toEqual([{ url: '/api/rooms/br', method: 'PUT', body: { icon: 'bed' } }]));
+    expect(screen.queryByTestId('room-edit')).toBeNull();                  // the pencil never opens the room page
+  });
+  it('premium pass desktop: a tile opens the centered room page; Remove room confirms', async () => {
+    const calls: Call[] = []; stub([LR, BR], calls);
+    render(<RoomsSettings wide />);
+    await waitFor(() => expect(screen.getAllByTestId('room-card')).toHaveLength(2));
+    fireEvent.click(screen.getAllByTestId('room-open')[0]!);
+    const page = screen.getByTestId('room-edit');
+    expect(page.style.maxWidth).toBe('600px');
+    expect(screen.getByRole('heading', { level: 2, name: 'Living Room' })).toBeTruthy();
+    expect(screen.queryByTestId('room-save')).toBeNull();                 // Save shows only when dirty
+    fireEvent.click(screen.getByTestId('room-remove-open'));
     expect(screen.getByRole('alertdialog', { name: 'Remove Living Room?' })).toBeTruthy();
     fireEvent.click(screen.getByTestId('room-remove-go'));
     await waitFor(() => expect(screen.getAllByTestId('room-card')).toHaveLength(1));
-    expect(writes(calls)[1]).toEqual({ url: '/api/rooms/lr', method: 'DELETE', body: undefined });
+    expect(writes(calls)).toEqual([{ url: '/api/rooms/lr', method: 'DELETE', body: undefined }]);
   });
   it('phone empty: No rooms yet, then Add Room wizard (blank name, no chips)', async () => {
     const calls: Call[] = []; stub([], calls);
@@ -123,7 +146,7 @@ describe('Settings > Rooms', () => {
     await waitFor(() => expect(screen.getByTestId('rooms-empty')).toBeTruthy());
     expect(screen.getByText('No rooms yet')).toBeTruthy();
     fireEvent.click(screen.getByTestId('rooms-empty-add'));
-    expect(screen.getByRole('heading', { name: 'Add Room' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Name this room' })).toBeTruthy();
     expect(screen.queryByTestId('room-chip')).toBeNull();
     expect((screen.getByTestId('room-name') as HTMLInputElement).value).toBe('');
     expect((screen.getByTestId('room-next') as HTMLButtonElement).disabled).toBe(true);
@@ -146,27 +169,31 @@ describe('Settings > Rooms', () => {
     const connect = writes(calls).find(c => String(c.url).endsWith('/connect'))!;
     expect(connect).toMatchObject({ method: 'POST', body: { player: { host: '192.168.1.77' } } });
   });
-  it('phone edit: wake segments, fields per method, Default room, Save sends only changes', async () => {
+  it('phone edit: Power chips, Wake-on-LAN under Advanced (MAC auto-detected), Default room, Save sends only changes', async () => {
     const calls: Call[] = []; stub([LR, BR], calls);
+    const base = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>);
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => String(url).endsWith('/mac')
+      ? new Response(JSON.stringify({ mac: 'AA:BB:CC:DD:EE:FF' })) : base(url, init)));
     render(<RoomsSettings wide={false} />);
     await waitFor(() => expect(screen.getAllByTestId('room-row')).toHaveLength(2));
     fireEvent.click(screen.getAllByTestId('room-row')[1]!);
     expect(screen.getByRole('heading', { name: 'Bedroom' })).toBeTruthy();
-    expect(['ADB', 'Wake-on-LAN', 'Harmony', 'Home Assistant', 'None'].every(l => screen.getByRole('radio', { name: l }))).toBe(true);
-    expect(screen.getByTestId('room-port')).toBeTruthy();
+    expect(['TV', 'Home Assistant', 'Harmony', 'Off'].every(l => screen.getByRole('radio', { name: l }))).toBe(true);
+    expect(screen.getByRole('radio', { name: 'TV' }).getAttribute('aria-checked')).toBe('true');
     expect(screen.getByTestId('room-paired').textContent).toBe('Paired');
     const save = screen.getByTestId('room-save') as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     expect(save.closest('header')).toBeTruthy();                       // Save sits in the title row (Designer)
     expect([save.style.opacity, save.style.height, save.style.minWidth, save.textContent]).toEqual(['0.4', '44px', '44px', 'Save']);
-    expect(save.style.color).toBe('rgb(59, 130, 246)');
     const page = screen.getByTestId('room-edit');
     expect(page.lastElementChild!.getAttribute('data-testid')).toBe('room-remove-open');   // Remove room is the last item
     expect(screen.getAllByRole('button', { name: 'Save' })).toHaveLength(1);
-    fireEvent.click(screen.getByTestId('room-wake-wol'));
+    expect(screen.queryByTestId('room-port')).toBeNull();               // Advanced starts collapsed
+    fireEvent.click(screen.getByTestId('room-advanced-toggle'));
+    expect(screen.getByTestId('room-port')).toBeTruthy();
+    fireEvent.click(screen.getByRole('switch', { name: 'Wake-on-LAN' }));
+    await waitFor(() => expect((screen.getByTestId('room-mac') as HTMLInputElement).value).toBe('AA:BB:CC:DD:EE:FF'));
     expect((screen.getByTestId('room-save') as HTMLButtonElement).style.opacity).toBe('1');
-    expect(screen.queryByTestId('room-port')).toBeNull();
-    fireEvent.change(screen.getByTestId('room-mac'), { target: { value: 'AA:BB:CC:DD:EE:FF' } });
     fireEvent.click(screen.getByRole('switch', { name: 'Default room' }));
     fireEvent.click(screen.getByTestId('room-save'));
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
@@ -203,7 +230,8 @@ describe('Settings > Rooms', () => {
     await waitFor(() => expect(screen.getAllByTestId('room-row')).toHaveLength(1));
     fireEvent.click(screen.getAllByTestId('room-row')[0]!);
     const text = screen.getByTestId('room-edit').textContent || '';
-    for (const s of ['Wake with', 'IP address', 'Default room', 'Remove room']) expect(text).toContain(s);
+    for (const s of ['Power', 'Name', 'Default room', 'Advanced', 'Remove room']) expect(text).toContain(s);
+    expect(screen.getByRole('textbox', { name: 'IP address' })).toBeTruthy();
     expect(screen.getByTestId('room-wake-homeassistant')).toBeTruthy();
   });
 });

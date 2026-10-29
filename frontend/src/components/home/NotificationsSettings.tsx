@@ -1,5 +1,5 @@
-/** Settings > Notifications (owner only): Web Push — Enable Push Sending, Contact Email,
- * Enable Notifications (permission + push subscribe), Test/Save. Matches prod 1b4ea74
+/** Settings > Notifications (owner only): Web Push — Push notifications toggle, This browser,
+ * Send test (premium pass: no Contact Email). Matches prod 1b4ea74
  * Services Web Push as closely as MINIMAL Settings allows. No helper text. Web Push only. */
 import { useState } from 'react';
 import { NoticeToast } from '@/components/start/SetupToast';

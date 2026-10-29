@@ -1105,6 +1105,29 @@ def _migrate_room_ids(data: dict) -> bool:
     return changed
 
 
+_ROOM_ICONS = ('sofa', 'bed', 'kitchen', 'dining', 'office', 'theater', 'game', 'kids', 'bath', 'gym',
+               'music', 'library', 'patio', 'garage', 'home')
+
+
+def _migrate_room_icons(data: dict) -> bool:
+    """Settings premium pass: give every room in devices.rooms an ``icon`` (one of _ROOM_ICONS).
+    A room without one (or with an unknown one) gets ``home``. Returns True if any room changed."""
+    devices = data.get("devices")
+    if not isinstance(devices, dict):
+        return False
+    rooms = devices.get("rooms")
+    if not isinstance(rooms, list):
+        return False
+    changed = False
+    for r in rooms:
+        if isinstance(r, dict) and r.get("icon") not in _ROOM_ICONS:
+            r["icon"] = "home"
+            changed = True
+    if changed:
+        _log_migration("Migrated room icons: set icon=home on rooms missing one")
+    return changed
+
+
 def _migrate_media_paths_v2(data: dict) -> bool:
     """Migrate media.paths entries to V2 shape.
 
@@ -1674,6 +1697,7 @@ def _run_all_migrations(data: dict, data_dir=None, existing: bool = False) -> bo
     changed |= _migrate_devices(data)
     changed |= _migrate_rooms_shape(data)
     changed |= _migrate_room_ids(data)
+    changed |= _migrate_room_icons(data)
     changed |= _migrate_media_paths(data)
     changed |= _migrate_media_paths_v2(data)
     changed |= _migrate_media_types_from_paths(data)

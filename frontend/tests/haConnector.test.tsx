@@ -68,26 +68,24 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('Settings > Connectors > Home Assistant', () => {
-  it('sits after Trakt and before qBittorrent; token shows only as dots', async () => {
+  it('premium pass: a Home row in the Connectors list opens its form; token shows only as dots', async () => {
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-homeassistant'));
     const card = await screen.findByTestId('connector-homeassistant');
-    const groups = [...document.querySelectorAll('[data-testid^="connector-"]')].map(e => e.getAttribute('data-testid'));
-    expect(groups).toEqual([
-      'connector-tmdb', 'connector-omdb', 'connector-tvdb', 'connector-trakt',
-      'connector-homeassistant', 'connector-qbittorrent',
-      'connector-webpush',
-    ]);
+    const rows = [...document.querySelectorAll('[data-testid^="connector-row-"]')].map(e => e.getAttribute('data-testid')!.slice(14));
+    expect(rows).toEqual(['plex', 'qbittorrent', 'homeassistant', 'tmdb', 'omdb', 'tvdb', 'trakt']);
     expect(field('url').value).toBe('http://ha.example:8123');
     expect(field('access-token').value).toBe('');
     expect(field('access-token').type).toBe('password');
     expect(field('access-token').placeholder).toBe(`••••${TOKEN.slice(-4)}`);
     expect((screen.getByTestId('ha-save') as HTMLButtonElement).disabled).toBe(true);
-    expect(card.textContent).toBe('Home AssistantURLAccess TokenShowTestSaveRemove');
+    expect(card.textContent).toBe('URLAccess TokenShowTestSaveRemove');
   });
 
   it('a fresh install starts empty with the prod URL placeholder', async () => {
     ha = { url: '', access_token: { set: false, last4: '' } };
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-homeassistant'));
     await screen.findByTestId('connector-homeassistant');
     expect(field('url').value).toBe('');
     expect(field('url').placeholder).toBe('http://homeassistant.local:8123');
@@ -97,6 +95,7 @@ describe('Settings > Connectors > Home Assistant', () => {
 
   it('Test sends the form and shows Connected', async () => {
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-homeassistant'));
     await screen.findByTestId('connector-homeassistant');
     type('access-token', TOKEN);
     fireEvent.click(screen.getByTestId('ha-test'));
@@ -108,6 +107,7 @@ describe('Settings > Connectors > Home Assistant', () => {
   it('Save writes URL + token; Remove clears both', async () => {
     ha = { url: '', access_token: { set: false, last4: '' } };
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-homeassistant'));
     await screen.findByTestId('connector-homeassistant');
     type('url', 'http://ha.example:8123');
     type('access-token', TOKEN);
@@ -123,6 +123,7 @@ describe('Settings > Connectors > Home Assistant', () => {
   it('never puts the token in any test assertion failure path text', async () => {
     testAnswer = { ok: false, error: 'Invalid token' };
     render(<ConnectorsSettings />);
+    fireEvent.click(await screen.findByTestId('connector-row-homeassistant'));
     await screen.findByTestId('connector-homeassistant');
     type('access-token', TOKEN);
     fireEvent.click(screen.getByTestId('ha-test'));

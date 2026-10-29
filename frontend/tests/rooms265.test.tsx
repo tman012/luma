@@ -37,7 +37,7 @@ describe('v265 Pair', () => {
     expect(screen.getByTestId('room-paired').textContent).toBe('Not paired');
     fireEvent.click(screen.getByTestId('room-pair'));
     expect(screen.getByTestId('room-paired').textContent).toBe('Pairing…');
-    await waitFor(() => expect(screen.getByTestId('room-paired').textContent).toBe('Paired and connected'));
+    await waitFor(() => expect(screen.getByTestId('room-paired').textContent).toBe('Paired'));   // premium pass: hero chip
     expect(calls.filter(c => c.method === 'POST').map(c => c.url)).toEqual(['/api/rooms/lr/connect']);
   });
   it('shows Allow network debugging when unauthorized (exact fail string)', async () => {

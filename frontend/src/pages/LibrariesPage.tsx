@@ -7,7 +7,7 @@
  * with a back chevron. Home screen shows only Libraries (drag to reorder,
  * switch on/off, instant save). */
 import { useEffect, useRef, useState } from 'react';
-import { Link, Navigate, useNavigate, useParams } from 'react-router';
+import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { FONT, GlowLayer, LOGO_SRC, NAVY_BG, glowPage } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
@@ -22,7 +22,7 @@ import { useKioskWidth } from '@/components/home/KioskHome';
 import { CheckIcon, ChevronIcon, ChevronLeftIcon, GripIcon, XIcon } from '@/components/nav/AppNav';
 import { UserMenu } from '@/components/nav/UserMenu';
 import { NoticeToast } from '@/components/start/SetupToast';
-import { PlexSettings, usePlexOwner } from '@/components/home/PlexSettings';
+import { usePlexOwner } from '@/components/home/PlexSettings';
 import { ConnectorsSettings } from '@/components/home/ConnectorsSettings';
 import { NotificationsSettings } from '@/components/home/NotificationsSettings';
 import { TrackersSettings, useTrackersAccess } from '@/components/trackers/TrackersSettings';
@@ -42,7 +42,6 @@ import { SAVE_FAILED } from '@/utils/messages';
 
 export const SETTINGS_SECTIONS = [
   { slug: 'home-screen', label: 'Home screen' },
-  { slug: 'plex', label: 'Plex' },   // owner only
   { slug: 'rooms', label: 'Rooms' },   // v224: owner only (Option A)
   { slug: 'connectors', label: 'Connectors' },   // owner only
   { slug: 'notifications', label: 'Notifications' },   // v280: owner only, Web Push (prod Services)
@@ -65,6 +64,7 @@ export function SettingsPage() {
   const { section } = useParams();
   const wide = useKioskWidth();
   const navigate = useNavigate();
+  const { hash } = useLocation();
   const [busy, setBusy] = useState(false);
   const owner = usePlexOwner(!!user?.is_admin);
   // Trackers: the API serves only the owner signed in with a session (never the implicit LAN owner).
@@ -72,9 +72,11 @@ export function SettingsPage() {
   useBodyScroll();
   if (loading) return null;
   if (!authenticated) return <Navigate to="/login" replace />;
+  // Premium pass: Plex lives under Connectors (Plex sign-in still returns to /settings/plex).
+  if (section === 'plex') return <Navigate to="/settings/connectors#plex" replace />;
   const known = SETTINGS_SECTIONS.find(s => s.slug === section);
   if (section && !known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
-  const ownerOnly = (slug: string) => slug === 'plex' || slug === 'connectors' || slug === 'notifications' || slug === 'library-paths' || slug === 'tv' || slug === 'movies' || slug === 'rooms' || slug === 'automation';
+  const ownerOnly = (slug: string) => slug === 'connectors' || slug === 'notifications' || slug === 'library-paths' || slug === 'tv' || slug === 'movies' || slug === 'rooms' || slug === 'automation';
   if (known && ownerOnly(known.slug) && owner === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   if (known?.slug === 'trackers' && trackersOk === false) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
   // Library paths: the API exists only on minimal (luma-test) builds.
@@ -82,10 +84,8 @@ export function SettingsPage() {
   const admin = !!user?.is_admin;
   const sections = SETTINGS_SECTIONS.filter(s => (s.slug === 'trackers' ? trackersOk
     : s.slug === 'library-paths' || s.slug === 'tv' || s.slug === 'movies' || s.slug === 'automation' ? owner && isMinimal() : !ownerOnly(s.slug) || owner));
-  const content = (slug: string) => slug === 'plex'
-    ? (owner ? <PlexSettings /> : null)
-    : slug === 'connectors'
-      ? (owner ? <ConnectorsSettings /> : null)
+  const content = (slug: string) => slug === 'connectors'
+      ? (owner ? <ConnectorsSettings initial={hash === '#plex' ? 'plex' : undefined} onInitialClosed={() => navigate('/settings/connectors', { replace: true })} /> : null)
       : slug === 'notifications'
         ? (owner ? <NotificationsSettings /> : null)
       : slug === 'trackers'

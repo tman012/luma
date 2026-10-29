@@ -33,7 +33,8 @@ const send = <T,>(url: string, method: string, body: unknown) =>
 
 const normUrl = (u: string) => u.trim().replace(/\/+$/, '');
 
-export function HaConnector({ onSaved }: { onSaved: (text: string) => void }) {
+/** bare: inside the Connectors modal (the modal shows the title). */
+export function HaConnector({ onSaved, bare = false }: { onSaved: (text: string) => void; bare?: boolean }) {
   const [view, setView] = useState<HaView | null>(null);
   useEffect(() => {
     let alive = true;
@@ -43,13 +44,14 @@ export function HaConnector({ onSaved }: { onSaved: (text: string) => void }) {
     return () => { alive = false; };
   }, []);
   if (!view) return null;
-  return <HaForm key={JSON.stringify(view)} view={view} onSaved={(v, removed) => {
+  return <HaForm key={JSON.stringify(view)} bare={bare} view={view} onSaved={(v, removed) => {
     setView(v);
     onSaved(removed ? 'Removed' : 'Saved');
   }} />;
 }
 
-function HaForm({ view, onSaved }: {
+function HaForm({ view, onSaved, bare = false }: {
+  bare?: boolean;
   view: HaView;
   onSaved: (v: HaView, removed: boolean) => void;
 }) {
@@ -142,9 +144,11 @@ function HaForm({ view, onSaved }: {
 
   return (
     <div data-testid="connector-homeassistant">
-      <h2 style={{ ...groupHeader, display: 'flex', alignItems: 'center', gap: 8 }}>
-        Home Assistant<span style={dot(saved)} aria-hidden="true" data-testid="ha-status" />
-      </h2>
+      {!bare && (
+        <h2 style={{ ...groupHeader, display: 'flex', alignItems: 'center', gap: 8 }}>
+          Home Assistant<span style={dot(saved)} aria-hidden="true" data-testid="ha-status" />
+        </h2>
+      )}
       <form style={card} noValidate onSubmit={e => { e.preventDefault(); save(); }}>
         <div>
           <label htmlFor="ha-url" style={labelStyle}>URL</label>
