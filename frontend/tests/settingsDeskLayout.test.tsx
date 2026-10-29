@@ -60,7 +60,7 @@ describe('desktop Settings layout', () => {
 
   it('content follows at the same 40px gap; TV takes the freed width, the panel title on the heading line', async () => {
     setup(true);
-    const v = at('/settings/tv');
+    const v = at('/settings/tv?view=series')   // v325: Calendar (the default) is full-width, no nav;
     const nav = await screen.findByTestId('settings-nav');
     await screen.findByRole('heading', { level: 2, name: 'TV' });
     const page = nav.parentElement!;

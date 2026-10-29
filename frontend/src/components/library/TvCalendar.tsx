@@ -318,7 +318,9 @@ export function Bookmark({ e, on, onToggle }: { e: CalEpisode; on: boolean; onTo
 /** Unmonitored cards render at ~0.5 opacity; the state edge stays full strength. */
 export const DIM = 0.5;
 
-/** v321 Designer D: glass card, 10px corners, 3px status stripe, 28×42 poster (or initial), show / SxxExx · title / air time. */
+/** v321 Designer D: glass card, 10px corners, 3px status stripe, 28×42 poster (or initial), show / SxxExx · title.
+ * v325 (Taylor): the air time sits centered at the top; no Downloaded/quality chip, no green check: the stripe
+ * (green have it, red missing) is the only got-it indicator. */
 function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
   const st = episodeState(e, today);
   const open = useOpenEpisode(e);
@@ -332,6 +334,11 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
         border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden', padding: '8px 8px 8px 11px' }}>
       <Stripe color={STATE_COLOR[st]} w={3} />
       <Bookmark e={e} on={mon} onToggle={flip} />
+      {air && (
+        <span data-testid="tv-air" style={{ display: 'block', textAlign: 'center', margin: '0 0 6px', fontSize: AIR_SIZE, lineHeight: '16px', color: W50, whiteSpace: 'nowrap', opacity: mon ? 1 : DIM }}>
+          {air}
+        </span>
+      )}
       <div data-testid="tv-card-body" style={{ opacity: mon ? 1 : DIM, transition: 'opacity 150ms', display: 'flex', gap: 8 }}>
         {e.poster_path ? (
           <span data-testid="tv-card-poster" style={{ flex: 'none' }}><Poster path={e.poster_path} w={28} h={42} /></span>
@@ -345,25 +352,9 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
         <div className="tvc-text" style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
           <span data-testid="tv-card-show" title={e.show} style={{ ...one, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
           <span data-testid="tv-card-title" title={epLine(e)} style={{ ...one, fontSize: 12, color: W70 }}>{epLine(e)}</span>
-          {air && (
-            <span data-testid="tv-air" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 1, fontSize: AIR_SIZE, lineHeight: '16px', color: W50, whiteSpace: 'nowrap' }}>
-              {st === 'downloaded' && <GreenCheck />}
-              {air}
-            </span>
-          )}
-          <QualityChip e={e} style={{ alignSelf: 'flex-start', marginTop: 2 }} />
         </div>
       </div>
     </div>
-  );
-}
-
-/** 12px green check before a downloaded episode's air time (Designer D / spec §2). */
-function GreenCheck() {
-  return (
-    <svg data-testid="tv-check" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
   );
 }
 

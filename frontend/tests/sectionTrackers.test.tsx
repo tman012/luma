@@ -202,7 +202,7 @@ describe('Settings > TV', () => {
       if (url.includes('/api/settings/sections/tv/trackers')) return res({ section: 'tv', trackers: [] });
       return res({}, 404);
     }));
-    await act(async () => { page('/settings/tv'); });
+    await act(async () => { page('/settings/tv?view=options'); });   // v325: Calendar (the default) has no Settings nav
     const nav = screen.getByTestId('settings-nav');
     await waitFor(() => expect(Array.from(nav.querySelectorAll('a')).map(a => a.textContent))
       .toEqual(['Home screen', 'Rooms', 'Connectors', 'Notifications', 'Trackers', 'Library paths', 'Movies', 'TV', 'Automation']));

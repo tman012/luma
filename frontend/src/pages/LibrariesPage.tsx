@@ -7,7 +7,7 @@
  * with a back chevron. Home screen shows only Libraries (drag to reorder,
  * switch on/off, instant save). */
 import { useEffect, useRef, useState } from 'react';
-import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { FONT, GlowLayer, LOGO_SRC, NAVY_BG, glowPage } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
@@ -19,7 +19,7 @@ import {
 import { homePage } from '@/pages/MinimalHomePage';
 import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { useKioskWidth } from '@/components/home/KioskHome';
-import { CheckIcon, ChevronIcon, ChevronLeftIcon, GripIcon, XIcon } from '@/components/nav/AppNav';
+import { CheckIcon, ChevronIcon, ChevronLeftIcon, ChevronUpIcon, GripIcon, XIcon } from '@/components/nav/AppNav';
 import { UserMenu } from '@/components/nav/UserMenu';
 import { NoticeToast } from '@/components/start/SetupToast';
 import { usePlexOwner } from '@/components/home/PlexSettings';
@@ -65,6 +65,7 @@ export function SettingsPage() {
   const wide = useKioskWidth();
   const navigate = useNavigate();
   const { hash } = useLocation();
+  const [query] = useSearchParams();
   const [busy, setBusy] = useState(false);
   const owner = usePlexOwner(!!user?.is_admin);
   // Trackers: the API serves only the owner signed in with a session (never the implicit LAN owner).
@@ -107,20 +108,33 @@ export function SettingsPage() {
   if (wide) {
     if (!known) return <Navigate to={`/settings/${DEFAULT_SECTION}`} replace />;
     const signOut = async () => { setBusy(true); await logout(); navigate('/login', { replace: true }); };
+    // v325 (Taylor): TV Calendar is its own full-width view, no Settings nav; the up arrow (top-left, in the
+    // logo's place) closes it to Home. Another TV tab (?view=...) or a show page is the normal Settings layout.
+    const calendar = known.slug === 'tv' && (query.get('view') ?? 'calendar') === 'calendar' && !query.get('show');
     return (
       <div style={settingsPage} data-step="settings" data-layout="desktop">
         <GlowLayer />
         <style>{css}</style>
         <header style={deskHeader}>
-          <Link to="/" aria-label="Home" style={{ display: 'inline-flex', borderRadius: 12 }} className="luma-focus">
-            <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="settings-logo" style={{ height: 64, width: 'auto' }} draggable={false} />
-          </Link>
+          {calendar ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', height: 64 }}>
+              <style>{'.luma-icon-btn:hover>span{background:rgba(255,255,255,0.16)}'}</style>
+              <button type="button" aria-label="Close calendar" data-testid="tv-calendar-close" onClick={() => navigate('/')}
+                style={{ ...circleHit, width: 48, height: 48, borderRadius: 24, marginLeft: -6 }} className="luma-focus luma-icon-btn">
+                <span style={{ ...circle, width: 40, height: 40, borderRadius: 20 }}><ChevronUpIcon size={20} /></span>
+              </button>
+            </span>
+          ) : (
+            <Link to="/" aria-label="Home" style={{ display: 'inline-flex', borderRadius: 12 }} className="luma-focus">
+              <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="settings-logo" style={{ height: 64, width: 'auto' }} draggable={false} />
+            </Link>
+          )}
           {!implicit
             ? <UserMenu name={user?.name || ''} admin={admin} busy={busy} onSignOut={signOut} size={48} />
             : <span style={{ width: 48 }} />}
         </header>
-        <div style={deskPage}>
-          <nav aria-label="Settings" data-testid="settings-nav" style={{ width: NAV_W, flex: 'none' }}>
+        <div style={deskPage} data-view={calendar ? 'tv-calendar' : undefined}>
+          {!calendar && <nav aria-label="Settings" data-testid="settings-nav" style={{ width: NAV_W, flex: 'none' }}>
             <h1 style={navHeading}>Settings</h1>
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
               {sections.map(s => {
@@ -136,7 +150,7 @@ export function SettingsPage() {
                 );
               })}
             </ul>
-          </nav>
+          </nav>}
           <main data-testid="settings-main" style={{ flex: 1, minWidth: 0, maxWidth: known.slug === 'tv' || known.slug === 'rooms' ? undefined : known.slug === 'automation' ? 1120 : 720 }}>
             {!ownChrome && <h2 style={deskTitle}>{known.label}</h2>}
             {content(known.slug)}

@@ -11,6 +11,7 @@ export const GearIcon = ({ size = 20 }: { size?: number }) => svg(size, <><path 
 export const LogOutIcon = ({ size = 20 }: { size?: number }) => svg(size, <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5" /><path d="M21 12H9" /></>);
 export const ChevronIcon = ({ size = 16 }: { size?: number }) => svg(size, <path d="m9 18 6-6-6-6" />);
 export const ChevronLeftIcon = ({ size = 18 }: { size?: number }) => svg(size, <path d="m15 18-6-6 6-6" />);
+export const ChevronUpIcon = ({ size = 18 }: { size?: number }) => svg(size, <path d="m18 15-6-6-6 6" />);
 export const XIcon = ({ size = 18 }: { size?: number }) => svg(size, <><path d="M18 6 6 18" /><path d="m6 6 12 12" /></>);
 export const GripIcon = () => svg(20, <><circle cx="9" cy="12" r="1" /><circle cx="9" cy="5" r="1" /><circle cx="9" cy="19" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="15" cy="5" r="1" /><circle cx="15" cy="19" r="1" /></>);
 export const CheckIcon = () => svg(20, <path d="M20 6 9 17l-5-5" />);

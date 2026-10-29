@@ -94,11 +94,17 @@ describe('Designer D week cards (v321)', () => {
     expect(within(card).getByTestId('tv-card-bookmark')).toBeTruthy();
     expect(card.style.borderRadius).toBe('10px');
   });
-  it('no poster: initial tile; downloaded air time gets a green check', () => {
+  it('no poster: initial tile; v325: no green check, no Downloaded/quality chip; the air time is centered on top', () => {
     render(<WeekGrid eps={[ep({ poster_path: null, downloaded: true, airstamp: '2026-10-12T21:00:00-04:00' } as Partial<CalEpisode>)]} week={'2026-10-11' as Day} today={'2026-10-12' as Day} />);
     const card = screen.getByTestId('tv-agenda-row');
     expect(within(card).getByTestId('tv-poster-initial').textContent).toBe('S');
-    expect(within(card).getByTestId('tv-check')).toBeTruthy();
+    expect(within(card).queryByTestId('tv-check')).toBeNull();
+    expect(within(card).queryByTestId('tv-quality-chip')).toBeNull();
+    expect(card.textContent).not.toMatch(/Downloaded|1080p|WEB/);
+    const air = within(card).getByTestId('tv-air');
+    expect(air.style.textAlign).toBe('center');
+    expect(card.querySelector('[data-testid="tv-air"] ~ [data-testid="tv-card-body"]')).toBeTruthy();   // above the body
+    expect(within(card).getByTestId('tv-stripe')).toBeTruthy();
     expect(card.getAttribute('data-state')).toBe('downloaded');
   });
 });
@@ -134,13 +140,13 @@ describe('cards collapse to their text (v179)', () => {
     }
     expect(tvCalendarCss).not.toMatch(/tvc-still|skel/i);
   });
-  it('the bottom line is the start time in the viewer zone for every state, never the date; no air time, no line', () => {
+  it('the top line is the start time in the viewer zone for every state, never the date; no air time, no line', () => {
     render(<WeekGrid eps={week} week={'2026-10-11' as Day} today={'2026-10-15' as Day} />);
     const [c1, c2, c3, c4] = screen.getAllByTestId('tv-agenda-row');
     expect([c1, c2, c3, c4].map(c => c!.getAttribute('data-state'))).toEqual(['missing', 'downloaded', 'missing', 'unaired']);
     expect(within(c1!).getByTestId('tv-air').textContent).toBe('9:00 PM');          // a start time, no range
     expect(within(c2!).getByTestId('tv-air').textContent).toContain('10:00 PM');
-    expect(within(c2!).getByTestId('tv-check')).toBeTruthy();
+    expect(within(c2!).queryByTestId('tv-check')).toBeNull();                       // v325: the stripe alone says got-it
     expect(within(c3!).queryByTestId('tv-air')).toBeNull();                         // no air time: the line is gone
     expect(within(c4!).getByTestId('tv-air').textContent).toBe('4:00 PM');
     for (const c of [c1, c2, c4]) expect(within(c!).getByTestId('tv-air').textContent).not.toMatch(/Oct|\d+\/\d+/);
@@ -260,9 +266,10 @@ describe('Calendar', () => {
     // v321 Designer D: 3px status stripe on every card
     expect(rows.every(r => within(r).queryByTestId('tv-stripe'))).toBe(true);
     expect(rows.every(r => within(r).queryByTestId('tv-check'))).toBe(false);  // fixtures have no airstamp
-    // nothing on screen but v211's chip ('Downloaded' for a downloaded episode of unknown quality)
+    // v325 (Taylor): no state words and no quality chip; the stripe is the only got-it indicator
     expect(rows.some(r => /Missing|Unaired/.test(r.textContent || ''))).toBe(false);
-    expect(rows.map(r => within(r).queryByTestId('tv-quality-chip')?.textContent ?? null)).toEqual(['Downloaded', null, null]);
+    expect(rows.map(r => within(r).queryByTestId('tv-quality-chip')?.textContent ?? null)).toEqual([null, null, null]);
+    expect(rows[0]!.textContent).not.toContain('Downloaded');
     expect(rows[0]!.textContent).toContain('Episode 1');
     const name = within(rows[0]!).getByTestId('tv-card-show');                     // 13/600, one line
     expect([name.style.fontSize, name.style.fontWeight, name.style.whiteSpace]).toEqual(['13px', '600', 'nowrap']);
@@ -272,7 +279,7 @@ describe('Calendar', () => {
     expect(title.textContent).toMatch(/^S\d\dE\d\d \u00b7 /);
     expect([title.style.fontSize, title.style.color, title.style.whiteSpace])
       .toEqual(['12px', 'rgba(255, 255, 255, 0.7)', 'nowrap']);
-    expect(within(rows[0]!).getByTestId('tv-quality-chip').textContent).toBe('Downloaded');
+    expect(within(rows[0]!).queryByTestId('tv-quality-chip')).toBeNull();          // v325: no chip on week cards
     // the top row: ‹ range › together in the true center (a 1fr auto 1fr grid), no separate toolbar
     const center = screen.getByTestId('tv-cal-center');
     expect(center.contains(screen.getByTestId('tv-cal-prev')) && center.contains(screen.getByTestId('tv-cal-next'))).toBe(true);
