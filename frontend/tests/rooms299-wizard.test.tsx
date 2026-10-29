@@ -103,6 +103,32 @@ describe('v299 Rooms Add wizard', () => {
     expect((post.body as { devices?: unknown }).devices).toBeUndefined();
   });
 
+  it('premium pass: Network debugging is a hero, a full-width inset group and one 240px Continue; Pair is the primary', async () => {
+    const calls: Call[] = []; stub([], calls);
+    await startWizard();
+    const step = screen.getByTestId('wiz-adb-howto');
+    expect(step.querySelector('[data-testid="wiz-adb-hero"]')).toBeTruthy();
+    const ol = screen.getByTestId('wiz-adb-steps');
+    expect(ol.style.width).toBe('100%');
+    expect(ol.style.borderRadius).toBe('20px');
+    const lis = [...ol.querySelectorAll('li')] as HTMLElement[];
+    expect(lis[0].style.borderTop).not.toContain('1px');
+    expect(lis.slice(1).every(li => li.style.borderTop.includes('1px'))).toBe(true);
+    expect(step.querySelectorAll('button')).toHaveLength(1);
+    const cont = screen.getByTestId('wiz-adb-continue');
+    expect(cont.style.minWidth).toBe('240px');
+    expect(cont.style.height).toBe('52px');
+    expect(cont.style.width).toBe('');                          // not stretched full width
+    fireEvent.click(cont);
+    const pair = await screen.findByTestId('wiz-player-step');
+    const btns = [...pair.querySelectorAll('button')];
+    expect(btns).toHaveLength(1);                                // the primary button is Pair, under the IP field
+    expect(btns[0].textContent).toBe('Pair');
+    expect(btns[0].style.minWidth).toBe('240px');
+    const input = pair.querySelector('input')!;
+    expect(input.compareDocumentPosition(btns[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('helper instructional copy only on Network debugging', async () => {
     const calls: Call[] = []; stub([], calls);
     await startWizard();
@@ -267,6 +293,11 @@ describe('v299 Rooms Add wizard', () => {
     fireEvent.click(screen.getByTestId('wiz-power-continue'));
     fireEvent.change(screen.getByTestId('room-hub'), { target: { value: '192.168.1.19' } });
     await waitFor(() => expect(screen.getByTestId('room-activity').querySelectorAll('option').length).toBe(3), { timeout: 2000 });
+    // the server reads only a saved hub: the wizard saves the typed hub on its room before asking for options
+    const hubPut = calls.findIndex(c => c.method === 'PUT' && JSON.stringify(c.body) === JSON.stringify({ harmony_hub: '192.168.1.19' }));
+    const optsGet = calls.findIndex(c => c.url.includes('/options/harmony?hub=192.168.1.19'));
+    expect(hubPut).toBeGreaterThanOrEqual(0);
+    expect(optsGet).toBeGreaterThan(hubPut);
     fireEvent.change(screen.getByTestId('room-activity'), { target: { value: 'SHIELD TV' } });
     fireEvent.change(screen.getByTestId('room-volume-device'), { target: { value: 'AV Receiver' } });
     expect(screen.queryByTestId('room-nav-device')).toBeNull();                   // Navigation lives under the room's Advanced
@@ -296,7 +327,7 @@ describe('v299 Rooms Add wizard', () => {
     const name = screen.getByTestId('room-name') as HTMLInputElement;
     expect([name.value, name.placeholder, name.getAttribute('autocomplete')]).toEqual(['', '', 'off']);
     expect(screen.getByTestId('room-name-step').querySelectorAll('input')).toHaveLength(1);
-    expect(screen.getByTestId('room-name-step').querySelectorAll('svg, img')).toHaveLength(0);   // no icons on the name step
+    expect(screen.getByTestId('room-name-step').querySelectorAll('svg, img, [role="radio"], [data-testid^="icon-"]')).toHaveLength(0);   // Taylor-approved scope: no icon on the name step
     expect(screen.queryByTestId('room-chip')).toBeNull();
     expect(screen.queryByTestId('icon-picker')).toBeNull();
     expect(screen.queryAllByRole('radio')).toHaveLength(0);                      // no icon choices on this step

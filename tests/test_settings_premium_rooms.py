@@ -94,8 +94,9 @@ def test_ha_entities_empty_without_a_connector(rs):  # noqa: F811
     assert _req(c, 'get', '/api/rooms/options/ha').get_json() == {'entities': []}
 
 
-def test_harmony_options_from_the_hub(rs, monkeypatch):  # noqa: F811
-    c, _, _ = rs
+def test_harmony_options_from_a_configured_hub(rs, monkeypatch):  # noqa: F811
+    c, fake, _ = rs
+    fake._settings['devices']['rooms'] = [{'id': 'r1', 'name': 'Den', 'harmonyHubIp': '192.168.1.19', 'devices': []}]
     seen = []
 
     def cfg(hub):
@@ -108,6 +109,41 @@ def test_harmony_options_from_the_hub(rs, monkeypatch):  # noqa: F811
     assert _req(c, 'get', '/api/rooms/options/harmony?hub=192.168.1.19').get_json() == {'ok': False, 'activities': [], 'devices': []}
     assert _req(c, 'get', '/api/rooms/options/harmony').status_code == 400
     assert _req(c, 'get', '/api/rooms/options/harmony?hub=bad%20host!').status_code == 400
+
+
+def test_harmony_options_refuse_a_hub_not_saved_on_a_room(rs, monkeypatch):  # noqa: F811
+    c, fake, _ = rs
+    fake._settings['devices']['rooms'] = [{'id': 'r1', 'name': 'Den', 'harmonyHubIp': '192.168.1.19', 'devices': []},
+                                          {'id': 'r2', 'name': 'Gym', 'harmonyHubIp': '', 'devices': []}]
+    monkeypatch.setitem(rooms_setup._cfg, 'harmony_config_fn', lambda hub: pytest.fail(f'contacted {hub}'))
+    for hub in ('192.168.1.20', '10.0.0.1', '127.0.0.1', 'example.com', '192.168.1.190'):
+        r = _req(c, 'get', f'/api/rooms/options/harmony?hub={hub}')
+        assert r.status_code == 400 and r.get_json()['errors'] == {'harmony_hub': 'Not configured'}, hub
+    fake._settings['devices']['rooms'] = []
+    assert _req(c, 'get', '/api/rooms/options/harmony?hub=192.168.1.19').status_code == 400
+    assert rooms_options.configured_hubs() == set()
+
+
+def test_a_hub_saved_by_put_becomes_readable(rs, monkeypatch):  # noqa: F811
+    """The wizard saves the typed hub on its room (validated PUT), then reads that hub's options."""
+    c, fake, _ = rs
+    fake._settings['devices']['rooms'] = [{'id': 'r1', 'name': 'Den', 'devices': []}]
+    monkeypatch.setitem(rooms_setup._cfg, 'harmony_config_fn', lambda hub: {'activities': [{'label': 'Watch TV'}], 'devices': []})
+    assert _req(c, 'get', '/api/rooms/options/harmony?hub=192.168.1.19').status_code == 400
+    assert _req(c, 'put', f'{API}/r1', {'harmony_hub': '192.168.1.19'}).status_code == 200
+    assert _req(c, 'get', '/api/rooms/options/harmony?hub=192.168.1.19').get_json()['activities'] == ['Watch TV']
+
+
+def test_room_icon_list_is_defined_once():
+    import app.room_icons as ri
+    from app import settings_manager
+    assert rooms_setup.ROOM_ICONS is ri.ROOM_ICONS and settings_manager._ROOM_ICONS is ri.ROOM_ICONS
+    assert rooms_setup.DEFAULT_ICON is ri.DEFAULT_ICON
+    for mod in (rooms_setup, settings_manager):
+        src = open(mod.__file__).read()
+        assert "'sofa', 'bed'" not in src and '"sofa", "bed"' not in src, mod.__name__
+    src = open(ri.__file__).read()
+    assert 'import' not in src.split('"""', 2)[2]          # no app imports: no cycle
 
 
 ARP = """IP address       HW type     Flags       HW address            Mask     Device

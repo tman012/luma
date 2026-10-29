@@ -72,8 +72,19 @@ describe('v288 Rooms sheet Harmony devices', () => {
     fireEvent.click(screen.getByTestId('room-advanced-toggle'));
     expect(screen.getByLabelText('Navigation')).toBeTruthy();
     fireEvent.change(screen.getByTestId('room-hub'), { target: { value: '192.168.1.19' } });
+    // The server reads only a hub saved on a room: an unsaved hub is never queried; Save, then the pickers fill.
+    await new Promise(r => setTimeout(r, 600));
+    expect(calls.some(c => c.url.includes('/api/rooms/options/harmony'))).toBe(false);
+    fireEvent.click(screen.getByTestId('room-save'));
+    await waitFor(() => expect(writes(calls).some(c => c.method === 'PUT' && (c.body as { harmony_hub?: string }).harmony_hub === '192.168.1.19')).toBe(true));
+    if (!screen.queryByTestId('room-activity')) {
+      fireEvent.click(screen.getAllByTestId('room-row')[0]!);
+      if (!screen.queryByTestId('room-activity')) fireEvent.click(screen.getByTestId('room-wake-harmony'));
+    }
     await waitFor(() => expect(screen.getByTestId('room-activity').querySelectorAll('option').length).toBeGreaterThan(2), { timeout: 2000 });
     expect(calls.some(c => c.url === '/api/rooms/options/harmony?hub=192.168.1.19')).toBe(true);
+    calls.length = 0;
+    if (!screen.queryByTestId('room-nav-device')) fireEvent.click(screen.getByTestId('room-advanced-toggle'));
     fireEvent.change(screen.getByTestId('room-activity'), { target: { value: 'SHIELD TV' } });
     fireEvent.change(screen.getByTestId('room-volume-device'), { target: { value: 'AV Receiver' } });
     fireEvent.change(screen.getByTestId('room-nav-device'), { target: { value: 'NVIDIA Shield' } });
@@ -81,8 +92,6 @@ describe('v288 Rooms sheet Harmony devices', () => {
     await waitFor(() => expect(writes(calls).some(c => c.method === 'PUT')).toBe(true));
     const put = writes(calls).find(c => c.method === 'PUT')!;
     expect(put.body).toMatchObject({
-      wake: 'harmony',
-      harmony_hub: '192.168.1.19',
       harmony_activity: 'SHIELD TV',
       harmony_volume_device: 'AV Receiver',
       harmony_nav_device: 'NVIDIA Shield',

@@ -157,9 +157,10 @@ export function RoomsSettings({ wide = true, onExit }: { wide?: boolean; onExit?
     };
   } else if (view.k === 'wiz-harmony' && room(view.id)) {
     const id = view.id;
+    const saveHub = hubSaver(id);
     flow = {
       title: 'Harmony Hub', back: () => setView({ k: 'wiz-power', id }), body: (
-        <WizHarmonyStep error={error}
+        <WizHarmonyStep error={error} saveHub={saveHub}
           onDone={patch => void updateRoom(id, { wake: 'harmony', ...patch }).then(x => take(x, toList))} />),
     };
   } else if (view.k === 'add' && room(view.id)) {
@@ -257,7 +258,7 @@ export function RoomsSettings({ wide = true, onExit }: { wide?: boolean; onExit?
       <style>{tvEditCss}{roomsCss}</style>
       <h2 style={{ margin: '0 0 40px', fontSize: 30, fontWeight: 650, letterSpacing: -0.4, color: W95, textAlign: 'center' }}>Rooms</h2>
       {error && view.k === 'list' && <div role="alert" style={{ color: '#fca5a5', fontSize: 13, marginBottom: 12 }}>{error}</div>}
-      <div data-testid="rooms-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, 236px)', gap: 20, justifyContent: 'center', width: '100%', maxWidth: 748 }}>
+      <div data-testid="rooms-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, 236px)', gap: 20, justifyContent: 'center', width: '100%', maxWidth: 748 }}>
         {rooms.map(r => (
           <RoomTile key={r.id} room={r} onOpen={() => { setError(''); setView({ k: 'edit', id: r.id }); }} onIcon={() => setIconFor(r.id)} />
         ))}
@@ -470,10 +471,17 @@ function WizAdbHowto({ onContinue }: { onContinue: () => void }) {
   ];
   return (
     <Center testid="wiz-adb-howto">
-      <h3 style={{ ...stepTitle, marginTop: 4 }}>Turn on Network debugging</h3>
-      <ol data-testid="wiz-adb-steps" style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 14, textAlign: 'left', alignSelf: 'center' }}>
+      <Bubble size={96}>
+        <svg data-testid="wiz-adb-hero" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#adc7ff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M8.5 8L4.5 12l4 4M15.5 8l4 4-4 4M13.2 6.5l-2.4 11" />
+        </svg>
+      </Bubble>
+      <h3 style={stepTitle}>Turn on Network debugging</h3>
+      <ol data-testid="wiz-adb-steps" style={{ listStyle: 'none', margin: 0, padding: '0 16px', width: '100%', boxSizing: 'border-box', textAlign: 'left',
+        borderRadius: 20, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}>
         {steps.map((s, i) => (
-          <li key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: 16, color: 'rgba(255,255,255,0.85)', fontFamily: FONT }}>
+          <li key={i} style={{ display: 'flex', alignItems: 'center', gap: 14, minHeight: 54, fontSize: 15, color: 'rgba(255,255,255,0.85)', fontFamily: FONT,
+            borderTop: i ? '1px solid rgba(255,255,255,0.08)' : 'none' }}>
             <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 14, background: 'rgba(59,130,246,0.2)', color: '#adc7ff', fontSize: 14, fontWeight: 700,
               display: 'grid', placeItems: 'center', flex: 'none' }}>{i + 1}</span>
             <span>{s}</span>
@@ -703,33 +711,46 @@ function WizHaStep({ error, onError, onDone }: { error: string; onError: (e: str
   );
 }
 
-/** Loads a hub's activities and devices once its address looks complete. */
-function useHarmony(hub: string) {
+/** Loads a hub's activities and devices once its address looks complete. The server only reads a hub
+ * that is already saved on a room, so the wizard saves the typed hub first (`save`); the room page reads
+ * only its saved hub (a new one is read after Save). */
+function useHarmony(hub: string, save?: (hub: string) => Promise<boolean>, saved?: string) {
   const [opts, setOpts] = useState<{ hub: string; activities: string[]; devices: string[] } | null>(null);
   useEffect(() => {
     const h = hub.trim();
     if (!IP_RE.test(h) && !/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(h)) return undefined;
+    if (!save && h !== (saved || '').trim()) return undefined;
     let alive = true;
     const t = window.setTimeout(() => {
-      void loadHarmonyOptions(h).then(o => { if (alive) setOpts({ hub: h, activities: o.activities, devices: o.devices }); });
+      void (save ? save(h) : Promise.resolve(true)).then(ok => {
+        if (!alive || !ok) return;
+        void loadHarmonyOptions(h).then(o => { if (alive) setOpts({ hub: h, activities: o.activities, devices: o.devices }); });
+      });
     }, 400);
     return () => { alive = false; window.clearTimeout(t); };
-  }, [hub]);
+  }, [hub, save, saved]);
   const live = opts && opts.hub === hub.trim() ? opts : null;
   return { activities: live?.activities || [], devices: live?.devices || [] };
+}
+const hubSavers = new Map<string, (hub: string) => Promise<boolean>>();
+/** One stable saver per room (keeps useHarmony's effect from re-running every render). */
+function hubSaver(id: string) {
+  let f = hubSavers.get(id);
+  if (!f) { f = (hub: string) => updateRoom(id, { harmony_hub: hub }).then(x => x.ok); hubSavers.set(id, f); }
+  return f;
 }
 const asOptions = (xs: string[]) => xs.map(x => ({ value: x, label: x }));
 
 /** Wizard 5b — Hub, Activity and Volume pickers (Harmony). */
-function WizHarmonyStep({ error, onDone }: {
-  error: string;
+function WizHarmonyStep({ error, onDone, saveHub }: {
+  error: string; saveHub: (hub: string) => Promise<boolean>;
   onDone: (p: { harmony_hub: string; harmony_activity: string; harmony_volume_device: string; harmony_nav_device: string }) => void;
 }) {
   const [hub, setHub] = useState('');
   const [act, setAct] = useState('');
   const [vol, setVol] = useState('');
   const [busy, setBusy] = useState(false);
-  const { activities, devices } = useHarmony(hub);
+  const { activities, devices } = useHarmony(hub, saveHub);
   useEffect(() => { if (error) setBusy(false); }, [error]);
   const ok = !busy && !!hub.trim();
   return (
@@ -856,7 +877,7 @@ function EditRoom({ room: r, error, wide, onSave, onRemove, onChangePlayer, onSa
   const [def, setDef] = useState(r.default);
   const [advanced, setAdvanced] = useState(false);
   const [confirm, setConfirm] = useState(false);
-  const { activities, devices } = useHarmony(power === 'harmony' ? hub : '');
+  const { activities, devices } = useHarmony(power === 'harmony' ? hub : '', undefined, r.harmony_hub);
   useEffect(() => { if (power === 'homeassistant') void loadHaEntities().then(setHaList); }, [power]);
   const wake: Wake = power === 'adb' && wol ? 'wol' : power;
   const patch: RoomPatch = {};

@@ -112,9 +112,7 @@ def _rooms() -> List[Dict[str, Any]]:
     return [nested(copy.deepcopy(r), i) for i, r in enumerate(_cfg['settings'].get('devices.rooms') or []) if isinstance(r, dict)]
 
 
-ROOM_ICONS = ('sofa', 'bed', 'kitchen', 'dining', 'office', 'theater', 'game', 'kids', 'bath', 'gym',
-              'music', 'library', 'patio', 'garage', 'home')
-DEFAULT_ICON = 'home'
+from app.room_icons import DEFAULT_ICON, ROOM_ICONS  # noqa: E402,F401  the one icon list
 
 
 def room_icon(room: Dict[str, Any]) -> str:

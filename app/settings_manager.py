@@ -1105,8 +1105,7 @@ def _migrate_room_ids(data: dict) -> bool:
     return changed
 
 
-_ROOM_ICONS = ('sofa', 'bed', 'kitchen', 'dining', 'office', 'theater', 'game', 'kids', 'bath', 'gym',
-               'music', 'library', 'patio', 'garage', 'home')
+from app.room_icons import DEFAULT_ICON as _DEFAULT_ROOM_ICON, ROOM_ICONS as _ROOM_ICONS  # noqa: E402  the one icon list
 
 
 def _migrate_room_icons(data: dict) -> bool:
@@ -1121,7 +1120,7 @@ def _migrate_room_icons(data: dict) -> bool:
     changed = False
     for r in rooms:
         if isinstance(r, dict) and r.get("icon") not in _ROOM_ICONS:
-            r["icon"] = "home"
+            r["icon"] = _DEFAULT_ROOM_ICON
             changed = True
     if changed:
         _log_migration("Migrated room icons: set icon=home on rooms missing one")

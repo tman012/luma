@@ -1,5 +1,5 @@
 /** Settings premium pass (Designer round 2): Connectors lists only the 7 real connectors with
- * same-origin vendor logos and Connected / Not connected; Plex lives here (no Plex section). */
+ * same-origin vendor logos and Set up / Not set up; Plex lives here (no Plex section). */
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync, existsSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -39,6 +39,7 @@ describe('Settings premium pass: Connectors', () => {
       title: g.querySelector('h2')!.textContent,
       rows: [...g.querySelectorAll('[data-testid^="connector-row-"]')].map(r => r.getAttribute('data-testid')!.slice(14)),
     }));
+    expect(screen.queryByText('Connected')).toBeNull();   // PM: saved config is never shown as Connected
     expect(groups).toEqual([
       { title: 'Media server', rows: ['plex'] },
       { title: 'Downloads', rows: ['qbittorrent'] },
@@ -46,13 +47,13 @@ describe('Settings premium pass: Connectors', () => {
       { title: 'Metadata', rows: ['tmdb', 'omdb', 'tvdb', 'trakt'] },
     ]);
     for (const id of ['sonarr', 'radarr', 'prowlarr', 'harmony', 'webpush', 'telegram']) expect(screen.queryByTestId(`connector-row-${id}`)).toBeNull();
-    await waitFor(() => expect(screen.getByTestId('connector-status-plex').textContent).toBe('Connected'));
+    await waitFor(() => expect(screen.getByTestId('connector-status-plex').textContent).toBe('Set up'));
     expect(within(screen.getByTestId('connector-row-plex')).getByText('Bosley Plex')).toBeTruthy();
-    expect(screen.getByTestId('connector-status-qbittorrent').textContent).toBe('Connected');
+    expect(screen.getByTestId('connector-status-qbittorrent').textContent).toBe('Set up');
     expect(within(screen.getByTestId('connector-row-qbittorrent')).getByText('192.168.1.72')).toBeTruthy();
-    expect(screen.getByTestId('connector-status-homeassistant').textContent).toBe('Not connected');   // no token saved
+    expect(screen.getByTestId('connector-status-homeassistant').textContent).toBe('Not set up');   // no token saved
     expect(['tmdb', 'omdb', 'tvdb', 'trakt'].map(id => screen.getByTestId(`connector-status-${id}`).textContent))
-      .toEqual(['Connected', 'Connected', 'Not connected', 'Not connected']);
+      .toEqual(['Set up', 'Set up', 'Not set up', 'Not set up']);
   });
 
   it('logos are same-origin static assets that exist (no remote loads); OMDb is a wordmark tile', async () => {
@@ -74,7 +75,7 @@ describe('Settings premium pass: Connectors', () => {
     fireEvent.click(await screen.findByTestId('connector-row-plex'));
     const modal = await screen.findByTestId('connector-modal-plex');
     expect(modal.style.width).toBe('560px');
-    await waitFor(() => expect(screen.getByTestId('connector-modal-status').textContent).toBe('Connected'));
+    await waitFor(() => expect(screen.getByTestId('connector-modal-status').textContent).toBe('Set up'));
     expect(await within(modal).findByTestId('plex-server-name')).toBeTruthy();
     fireEvent.click(screen.getByTestId('connector-modal-done'));
     expect(screen.queryByTestId('connector-modal-plex')).toBeNull();
@@ -86,5 +87,13 @@ describe('Settings premium pass: Connectors', () => {
     expect(await screen.findByTestId('connector-modal-plex')).toBeTruthy();
     fireEvent.click(screen.getByTestId('connector-modal-close'));
     expect(closed).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Settings premium pass: no Contact Email anywhere in Settings', () => {
+  it('the old full-app Services tab has no Contact email field and does not save vapid_email', () => {
+    const src = readFileSync('src/pages/settings/ServicesTab.tsx', 'utf8');
+    expect(src).not.toMatch(/Contact email/i);
+    expect(src).not.toContain('vapid_email');
   });
 });

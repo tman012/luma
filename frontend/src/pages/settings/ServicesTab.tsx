@@ -378,7 +378,7 @@ export function ServicesTab() {
       content: (
         <SettingsCard
           title="Web push notifications"
-          paths={['notifications.web_push.enabled', 'notifications.web_push.vapid_email']}
+          paths={['notifications.web_push.enabled']}
           testService="webpush"
           testLabel="Send Test"
           icon={
@@ -394,11 +394,6 @@ export function ServicesTab() {
               path="notifications.web_push.enabled"
             />
           </div>
-          <FormField
-            label="Contact email"
-            path="notifications.web_push.vapid_email"
-            placeholder="mailto:you@example.com"
-          />
           {/* -- Setup Guides -- */}
           <div className="sm:col-span-2 mt-2 space-y-2">
 

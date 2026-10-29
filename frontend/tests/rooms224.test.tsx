@@ -102,6 +102,8 @@ describe('Settings > Rooms', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Rooms' }).style.textAlign).toBe('center');
     const grid = screen.getByTestId('rooms-grid');
     expect(grid.lastElementChild!.getAttribute('data-testid')).toBe('rooms-add');
+    expect(grid.style.gridTemplateColumns).toBe('repeat(auto-fit, 236px)');   // Designer: 1–2 tiles center under the heading
+    expect(grid.style.justifyContent).toBe('center');
     expect(screen.getByTestId('rooms-add').textContent).toBe('Add room');
     expect(screen.queryByTestId('room-menu')).toBeNull();
     expect(writes(calls)).toEqual([]);

@@ -1,7 +1,7 @@
 """Settings premium pass: owner-only pickers for Settings > Rooms (no raw text entry).
 
 GET /api/rooms/options/ha               {entities: [{id, name}]}  TV-power candidates from Home Assistant
-GET /api/rooms/options/harmony?hub=IP   {ok, activities, devices}  labels from that hub's config
+GET /api/rooms/options/harmony?hub=IP   {ok, activities, devices}  labels from a hub already saved on a room (else 400)
 GET /api/rooms/<id>/mac                 {mac}                      the room TV's MAC from the ARP table
 
 Read-only: nothing here wakes, plays or sends a command. Writes stay in rooms_setup (PUT /api/rooms/<id>).
@@ -45,6 +45,16 @@ def ha_power_entities() -> List[Dict[str, str]]:
         name = ((st.get('attributes') or {}).get('friendly_name') or eid) if isinstance(st.get('attributes'), dict) else eid
         out.append({'id': eid, 'name': str(name)})
     out.sort(key=lambda e: (POWER_DOMAINS.index(e['id'].split('.', 1)[0]), e['name'].lower()))
+    return out
+
+
+def configured_hubs() -> set:
+    """Hubs saved on a room in settings (devices.rooms[*].harmonyHubIp); nothing else is contacted."""
+    out = set()
+    for r in _rooms():
+        h = r.get('harmonyHubIp') if isinstance(r, dict) else None
+        if isinstance(h, str) and h.strip():
+            out.add(h.strip())
     return out
 
 
@@ -94,6 +104,8 @@ def rooms_options_harmony():
         return jsonify({'errors': e.errors}), 400
     if not hub:
         return jsonify({'errors': {'harmony_hub': 'Required'}}), 400
+    if hub not in configured_hubs():
+        return jsonify({'errors': {'harmony_hub': 'Not configured'}}), 400   # only a hub saved on a room
     opts = harmony_options(hub)
     if opts is None:
         return jsonify({'ok': False, 'activities': [], 'devices': []})
