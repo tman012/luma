@@ -88,7 +88,11 @@ def enabled() -> bool:
 
 
 def category() -> str:
-    return (os.environ.get(CATEGORY_ENV) or '').strip() or DEFAULT_CATEGORY
+    """v324: the qBit category AND tag for every movie grab (Genre Roulette, monitoring, manual release):
+    exactly the one normal luma-test movie grabs use (qbit_owner.tag_name(), the tag the library mover
+    imports). The old default 'movie' (LUMA_MOVIE_CATEGORY) was watched by nothing, so GR grabs sat unimported."""
+    from app import qbit_owner
+    return qbit_owner.tag_name()
 
 
 # ------------------------------------------------------------------ trackers and profiles

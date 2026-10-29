@@ -209,6 +209,13 @@ def mkdir_p(container_dir: str, cfg: Optional[Dict[str, object]] = None) -> None
             f'remote DEST dir must be under {cfg["media_root"]}: {remote}')
 
 
+# v324b: an empty reply (no status line: RemoteDisconnected / BadStatusLine), a reset, a broken pipe or an
+# aborted connection means the helper stopped waiting (luma-mover restart, KillMode=process) while cp on .72
+# keeps going. Same as a timeout: poll tmp/final, fail only if the copy really stopped.
+_HELPER_STOPPED_WAITING = (socket.timeout, TimeoutError, http.client.RemoteDisconnected, http.client.BadStatusLine,
+                           ConnectionResetError, BrokenPipeError, ConnectionAbortedError)
+
+
 def _http_post_unix(sock_path: str, path: str, body: bytes, timeout: int) -> Tuple[int, str]:
     conn = _UnixHTTPConnection(sock_path, timeout=float(timeout))
     try:
@@ -225,6 +232,8 @@ def _http_post_unix(sock_path: str, path: str, body: bytes, timeout: int) -> Tup
             f'mover socket missing: {sock_path} '
             f'(mount host ~/luma-mover/mover.sock → /run/luma-mover/; '
             f'or set {ENV_SOCK})') from e
+    except (http.client.RemoteDisconnected, http.client.BadStatusLine) as e:
+        raise RemoteMoverError(f'mover helper sent an empty reply ({sock_path}): {e!r}') from e
     except (ConnectionRefusedError, ConnectionError, OSError) as e:
         raise RemoteMoverError(
             f'mover socket unreachable ({sock_path}): {e} '
@@ -360,8 +369,9 @@ def transfer(src_container: str, dest_container: str, mode: str = 'cp',
     try:
         status, raw = _http_post_unix(str(cfg['sock']), '/move', payload, timeout)
     except RemoteMoverError as e:
-        if observable and op == 'cp' and isinstance(e.__cause__, (socket.timeout, TimeoutError)):
-            logger.warning('Remote mover: socket timeout, waiting for copy: %s', rdest)
+        if observable and op == 'cp' and isinstance(e.__cause__, _HELPER_STOPPED_WAITING):
+            logger.warning('Remote mover: helper stopped waiting (%s), waiting for copy: %s',
+                           type(e.__cause__).__name__, rdest)
             return wait_for_remote_copy(src_container, dest_container, tmp_container)
         raise
     try:
