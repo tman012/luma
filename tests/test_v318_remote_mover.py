@@ -67,6 +67,8 @@ def test_transfer_posts_mode_over_unix(remote_env, monkeypatch):
     assert rm.transfer(str(src), '/media/Movies/a.mkv') == 'copied'
     assert seen['sock'] == str(remote_env['sock'])
     assert seen['path'] == '/move'
+    tmp = seen['body'].pop('tmp')   # v324: full temp path in dest's folder
+    assert tmp.startswith('/media/Movies/.luma-') and tmp.endswith('.luma-partial')
     assert seen['body'] == {
         'mode': 'cp',
         'src': '/scratch/downloads/a.mkv',

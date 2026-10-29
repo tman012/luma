@@ -6,7 +6,9 @@ Ops FINAL (preferred):
   Sock: host /home/tbosley02/luma-mover/mover.sock
         bind-mount → container /run/luma-mover/mover.sock
   HTTP over AF_UNIX:
-    POST /move  {"mode":"cp|mv","src":"...","dest":"..."}
+    POST /move  {"mode":"cp|mv","src":"...","dest":"...","tmp":"<dest dir>/.luma-<hex16>.luma-partial"}
+         (v324: CLI gets TMP as a 4th arg, a FULL path in DEST's folder; it copies to TMP and
+          renames into place without replacing; rc 124 = still copying when the wait ran out)
          → {"ok": bool, "rc": N, "output": "..."}
     GET  /health → {"ok": true}
 
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import socket
 import subprocess
@@ -37,13 +40,26 @@ DOWNLOADS_ROOT = os.environ.get('LUMA_REMOTE_DOWNLOADS_ROOT', '/scratch/download
 MEDIA_ROOT = os.environ.get('LUMA_REMOTE_MEDIA_ROOT', '/media').rstrip('/')
 TIMEOUT_S = int(os.environ.get('LUMA_REMOTE_MOVER_TIMEOUT_S', '3600'))
 EXISTS = 17
+TIMED_OUT = 124
+TMP_RE = re.compile(r'^\.luma-[0-9a-f]{16}\.luma-partial$')
 
 
 def _under(path: str, root: str) -> bool:
-    return path == root or path.startswith(root + '/')
+    if not path.startswith('/'):
+        return False
+    path, root = os.path.normpath(path), os.path.normpath(root)
+    return path == root or path.startswith(root.rstrip('/') + '/')
 
 
-def run_move(mode: str, src: str, dest: str) -> tuple[int, str]:
+def tmp_ok(tmp: str, dest: str) -> bool:
+    """TMP must be a full path in DEST's own folder, named .luma-<hex16>.luma-partial."""
+    if not tmp.startswith('/') or os.path.normpath(tmp) != tmp:
+        return False
+    return (os.path.dirname(tmp) == os.path.dirname(os.path.normpath(dest))
+            and bool(TMP_RE.match(os.path.basename(tmp))))
+
+
+def run_move(mode: str, src: str, dest: str, tmp: str = '') -> tuple[int, str]:
     if mode not in ('cp', 'mv'):
         return 2, f'mode must be cp|mv, got {mode!r}'
     if not _under(src, DOWNLOADS_ROOT):
@@ -51,14 +67,20 @@ def run_move(mode: str, src: str, dest: str) -> tuple[int, str]:
     if not _under(dest, MEDIA_ROOT):
         return 2, f'dest must be under {MEDIA_ROOT}'
     cmd = [CLI, mode, src, dest]
+    if tmp:
+        if not tmp_ok(tmp, dest):
+            return 2, 'tmp must be .luma-<hex16>.luma-partial in the destination folder'
+        cmd.append(tmp)
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT_S, check=False)
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     except FileNotFoundError:
         return 127, f'CLI not found: {CLI}'
+    try:
+        out, _ = p.communicate(timeout=TIMEOUT_S)
     except subprocess.TimeoutExpired:
-        return 124, f'timed out after {TIMEOUT_S}s'
-    out = ((p.stdout or '') + (p.stderr or '')).strip()
-    return p.returncode, out
+        # Never kill the copy: Luma keeps watching the temp/final file through /media.
+        return TIMED_OUT, f'timed out after {TIMEOUT_S}s (copy left running)'
+    return p.returncode, (out or '').strip()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -96,10 +118,11 @@ class Handler(BaseHTTPRequestHandler):
         mode = str(data.get('mode') or data.get('op') or 'cp').strip()
         src = str(data.get('src') or '').strip()
         dest = str(data.get('dest') or '').strip()
+        tmp = str(data.get('tmp') or '').strip()
         if not src or not dest:
             self._json(400, {'ok': False, 'rc': 2, 'output': 'src and dest required'})
             return
-        rc, output = run_move(mode, src, dest)
+        rc, output = run_move(mode, src, dest, tmp)
         ok = rc == 0
         code = 200 if ok else (409 if rc == EXISTS else 500)
         self._json(code, {'ok': ok, 'rc': rc, 'output': output})

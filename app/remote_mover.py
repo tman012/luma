@@ -7,7 +7,8 @@ bind-mounted Unix socket to the Ops host helper, which runs:
 
 Locked call (HTTP over AF_UNIX):
   POST /move
-  {"mode":"cp|mv","src":"/scratch/downloads/...","dest":"/media/..."}
+  {"mode":"cp|mv","src":"/scratch/downloads/...","dest":"/media/...",
+   "tmp":"/media/.../.luma-<hex16>.luma-partial"}   (v324: full path, same folder as dest)
 
 Socket (in luma-test): host /home/tbosley02/luma-mover/mover.sock mounted
 under /run/luma-mover. Defaults try:
@@ -27,7 +28,10 @@ import http.client
 import json
 import logging
 import os
+import posixpath
 import socket
+import stat
+import time
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -189,14 +193,36 @@ def mkdir_p(container_dir: str, cfg: Optional[Dict[str, object]] = None) -> None
             f'remote DEST dir must be under {cfg["media_root"]}: {remote}')
 
 
+class _HelperStoppedWaiting(Exception):
+    """The helper stopped answering for this request (timeout). The copy on .72 may still be running."""
+
+
+# v324: socket errors that mean "the helper stopped waiting", not "the copy never started".
+_KEEP_WAITING_ERRORS: Tuple[type, ...] = (socket.timeout, TimeoutError)
+
+# v324: watching the copy through /media after the helper stopped waiting.
+POLL_S = 15
+NO_GROWTH_S = 600
+MIN_DEADLINE_S = 1800
+MIN_RATE_BPS = 5 * 1024 * 1024
+STABLE_POLLS = 2            # no readable source size: final size must hold this many polls with the temp gone
+RC_TIMEOUT = 124            # deployed helper: copy still running when the helper gave up waiting
+SCRIPT_FAIL_RCS = frozenset({2, 3, 4, 5, 6})   # deployed script refused/failed: report at once
+_sleep = time.sleep
+_clock = time.monotonic
+
+
 def _http_post_unix(sock_path: str, path: str, body: bytes, timeout: int) -> Tuple[int, str]:
     conn = _UnixHTTPConnection(sock_path, timeout=float(timeout))
+    sent = False
     try:
+        conn.connect()
         conn.request(
             'POST', path, body=body,
             headers={'Content-Type': 'application/json', 'Content-Length': str(len(body)),
                      'Accept': 'application/json', 'Host': 'localhost'},
         )
+        sent = True
         resp = conn.getresponse()
         raw = resp.read().decode() or ''
         return resp.status, raw
@@ -205,6 +231,10 @@ def _http_post_unix(sock_path: str, path: str, body: bytes, timeout: int) -> Tup
             f'mover socket missing: {sock_path} '
             f'(mount host ~/luma-mover/mover.sock → /run/luma-mover/; '
             f'or set {ENV_SOCK})') from e
+    except _KEEP_WAITING_ERRORS as e:
+        if sent:
+            raise _HelperStoppedWaiting(f'{type(e).__name__}: {e}') from e
+        raise RemoteMoverError(f'mover socket unreachable ({sock_path}): {e}') from e
     except (ConnectionRefusedError, ConnectionError, OSError) as e:
         raise RemoteMoverError(
             f'mover socket unreachable ({sock_path}): {e} '
@@ -216,25 +246,98 @@ def _http_post_unix(sock_path: str, path: str, body: bytes, timeout: int) -> Tup
             pass
 
 
+def _size(path: str) -> Optional[int]:
+    try:
+        st = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return None
+    return st.st_size if stat.S_ISREG(st.st_mode) else None
+
+
+def deadline_s(size: Optional[int]) -> float:
+    """max(1800 s, twice the time to copy *size* bytes at 5 MiB/s)."""
+    if not size or size <= 0:
+        return float(MIN_DEADLINE_S)
+    return float(max(MIN_DEADLINE_S, 2 * size / MIN_RATE_BPS))
+
+
+def wait_for_copy(tmp_c: str, final_c: str, src_size: Optional[int], label: str = '') -> str:
+    """Watch the temp and final file (container paths under /media) after the helper stopped waiting.
+
+    Success: final file present with the source size and the temp gone. With no readable source size,
+    success needs the temp gone and the final size unchanged over STABLE_POLLS polls (fail-closed
+    otherwise). Failure: the temp vanished with no final file, nothing grew for NO_GROWTH_S, or the
+    deadline passed."""
+    start = _clock()
+    limit = deadline_s(src_size)
+    last_change = start
+    last_seen: Tuple[Optional[int], Optional[int]] = (None, None)
+    seen_tmp = False
+    stable = 0
+    last_final: Optional[int] = None
+    while True:
+        tsz, fsz = _size(tmp_c), _size(final_c)
+        now = _clock()
+        if tsz is not None:
+            seen_tmp = True
+        if tsz is None and fsz is not None:
+            if src_size is not None:
+                if fsz == src_size:
+                    logger.info('Remote mover: copy finished after helper stopped waiting (%s)', label)
+                    return 'copied'
+                raise RemoteMoverError(f'copy landed with the wrong size ({fsz} != {src_size}): {label}')
+            stable = stable + 1 if (fsz == last_final and fsz > 0) else (1 if fsz > 0 else 0)
+            last_final = fsz
+            if stable >= STABLE_POLLS:
+                logger.info('Remote mover: copy finished (size stable, source size unknown) (%s)', label)
+                return 'copied'
+        elif tsz is None and fsz is None and seen_tmp:
+            raise RemoteMoverError(f'copy stopped: temp file gone and no final file ({label})')
+        if (tsz, fsz) != last_seen:
+            last_seen = (tsz, fsz)
+            last_change = now
+        if now - last_change >= NO_GROWTH_S:
+            raise RemoteMoverError(f'copy stopped: no progress for {NO_GROWTH_S}s ({label})')
+        if now - start >= limit:
+            raise RemoteMoverError(f'copy did not finish within {int(limit)}s ({label})')
+        _sleep(POLL_S)
+
+
 def transfer(src_container: str, dest_container: str, mode: str = 'cp') -> str:
     """POST /move over the host Unix socket. Prefer mode=cp (keeps seeding).
 
+    v324: the helper copies to *tmp* (a full path in the destination folder, named by
+    library_mover.partial_name()) and renames into place without replacing. When the helper stops
+    waiting (socket timeout, HTTP 5xx, rc 124) the copy is watched through /media instead of failing.
+
     Returns 'copied' / 'moved' / 'exists'.
     """
+    from app import library_mover
     cfg = config()
     op = 'mv' if mode in ('mv', 'move') else 'cp'
     rsrc = to_remote(src_container, cfg)
     rdest = to_remote(dest_container, cfg)
     _assert_remote_bounds(rsrc, rdest, cfg)
-    # Locked Ops JSON: field name is "mode" (not "op").
-    payload = json.dumps({'mode': op, 'src': rsrc, 'dest': rdest}).encode()
-    status, raw = _http_post_unix(str(cfg['sock']), '/move', payload, int(cfg['timeout']))
+    tname = library_mover.partial_name()
+    rtmp = posixpath.join(posixpath.dirname(rdest), tname)
+    tmp_c = os.path.join(os.path.dirname(dest_container), tname)
+    src_size = _size(src_container)
+    label = f'{op} {rsrc} -> {rdest}'
+    # Locked Ops JSON: field name is "mode" (not "op"); v324 adds "tmp" (full path, same folder as dest).
+    payload = json.dumps({'mode': op, 'src': rsrc, 'dest': rdest, 'tmp': rtmp}).encode()
+    try:
+        status, raw = _http_post_unix(str(cfg['sock']), '/move', payload, int(cfg['timeout']))
+    except _HelperStoppedWaiting as e:
+        logger.warning('Remote mover: helper stopped waiting (%s); watching the copy (%s)', e, label)
+        return _watched(wait_for_copy(tmp_c, dest_container, src_size, label), op)
     try:
         data = json.loads(raw) if raw.strip() else {}
     except json.JSONDecodeError as e:
+        if status >= 500:
+            logger.warning('Remote mover: HTTP %s with no JSON; watching the copy (%s)', status, label)
+            return _watched(wait_for_copy(tmp_c, dest_container, src_size, label), op)
         raise RemoteMoverError(
-            f'host mover bad JSON HTTP {status}: {raw[:200]!r} '
-            f'({op} {rsrc} -> {rdest})') from e
+            f'host mover bad JSON HTTP {status}: {raw[:200]!r} ({label})') from e
 
     # PM ALIGN response: {"ok": bool, "rc": N, "output": "..."}
     ok = data.get('ok')
@@ -247,20 +350,25 @@ def transfer(src_container: str, dest_container: str, mode: str = 'cp') -> str:
 
     if status == 409 or rc_i == 17 or 'exist' in output.lower():
         return 'exists'
+    if rc_i in SCRIPT_FAIL_RCS:
+        raise RemoteMoverError(f'host mover failed HTTP {status} rc={rc_i}: {output or "script error"} ({label})')
+    # A 5xx carrying a helper verdict (rc) is final; a bare 5xx (no rc) means the helper stopped waiting.
+    if rc_i == RC_TIMEOUT or (status >= 500 and 'rc' not in data and ok is not True):
+        logger.warning('Remote mover: helper stopped waiting (HTTP %s rc=%s); watching the copy (%s)',
+                       status, rc_i, label)
+        return _watched(wait_for_copy(tmp_c, dest_container, src_size, label), op)
     if ok is False or status >= 400 or rc_i != 0:
         err = output or f'HTTP {status} rc={rc_i}'
-        if 'exist' in err.lower():
-            return 'exists'
-        raise RemoteMoverError(
-            f'host mover failed HTTP {status} rc={rc_i}: {err} '
-            f'({op} {rsrc} -> {rdest})')
+        raise RemoteMoverError(f'host mover failed HTTP {status} rc={rc_i}: {err} ({label})')
     if ok is True or (status == 200 and rc_i == 0):
         how = 'moved' if op == 'mv' else 'copied'
         logger.info('Remote mover via unix socket: %s %s -> %s', op, rsrc, rdest)
         return how
-    raise RemoteMoverError(
-        f'host mover unexpected response HTTP {status}: {raw[:200]!r} '
-        f'({op} {rsrc} -> {rdest})')
+    raise RemoteMoverError(f'host mover unexpected response HTTP {status}: {raw[:200]!r} ({label})')
+
+
+def _watched(result: str, op: str) -> str:
+    return 'moved' if (result == 'copied' and op == 'mv') else result
 
 
 def health(cfg: Optional[Dict[str, object]] = None) -> bool:

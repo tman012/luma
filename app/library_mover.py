@@ -828,18 +828,26 @@ def _ensure_folder(rfd: int, lib_root: str, folder: str, owner) -> Tuple[int, bo
 
 
 PARTIAL_SUFFIX = '.luma-partial'
+PARTIAL_RE = re.compile(r'^\.luma-[0-9a-f]{16}\.luma-partial$')
+
+
+def partial_name() -> str:
+    """v324: the one temp name for a copy in progress, '.luma-<hex16>.luma-partial', written in the same
+    folder as the final file. Never derived from the title. Shared by the local copy (_new_partial) and
+    the remote hop (remote_mover.transfer), so both look exactly the same on disk."""
+    import secrets
+    return f'.luma-{secrets.token_hex(8)}{PARTIAL_SUFFIX}'
 
 
 def _new_partial(dfd: int, name: str) -> Tuple[str, int, Tuple[int, int]]:
     """(name, write fd, (dev, ino)) of a new, uniquely named partial file,
     created here (O_EXCL, never through a symlink). A partial that is already
     there belongs to someone else and is never touched."""
-    import secrets
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_NOFOLLOW | _O_CLOEXEC
     for _ in range(8):
         # Hotfix (Reviewer, REQUIRED): short and fixed-length, never derived from *name*: a long final name
         # ('.<name>.<hex8>.luma-partial') no longer hits ENAMETOOLONG before the rename
-        tmp = f'.luma-{secrets.token_hex(8)}{PARTIAL_SUFFIX}'
+        tmp = partial_name()
         try:
             fd = os.open(tmp, flags, 0o600, dir_fd=dfd)
         except FileExistsError:
