@@ -94,12 +94,21 @@ const arr = <T,>(x: T[] | null | undefined): T[] => (Array.isArray(x) ? x : []);
 const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 const normHistory = (h: TtvEntry[] | null | undefined): TtvEntry[] => arr(h).filter(isObj);
 
+/** The server's defaults (app/automation/ttv.py defaults()); a field missing from a reply falls back to these. */
+export const TTV_DEFAULTS: TtvView['settings'] = {
+  enabled: true, limit: 10, profile_id: null, search_on_add: true, languages: ['en'], allow_unknown_language: true,
+  skip_plex: true, skip_if_plex_unreadable: true, no_readd: true, page: 1, path_id: null, monitor: 'all', require_tvdb: true,
+  one_season_only: true, interval_hours: 2, when_busy: 'skip', history_kept: 200,
+} as TtvView['settings'];
+const known = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).filter(([k, x]) => x !== undefined && (x !== null || k === 'profile_id' || k === 'path_id')));
+
 export function normTtv(v: unknown): TtvView | null {
   if (!isObj(v) || !isObj(v.settings) || !isObj(v.status)) return null;
   const d = v as unknown as TtvView;
+  const settings = { ...TTV_DEFAULTS, ...known(d.settings as unknown as Record<string, unknown>) } as TtvView['settings'];
   return { ...d, profiles: arr(d.profiles), libraries: arr(d.libraries), monitor: arr(d.monitor),
     languages: arr(d.languages), history: normHistory(d.history),
-    settings: { ...d.settings, languages: arr(d.settings.languages) } };
+    settings: { ...settings, languages: arr(settings.languages) } };
 }
 
 export function TrendingTvSettings({ wide = true }: { wide?: boolean } = {}) {

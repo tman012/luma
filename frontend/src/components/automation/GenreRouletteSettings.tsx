@@ -86,7 +86,8 @@ export function Field({ id, label, children }: { id: string; label: string; chil
 export function NumField({ id, value, onCommit, step = 1, bad, disabled, decimals = 0, grouped = false, style }: {
   id: string; value: number; onCommit: (n: number) => void; step?: number; bad?: boolean; disabled?: boolean; decimals?: number; grouped?: boolean; style?: CSSProperties;
 }) {
-  const show = (n: number) => (grouped ? n.toLocaleString('en-US') : decimals ? n.toFixed(decimals) : String(n));
+  // A missing value (undefined, null, NaN) shows an empty field, never the text 'undefined'.
+  const show = (n: number) => (typeof n !== 'number' || !Number.isFinite(n) ? '' : grouped ? n.toLocaleString('en-US') : decimals ? n.toFixed(decimals) : String(n));
   const [draft, setDraft] = useState(show(value));
   useEffect(() => setDraft(show(value)), [value]); // eslint-disable-line react-hooks/exhaustive-deps
   const commit = () => {
