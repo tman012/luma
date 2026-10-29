@@ -166,7 +166,7 @@ def test_picks_by_profile_size_priority_and_groups_and_grabs_once(mv):
     # blocklisted; tracker priority (IPT first) beats the indexer's FLUX with more seeders
     assert [x['release_title'] for x in g] == ['Dune.Part.Two.2024.1080p.WEB-DL.DDP5.1-NTb']
     assert g[0]['tmdb_id'] == 693134 and g[0]['state'] == 'grabbed' and len(g[0]['hash']) == 40
-    assert mv.q.torrents[0]['category'] == mv.q.torrents[0]['tags'] == 'movie'
+    assert mv.q.torrents[0]['category'] == mv.q.torrents[0]['tags'] == 'luma-test'   # v324b: the test tag, not 'movie'
     assert _scan()['next_search_at'] is None
     mv.calls.clear()
     assert sc.run_due(NOW + 3600)['movies'] == 0 and sc.feed(NOW + 3600)['grabbed'] == 0     # never twice

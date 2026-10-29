@@ -198,7 +198,11 @@ class _HelperStoppedWaiting(Exception):
 
 
 # v324: socket errors that mean "the helper stopped waiting", not "the copy never started".
-_KEEP_WAITING_ERRORS: Tuple[type, ...] = (socket.timeout, TimeoutError)
+# v324b: an empty reply (helper restarted under KillMode=process while cp keeps running on .72) or a
+# reset/broken connection after the request went out is the same as a timeout: keep watching the copy.
+_KEEP_WAITING_ERRORS: Tuple[type, ...] = (
+    socket.timeout, TimeoutError, http.client.RemoteDisconnected, http.client.BadStatusLine,
+    http.client.IncompleteRead, ConnectionResetError, BrokenPipeError, ConnectionAbortedError)
 
 # v324: watching the copy through /media after the helper stopped waiting.
 POLL_S = 15
@@ -217,12 +221,12 @@ def _http_post_unix(sock_path: str, path: str, body: bytes, timeout: int) -> Tup
     sent = False
     try:
         conn.connect()
+        sent = True          # connected: from here a drop may leave a copy running on .72
         conn.request(
             'POST', path, body=body,
             headers={'Content-Type': 'application/json', 'Content-Length': str(len(body)),
                      'Accept': 'application/json', 'Host': 'localhost'},
         )
-        sent = True
         resp = conn.getresponse()
         raw = resp.read().decode() or ''
         return resp.status, raw

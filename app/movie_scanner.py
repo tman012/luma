@@ -13,7 +13,7 @@ Every TICK_S, when LUMA_INSTANCE is test and Settings > Movies monitoring is on 
   * grab: the best release by the movie's profile (allowed qualities in order, MB/min limits by TMDB runtime),
     then tracker priority, preferred groups (empty: ranking unchanged), PROPER, freeleech, seeders; the
     blocklist is skipped. Sent through TV's download client path (tv_grab.fetch_link, the same scoped
-    qBittorrent add) with the movie category and tag ('movie'; LUMA_MOVIE_CATEGORY). Recorded in movies.db
+    qBittorrent add) with the test install's category and tag (v324: qbit_owner.tag_name(), 'luma-test'). Recorded in movies.db
     movie_grabs; a movie with a grab is never grabbed again.
 
 Only test's own watchlist (movies.db) is read; Radarr is never read or written. Roulette, 4K and Franchise
@@ -46,8 +46,8 @@ MOVIE_CATEGORIES = [2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060, 2070, 2080]
 SECTION = 'movies'
 AUTO_PURPOSE = 'backlog'            # search_log's label for an automatic movie search (guard purpose: 'tv')
 JOB = 'movie_grab'                  # the instance job for a movie add on test (instance.scoped_add)
-CATEGORY_ENV = 'LUMA_MOVIE_CATEGORY'              # the same name piece 4's import watches
-DEFAULT_CATEGORY = 'movie'
+CATEGORY_ENV = 'LUMA_MOVIE_CATEGORY'              # v324: no longer read for grabs (legacy import watch only)
+DEFAULT_CATEGORY = 'movie'                         # v324: legacy name; grabs now use qbit_owner.tag_name()
 TZ = ZoneInfo('America/New_York')
 ACTIVE = ('grabbed', 'importing', 'imported')    # movie_grabs states; 'failed' may be grabbed again
 NO_TRACKERS = 'No movie trackers are on'
@@ -88,7 +88,11 @@ def enabled() -> bool:
 
 
 def category() -> str:
-    return (os.environ.get(CATEGORY_ENV) or '').strip() or DEFAULT_CATEGORY
+    """v324: the qBittorrent category/tag every movie grab (watchlist and Genre Roulette) is added under:
+    the test install's own tag (qbit_owner.tag_name(), 'luma-test'), the same one normal luma-test movie
+    grabs carry, so the importer sees it. Never a library media_category ('movie')."""
+    from app import qbit_owner
+    return qbit_owner.tag_name()
 
 
 # ------------------------------------------------------------------ trackers and profiles
