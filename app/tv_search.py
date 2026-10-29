@@ -1464,6 +1464,7 @@ def feed(now: float) -> Dict[str, int]:
     """The recent-releases feed: each TV tracker's newest TV releases (see feed_due); picks for
     any wanted episode are grabbed."""
     out = {'trackers': 0, 'grabbed': 0}
+    claimed: set = set()       # episodes a grab reached qBittorrent for this run (no second tracker regrabs them)
     for cfg in trackers():
         key = f"tv_feed:{cfg['id']}"
         if not feed_due(cfg, now):
@@ -1489,11 +1490,17 @@ def feed(now: float) -> Dict[str, int]:
                 hits.setdefault(sid, []).append(it)
         for sid, its in hits.items():
             with tv_store.connect() as conn:
-                want = wanted(conn, sid)     # v253: every wanted episode, however long ago it aired
+                want = [e for e in wanted(conn, sid) if e['id'] not in claimed]   # v253: however long ago it aired
                 blocked = {r['release_title'] for r in conn.execute('SELECT release_title FROM blocklist WHERE series_id = ?', (sid,))}
+            if not want:
+                continue
             for c in choose(candidates(its, shows[sid], want, blocked)):
+                if claimed.intersection(c['covers']):
+                    continue
                 season = next((e['season_number'] for e in want if e['id'] == c['covers'][0]), None)
                 g = tv_grab.grab(c['item'], sid, season, c['covers'], 'auto', now)
+                if g.get('ok') or not (g.get('blocked') or g.get('client')):
+                    claimed.update(c['covers'])
                 if g.get('ok'):
                     out['grabbed'] += 1
                     with tv_store.write() as conn:

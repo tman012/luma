@@ -659,7 +659,11 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
                     except Exception:                          # noqa: BLE001 - reconcile() repairs it next pass
                         logger.exception('TV import: %s imported, grab row not updated', t.get('name'))
                     try:
-                        _notify_imported(res)
+                        files = res.get('files') or []
+                        if files and all((f or {}).get('how') == 'exists' for f in files):
+                            logger.info('TV import: %s added nothing new, no push', t.get('name'))
+                        else:
+                            _notify_imported(res)
                     except Exception:                          # noqa: BLE001 - notify never fails the import
                         logger.exception('TV import: notify failed for %s', t.get('name'))
                 except mover.InsufficientSpace as e:
