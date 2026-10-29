@@ -318,13 +318,23 @@ describe('v243 A1: the top bar opens from a bare chevron', () => {
     fireEvent.pointerDown(screen.getByTestId('outside'));
     expect(bar()).toBeNull();
   });
-  it('on the test install the buttons do nothing (no such pages)', () => {
+  it('on the test install Watchlist, Library, Explore do nothing (no such pages)', () => {
     render(<HomeSearchR3 />);
     fireEvent.click(screen.getByTestId('a1-chevron'));
     const before = window.location.pathname;
-    fireEvent.click(screen.getByRole('button', { name: 'Watchlist' }));
-    expect(window.location.pathname).toBe(before);
-    expect(bar()).toBeTruthy();
+    for (const name of ['Watchlist', 'Library', 'Explore']) {
+      fireEvent.click(screen.getByRole('button', { name }));
+      expect(window.location.pathname).toBe(before);
+      expect(bar()).toBeTruthy();
+    }
+  });
+  it('on the test install TV Calendar goes to /settings/tv and closes the bar', () => {
+    render(<HomeSearchR3 />);
+    fireEvent.click(screen.getByTestId('a1-chevron'));
+    fireEvent.click(screen.getByRole('button', { name: 'TV Calendar' }));
+    expect(window.location.pathname).toBe('/settings/tv');
+    expect(bar()).toBeNull();
+    window.history.pushState({}, '', '/');
   });
   it('outside the test install they go to /watchlist, /browse, /explore and /settings/tv', () => {
     delete window.__LUMA_MINIMAL__;

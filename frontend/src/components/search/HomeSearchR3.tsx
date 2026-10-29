@@ -171,11 +171,11 @@ export function HomeSearchR3() {
     return () => { document.removeEventListener('keydown', onKeyDoc); document.removeEventListener('pointerdown', onDown); };
   }, [shown, closeBar]);
   const go = (path: string) => {
-    if (isMinimal()) return;
+    if (isMinimal() && !path.startsWith('/settings')) return;
     closeBar();
     window.history.pushState({}, '', path);
     window.dispatchEvent(new PopStateEvent('popstate'));
-  };   // :5002 has none of these pages
+  };   // minimal: Watchlist/Library/Explore have no routes; Settings/TV calendar does
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('home-search', { detail: { searching } }));
   }, [searching]);
