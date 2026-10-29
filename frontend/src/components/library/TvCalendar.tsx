@@ -598,7 +598,8 @@ export function etParts(airstamp: string | null | undefined): [string, string] |
 }
 
 /** v211 U3 row: the time column (bold time, muted AM/PM below) vertically centered, show and episode to the
- * right, the quality chip on the far right for downloaded episodes only (QualityChip renders nothing otherwise). */
+ * right. v325 phone (Taylor): no quality/Downloaded chip and no check; the green/red left edge (Stripe, same
+ * STATE_COLOR as the desktop week cards) is the only got-it indicator. */
 function U3Row({ e, today }: { e: CalEpisode; today: Day }) {
   const st = episodeState(e, today);
   const open = useOpenEpisode(e);
@@ -607,8 +608,9 @@ function U3Row({ e, today }: { e: CalEpisode; today: Day }) {
   return (
     <div data-testid="tv-agenda-row" data-state={st} data-monitored={mon ? 'true' : 'false'} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
       className={`tv-u3-row ${open.className || ''}`.trim()}
-      style={{ cursor: open.onClick ? 'pointer' : undefined, display: 'flex', alignItems: 'center', gap: 12, minHeight: 82, padding: '10px 16px 10px 12px', boxSizing: 'border-box',
+      style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 12, minHeight: 82, padding: '10px 16px 10px 12px', boxSizing: 'border-box',
         borderRadius: 12, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
+      <Stripe color={STATE_COLOR[st]} w={3} />
       <span data-testid="tv-u3-time" style={{ flex: 'none', width: 50, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', alignSelf: 'center', opacity: mon ? 1 : DIM }}>
         {t && <span style={{ fontSize: 16, fontWeight: 700, color: W95, lineHeight: '20px' }}>{t[0]}</span>}
         {t && <span style={{ fontSize: 13, color: W50, lineHeight: '16px' }}>{t[1]}</span>}
@@ -617,7 +619,6 @@ function U3Row({ e, today }: { e: CalEpisode; today: Day }) {
         <span data-testid="tv-card-show" style={{ fontSize: 17, fontWeight: 600, color: W95, lineHeight: '22px' }}>{e.show}</span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span data-testid="tv-card-title" style={{ ...one, flex: 1, minWidth: 0, fontSize: 14, color: W70 }}>{epLine(e)}</span>
-          <QualityChip e={e} />
         </span>
       </span>
     </div>

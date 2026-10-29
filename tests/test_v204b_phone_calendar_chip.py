@@ -18,7 +18,9 @@ def test_sheet_reads_luma_calendar_not_sonarr():
     assert '<TvCalendar today={today} week={week} onWeek={setWeek} toolbar={false} phone />' in SHEET
     assert 'const phone = forcePhone || isPhone;' in CAL
     assert '<DayHeader day={day} today={today} onStep={step} />' in CAL
-    assert CAL.count('<QualityChip e={e}') >= 2 and "if (!e.downloaded) return null;" in CAL and "{e.quality || 'Downloaded'}" in CAL
+    # v325 (Taylor): phone rows (U3Row) drop the Q2a chip; the green/red left edge is the only got-it indicator
+    u3 = CAL[CAL.index('function U3Row('):]
+    assert '<QualityChip' not in u3 and '<Stripe color={STATE_COLOR[st]} w={3} />' in u3
 
 
 def test_tap_opens_e2_episode_page():

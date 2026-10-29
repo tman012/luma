@@ -11,7 +11,7 @@ describe('v211 U3 phone rows', () => {
     expect(etParts('2026-10-19T01:00:00Z')).toEqual(['9:00', 'PM']);
     expect(etParts(null)).toBeNull();
   });
-  it('time column centered, no T2 headers, chip only when downloaded', () => {
+  it('time column centered, no T2 headers, no chip (v325: left edge is the got-it indicator)', () => {
     render(<PhoneDay day={'2026-10-18' as Day} today={'2026-10-18' as Day} eps={[
       ep({ episode_id: 1, airstamp: '2026-10-19T01:00:00Z', downloaded: true, quality: '2160p WEB-DL' }),
       ep({ episode_id: 2, show: 'Tracker', airstamp: '2026-10-19T01:00:00Z', downloaded: false, quality: '1080p WEB' }),
@@ -25,9 +25,7 @@ describe('v211 U3 phone rows', () => {
     expect(col.style.alignSelf).toBe('center');
     expect(rows[0]!.style.alignItems).toBe('center');
     expect(col.textContent).toBe('9:00PM');
-    expect(within(rows[0]!).getByTestId('tv-quality-chip').textContent).toBe('2160p WEB-DL');
-    expect(within(rows[1]!).queryByTestId('tv-quality-chip')).toBeNull();
+    expect(screen.queryAllByTestId('tv-quality-chip')).toHaveLength(0);   // v325: no quality/Downloaded chip on phone rows
     expect(within(rows[2]!).getByTestId('tv-u3-time').textContent).toBe('');
-    expect(within(rows[2]!).getByTestId('tv-quality-chip').textContent).toBe('Downloaded');   // unknown quality
   });
 });
