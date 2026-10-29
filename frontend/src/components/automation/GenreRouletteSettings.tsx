@@ -36,7 +36,15 @@ export const grCss = `
 .gr-chip:hover{border-color:rgba(255,255,255,.3)!important}
 .gr-hist:hover{background:rgba(255,255,255,.04)}
 .gr-step:hover{color:#fff!important}
-@media (max-width:899px){.gr-grid{grid-template-columns:minmax(0,1fr)}}
+.gr-grid.gr-hgrid{align-items:stretch}
+.gr-hpanel{display:flex;flex-direction:column;min-height:0}
+.gr-hbox{flex:1 1 auto;min-height:176px;position:relative}
+.gr-hscroll{position:absolute;inset:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
+.gr-hscroll::-webkit-scrollbar{display:block;width:6px}
+.gr-hscroll::-webkit-scrollbar-track{background:transparent}
+.gr-hscroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:3px}
+.gr-hscroll::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.28)}
+@media (max-width:899px){.gr-grid{grid-template-columns:minmax(0,1fr)}.gr-hbox{position:static;min-height:0}.gr-hscroll{position:static;max-height:360px}}
 @media (max-width:599px){.gr-f4,.gr-f3{grid-template-columns:repeat(2,minmax(0,1fr))}.gr-head{flex-wrap:wrap}.gr-actions{width:100%;justify-content:flex-end}}
 `;
 
@@ -276,7 +284,7 @@ function StatusPanel({ status, history }: { status: GrStatus; history: GrRun[] }
   const [open, setOpen] = useState<Record<number, boolean>>({});
   const toggle = (id: number) => setOpen(cur => ({ ...cur, [id]: !cur[id] }));
   return (
-    <section aria-label="Status" data-testid="gr-status" style={{ ...panel, padding: '16px 16px 8px' }}>
+    <section aria-label="Status" data-testid="gr-status" className="gr-hpanel" style={{ ...panel, padding: '16px 16px 8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: W95 }}>Status</h3>
         <span data-testid="gr-state" style={{ fontSize: 12, color: state.color }}>● {state.text}</span>
@@ -290,7 +298,7 @@ function StatusPanel({ status, history }: { status: GrStatus; history: GrRun[] }
         ))}
       </div>
       <h4 style={group}>History</h4>
-      <div role="list" data-testid="gr-history">
+      <div className="gr-hbox"><div role="list" data-testid="gr-history" className="gr-hscroll">
         {rows.length === 0 && <div style={{ padding: '12px 0', fontSize: 13, color: W50 }}>No runs yet</div>}
         {rows.map(row => {
           const isOpen = !!open[row.runId];
@@ -327,7 +335,7 @@ function StatusPanel({ status, history }: { status: GrStatus; history: GrRun[] }
             </div>
           );
         })}
-      </div>
+      </div></div>
     </section>
   );
 }
@@ -445,7 +453,7 @@ export function GenreRouletteSettings({ wide = true }: { wide?: boolean } = {}) 
       </section>
       {error && <div role="alert" style={{ fontSize: 13, color: RED }}>{error}</div>}
 
-      <div className="gr-grid">
+      <div className="gr-grid gr-hgrid">
         <section aria-label="Settings" style={{ ...panel, padding: 16, display: 'flex', flexDirection: 'column', gap: 18 }}>
           <div>
             <h4 style={group}>Schedule &amp; picks</h4>

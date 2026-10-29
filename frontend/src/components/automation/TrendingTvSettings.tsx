@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { FONT } from '@/components/start/StartUI';
 import { Select, Toggle, SAVE_ERROR, primaryBtn, tvEditCss } from '@/components/library/TvEdit';
 import { ADD_MONITOR, type MonitorOption } from '@/components/library/tvCalendarApi';
-import { Field, LANGUAGES, NumField, Stepper, stamp, when } from './GenreRouletteSettings';
+import { Field, LANGUAGES, NumField, Stepper, grCss, stamp, when } from './GenreRouletteSettings';
 import { loadTtv, loadTtvLive, runTtv, saveTtv, type TtvCounts, type TtvEntry, type TtvPatch, type TtvStatus, type TtvView } from './trendingTvApi';
 
 const W50 = 'rgba(255,255,255,0.5)';
@@ -61,7 +61,7 @@ function StatusPanel({ status, history }: { status: TtvStatus; history: TtvEntry
     ['Shows', r?.error || counts(r), r?.error ? '' : skips(r)],
   ];
   return (
-    <section aria-label="Status" data-testid="ttv-status" style={{ ...panel, padding: '16px 16px 8px' }}>
+    <section aria-label="Status" data-testid="ttv-status" className="gr-hpanel" style={{ ...panel, padding: '16px 16px 8px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: W95 }}>Status</h3>
         <span data-testid="ttv-state" style={{ fontSize: 12, color: state.color }}>● {state.text}</span>
@@ -76,7 +76,7 @@ function StatusPanel({ status, history }: { status: TtvStatus; history: TtvEntry
         ))}
       </div>
       <h4 style={group}>History</h4>
-      <div role="list">
+      <div className="gr-hbox"><div role="list" data-testid="ttv-history-list" className="gr-hscroll">
         {history.length === 0 && <div style={{ padding: '12px 0', fontSize: 13, color: W50 }}>Nothing added yet</div>}
         {history.map(h => (
           <div role="listitem" key={h.id} data-testid="ttv-history" style={{ borderTop: '1px solid rgba(255,255,255,0.06)', minHeight: 44, display: 'flex', alignItems: 'center', gap: 10, padding: '0 4px', fontSize: 13 }}>
@@ -85,7 +85,7 @@ function StatusPanel({ status, history }: { status: TtvStatus; history: TtvEntry
             <span style={{ color: W70, fontSize: 12, flex: 'none' }}>{stamp(new Date(h.added_at * 1000))}</span>
           </div>
         ))}
-      </div>
+      </div></div>
     </section>
   );
 }
@@ -156,7 +156,7 @@ export function TrendingTvSettings({ wide = true }: { wide?: boolean } = {}) {
 
   return (
     <div data-testid="trending-tv" style={{ display: 'flex', flexDirection: 'column', gap: 16, fontFamily: FONT, color: W95, padding: wide ? 0 : '8px 16px 24px' }}>
-      <style>{tvEditCss}{css}</style>
+      <style>{tvEditCss}{grCss}{css}</style>
       <section className="gr-head" aria-label="Trending TV" style={{ ...panel, display: 'flex', alignItems: 'center', gap: 16, padding: '12px 16px', minHeight: 64 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
           <Toggle id="ttv-enabled" on={s.enabled} onChange={v => put({ enabled: v })} label="Trending TV" />
@@ -171,7 +171,7 @@ export function TrendingTvSettings({ wide = true }: { wide?: boolean } = {}) {
         </div>
       </section>
       {error && <div role="alert" style={{ fontSize: 13, color: RED }}>{error}</div>}
-      <div className="gr-grid">
+      <div className="gr-grid gr-hgrid">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
           <section aria-label="Schedule" style={{ ...panel, padding: 16 }}>
             <div className="gr-f3">
