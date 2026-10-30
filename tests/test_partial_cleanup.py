@@ -168,3 +168,9 @@ def test_remote_transfer_marks_its_tmp_in_flight(monkeypatch):
     with pytest.raises(rm.RemoteMoverError):
         rm.transfer('/d/a.mkv', '/media/M/a.mkv')
     assert seen['in'] is True and pc._inflight == set()
+
+
+def test_partial_name_rejects_trailing_newline():
+    from app.partial_cleanup import is_partial_name
+    assert is_partial_name('.luma-0123456789abcdef.luma-partial') is True
+    assert is_partial_name('.luma-0123456789abcdef.luma-partial\n') is False

@@ -22,7 +22,7 @@ from typing import Callable, Iterable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-PARTIAL_RE = re.compile(r'^\.luma-[0-9a-f]{16}\.luma-partial$')
+PARTIAL_RE = re.compile(r'^\.luma-[0-9a-f]{16}\.luma-partial\Z')
 DEFAULT_MAX_AGE_MIN = 60
 SWEEP_EVERY_S = 600
 SETTLE_S = 2.0
@@ -35,7 +35,7 @@ _inflight: set = set()
 
 
 def is_partial_name(name: str) -> bool:
-    return bool(PARTIAL_RE.match(name or ''))
+    return bool(PARTIAL_RE.fullmatch(name or ''))
 
 
 def max_age_s() -> float:
