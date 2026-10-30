@@ -67,8 +67,6 @@ export const PROPER_WORDS = new Set(['Alfred', 'Plex', 'Radarr', 'Sonarr', 'Kodi
 export const PROD_MATCHED = ['Add to Watchlist', 'In Watchlist', 'Select Quality', 'Upgrade Quality', 'Watchlist', 'Cast & Reviews', 'Remove from Watchlist', 'Remove from Watchlist?',
   // v215 PM ruling: the C2 palette's collapsed 'Find More' button is prod 1b4ea74's KioskSearch label as is
   'Find More',
-  // v325 Taylor copy ruling: the episode status 'Downloaded' reads 'In Library' (Title Case as Taylor wrote it)
-  'In Library',
   // v219 Designer GO: PlaybackModal device status as prod 1b4ea74
   'Not Configured',
   // v261 PM ruling: text ported from prod 1b4ea74 matches prod exactly (Home row pill, Downloads Guard card title)
@@ -96,6 +94,8 @@ const prodShelf = (h: string) => /^components\/search\/SearchShelf\.tsx:\d+: "TV
 const tvMenuTerms = (h: string) => /^components\/rooms\/RoomsSettings\.tsx:\d+: "(?:Device Preferences|Turn on Network debugging)" \(\w+\)$/.test(h);
 /** v319 Taylor (11:00 PM): Connectors section headers are proper names. */
 const connectorGroups = (h: string) => /^components\/home\/ConnectorsSettings\.tsx:\d+: "(?:Media Server|Download Client|Smart Home)" \(\w+\)$/.test(h);
+/** v325 Taylor copy ruling: the episode status 'Downloaded' reads 'In Library' (her capitalization); TV status maps only. */
+const inLibrary = (h: string) => /^components\/library\/(?:TvCalendar|TvSeriesDetail|tvCalendarApi)\.tsx?:\d+: "In Library" \(Library\)$/.test(h);
 const prodRooms = (h: string) => /^components\/rooms\/(RoomsSheet|FullScreenRemote)\.tsx:\d+: (?:"(?:Nothing Playing|Friends & Family|OK \/ Select|Play \/ Pause)" \(\w+\)|.*text-\[9px\] font-semibold uppercase tracking-\[0\.15em\].*)$/.test(h);
 /** v269 PM: ActivityFeed is prod 1b4ea74 verbatim (section + origin + tracker uppercase). */
 const prodActivity = (h: string) => /^components\/activity\/ActivityFeed\.tsx:\d+: .*\buppercase\b/.test(h);
@@ -206,7 +206,7 @@ describe('neutral glass chips', () => {
   });
 
   it('v174: no Title Case labels anywhere in the app', () => {
-    expect(titleCaseHits().filter((h) => !prodShelf(h) && !prodRooms(h) && !tvMenuTerms(h) && !connectorGroups(h))).toEqual([]);
+    expect(titleCaseHits().filter((h) => !prodShelf(h) && !prodRooms(h) && !tvMenuTerms(h) && !connectorGroups(h) && !inLibrary(h))).toEqual([]);
   });
 
   it('v174: the Title Case check catches new labels and keeps proper nouns and data', () => {
