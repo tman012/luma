@@ -179,12 +179,12 @@ def test_v10_sets_the_old_v9_labels_back_to_none_and_changes_nothing_else(tv_env
     raw_before = {r['id']: dict(r) for r in c.execute('SELECT * FROM series')}
     c.close()
     assert old != 'none'
-    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 13
+    assert tv_store.schema_version() == tv_store.SCHEMA_VERSION == 14
     got = {r['id']: r['monitor'] for r in rows('SELECT id, monitor FROM series')}
     assert got == {1: 'future', 2: 'none', 3: 'none', 4: 'future', 5: 'future'}
     after = {r['id']: dict(r) for r in rows('SELECT * FROM series')}
     for sid, r in raw_before.items():                    # labels only: every other column as it was
-        assert {k: v for k, v in after[sid].items() if k not in ('monitor', 'banner_url')} == {k: v for k, v in r.items() if k != 'monitor'}  # v13 adds banner_url
+        assert {k: v for k, v in after[sid].items() if k not in ('monitor', 'banner_url', 'banner_checked_at')} == {k: v for k, v in r.items() if k != 'monitor'}  # v13 banner_url, v14 banner_checked_at
 
 
 def test_v10_never_changes_monitoring_or_episode_states(tv_env):  # noqa: F811
@@ -196,7 +196,7 @@ def test_v10_never_changes_monitoring_or_episode_states(tv_env):  # noqa: F811
               sorted(tuple(r) for r in c.execute('SELECT series_id, season_number, episode_number, monitored FROM episodes')),
               sorted(tuple(r) for r in c.execute('SELECT series_id, season_number, monitored FROM seasons')))
     c.close()
-    assert tv_store.schema_version() == 13
+    assert tv_store.schema_version() == 14
     s, e, x = _state()
     assert sorted((k, *v) for k, v in s.items()) == before[0] and e == before[1] and x == before[2]
     assert rows('SELECT monitor FROM series WHERE id = 1')[0]['monitor'] == 'future'      # :5002's shows stay Future
@@ -205,7 +205,7 @@ def test_v10_never_changes_monitoring_or_episode_states(tv_env):  # noqa: F811
 def test_v10_backs_up_first_and_is_idempotent(tv_env):  # noqa: F811
     import stat
     p = _v9_db(FIVE002)
-    assert tv_store.schema_version() == 13
+    assert tv_store.schema_version() == 14
     bak = f'{p}.bak-v9'
     assert os.path.exists(bak) and stat.S_IMODE(os.stat(bak).st_mode) == 0o600 and tv_store._verified(bak, 9)
     import sqlite3
@@ -215,11 +215,11 @@ def test_v10_backs_up_first_and_is_idempotent(tv_env):  # noqa: F811
     with tv_store.write() as conn:                       # running it again changes nothing
         assert tv_store.repair_v9_labels(conn) == 0
     tv_store._ready.clear()                              # nor does another open
-    assert tv_store.schema_version() == 13 and rows("SELECT monitor FROM series WHERE id = 2")[0]['monitor'] == 'none'
+    assert tv_store.schema_version() == 14 and rows("SELECT monitor FROM series WHERE id = 2")[0]['monitor'] == 'none'
 
 
 def test_v10_on_a_fresh_or_already_correct_db_changes_nothing(tv_env):  # noqa: F811
     _v9_db(FIVE002[:1] + ["INSERT INTO episodes (series_id, season_number, episode_number, air_date, monitored)"
                           " VALUES (1, 1, 1, '2099-01-01', 1)"])
-    assert tv_store.schema_version() == 13
+    assert tv_store.schema_version() == 14
     assert rows('SELECT monitor, monitored FROM series') == [{'monitor': 'future', 'monitored': 1}]

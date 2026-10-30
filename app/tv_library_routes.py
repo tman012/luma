@@ -198,4 +198,6 @@ def tv_show_add():
     if not out['ok']:
         extra = {'series_id': out['series_id']} if out.get('series_id') else {}
         return _no_store(jsonify({'error': out['error'], **extra}), out.get('status', 400))
+    from app import tv_banners                 # the new show's banner: the backfill runs soon
+    tv_banners.poke()
     return _no_store(jsonify({'ok': True, 'series_id': out['series_id']}), 201)

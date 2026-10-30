@@ -387,5 +387,7 @@ def _forget_air_times() -> None:
     try:
         from app import tv_airtimes
         tv_airtimes.forget()
+        from app import tv_banners
+        tv_banners.forget()
     except Exception as e:             # noqa: BLE001 - no tv.db yet: nothing to ask again
         logger.debug('Air times not reset: %s', type(e).__name__)

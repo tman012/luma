@@ -1396,6 +1396,8 @@ def _refresh_pass(only: Optional[set], first: set, repair: set) -> None:
         tv_airtimes.refresh(first=first, repair=repair, only=only)
     except Exception:                  # noqa: BLE001
         logger.exception('TV air times refresh failed')
+    from app import tv_banners            # shows scanned in without a banner: the backfill runs soon
+    tv_banners.poke()
 
 
 def refresh_on_open(first: Optional[set] = None, start: Optional[dt.date] = None, end: Optional[dt.date] = None) -> bool:
@@ -1557,6 +1559,11 @@ def start_scheduler() -> bool:
     _sched_stop.clear()
     _sched_thread = threading.Thread(target=_loop, daemon=True, name='tv-rescan')
     _sched_thread.start()
+    try:
+        from app import tv_banners        # series banners backfill (paced, background)
+        tv_banners.start()
+    except Exception as e:               # noqa: BLE001
+        logger.error('Failed to start the series banner backfill: %s', type(e).__name__)
     return True
 
 

@@ -181,7 +181,7 @@ def wanted(conn, today: Optional[str] = None) -> List[int]:
 def series_view(sid: int) -> Optional[Dict[str, Any]]:
     with tv_store.connect() as conn:
         r = conn.execute('SELECT id, title, year, tmdb_id, path_id, folder, monitored, monitor, monitor_new_seasons, monitor_specials,'
-                         ' season_folder, series_type, profile_id FROM series WHERE id = ?', (sid,)).fetchone()
+                         ' season_folder, series_type, profile_id, banner_url FROM series WHERE id = ?', (sid,)).fetchone()
         if r is None:
             return None
         seasons = [{'season': x['season_number'], 'monitored': bool(x['monitored'])} for x in conn.execute(
@@ -198,6 +198,7 @@ def series_view(sid: int) -> Optional[Dict[str, Any]]:
             'monitor_specials': bool(r['monitor_specials']), 'season_folder': bool(r['season_folder']),
             'series_type': r['series_type'], 'profile_id': r['profile_id'], 'path_id': r['path_id'], 'folder': r['folder'],
             'path': os.path.join(root, r['folder']) if root and r['folder'] else root,
+            'banner_url': r['banner_url'],          # the detail header's TheTVDB banner (None until found)
             'seasons': seasons, 'episodes': eps}
 
 

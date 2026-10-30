@@ -183,9 +183,14 @@ def maybe_sweep(now: Optional[float] = None) -> List[str]:
     t = time.time() if now is None else now
     if _last['t'] and t - _last['t'] < SWEEP_EVERY_S:
         return []
+    first = not _last['t']
     _last['t'] = t
     try:
-        return sweep(library_roots())
+        roots = list(library_roots())
+        out = sweep(roots)
+        logger.log(logging.INFO if first or out else logging.DEBUG,
+                   'Partial cleanup%s: swept %d roots, removed %d', ' (startup)' if first else '', len(roots), len(out))
+        return out
     except Exception as e:
         logger.error('Partial cleanup pass failed: %s', type(e).__name__)
         return []
