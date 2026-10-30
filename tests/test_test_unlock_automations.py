@@ -107,3 +107,21 @@ def test_fc_and_4k_threads_never_start_on_test(test_instance, monkeypatch, mod, 
     monkeypatch.setenv('LUMA_TEST_ALLOW', job)
     getattr(m, fn)()
     assert started == []
+
+
+@pytest.mark.parametrize('inst,expect', [('test', []), ('prod', ['gr'])])
+def test_legacy_radarr_roulette_thread_never_starts_on_test(monkeypatch, inst, expect):
+    """No Radarr/Sonarr on test: the legacy GR thread stays off on test even with roulette allowed and
+    LUMA_MINIMAL off; prod still starts it."""
+    from app import genre_roulette, main
+    monkeypatch.setenv('LUMA_INSTANCE', inst)
+    monkeypatch.setenv('LUMA_TEST_ALLOW', 'roulette')
+    monkeypatch.delenv('LUMA_MINIMAL', raising=False)
+    monkeypatch.setattr(instance, 'test_signs', lambda: [], raising=False)   # prod here means a real prod host
+    started = []
+    monkeypatch.setattr(genre_roulette, 'start_genre_roulette_thread', lambda: started.append('gr'))
+    try:
+        assert main._start_legacy_genre_roulette() == bool(expect)
+    finally:
+        instance.uninstall_write_guard()
+    assert started == expect

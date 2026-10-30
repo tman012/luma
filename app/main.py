@@ -644,6 +644,22 @@ def _is_reloader_parent() -> bool:
             and os.environ.get('WERKZEUG_RUN_MAIN') != 'true')
 
 
+def _start_legacy_genre_roulette():
+    """Legacy Radarr-based Genre Roulette scheduler. Taylor 2026-10-29: no Radarr/Sonarr on test, so the test
+    instance never starts it, even with roulette in LUMA_TEST_ALLOW and LUMA_MINIMAL off."""
+    try:
+        from app.genre_roulette import start_genre_roulette_thread
+        if _instance.is_test():
+            return False
+        if _instance.writes_allowed('roulette'):
+            start_genre_roulette_thread()
+            logger.info("✅ Genre Roulette scheduler started")
+            return True
+    except Exception as e:
+        logger.error(f"❌ Failed to start Genre Roulette scheduler: {e}")
+    return False
+
+
 def start_services(app_instance):
     """Initialize database, caches, and background services.
     
@@ -859,14 +875,8 @@ def start_services(app_instance):
         except Exception as e:
             logger.error(f"❌ Failed to start Movie Night scheduler: {e}")
         
-        # Genre Roulette nightly scheduler
-        try:
-            from app.genre_roulette import start_genre_roulette_thread
-            if _instance.writes_allowed('roulette'):
-                start_genre_roulette_thread()
-                logger.info("✅ Genre Roulette scheduler started")
-        except Exception as e:
-            logger.error(f"❌ Failed to start Genre Roulette scheduler: {e}")
+        # Genre Roulette nightly scheduler (legacy Radarr path; never on test)
+        _start_legacy_genre_roulette()
         
         # Franchise Completer nightly scheduler
         try:
