@@ -50,6 +50,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 import requests
 
 from app import file_management as fm
+from app import partial_cleanup
 from app import qbit_owner
 from app.paced_copy import _paced_copy
 
@@ -854,6 +855,7 @@ def _new_partial(dfd: int, name: str) -> Tuple[str, int, Tuple[int, int]]:
         except FileExistsError:
             continue
         st = os.fstat(fd)
+        partial_cleanup.register(os.path.join(os.path.realpath(_fd_path(dfd)), tmp))
         return tmp, fd, (st.st_dev, st.st_ino)
     raise OSError(errno.EEXIST, 'no free partial name')
 
@@ -934,7 +936,10 @@ def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root:
                 return 'copied' if _rename_noreplace(dfd, tmp, name) else 'exists'
             return 'copied'
         finally:
-            _unlink_ours(dfd, tmp, ident)          # only when it was not renamed into place (or the name exists)
+            try:
+                _unlink_ours(dfd, tmp, ident)      # only when it was not renamed into place (or the name exists)
+            finally:
+                partial_cleanup.unregister(os.path.join(os.path.realpath(_fd_path(dfd)), tmp))
     finally:
         os.close(sfd)
 
@@ -1349,6 +1354,7 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
 def _loop() -> None:
     logger.info('Library mover started (tag %s)', qbit_owner.tag_name())
     while True:
+        partial_cleanup.maybe_sweep()     # at startup, then every partial_cleanup.SWEEP_EVERY_S
         try:
             tick()
         except Exception as e:   # never let one bad pass end the thread

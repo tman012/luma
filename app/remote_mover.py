@@ -358,6 +358,12 @@ def transfer(src_container: str, dest_container: str, mode: str = 'cp',
     rdest = to_remote(dest_container, cfg)
     _assert_remote_bounds(rsrc, rdest, cfg)
     tmp_container = tmp_container or remote_temp_for(dest_container)
+    from app import partial_cleanup
+    with partial_cleanup.tracking(tmp_container):   # the sweep never touches a partial this call is waiting on
+        return _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_container)
+
+
+def _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_container):
     rtmp = to_remote(tmp_container, cfg)
     if os.path.dirname(rtmp) != os.path.dirname(rdest):
         raise RemoteMoverError(f'temp must sit next to dest: {rtmp} vs {rdest}')
