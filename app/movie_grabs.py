@@ -120,3 +120,22 @@ def set_state(download_hash: str, state: str, path: Optional[str] = None, error:
         cur = conn.execute('UPDATE movie_grabs SET state = ?, path = COALESCE(?, path), error = ?, updated_at = ? WHERE hash = ?',
                            (state, path, error, now, h))
         return cur.rowcount > 0
+
+
+def requeue_failed(download_hash: str, expect_error: Optional[str] = None, now: Optional[float] = None) -> bool:
+    """import_reconciler: a 'failed' grab goes back to 'grabbed' (movie_import retries it next pass). Atomic:
+    only when the row is still 'failed' (and, given *expect_error*, still failed for that reason), so two
+    callers never both requeue it and an imported/importing row is never touched. True for the caller that did."""
+    try:
+        h = _hash(download_hash)
+    except ValueError:
+        return False
+    now = time.time() if now is None else now
+    with _Db() as conn:
+        if expect_error is None:
+            cur = conn.execute("UPDATE movie_grabs SET state = 'grabbed', error = NULL, updated_at = ?"
+                               " WHERE hash = ? AND state = 'failed'", (now, h))
+        else:
+            cur = conn.execute("UPDATE movie_grabs SET state = 'grabbed', error = NULL, updated_at = ?"
+                               " WHERE hash = ? AND state = 'failed' AND COALESCE(error, '') = ?", (now, h, expect_error))
+        return cur.rowcount > 0

@@ -351,6 +351,8 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
     h = tv_grab.info_hash(kind, payload)
     if not h:
         return {'ok': False, 'error': tv_grab.NO_HASH, 'link': True}
+    from app import grab_cache                 # import_reconciler re-adds a grab qBittorrent lost
+    grab_cache.save(h, kind, payload, now)
     with ms.connect() as conn:
         if conn.execute('SELECT 1 FROM movie_blocklist WHERE info_hash = ? OR (release_title = ? AND tmdb_id = ?)',
                         (h, item.get('title'), tmdb_id)).fetchone():

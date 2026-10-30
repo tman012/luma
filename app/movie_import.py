@@ -194,6 +194,10 @@ def copy_verified(src: str, dest: str) -> str:
         try:
             # v324: final name; temp = library_mover.partial_name() in dest dir (see remote_mover).
             return remote_mover.transfer(src, dest)
+        except remote_mover.RemoteTransient as e:
+            # a cut-off copy (helper unreachable, ssh rc 255, stall, remote reboot) is not a refusal: the
+            # grab stays 'grabbed' and the next pass tries again (it used to be 'failed' for good)
+            raise Skip(f'remote copy cut off ({e})') from e
         except remote_mover.RemoteMoverError as e:
             raise Refused(str(e)) from e
     if os.path.lexists(dest):
@@ -300,6 +304,8 @@ def import_one(t: Dict[str, Any], lib_root: str, path_map: Optional[Callable[[st
     if _rm.enabled():
         try:
             _rm.mkdir_p(dest_dir)
+        except _rm.RemoteTransient as e:
+            raise Skip(f'remote host unreachable ({e})') from e
         except _rm.RemoteMoverError as e:
             raise Refused(str(e)) from e
         try:

@@ -252,10 +252,13 @@ def test_not_finished_waits(env):
 def test_removed_from_qbit_is_dropped_after_a_few_checks(env):
     add_path('Movies', env.media / 'Movies')
     lm.track(H1, TMDB, 'Heat.1995')
+    t0 = 1_000_000.0
     for i in range(lm.ORPHAN_MISSES - 1):
-        env.tick()
+        env.tick(now=t0 + 30 * i)
         assert job(H1)['misses'] == i + 1
-    env.tick()
+    env.tick(now=t0 + 60)                       # enough passes, but not long enough: a qBit restart window
+    assert job(H1)['misses'] == lm.ORPHAN_MISSES and job(H1)['missing_since'] == t0
+    env.tick(now=t0 + lm.ORPHAN_MIN_S)
     assert job(H1) is None
 
 

@@ -297,6 +297,9 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
             return {'ok': False, 'error': str(e), 'link': True, 'status': 429, 'pending': True}
         return {'ok': False, 'error': str(e), 'link': True, 'status': getattr(e, 'status', 502)}
     h = info_hash(kind, payload)
+    if h:
+        from app import grab_cache       # import_reconciler re-adds a grab qBittorrent lost
+        grab_cache.save(h, kind, payload, now)
     if not h:
         # v171 (Tester FF-1): a magnet with no (or a short) btih is a bad link: 400 at the route, no fallback
         return {'ok': False, 'error': NO_HASH, 'link': True, 'status': 400}

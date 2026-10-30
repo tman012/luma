@@ -63,6 +63,7 @@ _start_lock = threading.Lock()
 INTERVAL_S = 30
 BATCH = 50
 ORPHAN_MISSES = 3          # checks in a row a tracked torrent may be missing
+ORPHAN_MIN_S = 1800        # ...and for at least this long: a qBit restart/reboot lists nothing for a while
 MAX_ATTEMPTS = 5           # failed transfers before a job is marked failed
 RELEASE_WAIT_S = 600       # how long a missing TMDB date may hold a job
 EXTRACT_WAIT_S = 3600      # prod: wait up to an hour for an unpack
@@ -1256,8 +1257,8 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
         _drop_job(h, f'not tagged {tag}')
         summary['dropped'] += 1
         return
-    if job.get('misses'):
-        _set_job(h, misses=0)
+    if job.get('misses') or job.get('missing_since'):
+        _set_job(h, misses=0, missing_since=None)
     if job.get('media_type') != 'movie':
         _set_job(h, state='skipped', error='tv', finished=now)
         return
@@ -1466,12 +1467,16 @@ def tick(now: Optional[float] = None, session_factory: Callable = requests.Sessi
             summary['checked'] += 1
             t = torrents.get(h)
             if t is None:
+                # A torrent qBit doesn't list is dropped only after ORPHAN_MISSES passes AND ORPHAN_MIN_S: a qBit
+                # that is restarting (or a remote host rebooting) answers 200 with an empty or partial list, and
+                # three 30 s passes used to drop the job for good (nothing re-tracks it; import_reconciler does now).
                 misses = int(job.get('misses') or 0) + 1
-                if misses >= ORPHAN_MISSES:
+                since = float(job.get('missing_since') or now)
+                if misses >= ORPHAN_MISSES and now - since >= ORPHAN_MIN_S:
                     _drop_job(h, 'removed from qBittorrent')
                     summary['dropped'] += 1
                 else:
-                    _set_job(h, misses=misses)
+                    _set_job(h, misses=misses, missing_since=since)
                 continue
             try:
                 _run_job(h, job, t, data, now, tag, list_files, summary)

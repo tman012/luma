@@ -21933,6 +21933,11 @@ try:
     _movie_import.start()       # v204: 1-min movie import pass (test only)
 except Exception:  # noqa: BLE001
     logger.exception("Movie import not started")
+try:
+    from app import import_reconciler as _import_reconciler
+    _import_reconciler.start()  # P0: completed Luma downloads that never imported are re-queued (test only)
+except Exception:  # noqa: BLE001
+    logger.exception("Import reconciler not started")
 _tv_settings.migrate_on_start()   # TV paths of earlier builds become Library path selections
 
 # TV library scan (Phase 1): TMDB key from Settings > Connectors.
