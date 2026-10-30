@@ -199,3 +199,35 @@ describe('v321 series header', () => {
     await waitFor(() => expect(screen.getByPlaceholderText('Search your shows')).toBeTruthy());
   });
 });
+
+describe('r2 (Designer NO on e799265e): Edit on the banner at phone width', () => {
+  const phoneAt390 = () => {
+    vi.stubGlobal('innerWidth', 390);
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q.includes('reduced-motion') ? false : /max-width/.test(q) && !/min-width/.test(q), media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} }));
+  };
+  it('at 390 with a banner, Edit sits inside the banner card (top right, beside the bookmark), not in the back row', async () => {
+    phoneAt390();
+    render(<TvSeriesDetail seriesId={1} wide={false} onBack={() => {}} say={() => {}} />);
+    const card = await screen.findByTestId('tv-detail-header');
+    await waitFor(() => expect(screen.getAllByTestId('tv-detail-edit')).toHaveLength(1));
+    const edit = screen.getByTestId('tv-detail-edit');
+    expect(card.contains(edit)).toBe(true);
+    const corner = screen.getByTestId('tv-detail-corner');
+    expect(corner.contains(edit)).toBe(true);
+    expect(corner.contains(screen.getByTestId('tv-detail-monitored'))).toBe(true);
+    expect(corner.style.top).toBe('9px');
+    expect(corner.style.right).toBe('9px');
+    const row = screen.queryByTestId('tv-detail-backrow');
+    if (row) expect(row.contains(edit)).toBe(false);
+  });
+  it('at 390 with no banner, there is no art box and Edit stays at the header top right (outside the hero)', async () => {
+    phoneAt390();
+    detail = { ...base(), banner_url: null };
+    render(<TvSeriesDetail seriesId={1} wide={false} onBack={() => {}} say={() => {}} />);
+    await screen.findByTestId('tv-detail-hero');
+    expect(screen.queryByTestId('tv-detail-header')).toBeNull();
+    const edits = screen.getAllByTestId('tv-detail-edit');
+    expect(edits).toHaveLength(1);
+    expect(screen.getByTestId('tv-detail-hero').contains(edits[0])).toBe(false);
+  });
+});

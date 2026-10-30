@@ -36,14 +36,21 @@ export function reducedMotion(): boolean {
   try { return !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches; } catch { return false; }
 }
 
-export function TvSeriesHero({ title, meta, facts, bannerUrl, phone, edit, flag }: {
+/** r2 (Designer NO on e799265e): Edit's inset on the banner at phone width (Designer: 9px phone inset) */
+export const EDIT_INSET = 20;
+export const EDIT_INSET_PHONE = 9;
+
+export function TvSeriesHero({ title, meta, facts, bannerUrl, phone, edit, flag, onArt }: {
   title: string; meta: string[]; facts: [string, string, string][]; bannerUrl?: string | null;
   phone: boolean; edit: ReactNode; flag: ReactNode;
+  /** r2: tells the page whether the banner is on screen, so the narrow layouts drop their own Edit when it's on the art */
+  onArt?: (banner: boolean) => void;
 }) {
   const banner = tvdbImg(bannerUrl);
   const [failed, setFailed] = useState(false);
   const useBanner = !!banner && !failed;
   const src = useBanner ? banner : null;
+  useEffect(() => { onArt?.(useBanner); }, [useBanner]); // eslint-disable-line react-hooks/exhaustive-deps
   const [ratio, setRatio] = useState(BANNER_RATIO);
   const [shown, setShown] = useState(false);
   const [animate, setAnimate] = useState(false);
@@ -75,9 +82,11 @@ export function TvSeriesHero({ title, meta, facts, bannerUrl, phone, edit, flag 
     </dl>
   );
   // Edit (and the show's bookmark) top right: on the art, or at the header's top right when there's no art (v11)
-  const corner = (inset: number) => (
+  // r2: on the banner Edit sits beside the bookmark at every width (Taylor: "Edit stays on the banner"); with no art on
+  // narrow layouts the page keeps its own Edit at the header's top right
+  const corner = (inset: number, withEdit: boolean) => (
     <div data-testid="tv-detail-corner" style={{ position: 'absolute', top: inset, right: inset, display: 'flex', alignItems: 'center', gap: 8, zIndex: 1 }}>
-      {flag}{!phone && edit}
+      {flag}{withEdit && edit}
     </div>
   );
   const mode = useBanner ? 'banner' : 'none';
@@ -94,9 +103,9 @@ export function TvSeriesHero({ title, meta, facts, bannerUrl, phone, edit, flag 
               objectFit: 'fill',
               opacity: shown ? 1 : 0, transition: fade }} />
         )}
-        {corner(phone ? 8 : 20)}
+        {corner(phone ? EDIT_INSET_PHONE : EDIT_INSET, true)}
         </section>
-      ) : corner(0)}
+      ) : corner(0, !phone)}
       {/* below the card, centered: the title, the meta line, then the fields row, then the seasons */}
       {/* v321 (Taylor via PM, 12:09 AM): with a banner the typed title is visually hidden (the banner carries the name)
           but stays the page's h1 for screen readers; the meta takes its slot */}
