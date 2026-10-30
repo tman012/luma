@@ -147,7 +147,7 @@ def test_copy_verified_and_library_mover_remote(remote_env, monkeypatch):
     src = dl / 's.mkv'
     src.write_bytes(b'data')
     seen = {}
-    def _fake(s, d, mode='cp'):
+    def _fake(s, d, mode='cp', **kw):
         seen['m'] = (s, d, mode)
         return 'copied'
     monkeypatch.setattr(rm, 'transfer', _fake)
