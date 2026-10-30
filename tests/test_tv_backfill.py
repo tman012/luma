@@ -22,7 +22,7 @@ def test_calendar_open_never_reads_shows_again_for_stills(owner, scanned, fake_t
     assert r.status_code == 200
     assert order == []
     for e in r.get_json()['episodes']:
-        assert not {'still_path', 'tvdb_image', 'backdrop_path'} & set(e)
+        assert not {'still_path', 'tvdb_image'} & set(e)          # v322: the series' banner/backdrop only (glass card art), no stills
     assert not hasattr(tv_scan, 'still_gaps')
 
 

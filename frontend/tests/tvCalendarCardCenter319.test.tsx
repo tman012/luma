@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 
 const cal = readFileSync(resolve(__dirname, '../src/components/library/TvCalendar.tsx'), 'utf8');
 const card = cal.slice(cal.indexOf('function GridCard'), cal.indexOf('export function Agenda'));
-const u3 = cal.slice(cal.indexOf('function U3Row'));
+const glass = cal.slice(cal.indexOf('function GlassCard'), cal.indexOf("/** '8:00 PM' in ET"));
 
 describe('v319 TV Calendar card centering', () => {
   it('air, show and episode line are all centered', () => {
@@ -20,13 +20,13 @@ describe('v319 TV Calendar card centering', () => {
     expect(cal).toContain('[data-testid=tv-card-show]{padding-left:28px;padding-right:28px}');
     expect(card).not.toMatch(/Poster|poster_path/);
   });
-  it('phone U3Row (Taylor 11:13 PM): time, show, episode line centered and ellipsized; stripe kept; no time column', () => {
-    expect(u3).toMatch(/data-testid="tv-u3-time" style=\{\{ \.\.\.one, textAlign: 'center'/);
-    expect(u3).toMatch(/data-testid="tv-card-show" style=\{\{ \.\.\.one, textAlign: 'center'/);
-    expect(u3).toMatch(/data-testid="tv-card-title" style=\{\{ \.\.\.one, textAlign: 'center'/);
-    expect(u3).toContain('<Stripe color={STATE_COLOR[st]} w={3} />');
-    expect(u3).not.toContain('etParts(');
-    expect(u3).not.toContain('width: 50');
+  it('v322 phone glass card (option C, replaces U3Row): time, show, episode line centered and ellipsized; a status dot, no stripe', () => {
+    expect(cal).not.toContain('function U3Row');
+    expect(glass).toContain("textAlign: 'center'");
+    expect(glass).toMatch(/data-testid="tv-card-show"[^>]*\.\.\.one/);
+    expect(glass).toMatch(/data-testid="tv-card-title"[^>]*\.\.\.one/);
+    expect(glass).toContain('data-testid="tv-glass-dot"');
+    expect(glass).not.toContain('<Stripe');
   });
   it('phone sheet has no title and no episode count line', () => {
     const sheet = readFileSync(resolve(__dirname, '../src/components/calendar/TvCalendarSheet.tsx'), 'utf8');

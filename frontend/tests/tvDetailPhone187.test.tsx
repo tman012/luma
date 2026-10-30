@@ -50,7 +50,7 @@ describe('v197 phone day header A', () => {
     expect(onStep.mock.calls).toEqual([[-1], [1]]);
     expect(screen.queryByTestId('tv-week-strip')).toBeNull();
   });
-  it('the day list has the count and no date heading; an empty day says No episodes', () => {
+  it('no count and no date heading in the day list; an empty day says No episodes', () => {
     render(<PhoneDay eps={[]} day="2026-10-18" today="2026-10-18" />);
     expect(screen.getByTestId('tv-cal-empty').textContent).toBe('No episodes');
     expect(document.querySelector('h4')).toBeNull();

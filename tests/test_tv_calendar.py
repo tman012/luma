@@ -63,9 +63,43 @@ def test_week_by_air_date_with_downloaded_flags(scanned):
     ]
     e = out['episodes'][0]
     assert set(e) == {'episode_id', 'series_id', 'tmdb_id', 'monitored', 'show', 'year', 'poster_path', 'season', 'episode', 'title',
-                      'air_date', 'airstamp', 'runtime', 'downloaded', 'quality'}   # v178: no image fields; v197 quality
+                      'air_date', 'airstamp', 'runtime', 'downloaded', 'quality',
+                      'banner_url', 'backdrop_path', 'grab'}   # v197 quality; v322 the glass card's art (no episode stills)
     assert e['poster_path'] == '/p95396.jpg' and e['title'] == 'Episode 1' and out['libraries'] == 1
     assert isinstance(e['tmdb_id'], int)                    # the card opens this show's detail
+
+
+def test_v322_calendar_carries_the_series_banner_and_backdrop(scanned):
+    with tv_store.connect() as conn:
+        conn.execute("UPDATE series SET banner_url = 'https://artworks.thetvdb.com/banners/graphical/1-g.jpg',"
+                     " backdrop_path = '/b1.jpg' WHERE title = 'Severance'")
+        conn.execute("UPDATE series SET banner_url = NULL, backdrop_path = NULL WHERE title = 'Dark'")
+        conn.commit()
+    eps = tv_calendar.calendar(D(2026, 10, 11), 7)['episodes']
+    sev = [e for e in eps if e['show'] == 'Severance']
+    dark = [e for e in eps if e['show'] == 'Dark']
+    assert sev and all(e['banner_url'].endswith('/1-g.jpg') and e['backdrop_path'] == '/b1.jpg' for e in sev)
+    assert dark and all(e['banner_url'] is None and e['backdrop_path'] is None for e in dark)   # plain glass
+
+
+def test_v322_grab_state_for_the_status_dot(scanned, monkeypatch):
+    from app import tv_monitor
+    monkeypatch.setattr(tv_monitor, '_imported', lambda h: h == 'done')
+    out = tv_calendar.calendar(D(2026, 10, 11), 7)
+    miss = [e for e in out['episodes'] if not e['downloaded']]
+    have = next(e for e in out['episodes'] if e['downloaded'])
+    a, b, c = (e['episode_id'] for e in miss[:3])
+    g = "INSERT INTO grabs (hash, series_id, episode_ids, origin, grabbed_at, state) VALUES (?, ?, ?, 'auto', ?, ?)"
+    with tv_store.connect() as conn:
+        conn.execute(g, ('dl', miss[0]['series_id'], json.dumps([a]), 2.0, 'downloading'))
+        conn.execute(g, ('old', miss[1]['series_id'], json.dumps([b]), 1.0, 'downloading'))   # older
+        conn.execute(g, ('bad', miss[1]['series_id'], json.dumps([b]), 2.0, 'failed'))        # newest decides
+        conn.execute(g, ('done', miss[2]['series_id'], json.dumps([c]), 2.0, 'importing'))    # torrent already imported
+        conn.execute(g, ('dl2', have['series_id'], json.dumps([have['episode_id']]), 2.0, 'downloading'))  # has a file
+        conn.commit()
+    got = {e['episode_id']: e for e in tv_calendar.calendar(D(2026, 10, 11), 7)['episodes']}
+    assert got[a]['grab'] == 'downloading' and got[b]['grab'] == 'failed'
+    assert got[c]['grab'] is None and got[have['episode_id']]['grab'] is None
 
 
 def test_v197_quality_is_the_linked_files_or_none(scanned):

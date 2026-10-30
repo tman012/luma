@@ -1,14 +1,15 @@
 /** Settings > TV > Calendar (v1, desktop web): the week's episodes by TMDB air
  * date as an agenda (day headers, 72px rows), capped at 720px and centered.
  * A card opens the show's detail at that episode. The week toolbar: ‹ › (and Today) on the left, the range centered. */
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ModalHostContext } from '@/contexts/ModalHostContext';
 import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
 import { Poster } from './TvImport';
+import { backdropUrl, posterUrl, tvdbImg } from '@/utils/image';
 import {
-  STATE_COLOR, STATE_HEX, STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, setEpisodeMonitored, shortDate, timeRangeParts, weekDays, weekLabel, weekStart,
+  STATE_COLOR, STATE_HEX, STATE_WORD, addDays, agendaLabel, byDay, code, sortDay, episodeState, loadCalendar, setEpisodeMonitored, shortDate, timeRangeParts, weekLabel, weekStart,
   type CalEpisode, type CalendarData, type Day, type EpisodeState,
 } from './tvCalendarApi';
 
@@ -83,18 +84,22 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, ph
   const loading = data?.key !== key && failed !== key;
   const end = addDays(week, 7);
   const eps = data?.key === key ? data.cal.episodes.filter(e => e.air_date >= week && e.air_date < end && shown(e)) : [];
+  // v322 (SPEC-fade-in): the phone list rises in on the view's first load only; paging and refetches crossfade
+  const played = useRef(false);
+  const motion: GlassMotion = played.current ? 'fade' : 'rise';
+  useEffect(() => { if (!loading && failed !== key) played.current = true; });
 
   return (
     <div data-testid="tv-calendar" style={{ fontFamily: FONT, width: '100%', containerType: 'inline-size', containerName: 'tvcal' }}>
-      {/* v301/v222: while phone is loading, PhonePlaceholder owns the week strip (no DayHeader / no desktop grid). */}
-      {phone ? (loading ? null : <DayHeader day={day} today={today} onStep={step} />) : toolbar && <WeekControls today={today} week={week} onWeek={onWeek} />}
-      <div style={{ marginTop: toolbar || phone ? 16 : 0 }}>
+      {/* v322 (TOKENS-C motion): phone keeps the day nav while loading; no placeholder cards (v301 skeletons retired) */}
+      {phone ? <DayHeader day={day} today={today} onStep={step} /> : toolbar && <WeekControls today={today} week={week} onWeek={onWeek} />}
+      <div style={{ marginTop: phone ? 18 : toolbar ? 16 : 0 }}>
         {failed === key ? (
           <div role="alert" style={emptyCard}>{"Couldn't load calendar"}</div>
         ) : loading ? (
-          phone ? <PhonePlaceholder week={week} day={day} today={today} /> : <Placeholder />
+          phone ? <div data-testid="tv-cal-loading-phone" aria-busy="true" style={{ minHeight: GLASS_CARD_MIN_H }} /> : <Placeholder />
         ) : phone ? (
-          <PhoneDay eps={eps} day={day} today={today} />
+          <PhoneDay key={`${day}/${key}`} eps={eps} day={day} today={today} motion={motion} />
         ) : (
           <>
             {heroIn ? createPortal(<WeekHero eps={eps} week={week} today={today} inRow />, heroIn) : <WeekHero eps={eps} week={week} today={today} />}
@@ -428,56 +433,6 @@ function Placeholder() {
   );
 }
 
-/** v222/v301: phone loading never paints the desktop week grid. v301 (Designer / SPEC-v187): week strip
- * without dots + 5 Home-style skeleton-shimmer cards with a neutral edge (variant-B 20-calendar-loading). */
-function PhonePlaceholder({ week, day, today }: { week: Day; day: Day; today: Day }) {
-  const days = weekDays(week);
-  const sel = days.includes(day) ? day : days.includes(today) ? today : week;
-  const dayLabel = new Date(`${sel}T12:00:00`).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-  const widths = [
-    ['70%', '50%'], ['55%', '35%'], ['80%', '60%'], ['62%', '42%'], ['74%', '54%'],
-  ] as const;
-  return (
-    <div data-testid="tv-cal-loading-phone" aria-busy="true">
-      <div data-testid="tv-cal-loading-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
-        {days.map(d => {
-          const on = d === sel;
-          const dt = new Date(`${d}T12:00:00`);
-          return (
-            <div key={d} data-testid="tv-cal-loading-chip" aria-hidden="true"
-              style={{ height: 68, minWidth: 0, borderRadius: 12, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
-                background: on ? '#3b82f6' : 'rgba(255,255,255,0.06)', color: on ? '#fff' : W95,
-                border: !on && d === today ? '1px solid #3b82f6' : '1px solid rgba(255,255,255,0.08)' }}>
-              <span style={{ fontSize: 12, fontWeight: 500, color: on ? '#fff' : W70 }}>{dt.toLocaleDateString('en-US', { weekday: 'short' })}</span>
-              <span style={{ fontSize: 17, fontWeight: 700 }}>{dt.getDate()}</span>
-              {/* SPEC-v187 loading: strip without dots — reserve the dots row height, leave empty */}
-              <span style={{ display: 'block', height: 5 }} />
-            </div>
-          );
-        })}
-      </div>
-      <div data-testid="tv-cal-loading-daylabel" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '16px 4px 8px' }}>
-        <span style={{ fontSize: 15, fontWeight: 700, color: W95 }}>{dayLabel}</span>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {widths.map(([w1, w2], i) => (
-          <div key={i} data-testid="tv-cal-loading-row" style={{ display: 'flex', borderRadius: 12, background: 'rgba(255,255,255,0.06)',
-            border: '1px solid rgba(255,255,255,0.08)', minHeight: 56, overflow: 'hidden',
-            boxShadow: 'inset 4px 0 0 rgba(255,255,255,0.14)' }}>
-            <span aria-hidden="true" style={{ width: 76, flex: 'none', padding: '14px 0 0 16px', boxSizing: 'border-box' }}>
-              <span className="skeleton-shimmer" style={{ display: 'block', width: 48, height: 12, borderRadius: 6 }} />
-            </span>
-            <span aria-hidden="true" style={{ flex: 1, minWidth: 0, padding: '12px 14px 12px 0' }}>
-              <span className="skeleton-shimmer" style={{ display: 'block', width: w1, height: 15, borderRadius: 6 }} />
-              <span className="skeleton-shimmer" style={{ display: 'block', width: w2, height: 12, borderRadius: 6, marginTop: 8 }} />
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 /** v166 (Designer): the card's time line is 12px at every width, never shrunk. v179: it is the start time
  * only ('9:00 PM', one nowrap line), so it never wraps. The show name keeps 28px on its right from 1000px,
  * where the 24px hover bookmark (4px from the edge) sits, so a wrapped name never runs under it. */
@@ -540,34 +495,175 @@ export function usePhone(): boolean {
   return m;
 }
 
-/** v197 phone calendar header A (Taylor's pick): one day at a time, ‹ and ›, "Today" or the weekday bold and centered, the date under it. */
+/** v197 phone calendar header A (Taylor's pick): one day at a time, ‹ and ›, "Today" or the weekday bold and centered, the date under it.
+ * v322 (TOKENS-C day nav): 44px #1e2025 circles with a 20px #c4c6d0 glyph, no border; 22px/700 white day, 13px/500 #adc7ff date. */
 export function DayHeader({ day, today, onStep }: { day: Day; today: Day; onStep: (delta: number) => void }) {
   const dt = new Date(`${day}T12:00:00`);
   const big = day === today ? 'Today' : dt.toLocaleDateString('en-US', { weekday: 'long' });
   const small = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  const nav: React.CSSProperties = { width: 52, height: 52, flex: 'none', borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: W95, padding: 0 };
+  const nav: React.CSSProperties = { width: 44, height: 44, flex: 'none', borderRadius: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+    background: '#1e2025', border: 'none', color: '#c4c6d0', padding: 0 };
   return (
-    <div data-testid="tv-day-header" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <button type="button" className="lp-focus tvc-glass" data-testid="tv-day-prev" aria-label="Previous day" onClick={() => onStep(-1)} style={nav}><ChevronLeftIcon size={18} /></button>
+    <div data-testid="tv-day-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+      <button type="button" className="lp-focus" data-testid="tv-day-prev" aria-label="Previous day" onClick={() => onStep(-1)} style={nav}><ChevronLeftIcon size={20} /></button>
       <div aria-live="polite" style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
-        <div data-testid="tv-day-title" style={{ fontSize: 20, fontWeight: 700, color: W95, lineHeight: '26px' }}>{big}</div>
-        <div data-testid="tv-day-date" style={{ fontSize: 15, color: W70, lineHeight: '20px' }}>{small}</div>
+        <div data-testid="tv-day-title" style={{ fontSize: 22, fontWeight: 700, color: '#fff', letterSpacing: '-0.2px', lineHeight: '28px' }}>{big}</div>
+        <div data-testid="tv-day-date" style={{ fontSize: 13, fontWeight: 500, color: GLASS.accent, letterSpacing: '0.3px', lineHeight: '18px' }}>{small}</div>
       </div>
-      <button type="button" className="lp-focus tvc-glass" data-testid="tv-day-next" aria-label="Next day" onClick={() => onStep(1)} style={nav}><ChevronIcon size={18} /></button>
+      <button type="button" className="lp-focus" data-testid="tv-day-next" aria-label="Next day" onClick={() => onStep(1)} style={nav}><ChevronIcon size={20} /></button>
     </div>
   );
 }
 
-/** The phone day list: the day's cards (v319 Taylor 11:13 PM: no episode count line; the date is in the header). */
-export function PhoneDay({ eps, day, today }: { eps: CalEpisode[]; day: Day; today: Day }) {
+/** v322 (Taylor's pick, option C minimal glass; TOKENS-C): the phone day list, one card per show and air time
+ * listing every episode (no count, no expander). No title text; the date is in the day nav. */
+export type GlassMotion = 'rise' | 'fade';
+export function PhoneDay({ eps, day, today, motion = 'fade' }: { eps: CalEpisode[]; day: Day; today: Day; motion?: GlassMotion }) {
   const list = sortDay(eps.filter(e => e.air_date === day));
-  if (!list.length) return <div data-testid="tv-cal-empty" style={{ ...emptyCard, minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No episodes</div>;
+  if (!list.length) return <><style>{glassCss}</style><div data-testid="tv-cal-empty" className="tvg-fade" style={{ ...emptyCard, minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No episodes</div></>;
   return (
-    <div data-testid="tv-cal-phone">
-      {/* v211 (Taylor's pick U3, replaces T2's air-time headers): one card per episode, a leading ET time column */}
+    <div data-testid="tv-cal-phone" data-motion={motion} className={motion === 'fade' ? 'tvg-fade' : undefined}>
+      <style>{glassCss}</style>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {list.map(e => <U3Row key={e.episode_id} e={e} today={today} />)}
+        {glassGroups(list).map((g, i) => <GlassCard key={g.key} eps={g.eps} today={today} index={i} rise={motion === 'rise'} />)}
+      </div>
+    </div>
+  );
+}
+
+/** TOKENS-C (design/tv-calendar-premium/TOKENS-C.md). */
+export const GLASS = {
+  page: '#111318', fill: 'linear-gradient(180deg, #26282d 0%, #1d1f24 100%)', border: 'rgba(255,255,255,0.07)', radius: 24,
+  glowOpacity: 0.18, glowBlur: 24, accent: '#adc7ff', ep: '#c4c6d0', list: 'rgba(17,19,24,0.55)', rule: 'rgba(255,255,255,0.06)',
+} as const;
+/** One card's reserved height while loading (16 + 30 time + 8 + 20 show + 3 + 18 episode + 16, and the hairline). */
+export const GLASS_CARD_MIN_H = 113;
+export type GlassState = 'failed' | 'missing' | 'downloading' | 'upcoming' | 'downloaded' | 'unmonitored';
+export const GLASS_DOT: Record<GlassState, string> = {
+  downloaded: '#9ad5a0', missing: '#ffb870', upcoming: '#adc7ff', downloading: '#adc7ff', unmonitored: '#8e9099', failed: '#ffb4ab',
+};
+/** The dot's screen-reader label (no visible text). */
+export const GLASS_WORD: Record<GlassState, string> = {
+  downloaded: 'Downloaded', missing: 'Missing', upcoming: 'Upcoming', downloading: 'Downloading', unmonitored: 'Unmonitored', failed: 'Failed',
+};
+/** Worst first: TOKENS-C missing > downloading > upcoming > downloaded; failed ranks above missing, unmonitored last. */
+export const GLASS_RANK: GlassState[] = ['failed', 'missing', 'downloading', 'upcoming', 'downloaded', 'unmonitored'];
+
+export function glassState(e: CalEpisode, today: Day): GlassState {
+  if (e.downloaded) return 'downloaded';
+  if (e.monitored === false) return 'unmonitored';
+  if (e.grab === 'failed') return 'failed';
+  if (e.grab === 'downloading') return 'downloading';
+  return episodeState(e, today) === 'missing' ? 'missing' : 'upcoming';
+}
+/** A group's state: the worst of its episodes. */
+export function groupState(eps: CalEpisode[], today: Day): GlassState {
+  const st = new Set(eps.map(e => glassState(e, today)));
+  return GLASS_RANK.find(s => st.has(s)) ?? 'upcoming';
+}
+
+/** The airstamp to the minute (UTC), so '…:00Z' and '…:00.000Z' group together; untimed: the air date. */
+const airMinute = (e: CalEpisode) => {
+  const t = e.airstamp ? new Date(e.airstamp) : null;
+  return t && !Number.isNaN(t.getTime()) ? t.toISOString().slice(0, 16) : `d${e.air_date}`;
+};
+/** Same series id and same air minute: one card. Cards keep the day order (air time, then title); episodes by season, episode. */
+export function glassGroups(list: CalEpisode[]): { key: string; eps: CalEpisode[] }[] {
+  const out: { key: string; eps: CalEpisode[] }[] = [];
+  const at = new Map<string, CalEpisode[]>();
+  for (const e of list) {
+    const key = `${e.series_id || e.show}@${airMinute(e)}`;
+    const g = at.get(key);
+    if (g) g.push(e); else { const eps = [e]; at.set(key, eps); out.push({ key, eps }); }
+  }
+  for (const g of out) g.eps.sort((a, b) => a.season - b.season || a.episode - b.episode);
+  return out;
+}
+
+/** The card's art: the TheTVDB banner, else the series poster, else the backdrop; null is a plain card. */
+export function glassArt(e: Pick<CalEpisode, 'banner_url' | 'backdrop_path' | 'poster_path'>): string | null {
+  return tvdbImg(e.banner_url) || (e.poster_path ? posterUrl(e.poster_path, 'w342') : null)
+    || (e.backdrop_path ? backdropUrl(e.backdrop_path, 'w780') : null);
+}
+
+const glassCss = `
+@keyframes tvgRise{from{opacity:0;transform:translateY(var(--motion-rise,6px))}to{opacity:1;transform:none}}
+@keyframes tvgFade{from{opacity:0}to{opacity:1}}
+@keyframes tvgPulse{0%,100%{opacity:1}50%{opacity:.5}}
+.tvg-rise{animation:tvgRise var(--motion-fade-dur,240ms) var(--motion-fade-ease,cubic-bezier(0.2,0,0,1)) both}
+.tvg-fade{animation:tvgFade 150ms linear both}
+.tvg-pulse{animation:tvgPulse 1.6s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.tvg-rise,.tvg-fade,.tvg-pulse{animation:none!important}.tvg-art{transition:none!important}}
+`;
+
+/** The blurred art: opacity 0 → .18 once on load; an image already cached shows at once; a failed load stays a plain card. */
+function GlassGlow({ src }: { src: string }) {
+  const ref = useRef<HTMLImageElement>(null);
+  const [on, setOn] = useState(false);
+  const [now, setNow] = useState(false);
+  useEffect(() => { if (ref.current?.complete && ref.current.naturalWidth) { setNow(true); setOn(true); } }, []);
+  return (
+    <img ref={ref} data-testid="tv-glass-art" className="tvg-art" src={src} alt="" aria-hidden="true" onLoad={() => setOn(true)} onError={() => setOn(false)}
+      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center', filter: `blur(${GLASS.glowBlur}px)`,
+        opacity: on ? GLASS.glowOpacity : 0, pointerEvents: 'none',
+        transition: now ? 'none' : 'opacity var(--motion-fade-dur, 240ms) var(--motion-fade-ease, cubic-bezier(0.2,0,0,1))' }} />
+  );
+}
+
+/** 'S03E04 · title': the code never truncates; only the title is cut off. */
+const EpLine = ({ e }: { e: CalEpisode }) => (
+  <span style={{ display: 'flex', justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
+    <span data-testid="tv-glass-code" style={{ flex: 'none', color: GLASS.accent, fontWeight: 600 }}>{code(e.season, e.episode)}</span>
+    {e.title ? <span data-testid="tv-glass-ep-title" style={{ ...one, whiteSpace: 'pre', minWidth: 0 }}>{` \u00b7 ${e.title}`}</span> : null}
+  </span>
+);
+
+function GlassRow({ e }: { e: CalEpisode }) {
+  const open = useOpenEpisode(e);
+  return (
+    <div data-testid="tv-glass-ep" title={epLine(e)} {...open}
+      style={{ cursor: open.onClick ? 'pointer' : undefined, fontSize: 13, lineHeight: '17px', color: GLASS.ep, padding: '6px 0', minWidth: 0 }}>
+      <EpLine e={e} />
+    </div>
+  );
+}
+
+function GlassCard({ eps, today, index, rise }: { eps: CalEpisode[]; today: Day; index: number; rise: boolean }) {
+  const e = eps[0]!;
+  const merged = eps.length > 1;
+  const st = groupState(eps, today);
+  const open = useOpenEpisode(e);
+  const t = etParts(e.airstamp);
+  const art = glassArt(e);
+  const label = `${GLASS_WORD[st]}: ${e.show} ${eps.map(x => code(x.season, x.episode)).join(', ')}`;
+  const delay = `min(calc(${index} * var(--motion-stagger, 30ms)), var(--motion-stagger-max, 240ms))`;
+  return (
+    <div data-testid="tv-agenda-row" data-glass="c" data-state={st} data-art={art ? 'true' : 'false'} data-merged={merged ? 'true' : 'false'}
+      aria-label={label} {...(merged ? {} : open)}
+      className={[rise ? 'tvg-rise' : '', merged ? '' : open.className || ''].filter(Boolean).join(' ') || undefined}
+      style={{ cursor: !merged && open.onClick ? 'pointer' : undefined, position: 'relative', overflow: 'hidden', isolation: 'isolate',
+        borderRadius: GLASS.radius, backgroundImage: GLASS.fill, border: `1px solid ${GLASS.border}`,
+        padding: '16px 18px', boxSizing: 'border-box', textAlign: 'center', animationDelay: rise ? delay : undefined }}>
+      {art && <GlassGlow key={art} src={art} />}
+      <span data-testid="tv-glass-dot" role="img" aria-label={GLASS_WORD[st]} className={st === 'downloading' ? 'tvg-pulse' : undefined}
+        style={{ position: 'absolute', top: 16, right: 16, width: 9, height: 9, borderRadius: '50%',
+          background: GLASS_DOT[st], boxShadow: '0 0 0 4px rgba(255,255,255,0.04)', zIndex: 1 }} />
+      <div style={{ position: 'relative' }}>
+        {t && (
+          <div data-testid="tv-glass-time" style={{ fontSize: 30, fontWeight: 300, color: '#fff', letterSpacing: '-0.5px', lineHeight: 1 }}>
+            {t[0]}<small data-testid="tv-glass-ampm" style={{ fontSize: 13, fontWeight: 600, color: GLASS.accent, marginLeft: 4, letterSpacing: '0.5px' }}>{t[1]}</small>
+          </div>
+        )}
+        <div data-testid="tv-card-show" title={e.show} style={{ ...one, fontSize: 16, fontWeight: 700, lineHeight: '20px', color: '#fff', marginTop: t ? 8 : 0, padding: '0 16px' }}>{e.show}</div>
+        {merged ? (
+          <div data-testid="tv-glass-list" style={{ marginTop: 10, background: GLASS.list, borderRadius: 14, padding: '6px 12px' }}>
+            {eps.map((x, i) => (
+              <div key={x.episode_id} style={{ borderTop: i ? `1px solid ${GLASS.rule}` : 'none' }}><GlassRow e={x} /></div>
+            ))}
+          </div>
+        ) : (
+          <div data-testid="tv-card-title" title={epLine(e)} style={{ ...one, fontSize: 13, lineHeight: '18px', color: GLASS.ep, marginTop: 3, padding: '0 16px' }}><EpLine e={e} /></div>
+        )}
       </div>
     </div>
   );
@@ -585,25 +681,4 @@ export function etParts(airstamp: string | null | undefined): [string, string] |
   const t = etTime(airstamp).replace(/\u202f/g, ' ');
   const m = /^(\d{1,2}:\d{2})\s*([AP]M)$/.exec(t);
   return m ? [m[1]!, m[2]!] : null;
-}
-
-/** v319 phone card (Taylor 11:13 PM, replaces the v211 U3 time column): the ET air time on top, centered on one
- * line, then the show name and the 'SxxExx · title' line, each centered and ellipsized. The green/red left edge
- * (Stripe, same STATE_COLOR as the desktop week cards) is the only got-it indicator. */
-function U3Row({ e, today }: { e: CalEpisode; today: Day }) {
-  const st = episodeState(e, today);
-  const open = useOpenEpisode(e);
-  const [mon] = useMonitored(e);
-  const t = etTime(e.airstamp).replace(/\u202f/g, ' ');
-  return (
-    <div data-testid="tv-agenda-row" data-state={st} data-monitored={mon ? 'true' : 'false'} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
-      className={`tv-u3-row ${open.className || ''}`.trim()}
-      style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center', gap: 4, minHeight: 82, padding: '10px 16px', boxSizing: 'border-box',
-        borderRadius: 12, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
-      <Stripe color={STATE_COLOR[st]} w={3} />
-      <span data-testid="tv-u3-time" style={{ ...one, textAlign: 'center', fontSize: 16, fontWeight: 700, color: W95, lineHeight: '20px', opacity: mon ? 1 : DIM }}>{t}</span>
-      <span data-testid="tv-card-show" style={{ ...one, textAlign: 'center', fontSize: 17, fontWeight: 600, color: W95, lineHeight: '22px', opacity: mon ? 1 : DIM }}>{e.show}</span>
-      <span data-testid="tv-card-title" style={{ ...one, textAlign: 'center', fontSize: 14, color: W70, lineHeight: '18px', opacity: mon ? 1 : DIM }}>{epLine(e)}</span>
-    </div>
-  );
 }

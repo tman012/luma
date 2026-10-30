@@ -1,30 +1,19 @@
-"""v301: phone TV calendar loading = week strip (no dots) + 5 Home-style skeleton cards; SW bumped."""
+"""v301: phone TV calendar loading skeletons; v322 retires them (SPEC-fade-in); SW bumped."""
 from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_phone_placeholder_variant_b_loading():
+def test_v322_phone_loading_has_no_skeletons():
+    """v322 (TOKENS-C / SPEC-fade-in supersede the v301 skeletons): phone loading keeps the day nav and reserves one
+    card's height, with no placeholder cards, shimmer or spinner."""
     src = (ROOT / 'frontend/src/components/library/TvCalendar.tsx').read_text()
-    assert 'function PhonePlaceholder' in src
-    i = src.index('function PhonePlaceholder')
-    j = src.index('\nexport const AIR_SIZE', i)
-    block = src[i:j]
-    assert 'skeleton-shimmer' in block
-    assert 'tv-cal-loading-phone' in block
-    assert 'tv-cal-loading-strip' in block
-    assert 'tv-cal-loading-row' in block
-    assert 'rgba(255,255,255,0.14)' in block  # neutral edge
-    assert 'spinner' not in block.lower()
-    # five skeleton cards (SPEC-v187 / variant-B)
-    assert "['70%', '50%']" in block or 'widths' in block
-
-
-def test_phone_loading_hides_day_header_path():
-    """First paint on phone must not flash DayHeader+desktop; loading owns the strip."""
-    src = (ROOT / 'frontend/src/components/library/TvCalendar.tsx').read_text()
-    assert 'loading ? null : <DayHeader' in src or '(loading ? null : <DayHeader' in src
+    assert 'function PhonePlaceholder' not in src
+    assert '<div data-testid="tv-cal-loading-phone" aria-busy="true" style={{ minHeight: GLASS_CARD_MIN_H }} />' in src
+    assert '{phone ? <DayHeader day={day} today={today} onStep={step} />' in src
+    phone = src[src.index('export function PhoneDay'):]
+    assert 'skeleton-shimmer' not in phone and 'spinner' not in phone.lower()
 
 
 def test_sw_v301():

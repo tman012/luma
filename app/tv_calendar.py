@@ -65,7 +65,7 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
             for r in conn.execute(
                     'SELECT e.id, e.series_id, e.season_number, e.episode_number, e.title, e.air_date, e.airstamp,'
                     ' COALESCE(e.air_runtime, e.runtime) AS minutes,'
-                    ' s.title AS show, s.year, s.poster_path, s.tmdb_id AS show_tmdb, s.tvdb_id AS show_tvdb,'
+                    ' s.title AS show, s.year, s.poster_path, s.backdrop_path, s.banner_url, s.tmdb_id AS show_tmdb, s.tvdb_id AS show_tvdb,'
                     ' (s.monitored AND e.monitored) AS mon,'
                     # downloaded: a linked file for this exact episode row (one rule, no fallback)
                     ' EXISTS (SELECT 1 FROM episode_file_links l JOIN episode_files f ON f.id = l.file_id'
@@ -79,11 +79,14 @@ def calendar(start: dt.date, days: int) -> Dict[str, Any]:
                             'poster_path': r['poster_path'], 'season': r['season_number'],
                             'episode': r['episode_number'], 'title': r['title'] or '', 'air_date': r['air_date'],
                             'airstamp': r['airstamp'], 'runtime': r['minutes'],
-                            # v178 (Taylor): text-only cards, so no episode stills or backdrops in the answer
+                            # v322 (Taylor, option C minimal glass): the phone card blurs the show's art behind it:
+                            # the TheTVDB banner, else the TMDB backdrop (no episode stills)
+                            'banner_url': r['banner_url'], 'backdrop_path': r['backdrop_path'],
                             # or Plex has it (tv_plex: read-only, cached; empty when Plex is down)
                             'downloaded': bool(r['downloaded']) or _in_plex(r),
-                            'quality': None})
+                            'quality': None, 'grab': None})
             _add_file_quality(conn, out)
+            _add_grab_state(conn, [e for e in out if not e['downloaded']])
     out.sort(key=lambda e: (e['air_date'], tv_scan.sort_title(e['show']), e['season'] or 0, e['episode'] or 0))
     return {'start': start.isoformat(), 'days': days, 'episodes': out, 'libraries': len(paths),
             'refreshed_at': _last_refresh()}
@@ -107,6 +110,35 @@ def _add_file_quality(conn, eps: List[Dict[str, Any]]) -> None:
             if e is not None and e['quality'] is None:
                 e['quality'] = _label(dict(x))
     _add_grab_quality(conn, [e for e in eps if e['quality'] is None and e['downloaded']])
+
+
+FAILED_GRABS = ('failed', 'manual_needed')
+
+
+def _add_grab_state(conn, eps: List[Dict[str, Any]]) -> None:
+    """v322 (option C status dot): an episode without a file reads 'downloading' while its newest grab is open
+    (downloading/importing, its torrent not imported yet, like the detail page) and 'failed' when its newest grab
+    failed or needs a manual import; else None. Reads only."""
+    if not eps:
+        return
+    from app import tv_monitor
+    by_id = {e['episode_id']: e for e in eps}
+    ids = list(by_id)
+    seen: set = set()
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        for x in conn.execute(
+                'SELECT CAST(j.value AS INTEGER) AS episode_id, g.state, g.hash FROM grabs g, json_each(g.episode_ids) j'
+                f' WHERE CAST(j.value AS INTEGER) IN ({_in(chunk)})'
+                ' ORDER BY g.grabbed_at DESC, g.rowid DESC', tuple(chunk)):
+            eid = x['episode_id']
+            if eid in seen or eid not in by_id:
+                continue
+            seen.add(eid)                       # the newest grab decides
+            if x['state'] in tv_monitor.ACTIVE_GRABS and not tv_monitor._imported(x['hash']):
+                by_id[eid]['grab'] = 'downloading'
+            elif x['state'] in FAILED_GRABS:
+                by_id[eid]['grab'] = 'failed'
 
 
 def _label(f: Dict[str, Any]) -> Optional[str]:

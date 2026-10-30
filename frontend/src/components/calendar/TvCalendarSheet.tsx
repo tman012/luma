@@ -131,7 +131,7 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
         style={{
           height: 'calc(100% - env(safe-area-inset-top, 0px) - 6px)',
           display: 'flex', flexDirection: 'column',
-          background: 'var(--color-kiosk-black)',
+          background: '#111318',                    // v322 option C (TOKENS-C): page and sheet #111318
           borderRadius: '20px 20px 0 0',
           overflow: 'hidden',
           transform: sheetTransform,
@@ -142,14 +142,14 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
       >
         {/* Grab handle */}
         <div data-sheet-handle
-          style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '12px 0 8px', cursor: 'grab' }}
+          style={{ flexShrink: 0, display: 'flex', justifyContent: 'center', padding: '10px 0 14px', cursor: 'grab' }}
         >
-          <div style={{ width: 40, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.3)' }} />
+          <div style={{ width: 36, height: 4, borderRadius: 2, background: '#45474e' }} />
         </div>
 
         <div
           data-scroll-container
-          className="luma-scroll-y flex-1 px-3"
+          className="luma-scroll-y flex-1 px-4"
           style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain', touchAction: 'pan-y' }}
         >
           {ep ? (

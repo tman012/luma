@@ -17,6 +17,10 @@ export interface CalEpisode {
   quality?: string | null;
   /** v158a: the series and this episode are monitored (unmonitored cards render dimmed). */
   monitored?: boolean;
+  /** v322 (option C minimal glass): the series' TheTVDB banner and TMDB backdrop, blurred behind the phone card. */
+  banner_url?: string | null; backdrop_path?: string | null;
+  /** v322: the newest grab of an episode without a file: open ('downloading') or 'failed' (failed / needs a manual import). */
+  grab?: 'downloading' | 'failed' | null;
 }
 
 /** '9:00 – 9:42 PM' (or '11:30 PM – 12:10 AM') in the viewer's zone (*timeZone* for tests); null without an airstamp. */

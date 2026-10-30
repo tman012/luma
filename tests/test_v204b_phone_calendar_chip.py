@@ -18,9 +18,9 @@ def test_sheet_reads_luma_calendar_not_sonarr():
     assert '<TvCalendar today={today} week={week} onWeek={setWeek} toolbar={false} phone />' in SHEET
     assert 'const phone = forcePhone || isPhone;' in CAL
     assert '<DayHeader day={day} today={today} onStep={step} />' in CAL
-    # v325 (Taylor): phone rows (U3Row) drop the Q2a chip; the green/red left edge is the only got-it indicator
-    u3 = CAL[CAL.index('function U3Row('):]
-    assert '<QualityChip' not in u3 and '<Stripe color={STATE_COLOR[st]} w={3} />' in u3
+    # v322 (option C, replaces U3Row): no quality chip; the status dot is the only got-it indicator
+    card = CAL[CAL.index('function GlassCard('):]
+    assert '<QualityChip' not in card and '<Stripe' not in card and 'tv-glass-dot' in card
 
 
 def test_tap_opens_e2_episode_page():
@@ -35,8 +35,8 @@ def test_tap_opens_e2_episode_page():
 def test_u3_replaces_t2_headers():
     """v211 (Taylor's pick U3): no air-time group headers. v319 (Taylor 11:13 PM): the time column is gone; the ET time sits centered on top."""
     assert 'airGroups' not in CAL and 'tv-time-head' not in CAL and 'tv-time-group' not in CAL
-    assert "timeZone: 'America/New_York'" in CAL and '<U3Row key={e.episode_id}' in CAL
-    assert "data-testid=\"tv-u3-time\" style={{ ...one, textAlign: 'center'" in CAL
+    assert "timeZone: 'America/New_York'" in CAL and '<GlassCard key={g.key}' in CAL   # v322 option C
+    assert 'data-testid="tv-glass-time"' in CAL
 
 
 
