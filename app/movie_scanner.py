@@ -357,7 +357,8 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
         if conn.execute('SELECT 1 FROM movie_blocklist WHERE info_hash = ? OR (release_title = ? AND tmdb_id = ?)',
                         (h, item.get('title'), tmdb_id)).fetchone():
             return {'ok': False, 'error': 'Blocklisted'}
-    if movie_grabs.by_hash(h):
+    prior = movie_grabs.by_hash(h)
+    if prior and prior['state'] != 'failed':   # Ops: a failed/lost grab of the same hash is sent again (row revived)
         return {'ok': False, 'error': 'Already grabbed', 'existing': True}
     name = category()
     sess, url = mover._qbit_session(session_factory or requests.Session, now)
@@ -388,6 +389,8 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
     with ms.connect() as conn:
         _set(conn, tmdb_id, next_search_at=None, last_search_at=now)
     movie_grabs.record(tmdb_id, str(item.get('title') or ''), h, now)
+    if prior:
+        movie_grabs.set_state(h, 'grabbed', now=now)
     if origin == 'manual':                       # the Activity badge (Genre Roulette notes its own after this)
         from app import grab_origin
         grab_origin.record('manual', info_hash=h, tmdb_id=tmdb_id, media_type='movie',

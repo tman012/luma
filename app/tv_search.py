@@ -742,7 +742,14 @@ def search_show(sid: int, episode_ids: Optional[Iterable[int]] = None, *, origin
         if do_grab:
             season = next((e['season_number'] for e in want if e['id'] == c['covers'][0]), None)
             g = tv_grab.grab(it, sid, season, c['covers'], origin, now)
-            row['grabbed'], row['error'] = bool(g.get('ok')), g.get('error')
+            # Ops: 'grabbed' only when this call sent something; an existing/claimed hash is not a grab
+            sent = bool(g.get('ok')) and not g.get('existing')
+            row['grabbed'], row['error'] = sent, g.get('error')
+            if not sent:
+                row['reason'] = ('existing' if g.get('existing') else 'duplicate' if g.get('claimed') or g.get('duplicate')
+                                 else 'send_failed')
+                if not row['error']:
+                    row['error'] = tv_grab.ALREADY
         out['picks'].append(row)
     _after(sid, want, out, now, automatic=not interactive and purpose != MANUAL_BACKGROUND)
     return out
@@ -1274,7 +1281,10 @@ def grab_release(sid: int, item: Dict[str, Any], now: Optional[float] = None) ->
         with tv_store.write() as conn:
             conn.executemany('UPDATE episodes SET last_search_at = ?, next_search_at = NULL WHERE id = ?',
                              [(now, i) for i in ids])
-    return {**g, 'episodes': ids}
+    out = {**g, 'episodes': ids, 'grabbed': bool(g.get('ok')) and not g.get('existing')}
+    if not out['grabbed']:
+        out['reason'] = 'existing' if g.get('existing') else 'duplicate' if g.get('claimed') else 'send_failed'
+    return out
 
 
 # ------------------------------------------------------------------ automatic

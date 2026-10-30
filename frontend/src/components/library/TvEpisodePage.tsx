@@ -160,7 +160,7 @@ export function AutoDialog({ auto, sub, onClose, onInteractive }: { auto: Auto; 
 type SortKey = 'seeders' | 'size' | 'quality';
 const qrank = (r: Release) => { const q = (r.quality || '').toLowerCase(); return (parseInt(q, 10) || 0) * 10 + (/remux|bluray/.test(q) ? 2 : q.includes('web') ? 1 : 0); };
 
-type GrabOut = { ok: true; data: { ok: boolean; error?: string | null } } | { ok: false; error: string };
+type GrabOut = { ok: true; data: { ok: boolean; error?: string | null; grabbed?: boolean } } | { ok: false; error: string };
 
 /** v203: shared by the episode page and the movie page (load and doGrab name the target). */
 export function InteractiveScreen({ title, sub, load, doGrab, onBack, onGrabbed }: {
@@ -187,7 +187,7 @@ export function InteractiveScreen({ title, sub, load, doGrab, onBack, onGrabbed 
     setBusy(k);
     const out = await doGrab(r);
     setBusy(null);
-    if (out.ok && out.data.ok) { onGrabbed(r); return; }
+    if (out.ok && out.data.ok && out.data.grabbed !== false) { onGrabbed(r); return; }
     setErrs(x => ({ ...x, [k]: out.ok ? out.data.error || 'Not grabbed' : out.error }));
   };
   const seg = (on: boolean): React.CSSProperties => ({ flex: 1, height: 44, borderRadius: 10, border: 'none', fontFamily: FONT, fontSize: 15, fontWeight: 600, cursor: 'pointer',

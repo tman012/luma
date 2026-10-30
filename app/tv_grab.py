@@ -64,6 +64,9 @@ _claim_lock = threading.Lock()
 _inflight: Dict[int, str] = {}             # episode id -> hash being sent to qBittorrent now
 
 
+REVIVE_STATES = ('failed', 'skipped', 'manual_needed')
+
+
 def _claimed_by(series_id: Any, episode_ids: List[int], own_hash: str, origin: str, now: float) -> Optional[str]:
     """The hash that already claims any of *episode_ids*, else None. Call under _claim_lock."""
     ids = {int(e) for e in episode_ids}
@@ -310,9 +313,14 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
             # v185 (PM): the owner's monitor-ON search goes by the file on disk now. The same release was
             # imported before but its file is gone (tv_safety already refused any episode with a file):
             # reopen that grab so the watcher imports it again; send it again in case the client dropped it.
-            if origin != 'manual' or g['state'] not in ('imported', 'partial'):
-                return {'ok': True, 'hash': h, 'existing': True}
-            reopen = True
+            # Ops (CAKES re-grab): a failed/lost/skipped row is no dedupe: the same hash is sent again and the
+            # row revived. Only an active or imported row dedupes.
+            if g['state'] in REVIVE_STATES:
+                reopen = True
+            elif origin != 'manual' or g['state'] not in ('imported', 'partial'):
+                return {'ok': True, 'hash': h, 'existing': True, 'grabbed': False, 'reason': 'existing'}
+            else:
+                reopen = True
         if conn.execute('SELECT 1 FROM blocklist WHERE info_hash = ? OR (release_title = ? AND series_id = ?)',
                         (h, item.get('title'), series_id)).fetchone():
             return {'ok': False, 'error': 'Blocklisted'}
@@ -380,15 +388,15 @@ def _send(item, series_id, season, episode_ids, origin, now, session_factory, ki
         return {'ok': False, 'error': err}
     if reopen:
         with tv_store.write() as conn:
-            conn.execute("UPDATE grabs SET state = 'downloading', finished_at = NULL, error = NULL, origin = 'manual',"
-                         ' episode_ids = ?, grabbed_at = ? WHERE hash = ?', (json.dumps(sorted(episode_ids)), now, h))
+            conn.execute("UPDATE grabs SET state = 'downloading', finished_at = NULL, error = NULL, origin = ?,"
+                         ' episode_ids = ?, grabbed_at = ? WHERE hash = ?', (origin, json.dumps(sorted(episode_ids)), now, h))
             conn.execute('INSERT INTO history (ts, series_id, episode_ids, event, detail) VALUES (?, ?, ?, ?, ?)',
                          (now, series_id, json.dumps(sorted(episode_ids)), 'grabbed',
                           json.dumps({'title': item.get('title'), 'origin': origin, 'hash': h, 'tracker': item.get('indexer'),
                                       'again': True})))
         tv_downloads._save(h, state='waiting', error=None, at=now, reopened=now)
         _job_clear(h)
-        logger.info('TV grab: %s again (its earlier file is gone; owner monitor search)', item.get('title'))
+        logger.info('TV grab: %s again (%s, same hash %s re-sent)', item.get('title'), origin, h[:8])
         return {'ok': True, 'hash': h, 'again': True}
     with tv_store.write() as conn:
         conn.execute('INSERT OR IGNORE INTO grabs (hash, series_id, season_number, episode_ids, release_title, tracker_id,'

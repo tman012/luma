@@ -381,7 +381,7 @@ export function InteractiveModal({ seriesId, target, title, wide, phone = false,
   const grab = async (r: Release, k: string) => {
     setGrabs(g => ({ ...g, [k]: { busy: true } }));
     const out = await grabRelease(seriesId, r);
-    if (out.ok && out.data.ok) { setGrabs(g => ({ ...g, [k]: { done: true } })); onGrabbed(); if (phone) onClose(); return; }
+    if (out.ok && out.data.ok && out.data.grabbed !== false) { setGrabs(g => ({ ...g, [k]: { done: true } })); onGrabbed(); if (phone) onClose(); return; }
     setGrabs(g => ({ ...g, [k]: { error: out.ok ? out.data.error || 'Not grabbed' : out.error } }));
   };
   const list = res?.releases ?? [];

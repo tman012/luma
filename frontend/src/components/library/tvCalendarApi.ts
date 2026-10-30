@@ -85,7 +85,7 @@ export const addShow = (tmdb_id: number, path_id?: string, opts: { monitor?: Mon
       ...(opts.profile_id != null ? { profile_id: opts.profile_id } : {}) }),
   }, d => typeof d.series_id === 'number');
 /** v158b: Search for an episode or a season (grabs what it picks when grabs are allowed). */
-export interface SearchPick { title: string; quality: string | null; episodes: number[]; grabbed: boolean; error: string | null }
+export interface SearchPick { title: string; quality: string | null; episodes: number[]; grabbed: boolean; error: string | null; reason?: string }
 export interface SearchResult { ok: boolean; wanted: number; searched: number; results: number; picks: SearchPick[];
   grabs_allowed: boolean; error: string | null }
 export const searchShow = (seriesId: number, target: { season: number } | { episode_id: number }) =>
@@ -337,7 +337,7 @@ export const interactiveSearch = (seriesId: number, target: SearchTarget) =>
   }, d => Array.isArray(d.releases) || typeof d.error === 'string');
 /** v182: grab the release the owner picked (what it covers is worked out on the server). */
 export const grabRelease = (seriesId: number, r: Release) =>
-  call<{ ok: boolean; error?: string | null; existing?: boolean; blocked?: boolean; refused?: string | null }>(
+  call<{ ok: boolean; error?: string | null; existing?: boolean; blocked?: boolean; refused?: string | null; grabbed?: boolean; reason?: string }>(
     `${TV_URL}/shows/${seriesId}/interactive/grab`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ download_url: r.download_url, title: r.title, size: r.size, quality: r.quality ?? undefined, indexer: r.tracker ?? undefined }),
