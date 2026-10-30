@@ -1,5 +1,5 @@
 /** v321 (PM, Taylor): the series detail header: no poster, the card takes the banner's natural aspect ratio with no
- * strip below, the backdrop fallback, the fade-in (instant on a cache hit or reduced motion), the centered title and the bottom meta/fields, the larger back link, and no "Search your shows" box on the detail route. */
+ * strip below, no art box without a banner (no backdrop fallback), the fade-in (instant on a cache hit or reduced motion), the centered title and the bottom meta/fields, the larger back link, and no "Search your shows" box on the detail route. */
 process.env.TZ = 'America/New_York';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
@@ -35,7 +35,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const FACTS: [string, string, string][] = [['Quality profile', 'TFlix', 'profile'], ['Path', '/media/Video/TV/VisionQuest', 'path'], ['Size', '11.5 GB', 'size']];
 const hero = (p: Partial<Parameters<typeof TvSeriesHero>[0]> = {}) => render(
-  <TvSeriesHero title="VisionQuest" meta={['2026', 'Disney+', 'Returning series']} facts={FACTS} bannerUrl={BANNER} backdropPath="/b.jpg"
+  <TvSeriesHero title="VisionQuest" meta={['2026', 'Disney+', 'Returning series']} facts={FACTS} bannerUrl={BANNER}
     phone={false} edit={<button type="button">Edit</button>} flag={null} {...p} />);
 const load = (img: HTMLElement, w: number, h: number) => {
   Object.defineProperty(img, 'naturalWidth', { value: w, configurable: true });
@@ -70,24 +70,33 @@ describe('v321 series header', () => {
     load(screen.getByTestId('tv-detail-art'), 758, 300);
     expect(ratioOf(screen.getByTestId('tv-detail-header'))).toBeCloseTo(758 / 300, 5);
   });
-  it('no banner: the backdrop, cover at center 22%, same box; neither: plain #111318', () => {
-    hero({ bannerUrl: null });
-    const card = screen.getByTestId('tv-detail-header');
-    expect(card.dataset.art).toBe('backdrop');
-    const img = screen.getByTestId('tv-detail-art');
-    expect(img.style.objectFit).toBe('cover'); expect(img.style.objectPosition).toBe('center 22%');
-    load(img, 1280, 720);
-    expect(ratioOf(card)).toBeCloseTo(BANNER_RATIO, 5);
-    cleanup();
-    hero({ bannerUrl: null, backdropPath: null });
-    expect(screen.getByTestId('tv-detail-header').dataset.art).toBe('none');
+  it('no banner: no art box at all, even with a backdrop; the title leads and Edit sits at the header top right', () => {
+    hero({ bannerUrl: null, edit: <button type="button" data-testid="e">Edit</button> });
+    expect(screen.queryByTestId('tv-detail-header')).toBeNull();
     expect(screen.queryByTestId('tv-detail-art')).toBeNull();
-    expect(screen.getByTestId('tv-detail-header').style.background).toMatch(/rgb\(17, 19, 24\)|#111318/);
+    expect(document.querySelector('img')).toBeNull();
+    const h = screen.getByTestId('tv-detail-hero');
+    expect(h.dataset.mode).toBe('none');
+    const corner = screen.getByTestId('tv-detail-corner');
+    expect([corner.style.position, corner.style.top, corner.style.right]).toEqual(['absolute', '0px', '0px']);
+    expect(corner.contains(screen.getByTestId('e'))).toBe(true);
+    const t = screen.getByTestId('tv-detail-title');
+    expect([t.className, t.style.margin, t.style.fontSize]).toEqual(['', '0px auto', '36px']);
+    expect([...h.children].map(c => c.getAttribute('data-testid'))).toEqual(['tv-detail-corner', 'tv-detail-title', 'tv-detail-meta', 'tv-detail-text']);
   });
-  it('a banner that fails to load falls back to the backdrop', () => {
+  it('the detail page: a show with a backdrop but no banner renders no art box', async () => {
+    detail = { ...base(), banner_url: null, backdrop_path: '/b.jpg' };
+    render(<TvSeriesDetail seriesId={1} wide onBack={() => {}} say={() => {}} />);
+    expect((await screen.findByTestId('tv-detail-title')).className).toBe('');
+    expect(screen.queryByTestId('tv-detail-header')).toBeNull();
+    expect(screen.queryByTestId('tv-detail-art')).toBeNull();
+    expect(screen.getByTestId('tv-detail-corner').contains(screen.getByTestId('tv-detail-edit'))).toBe(true);
+  });
+  it('a banner that fails to load counts as no banner (no art box, visible title)', () => {
     hero();
     fireEvent.error(screen.getByTestId('tv-detail-art'));
-    expect(screen.getByTestId('tv-detail-header').dataset.art).toBe('backdrop');
+    expect(screen.queryByTestId('tv-detail-header')).toBeNull();
+    expect(screen.getByTestId('tv-detail-title').className).toBe('');
   });
   it('fades in 240ms on load; instant on a cache hit and with reduced motion', () => {
     hero();
@@ -119,30 +128,44 @@ describe('v321 series header', () => {
       delete (HTMLImageElement.prototype as unknown as Record<string, unknown>).naturalWidth;
     }
   });
-  it('the banner is clean art with only Edit; below it, centered: title, meta, then the fields row (v9 spacing)', () => {
-    hero({ edit: <button type="button" data-testid="e">Edit</button> });
-    const card = screen.getByTestId('tv-detail-header');
+  it('no banner: the visible centered title, then meta at 12px, then the fields row (v11 spacing)', () => {
+    hero({ edit: <button type="button" data-testid="e">Edit</button>, bannerUrl: null });   // no banner: the visible title
     const t = screen.getByTestId('tv-detail-title');
     const meta = screen.getByTestId('tv-detail-meta');
     const row = screen.getByTestId('tv-detail-text');
-    for (const el of [t, meta, row]) expect(card.contains(el)).toBe(false);
-    expect(card.contains(screen.getByTestId('e'))).toBe(true);
-    expect(screen.queryByTestId('tv-detail-fade')).toBeNull();                                        // no fade on the art
+    expect(screen.getByTestId('tv-detail-corner').contains(screen.getByTestId('e'))).toBe(true);
     expect(t.tagName).toBe('H1'); expect(t.textContent).toBe('VisionQuest');
     expect(t.style.fontSize).toBe('36px'); expect(t.style.fontWeight).toBe('700'); expect(t.style.fontFamily).toContain('Google Sans Flex');
-    expect([t.style.textAlign, t.style.textOverflow, t.style.whiteSpace, t.style.maxWidth]).toEqual(['center', 'ellipsis', 'nowrap', `min(${TITLE_MAX}px, 100%)`]);
-    expect(t.style.margin).toBe(`${GAP_TITLE}px auto 0px`);
+    expect([t.style.textAlign, t.style.textOverflow, t.style.whiteSpace, t.style.maxWidth]).toEqual(['center', 'ellipsis', 'nowrap', `min(${TITLE_MAX}px, calc(100% - 240px))`]);   // clear of Edit
+    expect(t.style.margin).toBe('0px auto');
     expect([...screen.getByTestId('tv-detail-hero').children].map(c => c.getAttribute('data-testid')))
-      .toEqual(['tv-detail-header', 'tv-detail-title', 'tv-detail-meta', 'tv-detail-text']);
+      .toEqual(['tv-detail-corner', 'tv-detail-title', 'tv-detail-meta', 'tv-detail-text']);
     expect([meta.style.margin, meta.style.fontSize, meta.style.textAlign]).toEqual([`${GAP_META}px auto 0px`, '14px', 'center']);
     expect(meta.style.color).toMatch(/rgb\(201, 202, 210\)|#c9cad2/);
     expect(meta.textContent).toBe('2026 \u00b7 Disney+ \u00b7 Returning series');
     expect([row.style.margin, row.style.alignItems]).toEqual([`${GAP_FIELDS}px auto 0px`, 'center']);
     expect(row.style.maxWidth).toContain(`${BOTTOM_MAX}px`);
-    expect([GAP_TITLE, GAP_META, GAP_FIELDS, GAP_SEASONS]).toEqual([20, 6, 16, 28]);
+    expect([GAP_TITLE, GAP_META, GAP_FIELDS, GAP_SEASONS]).toEqual([20, 12, 16, 28]);
     expect(screen.getByTestId('tv-detail-hero').style.marginBottom).toBe(`${GAP_SEASONS - PAGE_GAP}px`);
     const lab = row.querySelector('dt')!, val = row.querySelector('dd')!;
     expect([lab.style.fontSize, lab.style.textShadow, val.style.fontSize, val.style.textShadow]).toEqual(['11.5px', '', '13px', '']);
+  });
+  it('with a banner: the h1 stays in the DOM, visually hidden (clip, not display:none); the meta takes its slot at 20px', () => {
+    hero();
+    const t = screen.getByTestId('tv-detail-title');
+    expect(t.tagName).toBe('H1'); expect(t.textContent).toBe('VisionQuest');
+    expect(screen.getByRole('heading', { level: 1, name: 'VisionQuest' })).toBe(t);
+    expect(t.className).toBe('sr-only');
+    expect([t.style.position, t.style.width, t.style.height, t.style.overflow, t.style.clip]).toEqual(['absolute', '1px', '1px', 'hidden', 'rect(0px, 0px, 0px, 0px)']);
+    expect(t.style.display).not.toBe('none'); expect(t.getAttribute('aria-hidden')).toBeNull();
+    const meta = screen.getByTestId('tv-detail-meta');
+    expect(meta.style.margin).toBe(`${GAP_TITLE}px auto 0px`);
+    expect(screen.getByTestId('tv-detail-text').style.margin).toBe(`${GAP_FIELDS}px auto 0px`);
+    // a banner that fails: no art, the title shows again with meta 12px under it
+    fireEvent.error(screen.getByTestId('tv-detail-art'));
+    expect(screen.getByTestId('tv-detail-title').className).toBe('');
+    expect(screen.getByTestId('tv-detail-title').style.fontSize).toBe('36px');
+    expect(screen.getByTestId('tv-detail-meta').style.margin).toBe(`${GAP_META}px auto 0px`);
   });
   it('fields row below the card (with Episodes), path ellipsis; Edit keeps its dark fill', async () => {
     render(<TvSeriesDetail seriesId={1} wide onBack={() => {}} say={() => {}} />);
