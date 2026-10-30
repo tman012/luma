@@ -87,14 +87,14 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimC
       // Compositor-only exit: transform/opacity on promoted layers, nothing that re-rasters mid-exit.
       card.style.willChange = rm ? 'opacity' : 'transform';
       scrim.style.willChange = 'opacity';
-      const exitMs = rm ? MOTION.dur.fast : Math.max(160, MOTION.dur.sheetExit * Math.max(0, h - y) / h);
+      const exitMs = rm ? MOTION.dur.fast : Math.max(MOTION.dur.sheetDragMin, MOTION.dur.sheetExit * Math.max(0, h - y) / h);
       anims.current = [
         rm
           ? card.animate([{ opacity: 1 }, { opacity: 0 }], { duration: exitMs, easing: MOTION.ease.standard, fill: 'forwards' })
           : card.animate([{ transform: `translate3d(0, ${y}px, 0)` }, { transform: 'translate3d(0, 100%, 0)' }],
-            { duration: exitMs, easing: MOTION.ease.accel, fill: 'forwards' }),
+            { duration: exitMs, easing: MOTION.ease.sheetExit, fill: 'forwards' }),
         scrim.animate([{ opacity: getComputedStyle(scrim).opacity }, { opacity: 0 }],
-          { duration: rm ? MOTION.dur.fast : 200, easing: MOTION.ease.accel, fill: 'forwards' }),
+          { duration: exitMs, easing: MOTION.ease.sheetExit, fill: 'forwards' }),
       ];
       return;
     }
@@ -107,7 +107,7 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimC
         stop();
         if (y > 0 && !rm) {
           anims.current = [card.animate([{ transform: `translate3d(0, ${y}px, 0)` }, { transform: 'translate3d(0, 0, 0)' }],
-            { duration: MOTION.dur.sheetEnter, easing: MOTION.ease.decel })];
+            { duration: MOTION.dur.sheetEnter, easing: MOTION.ease.sheet })];
         }
       }
       return;
@@ -117,17 +117,16 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimC
     const enter = rm
       ? card.animate([{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.dur.fast, easing: MOTION.ease.standard })
       : card.animate([{ transform: 'translate3d(0, 100%, 0)' }, { transform: 'translate3d(0, 0, 0)' }],
-        { duration: MOTION.dur.sheetEnter, easing: MOTION.ease.decel });
+        { duration: MOTION.dur.sheetEnter, easing: MOTION.ease.sheet });
     const fade = scrim.animate([{ opacity: 0 }, { opacity: MOTION.scrim }],
       { duration: rm ? MOTION.dur.fast : MOTION.dur.standard, easing: MOTION.ease.standard });
     anims.current = [enter, fade];
-    // PM fallback (MOTION.md §1.3): the details commit at ~60% of the slide and fade in place over its
-    // last part (the card is a composited layer by then, the slide stays on the compositor).
-    const early = window.setTimeout(() => setEntering(false), rm ? 0 : Math.round(MOTION.dur.sheetEnter * 0.6));
+    // The held details commit when the slide ends, then fade in place (Designer 7:30 PM: the fade must not drop
+    // slide frames; a commit at 60% of the slide dropped 5-9 frames at 1x/4x, sheetmeasure.py).
     let done = false;
     const finish = () => {
       if (done) return; done = true;
-      window.clearTimeout(early); window.clearTimeout(fallback);
+      window.clearTimeout(fallback);
       setEntering(false);
       card.style.willChange = '';
       anims.current = anims.current.filter((a) => a !== enter && a !== fade);
@@ -261,8 +260,8 @@ export function useModalMotion(phase: string, scrimRef: React.RefObject<HTMLElem
       stop();
       const d = rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetExit : MODAL_EXIT_MS;
       if (ok(card)) anims.current.push(card.animate(rm ? [{ opacity: curO }, { opacity: 0 }]
-        : [{ transform: curT, opacity: curO }, { transform: out, opacity: o0 }], { duration: d, easing: MOTION.ease.accel, fill: 'forwards' }));
-      if (ok(scrim) && scrim !== card) anims.current.push(scrim.animate([{ opacity: so }, { opacity: 0 }], { duration: d, easing: MOTION.ease.accel, fill: 'forwards' }));
+        : [{ transform: curT, opacity: curO }, { transform: out, opacity: o0 }], { duration: d, easing: bottom ? MOTION.ease.sheetExit : MOTION.ease.accel, fill: 'forwards' }));
+      if (ok(scrim) && scrim !== card) anims.current.push(scrim.animate([{ opacity: so }, { opacity: 0 }], { duration: d, easing: bottom ? MOTION.ease.sheetExit : MOTION.ease.accel, fill: 'forwards' }));
       return;
     }
     if (entered.current) {
@@ -274,7 +273,7 @@ export function useModalMotion(phase: string, scrimRef: React.RefObject<HTMLElem
       { duration: rm ? MOTION.dur.fast : MOTION.dur.standard, easing: MOTION.ease.standard }));
     if (ok(card)) anims.current.push(card.animate(rm ? [{ opacity: 0 }, { opacity: 1 }]
       : [{ transform: from, opacity: o0 }, { transform: 'none', opacity: 1 }],
-      { duration: rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetEnter : MODAL_ENTER_MS, easing: MOTION.ease.decel }));
+      { duration: rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetEnter : MODAL_ENTER_MS, easing: bottom ? MOTION.ease.sheet : MOTION.ease.decel }));
     const enter = anims.current[anims.current.length - 1];
     if (!enter) { setEntering(false); return; }
     let done = false;

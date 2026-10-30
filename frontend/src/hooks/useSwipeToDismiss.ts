@@ -184,19 +184,21 @@ export function useSwipeToDismiss({
 
     if (enabledRef.current && (velocity > 0.5 || s.translateY > threshold)) {
       s.isDragging = false;
-      // Continue from where the finger left it: max(160, exit x remaining / height), accelerate out.
-      const outMs = Math.round(Math.max(160, MOTION.dur.sheetExit * Math.max(0, containerH - s.translateY) / containerH));
-      applyTransform(el, containerH, 0, `transform ${outMs}ms ${MOTION.ease.accel}`);
+      // Continue from where the finger left it: max(sheetDragMin, exit x remaining / height), the sheet exit curve.
+      const outMs = Math.round(Math.max(MOTION.dur.sheetDragMin, MOTION.dur.sheetExit * Math.max(0, containerH - s.translateY) / containerH));
+      applyTransform(el, containerH, 0, `transform ${outMs}ms ${MOTION.ease.sheetExit}`);
       timersRef.current.push(setTimeout(() => onDismiss(), outMs));
     } else {
       s.isDragging = false;
+      // Snap back from where it is with the sheet curve (no overshoot), duration scaled by the distance left.
+      const backMs = Math.round(Math.max(MOTION.dur.sheetDragMin, MOTION.dur.sheetEnter * Math.min(1, s.translateY / containerH)));
       s.translateY = 0;
       s.backdropOpacity = 1;
-      applyTransform(el, 0, 1, `transform 300ms ${MOTION.ease.spring}`);
+      applyTransform(el, 0, 1, `transform ${backMs}ms ${MOTION.ease.sheet}`);
 
       timersRef.current.push(setTimeout(() => {
         if (el) applyTransform(el, 0, 1, '');
-      }, 310));
+      }, backMs + 10));
     }
   }, [scrollRef, onDismiss, resetGesture]);
 
