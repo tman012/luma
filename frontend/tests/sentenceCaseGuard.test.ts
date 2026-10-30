@@ -67,6 +67,8 @@ export const PROPER_WORDS = new Set(['Alfred', 'Plex', 'Radarr', 'Sonarr', 'Kodi
 export const PROD_MATCHED = ['Add to Watchlist', 'In Watchlist', 'Select Quality', 'Upgrade Quality', 'Watchlist', 'Cast & Reviews', 'Remove from Watchlist', 'Remove from Watchlist?',
   // v215 PM ruling: the C2 palette's collapsed 'Find More' button is prod 1b4ea74's KioskSearch label as is
   'Find More',
+  // v325 Taylor copy ruling: the episode status 'Downloaded' reads 'In Library' (Title Case as Taylor wrote it)
+  'In Library',
   // v219 Designer GO: PlaybackModal device status as prod 1b4ea74
   'Not Configured',
   // v261 PM ruling: text ported from prod 1b4ea74 matches prod exactly (Home row pill, Downloads Guard card title)
