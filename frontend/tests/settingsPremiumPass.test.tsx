@@ -41,7 +41,7 @@ describe('Settings premium pass: Connectors', () => {
     }));
     expect(screen.queryByText('Set up')).toBeNull();   // v319 Taylor: connected rows say Connected
     expect(groups).toEqual([
-      { title: 'Media server', rows: ['plex'] },
+      { title: 'Media Server', rows: ['plex'] },
       { title: 'Download Client', rows: ['qbittorrent'] },
       { title: 'Smart Home', rows: ['homeassistant'] },
       { title: 'Metadata', rows: ['tmdb', 'omdb', 'tvdb', 'trakt'] },

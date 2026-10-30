@@ -4,22 +4,31 @@ import { cleanup, render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { HomeChevron, HOME_CHEV_UP, HOME_CHEV_SIZE, homeChevCss } from '@/components/home/HomeChevron';
-import { r3Css } from '@/components/search/HomeSearchR3';
+import { HomeLogo } from '@/components/home/HomeLogo';
 
 const src = (f: string) => readFileSync(resolve(__dirname, '../src/' + f), 'utf8');
 afterEach(cleanup);
 
 describe('v326 desktop TV Calendar clean', () => {
-  it('Home and the calendar both render the one HomeChevron component', () => {
+  it('v319: Home keeps its HomeChevron; the TV views have no chevron and render the shared HomeLogo', () => {
     expect(src('components/search/HomeSearchR3.tsx')).toMatch(/<HomeChevron up=\{shown\}/);
-    expect(src('pages/LibrariesPage.tsx')).toMatch(/<HomeChevron up withCss aria-label="Close TV"/);
-    // no private copies of the glyph or its spot
-    for (const f of ['components/search/HomeSearchR3.tsx', 'pages/LibrariesPage.tsx']) {
-      expect(src(f)).not.toContain('M7.4 15.4');
-      expect(src(f)).not.toContain('.a1-chev{');
-      expect(src(f)).not.toContain('ChevronUpIcon');
-    }
-    expect(r3Css).toContain(homeChevCss);
+    const lib = src('pages/LibrariesPage.tsx');
+    expect(lib).not.toMatch(/HomeChevron|a1-chev|M7\.4 15\.4/);
+    expect(lib).toMatch(/<Link to="\/" aria-label="Home" data-testid="tv-home-link"[^>]*>\s*<HomeLogo data-testid="tv-logo" \/>/);
+    expect(lib).toContain("'TV Calendar'");
+    const home = src('pages/MinimalHomePage.tsx');
+    expect(home).toContain('<HomeLogo />');
+    expect(home).not.toContain('data-testid="kiosk-logo"');
+  });
+
+  it('HomeLogo is the pure move of Home\'s img: same src, alt, 64px, kiosk-logo test id', () => {
+    const { container } = render(<HomeLogo />);
+    const img = container.querySelector('img')!;
+    expect(img.getAttribute('data-testid')).toBe('kiosk-logo');
+    expect(img.getAttribute('alt')).toBe('Luma');
+    expect(img.getAttribute('src')).toContain('luma_wordmark.webp');
+    expect(img.getAttribute('style')).toBe('height: 64px; width: auto;');
+    expect(img.getAttribute('draggable')).toBe('false');
   });
 
   it('the up chevron: 48px glyph, fixed top 28px, centered, #e2e2e9, no circle or background', () => {

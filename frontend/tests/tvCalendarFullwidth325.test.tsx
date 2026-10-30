@@ -33,18 +33,19 @@ const at = (path: string) => render(<MemoryRouter initialEntries={['/elsewhere',
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('desktop TV Calendar full-width', () => {
-  it('/settings/tv (Calendar, the default view) opens full-width: no Settings nav, an up arrow in the logo place', async () => {
+  it('/settings/tv (Calendar, the default view) opens full-width: no Settings nav, the Home logo and the TV Calendar title', async () => {
     setup(true);
     at('/settings/tv');
-    const close = await screen.findByTestId('tv-calendar-close');
+    const close = await screen.findByTestId('tv-home-link');
     expect(screen.getByTestId('tv-stub')).toBeTruthy();
     expect(screen.queryByTestId('settings-nav')).toBeNull();
     expect(screen.queryByTestId('settings-logo')).toBeNull();
-    expect(close.getAttribute('aria-label')).toBe('Close TV');
-    expect(close.textContent).toBe('');                                    // icon only
+    expect(close.getAttribute('aria-label')).toBe('Home');                 // v319: Home's logo, not an up arrow
+    expect(close.getAttribute('href')).toBe('/');
     expect(close.closest('header')).toBeTruthy();
-    expect(close.className).toBe('a1-chev');                              // v326: Home's own chevron, centered (fixed)
-    expect(close.hasAttribute('data-home-chevron')).toBe(true);
+    expect(close.querySelector('[data-testid=tv-logo]')!.getAttribute('alt')).toBe('Luma');
+    expect(document.querySelector('[data-home-chevron], .a1-chev')).toBeNull();
+    expect(screen.getByTestId('tv-page-title').textContent).toBe('TV Calendar');
     expect(screen.getByTestId('settings-main').style.maxWidth).toBe('');   // takes the full width
   });
 
@@ -52,40 +53,40 @@ describe('desktop TV Calendar full-width', () => {
     setup(true);
     for (const p of ['/settings/tv?view=calendar', '/settings/tv?view=series', '/settings/tv?view=import', '/settings/tv?view=series&show=4']) {
       at(p);
-      expect(await screen.findByTestId('tv-calendar-close')).toBeTruthy();
+      expect(await screen.findByTestId('tv-home-link')).toBeTruthy();
       expect(screen.queryByTestId('settings-nav')).toBeNull();
       cleanup();
     }
     for (const p of ['/settings/tv/settings', '/settings/tv?view=options', '/settings/tv?view=libraries']) {
       at(p);
       expect(await screen.findByTestId('settings-nav')).toBeTruthy();
-      expect(screen.queryByTestId('tv-calendar-close')).toBeNull();
+      expect(screen.queryByTestId('tv-home-link')).toBeNull();
       expect(screen.getByTestId('settings-logo')).toBeTruthy();
       cleanup();
     }
   });
 
-  it('the up arrow always goes Home (not history back)', async () => {
+  it('the logo always goes Home (not history back)', async () => {
     setup(true);
     at('/settings/tv');
-    fireEvent.click(await screen.findByTestId('tv-calendar-close'));
+    fireEvent.click(await screen.findByTestId('tv-home-link'));
     expect(await screen.findByTestId('home')).toBeTruthy();
   });
 
-  it('phone is unchanged: no up arrow', async () => {
+  it('phone is unchanged: no desktop logo link', async () => {
     setup(false);
     at('/settings/tv');
     await screen.findByTestId('tv-stub');
-    expect(screen.queryByTestId('tv-calendar-close')).toBeNull();
+    expect(screen.queryByTestId('tv-home-link')).toBeNull();
   });
 
-  it('LUMA_MINIMAL: the reveal row path (go() pushState /settings/tv, 7a01c4be) opens the calendar and the arrow closes it', async () => {
+  it('LUMA_MINIMAL: the reveal row path (go() pushState /settings/tv, 7a01c4be) opens the calendar and the logo closes it', async () => {
     setup(true);
     window.history.replaceState({}, '', '/');
     render(<BrowserRouter>{routes}</BrowserRouter>);
     expect(screen.getByTestId('home')).toBeTruthy();
     act(() => { window.history.pushState({}, '', '/settings/tv'); window.dispatchEvent(new PopStateEvent('popstate')); });
-    fireEvent.click(await screen.findByTestId('tv-calendar-close'));
+    fireEvent.click(await screen.findByTestId('tv-home-link'));
     expect(await screen.findByTestId('home')).toBeTruthy();
     expect(window.location.pathname).toBe('/');
   });

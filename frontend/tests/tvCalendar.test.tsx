@@ -154,8 +154,8 @@ describe('cards collapse to their text (v179)', () => {
     expect(airLine({ airstamp: '2026-10-19T01:00:00Z' }, 'America/Los_Angeles')).toBe('6:00 PM');   // the viewer's own zone
     expect(airLine({ airstamp: null })).toBeNull();
   });
-  it('the show name keeps 28px on its right where the hover bookmark sits (1000px and up)', () => {
-    expect(tvCalendarCss).toContain('@container tvcal (min-width: 1000px){.tvc-card [data-testid=tv-card-show]{padding-right:28px}}');
+  it('the show name keeps 28px on both sides (right: hover bookmark; left: v319 centering balance) (1000px and up)', () => {
+    expect(tvCalendarCss).toContain('@container tvcal (min-width: 1000px){.tvc-card [data-testid=tv-card-show]{padding-left:28px;padding-right:28px}}');
   });
 });
 

@@ -1,5 +1,5 @@
 /** Settings > Connectors (owner only). Settings premium pass: one grouped list of the real
- * connectors only — Media server (Plex, moved here from its own section), Download Client (qBittorrent),
+ * connectors only — Media Server (Plex, moved here from its own section), Download Client (qBittorrent),
  * Home (Home Assistant), Metadata (TMDB, OMDb, TheTVDB, Trakt) — each with its vendor logo
  * (static/images/connectors, same origin) and Connected / Not set up (saved config, not a live check). A row opens its form in a modal.
  * Keys stay on the server; the browser only learns whether one is saved and its last 4
@@ -42,7 +42,7 @@ const GROUPS: { id: Id; title: string; field: string; body: string; removeTitle:
 export type ConnectorId = 'plex' | 'qbittorrent' | 'homeassistant' | Id;
 /** The real connectors, in list order (Designer round 2). Nothing else is shown here. */
 export const CONNECTORS: { id: ConnectorId; title: string; group: string; logo?: string; tile: string; pad: number }[] = [
-  { id: 'plex', title: 'Plex', group: 'Media server', logo: 'plex.svg', tile: '#1f1f1f', pad: 9 },
+  { id: 'plex', title: 'Plex', group: 'Media Server', logo: 'plex.svg', tile: '#1f1f1f', pad: 9 },
   { id: 'qbittorrent', title: 'qBittorrent', group: 'Download Client', logo: 'qbittorrent.svg', tile: '#ffffff', pad: 5 },
   { id: 'homeassistant', title: 'Home Assistant', group: 'Smart Home', logo: 'homeassistant.svg', tile: '#18BCF2', pad: 8 },
   { id: 'tmdb', title: 'TMDB', group: 'Metadata', logo: 'tmdb.svg', tile: '#0d253f', pad: 7 },
@@ -50,7 +50,7 @@ export const CONNECTORS: { id: ConnectorId; title: string; group: string; logo?:
   { id: 'tvdb', title: 'TheTVDB', group: 'Metadata', logo: 'tvdb.svg', tile: '#0b1b24', pad: 5 },
   { id: 'trakt', title: 'Trakt', group: 'Metadata', logo: 'trakt.svg', tile: '#ED1C24', pad: 8 },
 ];
-const CONNECTOR_GROUPS = ['Media server', 'Download Client', 'Smart Home', 'Metadata'];
+const CONNECTOR_GROUPS = ['Media Server', 'Download Client', 'Smart Home', 'Metadata'];
 
 type Status = { on: boolean; sub: string };
 const hostOf = (u: string) => { try { return new URL(u).hostname; } catch { return ''; } };

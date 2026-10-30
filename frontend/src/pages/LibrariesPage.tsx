@@ -21,7 +21,7 @@ import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { useKioskWidth } from '@/components/home/KioskHome';
 import { CheckIcon, ChevronIcon, ChevronLeftIcon, GripIcon, XIcon } from '@/components/nav/AppNav';
 import { UserMenu } from '@/components/nav/UserMenu';
-import { HomeChevron } from '@/components/home/HomeChevron';
+import { HomeLogo } from '@/components/home/HomeLogo';
 import { NoticeToast } from '@/components/start/SetupToast';
 import { usePlexOwner } from '@/components/home/PlexSettings';
 import { ConnectorsSettings } from '@/components/home/ConnectorsSettings';
@@ -122,18 +122,23 @@ export function SettingsPage() {
     const signOut = async () => { setBusy(true); await logout(); navigate('/login', { replace: true }); };
     // v325 (Taylor): TV Calendar is its own full-width view, no Settings nav; the up arrow (top-left, in the
     // logo's place) closes it to Home. Another TV tab (?view=...) or a show page is the normal Settings layout.
-    // v327 (Taylor 10:42): no TV view (Series, Calendar, Import) shows the Settings nav; HomeChevron closes each to Home.
+    // v327 (Taylor 10:42): no TV view (Series, Calendar, Import) shows the Settings nav; v319: Home's logo (HomeLogo) closes each to Home.
     const calendar = tvViews;
+    const tvView = query.get('view') || 'calendar';
+    const tvTitleText = tvView === 'calendar' && !query.get('show') ? 'TV Calendar' : null;
     return (
       <div style={settingsPage} data-step="settings" data-layout="desktop">
         <GlowLayer />
         <style>{css}</style>
-        <header style={deskHeader}>
+        <header style={calendar ? { ...deskHeader, position: 'relative' } : deskHeader}>
           {calendar ? (
-            // v326 (Taylor): Home's own chevron (shared component), same glyph, size, color and spot; no circle.
+            // v319 (Taylor 11:08): no up arrow; Home's own logo (shared HomeLogo, same size and spot) goes Home,
+            // and a centered page title. Series / Calendar / Import share this header; the title shows on Calendar only.
             <>
-              <HomeChevron up withCss aria-label="Close TV" data-testid="tv-calendar-close" onClick={() => navigate('/')} />
-              <span style={{ height: 64 }} />
+              <Link to="/" aria-label="Home" data-testid="tv-home-link" style={{ display: 'inline-flex', borderRadius: 12 }} className="luma-focus">
+                <HomeLogo data-testid="tv-logo" />
+              </Link>
+              {tvTitleText && <h1 data-testid="tv-page-title" style={tvTitle}>{tvTitleText}</h1>}
             </>
           ) : (
             <Link to="/" aria-label="Home" style={{ display: 'inline-flex', borderRadius: 12 }} className="luma-focus">
@@ -413,6 +418,10 @@ export const LOGO_LEFT = 44;
 export const HEADING_GAP = 16;
 export const NAV_W = 220;
 export const NAV_GAP = 40;
+const tvTitle: React.CSSProperties = {
+  position: 'absolute', left: '50%', top: 20, height: 64, transform: 'translateX(-50%)', margin: 0, display: 'flex', alignItems: 'center',
+  fontFamily: FONT, fontSize: 24, fontWeight: 600, color: 'rgba(255,255,255,0.95)', whiteSpace: 'nowrap', pointerEvents: 'none',
+};
 const deskHeader: React.CSSProperties = {
   display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `20px 60px 0 ${LOGO_LEFT}px`,
 };

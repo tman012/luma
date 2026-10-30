@@ -4,7 +4,7 @@ import { Navigate, useNavigate } from 'react-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
-import { FONT, LOGO_SRC, NAVY_BG } from '@/components/start/StartUI';
+import { FONT, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
 import { HomeRails, SkeletonRails, WYM_RAIL_ID, cardIds, railCss } from '@/components/home/Rails';
 import { img } from '@/components/home/homeApi';
@@ -18,6 +18,7 @@ import { KioskHome, useKioskWidth } from '@/components/home/KioskHome';
 import { UserMenu } from '@/components/nav/UserMenu';
 import { openSearch } from '@/components/search/MinimalSearchHost';
 import { HomeSearchR3 } from '@/components/search/HomeSearchR3';
+import { HomeLogo } from '@/components/home/HomeLogo';
 import { HomePills } from '@/components/home/HomePills';
 import { MobilePushBanner } from '@/components/mobile/MobilePushBanner';
 
@@ -116,7 +117,7 @@ export function MinimalHomePage() {
         <KioskHome />
         {/* v235: logo and avatar; the search field is centered in this bar (HomeSearchR3). */}
         <header style={kioskBar} data-testid="kiosk-header">
-          <img src={assetUrl(LOGO_SRC)} alt="Luma" data-testid="kiosk-logo" style={{ height: 64, width: 'auto' }} draggable={false} />
+          <HomeLogo />
           {menu(48)}
         </header>
         <HomeSearchR3 />

@@ -1,5 +1,5 @@
 /** Connectors copy (Taylor 11:00 PM): connected rows say Connected (green dot kept); disconnected or
- * errored rows keep Not set up; headers are Media server / Download Client / Smart Home / Metadata. */
+ * errored rows keep Not set up; headers are Media Server / Download Client / Smart Home / Metadata. */
 import { cleanup, render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectorsSettings } from '@/components/home/ConnectorsSettings';
@@ -20,12 +20,12 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 const connectors = () => res({ tmdb: { set: true, last4: 'abcd' }, omdb: { set: false, last4: '' }, tvdb: { set: false, last4: '' }, trakt: { set: false, last4: '' } });
 
 describe('Connectors copy v319', () => {
-  it('headers renamed; Media server and Metadata unchanged', async () => {
+  it('headers renamed; Media Server Title Case, Metadata unchanged', async () => {
     stub({ '/api/settings/connectors': connectors });
     render(<ConnectorsSettings />);
     await screen.findByTestId('connector-row-plex');
     expect(screen.getAllByTestId('connector-group').map(g => g.querySelector('h2')!.textContent))
-      .toEqual(['Media server', 'Download Client', 'Smart Home', 'Metadata']);
+      .toEqual(['Media Server', 'Download Client', 'Smart Home', 'Metadata']);
     expect(screen.queryByText('Downloads')).toBeNull();
   });
 

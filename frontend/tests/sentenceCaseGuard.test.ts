@@ -93,7 +93,7 @@ const prodShelf = (h: string) => /^components\/search\/SearchShelf\.tsx:\d+: "TV
 /** Premium pass: the Network debugging steps quote the TV's own menu names (Android TV Settings). */
 const tvMenuTerms = (h: string) => /^components\/rooms\/RoomsSettings\.tsx:\d+: "(?:Device Preferences|Turn on Network debugging)" \(\w+\)$/.test(h);
 /** v319 Taylor (11:00 PM): Connectors section headers are proper names. */
-const connectorGroups = (h: string) => /^components\/home\/ConnectorsSettings\.tsx:\d+: "(?:Download Client|Smart Home)" \(\w+\)$/.test(h);
+const connectorGroups = (h: string) => /^components\/home\/ConnectorsSettings\.tsx:\d+: "(?:Media Server|Download Client|Smart Home)" \(\w+\)$/.test(h);
 const prodRooms = (h: string) => /^components\/rooms\/(RoomsSheet|FullScreenRemote)\.tsx:\d+: (?:"(?:Nothing Playing|Friends & Family|OK \/ Select|Play \/ Pause)" \(\w+\)|.*text-\[9px\] font-semibold uppercase tracking-\[0\.15em\].*)$/.test(h);
 /** v269 PM: ActivityFeed is prod 1b4ea74 verbatim (section + origin + tracker uppercase). */
 const prodActivity = (h: string) => /^components\/activity\/ActivityFeed\.tsx:\d+: .*\buppercase\b/.test(h);

@@ -343,8 +343,8 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
       )}
       <div data-testid="tv-card-body" style={{ opacity: mon ? 1 : DIM, transition: 'opacity 150ms', display: 'flex', gap: 8 }}>
         <div className="tvc-text" style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-          <span data-testid="tv-card-show" title={e.show} style={{ ...one, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
-          <span data-testid="tv-card-title" title={epLine(e)} style={{ ...one, fontSize: 12, color: W70 }}>{epLine(e)}</span>
+          <span data-testid="tv-card-show" title={e.show} style={{ ...one, textAlign: 'center', fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
+          <span data-testid="tv-card-title" title={epLine(e)} style={{ ...one, textAlign: 'center', fontSize: 12, color: W70 }}>{epLine(e)}</span>
         </div>
       </div>
     </div>
@@ -491,7 +491,7 @@ export const tvCalendarCss = `
 .tvc-bm:hover{background:rgba(59,130,246,.35)!important}
 @media (hover:none){.tvc-card .tvc-bm{opacity:1}}
 @container tvcal (max-width: 999px){.tvc-card .tvc-bm{display:none!important}}
-@container tvcal (min-width: 1000px){.tvc-card [data-testid=tv-card-show]{padding-right:28px}}
+@container tvcal (min-width: 1000px){.tvc-card [data-testid=tv-card-show]{padding-left:28px;padding-right:28px}}
 @container tvcal (max-width: 599px){.tvc-card [data-testid=tv-card-show]{-webkit-line-clamp:2!important}.tvc-card [data-testid=tv-card-title]{-webkit-line-clamp:1!important}}
 `;
 

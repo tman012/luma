@@ -162,7 +162,7 @@ describe('TV views (Home > Calendar)', () => {
         expect(screen.queryByTestId('settings-nav')).toBeNull();
         expect(screen.queryByTestId('tv-paths')).toBeNull();
         expect(screen.queryByTestId('tv-upgrades')).toBeNull();
-        if (wide) expect(screen.getByTestId('tv-calendar-close').hasAttribute('data-home-chevron')).toBe(true);
+        if (wide) expect(screen.getByTestId('tv-home-link').querySelector('[data-testid=tv-logo]')).toBeTruthy();
         cleanup();
       }
     });
