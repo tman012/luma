@@ -159,3 +159,36 @@ def test_tick_uses_the_per_episode_push_guard():
     src = open(tv_downloads.__file__).read()
     i = src.index("_notify_imported(res)\n                    except")
     assert 'elif not _first_notify(res):' in src[i - 400:i]
+
+
+def _refuse_factory(real):
+    def refuse():
+        s = real()
+        post = s.post
+
+        def p(url, *a, **k):
+            if url.endswith('/torrents/add'):
+                return Resp(200, '{"added_torrent_ids":[],"failure_count":1}')
+            return post(url, *a, **k)
+        s.post = p
+        return s
+    return refuse
+
+
+def test_manual_grab_is_not_held_by_a_refusal_claim(qenv, safe):  # noqa: F811
+    q = FakeQbit()
+    real = q.factory
+    q.factory = _refuse_factory(real)
+    assert not _g(q, qenv, FLUX)['ok']
+    q.factory = real
+    assert _g(q, qenv, RAWR, now=5100.0)['claimed']                  # auto still held
+    r = _g(q, qenv, RAWR, origin='manual', now=5100.0)
+    assert r['ok'] and not r.get('existing') and not r.get('claimed')
+
+
+def test_manual_grab_held_by_active_grab_shows_existing(qenv, safe):  # noqa: F811
+    q = FakeQbit()
+    first = _g(q, qenv, FLUX)
+    assert first['ok']
+    r = _g(q, qenv, RAWR, origin='manual', now=5100.0)
+    assert r['ok'] and r['existing'] and r['claimed'] and r['hash'] == first['hash']

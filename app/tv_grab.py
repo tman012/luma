@@ -79,6 +79,8 @@ def _claimed_by(series_id: Any, episode_ids: List[int], own_hash: str, origin: s
                     return r['hash']
             except (ValueError, TypeError):
                 continue
+    if origin == 'manual':       # PM: a manual grab is never held by a past qBittorrent refusal
+        return None
     for e in ids:
         try:
             c = json.loads(tv_store.get_meta(f'{CLAIM_KEY}{e}') or 'null')
@@ -316,6 +318,8 @@ def grab(item: Dict[str, Any], series_id: int, season: Optional[int], episode_id
         by = _claimed_by(series_id, eids, h, origin, now)
         if by:
             logger.info('TV grab: %s not sent (episodes %s already claimed by %s)', item.get('title'), sorted(eids), by[:8])
+            if origin == 'manual':   # PM: show the grab that holds it, like the manual path's existing grab
+                return {'ok': True, 'hash': by, 'existing': True, 'claimed': True, 'by': by}
             return {'ok': False, 'error': ALREADY, 'claimed': True, 'by': by}
         for e in eids:
             _inflight[e] = h
