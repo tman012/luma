@@ -31,7 +31,7 @@ def test_helper_connection_failures_are_transient(remote_env, monkeypatch, statu
     monkeypatch.setattr(rm, '_http_post_unix', _post(status, rc, out))
     monkeypatch.setattr(rm, '_dest_observable', lambda d: True)
     monkeypatch.setattr(rm, 'wait_for_remote_copy', lambda *a: pytest.fail('rc 255 must not wait'))
-    with pytest.raises(rm.RemoteTransient):
+    with pytest.raises(rm.RemoteConnectionLost):
         rm.transfer(str(remote_env['dl'] / 'a.mkv'), '/media/Movies/a.mkv')
 
 
@@ -45,7 +45,7 @@ def test_a_script_refusal_is_not_transient(remote_env, monkeypatch):  # noqa: F8
 
 def test_unreachable_socket_is_transient(remote_env, monkeypatch):  # noqa: F811
     (remote_env['dl'] / 'a.mkv').write_bytes(b'x')
-    with pytest.raises(rm.RemoteTransient):     # nothing listens on remote_env['sock']
+    with pytest.raises(rm.RemoteConnectionLost):     # nothing listens on remote_env['sock']
         rm.transfer(str(remote_env['dl'] / 'a.mkv'), '/media/Movies/a.mkv')
 
 
@@ -93,6 +93,8 @@ class Remote:
             return 'copied'
         if isinstance(step, BaseException):
             raise step
+        if 'rc=255' in step or 'socket unreachable' in step:
+            raise rm.RemoteConnectionLost(step)
         raise rm.RemoteTransient(step)
 
     def adopt(self, src, dest, tmp):
@@ -116,6 +118,7 @@ def _final(env):
 
 def test_reboot_mid_copy_rc255_then_a_successful_retry(env, remote):  # noqa: F811
     remote.plan = ['host mover connection failed HTTP 500 rc=255: Connection closed by remote host']
+    remote.alive = False                        # the reboot killed the remote cp: its partial is dead
     env.tick(NOW)
     j = job(H1)
     assert j['state'] == 'waiting' and j['remote_tries'] == 1 and j['retry_at'] == NOW + lm.REMOTE_RETRY_S[0]
@@ -239,3 +242,48 @@ def test_cleanup_ignores_partials_of_finished_or_other_jobs(env, remote):  # noq
     assert job(H1)['state'] == 'done'
     assert lm.partials_removed([str(env.media / 'Movies' / '.luma-0123456789abcdef.luma-partial')]) == 0
     assert job(H1)['state'] == 'done'
+
+
+# ------------------------------------------------------------------ a dropped connection is not a dead copy
+
+RC255 = 'host mover connection failed HTTP 500 rc=255: Connection closed by remote host'
+
+
+def test_connection_failure_with_a_growing_partial_is_adopted_not_copied_again(env, remote):  # noqa: F811
+    remote.plan = [RC255]                       # ssh dropped, but cp keeps writing the partial on the host
+    env.tick(NOW)
+    j = job(H1)
+    assert j['state'] == 'waiting' and j['remote_tries'] == 1
+    assert list(j['inflight'].values()) == remote.calls and 'cut_partials' not in j
+    env.tick(NOW + lm.REMOTE_RETRY_S[0])
+    assert len(remote.calls) == 1, 'a second transfer was started alongside the live copy'
+    assert remote.adopted == remote.calls
+    j = job(H1)
+    assert j['state'] == 'done' and 'inflight' not in j
+    assert _final(env).read_bytes() == b'part'
+
+
+def test_connection_failure_with_a_dead_partial_makes_exactly_one_fresh_copy(env, remote):  # noqa: F811
+    remote.plan = [RC255]
+    remote.alive = False                        # the partial stopped changing: the copy is dead
+    env.tick(NOW)
+    j = job(H1)
+    assert j['state'] == 'waiting' and 'inflight' not in j and j['cut_partials'] == remote.calls
+    env.tick(NOW + lm.REMOTE_RETRY_S[0])
+    assert len(remote.calls) == 2 and remote.calls[0] != remote.calls[1] and remote.adopted == []
+    assert job(H1)['state'] == 'done'
+
+
+def test_socket_unreachable_with_a_growing_partial_is_adopted(env, remote):  # noqa: F811
+    remote.plan = ['mover socket unreachable (/run/luma-mover/mover.sock): refused']
+    env.tick(NOW)
+    assert 'inflight' in job(H1)
+    env.tick(NOW + lm.REMOTE_RETRY_S[0])
+    assert len(remote.calls) == 1 and remote.adopted == remote.calls and job(H1)['state'] == 'done'
+
+
+def test_a_stall_still_abandons_the_partial(env, remote):  # noqa: F811
+    remote.plan = ['remote copy stalled at 4 B']   # observed dead, not just a lost connection
+    env.tick(NOW)
+    j = job(H1)
+    assert 'inflight' not in j and j['cut_partials'] == remote.calls

@@ -78,6 +78,12 @@ class RemoteTransient(RemoteMoverError):
     The library mover retries these with backoff instead of giving up on the job."""
 
 
+class RemoteConnectionLost(RemoteTransient):
+    """Only the connection to the copy was lost (helper SSH rc 255 / refused / closed, helper socket
+    unreachable or an empty reply): the remote cp may still be running, so its partial is not abandoned
+    while it keeps growing."""
+
+
 # ssh exits 255 on its own errors (connection refused / reset / timed out / host down)
 _SSH_RC = 255
 _TRANSIENT_WORDS = ('connection refused', 'connection reset', 'connection closed', 'timed out', 'timeout',
@@ -256,14 +262,14 @@ def _http_post_unix(sock_path: str, path: str, body: bytes, timeout: int) -> Tup
         raw = resp.read().decode() or ''
         return resp.status, raw
     except FileNotFoundError as e:
-        raise RemoteTransient(
+        raise RemoteConnectionLost(
             f'mover socket missing: {sock_path} '
             f'(mount host ~/luma-mover/mover.sock → /run/luma-mover/; '
             f'or set {ENV_SOCK})') from e
     except (http.client.RemoteDisconnected, http.client.BadStatusLine) as e:
-        raise RemoteTransient(f'mover helper sent an empty reply ({sock_path}): {e!r}') from e
+        raise RemoteConnectionLost(f'mover helper sent an empty reply ({sock_path}): {e!r}') from e
     except (ConnectionRefusedError, ConnectionError, OSError) as e:
-        raise RemoteTransient(
+        raise RemoteConnectionLost(
             f'mover socket unreachable ({sock_path}): {e} '
             f'(Ops: luma-host-remote-mover listener on .62)') from e
     finally:
@@ -461,7 +467,7 @@ def _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_c
             return wait_for_remote_copy(src_container, dest_container, tmp_container)
         if is_transient_failure(rc_i, err):
             # the helper's SSH to the remote host failed (e.g. it rebooted mid-copy): retry later
-            raise RemoteTransient(
+            raise RemoteConnectionLost(
                 f'host mover connection failed HTTP {status} rc={rc_i}: {err} '
                 f'({op} {rsrc} -> {rdest})')
         raise RemoteMoverError(

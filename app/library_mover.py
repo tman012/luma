@@ -1006,7 +1006,13 @@ def _remote_transfer(src: str, dest: str) -> str:
         _set_inflight(h, dest, None)
         return how
     except remote_mover.RemoteTransient as e:
-        _set_inflight(h, dest, None, abandon=True)     # that copy is gone: the retry starts a fresh one
+        # A dropped connection (helper SSH rc 255, socket gone) doesn't mean the remote cp died. Keep the
+        # temp on the job while its partial is still growing (or the final landed) so the retry adopts it;
+        # abandon it only once the partial is confirmed dead, and the retry starts one fresh copy.
+        if isinstance(e, remote_mover.RemoteConnectionLost) and tmp and (remote_mover.partial_alive(tmp) or (os.path.lexists(dest) and not os.path.lexists(tmp))):
+            _set_inflight(h, dest, tmp)
+        else:
+            _set_inflight(h, dest, None, abandon=True)
         raise Transient(str(e)) from e
     except remote_mover.RemoteMoverError as e:
         _set_inflight(h, dest, None)
