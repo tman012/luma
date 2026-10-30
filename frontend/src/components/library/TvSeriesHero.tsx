@@ -1,6 +1,6 @@
 /** v321 (PM, Taylor 11:49 PM ET; final layout 12:03 AM, Designer r4c-title-v9 / build_v9.py): the series detail header.
  * No poster. The card takes the banner's natural aspect ratio (758/140 until the image loads) and the art fills it
- * 100% x 100%, so it's never cropped or stretched; it's clean art (no fade), with only Edit (dark fill) and the
+ * 100% x 100% (r3: no border on the box, the hairline is an overlay; object-fit cover, so it's never stretched and only center-cropped when the min height applies); it's clean art (no fade), with only Edit (dark fill) and the
  * monitored bookmark at the top right. Below it, centered: the title (visually hidden: the banner carries the name), the meta line, then the fields row.
  * No banner (final spec, 12:13 AM; no backdrop fallback): no art box at all, the visible title leads
  * and Edit sits at the header's top right. A banner that fails to load counts as no banner. The art fades in on load (SPEC-fade-in: 240ms,
@@ -39,6 +39,12 @@ export function reducedMotion(): boolean {
 /** r2 (Designer NO on e799265e): Edit's inset on the banner at phone width (Designer: 9px phone inset) */
 export const EDIT_INSET = 20;
 export const EDIT_INSET_PHONE = 9;
+/** r3 (Tester D2): the card's floor so Edit and the bookmark (40px tall) plus their inset always fit. A banner wider
+ * than the floor allows is center-cropped (object-fit: cover), never stretched; above the floor the box is the natural ratio. */
+export const CONTROLS_H = 40;
+export const HERO_MIN_H_PHONE = 64;
+export const HERO_MIN_H = 2 * EDIT_INSET + CONTROLS_H;
+export function heroMinH(phone: boolean): number { return phone ? HERO_MIN_H_PHONE : HERO_MIN_H; }
 
 export function TvSeriesHero({ title, meta, facts, bannerUrl, phone, edit, flag, onArt }: {
   title: string; meta: string[]; facts: [string, string, string][]; bannerUrl?: string | null;
@@ -85,7 +91,7 @@ export function TvSeriesHero({ title, meta, facts, bannerUrl, phone, edit, flag,
   // r2: on the banner Edit sits beside the bookmark at every width (Taylor: "Edit stays on the banner"); with no art on
   // narrow layouts the page keeps its own Edit at the header's top right
   const corner = (inset: number, withEdit: boolean) => (
-    <div data-testid="tv-detail-corner" style={{ position: 'absolute', top: inset, right: inset, display: 'flex', alignItems: 'center', gap: 8, zIndex: 1 }}>
+    <div data-testid="tv-detail-corner" style={{ position: 'absolute', top: inset, right: inset, display: 'flex', alignItems: 'center', gap: 8, zIndex: 2 }}>
       {flag}{withEdit && edit}
     </div>
   );
@@ -94,15 +100,19 @@ export function TvSeriesHero({ title, meta, facts, bannerUrl, phone, edit, flag,
     <div data-testid="tv-detail-hero" data-mode={mode} data-banner={useBanner || undefined} data-seasons-gap={GAP_SEASONS} style={{ position: 'relative', display: 'flex', flexDirection: 'column', minWidth: 0, marginBottom: GAP_SEASONS - PAGE_GAP }}>
       {src ? (
         <section data-testid="tv-detail-header" aria-label={title} data-art={mode} data-ratio={ratio}
-        style={{ position: 'relative', width: '100%', aspectRatio: String(ratio), borderRadius: phone ? 16 : 20, overflow: 'hidden',
-          background: HERO_BG, border: '1px solid rgba(255,255,255,.08)', boxSizing: 'border-box', fontFamily: FONT }}>
+        data-min-h={heroMinH(phone)}
+        style={{ position: 'relative', width: '100%', aspectRatio: String(ratio), minHeight: heroMinH(phone), borderRadius: phone ? 16 : 20, overflow: 'hidden',
+          background: HERO_BG, border: 0, padding: 0, boxSizing: 'border-box', fontFamily: FONT }}>
         {src && (
           <img ref={img} src={src} alt="" data-testid="tv-detail-art" data-shown={shown || undefined} decoding="async"
             onLoad={e => onLoad(e.currentTarget, true)} onError={() => setFailed(true)}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block',
-              objectFit: 'fill',
+              objectFit: 'cover', objectPosition: 'center',
               opacity: shown ? 1 : 0, transition: fade }} />
         )}
+        {/* r3 D1: the hairline is drawn on top, so the card's box (and the art) keeps the exact natural ratio */}
+        <div aria-hidden data-testid="tv-detail-hairline" style={{ position: 'absolute', inset: 0, borderRadius: 'inherit',
+          border: '1px solid rgba(255,255,255,.08)', boxSizing: 'border-box', pointerEvents: 'none', zIndex: 1 }} />
         {corner(phone ? EDIT_INSET_PHONE : EDIT_INSET, true)}
         </section>
       ) : corner(0, !phone)}

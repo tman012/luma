@@ -4,7 +4,7 @@ process.env.TZ = 'America/New_York';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TvSeriesHero, BANNER_RATIO, PATH_MAX, TITLE_MAX, BOTTOM_MAX, GAP_TITLE, GAP_META, GAP_FIELDS, GAP_SEASONS, PAGE_GAP } from '@/components/library/TvSeriesHero';
+import { TvSeriesHero, BANNER_RATIO, PATH_MAX, TITLE_MAX, BOTTOM_MAX, GAP_TITLE, GAP_META, GAP_FIELDS, GAP_SEASONS, PAGE_GAP, HERO_MIN_H, HERO_MIN_H_PHONE, EDIT_INSET, EDIT_INSET_PHONE, CONTROLS_H } from '@/components/library/TvSeriesHero';
 import { TvSeriesDetail } from '@/components/library/TvSeriesDetail';
 import { TvLibrarySettings } from '@/components/library/TvLibrarySettings';
 
@@ -57,12 +57,12 @@ describe('v321 series header', () => {
     load(img, 1000, 250);
     expect(ratioOf(card)).toBeCloseTo(4, 5);
     // the art fills the box edge to edge (no crop, no stretch: the box is the art's own ratio), no strip inside
-    expect(img.style.objectFit).toBe('fill');
+    expect(img.style.objectFit).toBe('cover');
     expect(img.style.width).toBe('100%'); expect(img.style.height).toBe('100%'); expect(img.style.inset).toBe('0px');
     expect(card.style.height).toBe('');
     // v9: clean art; only the art and the Edit/bookmark corner are inside the card
     expect(card.querySelector('[data-testid="tv-detail-facts"]')).toBeNull();
-    expect(card.children.length).toBe(2);
+    expect(card.children.length).toBe(3);
     for (const c of Array.from(card.children) as HTMLElement[]) expect(c.style.position).toBe('absolute');
   });
   it('a different banner ratio gives the card that ratio', () => {
@@ -229,5 +229,32 @@ describe('r2 (Designer NO on e799265e): Edit on the banner at phone width', () =
     const edits = screen.getAllByTestId('tv-detail-edit');
     expect(edits).toHaveLength(1);
     expect(screen.getByTestId('tv-detail-hero').contains(edits[0])).toBe(false);
+  });
+});
+
+describe('r3 (Tester PREP FAIL on e89d15ee): exact ratio and a floor for the controls', () => {
+  it('D1: the card box has no border (the hairline is an overlay), so the art box is exactly the natural ratio', () => {
+    hero();
+    const card = screen.getByTestId('tv-detail-header');
+    load(screen.getByTestId('tv-detail-art'), 758, 140);
+    expect(card.style.borderWidth === '' || card.style.borderWidth === '0px' || card.style.border === '0px' || card.style.borderStyle === 'none' || card.style.border === '').toBe(true);
+    expect(card.style.padding).toBe('0px');
+    expect(ratioOf(card)).toBeCloseTo(758 / 140, 5);
+    const line = screen.getByTestId('tv-detail-hairline');
+    expect(line.style.position).toBe('absolute'); expect(line.style.inset).toBe('0px');
+    expect(line.style.pointerEvents).toBe('none');
+    expect(screen.getByTestId('tv-detail-art').style.objectFit).toBe('cover');
+  });
+  it('D2: the card has a min height that fits Edit and the bookmark plus their inset (64px phone, 80px desktop)', () => {
+    expect(HERO_MIN_H_PHONE).toBeGreaterThanOrEqual(2 * EDIT_INSET_PHONE + CONTROLS_H);
+    expect(HERO_MIN_H).toBe(2 * EDIT_INSET + CONTROLS_H);
+    hero({ phone: true });
+    let card = screen.getByTestId('tv-detail-header');
+    expect(card.style.minHeight).toBe('64px');
+    expect(screen.getByTestId('tv-detail-art').style.objectPosition).toBe('center');
+    cleanup();
+    hero();
+    card = screen.getByTestId('tv-detail-header');
+    expect(card.style.minHeight).toBe(`${HERO_MIN_H}px`);
   });
 });
