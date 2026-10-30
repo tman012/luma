@@ -433,15 +433,24 @@ function SearchBox({ wide, value, onChange, results, placeholder = 'Search shows
 }
 
 /** The top row (v158c, Designer). Exported for tests. */
+/** MOTION.md §4 (v325): the desktop Calendar navigator sits 12px under the page title. The title is centered on the
+ * page header (LibrariesPage: 20px top + 64px box, side padding 44 left / 60 right) and this section starts
+ * HEADING_GAP (16px) under the header, so the row moves up 4px and right (60 - 44) / 2 = 8px to share its axis. */
+export const CAL_NAV_TOP = 12 - 16;
+export const CAL_NAV_SHIFT = (60 - 44) / 2;
 export const TOP_COLUMNS = 'minmax(200px, 320px) 1fr auto';
 export const topRowCss = `
 .tvt-top{display:grid;grid-template-columns:${TOP_COLUMNS};grid-template-areas:"search week tabs";align-items:center;column-gap:16px;row-gap:12px;min-height:40px}
 .tvt-top-search{grid-area:search;min-width:0}
 .tvt-top-week{grid-area:week;justify-self:center;display:flex;align-items:center;gap:12px;min-width:0}
 .tvt-top-tabs{grid-area:tabs;justify-self:end;min-width:0}
-.tvt-top[data-cal]{grid-template-columns:1fr auto 1fr;grid-template-areas:"week week week" "search . tabs";row-gap:16px}
-.tvt-top[data-cal] .tvt-top-week{position:relative;justify-self:center}
+.tvt-top[data-cal]{grid-template-columns:1fr auto 1fr;grid-template-areas:"week week week" "search . tabs";row-gap:20px}
+.tvt-top[data-cal] .tvt-top-week{position:relative;justify-self:center;margin-top:${CAL_NAV_TOP}px;left:${CAL_NAV_SHIFT}px}
+.tvt-top[data-cal] [data-testid="tv-cal-center"]{min-width:420px;justify-content:space-between}
 .tvt-top[data-cal] .tvt-top-week [data-testid="tv-cal-today"]{position:absolute;left:calc(100% + 12px);top:50%;transform:translateY(-50%);margin-left:0}
+@container tvtop (max-width: 999px){.tvt-top[data-cal]{grid-template-columns:minmax(200px, 320px) 1fr;grid-template-areas:"tabs tabs" "search week";row-gap:12px}
+.tvt-top[data-cal] .tvt-top-week{margin-top:0;left:0}.tvt-top[data-cal] [data-testid="tv-cal-center"]{min-width:0}
+.tvt-top[data-cal] .tvt-top-week [data-testid="tv-cal-today"]{position:static;transform:none}}
 @container tvtop (max-width: 999px){.tvt-top{grid-template-columns:minmax(200px, 320px) 1fr;grid-template-areas:"tabs tabs" "search week"}}
 `;
 const tabsCss = topRowCss + `

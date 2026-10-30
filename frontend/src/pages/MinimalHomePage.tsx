@@ -6,7 +6,7 @@ import { useBodyScroll } from '@/hooks/useBodyScroll';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { FONT, NAVY_BG } from '@/components/start/StartUI';
 import { assetUrl } from '@/urlHelpers';
-import { HomeRails, SkeletonRails, WYM_RAIL_ID, cardIds, railCss } from '@/components/home/Rails';
+import { HomeRails, ReservedRails, WYM_RAIL_ID, cardIds, railCss } from '@/components/home/Rails';
 import { img } from '@/components/home/homeApi';
 import { openWhenReady } from '@/services/modalPrefetch';
 import { useModalHost } from '@/contexts/ModalHostContext';
@@ -326,7 +326,7 @@ function homeView(data: HomeData | null, down: boolean, retry: () => void, onOpe
     );
   }
   // v289: match prod — pills under the first (CW) skeleton rail, not above it (avoids top→under-CW jump).
-  return <SkeletonRails afterFirst={<HomePills after />} />;
+  return <ReservedRails afterFirst={<HomePills after />} />;
 }
 
 // Centered in the space under the header: one muted line, optional Retry pill.

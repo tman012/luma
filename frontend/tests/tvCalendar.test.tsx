@@ -655,7 +655,19 @@ describe('clickable cards', () => {
 describe('v325 desktop week navigator (Taylor)', () => {
   it('sits in its own centered row under the title, wider, with Today off to the side', () => {
     const css = readFileSync(resolve(__dirname, '../src/components/library/TvLibrarySettings.tsx'), 'utf8');
-    expect(css).toContain('.tvt-top[data-cal]{grid-template-columns:1fr auto 1fr;grid-template-areas:"week week week" "search . tabs"');
+    expect(css).toContain('.tvt-top[data-cal]{grid-template-columns:1fr auto 1fr;grid-template-areas:"week week week" "search . tabs";row-gap:20px}');
+    expect(css).toContain('[data-testid="tv-cal-center"]{min-width:420px;justify-content:space-between}');
     expect(css).toContain('.tvt-top[data-cal] .tvt-top-week [data-testid="tv-cal-today"]{position:absolute');
+  });
+});
+
+describe('v325 MOTION.md §4: skeletons retired app-wide', () => {
+  it('no skeleton or shimmer source is left (SkeletonRails, .skeleton-shimmer, .luma-shimmer, @keyframes shimmer)', () => {
+    const files = ['index.css', 'components/home/Rails.tsx', 'pages/MinimalHomePage.tsx', 'pages/MobileHomePage.tsx', 'pages/AuthenticatedHomePage.tsx',
+      'pages/LibrariesPage.tsx', 'components/home/PlexSettings.tsx', 'components/settings/SectionTrackersList.tsx', 'components/library/TvCalendar.tsx'];
+    for (const f of files) {
+      const s = readFileSync(resolve(__dirname, '../src/' + f), 'utf8');
+      expect(s, f).not.toMatch(/SkeletonRails|skeleton-shimmer|luma-shimmer|@keyframes shimmer|lumaShimmer/);
+    }
   });
 });

@@ -65,7 +65,7 @@ export function SectionTrackersList({ section, label, wide = false }: { section:
         loadFailed
           ? <div role="alert" style={{ ...card, ...emptyRow }}><span style={muted}>{"Couldn't load trackers"}</span></div>
           : <div style={card} data-testid="section-trackers-loading">
-              {[0, 1].map(i => <div key={i} className="luma-shimmer" style={{ height: ROW_H }} />)}
+              {[0, 1].map(i => <div key={i} aria-hidden="true" style={{ height: ROW_H }} />)}
             </div>
       ) : list.length === 0 ? (
         <div style={{ ...card, ...emptyRow }} data-testid="section-trackers-empty"><span style={muted}>No trackers</span></div>

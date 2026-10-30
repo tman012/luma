@@ -132,18 +132,20 @@ export function WideCard({ card, onOpen, own }: { card: Card; onOpen?: OnOpen; o
   );
 }
 
-/** v289: afterFirst sits under the first (CW-shaped) skeleton rail — same slot as loaded HomeRails — so pills do not paint at the top then jump. */
-export function SkeletonRails({ rails = 3, afterFirst }: { rails?: number; afterFirst?: React.ReactNode }) {
+/** v325 (MOTION.md §4, skeletons retired): the rails' final boxes reserved at their real sizes and left empty on
+ * #111318 until Home loads, then HomeRails fades in (luma-rails-in). v289: afterFirst sits under the first
+ * (CW-shaped) rail, the same slot as loaded HomeRails, so pills never paint at the top and then jump. */
+export function ReservedRails({ rails = 3, afterFirst }: { rails?: number; afterFirst?: React.ReactNode }) {
   return (
-    <div data-testid="home-skeleton" aria-busy="true">
+    <div data-testid="home-reserved" aria-busy="true">
       {Array.from({ length: rails }, (_, r) => (
         <Fragment key={r}>
           <section style={railWrap}>
-            <div className="luma-shimmer" style={{ ...skel, width: 140, height: 18, borderRadius: 6, marginLeft: 20 }} />
+            <div aria-hidden="true" style={{ width: 140, height: 18, marginLeft: 20 }} />
             <div style={scroller}>
               {Array.from({ length: 6 }, (_, i) => (
                 <div key={i} style={r === 0 ? wideCard : posterCard}>
-                  <div className="luma-shimmer" style={{ ...skel, ...(r === 0 ? wideImg : posterImg) }} />
+                  <div aria-hidden="true" style={r === 0 ? wideImg : posterImg} />
                 </div>
               ))}
             </div>
@@ -187,11 +189,9 @@ export function HomeRails({ cw, rails, onOpen, onDismiss, afterFirst }: { cw: Ca
 export const railCss = `
 .luma-rail{scrollbar-width:none;-webkit-overflow-scrolling:touch}
 .luma-rail::-webkit-scrollbar{display:none}
-.luma-shimmer{background:linear-gradient(90deg,rgba(255,255,255,.05) 0%,rgba(255,255,255,.11) 50%,rgba(255,255,255,.05) 100%);background-size:200% 100%;animation:lumaShimmer 1.4s ease-in-out infinite}
-@keyframes lumaShimmer{from{background-position:200% 0}to{background-position:-200% 0}}
-.luma-rails-in{animation:lumaRailsIn .3s ease both}
-@keyframes lumaRailsIn{from{opacity:0}to{opacity:1}}
-@media (prefers-reduced-motion: reduce){.luma-shimmer{animation:none}.luma-rails-in{animation:none}}
+.luma-rails-in{animation:lumaRailsIn var(--m-dur-standard) var(--m-ease-standard) both}
+@keyframes lumaRailsIn{from{opacity:0;transform:translateY(var(--m-rise))}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.luma-rails-in{animation:none}}
 `;
 
 const cardButton: React.CSSProperties = {
@@ -225,7 +225,6 @@ const cardLabel: React.CSSProperties = {
 const cardSub: React.CSSProperties = { marginTop: 2, fontSize: 12, color: 'rgba(255,255,255,0.5)', fontFamily: FONT };
 const barTrack: React.CSSProperties = { position: 'absolute', left: 10, right: 10, bottom: 10, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.25)' };
 const barFill: React.CSSProperties = { height: '100%', borderRadius: 2, background: '#3b82f6' };
-const skel: React.CSSProperties = { borderRadius: 12 };
 
 /** Prod 1b4ea74's font stack (Tailwind's default sans, inherited by its home page). */
 export const PROD_FONT = 'ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"';

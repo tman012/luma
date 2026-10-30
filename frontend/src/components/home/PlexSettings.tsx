@@ -120,7 +120,7 @@ export function PlexSettings({ bare = false }: { bare?: boolean } = {}) {
       <h2 style={bare ? { ...sectionTitle, marginTop: 0 } : sectionTitle}>Server</h2>
       {error && <p role="alert" style={{ color: '#ff8a8a', fontSize: 14, margin: '0 0 12px' }}>{error}</p>}
       {status === null ? (
-        <div style={card}><div className="luma-shimmer" style={{ height: 60 }} /></div>
+        <div style={card}><div aria-hidden="true" style={{ height: 60 }} /></div>
       ) : phase === 'servers' ? (
         <div style={card} data-testid="plex-servers">
           {servers.map(s => (

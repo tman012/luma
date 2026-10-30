@@ -125,7 +125,7 @@ export function WeekCenter({ week, onWeek }: { week: Day; onWeek: (start: Day) =
       <button type="button" aria-label="Previous week" data-testid="tv-cal-prev" className="lp-focus tvc-glass" onClick={() => onWeek(addDays(week, -7))} style={navBtn}>
         <ChevronLeftIcon size={18} />
       </button>
-      <span data-testid="tv-cal-label" aria-live="polite" style={{ textAlign: 'center', minWidth: 132, fontSize: 17, fontWeight: 600, color: W95, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+      <span data-testid="tv-cal-label" aria-live="polite" style={{ textAlign: 'center', fontSize: 16, fontWeight: 600, lineHeight: '22px', color: W95, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
         {weekLabel(week)}
       </span>
       <button type="button" aria-label="Next week" data-testid="tv-cal-next" className="lp-focus tvc-glass" onClick={() => onWeek(addDays(week, 7))} style={navBtn}>
@@ -169,7 +169,7 @@ function Toolbar({ label, showToday, onPrev, onNext, onToday }: {
         </button>
         {showToday && <button type="button" data-testid="tv-cal-today" className="lp-focus tvc-glass" onClick={onToday} style={pill}>Today</button>}
       </div>
-      <span data-testid="tv-cal-label" aria-live="polite" style={{ textAlign: 'center', minWidth: 132, fontSize: 17, fontWeight: 600, color: W95, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+      <span data-testid="tv-cal-label" aria-live="polite" style={{ textAlign: 'center', fontSize: 16, fontWeight: 600, lineHeight: '22px', color: W95, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
         {label}
       </span>
       <span aria-hidden="true" />

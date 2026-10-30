@@ -331,7 +331,7 @@ export function LibrariesEditor() {
           <div style={emptyRow} role="alert"><span style={muted}>{"Couldn't load libraries"}</span></div>
         ) : (
           <div data-testid="libraries-skeleton">
-            {[0, 1, 2].map(i => <div key={i} className="luma-shimmer" style={{ height: ROW_H, margin: '0 20px 1px', borderRadius: 8 }} />)}
+            {[0, 1, 2].map(i => <div key={i} aria-hidden="true" style={{ height: ROW_H, margin: '0 20px 1px', borderRadius: 8 }} />)}
           </div>
         )
       ) : libs.length === 0 ? (
