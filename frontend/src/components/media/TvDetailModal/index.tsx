@@ -143,6 +143,14 @@ export function TvDetailModal({
     }, duration);
   }, [onClose, mode, isTablet]);
 
+
+  // MOTION.md §1.6: back (AppModalHost popstate) plays the exit from wherever the sheet is, then the host unmounts it.
+  useEffect(() => {
+    const onDismiss = (e: Event) => { e.preventDefault(); setPhase('exiting'); };
+    window.addEventListener('luma:modal-dismiss', onDismiss);
+    return () => window.removeEventListener('luma:modal-dismiss', onDismiss);
+  }, []);
+
   // Escape key
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {

@@ -24,6 +24,8 @@ interface StackEntry {
   personTarget: PersonTarget | null;
 }
 
+/** Back (popstate) dismissal: the longest sheet exit (desktop 300ms owner timers, phone --m-dur-sheet-exit 260ms). */
+const DISMISS_EXIT_MS = 300;
 export function AppModalHost({ children }: { children: ReactNode }) {
   const { mode } = useLayoutMode();
   const location = useLocation();
@@ -373,13 +375,18 @@ export function AppModalHost({ children }: { children: ReactNode }) {
         return;
       }
 
-      // No stacked parent: dismiss everything.
+      // No stacked parent: dismiss everything. MOTION.md §1.6: back runs the open sheet's exit animation first
+      // (the sheet claims the dismissal with preventDefault on 'luma:modal-dismiss'), then unmounts.
       popClosingRef.current = true;
-      setTarget(null);
-      setPersonTarget(null);
-      setStack([]);
-      setVibeEngineOpen(false);
-      window.dispatchEvent(new Event('modal-closed'));
+      const clear = () => {
+        setTarget(null);
+        setPersonTarget(null);
+        setStack([]);
+        setVibeEngineOpen(false);
+        window.dispatchEvent(new Event('modal-closed'));
+      };
+      const claimed = !window.dispatchEvent(new CustomEvent('luma:modal-dismiss', { cancelable: true }));
+      if (claimed) window.setTimeout(clear, DISMISS_EXIT_MS); else clear();
     };
 
     window.addEventListener('popstate', onPop);

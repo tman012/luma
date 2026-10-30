@@ -95,6 +95,11 @@ export function PersonDetailModal({
     closeTimer.current = setTimeout(onCloseNow, isCompact ? SHEET_EXIT_MS : MODAL_EXIT_MS);
   }, [onCloseNow, isCompact]);
   useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
+  useEffect(() => {
+    const onDismiss = (e: Event) => { e.preventDefault(); setPhase('exiting'); };
+    window.addEventListener('luma:modal-dismiss', onDismiss);
+    return () => window.removeEventListener('luma:modal-dismiss', onDismiss);
+  }, []);
 
   // Swipe-to-dismiss for compact mode
   const { handlers: swipeHandlers } = useSwipeToDismiss({
