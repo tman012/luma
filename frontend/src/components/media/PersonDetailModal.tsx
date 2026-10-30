@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useModalMotion, MODAL_EXIT_MS, SHEET_EXIT_MS } from '@/components/layout/SheetFrame';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import { useSwipeToDismiss } from '@/hooks/useSwipeToDismiss';
@@ -65,7 +66,7 @@ interface PersonDetailModalProps {
 export function PersonDetailModal({
   personId,
   personName,
-  onClose,
+  onClose: onCloseNow,
 }: PersonDetailModalProps) {
   const modalHost = useModalHost();
   const [person, setPerson] = useState<PersonData | null>(null);
@@ -82,6 +83,18 @@ export function PersonDetailModal({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const isCompact = mode === 'compact';
+  // MOTION.md §1: compact = phone bottom sheet, else desktop modal; the exit plays before unmount.
+  const [phase, setPhase] = useState<'entering' | 'exiting'>('entering');
+  const scrimMotionRef = useRef<HTMLDivElement>(null);
+  const cardMotionRef = useRef<HTMLDivElement>(null);
+  useModalMotion(phase, scrimMotionRef, cardMotionRef, isCompact ? 'bottom' : 'modal');
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onClose = useCallback(() => {
+    if (closeTimer.current) return;
+    setPhase('exiting');
+    closeTimer.current = setTimeout(onCloseNow, isCompact ? SHEET_EXIT_MS : MODAL_EXIT_MS);
+  }, [onCloseNow, isCompact]);
+  useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
 
   // Swipe-to-dismiss for compact mode
   const { handlers: swipeHandlers } = useSwipeToDismiss({
@@ -270,11 +283,12 @@ export function PersonDetailModal({
         display: 'flex',
         alignItems: isCompact ? 'stretch' : isTablet ? 'stretch' : 'center',
         justifyContent: 'center',
-        backgroundColor: isCompact ? 'rgba(0,0,0,0.6)' : isTablet ? 'transparent' : 'var(--color-kiosk-black)',
         padding: isCompact ? 0 : isTablet ? 0 : '20px',
       }}
     >
-      <div
+      <div ref={scrimMotionRef} data-sheet-scrim="" aria-hidden="true" onClick={onClose}
+        style={{ position: 'absolute', inset: 0, backgroundColor: isCompact ? 'rgba(0,0,0,0.6)' : isTablet ? 'transparent' : 'var(--color-kiosk-black)' }} />
+      <div ref={cardMotionRef}
         style={{
           ...cardStyle,
           overflow: 'hidden',

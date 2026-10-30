@@ -474,7 +474,7 @@ export function ReviewSheet({ review, variant, onClose }: { review: TopReview; v
         onTouchEnd={onTouchEnd}
         style={{
           maxHeight: 'calc(100% - max(env(safe-area-inset-top, 0px), 20px) - 24px)',
-          display: 'flex', flexDirection: 'column', background: 'var(--color-kiosk-black, #15102a)',
+          display: 'flex', flexDirection: 'column', background: 'var(--color-kiosk-black, #111318)',
           borderRadius: '20px 20px 0 0', boxShadow: '0 -12px 40px rgba(0,0,0,0.45), var(--luma-bleed-shadow)', overflow: 'hidden',
           transform: `translateY(${dismissing ? '100%' : entered ? `${dragOffset}px` : '100%'})`,
           transition: dragOffset > 0 ? 'none' : 'transform 0.3s cubic-bezier(0.32, 0.72, 0, 1)',
@@ -502,7 +502,7 @@ export function ReviewSheet({ review, variant, onClose }: { review: TopReview; v
       <div
         style={{
           width: '100%', maxWidth: 700, maxHeight: 'min(80vh, 860px)', display: 'flex', flexDirection: 'column',
-          background: 'var(--color-kiosk-black, #15102a)', borderRadius: 20, border: '1px solid rgba(255,255,255,0.08)',
+          background: 'var(--color-kiosk-black, #111318)', borderRadius: 20, border: '1px solid rgba(255,255,255,0.08)',
           boxShadow: '0 24px 80px rgba(0,0,0,0.6)', overflow: 'hidden',
           opacity: visible ? 1 : 0, transform: visible ? 'scale(1)' : 'scale(0.97)', transition: 'opacity 0.2s ease, transform 0.2s ease',
         }}

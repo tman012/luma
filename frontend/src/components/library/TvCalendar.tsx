@@ -97,18 +97,20 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, ph
         {failed === key ? (
           <div role="alert" style={emptyCard}>{"Couldn't load calendar"}</div>
         ) : loading ? (
-          phone ? <div data-testid="tv-cal-loading-phone" aria-busy="true" style={{ minHeight: GLASS_CARD_MIN_H }} /> : <Placeholder />
+          // v325 (Taylor): no skeletons on phone or desktop. An empty, invisible reserve keeps the page's height
+          // until the week arrives; the content then fades and rises in (MOTION.md §4 tokens), first load only.
+          <div data-testid={phone ? 'tv-cal-loading-phone' : 'tv-cal-loading'} aria-busy="true" style={{ minHeight: phone ? GLASS_CARD_MIN_H : DESK_RESERVE_H }} />
         ) : phone ? (
           <PhoneDay key={`${day}/${key}`} eps={eps} day={day} today={today} motion={motion} />
         ) : (
-          <>
+          <WeekIn key={key} motion={motion}>
             {heroIn ? createPortal(<WeekHero eps={eps} week={week} today={today} inRow />, heroIn) : <WeekHero eps={eps} week={week} today={today} />}
             {!eps.length ? (
               <div data-testid="tv-cal-empty" style={emptyCard}>No episodes this week</div>
             ) : (
               <WeekGrid eps={eps} week={week} today={today} />
             )}
-          </>
+          </WeekIn>
         )}
       </div>
     </div>
@@ -118,14 +120,15 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, ph
 /** The page's top row center: ‹ range › (prev, the week, next). */
 export function WeekCenter({ week, onWeek }: { week: Day; onWeek: (start: Day) => void }) {
   return (
-    <div data-testid="tv-cal-center" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-      <button type="button" aria-label="Previous week" data-testid="tv-cal-prev" className="lp-focus tvc-glass" onClick={() => onWeek(addDays(week, -7))} style={iconBtn}>
+    // Taylor (v325): a wider navigator, centered under the page title (own row on desktop Calendar).
+    <div data-testid="tv-cal-center" style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+      <button type="button" aria-label="Previous week" data-testid="tv-cal-prev" className="lp-focus tvc-glass" onClick={() => onWeek(addDays(week, -7))} style={navBtn}>
         <ChevronLeftIcon size={18} />
       </button>
-      <span data-testid="tv-cal-label" aria-live="polite" style={{ textAlign: 'center', fontSize: 15, fontWeight: 600, color: W95, whiteSpace: 'nowrap' }}>
+      <span data-testid="tv-cal-label" aria-live="polite" style={{ textAlign: 'center', minWidth: 132, fontSize: 17, fontWeight: 600, color: W95, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
         {weekLabel(week)}
       </span>
-      <button type="button" aria-label="Next week" data-testid="tv-cal-next" className="lp-focus tvc-glass" onClick={() => onWeek(addDays(week, 7))} style={iconBtn}>
+      <button type="button" aria-label="Next week" data-testid="tv-cal-next" className="lp-focus tvc-glass" onClick={() => onWeek(addDays(week, 7))} style={navBtn}>
         <ChevronIcon size={18} />
       </button>
     </div>
@@ -166,7 +169,7 @@ function Toolbar({ label, showToday, onPrev, onNext, onToday }: {
         </button>
         {showToday && <button type="button" data-testid="tv-cal-today" className="lp-focus tvc-glass" onClick={onToday} style={pill}>Today</button>}
       </div>
-      <span data-testid="tv-cal-label" aria-live="polite" style={{ textAlign: 'center', fontSize: 15, fontWeight: 600, color: W95, whiteSpace: 'nowrap' }}>
+      <span data-testid="tv-cal-label" aria-live="polite" style={{ textAlign: 'center', minWidth: 132, fontSize: 17, fontWeight: 600, color: W95, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
         {label}
       </span>
       <span aria-hidden="true" />
@@ -414,25 +417,8 @@ export const Stripe = ({ color, w = 3 }: { color: string; w?: number }) => (
   <span aria-hidden="true" data-testid="tv-stripe" style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: w, background: color, zIndex: 1 }} />
 );
 /** v321: status edge is Stripe (3px); EDGE_W retired with text-only cards. */
-/** Quiet loading that mirrors the week grid: 7 day-header strips and 2–3 glass .04
- * cards per column at a text-only card's height; no spinner, no motion. */
-const LOADING_CARDS = [3, 2, 3, 2, 3, 2, 2];
-function Placeholder() {
-  return (
-    <div data-testid="tv-cal-loading" aria-busy="true" style={gridWrap}>
-      {LOADING_CARDS.map((n, c) => (
-        <div key={c} data-testid="tv-cal-loading-day" style={gridCol}>
-          <span aria-hidden="true" style={{ ...gridHead, display: 'block', background: 'rgba(255,255,255,0.04)' }}>{'\u00a0'}</span>
-          {Array.from({ length: n }, (_, i) => (
-            <span key={i} data-testid="tv-cal-loading-card" style={{ display: 'block', height: CARD_TEXT_H, borderRadius: 10,
-              border: '1px solid rgba(255,255,255,0.04)', background: 'rgba(255,255,255,0.04)' }} />
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
+/** v325: the desktop loading reserve (no visible placeholder): day header + 3 text-only cards, so the
+ * week fades in without moving what's below it. */
 /** v166 (Designer): the card's time line is 12px at every width, never shrunk. v179: it is the start time
  * only ('9:00 PM', one nowrap line), so it never wraps. The show name keeps 28px on its right from 1000px,
  * where the 24px hover bookmark (4px from the edge) sits, so a wrapped name never runs under it. */
@@ -457,6 +443,13 @@ const gridCol: React.CSSProperties = { display: 'flex', flexDirection: 'column',
 const gridHead: React.CSSProperties = { margin: 0, padding: '0 8px', borderRadius: 8, fontSize: 12, fontWeight: 600, lineHeight: '16px' };
 /** v321 Designer D: poster row ~8+42+8; loading skeletons match card height. */
 export const CARD_TEXT_H = 74;
+const DESK_RESERVE_H = 29 + 3 * (CARD_TEXT_H + 8);
+/** One week's desktop content: it rises in on the view's first load, crossfades when paged or refetched
+ *  (the choice is fixed at mount, so a re-render never restarts the animation). */
+function WeekIn({ motion, children }: { motion: GlassMotion; children: React.ReactNode }) {
+  const [m] = useState(motion);
+  return <div className={m === 'rise' ? 'tvc-rise' : 'tvc-fade'} data-testid="tv-cal-week">{children}</div>;
+}
 const one: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
 /** v158c: week-grid captions wrap instead of clipping: the show name up to NAME_LINES, the episode line
  * up to EP_LINES, then an ellipsis. On a phone (calendar under 600px: day columns ~55px) they stay at 2 and 1
@@ -477,6 +470,7 @@ const iconBtn: React.CSSProperties = {
   width: 36, height: 36, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none', padding: 0,
   borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: W95, cursor: 'pointer',
 };
+const navBtn: React.CSSProperties = { ...iconBtn, width: 40, height: 40, borderRadius: 12 };
 const pill: React.CSSProperties = {
   height: 32, padding: '0 14px', borderRadius: 999, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)',
   color: W95, fontSize: 13, fontWeight: 600, fontFamily: FONT, cursor: 'pointer', flex: 'none', marginLeft: 4,
@@ -587,13 +581,15 @@ export function glassArt(e: Pick<CalEpisode, 'banner_url' | 'backdrop_path' | 'p
 }
 
 const glassCss = `
-@keyframes tvgRise{from{opacity:0;transform:translateY(var(--motion-rise,6px))}to{opacity:1;transform:none}}
+@keyframes tvgRise{from{opacity:0;transform:translateY(var(--m-rise,6px))}to{opacity:1;transform:none}}
 @keyframes tvgFade{from{opacity:0}to{opacity:1}}
+.tvc-rise{animation:tvgRise var(--m-dur-standard) var(--m-ease-standard) both}
+.tvc-fade{animation:tvgFade var(--m-dur-fast) var(--m-ease-standard) both}
 @keyframes tvgPulse{0%,100%{opacity:1}50%{opacity:.5}}
 .tvg-rise{animation:tvgRise var(--motion-fade-dur,240ms) var(--motion-fade-ease,cubic-bezier(0.2,0,0,1)) both}
 .tvg-fade{animation:tvgFade 150ms linear both}
 .tvg-pulse{animation:tvgPulse 1.6s ease-in-out infinite}
-@media (prefers-reduced-motion: reduce){.tvg-rise,.tvg-fade,.tvg-pulse{animation:none!important}.tvg-art{transition:none!important}}
+@media (prefers-reduced-motion: reduce){.tvc-rise,.tvc-fade,.tvg-rise,.tvg-fade,.tvg-pulse{animation:none!important}.tvg-art{transition:none!important}}
 `;
 
 /** The blurred art: opacity 0 → .18 once on load; an image already cached shows at once; a failed load stays a plain card. */

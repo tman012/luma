@@ -75,7 +75,7 @@ export function BackdropHero({
   const fade: React.CSSProperties = { transition: instant ? 'none' : 'opacity 0.45s ease-out' };
 
   return (
-    <div ref={containerRef} style={{ ...containerStyle, background: instant ? 'transparent' : '#15102a' }} data-backdrop-loaded={loaded ? 'true' : 'false'}>
+    <div ref={containerRef} style={{ ...containerStyle, background: instant ? 'transparent' : '#111318' }} data-backdrop-loaded={loaded ? 'true' : 'false'}>
       {backdropUrl ? (
         <img
           key={backdropUrl}

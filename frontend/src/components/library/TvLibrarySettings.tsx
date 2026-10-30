@@ -439,7 +439,9 @@ export const topRowCss = `
 .tvt-top-search{grid-area:search;min-width:0}
 .tvt-top-week{grid-area:week;justify-self:center;display:flex;align-items:center;gap:12px;min-width:0}
 .tvt-top-tabs{grid-area:tabs;justify-self:end;min-width:0}
-.tvt-top[data-cal]{grid-template-columns:auto 1fr auto}
+.tvt-top[data-cal]{grid-template-columns:1fr auto 1fr;grid-template-areas:"week week week" "search . tabs";row-gap:16px}
+.tvt-top[data-cal] .tvt-top-week{position:relative;justify-self:center}
+.tvt-top[data-cal] .tvt-top-week [data-testid="tv-cal-today"]{position:absolute;left:calc(100% + 12px);top:50%;transform:translateY(-50%);margin-left:0}
 @container tvtop (max-width: 999px){.tvt-top{grid-template-columns:minmax(200px, 320px) 1fr;grid-template-areas:"tabs tabs" "search week"}}
 `;
 const tabsCss = topRowCss + `

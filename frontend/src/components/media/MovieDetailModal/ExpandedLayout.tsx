@@ -1,3 +1,4 @@
+import { useModalMotion } from '@/components/layout/SheetFrame';
 import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -30,7 +31,6 @@ import { ManualMatchPicker } from '@/components/media/ManualMatchPicker';
 import { TrackerStatusNotice } from '@/components/media/sourcesTrackerStatus';
 import { srcPanel, srcAbove, srcConfirmCard, srcPrimaryBtn, srcCancelBtn, SRC_ROW_BG, SRC_HEADING_COLOR, SRC_HOVER_CSS, NO_SOURCES } from '@/components/media/sourcesTheme';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
-import { useTabletPerf } from '@/hooks/useTabletPerf';
 import { useFocusable } from '@/hooks/useFocusable';
 import { useReviews } from '@/hooks/useReviews';
 import { SimilarPanel } from './SimilarPanel';
@@ -385,7 +385,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   const [srcMatchFor, setSrcMatchFor] = useState<ProcessedRelease | null>(null);
   const { isTablet } = useLayoutMode();
   const t = isTablet ? TOKENS.tablet : TOKENS.desktop;
-  const perf = useTabletPerf();
 
   // Reviews data — deferred until Info shelf is opened (RT scraping is slow)
   const [reviewsRequested, setReviewsRequested] = useState(false);
@@ -629,15 +628,8 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // ---------------------------------------------------------------------------
   // Animation — tablet: opacity-only (skip scale/transform for GPU savings)
   // ---------------------------------------------------------------------------
-  const overlayOpacity = phase === 'visible' ? 1 : 0;
-  const cardTransform = perf.reduceMotion
-    ? 'none'
-    : phase === 'entering'
-      ? 'scale(0.95) translateY(20px)'
-      : phase === 'visible'
-        ? 'scale(1) translateY(0)'
-        : 'scale(0.97) translateY(10px)';
-  const cardOpacity = phase === 'visible' ? 1 : 0;
+  const cardRef = useRef<HTMLDivElement>(null);
+  useModalMotion(phase, overlayRef, cardRef);
 
   if (phase === 'gone') return null;
 
@@ -657,13 +649,11 @@ export function ExpandedLayout(props: MovieModalViewProps) {
         alignItems: t.overlay.alignItems,
         justifyContent: 'center',
         background: t.overlay.background,
-        opacity: overlayOpacity,
-        transition: 'opacity 0.3s ease',
         padding: t.overlay.padding,
       }}
     >
       {/* Card */}
-      <div
+      <div ref={cardRef}
         style={{
           position: 'relative',
           width: '100%',
@@ -673,13 +663,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
           overflow: 'hidden',
           backgroundColor: ultraBlurColors ? t.card.bgUltraBlur : CARD_BG,
           boxShadow: t.card.boxShadow,
-          transform: cardTransform,
-          opacity: cardOpacity,
-          transition: perf.reduceMotion
-            ? 'opacity 0.2s ease'
-            : phase === 'exiting'
-              ? 'transform 0.3s ease, opacity 0.3s ease'
-              : 'transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
           display: 'flex',
           flexDirection: 'column',
         }}

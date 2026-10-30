@@ -1,3 +1,4 @@
+import { useModalMotion } from '@/components/layout/SheetFrame';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -134,7 +135,7 @@ function PillButton({
           ? (hovered ? 'rgba(255,255,255,0.88)' : '#fff')
           : (hovered ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.08)'),
         border: primary || tone ? 'none' : '1px solid rgba(255,255,255,0.15)',
-        color: tone === 'blue' ? '#fff' : primary ? '#15102a' : '#fff',
+        color: tone === 'blue' ? '#fff' : primary ? '#111318' : '#fff',
         fontSize,
         fontWeight: 600,
         cursor: 'pointer',
@@ -465,7 +466,7 @@ function EpisodeGridModal({
                         background: 'rgba(255,255,255,0.95)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                       }}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="#15102a">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="#111318">
                           <polygon points="8,4 20,12 8,20" />
                         </svg>
                       </div>
@@ -754,7 +755,6 @@ function SeasonDetailModal({
   const seasonModalHost = useModalHost();
   const [phase, setPhase] = useState<'entering' | 'visible' | 'exiting'>('entering');
   const t = isTablet ? TOKENS.tablet : TOKENS.desktop;
-  const perf = useTabletPerf();
 
   const shelfOpen = showCastShelf;
 
@@ -794,25 +794,22 @@ function SeasonDetailModal({
   // Season rating — IMDb via OMDb (never TMDb vote_average)
   const effectiveRatings = useImdbRatings(show.title, show.year);
 
-  const overlayOpacity = phase === 'visible' ? 1 : 0;
-  const cardTransform = perf.reduceMotion ? 'none'
-    : phase === 'entering' ? 'scale(0.95) translateY(20px)'
-    : phase === 'visible' ? 'scale(1) translateY(0)'
-    : 'scale(0.97) translateY(10px)';
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  useModalMotion(phase, overlayRef, cardRef);
 
   return createPortal(
-    <div className="luma-fullscreen luma-bleed"
+    <div className="luma-fullscreen luma-bleed" ref={overlayRef}
       onClick={handleClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 200,
         display: 'flex', alignItems: t.overlay.alignItems, justifyContent: 'center',
         background: t.overlay.background,
-        opacity: overlayOpacity,
-        transition: 'opacity 0.3s ease',
         padding: t.overlay.padding,
       }}
     >
-      <div
+      <div ref={cardRef}
         onClick={(e) => e.stopPropagation()}
         style={{
           position: 'relative',
@@ -822,10 +819,6 @@ function SeasonDetailModal({
           overflow: 'hidden',
           backgroundColor: parentUltraBlurColors ? t.card.bgUltraBlur : CARD_BG,
           boxShadow: t.card.boxShadow,
-          transform: cardTransform, opacity: overlayOpacity,
-          transition: perf.reduceMotion
-            ? 'opacity 0.2s ease'
-            : 'transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
           display: 'flex', flexDirection: 'column',
         }}
       >
@@ -1297,15 +1290,8 @@ export function ExpandedLayout(props: TvModalViewProps) {
   // ---------------------------------------------------------------------------
   // Animation
   // ---------------------------------------------------------------------------
-  const overlayOpacity = phase === 'visible' ? 1 : 0;
-  const cardTransform = perf.reduceMotion
-    ? 'none'
-    : phase === 'entering'
-      ? 'scale(0.95) translateY(20px)'
-      : phase === 'visible'
-        ? 'scale(1) translateY(0)'
-        : 'scale(0.97) translateY(10px)';
-  const cardOpacity = phase === 'visible' ? 1 : 0;
+  const cardRef = useRef<HTMLDivElement>(null);
+  useModalMotion(phase, overlayRef, cardRef);
 
   if (phase === 'gone') return null;
 
@@ -1326,13 +1312,11 @@ export function ExpandedLayout(props: TvModalViewProps) {
           alignItems: t.overlay.alignItems,
           justifyContent: 'center',
           background: t.overlay.background,
-          opacity: overlayOpacity,
-          transition: 'opacity 0.3s ease',
           padding: t.overlay.padding,
         }}
       >
         {/* Card */}
-        <div
+        <div ref={cardRef}
           style={{
             position: 'relative',
             width: '100%',
@@ -1342,13 +1326,6 @@ export function ExpandedLayout(props: TvModalViewProps) {
             overflow: 'hidden',
             backgroundColor: ultraBlurColors ? t.card.bgUltraBlur : CARD_BG,
             boxShadow: t.card.boxShadow,
-            transform: cardTransform,
-            opacity: cardOpacity,
-            transition: perf.reduceMotion
-              ? 'opacity 0.2s ease'
-              : phase === 'exiting'
-                ? 'transform 0.3s ease, opacity 0.3s ease'
-                : 'transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
             display: 'flex',
             flexDirection: 'column',
           }}
@@ -1998,7 +1975,7 @@ export function ExpandedLayout(props: TvModalViewProps) {
 
 /** v158b (Designer): the Episodes/Seasons overlays are opaque (nothing of the detail page shows
  * through); cards are glass .06 with a .08 border; missing stills glass .04; chips glass .10. */
-const OVERLAY_SURFACE = '#15102a';
+const OVERLAY_SURFACE = '#111318';
 const CARD_GLASS: React.CSSProperties = {
   background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '14px', padding: '10px',
 };

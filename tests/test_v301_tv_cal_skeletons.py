@@ -10,7 +10,9 @@ def test_v322_phone_loading_has_no_skeletons():
     card's height, with no placeholder cards, shimmer or spinner."""
     src = (ROOT / 'frontend/src/components/library/TvCalendar.tsx').read_text()
     assert 'function PhonePlaceholder' not in src
-    assert '<div data-testid="tv-cal-loading-phone" aria-busy="true" style={{ minHeight: GLASS_CARD_MIN_H }} />' in src
+    # v325 (Taylor): no skeletons on phone or desktop either; one empty reserve (phone: one card's height)
+    assert "data-testid={phone ? 'tv-cal-loading-phone' : 'tv-cal-loading'} aria-busy=\"true\" style={{ minHeight: phone ? GLASS_CARD_MIN_H : DESK_RESERVE_H }} />" in src
+    assert 'function Placeholder' not in src and 'tv-cal-loading-card' not in src
     assert '{phone ? <DayHeader day={day} today={today} onStep={step} />' in src
     phone = src[src.index('export function PhoneDay'):]
     assert 'skeleton-shimmer' not in phone and 'spinner' not in phone.lower()

@@ -92,9 +92,9 @@ describe('Designer must-fix', () => {
     expect(screen.getByTestId('b').style.background).toBe('rgb(59, 130, 246)');
   });
 
-  it('the Episodes and Seasons overlays are opaque #15102a; cards glass .06 with a .08 border; stills .04; chips .10', () => {
+  it('the Episodes and Seasons overlays are opaque #111318; cards glass .06 with a .08 border; stills .04; chips .10', () => {
     const s = src('components/media/TvDetailModal/ExpandedLayout.tsx');
-    expect(s).toContain("const OVERLAY_SURFACE = '#15102a';");
+    expect(s).toContain("const OVERLAY_SURFACE = '#111318';");
     expect((s.match(/background: OVERLAY_SURFACE,/g) || []).length).toBe(2);
     expect(s).not.toContain("background: 'rgba(0,0,0,0.88)'");
     expect(s).toContain("background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)'");

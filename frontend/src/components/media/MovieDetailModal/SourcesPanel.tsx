@@ -328,7 +328,7 @@ function ConfirmPanel({ target, confirmLoading, onCancel, onDownload, zoneId, er
       </div>
       <div
         style={{
-          background: 'linear-gradient(rgba(255,255,255,0.06), rgba(255,255,255,0.06)), #15102a', borderRadius: '20px', padding: '36px',
+          background: 'linear-gradient(rgba(255,255,255,0.06), rgba(255,255,255,0.06)), #111318', borderRadius: '20px', padding: '36px',
           width: '520px', maxWidth: '90%', border: '1px solid rgba(255,255,255,0.08)',
           position: 'relative', zIndex: 1,
         }}

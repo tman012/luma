@@ -9,7 +9,7 @@
  * - Body scroll lock and the <html> background (#111318) from enter start to unmount.
  * `data-composed` stays on the root for the composed_ms hooks; it no longer gates visibility.
  */
-import { createContext, useContext, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { createContext, useContext, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { APP_BG, MOTION, reducedMotion } from '@/theme/motion';
 import { BACKDROP_HEIGHT } from '@/hooks/useBackdropEffects';
@@ -18,6 +18,9 @@ import { tapShell } from '@/services/modalPrefetch';
 export type SheetPhase = 'entering' | 'visible' | 'exiting' | 'gone';
 
 const CardRef = createContext<React.RefObject<HTMLDivElement | null> | null>(null);
+/** True while the enter animation runs (MOTION.md §6: no detail render on the animating frames). */
+const Entering = createContext(false);
+export const useSheetEntering = () => useContext(Entering);
 
 /** Duration the owner should wait after phase 'exiting' before unmounting. */
 export const SHEET_EXIT_MS = MOTION.dur.sheetExit;
@@ -40,6 +43,7 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimC
   const anims = useRef<Animation[]>([]);
   const entered = useRef(false);
   const prevPhase = useRef<SheetPhase>(phase);
+  const [entering, setEntering] = useState(true);
 
   // Scroll lock + app background paint, from enter start until unmount.
   useLayoutEffect(() => {
@@ -56,7 +60,7 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimC
   useLayoutEffect(() => {
     const card = cardRef.current;
     const scrim = scrimRef.current;
-    if (!card || !scrim || typeof card.animate !== 'function') return;
+    if (!card || !scrim || typeof card.animate !== 'function') { setEntering(false); return; }
     const rm = reducedMotion();
     const stop = () => { anims.current.forEach((a) => a.cancel()); anims.current = []; };
     if (phase === 'exiting') {
@@ -100,10 +104,11 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimC
       { duration: rm ? MOTION.dur.fast : MOTION.dur.standard, easing: MOTION.ease.standard });
     anims.current = [enter, fade];
     enter.finished.then(() => {
+      setEntering(false);
       card.style.willChange = '';
       anims.current = anims.current.filter((a) => a !== enter && a !== fade);
       card.dispatchEvent(new CustomEvent('luma:sheet-entered', { bubbles: true }));
-    }, () => {});
+    }, () => setEntering(false));
   }, [phase]);
 
   if (phase === 'gone') return null;
@@ -118,7 +123,7 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimC
       <div ref={scrimRef} data-sheet-scrim="" aria-hidden="true"
         onClick={onScrimClick}
         style={{ position: 'absolute', inset: 0, background: '#000', opacity: MOTION.scrim }} />
-      <CardRef.Provider value={cardRef}>{children}</CardRef.Provider>
+      <Entering.Provider value={entering}><CardRef.Provider value={cardRef}>{children}</CardRef.Provider></Entering.Provider>
     </div>,
     document.body,
   );
@@ -127,6 +132,11 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimC
 /** The sheet card: rounded top, full height under the safe area, slides with the frame. */
 export function SheetCard({ background, children }: { background: string; children: ReactNode }) {
   const ref = useContext(CardRef);
+  const entering = useContext(Entering);
+  // While the card slides in, keep the first frame's content (same element identity, so React skips the
+  // subtree): late detail/ratings/cast commit once, at enter end, instead of on the animating frames.
+  const snap = useRef<ReactNode>(children);
+  if (!entering) snap.current = children;
   const style: CSSProperties = {
     position: 'absolute',
     top: 'max(env(safe-area-inset-top, 0px), 6px)',
@@ -138,7 +148,7 @@ export function SheetCard({ background, children }: { background: string; childr
     transform: 'translate3d(0, 0, 0)',
     backfaceVisibility: 'hidden',
   };
-  return <div ref={ref} className="luma-bleed-down" data-sheet-card="" style={style}>{children}</div>;
+  return <div ref={ref} className="luma-bleed-down" data-sheet-card="" style={style}>{snap.current}</div>;
 }
 
 /** The sheet's first frame while details load (MOTION.md §1.2-1.3): the final layout's top (backdrop box,
@@ -169,3 +179,56 @@ export function SeedShell({ overlap }: { overlap: number }) {
 
 /** Content that replaces a seed shell crossfades in (--m-dur-crossfade); content there from the first frame doesn't. */
 export const SHELL_CROSSFADE = 'm-crossfade var(--m-dur-crossfade) var(--m-ease-standard) both';
+
+/** Desktop modal / side-sheet motion (MOTION.md §1 table, right column), shared by the ExpandedLayouts,
+ *  PersonDetail, PageModal and KioskSearch. Enter on mount: scrim 0 -> 1 over --m-dur-standard, card
+ *  scale(0.96)+opacity 0 -> rest over 320ms --m-ease-decel (side: translateX(24px)+fade). Exit when `phase`
+ *  becomes 'exiting': from the current state to scale(0.98)+opacity 0 over 200ms --m-ease-accel; the scrim
+ *  fades over 200ms. Reduced motion: opacity only, --m-dur-fast. WAAPI, transform/opacity only. */
+export const MODAL_ENTER_MS = 320;
+export const MODAL_EXIT_MS = 200;
+export function useModalMotion(phase: string, scrimRef: React.RefObject<HTMLElement | null>,
+  cardRef: React.RefObject<HTMLElement | null>, kind: 'modal' | 'side' | 'bottom' = 'modal') {
+  const anims = useRef<Animation[]>([]);
+  const entered = useRef(false);
+  useLayoutEffect(() => {
+    const card = cardRef.current; const scrim = scrimRef.current;
+    const ok = (el: HTMLElement | null): el is HTMLElement => !!el && typeof el.animate === 'function';
+    card?.setAttribute('data-modal-card', kind);
+    const rm = reducedMotion();
+    const stop = () => { anims.current.forEach((a) => a.cancel()); anims.current = []; };
+    // 'bottom': the phone sheet rule (opaque card slides from translateY(100%); --m-dur-sheet-enter/exit).
+    const bottom = kind === 'bottom';
+    const from = kind === 'side' ? 'translate3d(24px, 0, 0)' : bottom ? 'translate3d(0, 100%, 0)' : 'scale(0.96)';
+    const out = kind === 'side' ? 'translate3d(24px, 0, 0)' : bottom ? 'translate3d(0, 100%, 0)' : 'scale(0.98)';
+    const o0 = bottom ? 1 : 0;
+    if (phase === 'exiting') {
+      const cs = ok(card) ? getComputedStyle(card) : null;
+      const curT = cs && cs.transform !== 'none' ? cs.transform : 'none';
+      const curO = cs ? cs.opacity : '1';
+      const so = ok(scrim) ? getComputedStyle(scrim).opacity : '1';
+      stop();
+      const d = rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetExit : MODAL_EXIT_MS;
+      if (ok(card)) anims.current.push(card.animate(rm ? [{ opacity: curO }, { opacity: 0 }]
+        : [{ transform: curT, opacity: curO }, { transform: out, opacity: o0 }], { duration: d, easing: MOTION.ease.accel, fill: 'forwards' }));
+      if (ok(scrim) && scrim !== card) anims.current.push(scrim.animate([{ opacity: so }, { opacity: 0 }], { duration: d, easing: MOTION.ease.accel, fill: 'forwards' }));
+      return;
+    }
+    if (entered.current) {
+      if (anims.current.length) stop(); // a re-open during exit cancels the exit (back to rest)
+      return;
+    }
+    entered.current = true;
+    if (ok(scrim) && scrim !== card) anims.current.push(scrim.animate([{ opacity: 0 }, { opacity: 1 }],
+      { duration: rm ? MOTION.dur.fast : MOTION.dur.standard, easing: MOTION.ease.standard }));
+    if (ok(card)) anims.current.push(card.animate(rm ? [{ opacity: 0 }, { opacity: 1 }]
+      : [{ transform: from, opacity: o0 }, { transform: 'none', opacity: 1 }],
+      { duration: rm ? MOTION.dur.fast : bottom ? MOTION.dur.sheetEnter : MODAL_ENTER_MS, easing: MOTION.ease.decel }));
+    const enter = anims.current[anims.current.length - 1];
+    enter?.finished.then(() => {
+      anims.current = [];
+      card?.dispatchEvent(new CustomEvent('luma:sheet-entered', { bubbles: true }));
+    }, () => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase === 'exiting']);
+}

@@ -340,7 +340,7 @@ describe('Calendar', () => {
     expect(screen.getByTestId('tv-cal-label').textContent).toBe('Nov 1 \u2013 7');
   });
 
-  it('quiet loading: glass .04 placeholder rows, no spinner, no motion', async () => {
+  it('v325 (Taylor): no skeleton while loading, an empty invisible reserve; the week then rises in', async () => {
     let release!: () => void;
     const fetch0 = globalThis.fetch;
     vi.stubGlobal('fetch', vi.fn(async (u: string, i?: RequestInit) => {
@@ -349,21 +349,17 @@ describe('Calendar', () => {
     }));
     page(true);
     const ph = await screen.findByTestId('tv-cal-loading');
-    const cols = within(ph).getAllByTestId('tv-cal-loading-day');                  // mirrors the grid: 7 columns
-    expect(cols).toHaveLength(7);
-    expect(ph.style.gridTemplateColumns).toBe('repeat(7, minmax(0, 1fr))');
-    for (const c of cols) {
-      expect((c.firstElementChild as HTMLElement).style.background).toBe('rgba(255, 255, 255, 0.04)');   // a day-header strip
-      const cards = within(c).getAllByTestId('tv-cal-loading-card');
-      expect(cards.length >= 2 && cards.length <= 3).toBe(true);
-      expect(cards[0]!.style.background).toBe('rgba(255, 255, 255, 0.04)');
-      expect(cards[0]!.style.height).toBe(`${CARD_TEXT_H}px`);                       // a text-only card's height
-      expect(cards[0]!.querySelector('[style*="aspect-ratio"]')).toBeNull();
-    }
+    expect(ph.children).toHaveLength(0);                                             // nothing visible: no strips, no cards
+    expect(ph.getAttribute('aria-busy')).toBe('true');
+    expect(ph.style.background).toBe('');
+    expect(parseInt(ph.style.minHeight, 10)).toBe(29 + 3 * (CARD_TEXT_H + 8));        // the height is reserved
+    expect(screen.queryAllByTestId('tv-cal-loading-day')).toHaveLength(0);
+    expect(screen.queryAllByTestId('tv-cal-loading-card')).toHaveLength(0);
     expect(document.querySelector('.tvi-spin, .tvc-pulse, [class*="spin"]')).toBeNull();
     expect(screen.getByTestId('tv-cal-label').textContent).toBe('Oct 11 \u2013 17');   // the toolbar stays put
     await act(async () => release());
     await screen.findAllByTestId('tv-agenda-row');
+    expect(screen.getByTestId('tv-cal-week').className).toBe('tvc-rise');           // first load: fade + rise (MOTION tokens)
   });
 });
 
@@ -653,5 +649,13 @@ describe('clickable cards', () => {
     const host = { openTv: vi.fn(), openMovie: vi.fn() } as unknown as ModalHostContextValue;
     render(<ModalHostContext.Provider value={host}><WeekGrid week="2026-10-11" today="2026-10-17" eps={[ep(9, '2026-10-15', true)]} /></ModalHostContext.Provider>);
     expect(screen.getByTestId('tv-agenda-row').getAttribute('role')).toBeNull();
+  });
+});
+
+describe('v325 desktop week navigator (Taylor)', () => {
+  it('sits in its own centered row under the title, wider, with Today off to the side', () => {
+    const css = readFileSync(resolve(__dirname, '../src/components/library/TvLibrarySettings.tsx'), 'utf8');
+    expect(css).toContain('.tvt-top[data-cal]{grid-template-columns:1fr auto 1fr;grid-template-areas:"week week week" "search . tabs"');
+    expect(css).toContain('.tvt-top[data-cal] .tvt-top-week [data-testid="tv-cal-today"]{position:absolute');
   });
 });

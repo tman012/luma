@@ -13,7 +13,7 @@ describe('details popup backdrop', () => {
     const view = render(hero('/api/img/plex?url=/library/metadata/1/art/1'));
     let img = view.container.querySelector('img')!;
     expect(img.style.opacity).toBe('0');
-    expect((view.container.firstChild as HTMLElement).style.background).toMatch(/#15102a|rgb\(21, 16, 42\)/);
+    expect((view.container.firstChild as HTMLElement).style.background).toMatch(/#111318|rgb\(17, 19, 24\)/);
     fireEvent.load(img);
     expect(img.style.opacity).toBe('1');
     expect(img.style.transition).toContain('opacity');
