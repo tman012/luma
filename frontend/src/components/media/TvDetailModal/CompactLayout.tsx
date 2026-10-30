@@ -1,4 +1,6 @@
 import { sheetBase } from '@/utils/posterColors';
+import { APP_BG } from '@/theme/motion';
+import { SheetFrame, SheetCard, SeedShell, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
 import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
@@ -197,7 +199,7 @@ export function CompactLayout(props: TvModalViewProps) {
   // Phone: the sheet stays off-screen until it can show fully composed
   // (details, backdrop, logo and colors, or the 600 ms cap), then slides in.
   const composed = !!error || (!loading && !!show && titleState !== 'hold');
-  const sheetBg = sheetBase(ultraBlurColors) ?? '#15102a';
+  const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
   useEffect(() => {
     if (composed) window.dispatchEvent(new Event(REVEALED_EVENT));
   }, [composed]);
@@ -332,26 +334,7 @@ export function CompactLayout(props: TvModalViewProps) {
   // Plex-like backdrop effects: crop/zoom header + UltraBlur color bleed
   const backdropEffects = useBackdropEffects(show?.backdropUrl, ultraBlurColors);
 
-  // -----------------------------------------------------------------------
-  // Body scroll lock + safe-area background
-  // -----------------------------------------------------------------------
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
-  }, []);
 
-  // Paint <html> background to match modal once visible — delayed to avoid
-  // flashing a black screen before the modal card animates in.
-  useEffect(() => {
-    if (phase !== 'visible') return;
-    const bg = 'var(--color-kiosk-black, #15102a)';
-    const prev = document.documentElement.style.background;
-    document.documentElement.style.background = bg;
-    return () => {
-      document.documentElement.style.background = prev;
-    };
-  }, [phase]);
 
   // Parallax scroll handler (backdrop: translate up + fade out)
   useEffect(() => {
@@ -435,66 +418,14 @@ export function CompactLayout(props: TvModalViewProps) {
   // Animation styles
   // -----------------------------------------------------------------------
 
-  // Slide up from bottom on enter, slide back down on exit
-  const ENTER_DURATION = 600;
-  const SHEET_FADE_MS = 200;
-  const EXIT_DURATION = 400;
-  const springBezier = 'cubic-bezier(0.22, 1, 0.36, 1)';
-  // Use translate3d to force GPU compositing for smooth animations
-  const cardTransform =
-    phase === 'exiting'
-      ? 'translate3d(0, 100%, 0)'
-      : phase === 'entering' || !composed
-        ? 'translate3d(0, 16px, 0)'
-        : 'translate3d(0, 0, 0)';
-  const cardTransition =
-    phase === 'exiting'
-      ? `transform ${EXIT_DURATION}ms cubic-bezier(0.4, 0, 1, 1)`
-      : `transform ${ENTER_DURATION}ms ${springBezier}, opacity ${SHEET_FADE_MS}ms ease-out`;
-  // The sheet only ever shows composed: it fades in as one piece (no slide
-  // that would uncover an empty sheet first), and nothing in it fades alone.
-  const cardOpacity = phase === 'exiting' || (phase !== 'entering' && composed) ? 1 : 0;
-
+  const shellShown = useRef(loading);
+  if (loading) shellShown.current = true;
+  // Enter/exit motion, scrim, scroll lock and the app background live in SheetFrame (MOTION.md §1).
   if (phase === 'gone') return null;
 
-  return createPortal(
-    <div className="luma-fullscreen luma-bleed"
-      data-modal="TvDetailModal"
-      data-variant="mobile"
-      data-composed={composed ? "true" : "false"}
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 10000,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        opacity: phase === 'entering' || !composed ? 0 : 1,
-        transition: 'opacity 250ms ease-out',
-      }}
-    >
-      {/* Modal card — rounded top, extends to bottom of wrapper */}
-      <div className="luma-bleed-down"
-        style={{
-          position: 'absolute',
-          top: 'max(env(safe-area-inset-top, 0px), 6px)',
-          left: 0,
-          right: 0,
-          bottom: 0,
-          borderTopLeftRadius: '14px',
-          borderTopRightRadius: '14px',
-          overflow: 'hidden',
-          backgroundColor: sheetBg,
-          display: 'flex',
-          flexDirection: 'column',
-          transform: cardTransform,
-          opacity: cardOpacity,
-          transition: cardTransition,
-          willChange: 'transform',
-          backfaceVisibility: 'hidden',
-        }}
-      >
+  return (
+    <SheetFrame name="TvDetailModal" phase={phase} composed={composed} onScrimClick={onClose}>
+      <SheetCard background={sheetBg}>
         {/* Scrollable content */}
         <div
           ref={scrollRef}
@@ -517,27 +448,7 @@ export function CompactLayout(props: TvModalViewProps) {
           }}
         >
           {/* Loading */}
-          {loading && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '100%',
-              }}
-            >
-              <div
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '50%',
-                  border: '3px solid rgba(255,255,255,0.15)',
-                  borderTopColor: 'rgba(255,255,255,0.7)',
-                  animation: 'mobileTvModalSpin 0.8s linear infinite',
-                }}
-              />
-            </div>
-          )}
+          {loading && <SeedShell overlap={220} />}
 
           {/* Error */}
           {!loading && error && (
@@ -591,10 +502,9 @@ export function CompactLayout(props: TvModalViewProps) {
                 zIndex: 3,
                 textAlign: 'center',
                 marginTop: '-220px',
-                // One reveal for everything (backdrop, blur, title, text, buttons).
-                opacity: titleState === 'hold' ? 0 : 1,
-                transition: 'none', // the sheet itself fades in, composed
-                willChange: 'opacity',
+                // The sheet is opaque from its first frame; only the title waits for the logo (titleTextStyle).
+                // Details that replace the seed shell crossfade in.
+                animation: shellShown.current ? SHELL_CROSSFADE : 'none',
               }}>
                 {/* UltraBlur — scrolls with content, slides up over backdrop */}
                 {ultraBlurColors && (
@@ -1258,7 +1168,7 @@ export function CompactLayout(props: TvModalViewProps) {
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </button>
-      </div>
+      </SheetCard>
 
       {/* Playback sheet — normal playback */}
       {showPlayback && playbackRatingKey && !shuffleTarget && (
@@ -1411,7 +1321,7 @@ export function CompactLayout(props: TvModalViewProps) {
             fontWeight: 600,
             zIndex: 10003,
             whiteSpace: 'nowrap',
-            animation: 'mobileToastEnter 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
+            animation: 'mobileToastEnter var(--m-dur-standard) var(--m-ease-decel)',
           }}
         >
           Download started!
@@ -1435,7 +1345,7 @@ export function CompactLayout(props: TvModalViewProps) {
             fontWeight: 600,
             zIndex: 10003,
             whiteSpace: 'nowrap',
-            animation: 'mobileToastEnter 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
+            animation: 'mobileToastEnter var(--m-dur-standard) var(--m-ease-decel)',
           }}
         >
           Added to watchlist
@@ -1479,8 +1389,7 @@ export function CompactLayout(props: TvModalViewProps) {
         @keyframes mobileTvModalSpin { to { transform: rotate(360deg); } }
         @keyframes searchPopupFadeIn { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
       `}</style>
-    </div>,
-    document.body,
+    </SheetFrame>
   );
 }
 

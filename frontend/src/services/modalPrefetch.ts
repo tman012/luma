@@ -171,9 +171,10 @@ export function scheduleWarm(key: string, run: () => Promise<void>): () => void 
 }
 
 // ---------------------------------------------------------------------------
-// Phone: open the popup only once it can show fully composed. The tapped
-// poster gets a pressed state meanwhile; its own pixels seed the color blur so
-// the sheet's first paint is the blur even at the cap.
+// Phone: a tap opens the sheet within OPEN_BUDGET_MS (150 ms, MOTION.md §1.1),
+// sooner when the title is warm; the sheet slides in opaque with the seed shell
+// and fills in place. The tapped poster's pixels seed the color blur. OPEN_CAP_MS
+// is only how long the detail hooks still wait for the logo/colors (remainingCap).
 // ---------------------------------------------------------------------------
 
 export const OPEN_CAP_MS = 600;
@@ -191,31 +192,76 @@ export function remainingCap(fallback: number): number {
   return Math.max(0, OPEN_CAP_MS - elapsed);
 }
 
+/** What the tapped card/row already shows (title, poster), for the sheet's seed shell (MOTION.md §1.2). */
+export interface TapShell { title: string; poster: string | null; at: number }
+let shell: TapShell | null = null;
+function tapTitle(card: HTMLElement): string {
+  const t = card.getAttribute('aria-label') || card.querySelector('[data-testid="row-title"]')?.textContent
+    || (card.innerText || card.textContent || '').split('\n')[0];
+  return (t || '').trim();
+}
+/** The seed shell of the tap that is opening a sheet now (none after 5 s). */
+export function tapShell(): TapShell | null {
+  return shell && now() - shell.at < 5000 ? shell : null;
+}
+
+const SHEET_SEL = '[data-modal="MovieDetailModal"],[data-modal="TvDetailModal"]';
+/** How long a tap waits for a detail sheet to mount before giving up on it (no sheet: release). */
+export const SHEET_MOUNT_WAIT_MS = 1500;
+
+/** Calls `onClosed` once the detail sheet that is about to mount (or already mounted) is gone again;
+ *  if none mounts within SHEET_MOUNT_WAIT_MS, calls it then. */
+export function watchSheet(onClosed: () => void): void {
+  let seen = !!document.querySelector(SHEET_SEL);
+  let done = false;
+  const finish = () => { if (done) return; done = true; obs.disconnect(); window.clearTimeout(t); onClosed(); };
+  const obs = new MutationObserver(() => {
+    const now = !!document.querySelector(SHEET_SEL);
+    if (now) seen = true;
+    else if (seen) finish();
+  });
+  obs.observe(document.body, { childList: true, subtree: true });
+  const t = window.setTimeout(() => { if (!seen) finish(); }, SHEET_MOUNT_WAIT_MS);
+}
+
+/** MOTION.md §1.3: the tap waits at most this long for warm details, then opens with the seed shell. */
+export const OPEN_BUDGET_MS = 150;
+
+/** Home card and search result taps (one path): pressed state on the tapped element, warm details for up
+ *  to OPEN_BUDGET_MS, then `open()`; the press releases as the sheet starts entering (next frame).
+ *  While that sheet is open further taps are ignored (a double tap or a 2nd Enter never opens or
+ *  pushes it twice); `onClosed` runs when it closes (search UIs stay mounted under it and use this to
+ *  come back). */
 export async function openWhenReady(
   kind: 'movie' | 'tv', ratingKey: number | undefined, tmdbId: number | undefined,
-  card: HTMLElement | null, open: () => void,
+  card: HTMLElement | null, open: () => void, onClosed?: () => void,
 ): Promise<void> {
   if (pending) return;
   pending = true;
   tapAt = now();
-  const seed = colorsFromImage(card?.querySelector('img') ?? null);
+  const img = card?.querySelector('img') ?? null;
+  const seed = colorsFromImage(img);
   if (seed) setSeedColors(kind, ratingKey, tmdbId, seed);
+  shell = card ? { title: tapTitle(card), poster: img?.currentSrc || img?.src || null, at: now() } : null;
   card?.setAttribute('data-pressed', 'true');
   let timer = 0;
   try {
     await Promise.race([
       warmDetail(kind, ratingKey, tmdbId).catch(() => {}),
-      new Promise<void>((res) => { timer = window.setTimeout(res, remainingCap(OPEN_CAP_MS)); }),
+      new Promise<void>((res) => { timer = window.setTimeout(res, OPEN_BUDGET_MS); }),
     ]);
   } finally {
     window.clearTimeout(timer);
-    pending = false;
   }
-  // Keep the pressed state until the sheet shows (or a short safety net).
-  const done = () => { card?.removeAttribute('data-pressed'); window.removeEventListener(REVEALED_EVENT, done); };
-  window.addEventListener(REVEALED_EVENT, done);
-  window.setTimeout(done, 1500);
-  open();
+  try {
+    open();
+  } catch (e) {
+    pending = false;
+    card?.removeAttribute('data-pressed');
+    throw e;
+  }
+  requestAnimationFrame(() => card?.removeAttribute('data-pressed'));
+  watchSheet(() => { pending = false; onClosed?.(); });
 }
 
 export function _resetModalPrefetch(): void {
@@ -228,4 +274,5 @@ export function _resetModalPrefetch(): void {
   active = 0;
   pending = false;
   tapAt = 0;
+  shell = null;
 }

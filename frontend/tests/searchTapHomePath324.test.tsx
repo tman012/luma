@@ -36,7 +36,13 @@ describe('v324 search taps open through Home\'s openWhenReady path', () => {
     await waitFor(() => expect(host.openMovie).toHaveBeenCalledWith(expect.objectContaining({ ratingKey: 7, tmdbId: 157336, origin: 'search' })));
     expect(Date.now() - t0).toBeLessThan(320);
     await act(async () => { await new Promise((r) => setTimeout(r, 350)); });
-    expect(onClose).toHaveBeenCalled();
+    // v325 motion P1: the shelf stays under the popup; closing the popup returns to it.
+    const m = document.createElement('div'); m.setAttribute('data-modal', 'MovieDetailModal'); document.body.appendChild(m);
+    await act(async () => { await new Promise((r) => setTimeout(r, 350)); });
+    m.remove();
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId('search-shelf')).toBeTruthy();
   });
 
   it('TV results open the TV popup through the same path', async () => {

@@ -258,12 +258,14 @@ function warmResult(item: SearchMovie, opts?: { images?: boolean }): Promise<voi
   return warmDetail(kind, ratingKey, tmdbId, opts).catch(() => {});
 }
 
-/** A result tap opens its popup exactly like a Home card tap (MinimalHomePage openCard):
- *  openWhenReady with the tapped element, then `open`. */
-export function openResult(item: SearchMovie, el: HTMLElement | null | undefined, open: () => void): Promise<void> {
+/** A result tap opens its popup exactly like a Home card tap (MinimalHomePage openCard): openWhenReady with
+ *  the tapped element, then `open`. The search UI stays mounted under the sheet; `onClosed` runs when the
+ *  sheet closes (MOTION.md §3). */
+export function openResult(item: SearchMovie, el: HTMLElement | null | undefined, open: () => void,
+  onClosed?: () => void): Promise<void> {
   const { kind, ratingKey, tmdbId } = resultIds(item);
   if (!ratingKey && !tmdbId) return Promise.resolve();
-  return openWhenReady(kind, ratingKey, tmdbId, el ?? null, open);
+  return openWhenReady(kind, ratingKey, tmdbId, el ?? null, open, onClosed);
 }
 
 /** Phone search: warm what's on screen as soon as results land: the top rows

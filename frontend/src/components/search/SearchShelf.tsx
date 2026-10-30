@@ -2,6 +2,7 @@
  * build's search host can mount it too (v261). */
 import { useRef, useState, useMemo, useCallback, useEffect } from 'react';
 import { useModalHost } from '@/contexts/ModalHostContext';
+import { MOTION } from '@/theme/motion';
 import { openModalForItem } from '@/utils/modalNavigation';
 import {
   openResult,
@@ -89,7 +90,7 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
 
   const handleClose = useCallback(() => {
     setPhase('exiting');
-    setTimeout(onClose, 300);
+    setTimeout(onClose, MOTION.dur.crossfade);
   }, [onClose]);
 
   const doSearch = useCallback(async (q: string) => {
@@ -111,6 +112,7 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
   // Seed the search when opened pre-filled (e.g. a cast tap with no person id).
   useEffect(() => {
     if (initialQuery && initialQuery.trim().length >= 2) {
+      setQuery(initialQuery); // the shelf stays mounted under the popup, so a new seed replaces the text
       doSearch(initialQuery.trim());
     }
   }, [initialQuery, doSearch]);
@@ -123,7 +125,9 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
     debounceRef.current = setTimeout(() => doSearch(value.trim()), 300);
   }, [doSearch]);
 
-  // Same open as a Home card tap: pressed row, warm up to the 600 ms cap, then the popup; the shelf closes under it.
+  // Same open as a Home card tap: pressed row, warm up to the 150 ms budget, then the popup slides in over the
+  // shelf, which stays mounted under it (z 9000 < the sheet's 10000); closing the popup returns here with the
+  // query, results and scroll intact and focus on the tapped row (MOTION.md §3).
   const handleResultClick = useCallback((item: SearchMovie, el?: HTMLElement | null) => {
     void openResult(item, el, () => {
       const tmdbId = item.tmdb_id || item.id;
@@ -138,9 +142,8 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
         'search',
         { searchQuery: query.trim() || undefined, ...(onPersonSearch ? { onPersonSearch } : {}) },
       );
-      handleClose();
-    });
-  }, [handleClose, modalHost, query, onPersonSearch]);
+    }, () => el?.focus({ preventScroll: true }));
+  }, [modalHost, query, onPersonSearch]);
 
   // Build deduped lists by type
   type ResultEntry =
@@ -208,10 +211,10 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
     <div className="luma-fullscreen luma-bleed"
       data-testid="search-shelf"
       style={{
-        position: 'fixed', top: 0, left: 0, right: 0, zIndex: 10000,
+        position: 'fixed', top: 0, left: 0, right: 0, zIndex: MOTION.z.overlay,   // under every sheet (MOTION.md §3)
         background: 'var(--color-kiosk-black)',
         opacity: phase === 'visible' ? 1 : 0,
-        transition: 'opacity 0.2s ease',
+        transition: `opacity ${MOTION.dur.crossfade}ms ${phase === 'exiting' ? MOTION.ease.accel : MOTION.ease.standard}`,
       }}
     >
       {/* Fixed search header — pinned to top, never scrolls */}
@@ -332,11 +335,8 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
                 if (!isPerson) {
                   handleResultClick(media!, e.currentTarget);
                 } else if (person?.id) {
-                  // Open the person modal instead of silently closing the sheet.
-                  handleClose();
-                  const pid = person.id;
-                  const pname = person.name;
-                  setTimeout(() => modalHost.openPerson({ personId: pid, personName: pname }), 320);
+                  // The person view opens over the shelf, which stays under it (no close-then-open timer).
+                  modalHost.openPerson({ personId: person.id, personName: person.name });
                 } else {
                   handleClose();
                 }

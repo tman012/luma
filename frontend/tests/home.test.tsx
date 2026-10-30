@@ -99,15 +99,24 @@ describe('Home', () => {
     vi.stubGlobal('fetch', vi.fn(async () => json({ ...HOME, continue_watching: [{ ...HOME.continue_watching[0], show_key: '9', season: 1, episode: 2 }] })));
     render(<MemoryRouter><MinimalHomePage /></MemoryRouter>);
     await waitFor(() => screen.getByTestId('home-rails'));
-    // The popup opens once it's ready (or at the 600 ms cap), never on the
+    // The popup opens once it's ready (or at the 150 ms budget), never on the
     // tap itself; the tapped card shows a pressed state meanwhile.
     fireEvent.click(screen.getByTestId('card-21'));
     expect(modals.openMovie).not.toHaveBeenCalled();
     expect(screen.getByTestId('card-21').getAttribute('data-pressed')).toBe('true');
     await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith({ ratingKey: 21, origin: 'continue_watching' }), { timeout: 1500 });
+    // v325 motion P1: a tap is held while its sheet is up (double-tap guard); closing the sheet frees it.
+    const sheetUpDown = async () => {
+      const m = document.createElement('div'); m.setAttribute('data-modal', 'MovieDetailModal'); document.body.appendChild(m);
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+      m.remove();
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    };
+    await sheetUpDown();
     fireEvent.click(screen.getByTestId('card-10'));
     await waitFor(() => expect(modals.openTv).toHaveBeenLastCalledWith({ ratingKey: 9, origin: 'continue_watching',
       episodeContext: { seasonNumber: 1, episodeNumber: 2, episodeRatingKey: 10 } }), { timeout: 1500 });
+    await sheetUpDown();
     fireEvent.click(screen.getByTestId('card-31'));
     await waitFor(() => expect(modals.openTv).toHaveBeenLastCalledWith({ ratingKey: 31, origin: 'recently_added_tv' }), { timeout: 1500 });
     // Continue cards keep the backdrop look (art + progress bar).

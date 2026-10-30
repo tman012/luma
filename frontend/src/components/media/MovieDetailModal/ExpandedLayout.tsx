@@ -1649,7 +1649,7 @@ export function ExpandedLayout(props: MovieModalViewProps) {
               aria-modal="true"
               aria-label="Remove from Watchlist"
               style={{
-                background: 'var(--color-kiosk-black)',
+                background: '#111318',
                 borderRadius: '16px',
                 padding: '32px 40px',
                 textAlign: 'center',

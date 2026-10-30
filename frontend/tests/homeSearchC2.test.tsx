@@ -6,6 +6,16 @@ vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => modals }));
 
 import { HomeSearchPalette, buildGroups, metaLine, autoExpand, CLOSE_MS } from '@/components/search/HomeSearchPalette';
 import { openSearch } from '@/components/search/MinimalSearchHost';
+import { _resetModalPrefetch } from '@/services/modalPrefetch';
+/** v325: a sheet in the DOM (+ the reveal event); removing it is the popup closing. */
+function revealSheet() {
+  if (!document.querySelector('[data-modal]')) {
+    const m = document.createElement('div'); m.setAttribute('data-modal', 'MovieDetailModal'); m.setAttribute('data-test-sheet', '');
+    document.body.appendChild(m);
+  }
+  window.dispatchEvent(new Event('luma:detail-revealed'));
+}
+
 
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } });
 const LIB = { movies: [{ rating_key: 1, title: 'Dune', year: 2021, tmdb_id: 438631 }],
@@ -23,8 +33,8 @@ const fetchMock = vi.fn(async (u: string) => {
   return json({});
 });
 
-beforeEach(() => { vi.useFakeTimers({ shouldAdvanceTime: true }); vi.stubGlobal('fetch', fetchMock); mode = 'ok'; modals.openMovie.mockReset(); modals.openTv.mockReset(); });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+beforeEach(() => { _resetModalPrefetch(); document.querySelectorAll('[data-test-sheet]').forEach(n => n.remove()); vi.useFakeTimers({ shouldAdvanceTime: true }); vi.stubGlobal('fetch', fetchMock); mode = 'ok'; modals.openMovie.mockReset(); modals.openTv.mockReset(); });
+afterEach(() => { document.querySelectorAll('[data-test-sheet]').forEach((n) => n.remove()); cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 const mount = () => render(<><button type="button" data-testid="opener">Search</button><HomeSearchPalette /></>);
 const type = async (q: string) => {
@@ -73,7 +83,7 @@ describe('C2 palette states', () => {
     expect(screen.getByTestId('group-library')).toBeTruthy();
     expect(screen.getByTestId('find-more')).toBeTruthy();
   });
-  it('arrow keys + Enter open the movie popup and close the palette; focus returns to the opener', async () => {
+  it('arrow keys + Enter open the movie popup over the palette; closing the popup returns to the palette (v325 motion P1)', async () => {
     mount(); screen.getByTestId('opener').focus(); act(() => openSearch());
     await type('dune');
     await waitFor(() => screen.getByTestId('search-results'));
@@ -82,12 +92,17 @@ describe('C2 palette states', () => {
     fireEvent.keyDown(input, { key: 'ArrowDown' }); fireEvent.keyDown(input, { key: 'ArrowUp' });
     expect(input.getAttribute('aria-activedescendant')).toBe('lsp-row-0');
     fireEvent.keyDown(input, { key: 'Enter' });
-    // v324: opens through openWhenReady (Home's path), so the popup follows the warm-up (600 ms cap).
+    // v324: opens through openWhenReady (Home's path), so the popup follows the warm-up (150 ms budget).
     await act(async () => { vi.advanceTimersByTime(700); });
     await waitFor(() => expect(modals.openMovie).toHaveBeenCalledWith(expect.objectContaining({ tmdbId: 841, ratingKey: undefined })));
-    await act(async () => { vi.advanceTimersByTime(CLOSE_MS + 50); });
-    expect(screen.queryByTestId('search-palette')).toBeNull();
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('opener')));
+    // v325 motion P1: the palette stays under the popup; when the popup closes the palette is back, focused.
+    expect(screen.getByTestId('search-palette')).toBeTruthy();
+    expect(document.querySelector('.lsp-root')!.getAttribute('data-handoff')).toBe('true');
+    await act(async () => { revealSheet(); vi.advanceTimersByTime(CLOSE_MS + 50); });
+    expect(screen.getByTestId('search-palette')).toBeTruthy();
+    document.querySelectorAll('[data-test-sheet]').forEach((n) => n.remove());
+    await waitFor(() => expect(document.querySelector('.lsp-root')!.getAttribute('data-handoff')).not.toBe('true'));
+    await waitFor(() => expect(document.activeElement).toBe(input));
   });
   it('chips filter as prod: TV shows only TV rows', async () => {
     mount(); act(() => openSearch());

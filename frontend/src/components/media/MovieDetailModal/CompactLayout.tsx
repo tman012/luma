@@ -1,9 +1,10 @@
 import { sheetBase } from '@/utils/posterColors';
+import { APP_BG } from '@/theme/motion';
+import { SheetFrame, SheetCard, SeedShell, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
 import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { formatRuntime } from '@/utils/image';
 import {
   PERSON_FALLBACK_SVG,
@@ -138,7 +139,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   const composed = !!error || (!loading && !!detail && titleState !== 'hold');
   // v276 (Taylor): restore prod colorblur on phone movie sheets — never flatten to navy on minimal.
   const ultraBlurColors = paletteColors;
-  const sheetBg = sheetBase(ultraBlurColors) ?? '#15102a';
+  const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG;
   useEffect(() => {
     if (composed) window.dispatchEvent(new Event(REVEALED_EVENT));
   }, [composed]);
@@ -237,28 +238,7 @@ export function CompactLayout(props: MovieModalViewProps) {
   // Plex-like backdrop effects: crop/zoom header + UltraBlur color bleed
   const backdropEffects = useBackdropEffects(detail?.backdropUrl, ultraBlurColors);
 
-  // -------------------------------------------------------------------------
-  // Body scroll lock + safe-area background
-  // -------------------------------------------------------------------------
-  useEffect(() => {
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prevOverflow;
-    };
-  }, []);
 
-  // Paint <html> background to match modal once visible — delayed to avoid
-  // flashing a black screen before the modal card animates in.
-  useEffect(() => {
-    if (phase !== 'visible') return;
-    const bg = '#15102a';
-    const prev = document.documentElement.style.background;
-    document.documentElement.style.background = bg;
-    return () => {
-      document.documentElement.style.background = prev;
-    };
-  }, [phase]);
 
   // Parallax scroll handler (backdrop: translate up + fade out)
   useEffect(() => {
@@ -358,67 +338,14 @@ export function CompactLayout(props: MovieModalViewProps) {
   // Animation styles
   // -------------------------------------------------------------------------
 
-  // Slide up from bottom on enter, slide back down on exit
-  const ENTER_DURATION = 600;
-  const SHEET_FADE_MS = 200;
-  const EXIT_DURATION = 400;
-  const springBezier = 'cubic-bezier(0.22, 1, 0.36, 1)';
-  // Use translate3d to force GPU compositing for smooth animations
-  const cardTransform =
-    phase === 'exiting'
-      ? 'translate3d(0, 100%, 0)'
-      : phase === 'entering' || !composed
-        ? 'translate3d(0, 16px, 0)'
-        : 'translate3d(0, 0, 0)';
-  const cardTransition =
-    phase === 'exiting'
-      ? `transform ${EXIT_DURATION}ms cubic-bezier(0.4, 0, 1, 1)`
-      : `transform ${ENTER_DURATION}ms ${springBezier}, opacity ${SHEET_FADE_MS}ms ease-out`;
-  // The sheet only ever shows composed: it fades in as one piece (no slide
-  // that would uncover an empty sheet first), and nothing in it fades alone.
-  const cardOpacity = phase === 'exiting' || (phase !== 'entering' && composed) ? 1 : 0;
-
+  const shellShown = useRef(loading);
+  if (loading) shellShown.current = true;
+  // Enter/exit motion, scrim, scroll lock and the app background live in SheetFrame (MOTION.md §1).
   if (phase === 'gone') return null;
 
-  return createPortal(
-    <div className="luma-fullscreen luma-bleed"
-      data-modal="MovieDetailModal"
-      data-variant="mobile"
-      data-composed={composed ? "true" : "false"}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      style={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        zIndex: 10000,
-        backgroundColor: 'rgba(0,0,0,0.6)',
-        opacity: phase === 'entering' || !composed ? 0 : 1,
-        transition: 'opacity 250ms ease-out',
-      }}
-    >
-      {/* Modal card — rounded top, extends to bottom of wrapper */}
-      <div className="luma-bleed-down"
-        style={{
-          position: 'absolute',
-          top: 'max(env(safe-area-inset-top, 0px), 6px)',
-          left: 0,
-          right: 0,
-          bottom: 0,
-          borderTopLeftRadius: '14px',
-          borderTopRightRadius: '14px',
-          overflow: 'hidden',
-          backgroundColor: sheetBg,
-          display: 'flex',
-          flexDirection: 'column',
-          transform: cardTransform,
-          opacity: cardOpacity,
-          transition: cardTransition,
-          willChange: 'transform',
-          backfaceVisibility: 'hidden',
-        }}
-      >
+  return (
+    <SheetFrame name="MovieDetailModal" phase={phase} composed={composed} onScrimClick={onClose}>
+      <SheetCard background={sheetBg}>
         {/* Scrollable content */}
         <div
           ref={scrollRef}
@@ -443,27 +370,7 @@ export function CompactLayout(props: MovieModalViewProps) {
         >
           {/* Loading — the sheet now slides up before the data lands, so this
               placeholder is what the user sees for the first few hundred ms. */}
-          {loading && (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '100%',
-              }}
-            >
-              <div
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '50%',
-                  border: '3px solid rgba(255,255,255,0.15)',
-                  borderTopColor: 'rgba(255,255,255,0.7)',
-                  animation: 'webModalSpin 0.8s linear infinite',
-                }}
-              />
-            </div>
-          )}
+          {loading && <SeedShell overlap={100} />}
 
           {/* Error */}
           {!loading && error && (
@@ -517,10 +424,9 @@ export function CompactLayout(props: MovieModalViewProps) {
                 zIndex: 3,
                 textAlign: 'center',
                 marginTop: '-100px',
-                // One reveal for everything (backdrop, blur, title, text, buttons).
-                opacity: titleState === 'hold' ? 0 : 1,
-                transition: 'none', // the sheet itself fades in, composed
-                willChange: 'opacity',
+                // The sheet is opaque from its first frame; only the title waits for the logo (titleTextStyle).
+                // Details that replace the seed shell crossfade in.
+                animation: shellShown.current ? SHELL_CROSSFADE : 'none',
               }}>
                 {/* UltraBlur — scrolls with content, slides up over backdrop */}
                 {ultraBlurColors && (
@@ -1269,7 +1175,7 @@ export function CompactLayout(props: MovieModalViewProps) {
             </svg>
           </button>
         )}
-      </div>
+      </SheetCard>
 
       {/* Full review sheet (Ratings & Reviews row) */}
       {openReview && (
@@ -1513,7 +1419,7 @@ export function CompactLayout(props: MovieModalViewProps) {
             fontWeight: 600,
             zIndex: 10003,
             whiteSpace: 'nowrap',
-            animation: 'mobileToastEnter 0.4s cubic-bezier(0.22, 1, 0.36, 1)',
+            animation: 'mobileToastEnter var(--m-dur-standard) var(--m-ease-decel)',
           }}
         >
           Download started!
@@ -1531,7 +1437,6 @@ export function CompactLayout(props: MovieModalViewProps) {
           to { transform: rotate(360deg); }
         }
       `}</style>
-    </div>,
-    document.body,
+    </SheetFrame>
   );
 }

@@ -351,7 +351,7 @@ export function SimilarPanel({ tmdbId, ratingKey, title, onClose }: SimilarPanel
           style={{
             maxHeight: 'calc(100% - 60px)',
             display: 'flex', flexDirection: 'column',
-            background: 'var(--color-kiosk-black)',
+            background: '#111318',
             borderRadius: '20px 20px 0 0',
             overflow: 'hidden',
             transform: `translateY(${sheetTranslate})`,

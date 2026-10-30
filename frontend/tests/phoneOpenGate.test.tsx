@@ -8,7 +8,7 @@ vi.mock('@/utils/posterColors', async (orig) => ({
   colorsFromImage: vi.fn(() => ({ topLeft: 'rgb(200, 40, 40)', topRight: 'rgb(180, 60, 20)', bottomLeft: 'rgb(90, 20, 20)', bottomRight: 'rgb(120, 30, 10)' })),
 }));
 
-import { openWhenReady, scheduleWarm, OPEN_CAP_MS, REVEALED_EVENT, WARM_CONCURRENCY, _resetModalPrefetch } from '@/services/modalPrefetch';
+import { openWhenReady, scheduleWarm, OPEN_CAP_MS, OPEN_BUDGET_MS, WARM_CONCURRENCY, _resetModalPrefetch } from '@/services/modalPrefetch';
 import { getSeedColors, _resetModalColors } from '@/services/modalColors';
 import { useModalColors } from '@/hooks/useModalColors';
 import { sheetBase } from '@/utils/posterColors';
@@ -20,20 +20,18 @@ describe('phone popup opens only when composed', () => {
   beforeEach(() => { _resetModalPrefetch(); _resetModalColors(); vi.useFakeTimers(); vi.stubGlobal('fetch', vi.fn(never)); });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-  it('does not open on the tap; the poster shows pressed, then it opens at the cap', async () => {
+  it('v325 motion P1: waits at most the 150 ms budget for a cold title, pressed meanwhile; the press lifts on open', async () => {
     const card = document.createElement('button');
     card.appendChild(document.createElement('img'));
     const open = vi.fn();
     void openWhenReady('movie', 21, undefined, card, open);
     expect(open).not.toHaveBeenCalled();
     expect(card.getAttribute('data-pressed')).toBe('true');
-    await act(async () => { await vi.advanceTimersByTimeAsync(OPEN_CAP_MS - 50); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(OPEN_BUDGET_MS - 20); });
     expect(open).not.toHaveBeenCalled();
-    await act(async () => { await vi.advanceTimersByTimeAsync(60); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(40); });
     expect(open).toHaveBeenCalledTimes(1);
-    // Still pressed until the sheet shows composed.
-    expect(card.getAttribute('data-pressed')).toBe('true');
-    window.dispatchEvent(new Event(REVEALED_EVENT));
+    await act(async () => { await vi.advanceTimersByTimeAsync(20); });
     expect(card.hasAttribute('data-pressed')).toBe(false);
   });
 
@@ -80,19 +78,18 @@ describe('phone card warming', () => {
 
 describe('phone sheet markup', () => {
   for (const f of ['components/media/MovieDetailModal/CompactLayout.tsx', 'components/media/TvDetailModal/CompactLayout.tsx']) {
-    it(`${f}: stays off-screen until composed and paints the blur base, not navy`, () => {
+    it(`${f}: v325 motion P1: SheetFrame slides an opaque card in, seed shell first, never navy`, () => {
       const s = read(f);
-      // Hidden until composed, then the whole sheet fades in as one piece.
-      expect(s).toContain("const cardOpacity = phase === 'exiting' || (phase !== 'entering' && composed) ? 1 : 0;");
-      expect(s).toContain('opacity: cardOpacity,');
-      expect(s).toContain("opacity: phase === 'entering' || !composed ? 0 : 1");
-      // No slide that uncovers an empty sheet; nothing inside fades on its own.
-      expect(s).not.toMatch(/phase === 'entering' \|\| !composed\n\s+\? 'translate3d\(0, 100%, 0\)'/);
+      expect(s).toContain('<SheetFrame');
+      expect(s).toContain('composed={composed}');
+      expect(s).toContain('<SeedShell');
+      // No invisible-until-composed sheet; only the title holds for the logo.
+      expect(s).not.toContain('cardOpacity');
+      expect(s).not.toContain("opacity: titleState === 'hold' ? 0 : 1");
       expect(s).toContain("hold={titleState === 'hold'} instant");
-      expect(s).toContain("transition: 'none', // the sheet itself fades in, composed");
-      expect(s).toContain('ready={composed}'); // cast photos load after the reveal
-      expect(s).toContain("const sheetBg = sheetBase(ultraBlurColors) ?? '#15102a'");
-      expect(s).not.toContain("backgroundColor: '#15102a'");
+      expect(s).toContain('ready={composed}');
+      expect(s).toContain('const sheetBg = sheetBase(ultraBlurColors) ?? APP_BG');
+      expect(s).not.toContain('#15102a');
     });
   }
 });

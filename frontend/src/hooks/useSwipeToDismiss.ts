@@ -1,4 +1,8 @@
 import { useRef, useCallback, useEffect, type RefObject } from 'react';
+import { MOTION } from '@/theme/motion';
+
+/** Release dismisses past this share of the sheet height (or > 0.5 px/ms down). MOTION.md §1.5 */
+const DISMISS_FRACTION = 0.33;
 
 interface SwipeToDismissOptions {
   /** Element ref whose scrollTop is checked (modal scroll container) */
@@ -30,7 +34,7 @@ interface SwipeToDismissResult {
 /**
  * Hook that tracks downward swipe gestures on a modal scroll container.
  * Only activates when scrollTop === 0 and dragging downward.
- * Dismisses on velocity > 0.5px/ms OR distance > 30% of container height.
+ * Dismisses on velocity > 0.5px/ms OR distance > 33% of container height.
  *
  * Critical: never leave transform/tracking stuck — that traps native scroll
  * (especially "can't scroll back up" after a cancelled or interrupted gesture).
@@ -148,7 +152,7 @@ export function useSwipeToDismiss({
     s.translateY = dampened;
 
     const containerH = el.parentElement?.clientHeight ?? window.innerHeight;
-    const progress = Math.min(dampened / (containerH * 0.3), 1);
+    const progress = Math.min(dampened / (containerH * DISMISS_FRACTION), 1);
     s.backdropOpacity = 1 - progress * 0.7;
 
     // React's touchmove listener is passive, so preventDefault() here was a
@@ -176,24 +180,19 @@ export function useSwipeToDismiss({
     const elapsed = Date.now() - s.startTime;
     const velocity = elapsed > 0 ? deltaY / elapsed : 0;
     const containerH = el.parentElement?.clientHeight ?? window.innerHeight;
-    const threshold = containerH * 0.3;
+    const threshold = containerH * DISMISS_FRACTION;
 
     if (enabledRef.current && (velocity > 0.5 || s.translateY > threshold)) {
       s.isDragging = false;
-      applyTransform(el, containerH, 0, 'transform 300ms cubic-bezier(0.22, 1, 0.36, 1), opacity 300ms ease-out');
-
-      const overlay = el.closest('[data-modal]') as HTMLElement | null;
-      if (overlay) {
-        overlay.style.transition = 'opacity 300ms ease-out';
-        overlay.style.opacity = '0';
-      }
-
-      timersRef.current.push(setTimeout(() => onDismiss(), 280));
+      // Continue from where the finger left it: max(160, exit x remaining / height), accelerate out.
+      const outMs = Math.round(Math.max(160, MOTION.dur.sheetExit * Math.max(0, containerH - s.translateY) / containerH));
+      applyTransform(el, containerH, 0, `transform ${outMs}ms ${MOTION.ease.accel}`);
+      timersRef.current.push(setTimeout(() => onDismiss(), outMs));
     } else {
       s.isDragging = false;
       s.translateY = 0;
       s.backdropOpacity = 1;
-      applyTransform(el, 0, 1, 'transform 300ms cubic-bezier(0.25, 1, 0.5, 1)');
+      applyTransform(el, 0, 1, `transform 300ms ${MOTION.ease.spring}`);
 
       timersRef.current.push(setTimeout(() => {
         if (el) applyTransform(el, 0, 1, '');
@@ -239,7 +238,9 @@ function applyTransform(
   }
 
   const overlay = scrollEl.closest('[data-modal]') as HTMLElement | null;
-  if (overlay) {
-    overlay.style.backgroundColor = `rgba(0,0,0,${0.6 * backdropOpacity})`;
+  const scrim = overlay?.querySelector<HTMLElement>('[data-sheet-scrim]');
+  if (scrim) scrim.style.opacity = String(MOTION.scrim * backdropOpacity);
+  else if (overlay) {
+    overlay.style.backgroundColor = `rgba(0,0,0,${MOTION.scrim * backdropOpacity})`;
   }
 }

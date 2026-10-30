@@ -116,9 +116,11 @@ describe('v266 full-bleed phone surfaces (Home match)', () => {
     const s = readFileSync(join(SRC, 'components/search/SearchShelf.tsx'), 'utf8');
     expect(s).toMatch(/luma-scroll-y luma-bleed-down/);
     expect(s).toMatch(/calc\(var\(--luma-end-pad\) \+ 24px\)/);
+    // v325 motion P1: the card is the shared SheetCard.
+    expect(readFileSync(join(SRC, 'components/layout/SheetFrame.tsx'), 'utf8')).toMatch(/className="[^"]*luma-bleed-down[^"]*"/);
     for (const f of ['components/media/MovieDetailModal/CompactLayout.tsx', 'components/media/TvDetailModal/CompactLayout.tsx']) {
       const t = readFileSync(join(SRC, f), 'utf8');
-      expect(t).toMatch(/className="[^"]*luma-bleed-down[^"]*"/);
+      expect(t).toMatch(/<SheetCard /);
       expect(t).toMatch(/var\(--luma-end-pad\) \+ 40px/);
     }
   });
@@ -134,7 +136,7 @@ describe('v266 full-bleed phone surfaces (Home match)', () => {
     expect(scroller).not.toMatch(/luma-fullscreen/);
   });
   it('CompactLayout cards keep safe-area top (not forced to 0 by .luma-bleed-down)', () => {
-    for (const f of ['components/media/MovieDetailModal/CompactLayout.tsx', 'components/media/TvDetailModal/CompactLayout.tsx']) {
+    for (const f of ['components/layout/SheetFrame.tsx']) {
       const t = readFileSync(join(SRC, f), 'utf8');
       expect(t).toMatch(/className="luma-bleed-down"/);
       expect(t).toMatch(/top:\s*'max\(env\(safe-area-inset-top, 0px\), 6px\)'/);

@@ -166,7 +166,7 @@ export function MobileUpgradeSheet({
         style={{
           display: 'flex',
           flexDirection: 'column',
-          background: 'var(--color-kiosk-black)',
+          background: '#111318',
           borderRadius: '20px 20px 0 0',
           overflow: 'hidden',
           transform: `translateY(${sheetTranslate})`,

@@ -23,6 +23,7 @@ export const MIN_QUERY = 2;
 export const DEBOUNCE_MS = 300;
 export const SKELETON_DELAY_MS = 150;
 export const CLOSE_MS = 140;
+const reducedMotion = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 export type Row =
   | { kind: 'media'; item: SearchMovie; owned: boolean }
@@ -95,6 +96,9 @@ export function HomeSearchPalette() {
   const { openMovie, openTv } = useModalHost();
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
+  // A result's popup is open over the palette: the palette drops under it (z 90 < the desktop popup's 100) and stays;
+  // closing the popup brings it back with the same results, focus on the chosen row (MOTION.md §3).
+  const [handoff, setHandoff] = useState(false);
   const [query, setQuery] = useState('');
   const [chip, setChip] = useState<Chip>('all');
   const [res, setRes] = useState<SearchResults | null>(null);
@@ -148,13 +152,16 @@ export function HomeSearchPalette() {
   const close = useCallback(() => {
     abortRef.current?.abort();
     if (debRef.current) clearTimeout(debRef.current);
-    setClosing(true);
-    window.setTimeout(() => {
-      setOpen(false); setClosing(false);
+    const finish = () => {
+      setOpen(false); setClosing(false); setHandoff(false);
       window.dispatchEvent(new CustomEvent('search-palette', { detail: { open: false } }));
       const back = returnTo.current; returnTo.current = null;
       requestAnimationFrame(() => requestAnimationFrame(() => back?.focus?.()));
-    }, CLOSE_MS);
+    };
+    // Reduced motion: gone in one frame, no fade.
+    if (reducedMotion()) { finish(); return; }
+    setClosing(true);
+    window.setTimeout(finish, CLOSE_MS);
   }, []);
 
   useEffect(() => {
@@ -189,10 +196,11 @@ export function HomeSearchPalette() {
     const opts = { ratingKey: (item.isOwned && item.rating_key) ? item.rating_key : undefined, tmdbId: tmdbId ?? undefined, origin: 'search' as const };
     if (!opts.ratingKey && !opts.tmdbId) { close(); return; }
     // Same open as a Home card tap (openWhenReady through openResult); the palette closes as the popup opens.
-    void openResult(item, el ?? listRef.current?.querySelector<HTMLElement>(`[data-row="${hi}"]`), () => {
-      close();
+    const row = el ?? listRef.current?.querySelector<HTMLElement>(`[data-row="${hi}"]`);
+    void openResult(item, row, () => {
+      setHandoff(true);
       if (item.media_type === 'tv') openTv(opts); else openMovie(opts);
-    });
+    }, () => { setHandoff(false); inputRef.current?.focus(); });
   };
   useEffect(() => {
     if (!res) return;
@@ -222,7 +230,7 @@ export function HomeSearchPalette() {
   const showChips = query.trim().length >= MIN_QUERY && phase !== 'error';
   let idx = -1;
   return (
-    <div className="lsp-root" data-closing={closing ? 'true' : 'false'} style={{ fontFamily: FONT }} onKeyDown={onKey}>
+    <div className="lsp-root" data-closing={closing ? 'true' : 'false'} data-handoff={handoff ? 'true' : 'false'} style={{ fontFamily: FONT }} onKeyDown={onKey}>
       <style>{paletteCss}</style>
       <div className="lsp-scrim" data-testid="search-scrim" onMouseDown={close} />
       <div ref={panelRef} className="lsp-panel" role="dialog" aria-modal="true" aria-label="Search" data-testid="search-palette"
@@ -315,6 +323,7 @@ function ChevronLeft() {
 const PAL_TOP = 'min(clamp(184px, 31vh, 372px), calc(100vh - 24px - 420px))';
 export const paletteCss = `
 .lsp-root{position:fixed;inset:0;z-index:200;color:rgba(255,255,255,.95);line-height:normal}
+.lsp-root[data-handoff="true"]{z-index:90}
 .lsp-scrim{position:absolute;inset:0;background:rgba(21,16,42,.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:lsp-fade 180ms ease-out}
 .lsp-panel{position:absolute;left:50%;top:max(24px, ${PAL_TOP});transform:translateX(-50%);width:min(720px, calc(100vw - 96px));
   max-height:calc(100vh - max(24px, ${PAL_TOP}) - 24px);display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box;
@@ -364,9 +373,7 @@ export const paletteCss = `
 @keyframes lsp-pulse{0%,100%{opacity:1}50%{opacity:.55}}
 @keyframes lsp-in-rm{from{opacity:0}to{opacity:1}}
 @media (prefers-reduced-motion: reduce){
-  .lsp-scrim{animation:lsp-fade 100ms linear}
-  .lsp-panel{animation:lsp-in-rm 100ms linear}
-  .lsp-sk,.lsp-th.lsp-sk2{animation:none}
-  .lsp-root[data-closing="true"] .lsp-scrim,.lsp-root[data-closing="true"] .lsp-panel{animation:lsp-fade-out 100ms linear forwards}
+  .lsp-scrim,.lsp-panel,.lsp-sk,.lsp-th.lsp-sk2{animation:none}
+  .lsp-root[data-closing="true"] .lsp-scrim,.lsp-root[data-closing="true"] .lsp-panel{animation:none}
 }
 `;

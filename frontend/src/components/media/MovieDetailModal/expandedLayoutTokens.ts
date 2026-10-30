@@ -5,7 +5,7 @@
 // clean typography, pill actions. Think Google TV / Apple TV+.
 // ---------------------------------------------------------------------------
 
-const CARD_BG = 'var(--color-kiosk-black)';
+const CARD_BG = '#111318';
 
 export const TOKENS = {
   tablet: {
@@ -77,7 +77,7 @@ export const TOKENS = {
   desktop: {
     overlay: {
       alignItems: 'center' as const,
-      background: 'var(--color-kiosk-black)',
+      background: '#111318',
       padding: '20px' as number | string,
     },
     card: {
@@ -85,7 +85,7 @@ export const TOKENS = {
       height: '90vh',
       borderRadius: '20px' as number | string,
       boxShadow: '0 32px 100px rgba(0,0,0,0.8)',
-      bgUltraBlur: 'var(--color-kiosk-black)',
+      bgUltraBlur: '#111318',
     },
     close: {
       top: '28px',

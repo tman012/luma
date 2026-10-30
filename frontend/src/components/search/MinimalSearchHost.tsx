@@ -20,11 +20,12 @@ export function MinimalSearchHost() {
   const modalHost = useModalHost();
 
   // v261: prod's Home handlePersonSearch (AuthenticatedHomePage.tsx:854-862) for popups the shelf opens: a cast
-  // tap opens the person modal when it has an id, otherwise the shelf pre-filled with the name.
+  // tap opens the person modal when it has an id, otherwise the shelf pre-filled with the name. v325 motion P1:
+  // the person sheet replaces the title sheet at once (no 320 ms wait); the shelf is still under it.
   const handlePersonSearch = useCallback((name: string, personId?: number) => {
     modalHost.close();
     if (personId) {
-      setTimeout(() => modalHost.openPerson({ personId, personName: name }), 320);
+      modalHost.openPerson({ personId, personName: name });
     } else {
       setSearchSeed(name);
       setPhoneOpen(true);

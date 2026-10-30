@@ -6,6 +6,16 @@ vi.mock('@/contexts/ModalHostContext', () => ({ useModalHost: () => host }));
 
 import { SearchShelf } from '@/components/search/SearchShelf';
 import { MinimalSearchHost, openSearch } from '@/components/search/MinimalSearchHost';
+import { _resetModalPrefetch } from '@/services/modalPrefetch';
+/** v325: the popup is shown (a sheet in the DOM + the reveal event), so search UIs under it may go. */
+function revealSheet() {
+  if (!document.querySelector('[data-modal]')) {
+    const m = document.createElement('div'); m.setAttribute('data-modal', 'MovieDetailModal'); m.setAttribute('data-test-sheet', '');
+    document.body.appendChild(m);
+  }
+  window.dispatchEvent(new Event('luma:detail-revealed'));
+}
+
 
 const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } });
 const LIB = { movies: [{ rating_key: 7, title: 'Interstellar', year: 2014, poster_url: '/api/img/plex?url=%2Fx' }], tv_shows: [], people: [] };
@@ -25,8 +35,9 @@ describe('v261 phone search is prod 1b4ea74 SearchShelf', () => {
     vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} });
     (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__ = true;
     Object.values(host).forEach((f) => f.mockClear());
+    _resetModalPrefetch();
   });
-  afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__ = undefined; });
+  afterEach(() => { document.querySelectorAll('[data-test-sheet]').forEach(n => n.remove()); cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); (window as { __LUMA_MINIMAL__?: boolean }).__LUMA_MINIMAL__ = undefined; });
 
   const type = async (v: string) => {
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: v } });
@@ -66,16 +77,19 @@ describe('v261 phone search is prod 1b4ea74 SearchShelf', () => {
     expect(screen.getAllByTestId('search-result')[0]!.textContent).toContain('Inter Milan');
   });
 
-  it('a title closes the shelf, then opens its popup with the search text (Sources seed) and the cast handler', async () => {
+  it('a title opens its popup over the shelf (search text, cast handler); the shelf stays under it (v325 motion P1)', async () => {
     const onClose = vi.fn();
     const ps = vi.fn();
     render(<SearchShelf onClose={onClose} onPersonSearch={ps} />);
     await type('inter');
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     fireEvent.click((await screen.findAllByTestId('search-result'))[0]!);
-    await act(async () => { await vi.advanceTimersByTimeAsync(330); });
-    expect(onClose).toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(700); });
     expect(host.openMovie).toHaveBeenCalledWith(expect.objectContaining({ ratingKey: 7, searchQuery: 'inter', onPersonSearch: ps }));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId('search-shelf').style.zIndex).toBe('9000');   // --z-overlay, under the sheet (10000)
+    await act(async () => { revealSheet(); await vi.advanceTimersByTimeAsync(350); });
+    expect(onClose).not.toHaveBeenCalled();   // closing the sheet returns to search
   });
 
   it('a person opens the person modal', async () => {
@@ -122,13 +136,14 @@ describe('v261 phone search is prod 1b4ea74 SearchShelf', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     fireEvent.click((await screen.findAllByTestId('search-result'))[0]!);
     await act(async () => { await vi.advanceTimersByTimeAsync(700); });
-    expect(screen.queryByTestId('search-shelf')).toBeNull();
+    expect(screen.getByTestId('search-shelf')).toBeTruthy();   // v325 motion P1: stays under the popup
+    await act(async () => { revealSheet(); await vi.advanceTimersByTimeAsync(350); });
+    expect(screen.getByTestId('search-shelf')).toBeTruthy();
     const cast = host.openMovie.mock.calls[0]![0].onPersonSearch as (n: string, id?: number) => void;
     act(() => cast('Anne Hathaway'));
     expect(host.close).toHaveBeenCalled();
     expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('Anne Hathaway');
     act(() => cast('Jessica Chastain', 83002));
-    await act(async () => { await vi.advanceTimersByTimeAsync(330); });
     expect(host.openPerson).toHaveBeenCalledWith({ personId: 83002, personName: 'Jessica Chastain' });
   });
 });

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { MOTION } from '@/theme/motion';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import {
   performSearch,
@@ -282,7 +283,8 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
     if (!opts.ratingKey && !opts.tmdbId) return;
     // The popup opens only once it can show fully composed (the tapped row
     // shows a pressed state meanwhile, 600 ms cap).
-    void openResult(item, el, () => (item.media_type === 'tv' ? openTv(opts) : openMovie(opts)));
+    // The sheet slides in over the overlay (z 9000), which stays; closing the sheet returns here on the tapped row.
+    void openResult(item, el, () => (item.media_type === 'tv' ? openTv(opts) : openMovie(opts)), () => el?.focus({ preventScroll: true }));
     // Don't close search — user may come back from modal
   };
 
@@ -325,7 +327,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
   const inPersonMode = personView || personLoading;
 
   return (
-    <div className="luma-fullscreen luma-bleed fixed inset-0 z-[100] bg-kiosk-black flex flex-col" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+    <div className="luma-fullscreen luma-bleed fixed inset-0 bg-kiosk-black flex flex-col" style={{ zIndex: MOTION.z.overlay, paddingTop: 'env(safe-area-inset-top, 0px)' }}>
       {/* Header: search bar OR person header — stays fixed above scroll */}
       {inPersonMode ? (
         /* Person header */

@@ -85,6 +85,32 @@ html.layout-compact .settings-tab-header {
     0 4px 16px rgb(0 0 0 / 0.2);
 }
 
+/* Motion tokens (MOTION.md §0); TS twin: src/theme/motion.ts */
+:root {
+  --m-dur-instant: 0ms; --m-dur-fast: 120ms; --m-dur-standard: 240ms;
+  --m-dur-emphasized: 360ms; --m-dur-sheet-enter: 380ms; --m-dur-sheet-exit: 260ms;
+  --m-dur-press: 100ms; --m-dur-image: 240ms; --m-dur-crossfade: 200ms;
+  --m-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --m-ease-decel: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --m-ease-accel: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --m-ease-spring: linear(0, 0.25 7%, 0.6 16%, 0.86 27%, 0.97 38%, 1.005 50%, 1.002 65%, 1);
+  --m-rise: 6px; --m-route-shift: 8px; --m-stagger: 30ms; --m-stagger-max: 240ms;
+  --m-press-scale: 0.98; --m-sheet-scrim: 0.6; --m-placeholder: #1b1d22;
+  --z-page: 0; --z-nav: 100; --z-overlay: 9000; --z-sheet: 10000; --z-sheet-nested: 10050; --z-toast: 10080; --z-system: 10100;
+  /* old names alias the tokens */
+  --motion-fade-dur: var(--m-dur-standard);
+  --motion-fade-ease: var(--m-ease-standard);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --m-rise: 0px; --m-route-shift: 0px; --m-press-scale: 1;
+    --m-dur-sheet-enter: 120ms; --m-dur-sheet-exit: 120ms; --m-dur-emphasized: 120ms; --m-dur-standard: 120ms;
+    --m-dur-image: 0ms; --m-dur-crossfade: 0ms; --m-stagger: 0ms; --m-stagger-max: 0ms;
+  }
+}
+
+@keyframes m-crossfade { from { opacity: 0; } to { opacity: 1; } }
+
 /* Dynamic viewport height — fixes Android WebView / Fully Kiosk address bar issues */
 :root {
   --quality-chip: #10b981;

@@ -44,7 +44,7 @@ interface FixMatchSheetProps {
   onMatched: (r: FixMatchResult) => void;
 }
 
-const BG = 'var(--color-kiosk-black, #15102a)';
+const BG = '#111318';
 const RED = '#ff6b6b';
 const DISMISS_THRESHOLD = 90;
 

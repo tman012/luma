@@ -1,4 +1,5 @@
 import { isMinimal } from '@/minimal';
+import { SHEET_EXIT_MS } from '@/components/layout/SheetFrame';
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { FixMatchResult } from './FixMatchSheet';
@@ -85,12 +86,12 @@ export function MovieDetailModal({
 
   const { mode, isTablet } = useLayoutMode();
 
-  // Animated close — compact uses 400ms, tablet 200ms, expanded 300ms
+  // Animated close — compact: SheetFrame's exit (--m-dur-sheet-exit), tablet 200ms, expanded 300ms
   const handleClose = useCallback(() => {
     setShowSources(false);
     setShowCollection(false);
     setPhase('exiting');
-    const duration = mode === 'compact' ? 400 : isTablet ? 200 : 300;
+    const duration = mode === 'compact' ? SHEET_EXIT_MS : isTablet ? 200 : 300;
     setTimeout(() => {
       setPhase('gone');
       onClose();

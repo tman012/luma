@@ -49,7 +49,7 @@ export function FullPlotModal({ text, onClose }: FullPlotModalProps) {
       <div
         ref={panelRef}
         style={{
-          background: 'var(--color-kiosk-black)',
+          background: '#111318',
           borderRadius: '16px',
           border: '1px solid rgba(255,255,255,0.1)',
           boxShadow: '0 24px 80px rgba(0,0,0,0.8)',
