@@ -45,6 +45,7 @@ LABELS = {
     'requested': 'Requested',
     'upgrade': 'Upgrade',
     'auto': 'Auto',
+    'tv_auto': 'TV Auto',
     'other': 'Other',
 }
 
@@ -354,6 +355,60 @@ def _is_upgrade(arr: Dict[str, Any], g: Dict[str, Any], did: str) -> bool:
     return False
 
 
+def _test_instance() -> bool:
+    try:
+        from app import instance
+        return instance.is_test()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _added_by(table: str, col: str, val, grab_ts: float, extra: str = '') -> bool:
+    """An automation.db log row (ttv_log / antic_log) for *val* added before *grab_ts* (adder window)."""
+    from app.automation import gr_store
+    try:
+        with gr_store.connect() as conn:
+            return bool(conn.execute(
+                f'SELECT 1 FROM {table} WHERE {col} = ?{extra} AND added_at BETWEEN ? AND ? LIMIT 1',
+                (val, grab_ts - _ADDER_WINDOW, grab_ts + 15 * 60)).fetchone())
+    except Exception:  # noqa: BLE001 - no table yet
+        return False
+
+
+def _native(did: str, item: Dict[str, Any]) -> Optional[tuple]:
+    """luma-test's own grab rows (no Radarr/Sonarr): tv.db grabs.origin, movies.db movie_grabs."""
+    if not did:
+        return None
+    try:
+        from app import tv_store
+        with tv_store.connect() as conn:
+            r = conn.execute('SELECT series_id, origin, grabbed_at FROM grabs WHERE hash = ?', (did,)).fetchone()
+    except Exception:  # noqa: BLE001
+        r = None
+    if r:
+        if r['origin'] == 'manual':
+            return 'manual', 'tv-grab:manual'
+        if r['origin'] == 'upgrade':
+            return 'upgrade', 'tv-grab:upgrade'
+        ts = r['grabbed_at'] or 0
+        if r['series_id'] is not None:
+            if _added_by('ttv_log', 'series_id', r['series_id'], ts):
+                return 'trending_tv', 'tv-grab:auto+ttv_log'
+            if _added_by('antic_log', 'series_id', r['series_id'], ts):
+                return 'anticipated', 'tv-grab:auto+antic_log'
+        return 'tv_auto', 'tv-grab:auto'
+    try:
+        from app import movie_grabs
+        m = movie_grabs.by_hash(did)
+    except Exception:  # noqa: BLE001
+        m = None
+    if m:
+        ts = m.get('grabbed_at') or 0
+        if _added_by('antic_log', 'tmdb_id', m['tmdb_id'], ts, " AND kind = 'movies'"):
+            return 'anticipated', 'movie-grab+antic_log'
+    return None
+
+
 def resolve_one(item: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, str]:
     did = _norm_hash(item.get('torrent_hash'))
     st = ctx['store']
@@ -365,6 +420,12 @@ def resolve_one(item: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, str]:
     if hit:
         return out(hit['origin'], 'luma-store:hash')
 
+    nat = _native(did, item)
+    if nat:
+        return out(*nat)
+
+    if ctx['arr'] is None and _test_instance():
+        ctx['arr'] = {'grabs': {}, 'by_guid': {}, 'movie_grabs': {}, 'ep_imports': {}, 'added': {}}  # no *arr on test
     if ctx['arr'] is None:
         a = _cache.get('arr')
         if not a or time.time() - a['at'] > _CACHE_TTL:

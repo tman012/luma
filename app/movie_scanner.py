@@ -386,6 +386,10 @@ def grab(item: Dict[str, Any], tmdb_id: int, origin: str, now: Optional[float] =
     with ms.connect() as conn:
         _set(conn, tmdb_id, next_search_at=None, last_search_at=now)
     movie_grabs.record(tmdb_id, str(item.get('title') or ''), h, now)
+    if origin == 'manual':                       # the Activity badge (Genre Roulette notes its own after this)
+        from app import grab_origin
+        grab_origin.record('manual', info_hash=h, tmdb_id=tmdb_id, media_type='movie',
+                           title=str(item.get('title') or ''), evidence='movie-grab:manual', hash_only=True)
     logger.info('Movie grab: %s (%s, category %s)', item.get('title'), origin, name)
     return {'ok': True, 'hash': h}
 

@@ -11,6 +11,7 @@ can't attach another show's times). No match: the card shows the date only.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -28,6 +29,11 @@ MAX_SHOWS = 200                 # per refresh; the rest wait for the next open
 
 _cfg: Dict[str, Any] = {'get': None, 'sleep': time.sleep}
 _last = [0.0]
+# A failed refresh backs off (1, 2, 4 ... 60 min) instead of asking again on every Calendar open (every minute).
+BACKOFF_S = 60.0
+BACKOFF_MAX_S = 3600.0
+_fail: Dict[str, float] = {'until': 0.0, 'n': 0}
+_SHOW_LOC = re.compile(r'^(?:https://api\.tvmaze\.com)?/shows/(\d+)$')
 
 
 def _get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
@@ -40,6 +46,11 @@ def _get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
     r = sess.get(BASE + path, params=params, timeout=TIMEOUT_S, allow_redirects=False, headers={'User-Agent': 'Luma'})
     if r.status_code == 404:
         return None
+    if path == '/lookup/shows' and r.status_code in (301, 302):
+        # TVmaze answers a found lookup with a redirect to /shows/{id}: read the id, never follow it.
+        m = _SHOW_LOC.match((r.headers.get('Location') or '').strip())
+        if m:
+            return {'id': int(m.group(1))}
     if r.status_code != 200:                     # a redirect is never followed
         raise requests.HTTPError(f'HTTP {r.status_code}')
     return r.json()
@@ -86,6 +97,8 @@ def refresh(now: Optional[float] = None, first: Optional[set] = None, repair: Op
     """Air times for the selected libraries' shows not asked in REFRESH_S. Returns shows written."""
     from app import tv_settings
     now = time.time() if now is None else now
+    if now < _fail['until']:
+        return 0                                   # backing off after a failure; cached air times stay
     pids = [p['id'] for p in tv_settings.libraries()]
     if not pids:
         return 0
@@ -113,9 +126,15 @@ def refresh(now: Optional[float] = None, first: Optional[set] = None, repair: Op
                 mid = r['tvmaze_id'] or lookup(r['tvdb_id'], r['imdb_id'])
                 eps = episodes(mid) if mid else {}
         except (requests.RequestException, ValueError, tv_tvdb.TvdbError) as e:
-            logger.info('Air times unavailable (%s); they wait for the next open', type(e).__name__)
+            _fail['n'] += 1
+            wait = min(BACKOFF_S * 2 ** (_fail['n'] - 1), BACKOFF_MAX_S)
+            _fail['until'] = now + wait
+            logger.info('Air times unavailable (%s: %s); saved air times kept, next try in %d min',
+                        type(e).__name__, str(e)[:40], int(wait // 60))
             break
         n += store(r['id'], r['tmdb_id'], mid, eps, now)
+    else:
+        _fail.update(until=0.0, n=0)
     if rows:
         logger.info('TV air times%s: %d of %d shows written (%s), %d episodes with a TVDB image',
                     ' (this week)' if only is not None else '', n, len(rows), 'TheTVDB' if creds[0] else 'TVmaze',
@@ -140,6 +159,7 @@ def configure(get: Optional[Callable[[str, Dict[str, Any]], Any]] = None, sleep:
     """Tests: a fake TVmaze (*get*) and clock."""
     _cfg.update(get=get, sleep=sleep)
     _last[0] = 0.0
+    _fail.update(until=0.0, n=0)
 
 
 def forget() -> None:

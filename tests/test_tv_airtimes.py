@@ -88,3 +88,56 @@ def test_tvmaze_down_stops_quietly(scanned):  # noqa: F811
         raise requests.ConnectionError('down')
     tv_airtimes.configure(get=down, sleep=lambda s: None)
     assert tv_airtimes.refresh(now=5000.0) == 0
+
+
+class _Resp:
+    def __init__(self, code, loc=None, body=None):
+        self.status_code, self.headers, self._b = code, ({'Location': loc} if loc else {}), body
+
+    def json(self):
+        return self._b
+
+
+def test_lookup_reads_tvmaze_301_without_following(monkeypatch):
+    """TVmaze answers a found /lookup/shows with 301 -> /shows/{id}; that raised HTTPError every open."""
+    import requests
+    seen = []
+
+    class Sess:
+        trust_env = True
+
+        def get(self, url, params=None, timeout=None, allow_redirects=True, headers=None):
+            seen.append((url, allow_redirects))
+            if '/lookup/shows' in url:
+                return _Resp(301, 'https://api.tvmaze.com/shows/44933')
+            return _Resp(301, 'https://evil.example/shows/1')
+    monkeypatch.setattr(requests, 'Session', Sess)
+    tv_airtimes.configure(get=None, sleep=lambda s: None)
+    assert tv_airtimes.lookup(371980, None) == 44933
+    assert all(a is False for _, a in seen)                                         # never followed
+    with pytest.raises(requests.HTTPError):
+        tv_airtimes._get('/shows/1/episodes')                                       # other redirects still fail
+    tv_airtimes.configure(get=None, sleep=lambda s: None)
+
+
+def test_failure_keeps_saved_air_times_and_backs_off(scanned):  # noqa: F811
+    import requests
+    tv_airtimes.configure(get=Maze({1: SEV}), sleep=lambda s: None)
+    tv_airtimes.refresh(now=5000.0)
+    saved = _eps(95396)
+    assert saved
+    calls = []
+
+    def down(path, params):
+        calls.append(path)
+        raise requests.HTTPError('HTTP 429')
+    tv_airtimes.configure(get=down, sleep=lambda s: None)
+    write('UPDATE series SET tvmaze_checked_at = NULL, tvmaze_id = NULL')
+    assert tv_airtimes.refresh(now=200000.0) == 0
+    n = len(calls)
+    assert n >= 1 and _eps(95396) == saved                                          # last good times kept
+    assert tv_airtimes.refresh(now=200030.0) == 0 and len(calls) == n               # next minute: backing off
+    assert tv_airtimes.refresh(now=200061.0) == 0 and len(calls) > n                # 1 min later: one try
+    m = len(calls)
+    assert tv_airtimes.refresh(now=200121.0) == 0 and len(calls) == m               # now 2 min
+    tv_airtimes.configure(get=Maze({1: SEV}), sleep=lambda s: None)
