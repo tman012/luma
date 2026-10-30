@@ -18,7 +18,7 @@ import { tapShell } from '@/services/modalPrefetch';
 export type SheetPhase = 'entering' | 'visible' | 'exiting' | 'gone';
 
 const CardRef = createContext<React.RefObject<HTMLDivElement | null> | null>(null);
-/** True while the enter animation runs (MOTION.md §6: no detail render on the animating frames). */
+/** True while the enter or the exit animation runs (MOTION.md §6: no detail render on the animating frames). */
 const Entering = createContext(false);
 export const useSheetEntering = () => useContext(Entering);
 
@@ -150,7 +150,7 @@ export function SheetFrame({ name, variant = 'mobile', phase, composed, onScrimC
       <div ref={scrimRef} data-sheet-scrim="" aria-hidden="true"
         onClick={onScrimClick}
         style={{ position: 'absolute', inset: 0, background: '#000', opacity: MOTION.scrim }} />
-      <Entering.Provider value={entering}><CardRef.Provider value={cardRef}>{children}</CardRef.Provider></Entering.Provider>
+      <Entering.Provider value={entering || phase === 'exiting'}><CardRef.Provider value={cardRef}>{children}</CardRef.Provider></Entering.Provider>
     </div>,
     document.body,
   );
