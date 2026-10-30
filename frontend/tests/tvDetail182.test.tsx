@@ -72,7 +72,7 @@ describe('Series detail page', () => {
   it('the header: poster, title, year, network, status, quality profile, path, size, have/total, the monitored bookmark and Edit', async () => {
     page();
     expect((await screen.findByTestId('tv-detail-title')).textContent).toBe('Severance');
-    expect(screen.getByTestId('tv-detail-meta').textContent).toBe('2022 \u00b7 Apple TV+ \u00b7 Returning series');
+    expect(screen.getByTestId('tv-detail-meta').textContent).toBe('2022 \u00b7 Apple TV+ \u00b7 Returning Series');   // v321: TMDB casing
     const facts = screen.getByTestId('tv-detail-facts');
     expect(within(facts).getByTestId('tv-detail-fact-profile').textContent).toBe('Quality profileHD-1080p');
     expect(within(facts).getByTestId('tv-detail-fact-path').textContent).toBe('Path/media/TV/Severance (2022)');
@@ -82,7 +82,7 @@ describe('Series detail page', () => {
     expect([flag.tagName, flag.getAttribute('aria-pressed'), flag.getAttribute('aria-label')]).toEqual(['BUTTON', 'true', 'Monitored']);
     expect(flag.querySelector('path')!.closest('svg')!.getAttribute('fill')).toBe('currentColor');
     expect(screen.queryAllByRole('switch')).toEqual([]);
-    expect(screen.getByTestId('tv-poster-tile')).toBeTruthy();
+    expect(screen.queryByTestId('tv-detail-poster')).toBeNull();                // v321: no poster
     fireEvent.click(screen.getByTestId('tv-detail-edit'));
     expect(await screen.findByTestId('tv-edit-series')).toBeTruthy();
   });
@@ -184,9 +184,9 @@ describe('Series detail page', () => {
       expect(screen.queryByTestId(id)).toBeNull();
     expect(document.querySelectorAll('[role="checkbox"], input[type="checkbox"]').length).toBe(0);
     const show = screen.getByTestId('tv-detail-monitored');
-    expect(screen.getByTestId('tv-detail-poster').contains(show)).toBe(true);
-    expect([show.getAttribute('aria-label'), show.getAttribute('aria-pressed'), show.style.width, show.style.position]).toEqual(['Monitored', 'true', '40px', 'absolute']);
-    expect(screen.getAllByTestId('tv-detail-monitored')).toHaveLength(1);           // none next to Edit
+    expect(screen.getByTestId('tv-detail-header').contains(show)).toBe(true);   // v321: on the banner (no poster)
+    expect([show.getAttribute('aria-label'), show.getAttribute('aria-pressed'), show.style.width]).toEqual(['Monitored', 'true', '40px']);
+    expect(screen.getAllByTestId('tv-detail-monitored')).toHaveLength(1);
     for (const sec of screen.getAllByTestId('tv-detail-season')) {
       const head = sec.querySelector('.tvd-season-head')!;
       expect(head.querySelectorAll('[data-testid="tv-detail-season-monitored"]')).toHaveLength(1);
@@ -300,8 +300,9 @@ describe('v185 Designer polish', () => {
   it('the poster bookmark: a 40px dark glass chip, 22px glyph, 8px inside the top-left corner; filled white when monitored', async () => {
     page();
     const flag = await screen.findByTestId('tv-detail-monitored');
-    expect(flag.closest('[data-testid="tv-detail-poster"]')).toBeTruthy();
-    expect([flag.style.width, flag.style.height, flag.style.top, flag.style.left, flag.style.position]).toEqual(['40px', '40px', '8px', '8px', 'absolute']);
+    // v321: no poster; the chip sits on the banner, top right beside Edit
+    expect(flag.closest('[data-testid="tv-detail-header"]')).toBeTruthy();
+    expect([flag.style.width, flag.style.height]).toEqual(['40px', '40px']);
     const svg = flag.querySelector('svg')!;
     expect([svg.getAttribute('width'), svg.getAttribute('height')]).toEqual(['22', '22']);
     expect(flag.getAttribute('aria-label')).toBe('Monitored');
@@ -337,7 +338,8 @@ describe('v187 phone detail and episode sheet', () => {
     vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(max-width: 767px)', addEventListener() {}, removeEventListener() {} }));
     render(<MemoryRouter><TvSeriesDetail seriesId={1} wide={false} onBack={() => {}} say={() => {}} /></MemoryRouter>);
     await screen.findByTestId('tv-detail-backrow');
-    expect(screen.getByTestId('tv-detail-back').textContent).toBe('\u2039 Series');
+    expect(screen.getByTestId('tv-detail-back').textContent).toBe('Series');     // v321: an 18px chevron icon
+    expect(screen.getByTestId('tv-detail-back-chevron')).toBeTruthy();
     expect(screen.queryAllByTestId('tv-detail-episode-search')).toHaveLength(0);
     const titles = screen.getAllByTestId('tv-detail-episode-title').map(t => t.textContent);
     expect(titles).toContain('1 \u00b7 Hello, Ms. Cobel');

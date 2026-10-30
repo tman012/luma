@@ -161,6 +161,8 @@ export function TvLibrarySettings({ wide, options, mode = 'views' }: { wide: boo
     go({ view: 'series', show: String(id), episode: episodeId ? String(episodeId) : null });
   };
   const openShow = (s: Show) => openDetail(s.id);
+  // v321 (Taylor via PM): the series detail page has no "Search your shows" box
+  const detailRoute = view === 'series' && !!showId && !noLibraries;
   const search = (
     // v182 (Taylor): on every TV view the toolbar finds only your own shows (tv.db, already loaded): no network
     // search and no Add; a result opens the detail page. Adding is the Series page's own Add series flow.
@@ -281,7 +283,7 @@ export function TvLibrarySettings({ wide, options, mode = 'views' }: { wide: boo
         // centered in the middle column, the tabs right. Under 1000px of content (container query): the tabs
         // on their own row above, right-aligned, 12px gap; search and the week controls on the row below.
         <div data-testid="tv-top-row" className="tvt-top" data-cal={deskCalendar || undefined}>
-          <div data-testid="tv-top-left" className="tvt-top-search" ref={calendarTop ? setHeroEl : undefined}>{deskCalendar ? null : search}</div>
+          <div data-testid="tv-top-left" className="tvt-top-search" ref={calendarTop ? setHeroEl : undefined}>{deskCalendar || detailRoute ? null : search}</div>
           <div data-testid="tv-top-center" className="tvt-top-week">
             {calendarTop && <WeekCenter week={week} onWeek={onWeek} />}
             {calendarTop && <TodayButton today={today} week={week} onWeek={onWeek} />}
@@ -290,8 +292,8 @@ export function TvLibrarySettings({ wide, options, mode = 'views' }: { wide: boo
         </div>
       ) : (
         <>
-          {search}
-          <div style={{ marginTop: 12 }}>{control}</div>
+          {!detailRoute && search}
+          <div style={{ marginTop: detailRoute ? 0 : 12 }}>{control}</div>
         </>
       )}
       {body && <div data-testid="tv-view" style={{ marginTop: 20 }}>{body}</div>}

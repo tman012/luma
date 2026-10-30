@@ -8,7 +8,7 @@
  * has a file is still refused, and monitor switches never search. */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { FONT } from '@/components/start/StartUI';
-import { Poster } from './TvImport';
+import { TvSeriesHero, heroEditBtn } from './TvSeriesHero';
 import { EditSeriesModal, Modal, glassBtn, primaryBtn } from './TvEdit';
 import { MonitorFlag, monitorFlagCss } from './TvMonitorFlag';
 
@@ -156,9 +156,9 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   if (!view) return <div data-testid="tv-detail-loading" aria-busy="true" style={{ height: 320, borderRadius: 16, background: GLASS }} />;
 
   const phone = phoneQ && !wide;
-  const PW = phone ? 120 : wide ? 128 : 88, PH = PW * 1.5;
   const eps = view.episodes;
-  const meta = [view.year ? String(view.year) : '', view.network || '', sentence(view.status)].filter(Boolean);
+  // v321 (Designer v8): the status keeps TMDB's casing ('Returning Series')
+  const meta = [view.year ? String(view.year) : '', view.network || '', view.status || ''].filter(Boolean);
   const facts: [string, string, string][] = [
     ['Quality profile', view.profile_name || 'None', 'profile'],
     ['Path', view.path || '', 'path'],
@@ -172,49 +172,27 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
       {phone ? (
         <div data-testid="tv-detail-backrow" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <button type="button" className="lp-focus" data-testid="tv-detail-back" onClick={onBack}
-            style={{ height: 44, padding: '0 8px 0 0', border: 'none', background: 'none', color: '#3b82f6', fontFamily: FONT, fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>
-            {'\u2039 Series'}
+            style={{ ...BACK, color: '#3b82f6' }}>
+            <BackChevron />Series
           </button>
           <button type="button" className="lp-focus tve-glass" data-testid="tv-detail-edit" onClick={() => setEditing(true)} style={{ ...glassBtn, height: 44 }}>Edit</button>
         </div>
       ) : (
       <button type="button" className="lp-focus tvd-back" data-testid="tv-detail-back" onClick={onBack}
-          style={{ alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 8px 0 4px', border: 'none',
-            background: 'none', color: W70, fontFamily: FONT, fontSize: 14, fontWeight: 600, cursor: 'pointer', borderRadius: 8 }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
-          Series
+          style={{ ...BACK, alignSelf: 'flex-start', color: W70 }}>
+          <BackChevron />Series
         </button>
       )}
 
-      <section data-testid="tv-detail-header" aria-label={view.title}
-        style={{ display: 'grid', gridTemplateColumns: `${PW}px minmax(0, 1fr)`, columnGap: wide ? 24 : phone ? 14 : 16, rowGap: 16,
-          padding: wide ? 20 : 16, borderRadius: 16, background: GLASS, border: '1px solid rgba(255,255,255,0.08)' }}>
-        <div data-testid="tv-detail-poster" style={{ position: 'relative', width: PW, height: PH }}>
-          <Poster path={view.poster_path} w={PW} h={PH} tmdbLogo />
-          {/* v184 (Taylor): the show's bookmark sits on the poster's top-left corner, Sonarr style; v185 (Designer):
-              a 40px dark glass chip with a 22px glyph, 8px inside the corner, filled white when monitored */}
+      <TvSeriesHero title={view.title} meta={meta} facts={facts} bannerUrl={view.banner_url} backdropPath={view.backdrop_path} phone={!wide}
+        edit={<button type="button" className="lp-focus" data-testid="tv-detail-edit" onClick={() => setEditing(true)} style={heroEditBtn}>Edit</button>}
+        flag={(
           <MonitorFlag on={view.monitored} title={view.title} testid="tv-detail-monitored" size={POSTER_FLAG} glyph={POSTER_GLYPH}
             onChange={on => void monitorShow(on)}
-            style={{ position: 'absolute', top: 8, left: 8, borderRadius: 10, background: 'rgba(21,16,42,0.72)', backdropFilter: 'blur(12px)',
+            style={{ borderRadius: 10, background: 'rgba(17,19,24,.72)', backdropFilter: 'blur(12px)',
               WebkitBackdropFilter: 'blur(12px)', color: view.monitored ? '#fff' : 'rgba(255,255,255,0.85)', boxShadow: '0 2px 8px rgba(0,0,0,0.45)' }} />
-        </div>
-        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-            <h2 data-testid="tv-detail-title" style={{ margin: 0, flex: 1, minWidth: 0, fontSize: wide ? 24 : 20, lineHeight: wide ? '30px' : '26px', fontWeight: 700, color: W95, overflowWrap: 'anywhere' }}>
-              {view.title}
-            </h2>
-            {wide && <HeaderActions onEdit={() => setEditing(true)} />}
-          </div>
-          {meta.length > 0 && <div data-testid="tv-detail-meta" style={{ fontSize: 14, color: W70 }}>{meta.join(' \u00b7 ')}</div>}
-          {wide && <Facts facts={facts} wide />}
-        </div>
-        {!wide && (
-          <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Facts facts={facts} wide={false} />
-            {!phone && <HeaderActions onEdit={() => setEditing(true)} />}
-          </div>
-        )}
-      </section>
+        )} />
+      {!wide && !phone && <HeaderActions onEdit={() => setEditing(true)} />}
 
       {view.seasons.map(s => {
         const list = eps.filter(e => e.season === s.season).sort((a, b) => b.episode - a.episode);
@@ -284,26 +262,19 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   );
 }
 
+/** v321 (Taylor via PM): the back link, 17px semibold with an 18px chevron, 44px tall */
+export const BACK = { display: 'inline-flex', alignItems: 'center', gap: 4, minHeight: 44, padding: '0 10px 0 2px', border: 'none', background: 'none',
+  fontFamily: FONT, fontSize: 17, fontWeight: 600, cursor: 'pointer', borderRadius: 8 } as const;
+const BackChevron = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    data-testid="tv-detail-back-chevron"><path d="M15 18l-6-6 6-6" /></svg>
+);
+
 function HeaderActions({ onEdit }: { onEdit: () => void }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 'none' }}>
       <button type="button" className="lp-focus tve-glass" data-testid="tv-detail-edit" onClick={onEdit} style={{ ...glassBtn, height: 36 }}>Edit</button>
     </div>
-  );
-}
-
-function Facts({ facts, wide }: { facts: [string, string, string][]; wide: boolean }) {
-  return (
-    <dl data-testid="tv-detail-facts" style={{ margin: wide ? '8px 0 0' : 0, display: 'grid', gridTemplateColumns: wide ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)',
-      columnGap: 24, rowGap: wide ? 12 : 8 }}>
-      {facts.map(([k, v, id]) => (
-        <div key={k} data-testid={`tv-detail-fact-${id}`} style={{ minWidth: 0, display: wide ? 'flex' : 'grid', flexDirection: 'column', gap: wide ? 2 : 12,
-          gridTemplateColumns: wide ? undefined : '120px minmax(0, 1fr)', gridColumn: id === 'path' && wide ? '1 / -1' : undefined }}>
-          <dt style={{ fontSize: 12, fontWeight: 600, color: W50 }}>{k}</dt>
-          <dd style={{ margin: 0, fontSize: 14, color: W95, overflowWrap: 'anywhere', fontVariantNumeric: 'tabular-nums' }}>{v}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 

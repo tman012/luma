@@ -311,6 +311,8 @@ export interface DetailEpisode {
 export interface DetailSeason { season: number; monitored: boolean; episodes: number; have: number; total: number; size: number }
 export interface DetailView extends Omit<SeriesView, 'seasons' | 'episodes'> {
   network: string | null; status: string | null; overview: string | null; poster_path: string | null; backdrop_path: string | null;
+  /** v321: TheTVDB banner (proxied through tvdbImg) */
+  banner_url?: string | null;
   profile_name: string | null; size: number; have: number; total: number; seasons: DetailSeason[]; episodes: DetailEpisode[];
 }
 export const getDetail = (id: number) => call<DetailView>(`${TV_URL}/shows/${id}/detail`, undefined, d => typeof d.id === 'number' && Array.isArray(d.seasons));
