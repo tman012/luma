@@ -27,9 +27,10 @@ describe('v325 phone calendar rows', () => {
     const rows = screen.getAllByTestId('tv-agenda-row');
     const edge = (r: HTMLElement) => within(r).getAllByTestId('tv-stripe');
     rows.forEach(r => { expect(edge(r)).toHaveLength(1); expect(edge(r)[0]!.style.left).toBe('0px'); });
-    expect(rows.map(r => r.dataset.state)).toEqual(['downloaded', 'downloaded', 'missing']);
+    // r4: PhoneDay sorts like sortDay (same time, then show name): Have, Missing, Unknown
+    expect(rows.map(r => r.dataset.state)).toEqual(['downloaded', 'missing', 'downloaded']);
     expect(edge(rows[0]!)[0]!.style.background).toBe(STATE_COLOR.downloaded);
-    expect(edge(rows[2]!)[0]!.style.background).toBe(STATE_COLOR.missing);
+    expect(edge(rows[1]!)[0]!.style.background).toBe(STATE_COLOR.missing);
     expect(rows[0]!.style.position).toBe('relative');
   });
 });

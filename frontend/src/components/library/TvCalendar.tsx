@@ -561,7 +561,7 @@ export function DayHeader({ day, today, onStep }: { day: Day; today: Day; onStep
 
 /** The phone day list: the day's cards (v319 Taylor 11:13 PM: no episode count line; the date is in the header). */
 export function PhoneDay({ eps, day, today }: { eps: CalEpisode[]; day: Day; today: Day }) {
-  const list = eps.filter(e => e.air_date === day);
+  const list = sortDay(eps.filter(e => e.air_date === day));
   if (!list.length) return <div data-testid="tv-cal-empty" style={{ ...emptyCard, minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No episodes</div>;
   return (
     <div data-testid="tv-cal-phone">

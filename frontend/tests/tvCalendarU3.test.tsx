@@ -36,4 +36,17 @@ describe('v211 U3 phone rows', () => {
     expect(screen.queryAllByTestId('tv-quality-chip')).toHaveLength(0);
     expect(within(rows[2]!).getByTestId('tv-u3-time').textContent).toBe('');
   });
+  it('v319 r4 phone list sorts by air time (API order 8, 9, 6, 7 PM); untimed last', () => {
+    const { container } = render(<PhoneDay day={'2026-10-18' as Day} today={'2026-10-18' as Day} eps={[
+      ep({ episode_id: 1, show: 'Eight', airstamp: '2026-10-19T00:00:00Z' }),
+      ep({ episode_id: 2, show: 'Untimed', airstamp: null }),
+      ep({ episode_id: 3, show: 'Nine', airstamp: '2026-10-19T01:00:00Z' }),
+      ep({ episode_id: 4, show: 'Six', airstamp: '2026-10-18T22:00:00Z' }),
+      ep({ episode_id: 5, show: 'Seven', airstamp: '2026-10-18T23:00:00Z' }),
+      ep({ episode_id: 6, show: 'Other day', air_date: '2026-10-19', airstamp: '2026-10-19T20:00:00Z' }),
+    ]} />);
+    const rows = within(container as HTMLElement).getAllByTestId('tv-agenda-row');
+    expect(rows.map(r => within(r).getByTestId('tv-card-show').textContent)).toEqual(['Six', 'Seven', 'Eight', 'Nine', 'Untimed']);
+    expect(rows.map(r => within(r).getByTestId('tv-u3-time').textContent)).toEqual(['6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '']);
+  });
 });
