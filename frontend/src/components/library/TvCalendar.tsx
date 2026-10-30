@@ -534,10 +534,10 @@ export function PhoneDay({ eps, day, today, motion = 'fade' }: { eps: CalEpisode
 /** TOKENS-C (design/tv-calendar-premium/TOKENS-C.md). */
 export const GLASS = {
   page: '#111318', fill: 'linear-gradient(180deg, #26282d 0%, #1d1f24 100%)', border: 'rgba(255,255,255,0.07)', radius: 24,
-  glowOpacity: 0.18, glowBlur: 24, accent: '#adc7ff', ep: '#c4c6d0', list: 'rgba(17,19,24,0.55)', rule: 'rgba(255,255,255,0.06)',
+  glowOpacity: 0.18, glowBlur: 24, accent: '#adc7ff', ep: '#c4c6d0',
 } as const;
-/** One card's reserved height while loading (16 + 30 time + 8 + 20 show + 3 + 18 episode + 16, and the hairline). */
-export const GLASS_CARD_MIN_H = 113;
+/** One card's reserved height while loading (16 + 16 time + 8 + 28 show + 10 + 24 episode + 16, and the hairline). */
+export const GLASS_CARD_MIN_H = 120;
 export type GlassState = 'failed' | 'missing' | 'downloading' | 'upcoming' | 'downloaded' | 'unmonitored';
 export const GLASS_DOT: Record<GlassState, string> = {
   downloaded: '#9ad5a0', missing: '#ffb870', upcoming: '#adc7ff', downloading: '#adc7ff', unmonitored: '#8e9099', failed: '#ffb4ab',
@@ -610,20 +610,19 @@ function GlassGlow({ src }: { src: string }) {
   );
 }
 
-/** 'S03E04 · title': the code never truncates; only the title is cut off. */
-const EpLine = ({ e }: { e: CalEpisode }) => (
-  <span style={{ display: 'flex', justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
-    <span data-testid="tv-glass-code" style={{ flex: 'none', color: GLASS.accent, fontWeight: 600 }}>{code(e.season, e.episode)}</span>
-    {e.title ? <span data-testid="tv-glass-ep-title" style={{ ...one, whiteSpace: 'pre', minWidth: 0 }}>{` \u00b7 ${e.title}`}</span> : null}
-  </span>
-);
-
-function GlassRow({ e }: { e: CalEpisode }) {
+/** r2-A (TOKENS-r2-a): one episode row in the two-column block; a subgrid row so every code and every title
+ * starts at the same x. The code never truncates; only the title is cut off. */
+function GlassRow({ e, own }: { e: CalEpisode; own: boolean }) {
   const open = useOpenEpisode(e);
+  const click = own ? open : {};
   return (
-    <div data-testid="tv-glass-ep" title={epLine(e)} {...open}
-      style={{ cursor: open.onClick ? 'pointer' : undefined, fontSize: 13, lineHeight: '17px', color: GLASS.ep, padding: '6px 0', minWidth: 0 }}>
-      <EpLine e={e} />
+    <div data-testid="tv-glass-ep" title={epLine(e)} {...click}
+      style={{ cursor: own && open.onClick ? 'pointer' : undefined, display: 'grid', gridColumn: '1 / -1', gridTemplateColumns: 'subgrid',
+        columnGap: 6, lineHeight: '24px', fontSize: 13, minWidth: 0 }}>
+      <span data-testid="tv-glass-code" style={{ color: GLASS.accent, fontWeight: 600, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{code(e.season, e.episode)}</span>
+      <span data-testid="tv-glass-ep-title" style={{ ...one, color: GLASS.ep, fontWeight: 400, minWidth: 0 }}>
+        {e.title ? <><span style={{ color: '#8e9099' }}>{'\u00b7 '}</span>{e.title}</> : null}
+      </span>
     </div>
   );
 }
@@ -650,20 +649,15 @@ function GlassCard({ eps, today, index, rise }: { eps: CalEpisode[]; today: Day;
           background: GLASS_DOT[st], boxShadow: '0 0 0 4px rgba(255,255,255,0.04)', zIndex: 1 }} />
       <div style={{ position: 'relative' }}>
         {t && (
-          <div data-testid="tv-glass-time" style={{ fontSize: 30, fontWeight: 300, color: '#fff', letterSpacing: '-0.5px', lineHeight: 1 }}>
-            {t[0]}<small data-testid="tv-glass-ampm" style={{ fontSize: 13, fontWeight: 600, color: GLASS.accent, marginLeft: 4, letterSpacing: '0.5px' }}>{t[1]}</small>
+          <div data-testid="tv-glass-time" style={{ fontSize: 12, fontWeight: 600, color: GLASS.accent, letterSpacing: '0.3px', lineHeight: '16px', marginBottom: 8 }}>
+            {`${t[0]} ${t[1]}`}
           </div>
         )}
-        <div data-testid="tv-card-show" title={e.show} style={{ ...one, fontSize: 16, fontWeight: 700, lineHeight: '20px', color: '#fff', marginTop: t ? 8 : 0, padding: '0 16px' }}>{e.show}</div>
-        {merged ? (
-          <div data-testid="tv-glass-list" style={{ marginTop: 10, background: GLASS.list, borderRadius: 14, padding: '6px 12px' }}>
-            {eps.map((x, i) => (
-              <div key={x.episode_id} style={{ borderTop: i ? `1px solid ${GLASS.rule}` : 'none' }}><GlassRow e={x} /></div>
-            ))}
-          </div>
-        ) : (
-          <div data-testid="tv-card-title" title={epLine(e)} style={{ ...one, fontSize: 13, lineHeight: '18px', color: GLASS.ep, marginTop: 3, padding: '0 16px' }}><EpLine e={e} /></div>
-        )}
+        <div data-testid="tv-card-show" title={e.show} style={{ ...one, fontSize: 22, fontWeight: 700, lineHeight: '28px', letterSpacing: '-0.2px', color: '#fff', padding: '0 22px' }}>{e.show}</div>
+        <div data-testid="tv-glass-list" style={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, auto)', columnGap: 6, width: 'fit-content', maxWidth: '100%',
+          margin: '10px auto 0', textAlign: 'left' }}>
+          {eps.map(x => <GlassRow key={x.episode_id} e={x} own={merged} />)}
+        </div>
       </div>
     </div>
   );

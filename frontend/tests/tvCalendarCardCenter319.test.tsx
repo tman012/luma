@@ -24,7 +24,7 @@ describe('v319 TV Calendar card centering', () => {
     expect(cal).not.toContain('function U3Row');
     expect(glass).toContain("textAlign: 'center'");
     expect(glass).toMatch(/data-testid="tv-card-show"[^>]*\.\.\.one/);
-    expect(glass).toMatch(/data-testid="tv-card-title"[^>]*\.\.\.one/);
+    expect(cal).toMatch(/data-testid="tv-glass-ep-title"[^>]*\.\.\.one/);
     expect(glass).toContain('data-testid="tv-glass-dot"');
     expect(glass).not.toContain('<Stripe');
   });

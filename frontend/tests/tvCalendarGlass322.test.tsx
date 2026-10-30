@@ -30,17 +30,17 @@ describe('v322 glass grouping', () => {
     expect(groupState([ep({ downloaded: true }), ep({ downloaded: true })], today)).toBe('downloaded');
     expect(groupState([ep({ downloaded: true }), ep({ downloaded: false })], today)).toBe('missing');
   });
-  it('renders one card with an inner list for the merged show', () => {
+  it('renders one card listing every episode of the merged show (r2-A: rows on the glass)', () => {
     render(<PhoneDay day={DAY} today={DAY} eps={[...AVATAR, ep({ episode_id: 9, series_id: 2, show: 'VisionQuest', episode: 5, title: 'Echo Chamber' })]} />);
     const cards = screen.getAllByTestId('tv-agenda-row');
     expect(cards).toHaveLength(2);
     expect(cards[0]!.dataset.merged).toBe('true');
     expect(within(cards[0]!).getAllByTestId('tv-glass-ep').map(r => r.textContent)).toEqual(
-      ['S01E01 \u00b7 Part 1', 'S01E02 \u00b7 Part 2', 'S01E03 \u00b7 Part 3', 'S01E04 \u00b7 Part 4']);
+      ['S01E01\u00b7 Part 1', 'S01E02\u00b7 Part 2', 'S01E03\u00b7 Part 3', 'S01E04\u00b7 Part 4']);
     expect(within(cards[0]!).getAllByTestId('tv-card-show')).toHaveLength(1);
     expect(cards[1]!.dataset.merged).toBe('false');
-    expect(within(cards[1]!).getByTestId('tv-card-title').textContent).toBe('S01E05 \u00b7 Echo Chamber');
-    expect(within(cards[1]!).queryByTestId('tv-glass-list')).toBeNull();
+    expect(within(cards[1]!).getAllByTestId('tv-glass-ep').map(r => r.textContent)).toEqual(['S01E05\u00b7 Echo Chamber']);
+    expect(within(cards[1]!).getAllByTestId('tv-glass-list')).toHaveLength(1);   // r2-A: same block for one or many
   });
 });
 
@@ -67,15 +67,16 @@ describe('v322 glass art fallback', () => {
 });
 
 describe('v322 time and text', () => {
-  it('splits the time into a large light number and a small AM/PM', () => {
+  it('r2-A: the time is one small accent line (12px/600 #adc7ff), no pill', () => {
     expect(etParts('2026-10-30T07:00:00Z')).toEqual(['3:00', 'AM']);
     expect(etParts('2026-10-31T02:00:00Z')).toEqual(['10:00', 'PM']);
     render(<PhoneDay day={DAY} today={DAY} eps={[ep({ airstamp: '2026-10-31T02:00:00Z' })]} />);
     const t = screen.getByTestId('tv-glass-time');
-    expect(t.style.fontSize).toBe('30px'); expect(t.style.fontWeight).toBe('300');
-    const ap = screen.getByTestId('tv-glass-ampm');
-    expect(ap.tagName).toBe('SMALL'); expect(ap.textContent).toBe('PM'); expect(ap.style.fontSize).toBe('13px');
-    expect(t.firstChild!.textContent).toBe('10:00');
+    expect(t.style.fontSize).toBe('12px'); expect(t.style.fontWeight).toBe('600');
+    expect(t.style.color).toMatch(/#adc7ff|rgb\(173, 199, 255\)/);
+    expect(t.textContent).toBe('10:00 PM');
+    expect(t.style.background).toBe(''); expect(t.style.borderRadius).toBe(''); expect(t.style.padding).toBe('');
+    expect(screen.queryByTestId('tv-glass-ampm')).toBeNull();
   });
   it('no title text, no counts, no helper text', () => {
     const { container } = render(<PhoneDay day={DAY} today={DAY} eps={[...AVATAR, ep({ episode_id: 9, series_id: 2, show: 'VisionQuest' })]} />);
@@ -142,7 +143,7 @@ describe('v322 TOKENS-C states, motion and ellipsis', () => {
   });
   it('the episode code never truncates; only the title ellipsizes', () => {
     render(<PhoneDay day={DAY} today={DAY} eps={[ep({ title: 'A very long title that will never fit on one line of a phone card at all' })]} />);
-    expect(screen.getByTestId('tv-glass-code').style.flexShrink).toBe('0');
+    expect(screen.getByTestId('tv-glass-code').style.whiteSpace).toBe('nowrap');
     const t = screen.getByTestId('tv-glass-ep-title');
     expect(t.style.textOverflow).toBe('ellipsis'); expect(t.style.overflow).toBe('hidden');
   });

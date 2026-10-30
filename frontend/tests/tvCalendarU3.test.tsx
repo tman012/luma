@@ -24,14 +24,12 @@ describe('v211 U3 phone rows', () => {
     expect(rows).toHaveLength(3);
     // v322 (option C): the whole card is centered; the show and episode lines ellipsize on one line
     expect(rows[0]!.style.textAlign).toBe('center');
-    for (const id of ['tv-card-show', 'tv-card-title']) {
-      const el = within(rows[0]!).getByTestId(id);
+    for (const el of [within(rows[0]!).getByTestId('tv-card-show'), within(rows[0]!).getByTestId('tv-glass-ep-title')]) {
       expect(el.style.textOverflow).toBe('ellipsis');
       expect(el.style.whiteSpace).toBe('nowrap');
     }
-    expect(within(rows[0]!).getByTestId('tv-glass-time').textContent).toBe('9:00PM');
-    expect(within(rows[0]!).getByTestId('tv-glass-ampm').textContent).toBe('PM');
-    expect(within(rows[0]!).getByTestId('tv-card-title').textContent).toContain('S04E03');
+    expect(within(rows[0]!).getByTestId('tv-glass-time').textContent).toBe('9:00 PM');
+    expect(within(rows[0]!).getByTestId('tv-glass-code').textContent).toBe('S04E03');
     expect(screen.queryAllByTestId('tv-quality-chip')).toHaveLength(0);
     expect(within(rows[2]!).queryByTestId('tv-glass-time')).toBeNull();   // untimed: no time line
   });
@@ -46,6 +44,6 @@ describe('v211 U3 phone rows', () => {
     ]} />);
     const rows = within(container as HTMLElement).getAllByTestId('tv-agenda-row');
     expect(rows.map(r => within(r).getByTestId('tv-card-show').textContent)).toEqual(['Six', 'Seven', 'Eight', 'Nine', 'Untimed']);
-    expect(rows.map(r => within(r).queryByTestId('tv-glass-time')?.textContent ?? '')).toEqual(['6:00PM', '7:00PM', '8:00PM', '9:00PM', '']);
+    expect(rows.map(r => within(r).queryByTestId('tv-glass-time')?.textContent ?? '')).toEqual(['6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '']);
   });
 });
