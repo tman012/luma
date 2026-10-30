@@ -2,6 +2,7 @@
  * date as an agenda (day headers, 72px rows), capped at 720px and centered.
  * A card opens the show's detail at that episode. The week toolbar: ‹ › (and Today) on the left, the range centered. */
 import { createContext, useContext, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ModalHostContext } from '@/contexts/ModalHostContext';
 import { FONT } from '@/components/start/StartUI';
 import { ChevronIcon, ChevronLeftIcon } from '@/components/nav/AppNav';
@@ -26,12 +27,14 @@ const W50 = 'rgba(255,255,255,0.5)';
 const W70 = 'rgba(255,255,255,0.7)';
 const W95 = 'rgba(255,255,255,0.95)';
 
-export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, phone: forcePhone = false }: {
+export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, phone: forcePhone = false, heroIn = null }: {
   today: Day; week: Day; onWeek: (start: Day) => void; reload?: number;
   /** v204: the home screen's TV calendar sheet is always the phone layout */
   phone?: boolean;
   /** false: the page shows WeekControls in its top row instead */
   toolbar?: boolean;
+  /** v326 (Taylor): desktop, the This week strip renders here (the page's top row, where the search was) */
+  heroIn?: HTMLElement | null;
 }) {
   const [data, setData] = useState<{ key: string; cal: CalendarData } | null>(null);
   const [failed, setFailed] = useState('');
@@ -94,7 +97,7 @@ export function TvCalendar({ today, week, onWeek, reload = 0, toolbar = true, ph
           <PhoneDay eps={eps} day={day} today={today} />
         ) : (
           <>
-            <WeekHero eps={eps} week={week} today={today} />
+            {heroIn ? createPortal(<WeekHero eps={eps} week={week} today={today} inRow />, heroIn) : <WeekHero eps={eps} week={week} today={today} />}
             {!eps.length ? (
               <div data-testid="tv-cal-empty" style={emptyCard}>No episodes this week</div>
             ) : (
@@ -168,7 +171,7 @@ function Toolbar({ label, showToday, onPrev, onNext, onToday }: {
 
 /** The week grid (default): 7 columns, Sunday first, one text-only glass card per episode with a 4px state edge. */
 /** v321 Designer D: This week count strip + Today pill above the week grid (desktop only). */
-export function WeekHero({ eps, week, today }: { eps: CalEpisode[]; week: Day; today: Day }) {
+export function WeekHero({ eps, week, today, inRow = false }: { eps: CalEpisode[]; week: Day; today: Day; inRow?: boolean }) {
   const counts = weekCounts(eps, today);
   const current = week === weekStart(today);
   const todayLabel = (() => {
@@ -177,7 +180,7 @@ export function WeekHero({ eps, week, today }: { eps: CalEpisode[]; week: Day; t
     return `${dow} ${dd} · Today`;
   })();
   return (
-    <div data-testid="tv-cal-hero" style={{ display: 'flex', alignItems: 'center', gap: 10, height: 40, marginBottom: 14, flex: 'none' }}>
+    <div data-testid="tv-cal-hero" style={{ display: 'flex', alignItems: 'center', gap: 10, height: 40, marginBottom: inRow ? 0 : 14, flex: 'none' }}>
       <div data-testid="tv-cal-this-week" style={{
         display: 'flex', alignItems: 'center', gap: 16, height: 40, padding: '0 16px', borderRadius: 12,
         background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.08)',
@@ -318,7 +321,7 @@ export function Bookmark({ e, on, onToggle }: { e: CalEpisode; on: boolean; onTo
 /** Unmonitored cards render at ~0.5 opacity; the state edge stays full strength. */
 export const DIM = 0.5;
 
-/** v321 Designer D: glass card, 10px corners, 3px status stripe, 28×42 poster (or initial), show / SxxExx · title.
+/** v321 Designer D: glass card, 10px corners, 3px status stripe, show (v326: no poster), show / SxxExx · title.
  * v325 (Taylor): the air time sits centered at the top; no Downloaded/quality chip, no green check: the stripe
  * (green have it, red missing) is the only got-it indicator. */
 function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
@@ -326,7 +329,6 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
   const open = useOpenEpisode(e);
   const [mon, flip] = useMonitored(e);
   const air = airLine(e);
-  const initial = (e.show.trim()[0] || '?').toUpperCase();
   return (
     <div data-testid="tv-agenda-row" data-state={st} data-monitored={mon ? 'true' : 'false'} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
       className={`tvc-card ${open.className || ''}`.trim()}
@@ -340,15 +342,6 @@ function GridCard({ e, today }: { e: CalEpisode; today: Day }) {
         </span>
       )}
       <div data-testid="tv-card-body" style={{ opacity: mon ? 1 : DIM, transition: 'opacity 150ms', display: 'flex', gap: 8 }}>
-        {e.poster_path ? (
-          <span data-testid="tv-card-poster" style={{ flex: 'none' }}><Poster path={e.poster_path} w={28} h={42} /></span>
-        ) : (
-          <span aria-hidden="true" data-testid="tv-poster-initial" style={{
-            width: 28, height: 42, borderRadius: 6, flex: 'none', display: 'grid', placeItems: 'center',
-            background: 'linear-gradient(160deg, rgba(59,130,246,.35), rgba(15,23,42,.9))',
-            border: '1px solid rgba(255,255,255,.1)', fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,.55)',
-          }}>{initial}</span>
-        )}
         <div className="tvc-text" style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
           <span data-testid="tv-card-show" title={e.show} style={{ ...one, fontSize: 13, fontWeight: 600, color: W95 }}>{e.show}</span>
           <span data-testid="tv-card-title" title={epLine(e)} style={{ ...one, fontSize: 12, color: W70 }}>{epLine(e)}</span>

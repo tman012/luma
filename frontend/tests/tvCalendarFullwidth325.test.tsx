@@ -41,7 +41,9 @@ describe('desktop TV Calendar full-width', () => {
     expect(screen.queryByTestId('settings-logo')).toBeNull();
     expect(close.getAttribute('aria-label')).toBe('Close calendar');
     expect(close.textContent).toBe('');                                    // icon only
-    expect(close.closest('header')!.firstElementChild!.contains(close)).toBe(true);   // top-left
+    expect(close.closest('header')).toBeTruthy();
+    expect(close.className).toBe('a1-chev');                              // v326: Home's own chevron, centered (fixed)
+    expect(close.hasAttribute('data-home-chevron')).toBe(true);
     expect(screen.getByTestId('settings-main').style.maxWidth).toBe('');   // takes the full width
   });
 

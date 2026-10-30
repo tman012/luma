@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { FONT } from '@/components/start/StartUI';
+import { HomeChevron, homeChevCss } from '@/components/home/HomeChevron';
 import { useModalHost } from '@/contexts/ModalHostContext';
 import {
   performSearch, getPosterUrl, getProfileUrl, getTitle, getYear, TMDB_BUSY_TEXT,
@@ -215,12 +216,8 @@ export function HomeSearchR3() {
         </div>
       )}
       <div className="a1-bar" data-testid="a1-bar" data-open={shown ? 'true' : 'false'} aria-hidden="true" />
-      <button type="button" className="a1-chev" data-testid="a1-chevron" aria-label={shown ? 'Close menu' : 'Open menu'}
-        aria-expanded={shown} onClick={() => (shown ? closeBar() : setBar(true))}>
-        <svg width={48} height={48} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d={shown ? 'M7.4 15.4 12 10.8l4.6 4.6L18 14l-6-6-6 6z' : 'M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z'} />
-        </svg>
-      </button>
+      <HomeChevron up={shown} data-testid="a1-chevron" aria-label={shown ? 'Close menu' : 'Open menu'}
+        aria-expanded={shown} onClick={() => (shown ? closeBar() : setBar(true))} />
       <div className="r3-head" data-testid="r3-head" data-open={shown ? 'true' : 'false'} inert={!shown}>
         <div className="a1-nav" data-testid="a1-nav">
           <button type="button" className="a1-tb" onClick={() => go('/watchlist')} aria-label="Watchlist">
@@ -361,9 +358,7 @@ export const r3Css = `
 .a1-bar{position:fixed;z-index:49;top:0;left:0;right:0;height:152px;background:rgba(17,19,24,.55);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
   border-bottom:1px solid rgba(255,255,255,.08);will-change:transform,opacity}
 @media (prefers-reduced-motion: reduce){[data-r3-search]{--a1-dur:0ms}}
-.a1-chev{position:fixed;z-index:56;top:28px;left:50%;transform:translateX(-50%);width:48px;height:48px;padding:0;border:0;background:none;box-shadow:none;
-  color:#e2e2e9;display:grid;place-items:center;cursor:pointer;border-radius:8px}
-.a1-chev:focus-visible{outline:2px solid var(--color-accent, #3b82f6);outline-offset:2px}
+${homeChevCss}
 .a1-nav{position:absolute;left:calc(100% + 12px);top:0;display:flex;gap:12px}
 .a1-tb{height:48px;padding:0 20px;border-radius:24px;display:flex;align-items:center;gap:8px;background:rgba(51,53,58,.85);border:0;color:#e2e2e9;
   font:inherit;font-size:15px;font-weight:500;cursor:pointer;white-space:nowrap}

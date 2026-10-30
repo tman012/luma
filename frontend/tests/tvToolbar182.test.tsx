@@ -29,7 +29,8 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const NETWORK_SEARCH = /\/find|search|lookup|tmdb|tvdb|themoviedb/i;
-const views = [...TV_VIEWS.map(v => `/settings/tv?view=${v.id}`), '/settings/tv', '/settings/tv?view=series&show=1'];
+// v326 (Taylor): the desktop calendar has no search box; every other view keeps it
+const views = [...TV_VIEWS.filter(v => v.id !== 'calendar').map(v => `/settings/tv?view=${v.id}`), '/settings/tv?view=series&show=1'];
 
 describe('the TV toolbar search (v182)', () => {
   it.each(views)('%s: finds only your shows, with no network search and no Add; a result opens the detail page', async at => {
@@ -52,6 +53,14 @@ describe('the TV toolbar search (v182)', () => {
     await waitFor(() => expect(loc).toBe('/settings/tv?view=series&show=1'));
   });
 
+  it.each(['/settings/tv', '/settings/tv?view=calendar'])('%s (desktop calendar): no search box (v326)', async at => {
+    render(<MemoryRouter initialEntries={[at]}><TvLibrarySettings wide /><Where /></MemoryRouter>);
+    await screen.findByTestId('tv-tabs');
+    await waitFor(() => expect(calls).toContain('/api/settings/tv/library'));
+    expect(screen.queryByTestId('tv-search')).toBeNull();
+    expect(screen.queryByTestId('tv-search-box')).toBeNull();
+  });
+
   it('Add series lives only on the Series page, in its own dialog', async () => {
     render(<MemoryRouter initialEntries={['/settings/tv?view=series']}><TvLibrarySettings wide /><Where /></MemoryRouter>);
     fireEvent.click(await screen.findByTestId('tv-add-series'));
@@ -59,7 +68,7 @@ describe('the TV toolbar search (v182)', () => {
     cleanup();
     for (const v of TV_VIEWS.filter(x => x.id !== 'series')) {
       render(<MemoryRouter initialEntries={[`/settings/tv?view=${v.id}`]}><TvLibrarySettings wide /></MemoryRouter>);
-      await screen.findByTestId('tv-search');
+      await screen.findByTestId(v.id === 'calendar' ? 'tv-tabs' : 'tv-search');
       expect(screen.queryByTestId('tv-add-series')).toBeNull();
       cleanup();
     }

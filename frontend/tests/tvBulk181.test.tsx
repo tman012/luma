@@ -217,7 +217,7 @@ describe('Episode select', () => {
 
 describe('Calendar toolbar search', () => {
   it('finds only your own shows (no TMDB or TVDB lookup); a result opens the show page', async () => {
-    render(<MemoryRouter initialEntries={['/settings/tv']}><TvLibrarySettings wide /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={['/settings/tv?view=series']}><TvLibrarySettings wide /></MemoryRouter>);
     const field = await screen.findByTestId('tv-search') as HTMLInputElement;
     expect(field.placeholder).toBe('Search your shows');
     await waitFor(() => expect(calls.some(c => c.url === '/api/settings/tv/library')).toBe(true));

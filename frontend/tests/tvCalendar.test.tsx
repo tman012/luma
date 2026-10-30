@@ -83,10 +83,11 @@ const calCalls = () => calls.filter(c => c.url.startsWith('/api/settings/tv/cale
 describe('Designer D week cards (v321)', () => {
   const ep = (o: Partial<CalEpisode>): CalEpisode => ({ episode_id: 1, series_id: 1, show: 'Severance', year: 2022, poster_path: '/p.jpg',
     season: 2, episode: 1, title: 'Hello', air_date: '2026-10-12', downloaded: false, ...o });
-  it('poster or initial, 3px status stripe, show / SxxExx · title / air time, bookmark', () => {
+  it('v326: no thumbnail, 3px status stripe, show / SxxExx · title / air time, bookmark', () => {
     render(<WeekGrid eps={[ep({ airstamp: '2026-10-12T21:00:00-04:00', runtime: 60 } as Partial<CalEpisode>)]} week={'2026-10-11' as Day} today={'2026-10-12' as Day} />);
     const card = screen.getByTestId('tv-agenda-row');
-    expect(within(card).getByTestId('tv-card-poster')).toBeTruthy();
+    expect(within(card).queryByTestId('tv-card-poster')).toBeNull();
+    expect(card.querySelector('img')).toBeNull();
     expect(within(card).getByTestId('tv-stripe')).toBeTruthy();
     expect(within(card).getByTestId('tv-card-show').textContent).toBe('Severance');
     expect(within(card).getByTestId('tv-card-title').textContent).toBe('S02E01 \u00b7 Hello');
@@ -94,10 +95,10 @@ describe('Designer D week cards (v321)', () => {
     expect(within(card).getByTestId('tv-card-bookmark')).toBeTruthy();
     expect(card.style.borderRadius).toBe('10px');
   });
-  it('no poster: initial tile; v325: no green check, no Downloaded/quality chip; the air time is centered on top', () => {
+  it('no poster: no initial tile either (v326); v325: no green check, no Downloaded/quality chip; the air time is centered on top', () => {
     render(<WeekGrid eps={[ep({ poster_path: null, downloaded: true, airstamp: '2026-10-12T21:00:00-04:00' } as Partial<CalEpisode>)]} week={'2026-10-11' as Day} today={'2026-10-12' as Day} />);
     const card = screen.getByTestId('tv-agenda-row');
-    expect(within(card).getByTestId('tv-poster-initial').textContent).toBe('S');
+    expect(within(card).queryByTestId('tv-poster-initial')).toBeNull();
     expect(within(card).queryByTestId('tv-check')).toBeNull();
     expect(within(card).queryByTestId('tv-quality-chip')).toBeNull();
     expect(card.textContent).not.toMatch(/Downloaded|1080p|WEB/);
@@ -120,16 +121,16 @@ describe('cards collapse to their text (v179)', () => {
     ep({ episode_id: 3, episode: 3, air_date: '2026-10-14' }),                                      // no air time
     ep({ episode_id: 4, episode: 4, air_date: '2026-10-17', airstamp: '2026-10-17T20:00:00Z' } as Partial<CalEpisode>),
   ];
-  it('D cards: poster+text row, content-height columns, no stretch', () => {
+  it('D cards: text only (v326), content-height columns, no stretch', () => {
     render(<WeekGrid eps={week} week={'2026-10-11' as Day} today={'2026-10-15' as Day} />);
     const cards = screen.getAllByTestId('tv-agenda-row');
     expect(cards).toHaveLength(4);
     for (const card of cards) {
       expect(within(card).getByTestId('tv-stripe')).toBeTruthy();
-      expect(within(card).queryByTestId('tv-card-poster') || within(card).queryByTestId('tv-poster-initial')).toBeTruthy();
+      expect(within(card).queryByTestId('tv-card-poster') || within(card).queryByTestId('tv-poster-initial')).toBeNull();
       expect(card.style.flex).toBe('0 0 auto');
       const body = within(card).getByTestId('tv-card-body');
-      expect(body.children).toHaveLength(2);
+      expect(body.children).toHaveLength(1);
       expect((body.lastElementChild as HTMLElement).className).toBe('tvc-text');
     }
     const grid = screen.getByTestId('tv-cal-grid');
@@ -381,6 +382,24 @@ describe('Search', () => {
   it('a compact 36px field; waits 250ms and 2 characters; library first with In library (not clickable), then TMDB with Add', async () => {
     page(true);
     await screen.findAllByTestId('tv-agenda-row');
+    // v326 (Taylor): the desktop calendar has no search; the This week strip sits in the top row's left cell
+    expect(screen.queryByTestId('tv-search')).toBeNull();
+    expect(screen.queryByTestId('tv-search-box')).toBeNull();
+    expect(screen.getByTestId('tv-top-left').contains(screen.getByTestId('tv-cal-this-week'))).toBe(true);
+    expect(screen.getByTestId('tv-top-row').getAttribute('data-cal')).toBe('true');
+    expect(screen.getByTestId('tv-view').contains(screen.getByTestId('tv-cal-grid'))).toBe(true);
+    expect(screen.getByTestId('tv-view').querySelector('[data-testid="tv-cal-hero"]')).toBeNull();
+    {
+    const row = screen.getByTestId('tv-top-row');
+    expect(row.className).toBe('tvt-top');
+    const center = screen.getByTestId('tv-top-center');
+    expect([...within(center).getByTestId('tv-cal-center').children].map(c => c.getAttribute('data-testid')))
+      .toEqual(['tv-cal-prev', 'tv-cal-label', 'tv-cal-next']);
+    expect(screen.getByTestId('tv-top-right').contains(screen.getByTestId('tv-tabs'))).toBe(true);
+    }
+    cleanup();
+    page(true, '/settings/tv?view=series');
+    await screen.findByTestId('tv-search');
     let field = screen.getByTestId('tv-search') as HTMLInputElement;
     expect([field.placeholder, field.style.height]).toEqual(['Search your shows', '36px']);     // v181: the calendar finds only your shows
     expect([screen.getByTestId('tv-search-box').style.width, screen.getByTestId('tv-search-box').style.maxWidth]).toEqual(['100%', '320px']);
@@ -389,10 +408,7 @@ describe('Search', () => {
     expect(row.className).toBe('tvt-top');
     expect(screen.getByTestId('tv-top-left').className).toBe('tvt-top-search');
     expect(screen.getByTestId('tv-top-left').contains(screen.getByTestId('tv-search-box'))).toBe(true);
-    const center = screen.getByTestId('tv-top-center');
-    expect(center.className).toBe('tvt-top-week');
-    expect([...within(center).getByTestId('tv-cal-center').children].map(c => c.getAttribute('data-testid')))
-      .toEqual(['tv-cal-prev', 'tv-cal-label', 'tv-cal-next']);
+    expect(screen.getByTestId('tv-top-center').className).toBe('tvt-top-week');
     expect(screen.getByTestId('tv-top-right').className).toBe('tvt-top-tabs');
     expect(screen.getByTestId('tv-top-right').contains(screen.getByTestId('tv-tabs'))).toBe(true);
     expect(screen.queryByTestId('tv-title')).toBeNull();                                           // no 'TV' heading
@@ -564,7 +580,7 @@ describe('tabs', () => {
 
   it('No TV libraries: Calendar and Search offer Choose libraries, which opens Libraries', async () => {
     paths = [];
-    page(true);
+    page(true, '/settings/tv?view=series');
     expect((await screen.findByTestId('tv-no-libraries')).textContent).toBe('No TV libraries' + 'Choose libraries');
     expect(calCalls()).toEqual([]);
     fireEvent.change(screen.getByTestId('tv-search'), { target: { value: 'Severance' } });

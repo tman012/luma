@@ -58,6 +58,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
   const [importingAll, setImportingAll] = useState(false);
   const [fading, setFading] = useState<Set<number>>(new Set());
   const [q, setQ] = useState('');
+  const [heroEl, setHeroEl] = useState<HTMLDivElement | null>(null);
   const [reload, setReload] = useState(0);                          // the Calendar reloads after an import or an Add
   const seq = useRef(0);
   const [params, setParams] = useSearchParams();
@@ -134,6 +135,8 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
   const noLibraries = settingsView.paths.length === 0;
   const searching = q.trim().length >= SEARCH_MIN;
   const calendarTop = wide && view === 'calendar' && !noLibraries;    // the week controls sit in the top row
+  // v326 (Taylor): the desktop calendar has no search; its This week strip takes the search's place in the top row.
+  const deskCalendar = wide && view === 'calendar';
   const control = (
     phone ? <PhoneSegmented value={view} onPick={pickView} /> : <Segmented value={view} wide={wide} onPick={pickView} />
   );
@@ -167,7 +170,7 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
   if (view === 'calendar') {
     body = noLibraries ? noLibs : (
       <OpenShowContext.Provider value={openDetail}>
-        <TvCalendar today={today} week={week} reload={reload} toolbar={!calendarTop} onWeek={onWeek} />
+        <TvCalendar today={today} week={week} reload={reload} toolbar={!calendarTop} onWeek={onWeek} heroIn={calendarTop ? heroEl : null} />
       </OpenShowContext.Provider>
     );
   } else if (view === 'series') {
@@ -258,8 +261,8 @@ export function TvLibrarySettings({ wide, options }: { wide: boolean; options?: 
         // v158c (Designer): a 3-column grid, minmax(200px, 320px) 1fr auto: search left, the week controls
         // centered in the middle column, the tabs right. Under 1000px of content (container query): the tabs
         // on their own row above, right-aligned, 12px gap; search and the week controls on the row below.
-        <div data-testid="tv-top-row" className="tvt-top">
-          <div data-testid="tv-top-left" className="tvt-top-search">{search}</div>
+        <div data-testid="tv-top-row" className="tvt-top" data-cal={deskCalendar || undefined}>
+          <div data-testid="tv-top-left" className="tvt-top-search" ref={calendarTop ? setHeroEl : undefined}>{deskCalendar ? null : search}</div>
           <div data-testid="tv-top-center" className="tvt-top-week">
             {calendarTop && <WeekCenter week={week} onWeek={onWeek} />}
             {calendarTop && <TodayButton today={today} week={week} onWeek={onWeek} />}
@@ -421,6 +424,7 @@ export const topRowCss = `
 .tvt-top-search{grid-area:search;min-width:0}
 .tvt-top-week{grid-area:week;justify-self:center;display:flex;align-items:center;gap:12px;min-width:0}
 .tvt-top-tabs{grid-area:tabs;justify-self:end;min-width:0}
+.tvt-top[data-cal]{grid-template-columns:auto 1fr auto}
 @container tvtop (max-width: 999px){.tvt-top{grid-template-columns:minmax(200px, 320px) 1fr;grid-template-areas:"tabs tabs" "search week"}}
 `;
 const tabsCss = topRowCss + `
