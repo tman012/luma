@@ -96,8 +96,10 @@ def _token(key: str, pin: str, renew: bool = False) -> str:
         return tok
 
 
-def _get(path: str, creds: Tuple[str, str], params: Optional[Dict[str, Any]] = None) -> Any:
-    """'data' of a GET; None on 404; a 401 logs in again once."""
+def _get(path: str, creds: Tuple[str, str], params: Optional[Dict[str, Any]] = None,
+         strict: bool = False) -> Any:
+    """'data' of a GET; None on 404; a 401 logs in again once. Any other non-200 (and a failed login)
+    raises TvdbError. strict: a 200 whose body isn't {'data': ...} raises too (never read as 'nothing')."""
     for attempt in (0, 1):
         tok = _token(*creds, renew=attempt == 1)
         if _cfg['get'] is not None:
@@ -112,8 +114,10 @@ def _get(path: str, creds: Tuple[str, str], params: Optional[Dict[str, Any]] = N
             return None
         if status != 200:
             raise TvdbError(f'HTTP {status}')
+        if strict and not (isinstance(data, dict) and 'data' in data):
+            raise TvdbError('Unexpected response')
         return (data or {}).get('data') if isinstance(data, dict) else None
-    return None
+    raise TvdbError('HTTP 401')
 
 
 ART = 'https://artworks.thetvdb.com'
@@ -179,8 +183,14 @@ BANNER_TYPE = 1   # TheTVDB v4 artwork type: series banner
 
 def banner(tvdb_id: int, creds: Tuple[str, str]) -> Optional[str]:
     """v321: the show's best-scored banner on TheTVDB's artwork host, else None."""
-    data = _get(f'/series/{int(tvdb_id)}/artworks', creds, {'type': BANNER_TYPE})
-    arts = data.get('artworks') if isinstance(data, dict) else None
+    data = _get(f'/series/{int(tvdb_id)}/artworks', creds, {'type': BANNER_TYPE}, strict=True)
+    if data is None:
+        return None                     # 404: TheTVDB has no such series
+    if not isinstance(data, dict):
+        raise TvdbError('Unexpected response')
+    arts = data.get('artworks')
+    if arts is not None and not isinstance(arts, list):
+        raise TvdbError('Unexpected response')
     best: Tuple[float, Optional[str]] = (-1.0, None)
     for a in arts or []:
         if not isinstance(a, dict) or a.get('type') not in (None, BANNER_TYPE):
