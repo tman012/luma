@@ -95,6 +95,17 @@ class Refused(Exception):
     """Will never work as things stand (unsafe path, nothing to file)."""
 
 
+class Transient(Exception):
+    """A remote copy was cut off (stall, helper connection failure, remote host reboot): try again later."""
+
+
+# A cut-off remote copy is retried after these waits, then the job fails (REMOTE_TRIES tries in all).
+REMOTE_RETRY_S = (120, 600)
+REMOTE_TRIES = len(REMOTE_RETRY_S) + 1
+CLEANUP_REQUEUES = 1      # a failed job whose partial the sweep removed goes back to waiting this many times
+_current = {'h': None}    # the job tick() is running (transfer() records its remote copy on it)
+
+
 class InsufficientSpace(Exception):
     """The library folder can't hold the copy (ENOSPC or the pre-check). The job
     fails with INSUFFICIENT_SPACE. Free space as reported is never trusted on its own
@@ -880,20 +891,15 @@ def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root:
     the scan saw (*expect*)."""
     if mode not in ('hardlink', 'copy'):   # never a move (LUMA_INSTANCE=test asserts it; prod has no other mode)
         raise Refused('transfer must be copy or hardlink')
-    if _lexists_at(dfd, name):
-        return 'exists'
+    if _lexists_at(dfd, name) and not _inflight_of(_current['h']).get(os.path.join(folder, name)):
+        return 'exists'        # (a final that our own remote copy put there while we were away is verified below)
     # v318: remote push-import — .72 copies downloads→/media over SSH (no byte
     # copy through the Luma container). Hardlink falls back to remote copy.
     from app import remote_mover
     if remote_mover.enabled():
         if not _real_under(src, root):
             raise Refused('outside the downloads folder')
-        try:
-            # v324: final name; remote_mover picks the temp via partial_name() (same rule as
-            # the local copy) and the .72 script copies to it, checks size, renames, cleans up.
-            return remote_mover.transfer(src, os.path.join(folder, name))
-        except remote_mover.RemoteMoverError as e:
-            raise Refused(str(e)) from e
+        return _remote_transfer(src, os.path.join(folder, name))
     sfd, st = _open_source(src, root, expect)
     try:
         if mode == 'hardlink':
@@ -942,6 +948,111 @@ def transfer(src: str, dfd: int, folder: str, name: str, mode: str, owner, root:
                 partial_cleanup.unregister(os.path.join(os.path.realpath(_fd_path(dfd)), tmp))
     finally:
         os.close(sfd)
+
+
+def _inflight_of(h: Optional[str]) -> Dict[str, str]:
+    if not h:
+        return {}
+    j = fm.load()['jobs'].get(h) or {}
+    v = j.get('inflight')
+    return dict(v) if isinstance(v, dict) else {}
+
+
+def _set_inflight(h: Optional[str], dest: str, tmp: Optional[str], abandon: bool = False) -> None:
+    """Record (tmp) or clear the remote copy into *dest*. abandon: the copy was cut off; its partial is
+    remembered (cut_partials) so that when partial cleanup removes it the job is requeued."""
+    if not h:
+        return
+
+    def apply(data):
+        j = data['jobs'].get(h)
+        if j is None:
+            return
+        cur = dict(j.get('inflight') or {})
+        if abandon and cur.get(dest):
+            j['cut_partials'] = (list(j.get('cut_partials') or []) + [cur[dest]])[-5:]
+        if tmp:
+            cur[dest] = tmp
+        else:
+            cur.pop(dest, None)
+        if cur:
+            j['inflight'] = cur
+        else:
+            j.pop('inflight', None)
+    fm.update(apply)
+
+
+def _remote_transfer(src: str, dest: str) -> str:
+    """One remote copy, at most one per destination across restarts. The temp name is saved on the job
+    before the helper is asked, so after a restart (or a cut-off call) a copy still running on the remote
+    host is adopted, not started again. A copy that was cut off raises Transient; a refusal raises Refused."""
+    from app import remote_mover
+    h = _current['h']
+    tmp = _inflight_of(h).get(dest)
+    try:
+        if tmp and remote_mover.partial_alive(tmp):
+            try:
+                return remote_mover.adopt(src, dest, tmp)
+            finally:
+                _set_inflight(h, dest, None)
+        if tmp and os.path.lexists(dest) and not os.path.lexists(tmp):
+            how = remote_mover.adopt(src, dest, tmp)      # it landed while we were away: verify its size
+            _set_inflight(h, dest, None)
+            return how
+        # (a dead partial from an earlier attempt is left to partial cleanup)
+        tmp = remote_mover.remote_temp_for(dest)
+        _set_inflight(h, dest, tmp)
+        how = remote_mover.transfer(src, dest, tmp_container=tmp)
+        _set_inflight(h, dest, None)
+        return how
+    except remote_mover.RemoteTransient as e:
+        _set_inflight(h, dest, None, abandon=True)     # that copy is gone: the retry starts a fresh one
+        raise Transient(str(e)) from e
+    except remote_mover.RemoteMoverError as e:
+        _set_inflight(h, dest, None)
+        raise Refused(str(e)) from e
+
+
+def partials_removed(paths) -> int:
+    """Partial cleanup removed these partials. A job that was copying into one of them and didn't finish
+    (still waiting, or failed/skipped after the copy was cut off) goes back to waiting so the copy is made
+    again. A failed job only CLEANUP_REQUEUES times. Returns the number requeued."""
+    gone = {os.path.realpath(os.path.dirname(p)) + os.sep + os.path.basename(p) for p in paths or ()}
+    if not gone:
+        return 0
+
+    def key(p):
+        return os.path.realpath(os.path.dirname(p)) + os.sep + os.path.basename(p)
+
+    def apply(data):
+        n = 0
+        for j in data['jobs'].values():
+            inf = j.get('inflight') if isinstance(j.get('inflight'), dict) else {}
+            cut = [t for t in (j.get('cut_partials') or []) if isinstance(t, str)]
+            hit = [d for d, t in inf.items() if isinstance(t, str) and key(t) in gone]
+            hit_cut = [t for t in cut if key(t) in gone]
+            if not hit and not hit_cut:
+                continue
+            for d in hit:
+                inf.pop(d, None)
+            if not inf:
+                j.pop('inflight', None)
+            rest = [t for t in cut if t not in hit_cut]
+            if rest:
+                j['cut_partials'] = rest
+            else:
+                j.pop('cut_partials', None)
+            if j.get('state') in ('done', 'exists'):
+                continue
+            if j.get('state') in ('failed', 'skipped'):
+                if int(j.get('cleanup_requeues') or 0) >= CLEANUP_REQUEUES:
+                    continue
+                j['cleanup_requeues'] = int(j.get('cleanup_requeues') or 0) + 1
+            _requeue(j)
+            n += 1
+            logger.info('Library mover: %s back to waiting (its unfinished copy was cleaned up)', j.get('title'))
+        return n
+    return fm.update(apply)
 
 
 # --------------------------------------------------------------------------- one job
@@ -1146,8 +1257,22 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
         return
     if not (t.get('progress') == 1 and t.get('state') in COMPLETED_STATES):
         return
+    if float(job.get('retry_at') or 0) > now:
+        return                                  # a cut-off remote copy: waiting out its backoff
+    _current['h'] = h
     try:
         fields = process(dict(job), t, data, now, list_files)
+    except Transient as e:
+        tries = int(job.get('remote_tries') or 0) + 1
+        if tries >= REMOTE_TRIES:
+            logger.error('Library mover: copy of %s failed (%s, try %d/%d)', job.get('title'), e, tries, REMOTE_TRIES)
+            _set_job(h, state='failed', error=str(e), remote_tries=tries, retry_at=None, finished=now)
+        else:
+            wait = REMOTE_RETRY_S[tries - 1]
+            logger.warning('Library mover: copy of %s was cut off (%s), try %d/%d, next in %d min',
+                           job.get('title'), e, tries, REMOTE_TRIES, wait // 60)
+            _set_job(h, remote_tries=tries, retry_at=now + wait, error=str(e))
+        return
     except Pending as e:
         logger.debug('Library mover: %s waiting (%s)', job.get('title'), e)
         _note_pending(h, job, str(e), now)
@@ -1166,6 +1291,9 @@ def _run_job(h: str, job: Dict[str, Any], t: Dict[str, Any], data: Dict[str, Any
     except OSError as e:
         _fail(h, job, errno.errorcode.get(e.errno, type(e).__name__) if e.errno else type(e).__name__, now)
         return
+    finally:
+        _current['h'] = None
+    fields.update(remote_tries=0, retry_at=None)
     _set_job(h, **fields)
     summary['filed'] += 1
     logger.info('Library mover: %s -> %s (%s)', job.get('title'), fields['dest'],
@@ -1226,7 +1354,8 @@ def _free_or_none(path: str) -> Optional[int]:
 
 
 def _requeue(j: Dict[str, Any]) -> None:
-    j.update(state='waiting', error='', attempts=0, misses=0, status='', pending_since=None)
+    j.update(state='waiting', error='', attempts=0, misses=0, status='', pending_since=None,
+             remote_tries=0, retry_at=None)
     for k in ('finished', 'space'):
         j.pop(k, None)
 

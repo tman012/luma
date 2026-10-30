@@ -188,6 +188,12 @@ def maybe_sweep(now: Optional[float] = None) -> List[str]:
     try:
         roots = list(library_roots())
         out = sweep(roots)
+        if out:
+            try:
+                from app import library_mover
+                library_mover.partials_removed(out)     # an unfinished copy's partial: requeue its job
+            except Exception as e:                     # noqa: BLE001 - never stops the sweep
+                logger.error('Partial cleanup: requeue failed: %s', type(e).__name__)
         logger.log(logging.INFO if first or out else logging.DEBUG,
                    'Partial cleanup%s: swept %d roots, removed %d', ' (startup)' if first else '', len(roots), len(out))
         return out

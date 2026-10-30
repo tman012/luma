@@ -72,6 +72,34 @@ class RemoteMoverError(RuntimeError):
     """Remote copy cannot run (misconfigured) or the host helper failed."""
 
 
+class RemoteTransient(RemoteMoverError):
+    """The copy was cut off, not refused: a stall, a vanished partial, the helper's SSH to the remote
+    host failing (rc 255, refused, timed out, host rebooted) or the helper socket unreachable.
+    The library mover retries these with backoff instead of giving up on the job."""
+
+
+# ssh exits 255 on its own errors (connection refused / reset / timed out / host down)
+_SSH_RC = 255
+_TRANSIENT_WORDS = ('connection refused', 'connection reset', 'connection closed', 'timed out', 'timeout',
+                    'no route to host', 'host is down', 'network is unreachable', 'broken pipe',
+                    'ssh_exchange_identification', 'kex_exchange_identification', 'lost connection')
+
+
+_SSH_WORDS = ('ssh:', 'client_loop', 'connect to host', 'connection refused', 'connection closed',
+              'no route to host', 'host is down', 'kex_exchange_identification', 'ssh_exchange_identification')
+
+
+def is_connection_failure(rc: int, output: str) -> bool:
+    """The helper never reached (or lost) the remote host: ssh's own exit 255 or its error text."""
+    low = (output or '').lower()
+    return rc == _SSH_RC or any(w in low for w in _SSH_WORDS)
+
+
+def is_transient_failure(rc: int, output: str) -> bool:
+    low = (output or '').lower()
+    return is_connection_failure(rc, output) or any(w in low for w in _TRANSIENT_WORDS)
+
+
 class _UnixHTTPConnection(http.client.HTTPConnection):
     """http.client over AF_UNIX (stdlib-only; no requests)."""
 
@@ -228,14 +256,14 @@ def _http_post_unix(sock_path: str, path: str, body: bytes, timeout: int) -> Tup
         raw = resp.read().decode() or ''
         return resp.status, raw
     except FileNotFoundError as e:
-        raise RemoteMoverError(
+        raise RemoteTransient(
             f'mover socket missing: {sock_path} '
             f'(mount host ~/luma-mover/mover.sock → /run/luma-mover/; '
             f'or set {ENV_SOCK})') from e
     except (http.client.RemoteDisconnected, http.client.BadStatusLine) as e:
-        raise RemoteMoverError(f'mover helper sent an empty reply ({sock_path}): {e!r}') from e
+        raise RemoteTransient(f'mover helper sent an empty reply ({sock_path}): {e!r}') from e
     except (ConnectionRefusedError, ConnectionError, OSError) as e:
-        raise RemoteMoverError(
+        raise RemoteTransient(
             f'mover socket unreachable ({sock_path}): {e} '
             f'(Ops: luma-host-remote-mover listener on .62)') from e
     finally:
@@ -307,7 +335,7 @@ def wait_for_remote_copy(src_container: str, dest_container: str, tmp_container:
                     f'remote copy size mismatch at {dest_container}: {final} != {src_size}')
             # smaller final with no partial: a pre-partial script still copying in place.
         if psize is None and final is None and last_part is not None:
-            raise RemoteMoverError(
+            raise RemoteTransient(
                 f'remote copy failed: partial removed without final ({dest_container})')
         progress = psize if psize is not None else final
         t = _now()
@@ -315,12 +343,12 @@ def wait_for_remote_copy(src_container: str, dest_container: str, tmp_container:
             last_part = progress
             last_growth = t
         elif progress is None and last_part is None and t - start >= STALL_S:
-            raise RemoteMoverError(
+            raise RemoteTransient(
                 f'remote copy never started (no partial/final after {int(STALL_S)}s): {dest_container}')
         if progress is not None and t - last_growth >= STALL_S:
-            raise RemoteMoverError(f'remote copy stalled at {progress} B: {dest_container}')
+            raise RemoteTransient(f'remote copy stalled at {progress} B: {dest_container}')
         if t >= deadline:
-            raise RemoteMoverError(f'remote copy did not finish by deadline: {dest_container}')
+            raise RemoteTransient(f'remote copy did not finish by deadline: {dest_container}')
         _sleep(POLL_INTERVAL_S)
 
 
@@ -336,6 +364,26 @@ def _verify_final(src_container: str, dest_container: str, tmp_container: str) -
     if src_size is not None and final != src_size:
         raise RemoteMoverError(
             f'remote copy size mismatch at {dest_container}: {final} != {src_size}')
+
+
+def partial_alive(tmp_container: str, now: Optional[float] = None) -> bool:
+    """A remote partial that is still being written: it exists and changed within STALL_S."""
+    try:
+        st = os.lstat(tmp_container)
+    except OSError:
+        return False
+    t = time.time() if now is None else now
+    return t - st.st_mtime < STALL_S
+
+
+def adopt(src_container: str, dest_container: str, tmp_container: str) -> str:
+    """A copy started earlier (before a restart) may still be running on the remote host: wait for it
+    through the /media mount instead of starting a second one. 'copied' when it lands; RemoteTransient
+    when it stalls or its partial vanishes without a final."""
+    from app import partial_cleanup
+    with partial_cleanup.tracking(tmp_container):
+        logger.info('Remote mover: adopting the copy already in progress: %s', dest_container)
+        return wait_for_remote_copy(src_container, dest_container, tmp_container)
 
 
 def transfer(src_container: str, dest_container: str, mode: str = 'cp',
@@ -407,10 +455,15 @@ def _transfer_tracked(src_container, dest_container, op, rsrc, rdest, cfg, tmp_c
             return 'exists'
         helper_gave_up = rc_i == 124 or 'timed out' in err.lower() or 'timeout' in err.lower() \
             or (status >= 500 and rc_i not in _SCRIPT_FAIL_RCS)
-        if observable and op == 'cp' and helper_gave_up:
+        if observable and op == 'cp' and helper_gave_up and not is_connection_failure(rc_i, err):
             logger.warning('Remote mover: helper gave up (HTTP %s rc=%s), waiting for copy: %s',
                            status, rc_i, rdest)
             return wait_for_remote_copy(src_container, dest_container, tmp_container)
+        if is_transient_failure(rc_i, err):
+            # the helper's SSH to the remote host failed (e.g. it rebooted mid-copy): retry later
+            raise RemoteTransient(
+                f'host mover connection failed HTTP {status} rc={rc_i}: {err} '
+                f'({op} {rsrc} -> {rdest})')
         raise RemoteMoverError(
             f'host mover failed HTTP {status} rc={rc_i}: {err} '
             f'({op} {rsrc} -> {rdest})')
