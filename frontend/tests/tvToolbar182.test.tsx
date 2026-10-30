@@ -30,7 +30,8 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 const NETWORK_SEARCH = /\/find|search|lookup|tmdb|tvdb|themoviedb/i;
 // v326 (Taylor): the desktop calendar has no search box; every other view keeps it
-const views = [...TV_VIEWS.filter(v => v.id !== 'calendar').map(v => `/settings/tv?view=${v.id}`), '/settings/tv?view=series&show=1'];
+// v321 (Taylor via PM): the series detail page (?show=1) has no search box
+const views = [...TV_VIEWS.filter(v => v.id !== 'calendar').map(v => `/settings/tv?view=${v.id}`)];
 
 describe('the TV toolbar search (v182)', () => {
   it.each(views)('%s: finds only your shows, with no network search and no Add; a result opens the detail page', async at => {
@@ -53,7 +54,7 @@ describe('the TV toolbar search (v182)', () => {
     await waitFor(() => expect(loc).toBe('/settings/tv?view=series&show=1'));
   });
 
-  it.each(['/settings/tv', '/settings/tv?view=calendar'])('%s (desktop calendar): no search box (v326)', async at => {
+  it.each(['/settings/tv', '/settings/tv?view=calendar', '/settings/tv?view=series&show=1'])('%s (desktop calendar, v326; series detail, v321): no search box', async at => {
     render(<MemoryRouter initialEntries={[at]}><TvLibrarySettings wide /><Where /></MemoryRouter>);
     await screen.findByTestId('tv-tabs');
     await waitFor(() => expect(calls).toContain('/api/settings/tv/library'));
