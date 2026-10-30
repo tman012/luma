@@ -424,6 +424,11 @@ export const Stripe = ({ color, w = 3 }: { color: string; w?: number }) => (
  * where the 24px hover bookmark (4px from the edge) sits, so a wrapped name never runs under it. */
 export const AIR_SIZE = 12;
 export const tvCalendarCss = `
+@keyframes tvcRise{from{opacity:0;transform:translateY(var(--m-rise,6px))}to{opacity:1;transform:none}}
+@keyframes tvcFade{from{opacity:0}to{opacity:1}}
+.tvc-rise{animation:tvcRise var(--m-dur-standard) var(--m-ease-standard) both}
+.tvc-fade{animation:tvcFade var(--m-dur-fast) var(--m-ease-standard) both}
+@media (prefers-reduced-motion: reduce){.tvc-rise,.tvc-fade{animation:none!important}}
 :root{--tv-state-downloaded:#22c55e;--tv-state-missing:#ef4444;--tv-state-unaired:#3b82f6}
 .tvc-row:hover{background:rgba(255,255,255,.04)!important}
 .tvc-glass:hover{background:rgba(255,255,255,.10)!important}
@@ -583,13 +588,11 @@ export function glassArt(e: Pick<CalEpisode, 'banner_url' | 'backdrop_path' | 'p
 const glassCss = `
 @keyframes tvgRise{from{opacity:0;transform:translateY(var(--m-rise,6px))}to{opacity:1;transform:none}}
 @keyframes tvgFade{from{opacity:0}to{opacity:1}}
-.tvc-rise{animation:tvgRise var(--m-dur-standard) var(--m-ease-standard) both}
-.tvc-fade{animation:tvgFade var(--m-dur-fast) var(--m-ease-standard) both}
 @keyframes tvgPulse{0%,100%{opacity:1}50%{opacity:.5}}
 .tvg-rise{animation:tvgRise var(--motion-fade-dur,240ms) var(--motion-fade-ease,cubic-bezier(0.2,0,0,1)) both}
 .tvg-fade{animation:tvgFade 150ms linear both}
 .tvg-pulse{animation:tvgPulse 1.6s ease-in-out infinite}
-@media (prefers-reduced-motion: reduce){.tvc-rise,.tvc-fade,.tvg-rise,.tvg-fade,.tvg-pulse{animation:none!important}.tvg-art{transition:none!important}}
+@media (prefers-reduced-motion: reduce){.tvg-rise,.tvg-fade,.tvg-pulse{animation:none!important}.tvg-art{transition:none!important}}
 `;
 
 /** The blurred art: opacity 0 → .18 once on load; an image already cached shows at once; a failed load stays a plain card. */

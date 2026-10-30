@@ -359,7 +359,8 @@ describe('Calendar', () => {
     expect(screen.getByTestId('tv-cal-label').textContent).toBe('Oct 11 \u2013 17');   // the toolbar stays put
     await act(async () => release());
     await screen.findAllByTestId('tv-agenda-row');
-    expect(screen.getByTestId('tv-cal-week').className).toBe('tvc-rise');           // first load: fade + rise (MOTION tokens)
+    expect(screen.getByTestId('tv-cal-week').className).toBe('tvc-rise');
+    expect(tvCalendarCss).toContain('.tvc-rise{animation:tvcRise var(--m-dur-standard) var(--m-ease-standard) both}');           // first load: fade + rise (MOTION tokens)
   });
 });
 
