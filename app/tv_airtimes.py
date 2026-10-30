@@ -79,12 +79,15 @@ def episodes(maze_id: int) -> Dict[tuple, Dict[str, Any]]:
     return out
 
 
-def store(sid: int, tmdb_id: int, maze_id: Optional[int], eps: Dict[tuple, Dict[str, Any]], now: float) -> bool:
+def store(sid: int, tmdb_id: int, maze_id: Optional[int], eps: Dict[tuple, Dict[str, Any]], now: float,
+          banner: Optional[str] = None) -> bool:
     """Write one show's air times, only if row *sid* still holds *tmdb_id* (same transaction)."""
     with tv_store.write() as conn:
         if not conn.execute('SELECT 1 FROM series WHERE id = ? AND tmdb_id = ?', (sid, tmdb_id)).fetchone():
             return False
         conn.execute('UPDATE series SET tvmaze_id = ?, tvmaze_checked_at = ? WHERE id = ?', (maze_id, now, sid))
+        if banner:                                 # a banner once found stays when TVDB is later unreachable
+            conn.execute('UPDATE series SET banner_url = ? WHERE id = ?', (banner, sid))
         for (s, n), v in eps.items():
             conn.execute('UPDATE episodes SET airstamp = ?, air_runtime = ?, tvdb_image = ? WHERE series_id = ?'
                          ' AND season_number = ? AND episode_number = ?',
@@ -120,8 +123,12 @@ def refresh(now: Optional[float] = None, first: Optional[set] = None, repair: Op
     for r in rows:
         try:
             mid, eps = None, {}
+            ban = None
             if creds[0] and r['tvdb_id']:     # TheTVDB (key in Connectors) first
                 eps = tv_tvdb.episodes(r['tvdb_id'], creds, _pace)
+                if eps:                       # v321: the detail header's banner (series artwork)
+                    _pace()
+                    ban = tv_tvdb.banner(r['tvdb_id'], creds)
             if not eps:                       # no key, no tvdb_id, or TVDB doesn't know it: TVmaze (no key)
                 mid = r['tvmaze_id'] or lookup(r['tvdb_id'], r['imdb_id'])
                 eps = episodes(mid) if mid else {}
@@ -132,7 +139,7 @@ def refresh(now: Optional[float] = None, first: Optional[set] = None, repair: Op
             logger.info('Air times unavailable (%s: %s); saved air times kept, next try in %d min',
                         type(e).__name__, str(e)[:40], int(wait // 60))
             break
-        n += store(r['id'], r['tmdb_id'], mid, eps, now)
+        n += store(r['id'], r['tmdb_id'], mid, eps, now, banner=ban)
     else:
         _fail.update(until=0.0, n=0)
     if rows:

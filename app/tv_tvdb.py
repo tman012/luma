@@ -174,6 +174,24 @@ def episodes(tvdb_id: int, creds: Tuple[str, str], pace: Callable[[], None]) -> 
     return out
 
 
+BANNER_TYPE = 1   # TheTVDB v4 artwork type: series banner
+
+
+def banner(tvdb_id: int, creds: Tuple[str, str]) -> Optional[str]:
+    """v321: the show's best-scored banner on TheTVDB's artwork host, else None."""
+    data = _get(f'/series/{int(tvdb_id)}/artworks', creds, {'type': BANNER_TYPE})
+    arts = data.get('artworks') if isinstance(data, dict) else None
+    best: Tuple[float, Optional[str]] = (-1.0, None)
+    for a in arts or []:
+        if not isinstance(a, dict) or a.get('type') not in (None, BANNER_TYPE):
+            continue
+        url = image_url(a.get('image'))
+        score = a.get('score') if isinstance(a.get('score'), (int, float)) else 0
+        if url and score > best[0]:
+            best = (float(score), url)
+    return best[1]
+
+
 def configure(post=None, get=None) -> None:
     """Tests: a fake TheTVDB."""
     _cfg.update(post=post, get=get)

@@ -363,10 +363,15 @@ def undaily_titles(conn: sqlite3.Connection) -> List[int]:
     return out
 
 
+# v321 (PM): the series detail header shows the show's TheTVDB banner (series artwork type 1).
+SCHEMA_V13 = "ALTER TABLE series ADD COLUMN banner_url TEXT;"
+
+
 # MIGRATIONS[n] takes user_version n to n + 1.
 MIGRATIONS: List[Any] = [SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6,
                          (SCHEMA_V7, monitor_defaults), SCHEMA_V8, (SCHEMA_V9, monitor_labels),
-                         (SCHEMA_V10, repair_v9_labels), (SCHEMA_V11, daily_types), (SCHEMA_V12, undaily_titles)]
+                         (SCHEMA_V10, repair_v9_labels), (SCHEMA_V11, daily_types), (SCHEMA_V12, undaily_titles),
+                         SCHEMA_V13]
 # A step is SQL, or (SQL, fn(conn)) run in the same transaction after it.
 SCHEMA_VERSION = len(MIGRATIONS)
 

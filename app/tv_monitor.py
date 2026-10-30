@@ -268,7 +268,7 @@ def detail_view(sid: int, today: Optional[str] = None) -> Optional[Dict[str, Any
     if base is None:
         return None
     with tv_store.connect() as conn:
-        r = conn.execute('SELECT s.network, s.status, s.overview, s.poster_path, s.backdrop_path, q.name AS profile_name'
+        r = conn.execute('SELECT s.network, s.status, s.overview, s.poster_path, s.backdrop_path, s.banner_url, q.name AS profile_name'
                          ' FROM series s LEFT JOIN quality_profiles q ON q.id = s.profile_id WHERE s.id = ?', (sid,)).fetchone()
         size = conn.execute("SELECT COALESCE(SUM(size), 0) AS n FROM episode_files WHERE series_id = ? AND state = 'linked'",
                             (sid,)).fetchone()['n']
@@ -321,7 +321,7 @@ def detail_view(sid: int, today: Optional[str] = None) -> Optional[Dict[str, Any
                         'size': sum(e['size'] or 0 for e in mine)})
     counted = [e for e in eps if _counted(e, today)]
     return {**base, 'network': r['network'], 'status': r['status'], 'overview': r['overview'], 'poster_path': r['poster_path'],
-            'backdrop_path': r['backdrop_path'], 'profile_name': r['profile_name'], 'size': int(size or 0),
+            'backdrop_path': r['backdrop_path'], 'banner_url': r['banner_url'], 'profile_name': r['profile_name'], 'size': int(size or 0),
             'have': sum(1 for e in counted if e['has_file']), 'total': len(counted),
             'seasons': seasons, 'episodes': eps}
 
