@@ -716,15 +716,6 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
                 cursor: scanning ? 'not-allowed' : 'pointer',
               }}
             >
-              {scanning && (
-                <span
-                  className="absolute inset-0"
-                  style={{
-                    background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.08) 50%, transparent 100%)',
-                    animation: 'scanShimmer 1.5s ease-in-out infinite',
-                  }}
-                />
-              )}
               <span className="relative flex items-center gap-2">
                 {scanning && (
                   <span className="h-3 w-3 animate-spin rounded-full border-[1.5px] border-white/15 border-t-white/60 inline-block" />
@@ -856,14 +847,6 @@ export function UpgradesSheet({ open, onClose }: UpgradesSheetProps) {
           {toast}
         </div>
       )}
-
-      {/* Inline keyframes for scan shimmer */}
-      <style>{`
-        @keyframes scanShimmer {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(100%); }
-        }
-      `}</style>
     </div>,
     document.body,
   );

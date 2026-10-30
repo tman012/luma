@@ -51,10 +51,6 @@ const PosterCard = memo(function PosterCard({ item, onClick, revealed, onImgRead
   return (
     <button type="button" onClick={onClick} className="w-full text-left">
       <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-white/5">
-        {/* Skeleton pulse — visible until batch is revealed */}
-        {!revealed && (
-          <div className="absolute inset-0 animate-pulse bg-white/5" />
-        )}
         {item.poster_url ? (
           <img
             src={item.poster_url} alt={item.title} draggable={false}
@@ -554,9 +550,9 @@ export function LibrariesSheet({ open, onClose }: LibrariesSheetProps) {
                           <MovieIcon />
                           <span className="flex-1 truncate text-[16px] font-medium text-white/90">{row.name}</span>
                           {row.count != null ? (
-                            <span className="text-[14px] text-white/30">{row.count.toLocaleString()}</span>
+                            <span className="luma-fade-in text-[14px] text-white/30">{row.count.toLocaleString()}</span>
                           ) : (
-                            <span className="h-4 w-10 animate-pulse rounded bg-white/5" />
+                            <span className="h-4 w-10" aria-hidden="true" />
                           )}
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-white/20">
                             <polyline points="9 18 15 12 9 6" />
@@ -579,9 +575,9 @@ export function LibrariesSheet({ open, onClose }: LibrariesSheetProps) {
                           <TvIcon />
                           <span className="flex-1 truncate text-[16px] font-medium text-white/90">{row.name}</span>
                           {row.count != null ? (
-                            <span className="text-[14px] text-white/30">{row.count.toLocaleString()}</span>
+                            <span className="luma-fade-in text-[14px] text-white/30">{row.count.toLocaleString()}</span>
                           ) : (
-                            <span className="h-4 w-10 animate-pulse rounded bg-white/5" />
+                            <span className="h-4 w-10" aria-hidden="true" />
                           )}
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-white/20">
                             <polyline points="9 18 15 12 9 6" />
@@ -596,11 +592,11 @@ export function LibrariesSheet({ open, onClose }: LibrariesSheetProps) {
           ) : (
             /* ---- Grid browse view ---- */
             loadingGrid ? (
-              <div className="grid grid-cols-3 gap-3 px-4">
+              <div className="grid grid-cols-3 gap-3 px-4" data-testid="libraries-reserved" aria-hidden="true">
                 {Array.from({ length: 9 }).map((_, i) => (
                   <div key={i}>
-                    <div className="aspect-[2/3] animate-pulse rounded-lg bg-white/5" />
-                    <div className="mt-1.5 h-3 w-3/4 animate-pulse rounded bg-white/5" />
+                    <div className="aspect-[2/3]" />
+                    <div className="mt-1.5 h-3" />
                   </div>
                 ))}
               </div>
@@ -609,7 +605,7 @@ export function LibrariesSheet({ open, onClose }: LibrariesSheetProps) {
                 <p className="text-[14px]">No items found</p>
               </div>
             ) : (
-              <div className="px-4">
+              <div className="px-4 luma-fade-in">
                 <div className="grid grid-cols-3 gap-3">
                   {items.map((item, idx) => (
                     <PosterCard key={`${item.rating_key}-${idx}`} item={item} onClick={() => handleCardClick(item)} revealed={postersRevealed} onImgReady={handleImgReady} />

@@ -147,6 +147,15 @@ body,
   min-height: 100%;
   background: var(--color-kiosk-black);
 }
+/* MOTION.md: skeletons retired; loading keeps an empty reserved box, then the content fades and rises in. */
+.luma-fade-in{animation:lumaFadeIn var(--m-dur-standard) var(--m-ease-standard) both}
+@keyframes lumaFadeIn{from{opacity:0;transform:translateY(var(--m-rise))}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion: reduce){.luma-fade-in{animation:none}}
+html[data-luma-surface='series'],
+html[data-luma-surface='series'] body,
+html[data-luma-surface='series'] #root {
+  background: #111318;
+}
 
 /* v266 (Taylor/Designer): Home reaches the bottom because it sizes by 100dvh (in flow), not
    position:fixed + inset:0. Fixed inset:0 / negative-bottom / bleed ::after paint stay clipped on a

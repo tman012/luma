@@ -256,7 +256,7 @@ export function HomeSearchPalette() {
           </div>
         )}
         {phase === 'loading' && skeleton && (
-          <div className="lsp-list" data-testid="search-skeleton" aria-hidden="true">
+          <div className="lsp-list" data-testid="search-reserved" aria-hidden="true">
             <div className="lsp-sk lsp-sk-h" />
             {[180, 240, 150, 210].map(w => (
               <div key={w} className="lsp-row"><div className="lsp-th lsp-sk2" />
@@ -275,7 +275,7 @@ export function HomeSearchPalette() {
           </div>
         )}
         {phase === 'done' && (rows.length > 0 || moreCount > 0) && (
-          <div ref={listRef} className="lsp-list lsp-scroll" id="lsp-list" role="listbox" data-testid="search-results">
+          <div ref={listRef} className="lsp-list lsp-scroll luma-fade-in" id="lsp-list" role="listbox" data-testid="search-results">
             {groups.map(g => (
               <div key={g.id} role="group" aria-label={g.title}>
                 {g.id === 'more'
@@ -350,10 +350,10 @@ export const paletteCss = `
 .lsp-a{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lsp-em{font-style:normal;font-weight:inherit;color:var(--color-accent-hover)}
 .lsp-b{font-size:12px;color:rgba(255,255,255,.50);margin-top:3px}
-.lsp-sk{background:var(--color-glass-6);animation:lsp-pulse 1.2s ease-in-out infinite}
+.lsp-sk{background:transparent}
 .lsp-sk2{background:var(--color-glass-10)}
 .lsp-sk-h{height:12px;width:110px;border-radius:6px;margin:12px}
-.lsp-th.lsp-sk2{border-color:var(--color-glass-8);animation:lsp-pulse 1.2s ease-in-out infinite}
+.lsp-th.lsp-sk2{border-color:transparent;background:transparent}
 .lsp-fm{display:flex;width:100%;align-items:center;justify-content:center;gap:8px;padding:12px 0;background:none;border:0;font:inherit;font-size:18px;font-weight:500;color:rgba(255,255,255,.80);cursor:pointer;transition:color 150ms;outline:none;border-radius:10px}
 .lsp-fm:hover{color:#fff}
 .lsp-fm-back{display:flex;width:100%;align-items:center;justify-content:center;gap:8px;margin:6px 0 12px;padding:0;background:none;border:0;font:inherit;font-size:18px;font-weight:600;color:var(--color-text-secondary, rgba(255,255,255,.70));cursor:pointer;transition:color 150ms;outline:none;border-radius:10px}
@@ -370,10 +370,9 @@ export const paletteCss = `
 @keyframes lsp-out{from{opacity:1;transform:translateX(-50%)}to{opacity:0;transform:translateX(-50%) translateY(-4px) scale(.98)}}
 @keyframes lsp-fade{from{opacity:0}to{opacity:1}}
 @keyframes lsp-in{from{opacity:0;transform:translateX(-50%) translateY(-4px) scale(.98)}to{opacity:1;transform:translateX(-50%)}}
-@keyframes lsp-pulse{0%,100%{opacity:1}50%{opacity:.55}}
 @keyframes lsp-in-rm{from{opacity:0}to{opacity:1}}
 @media (prefers-reduced-motion: reduce){
-  .lsp-scrim,.lsp-panel,.lsp-sk,.lsp-th.lsp-sk2{animation:none}
+  .lsp-scrim,.lsp-panel{animation:none}
   .lsp-root[data-closing="true"] .lsp-scrim,.lsp-root[data-closing="true"] .lsp-panel{animation:none}
 }
 `;

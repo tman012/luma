@@ -97,6 +97,12 @@ export function TvSeriesDetail({ seriesId, episodeId, wide, onBack, onChanged, s
   const [interactive, setInteractive] = useState<{ target: SearchTarget; label: string; epTitle?: string } | null>(null);
   const live = useRef(true);
   useEffect(() => () => { live.current = false; }, []);
+  // TYPE-series T9: the desktop series page sits on #111318, not the app navy (#15102a, html/body token).
+  useEffect(() => {
+    if (!wide) return;
+    const h = document.documentElement; h.dataset.lumaSurface = 'series';
+    return () => { if (h.dataset.lumaSurface === 'series') delete h.dataset.lumaSurface; };
+  }, [wide]);
   const [onSearch, searchAsk] = useMonitorSearch(say);
 
   const load = useCallback(() => getDetail(seriesId).then(r => {

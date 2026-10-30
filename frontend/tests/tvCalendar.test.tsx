@@ -672,3 +672,13 @@ describe('v325 MOTION.md §4: skeletons retired app-wide', () => {
     }
   });
 });
+
+describe('MOTION.md: no skeleton pulse/shimmer in search, Libraries or Upgrades', () => {
+  it('sources carry no pulse or shimmer animation', async () => {
+    const fs = await import('node:fs');
+    for (const f of ['src/components/search/HomeSearchR3.tsx', 'src/components/search/HomeSearchPalette.tsx', 'src/components/libraries/LibrariesSheet.tsx', 'src/components/upgrades/UpgradesSheet.tsx']) {
+      const s = fs.readFileSync(f, 'utf8');
+      expect(s, f).not.toMatch(/animate-pulse|lsp-pulse|r3-pulse|scanShimmer/);
+    }
+  });
+});

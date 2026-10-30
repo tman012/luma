@@ -253,7 +253,7 @@ export function HomeSearchR3() {
       {searching && (
         <div className="r3-body" data-testid="r3-results" data-state={phase === 'loading' ? (skeleton ? 'loading' : 'pending') : nothing ? 'empty' : phase}>
           {phase === 'loading' && skeleton && (
-            <div className="r3-main" data-testid="search-skeleton" aria-hidden="true">
+            <div className="r3-main" data-testid="search-reserved" aria-hidden="true">
               <div className="r3-top r3-sk" style={{ height: 'calc(var(--r3-top) * 0.56 + 150px)' }} />
               <div className="r3-grid">{[0, 1, 2, 3, 4].map(i => <div key={i} className="r3-po r3-sk" />)}</div>
             </div>
@@ -266,8 +266,8 @@ export function HomeSearchR3() {
             </div>
           )}
           {phase === 'done' && !nothing && (
-            <D3Results key={q} titles={[...(view.top ? [view.top] : []), ...view.grid, ...view.more]} people={view.people}
-              onOpen={open} onPerson={openPerson} wlFor={wlFor} />
+            <div className="luma-fade-in"><D3Results key={q} titles={[...(view.top ? [view.top] : []), ...view.grid, ...view.more]} people={view.people}
+              onOpen={open} onPerson={openPerson} wlFor={wlFor} /></div>
           )}
         </div>
       )}
@@ -444,10 +444,8 @@ span.r3-wl{cursor:default;background:#22c55e;border-color:#22c55e}
 .r3-more-t{font-size:15px;font-weight:600}
 .r3-more-n{margin-left:auto;display:inline-flex;align-items:center;gap:4px;font-size:13px;color:rgba(255,255,255,.55)}
 .r3-empty{padding:56px 0;text-align:center;font-size:15px;color:rgba(255,255,255,.7)}
-.r3-sk{background:rgba(255,255,255,.06);animation:r3-pulse 1.2s ease-in-out infinite;box-shadow:none}
+.r3-sk{background:transparent;box-shadow:none}
 .r3-card:focus-visible .r3-po,.r3-btn:focus-visible,.r3-more:focus-visible,.r3-person:focus-visible{box-shadow:0 0 0 3px rgba(59,130,246,.45)}
-@keyframes r3-pulse{0%,100%{opacity:1}50%{opacity:.55}}
-@media (prefers-reduced-motion: reduce){.r3-sk{animation:none}}
 `;
 
 /** v241 (H2): the filled search glyph from the H2 mock. */

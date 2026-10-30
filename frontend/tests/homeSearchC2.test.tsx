@@ -53,9 +53,9 @@ describe('C2 palette states', () => {
   it('loading: skeleton only after 150 ms, chips visible', async () => {
     mode = 'hang'; mount(); act(() => openSearch());
     await type('dune');
-    expect(screen.queryByTestId('search-skeleton')).toBeNull();
+    expect(screen.queryByTestId('search-reserved')).toBeNull();
     await act(async () => { vi.advanceTimersByTime(150); });
-    expect(screen.getByTestId('search-skeleton')).toBeTruthy();
+    expect(screen.getByTestId('search-reserved')).toBeTruthy();
     expect(screen.getByTestId('search-palette').dataset.state).toBe('loading');
     expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['All', 'Movies', 'TV', 'People']);
   });
