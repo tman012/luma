@@ -4,7 +4,8 @@
  * fails returns null and the caller falls back to the fetched palette. */
 import type { UltraBlurColors } from '@/utils/modalParsers';
 
-const NAVY: [number, number, number] = [0x15, 0x10, 0x2a];
+// The sheet base mixes into the app surface #111318 (MOTION §7 #12), not the navy token.
+const NAVY: [number, number, number] = [0x11, 0x13, 0x18];
 
 function rgb([r, g, b]: [number, number, number]): string {
   return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;

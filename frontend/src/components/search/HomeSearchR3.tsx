@@ -161,7 +161,8 @@ export function HomeSearchR3() {
   const closeBar = useCallback(() => { setBar(false); clear(); inputRef.current?.blur(); }, [clear]);
   useEffect(() => {
     if (!shown) return;
-    const onKeyDoc = (e: KeyboardEvent) => { if (e.key === 'Escape') closeBar(); };
+    // A sheet/modal open over R3 owns Escape: only it closes, R3 stays (Tester, v326).
+    const onKeyDoc = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('[data-modal]')) closeBar(); };
     const onDown = (e: PointerEvent | MouseEvent) => {
       const t = e.target as Element | null;
       if (!t || !t.closest) return;

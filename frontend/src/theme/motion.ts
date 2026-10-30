@@ -2,7 +2,7 @@
 const SPRING = 'linear(0, 0.25 7%, 0.6 16%, 0.86 27%, 0.97 38%, 1.005 50%, 1.002 65%, 1)';
 
 export const MOTION = {
-  dur: { instant: 0, fast: 120, standard: 240, emphasized: 360, sheetEnter: 380, sheetExit: 260, press: 100, image: 240, crossfade: 200 },
+  dur: { instant: 0, fast: 120, standard: 240, emphasized: 360, sheetEnter: 380, sheetExit: 260, press: 100, image: 240, crossfade: 200, dismissExit: 300 },
   ease: {
     standard: 'cubic-bezier(0.2,0,0,1)',
     decel: 'cubic-bezier(0.05,0.7,0.1,1)',

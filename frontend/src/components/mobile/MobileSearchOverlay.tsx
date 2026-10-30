@@ -68,9 +68,9 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
 
   // Paint html background for safe-area coverage
   useEffect(() => {
-    const prev = document.documentElement.style.background;
-    document.documentElement.style.background = 'var(--color-kiosk-black)';
-    return () => { document.documentElement.style.background = prev; };
+    const h = document.documentElement;
+    h.dataset.lumaSearch = '';   // index.css: html[data-luma-search] paints #111318
+    return () => { delete h.dataset.lumaSearch; };
   }, []);
 
   // Dismiss keyboard when user touches the results area
@@ -327,11 +327,11 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
   const inPersonMode = personView || personLoading;
 
   return (
-    <div className="luma-fullscreen luma-bleed fixed inset-0 bg-kiosk-black flex flex-col" style={{ zIndex: MOTION.z.overlay, paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+    <div className="luma-fullscreen luma-bleed fixed inset-0 bg-[#111318] flex flex-col" style={{ zIndex: MOTION.z.overlay, paddingTop: 'env(safe-area-inset-top, 0px)' }}>
       {/* Header: search bar OR person header — stays fixed above scroll */}
       {inPersonMode ? (
         /* Person header */
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-white/10 bg-kiosk-black shrink-0">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-white/10 bg-[#111318] shrink-0">
           <button
             type="button"
             onClick={handleBack}
@@ -353,7 +353,7 @@ export function MobileSearchOverlay({ initialQuery = '', initialPerson, onClose 
         </div>
       ) : (
         /* Search bar */
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-white/10 bg-kiosk-black shrink-0">
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-white/10 bg-[#111318] shrink-0">
           <button
             type="button"
             onClick={onClose}

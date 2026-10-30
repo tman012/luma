@@ -366,6 +366,8 @@ export const paletteCss = `
   background:var(--color-accent);color:#fff;font:inherit;font-size:14px;font-weight:500;cursor:pointer;outline:none}
 .lsp-root[data-closing="true"] .lsp-scrim{animation:lsp-fade-out 140ms ease-in forwards}
 .lsp-root[data-closing="true"] .lsp-panel{animation:lsp-out 140ms ease-in forwards}
+html[data-luma-modal] .lsp-scrim,html[data-luma-modal] .lsp-panel{backdrop-filter:none;-webkit-backdrop-filter:none}
+html[data-luma-modal] .lsp-scrim{background:rgba(21,16,42,.84)}
 @keyframes lsp-fade-out{from{opacity:1}to{opacity:0}}
 @keyframes lsp-out{from{opacity:1;transform:translateX(-50%)}to{opacity:0;transform:translateX(-50%) translateY(-4px) scale(.98)}}
 @keyframes lsp-fade{from{opacity:0}to{opacity:1}}

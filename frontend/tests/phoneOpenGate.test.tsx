@@ -82,7 +82,7 @@ describe('phone sheet markup', () => {
       const s = read(f);
       expect(s).toContain('<SheetFrame');
       expect(s).toContain('composed={composed}');
-      expect(s).toContain('<SeedShell');
+      expect(s).toContain('<SeedLayer show={shellShown.current} ready={composed}');
       // No invisible-until-composed sheet; only the title holds for the logo.
       expect(s).not.toContain('cardOpacity');
       expect(s).not.toContain("opacity: titleState === 'hold' ? 0 : 1");
@@ -103,5 +103,25 @@ describe('blur crossfade', () => {
     expect(container.querySelector('[data-blur-crossfade]')).toBeNull();
     rerender(<div><UltraBlurOverlay colors={b as never} /></div>);
     expect(container.querySelector('[data-blur-crossfade]')).toBeTruthy();
+  });
+});
+
+describe('designer NO fixes on 15a4f789', () => {
+  const read = (p: string) => require('node:fs').readFileSync(p, 'utf8') as string;
+  it('the seed draws only hero + title (no placeholder bars) and fades out over the details', () => {
+    const s = read('src/components/layout/SheetFrame.tsx');
+    const seed = s.slice(s.indexOf('export function SeedShell'), s.indexOf('export type SeedState'));
+    expect(seed).not.toContain('--m-placeholder');
+    expect(s).toContain('export function SeedLayer');
+  });
+  it('phone search surfaces and the sheet base mix sit on #111318', () => {
+    expect(read('src/components/search/SearchShelf.tsx')).not.toContain('var(--color-kiosk-black)');
+    expect(read('src/components/mobile/MobileSearchOverlay.tsx')).not.toMatch(/kiosk-black/);
+    expect(read('src/utils/posterColors.ts')).toContain('[0x11, 0x13, 0x18]');
+  });
+  it('the desktop series page loads Google Sans Flex', () => {
+    const css = read('src/index.css');
+    expect(css).toContain("url('/fonts/GoogleSansFlex-latin.woff2')");
+    expect(css).toContain("html[data-luma-surface='series'] #root *");
   });
 });

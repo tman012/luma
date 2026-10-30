@@ -1,6 +1,6 @@
 import { sheetBase } from '@/utils/posterColors';
 import { APP_BG } from '@/theme/motion';
-import { SheetFrame, SheetCard, SeedShell, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
+import { SheetFrame, SheetCard, SeedLayer, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
 import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
@@ -448,7 +448,7 @@ export function CompactLayout(props: TvModalViewProps) {
           }}
         >
           {/* Loading */}
-          {loading && <SeedShell overlap={220} />}
+          <SeedLayer show={shellShown.current} ready={composed} overlap={220} />
 
           {/* Error */}
           {!loading && error && (

@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, lazy, Suspense, type ReactNod
 import { useLocation, useNavigate } from 'react-router';
 import { ModalHostContext, type ModalOpenOptions } from './ModalHostContext';
 import { useLayoutMode } from '@/contexts/LayoutModeContext';
+import { MOTION } from '@/theme/motion';
 import { MovieDetailModal } from '@/components/media/MovieDetailModal';
 import { TvDetailModal } from '@/components/media/TvDetailModal';
 import { PersonDetailModal } from '@/components/media/PersonDetailModal';
@@ -25,7 +26,7 @@ interface StackEntry {
 }
 
 /** Back (popstate) dismissal: the longest sheet exit (desktop 300ms owner timers, phone --m-dur-sheet-exit 260ms). */
-const DISMISS_EXIT_MS = 300;
+const DISMISS_EXIT_MS = MOTION.dur.dismissExit;
 export function AppModalHost({ children }: { children: ReactNode }) {
   const { mode } = useLayoutMode();
   const location = useLocation();

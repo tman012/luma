@@ -2,7 +2,7 @@
  * build's search host can mount it too (v261). */
 import { useRef, useState, useMemo, useCallback, useEffect } from 'react';
 import { useModalHost } from '@/contexts/ModalHostContext';
-import { MOTION } from '@/theme/motion';
+import { APP_BG, MOTION } from '@/theme/motion';
 import { openModalForItem } from '@/utils/modalNavigation';
 import {
   openResult,
@@ -212,7 +212,7 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
       data-testid="search-shelf"
       style={{
         position: 'fixed', top: 0, left: 0, right: 0, zIndex: MOTION.z.overlay,   // under every sheet (MOTION.md §3)
-        background: 'var(--color-kiosk-black)',
+        background: APP_BG,   // MOTION §7 #12: the phone search surface under the sheet is #111318
         opacity: phase === 'visible' ? 1 : 0,
         transition: `opacity ${MOTION.dur.crossfade}ms ${phase === 'exiting' ? MOTION.ease.accel : MOTION.ease.standard}`,
       }}
@@ -223,7 +223,7 @@ export function SearchShelf({ onClose, initialQuery, onPersonSearch }: {
         style={{
           position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1,
           paddingTop: 'env(safe-area-inset-top, 0px)',
-          background: 'var(--color-kiosk-black)',
+          background: APP_BG,
         }}
       >
         {/* Header: X + "Search" title */}

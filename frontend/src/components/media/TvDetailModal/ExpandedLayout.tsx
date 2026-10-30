@@ -1,4 +1,4 @@
-import { useModalMotion } from '@/components/layout/SheetFrame';
+import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -797,10 +797,10 @@ function SeasonDetailModal({
   const overlayRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  useModalMotion(phase, overlayRef, cardRef);
+  const modalEntering = useModalMotion(phase, overlayRef, cardRef);
 
   return createPortal(
-    <div className="luma-fullscreen luma-bleed" ref={overlayRef}
+    <Hold hold={modalEntering}><div className="luma-fullscreen luma-bleed" ref={overlayRef}
       onClick={handleClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 200,
@@ -1124,7 +1124,7 @@ function SeasonDetailModal({
           onEpisodeSources={onEpisodeSources}
         />
       )}
-    </div>,
+    </div></Hold>,
     document.body,
   );
 }

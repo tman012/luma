@@ -1,4 +1,4 @@
-import { useModalMotion } from '@/components/layout/SheetFrame';
+import { Hold, useModalMotion } from '@/components/layout/SheetFrame';
 import { WatchlistAddSheet } from '@/components/movies/WatchlistAddSheet';
 import { useTitleReveal, logoInput, titleTextStyle, revealStyle } from '@/hooks/useTitleReveal';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -629,12 +629,12 @@ export function ExpandedLayout(props: MovieModalViewProps) {
   // Animation — tablet: opacity-only (skip scale/transform for GPU savings)
   // ---------------------------------------------------------------------------
   const cardRef = useRef<HTMLDivElement>(null);
-  useModalMotion(phase, overlayRef, cardRef);
+  const modalEntering = useModalMotion(phase, overlayRef, cardRef);
 
   if (phase === 'gone') return null;
 
   return (
-    <>
+    <Hold hold={modalEntering}>
     {createPortal(
     <div className="luma-fullscreen luma-bleed"
       data-modal="MovieDetailModal"
@@ -1823,6 +1823,6 @@ export function ExpandedLayout(props: MovieModalViewProps) {
       <FullPlotModal text={detail.summary} onClose={() => setShowFullPlot(false)} />,
       document.body,
     )}
-    </>
+    </Hold>
   );
 }

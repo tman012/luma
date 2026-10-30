@@ -1,5 +1,5 @@
 import { isMinimal } from '@/minimal';
-import { SHEET_EXIT_MS } from '@/components/layout/SheetFrame';
+import { SHEET_EXIT_MS, useCloseOnce } from '@/components/layout/SheetFrame';
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { FixMatchResult } from './FixMatchSheet';
@@ -87,7 +87,9 @@ export function MovieDetailModal({
   const { mode, isTablet } = useLayoutMode();
 
   // Animated close — compact: SheetFrame's exit (--m-dur-sheet-exit), tablet 200ms, expanded 300ms
+  const closeOnce = useCloseOnce();
   const handleClose = useCallback(() => {
+    if (!closeOnce()) return;
     setShowSources(false);
     setShowCollection(false);
     setPhase('exiting');
@@ -96,15 +98,15 @@ export function MovieDetailModal({
       setPhase('gone');
       onClose();
     }, duration);
-  }, [onClose, mode, isTablet]);
+  }, [onClose, mode, isTablet, closeOnce]);
 
 
   // MOTION.md §1.6: back (AppModalHost popstate) plays the exit from wherever the sheet is, then the host unmounts it.
   useEffect(() => {
-    const onDismiss = (e: Event) => { e.preventDefault(); setPhase('exiting'); };
+    const onDismiss = (e: Event) => { e.preventDefault(); if (closeOnce()) setPhase('exiting'); };
     window.addEventListener('luma:modal-dismiss', onDismiss);
     return () => window.removeEventListener('luma:modal-dismiss', onDismiss);
-  }, []);
+  }, [closeOnce]);
 
   // Escape key
   useEffect(() => {

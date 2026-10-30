@@ -310,6 +310,12 @@ describe('v243 A1: the top bar opens from a bare chevron', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(bar()).toBeNull();
   });
+  it('v326: Esc with a sheet open over R3 is the sheet\'s; R3 stays', () => {
+    render(<><div data-modal="MovieDetailModal" /><HomeSearchR3 /></>);
+    fireEvent.click(screen.getByTestId('a1-chevron'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(bar()).not.toBeNull();
+  });
   it('a click outside closes it; clicks inside the bar do not', () => {
     render(<><p data-testid="outside">hero</p><HomeSearchR3 /></>);
     fireEvent.click(screen.getByTestId('a1-chevron'));

@@ -1,6 +1,6 @@
 import { sheetBase } from '@/utils/posterColors';
 import { APP_BG } from '@/theme/motion';
-import { SheetFrame, SheetCard, SeedShell, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
+import { SheetFrame, SheetCard, SeedLayer, SHELL_CROSSFADE } from '@/components/layout/SheetFrame';
 import { CastPhoto } from '@/components/media/CastPhoto';
 import { REVEALED_EVENT } from '@/services/modalPrefetch';
 import { useTitleReveal, logoInput, titleTextStyle } from '@/hooks/useTitleReveal';
@@ -370,7 +370,7 @@ export function CompactLayout(props: MovieModalViewProps) {
         >
           {/* Loading — the sheet now slides up before the data lands, so this
               placeholder is what the user sees for the first few hundred ms. */}
-          {loading && <SeedShell overlap={100} />}
+          <SeedLayer show={shellShown.current} ready={composed} overlap={100} />
 
           {/* Error */}
           {!loading && error && (
