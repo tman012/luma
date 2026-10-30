@@ -11,21 +11,29 @@ describe('v211 U3 phone rows', () => {
     expect(etParts('2026-10-19T01:00:00Z')).toEqual(['9:00', 'PM']);
     expect(etParts(null)).toBeNull();
   });
-  it('time column centered, no T2 headers, no chip (v325: left edge is the got-it indicator)', () => {
+  it('v319 phone card: time on top, show, then SxxExx line, all centered; no count line, no chip', () => {
     render(<PhoneDay day={'2026-10-18' as Day} today={'2026-10-18' as Day} eps={[
       ep({ episode_id: 1, airstamp: '2026-10-19T01:00:00Z', downloaded: true, quality: '2160p WEB-DL' }),
       ep({ episode_id: 2, show: 'Tracker', airstamp: '2026-10-19T01:00:00Z', downloaded: false, quality: '1080p WEB' }),
       ep({ episode_id: 3, show: 'Untimed', airstamp: null, downloaded: true, quality: null }),
     ]} />);
     expect(screen.queryByTestId('tv-time-head')).toBeNull();
+    expect(screen.queryByTestId('tv-day-count')).toBeNull();
+    expect(screen.queryByText(/\d+ episodes?$/)).toBeNull();
     const rows = screen.getAllByTestId('tv-agenda-row');
     expect(rows).toHaveLength(3);
-    const col = within(rows[0]!).getByTestId('tv-u3-time');
-    expect(col.style.justifyContent).toBe('center');
-    expect(col.style.alignSelf).toBe('center');
-    expect(rows[0]!.style.alignItems).toBe('center');
-    expect(col.textContent).toBe('9:00PM');
-    expect(screen.queryAllByTestId('tv-quality-chip')).toHaveLength(0);   // v325: no quality/Downloaded chip on phone rows
+    expect(rows[0]!.style.flexDirection).toBe('column');
+    const kids = [...rows[0]!.children].map(c => c.getAttribute('data-testid')).filter(id => id && id !== 'tv-stripe');
+    expect(kids).toEqual(['tv-u3-time', 'tv-card-show', 'tv-card-title']);
+    for (const id of kids) {
+      const el = within(rows[0]!).getByTestId(id!);
+      expect(el.style.textAlign).toBe('center');
+      expect(el.style.textOverflow).toBe('ellipsis');
+      expect(el.style.whiteSpace).toBe('nowrap');
+    }
+    expect(within(rows[0]!).getByTestId('tv-u3-time').textContent).toBe('9:00 PM');
+    expect(within(rows[0]!).getByTestId('tv-card-title').textContent).toContain('S04E03');
+    expect(screen.queryAllByTestId('tv-quality-chip')).toHaveLength(0);
     expect(within(rows[2]!).getByTestId('tv-u3-time').textContent).toBe('');
   });
 });

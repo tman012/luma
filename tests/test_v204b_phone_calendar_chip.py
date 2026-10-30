@@ -33,10 +33,10 @@ def test_tap_opens_e2_episode_page():
 
 
 def test_u3_replaces_t2_headers():
-    """v211 (Taylor's pick U3): no air-time group headers; a leading ET time column, vertically centered."""
+    """v211 (Taylor's pick U3): no air-time group headers. v319 (Taylor 11:13 PM): the time column is gone; the ET time sits centered on top."""
     assert 'airGroups' not in CAL and 'tv-time-head' not in CAL and 'tv-time-group' not in CAL
     assert "timeZone: 'America/New_York'" in CAL and '<U3Row key={e.episode_id}' in CAL
-    assert "alignItems: 'center', justifyContent: 'center', alignSelf: 'center'" in CAL
+    assert "data-testid=\"tv-u3-time\" style={{ ...one, textAlign: 'center'" in CAL
 
 
 

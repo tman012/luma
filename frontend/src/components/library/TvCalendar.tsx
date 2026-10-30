@@ -559,15 +559,12 @@ export function DayHeader({ day, today, onStep }: { day: Day; today: Day; onStep
   );
 }
 
-/** The phone day list: the count on the right (the date is in the header), then the day's cards. */
+/** The phone day list: the day's cards (v319 Taylor 11:13 PM: no episode count line; the date is in the header). */
 export function PhoneDay({ eps, day, today }: { eps: CalEpisode[]; day: Day; today: Day }) {
   const list = eps.filter(e => e.air_date === day);
   if (!list.length) return <div data-testid="tv-cal-empty" style={{ ...emptyCard, minHeight: 240, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No episodes</div>;
   return (
     <div data-testid="tv-cal-phone">
-      <div data-testid="tv-day-count" style={{ margin: '0 4px 8px', fontSize: 15, fontWeight: 600, color: W95 }}>
-        {list.length === 1 ? '1 episode' : `${list.length} episodes`}
-      </div>
       {/* v211 (Taylor's pick U3, replaces T2's air-time headers): one card per episode, a leading ET time column */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {list.map(e => <U3Row key={e.episode_id} e={e} today={today} />)}
@@ -590,30 +587,23 @@ export function etParts(airstamp: string | null | undefined): [string, string] |
   return m ? [m[1]!, m[2]!] : null;
 }
 
-/** v211 U3 row: the time column (bold time, muted AM/PM below) vertically centered, show and episode to the
- * right. v325 phone (Taylor): no quality/Downloaded chip and no check; the green/red left edge (Stripe, same
- * STATE_COLOR as the desktop week cards) is the only got-it indicator. */
+/** v319 phone card (Taylor 11:13 PM, replaces the v211 U3 time column): the ET air time on top, centered on one
+ * line, then the show name and the 'SxxExx · title' line, each centered and ellipsized. The green/red left edge
+ * (Stripe, same STATE_COLOR as the desktop week cards) is the only got-it indicator. */
 function U3Row({ e, today }: { e: CalEpisode; today: Day }) {
   const st = episodeState(e, today);
   const open = useOpenEpisode(e);
   const [mon] = useMonitored(e);
-  const t = etParts(e.airstamp);
+  const t = etTime(e.airstamp).replace(/\u202f/g, ' ');
   return (
     <div data-testid="tv-agenda-row" data-state={st} data-monitored={mon ? 'true' : 'false'} aria-label={`${STATE_WORD[st]}: ${e.show} ${code(e.season, e.episode)}`} {...open}
       className={`tv-u3-row ${open.className || ''}`.trim()}
-      style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', gap: 12, minHeight: 82, padding: '10px 16px 10px 12px', boxSizing: 'border-box',
+      style={{ cursor: open.onClick ? 'pointer' : undefined, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center', gap: 4, minHeight: 82, padding: '10px 16px', boxSizing: 'border-box',
         borderRadius: 12, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)' }}>
       <Stripe color={STATE_COLOR[st]} w={3} />
-      <span data-testid="tv-u3-time" style={{ flex: 'none', width: 50, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', alignSelf: 'center', opacity: mon ? 1 : DIM }}>
-        {t && <span style={{ fontSize: 16, fontWeight: 700, color: W95, lineHeight: '20px' }}>{t[0]}</span>}
-        {t && <span style={{ fontSize: 13, color: W50, lineHeight: '16px' }}>{t[1]}</span>}
-      </span>
-      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6, opacity: mon ? 1 : DIM }}>
-        <span data-testid="tv-card-show" style={{ fontSize: 17, fontWeight: 600, color: W95, lineHeight: '22px' }}>{e.show}</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span data-testid="tv-card-title" style={{ ...one, flex: 1, minWidth: 0, fontSize: 14, color: W70 }}>{epLine(e)}</span>
-        </span>
-      </span>
+      <span data-testid="tv-u3-time" style={{ ...one, textAlign: 'center', fontSize: 16, fontWeight: 700, color: W95, lineHeight: '20px', opacity: mon ? 1 : DIM }}>{t}</span>
+      <span data-testid="tv-card-show" style={{ ...one, textAlign: 'center', fontSize: 17, fontWeight: 600, color: W95, lineHeight: '22px', opacity: mon ? 1 : DIM }}>{e.show}</span>
+      <span data-testid="tv-card-title" style={{ ...one, textAlign: 'center', fontSize: 14, color: W70, lineHeight: '18px', opacity: mon ? 1 : DIM }}>{epLine(e)}</span>
     </div>
   );
 }

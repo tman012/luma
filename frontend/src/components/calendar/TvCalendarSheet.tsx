@@ -147,10 +147,6 @@ export function TvCalendarSheet({ open, onClose }: TvCalendarSheetProps) {
           <div style={{ width: 40, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.3)' }} />
         </div>
 
-        <div className="shrink-0 px-4 pb-3">
-          <h2 className="text-[18px] font-bold text-white">TV calendar</h2>
-        </div>
-
         <div
           data-scroll-container
           className="luma-scroll-y flex-1 px-3"
